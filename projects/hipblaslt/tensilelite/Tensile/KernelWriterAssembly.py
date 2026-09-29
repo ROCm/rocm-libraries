@@ -741,7 +741,13 @@ class KernelWriterAssembly(KernelWriter):
     tP["enableLDSTr"] = kernel["enableLDSTr%s"%tChar]
 
     lrInstPoolName = "LocalRead"
-    if tP["enableLDSTr"]:
+    # UseSubtileImpl TLU tiles (free-dim contiguous in LDS) recover the MFMA
+    # K-layout with transposed ds_read; the subtile scheduler emits those reads
+    # itself, but tP["localReadInstruction"] must still resolve to the matching
+    # transpose instruction (the classic selector has no entry for a sub-byte
+    # single-element read).
+    useSubtileTr = bool(kernel.get("UseSubtileImpl") and tP.get("tlu") and tChar in ("A", "B"))
+    if tP["enableLDSTr"] or useSubtileTr:
       lrInstPoolName = "TrLocalRead"
       maxTrLoadNumReturnedVgpr = 4 if self.states.asmCaps["HasLDSTrB128B16"] else 2
       if tP["bpeDS"] in (0.5, 1):
@@ -1896,6 +1902,19 @@ class KernelWriterAssembly(KernelWriter):
     for skey in self.sgprs:
       module.add(RegSet("s", "sgpr"+skey, self.sgprs[skey]))
     # module.addComment0("max SGPR=%u"%self.sgprPool.size())
+
+    if (kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]) \
+       and kernel.get("UseSubtileImpl"):
+      # The prologue overwrites Strides<MXS*> with the scale group span
+      # (paddedKBlocks * 32), so after that point the register no longer holds a
+      # stride.  Alias it rather than allocate: same register, a name that says
+      # what it contains, so a reader reaching for a K stride cannot pick it up
+      # by mistake.
+      module.addSpaceLine()
+      module.addComment0("MX scale group span (Strides<tc> renamed after the prologue rewrites it)")
+      for tc in ("MXSA", "MXSB"):
+        if kernel["ProblemType"]["MXBlock%s" % tc[-1]]:
+          module.add(RegSet("s", "sgprScaleGroupSpan%s" % tc, "sgprStrides%s" % tc, 0))
 
     if self.states.streamK.emitsParallelReductionSgprAliases:
       module.addSpaceLine()
@@ -4946,6 +4965,13 @@ class KernelWriterAssembly(KernelWriter):
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(tP["wg"]), kernel[tP["mt"]], comment="WorkGroup[01] * MT"))
 
         strideF = self.strideRef(tc, tP['tileIdx'])
+        # A swizzled scale is block-linear, and its GR walks blocks by
+        # Strides<tc>+0 whatever the layout.  On TLU=1 strideRef returns a
+        # constStride literal, which would drop the scale into the data-shaped
+        # branch below; name the block stride so both layouts take the block
+        # formula.  TLU=0 already resolves to the same register.
+        if isMxSwizzledScaleLayout and self.isConstUnitStride(strideF):
+          strideF = sgpr("Strides%s"%tc)
         if not self.isConstUnitStride(strideF):
           if useFixedSrd2:
             # Tile-boundary SRD+2 for UseSubtileImpl (unified for MX scale and data A/B).
@@ -4983,6 +5009,47 @@ class KernelWriterAssembly(KernelWriter):
                   module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]), comment="buffer_load limit for %s (tile-boundary, avoids 32-bit overflow)"%tc))
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
                     strideF, comment="tlu=0, scaled tile-offset by stride"))
+        elif useFixedSrd2:
+          # Unit-stride tile dim (TLU=1): the strided formula above cannot fire,
+          # and without this Srd+2 stays 0 and every load returns 0.  Bound the
+          # window along K instead:
+          #   Srd+2 = ((DepthU - 1) * unrollStride + span) * bpe + prePad
+          # DepthU-1, not DepthU: the base advances a window per iteration, so
+          # DepthU overshoots by one row and hangs once that row is unmapped.
+          unrollIdx = kernel["ProblemType"]["IndexUnroll"]
+          unrollStride = self.strideRef(tc, unrollIdx)
+          freeSpan = kernel[tP["mt"]]  # MT free elements (unit stride)
+          prePadElems = self.states.srdShiftLeft[tc]
+          module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), \
+                    unrollStride, kernel["DepthU"] - 1, comment="(DepthU-1) * unrollStride (last K row in window)"))
+          # Clamp the span to what is left of the tensor, as the strided branch
+          # does with SMinU32: the last workgroup owns fewer than MT when the
+          # size leaves a remainder, and that overhang lands off the allocation
+          # on the final K window (tile 96 over M 2048 faults).  numToEnd needs
+          # no rounding up to a whole load: a partial one would lose its DTL
+          # write, but the free-dim assert and MT are both multiples of it.
+          grTileInfo = self.states.a.tileInfo if tc == 'A' else \
+                       (self.states.b.tileInfo if tc == 'B' else None)
+          chunkElems = max(1, int(int(getattr(grTileInfo, "loadWidthGR", 16) or 16)
+                                  / float(tP["bpeGR"])))
+          aem = kernel["AssertFree0ElementMultiple" if tc == 'A'
+                       else "AssertFree1ElementMultiple"]
+          assert aem % chunkElems == 0 and kernel[tP["mt"]] % chunkElems == 0, \
+              "%s: TLU=1 free dim and MT must be multiples of %u elements" % (tc, chunkElems)
+          for i in range(0, numDim):
+            idx = indices[i]
+            if idx == kernel["ProblemType"]["Index0"] or idx == kernel["ProblemType"]["Index1"]:
+              module.add(SSubU32(dst=sgpr(stmp+1), src0=self.sizeRef(idx), src1=sgpr(tileStart+0), \
+                        comment="numToEnd = size - WG*MT"))
+              module.add(SMinU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=freeSpan, \
+                        comment="free span = min(that, MT %u)"%freeSpan))
+              module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=prePadElems, \
+                        comment="+ prePad (%u)"%prePadElems))
+              module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr(stmp+1), \
+                        comment="+ free span + prePad"))
+          module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]), \
+                    comment="buffer_load limit for %s (unit-stride tile K-window)"%tc))
+          # tileStart stays in elements (stride 1); no scaling needed.
 
         skComponent = Component.StreamK.find(self)
         module.add(skComponent.computeLoadSrd(self, kernel, tP, stmp))
@@ -6755,11 +6822,18 @@ class KernelWriterAssembly(KernelWriter):
       #---
       imod.addComment1("addr += (StaggerUIter) * GlobalReadIncs%s+%u"% (tc, self.states.unrollIdx))
 
+      # GSU.graIncrements negates GlobalReadIncs when the unroll dimension is
+      # mirrored, so that operand is signed there and unsigned everywhere else.
+      unrollMirrored = tc in ('A', 'B', 'Metadata', 'MXSA', 'MXSB') \
+          and kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx] \
+              in kernel["ProblemType"]["MirrorDims%s"%tc]
+      widenIncs = self.s_mul_i64_i32 if unrollMirrored else self.s_mul_u64_u32
+
       # Calculate the stagger byte offset
-      imod.addModuleAsFlatItems(self.s_mul_i64_i32(
+      imod.addModuleAsFlatItems(widenIncs(
                 sgpr(staggerTmp), sgpr(staggerTmp+1), \
                 sgpr("StaggerUIter"), sgpr("GlobalReadIncs%s+%u"%(tc, self.states.unrollIdx)), \
-                " stagger byte offset"))
+                comment=" stagger byte offset"))
 
       # Apply TDM stagger now while staggerTmp still holds StaggerUIter * GlobalReadIncs.
       # The Sparse and PGR>=3 paths below both reuse staggerTmp for other computations.
@@ -6768,9 +6842,9 @@ class KernelWriterAssembly(KernelWriter):
 
       # Amount of bytes to add to get back to start.
       # on the llop iteration which matches StaggerUIter, this offset added instead of GlobalReadInc
-      imod.addModuleAsFlatItems(self.s_mul_i64_i32(sgpr("WrapU%s+0"%tc), sgpr("WrapU%s+1"%tc), \
+      imod.addModuleAsFlatItems(widenIncs(sgpr("WrapU%s+0"%tc), sgpr("WrapU%s+1"%tc), \
                 self.loopCounter(kernel, self.states.unrollIdx), sgpr("GlobalReadIncs%s+%u"%(tc,self.states.unrollIdx)), \
-                "Number of bytes accessed by the unroll loop"))
+                comment="Number of bytes accessed by the unroll loop"))
 
       # TODO: put this asmCaps into rocisa SSubU64
       if self.states.asmCaps["s_sub_u64"] and self.states.asmCaps["HasWMMA_V3"]:
@@ -6804,20 +6878,28 @@ class KernelWriterAssembly(KernelWriter):
         imod.addComment1("SRDs += (StaggerUIter) * GlobalReadIncsMetadata")
 
         tc = "Metadata"
+        # Same reasoning as widenIncs above, but evaluated against this tensor's own
+        # mirror list, because the block has just reassigned tc. The metadata
+        # increment is a byte stride like the A/B one, so widening it signed
+        # sign-extends it past 2^31 in exactly the same way.
+        metadataMirrored = kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx] \
+            in kernel["ProblemType"]["MirrorDims%s"%tc]
+        widenMetaIncs = self.s_mul_i64_i32 if metadataMirrored else self.s_mul_u64_u32
+
         if kernel["DirectToVgprSparseMetadata"]:
           incSparse = incSparseSgpr
           imod.add(self.calculateIncrementMetadata(kernel, incSparse))
         else:
           incSparse = "GlobalReadIncsMetadata+%u"%(self.states.unrollIdx)
-        imod.addModuleAsFlatItems(self.s_mul_i64_i32( \
+        imod.addModuleAsFlatItems(widenMetaIncs( \
                         sgpr(staggerTmp), sgpr(staggerTmp+1), \
-                        sgpr("StaggerUIter"), sgpr(incSparse), " stagger byte offset of metadata"))
+                        sgpr("StaggerUIter"), sgpr(incSparse), comment=" stagger byte offset of metadata"))
         # Amount of bytes to add to get back to start.
         # on the llop iteration which matches StaggerUIter, this offset added instead of GlobalReadInc
-        imod.addModuleAsFlatItems(self.s_mul_i64_i32( \
+        imod.addModuleAsFlatItems(widenMetaIncs( \
                   sgpr("WrapU%s+0"%tc), sgpr("WrapU%s+1"%tc), \
                   self.loopCounter(kernel, self.states.unrollIdx), sgpr(incSparse), \
-                  "Number of bytes accessed by the unroll loop"))
+                  comment="Number of bytes accessed by the unroll loop"))
 
         imod.add(SSubU32(sgpr("WrapU%s+0"%tc), sgpr(incSparse), sgpr("WrapU%s+0"%tc), " remove one iteration"))
         imod.add(SSubBU32(sgpr("WrapU%s+1"%tc), 0, sgpr("WrapU%s+1"%tc), " remove one iteration"))
@@ -9348,8 +9430,13 @@ class KernelWriterAssembly(KernelWriter):
     numMIInUnroll    = max(numMIInputA//numTileInInstA, numMIInputB//numTileInInstB)
 
     miInInstType, miOutInstType, neg_flag = matrixInstructionTypes(
-        miInputTypeA, miInputTypeB, kernel["ProblemType"]["ComputeDataType"],
-        kernel["SourceSwap"], kernel["ProblemType"]["Sparse"], is_mfma)
+        miInputTypeA,
+        miInputTypeB,
+        kernel["ProblemType"]["ComputeDataType"],
+        kernel["SourceSwap"],
+        kernel["ProblemType"]["Sparse"],
+        is_mfma,
+    )
     miInScaleAInstType = dataTypeNameAbbrevToInstType(kernel["ProblemType"]["DataTypeMXSA"].toNameAbbrev())
     miInScaleBInstType = dataTypeNameAbbrevToInstType(kernel["ProblemType"]["DataTypeMXSB"].toNameAbbrev())
     numReadsIterCoalescedA = self.states.numReadsIterCoalescedA
@@ -16312,13 +16399,16 @@ class KernelWriterAssembly(KernelWriter):
         self.sgprPool.checkIn(sgprScaleA)
         self.sgprPool.checkIn(sgprScaleB)
 
+      # The epilogue consumes these scalar loads even when beta is unused.
+      # GSU1 does not otherwise guarantee a wait before the first scale read.
+      if kernel["ProblemType"]["UseScaleCD"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["StreamK"] > 0):
+        module.add(SWaitCnt(kmcnt=0, comment="wait for scaleC and scaleD loads"))
+
       # Update beta with ScaleC (only when Beta is actually used)
       if kernel["ProblemType"]["UseBeta"] and kernel["ProblemType"]["UseScaleCD"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["StreamK"] > 0):
         assert(kernel["ProblemType"]["ComputeDataType"].isSingle())
         newBetaVgpr = self.vgprPool.checkOut(1, tag="globalWriteElements_newBetaVgpr")
         module.add(VMovB32(dst=vgpr(newBetaVgpr), src=sgpr("Beta")))
-        if (not ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')) or kernel["StreamK"] > 0:
-          module.add(SWaitCnt(kmcnt=0, comment="wait for scaleC load"))
         module.add(VMulF32(dst=vgpr(newBetaVgpr), src0=vgpr(newBetaVgpr), src1=sgpr(sgprScaleC)))
         module.add(SNop(waitState=0, comment="1 wait states"))
         module.add(VReadfirstlaneB32(dst=sgpr("Beta"), src=vgpr(newBetaVgpr), comment="Update Beta"))
@@ -18630,9 +18720,11 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SCmpEQU32(sgpr("Offset"), 0))
     mod.add(SCBranchSCC1(label_wave_end.getLabelName()))
     mod.add(SLShiftLeftB32(sgpr("Tmp"), 1, sgpr("Offset")))
-    mod.add(VCmpLtU32(sgpr("Tmp+2",2), vgpr("Widx"), sgpr("Tmp")))
-    mod.add(VCmpGEU32(sgpr("Tmp+4",2), vgpr("Widx"), sgpr("Offset")))
-    mod.add(SAndB64(VCC(), sgpr("Tmp+2",2), sgpr("Tmp+4",2)))
+    laneSGPRCount = 1 if wave_size == 32 else 2
+    SAndBX = SAndB32 if wave_size == 32 else SAndB64
+    mod.add(VCmpLtU32(sgpr("Tmp+2", laneSGPRCount), vgpr("Widx"), sgpr("Tmp")))
+    mod.add(VCmpGEU32(sgpr("Tmp+4", laneSGPRCount), vgpr("Widx"), sgpr("Offset")))
+    mod.add(SAndBX(VCC(), sgpr("Tmp+2", laneSGPRCount), sgpr("Tmp+4", laneSGPRCount)))
     mod.add(SCBranchVCCNZ(label_wave_upper.getLabelName()))
     mod.add(VCmpLtU32(VCC(), vgpr("Widx"), sgpr("Offset")))
     mod.add(SCBranchVCCNZ(label_wave_lower.getLabelName()))
@@ -18699,6 +18791,11 @@ class KernelWriterAssembly(KernelWriter):
     amaxInType = kernel["ProblemType"]["ComputeDataType"]
     amaxOutType = kernel["ProblemType"]["DataTypeAmaxD"]
 
+    # Reuse the established cross-workgroup publication protocol and atomic
+    # fallback. Output-amax solutions require GlobalSplitU=1.
+    memoryOrder = Component.StreamKMemoryOrdering.find(self)
+    workspaceModifiers = MUBUFModifiers(offen=True, scope=CacheScope.SCOPE_DEV) \
+        if self.states.archCaps["DefaultScopeIsCULocal"] else MUBUFModifiers(offen=True, glc=True, slc=True)
     mod = Module("output_result")
     mod.addComment0("output_result")
 
@@ -18722,20 +18819,24 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SMovB32(sgpr("Dst+1"), sgpr("AddressWk+1")))
     mod.add(SMovB32(sgpr("Dst+2"), sgpr("Tmp")))
     mod.add(SMovB32(sgpr("Dst+3"), "Srd127_96"))
+    mod.add(self._shiftSrdImpl(sgpr("Dst+1"), sgpr("Dst+2")))
 
     mod.add(SLShiftLeftB32(sgpr("Offset"), int(log2(amaxInType.numBytes())), sgpr("WGIdx")))
     mod.add(VMovB32(vgpr("Offset"), 0))
 
     # TODO- select inst
-    mod.add(BufferStoreB32(vgpr("AmaxOut"), vgpr("Offset"), sgpr("Dst",4), sgpr("Offset"), MUBUFModifiers(offen=True, glc=True, slc=True)))
-    mod.add(SWaitCnt(vlcnt=0))
+    mod.add(memoryOrder.preVolatileVmem(self, comment="drain before amax partial store"))
+    mod.add(BufferStoreB32(vgpr("AmaxOut"), vgpr("Offset"), sgpr("Dst",4), sgpr("Offset"), workspaceModifiers))
+    mod.add(memoryOrder.releaseFence(self))
     mod.addSpaceLine()
 
     mod.add(SSubI32(sgpr("Tmp"), sgpr("NumGroup"), 1))
-    mod.add(SAtomicDec(sgpr("Tmp"), sgpr("AddressSy",2), SMEMModifiers(glc=True)))
+    mod.add(Component.GSU.find(self)._generateAtomicDec(
+        self, kernel, dst=sgpr("Tmp"), base=sgpr("AddressSy",2)))
     mod.add(SWaitCnt(vlcnt=0, kmcnt=0))
     mod.add(SCmpEQU32(sgpr("Tmp"), 1))
     mod.add(SCBranchSCC0(label_end.getLabelName()))
+    mod.add(memoryOrder.acquireFence(self))
     mod.addSpaceLine()
 
     mod.add(SLShiftLeftB32(sgpr("Tmp"), int(log2(amaxInType.numBytes())), sgpr("NumGroup")))
@@ -18743,6 +18844,7 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SMovB32(sgpr("Src+1"), sgpr("AddressWk+1")))
     mod.add(SMovB32(sgpr("Src+2"), sgpr("Tmp")))
     mod.add(SMovB32(sgpr("Src+3"), "Srd127_96"))
+    mod.add(self._shiftSrdImpl(sgpr("Src+1"), sgpr("Src+2")))
     mod.addSpaceLine()
 
     mod.add(VLShiftLeftB32(vgpr("Offset"), int(log2(amaxOutType.numBytes())), vgpr("Serial")))
@@ -18753,7 +18855,8 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(label_final_loop)
 
     # TODO- select inst
-    mod.add(BufferLoadB32(vgpr(f"Value"), vgpr("Offset"), sgpr("Src",4), 0, MUBUFModifiers(offen=True, glc=True, slc=True)))
+    mod.add(memoryOrder.preVolatileVmem(self, comment="drain before amax partial load"))
+    mod.add(BufferLoadB32(vgpr(f"Value"), vgpr("Offset"), sgpr("Src",4), 0, workspaceModifiers))
     mod.add(SWaitCnt(vlcnt=0))
     mod.addSpaceLine()
 
@@ -18778,6 +18881,7 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SMovB32(sgpr("Dst+1"), sgpr("AddrAmaxOut+1")))
     mod.add(SMovB32(sgpr("Dst+2"), int(amaxOutType.numBytes())))
     mod.add(SMovB32(sgpr("Dst+3"), "Srd127_96"))
+    mod.add(self._shiftSrdImpl(sgpr("Dst+1"), sgpr("Dst+2")))
     mod.addSpaceLine()
 
     mod.add(VMovB32(vgpr("Offset"), 0))
@@ -18871,6 +18975,9 @@ class KernelWriterAssembly(KernelWriter):
 
   def insertActivationAfterPacked(self, kernel, activationTypeStr):
     result = False
+    if kernel["ProblemType"]["OutputAmaxD"]:
+      # The reduction needs activated accumulators before packing overwrites them.
+      return result
     if kernel["ProblemType"]["UseScaleCD"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["StreamK"] > 0):
       return result
     elif ((kernel["ProblemType"]["ActivationType"] != 'none') and \
@@ -21636,9 +21743,21 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["enableTDMMetadata"]:
       tpList.append(tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"])
 
-    for tp in tpList:
-      mod.add(comp.setIncrement(self, kernel, tp))
-      mod.add(comp.calculateStartAddr(self, kernel, tp))
+    if not comp.isGSUEnabled(kernel):
+      for tp in tpList:
+        mod.add(comp.setIncrement(self, kernel, tp))
+        mod.add(comp.calculateStartAddr(self, kernel, tp))
+      return mod
+
+    # The GSU chunk starts at the same unroll iteration for every tensor, so derive
+    # it once here and let each tensor scale it by its own per-iteration increment.
+    with self.allocTmpSgpr(3, tag="gl2PrefetchCalcAddr_gsu") as tmpSgprRes:
+      gsuIterSgpr = tmpSgprRes.idx
+      offsetTmp = ContinuousRegister(idx=tmpSgprRes.idx + 1, size=2)
+      mod.add(comp.calculateGSUIterOffset(self, kernel, gsuIterSgpr, offsetTmp))
+      for tp in tpList:
+        mod.add(comp.setIncrement(self, kernel, tp))
+        mod.add(comp.calculateStartAddr(self, kernel, tp, gsuIterSgpr))
     return mod
   
   def gl2PrefetchIssueLoad(self, kernel, tPA, tPB) -> Module:
@@ -21667,6 +21786,20 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(comp.incrementAddr(self, kernel, tPB["MX"]))
     if kernel["enableTDMMetadata"]:
       mod.add(comp.incrementAddr(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]))
+    return mod
+  
+  def gl2PrefetchSkipPGR(self, kernel, tPA, tPB) -> Module:
+    mod = Module("GL2 Prefetch Skip PGR")
+    mod.addComment("GL2 Prefetch Skip PGR")
+    comp = GL2PrefetchLoad.find(self)
+    mod.add(comp.skipPGR(self, kernel, tPA))
+    mod.add(comp.skipPGR(self, kernel, tPB))
+    if kernel["ProblemType"]["MXBlockA"]:
+      mod.add(comp.skipPGR(self, kernel, tPA["MX"]))
+    if kernel["ProblemType"]["MXBlockB"]:
+      mod.add(comp.skipPGR(self, kernel, tPB["MX"]))
+    if kernel["enableTDMMetadata"]:
+      mod.add(comp.skipPGR(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]))
     return mod
 
   def getHalfPLRGroups(self, kernel, lc, u):
