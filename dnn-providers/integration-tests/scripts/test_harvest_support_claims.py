@@ -608,6 +608,16 @@ class TestMain(unittest.TestCase):
         code, out, _ = self._main(log)
         self.assertEqual(code, 1)
         self.assertIn("REJECTED: stream 23: schema_version 2", out)
+        self.assertIn("Missing (0)\n", out)
+
+    def test_log_without_block_is_missing(self) -> None:
+        self._write("run/a.log", _single_log(_summary()))
+        empty = self._write("run/b.log", "no block here\n")
+        code, out, err = self._main(str(self.root / "run"))
+        self.assertEqual(code, 0)
+        self.assertIn(f"Missing (1)\n  {empty}\n", out)
+        self.assertIn("gfx1030/windows        3 claims", out)
+        self.assertIn("warning: 1 log has no support block", err)
 
     def test_usage_errors_exit_2(self) -> None:
         log = self._write("a.log", _single_log(_summary()))
@@ -902,16 +912,54 @@ class TestFetch(unittest.TestCase):
             err,
         )
         self.assertIn(
-            "skipped https://github.com/ROCm/rocm-libraries/actions/runs/7/job/13: cancelled",
-            err,
-        )
-        self.assertIn(
             "https://github.com/ROCm/rocm-libraries/actions/runs/7/job/11  1 block",
             out,
         )
+        self.assertIn(
+            "Missing (1)\n"
+            f"  https://github.com/ROCm/rocm-libraries/actions/runs/7/job/13  cancelled  {_JOB} retry\n",
+            out,
+        )
+        self.assertIn("warning: 1 log has no support block", err)
         self.assertIn("gfx1030/windows        3 claims", out)
         self.assertEqual(gh.fetched_logs(), ["11"])
         self.assertTrue(gh.calls[0][0].endswith("/runs?per_page=50"))
+
+    def test_failed_job_without_block_is_missing(self) -> None:
+        # A timed-out job fails before it prints its block.
+        gh = self._gh(**{"12": "failure"})
+        gh.logs[12] = "##[error]The job has exceeded the maximum execution time\n"
+        code, out, err = self._main(gh, "--run", "7", "--jobs", "miopenprovider")
+        self.assertEqual(code, 0)
+        self.assertIn(
+            "Missing (2)\n"
+            "  https://github.com/ROCm/rocm-libraries/actions/runs/7/job/12  failure  Build miopenprovider\n"
+            f"  https://github.com/ROCm/rocm-libraries/actions/runs/7/job/13  cancelled  {_JOB} retry\n",
+            out,
+        )
+        self.assertIn("gfx1030/windows        3 claims", out)
+        self.assertIn("warning: 2 logs have no support block", err)
+
+    def test_missing_in_json(self) -> None:
+        code, out, _ = self._main(self._gh(), "--run", "7", "--format", "json")
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            json.loads(out)["missing"],
+            [
+                {
+                    "log": "https://github.com/ROCm/rocm-libraries/actions/runs/7/job/13",
+                    "conclusion": "cancelled",
+                    "name": _JOB + " retry",
+                }
+            ],
+        )
+
+    def test_no_warning_when_nothing_is_missing(self) -> None:
+        gh = self._gh(**{"13": "success"})
+        code, out, err = self._main(gh, "--run", "7")
+        self.assertEqual(code, 0)
+        self.assertIn("Missing (0)\n", out)
+        self.assertNotIn("warning", err)
 
     def test_run_is_fetched_by_id(self) -> None:
         gh = self._gh()

@@ -32,8 +32,11 @@ Runs
    matches --jobs and that succeeded or failed.  With neither, the latest
    completed scheduled run of the develop nightly is fetched.
 5. A log with a rejected block contributes nothing, and the exit status is
-   1.  A cell is claimed when it is kept in at least --min-runs runs and
-   dropped in none; a single drop anywhere vetoes it.
+   1.  A log with no block, and a matching job that neither succeeded nor
+   failed, is listed under Missing: its engines are absent from the
+   harvest.  A job that timed out, for one, ends before its block.  A cell
+   is claimed when it is kept in at least --min-runs runs and dropped in
+   none; a single drop anywhere vetoes it.
 6. claim_failures and failed_in_use are listed for a human; they are never
    claims.
 
@@ -370,6 +373,30 @@ class Harvest:
     drops: Dict[str, Counter]  # lane -> DROP_* reason -> distinct cells
     claim_failures: List[dict]
     failed_in_use: List[dict]
+    missing: List[dict] = field(default_factory=list)  # see missing_logs
+
+
+class Job(NamedTuple):
+    """A job of a fetched CI run whose name matches --jobs."""
+
+    url: str
+    name: str
+    conclusion: str
+
+
+def missing_logs(logs: Sequence[LogReport], jobs: Sequence[Job]) -> List[dict]:
+    """Every accepted log with no block, then every job whose log was not read."""
+    by_url = {job.url: job for job in jobs}
+
+    def entry(log: str) -> dict:
+        job = by_url.get(log)
+        if job is None:
+            return {"log": log}
+        return {"log": log, "conclusion": job.conclusion, "name": job.name}
+
+    missing = [entry(log.path) for log in logs if log.error is None and not log.blocks]
+    read = {log.path for log in logs}
+    return missing + [entry(job.url) for job in jobs if job.url not in read]
 
 
 def _canonical(value: object) -> str:
@@ -502,6 +529,7 @@ def render_json(result: Harvest) -> str:
                 }
                 for lane in lanes
             },
+            "missing": result.missing,
             "claims": [_cell_json(c) for c in result.claims],
             "claim_failures": result.claim_failures,
             "failed_in_use": result.failed_in_use,
@@ -524,6 +552,12 @@ def render_table(result: Harvest) -> str:
     out = [f"runs: {result.runs}  min-runs: {result.min_runs}{lane}", "", "Logs"]
     width = max((len(log.path) for log in result.logs), default=0)
     out += [f"  {log.path:<{width}}  {log.status()}" for log in result.logs]
+
+    out += ["", f"Missing ({len(result.missing)})"]
+    out += [
+        "  " + "  ".join(m[k] for k in ("log", "conclusion", "name") if k in m)
+        for m in result.missing
+    ]
 
     out += ["", "Lanes"]
     claims_by_lane = Counter(c.lane for c in result.claims)
@@ -596,11 +630,14 @@ def latest_nightly(gh: Gh) -> int:
     )
 
 
-def fetch_run(run_id: int, jobs: Pattern[str], gh: Gh) -> List[Tuple[str, str]]:
-    """Returns (job URL, log text) for each job of RUN_ID that matches JOBS.
+def fetch_run(
+    run_id: int, jobs: Pattern[str], gh: Gh
+) -> Tuple[List[Tuple[str, str]], List[Job]]:
+    """Returns the jobs of RUN_ID that match JOBS, and (job URL, log text) of
+    each one that succeeded or failed.
 
-    Jobs that neither succeeded nor failed have no complete log; each one is
-    named on stderr and skipped.
+    A job that neither succeeded nor failed has no complete log and is not
+    fetched.
     """
     status = json.loads(gh([f"repos/{REPO}/actions/runs/{run_id}"])).get("status")
     if status != "completed":
@@ -621,17 +658,16 @@ def fetch_run(run_id: int, jobs: Pattern[str], gh: Gh) -> List[Tuple[str, str]]:
     if not matched:
         raise FetchError(f"run {run_id} has no job matching {jobs.pattern!r}")
 
-    logs = []
+    found, logs = [], []
     for job in sorted(matched, key=lambda j: j["id"]):
-        label = f"{RUN_URL}/{run_id}/job/{job['id']}"
-        if job["conclusion"] not in FETCHED_CONCLUSIONS:
-            print(f"skipped {label}: {job['conclusion']}", file=sys.stderr)
-            continue
-        text = gh([f"repos/{REPO}/actions/jobs/{job['id']}/logs"])
-        logs.append((label, text.decode("utf-8", "replace")))
+        url = f"{RUN_URL}/{run_id}/job/{job['id']}"
+        found.append(Job(url, job["name"], str(job["conclusion"])))
+        if job["conclusion"] in FETCHED_CONCLUSIONS:
+            text = gh([f"repos/{REPO}/actions/jobs/{job['id']}/logs"])
+            logs.append((url, text.decode("utf-8", "replace")))
     if not logs:
         raise FetchError(f"run {run_id} has no succeeded or failed matching job")
-    return logs
+    return logs, found
 
 
 def _lane_arg(text: str) -> str:
@@ -806,13 +842,25 @@ def main(
             print(f"latest nightly: run {run_ids[0]}", file=sys.stderr)
             print(f"  {RUN_URL}/{run_ids[0]}", file=sys.stderr)
         runs = [_read_run(Path(p)) for p in args.runs]
-        runs += [fetch_run(i, args.jobs, gh) for i in run_ids]
+        jobs: List[Job] = []
+        for run_id in run_ids:
+            logs, found = fetch_run(run_id, args.jobs, gh)
+            runs.append(logs)
+            jobs += found
     except (OSError, FetchError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
     result = harvest(runs, args.min_runs, args.lane)
+    result.missing = missing_logs(result.logs, jobs)
     print(render_json(result) if args.format == "json" else render_table(result))
+    if result.missing:
+        n = len(result.missing)
+        print(
+            f"warning: {n} {'log has' if n == 1 else 'logs have'} no support"
+            " block; their engines are not harvested (see Missing)",
+            file=sys.stderr,
+        )
     if any(log.error is not None for log in result.logs):
         if args.write:
             print("error: a log was rejected; wrote nothing", file=sys.stderr)
