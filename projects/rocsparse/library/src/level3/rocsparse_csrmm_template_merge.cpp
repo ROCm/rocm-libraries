@@ -34,6 +34,22 @@
 
 namespace rocsparse
 {
+    // The merge coordinates are coordinate_t<uint32_t>: x is a row index bounded by
+    // m and y a non-zero index bounded by nnz, so the merge path cannot address a
+    // problem where either exceeds UINT32_MAX.
+    template <typename I, typename J>
+    static rocsparse_status csrmm_merge_check_coordinate_range(J m, I nnz)
+    {
+        if(static_cast<uint64_t>(m) > UINT32_MAX || static_cast<uint64_t>(nnz) > UINT32_MAX)
+        {
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                rocsparse_status_not_implemented,
+                "the csrmm merge path algorithm requires m and nnz to be at most 2^32 - 1; "
+                "use the row split or nnz split algorithm instead");
+        }
+        return rocsparse_status_success;
+    }
+
     template <typename T, typename I, typename J, typename A>
     rocsparse_status csrmm_buffer_size_template_merge(rocsparse_handle          handle,
                                                       rocsparse_operation       trans_A,
@@ -54,6 +70,8 @@ namespace rocsparse
         {
         case rocsparse_operation_none:
         {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_merge_check_coordinate_range(m, nnz));
+
             constexpr uint32_t ITEM_PER_THREAD = 256;
             const uint64_t     total_work      = static_cast<uint64_t>(m) + nnz;
             const uint64_t     block_count     = (total_work - 1) / ITEM_PER_THREAD + 1;
@@ -99,6 +117,8 @@ namespace rocsparse
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
             }
+
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_merge_check_coordinate_range(m, nnz));
 
             constexpr uint32_t ITEM_PER_THREAD = 256;
             const uint64_t     total_work      = static_cast<uint64_t>(m) + nnz;
@@ -509,6 +529,8 @@ namespace rocsparse
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
             }
+
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_merge_check_coordinate_range(m, nnz));
 
             if((order_B == rocsparse_order_column && trans_B == rocsparse_operation_none)
                || (order_B == rocsparse_order_row && trans_B == rocsparse_operation_transpose)
