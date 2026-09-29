@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import builtins
 import sys
 import types
 from pathlib import Path
@@ -592,11 +593,11 @@ def test_prune_library_raises_when_merge_returns_multiple(monkeypatch: pytest.Mo
 # ---------------------------------------------------------------------------
 
 def _make_tensile_mocks(calls: dict):
-    """Return (sys.modules patch dict, mock modules) for Tensile imports."""
-    tensile_mod = types.ModuleType("Tensile")
-    library_io_mod = types.ModuleType("Tensile.LibraryIO")
-    custom_yaml_mod = types.ModuleType("Tensile.CustomYamlLoader")
-    merge_lib_mod = types.ModuleType("Tensile.TensileMergeLibrary")
+    """Return (sys.modules patch dict, mock modules) for TensileLite imports."""
+    tensile_mod = types.ModuleType("tensilelite")
+    library_io_mod = types.ModuleType("tensilelite.LibraryIO")
+    custom_yaml_mod = types.ModuleType("tensilelite.CustomYamlLoader")
+    merge_lib_mod = types.ModuleType("tensilelite.TensileMergeLibrary")
 
     def _load_yaml_stream(path, loader):
         calls["load"] = path
@@ -619,10 +620,10 @@ def _make_tensile_mocks(calls: dict):
     tensile_mod.LibraryIO = library_io_mod
 
     patch = {
-        "Tensile": tensile_mod,
-        "Tensile.LibraryIO": library_io_mod,
-        "Tensile.CustomYamlLoader": custom_yaml_mod,
-        "Tensile.TensileMergeLibrary": merge_lib_mod,
+        "tensilelite": tensile_mod,
+        "tensilelite.LibraryIO": library_io_mod,
+        "tensilelite.CustomYamlLoader": custom_yaml_mod,
+        "tensilelite.TensileMergeLibrary": merge_lib_mod,
     }
     return patch
 
@@ -646,7 +647,7 @@ def test_normalize_raises_if_data_not_list(monkeypatch: pytest.MonkeyPatch, tmp_
     calls: dict = {}
     mocks = _make_tensile_mocks(calls)
     # Override load to return a non-list (dict format is unsupported as input)
-    mocks["Tensile.CustomYamlLoader"].load_yaml_stream = lambda *_a, **_k: {"dict": "format"}
+    mocks["tensilelite.CustomYamlLoader"].load_yaml_stream = lambda *_a, **_k: {"dict": "format"}
     for mod_name, mod in mocks.items():
         monkeypatch.setitem(sys.modules, mod_name, mod)
 
@@ -671,7 +672,7 @@ def test_normalize_calls_tensile_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_p
     assert calls["write"] == (str(out), {"converted": True})
 
 
-def test_normalize_appends_tensile_to_sys_path_when_hipblaslt_given(
+def test_normalize_prioritizes_tensilelite_path_when_hipblaslt_given(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     lib = tmp_path / "lib.yaml"
@@ -685,12 +686,20 @@ def test_normalize_appends_tensile_to_sys_path_when_hipblaslt_given(
         monkeypatch.setitem(sys.modules, mod_name, mod)
 
     original_path = list(sys.path)
+    import_paths = []
+    real_import = builtins.__import__
+
+    def capture_import(name, *args, **kwargs):
+        if name == "tensilelite" or name.startswith("tensilelite."):
+            import_paths.append(sys.path[0])
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", capture_import)
     operations.normalize(lib, tmp_path / "out.yaml", hipblaslt_path=hip)
 
-    assert expected in sys.path
-    # cleanup to avoid polluting other tests
-    if expected not in original_path:
-        sys.path.remove(expected)
+    assert import_paths
+    assert set(import_paths) == {expected}
+    assert sys.path == original_path
 
 
 # ---------------------------------------------------------------------------

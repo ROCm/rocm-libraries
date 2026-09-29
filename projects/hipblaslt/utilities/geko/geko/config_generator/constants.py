@@ -245,12 +245,12 @@ ONLY_INCLUDE_MIs_MI45X = {
 
 from geko.constants import SUPPORTED_ARCH
 
-# Tensile LibraryLogic ``DeviceNames`` as emitted in YAML (asm_full conventions).
+# TensileLite LibraryLogic ``DeviceNames`` as emitted in YAML (asm_full conventions).
 LIBRARY_LOGIC_DEVICE_NAMES_GFX950 = '["Device 75a0"]'
 LIBRARY_LOGIC_DEVICE_NAMES_GFX942 = '["Device 0049", "Device 0050"]'
 LIBRARY_LOGIC_DEVICE_NAMES_GFX1250 = '["Device 73f0"]'
 
-# Shared Tensile LibraryLogic fields (ScheduleName / ArchitectureName / DeviceNames) per silicon family.
+# Shared TensileLite LibraryLogic fields (ScheduleName / ArchitectureName / DeviceNames) per silicon family.
 _LIBRARY_LOGIC_FIELDS_GFX950 = {
     "ScheduleName": '"gfx950"',
     "ArchitectureName": '"gfx950"',
@@ -267,7 +267,7 @@ _LIBRARY_LOGIC_FIELDS_GFX1250 = {
     "DeviceNames": LIBRARY_LOGIC_DEVICE_NAMES_GFX1250,
 }
 
-# gfx-style ARCH (YAML) → CUs, XCC, dtype→MI allowlist, Tensile LibraryLogic fields, MX scale value,
+# gfx-style ARCH (YAML) → CUs, XCC, dtype→MI allowlist, TensileLite LibraryLogic fields, MX scale value,
 # MX block size (keys align with geko.constants.SUPPORTED_ARCH).
 # mx_scale: hipblaslt scaleA/scaleB value for MX block scaling (0 = MX not supported on this arch).
 # mx_block_size: MXBlockA/MXBlockB size (None = MX not supported on this arch).
