@@ -66,6 +66,65 @@ namespace hipblaslt_ext::experimental
                 static auto* instance = new Registry;
                 return *instance;
             }
+
+            hipblasStatus_t toHipStatus(hipblaslt_jit::Status::Code code)
+            {
+                using Code = hipblaslt_jit::Status::Code;
+                switch(code)
+                {
+                case Code::Success:
+                    return HIPBLAS_STATUS_SUCCESS;
+                case Code::NotSupported:
+                    return HIPBLAS_STATUS_NOT_SUPPORTED;
+                case Code::TargetMismatch:
+                    return HIPBLAS_STATUS_ARCH_MISMATCH;
+                default:
+                    return HIPBLAS_STATUS_INTERNAL_ERROR;
+                }
+            }
+
+            struct JitImplementation final : BackendImplementation
+            {
+                std::shared_ptr<const hipblaslt_jit::Jit> jit;
+                explicit JitImplementation(std::shared_ptr<const hipblaslt_jit::Jit> value)
+                    : jit(std::move(value))
+                {
+                }
+                std::string_view name() const noexcept override
+                {
+                    return jit->components().backend->info().name;
+                }
+                hipblasStatus_t compile(const OperationRequest&              request,
+                                        const Target&                        target,
+                                        size_t                               workspaceLimit,
+                                        std::shared_ptr<const KernelBundle>& bundle,
+                                        Diagnostics&                         diagnostics) const override
+                {
+                    bundle.reset();
+                    hipblaslt_jit::DeviceTarget device;
+                    auto status = hipblaslt_jit::DeviceTarget::make(target.device, device);
+                    if(status.ok())
+                    {
+                        auto outcome = jit->generate(request, device, 1, workspaceLimit, {});
+                        if(!outcome.unpublished.empty())
+                        {
+                            bundle              = std::move(outcome.unpublished.front());
+                            diagnostics.message = std::move(outcome.summary);
+                            return HIPBLAS_STATUS_SUCCESS;
+                        }
+                        if(outcome.failures.empty())
+                            return HIPBLAS_STATUS_INTERNAL_ERROR;
+                        status = std::move(outcome.failures.front());
+                    }
+                    diagnostics.message = status.message;
+                    return toHipStatus(status.code);
+                }
+            };
+        }
+
+        Backend BackendAccess::make(std::shared_ptr<const hipblaslt_jit::Jit> jit)
+        {
+            return make(std::make_shared<const JitImplementation>(std::move(jit)));
         }
 
         uint64_t registerBundle(std::shared_ptr<const CompiledSolution> bundle)

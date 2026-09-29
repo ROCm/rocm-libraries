@@ -6,6 +6,11 @@
 #include <memory>
 #include <string_view>
 
+namespace hipblaslt_jit
+{
+    class Jit;
+}
+
 // Private, compiled-in provider interface. This is not a stable plugin ABI.
 namespace hipblaslt_ext::experimental::jit::detail
 {
@@ -75,6 +80,7 @@ namespace hipblaslt_ext::experimental::jit::detail
             backend.implementation = std::move(implementation);
             return backend;
         }
+        static Backend make(std::shared_ptr<const hipblaslt_jit::Jit> jit);
         static const auto& get(const Backend& backend)
         {
             return backend.implementation;

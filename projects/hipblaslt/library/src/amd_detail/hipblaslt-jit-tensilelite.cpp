@@ -73,7 +73,7 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
             return true;
         }
 
-        void generate(const Options& options, const char* module = "Tensile.SingleSolution")
+        void runGenerator(const Options& options, const char* module)
         {
             require(!options.pythonExecutable.empty() && !options.tensileSourceDirectory.empty()
                         && !options.configPath.empty() && !options.outputPath.empty()
@@ -284,93 +284,56 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
             return result;
         }
 
-        struct Provider final : jit::detail::BackendImplementation
+        using hipblaslt_jit::Stage;
+        using hipblaslt_jit::Status;
+
+        // Runs the TensileLite generator and returns its bundle; it never loads code.
+        class TensileLiteBackend final : public hipblaslt_jit::Backend
         {
-            Options                                                 options;
-            std::shared_ptr<const hipblaslt_jit::Predictor>         predictor;
-            std::shared_ptr<const hipblaslt_jit::TuningKnowledge>   knowledge;
-            std::shared_ptr<const hipblaslt_jit::CodeObjectBuilder> builder;
-            std::shared_ptr<const hipblaslt_jit::SolutionLoader>    loader;
-            explicit Provider(const Options& value)
-                : options(value)
-                , predictor(hipblaslt_jit::makeOrigamiPredictor())
-                , knowledge(hipblaslt_jit::makeTensileLiteDefaults())
-                , builder(hipblaslt_jit::makePrebuiltBuilder())
-                , loader(hipblaslt_jit::makeTensileLoader())
+        public:
+            explicit TensileLiteBackend(const Options& options)
+                : m_options(options)
+                , m_info{"tensilelite",
+                         "TensileLite",
+                         options.configPath.empty() ? "origami.gemm.dp.v1" : ""}
             {
             }
-            std::string_view name() const noexcept override
+            const hipblaslt_jit::BackendInfo& info() const noexcept override
             {
-                return "TensileLite";
+                return m_info;
             }
-            hipblasStatus_t compile(const jit::detail::OperationRequest& request,
-                                    const jit::detail::Target&           target,
-                                    size_t                               workspaceLimit,
-                                    std::shared_ptr<const jit::detail::KernelBundle>& bundle,
-                                    jit::Diagnostics& diagnostics) const override
+            Status generate(const hipblaslt_jit::GenerationRequest&        request,
+                            std::vector<hipblaslt_jit::GeneratedSolution>& solutions) const override
             {
-                bundle.reset();
-                diagnostics.backend = "TensileLite";
-                if(request.kind() != jit::detail::GemmRequest::operation
-                   || !dynamic_cast<const jit::detail::GemmRequest*>(&request))
-                {
-                    diagnostics.message = "TensileLite does not implement this operation";
-                    return HIPBLAS_STATUS_NOT_SUPPORTED;
-                }
-                auto configured = options;
+                solutions.clear();
+                const auto* gemm = dynamic_cast<const jit::detail::GemmRequest*>(&request.request);
+                if(!gemm || request.request.kind() != jit::detail::GemmRequest::operation)
+                    return {Status::Code::NotSupported,
+                            Stage::Generate,
+                            "TensileLite does not implement this operation"};
+                auto configured = m_options;
                 if(configured.architecture.empty())
-                    configured.architecture = target.properties.gcnArchName;
-                if(!targetMatchesDevice(configured.architecture, target.properties.gcnArchName))
-                {
-                    diagnostics.message
-                        = "Requested TensileLite architecture does not match device";
-                    return HIPBLAS_STATUS_ARCH_MISMATCH;
-                }
+                    configured.architecture = request.target.targetId;
+                if(!targetMatchesDevice(configured.architecture, request.target.targetId))
+                    return {Status::Code::TargetMismatch,
+                            Stage::Configure,
+                            "Requested TensileLite architecture does not match device"};
                 try
                 {
-                    const auto failed = [&](const hipblaslt_jit::Status& status) {
-                        diagnostics.message = status.message;
-                        return status.code == hipblaslt_jit::Status::Code::NotSupported
-                                   ? HIPBLAS_STATUS_NOT_SUPPORTED
-                                   : HIPBLAS_STATUS_INTERNAL_ERROR;
-                    };
-                    hipblaslt_jit::DeviceTarget device;
-                    auto status = hipblaslt_jit::DeviceTarget::make(target.device, device);
-                    if(!status.ok())
-                        return failed(status);
-                    const bool  predict = configured.configPath.empty();
                     std::string summary;
-                    if(predict)
+                    if(request.prediction)
                     {
-                        hipblaslt_jit::Prediction prediction;
-                        status = predictor->predict(request, device, *knowledge, prediction);
-                        if(!status.ok())
-                            return failed(status);
-                        configured.configPath = writeJitGemmRequest(
-                            static_cast<const jit::detail::GemmRequest&>(request),
-                            configured,
-                            prediction);
-                        summary = "Origami ranked " + std::to_string(prediction.ranked.size())
+                        configured.configPath
+                            = writeJitGemmRequest(*gemm, configured, *request.prediction);
+                        summary = "Origami ranked "
+                                  + std::to_string(request.prediction->ranked.size())
                                   + " parameter candidates; the first candidate accepted by "
                                     "TensileLite was compiled";
                     }
-                    generate(configured, predict ? "Tensile.JitGemm" : "Tensile.SingleSolution");
-                    const auto generated = readGeneratedSolution(configured, device.targetId);
-                    const hipblaslt_jit::GenerationRequest generation{
-                        request, device, nullptr, 1, workspaceLimit, {}, {}};
-                    hipblaslt_jit::BuiltSolution built;
-                    status = builder->build(generated, generation, built);
-                    if(status.ok())
-                        status = loader->support(built, request, device, workspaceLimit);
-                    std::shared_ptr<const jit::detail::KernelBundle> loaded;
-                    if(status.ok())
-                        status = loader->load(built, request, device, workspaceLimit, loaded);
-                    if(!status.ok())
-                        return failed(status);
-                    bundle = std::move(loaded);
-                    if(predict)
-                        diagnostics.message = summary;
-                    return HIPBLAS_STATUS_SUCCESS;
+                    runGenerator(configured,
+                                 request.prediction ? "Tensile.JitGemm" : "Tensile.SingleSolution");
+                    solutions.push_back(readGeneratedSolution(configured, request.target.targetId));
+                    return {Status::Code::Success, Stage::Generate, std::move(summary)};
                 }
                 catch(const std::bad_alloc&)
                 {
@@ -378,10 +341,18 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                 }
                 catch(const std::exception& e)
                 {
-                    diagnostics.message = e.what();
-                    return HIPBLAS_STATUS_INTERNAL_ERROR;
+                    Status failure{Status::Code::Failed, Stage::Generate, e.what()};
+                    const auto log = fs::u8path(configured.outputPath + ".log");
+                    std::error_code error;
+                    if(fs::exists(log, error))
+                        failure.logPath = fs::absolute(log, error).u8string();
+                    return failure;
                 }
             }
+
+        private:
+            Options                    m_options;
+            hipblaslt_jit::BackendInfo m_info;
         };
     }
 
@@ -398,7 +369,14 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
         }
         try
         {
-            backend = jit::detail::BackendAccess::make(std::make_shared<Provider>(options));
+            backend = jit::detail::BackendAccess::make(
+                std::make_shared<const hipblaslt_jit::Jit>(hipblaslt_jit::Jit::Components{
+                    std::make_shared<const TensileLiteBackend>(options),
+                    hipblaslt_jit::makeOrigamiPredictor(),
+                    hipblaslt_jit::makeTensileLiteDefaults(),
+                    hipblaslt_jit::makePrebuiltBuilder(),
+                    hipblaslt_jit::makeTensileLoader(),
+                    nullptr}));
             return HIPBLAS_STATUS_SUCCESS;
         }
         catch(const std::bad_alloc&)
