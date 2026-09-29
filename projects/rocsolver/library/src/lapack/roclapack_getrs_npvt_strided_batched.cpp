@@ -55,6 +55,12 @@ try
         if(!handle)
             return rocblas_status_invalid_handle;
 
+        bool const has_work = (n >= 1) && (nrhs >= 1) && (batch_count >= 1);
+        if(!has_work)
+        {
+            return (rocblas_status_success);
+        }
+
         // argument checking
         rocblas_status st
             = rocsolver_getrs_npvt_argCheck(handle, trans, n, nrhs, lda, ldb, A, B, batch_count);
@@ -72,8 +78,8 @@ try
         I const bid_end = std::min(batch_count_arg, bid + bid_inc);
         I const batch_count = bid_end - bid;
 
-        auto const A = A_arg + bid * strideA;
-        auto const B = B_arg + bid * strideB;
+        auto const A = (A_arg == nullptr) ? nullptr : A_arg + bid * strideA;
+        auto const B = (B_arg == nullptr) ? nullptr : B_arg + bid * strideB;
 
         // working with unshifted arrays
         rocblas_stride shiftA = 0;
