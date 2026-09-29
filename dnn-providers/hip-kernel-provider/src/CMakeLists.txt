@@ -342,7 +342,6 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         hkp_gfx950_attention_dense_available(_hkp_gfx950_attention_dense)
     endif()
     if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
-       AND HIPKERNELPROVIDER_ENABLE_ROCKE
        AND _hkp_gfx950_attention_dense
        AND TARGET hipdnn_integration_tests)
         # Route the installed entry and its TOML into the gfx950 shard, so pruning to
