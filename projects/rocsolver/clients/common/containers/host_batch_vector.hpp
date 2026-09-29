@@ -237,6 +237,22 @@ private:
                 {
                     break;
                 }
+#ifdef NDEBUG
+#else
+                // -------------------------------
+                // set initial data to NaN or 0xFF
+                // to assist in debugging
+                // -------------------------------
+                int const val = 0xFF;
+                size_t const nbytes = nmemb * sizeof(T);
+                void* dst = (void*)(this->m_data[batch_index]);
+                void* istat = memset(dst, val, nbytes);
+                bool const isok = (istat == dst);
+                if(!isok)
+                {
+                    break;
+                }
+#endif
             }
         }
         return success;
