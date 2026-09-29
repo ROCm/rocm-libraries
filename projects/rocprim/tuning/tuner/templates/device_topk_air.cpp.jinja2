@@ -18,8 +18,10 @@
         using benchmark_type = device_topk_air_benchmark<key_type, value_type, config>;
 {% endblock %}
 
-using key_type = {{ key_type }};
-using value_type = {{ value_type }};
+{% block type_definitions %}
+    using key_type = {{ key_type }};
+    using value_type = {{ value_type }};
+{% endblock %}
 
 {% block primbench_executor %}
     auto executor = primbench::executor(1, args, settings, primbench::flags::sync);
