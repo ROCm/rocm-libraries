@@ -65,6 +65,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/InsertPhiTest.cpp
     unit/asm/EstimateAsmCyclesTest.cpp
     unit/asm/RedundantMovEliminationPassTest.cpp
+    unit/asm/AsmMovePropagationPassTest.cpp
     unit/asm/OptimizationPipelineTest.cpp
     unit/asm/ScopeAdaptorTest.cpp
     unit/asm/ModuleAdaptorsTest.cpp
@@ -149,6 +150,7 @@ set(UNIT_CORE_TEST_FILES
     unit/core/ComgrProbeTest.cpp
     unit/core/PassBuilderTest.cpp
     unit/core/BackendTest.cpp
+    unit/core/TimePassesInstrumentation_test.cpp
     unit/core/VersionTest.cpp
 )
 

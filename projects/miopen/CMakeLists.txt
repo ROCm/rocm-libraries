@@ -780,7 +780,7 @@ endfunction()
 # The default behaviour when no list of AMDGPU targets is supplied should be to
 # install for all targets; this was the behaviour before MIOPEN_INSTALL_GPU_DATABASES
 # was added.
-set(ALL_GPU_DATABASES gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1102 gfx1151 gfx1200 gfx1201)
+set(ALL_GPU_DATABASES gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1102 gfx1151 gfx1200 gfx1201)
 set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE LIST "List of AMDGPU targets for which to install databases")
 
 # This list should be updated when a new KDB file is added to the project
@@ -849,6 +849,12 @@ enable_cppcheck(
     SUPPRESS
         ConfigurationNotChecked
         constStatement
+        # cppcheck cannot resolve a transitive header for the LGBM picker gtests
+        # in project mode, so it aborts parsing the whole TU with a spurious
+        # syntaxError at the first TEST_F. The files compile fine with the real
+        # toolchain; suppress the parse-abort for just these two.
+        syntaxError:*test/gtest/lgbm_picker.cpp
+        syntaxError:*test/gtest/lgbm_pcfg_picker.cpp
         # There is no ODR violation because of using separate executables,
         # but cppcheck doesn't understand that as it assumes everything
         # will be compiled together in one binary.
