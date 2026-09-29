@@ -140,6 +140,16 @@ CI runs pre-commit on every pull request, so a stale header fails there.
 See [Cache-Key Annotations](./AddingNewOperations.md#cache-key-annotations) for the full
 field-policy reference.
 
+#### Operand features
+
+`scripts/gen_node_operands.py` reads the same compiled schema to generate
+`node_operands_generated.h`: a visitor over each node type's tensor operands (`(cache_uid)`
+fields) and attributes, which the UHD heuristics publish as `graph.nodes[i].*` features.
+Annotate a `(cache_uid)` field `work_data_dependent` when the tensor's contents, not its
+shape, decide how much work the node does (valid lengths, page tables, routing offsets). The
+`node-operands-hipdnn` pre-commit hook regenerates the header. See
+[Operand Features](./AddingNewOperations.md#operand-features).
+
 ### Configuring Engine Knobs
 
 hipDNN engines support runtime configuration through **knobs** - configurable parameters that control engine behavior, performance tuning, and feature selection.

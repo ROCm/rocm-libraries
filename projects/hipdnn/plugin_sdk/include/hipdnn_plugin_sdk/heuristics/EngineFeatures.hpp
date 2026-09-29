@@ -6,8 +6,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -15,6 +17,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <hipdnn_flatbuffers_sdk/data_objects/node_operands_generated.h>
 #include <hipdnn_plugin_sdk/heuristics/DeviceFeatures.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #endif
@@ -225,93 +228,132 @@ inline std::optional<double> logicalFlops(const Graph& graph, const Node& node)
     return std::nullopt;
 }
 
+/// Publishes one node's operands through the schema-generated visitor
+/// (node_operands_generated.h), so every node type is covered without per-op code:
+///   <prefix>.<role>.{data_type, rank, numel, virtual, dims[i], strides[i]} per tensor operand
+///   <prefix>.<name> per scalar attribute, <prefix>.<name>[i] per vector attribute element
+/// Names and values match what the hand-written Matmul/ConvolutionFwd/SDPA binders
+/// published, which shipped models read.
+class NodeFeatureBinder
+{
+public:
+    NodeFeatureBinder(uhd::FeatureExtractionContext& features,
+                      const Graph& graph,
+                      const std::string& prefix)
+        : _features(features)
+        , _graph(graph)
+        , _prefix(prefix)
+    {
+    }
+
+    void tensor(std::string_view role, int64_t uid, bool workDataDependent)
+    {
+        // The annotation is about the uid's contents, so it counts even when the
+        // referenced tensor is missing from the graph.
+        _dataDependent = _dataDependent || workDataDependent;
+        const auto* value = detail::tensor(_graph, uid);
+        if(value == nullptr)
+        {
+            return;
+        }
+        _dataDependent
+            = _dataDependent
+              || hipdnn_flatbuffers_sdk::data_objects::node_operands::workDataDependent(*value);
+        const auto name = feature(role) + ".";
+        _features.bind(name + "data_type", static_cast<int64_t>(value->data_type()));
+        _features.bind(name + "virtual", value->virtual_());
+        if(const auto* dims = value->dims())
+        {
+            _features.bind(name + "rank", static_cast<int64_t>(dims->size()));
+            if(const auto count = numel(*dims))
+            {
+                _features.bind(name + "numel", *count);
+            }
+            for(flatbuffers::uoffset_t i = 0; i < dims->size(); ++i)
+            {
+                _features.bind(name + "dims[" + std::to_string(i) + "]", dims->Get(i));
+            }
+        }
+        if(const auto* strides = value->strides())
+        {
+            for(flatbuffers::uoffset_t i = 0; i < strides->size(); ++i)
+            {
+                _features.bind(name + "strides[" + std::to_string(i) + "]", strides->Get(i));
+            }
+        }
+    }
+
+    template <typename TValue>
+    void scalar(std::string_view name, TValue value)
+    {
+        _features.bind(feature(name), value);
+    }
+
+    template <typename TValue>
+    void element(std::string_view name, size_t index, TValue value)
+    {
+        _features.bind(feature(name) + "[" + std::to_string(index) + "]", value);
+    }
+
+    /// Whether any operand's contents decide the node's work: a `work_data_dependent`
+    /// operand is present, or an operand tensor is itself data-dependent (ragged).
+    bool dataDependent() const
+    {
+        return _dataDependent;
+    }
+
+private:
+    std::string feature(std::string_view name) const
+    {
+        std::string result = _prefix;
+        result += '.';
+        result += name;
+        return result;
+    }
+
+    /// Absent when a dimension is negative or the product overflows: unknown, not 0.
+    static std::optional<int64_t> numel(const flatbuffers::Vector<int64_t>& dims)
+    {
+        int64_t product = 1;
+        for(const auto extent : dims)
+        {
+            if(extent < 0
+               || (extent != 0 && product > std::numeric_limits<int64_t>::max() / extent))
+            {
+                return std::nullopt;
+            }
+            product *= extent;
+        }
+        return product;
+    }
+
+    uhd::FeatureExtractionContext& _features;
+    const Graph& _graph;
+    const std::string& _prefix;
+    bool _dataDependent = false;
+};
+
+/// Publishes @p node's operands, `<prefix>.data_dependent`, and the derived SDPA flags.
+/// Publishes nothing for a node without attributes or of a type this build predates.
 inline void bindNodeFeatures(uhd::FeatureExtractionContext& features,
                              const Graph& graph,
                              const Node& node,
                              const std::string& prefix)
 {
-    const auto bindTensor = [&](const char* role, int64_t uid) {
-        const auto* value = tensor(graph, uid);
-        if(value == nullptr)
-        {
-            return;
-        }
-        const auto name = prefix + "." + role;
-        features.bind(name + ".data_type", static_cast<int64_t>(value->data_type()));
-        if(value->dims() != nullptr)
-        {
-            for(flatbuffers::uoffset_t i = 0; i < value->dims()->size(); ++i)
-            {
-                features.bind(name + ".dims[" + std::to_string(i) + "]", value->dims()->Get(i));
-            }
-        }
-        if(value->strides() != nullptr)
-        {
-            for(flatbuffers::uoffset_t i = 0; i < value->strides()->size(); ++i)
-            {
-                features.bind(name + ".strides[" + std::to_string(i) + "]",
-                              value->strides()->Get(i));
-            }
-        }
-    };
-    if(const auto* op = node.attributes_as_MatmulAttributes())
+    NodeFeatureBinder binder(features, graph, prefix);
+    if(!hipdnn_flatbuffers_sdk::data_objects::node_operands::visit(node, binder))
     {
-        bindTensor("a", op->a_tensor_uid());
-        bindTensor("b", op->b_tensor_uid());
-        bindTensor("c", op->c_tensor_uid());
         return;
     }
-    if(const auto* op = node.attributes_as_ConvolutionFwdAttributes())
-    {
-        bindTensor("x", op->x_tensor_uid());
-        bindTensor("w", op->w_tensor_uid());
-        bindTensor("y", op->y_tensor_uid());
-        const auto bindVector = [&](const char* name, const auto* values) {
-            if(values != nullptr)
-            {
-                for(flatbuffers::uoffset_t i = 0; i < values->size(); ++i)
-                {
-                    features.bind(prefix + "." + name + "[" + std::to_string(i) + "]",
-                                  values->Get(i));
-                }
-            }
-        };
-        bindVector("pre_padding", op->pre_padding());
-        bindVector("post_padding", op->post_padding());
-        bindVector("stride", op->stride());
-        bindVector("dilation", op->dilation());
-        features.bind(prefix + ".conv_mode", static_cast<int64_t>(op->conv_mode()));
-        return;
-    }
+    features.bind(prefix + ".data_dependent", binder.dataDependent());
+    // Derived rather than schema fields, so no generated visitor reports them; the
+    // shipped SDPA models read both.
     if(const auto* op = node.attributes_as_SdpaAttributes())
     {
-        bindTensor("q", op->q_tensor_uid());
-        bindTensor("k", op->k_tensor_uid());
-        bindTensor("v", op->v_tensor_uid());
-        bindTensor("o", op->o_tensor_uid());
-        features.bind(prefix + ".causal_mask", op->causal_mask());
-        features.bind(prefix + ".causal_mask_bottom_right", op->causal_mask_bottom_right());
-        features.bind(prefix + ".diagonal_alignment",
-                      static_cast<int64_t>(op->diagonal_alignment()));
-        features.bind(prefix + ".padding_mask", op->padding_mask());
-        features.bind(prefix + ".alibi_mask", op->alibi_mask());
         features.bind(prefix + ".has_attention_mask", op->attn_mask_tensor_uid().has_value());
         features.bind(prefix + ".has_variable_lengths",
                       op->seq_len_q_tensor_uid().has_value()
                           || op->seq_len_kv_tensor_uid().has_value());
-        if(op->left_bound())
-        {
-            features.bind(prefix + ".left_bound", *op->left_bound());
-        }
-        if(op->right_bound())
-        {
-            features.bind(prefix + ".right_bound", *op->right_bound());
-        }
-        if(op->dropout_probability())
-        {
-            features.bind(prefix + ".dropout_probability",
-                          static_cast<double>(*op->dropout_probability()));
-        }
     }
 }
 } // namespace detail

@@ -235,6 +235,32 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             COMMENT "Cache-key header generation"
         )
         add_dependencies(hipdnn_flatbuffers_sdk generate_hipdnn_cache_key)
+
+        # Same shape as the cache-key header, for the same reasons: the node-operand
+        # visitor is driven by the `cache_uid` and `work_data_dependent` annotations,
+        # which flatc's C++ output does not expose. gen_node_operands.py imports
+        # gen_cache_key.py's schema reader, so a change to either script regenerates it.
+        set(_node_operands_header
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/hipdnn_flatbuffers_sdk/data_objects/node_operands_generated.h"
+        )
+        add_custom_command(
+            OUTPUT "${_node_operands_header}"
+            COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/gen_node_operands.py" --flatc
+                    "${_cache_key_flatc}"
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/gen_node_operands.py"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/gen_cache_key.py"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/default_flatc_version.txt"
+                    ${_cache_key_schema_depends} ${_cache_key_flatc_dependency}
+            COMMENT "Generating node_operands_generated.h from the FlatBuffers schemas"
+            VERBATIM
+        )
+        add_custom_target(
+            generate_hipdnn_node_operands
+            DEPENDS "${_node_operands_header}"
+            COMMENT "Node-operand visitor header generation"
+        )
+        add_dependencies(hipdnn_flatbuffers_sdk generate_hipdnn_node_operands)
     endif()
 endif()
 
