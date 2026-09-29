@@ -551,12 +551,7 @@ TEST(TestGpuResampleFwdRefMixedType, HalfInputFloatOutput)
                                                                  &indexGpu);
 
     assertAllClose(yCpu, yGpu, getTolerance<float>());
-    const auto* indexCpuData = static_cast<const int32_t*>(indexCpu.rawHostData());
-    const auto* indexGpuData = static_cast<const int32_t*>(indexGpu.rawHostData());
-    for(size_t i = 0; i < indexCpu.elementSpace(); ++i)
-    {
-        EXPECT_EQ(indexCpuData[i], indexGpuData[i]) << "Index mismatch at position " << i;
-    }
+    assertAllExact(indexCpu, indexGpu);
 }
 
 TEST(TestGpuResampleFwdRefMixedType, HalfInputHalfOutput)
@@ -591,12 +586,7 @@ TEST(TestGpuResampleFwdRefMixedType, HalfInputHalfOutput)
                                                                 &indexGpu);
 
     assertAllClose(yCpu, yGpu, getTolerance<half>());
-    const auto* indexCpuData = static_cast<const int32_t*>(indexCpu.rawHostData());
-    const auto* indexGpuData = static_cast<const int32_t*>(indexGpu.rawHostData());
-    for(size_t i = 0; i < indexCpu.elementSpace(); ++i)
-    {
-        EXPECT_EQ(indexCpuData[i], indexGpuData[i]) << "Index mismatch at position " << i;
-    }
+    assertAllExact(indexCpu, indexGpu);
 }
 
 TEST(TestGpuResampleFwdRefMixedType, BfloatInputFloatOutput)
@@ -695,12 +685,7 @@ TEST(TestGpuResampleFwdRefMixedType, DoubleInputDoubleOutput)
                                                                      &indexGpu);
 
     assertAllClose(yCpu, yGpu, getTolerance<double>());
-    const auto* indexCpuData = static_cast<const int32_t*>(indexCpu.rawHostData());
-    const auto* indexGpuData = static_cast<const int32_t*>(indexGpu.rawHostData());
-    for(size_t i = 0; i < indexCpu.elementSpace(); ++i)
-    {
-        EXPECT_EQ(indexCpuData[i], indexGpuData[i]) << "Index mismatch at position " << i;
-    }
+    assertAllExact(indexCpu, indexGpu);
 }
 
 // --- Optional arguments tests ---
@@ -736,12 +721,7 @@ TEST(TestGpuResampleFwdRefOptionalArgs, MaxPoolWithIndex)
                                                                   &indexGpu);
 
     assertAllClose(yCpu, yGpu, getTolerance<float>());
-    const auto* indexCpuData = static_cast<const int32_t*>(indexCpu.rawHostData());
-    const auto* indexGpuData = static_cast<const int32_t*>(indexGpu.rawHostData());
-    for(size_t i = 0; i < indexCpu.elementSpace(); ++i)
-    {
-        EXPECT_EQ(indexCpuData[i], indexGpuData[i]) << "Index mismatch at position " << i;
-    }
+    assertAllExact(indexCpu, indexGpu);
 }
 
 TEST(TestGpuResampleFwdRefOptionalArgs, AverageExcludePadding)
@@ -862,12 +842,7 @@ TEST(TestGpuResampleFwdRefChannelLast, MaxPoolMatchesCpuRefWithIndex4D)
                                                          &indexGpu);
 
     assertAllClose(yCpu, yGpu, getTolerance<float>());
-    const auto* indexCpuData = static_cast<const int32_t*>(indexCpu.rawHostData());
-    const auto* indexGpuData = static_cast<const int32_t*>(indexGpu.rawHostData());
-    for(size_t i = 0; i < indexCpu.elementSpace(); ++i)
-    {
-        EXPECT_EQ(indexCpuData[i], indexGpuData[i]) << "Index mismatch at position " << i;
-    }
+    assertAllExact(indexCpu, indexGpu);
 }
 
 TEST(TestGpuResampleFwdRefChannelLast, AvgPoolMatchesCpuRef5D)
@@ -928,12 +903,7 @@ TEST(TestGpuResampleFwdRefChannelLast, MaxPoolMatchesCpuRefWithIndex5D)
                                                          &indexGpu);
 
     assertAllClose(yCpu, yGpu, getTolerance<float>());
-    const auto* indexCpuData = static_cast<const int32_t*>(indexCpu.rawHostData());
-    const auto* indexGpuData = static_cast<const int32_t*>(indexGpu.rawHostData());
-    for(size_t i = 0; i < indexCpu.elementSpace(); ++i)
-    {
-        EXPECT_EQ(indexCpuData[i], indexGpuData[i]) << "Index mismatch at position " << i;
-    }
+    assertAllExact(indexCpu, indexGpu);
 }
 
 // --- Test suite instantiations ---
