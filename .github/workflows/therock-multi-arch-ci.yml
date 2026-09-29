@@ -134,7 +134,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: 7440cb8578f4daae0d85a428fadd6645dc5464a0 # 2026-09-28
+          ref: users/geomin12/external-ci-test
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -155,6 +155,7 @@ jobs:
     needs: [ci-env, configure]
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@7440cb8578f4daae0d85a428fadd6645dc5464a0 # 2026-09-28
     with:
+      changed_projects: ${{ needs.configure.outputs.changed_projects }}
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI.
       # gfx125X (CDNA5/gfx1250) is included build-only on every PR/push: no test
@@ -192,7 +193,7 @@ jobs:
           'off'
         }}
       repository: ROCm/TheRock
-      ref: 7440cb8578f4daae0d85a428fadd6645dc5464a0 # 2026-09-28
+      ref: users/geomin12/external-ci-test
       # Pass external repo info for stage-impact analysis.
       # extra_cmake_options is appended to the cmake configure line of every
       # build stage, scoped to this repository's CI runs. TheRock keeps
@@ -232,7 +233,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 7440cb8578f4daae0d85a428fadd6645dc5464a0 # 2026-09-28
+      ref: users/geomin12/external-ci-test
     permissions:
       contents: read
       id-token: write
@@ -258,7 +259,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 7440cb8578f4daae0d85a428fadd6645dc5464a0 # 2026-09-28
+      ref: users/geomin12/external-ci-test
     permissions:
       contents: read
       id-token: write
@@ -305,7 +306,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: 7440cb8578f4daae0d85a428fadd6645dc5464a0 # 2026-09-28
+          ref: users/geomin12/external-ci-test
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
