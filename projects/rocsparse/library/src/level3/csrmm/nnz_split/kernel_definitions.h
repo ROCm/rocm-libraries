@@ -69,7 +69,7 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
 
         // One block per nnz block. grid.x is sized from the 64-bit nblocks and
-        // clamped against handle->properties.maxGridSize[0] at the launch site, so
+        // clamped by rocsparse::get_grid_size_x at the launch site, so
         // grid-stride over the full count (AISPARSE-672). The bound derives from the
         // nnz kernel argument and the compile-time BLOCKSIZE and the stride is
         // hipGridDim_x, so both are block uniform and the __syncthreads() calls in

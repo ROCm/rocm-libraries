@@ -35,22 +35,6 @@
 
 namespace rocsparse
 {
-    // AISPARSE-672. The nnz split path sizes grid.x from an int64_t nnz, or from an
-    // nblocks derived from it, and assigns the result to the unsigned int dim3
-    // field, so each grid must be clamped against the hardware grid.x maximum.
-    // Every kernel launched through these sites grid-strides over the full count, so
-    // a clamped grid only costs iterations, never coverage.
-    //
-    // Deliberately local to this translation unit rather than added to
-    // rocsparse_common.hpp, which is a live conflict zone (AISPARSE-677/678/696).
-    // The signature matches rocsparse::get_grid_size from AISPARSE-696 (PR #11512),
-    // so once that lands every call site below becomes a one-line substitution:
-    // csrmm_nnz_split_grid_size_x -> rocsparse::get_grid_size.
-    static inline uint32_t csrmm_nnz_split_grid_size_x(int64_t count, int64_t max_extent)
-    {
-        return static_cast<uint32_t>((count > max_extent) ? max_extent : count);
-    }
-
     template <typename T, typename I, typename J, typename A>
     rocsparse_status csrmm_buffer_size_template_nnz_split(rocsparse_handle          handle,
                                                           rocsparse_operation       trans_A,
@@ -121,8 +105,7 @@ namespace rocsparse
             I nblocks = (nnz - 1) / NNZ_PER_BLOCK + 1;
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrmmnn_nnz_split_compute_row_limits<256, NNZ_PER_BLOCK>),
-                dim3(csrmm_nnz_split_grid_size_x((int64_t(nblocks) - 1) / 256 + 1,
-                                                 handle->properties.maxGridSize[0])),
+                dim3(rocsparse::get_grid_size_x(handle, (int64_t(nblocks) - 1) / 256 + 1, 256)),
                 dim3(256),
                 0,
                 handle->stream,
@@ -259,8 +242,7 @@ namespace rocsparse
         // One block per nnz block, clamped against the hardware grid.x maximum; the
         // kernels grid-stride over the full nblocks (AISPARSE-672). nblocks itself
         // stays unclamped because it is also the reduction buffer row stride below.
-        const uint32_t grid_x
-            = csrmm_nnz_split_grid_size_x(nblocks, handle->properties.maxGridSize[0]);
+        const uint32_t grid_x = rocsparse::get_grid_size_x(handle, nblocks, NNZ_PER_BLOCK);
 
         // Layout: row_limits is shared across batches, while row_block_red and
         // val_block_red are laid out contiguously per batch. Each batch b owns
@@ -328,8 +310,7 @@ namespace rocsparse
         // clamped like the nnz-derived grids above and the kernel grid-strides over
         // it; n is now passed explicitly because the kernel used to read it off
         // hipGridDim_x to stride val_block_red (AISPARSE-672).
-        const uint32_t reduce_grid_x
-            = csrmm_nnz_split_grid_size_x(n, handle->properties.maxGridSize[0]);
+        const uint32_t reduce_grid_x = rocsparse::get_grid_size_x(handle, n, 1024);
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::csrmmnn_general_block_reduce<1024>),
@@ -463,8 +444,8 @@ namespace rocsparse
         // One block per nnz block, the same count the nn path calls nblocks, clamped
         // against the hardware grid.x maximum; the kernels grid-stride over the full
         // count (AISPARSE-672).
-        const uint32_t grid_x = csrmm_nnz_split_grid_size_x((int64_t(nnz) - 1) / BLOCKSIZE + 1,
-                                                            handle->properties.maxGridSize[0]);
+        const uint32_t grid_x
+            = rocsparse::get_grid_size_x(handle, (int64_t(nnz) - 1) / BLOCKSIZE + 1, BLOCKSIZE);
 
         J main      = 0;
         J remainder = n;

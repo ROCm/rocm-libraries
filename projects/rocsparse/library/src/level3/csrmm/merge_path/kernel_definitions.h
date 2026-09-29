@@ -82,8 +82,8 @@ namespace rocsparse
                       ? static_cast<int64_t>(((coord_block_count - 1) / 256 + 1) * 256)
                       : 0;
 
-            // One block per merge block. grid.x is clamped against
-            // handle->properties.maxGridSize[0] at the launch site, so grid-stride
+            // One block per merge block. grid.x is clamped by
+            // rocsparse::get_grid_size_x at the launch site, so grid-stride
             // over the full 64-bit merge block count (AISPARSE-671). The bound and
             // the stride are block uniform (a kernel argument and hipGridDim_x), so
             // every thread of a block runs the same number of iterations.
