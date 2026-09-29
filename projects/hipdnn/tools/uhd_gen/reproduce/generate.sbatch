@@ -174,7 +174,11 @@ PLUGIN_DIR=$(dirname "$(find "$BUILD" \( -name "libhip_kernel_provider*.so" -o -
 # tree handed to the generator must be the root that owns kpack -- copying one engine's
 # folder leaves its kernels unresolvable and every pinned configuration comes back
 # config_not_applicable (measured, run 67926620).
-TREE_ROOT=$(find "$BUILD" -type d -name kpack -path "*arch_content*" | head -1)
+# The shipped (product) tree for this arch, never test_arch_content: that tree also holds
+# kpack archives, sorts first, and carries none of the provider's engines (run 68007330 took
+# test_arch_content/.../unit/shared/gfx950 and found no UED for the engine).
+TREE_ROOT=$(find "$BUILD" -type d -name kpack -path "*/arch_content/*/$ARCH/kpack" \
+    -not -path "*/test_arch_content/*" | head -1)
 TREE_ROOT=${TREE_ROOT%/kpack}
 if [ -z "$TREE_ROOT" ] && [[ "+$PROVIDERS+" != *"+hip-kernel-provider+"* ]]; then
     # MIOpen alone ships no descriptors: its L1 models are installed into (and read from)
