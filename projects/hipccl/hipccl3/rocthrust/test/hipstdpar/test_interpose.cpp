@@ -20,6 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <hip/hip_runtime.h>
+
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -300,6 +302,23 @@ int main()
       return EXIT_FAILURE;
     }
 
+    // munmap must release the whole range even when un-advising it fails, as it
+    // does here because the second page is already unmapped, and must not leave
+    // that HIP failure pending.
+    {
+      auto pages = static_cast<unsigned char*>(
+        mmap(nullptr, 2 * 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+      if (pages == MAP_FAILED || munmap(pages + 4096, 4096) != 0 || munmap(pages, 2 * 4096) != 0)
+      {
+        return EXIT_FAILURE;
+      }
+      unsigned char residency{};
+      if (mincore(pages, 4096, &residency) == 0 || hipPeekAtLastError() != hipSuccess)
+      {
+        return EXIT_FAILURE;
+      }
+    }
+
     // A MAP_FIXED mapping that the interposer rejects must leave the range
     // mapped. The reservation bypasses interposition through the raw syscall,
     // and exceeds system memory so that hipMemAdvise refuses to advise it.
@@ -314,12 +333,13 @@ int main()
     }
     else
     {
+      errno = 0;
       const auto fixed_mapping =
         mmap(reservation, reservation_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0);
       if (fixed_mapping == MAP_FAILED)
       {
         unsigned char residency{};
-        if (mincore(reservation, 4096, &residency) != 0)
+        if (errno != ENOMEM || mincore(reservation, 4096, &residency) != 0)
         {
           return EXIT_FAILURE;
         }
@@ -333,6 +353,10 @@ int main()
         }
       }
       munmap(reservation, reservation_size);
+      if (hipPeekAtLastError() != hipSuccess)
+      {
+        return EXIT_FAILURE;
+      }
     }
 #endif
 

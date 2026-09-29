@@ -69,6 +69,14 @@ namespace hipstd
 {
 inline static const bool __initialised{hipInit(0) == hipSuccess};
 
+// Clears a HIP failure that the interposer handles itself; left pending, it
+// would be reported by the next unrelated HIP call, such as a kernel launch.
+inline hipError_t __consume_error(hipError_t e) noexcept
+{
+    if (e != hipSuccess) static_cast<void>(hipGetLastError());
+    return e;
+}
+
 #if defined(__HIPSTDPAR_INTERPOSE_ALLOC_HAS_STACK_ACCESS__)
     class Stack_accessor final {
         // DATA
@@ -139,8 +147,9 @@ extern "C" {
         if (!r || !hipstd::__initialised || n == 0) return r;
 
         hipDevice_t d{};
-        if (hipGetDevice(&d) != hipSuccess ||
-            hipMemAdvise(r, n, hipMemAdviseSetAccessedBy, d) != hipSuccess) {
+        if (hipstd::__consume_error(hipGetDevice(&d)) != hipSuccess ||
+            hipstd::__consume_error(hipMemAdvise(
+                r, n, hipMemAdviseSetAccessedBy, d)) != hipSuccess) {
             __hipstdpar_hidden_free(r);
             errno = ENOMEM;
             return nullptr;
@@ -199,9 +208,9 @@ extern "C" {
 
         if (hipstd::__initialised) {
             hipDevice_t d{};
-            if (hipGetDevice(&d) == hipSuccess)
-                static_cast<void>(
-                    hipMemAdvise(p, UINT64_MAX, hipMemAdviseUnsetAccessedBy, d));
+            if (hipstd::__consume_error(hipGetDevice(&d)) == hipSuccess)
+                static_cast<void>(hipstd::__consume_error(hipMemAdvise(
+                    p, UINT64_MAX, hipMemAdviseUnsetAccessedBy, d)));
         }
         return __hipstdpar_hidden_free(p);
     }
@@ -317,8 +326,9 @@ extern "C" {
             if (r == MAP_FAILED || !hipstd::__initialised) return r;
 
             hipDevice_t d{};
-            if (hipGetDevice(&d) != hipSuccess ||
-                hipMemAdvise(r, n, hipMemAdviseSetAccessedBy, d) != hipSuccess) {
+            if (hipstd::__consume_error(hipGetDevice(&d)) != hipSuccess ||
+                hipstd::__consume_error(hipMemAdvise(
+                    r, n, hipMemAdviseSetAccessedBy, d)) != hipSuccess) {
                 // MAP_FIXED has already replaced whatever was mapped there;
                 // unmapping would leave a hole inside a range the caller owns.
                 if (!(f & MAP_FIXED)) __hipstdpar_hidden_munmap(r, n);
@@ -334,9 +344,9 @@ extern "C" {
         {
             if (hipstd::__initialised) {
                 hipDevice_t d{};
-                if (hipGetDevice(&d) == hipSuccess)
-                    static_cast<void>(
-                        hipMemAdvise(p, n, hipMemAdviseUnsetAccessedBy, d));
+                if (hipstd::__consume_error(hipGetDevice(&d)) == hipSuccess)
+                    static_cast<void>(hipstd::__consume_error(hipMemAdvise(
+                        p, n, hipMemAdviseUnsetAccessedBy, d)));
             }
             return __hipstdpar_hidden_munmap(p, n);
         }

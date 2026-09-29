@@ -23,6 +23,8 @@
 // Regression tests for the calloc implementation selected by
 // --hipstdpar-interpose-alloc.
 
+#include <hip/hip_runtime.h>
+
 #include <cerrno>
 #include <cstddef>
 #include <cstdlib>
@@ -101,6 +103,11 @@ int main()
     {
       return EXIT_FAILURE;
     }
+  }
+  // Handling the failure must not leave a HIP error for the next HIP call to report.
+  if (hipPeekAtLastError() != hipSuccess)
+  {
+    return EXIT_FAILURE;
   }
 
   // A successful allocation must still be fully zero-initialized.

@@ -67,6 +67,17 @@ struct Header
   std::size_t align;
 };
 
+// Clears a HIP failure that the interposer handles itself; left pending, it
+// would be reported by the next unrelated HIP call, such as a kernel launch.
+inline hipError_t __consume_error(hipError_t e) noexcept
+{
+  if (e != hipSuccess)
+  {
+    static_cast<void>(hipGetLastError());
+  }
+  return e;
+}
+
 inline std::pmr::synchronized_pool_resource heap{
   std::pmr::pool_options{0u, 15u * 1024u}, []() {
     static class final : public std::pmr::memory_resource
@@ -74,7 +85,7 @@ inline std::pmr::synchronized_pool_resource heap{
       void* do_allocate(std::size_t n, std::size_t a) override
       {
         void* r{};
-        if (hipMallocManaged(&r, n) != hipSuccess || !r)
+        if (__consume_error(hipMallocManaged(&r, n)) != hipSuccess || !r)
         {
           throw std::bad_alloc{};
         }
@@ -84,7 +95,7 @@ inline std::pmr::synchronized_pool_resource heap{
 
       void do_deallocate(void* p, std::size_t, std::size_t) override
       {
-        static_cast<void>(hipFree(p));
+        static_cast<void>(__consume_error(hipFree(p)));
       }
 
       bool do_is_equal(const std::pmr::memory_resource& x) const noexcept override
@@ -234,7 +245,7 @@ extern "C" inline __attribute__((used)) void* __hipstdpar_realloc(void* p, std::
   auto h = static_cast<hipstd::Header*>(p) - 1;
 
   hipPointerAttribute_t tmp{};
-  auto r = hipPointerGetAttributes(&tmp, h);
+  static_cast<void>(hipstd::__consume_error(hipPointerGetAttributes(&tmp, h)));
 
   if (!tmp.isManaged)
   {
@@ -280,7 +291,7 @@ extern "C" inline __attribute__((used)) void __hipstdpar_free(void* p)
   auto h = static_cast<hipstd::Header*>(p) - 1;
 
   hipPointerAttribute_t tmp{};
-  auto r = hipPointerGetAttributes(&tmp, h);
+  static_cast<void>(hipstd::__consume_error(hipPointerGetAttributes(&tmp, h)));
 
   if (!tmp.isManaged)
   {
