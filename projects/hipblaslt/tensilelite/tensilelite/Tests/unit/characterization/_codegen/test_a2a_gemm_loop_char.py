@@ -184,6 +184,32 @@ class TestA2AGemmBatchNumbering:
             r"s_sub_u32 s\[sgprA2ABlockCount\][^\n]*sgprA2ABlockLo", self._src()
         )
 
+    def test_flag_row_aliases_the_block_count_past_the_enqueue(self):
+        import re
+
+        src = self._src()
+        count = re.search(r"^\.set sgprA2ABlockCount, (\d+)$", src, re.M)
+        row = re.search(r"^\.set sgprA2AFlagRow, (\d+)$", src, re.M)
+        assert count and row, "no A2AFlagRow alias in the emitted kernel"
+        assert row.group(1) == count.group(1), "A2AFlagRow takes a register of its own"
+        assert src.index("label_A2ASkipEnqueue:") < row.start(), (
+            "A2AFlagRow is written while the enqueuer still reads A2ABlockCount"
+        )
+
+    def test_flag_row_is_the_last_block_of_the_group(self):
+        import re
+
+        src = self._src()
+        assert re.search(r"s_sub_u32 s\d+, s\[sgprWorkGroup1\], s\[sgprA2ABlockLo\]", src), (
+            "the group offset is not taken from the batch's first block"
+        )
+        assert re.search(
+            r"v_readfirstlane_b32 s\[sgprA2AFlagRow\], v\d+[^\n]*\n"
+            r"s_add_u32 s\[sgprA2AFlagRow\], s\[sgprA2AFlagRow\], s\[sgprA2ABlockLo\][^\n]*\n"
+            r"s_mul_i32 s\[sgprA2AFlagRow\], s\[sgprA2AFlagRow\], s\d+",
+            src,
+        ), "the flag row is not (bLo + (b - bLo) % (W-1)) * (W-1)"
+
 
 class TestA2AGemmElection:
     """The batch's single enqueuer: the wave-0 gate, the SMEM atomic, its target."""
@@ -339,11 +365,29 @@ class TestA2AGemmEnqueueLoops:
             r"label_a2a_group_loop\w*:",
             body,
         )
-        assert m, "the pair counter is not seeded from A2ABlockCount before the group loop"
+        assert m, "the block counter is not seeded from A2ABlockCount before the group loop"
         assert re.search(
-            r"s_sub_u32 s%s, s%s, 1[^\n]*// one pair placed" % (m.group(1), m.group(1)),
+            r"s_sub_u32 s%s, s%s, 1[^\n]*// one block placed" % (m.group(1), m.group(1)),
             body,
-        ), "the pair counter does not count one packet pair at a time"
+        ), "the block counter does not count one block at a time"
+
+    def test_reservation_counts_one_atomic_per_group(self):
+        import re
+
+        from Tensile.Components.SdmaPacketEmitter import (ATOMIC_PACKET_DWORDS,
+                                                          COPY_PACKET_DWORDS)
+
+        body = self._queue_loop_body(self._src())
+        m = re.search(
+            r"s_sub_u32 s(\d+), s\[sgprA2AShardCounter\], 1[^\n]*\n"
+            r"s_min_u32 s\1, s\1, s\[sgprA2ABlockCount\][^\n]*\n"
+            r"s_mul_i32 s\1, s\1, %d[^\n]*\n"
+            r"s_mul_i32 s(\d+), s\[sgprA2ABlockCount\], %d[^\n]*\n"
+            r"s_add_u32 s\1, s\1, s\2"
+            % (ATOMIC_PACKET_DWORDS * 4, COPY_PACKET_DWORDS * 4),
+            body,
+        )
+        assert m, "the reservation is not count COPYs + min(W-1, count) ATOMICs"
 
     def test_single_rank_skips_the_packing_pass(self):
         import re
@@ -414,7 +458,22 @@ class TestA2AGemmRoundGroupOrder:
             r"s_cmp_lt_i32 s\d+, s\[sgprA2ABlockLo\][^\n]*\n"
             r"s_cbranch_scc1 label_a2a_group_next",
             self._queue_loop_body(self._src()),
-        ), "a group holding no block still places a packet pair"
+        ), "a group holding no block still places packets"
+
+    def test_the_atomic_is_placed_once_per_group(self):
+        import re
+
+        body = self._queue_loop_body(self._src())
+        head = re.search(r"^label_a2a_packet_loop\w*:", body, re.M)
+        tail = re.search(r"^s_cbranch_scc1 label_a2a_packet_loop\w*", body, re.M)
+        nxt = re.search(r"^label_a2a_group_next\w*:", body, re.M)
+        assert head and tail and nxt, "no packet loop / group-next in the queue loop"
+        assert body[head.end() : tail.start()].count("(packet base)") == 1, (
+            "the packet loop places more than the block's COPY"
+        )
+        assert body[tail.end() : nxt.start()].count("(packet base)") == 1, (
+            "the group's ATOMIC is not placed once after its last block"
+        )
 
     def test_one_reservation_and_one_doorbell_cover_every_group(self):
         body = self._queue_loop_body(self._src())
@@ -426,7 +485,7 @@ class TestA2AGemmRoundGroupOrder:
 
 
 class TestA2AGemmPacketBody:
-    """The COPY_SUBWIN + ATOMIC pair the enqueuer places for each token block."""
+    """The COPY_SUBWIN per token block and the ATOMIC per group the enqueuer places."""
 
     # MacroTile1 of the config: one token block's row count, and rect_y once the
     # tail block is behind us.
@@ -888,14 +947,12 @@ class TestA2AGemmFlagSpin:
 
         body = self._body()
         m = re.search(
-            r"s_sub_u32 s(\d+), s\d+, 1[^\n]*\n"
-            r"s_mul_i32 s\1, s\[sgprWorkGroup1\], s\1[^\n]*\n"
-            r"s_add_u32 s\1, s\1, s\[sgprA2AShardIdx\][^\n]*\n"
+            r"s_add_u32 s(\d+), s\[sgprA2AFlagRow\], s\[sgprA2AShardIdx\][^\n]*\n"
             r"s_sub_u32 s\1, s\1, 1[^\n]*\n"
             r"s_lshl_b32 s\1, s\1, 2",
             body,
         )
-        assert m, "the polled slot is not b*(W-1) + queue index"
+        assert m, "the polled slot is not the group's flag row + queue index"
         assert m.start() < body.index("s_add_u32 s[sgprA2AShardIdx]"), (
             "the slot is taken after the shard index advances, naming the next "
             "round's queue"
