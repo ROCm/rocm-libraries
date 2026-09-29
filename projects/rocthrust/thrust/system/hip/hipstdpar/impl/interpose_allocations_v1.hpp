@@ -69,8 +69,9 @@ namespace hipstd
 {
 inline const bool __initialised{hipInit(0) == hipSuccess};
 
-// Clears a HIP failure that the interposer handles itself; left pending, it
-// would be reported by the next unrelated HIP call, such as a kernel launch.
+// Clears a HIP failure that the interposer handles itself. Left pending, it
+// would be returned by the next hipGetLastError, which rocPRIM calls after
+// every kernel launch, and make an unrelated algorithm fail.
 inline hipError_t __consume_error(hipError_t e) noexcept
 {
     if (e != hipSuccess) static_cast<void>(hipGetLastError());
