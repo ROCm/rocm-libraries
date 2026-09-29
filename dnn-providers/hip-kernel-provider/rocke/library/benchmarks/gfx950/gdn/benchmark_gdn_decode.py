@@ -115,12 +115,6 @@ def main() -> int:
     ap.add_argument("--no-device", action="store_true", help="skip HIP-graph timing")
     args = ap.parse_args()
 
-    import torch
-
-    if not torch.cuda.is_available():
-        print("no HIP device visible", file=sys.stderr)
-        return 2
-
     print(
         f"{'batch':>6} {'arm':>5} {'tile':>10} {'spec_id':>22} {'grid':>8} "
         f"{'eager_us':>10} {'device_us':>10}  correctness"
@@ -137,6 +131,12 @@ def main() -> int:
             )
             failures += 1
             continue
+
+        import torch
+
+        if not torch.cuda.is_available():
+            print("no HIP device visible", file=sys.stderr)
+            return 2
         from builders.gfx950.gdn.gdn_decode import TOL, check
 
         auto = dispatch_gdn_decode(request)

@@ -29,7 +29,6 @@ from dispatch.gdn.gfx950 import (
     TUNED_SPEC_IDS,
     tile_for_work,
 )
-from dispatch.gdn.gfx950 import ARCH, CONFIGURED_TILES, DEFAULT_TILE
 from kernels.gfx950.gdn_decode import (
     gdn_decode_grid,
     gdn_decode_signature,

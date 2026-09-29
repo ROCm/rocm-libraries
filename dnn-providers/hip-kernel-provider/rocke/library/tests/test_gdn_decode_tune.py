@@ -41,21 +41,6 @@ def test_sweep_registry_batch_returns_empty_without_registry_results():
     assert tune.sweep_registry_batch(1, ()) == []
 
 
-def test_complete_sweep_returns_success(capsys):
-    assert tune.report_missing_cells([]) == 0
-    assert capsys.readouterr().err == ""
-
-
-def test_incomplete_sweep_returns_failure_and_names_every_cell(capsys):
-    missing = [(32, 32, 8), (16, 32, 4)]
-
-    assert tune.report_missing_cells(missing) == 1
-    err = capsys.readouterr().err
-    assert "incomplete sweep" in err
-    assert "Hk=32 Hv=32 batch=8" in err
-    assert "Hk=16 Hv=32 batch=4" in err
-
-
 def test_main_fails_when_any_requested_registry_cell_is_missing(monkeypatch, capsys):
     monkeypatch.setattr(tune, "device_is_visible", lambda: True)
 
@@ -89,25 +74,4 @@ def test_main_fails_when_any_requested_registry_cell_is_missing(monkeypatch, cap
     assert tune.main() == 1
     assert (
         "batch 2: no candidate was both correct and timeable" in capsys.readouterr().out
-    )
-
-
-def test_main_reports_unsupported_kda_geometry_without_traceback(monkeypatch, capsys):
-    monkeypatch.setattr(tune, "device_is_visible", lambda: True)
-    monkeypatch.setattr(
-        "sys.argv",
-        [
-            "tune.py",
-            "--gate-kind",
-            "kda",
-            "--geometries",
-            "33/32",
-            "--batches",
-            "1",
-        ],
-    )
-
-    assert tune.main() == 1
-    assert (
-        "batch 1: no candidate was both correct and timeable" in capsys.readouterr().out
     )

@@ -150,6 +150,14 @@ def _make_candidate(
         ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
+        if req.spec_id.strip().lower() == "auto" and req.gate_kind == "gdn":
+            default_is_legal = is_valid_spec(
+                make_spec(req, DEFAULT_TILE), arch=req.arch
+            )[0]
+            if default_is_legal and tile != DEFAULT_TILE:
+                return False, (
+                    f"static GDN auto tile is {DEFAULT_TILE!r}, not {tile!r}"
+                )
         if req.spec_id.strip().lower() == "auto" and req.gate_kind == "kda":
             wanted = spec_id_for_work(work_for(req.batch, req.num_v_heads))
             if (

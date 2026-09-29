@@ -128,6 +128,15 @@ def test_auto_is_static_default_independent_of_batch():
     assert len(set(outcomes)) == 1
 
 
+def test_gdn_auto_ignores_custom_rankers_when_default_is_legal():
+    def reverse(request, candidates):
+        return tuple(reversed(candidates))
+
+    result = dispatch_gdn_decode(_req(), ranker=reverse)
+
+    assert _tile(result.spec) == DEFAULT_TILE
+
+
 def test_d64_auto_falls_back_to_a_validator_approved_candidate():
     result = dispatch_gdn_decode(_req(head_k_dim=64))
     assert is_valid_spec(result.spec, arch=ARCH)[0]
@@ -160,15 +169,9 @@ def test_benchmark_reports_missing_candidates_before_selecting_auto(
     monkeypatch, capsys
 ):
     import sys
-    from types import SimpleNamespace
 
     from benchmarks.gfx950.gdn import benchmark_gdn_decode
 
-    monkeypatch.setitem(
-        sys.modules,
-        "torch",
-        SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: True)),
-    )
     monkeypatch.setattr(benchmark_gdn_decode, "registered_results", lambda request: ())
     monkeypatch.setattr(
         benchmark_gdn_decode,

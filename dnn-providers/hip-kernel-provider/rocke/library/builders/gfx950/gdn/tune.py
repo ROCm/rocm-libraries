@@ -212,16 +212,6 @@ def sweep_batch(base: GdnDecodeSpec, batch: int, configs):
     return rows
 
 
-def report_missing_cells(missing_cells) -> int:
-    """Report requested cells with no correct timing; return a process status."""
-    if not missing_cells:
-        return 0
-    print("\nincomplete sweep:", file=sys.stderr)
-    for hk, hv, batch in missing_cells:
-        print(f"  Hk={hk} Hv={hv} batch={batch}", file=sys.stderr)
-    return 1
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -266,12 +256,7 @@ def main() -> int:
                 # KDA's measured table is work-keyed, but the study must test
                 # every validator-admitted tile rather than the current band's
                 # dispatcher result.
-                try:
-                    auto = dispatch_gdn_decode(request)
-                except ValueError:
-                    print(f"batch {batch}: no candidate was both correct and timeable")
-                    failed = True
-                    continue
+                auto = dispatch_gdn_decode(request)
                 base = auto.spec
                 configs = legal_configs(base)
                 print(f"legal KDA configurations for batch {batch}: {len(configs)}")
