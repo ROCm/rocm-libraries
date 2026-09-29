@@ -939,6 +939,29 @@ class TestGfx950DenseCandidates(unittest.TestCase):
         with self.assertRaises(ValueError):
             _spec(req, _WIDE, block_n=128)
 
+    def test_nonpersist_decode_is_a_knob_of_the_grid_body(self):
+        """The non-persistent block order is a knob of the grid candidate, kept
+        unless it restates auto; the persistent bodies never read it, so there
+        it is dropped."""
+        req = _gfx950_dense_req(hdim_q=128, hdim_v=128, nhead_q=32, nhead_k=8)
+        grid = _spec(req, _GRID, nonpersist_decode="hq_minor_swz")
+        self.assertEqual(grid.resolved_nonpersist_decode, "hq_minor_swz")
+        self.assertIn("nphqminswz", grid.kernel_name())
+        auto = attention_tuning_spec(req, _GRID)
+        restated = tuning_spec_with_knobs(
+            req,
+            _GRID,
+            {"nonpersist_decode": auto.kernel_spec.resolved_nonpersist_decode},
+        )
+        self.assertEqual(restated, auto)
+        for spec_id in (_PERSIST, _WIDE):
+            with self.subTest(spec_id=spec_id):
+                pinned = tuning_spec_with_knobs(
+                    req, spec_id, {"nonpersist_decode": "hq_minor_swz"}
+                )
+                self.assertEqual(pinned, attention_tuning_spec(req, spec_id))
+                self.assertEqual(pinned.kernel_spec.nonpersist_decode, "auto")
+
     def test_tile_knob_recomputes_ragged(self):
         req = _gfx950_dense_req(
             hdim_q=128, hdim_v=128, nhead_q=32, nhead_k=8, seqlen_q=384, seqlen_k=384
