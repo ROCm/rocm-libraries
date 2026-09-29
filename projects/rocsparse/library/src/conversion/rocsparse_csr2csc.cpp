@@ -26,6 +26,7 @@
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csr2csc.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "csr2csc_device.h"
@@ -34,25 +35,6 @@
 #include "rocsparse_csr2coo.hpp"
 #include "rocsparse_identity.hpp"
 #include "rocsparse_primitives.hpp"
-
-namespace
-{
-    // Blocks needed to cover `nitems` at BLOCKSIZE items each, clamped to the device
-    // grid.x limit. csr2csc_permute_kernel grid-strides over whatever the clamp drops.
-    //
-    // Deliberately local: AISPARSE-696 (PR #11512) adds rocsparse::ceil_div() and
-    // rocsparse::get_grid_size() to rocsparse_common.h, but it has not merged and
-    // rocsparse_common.h/.hpp are a live conflict zone (AISPARSE-677/678/696). Once
-    // #11512 lands the body below is the one-line
-    //   return rocsparse::get_grid_size(rocsparse::ceil_div(nitems, BLOCKSIZE),
-    //                                   handle->properties.maxGridSize[0]);
-    template <uint32_t BLOCKSIZE>
-    int64_t grid_size_x(rocsparse_handle handle, int64_t nitems)
-    {
-        return rocsparse::min((nitems - 1) / BLOCKSIZE + 1,
-                              static_cast<int64_t>(handle->properties.maxGridSize[0]));
-    }
-}
 
 template <typename I, typename J, typename T>
 rocsparse_status rocsparse::csr2csc_core(rocsparse_handle     handle,
@@ -175,7 +157,8 @@ rocsparse_status rocsparse::csr2csc_core(rocsparse_handle     handle,
 // type now; the grid is clamped here so the stride loop behind it has something to
 // stride over.
 #define CSR2CSC_DIM 512
-        dim3 csr2csc_blocks(grid_size_x<CSR2CSC_DIM>(handle, nnz));
+        dim3 csr2csc_blocks(
+            rocsparse::get_grid_size_x(handle, (nnz - 1) / CSR2CSC_DIM + 1, CSR2CSC_DIM));
         dim3 csr2csc_threads(CSR2CSC_DIM);
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csr2csc_permute_kernel<CSR2CSC_DIM>),
                                            csr2csc_blocks,

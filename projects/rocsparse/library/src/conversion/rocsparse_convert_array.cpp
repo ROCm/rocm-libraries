@@ -24,35 +24,11 @@
 #include "rocsparse.h"
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_handle.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "rocsparse_convert_array.hpp"
-
-namespace
-{
-    // Blocks needed to cover `nitems` at BLOCKSIZE items each, clamped to the device
-    // grid.x limit. Every kernel in this file grid-strides over whatever the clamp
-    // drops.
-    //
-    // AISPARSE-686. nitems_ here is a size_t, not an index type: convert_array is a
-    // generic helper reached from rocsparse_sparse_to_sparse and, through
-    // internal_spmat_transfer_from, from rocsparse_dnvec_transfer_from, so its length
-    // is not bounded by any matrix dimension.
-    //
-    // Deliberately local: AISPARSE-696 (PR #11512) adds rocsparse::ceil_div() and
-    // rocsparse::get_grid_size() to rocsparse_common.h, but it has not merged and
-    // rocsparse_common.h/.hpp are a live conflict zone (AISPARSE-677/678/696). Once
-    // #11512 lands the body below is the one-line
-    //   return rocsparse::get_grid_size(rocsparse::ceil_div(nitems, BLOCKSIZE),
-    //                                   handle->properties.maxGridSize[0]);
-    template <uint32_t BLOCKSIZE>
-    int64_t grid_size_x(rocsparse_handle handle, size_t nitems)
-    {
-        return rocsparse::min(static_cast<int64_t>((nitems - 1) / BLOCKSIZE + 1),
-                              static_cast<int64_t>(handle->properties.maxGridSize[0]));
-    }
-}
 
 namespace rocsparse
 {
@@ -181,7 +157,7 @@ namespace rocsparse
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::copy_indexbase_iarray_mix_safe<BLOCKSIZE, TARGET, SOURCE>),
-            dim3(grid_size_x<BLOCKSIZE>(handle_, nitems_)),
+            dim3(rocsparse::get_grid_size_x(handle_, (nitems_ - 1) / BLOCKSIZE + 1, BLOCKSIZE)),
             dim3(BLOCKSIZE),
             0,
             handle_->stream,
@@ -291,7 +267,7 @@ namespace rocsparse
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::copy_iarray_mix_safe<BLOCKSIZE, TARGET, SOURCE>),
-            dim3(grid_size_x<BLOCKSIZE>(handle_, nitems_)),
+            dim3(rocsparse::get_grid_size_x(handle_, (nitems_ - 1) / BLOCKSIZE + 1, BLOCKSIZE)),
             dim3(BLOCKSIZE),
             0,
             handle_->stream,
@@ -674,7 +650,7 @@ namespace rocsparse
             rocsparse_hipMemsetAsync(derr, 0, sizeof(floating_data_t<SOURCE>), handle_->stream));
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::copy_farray_mix_safe_kernel_t<TARGET, SOURCE>::template run<BLOCKSIZE>),
-            dim3(grid_size_x<BLOCKSIZE>(handle_, nitems_)),
+            dim3(rocsparse::get_grid_size_x(handle_, (nitems_ - 1) / BLOCKSIZE + 1, BLOCKSIZE)),
             dim3(BLOCKSIZE),
             0,
             handle_->stream,

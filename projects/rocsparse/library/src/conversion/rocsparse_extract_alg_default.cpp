@@ -23,32 +23,8 @@
 
 #include "rocsparse_extract_alg_default.hpp"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_primitives.hpp"
-
-namespace
-{
-    // Blocks needed to cover `nseq` sequences at BLOCKSIZE per block, clamped to the
-    // device grid.x limit. Both extract kernels grid-stride over whatever the clamp
-    // drops.
-    //
-    // The 32-bit side of this is already guarded: internal_extract_analysis_template
-    // and internal_extract_compute_template reject source_m_ / source_n_ / source_nnz_
-    // that exceed the target index type before launching. That covers i32 and stops
-    // exactly where AISPARSE-686 starts, because there is no i64 equivalent.
-    //
-    // Deliberately local: AISPARSE-696 (PR #11512) adds rocsparse::ceil_div() and
-    // rocsparse::get_grid_size() to rocsparse_common.h, but it has not merged and
-    // rocsparse_common.h/.hpp are a live conflict zone (AISPARSE-677/678/696). Once
-    // #11512 lands the body below is the one-line
-    //   return rocsparse::get_grid_size(rocsparse::ceil_div(nseq, BLOCKSIZE),
-    //                                   handle->properties.maxGridSize[0]);
-    template <uint32_t BLOCKSIZE>
-    int64_t grid_size_x(rocsparse_handle handle, int64_t nseq)
-    {
-        return rocsparse::min((nseq - 1) / BLOCKSIZE + 1,
-                              static_cast<int64_t>(handle->properties.maxGridSize[0]));
-    }
-}
 
 namespace rocsparse
 {
@@ -290,7 +266,8 @@ namespace rocsparse
 
         static constexpr int nthreads_per_block = 1024;
         dim3                 threads(nthreads_per_block);
-        dim3                 blocks(grid_size_x<nthreads_per_block>(handle_, num_seq));
+        dim3                 blocks(rocsparse::get_grid_size_x(
+            handle_, (num_seq - 1) / nthreads_per_block + 1, nthreads_per_block));
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::extract_count_kernel<nthreads_per_block, I, J>),
@@ -576,7 +553,8 @@ namespace rocsparse
 
         static constexpr uint32_t nthreads_per_block = 1024;
         dim3                      threads(nthreads_per_block);
-        dim3                      blocks(grid_size_x<nthreads_per_block>(handle_, num_seq));
+        dim3                      blocks(rocsparse::get_grid_size_x(
+            handle_, (num_seq - 1) / nthreads_per_block + 1, nthreads_per_block));
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::internal_extract_fill_kernel<nthreads_per_block, T, I, J>),
