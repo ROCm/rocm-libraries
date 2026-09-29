@@ -337,7 +337,8 @@ void testing_csr2hyb(Arguments argus)
                                                      &h_coo_nnz,
                                                      &d_coo_row_ind,
                                                      &d_coo_col_ind,
-                                                     &d_coo_val));
+                                                     &d_coo_val,
+                                                     nullptr));
 
         // Check if sizes match
         unit_check_general(1, 1, 1, &m, &h_m);

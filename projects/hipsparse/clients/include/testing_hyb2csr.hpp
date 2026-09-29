@@ -71,6 +71,7 @@ void testing_hyb2csr_bad_arg(const Arguments& argus)
                                                  &h_coo_nnz,
                                                  nullptr,
                                                  nullptr,
+                                                 nullptr,
                                                  nullptr));
 
     auto csr_row_ptr_managed
@@ -229,6 +230,7 @@ void testing_hyb2csr(Arguments argus)
                                                      nullptr,
                                                      nullptr,
                                                      &h_coo_nnz,
+                                                     nullptr,
                                                      nullptr,
                                                      nullptr,
                                                      nullptr));

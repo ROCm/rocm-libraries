@@ -73,6 +73,7 @@ void testing_hybmv_bad_arg(const Arguments& argus)
                                                  &h_coo_nnz,
                                                  nullptr,
                                                  nullptr,
+                                                 nullptr,
                                                  nullptr));
 
     auto dx_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * safe_size), device_free};
@@ -237,7 +238,8 @@ void testing_hybmv(Arguments argus)
                                                      &coo_nnz,
                                                      &d_coo_row_ind,
                                                      &d_coo_col_ind,
-                                                     &d_coo_val));
+                                                     &d_coo_val,
+                                                     nullptr));
 
         std::vector<int> hell_col(ell_nnz);
         std::vector<T>   hell_val(ell_nnz);
