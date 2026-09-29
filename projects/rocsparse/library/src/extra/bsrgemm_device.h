@@ -164,8 +164,9 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename I, typename T>
     ROCSPARSE_DEVICE_ILF void bsrgemm_copy_scale_device(I size, T beta, const T* in, T* out)
     {
-        for(I idx = static_cast<I>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; idx < size;
-            idx += static_cast<I>(hipGridDim_x) * BLOCKSIZE)
+        for(int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+            idx < size;
+            idx += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
         {
             out[idx] = beta * in[idx];
         }
