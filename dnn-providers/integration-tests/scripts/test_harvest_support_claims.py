@@ -926,6 +926,28 @@ class TestFetch(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(gh.fetched_logs(), ["12"])
 
+    def test_default_jobs_are_every_provider_test(self) -> None:
+        names = {
+            21: "Linux::release / Test gfx94X-dcgpu / Test miopenprovider / "
+            "Test miopenprovider (shard 1/1) (gfx94X-dcgpu)",
+            22: "Linux::release / Test gfx94X-dcgpu / Test hipkernelprovider / "
+            "Test hipkernelprovider (shard 1/1) (gfx94X-dcgpu)",
+            23: "Windows::release / Test gfx1151 / Test hipblasltprovider / "
+            "Test hipblasltprovider (shard 1/1) (gfx1151)",
+            24: "Linux::release / Test gfx94X-dcgpu / Test hipblaslt / "
+            "Test hipblaslt (shard 1/6) (gfx94X-dcgpu)",
+            25: "Linux::release / Test gfx94X-dcgpu / Test hipdnn / "
+            "Test hipdnn (shard 1/1) (gfx94X-dcgpu)",
+            26: "Build miopenprovider",
+        }
+        text = _single_log(_summary())
+        gh = FakeGh(
+            runs={7: ("completed", [(i, n, "success") for i, n in names.items()])},
+            logs={i: text for i in names},
+        )
+        self.assertEqual(self._main(gh, "--run", "7")[0], 0)
+        self.assertEqual(sorted(gh.fetched_logs()), ["21", "22", "23"])
+
     def test_failed_job_is_fetched(self) -> None:
         gh = self._gh(**{"11": "failure"})
         self.assertEqual(self._main(gh, "--run", "7")[0], 0)
