@@ -1820,7 +1820,8 @@ def dispatcherVariantCmd(String arch, String variant) {
 String _dispatcherCorrectnessBaseCmd(String arch, String compiler, String dtypes, int budget) {
     return """
         run_ok() { rc=0; "\$@" || rc=\$?; if [ \$rc -eq 77 ]; then echo "SKIP(77): \$*"; return 0; fi; return \$rc; } && \
-        pip3 install --break-system-packages --quiet ml_dtypes==0.6.0 && \
+        pip3 install --target /tmp/ci_py_pkgs --quiet ml_dtypes==0.6.0 && \
+        export PYTHONPATH=/tmp/ci_py_pkgs\${PYTHONPATH:+:\$PYTHONPATH} && \
         cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
             -D CMAKE_CXX_COMPILER="${compiler}" \
             -D CMAKE_HIP_COMPILER="${compiler}" \
