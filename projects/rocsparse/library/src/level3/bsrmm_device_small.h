@@ -62,7 +62,7 @@ namespace rocsparse
         static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
 
         const int32_t tid  = hipThreadIdx_x;
-        const J       gid  = hipBlockIdx_x * hipBlockDim_x + tid;
+        const int64_t gid  = static_cast<int64_t>(hipBlockIdx_x) * hipBlockDim_x + tid;
         const int32_t lid  = gid & (WF_SIZE - 1);
         const J       nwfb = hipGridDim_x * hipBlockDim_x / (WF_SIZE * BSR_BLOCK_DIM);
 
@@ -78,11 +78,12 @@ namespace rocsparse
             const J       col  = lid + col_panel;
             const int64_t colB = col * ldb;
 
-            for(J block_row = gid / (WF_SIZE * BSR_BLOCK_DIM); block_row < Mb; block_row += nwfb)
+            for(int64_t block_row = gid / (WF_SIZE * BSR_BLOCK_DIM); block_row < Mb;
+                block_row += nwfb)
             {
                 // global row must track the strided block_row so a clamped grid still
                 // writes the correct output rows.
-                const J global_row = block_row * BSR_BLOCK_DIM + local_row;
+                const J global_row = static_cast<J>(block_row) * BSR_BLOCK_DIM + local_row;
 
                 const I block_row_start = bsr_row_ptr[block_row] - idx_base;
                 const I block_row_end   = bsr_row_ptr[block_row + 1] - idx_base;

@@ -70,9 +70,9 @@ namespace rocsparse
 
         // Grid-stride loop over the block-row dimension (grid x) so a clamped
         // grid still covers all Mb block rows.
-        for(J block_row = hipBlockIdx_x; block_row < Mb; block_row += hipGridDim_x)
+        for(int64_t block_row = hipBlockIdx_x; block_row < Mb; block_row += hipGridDim_x)
         {
-            const J global_row      = tidx + block_row * block_dim;
+            const J global_row      = tidx + static_cast<J>(block_row) * block_dim;
             const I block_row_start = bsr_row_ptr[block_row] - idx_base;
             const I block_row_end   = bsr_row_ptr[block_row + 1] - idx_base;
 
