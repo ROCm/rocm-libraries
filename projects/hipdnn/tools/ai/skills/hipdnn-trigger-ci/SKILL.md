@@ -52,6 +52,82 @@ Multi-arch has further dispatch inputs (`prebuilt_stages`, `baseline_run_id`, `b
    ```
    `status` with `--pr` shows `gh pr checks`; otherwise it lists the 10 most recent runs on the branch. `watch` without `--run-id` follows the newest in-progress or queued run on the branch and exits with the run's status.
 
+## Test reference
+
+Sources, all at the pinned TheRock ref: [fetch_test_configurations.py](https://github.com/ROCm/TheRock/blob/7440cb8578f4daae0d85a428fadd6645dc5464a0/build_tools/github_actions/fetch_test_configurations.py) (component matrix and label matching), [configure_multi_arch_ci.py](https://github.com/ROCm/TheRock/blob/7440cb8578f4daae0d85a428fadd6645dc5464a0/build_tools/github_actions/configure_multi_arch_ci.py) (`_determine_test_type`), [test_runner.py](https://github.com/ROCm/TheRock/blob/7440cb8578f4daae0d85a428fadd6645dc5464a0/build_tools/github_actions/test_executable_scripts/test_runner.py) (ctest invocation) and [amdgpu_family_matrix.py](https://github.com/ROCm/TheRock/blob/7440cb8578f4daae0d85a428fadd6645dc5464a0/build_tools/github_actions/amdgpu_family_matrix.py). Re-read them if the pin in `.github/actions/ci-env/action.yml` has moved.
+
+### Component labels
+
+`--test-labels` values are the `linux_test_labels` / `windows_test_labels` workflow_dispatch inputs, not GitHub PR labels. Each label names one TheRock test component. The `test:` prefix is optional (`test:hipdnn` and `hipdnn` select the same component) and matching is exact. The `sanity` component always runs. With no labels, every component that applies to the family and platform runs.
+
+hipDNN components (all run on Linux and Windows, one shard, 30-minute timeout):
+
+| Label | Artifacts fetched | CTest directory in the test job |
+|---|---|---|
+| `test:hipdnn` | hipDNN | `hipdnn` |
+| `test:hipdnn_install` | none | none (runs `test_hipdnn_install.py`) |
+| `test:hipdnn-integration-tests` | hipDNN, integration tests | `hipdnn_integration_tests_ctest` |
+| `test:hipdnn-samples` | BLAS, MIOpen, hipDNN, MIOpen provider, samples | `hipdnn_samples` |
+| `test:miopenprovider` | BLAS, MIOpen, hipDNN, MIOpen provider, integration tests | `miopen_plugin` |
+| `test:hipblasltprovider` | BLAS, hipDNN, hipBLASLt provider, integration tests | `hipblaslt_plugin` |
+| `test:hipkernelprovider` | hipDNN, hip-kernel-provider, integration tests | `hip_kernel_provider` (installs the rocKE wheels first) |
+
+Other components use their own names (for example `test:rocblas`, `test:hipblaslt`); read the component matrix for the full list. Do not invent labels: an unknown label matches no component, so only sanity runs.
+
+### Test tier
+
+One tier (`test_type`) is chosen for the whole run:
+
+1. A `test_filter:<tier>` entry in the test labels wins. `<tier>` is `quick`, `standard`, `comprehensive` or `full`; any other value fails the setup job.
+2. Otherwise any component label selects `full`.
+3. Otherwise a dispatch runs `quick`.
+
+`gfx125X` is forced to `quick` for its own test jobs (`test_type_for_family` in the family matrix).
+
+`test_filter:` entries are passed through to component matching unchanged and match no component, so **always pair `test_filter:<tier>` with at least one component label**; on its own it leaves only sanity. Because component labels imply `full`, add `test_filter:quick` for a fast signal on a provider.
+
+Each test job runs `ctest -L ^<tier>$` in its CTest directory, plus the `ex_gpu_<arch>` label when the build defines it, and excludes the `<tier>_exclude` and `<tier>_therock_ci_exclude` labels.
+
+### What each tier runs
+
+CTest labels come from the test category YAMLs. A test in a lower tier also carries every higher tier's label (quick ⊂ standard ⊂ comprehensive ⊂ full).
+
+- `hipdnn`: `projects/hipdnn/test_categories.yaml`. Quick covers all GTests; the `unit` and `integration` categories name the test executables (for example `hipdnn_backend_tests`, `hipdnn_frontend_tests`, `hipdnn_public_backend_tests`).
+- Integration-test bundle sweeps are driven by each provider, not by `hipdnn-integration-tests` (see `dnn-providers/integration-tests/CMakeLists.txt`). Bundle GTest suites are named `<tier>_<Op>_<Variant>` after the bundle folder (for example `quick_SdpaFwd_bhsd_bf16_hd128_nomask_batch_Small`). `dnn-providers/miopen-provider/test_categories_integration.yaml` and `dnn-providers/hipblaslt-provider/test_categories_integration.yaml` select `quick_*` for quick, add `standard_*` for standard, add `full_*` for comprehensive, and `*` for full.
+- `hipdnn-integration-tests`: `dnn-providers/integration-tests/test_categories.yaml` (quick is everything not prefixed `Standard`, `Comprehensive` or `Full`) and `dnn-providers/integration-tests/test_categories_external.yaml` (the pre-registered `hipdnn-integration-tests_test_name_validation`, `hipdnn_bundle_verifier_python_tests` and `hipdnn_support_claim_verifier_python_tests`).
+- `hipkernelprovider`: the `*_test_categories*.yaml` files in `dnn-providers/hip-kernel-provider`, for example `dnn-providers/hip-kernel-provider/ROCKE_ENGINE_test_categories_external.yaml` (the rocKE quick checks).
+
+To choose ctest names or reproduce a tier locally, prefer the `hipdnn-integration-testing` skill once it lands (ALMIOPEN-2578; not on develop yet). Until then, read the YAMLs above.
+
+### Examples
+
+Always dry-run first and show the printed command.
+
+TheRock CI for the integration-tests subtree on one family (no TheRock branch needed):
+
+```bash
+python3 <skill-directory>/scripts/trigger_ci.py dispatch -w therock-ci --gfx gfx94X --projects "dnn-providers/integration-tests" --dry-run
+```
+
+Multi-arch, Linux-only, MIOpen provider and hipDNN tests at the full tier (implied by the labels):
+
+```bash
+python3 <skill-directory>/scripts/trigger_ci.py dispatch -w multi-arch --gfx gfx94X,gfx950 --windows-gfx none --test-labels test:hipdnn,test:miopenprovider --dry-run
+```
+
+Same, but at the quick tier:
+
+```bash
+python3 <skill-directory>/scripts/trigger_ci.py dispatch -w multi-arch --gfx gfx94X --windows-gfx none --test-labels test:miopenprovider,test_filter:quick --dry-run
+```
+
+Check or follow the run on a PR's branch:
+
+```bash
+python3 <skill-directory>/scripts/trigger_ci.py --pr <pr-number> status
+python3 <skill-directory>/scripts/trigger_ci.py --pr <pr-number> watch
+```
+
 ## Report
 
 Summarize:
