@@ -17,6 +17,8 @@ _ALL_TYPES = {KDP_TYPE, UKD_TYPE} | _GENERIC_TYPES
 # Defined here rather than in pipeline.py because the loader enforces it and
 # pipeline.py imports from this module.
 KPACK_DIR_NAME = "kpack"
+# Every kernel_source kind a UKD may declare; _validate_ukd_fields rejects others.
+UKD_KINDS = ("hip", "rocke", "hsaco", "kpack", "embedded_source")
 
 _SCALAR_TYPES = (str, int, float, bool)
 
@@ -487,7 +489,7 @@ def _validate_shape(desc, log=print):
         _validate_kmd(desc)
 
 
-def load_flat_input(root, log=print):
+def load_flat_input(root, log=print, *, exclude_folders=(), disabled_kinds=()):
     """Load and structurally validate every *.json descriptor under a root.
 
     Walks the root recursively: a descriptor's authored subpath is meaningful
@@ -513,9 +515,20 @@ def load_flat_input(root, log=print):
     if not root.is_dir():
         raise HkpPackError(f"input folder does not exist: {root}")
 
+    unknown = sorted(set(disabled_kinds) - set(UKD_KINDS))
+    if unknown:
+        raise HkpPackError(
+            f"cannot disable unknown kernel_source kind(s) {unknown}; "
+            f"known kinds are {list(UKD_KINDS)}"
+        )
+
     descriptors = []
     for jp in sorted(root.rglob("*.json")):
         rel_path = jp.relative_to(root)
+        # A disabled family folder is not content in this build: its files are never
+        # read, so they can neither ship nor fail validation.
+        if len(rel_path.parts) > 1 and rel_path.parts[0] in exclude_folders:
+            continue
         # A dot-prefixed segment at any depth, or a dot-prefixed filename. The
         # source root is user-supplied and plausibly a checkout, so `.git/`,
         # `.venv/` and friends are skipped rather than refused, unlike the
@@ -560,7 +573,48 @@ def load_flat_input(root, log=print):
     _reject_duplicate_ids(flat)
     _validate_references(flat)
     _warn_orphan_standalone_ukds(flat, log)
+    if disabled_kinds:
+        _drop_disabled_kinds(flat, frozenset(disabled_kinds), log)
     return flat
+
+
+def _drop_disabled_kinds(flat, disabled_kinds, log):
+    """Prune every UKD whose kind this build has no producer for, as arch pruning
+    prunes one that does not apply.
+
+    Runs after validation, so a disabled UKD is still checked and an unknown kind
+    is still an error. Each KDP keeps only its enabled entries; a KDP left with
+    none is dropped with the disabled standalone UKDs, and the generics only it
+    reached are pruned later like any other unreachable generic.
+    """
+    ukd_by_id = flat.ukd_by_id()
+
+    def _disabled(entry):
+        doc = ukd_by_id[entry].doc if isinstance(entry, str) else entry
+        return doc["kernel_source"]["kind"] in disabled_kinds
+
+    dropped = set()
+    for kdp in flat.kdps():
+        entries = kdp.doc.get("kernelDescriptors", [])
+        kept = [e for e in entries if not _disabled(e)]
+        if len(kept) == len(entries):
+            continue
+        log(
+            f"{kdp.path.name}: skipping {len(entries) - len(kept)} UKD(s) of a "
+            f"disabled kind ({', '.join(sorted(disabled_kinds))})"
+        )
+        if kept:
+            kdp.doc["kernelDescriptors"] = kept
+        else:
+            dropped.add(id(kdp))
+    flat.descriptors = [
+        d
+        for d in flat.descriptors
+        if id(d) not in dropped
+        and not (
+            d.type == UKD_TYPE and d.doc["kernel_source"]["kind"] in disabled_kinds
+        )
+    ]
 
 
 def _reject_inline_standalone_collision(flat):

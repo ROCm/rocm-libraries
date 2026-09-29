@@ -391,46 +391,25 @@ def _selected_entries(doc, arch, ukd_by_id):
             yield None, entry, None
 
 
-def _reject_rocke_entries(surviving, arch, ukd_by_id):
-    """Fail on any rocke UKD selected for arch in a pack built without rocKE.
+def shipped_engines(flat, arches):
+    """The engine names each arch's shard would carry: `{arch: [name, ...]}`.
 
-    Walks the same selection the prewarm and the walk compile from, so a rocke UKD
-    that prunes out of arch -- by its KDP's arch list or its own -- does not fail
-    the pack, and one that would ship always does. Skipping it instead would ship
-    a shard missing a kernel its descriptors promise, which no consumer can tell
-    apart from a kernel that was never authored.
+    What configure asks before wiring a pack. Uses the same survival rule as the
+    walk, over the same filtered input, so a root whose every arch maps to an
+    empty list is one the pack would skip, and an engine absent for an arch is one
+    that shard does not ship. A KDP whose engine names no UED contributes its Id.
     """
-    for kdp in surviving:
-        for _sid, ukd, _sdesc in _selected_entries(kdp.doc, arch, ukd_by_id):
-            if ukd["kernel_source"]["kind"] == "rocke":
-                raise HkpPackError(
-                    f"UKD '{ukd['id']}' in KDP {kdp.path.name} is a rocKE kernel "
-                    f"selected for {arch}, but this build has rocKE disabled "
-                    "(HIPKERNELPROVIDER_ENABLE_ROCKE=OFF), so no rocKE producer "
-                    "exists to compile it. Configure with "
-                    "-DHIPKERNELPROVIDER_ENABLE_ROCKE=ON, or remove rocKE "
-                    "descriptors from the source root."
-                )
-
-
-def selects_only_rocke(flat, arches):
-    """Whether flat selects at least one UKD for arches and every one is rocke.
-
-    The question a build without rocKE asks of its default production root:
-    True means a pack of that root for arches can only fail in
-    _reject_rocke_entries and has nothing else to ship. Walks the same selection
-    the gate does, so a rocke UKD pruned out of every arch counts neither way, and
-    a root that selects nothing is not rocke-only.
-    """
-    ukd_by_id = flat.ukd_by_id()
-    selected = False
-    for arch in arches:
-        for kdp in flat.kdps():
-            for _sid, ukd, _sdesc in _selected_entries(kdp.doc, arch, ukd_by_id):
-                if ukd["kernel_source"]["kind"] != "rocke":
-                    return False
-                selected = True
-    return selected
+    names = {d.id: d.doc.get("name", d.id) for d in flat.by_type("ued")}
+    return {
+        arch: sorted(
+            {
+                names.get(k.doc.get("engine"), k.doc.get("engine"))
+                for k in flat.kdps()
+                if kdp_survives(k.doc, flat, arch)
+            }
+        )
+        for arch in arches
+    }
 
 
 def _agreement_inputs(flat, arch):
@@ -1407,7 +1386,8 @@ def run_pipeline(
     rocke_wheel_stamp=None,
     group=GROUP_NAME,
     source_label=None,
-    enable_rocke=True,
+    exclude_folders=(),
+    disabled_kinds=(),
     log=print,
 ):
     """One invocation over the full arch list: compile, prune, pack, install.
@@ -1421,13 +1401,13 @@ def run_pipeline(
     no producer and is emitted as authored, so a root that holds only
     pass-through UKDs writes descriptors and no archive. An arch with no
     surviving KDP is skipped cleanly (no folder, no kpack) and logged with 'no
-    kernels for <arch>, skipping'; every arch skipping is a failure, not a
-    pack. Empty arch list installs nothing (exit 0).
+    kernels for <arch>, skipping'; every arch skipping packs nothing, which is a
+    clean skip too. Empty arch list installs nothing (exit 0).
 
-    `enable_rocke=False` states the build has no rocKE producer: a rocke UKD
-    selected for a requested arch fails that arch before it compiles anything,
-    the same way any other arch failure does, so the pack fails naming every
-    such arch. One pruned out of every requested arch is left alone.
+    `exclude_folders` names top-level child folders of the root this build does
+    not pack, and `disabled_kinds` the kernel_source kinds it has no producer for;
+    both are pruned at load (load_flat_input) exactly as arch pruning prunes, so
+    nothing downstream sees them.
     """
     out_root = Path(out_root)
     results = {}
@@ -1435,7 +1415,12 @@ def run_pipeline(
         return results
 
     kpack_mod, comp = load_kpack(rocm_kpack_dir)
-    flat = load_flat_input(source_root, log=log)
+    flat = load_flat_input(
+        source_root,
+        log=log,
+        exclude_folders=exclude_folders,
+        disabled_kinds=disabled_kinds,
+    )
 
     if inter_root is None:
         raise HkpPackError(
@@ -1458,8 +1443,6 @@ def run_pipeline(
             )
             continue
         try:
-            if not enable_rocke:
-                _reject_rocke_entries(surviving, arch, flat.ukd_by_id())
             inter = compile_intermediate(
                 flat, source_root, arch, hipcc, inter_root / arch, log=log
             )
@@ -1530,26 +1513,19 @@ def run_pipeline(
             "output was discarded."
         )
 
-    # The archive clause keys on what the root holds rather than on what survived
-    # pruning: a compiling UKD that prunes out of every requested arch is
-    # indistinguishable downstream from one whose archive went missing. Nothing
-    # downstream restates either clause -- the build edge's OUTPUT is a stamp its
-    # recipe touches unconditionally, and a staged tree holding nothing reads the
-    # same there as a root that is legitimately empty. Only the packer knows the
-    # kinds it walked and which arches pruned.
+    # Nothing surviving any arch is a root with nothing to pack for this build --
+    # arch-pruned, or all in disabled folders or kinds -- so it packs nothing and that
+    # is not an error. Configure asks shipped_engines() first and leaves such a root
+    # dormant rather than wiring it.
     arch_list = ", ".join(arches)
     if all(r.skipped for r in results.values()):
-        raise HkpPackError(
-            f"packing '{source_root}' produced nothing: no KDP survived arch "
-            f"pruning for any of the {len(arches)} requested arch(es) "
-            f"[{arch_list}], so every arch was skipped. A root wired to a pack "
-            "was wired to ship descriptors, so this is a failure and not a "
-            "clean skip. Check each KDP's 'arch' list against the requested "
-            "arches. Archives are a separate matter and are not always "
-            "required -- a root of only pass-through kinds legitimately packs "
-            "descriptors and no archive -- but descriptors always are."
-        )
+        log(f"packing '{source_root}': nothing to pack for [{arch_list}], skipping")
+        return results
 
+    # The archive clause keys on what the root holds rather than on what survived
+    # pruning: a compiling UKD that prunes out of every shard that shipped is
+    # indistinguishable downstream from one whose archive went missing. Only the
+    # packer knows the kinds it walked and which arches pruned.
     if _root_holds_compiling_source(flat) and not any(
         r.kpack_path for r in results.values()
     ):

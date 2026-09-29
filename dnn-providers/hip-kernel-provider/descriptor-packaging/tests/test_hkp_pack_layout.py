@@ -22,14 +22,14 @@ from pathlib import Path
 
 import pytest
 
-from hkp_pack.descriptors import kdp_survives, load_flat_input
+from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.hip_compile import hip_variant_key
 from hkp_pack.pipeline import (
     _agreement_inputs,
     compile_intermediate,
     run_pipeline,
-    selects_only_rocke,
+    shipped_engines,
 )
 from pack_helpers import (
     ARCH,
@@ -1803,27 +1803,25 @@ def test_packing_without_a_source_label_is_refused(
     assert "pointwise/kernels/PointwiseAdd.cpp" in message
 
 
-# --- K. A pack that produced nothing ----------------------------------------
+# --- K. A pack with nothing to pack ------------------------------------------
 
 
 @pytest.mark.quick
-def test_a_root_that_prunes_for_every_arch_is_a_failure(
+def test_a_root_that_prunes_for_every_arch_packs_nothing_cleanly(
     tmp_path, empty_arch_fixture, rocm_kpack_dir
 ):
-    """Every arch skipping is a pack that shipped nothing, not a clean skip."""
+    """Every arch skipping is a root with nothing to pack for this build: no
+    error, no shard, and no compile is attempted."""
     root = tmp_path / "root"
     # The fixture's only KDP names gfx942, so neither requested arch keeps it.
     _nest(root, "hip/pointwise", empty_arch_fixture)
 
-    with pytest.raises(HkpPackError) as excinfo:
-        _run(root, tmp_path, "hipcc-not-invoked", rocm_kpack_dir, ["gfx90a", "gfx1100"])
+    results = _run(
+        root, tmp_path, "hipcc-not-invoked", rocm_kpack_dir, ["gfx90a", "gfx1100"]
+    )
 
-    message = str(excinfo.value)
-    assert str(root) in message
-    assert "gfx90a" in message
-    assert "gfx1100" in message
-    # The reader must not take this failure for "every root owes an archive".
-    assert "not always required" in message
+    assert all(r.skipped for r in results.values())
+    assert not list((tmp_path / "out").glob("gfx*"))
 
 
 @pytest.mark.quick
@@ -1875,24 +1873,12 @@ def test_a_compiling_root_that_wrote_no_archive_is_a_failure(
     assert OTHER_ARCH in message
 
 
-# --- L. A build without rocKE (quick, compile-free) --------------------------
+# --- L. Disabled families and producer kinds (quick, compile-free) -------------
 # The rocKE fixture's one UKD, scoped to ROCKE_ARCH, is read here as JSON only: the
-# gate has to run in the build without rocKE that it protects.
+# filters have to work in the build without rocKE that they exist for.
 _ROCKE_UKD_ID = "ukd-attention-dense-gfx950"
 _ROCKE_UKD_FILE = "attention_dense.ukd.json"
 _AUTHORING_FORMS = ["inline", "standalone"]
-
-
-def _pack_without_rocke(root, tmp_path, rocm_kpack_dir, arches):
-    return run_pipeline(
-        source_root=root,
-        arches=list(arches),
-        out_root=tmp_path / "out",
-        hipcc="hipcc-not-invoked",
-        rocm_kpack_dir=rocm_kpack_dir,
-        inter_root=tmp_path / "inter",
-        enable_rocke=False,
-    )
 
 
 def _add_rocke_ukd(kdp_path, ukd, form):
@@ -1909,125 +1895,103 @@ def _add_rocke_ukd(kdp_path, ukd, form):
     kdp_path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
 
 
-def _rocke_root(tmp_path, rocke_fixture, form, arch=None):
-    """The rocKE fixture nested under `rocKE/attention`, its UKD authored in `form`
-    and, when `arch` is given, scoped to that list instead of ROCKE_ARCH."""
+def _mixed_root(tmp_path, main_fixture, rocke_fixture, form):
+    """The hip pointwise KDP carrying the rocKE fixture's UKD, re-scoped to both of
+    the KDP's arches so that only the kind filter can remove it."""
+    root = tmp_path / "mixed"
+    kdp_path = _nest(root, "hip/pointwise", main_fixture) / "pointwise.kdp.json"
+    (ukd,) = _read(rocke_fixture / "attention.kdp.json")["kernelDescriptors"]
+    ukd["arch"] = [ARCH, ROCKE_ARCH]
+    _add_rocke_ukd(kdp_path, ukd, form)
+    return root, kdp_path
+
+
+def _entry_ids(kdp):
+    return [e if isinstance(e, str) else e["id"] for e in kdp.doc["kernelDescriptors"]]
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("form", _AUTHORING_FORMS)
+def test_a_disabled_kind_is_pruned_from_its_kdp_and_the_rest_ships(
+    tmp_path, main_fixture, rocke_fixture, form
+):
+    """A UKD of a kind the build has no producer for leaves its KDP, which keeps
+    its other entries and still survives every arch they cover."""
+    root, kdp_path = _mixed_root(tmp_path, main_fixture, rocke_fixture, form)
+
+    enabled = load_flat_input(root, log=_silent)
+    (kdp,) = [k for k in enabled.kdps() if k.path == kdp_path]
+    assert _ROCKE_UKD_ID in _entry_ids(kdp), "the premise: rocKE UKD selected"
+
+    flat = load_flat_input(root, log=_silent, disabled_kinds=("rocke",))
+    (kdp,) = [k for k in flat.kdps() if k.path == kdp_path]
+    assert _ROCKE_UKD_ID not in _entry_ids(kdp)
+    assert _entry_ids(kdp), "the hip entries stay"
+    assert _ROCKE_UKD_ID not in flat.ukd_by_id()
+    arches = [ARCH, ROCKE_ARCH]
+    assert shipped_engines(flat, arches) == shipped_engines(enabled, arches)
+    assert all(
+        "test_fixture:pointwise" in e for e in shipped_engines(flat, arches).values()
+    )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("form", _AUTHORING_FORMS)
+def test_a_kdp_left_with_no_enabled_kind_does_not_ship(
+    tmp_path, rocke_fixture, rocm_kpack_dir, form
+):
+    """A rocKE-only root has nothing to pack without rocKE: it ships no engine,
+    and a pack of it skips cleanly without reaching any producer."""
     root = tmp_path / "root"
-    kdp_path = _nest(root, "rocKE/attention", rocke_fixture) / "attention.kdp.json"
+    kdp_path = _nest(root, "attention", rocke_fixture) / "attention.kdp.json"
     doc = _read(kdp_path)
     (ukd,) = doc["kernelDescriptors"]
     doc["kernelDescriptors"] = []
     kdp_path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
-    if arch is not None:
-        ukd["arch"] = arch
-    _add_rocke_ukd(kdp_path, ukd, form)
-    return root
-
-
-@pytest.mark.quick
-@pytest.mark.parametrize("form", _AUTHORING_FORMS)
-def test_a_selected_rocke_ukd_fails_a_pack_without_rocke(
-    tmp_path, rocke_fixture, rocm_kpack_dir, form
-):
-    """A rocKE kernel a build without rocKE is asked to ship fails the pack.
-
-    Skipping it would ship a shard missing a kernel its descriptors promise. The
-    error is raised before the arch compiles anything, so neither hipcc nor rocke
-    is reached, and it names the kernel, the arch and the remedy.
-    """
-    root = _rocke_root(tmp_path, rocke_fixture, form)
-
-    with pytest.raises(HkpPackError, match="HIPKERNELPROVIDER_ENABLE_ROCKE") as excinfo:
-        _pack_without_rocke(root, tmp_path, rocm_kpack_dir, [ROCKE_ARCH])
-
-    message = str(excinfo.value)
-    assert _ROCKE_UKD_ID in message
-    assert "attention.kdp.json" in message
-    assert ROCKE_ARCH in message
-    assert "remove rocKE descriptors from the source root" in message
-    assert not (tmp_path / "inter" / ROCKE_ARCH).exists()
-
-
-@pytest.mark.quick
-def test_the_rocke_gate_fails_every_arch_it_reaches_and_drops_its_shard(
-    tmp_path, rocke_fixture, rocm_kpack_dir
-):
-    """The gate is one more per-arch failure, not an abort of the whole run.
-
-    Every arch the rocKE UKD is selected for is attempted and named, and each
-    loses the shard a previous run left, so a direct re-pack over an existing
-    out-root cannot leave a stale shard beside the error.
-    """
-    arches = [ARCH, ROCKE_ARCH]
-    root = _rocke_root(tmp_path, rocke_fixture, "inline", arch=arches)
-    for arch in arches:
-        stale = tmp_path / "out" / arch
-        stale.mkdir(parents=True)
-        (stale / "attention.kdp.json").write_text("{}", encoding="utf-8")
-
-    with pytest.raises(HkpPackError) as excinfo:
-        _pack_without_rocke(root, tmp_path, rocm_kpack_dir, arches)
-
-    message = str(excinfo.value)
-    assert "packing failed for 2 of 2" in message
-    for arch in arches:
-        assert f"rocKE kernel selected for {arch}" in message, arch
-        assert not (tmp_path / "out" / arch).exists(), arch
-
-
-@pytest.mark.quick
-@pytest.mark.parametrize("form", _AUTHORING_FORMS)
-def test_an_arch_pruned_rocke_ukd_does_not_trip_the_rocke_gate(
-    tmp_path, main_fixture, rocke_fixture, rocm_kpack_dir, form
-):
-    """The gate walks the arch selection, not the root.
-
-    The hip fixture's pointwise KDP survives ARCH through its hip UKDs and also
-    carries the rocKE UKD, scoped to ROCKE_ARCH, so a pack for ARCH ships the KDP
-    and prunes only the rocKE UKD. That pack must get past the gate to the hip
-    compile, which fails on a hipcc that does not exist; a gate reading every
-    entry of a surviving KDP would stop it first.
-    """
-    root = tmp_path / "root"
-    kdp_path = _nest(root, "hip/pointwise", main_fixture) / "pointwise.kdp.json"
-    (ukd,) = _read(rocke_fixture / "attention.kdp.json")["kernelDescriptors"]
     _add_rocke_ukd(kdp_path, ukd, form)
 
-    flat = load_flat_input(root)
-    (kdp,) = [k for k in flat.kdps() if k.path == kdp_path]
-    assert kdp_survives(kdp.doc, flat, ARCH), "the premise: the KDP ships for ARCH"
+    assert shipped_engines(load_flat_input(root, log=_silent), [ROCKE_ARCH]) == {
+        ROCKE_ARCH: ["test_fixture:attention"]
+    }, "the premise: it ships with rocKE"
+    flat = load_flat_input(root, log=_silent, disabled_kinds=("rocke",))
+    assert shipped_engines(flat, [ROCKE_ARCH]) == {ROCKE_ARCH: []}
 
-    with pytest.raises(HkpPackError) as excinfo:
-        _pack_without_rocke(root, tmp_path, rocm_kpack_dir, [ARCH])
-
-    message = str(excinfo.value)
-    assert "HIPKERNELPROVIDER_ENABLE_ROCKE" not in message
-    assert f"failed to compile for {ARCH}" in message
-
-
-@pytest.mark.quick
-@pytest.mark.parametrize("form", _AUTHORING_FORMS)
-def test_a_root_is_rocke_only_when_every_kernel_it_selects_is_rocke(
-    tmp_path, main_fixture, rocke_fixture, form
-):
-    """What leaves the default root dormant without rocKE: at least one kernel
-    selected for the arches, and none of them hip.
-
-    A root that selects nothing is not rocke-only, and a rocKE UKD pruned out of
-    the arches counts neither way, so the hip kernels beside it keep the root
-    wired and the gate still sees any rocKE kernel that would ship.
-    """
-    rocke_only = load_flat_input(
-        _rocke_root(tmp_path / "rocke", rocke_fixture, form), log=_silent
+    results = run_pipeline(
+        source_root=root,
+        arches=[ROCKE_ARCH],
+        out_root=tmp_path / "out",
+        hipcc="hipcc-not-invoked",
+        rocm_kpack_dir=rocm_kpack_dir,
+        inter_root=tmp_path / "inter",
+        disabled_kinds=("rocke",),
     )
-    assert selects_only_rocke(rocke_only, [ROCKE_ARCH])
-    assert selects_only_rocke(rocke_only, [ARCH, ROCKE_ARCH])
-    assert not selects_only_rocke(rocke_only, [ARCH])
+    assert results[ROCKE_ARCH].skipped
 
-    mixed_root = tmp_path / "mixed"
-    kdp_path = _nest(mixed_root, "hip/pointwise", main_fixture) / "pointwise.kdp.json"
-    (ukd,) = _read(rocke_fixture / "attention.kdp.json")["kernelDescriptors"]
-    _add_rocke_ukd(kdp_path, ukd, form)
-    mixed = load_flat_input(mixed_root, log=_silent)
-    assert not selects_only_rocke(mixed, [ARCH])
-    assert not selects_only_rocke(mixed, [ARCH, ROCKE_ARCH])
+
+@pytest.mark.quick
+def test_an_excluded_folder_is_never_read(tmp_path, main_fixture):
+    """A disabled family's folder is not content: even a descriptor that would
+    fail validation there is not loaded. Only a top-level child is a family."""
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", main_fixture)
+    for family in (root / "rocKE", root / "hip" / "rocKE"):
+        family.mkdir(parents=True)
+        (family / "broken.kdp.json").write_text("{", encoding="utf-8")
+
+    with pytest.raises(HkpPackError, match="malformed"):
+        load_flat_input(root, log=_silent)
+    with pytest.raises(HkpPackError, match="malformed"):
+        load_flat_input(root, log=_silent, exclude_folders=("rocKE",))
+    (root / "hip" / "rocKE" / "broken.kdp.json").unlink()
+    flat = load_flat_input(root, log=_silent, exclude_folders=("rocKE",))
+    assert not any("rocKE" in k.path.parts for k in flat.kdps())
+    assert flat.kdps()
+
+
+@pytest.mark.quick
+def test_disabling_an_unknown_kind_is_an_error(tmp_path, main_fixture):
+    """A misspelled kind in the build's filter must not silently disable nothing."""
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", main_fixture)
+    with pytest.raises(HkpPackError, match="unknown kernel_source kind"):
+        load_flat_input(root, log=_silent, disabled_kinds=("rokce",))

@@ -116,16 +116,20 @@ def consumer(tmp_path, cmake, cmake_make_program):
 
 def test_a_root_without_rocke_packs_under_a_base_interpreter_without_pip(consumer):
     """The pack runs under the supplied interpreter with no rocKE environment, no
-    private import directory on PYTHONPATH, and `--no-rocke` in place of the wheel
-    stamp. pip is absent, so any rocKE wheel step would fail configure or build."""
+    private import directory on PYTHONPATH, and rocke pruned as a disabled kind in
+    place of the wheel stamp; each excluded family folder reaches the tool. pip is
+    absent, so any rocKE wheel step would fail configure or build."""
     consumer.run(consumer.python, "-m", "pip", "--version", success=False)
-    consumer.wire("ENABLE_ROCKE OFF PACK_JOBS 2")
+    consumer.wire("ENABLE_ROCKE OFF EXCLUDE_FOLDERS rocKE asm PACK_JOBS 2")
     consumer.configure()
     consumer.build()
 
     record = consumer.invocation()
     assert Path(record["python"]) == consumer.python
-    assert "--no-rocke" in record["argv"]
+    pairs = list(zip(record["argv"], record["argv"][1:]))
+    assert ("--disable-kind", "rocke") in pairs
+    assert ("--exclude-folder", "rocKE") in pairs
+    assert ("--exclude-folder", "asm") in pairs
     assert "--rocke-wheel-stamp" not in record["argv"]
     # The harness strips PYTHONPATH from the build's environment, so any value
     # the pack sees is a prepend the command made.
@@ -192,18 +196,30 @@ def test_the_registered_suites_collect_tests_rocke_only_with_rocke(
         assert ignored == ([rocke_tests] if enable_rocke == "OFF" else []), name
 
 
-@pytest.mark.parametrize(("arch", "verdict"), [("gfx950", "TRUE"), ("gfx942", "FALSE")])
-def test_the_rocke_only_probe_answers_under_a_base_interpreter_without_pip(
-    consumer, rocke_fixture, arch, verdict
+@pytest.mark.parametrize(
+    ("enable_rocke", "folders", "expected"),
+    [
+        ("ON", "", {"gfx950": ["test_fixture:attention"], "gfx942": []}),
+        ("OFF", "", {"gfx950": [], "gfx942": []}),
+        ("ON", "rocKE", {"gfx950": [], "gfx942": []}),
+    ],
+    ids=["rocke-on", "kind-disabled", "folder-excluded"],
+)
+def test_the_shipped_engines_probe_answers_under_a_base_interpreter_without_pip(
+    consumer, rocke_fixture, enable_rocke, folders, expected
 ):
-    """The probe that leaves a rocKE-only default root dormant runs the packer's
-    selection under the pip-less interpreter, through a path with spaces. The
-    fixture's rocKE kernel is scoped to gfx950: selected there, pruned for gfx942.
-    A probe that could not run would answer FALSE for both."""
+    """The configure-time probe that decides dormancy and engine availability runs
+    the packer's own selection under the pip-less interpreter, through a path with
+    spaces, with the build's filters. The fixture's rocKE kernel is scoped to
+    gfx950, so only an unfiltered gfx950 ships its engine; a probe that could not
+    run would print no JSON at all."""
     shutil.copytree(rocke_fixture, consumer.source / "authored" / "rocKE" / "attention")
     consumer._write(
-        f"""_hkp_root_selects_only_rocke(_only "${{CMAKE_CURRENT_SOURCE_DIR}}/authored" {arch})
-message(STATUS "rocke-only=${{_only}}")
+        f"""_hkp_root_shipped_engines(_shipped "${{CMAKE_CURRENT_SOURCE_DIR}}/authored"
+    "gfx950;gfx942" "{folders}" {enable_rocke})
+message(STATUS "shipped=${{_shipped}}")
 """
     )
-    assert f"rocke-only={verdict}" in consumer.configure()
+    output = consumer.configure()
+    shipped = output.split("shipped=", 1)[1].split(" -- ", 1)[0]
+    assert json.loads(shipped) == expected

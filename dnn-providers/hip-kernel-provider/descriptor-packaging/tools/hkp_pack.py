@@ -140,11 +140,21 @@ def _parse_args(argv):
         "the wheel that produced it.",
     )
     p.add_argument(
-        "--no-rocke",
-        action="store_true",
-        help="The build was configured without rocKE "
-        "(HIPKERNELPROVIDER_ENABLE_ROCKE=OFF), so no rocKE producer exists: "
-        "any rocke UKD selected for packing is an error, never skipped.",
+        "--exclude-folder",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="A top-level child folder of the source root that this build does "
+        "not pack (a descriptor family whose build flag is off). Repeatable.",
+    )
+    p.add_argument(
+        "--disable-kind",
+        action="append",
+        default=[],
+        metavar="KIND",
+        help="A kernel_source kind this build has no producer for. Its UKDs are "
+        "pruned like arch-pruned ones, and a KDP left with none is dropped. "
+        "Repeatable; an unknown kind is an error.",
     )
     return p.parse_args(argv)
 
@@ -162,7 +172,8 @@ def main(argv=None):
         rocke_wheel_stamp=args.rocke_wheel_stamp,
         group=args.group,
         source_label=args.source_label,
-        enable_rocke=not args.no_rocke,
+        exclude_folders=tuple(args.exclude_folder),
+        disabled_kinds=tuple(args.disable_kind),
     )
     return 0
 

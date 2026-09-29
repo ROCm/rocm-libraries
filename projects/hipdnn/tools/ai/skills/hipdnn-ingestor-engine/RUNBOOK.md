@@ -406,8 +406,9 @@ separately:
 - **An `embedded_source` root legitimately produces descriptors and no archive.** It is
   a passthrough kind: emitted as authored, no producer, no code object, no archive
   entry, so its shard holds no `kpack/` directory. Compiled-specialization obligations
-  stay mandatory for every compiling kind. "Descriptors but no archive" is legal; "no
-  descriptors" never is.
+  stay mandatory for every compiling kind. "Descriptors but no archive" is legal, and
+  so is a root with nothing to pack for the build: it is skipped, and configure leaves
+  the production root dormant.
 - **Two independent artifact checks bind a packed kernel to its binary.** `sha256` is
   byte identity of the *decompressed* code object, 64 lowercase hex;
   `kernel_signature.py` records the argument list read back out of the compiled object.

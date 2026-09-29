@@ -13,14 +13,20 @@ selection is per-UKD on `kernel_source.kind`, never per-folder, so one root feed
 producer into one kpack per arch. Nothing is registered in CMake: adding a descriptor is
 dropping files in a folder.
 
-The rocKE producer, and the private rocKE wheels and comgr it lowers through, are wired
-only under `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`. With it OFF every root packs with the hip
-producer alone, and the packer is run with `--no-rocke`: a `rocke` UKD selected for any
-requested arch fails that root's pack rather than being skipped, while one that arch
-pruning drops is never looked at. Configure with `-DHIPKERNELPROVIDER_ENABLE_ROCKE=ON`,
-or remove the rocKE descriptors from the root. The inherited default production root is
-the one exception: when every UKD it selects for the build's arches is `rocke`, it has
-nothing the hip producer can ship, so it goes **dormant** instead (below).
+Two filters decide what a build packs, and both prune exactly as arch pruning does:
+
+- **Family folders.** A descriptor family lives in a top-level child folder of a root
+  (`rocKE/` today; `hip/` has no switch). `HKP_DESCRIPTOR_FAMILIES` in
+  `HkpPackaging.cmake` maps each switchable folder to the option that enables it, and a
+  family whose option is OFF is passed as `--exclude-folder <name>`: its files are
+  never read, under every root. A new family is one entry in that table.
+- **Producer kinds.** A `kernel_source.kind` this build has no producer for is passed
+  as `--disable-kind <kind>`. Its UKDs are dropped from their KDPs, and a KDP left with
+  none does not ship. The rocKE producer, and the private rocKE wheels and comgr it
+  lowers through, exist only under `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, so with it OFF
+  `rocke` is disabled. A kind outside the vocabulary is still a validation error.
+
+A root, or an arch, left with nothing to pack is skipped, not failed.
 
 The provider wires six roots: production, plus five over the four authored test sets
 (`shared` packs twice, once into each test binary's discovery root).
@@ -30,16 +36,13 @@ The provider wires six roots: production, plus five over the four authored test 
 | Production | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT`, a `CACHE PATH` defaulting to the in-tree `src/engines/kernel_ingestor_engine/descriptors/` | yes |
 | Test | `src/engines/kernel_ingestor_engine/test_descriptors/{shared,unit,integration,archive_fixture}/` | only under `HIPKERNELPROVIDER_ENABLE_TESTS` |
 
-Production wiring is gated on the root holding at least one non-hidden `*.kdp.json`,
-since a KDP is what arch pruning consumes. With none, packaging is **dormant** and any
-stale product tree is removed; neither is an error. A root set but not a directory is
-fatal. A KDP that prunes on every arch is a hard failure for a root the build NAMED, and
-dormancy for the inherited default root. The same split applies with rocKE OFF to a root
-whose every selected UKD is `rocke`: fatal at pack time when named, dormant when inherited.
-A default root that selects any hip UKD stays wired, so a `rocke` UKD beside it still
-fails the pack. The rocKE-only verdict is the packer's own selection
-(`pipeline.selects_only_rocke`), run at configure; a probe that cannot answer leaves the
-root wired for the packer to report.
+Before wiring production, configure asks the packer (`pipeline.shipped_engines`, under
+the base interpreter, with the same filters) which engines each arch's shard would
+carry. A root that is empty or would ship nothing for any arch this build packs for is
+**dormant**, named or inherited alike, and any stale product tree is removed; neither
+is an error. The same answer decides which engines' census and integration tests are
+registered. A probe that cannot answer leaves the root wired, so the packer reports
+what is wrong with it. A root set but not a directory is fatal.
 
 Two rules govern the walk:
 
@@ -56,7 +59,7 @@ Two rules govern the walk:
 producer runs, and it contributes no code object and no archive entry — the packer only
 stamps the shard architecture and records provenance. A root of only passthrough kinds
 therefore produces descriptors and **no** archive, and a shard with no compiled variant
-holds no `kpack/`. Descriptors but no archive is legal; no descriptors never is.
+holds no `kpack/`. Descriptors but no archive is legal.
 
 ## Compiler-bound specialization agreement
 
@@ -285,9 +288,8 @@ fixtures (`rocke_available`, `rocke_importable`, `rocke_ukd`) and puts the in-tr
 platform and kernels library on `sys.path`, so the command above needs no rocke path. No
 test outside that directory imports rocke or needs the rocKE toolchain, so a new rocKE
 test goes there. Tests outside it may still author or read rocKE descriptors as JSON:
-the `--no-rocke` gate tests in `tests/test_hkp_pack_layout.py` hand them to a pack built
-without rocKE, which must refuse a selected one before any producer runs and pass over
-an arch-pruned one. With
+the disabled-kind and disabled-folder tests in `tests/test_hkp_pack_layout.py` hand
+them to a build without rocKE, which must prune them before any producer runs. With
 `HIPKERNELPROVIDER_ENABLE_ROCKE=OFF` the registered ctest entries pass
 `--ignore=<tests>/rocke` and never collect it; this runs the suite as that build does:
 
@@ -299,7 +301,8 @@ PYTHONPATH=descriptor-packaging/python:/opt/rocm-kpack/python \
 
 `tests/test_hkp_pack_wiring.py` drives real sub-configures of `HkpPackaging.cmake` to
 hold that build's CMake wiring: a root wired with `ENABLE_ROCKE OFF` packs under an
-interpreter without pip, the rocKE-only probe answers under that interpreter, and the
+interpreter without pip with rocke disabled and the excluded folders passed, the
+configure-time `shipped_engines` probe answers under that interpreter, and the
 registered entries ignore `tests/rocke/`.
 
 The two `conftest.py` files both import as `conftest`, so neither exports helpers, and no

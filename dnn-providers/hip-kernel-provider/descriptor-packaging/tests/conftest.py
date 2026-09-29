@@ -91,6 +91,7 @@ def empty_arch_fixture(fixtures_dir):
 
 @pytest.fixture(scope="session")
 def rocke_fixture(fixtures_dir):
-    """rocKE descriptor data, read without rocke: the packer's `--no-rocke` gate
-    tests hand it to a build that must refuse it, and tests/rocke/ packs it."""
+    """rocKE descriptor data, read without rocke: the disabled-kind and
+    disabled-folder tests hand it to a build without rocKE, and tests/rocke/ packs
+    it."""
     return fixtures_dir / "rocke"
