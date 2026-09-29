@@ -472,6 +472,8 @@ struct BlockFmhaPipelineQRKSVSTdm
             reinterpret_cast<QDataType*>(static_cast<char*>(smem_arena) + Layout::kQOffset);
         auto* smem_ptrk =
             reinterpret_cast<KDataType*>(static_cast<char*>(smem_arena) + Layout::kK0Offset);
+        auto* smem_ptrk1 =
+            reinterpret_cast<KDataType*>(static_cast<char*>(smem_arena) + Layout::kK1Offset);
         auto* smem_ptrs =
             reinterpret_cast<SaccDataType*>(static_cast<char*>(smem_arena) + Layout::kSOffset);
         auto* smem_ptrv =
@@ -664,24 +666,27 @@ struct BlockFmhaPipelineQRKSVSTdm
                              {bias_origin.at(number<0>{}), kv_load_start},
                              gemm_0.MakeCBlockTile().get_tile_distribution());
 
+        // K is staged a whole (kN0 x kSubQKHeaddim) tile at a time, into two
+        // ping-pong buffers: the tile consumed this iteration and the next
+        // iteration's tile, prefetched one iteration ahead.
         auto k_dram_window =
             make_tile_window(k_dram_block_window_tmp,
                              {kv_load_start, 0},
-                             Policy::template MakeKDramTileDistribution<Problem>());
+                             Policy::template MakeKDramTileDistribution<Problem, true>());
 
         // K LDS writer (TDM) and reader share plain row-major desc; see Q
         // comment above for the no-swizzle rationale.
         auto k_lds_write_view = make_tensor_view<address_space_enum::lds>(
             reinterpret_cast<KDataType*>(smem_ptrk),
-            Policy::template MakeKLdsBlockDescriptor<Problem>());
+            Policy::template MakeKLdsBlockDescriptor<Problem, true>());
         auto k_lds_read_view = make_tensor_view<address_space_enum::lds>(
             reinterpret_cast<KDataType*>(smem_ptrk),
-            Policy::template MakeKLdsBlockDescriptor<Problem>());
+            Policy::template MakeKLdsBlockDescriptor<Problem, true>());
 
-        auto k_lds_write_window =
-            make_tile_window(k_lds_write_view,
-                             Policy::template MakeKLdsBlockDescriptor<Problem>().get_lengths(),
-                             {0, 0});
+        auto k_lds_write_window = make_tile_window(
+            k_lds_write_view,
+            Policy::template MakeKLdsBlockDescriptor<Problem, true>().get_lengths(),
+            {0, 0});
         auto k_lds_read_window =
             make_tile_window(k_lds_read_view,
                              make_tuple(number<kN0>{}, number<kK0>{}),
@@ -746,57 +751,101 @@ struct BlockFmhaPipelineQRKSVSTdm
         static_assert(1 <= k0_loops);
         static_assert(1 <= k1_loops);
 
+        // K ping-pong: each buffer holds a whole (kN0 x kSubQKHeaddim) K tile.
+        // Iteration i consumes buffer (i % 2) while the next tile streams into
+        // the other one, so the K load latency is hidden behind a full
+        // gemm0 + softmax + gemm1 instead of a single gemm.
+        //
+        // The buffer is picked at compile time on purpose. Selecting it with a
+        // runtime index turns the LDS base into a per-iteration s_cselect, and
+        // here that was enough to lose the compiler's LDS address-space
+        // inference: the K reads came out as generic flat_load instead of
+        // ds_load, and since a flat access bumps loadcnt as well as dscnt,
+        // every v_wmma ended up gated by a conservative s_wait_loadcnt_dscnt
+        // 0x0, which costs far more than the ping-pong saves. Hence the
+        // mainloop is unrolled by two and each half names its K buffer as a
+        // constant.
+        const auto k_lds_ptr = [&](auto i_buf) {
+            if constexpr(decltype(i_buf)::value == 0)
+                return smem_ptrk;
+            else
+                return smem_ptrk1;
+        };
+
+        // Prologue: issue K for the first KV tile (q_tile has already been read
+        // out of LDS above, so reusing the Q region for K0 is safe), then point
+        // the K dram window at the next tile -- the in-loop load prefetches the
+        // *next* tile. k_lds_write_window is still bound to buffer 0, so
+        // iteration 0 consumes buffer 0 and therefore runs at parity 0.
         block_sync_lds();
         load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
+        move_tile_window(k_dram_window, {num_total_loop > 1 ? kN0 : 0, 0});
 
-        do
-        {
+        // One KV-tile iteration. i_parity is the compile-time LDS buffer
+        // parity: the iteration consumes buffer i_parity and prefetches the
+        // next tile into buffer (1 - i_parity).
+        auto kv_iteration = [&](auto i_parity) {
+            constexpr index_t kCurBuf  = decltype(i_parity)::value;
+            constexpr index_t kNextBuf = 1 - kCurBuf;
             [[maybe_unused]] const index_t kv_tile_start = kv_load_start + i_total_loops * kN0;
             // the tile range rounds its end up to kN0, so bound the scale index by seqlen_k
             [[maybe_unused]] const index_t kv_last = mask.GetXTotal() - 1;
 
+            // This barrier covers both reuses below: V is single-buffered (the
+            // previous iteration's gemm1 must be done reading it) and buffer
+            // kNextBuf is the one the previous iteration's gemm0 consumed.
             block_sync_lds();
-            // V uses load_tile_tdm (single-box plain LDS write). Both K and V
-            // are on the tensorcnt counter (s_wait_tensorcnt_barrier for sync).
+
+            // Issue order is [K(cur) (issued one iteration ago), V, K(next)] and
+            // TDM retires in order, hence the waits below:
+            //   wait<2> -> K(cur) landed, V and K(next) still in flight
+            //   wait<1> -> V landed, K(next) still in flight
             load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window); // prefetch load v tile
 
             // move V tile windows
             move_tile_window(v_dram_window, {kN0, 0});
 
+            // The K load below prefetches the NEXT iteration's tile, so the
+            // sink->normal jump has to be applied one iteration earlier than it
+            // is for V/bias (which are handled at the bottom of the loop).
+            //
+            // On the final iteration there is no next tile. The prefetch is
+            // still issued unconditionally, because the wait counts above are
+            // compile-time constants: they only name K(cur) and V correctly
+            // while exactly three TDM loads are in flight on every iteration.
+            // Skipping the last prefetch would shift them by one, and gemm0
+            // would read K before it landed. The window is parked on the last
+            // valid tile rather than advanced past the end of K, so the extra
+            // load is a redundant re-read into a buffer nobody consumes.
+            if constexpr(kHasSink)
+            {
+                if(i_total_loops == num_sink_loop - 1 && i_total_loops + 1 < num_total_loop)
+                {
+                    move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+                }
+            }
+            k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_ptr(number<kNextBuf>{}));
+            load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
+            move_tile_window(k_dram_window, {i_total_loops + 2 < num_total_loop ? kN0 : 0, 0});
+
             // STAGE 1, QK gemm
             clear_tile(s_acc); // initialize C
 
+            s_wait_tensorcnt_barrier<2>();
+            k_lds_read_window.set_bottom_tensor_view_data_ptr(k_lds_ptr(number<kCurBuf>{}));
+            static_for<0, k0_loops, 1>{}([&](auto i_k0) {
+                auto k_tile = load_tile(k_lds_read_window);
+                gemm_0(s_acc,
+                       get_slice_tile(q_tile,
+                                      sequence<0, i_k0 * kK0>{},
+                                      sequence<kM0, (i_k0 + 1) * kK0>{}),
+                       k_tile);
+                if constexpr(i_k0 + 1 < k0_loops)
+                    move_tile_window(k_lds_read_window, {0, kK0});
+            });
+            // rewind the LDS read window to the tile origin for the next iteration
             if constexpr(1 < k0_loops)
-            {
-                static_for<0, k0_loops - 1, 1>{}([&](auto i_k0) {
-                    s_wait_tensorcnt_barrier<0>();
-
-                    auto k_tile = load_tile(k_lds_read_window);
-
-                    gemm_0(s_acc,
-                           get_slice_tile(q_tile,
-                                          sequence<0, i_k0 * kK0>{},
-                                          sequence<kM0, (i_k0 + 1) * kK0>{}),
-                           k_tile);
-
-                    // loop over along the [K]ey head dimension
-                    move_tile_window(k_dram_window, {0, kK0});
-                    block_sync_lds();
-                    load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
-                });
-                // move back to the origin
-                move_tile_window(k_dram_window, {0, -kK0 * (k0_loops - 1)});
-            }
-
-            s_wait_tensorcnt_barrier<0>();
-
-            auto k_tile = load_tile(k_lds_read_window);
-
-            gemm_0(s_acc,
-                   get_slice_tile(q_tile,
-                                  sequence<0, (k0_loops - 1) * kK0>{},
-                                  sequence<kM0, k0_loops * kK0>{}),
-                   k_tile);
+                move_tile_window(k_lds_read_window, {0, -kK0 * (k0_loops - 1)});
 
             if constexpr(kBlockScale)
             {
@@ -906,25 +955,21 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
             }
 
-            // Sink->normal window jump: at the boundary between sink region
-            // and normal region, jump K/V/bias dram windows forward.
+            // Sink->normal window jump for V/bias, which are consumed in the
+            // iteration that issues them. K runs one iteration ahead and was
+            // already jumped before its prefetch at the top of the loop.
             if constexpr(kHasSink)
             {
                 if(i_total_loops == num_sink_loop - 1)
                 {
-                    move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
                     move_tile_window(v_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
                     move_tile_window(bias_dram_window, {0, physical_seqlen_k_start - sink_seq_end});
                 }
             }
 
-            // move K and bias tile windows after current status checked
-            // prefetch next-tile along [K]ey sequence length dimension
-            move_tile_window(k_dram_window, {kN0, 0});
+            // K's dram window is advanced right after its prefetch at the top of
+            // the loop, so only bias needs advancing here.
             move_tile_window(bias_dram_window, {0, kN0});
-
-            block_sync_lds();
-            load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
 
             // Gemm1
             auto s_new = [&]() {
@@ -1036,9 +1081,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             });
 
-            // V is on the tensorcnt counter (load_tile_tdm). Wait for V TDM
-            // write to fully commit before ds_load_tr reads.
-            s_wait_tensorcnt_barrier<0>();
+            // V is on the tensorcnt counter (load_tile_tdm). Wait for V's TDM
+            // write to commit before ds_load_tr reads it; the next iteration's
+            // K prefetch is still outstanding, hence <1> rather than <0>.
+            s_wait_tensorcnt_barrier<1>();
 
             auto v_tile = load_tile_transpose(v_lds_read_window);
 
@@ -1083,8 +1129,27 @@ struct BlockFmhaPipelineQRKSVSTdm
                    v_tile,
                    p_scale_arg,
                    v_scale(number<k1_loops - 1>{}));
+        };
 
+        // Unrolled by two so that each half addresses its K LDS buffer with a
+        // compile-time constant (see the k_lds_ptr comment above). Written as
+        // an early-exit do/while rather than "pairs + tail" so the body is
+        // instantiated exactly twice, not three times. num_total_loop >= 1 is
+        // guaranteed by the caller, and i_total_loops is even whenever the
+        // parity-0 half runs.
+        do
+        {
+            kv_iteration(number<0>{});
+            if(++i_total_loops >= num_total_loop)
+                break;
+            kv_iteration(number<1>{});
         } while(++i_total_loops < num_total_loop);
+
+        // The last iteration issued a K prefetch that nothing consumes; drain it
+        // before leaving, so the LDS region this pipeline was handed is not
+        // still a TDM destination once the caller reuses it. The double-buffer
+        // path below ends the same way.
+        s_wait_tensorcnt_barrier<0>();
 
         if constexpr(kStoreLSE)
         {

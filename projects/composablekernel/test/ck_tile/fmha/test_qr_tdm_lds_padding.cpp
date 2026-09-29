@@ -477,10 +477,14 @@ constexpr bool validate_arena_layouts()
     static_assert(PrefillAll::kV0Offset == 34816);
     static_assert(PrefillAll::kV1Offset == 53248);
     static_assert(PrefillAll::kArenaBytes == 71680);
+    // The single-buffer path stages whole K tiles in two ping-pong buffers, so
+    // its K region has the same geometry as the double-buffer one; only V is
+    // single.
     static_assert(DecodeAll::kQOffset == 0);
     static_assert(DecodeAll::kK0Offset == 0);
-    static_assert(DecodeAll::kV0Offset == 4352);
-    static_assert(DecodeAll::kArenaBytes == 22784);
+    static_assert(DecodeAll::kK1Offset == 17408);
+    static_assert(DecodeAll::kV0Offset == 34816);
+    static_assert(DecodeAll::kArenaBytes == 53248);
 
     using PrefillNone =
         typename Policy::template LdsArenaLayout<PrefillProblem, NoPad, NoPad, NoPad>;
@@ -499,14 +503,18 @@ constexpr bool validate_arena_layouts()
     using DecodeKV   = typename Policy::template LdsArenaLayout<DecodeProblem, NoPad, QKPad, VPad>;
     using DecodeK    = typename Policy::template LdsArenaLayout<DecodeProblem, NoPad, QKPad, NoPad>;
     using DecodeV    = typename Policy::template LdsArenaLayout<DecodeProblem, NoPad, NoPad, VPad>;
-    static_assert(DecodeNone::kArenaBytes == 20480);
-    static_assert(DecodeQKV::kArenaBytes == 22784);
-    static_assert(DecodeKV::kArenaBytes == 22784);
-    static_assert(DecodeK::kArenaBytes == 20736);
-    static_assert(DecodeV::kArenaBytes == 22528);
+    static_assert(DecodeNone::kArenaBytes == 49152);
+    static_assert(DecodeQKV::kArenaBytes == 53248);
+    static_assert(DecodeKV::kArenaBytes == 53248);
+    static_assert(DecodeK::kArenaBytes == 51200);
+    static_assert(DecodeV::kArenaBytes == 51200);
 
     static_assert(has_aligned_production_regions<PrefillAll>());
     static_assert(has_aligned_production_regions<DecodeAll>());
+    // K is a whole tile in both modes now; V is the only region that stays single.
+    static_assert(DecodeAll::kKBytes == PrefillAll::kKBytes);
+    static_assert(DecodeAll::kV1Offset == DecodeAll::kV0Offset);
+    static_assert(PrefillAll::kV1Offset > PrefillAll::kV0Offset);
     static_assert(PrefillAll::kK0Offset + PrefillAll::kKBytes <= PrefillAll::kK1Offset);
     static_assert(PrefillAll::kK1Offset + PrefillAll::kKBytes <= PrefillAll::kV0Offset);
     static_assert(PrefillAll::kQOffset + PrefillAll::kQBytes <= PrefillAll::kV0Offset);
@@ -575,8 +583,10 @@ constexpr bool validate_policy_coupling()
     static_assert(k_desc.get_element_space_size() * sizeof(DataType) ==
                   (UseDoubleKVLdsBuffer ? 17392 : 4336));
     static_assert(v_desc.get_element_space_size() * sizeof(DataType) == 18400);
-    static_assert(Layout::kArenaBytes ==
-                  (UseDoubleKVLdsBuffer ? 71680 : (M == 128 ? 32768 : 22784)));
+    // The arena no longer depends on M0: both modes store Q, two whole K tiles
+    // and V, and the single-buffer one trades the second V for the S staging
+    // area.
+    static_assert(Layout::kArenaBytes == (UseDoubleKVLdsBuffer ? 71680 : 53248));
     static_assert(Layout::kUseDoubleKVLdsBuffer == UseDoubleKVLdsBuffer);
     static_assert(Pipeline::kKLoadOnce == UseDoubleKVLdsBuffer);
     static_assert(Pipeline::GetSmemSize() == Layout::kArenaBytes);
