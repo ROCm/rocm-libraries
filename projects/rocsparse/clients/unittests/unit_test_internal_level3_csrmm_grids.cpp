@@ -58,9 +58,9 @@
 // grid is many blocks wide for every kernel under test:
 //
 //   * nnz = 8704 over m = 512 rows gives nblocks = 34 for the nnz split kernels.
-//   * m + nnz = 9216 gives block_count = 37 for the merge path, and the merge
+//   * m + nnz = 9216 gives block_count = 36 for the merge path, and the merge
 //     kernels that assign BLOCKSIZE / WF_SIZE merge blocks per block still need
-//     ceil(37 / 16) = 3 blocks in the narrowest configuration (n <= 16).
+//     ceil(36 / 16) = 3 blocks in the narrowest configuration (n <= 16).
 //
 // With the limit shrunk to clamped_grid_x = 2 every one of those grids is
 // clamped, so a kernel that does not grid-stride drops most of its work and the
@@ -75,7 +75,8 @@
 // grid whose block count, and therefore whose accumulation order, differs.
 //
 // NO DEVICE-MEMORY GUARD and no size-based skip: the largest allocation in this
-// file is well under a megabyte, so every case runs on every GPU.
+// file is under 3 MB (the batched n = 300 C matrix), so every case runs on every
+// GPU.
 //
 // TARGET: rocsparse-unit-test-device. These tests drive the public
 // rocsparse_spmm entry point, so nothing hidden in librocsparse is needed, but
@@ -104,57 +105,67 @@ namespace
 
     // Default shape. 512 rows of 17 entries gives nnz = 8704, so the nnz split
     // kernels want nblocks = 34 blocks and the merge path wants
-    // block_count = (512 + 8704 - 1) / 256 + 1 = 37.
+    // block_count = (512 + 8704 - 1) / 256 + 1 = 36.
     constexpr int32_t default_m           = 512;
     constexpr int32_t default_nnz_per_row = 17;
 
     // Second shape, used only to reach the analysis launch. The grid of
     // csrmmnn_nnz_split_compute_row_limits is ceil(nblocks / 256), which is a single
     // block for the default shape and therefore never clamped. 1024 rows of 140
-    // entries gives nnz = 143360 and nblocks = 561, so that grid is 3 blocks wide
+    // entries gives nnz = 143360 and nblocks = 560, so that grid is 3 blocks wide
     // and the clamp below actually bites.
     constexpr int32_t many_blocks_m           = 1024;
     constexpr int32_t many_blocks_nnz_per_row = 140;
 
-    // Far below the 3 to 37 blocks the grids above ask for, so the grid-stride
+    // Far below the 3 to 36 blocks the grids above ask for, so the grid-stride
     // loops carry almost all of the work.
     constexpr int clamped_grid_x = 2;
 
+    // batch_count_C of the batched cases.
+    constexpr int32_t batched_count = 2;
+
     // A small banded pattern with exactly nnz_per_row entries per row, and small
     // integer values so that the host reference is bit-exact against any
-    // accumulation order.
+    // accumulation order. A batched matrix stores batch_count strided copies, each
+    // with its own column pattern and values, so a kernel that reads the wrong
+    // batch of A produces a visibly wrong result. nnz is the per-batch count.
     struct CsrMatrix
     {
-        int32_t              m   = 0;
-        int32_t              k   = mat_k;
-        int64_t              nnz = 0;
+        int32_t              m           = 0;
+        int32_t              k           = mat_k;
+        int64_t              nnz         = 0;
+        int32_t              batch_count = 1;
         std::vector<int32_t> row_ptr;
         std::vector<int32_t> col_ind;
         std::vector<double>  val;
     };
 
-    CsrMatrix make_matrix(int32_t m, int32_t nnz_per_row)
+    CsrMatrix make_matrix(int32_t m, int32_t nnz_per_row, int32_t batch_count = 1)
     {
         CsrMatrix a;
-        a.m   = m;
-        a.nnz = static_cast<int64_t>(m) * nnz_per_row;
-        a.row_ptr.resize(m + 1);
-        a.col_ind.reserve(a.nnz);
-        a.val.reserve(a.nnz);
+        a.m           = m;
+        a.nnz         = static_cast<int64_t>(m) * nnz_per_row;
+        a.batch_count = batch_count;
+        a.row_ptr.reserve(static_cast<size_t>(m + 1) * batch_count);
+        a.col_ind.reserve(a.nnz * batch_count);
+        a.val.reserve(a.nnz * batch_count);
 
-        a.row_ptr[0] = 0;
-        for(int32_t i = 0; i < m; ++i)
+        for(int32_t batch = 0; batch < batch_count; ++batch)
         {
-            // Row start walks across the columns; the entries of a row are then
-            // consecutive, which keeps the column indices strictly increasing as
-            // csrmm requires, and keeps the largest index below mat_k.
-            const int32_t base = (i * 7) % (mat_k - nnz_per_row);
-            for(int32_t j = 0; j < nnz_per_row; ++j)
+            a.row_ptr.push_back(0);
+            for(int32_t i = 0; i < m; ++i)
             {
-                a.col_ind.push_back(base + j);
-                a.val.push_back(static_cast<double>(1 + ((i + j) % 5)));
+                // Row start walks across the columns; the entries of a row are then
+                // consecutive, which keeps the column indices strictly increasing as
+                // csrmm requires, and keeps the largest index below mat_k.
+                const int32_t base = (i * 7 + batch * 3) % (mat_k - nnz_per_row);
+                for(int32_t j = 0; j < nnz_per_row; ++j)
+                {
+                    a.col_ind.push_back(base + j);
+                    a.val.push_back(static_cast<double>(1 + ((i + j + batch) % 5)));
+                }
+                a.row_ptr.push_back(a.row_ptr.back() + nnz_per_row);
             }
-            a.row_ptr[i + 1] = a.row_ptr[i] + nnz_per_row;
         }
         return a;
     }
@@ -172,7 +183,8 @@ namespace
 
     // C = alpha * A * B + beta * C on the host, in the same type and with the same
     // layouts the device call uses. order_B selects how the dense_B buffer is
-    // interpreted; C is always column order here.
+    // interpreted; C is always column order here. B and C hold a.batch_count
+    // tightly packed batches, of k * n and m * n elements.
     std::vector<double> host_csrmm(const CsrMatrix&           a,
                                    int32_t                    n,
                                    const std::vector<double>& b,
@@ -182,22 +194,31 @@ namespace
                                    const std::vector<double>& c_in)
     {
         std::vector<double> c = c_in;
-        for(int32_t i = 0; i < a.m; ++i)
+        for(int32_t batch = 0; batch < a.batch_count; ++batch)
         {
-            for(int32_t j = 0; j < n; ++j)
+            const int32_t* row_ptr = a.row_ptr.data() + static_cast<int64_t>(a.m + 1) * batch;
+            const int32_t* col_ind = a.col_ind.data() + a.nnz * batch;
+            const double*  val     = a.val.data() + a.nnz * batch;
+            const double*  b_batch = b.data() + static_cast<int64_t>(a.k) * n * batch;
+            double*        c_batch = c.data() + static_cast<int64_t>(a.m) * n * batch;
+
+            for(int32_t i = 0; i < a.m; ++i)
             {
-                double sum = 0.0;
-                for(int32_t p = a.row_ptr[i]; p < a.row_ptr[i + 1]; ++p)
+                for(int32_t j = 0; j < n; ++j)
                 {
-                    const int32_t col = a.col_ind[p];
-                    const double  bv
-                        = (order_B == rocsparse_order_column)
-                              ? b[static_cast<int64_t>(col) + static_cast<int64_t>(mat_k) * j]
-                              : b[static_cast<int64_t>(col) * n + j];
-                    sum += a.val[p] * bv;
+                    double sum = 0.0;
+                    for(int32_t p = row_ptr[i]; p < row_ptr[i + 1]; ++p)
+                    {
+                        const int32_t col = col_ind[p];
+                        const double  bv  = (order_B == rocsparse_order_column)
+                                                ? b_batch[static_cast<int64_t>(col)
+                                                        + static_cast<int64_t>(mat_k) * j]
+                                                : b_batch[static_cast<int64_t>(col) * n + j];
+                        sum += val[p] * bv;
+                    }
+                    const int64_t ci = static_cast<int64_t>(i) + static_cast<int64_t>(a.m) * j;
+                    c_batch[ci]      = alpha * sum + beta * c_batch[ci];
                 }
-                const int64_t ci = static_cast<int64_t>(i) + static_cast<int64_t>(a.m) * j;
-                c[ci]            = alpha * sum + beta * c[ci];
             }
         }
         return c;
@@ -216,6 +237,37 @@ namespace
         }
         return -1;
     }
+
+    // Owns the spmm descriptors so that each one created is destroyed on every
+    // return path, including a failure part way through creating them.
+    struct SpmmDescrs
+    {
+        rocsparse_spmat_descr mat_a = nullptr;
+        rocsparse_dnmat_descr mat_b = nullptr;
+        rocsparse_dnmat_descr mat_c = nullptr;
+
+        SpmmDescrs() = default;
+
+        SpmmDescrs(const SpmmDescrs&) = delete;
+
+        SpmmDescrs& operator=(const SpmmDescrs&) = delete;
+
+        ~SpmmDescrs()
+        {
+            if(mat_a != nullptr)
+            {
+                (void)rocsparse_destroy_spmat_descr(mat_a);
+            }
+            if(mat_b != nullptr)
+            {
+                (void)rocsparse_destroy_dnmat_descr(mat_b);
+            }
+            if(mat_c != nullptr)
+            {
+                (void)rocsparse_destroy_dnmat_descr(mat_c);
+            }
+        }
+    };
 
     // Run rocsparse_spmm (buffer size / preprocess / compute) for the given
     // algorithm and B layout, and return C. When clamp_grid_x is true the grid.x
@@ -248,9 +300,10 @@ namespace
             return {};
         }
 
-        rocsparse_spmat_descr mat_a = nullptr;
-        rocsparse_dnmat_descr mat_b = nullptr;
-        rocsparse_dnmat_descr mat_c = nullptr;
+        SpmmDescrs             descrs;
+        rocsparse_spmat_descr& mat_a = descrs.mat_a;
+        rocsparse_dnmat_descr& mat_b = descrs.mat_b;
+        rocsparse_dnmat_descr& mat_c = descrs.mat_c;
 
         const int64_t ldb = (order_B == rocsparse_order_column) ? a.k : n;
 
@@ -274,6 +327,20 @@ namespace
                   != rocsparse_status_success)
         {
             ADD_FAILURE() << "descriptor creation failed";
+            return {};
+        }
+
+        if(a.batch_count > 1
+           && (rocsparse_csr_set_strided_batch(mat_a, a.batch_count, a.m + 1, a.nnz)
+                   != rocsparse_status_success
+               || rocsparse_dnmat_set_strided_batch(
+                      mat_b, a.batch_count, static_cast<int64_t>(a.k) * n)
+                      != rocsparse_status_success
+               || rocsparse_dnmat_set_strided_batch(
+                      mat_c, a.batch_count, static_cast<int64_t>(a.m) * n)
+                      != rocsparse_status_success))
+        {
+            ADD_FAILURE() << "strided batch setup failed";
             return {};
         }
 
@@ -370,10 +437,6 @@ namespace
             }
         }
 
-        (void)rocsparse_destroy_spmat_descr(mat_a);
-        (void)rocsparse_destroy_dnmat_descr(mat_b);
-        (void)rocsparse_destroy_dnmat_descr(mat_c);
-
         return out;
     }
 
@@ -385,9 +448,9 @@ namespace
                                          rocsparse_spmm_alg alg,
                                          rocsparse_order    order_B)
     {
-        const std::vector<double> b
-            = make_dense(static_cast<int64_t>(a.k) * n); // same buffer either layout
-        const std::vector<double> c_in(static_cast<size_t>(a.m) * n, 1.0);
+        const std::vector<double> b = make_dense(static_cast<int64_t>(a.k) * n
+                                                 * a.batch_count); // same buffer either layout
+        const std::vector<double> c_in(static_cast<size_t>(a.m) * n * a.batch_count, 1.0);
 
         const std::vector<double> want = host_csrmm(a, n, b, order_B, 2.0, 3.0, c_in);
 
@@ -395,13 +458,15 @@ namespace
             = device_csrmm(handle, a, n, alg, order_B, /*clamp_grid_x=*/true, b, c_in);
         ASSERT_EQ(got.size(), want.size());
 
-        const int64_t bad = first_mismatch(got, want);
+        const int64_t bad      = first_mismatch(got, want);
+        const int64_t in_batch = bad % (static_cast<int64_t>(a.m) * n);
         EXPECT_EQ(bad, -1) << "csrmm did not cover the full block count with grid.x clamped to "
                            << clamped_grid_x << " blocks: first wrong element at linear index "
-                           << bad << " (row " << (bad % a.m) << ", column " << (bad / a.m)
+                           << bad << " (batch " << (bad / (static_cast<int64_t>(a.m) * n))
+                           << ", row " << (in_batch % a.m) << ", column " << (in_batch / a.m)
                            << "), got " << (bad >= 0 ? got[bad] : 0.0) << " want "
                            << (bad >= 0 ? want[bad] : 0.0) << ". n = " << n << ", m = " << a.m
-                           << ", nnz = " << a.nnz;
+                           << ", nnz = " << a.nnz << ", batch_count = " << a.batch_count;
     }
 
     // The default shape, built once per test.
@@ -423,7 +488,7 @@ namespace
 // ---------------------------------------------------------------------------
 
 // csrmmnn_merge_path_kernel, narrowest branch: n <= 16 means 16 merge blocks per
-// launched block, so the grid is only ceil(37 / 16) = 3 blocks wide. This is the
+// launched block, so the grid is only ceil(36 / 16) = 3 blocks wide. This is the
 // tightest case in the file and the one a missing stride loop is least likely to
 // break, which is exactly why it is worth pinning.
 TEST_F(CsrmmGrids, merge_path_nn_grid_stride_n16)
@@ -433,7 +498,7 @@ TEST_F(CsrmmGrids, merge_path_nn_grid_stride_n16)
 }
 
 // csrmmnn_merge_path_kernel, widest branch: n > 64 means one merge block per
-// launched block, so the unclamped grid is the full 37 blocks.
+// launched block, so the unclamped grid is the full 36 blocks.
 TEST_F(CsrmmGrids, merge_path_nn_grid_stride_n80)
 {
     check_clamped_grid_matches_host(
@@ -507,12 +572,12 @@ TEST_F(CsrmmGrids, nnz_split_nt_remainder_grid_stride)
 // csrmmnn_nnz_split_compute_row_limits is launched with one thread per nnz block,
 // so its grid is ceil(nblocks / 256): a single block for the default shape, which
 // means the clamp there can never bite and the stride loop never runs. The
-// many-blocks shape has nblocks = 561, so that grid is 3 blocks wide and clamping
+// many-blocks shape has nblocks = 560, so that grid is 3 blocks wide and clamping
 // it to 2 forces the stride loop. row_limits feeds the dichotomic search in every
 // compute kernel, so a gap in it shows up as wrong rows rather than as a missing
 // tail.
 //
-// This shape also drives the nn compute kernels and the block reduction over 561
+// This shape also drives the nn compute kernels and the block reduction over 560
 // nnz blocks instead of 34, which is a much longer stride loop than the cases
 // above.
 // ---------------------------------------------------------------------------
@@ -534,6 +599,63 @@ TEST_F(CsrmmGrids, merge_path_many_blocks_grid_stride)
 
     check_clamped_grid_matches_host(
         handle, a, 8, rocsparse_spmm_alg_csr_merge_path, rocsparse_order_column);
+}
+
+// ---------------------------------------------------------------------------
+// Batched, batch_count_C = 2
+//
+// The batch dimension runs on grid.y, which is not clamped here, so these cases
+// check that the per-batch offsets survive the grid.x stride loops. A, B and C
+// are all batched, and each batch of A has its own column pattern and values,
+// so the merge path computes a separate coordinate set per batch
+// (offsets_batch_stride_A != 0), and the nnz split reduction reads its own
+// nblocks * n slice of val_block_red per batch. Reading the wrong batch
+// anywhere gives a wrong result.
+// ---------------------------------------------------------------------------
+
+TEST_F(CsrmmGrids, batched_merge_path_nn_grid_stride_n16)
+{
+    check_clamped_grid_matches_host(handle,
+                                    make_matrix(default_m, default_nnz_per_row, batched_count),
+                                    16,
+                                    rocsparse_spmm_alg_csr_merge_path,
+                                    rocsparse_order_column);
+}
+
+TEST_F(CsrmmGrids, batched_merge_path_nn_grid_stride_n80)
+{
+    check_clamped_grid_matches_host(handle,
+                                    make_matrix(default_m, default_nnz_per_row, batched_count),
+                                    80,
+                                    rocsparse_spmm_alg_csr_merge_path,
+                                    rocsparse_order_column);
+}
+
+TEST_F(CsrmmGrids, batched_merge_path_nt_remainder_grid_stride)
+{
+    check_clamped_grid_matches_host(handle,
+                                    make_matrix(default_m, default_nnz_per_row, batched_count),
+                                    300,
+                                    rocsparse_spmm_alg_csr_merge_path,
+                                    rocsparse_order_row);
+}
+
+TEST_F(CsrmmGrids, batched_nnz_split_nn_remainder_grid_stride)
+{
+    check_clamped_grid_matches_host(handle,
+                                    make_matrix(default_m, default_nnz_per_row, batched_count),
+                                    35,
+                                    rocsparse_spmm_alg_csr_nnz_split,
+                                    rocsparse_order_column);
+}
+
+TEST_F(CsrmmGrids, batched_nnz_split_nt_remainder_grid_stride)
+{
+    check_clamped_grid_matches_host(handle,
+                                    make_matrix(default_m, default_nnz_per_row, batched_count),
+                                    70,
+                                    rocsparse_spmm_alg_csr_nnz_split,
+                                    rocsparse_order_row);
 }
 
 // ---------------------------------------------------------------------------
@@ -606,5 +728,32 @@ TEST_F(CsrmmGrids, unclamped_grid_matches_host)
 
         EXPECT_EQ(first_mismatch(got, want), -1)
             << "csrmm is wrong with an unclamped grid on the many-blocks shape: alg = " << alg;
+    }
+
+    // And the batched cases.
+    const CsrMatrix batched         = make_matrix(default_m, default_nnz_per_row, batched_count);
+    const Case      batched_cases[] = {
+        {16, rocsparse_spmm_alg_csr_merge_path, rocsparse_order_column},
+        {80, rocsparse_spmm_alg_csr_merge_path, rocsparse_order_column},
+        {300, rocsparse_spmm_alg_csr_merge_path, rocsparse_order_row},
+        {35, rocsparse_spmm_alg_csr_nnz_split, rocsparse_order_column},
+        {70, rocsparse_spmm_alg_csr_nnz_split, rocsparse_order_row},
+    };
+
+    for(const Case& c : batched_cases)
+    {
+        const std::vector<double> b
+            = make_dense(static_cast<int64_t>(batched.k) * c.n * batched.batch_count);
+        const std::vector<double> c_in(static_cast<size_t>(batched.m) * c.n * batched.batch_count,
+                                       1.0);
+
+        const std::vector<double> want = host_csrmm(batched, c.n, b, c.order_B, 2.0, 3.0, c_in);
+        const std::vector<double> got
+            = device_csrmm(handle, batched, c.n, c.alg, c.order_B, /*clamp_grid_x=*/false, b, c_in);
+        ASSERT_EQ(got.size(), want.size());
+
+        EXPECT_EQ(first_mismatch(got, want), -1)
+            << "batched csrmm is wrong with an unclamped grid: n = " << c.n << ", alg = " << c.alg
+            << ", order_B = " << c.order_B;
     }
 }
