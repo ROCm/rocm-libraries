@@ -89,8 +89,14 @@ and unstarted cases. A client's exit status alone cannot establish coverage.
 
 Each worker is pinned to a distinct physical core; ROCr helpers inherit affinity
 and OpenMP/BLAS/emulator thread budgets are one. Each process group has a
-120-second timeout. Generated cases have a conservative 128 MiB estimated
-buffer limit and dimensions at most 8192; client workspace is separately capped
+120-second timeout, shortened to the remaining suite budget. Each backend has a
+25-minute budget starting before inventory preparation. Expiry stops new work,
+kills any remaining native process groups at the deadline, and fails the suite
+with explicit unstarted-case accounting. The other backend still runs with its
+own budget. Inventory preparation and report writing run in Python and are not
+forcibly interrupted; if preparation exhausts the budget, no kernels are launched.
+Generated cases have a conservative 128 MiB estimated buffer limit and dimensions
+at most 8192; client workspace is separately capped
 at 128 MiB. These are workload limits, not a hard process-memory cap. The
 emulator tick limit is disabled in favor of the subprocess wall timeout.
 
@@ -146,12 +152,14 @@ dispatch per case. Compatible batching or shared transient planning could reduce
 startup work, but should follow measurements from the paired CI artifact rather
 than add caching or scheduling machinery now.
 
-Each backend can take up to roughly 50 minutes if all 100 processes finish just
-inside their 120-second timeout. The two sequential stages can therefore exceed
-the enclosing 75-minute CI step. A suite-level time budget with explicit unstarted
-accounting is a follow-up before expanding or treating this as a reliable timing
-gate; current incremental reports preserve the partial evidence. The per-case
-buffer estimate is also not a hard cap on native/emulator process memory.
+The two sequential suites have 25-minute budgets, leaving 25 minutes of the
+enclosing 75-minute CI step for the emulator build, old smokes and reporting.
+This bounds sampled native execution; slow setup or Python preparation/reporting
+can still reach the outer step/job timeout. `settings.json` and `summary.json`
+record the suite budget; the summary also records total suite time and a
+`suite-timeout` stop reason. Completed results and unstarted cases remain in the
+final report on expiry. The per-case buffer estimate is not a hard cap on
+native/emulator process memory.
 
 ## Reproduction
 
@@ -169,7 +177,7 @@ python3 -B .github/scripts/rocjitsu_race_sweep.py \
   --config "$ROCJITSU_SOURCE_DIR/configs/gfx942_cdna3_kmd.json" \
   --library-dir "$ROCM_PATH/lib/hipblaslt/library" \
   --target gfx942 --reports "$RACE_REPORT_DIR/sweep-tensile" \
-  --workers 4 --kernels 100 --timeout 120
+  --workers 4 --kernels 100 --timeout 120 --suite-timeout 1500
 python3 -B .github/scripts/rocjitsu_race_sweep.py \
   --backend bench --seed "$PR_REVISION" \
   --rocjitsu "$ROCJITSU_BUILD_DIR/tools/rocjitsu/rocjitsu" \
@@ -177,9 +185,10 @@ python3 -B .github/scripts/rocjitsu_race_sweep.py \
   --config "$ROCJITSU_SOURCE_DIR/configs/gfx942_cdna3_kmd.json" \
   --library-dir "$ROCM_PATH/lib/hipblaslt/library" \
   --target gfx942 --reports "$RACE_REPORT_DIR/sweep-bench" \
-  --workers 4 --kernels 100 --timeout 120
+  --workers 4 --kernels 100 --timeout 120 --suite-timeout 1500
 ```
 
 The CLI permits smaller diagnostic samples but caps workers at four, kernels at
-100 and timeout at 120 seconds. To replay a saved solution, use its argv and
-recorded environment with the same artifacts. The INI/YAML paths are absolute.
+100, process timeout at 120 seconds and suite timeout at 1500 seconds. To replay
+a saved solution, use its argv and recorded environment with the same artifacts.
+The INI/YAML paths are absolute.
