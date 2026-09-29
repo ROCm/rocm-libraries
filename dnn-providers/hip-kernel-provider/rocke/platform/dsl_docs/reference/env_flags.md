@@ -14,7 +14,7 @@ For setup and the most common flags in context, see
 | Variable | Values (default) | Purpose |
 |---|---|---|
 | `ROCKE_BACKEND` | `cpp` \| `python` \| `both` (**cpp**) | Which engine lowers Python-authored kernels. `cpp` = C++ engine (auto-falls back to Python if `rocke_engine` isn't built); `python` = native lowerer; `both` = run both and assert byte-identical (the differential check). |
-| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` (auto) | Override the emitted LLVM IR flavor. AUTO loads COMGR, queries its compiler, and maps LLVM <=20 to `llvm20`, 21/22 to `llvm22`, and >=23 to `llvm23`. If no compiler can be queried, core lowering retains its `llvm22` default. An override selects emission; it does not change or bypass validation against the loaded compiler. |
+| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` (auto) | Override the emitted LLVM IR flavor. AUTO loads COMGR, queries its compiler, and maps LLVM <=20 to `llvm20`, 21/22 to `llvm22`, and >=23 to `llvm23`. If no compiler can be queried, AUTO raises; select a flavor explicitly for offline IR emission. An override selects emission; it does not change or bypass validation against the loaded compiler. |
 | `ROCKE_CPP_STRICT` | `1` (unset) | Make `cpp` backend **raise** instead of silently falling back to Python when `rocke_engine` is unavailable. |
 | `ROCKE_DEBUG` | `1` (unset) | Verbose engine diagnostics during build/lowering. |
 | `ROCKE_DEBUG_LOC` | `1` (unset) | Record the Python call stack behind every op while the kernel builds, and lower it to DWARF inlining scopes, so an ATT trace maps instructions back to the source that authored them. Off by default for two reasons: it costs a stack walk per op (material on sweeps that build thousands of kernels), and populating `op.loc` **changes the emitted `.ll` bytes**, so the byte-identity gate and the IR goldens run without it. The added metadata does not change the generated ISA, so a trace captured with it on is still representative. `IRBuilder(capture_loc=True)` is the per-builder equivalent. Set it on the process that **builds** the kernel, not on the compiler; [`capture_wavescope_trace.py`](../optimization/utilities/tools/wavescope/capture_wavescope_trace.py) does that and the rest of the capture in one command. The same DWARF is what lets `rocgdb` name the authoring line behind a memory fault — see [`../development/debugging_rocgdb.md`](../development/debugging_rocgdb.md). |
@@ -154,8 +154,11 @@ the AUTO adapter does not share its private handle with that stage.
 `ROCKE_LLVM_FLAVOR` and explicit API flavors support offline emission without
 loading COMGR. The runtime's p8-generation guard still checks against detected
 compiler evidence when compiling, even if emission used an override. If version
-information is unavailable, core lowering retains its `llvm22` default; replay
-and parity drivers retain their `llvm20` fallback and existing override precedence.
+information is unavailable, AUTO raises instead of selecting a default flavor.
+Replay and parity drivers also require compiler evidence for automatic selection;
+their explicit argument/environment precedence is unchanged. Offline IR emission
+requires an explicit flavor. COMGR compilation requires a known compiler version
+even with an emission override or an unrecognised input datalayout.
 
 The detected LLVM version selects a baseline flavor; it does not prove that
 all builds of that version share an exact DataLayout or intrinsic catalog.

@@ -279,7 +279,7 @@ const ckc::CompilerInfo* ckc::candidate_compiler_info()
     }
     catch(const std::exception&)
     {
-        // Candidate introspection is best-effort; unavailable keeps the offline default.
+        // Candidate introspection is best-effort; the caller decides how to handle unavailable.
         return nullptr;
     }
 }
