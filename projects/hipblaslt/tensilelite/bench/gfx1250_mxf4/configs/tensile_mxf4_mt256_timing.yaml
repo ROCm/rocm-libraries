@@ -29,8 +29,8 @@ BenchmarkProblems:
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: F4
-      DestDataType: s
+      DataType: b #F4
+      DestDataType: b #s
       ComputeDataType: s
       HighPrecisionAccumulate: True
       TransposeA: True
@@ -39,10 +39,10 @@ BenchmarkProblems:
       Batched: True
       Activation: False
       UseBias: 0
-      MXBlockA: 32
-      MXBlockB: 32
-      DataTypeMXSA: e8
-      DataTypeMXSB: e8
+      # MXBlockA: 32
+      # MXBlockB: 32
+      # DataTypeMXSA: e8
+      # DataTypeMXSB: e8
 
     - InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -51,8 +51,9 @@ BenchmarkProblems:
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [true]
         - MatrixInstruction:
-          - [32, 16, 128, 1,  1, 4, 8,  2, 2]  # MT 256x256  WG 2x2  WT 4x8
-        - DepthU: [256]
+          # - [32, 16, 128, 1,  1, 4, 8,  2, 2]  # MT 256x256  WG 2x2  WT 4x8
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]  # MT 256x256  WG 2x2  WT 4x8
+        - DepthU: [128]
         - WavefrontSize: [32]
         - PrefetchGlobalRead: [2]
         - ScheduleIterAlg: [3]

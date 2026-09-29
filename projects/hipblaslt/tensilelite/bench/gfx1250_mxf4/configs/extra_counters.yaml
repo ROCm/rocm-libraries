@@ -1,0 +1,74 @@
+# gfx1250 counters missing from the installed rocprofiler-sdk schema.
+# Event numbers match the MI450 post-bring-up counter list (TX_PERF_SEL_* names,
+# TCP block). Do not drop the TX_PERF_SEL_ prefix: that is the name rocprof matches.
+rocprofiler-sdk:
+  counters-schema-version: 1
+  counters:
+    - name: SQ_INSTS_TDM
+      description: Number of tensor DMA (TDM) instructions issued. Hardware select SQ_PERF_SEL_INSTS_TDM.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 190
+    - name: TX_PERF_SEL_VMW_LDS_BANK_CONFLICT
+      description: Cycles LDS0+LDS1 is stalled by conflicting bank addresses. {emulated, C1}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 132
+    - name: TX_PERF_SEL_VMW_LDS_ADDR_CONFLICT
+      description: Cycles LDS0+LDS1 is stalled by read-after-write address hazards. {nondeterministic, C1}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 135
+    - name: TX_PERF_SEL_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES
+      description: Cycles the secondary LDS port is stalled by a segment conflict.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 164
+    - name: TX_PERF_SEL_VMW_LDS_INPUT_ACTIVE
+      description: Cycles LDSI_0+LDSI_1 is active. Liveness check for the LDS counters.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 146
+    - name: TX_PERF_SEL_VMW_LDS_BANK_CONFLICT_max
+      description: Max across TCP instances. Same reduction the bring-up derived metrics use.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: reduce(TX_PERF_SEL_VMW_LDS_BANK_CONFLICT,max)
+    - name: TX_PERF_SEL_VMW_LDS_ADDR_CONFLICT_max
+      description: Max across TCP instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: reduce(TX_PERF_SEL_VMW_LDS_ADDR_CONFLICT,max)
+    - name: TX_PERF_SEL_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES_max
+      description: Max across TCP instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: reduce(TX_PERF_SEL_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES,max)
+    - name: TX_PERF_SEL_VMW_LDS_INPUT_ACTIVE_max
+      description: Max across TCP instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: reduce(TX_PERF_SEL_VMW_LDS_INPUT_ACTIVE,max)

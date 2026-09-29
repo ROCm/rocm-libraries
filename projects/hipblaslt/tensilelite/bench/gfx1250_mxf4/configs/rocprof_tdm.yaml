@@ -1,0 +1,13 @@
+# Count TDM instructions on the Cijk kernel.
+# Hardware select: SQ_PERF_SEL_INSTS_TDM (SQ event 190), injected as SQ_INSTS_TDM.
+jobs:
+  - kernel_trace: true
+    kernel_include_regex: "Cijk"
+    pmc:
+      - SQ_INSTS_TDM
+      - SQ_WAVES
+      - SQ_BUSY_CYCLES
+    output_format:
+      - csv
+      - json
+    log_level: info

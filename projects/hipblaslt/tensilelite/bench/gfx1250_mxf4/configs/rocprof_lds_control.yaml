@@ -1,0 +1,19 @@
+# Same counters as rocprof_pmc.yaml, filtered to the LDS positive-control kernels.
+jobs:
+  - kernel_trace: true
+    kernel_include_regex: "lds_"
+    pmc:
+      - TX_PERF_SEL_VMW_LDS_BANK_CONFLICT
+      - TX_PERF_SEL_VMW_LDS_ADDR_CONFLICT
+      - TX_PERF_SEL_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES
+      - TX_PERF_SEL_VMW_LDS_INPUT_ACTIVE
+      - TX_PERF_SEL_VMW_LDS_BANK_CONFLICT_max
+      - TX_PERF_SEL_VMW_LDS_ADDR_CONFLICT_max
+      - TX_PERF_SEL_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES_max
+      - TX_PERF_SEL_VMW_LDS_INPUT_ACTIVE_max
+      - SQ_WAVES
+      - SQ_BUSY_CYCLES
+      - GRBM_GUI_ACTIVE
+    output_format:
+      - csv
+    log_level: info

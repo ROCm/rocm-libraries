@@ -1,24 +1,27 @@
 # rocprofv3 kernel dispatch + LDS conflict counters.
 #
-# gfx1250 LDS conflicts are TCP/VMW events (Arcadia TX_PERF_SEL_VMW_*), not the
-# gfx9 SQ_LDS_* / gfx12 SQC_LDS_* counters. Names below drop the TX_PERF_SEL_ prefix:
-#   TX_VMW_LDS_BANK_CONFLICT                              event 0x84
-#   TX_VMW_LDS_ADDR_CONFLICT                              event 0x87
-#   TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES event 0xa4
-# Segment conflict: two LDS read ports hitting the same segment in one cycle.
-# ROW0/ROW1 splits exist for bank and address; the unsuffixed counters are both rows.
-#
-# SQ_INST_CYCLES_LDS / SQ_INSTS_LDS is the average cycles per LDS instruction.
-# On the current subtile kernel both have read 0 (TDM may not increment SQ_INSTS_LDS).
+# gfx1250 LDS conflicts are TCP events from the MI450 post-bring-up list.
+# Keep the TX_PERF_SEL_ prefix. These names are not in the installed
+# rocprofiler-sdk schema; run.sh pmc passes configs/extra_counters.yaml via -E.
+#   TX_PERF_SEL_VMW_LDS_BANK_CONFLICT                              event 0x84 (132)
+#   TX_PERF_SEL_VMW_LDS_ADDR_CONFLICT                              event 0x87 (135)
+#   TX_PERF_SEL_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES event 0xa4 (164)
+#   TX_PERF_SEL_VMW_LDS_INPUT_ACTIVE                               event 146
+# Bank and address unsuffixed counters cover both LDS rows. The _max counters
+# are reduce(..., max), which is the reduction the bring-up derived metrics use.
+# TX_PERF_SEL_VMW_VMW_BUSY is not windowed, so it stays out of this per-dispatch pass.
 jobs:
   - kernel_trace: true
     kernel_include_regex: "Cijk"
     pmc:
-      - TX_VMW_LDS_BANK_CONFLICT
-      - TX_VMW_LDS_ADDR_CONFLICT
-      - TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES
-      - SQ_INSTS_LDS
-      - SQ_INST_CYCLES_LDS
+      - TX_PERF_SEL_VMW_LDS_BANK_CONFLICT
+      - TX_PERF_SEL_VMW_LDS_ADDR_CONFLICT
+      - TX_PERF_SEL_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES
+      - TX_PERF_SEL_VMW_LDS_INPUT_ACTIVE
+      - TX_PERF_SEL_VMW_LDS_BANK_CONFLICT_max
+      - TX_PERF_SEL_VMW_LDS_ADDR_CONFLICT_max
+      - TX_PERF_SEL_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES_max
+      - TX_PERF_SEL_VMW_LDS_INPUT_ACTIVE_max
       - SQ_WAVES
       - SQ_BUSY_CYCLES
       - GRBM_GUI_ACTIVE
