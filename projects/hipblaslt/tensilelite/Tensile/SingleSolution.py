@@ -373,10 +373,15 @@ def _build(
                 config, configPath, architecture, toolchain, debug, isaInfoMap)
         else:
             def derive(candidateConfig, label):
-                return _deriveSingleSolution(
+                derived = _deriveSingleSolution(
                     candidateConfig, label, architecture, toolchain, debug, isaInfoMap,
                     strictErrors=True)
-            configPath, solution, prediction = _selection[1](derive)
+                derived["KernelNameMin"] = getKernelNameMin(derived, debug.splitGSU)
+                return derived
+            choice = _selection[1](derive)
+            if choice is None:
+                return None
+            configPath, solution, prediction = choice
         helpers = initHelperKernelObjects(solution, KernelHelperEnum.All, str(compiler), isaInfoMap)
         # Match the normal build's helper-family deduplication. One writer may
         # emit several exported kernels, while activation writers emit support.
@@ -585,6 +590,7 @@ def _generateAndBuild(
     keepBuildTmp: bool = False,
     sourceOnly: bool = False,
     _selection=None,
+    _count=None,
 ) -> SingleSolutionBuildResult:
     """Build one YAML-requested solution and publish ``outputPath/bundle`` atomically.
 
@@ -594,6 +600,11 @@ def _generateAndBuild(
     the Python result are absolute. No benchmarking or GPU launch is performed.
     With ``sourceOnly`` nothing is assembled, compiled, or bundled: the bundle
     holds ``sources/`` and ``library/`` for the caller to build.
+
+    With ``_count``, ``_selection`` is asked for up to that many solutions, one
+    build each, until it returns None. They are published together as
+    ``outputPath/bundle-<rank>``, and ``outputPath/bundle`` links to
+    ``bundle-0``, which the result describes.
     """
     if not _generationLock.acquire(blocking=False):
         raise SingleSolutionError("Concurrent generation in one Python process is not supported")
@@ -601,27 +612,40 @@ def _generateAndBuild(
         configPath = Path(configPath).resolve(strict=True)
         outputPath = Path(os.path.abspath(outputPath))
         outputPath.mkdir(parents=True, exist_ok=False)
-        staging = outputPath / ".staging"
-        staging.mkdir()
-        manifest = _build(
-            configPath,
-            staging,
-            architecture,
-            cxxCompiler,
-            offloadBundler,
-            codeObjectVersion,
-            libraryFormat,
-            keepBuildTmp,
-            sourceOnly,
-            *(() if _selection is None else (_selection,)),
-        )
-        (staging / "manifest.json").write_text(
-            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
-        )
-        if not sourceOnly:
-            _writeLoaderEnvelope(staging / "loader.bin", manifest)
+        names = ["bundle"] if _count is None else [f"bundle-{rank}" for rank in range(_count)]
+        staged = []
+        for name in names:
+            staging = outputPath / (".staging" if _count is None else f".staging-{name}")
+            staging.mkdir()
+            manifest = _build(
+                configPath,
+                staging,
+                architecture,
+                cxxCompiler,
+                offloadBundler,
+                codeObjectVersion,
+                libraryFormat,
+                keepBuildTmp,
+                sourceOnly,
+                *(() if _selection is None else (_selection,)),
+            )
+            if manifest is None:
+                staging.rmdir()
+                break
+            (staging / "manifest.json").write_text(
+                json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+            )
+            if not sourceOnly:
+                _writeLoaderEnvelope(staging / "loader.bin", manifest)
+            staged.append((staging, name, manifest))
+        if not staged:
+            raise SingleSolutionBuildError("No solution was selected")
+        for staging, name, _ in staged:
+            staging.rename(outputPath / name)
         bundle = outputPath / "bundle"
-        staging.rename(bundle)
+        if _count is not None:
+            bundle.symlink_to(names[0], target_is_directory=True)
+        manifest = staged[0][2]
         mainCodeObject = manifest["main_kernel"].get("code_object")
         return SingleSolutionBuildResult(
             bundle,

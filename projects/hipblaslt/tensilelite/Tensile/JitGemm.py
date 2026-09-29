@@ -287,6 +287,12 @@ def _readRequest(path):
     candidates = request.get("candidates")
     _require(isinstance(candidates, list) and 0 < len(candidates) <= _MAX_CANDIDATES,
              f"Expected 1 through {_MAX_CANDIDATES} ranked candidates")
+    requested = request.get("requested_solutions", 1)
+    _require(_integer(requested, 1) and requested <= len(candidates),
+             "requested_solutions must be a positive integer no larger than the candidate count")
+    excluded = request.get("exclude_kernel_names", [])
+    _require(isinstance(excluded, list) and all(isinstance(name, str) and name for name in excluded),
+             "exclude_kernel_names must be a list of kernel names")
     ids = set()
     for candidate in candidates:
         _require(isinstance(candidate, dict), "Candidate must be a mapping")
@@ -358,15 +364,24 @@ def _candidateDescriptorRejection(candidate, request):
     return None
 
 
-def _select(request, configPath, derive):
+def _select(request, configPath, derive, ranking=None):
+    """Return the first acceptable candidate as (configPath, solution, metadata).
+
+    A ``ranking`` from _Ranking continues after the candidate it last accepted,
+    and after its first acceptance returns None once no candidate is left.
+    """
     from Tensile.Common import state
     from Tensile.Common.GlobalParameters import defaultSolution
     from Tensile.SolutionStructs.Validators.ProblemSizes import problemSizeRejection
     import yaml
 
-    rejections = []
+    ranking = _Ranking() if ranking is None else ranking
+    rejections = ranking.rejections
+    excluded = set(request.get("exclude_kernel_names", []))
     candidates = request["candidates"]
-    for candidate in candidates:
+    while ranking.position < len(candidates):
+        candidate = candidates[ranking.position]
+        ranking.position += 1
         reason = (_modeledTransportRejection(request, candidate)
                   or _candidateDescriptorRejection(candidate, request))
         if reason:
@@ -395,6 +410,10 @@ def _select(request, configPath, derive):
         if reason:
             rejections.append({"candidate_id": candidate["id"], "reason": reason})
             continue
+        if solution.get("KernelNameMin") in excluded:
+            rejections.append({"candidate_id": candidate["id"],
+                               "reason": f"Excluded kernel {solution['KernelNameMin']}"})
+            continue
         with configPath.open("x", encoding="utf-8") as stream:
             stream.write("# Copyright Advanced Micro Devices, Inc., or its affiliates.\n"
                          "# SPDX-License-Identifier: MIT\n")
@@ -416,7 +435,7 @@ def _select(request, configPath, derive):
             "selected_parameters": selected,
             "implementation_parameters": implementation,
             "ranked_candidates": copy.deepcopy(candidates),
-            "rejections": rejections,
+            "rejections": copy.deepcopy(rejections),
             "defaults_source": _DEFAULTS_SOURCE,
             "default_parameters": defaults,
             "resolved_parameters": resolved,
@@ -438,12 +457,30 @@ def _select(request, configPath, derive):
         if request.get("modeled_contract"):
             metadata["modeled_contract"] = request["modeled_contract"]
             metadata["modeled"] = copy.deepcopy(candidate["modeled"])
+        ranking.accepted += 1
         return configPath, solution, metadata
+    if ranking.accepted:
+        return None
     details = "; ".join(f"{item['candidate_id']}: {item['reason']}" for item in rejections)
     raise SS.SingleSolutionConfigError("No JIT candidate supports the problem; all supplied recipes were rejected: " + details)
 
 
+class _Ranking:
+    """Progress through the ranked candidates across the builds of one request."""
+
+    def __init__(self):
+        self.position = 0
+        self.accepted = 0
+        self.rejections = []
+
+
 def generateAndBuildJitGemm(requestPath, outputPath, *, architecture, **options):
+    """Build the best ``requested_solutions`` candidates as ``outputPath/bundle-<rank>``.
+
+    ``outputPath/bundle`` links to ``bundle-0``, whose recipe and prediction are
+    also written next to ``outputPath``. Later ranks write ``<outputPath>.<rank>.yaml``.
+    Fewer bundles than requested means the remaining candidates were rejected.
+    """
     requestPath = Path(requestPath).resolve(strict=True)
     request = _readRequest(requestPath)
     _require(request["architecture"] == architecture, "Prediction and build architectures differ")
@@ -452,10 +489,16 @@ def generateAndBuildJitGemm(requestPath, outputPath, *, architecture, **options)
     predictionPath = Path(str(outputPath) + ".prediction.json")
     _require(not configPath.exists() and not predictionPath.exists(),
              "Selected YAML or prediction output already exists")
-    selection = (_configuration(request, request["candidates"][0]),
-                 lambda derive: _select(request, configPath, derive))
+    ranking = _Ranking()
+
+    def select(derive):
+        path = configPath if not ranking.accepted else Path(f"{outputPath}.{ranking.accepted}.yaml")
+        return _select(request, path, derive, ranking)
+
+    selection = (_configuration(request, request["candidates"][0]), select)
     result = SS._generateAndBuild(requestPath, outputPath, architecture=architecture,
-                                  _selection=selection, **options)
+                                  _selection=selection,
+                                  _count=request.get("requested_solutions", 1), **options)
     manifest = json.loads(result.manifestPath.read_text(encoding="utf-8"))
     with predictionPath.open("x", encoding="utf-8") as stream:
         json.dump(manifest["jit_prediction"], stream, indent=2, allow_nan=False)

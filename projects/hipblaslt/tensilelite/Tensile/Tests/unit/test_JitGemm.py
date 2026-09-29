@@ -248,15 +248,21 @@ def test_modeled_outputs_survive_real_generation(modeled_request, tmp_path):
     assert prediction["resolved_parameters"]["_staggerStrideShift"] == 1
 
 
-def test_source_only_generation_keeps_the_prediction(modeled_request, tmp_path):
+def test_source_only_generation_builds_ranked_bundles(modeled_request, tmp_path):
+    modeled_request["requested_solutions"] = 2
     manifest = compile_request(
         modeled_request, tmp_path, "--source-only", "--offload-bundler", str(tmp_path / "missing"))
     assert manifest["schema_version"] == 3 and manifest["mode"] == "source"
     assert manifest["jit_prediction"]["candidate_id"] == 7
     assert json.loads((tmp_path / "compiled.prediction.json").read_text()) == manifest["jit_prediction"]
-    bundle = tmp_path / "compiled" / "bundle"
-    assert Path(manifest["sources"][0]).suffix == ".s"
-    assert not list(bundle.rglob("*.co")) and not (bundle / "loader.bin").exists()
+    output = tmp_path / "compiled"
+    second = json.loads((output / "bundle-1" / "manifest.json").read_text())
+    assert second["jit_prediction"]["candidate_id"] == 2
+    assert second["main_kernel"]["name"] != manifest["main_kernel"]["name"]
+    for bundle, current in ((output / "bundle-0", manifest), (output / "bundle-1", second)):
+        assert Path(current["sources"][0]).suffix == ".s"
+        assert (bundle / current["sources"][0]).is_file()
+        assert not list(bundle.rglob("*.co")) and not (bundle / "loader.bin").exists()
 
 
 def problem_rejection(derived, request, candidate=None):
@@ -333,6 +339,82 @@ def test_ranked_validation_rejects_first_and_builds_only_winner(prediction_reque
     config = yaml.safe_load(Path(str(output) + ".yaml").read_text())
     assert config["BenchmarkProblems"][0][1]["ForkParameters"] == [
         {name: [value]} for name, value in prediction_request["candidates"][1]["parameters"].items()]
+
+
+@pytest.mark.parametrize("field, value", [
+    ("requested_solutions", 0), ("requested_solutions", True), ("requested_solutions", 1.0),
+    ("requested_solutions", 3), ("exclude_kernel_names", "kernel"),
+    ("exclude_kernel_names", [""]), ("exclude_kernel_names", [1])])
+def test_reject_invalid_ranked_output_fields(prediction_request, tmp_path, field, value):
+    prediction_request[field] = value
+    path = tmp_path / "request.json"
+    path.write_text(json.dumps(prediction_request))
+    with pytest.raises(SS.SingleSolutionConfigError):
+        JG._readRequest(path)
+
+
+def ranked_build(monkeypatch):
+    """Replace code emission; selection and publication stay real."""
+    def build(configPath, staging, *args):
+        def derive(config, label):
+            derived = solution()
+            derived["KernelNameMin"] = f"kernel-{label.rsplit(' ', 1)[1]}"
+            return derived
+
+        choice = args[-1][1](derive)
+        if choice is None:
+            return None
+        _, derived, prediction = choice
+        (staging / "library").mkdir()
+        (staging / "library" / "TensileLibrary.dat.zlib").write_bytes(b"library")
+        return {
+            "architecture": {"resolved": "gfx950"},
+            "main_kernel": {"name": derived["KernelNameMin"]},
+            "sources": [],
+            "solution": {"index": 0, "name": derived["KernelNameMin"]},
+            "library": {"path": "library/TensileLibrary.dat.zlib",
+                        "logical_path": "library/TensileLibrary.dat"},
+            "jit_prediction": prediction,
+        }
+
+    monkeypatch.setattr(SS, "_build", build)
+
+
+def test_ranked_bundles_skip_excluded_kernels_and_publish_together(
+    prediction_request, tmp_path, monkeypatch
+):
+    ranked_build(monkeypatch)
+    prediction_request["candidates"].append(copy.deepcopy(prediction_request["candidates"][1]))
+    prediction_request["candidates"][2]["id"] = 5
+    prediction_request.update(requested_solutions=2, exclude_kernel_names=["kernel-7"])
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(prediction_request))
+    output = tmp_path / "ranked"
+    result = JG.generateAndBuildJitGemm(source, output, architecture="gfx950", sourceOnly=True)
+    assert result.kernelName == "kernel-2"
+    assert sorted(path.name for path in output.iterdir()) == ["bundle", "bundle-0", "bundle-1"]
+    assert (output / "bundle").is_symlink() and (output / "bundle").resolve() == output / "bundle-0"
+    manifests = [json.loads((output / f"bundle-{rank}/manifest.json").read_text()) for rank in (0, 1)]
+    assert [m["jit_prediction"]["candidate_id"] for m in manifests] == [2, 5]
+    assert manifests[1]["jit_prediction"]["rejections"] == [
+        {"candidate_id": 7, "reason": "Excluded kernel kernel-7"}]
+    assert json.loads(Path(f"{output}.prediction.json").read_text())["candidate_id"] == 2
+    assert Path(f"{output}.yaml").is_file() and Path(f"{output}.1.yaml").is_file()
+
+
+def test_ranked_bundles_stop_when_candidates_run_out(prediction_request, tmp_path, monkeypatch):
+    ranked_build(monkeypatch)
+    prediction_request.update(requested_solutions=2, exclude_kernel_names=["kernel-2"])
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(prediction_request))
+    output = tmp_path / "ranked"
+    JG.generateAndBuildJitGemm(source, output, architecture="gfx950", sourceOnly=True)
+    assert sorted(path.name for path in output.iterdir()) == ["bundle", "bundle-0"]
+    prediction_request["exclude_kernel_names"] = ["kernel-2", "kernel-7"]
+    source.write_text(json.dumps(prediction_request))
+    with pytest.raises(SS.SingleSolutionConfigError, match="Excluded kernel kernel-7"):
+        JG.generateAndBuildJitGemm(source, tmp_path / "excluded", architecture="gfx950")
+    assert not (tmp_path / "excluded" / "bundle").exists()
 
 
 def test_unexpected_derivation_failure_does_not_try_next_candidate(prediction_request, tmp_path):
