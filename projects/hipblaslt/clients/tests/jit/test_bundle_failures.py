@@ -27,19 +27,24 @@ def main():
     original = json.loads((args.bundle / "manifest.json").read_text())
     assert original["schema_version"] == 3 and "sources/Kernels.cpp" in original["sources"]
     args.fresh_output.mkdir(parents=True, exist_ok=False)
+    # Build failures name the comgr log; the others fail while the backend reads
+    # the bundle, or at launch.
     cases = {
-        "architecture": "targets gfx942",
-        "path-escape": "Artifact symlink escapes bundle",
-        "missing-sources": "Missing source directory",
-        "missing-symbol": "does not define kernel",
-        "corrupt-library": "Invalid compressed solution library",
-        "unsupported-problem": "does not support the request",
-        "missing-main": "No main kernel assembly",
-        "missing-helper-source": "C API matmul",
-        "missing-helper-symbol": "C API matmul",
-        "mismatched-amax": "does not support the request",
+        "architecture": ("targets gfx942",),
+        "path-escape": ("Artifact symlink escapes bundle",),
+        "missing-sources": ("Missing source directory",),
+        "missing-symbol": ("does not define kernel",),
+        "corrupt-assembly": ("comgr could not assemble", "comgr.log"),
+        "broken-helper-source": ("comgr could not compile HIP", "comgr.log"),
+        "corrupt-library": ("Invalid compressed solution library",),
+        "truncated-library": ("Invalid compressed solution library",),
+        "unsupported-problem": ("does not support the request",),
+        "missing-main": ("No main kernel assembly",),
+        "missing-helper-source": ("C API matmul",),
+        "missing-helper-symbol": ("C API matmul",),
+        "mismatched-amax": ("does not support the request",),
     }
-    for case, diagnostic in cases.items():
+    for case, diagnostics in cases.items():
         wrapper = args.fresh_output / (case + "-generator")
         wrapper.write_text(
             f"#!{sys.executable}\n"
@@ -61,8 +66,17 @@ def main():
             "if case == 'missing-sources': shutil.rmtree(sources)\n"
             "if case == 'missing-main': main.unlink()\n"
             "if case == 'missing-helper-source': helpers[0].unlink()\n"
+            "if case == 'corrupt-assembly':\n"
+            "    main.write_text(main.read_text() + '\\n  s_not_an_instruction v0\\n')\n"
+            "if case == 'broken-helper-source':\n"
+            "    helpers[0].write_text(helpers[0].read_text() + '\\nthis is not C++;\\n')\n"
             "if case == 'corrupt-library':\n"
             "    (bundle / data['library']['path']).write_bytes(b'bad library')\n"
+            "if case == 'truncated-library':\n"
+            "    library = bundle / data['library']['path']\n"
+            "    assert library.suffix == '.zlib'\n"
+            "    encoded = library.read_bytes()\n"
+            "    library.write_bytes(encoded[:len(encoded) // 2])\n"
             "if case == 'missing-symbol':\n"
             "    name = data['main_kernel']['name']\n"
             "    text = main.read_text()\n"
@@ -113,8 +127,9 @@ def main():
         log = result.stdout + result.stderr
         (args.fresh_output / (case + ".log")).write_text(log)
         assert result.returncode == 1, (case, result.returncode, log)
-        assert diagnostic in log, (case, diagnostic, log)
-        print(f"PASS {case}: {diagnostic}", flush=True)
+        for diagnostic in diagnostics:
+            assert diagnostic in log, (case, diagnostic, log)
+        print(f"PASS {case}: {', '.join(diagnostics)}", flush=True)
     print(
         f"PASS: {len(cases)} malformed solution bundles/problems rejected before launch"
     )
