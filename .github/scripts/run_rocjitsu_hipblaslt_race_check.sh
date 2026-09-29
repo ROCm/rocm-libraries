@@ -7,8 +7,8 @@ set -euo pipefail
 # TODO(newling) Until rocjitsu is packaged as a complete runnable TheRock
 # artifact, we build the rocjitsu CLI locally. Monitor progress on packaging rocjitsu.
 #
-# The script runs small hipBLASLt and TensileLite GEMMs under the race detector.
-# TODO(newling) expand the GEMM-space tested.
+# The script runs small hipBLASLt and TensileLite GEMMs, followed by a bounded
+# four-worker / 100-kernel sweep of the same packaged device library.
 #
 # Basic flow:
 #   1. Use the TheRock artifact tree unpacked at ROCM_PATH.
@@ -16,6 +16,7 @@ set -euo pipefail
 #   3. Select a rocjitsu config for gfx942 or gfx950.
 #   4. Run hipblaslt-bench and a reduced TensileLite smoke with the race and
 #      logging plugins enabled in per-workload configs.
+#   5. Sweep 100 packaged kernels with four cases each; see rocjitsu_race_sweep.md.
 
 # These defaults match the GitHub Actions workspace layout: ROCM_PATH is the
 # unpacked TheRock artifact tree, ROCJITSU_SOURCE_DIR is the checked-out
@@ -511,7 +512,7 @@ run_timed "rocjitsu version" show_rocjitsu_version
 
 check_status=0
 
-# Run both workload checks even if the first one fails. That gives the uploaded
+# Run all three workload checks even if an earlier one fails. That gives the uploaded
 # race-reports artifact a complete picture for the failing CI attempt instead of
 # forcing a second long run just to learn whether the other workload also broke.
 set +e
@@ -519,6 +520,19 @@ run_timed "hipblaslt-bench race check" run_hipblaslt_bench_check
 hipblaslt_status=$?
 run_timed "tensilelite-client race check" run_tensilelite_client_check
 tensilelite_status=$?
+# Reuse the emulator, client, runtime paths and target already prepared above.
+# Keep this inside the advisory job and preserve its diagnostics even when an
+# earlier workload failed. No separate device-library build or package is used.
+run_timed "100-kernel toy race sweep" \
+  python3 "$(dirname "${BASH_SOURCE[0]}")/rocjitsu_race_sweep.py" \
+    --rocjitsu "${ROCJITSU_BIN}" \
+    --client "${TENSILELITE_CLIENT}" \
+    --config "${ROCJITSU_CONFIG}" \
+    --target "${ROCJITSU_GPU_TARGET}" \
+    --library-dir "${ROCM_PATH}/lib/hipblaslt/library" \
+    --reports "${RACE_REPORT_DIR}/toy-sweep" \
+    --workers 4 --kernels 100 --batch-size 10 --timeout 120
+sweep_status=$?
 set -e
 
 if [[ "${hipblaslt_status}" -ne 0 ]]; then
@@ -528,6 +542,11 @@ fi
 
 if [[ "${tensilelite_status}" -ne 0 ]]; then
   echo "tensilelite-client race check failed with status ${tensilelite_status}" >&2
+  check_status=1
+fi
+
+if [[ "${sweep_status}" -ne 0 ]]; then
+  echo "toy race sweep failed with status ${sweep_status}; see toy-sweep reports" >&2
   check_status=1
 fi
 
