@@ -1,8 +1,9 @@
 # AMD Matrix Instruction (MFMA / WMMA / SWMMA / SMFMAC) Support by Architecture
 
-A convenience index of AMD matrix instructions. The public XML instruction and
-encoding records are the source of truth. The tables are not exhaustive and do
-not imply that rocKE exposes every instruction.
+A convenience index of AMD matrix instructions, sourced from public XML
+instruction and encoding records. The paired WMMA scale-load entries are sourced
+separately from pinned LLVM definitions. The tables are not exhaustive and do not
+imply that rocKE exposes every instruction.
 
 ## Contents
 
@@ -47,7 +48,8 @@ To locate a row, find its mnemonic under
 `ISA/Instructions/Instruction/InstructionName` (or an official alias), then read
 `InstructionEncodings/InstructionEncoding/Opcode` and `EncodingName`.
 The encoding layout is under `ISA/Encodings/Encoding`. These locators replace
-unversioned PDF page references. Scale helpers have separate encoding records.
+unversioned PDF page references. The paired WMMA scale-load entries below cite
+LLVM because they are absent from this XML archive.
 For gfx1250, `ENC_VOP3P` has an eight-bit `OP` field at **[23:16]**; use each
 architecture's encoding record rather than a universal seven-bit mask.
 
@@ -425,12 +427,13 @@ formats, and adds **F8F6F4/FP4** with per-block scaling (`V_WMMA_SCALE*` /
 
 ### Scaled WMMA (F8F6F4 / FP4 microscaling — VOP3PX2 128-bit encoding)
 
-These are matrix instructions in their own right, not helpers. They use the
-**VOP3PX2** encoding: **four 32-bit dwords / two 64-bit halves**. The first
+These matrix instructions use the **VOP3PX2** encoding:
+**four 32-bit dwords / two 64-bit halves**. The first
 half, bits **[63:0]**, is the load-scale portion; the second, bits **[127:64]**,
 is the WMMA portion. The scale opcode byte is at **[23:16]** (the first dword),
 and the base WMMA opcode is at **[87:80]** (the third dword), counting from the
-start of the instruction.
+start of the instruction. See the pinned LLVM
+[VOP3PX2 encoding definition](https://github.com/ROCm/llvm-project/blob/0586239bb02ac04051622636bcca1c6d34642ad2/llvm/lib/Target/AMDGPU/VOP3PInstructions.td#L2556).
 
 | Scale opcode byte [23:16] | Base WMMA opcode [87:80] | Instruction |
 |---|---|---|
@@ -441,17 +444,19 @@ start of the instruction.
 
 ### WMMA scale-load helpers
 
-Separate scalar instructions that stage the per-block scale operands consumed by
-the table above.
+These VOP3P instructions stage per-block scale operands. They are absent from the
+pinned XML archive; the entries below come from LLVM's
+[paired scale-load definitions](https://github.com/ROCm/llvm-project/blob/0586239bb02ac04051622636bcca1c6d34642ad2/llvm/lib/Target/AMDGPU/VOP3PInstructions.td#L2217)
+and [encodings](https://github.com/ROCm/llvm-project/blob/0586239bb02ac04051622636bcca1c6d34642ad2/llvm/lib/Target/AMDGPU/VOP3PInstructions.td#L2839).
 
 | Instruction |
 |---|
 | V_WMMA_LD_SCALE_PAIRED_B32 |
 | V_WMMA_LD_SCALE16_PAIRED_B64 |
 
-> Only the `*_PAIRED_*` forms exist on this part. There is no unpaired
-> `V_WMMA_LD_SCALE_B32` / `V_WMMA_LD_SCALE16_B64`; the unpaired scale-load for
-> MFMA-class parts is the separate `V_MFMA_LD_SCALE_B32` (op `0x2c`).
+> The pinned LLVM source defines only the `*_PAIRED_*` WMMA forms. Neither it nor
+> the pinned XML contains `V_WMMA_LD_SCALE_B32` or `V_WMMA_LD_SCALE16_B64`.
+> `V_MFMA_LD_SCALE_B32` (op `0x2c`) is a separate MFMA scale-load instruction.
 
 **Data types:** F16, BF16, F32, IU8, FP8/BF8, and **F8F6F4 & FP4** with
 per-block **scale** operands. **No native XF32/TF32 or F64 matrix instruction.**
