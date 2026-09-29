@@ -19,7 +19,9 @@ Log handling
    that does not parse, schema_version != 1, a mode other than enforcing or
    warning_only, an invalid run arch, platform or engine,
    counters_consistent != true, or a harness_defects count other than 0 is
-   rejected whole.
+   rejected whole.  Each log is listed with the lanes and modes of its
+   blocks.  A warning_only block is harvested like an enforcing one: both
+   report the same results.
 3. Each unclaimed_support entry becomes one cell per case: (bundle, case,
    arch, platform, engine).  "reached: verified" means the comparison ran,
    not that it passed, so a cell whose gtest FAILED or was SKIPPED in the
@@ -362,6 +364,7 @@ class LogReport:
     blocks: int = 0
     unique: int = 0
     lanes: Set[str] = field(default_factory=set)
+    modes: Set[str] = field(default_factory=set)
     error: Optional[str] = None
 
     def status(self) -> str:
@@ -370,7 +373,7 @@ class LogReport:
         if not self.blocks:
             return "no block"
         noun = "block" if self.blocks == 1 else "blocks"
-        lanes = " ".join(sorted(self.lanes))
+        lanes = " ".join(sorted(self.lanes) + sorted(self.modes))
         return f"{self.blocks} {noun} ({self.unique} unique) {lanes}"
 
 
@@ -433,6 +436,7 @@ def read_log(path: str, text: str) -> Tuple[LogReport, List[BlockCells]]:
             return report, []
         run = block.summary["run"]
         report.lanes.add(f"{run['arch']}/{run['platform']}")
+        report.modes.add(block.summary["mode"])
     report.blocks = len(blocks)
     report.unique = len({_canonical([b.summary, sorted(b.not_passed)]) for b in blocks})
     return report, cells
@@ -529,6 +533,7 @@ def render_json(result: Harvest) -> str:
                     "blocks": log.blocks,
                     "unique_blocks": log.unique,
                     "lanes": sorted(log.lanes),
+                    "modes": sorted(log.modes),
                     "error": log.error,
                 }
                 for log in result.logs

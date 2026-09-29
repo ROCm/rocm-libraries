@@ -482,9 +482,23 @@ class TestReadLog(unittest.TestCase):
         report, cells = read_log("a.log", _doubled(_summary(), failed=[_FP32]))
         self.assertEqual((report.blocks, report.unique), (2, 1))
         self.assertEqual(report.lanes, {"gfx1030/windows"})
-        self.assertEqual(report.status(), "2 blocks (1 unique) gfx1030/windows")
+        self.assertEqual(
+            report.status(), "2 blocks (1 unique) gfx1030/windows enforcing"
+        )
         self.assertIsNone(report.error)
         self.assertEqual(len(cells), 2)
+
+    def test_warning_only_block_is_harvested_and_shows_its_mode(self) -> None:
+        output = _gtest_output(
+            _summary(mode="warning_only"), mode="WARNING ONLY -- NOT ENFORCED"
+        )
+        report, cells = read_log("a.log", _log((23, output)))
+        self.assertEqual(report.modes, {"warning_only"})
+        self.assertEqual(
+            report.status(), "1 block (1 unique) gfx1030/windows warning_only"
+        )
+        _, enforcing = read_log("b.log", _single_log(_summary()))
+        self.assertEqual(cells, enforcing)
 
     def test_no_block(self) -> None:
         report, cells = read_log("a.log", _log((3, ["[  PASSED  ] 5 tests."])))
@@ -635,7 +649,7 @@ class TestMain(unittest.TestCase):
         log = self._write("run/a.log", _doubled(_summary(), failed=[_FP32]))
         code, out, _ = self._main(str(self.root / "run"))
         self.assertEqual(code, 0)
-        self.assertIn(f"{log}  2 blocks (1 unique) gfx1030/windows", out)
+        self.assertIn(f"{log}  2 blocks (1 unique) gfx1030/windows enforcing\n", out)
         self.assertIn(
             "gfx1030/windows        2 claims; dropped: 1 gtest failed or skipped", out
         )
@@ -647,6 +661,7 @@ class TestMain(unittest.TestCase):
         code, out, _ = self._main(log, "--format", "json")
         self.assertEqual(code, 0)
         report = json.loads(out)
+        self.assertEqual(report["logs"][0]["modes"], ["enforcing"])
         self.assertEqual(
             report["lanes"], {"gfx1030/windows": {"claims": 3, "drops": {}}}
         )
