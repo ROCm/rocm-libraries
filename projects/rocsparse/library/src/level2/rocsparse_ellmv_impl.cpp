@@ -165,7 +165,8 @@ namespace rocsparse
 
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::ellmvt_kernel<ELLMVT_DIM>),
-                dim3((m - 1) / ELLMVT_DIM + 1),
+                dim3(rocsparse::get_grid_size_x(
+                    handle, (static_cast<int64_t>(m) - 1) / ELLMVT_DIM + 1, ELLMVT_DIM)),
                 dim3(ELLMVT_DIM),
                 0,
                 stream,
