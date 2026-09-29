@@ -17,6 +17,9 @@
           "5_256_14_14_fp32_nhwc"
         ],
         "support": {
+          "gfx1100": [
+            "linux"
+          ],
           "gfx1101": [
             "windows"
           ],

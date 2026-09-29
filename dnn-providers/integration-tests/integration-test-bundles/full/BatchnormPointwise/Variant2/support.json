@@ -131,6 +131,9 @@
           "8_16_28_28_fp32_nhwc_rlo0p1_norslope_rhi0p5"
         ],
         "support": {
+          "gfx1100": [
+            "linux"
+          ],
           "gfx1101": [
             "windows"
           ],

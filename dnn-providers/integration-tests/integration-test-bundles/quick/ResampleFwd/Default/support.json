@@ -29,6 +29,9 @@
           "2_3_4_3_fp32_nhwc_padding_modezero_pad_postpad1x1_prepad1x1"
         ],
         "support": {
+          "gfx1100": [
+            "linux"
+          ],
           "gfx1101": [
             "windows"
           ],
