@@ -432,6 +432,7 @@ class TestBlockCells(unittest.TestCase):
         bad_entries = (
             [{"bundle": _SINGLE, "arch": "unknown", "reached": "verified"}],
             [{"bundle": _SWEEP, "cases": "a", "reached": "verified"}],
+            [{"bundle": _SWEEP, "cases": [], "reached": "verified"}],
             [{"reached": "verified"}],
             "not a list",
         )

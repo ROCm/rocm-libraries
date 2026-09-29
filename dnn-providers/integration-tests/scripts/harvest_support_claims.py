@@ -324,8 +324,14 @@ def block_cells(block: Block) -> BlockCells:
 
     for entry in _entries(summary, "unclaimed_support"):
         cases = entry.get("cases", [""])
-        if not isinstance(cases, list) or not all(isinstance(c, str) for c in cases):
-            raise MalformedSummary(f"cases of {entry['bundle']} is not a string list")
+        if (
+            not isinstance(cases, list)
+            or not cases
+            or not all(isinstance(c, str) for c in cases)
+        ):
+            raise MalformedSummary(
+                f"cases of {entry['bundle']} is not a non-empty string list"
+            )
         lane = _lane_of(entry, run)
         reached = DEPTHS.get(entry.get("reached"))
         required = DEPTHS.get(entry.get("required"))
