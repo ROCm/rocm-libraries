@@ -568,6 +568,32 @@ validParameters = { # we need to make sure this matches develop
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
     "UseSubtileImpl": [False, True],
+    # Run the StinkyTofu pipeline as a post-pass over a finished subtile kernel.
+    # The classic gfx1250 path already runs this pipeline at OptLevel 0; the
+    # subtile path returns its own assembly and never calls it, so subtile
+    # kernels miss work a classic kernel gets today -- VGPR-MSB materialization,
+    # s_wait_xcnt hazard coverage (which subtile emits none of), move
+    # propagation, and software instruction prefetch.
+    #
+    # Defaults True, so a gfx1250 subtile kernel gets the post-pass without
+    # opting in. Solution turns it back off anywhere StinkyTofu has no backend,
+    # which is every other architecture including gfx950 subtile, so nothing
+    # outside gfx1250 changes. Note that UseSubtileImpl alone is not enough to
+    # key on: gfx950 sets it too, and gfx950 MX requires it.
+    #
+    # This does not let StinkyTofu reorder an instruction or rewrite a wait:
+    # OptLevel 0 keeps the DAG scheduler out, and EnableWaitCntInsertion /
+    # EnableESM2 / ClusterBarrier stay False, which keeps waitcnt insertion,
+    # RemoveWaitAlu / RemoveDelayAlu and InsertWaitAluModule out of the
+    # pipeline. Components/Subtile keeps ownership of instruction order and of
+    # every s_waitcnt / s_wait_alu it emits.
+    #
+    # Prefetch follows the existing SwInstructionPrefetch knob rather than
+    # adding a second control, so setting that to 0 turns the prefetch passes
+    # off without turning the post-pass off. Prefer SwInstructionPrefetch 2
+    # (Absolute) on this path: it measures neutral to +2.3% on entry-dominated
+    # shapes where the knob's Relative default measures negative.
+    "StinkySubtile": [False, True],
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:
