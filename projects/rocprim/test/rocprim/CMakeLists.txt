@@ -33,11 +33,14 @@ function(set_build_coverage TEST_TARGET)
   if(BUILD_CODE_COVERAGE)
     target_compile_options(${TEST_TARGET} PRIVATE
       -w
-      -fprofile-instr-generate
-      -fcoverage-mapping
+      # Instrument host code only: device-side instrumentation emits profile
+      # globals that the HIP runtime cannot register.
+      # Note: use SHELL here to prevent cmake from removing what it thinks is duplicate -Xarch_host options.
+      "SHELL:-Xarch_host -fprofile-instr-generate"
+      "SHELL:-Xarch_host -fcoverage-mapping"
     )
     target_link_options(${TEST_TARGET} PRIVATE
-      -fprofile-instr-generate
+      "SHELL:-Xarch_host -fprofile-instr-generate"
     )
   endif()
 endfunction()
