@@ -45,8 +45,8 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-import Tensile.ClientWriter as CW
-from Tensile.Common.GlobalParameters import globalParameters
+import tensilelite.ClientWriter as CW
+from tensilelite.Common.GlobalParameters import globalParameters
 
 pytestmark = pytest.mark.unit
 

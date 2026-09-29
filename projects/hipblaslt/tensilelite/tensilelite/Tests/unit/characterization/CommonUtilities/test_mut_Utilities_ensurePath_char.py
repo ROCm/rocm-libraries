@@ -4,7 +4,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.Utilities.ensurePath``.
+``tensilelite.Common.Utilities.ensurePath``.
 
 These pin the exact behavior of the ``except OSError`` branch: when
 ``os.makedirs`` raises a (non-FileExists) OSError, ``ensurePath`` re-raises a
@@ -15,7 +15,7 @@ import os
 
 import pytest
 
-from Tensile.Common.Utilities import ensurePath
+from tensilelite.Common.Utilities import ensurePath
 
 pytestmark = pytest.mark.unit
 

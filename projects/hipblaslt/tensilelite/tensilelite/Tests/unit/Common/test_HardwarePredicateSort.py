@@ -23,10 +23,10 @@
 ################################################################################
 import io
 import pytest
-from Tensile.Common.Architectures import gfxToIsa
-from Tensile.Common.Utilities import state
-from Tensile.Hardware import HardwarePredicate, _extractPciChipIds
-from Tensile.SolutionLibrary import PredicateLibrary
+from tensilelite.Common.Architectures import gfxToIsa
+from tensilelite.Common.Utilities import state
+from tensilelite.Hardware import HardwarePredicate, _extractPciChipIds
+from tensilelite.SolutionLibrary import PredicateLibrary
 
 ISA = gfxToIsa("gfx950")
 

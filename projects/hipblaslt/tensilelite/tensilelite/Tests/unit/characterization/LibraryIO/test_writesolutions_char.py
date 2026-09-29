@@ -42,12 +42,12 @@ from types import SimpleNamespace
 import pytest
 import contextlib
 
-from Tensile import __version__
-import Tensile.LibraryIO as L
+from tensilelite import __version__
+import tensilelite.LibraryIO as L
 
 pytestmark = pytest.mark.unit
-from Tensile.Common.GlobalParameters import globalParameters
-import Tensile.Common.TimingInstrumentation as _TI
+from tensilelite.Common.GlobalParameters import globalParameters
+import tensilelite.Common.TimingInstrumentation as _TI
 
 
 def _norm(text):
