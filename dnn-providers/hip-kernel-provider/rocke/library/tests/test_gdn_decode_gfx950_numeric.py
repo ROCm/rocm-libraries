@@ -132,22 +132,87 @@ def test_simple_reference_path_matches(harness):
 
 
 @requires_gfx950
-def test_every_dispatched_tile_is_correct(harness):
-    """Every tile the dispatcher can select must be numerically sound.
+def test_all_registry_candidates_are_correct(harness, request):
+    """Every legal registry candidate must match the independent FP32 oracle."""
+    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all
 
-    A tuning table that can route a request to a wrong kernel is worse than no
-    tuning at all, so the whole table is exercised rather than the default only.
-    """
+    batches = [request.config.getoption("--gdn-batch")] if request.config.getoption("--gdn-batch") else [1, 16, 64, 256]
+    selected_id = request.config.getoption("--gdn-spec-id")
+    for batch in batches:
+        results = dispatch_gdn_decode_all(GdnDecodeRequest(batch=batch, arch=ARCH))
+        if selected_id:
+            results = tuple(result for result in results if result.candidate.spec_id == selected_id)
+            assert len(results) == 1, f"unknown or illegal spec ID {selected_id!r}"
+        else:
+            assert len(results) == 54
+        for result in results:
+            from rocke.helpers.compile import compile_kernel
+            from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
+
+            spec = result.spec
+            artifact = compile_kernel(result.build(), arch=ARCH)
+            launcher = KernelLauncher(
+                hsaco=artifact.hsaco,
+                kernel_name=artifact.kernel_name,
+                signature=result.signature,
+            )
+            inputs = harness["make_inputs"](spec, batch)
+            before = inputs["state"].clone()
+            values, _ = harness["prepare"](spec, inputs, batch)
+            cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
+            with no_fence():
+                launcher(values, config=cfg)
+            torch.cuda.synchronize()
+            written = inputs["write_indices"].long()
+            untouched = torch.ones(
+                values["state"].shape[0], dtype=torch.bool, device=values["state"].device
+            )
+            untouched[written] = False
+            assert untouched.any(), result.candidate.spec_id
+            assert torch.equal(values["state"][untouched], before[untouched]), result.candidate.spec_id
+            assert torch.isfinite(values["out"]).all(), result.candidate.spec_id
+            assert torch.isfinite(values["state"][written]).all(), result.candidate.spec_id
+            ref_out, ref_state = harness["ref_fp32"](spec, inputs)
+            out_err = (values["out"].float() - ref_out).abs().max().item()
+            state_err = (values["state"].float()[written] - ref_state).abs().max().item()
+            assert max(out_err, state_err) <= harness["TOL"], (
+                f"batch {batch} spec_id={result.candidate.spec_id} "
+                f"out={out_err:.3e} state={state_err:.3e}"
+            )
+
+
+@requires_gfx950
+def test_production_dispatch_smoke(harness):
+    """Compile and launch only through the production auto DispatchResult."""
     from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
+    from rocke.helpers.compile import compile_kernel
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
 
-    for batch in (1, 16, 64, 256):
-        spec = dispatch_gdn_decode(GdnDecodeRequest(batch=batch, arch=ARCH)).spec
-        out_err, state_err = harness["check"](spec, batch)
-        assert max(out_err, state_err) <= harness["TOL"], (
-            f"batch {batch} tile "
-            f"({spec.num_warps},{spec.warp_threads_k},{spec.blocks_per_v_dim}) "
-            f"out={out_err:.3e} state={state_err:.3e}"
-        )
+    batch = 16
+    result = dispatch_gdn_decode(GdnDecodeRequest(batch=batch, arch=ARCH))
+    artifact = compile_kernel(result.build(), arch=ARCH)
+    launcher = KernelLauncher(
+        hsaco=artifact.hsaco,
+        kernel_name=artifact.kernel_name,
+        signature=result.signature,
+    )
+    inputs = harness["make_inputs"](result.spec, batch)
+    ref_out, ref_state = harness["ref_fp32"](result.spec, inputs)
+    written = inputs["write_indices"].long()
+    untouched = torch.ones(inputs["state"].shape[0], dtype=torch.bool, device="cuda")
+    untouched[written] = False
+    assert untouched.any()
+    before = inputs["state"].clone()
+    values, _ = harness["prepare"](result.spec, inputs, batch)
+    cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
+    with no_fence():
+        launcher(values, config=cfg)
+    torch.cuda.synchronize()
+    assert torch.isfinite(values["out"]).all()
+    assert torch.isfinite(values["state"][written]).all()
+    assert (values["out"].float() - ref_out).abs().max().item() <= harness["TOL"]
+    assert (values["state"].float()[written] - ref_state).abs().max().item() <= harness["TOL"]
+    assert torch.equal(values["state"][untouched], before[untouched])
 
 
 @requires_gfx950
@@ -285,6 +350,27 @@ def test_f16_io_variant_is_correct(harness):
     out_err, state_err = harness["check"](spec, 8)
     assert max(out_err, state_err) <= harness["TOL"]
 
+@requires_gfx950
+def test_f16_io_bf16_state_is_correct(harness):
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec
+
+    spec = dc.replace(GdnDecodeSpec(), dtype="f16", state_dtype="bf16")
+    batch = 8
+    inp = harness["make_inputs"](spec, batch)
+    before = inp["state"].clone()
+    ref_out, ref_state = harness["ref_fp32"](spec, inp)
+    values, cfg = harness["prepare"](spec, inp, batch)
+    harness["launch"](harness["launcher_for"](spec), values, cfg)
+    torch.cuda.synchronize()
+    written = inp["write_indices"].long()
+    untouched = torch.ones(values["state"].shape[0], dtype=torch.bool, device="cuda")
+    untouched[written] = False
+    assert torch.isfinite(values["out"]).all()
+    assert torch.isfinite(values["state"][written]).all()
+    assert (values["out"].float() - ref_out).abs().max().item() <= harness["TOL"]
+    assert (values["state"].float()[written] - ref_state).abs().max().item() <= harness["TOL"]
+    assert torch.equal(values["state"][untouched], before[untouched])
+
 
 @requires_gfx950
 def test_use_qk_l2norm_off_matches_reference(harness):
@@ -353,3 +439,94 @@ def test_end_to_end_through_the_dispatch_result(harness):
         f"dispatch-driven launch disagreed with the reference: "
         f"out={out_err:.3e} state={state_err:.3e}"
     )
+
+
+@requires_gfx950
+def test_mismatched_write_skip_leaves_state_untouched(harness):
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec
+
+    spec, batch, lane = GdnDecodeSpec(), 8, 2
+    inp = harness["make_inputs"](spec, batch)
+    skipped_write = int(inp["write_indices"][lane])
+    inp["write_indices"][lane] = -1
+    before = inp["state"].clone()
+    values, cfg = harness["prepare"](spec, inp, batch)
+    harness["launch"](harness["launcher_for"](spec), values, cfg)
+    torch.cuda.synchronize()
+    active_writes = inp["write_indices"][inp["write_indices"] >= 0].long()
+    untouched = torch.ones(values["state"].shape[0], dtype=torch.bool, device="cuda")
+    untouched[active_writes] = False
+    assert untouched[skipped_write]
+    assert torch.equal(values["state"][untouched], before[untouched])
+    assert torch.equal(values["out"][lane], torch.zeros_like(values["out"][lane]))
+
+
+@requires_gfx950
+def test_paged_reorder_matches_reference(harness):
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec
+
+    spec, batch = GdnDecodeSpec(), 16
+    inp = harness["make_inputs"](spec, batch)
+    inp["read_indices"] = inp["read_indices"].flip(0).contiguous()
+    inp["write_indices"] = inp["write_indices"].roll(3).contiguous()
+    ref_out, ref_state = harness["ref_fp32"](spec, inp)
+    before = inp["state"].clone()
+    values, cfg = harness["prepare"](spec, inp, batch)
+    harness["launch"](harness["launcher_for"](spec), values, cfg)
+    torch.cuda.synchronize()
+    written = inp["write_indices"].long()
+    untouched = torch.ones(values["state"].shape[0], dtype=torch.bool, device="cuda")
+    untouched[written] = False
+    assert (values["out"].float() - ref_out).abs().max().item() <= harness["TOL"]
+    assert (values["state"].float()[written] - ref_state).abs().max().item() <= harness["TOL"]
+    assert torch.equal(values["state"][untouched], before[untouched])
+
+
+@requires_gfx950
+def test_two_step_continuation(harness):
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec
+
+    spec, batch = GdnDecodeSpec(), 16
+    inp = harness["make_inputs"](spec, batch)
+    inp["write_indices"] = inp["read_indices"].clone()
+    launcher = harness["launcher_for"](spec)
+    for _ in range(2):
+        ref_out, ref_state = harness["ref_fp32"](spec, inp)
+        before = inp["state"].clone()
+        values, cfg = harness["prepare"](spec, inp, batch)
+        harness["launch"](launcher, values, cfg)
+        torch.cuda.synchronize()
+        written = inp["write_indices"].long()
+        untouched = torch.ones(values["state"].shape[0], dtype=torch.bool, device="cuda")
+        untouched[written] = False
+        assert (values["out"].float() - ref_out).abs().max().item() <= harness["TOL"]
+        assert (values["state"].float()[written] - ref_state).abs().max().item() <= harness["TOL"]
+        assert torch.equal(values["state"][untouched], before[untouched])
+        inp = dict(inp, state=values["state"].clone())
+
+
+@requires_gfx950
+def test_state_reset_is_bit_exact(harness):
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec
+
+    spec, batch = GdnDecodeSpec(), 16
+    inp = harness["make_inputs"](spec, batch)
+    ref_out, ref_state = harness["ref_fp32"](spec, inp)
+    launcher = harness["launcher_for"](spec)
+    outputs = []
+    for _ in range(2):
+        before = inp["state"].clone()
+        values, cfg = harness["prepare"](spec, inp, batch)
+        harness["launch"](launcher, values, cfg)
+        torch.cuda.synchronize()
+        written = inp["write_indices"].long()
+        untouched = torch.ones(values["state"].shape[0], dtype=torch.bool, device="cuda")
+        untouched[written] = False
+        assert torch.isfinite(values["out"]).all()
+        assert torch.isfinite(values["state"][written]).all()
+        assert (values["out"].float() - ref_out).abs().max().item() <= harness["TOL"]
+        assert (values["state"].float()[written] - ref_state).abs().max().item() <= harness["TOL"]
+        assert torch.equal(values["state"][untouched], before[untouched])
+        outputs.append((values["out"].clone(), values["state"].clone()))
+    assert torch.equal(outputs[0][0], outputs[1][0])
+    assert torch.equal(outputs[0][1], outputs[1][1])

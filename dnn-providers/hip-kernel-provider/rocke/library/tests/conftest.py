@@ -31,6 +31,21 @@ _PYROOT = Path(__file__).resolve().parents[2] / "platform" / "python"
 if str(_PYROOT) not in sys.path:
     sys.path.insert(0, str(_PYROOT))
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--gdn-batch",
+        action="store",
+        type=int,
+        default=None,
+        help="run GDN all-candidate numeric coverage for one batch",
+    )
+    parser.addoption(
+        "--gdn-spec-id",
+        action="store",
+        default=None,
+        help="run GDN all-candidate numeric coverage for one stable spec ID",
+    )
+
 
 @pytest.fixture(autouse=True)
 def _restore_attention_arch_state():
