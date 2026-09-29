@@ -16,6 +16,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from harvest_support_claims import (
+    DEVELOP,
     DROP_BAD_PATH,
     DROP_MIN_RUNS,
     DROP_NO_DEPTH,
@@ -31,6 +32,7 @@ from harvest_support_claims import (
     main,
     read_log,
     run_gh,
+    run_git,
     split_streams,
 )
 from support_sidecar import Claim, load, render
@@ -630,8 +632,36 @@ class TestMain(unittest.TestCase):
                 self.assertEqual(gh.calls, [])
 
 
+class FakeGit:
+    """Serves the git commands that read sidecars from the tip of develop."""
+
+    REV = "0123abc"
+
+    def __init__(self, develop: Optional[Dict[str, str]] = None, fail: bool = False):
+        self.develop = develop or {}
+        self.fail = fail
+        self.calls: List[List[str]] = []
+
+    def __call__(self, args: List[str]) -> bytes:
+        self.calls.append(args)
+        command = args[2:]  # after "-C ROOT"
+        if self.fail:
+            raise FetchError(f"git {' '.join(args)}: fatal: unable to access")
+        if command[0] == "fetch":
+            return b""
+        if command[0] == "rev-parse":
+            return f"{self.REV}\n".encode()
+        if command[:4] == ["ls-tree", "-z", "--name-only", self.REV]:
+            names = [n for n in command[5:] if n in self.develop]
+            return "".join(n + "\0" for n in names).encode()
+        if command[:2] == ["cat-file", "blob"]:
+            return self.develop[command[2].split(":./", 1)[1]].encode()
+        raise AssertionError(f"unexpected git {args}")
+
+
 class TestWrite(unittest.TestCase):
     _LANE = ("--lane", "gfx1030/windows")
+    _WRITE = (*_LANE, "--write")
 
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
@@ -643,28 +673,44 @@ class TestWrite(unittest.TestCase):
             path.write_text("{}\n", encoding="utf-8")
         self.sweep = self.root / _SWEEP.replace("sweep.json", "support.json")
         self.single = self.root / _SINGLE.replace(".json", ".support.json")
+        self.git = FakeGit()
 
     def _main(self, *argv: str, summary: Optional[dict] = None) -> tuple:
         log = self.root / "a.log"
         log.write_text(_single_log(summary or _summary()), encoding="utf-8")
         err = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
-            code = main([str(log), "--write", *argv], FakeGh(), self.root)
+            code = main([str(log), *argv], FakeGh(), self.root, self.git)
         return code, err.getvalue()
 
     def _claim(self, case: str = "") -> Claim:
         return Claim(case, "MIOPEN_ENGINE", "gfx1030", "windows")
 
+    def _rel(self, path: Path) -> str:
+        return path.relative_to(self.root).as_posix()
+
     def test_writes_new_sidecars(self) -> None:
-        code, err = self._main(*self._LANE)
+        code, err = self._main(*self._WRITE)
         self.assertEqual(code, 0)
         self.assertEqual(
             load(self.sweep),
             {self._claim("2_8_3_3_fp16_nchw"), self._claim("2_8_3_3_fp32_nchw")},
         )
         self.assertEqual(load(self.single), {self._claim()})
-        self.assertIn(f"wrote {self.sweep.relative_to(self.root)}\n", err)
-        self.assertIn("2 sidecars changed", err)
+        self.assertIn(f"changed {self._rel(self.sweep)} (+2)\n", err)
+        self.assertIn(f"changed {self._rel(self.single)} (+1)\n", err)
+        self.assertIn("2 sidecars changed, +3 claims", err)
+
+    def test_without_write_names_the_changes_and_writes_nothing(self) -> None:
+        old = {self._claim("2_8_3_3_fp16_nchw")}
+        self.sweep.write_text(render(self.sweep, old), encoding="utf-8")
+        code, err = self._main(*self._LANE)
+        self.assertEqual(code, 0)
+        self.assertIn(f"would change {self._rel(self.sweep)} (+1)\n", err)
+        self.assertIn(f"would change {self._rel(self.single)} (+1)\n", err)
+        self.assertIn("2 sidecars would change, +2 claims", err)
+        self.assertEqual(load(self.sweep), old)
+        self.assertFalse(self.single.exists())
 
     def test_adds_to_an_existing_sidecar_and_keeps_every_old_claim(self) -> None:
         old = {
@@ -672,28 +718,74 @@ class TestWrite(unittest.TestCase):
             Claim("2_8_3_3_fp16_nchw", "OTHER_ENGINE", "gfx1030", "windows"),
         }
         self.sweep.write_text(render(self.sweep, old), encoding="utf-8")
-        self.assertEqual(self._main(*self._LANE)[0], 0)
+        # Develop has one of the old claims: the sidecar is ahead, not behind.
+        develop = {Claim("x", "MIOPEN_ENGINE", "gfx942", "linux")}
+        self.git.develop = {self._rel(self.sweep): render(self.sweep, develop)}
+        self.assertEqual(self._main(*self._WRITE)[0], 0)
         self.assertEqual(
             load(self.sweep),
             old | {self._claim("2_8_3_3_fp16_nchw"), self._claim("2_8_3_3_fp32_nchw")},
         )
 
+    def test_reads_each_sidecar_from_the_fetched_develop(self) -> None:
+        self._main(*self._WRITE)
+        root = ["-C", str(self.root)]
+        self.assertEqual(
+            self.git.calls[:3],
+            [
+                [*root, "fetch", "--quiet", "--no-tags", DEVELOP[0], "develop"],
+                [*root, "rev-parse", "FETCH_HEAD"],
+                [
+                    *root,
+                    *("ls-tree", "-z", "--name-only", FakeGit.REV, "--"),
+                    self._rel(self.single),
+                    self._rel(self.sweep),
+                ],
+            ],
+        )
+
+    def test_sidecar_behind_develop_is_refused(self) -> None:
+        claim = Claim("", "MIOPEN_ENGINE", "gfx942", "linux")
+        self.git.develop = {self._rel(self.single): render(self.single, {claim})}
+        for argv, suffix in ((self._LANE, "\n"), (self._WRITE, "; wrote nothing\n")):
+            with self.subTest(argv=argv):
+                code, err = self._main(*argv)
+                self.assertEqual(code, 1)
+                self.assertIn(
+                    f"{self._rel(self.single)}: lacks 1 of develop's claims;"
+                    f" rebase onto develop{suffix}",
+                    err,
+                )
+                self.assertFalse(self.sweep.exists() or self.single.exists())
+
+    def test_unfetchable_develop_exits_2_and_writes_nothing(self) -> None:
+        self.git = FakeGit(fail=True)
+        code, err = self._main(*self._WRITE)
+        self.assertEqual(code, 2)
+        self.assertIn("unable to access; wrote nothing", err)
+        self.assertFalse(self.sweep.exists() or self.single.exists())
+
     def test_second_run_changes_nothing(self) -> None:
-        self._main(*self._LANE)
+        self._main(*self._WRITE)
         before = self.sweep.read_bytes(), self.single.read_bytes()
-        code, err = self._main(*self._LANE)
+        code, err = self._main(*self._WRITE)
         self.assertEqual(code, 0)
-        self.assertIn("0 sidecars changed", err)
+        self.assertIn("0 sidecars changed, +0 claims", err)
         self.assertEqual((self.sweep.read_bytes(), self.single.read_bytes()), before)
 
-    def test_other_lane_writes_nothing(self) -> None:
-        self.assertEqual(self._main("--lane", "gfx942/linux")[0], 0)
+    def test_other_lane_writes_nothing_and_fetches_nothing(self) -> None:
+        self.assertEqual(self._main("--lane", "gfx942/linux", "--write")[0], 0)
         self.assertFalse(self.sweep.exists() or self.single.exists())
+        self.assertEqual(self.git.calls, [])
+
+    def test_without_lane_fetches_nothing(self) -> None:
+        self.assertEqual(self._main()[0], 0)
+        self.assertEqual(self.git.calls, [])
 
     def test_refused_sidecar_writes_nothing(self) -> None:
         text = '{"version": 1, "claims": {}}\n'
         self.single.write_text(text, encoding="utf-8")
-        code, err = self._main(*self._LANE)
+        code, err = self._main(*self._WRITE)
         self.assertEqual(code, 1)
         self.assertIn("not in the form this writer renders; wrote nothing", err)
         self.assertFalse(self.sweep.exists())
@@ -701,16 +793,32 @@ class TestWrite(unittest.TestCase):
 
     def test_missing_bundle_writes_nothing(self) -> None:
         (self.root / _SINGLE).unlink()
-        code, err = self._main(*self._LANE)
+        code, err = self._main(*self._WRITE)
         self.assertEqual(code, 1)
         self.assertIn(f"{_SINGLE}: no such bundle", err)
         self.assertFalse(self.sweep.exists() or self.single.exists())
 
     def test_rejected_log_writes_nothing(self) -> None:
-        code, err = self._main(*self._LANE, summary=_summary(schema_version=2))
+        code, err = self._main(*self._WRITE, summary=_summary(schema_version=2))
         self.assertEqual(code, 1)
         self.assertIn("a log was rejected; wrote nothing", err)
         self.assertFalse(self.sweep.exists() or self.single.exists())
+        self.assertEqual(self.git.calls, [])
+
+    def test_run_git_errors(self) -> None:
+        with mock.patch("subprocess.run", side_effect=FileNotFoundError):
+            with self.assertRaisesRegex(FetchError, "not installed"):
+                run_git(["fetch"])
+        failed = mock.Mock(returncode=128, stdout=b"", stderr=b"fatal: no remote\n")
+        with mock.patch("subprocess.run", return_value=failed):
+            with self.assertRaisesRegex(FetchError, "^git fetch x: fatal: no remote$"):
+                run_git(["fetch", "x"])
+
+    def test_run_git_returns_stdout(self) -> None:
+        done = mock.Mock(returncode=0, stdout=b"abc\n", stderr=b"")
+        with mock.patch("subprocess.run", return_value=done) as run:
+            self.assertEqual(run_git(["rev-parse", "HEAD"]), b"abc\n")
+        self.assertEqual(run.call_args.args[0], ["git", "rev-parse", "HEAD"])
 
 
 _JOB = "Test miopenprovider (gfx1030, windows)"

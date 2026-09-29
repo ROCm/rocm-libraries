@@ -39,14 +39,18 @@ Runs
 
 Writing
 -------
-7. --write adds the claims to the sidecars of their bundles and names each
-   file it changed.  It needs --lane, so one change covers one lane.  Claims
-   are only added: a sidecar becomes its old claims plus the new ones.
-   Nothing is written if a log was rejected or any sidecar is refused (see
+7. With --lane, the claims are added to the current sidecars of their
+   bundles, and each sidecar that would change is named; --write writes
+   them.  --write needs --lane, so one change covers one lane.  Claims are
+   only added: a sidecar becomes its old claims plus the new ones.
+8. The sidecars must be up to date.  The tip of develop is fetched from
+   GitHub with git, and a sidecar that lacks any claim its develop version
+   has is refused: rebase onto develop first.
+9. Nothing is written if a log was rejected or any sidecar is refused (see
    support_sidecar.py).  verify_support_claims.py checks the result.
 
 Exit status: 0 on success, 1 if any log was rejected or a sidecar was
-refused, 2 on a usage error or when a run cannot be fetched.
+refused, 2 on a usage error or when a run or develop cannot be fetched.
 """
 
 from __future__ import annotations
@@ -72,7 +76,7 @@ from typing import (
     Tuple,
 )
 
-from support_sidecar import Claim, SidecarError, load, render, sidecar_path
+from support_sidecar import Claim, SidecarError, load, parse, render, sidecar_path
 
 VALID_PLATFORMS = {"linux", "windows"}
 SCHEMA_VERSION = 1
@@ -94,6 +98,7 @@ DROP_BAD_PATH = "bundle outside integration-test-bundles/"
 DROP_MIN_RUNS = "kept in fewer than --min-runs runs"
 
 REPO = "ROCm/rocm-libraries"
+DEVELOP = (f"https://github.com/{REPO}.git", "develop")
 NIGHTLY_WORKFLOW = "therock-multi-arch-ci-nightly.yml"
 DEFAULT_JOBS = "Test miopenprovider"
 FETCHED_CONCLUSIONS = ("success", "failure")
@@ -551,7 +556,7 @@ Gh = Callable[[List[str]], bytes]
 
 
 class FetchError(RuntimeError):
-    """A CI run or its job logs could not be fetched."""
+    """A CI run, its job logs or develop could not be fetched."""
 
 
 def run_gh(args: List[str]) -> bytes:
@@ -660,11 +665,51 @@ def _read_run(path: Path) -> List[Tuple[str, str]]:
     return [(str(f), f.read_text(encoding="utf-8", errors="replace")) for f in files]
 
 
-def write_claims(cells: Sequence[Cell], root: Path) -> List[Path]:
-    """Add cells to the sidecars under root; return the files that changed.
+Git = Callable[[List[str]], bytes]
 
-    Every sidecar is read and rendered before any is written, so a refused
-    one (SidecarError) leaves all files as they were.
+
+def run_git(args: List[str]) -> bytes:
+    """Runs `git ARGS` and returns stdout."""
+    try:
+        done = subprocess.run(["git", *args], capture_output=True, check=False)
+    except FileNotFoundError as exc:
+        raise FetchError("git is not installed") from exc
+    if done.returncode != 0:
+        message = done.stderr.decode("utf-8", "replace").strip()
+        raise FetchError(f"git {' '.join(args)}: {message}")
+    return done.stdout
+
+
+def develop_claims(
+    paths: Sequence[Path], root: Path, git: Git
+) -> Dict[Path, Set[Claim]]:
+    """The claims each sidecar under root has on the tip of develop.
+
+    The fetch only sets FETCH_HEAD; no branch or remote-tracking ref moves.
+    """
+    in_root = ["-C", str(root)]
+    git([*in_root, "fetch", "--quiet", "--no-tags", *DEVELOP])
+    rev = git([*in_root, "rev-parse", "FETCH_HEAD"]).decode().strip()
+    names = {path.relative_to(root).as_posix(): path for path in paths}
+    listed = git([*in_root, "ls-tree", "-z", "--name-only", rev, "--", *names])
+    claims: Dict[Path, Set[Claim]] = {path: set() for path in paths}
+    for name in filter(None, listed.decode("utf-8").split("\0")):
+        text = git([*in_root, "cat-file", "blob", f"{rev}:./{name}"])
+        claims[names[name]] = parse(names[name], text.decode("utf-8"))
+    return claims
+
+
+class Change(NamedTuple):
+    text: str  # the new content of the sidecar
+    added: int  # claims it gains
+
+
+def plan_claims(cells: Sequence[Cell], root: Path, git: Git) -> Dict[Path, Change]:
+    """The change adding cells makes to each sidecar under root it changes.
+
+    A sidecar that lacks a claim its develop version has is behind develop,
+    and is refused (SidecarError) like a missing bundle or a sidecar that
+    support_sidecar.load refuses.
     """
     new: Dict[Path, Set[Claim]] = {}
     for cell in cells:
@@ -673,19 +718,29 @@ def write_claims(cells: Sequence[Cell], root: Path) -> List[Path]:
         path = root / sidecar_path(cell.bundle)
         claim = Claim(cell.case, cell.engine, cell.arch, cell.platform)
         new.setdefault(path, set()).add(claim)
-    texts = {path: render(path, load(path) | claims) for path, claims in new.items()}
-    changed = []
-    for path, text in sorted(texts.items()):
-        if not path.exists() or path.read_bytes().decode("utf-8") != text:
-            path.write_bytes(text.encode("utf-8"))
-            changed.append(path)
-    return changed
+    if not new:
+        return {}
+    current = {path: load(path) for path in new}
+    for path, claims in sorted(develop_claims(sorted(new), root, git).items()):
+        missing = len(claims - current[path])
+        if missing:
+            raise SidecarError(
+                f"{path.relative_to(root)}: lacks {missing} of develop's claims;"
+                " rebase onto develop"
+            )
+    plan = {}
+    for path in sorted(new):
+        added = new[path] - current[path]
+        if added:
+            plan[path] = Change(render(path, current[path] | added), len(added))
+    return plan
 
 
 def main(
     argv: Optional[Sequence[str]] = None,
     gh: Gh = run_gh,
     root: Path = INTEGRATION_TESTS,
+    git: Git = run_git,
 ) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -760,18 +815,30 @@ def main(
         if args.write:
             print("error: a log was rejected; wrote nothing", file=sys.stderr)
         return 1
+    if args.lane is None:
+        return 0
+    wrote_nothing = "; wrote nothing" if args.write else ""
+    try:
+        plan = plan_claims(result.claims, root, git)
+    except FetchError as exc:
+        print(f"error: {exc}{wrote_nothing}", file=sys.stderr)
+        return 2
+    except (SidecarError, OSError) as exc:
+        print(f"error: {exc}{wrote_nothing}", file=sys.stderr)
+        return 1
+    verb = "would change"
     if args.write:
+        verb = "changed"
         try:
-            changed = write_claims(result.claims, root)
-        except SidecarError as exc:
-            print(f"error: {exc}; wrote nothing", file=sys.stderr)
-            return 1
+            for path, change in plan.items():
+                path.write_bytes(change.text.encode("utf-8"))
         except OSError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
-        for path in changed:
-            print(f"wrote {path.relative_to(root)}", file=sys.stderr)
-        print(f"{len(changed)} sidecars changed", file=sys.stderr)
+    for path, change in plan.items():
+        print(f"{verb} {path.relative_to(root)} (+{change.added})", file=sys.stderr)
+    added = sum(change.added for change in plan.values())
+    print(f"{len(plan)} sidecars {verb}, +{added} claims", file=sys.stderr)
     return 0
 
 
