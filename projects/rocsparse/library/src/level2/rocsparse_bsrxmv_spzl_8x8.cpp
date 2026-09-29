@@ -486,9 +486,8 @@ namespace rocsparse
                 // would otherwise narrow the block count to unsigned int. The kernel
                 // grid-strides over the block rows, so an undersized grid still covers
                 // [0, size).
-                const int64_t num_blocks_x = rocsparse::get_grid_size_x(
-                    handle, (size - 1) / nwarps_per_block + 1, nthreads_per_warp);
-                dim3 const grid1d_dim(num_blocks_x);
+                dim3 const grid1d_dim(rocsparse::get_grid_size_x(
+                    handle, (size - 1) / nwarps_per_block + 1, nthreads_per_warp));
 
                 if(rocsparse_direction_row == dir)
                 {
