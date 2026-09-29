@@ -123,7 +123,7 @@ BenchmarkProblems:
             - Exact: [44032, 16384, 1, 8192]
 
 LibraryLogic:
-  ScheduleName: "alphavec2_sweep_bf16_k1"
+  ScheduleName: "epilogues_alphavec2_bf16_k2"
   DeviceNames: ["Device 75a0", "Device 75b0", "Device 75a2", "Device 75b2", "Device 75a3", "Device 75b3", "Device 75a8", "Device 75b8"]
   ArchitectureName: "gfx950"
   LibraryType: "Equality"
