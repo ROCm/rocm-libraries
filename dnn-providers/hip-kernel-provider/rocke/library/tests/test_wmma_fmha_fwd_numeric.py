@@ -383,6 +383,10 @@ def test_compiled_wmma_preserves_declared_workgroup_limit():
         (64, 64, 2, "causal", 64, 128, 4, 2),
         (128, 32, 2, "none", 32, 64, 6, 2),
         (128, 64, 1, "causal", 16, 64, 4, 4),
+        (64, 32, 1, "bottom_right", 16, 64, 8, 2),
+        (64, 64, 2, "bottom_right", 128, 64, 4, 2),
+        (128, 32, 2, "bottom_right", 64, 32, 6, 2),
+        (128, 64, 1, "bottom_right", 16, 128, 8, 1),
     ],
 )
 def test_transposed_qk_preserves_output_coordinates_and_guards(dimension, block_n, waves, mask, sq, sk, hq, hkv):
@@ -405,13 +409,16 @@ def test_transposed_qk_preserves_output_coordinates_and_guards(dimension, block_
         + np.arange(hkv)[None, None, :, None] * 8
         + columns[None, None, None, :]
     ).astype(np.float16)
-    mean_key = np.full(sq, (sk - 1) / 2, np.float32) if mask == "none" else np.minimum(np.arange(sq), sk - 1) / 2
+    context = sk - sq if mask == "bottom_right" else 0
+    visible = np.full(sq, sk) if mask == "none" else np.clip(np.arange(sq) + context + 1, 0, sk)
+    mean_key = (visible - 1) / 2
     expected = (
         np.arange(batch)[:, None, None, None] * 32
         + mean_key[None, :, None, None]
         + (np.arange(hq) // (hq // hkv))[None, None, :, None] * 8
         + columns[None, None, None, :]
     ).astype(np.float32)
+    expected[:, visible == 0] = 0
     rt = Runtime()
     buffers = DeviceBuffers(rt, CaseInputs(q=q, k=k, v=v))
     guard = 64
@@ -422,7 +429,9 @@ def test_transposed_qk_preserves_output_coordinates_and_guards(dimension, block_
     module = None
     try:
         spec = WmmaFmhaFwdSpec(
-            head_size=dimension, num_query_heads=hq, num_kv_heads=hkv, mask_mode=mask,
+            head_size=dimension, num_query_heads=hq, num_kv_heads=hkv,
+            mask_mode="none" if mask == "none" else "causal",
+            causal_bottom_right=mask == "bottom_right",
             transposed_qk=True, block_n=block_n, num_waves=waves,
         )
         artifact = compile_kernel(build_wmma_fmha_fwd(spec), arch="gfx1151", backend="python")
@@ -444,7 +453,10 @@ def test_transposed_qk_preserves_output_coordinates_and_guards(dimension, block_
         actual = buffers.read_output("rocke_out")
         np.testing.assert_array_equal(actual[:guard], np.full(guard, 37, np.float32))
         np.testing.assert_array_equal(actual[-guard:], np.full(guard, 37, np.float32))
-        np.testing.assert_allclose(actual[guard:-guard].reshape(q.shape), expected, rtol=0, atol=2e-2)
+        actual_output = actual[guard:-guard].reshape(q.shape)
+        np.testing.assert_allclose(actual_output, expected, rtol=0, atol=2e-2)
+        if np.any(visible == 0):
+            np.testing.assert_array_equal(actual_output[:, visible == 0], expected[:, visible == 0])
     finally:
         rt.sync()
         if module is not None:

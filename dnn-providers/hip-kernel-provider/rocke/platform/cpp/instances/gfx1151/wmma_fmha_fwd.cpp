@@ -265,7 +265,7 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
             return false;
         }
         if(strcmp(spec->layout, "dense") != 0 || spec->kv_dtype[0] != '\0'
-           || spec->causal_bottom_right || spec->query_tail || spec->kv_tail
+           || spec->query_tail || spec->kv_tail
            || spec->v_lds_stage || spec->sliding_window || spec->use_softcap
            || spec->use_sinks || spec->use_alibi || spec->use_qq_bias)
         {
@@ -756,7 +756,11 @@ static rocke_status_t
     }
 
     if(spec->transposed_qk)
+    {
+        if(!spec->causal_bottom_right)
+            p.causal_ctx_offset = NULL;
         (void)rocke_wmma_swapqk_fwd_inner_body(b, &p, spec->block_n, spec->num_waves);
+    }
     else
         (void)rocke_mfma_attention_fwd_inner_body(b, &p);
 

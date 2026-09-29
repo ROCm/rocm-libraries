@@ -2,8 +2,8 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/gfx1151_wmma_fmha_fwd_emit.c -- C-side emitter for the gfx1151
- * WMMA FMHA forward parity harness. Selects one of 86 configurations
- * by argv[1] (0..85), builds it exactly as the
+ * WMMA FMHA forward parity harness. Selects one of 94 configurations
+ * by argv[1] (0..93), builds it exactly as the
  * Python emitter gfx1151_wmma_fmha_fwd_emit.py does, and lowers to LLVM .ll
  * text at arch=gfx1151 (flavor AUTO) so the two outputs can be byte-compared.
  *
@@ -26,6 +26,14 @@
 static int make_spec(int idx, rocke_wmma_fmha_fwd_spec_t* spec)
 {
     *spec = rocke_wmma_fmha_fwd_spec_default();
+    if(idx >= 86 && idx < 94)
+    {
+        static const int bases[] = {74, 75, 76, 77, 82, 83, 84, 85};
+        if(make_spec(bases[idx - 86], spec) != 0)
+            return -1;
+        spec->causal_bottom_right = true;
+        return 0;
+    }
     if(idx >= 70 && idx < 86)
     {
         int variant = idx - 70;
@@ -138,7 +146,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..85>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..93>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

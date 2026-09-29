@@ -23,11 +23,17 @@
  * second params type; only the fields the Python keyword signature lists are
  * read (Q, K, V, O, head_size, seqlen_k, q_tile_base, q_pos_base, head_idx,
  * kv_head_idx, the eight stride_* fields, scale_log2, k_token_offset_elems,
- * v_token_offset_elems, mask_mode, arch). The caller has already declared all
+ * v_token_offset_elems, mask_mode, arch, causal_ctx_offset, mask_neg_inf).
+ * The caller has already declared all
  * kernel params and decoded the (q_group, head, batch) grid ids / GQA head
  * mapping (mirroring the Python docstring): this function only emits the
  * QK/softmax/PV/epilogue body (including the O stores). It does not declare
  * params, decode block_id_{x,y,z}, or emit ret().
+ *
+ * An optional causal_ctx_offset shifts the diagonal, normally by Sk-Sq for
+ * bottom-right alignment. NULL preserves legacy top-left emission. Offset
+ * masking uses true -inf and a safe empty-row softmax shift; mask_neg_inf can
+ * reuse the caller's -inf Value instead of emitting another constant.
  *
  * FIDELITY. Every rocke_b_* call sequence reproduces the Python builder-call
  * order, operands and compile-time constants op-for-op so the emitted IR is

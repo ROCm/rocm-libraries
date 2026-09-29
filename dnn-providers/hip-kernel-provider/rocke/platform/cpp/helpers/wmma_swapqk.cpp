@@ -14,6 +14,7 @@
  */
 #include "rocke/helper_rocke.helpers.wmma_swapqk.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -323,6 +324,11 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "wmma_swapqk mask_mode must be none or causal");
         return ROCKE_ERR_VALUE;
     }
+    if(p->causal_ctx_offset != NULL && p->mask_mode != ROCKE_ATTN_MASK_CAUSAL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "a causal context offset requires causal masking");
+        return ROCKE_ERR_VALUE;
+    }
 
     const rocke_arch_target_t* target = rocke_arch_target_from_gfx(arch);
     if(target == NULL)
@@ -375,7 +381,10 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
     rocke_value_t* col = rocke_b_mod(b, lane, c16); /* lane % 16 == query row within the 16-tile */
     rocke_value_t* lane_lt16 = rocke_b_cmp_lt(b, lane, c16);
 
-    rocke_value_t* neg_inf = rocke_b_const_f32(b, -1e30);
+    const bool strict = p->causal_ctx_offset != NULL || p->mask_neg_inf != NULL;
+    rocke_value_t* neg_inf = p->mask_neg_inf;
+    if(neg_inf == NULL)
+        neg_inf = rocke_b_const_f32(b, strict ? -INFINITY : -1e30);
     rocke_value_t* zero_f = rocke_b_const_f32(b, 0.0);
 
     /* Q/K: (head, token, dim), dim contiguous. O^T view: (head, dim, token). */
@@ -438,14 +447,24 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
     rocke_value_t* loop_stop = rocke_b_div(b, seqlen_k, c_block_n);
     if(p->mask_mode == ROCKE_ATTN_MASK_CAUSAL)
     {
-        /* CTA owns q rows up to q_pos_base + 16*n_waves - 1; a kv block kt is
-         * needed iff kt*block_n <= max q pos. Round up + 1 (over-inclusion is
-         * masked, safe). */
         rocke_value_t* span = rocke_b_const_i32(b, 16 * n_waves);
         rocke_value_t* max_row = rocke_b_add(b, q_pos_base, span);
-        rocke_value_t* stop_div = rocke_b_div(b, max_row, c_block_n);
-        rocke_value_t* one = rocke_b_const_i32(b, 1);
-        rocke_value_t* causal_stop = rocke_b_add(b, stop_div, one);
+        rocke_value_t* causal_stop = NULL;
+        if(p->causal_ctx_offset == NULL)
+        {
+            rocke_value_t* stop_div = rocke_b_div(b, max_row, c_block_n);
+            rocke_value_t* one = rocke_b_const_i32(b, 1);
+            causal_stop = rocke_b_add(b, stop_div, one);
+        }
+        else
+        {
+            max_row = rocke_b_add(b, max_row, p->causal_ctx_offset);
+            rocke_value_t* negative = rocke_b_cmp_lt(b, max_row, c0);
+            max_row = rocke_b_select(b, negative, c0, max_row);
+            rocke_value_t* last = rocke_b_const_i32(b, block_n - 1);
+            rocke_value_t* rounded = rocke_b_add(b, max_row, last);
+            causal_stop = rocke_b_div(b, rounded, c_block_n);
+        }
         rocke_value_t* pick = rocke_b_cmp_lt(b, causal_stop, loop_stop);
         loop_stop = rocke_b_select(b, pick, causal_stop, loop_stop);
     }
@@ -526,7 +545,9 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
                 rocke_value_t* s_i = rocke_b_fmul(b, slot, scale_log2);
                 rocke_value_t* k_idx = rocke_b_add(b, kv_base, kv_rel);
                 rocke_value_t* query_pos = rocke_b_add(b, q_pos_local, q_rel);
-                s_i = rocke_apply_attention_mask(b, s_i, p->mask_mode, k_idx, query_pos, 0, NULL, NULL);
+                s_i = rocke_apply_attention_mask(
+                    b, s_i, p->mask_mode, k_idx, query_pos, 0,
+                    p->causal_ctx_offset, strict ? neg_inf : NULL);
                 s_sub[ns][i] = s_i;
             }
         }
@@ -542,7 +563,7 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
         /* lazy: if every lane's tile_max is within threshold of m_i, don't
          * re-anchor (m_new = m_i -> alpha = 1) and skip the O rescale below. */
         rocke_value_t* delta = rocke_b_fsub(b, tile_max, m_i);
-        rocke_value_t* thresh = rocke_b_const_f32(b, 8.0); /* exp2(8)=256 keeps P in fp32 range */
+        rocke_value_t* thresh = rocke_b_const_f32(b, 8.0); /* bounds P before its FP16 cast */
         rocke_value_t* within = rocke_b_fcmp(b, "ole", delta, thresh);
         rocke_value_t* c1_i32 = rocke_b_const_i32(b, 1);
         rocke_value_t* below = rocke_b_select(b, within, c1_i32, c0);
@@ -551,13 +572,19 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
         rocke_value_t* m_hi = rocke_b_fmax(b, m_i, tile_max);
         rocke_value_t* m_new = rocke_b_select(b, skip_rescale, m_i, m_hi);
 
-        rocke_value_t* m_delta = rocke_b_fsub(b, m_i, m_new);
+        rocke_value_t* shift = m_new;
+        if(strict)
+        {
+            rocke_value_t* empty = rocke_b_fcmp(b, "oeq", m_new, neg_inf);
+            shift = rocke_b_select(b, empty, zero_f, m_new);
+        }
+        rocke_value_t* m_delta = rocke_b_fsub(b, m_i, shift);
         rocke_value_t* alpha = rocke_b_exp2_fast(b, m_delta);
         rocke_value_t* ps_sub[ROCKE_SWAPQK_MAX_NS][ROCKE_SWAPQK_MAX_CFRAG];
         for(int ns = 0; ns < n_kv_sub; ++ns)
             for(int i = 0; i < c_frag; ++i)
             {
-                rocke_value_t* d = rocke_b_fsub(b, s_sub[ns][i], m_new);
+                rocke_value_t* d = rocke_b_fsub(b, s_sub[ns][i], shift);
                 ps_sub[ns][i] = rocke_b_exp2_fast(b, d);
             }
         rocke_value_t* all_p[ROCKE_SWAPQK_MAX_ALLS];

@@ -61,9 +61,9 @@ The parity emitters cover both dtypes, head sizes, masks, GQA, and V staging.
 ### Aligned FP16 transposed-QK specialization
 
 Public dispatch selects `transposed_qk=True` for dense FP16 D64/D128 attention
-with no mask or top-left causal masking, query lengths divisible by 16, and
-KV lengths divisible by 32. Score features, bottom-right alignment, sequence
-tails, packed/paged layouts, BF16, FP8 KV, and D256 retain the shared WMMA path.
+with no mask or either causal alignment, query lengths divisible by 16, and
+KV lengths divisible by 32. Score features, sequence tails, packed/paged
+layouts, BF16, FP8 KV, and D256 retain the shared WMMA path.
 
 The specialized helper computes `K @ Q.T`, reduces softmax over lane-local
 accumulator slots and a cross-half exchange, then computes `V @ P`. The
@@ -79,6 +79,11 @@ is at least 512 and divisible by 32 and the KV length is divisible by 64;
 otherwise it uses `(32,1)`. Direct spec callers must satisfy the selected
 query-group and KV-tile alignment. The grid helper and tensor binding reject
 partial groups/tiles rather than silently dropping them.
+
+Bottom-right alignment shifts the visible-key bound by `Sk-Sq`. Empty query
+groups skip the KV loop. True negative-infinity initialization and safe
+empty-row exponential shifts preserve exact-zero fully masked prefixes;
+the legacy top-left specialization is unchanged.
 
 The new variant has a distinct cache name and preserves the base tensor ABI.
 Its native spec fields and pybind mapping mirror Python; native consumers must

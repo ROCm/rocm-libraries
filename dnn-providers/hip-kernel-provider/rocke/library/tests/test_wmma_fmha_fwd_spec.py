@@ -126,7 +126,6 @@ class TestWmmaFmhaFwdSpec(unittest.TestCase):
             {"layout": "ragged"}, {"kv_dtype": "fp8e4m3"}, {"query_tail": True},
             {"kv_tail": True}, {"v_lds_stage": True}, {"use_sinks": True},
             {"use_softcap": True}, {"use_alibi": True}, {"use_qq_bias": True},
-            {"mask_mode": "causal", "causal_bottom_right": True},
             {"mask_mode": "causal", "sliding_window": 32},
         ):
             with self.subTest(changes=changes), self.assertRaises(ValueError):

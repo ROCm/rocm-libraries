@@ -76,7 +76,10 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
     transposed = (
         req.dtype.strip().lower() == "fp16" and layout == "dense"
         and int(req.hdim_q) in (64, 128)
-        and mask_type in (AttentionMaskType.NO_MASK, AttentionMaskType.TOP_LEFT_CAUSAL)
+        and mask_type in (
+            AttentionMaskType.NO_MASK, AttentionMaskType.TOP_LEFT_CAUSAL,
+            AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+        )
         and not query_tail and seqlen_k % 32 == 0
         and not (req.use_fp8 or req.sliding_window or req.use_softcap
                  or req.use_sinks or req.use_alibi or req.use_qq_bias)

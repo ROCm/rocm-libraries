@@ -85,6 +85,8 @@ def wmma_swapqk_fwd_inner_body(
     mask_mode: str,
     block_n: int,
     n_waves: int,
+    causal_ctx_offset: Value | None = None,
+    mask_neg_inf: Value | None = None,
     arch: str = "gfx1151",
 ) -> None:
     """Emit one transposed-QK WMMA FMHA-forward wave body.
@@ -106,8 +108,10 @@ def wmma_swapqk_fwd_inner_body(
     offset and the per-iteration / per-lane token and head-dim offsets on top.
     All strides are in elements.
 
-    ``mask_mode`` is ``"none"`` or ``"causal"`` (top-left, zero context
-    offset). ``block_n`` (32 or 64) and ``n_waves`` (1 or 2) are the only tunables.
+    ``causal_ctx_offset`` shifts the causal diagonal; use ``seqlen_k-seqlen_q``
+    for bottom-right alignment, or leave it unset for legacy top-left emission.
+    ``mask_neg_inf`` may reuse the caller's true negative-infinity constant.
+    ``block_n`` (32 or 64) and ``n_waves`` (1 or 2) are the only tunables.
     """
     if arch != "gfx1151":
         raise ValueError(f"wmma_swapqk is a gfx1151 (RDNA3.5) kernel; got arch={arch!r}")
@@ -119,6 +123,8 @@ def wmma_swapqk_fwd_inner_body(
         raise ValueError(f"n_waves must be 1 or 2 (got {n_waves})")
     if mask_mode not in ("none", "causal"):
         raise ValueError(f"mask_mode must be 'none' or 'causal' (got {mask_mode!r})")
+    if causal_ctx_offset is not None and mask_mode != "causal":
+        raise ValueError("a causal context offset requires causal masking")
 
     atom = WmmaAtom.f16_16x16x16()
     wave = atom.wave_size  # 32
@@ -137,7 +143,10 @@ def wmma_swapqk_fwd_inner_body(
     col = b.mod(lane, c16)  # lane % 16 == query row within the 16-tile
     lane_lt16 = b.cmp_lt(lane, c16)
 
-    neg_inf = b.const_f32(-1e30)
+    strict = causal_ctx_offset is not None or mask_neg_inf is not None
+    neg_inf = mask_neg_inf
+    if neg_inf is None:
+        neg_inf = b.const_f32(float("-inf") if strict else -1e30)
     zero_f = b.const_f32(0.0)
 
     # Q/K: (head, token, dim), dim contiguous -> WMMA operands are contiguous
@@ -183,12 +192,17 @@ def wmma_swapqk_fwd_inner_body(
     c_block_n = b.const_i32(block_n)
     loop_stop = b.div(seqlen_k, c_block_n)
     if mask_mode == "causal":
-        # CTA owns q rows up to q_pos_base + 16*n_waves - 1; a kv block kt is
-        # needed iff kt*block_n <= max q pos. Round up + 1 (over-inclusion is
-        # masked, safe).
-        causal_stop = b.add(
-            b.div(b.add(q_pos_base, b.const_i32(16 * n_waves)), c_block_n), b.const_i32(1)
-        )
+        query_stop = b.add(q_pos_base, b.const_i32(16 * n_waves))
+        if causal_ctx_offset is None:
+            # Preserve the legacy conservative top-left bound.
+            causal_stop = b.add(b.div(query_stop, c_block_n), b.const_i32(1))
+        else:
+            query_stop = b.add(query_stop, causal_ctx_offset)
+            query_stop = b.select(b.cmp_lt(query_stop, c0), c0, query_stop)
+            # Exclusive visible-key bound; empty query groups scan no KV tiles.
+            causal_stop = b.div(
+                b.add(query_stop, b.const_i32(block_n - 1)), c_block_n
+            )
         loop_stop = b.select(b.cmp_lt(causal_stop, loop_stop), causal_stop, loop_stop)
 
     # ---- buffer-descriptor D16 V-gather (address in the memory unit, no VALU) ----
@@ -313,6 +327,8 @@ def wmma_swapqk_fwd_inner_body(
                     k_idx=b.add(kv_base, kv_rel),
                     query_pos=b.add(q_pos_local, q_rel),
                     sliding_window=0,
+                    context_len=causal_ctx_offset,
+                    neg_inf=neg_inf if strict else None,
                 )
                 row.append(s_i)
             s_sub.append(row)
@@ -330,9 +346,13 @@ def wmma_swapqk_fwd_inner_body(
         skip_rescale = b.cmp_ne(b.wave_all(below), c0)  # wave-uniform i1
         m_new = b.select(skip_rescale, m_i, b.fmax(m_i, tile_max))
 
-        alpha = b.exp2_fast(b.fsub(m_i, m_new))
+        shift = m_new
+        if strict:
+            # Empty rows retain m=-inf, but never subtract -inf from itself.
+            shift = b.select(b.fcmp("oeq", m_new, neg_inf), zero_f, m_new)
+        alpha = b.exp2_fast(b.fsub(m_i, shift))
         ps_sub = [
-            [b.exp2_fast(b.fsub(s_sub[ns][i], m_new)) for i in range(c_frag)]
+            [b.exp2_fast(b.fsub(s_sub[ns][i], shift)) for i in range(c_frag)]
             for ns in range(n_kv_sub)
         ]
         all_p = [v for row in ps_sub for v in row]

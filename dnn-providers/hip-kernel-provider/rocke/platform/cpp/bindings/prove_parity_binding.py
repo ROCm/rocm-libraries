@@ -693,7 +693,7 @@ def cfgs_gfx1151_wmma_fmha_fwd():
         dict(configs[index], kv_dtype="fp8e4m3")
         for index in (0, 7, 14, 15, 22, 23, 24, 25, 44, 47, 51, 57)
     ]
-    return configs + [
+    transposed = [
         dict(
             head_size=head, num_query_heads=8, num_kv_heads=2, mask_mode=mask,
             transposed_qk=True, block_n=block, num_waves=waves,
@@ -702,6 +702,10 @@ def cfgs_gfx1151_wmma_fmha_fwd():
         for mask in ("none", "causal")
         for block in (32, 64)
         for waves in (1, 2)
+    ]
+    return configs + transposed + [
+        dict(config, causal_bottom_right=True)
+        for config in transposed if config["mask_mode"] == "causal"
     ]
 
 

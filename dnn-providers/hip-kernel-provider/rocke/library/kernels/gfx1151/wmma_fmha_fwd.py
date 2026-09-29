@@ -152,7 +152,7 @@ class WmmaFmhaFwdSpec:
             if self.block_n not in (32, 64) or self.num_waves not in (1, 2):
                 raise ValueError("transposed QK requires block_n 32/64 and one or two waves")
             if (
-                self.layout != "dense" or self.kv_dtype or self.causal_bottom_right
+                self.layout != "dense" or self.kv_dtype
                 or self.query_tail or self.kv_tail or self.v_lds_stage
                 or self.sliding_window or self.use_softcap or self.use_sinks
                 or self.use_alibi or self.use_qq_bias
@@ -507,6 +507,8 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
             scale_log2=p["scale_log2"], k_token_offset_elems=batch_off_k,
             v_token_offset_elems=batch_off_v, mask_mode=spec.mask_mode,
             block_n=spec.block_n, n_waves=spec.num_waves, arch=arch,
+            causal_ctx_offset=context if spec.causal_bottom_right else None,
+            mask_neg_inf=masked,
         )
         b.ret()
         return b.kernel
