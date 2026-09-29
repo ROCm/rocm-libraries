@@ -33,7 +33,11 @@ def _legal_results(req: GdnDecodeRequest | None = None):
 
 
 def test_configured_count_and_identity_are_stable_and_unique():
-    candidates = gdn_candidates()
+    candidates = tuple(
+        candidate
+        for candidate in gdn_candidates()
+        if not candidate.spec_id.startswith("kda_")
+    )
     expected_ids = tuple(
         f"nw{nw}_wtk{wtk}_bpv{bpv}" for nw, wtk, bpv in CONFIGURED_TILES
     )

@@ -51,7 +51,8 @@ def _cases():
     Covers the default spec, the reference path, and every legal registered
     tile, so a change to any selectable configuration is visible.
     """
-from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all
+    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all
+    from dispatch.gdn.gfx950 import _TUNED_TILES_KDA
     from kernels.gfx950.gdn_decode import GdnDecodeSpec, build_gdn_decode
 
     def build(**overrides):

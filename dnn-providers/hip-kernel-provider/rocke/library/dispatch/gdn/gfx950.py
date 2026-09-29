@@ -64,7 +64,9 @@ def work_for(batch: int, num_v_heads: int) -> int:
     return int(batch) * int(num_v_heads)
 
 
-def tile_for_work(work: int) -> Tuple[int, int, int]:
+def tile_for_work(work: int, gate_kind: str = "kda") -> Tuple[int, int, int]:
+    if gate_kind != "kda":
+        raise ValueError(f"no work-keyed table for gate kind {gate_kind!r}")
     for max_work, tile, _ in _TUNED_TILES_KDA:
         if max_work is None or work <= max_work:
             return tile

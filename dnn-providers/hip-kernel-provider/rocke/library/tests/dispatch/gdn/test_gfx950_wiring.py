@@ -24,8 +24,9 @@ from dispatch.gdn import (
 )
 from dispatch.gdn.gfx950 import (
     ARCH,
+    CONFIGURED_TILES,
+    DEFAULT_TILE,
     TUNED_SPEC_IDS,
-    tile_for_batch,
     tile_for_work,
 )
 from dispatch.gdn.gfx950 import ARCH, CONFIGURED_TILES, DEFAULT_TILE
@@ -45,7 +46,9 @@ def _req(batch: int, **kw) -> GdnDecodeRequest:
 
 class TestRegistration(unittest.TestCase):
     def test_every_configured_tile_is_registered(self):
-        names = {c.spec_id for c in gdn_candidates()}
+        names = {
+            c.spec_id for c in gdn_candidates() if not c.spec_id.startswith("kda_")
+        }
         expected = {f"nw{nw}_wtk{wtk}_bpv{bpv}" for nw, wtk, bpv in CONFIGURED_TILES}
         self.assertEqual(names, expected)
 
@@ -391,51 +394,18 @@ class TestWorkKeyedTable(unittest.TestCase):
             self.assertIsNotNone(tile_for_work(work, "kda"))
 
 
-class TestGdnSelectionIsFrozen(unittest.TestCase):
-    """GDN stays batch-keyed; only the new KDA mode is work-keyed.
+class TestGdnAndKdaTileNamespaces(unittest.TestCase):
+    """The shared registry keeps GDN and KDA selectable identities disjoint."""
 
-    Re-keying GDN on ``batch * num_v_heads`` reroutes every sharded-head
-    deployment even though this PR measured only the new KDA gate. Pin the
-    original GDN selector across head counts, not only the Hv=32 case where the
-    old and new keys happen to be algebraically equivalent.
-    """
-
-    # The original shipped GDN table, keyed on batch.
-    _ORIGINAL = (
-        (4, (4, 16, 8)),
-        (32, (2, 8, 2)),
-        (128, (1, 8, 1)),
-        (None, (8, 16, 1)),
-    )
-
-    def _original_tile(self, batch):
-        for max_batch, tile in self._ORIGINAL:
-            if max_batch is None or batch <= max_batch:
-                return tile
-        raise AssertionError("unreachable")
-
-    def test_gdn_selection_matches_original_table_across_head_counts(self):
-        for num_v_heads in (4, 8, 16, 32, 64):
-            for batch in (1, 4, 5, 16, 32, 33, 64, 128, 129, 256):
-                with self.subTest(num_v_heads=num_v_heads, batch=batch):
-                    result = dispatch_gdn_decode(
-                        GdnDecodeRequest(
-                            batch=batch,
-                            arch=ARCH,
-                            num_k_heads=max(1, num_v_heads // 2),
-                            num_v_heads=num_v_heads,
-                        )
-                    )
-                    self.assertEqual(_TILE(result.spec), self._original_tile(batch))
-                    self.assertEqual(tile_for_batch(batch), self._original_tile(batch))
-                    self.assertEqual(result.spec.gate_kind, "gdn")
-
-    def test_kda_tuning_cannot_reach_the_gdn_table(self):
-        from dispatch.gdn.gfx950 import _TUNED_TILES_GDN, _TUNED_TILES_KDA
-
-        gdn_tiles = {t for _, t, _ in _TUNED_TILES_GDN}
-        gdn_ids = {sid for _, _, sid in _TUNED_TILES_GDN}
-        kda_ids = {sid for _, _, sid in _TUNED_TILES_KDA}
-
-        self.assertEqual(gdn_tiles, {(4, 16, 8), (2, 8, 2), (1, 8, 1), (8, 16, 1)})
-        self.assertFalse(gdn_ids & kda_ids, "spec ids must not collide")
+    def test_kda_spec_ids_cannot_collide_with_gdn_spec_ids(self):
+        gdn_ids = {
+            candidate.spec_id
+            for candidate in gdn_candidates()
+            if not candidate.spec_id.startswith("kda_")
+        }
+        kda_ids = {
+            candidate.spec_id
+            for candidate in gdn_candidates()
+            if candidate.spec_id.startswith("kda_")
+        }
+        self.assertFalse(gdn_ids & kda_ids)

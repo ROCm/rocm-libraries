@@ -32,8 +32,6 @@ from __future__ import annotations
 import argparse
 import sys
 
-import torch
-
 from builders.gfx950.gdn.gdn_decode import (
     TOL,
     launch,
@@ -43,8 +41,6 @@ from builders.gfx950.gdn.gdn_decode import (
     ref_fp32,
 )
 from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode, dispatch_gdn_decode_all
-from dispatch.gdn.gfx950 import tile_for_work
-from kernels.gfx950.gdn_decode import GdnDecodeSpec, is_valid_spec
 
 ARCH = "gfx950"
 DEFAULT_BATCHES = (1, 16, 64, 256)
@@ -52,6 +48,8 @@ DEFAULT_BATCHES = (1, 16, 64, 256)
 
 def device_us(values, cfg, launcher, reps: int = 32):
     """Per-launch device time from a replayed graph, or None if capture fails."""
+    import torch
+
     for _ in range(10):
         launch(launcher, values, cfg)
     torch.cuda.synchronize()
@@ -80,6 +78,8 @@ def device_us(values, cfg, launcher, reps: int = 32):
 
 def sweep_batch(batch: int, results):
     """Return correct, timed registry candidates for one batch, fastest first."""
+    import torch
+
     base = results[0].spec
     inp = make_inputs(base, batch)
     ref_out, ref_state = ref_fp32(base, inp)
@@ -132,16 +132,6 @@ def sweep_batch(batch: int, results):
     return rows
 
 
-def report_missing_cells(missing_cells) -> int:
-    """Report requested cells with no correct timing; return a process status."""
-    if not missing_cells:
-        return 0
-    print("\nincomplete sweep:", file=sys.stderr)
-    for hk, hv, batch in missing_cells:
-        print(f"  Hk={hk} Hv={hv} batch={batch}", file=sys.stderr)
-    return 1
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -149,116 +139,62 @@ def main() -> int:
         default=",".join(str(batch) for batch in DEFAULT_BATCHES),
         help="comma-separated decode batch sizes",
     )
-    ap.add_argument(
+    parser.add_argument(
         "--gate-kind",
         default="gdn",
         choices=("gdn", "kda"),
         help="forget-gate granularity to tune for",
     )
-    ap.add_argument(
+    parser.add_argument(
         "--geometries",
         default="16/32",
-        help=(
-            "comma-separated num_k_heads/num_v_heads pairs. More than one turns "
-            "the run into a test of the work-keying hypothesis: cells sharing "
-            "batch * num_v_heads should agree on the best tile."
-        ),
+        help="comma-separated num_k_heads/num_v_heads pairs",
     )
-    ap.add_argument("--top", type=int, default=8, help="rows to print per cell")
-    args = ap.parse_args()
+    parser.add_argument("--top", type=int, default=8, help="rows to print per cell")
+    args = parser.parse_args()
+
+    import torch
 
     if not torch.cuda.is_available():
         print("no HIP device visible", file=sys.stderr)
         return 2
 
-    geometries = []
-    for item in args.geometries.split(","):
-        hk, hv = item.split("/")
-        geometries.append((int(hk), int(hv)))
-    batches = [int(x) for x in args.batches.split(",")]
-
-    by_work = {}  # work -> [(us, tile, batch, hv), ...]
-    missing_cells = []
-
-    for hk, hv in geometries:
-        base = dc.replace(
-            GdnDecodeSpec(),
-            gate_kind=args.gate_kind,
-            num_k_heads=hk,
-            num_v_heads=hv,
-        )
-        configs = legal_configs(base)
-        print(f"\n### geometry Hk={hk} Hv={hv}: {len(configs)} legal configurations")
+    batches = [int(value) for value in args.batches.split(",")]
+    geometries = [
+        tuple(int(value) for value in item.split("/"))
+        for item in args.geometries.split(",")
+    ]
+    failed = False
+    for num_k_heads, num_v_heads in geometries:
         for batch in batches:
-            rows = sweep_batch(base, batch, configs)
+            request = GdnDecodeRequest(
+                batch=batch,
+                arch=ARCH,
+                gate_kind=args.gate_kind,
+                num_k_heads=num_k_heads,
+                num_v_heads=num_v_heads,
+            )
+            results = dispatch_gdn_decode_all(request)
+            print(f"legal registry candidates for batch {batch}: {len(results)}")
+            rows = sweep_batch(batch, results)
             if not rows:
-                print(f"  batch {batch}: nothing both correct and timeable")
-                missing_cells.append((hk, hv, batch))
+                print(f"batch {batch}: no candidate was both correct and timeable")
+                failed = True
                 continue
-            work = batch * hv
-            shipped = (
-                tile_for_work(work, "kda")
-                if args.gate_kind == "kda"
-                else tile_for_batch(batch)
-            )
-            ranked = [tile for _, tile, _ in rows]
-            shipped_rank = ranked.index(shipped) + 1 if shipped in ranked else None
+            auto = dispatch_gdn_decode(request)
+            auto_id = auto.candidate.spec_id
             print(
-                f"\n=== Hk{hk}/Hv{hv} batch {batch} (work {work}): "
-                f"top {args.top} of {len(rows)} ==="
+                f"\n=== Hk{num_k_heads}/Hv{num_v_heads} batch {batch}: "
+                f"top {args.top} ==="
             )
-            for micros, tile, err in rows[: args.top]:
-                mark = " <- shipped" if tile == shipped else ""
+            for micros, tile, spec_id, err in rows[: args.top]:
+                mark = " <- production auto" if spec_id == auto_id else ""
                 print(
-                    f"  {micros:9.3f}us  num_warps={tile[0]} "
-                    f"warp_threads_k={tile[1]} blocks_per_v_dim={tile[2]}  "
-                    f"err={err:.2e}{mark}"
+                    f"  {micros:9.3f}us  {spec_id} tile={tile} " f"err={err:.2e}{mark}"
                 )
-            if shipped_rank is None:
-                print(
-                    f"  shipped tile {shipped} is NOT in the correct-and-timeable "
-                    "set for this cell -- dispatch would ship a tile this sweep "
-                    "could not verify"
-                )
-            else:
-                best_us = rows[0][0]
-                shipped_us = rows[shipped_rank - 1][0]
-                print(
-                    f"  shipped tile {shipped} ranks {shipped_rank} of {len(rows)}"
-                    f"  ({shipped_us / best_us:.2f}x the best row)"
-                )
-            by_work.setdefault(work, []).append((rows[0][0], rows[0][1], batch, hv))
 
-    # Does the best tile depend only on the product? Cells sharing a work value
-    # but differing in (batch, heads) are the evidence either way. A real
-    # disagreement here invalidates the table's KEY, not just its values.
-    print("\n=== work -> best tile, across geometries ===")
-    print(f"{'work':>7}  {'best tile':16} {'us':>9}  cells (batch x Hv)")
-    disagreements = []
-    for work in sorted(by_work):
-        cells = by_work[work]
-        tiles = {c[1] for c in cells}
-        fastest = min(cells)
-        cellstr = " ".join(f"{b}x{h}" for _, _, b, h in cells)
-        flag = "" if len(tiles) == 1 else "   <-- TILES DISAGREE"
-        if len(tiles) > 1:
-            disagreements.append((work, sorted(tiles)))
-        print(f"{work:>7}  {str(fastest[1]):16} {fastest[0]:9.3f}  {cellstr}{flag}")
-
-    if disagreements:
-        print(
-            f"\nWARNING: work alone did not fix the best tile at "
-            f"{len(disagreements)} work value(s). Before banding, check whether "
-            "the disagreeing times sit inside run-to-run variation. If they do "
-            "not, the table must not be keyed on work."
-        )
-    table_name = "_TUNED_TILES_KDA" if args.gate_kind == "kda" else "_TUNED_TILES_GDN"
-    print(
-        f"\nUpdate {table_name} in dispatch/gdn/gfx950.py from the relevant "
-        "selection axis, record which points were measured and which band "
-        "edges are interpolated, then rerun dispatch wiring and numeric tests."
-    )
-    return report_missing_cells(missing_cells)
+    print("\nProduction auto is deterministic; measurements do not change selection.")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
