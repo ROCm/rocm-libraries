@@ -25,7 +25,10 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_handle.hpp"
 #include "rocsparse_utility.hpp"
+#include <algorithm>
 #include <iomanip>
+#include <iterator>
+#include <limits>
 #include <map>
 
 #include <hip/hip_runtime_api.h>
@@ -1378,7 +1381,8 @@ rocsparse_status rocsparse_hyb_mat_get_info(const rocsparse_hyb_mat  hyb,
                                             rocsparse_int*           coo_nnz,
                                             const rocsparse_int**    coo_row_ind,
                                             const rocsparse_int**    coo_col_ind,
-                                            const void**             coo_val)
+                                            const void**             coo_val,
+                                            rocsparse_datatype*      data_type)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -1429,6 +1433,10 @@ try
     {
         *coo_val = hyb->coo_val;
     }
+    if(data_type != nullptr)
+    {
+        *data_type = hyb->data_type_T;
+    }
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -1441,6 +1449,7 @@ catch(...)
 
 /********************************************************************************
  * \brief Set the internal fields of a HYB matrix, without exposing its layout.
+ * Ownership of the array pointers is transferred to the HYB matrix.
  *******************************************************************************/
 rocsparse_status rocsparse_hyb_mat_set_info(rocsparse_hyb_mat              hyb,
                                             const rocsparse_int*           m,
@@ -1453,12 +1462,81 @@ rocsparse_status rocsparse_hyb_mat_set_info(rocsparse_hyb_mat              hyb,
                                             const rocsparse_int*           coo_nnz,
                                             rocsparse_int* const*          coo_row_ind,
                                             rocsparse_int* const*          coo_col_ind,
-                                            void* const*                   coo_val)
+                                            void* const*                   coo_val,
+                                            const rocsparse_datatype*      data_type)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, hyb);
+
+    // Validate everything before modifying hyb, so that an error leaves it unchanged.
+    if(m != nullptr)
+    {
+        ROCSPARSE_CHECKARG_SIZE(1, *m);
+    }
+    if(n != nullptr)
+    {
+        ROCSPARSE_CHECKARG_SIZE(2, *n);
+    }
+    if(partition != nullptr)
+    {
+        ROCSPARSE_CHECKARG_ENUM(3, *partition);
+    }
+    if(ell_nnz != nullptr)
+    {
+        ROCSPARSE_CHECKARG_SIZE(4, *ell_nnz);
+        ROCSPARSE_CHECKARG(4,
+                           ell_nnz,
+                           (static_cast<uint64_t>(*ell_nnz) > static_cast<uint64_t>(
+                                std::numeric_limits<decltype(hyb->ell_nnz)>::max())),
+                           rocsparse_status_invalid_size);
+    }
+    if(ell_width != nullptr)
+    {
+        ROCSPARSE_CHECKARG_SIZE(5, *ell_width);
+    }
+    if(coo_nnz != nullptr)
+    {
+        ROCSPARSE_CHECKARG_SIZE(8, *coo_nnz);
+    }
+    if(data_type != nullptr)
+    {
+        ROCSPARSE_CHECKARG_ENUM(12, *data_type);
+    }
+
+    void* const old_arrays[]
+        = {hyb->ell_col_ind, hyb->ell_val, hyb->coo_row_ind, hyb->coo_col_ind, hyb->coo_val};
+
+    rocsparse_int* new_ell_col_ind = (ell_col_ind != nullptr) ? *ell_col_ind : hyb->ell_col_ind;
+    void*          new_ell_val     = (ell_val != nullptr) ? *ell_val : hyb->ell_val;
+    rocsparse_int* new_coo_row_ind = (coo_row_ind != nullptr) ? *coo_row_ind : hyb->coo_row_ind;
+    rocsparse_int* new_coo_col_ind = (coo_col_ind != nullptr) ? *coo_col_ind : hyb->coo_col_ind;
+    void*          new_coo_val     = (coo_val != nullptr) ? *coo_val : hyb->coo_val;
+
+    const void* const new_arrays[]
+        = {new_ell_col_ind, new_ell_val, new_coo_row_ind, new_coo_col_ind, new_coo_val};
+
+    // Release every previously held array that is not kept by any field. An array
+    // moved to another field, or passed again unchanged, must not be freed.
+    bool synchronized = false;
+    for(void* old_array : old_arrays)
+    {
+        if(old_array == nullptr
+           || std::find(std::begin(new_arrays), std::end(new_arrays), old_array)
+                  != std::end(new_arrays))
+        {
+            continue;
+        }
+
+        if(!synchronized)
+        {
+            // hipFree may be asynchronous since HIP 7.0 (see rocsparse_destroy_hyb_mat).
+            RETURN_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
+            synchronized = true;
+        }
+        RETURN_IF_HIP_ERROR(rocsparse_hipFree(old_array));
+    }
 
     if(m != nullptr)
     {
@@ -1474,36 +1552,26 @@ try
     }
     if(ell_nnz != nullptr)
     {
-        hyb->ell_nnz = *ell_nnz;
+        hyb->ell_nnz = static_cast<decltype(hyb->ell_nnz)>(*ell_nnz);
     }
     if(ell_width != nullptr)
     {
         hyb->ell_width = *ell_width;
     }
-    if(ell_col_ind != nullptr)
-    {
-        hyb->ell_col_ind = *ell_col_ind;
-    }
-    if(ell_val != nullptr)
-    {
-        hyb->ell_val = *ell_val;
-    }
     if(coo_nnz != nullptr)
     {
         hyb->coo_nnz = *coo_nnz;
     }
-    if(coo_row_ind != nullptr)
+    if(data_type != nullptr)
     {
-        hyb->coo_row_ind = *coo_row_ind;
+        hyb->data_type_T = *data_type;
     }
-    if(coo_col_ind != nullptr)
-    {
-        hyb->coo_col_ind = *coo_col_ind;
-    }
-    if(coo_val != nullptr)
-    {
-        hyb->coo_val = *coo_val;
-    }
+
+    hyb->ell_col_ind = new_ell_col_ind;
+    hyb->ell_val     = new_ell_val;
+    hyb->coo_row_ind = new_coo_row_ind;
+    hyb->coo_col_ind = new_coo_col_ind;
+    hyb->coo_val     = new_coo_val;
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
