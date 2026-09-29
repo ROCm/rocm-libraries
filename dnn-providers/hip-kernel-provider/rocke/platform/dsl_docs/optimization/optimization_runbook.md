@@ -2057,7 +2057,7 @@ arch reference §21.4a and §17.4 for the measured occupancy and per-shape numbe
 |---|---|---|---|
 | `chiplet_swizzle` | GEMM / conv | False | Remap WGIDs so contiguous stripes land on the same XCD (L2 reuse) |
 | `chiplet_wgm` | GEMM / conv | 8 | Super-tile WGM grouping |
-| `chiplet_num_xcds` | GEMM / conv | 8 | MI300X / MI325X / MI350X have 8 XCDs |
+| `chiplet_num_xcds` | GEMM / conv / dense attention | 8 | MI300X / MI325X / MI350X have 8 XCDs; dense attention's XCD-aware block orders read it |
 | `chiplet_chunk_size` | GEMM / conv | 64 | XCD round-robin chunk size |
 | `helpers/grid.py::chiplet_transform_chunked` | helper | — | Pure helper if you author your own kernel |
 | Constants `NUM_XCDS_MI300X / MI325X / MI350X` | `helpers/grid.py` | — | All 8 today |
