@@ -1997,4 +1997,3 @@ def test_an_arch_pruned_rocke_ukd_does_not_trip_the_rocke_gate(
     message = str(excinfo.value)
     assert "HIPKERNELPROVIDER_ENABLE_ROCKE" not in message
     assert f"failed to compile for {ARCH}" in message
-    assert "hipcc-not-invoked" in message

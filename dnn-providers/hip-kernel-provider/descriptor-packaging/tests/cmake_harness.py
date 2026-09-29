@@ -36,8 +36,10 @@ class SuppliedPython:
     msgpack and zstandard, which every pack imports, are stub modules on a `.pth`
     path, so the interpreter imports them though pip never installed them. pip
     itself is present only when asked for. Commands run with the calling
-    environment's Python, pip and CMake variables stripped, and every install
-    stays inside `root`, never the pytest interpreter or its user site.
+    environment's Python, pip, CMake and rocKE runtime (`ROCKE_*`) variables
+    stripped, so a value a build step receives is one the wiring under test set,
+    and every install stays inside `root`, never the pytest interpreter or its
+    user site.
     """
 
     def __init__(self, root, *, pip=True, user_site=False):
@@ -46,7 +48,7 @@ class SuppliedPython:
         self.env = {
             key: value
             for key, value in os.environ.items()
-            if not key.startswith(("PYTHON", "PIP_", "CMAKE_"))
+            if not key.startswith(("PYTHON", "PIP_", "CMAKE_", "ROCKE_"))
             and key not in ("VIRTUAL_ENV", "CONDA_PREFIX")
         }
         self.env.update(
