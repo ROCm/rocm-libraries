@@ -4472,6 +4472,11 @@ class Solution(collections.abc.Mapping):
               if (state["DepthU"] // state["MatrixInstK"] <= state["LocalReadVectorWidthA"] // state["MIInputPerThreadA"]):
                 # if only have 1 iteration with wider local read, reduce LRVW to have better scheduling (at least 2 iterations)
                 state["LocalReadVectorWidthA"] //= 2
+            # HalfPLR has room for one local-read iteration in each of its
+            # two active half-blocks; do not coalesce multiple iterations.
+            if state["HalfPLR"] & 0x01:
+              state["LocalReadVectorWidthA"] = min(
+                state["LocalReadVectorWidthA"], state["MIInputPerThreadA"])
 
           # Default LocalReadVectorWidth
           autoLRVWB = False
@@ -4508,6 +4513,10 @@ class Solution(collections.abc.Mapping):
               if (state["DepthU"] // state["MatrixInstK"] <= state["LocalReadVectorWidthB"] // state["MIInputPerThreadB"]):
                 # if only have 1 iteration with wider local read, reduce LRVW to have better scheduling (at least 2 iterations)
                 state["LocalReadVectorWidthB"] //= 2
+            # See the HalfPLR A-side restriction above.
+            if state["HalfPLR"] & 0x02:
+              state["LocalReadVectorWidthB"] = min(
+                state["LocalReadVectorWidthB"], state["MIInputPerThreadB"])
 
           if autoLRVWA or autoLRVWB:
             wlrA = max(state["LocalReadVectorWidthA"] // state["MIInputPerThread"], 1)
@@ -4658,6 +4667,20 @@ class Solution(collections.abc.Mapping):
       if not _validateMXLocalReadWidth(
           state, isaInfoMap[isa].asmCaps, printRejectionReason):
         return
+
+      # An explicitly wide local read cannot be reduced by the auto-width
+      # derivation above. Reject it before getHalfPLRValuStr indexes beyond the
+      # two active rotating groups. MIInputPerThread* is only derived for
+      # matrix instruction kernels.
+      if state["EnableMatrixInstruction"]:
+        for tc in ("A", "B"):
+          lrvw = state[f"LocalReadVectorWidth{tc}"]
+          miInput = state[f"MIInputPerThread{tc}"]
+          if state[f"HalfPLR{tc}"] and lrvw > miInput:
+            reject(state, printRejectionReason,
+                   f"HalfPLR{tc} does not support coalesced local reads "
+                   f"(LocalReadVectorWidth{tc}={lrvw} > MIInputPerThread{tc}={miInput})")
+            return
 
       def calcOptGRVW(lrvw: int, unrollMajorLDS: bool, datatype: DataType) -> int:
         # with UnrollMajorLDS, GRVW need to less or equal than LRVW to have conflict free LDS read with padding.
