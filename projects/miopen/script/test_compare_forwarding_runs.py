@@ -276,6 +276,17 @@ class ComparatorTest(unittest.TestCase):
         self.assertIn("no longer diverges", err)
         self.assertIn("remove its line", err)
 
+    def test_a_listed_divergence_declined_in_both_modes_is_not_stale(self):
+        # On a device with no engine for the case, forwarding off declines it too. The
+        # runs agree, but the gap is still open on devices where MIOpen serves the case.
+        rc, _, err = self.compare(suite(DECLINED), suite(DECLINED), known=KNOWN_LINE)
+        self.assertEqual(rc, 0, err)
+
+    def test_a_listed_divergence_skipped_in_both_modes_is_not_stale(self):
+        xml = suite(("A", "gtest_skipped"), ("B", "passed"))
+        rc, _, err = self.compare(xml, xml, known=KNOWN_LINE)
+        self.assertEqual(rc, 0, err)
+
     def test_a_listed_test_absent_from_the_run_is_not_stale(self):
         # The discrete build registers the harness against several binaries, and only
         # one of them holds any given test. Absence is not a line that has gone stale.

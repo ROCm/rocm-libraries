@@ -887,7 +887,7 @@ def test_a_private_library_with_no_renamed_symbols_is_an_error():
 # --------------------------------------------------------------------------
 
 
-def run_check_wrapper(tmp_path, monkeypatch, wrapper, private):
+def run_check_wrapper(tmp_path, monkeypatch, wrapper, private, extra=()):
     """Run `check-wrapper` through main() against stand-ins for the two libraries."""
     baseline = tmp_path / "public_symbols.baseline"
     baseline.write_text("miopenFoo\nmiopenBar\nmiopenExcluded\n")
@@ -905,6 +905,7 @@ def run_check_wrapper(tmp_path, monkeypatch, wrapper, private):
             str(excluded),
             "--private-lib",
             "libMIOpen_private.so",
+            *extra,
         ]
     )
 
@@ -935,6 +936,34 @@ def test_check_wrapper_fails_on_a_missing_stub(tmp_path, monkeypatch, capsys):
     )
     assert run_check_wrapper(tmp_path, monkeypatch, good_wrapper(), private) == 1
     assert "wrapper public-abi symbol check: FAIL" in capsys.readouterr().out
+
+
+def run_with_needed_baseline(tmp_path, monkeypatch, listed):
+    needed = tmp_path / "wrapper_needed.baseline"
+    needed.write_text("".join(entry + "\n" for entry in listed))
+    return run_check_wrapper(
+        tmp_path,
+        monkeypatch,
+        good_wrapper(needed=("libMIOpen_private.so.1", "libc.so.6")),
+        good_private(),
+        extra=("--needed-baseline", str(needed)),
+    )
+
+
+def test_check_wrapper_passes_a_matching_needed_baseline(tmp_path, monkeypatch, capsys):
+    listed = ("libMIOpen_private.so.1", "libc.so.6")
+    assert run_with_needed_baseline(tmp_path, monkeypatch, listed) == 0
+    assert "DT_NEEDED list matches baseline (2 entries)" in capsys.readouterr().out
+
+
+def test_check_wrapper_fails_a_differing_needed_baseline(tmp_path, monkeypatch, capsys):
+    listed = ("libMIOpen_private.so.1", "libhipdnn_backend.so")
+    assert run_with_needed_baseline(tmp_path, monkeypatch, listed) == 1
+    out = capsys.readouterr().out
+    assert "DT_NEEDED list differs from baseline" in out
+    assert "missing from build: libhipdnn_backend.so" in out
+    assert "unexpected in build: libc.so.6" in out
+    assert "wrapper public-abi symbol check: FAIL" in out
 
 
 def test_check_wrapper_that_cannot_run_exits_2(tmp_path, monkeypatch, capsys):

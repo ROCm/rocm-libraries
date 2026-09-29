@@ -202,13 +202,12 @@ bool IsPlainLayout(const TensorInfo& tensor)
 
 miopenStatus_t CheckSupported(const std::vector<TensorInfo>& tensors, const ConvInfo& conv)
 {
-    const TensorInfo& reference = tensors.front();
     fe::DataType unused{};
-    if(!ToHipdnnDataType(reference.dataType, unused) || !ComputeTypeFor(reference.dataType, unused))
+    if(!ComputeTypeFor(tensors.front().dataType, unused))
         return miopenStatusUnsupportedOp;
     for(const TensorInfo& tensor : tensors)
     {
-        if(!IsPlainLayout(tensor))
+        if(!ToHipdnnDataType(tensor.dataType, unused) || !IsPlainLayout(tensor))
             return miopenStatusUnsupportedOp;
     }
     if(conv.groupCount != 1)
@@ -295,8 +294,13 @@ struct HandleState
         void* grown = nullptr;
         if(hipMalloc(&grown, bytes) != hipSuccess)
             return false;
+        // Work queued by an earlier call may still be using the old buffer.
+        // hipFree happens to wait for it, but that is not a documented promise.
         if(workspace != nullptr)
+        {
+            static_cast<void>(hipStreamSynchronize(stream));
             static_cast<void>(hipFree(workspace));
+        }
         workspace     = grown;
         workspaceSize = bytes;
         return true;
@@ -440,20 +444,26 @@ bool ToPointwiseActivation(miopenActivationMode_t mode, fe::PointwiseMode& out)
 // kind.
 bool PopulateGraph(const PlanKey& key, fe::graph::Graph& graph)
 {
-    fe::DataType ioType{};
+    // Each tensor keeps its own type: MIOpen accepts mixed-type problems such as
+    // int8 x and w with an int32 or float y.
+    std::vector<fe::DataType> types(key.tensors.size());
+    for(size_t i = 0; i < key.tensors.size(); ++i)
+    {
+        if(!ToHipdnnDataType(key.tensors[i].dataType, types[i]))
+            return false;
+    }
     fe::DataType computeType{};
-    if(!ToHipdnnDataType(key.tensors.front().dataType, ioType) ||
-       !ComputeTypeFor(key.tensors.front().dataType, computeType))
+    if(!ComputeTypeFor(key.tensors.front().dataType, computeType))
         return false;
 
     // Without the intermediate type, the virtual tensors between the fused
     // graph's nodes are left with no data type at all and the build fails.
-    graph.set_io_data_type(ioType)
+    graph.set_io_data_type(types.front())
         .set_compute_data_type(computeType)
         .set_intermediate_data_type(computeType);
 
-    auto a                    = MakeTensor(key.tensors[0], ioType, kUidA);
-    auto b                    = MakeTensor(key.tensors[1], ioType, kUidB);
+    auto a                    = MakeTensor(key.tensors[0], types[0], kUidA);
+    auto b                    = MakeTensor(key.tensors[1], types[1], kUidB);
     const TensorInfo& outInfo = key.tensors[2];
 
     std::shared_ptr<fe::graph::TensorAttributes> out;
@@ -499,26 +509,27 @@ bool PopulateGraph(const PlanKey& key, fe::graph::Graph& graph)
         // the bias add will broadcast against.
         out->set_dim(outInfo.dims).set_stride(outInfo.strides);
 
-        auto bias = MakeTensor(key.tensors[3], ioType, kUidBias);
+        auto bias = MakeTensor(key.tensors[3], types[3], kUidBias);
 
         fe::graph::PointwiseAttributes add;
         add.set_mode(fe::PointwiseMode::ADD).set_compute_data_type(computeType);
         out = graph.pointwise(out, bias, add);
 
-        if(key.act != miopenActivationPASTHRU)
-        {
-            fe::PointwiseMode activation{};
-            if(!ToPointwiseActivation(key.act, activation))
-                return false;
-            out->set_dim(outInfo.dims).set_stride(outInfo.strides);
+        fe::PointwiseMode activation{};
+        if(!ToPointwiseActivation(key.act, activation))
+            return false;
+        out->set_dim(outInfo.dims).set_stride(outInfo.strides);
 
-            fe::graph::PointwiseAttributes activationAttributes;
-            activationAttributes.set_mode(activation).set_compute_data_type(computeType);
-            out = graph.pointwise(out, activationAttributes);
-        }
+        fe::graph::PointwiseAttributes activationAttributes;
+        activationAttributes.set_mode(activation).set_compute_data_type(computeType);
+        out = graph.pointwise(out, activationAttributes);
     }
 
-    out->set_dim(outInfo.dims).set_stride(outInfo.strides).set_uid(kUidOut).set_output(true);
+    out->set_dim(outInfo.dims)
+        .set_stride(outInfo.strides)
+        .set_data_type(types[2])
+        .set_uid(kUidOut)
+        .set_output(true);
     return true;
 }
 
@@ -535,7 +546,9 @@ std::pair<GraphPtr, miopenStatus_t> AcquireGraph(const PlanKey& key, hipdnnHandl
 
     GraphPtr graph = std::make_shared<fe::graph::Graph>();
     if(!PopulateGraph(key, *graph))
-        return {nullptr, miopenStatusUnsupportedOp};
+        return {nullptr,
+                RecordFailure(miopenStatusUnsupportedOp,
+                              "could not build a hipDNN graph for this problem")};
 
     const fe::Error error = graph->build(hipdnnHandle);
     if(!error.is_good())
@@ -792,16 +805,25 @@ miopenStatus_t ConvolutionBiasActivationForward(miopenHandle_t handle,
         return RecordFailure(miopenStatusBadParm, "could not read the MIOpen descriptors");
 
     const miopenDataType_t dataType = key.tensors[0].dataType;
-    // alpha2 scales the z tensor; with no scaling attribute to carry it, the
-    // only expressible case is the one where z drops out of the graph entirely.
-    if(!ScalarEquals(alpha1, dataType, 1.0) || !ScalarEquals(alpha2, dataType, 0.0))
+    // MIOpen reads a null alpha1 or alpha2 as 1. alpha2 scales z, and the graph
+    // has no z, so only alpha2 = 0 can be forwarded.
+    if(alpha1 != nullptr && !ScalarEquals(alpha1, dataType, 1.0))
         return RecordFailure(miopenStatusUnsupportedOp,
-                             "hipDNN fused convolution supports only alpha1=1, alpha2=0");
+                             "hipDNN fused convolution supports only alpha1=1");
+    if(alpha2 == nullptr)
+        return RecordFailure(miopenStatusUnsupportedOp,
+                             "alpha2 is null, which MIOpen reads as 1, and hipDNN fused "
+                             "convolution does not support adding z");
+    if(!ScalarEquals(alpha2, dataType, 0.0))
+        return RecordFailure(miopenStatusUnsupportedOp,
+                             "hipDNN fused convolution supports only alpha2=0");
 
     if(const miopenStatus_t status = CheckSupported(key.tensors, key.conv);
        status != miopenStatusSuccess)
         return RecordFailure(status, "this convolution is not expressible as a hipDNN graph");
 
+    // RELU, the only mode accepted, ignores these. The getter just needs
+    // somewhere to write them.
     double activAlpha = 0.0;
     double activBeta  = 0.0;
     double activGamma = 0.0;
@@ -809,10 +831,10 @@ miopenStatus_t ConvolutionBiasActivationForward(miopenHandle_t handle,
            activationDesc, &key.act, &activAlpha, &activBeta, &activGamma) != miopenStatusSuccess)
         return RecordFailure(miopenStatusBadParm, "could not read the activation descriptor");
 
-    fe::PointwiseMode unused{};
-    if(key.act != miopenActivationPASTHRU && !ToPointwiseActivation(key.act, unused))
-        return RecordFailure(miopenStatusUnsupportedOp,
-                             "this activation mode has no hipDNN pointwise equivalent");
+    // Matches the status MIOpen's own fused path returns.
+    if(key.act != miopenActivationRELU)
+        return RecordFailure(miopenStatusNotImplemented,
+                             "only Activation Mode == miopenActivationRELU is supported");
 
     HandleState* state = AcquireHandleState(handle);
     if(state == nullptr)

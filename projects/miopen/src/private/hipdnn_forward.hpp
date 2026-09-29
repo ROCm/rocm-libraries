@@ -55,6 +55,8 @@ bool IsAvailable();
 // Drops whatever hipDNN state was created for this MIOpen handle. Called from
 // the miopenDestroy stub on both routes, because a handle can be destroyed after
 // MIOPEN_DISABLE_HIPDNN_FOR took its entry points back off the hipDNN path.
+// Like miopenDestroy, it must not run while another call is using the handle:
+// calls use the handle's state without holding the map lock.
 void ReleaseHandle(miopenHandle_t handle);
 
 // Replacement text for miopenGetErrorString when the last forwarded call on this
@@ -66,6 +68,14 @@ void ReleaseHandle(miopenHandle_t handle);
 // raised by MIOpen itself, without adding a public symbol to do it.
 const char* PrefixedErrorString(miopenStatus_t status, const char* nativeMessage);
 
+// The forwarded convolution entry points. If hipDNN cannot express a problem,
+// the call fails instead of running through MIOpen, so a caller can tell that
+// forwarding did not happen. It returns miopenStatusUnsupportedOp, and
+// miopenGetErrorString gives the reason with a "[hipDNN-forwarded]" prefix.
+// To take one entry point off the hipDNN path, use MIOPEN_DISABLE_HIPDNN_FOR.
+//
+// The plain entry points decline a null alpha or beta. MIOpen would dereference
+// it and crash, so there is no MIOpen behaviour to match.
 miopenStatus_t ConvolutionForward(miopenHandle_t handle,
                                   const void* alpha,
                                   const miopenTensorDescriptor_t xDesc,

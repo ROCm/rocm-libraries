@@ -204,9 +204,15 @@ def main(disabled_xml, enabled_xml, newer_than=None, known_divergences=None):
     # it describes and goes on silencing a test that has started agreeing, so the
     # list only ever grows. A listed test missing from the run is left alone: the
     # harness is registered against several binaries and only one holds any given
-    # test, which is absence rather than staleness.
+    # test, which is absence rather than staleness. A run whose disabled outcome
+    # differs from the listed one is also left alone: the gap belongs to another
+    # device or build, where the line is still needed.
     for entry in known:
-        if entry.name in shared and entry.name not in diverged:
+        if (
+            entry.name in shared
+            and entry.name not in diverged
+            and describe(a[entry.name]) == entry.disabled
+        ):
             problems.append(
                 "{} no longer diverges (both runs report {}) -- remove its line from "
                 "{}".format(entry.name, describe(a[entry.name]), known_divergences)
