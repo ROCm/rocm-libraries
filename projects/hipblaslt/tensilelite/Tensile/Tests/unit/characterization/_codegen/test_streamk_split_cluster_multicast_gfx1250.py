@@ -17,6 +17,15 @@ _CONFIG = Path(__file__).parent / "data/test_data/_designed/gfx1250/streamk_spli
 
 def _check_kernel(base, src):
     assert_assembles(src, base)
+    metadata = yaml.safe_load(src.split(".amdgpu_metadata", 1)[1].split(".end_amdgpu_metadata", 1)[0])
+    symbol = metadata["amdhsa.kernels"][0][".name"]
+    assert "_PLAV2_" in symbol
+    assert "_SKCM" not in symbol
+    config = metadata["custom.config"]
+    assert config["TileProcessingStrategy"] == "StreamK"
+    assert config["WorkAssignment"] == "StaticGrid"
+    assert config["ClusterDim"][0] > 1
+    assert config["InternalSupportParams"]["PersistentLoopArgsVersion"] == 2
     assert "logical StreamK worker = hardware cluster" in src
     assert "physical partial slot = cluster * peers + peer" in src
     assert "flag offset based on physical partial slot" in src
@@ -67,13 +76,15 @@ def test_static_streamk_cluster_shadow_init_assembles(tmp_path):
         _check_kernel(base, src)
         skip = src.index("skip to ShadowInitStart iter b/c numIter==0")
         assert "cluster_barrier wait" in src[skip - 500:skip]
+        from Tensile.CustomKernels import getCustomKernelConfig
+        (tmp_path / (base + ".s")).write_text(src)
+        with pytest.raises(ValueError, match="Custom kernels do not yet support clustered StreamK"):
+            getCustomKernelConfig(base, {}, str(tmp_path))
 
 
 def test_ordinary_streamk_tree_reduction_still_assembles(tmp_path):
     config = yaml.safe_load(_CONFIG.read_text())
     for fork in config["BenchmarkProblems"][0][1]["ForkParameters"]:
-        if "StreamKClusterMulticast" in fork:
-            fork["StreamKClusterMulticast"] = [False]
         if "ClusterDim" in fork:
             fork["ClusterDim"] = [[1, 1]]
     path = tmp_path / "ordinary_streamk.yaml"

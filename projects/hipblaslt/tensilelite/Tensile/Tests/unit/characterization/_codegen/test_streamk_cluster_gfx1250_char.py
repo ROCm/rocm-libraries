@@ -10,8 +10,8 @@ StreamK preLoop. Under clustering, defineAndResources leaves the cluster-decoded
 rank in WorkGroup0/1/2; the reread would overwrite it, so the enableCluster
 guard skips it.
 
-Uses normal StreamK=3 with ClusterDim=[2, 1]; the guard applies equally to
-StreamK modes 3, 4, and 5.
+Uses StreamK/StaticGrid with ClusterDim=[2, 1] and tree reduction. The same
+geometry also selects cooperative loads and the spatial cluster schedule.
 """
 
 import os
@@ -58,3 +58,8 @@ def test_streamk_cluster_gfx1250_emits_assembly():
         assert "workaround" not in src, (
             f"Kernel {base!r}: ttmp reread emitted under ClusterDim != [1, 1]"
         )
+        assert "PersistentLoopArgsVersion: 2" in src
+        assert "logical StreamK worker = hardware cluster" in src
+        assert "physical partial slot = cluster * peers + peer" in src
+        assert "s[sgprMulticastMaskB]" in src
+        assert "phantom tiles skip the store" in src
