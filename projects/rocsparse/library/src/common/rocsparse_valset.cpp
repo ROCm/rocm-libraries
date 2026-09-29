@@ -24,27 +24,8 @@
 
 #include "rocsparse_common.h"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
-
-namespace
-{
-    // Blocks needed to cover `length` elements at BLOCKSIZE threads each, clamped to
-    // the device grid.x limit. valset_kernel grid-strides over whatever the clamp
-    // drops.
-    //
-    // Deliberately local: AISPARSE-696 (PR #11512) adds rocsparse::ceil_div() and
-    // rocsparse::get_grid_size() to rocsparse_common.h, but it has not merged and
-    // rocsparse_common.h/.hpp are a live conflict zone (AISPARSE-677/678/696). Once
-    // #11512 lands the body below is the one-line
-    //   return rocsparse::get_grid_size(rocsparse::ceil_div(length, BLOCKSIZE),
-    //                                   handle->properties.maxGridSize[0]);
-    template <uint32_t BLOCKSIZE>
-    int64_t grid_size_x(rocsparse_handle handle, int64_t length)
-    {
-        return rocsparse::min((length - 1) / BLOCKSIZE + 1,
-                              static_cast<int64_t>(handle->properties.maxGridSize[0]));
-    }
-}
 
 namespace rocsparse
 {
@@ -92,14 +73,15 @@ namespace rocsparse
     static rocsparse_status
         launch_valset(rocsparse_handle handle, int64_t length, int64_t value, void* array)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::valset_kernel<256>),
-                                           dim3(grid_size_x<256>(handle, length)),
-                                           dim3(256),
-                                           0,
-                                           handle->stream,
-                                           length,
-                                           value,
-                                           reinterpret_cast<T*>(array));
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::valset_kernel<256>),
+            dim3(rocsparse::get_grid_size_x(handle, (length - 1) / 256 + 1, 256)),
+            dim3(256),
+            0,
+            handle->stream,
+            length,
+            value,
+            reinterpret_cast<T*>(array));
 
         return rocsparse_status_success;
     }

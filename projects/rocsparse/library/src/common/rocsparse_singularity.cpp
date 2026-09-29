@@ -22,6 +22,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_singularity.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_handle.hpp"
 #include "rocsparse_logging.hpp"
 
@@ -141,7 +142,7 @@ namespace rocsparse
                                                   void*                  data_,
                                                   size_t                 buffer_size_in_bytes,
                                                   void*                  buffer,
-                                                  int64_t                max_grid_size_x,
+                                                  rocsparse_handle       handle,
                                                   hipStream_t            stream)
     {
         ROCSPARSE_ROUTINE_TRACE;
@@ -236,14 +237,9 @@ namespace rocsparse
         case rocsparse_pointer_mode_device:
         {
             // Clamp grid.x against the device limit; batch_count is int64_t, and the
-            // kernels above grid-stride over whatever the clamp drops. Computed here
-            // rather than through a shared helper because AISPARSE-696 (PR #11512)
-            // has not merged and rocsparse_common.h/.hpp are a live conflict zone
-            // (AISPARSE-677/678/696); once it lands this is
-            //   rocsparse::get_grid_size(
-            //       rocsparse::ceil_div(batch_count, s_blocksize), max_grid_size_x);
-            const int64_t grid_x
-                = std::min<int64_t>((batch_count - 1) / s_blocksize + 1, max_grid_size_x);
+            // kernels above grid-stride over whatever the clamp drops.
+            const int64_t grid_x = rocsparse::get_grid_size_x(
+                handle, (batch_count - 1) / s_blocksize + 1, s_blocksize);
 
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((kernel),
                                                dim3(grid_x),
@@ -338,7 +334,7 @@ namespace rocsparse
                                              position,
                                              handle->buffer_size,
                                              handle->buffer,
-                                             handle->properties.maxGridSize[0],
+                                             handle,
                                              handle->stream));
         return rocsparse_status_success;
     }
@@ -419,7 +415,7 @@ namespace rocsparse
                                              singularity,
                                              handle->buffer_size,
                                              handle->buffer,
-                                             handle->properties.maxGridSize[0],
+                                             handle,
                                              handle->stream));
         return rocsparse_status_success;
     }

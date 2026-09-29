@@ -24,6 +24,7 @@
 
 #include "rocsparse_common.h"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include <hip/hip_runtime.h>
@@ -145,14 +146,8 @@ namespace rocsparse
                                    int64_t                B_stride)
     {
         // Clamp grid.x against the device limit; m is int64_t and the kernel
-        // grid-strides over the row panels the clamp drops (AISPARSE-700). Computed
-        // here rather than through a shared helper because AISPARSE-696 (PR #11512)
-        // has not merged and rocsparse_common.h/.hpp are a live conflict zone
-        // (AISPARSE-677/678/696); once it lands this is
-        //   rocsparse::get_grid_size(rocsparse::ceil_div(m, 32),
-        //                            handle->properties.maxGridSize[0]);
-        const int64_t grid_x = rocsparse::min(
-            (m - 1) / 32 + 1, static_cast<int64_t>(handle->properties.maxGridSize[0]));
+        // grid-strides over the row panels the clamp drops (AISPARSE-700).
+        const int64_t grid_x = rocsparse::get_grid_size_x(handle, (m - 1) / 32 + 1, 32 * 8);
 
         if(mode == rocsparse_pointer_mode_host)
         {

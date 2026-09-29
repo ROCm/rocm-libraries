@@ -24,29 +24,10 @@
 
 #include "rocsparse_common.h"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include <hip/hip_runtime.h>
-
-namespace
-{
-    // Number of BLOCKSIZE-thread blocks needed to cover nelm elements, clamped to the
-    // device grid.x limit. Every kernel launched with one of these grids grid-strides
-    // over the full element count, so a clamped grid still covers all of it.
-    //
-    // Deliberately local: AISPARSE-696 (PR #11512) adds rocsparse::ceil_div() and
-    // rocsparse::get_grid_size() to rocsparse_common.h, but it has not merged and
-    // rocsparse_common.h/.hpp are a live conflict zone (AISPARSE-677/678/696). Once
-    // #11512 lands the body below is the one-line
-    //   return rocsparse::get_grid_size(rocsparse::ceil_div(nelm, BLOCKSIZE),
-    //                                   handle->properties.maxGridSize[0]);
-    template <uint32_t BLOCKSIZE>
-    int64_t grid_size_x(rocsparse_handle handle, int64_t nelm)
-    {
-        return rocsparse::min((nelm - 1) / BLOCKSIZE + 1,
-                              static_cast<int64_t>(handle->properties.maxGridSize[0]));
-    }
-}
 
 namespace rocsparse
 {
@@ -301,17 +282,18 @@ rocsparse_status rocsparse::valset_2d(
     // 64-bit element count, shared with the kernel bound (AISPARSE-699).
     const int64_t nelm = static_cast<int64_t>(m) * n;
 
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::valset_2d_kernel<256>),
-                                       dim3(grid_size_x<256>(handle, nelm)),
-                                       dim3(256),
-                                       0,
-                                       handle->stream,
-                                       m,
-                                       n,
-                                       ld,
-                                       value,
-                                       array,
-                                       order);
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+        (rocsparse::valset_2d_kernel<256>),
+        dim3(rocsparse::get_grid_size_x(handle, (nelm - 1) / 256 + 1, 256)),
+        dim3(256),
+        0,
+        handle->stream,
+        m,
+        n,
+        ld,
+        value,
+        array,
+        order);
 
     return rocsparse_status_success;
 }
@@ -335,7 +317,8 @@ rocsparse_status rocsparse::scale_array(rocsparse_handle       handle,
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::scale_kernel<256>),
-                dim3(grid_size_x<256>(handle, static_cast<int64_t>(length))),
+                dim3(rocsparse::get_grid_size_x(
+                    handle, (static_cast<int64_t>(length) - 1) / 256 + 1, 256)),
                 dim3(256),
                 0,
                 handle->stream,
@@ -368,7 +351,8 @@ rocsparse_status rocsparse::axpby_array_batched(rocsparse_handle handle,
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::axpby_batched_kernel<256>),
-            dim3(grid_size_x<256>(handle, static_cast<int64_t>(length))),
+            dim3(rocsparse::get_grid_size_x(
+                handle, (static_cast<int64_t>(length) - 1) / 256 + 1, 256)),
             dim3(256),
             0,
             handle->stream,
@@ -408,7 +392,8 @@ rocsparse_status rocsparse::scale_2d_array(rocsparse_handle handle,
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::scale_2d_kernel<256>),
-            dim3(grid_size_x<256>(handle, nelm), (batch_count > 65535) ? 65535 : batch_count),
+            dim3(rocsparse::get_grid_size_x(handle, (nelm - 1) / 256 + 1, 256),
+                 rocsparse::get_grid_size_y(handle, batch_count)),
             dim3(256),
             0,
             handle->stream,
