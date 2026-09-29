@@ -56,6 +56,47 @@ void test_new_handler()
   std::set_new_handler(nullptr);
 }
 
+// Publishing a pointer keeps the optimizer from eliding the allocation that
+// produced it, which would remove the call before it can be interposed.
+void* volatile published{};
+
+template <class T>
+T* publish(T* p)
+{
+  published = p;
+  return p;
+}
+
+// Allocates and releases a block repeatedly. Returns -1 if an allocation fails,
+// 1 once a released block is handed out again, and 0 if none ever is, as when
+// the deallocation leaks the block instead of releasing it.
+template <class Allocate, class Deallocate>
+int reuse_after_release(Allocate allocate, Deallocate deallocate)
+{
+  auto p = allocate();
+  if (!p)
+  {
+    return -1;
+  }
+  const auto first = reinterpret_cast<std::uintptr_t>(p);
+  deallocate(p);
+  for (int i = 0; i < 64; ++i)
+  {
+    p = allocate();
+    if (!p)
+    {
+      return -1;
+    }
+    const auto again = reinterpret_cast<std::uintptr_t>(p);
+    deallocate(p);
+    if (again == first)
+    {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 // glibc declares memalign with alloc_align, which makes an alignment that is not
 // a power of two undefined at the call site. __libc_memalign is interposed the
 // same way but is declared above without that attribute.
@@ -100,19 +141,19 @@ int main()
 {
   try
   {
-    if (auto p = std::aligned_alloc(8u, 64))
+    if (auto p = publish(std::aligned_alloc(8u, 64)))
     {
       std::free(p);
     }
-    if (auto p = std::calloc(1, 42))
+    if (auto p = publish(std::calloc(1, 42)))
     {
       std::free(p);
     }
-    if (auto p = std::malloc(42))
+    if (auto p = publish(std::malloc(42)))
     {
       std::free(p);
     }
-    if (auto p = memalign(8, 42))
+    if (auto p = publish(memalign(8, 42)))
     {
       std::free(p);
     }
@@ -178,43 +219,43 @@ int main()
         return EXIT_FAILURE;
       }
     }
-    if (auto p = std::realloc(std::malloc(42), 42))
+    if (auto p = publish(std::realloc(std::malloc(42), 42)))
     {
       std::free(p);
     }
-    if (auto p = reallocarray(std::calloc(1, 42), 1, 42))
+    if (auto p = publish(reallocarray(std::calloc(1, 42), 1, 42)))
     {
       std::free(p);
     }
-    if (auto p = new std::uint8_t)
+    if (auto p = publish(new std::uint8_t))
     {
       delete p;
     }
-    if (auto p = new (std::align_val_t{8}) std::uint8_t)
+    if (auto p = publish(new (std::align_val_t{8}) std::uint8_t))
     {
       ::operator delete(p, std::align_val_t{8});
     }
-    if (auto p = new (std::nothrow) std::uint8_t)
+    if (auto p = publish(new (std::nothrow) std::uint8_t))
     {
       delete p;
     }
-    if (auto p = new (std::align_val_t{8}, std::nothrow) std::uint8_t)
+    if (auto p = publish(new (std::align_val_t{8}, std::nothrow) std::uint8_t))
     {
       ::operator delete(p, std::align_val_t{8});
     }
-    if (auto p = new std::uint8_t[42])
+    if (auto p = publish(new std::uint8_t[42]))
     {
       delete[] p;
     }
-    if (auto p = new (std::align_val_t{8}) std::uint8_t[42])
+    if (auto p = publish(new (std::align_val_t{8}) std::uint8_t[42]))
     {
       ::operator delete[](p, std::align_val_t{8});
     }
-    if (auto p = new (std::nothrow) std::uint8_t[42])
+    if (auto p = publish(new (std::nothrow) std::uint8_t[42]))
     {
       delete[] p;
     }
-    if (auto p = new (std::align_val_t{8}, std::nothrow) std::uint8_t[42])
+    if (auto p = publish(new (std::align_val_t{8}, std::nothrow) std::uint8_t[42]))
     {
       ::operator delete[](p, std::align_val_t{8});
     }
@@ -264,20 +305,33 @@ int main()
     runtime_operator_delete(zero_sized_new);
 
     // Exercise sized and aligned-sized deallocation explicitly so optimizer
-    // selection of a delete-expression overload cannot hide these paths.
-    auto sized_new = runtime_operator_new(42);
-    if (!sized_new)
+    // selection of a delete-expression overload cannot hide these paths. The
+    // released block must be reclaimed: v0 serves these sizes from a pool that
+    // hands it out again, while libc makes no such promise for v1.
+#if defined(__HIPSTDPAR_INTERPOSE_ALLOC_V1__)
+    constexpr bool expect_reuse = false;
+#else
+    constexpr bool expect_reuse = true;
+#endif
+    const auto sized_reuse = reuse_after_release(
+      [] {
+        return runtime_operator_new(42);
+      },
+      [](void* p) {
+        runtime_operator_delete_sized(p, 42);
+      });
+    const auto aligned_sized_reuse = reuse_after_release(
+      [] {
+        auto p = runtime_operator_new_aligned(42, 64);
+        return reinterpret_cast<std::uintptr_t>(p) % 64 == 0 ? p : nullptr;
+      },
+      [](void* p) {
+        runtime_operator_delete_aligned_sized(p, 42, 64);
+      });
+    if (sized_reuse < 0 || aligned_sized_reuse < 0 || (expect_reuse && (sized_reuse == 0 || aligned_sized_reuse == 0)))
     {
       return EXIT_FAILURE;
     }
-    runtime_operator_delete_sized(sized_new, 42);
-
-    auto aligned_sized_new = runtime_operator_new_aligned(42, 64);
-    if (!aligned_sized_new || reinterpret_cast<std::uintptr_t>(aligned_sized_new) % 64 != 0)
-    {
-      return EXIT_FAILURE;
-    }
-    runtime_operator_delete_aligned_sized(aligned_sized_new, 42, 64);
 
     // free(nullptr) is required to be a no-op.
     void* volatile null_pointer = nullptr;
@@ -392,43 +446,43 @@ int main()
     }
 #endif
 
-    if (auto p = __builtin_calloc(1, 42))
+    if (auto p = publish(__builtin_calloc(1, 42)))
     {
       __builtin_free(p);
     }
-    if (auto p = __builtin_malloc(42))
+    if (auto p = publish(__builtin_malloc(42)))
     {
       __builtin_free(p);
     }
-    if (auto p = __builtin_operator_new(42))
+    if (auto p = publish(__builtin_operator_new(42)))
     {
       __builtin_operator_delete(p);
     }
-    if (auto p = __builtin_operator_new(42, std::align_val_t{8}))
+    if (auto p = publish(__builtin_operator_new(42, std::align_val_t{8})))
     {
       __builtin_operator_delete(p, std::align_val_t{8});
     }
-    if (auto p = __builtin_operator_new(42, std::nothrow))
+    if (auto p = publish(__builtin_operator_new(42, std::nothrow)))
     {
       __builtin_operator_delete(p);
     }
-    if (auto p = __builtin_operator_new(42, std::align_val_t{8}, std::nothrow))
+    if (auto p = publish(__builtin_operator_new(42, std::align_val_t{8}, std::nothrow)))
     {
       __builtin_operator_delete(p, std::align_val_t{8});
     }
-    if (auto p = __builtin_realloc(__builtin_malloc(42), 41))
+    if (auto p = publish(__builtin_realloc(__builtin_malloc(42), 41)))
     {
       __builtin_free(p);
     }
-    if (auto p = __libc_calloc(1, 42))
+    if (auto p = publish(__libc_calloc(1, 42)))
     {
       __libc_free(p);
     }
-    if (auto p = __libc_malloc(42))
+    if (auto p = publish(__libc_malloc(42)))
     {
       __libc_free(p);
     }
-    if (auto p = __libc_memalign(8, 42))
+    if (auto p = publish(__libc_memalign(8, 42)))
     {
       __libc_free(p);
     }
