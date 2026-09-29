@@ -28,6 +28,7 @@
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrgeam.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "csrgeam_device.h"
@@ -110,8 +111,8 @@ namespace rocsparse
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrgeam_fill_multipass_kernel<CSRGEAM_DIM, 32>),
-                dim3(rocsparse::get_grid_size(
-                    m, CSRGEAM_DIM / 32, handle->properties.maxGridSize[0])),
+                dim3(rocsparse::get_grid_size_x(
+                    handle, (static_cast<int64_t>(m) - 1) / (CSRGEAM_DIM / 32) + 1, CSRGEAM_DIM)),
                 dim3(CSRGEAM_DIM),
                 0,
                 stream,
@@ -139,8 +140,8 @@ namespace rocsparse
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrgeam_fill_multipass_kernel<CSRGEAM_DIM, 64>),
-                dim3(rocsparse::get_grid_size(
-                    m, CSRGEAM_DIM / 64, handle->properties.maxGridSize[0])),
+                dim3(rocsparse::get_grid_size_x(
+                    handle, (static_cast<int64_t>(m) - 1) / (CSRGEAM_DIM / 64) + 1, CSRGEAM_DIM)),
                 dim3(CSRGEAM_DIM),
                 0,
                 stream,
