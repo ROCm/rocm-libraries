@@ -250,14 +250,15 @@ preserves legacy conventions on other architectures. `use_fp8`,
 `use_softcap`, `use_sinks`, `use_alibi`, and `use_qq_bias` describe required
 features before selection, not features inferred silently at bind time.
 
-For FP16 D64 ragged causal requests without additional score features or an
-explicit window, dispatch uses V-LDS staging and `max-ilp`. Its effective
-window spans both advertised maximum sequence lengths, preserving every
-causally-visible key for either alignment, including top-left `Sq > Sk`.
-Those maxima must bound the device-resident sequence lengths. The profile
-admits maxima up to `2**30` to keep context/window arithmetic within I32;
-other requests retain their existing policy. No sequence metadata is copied
-to the host to choose the profile.
+For FP16 D64 ragged causal requests and dense query/KV-tail requests without
+additional score features or an explicit window, dispatch uses V-LDS staging
+and `max-ilp`. Causal profiles use an effective window spanning both advertised
+maximum sequence lengths, preserving every causally-visible key for either
+alignment, including top-left `Sq > Sk`. Unmasked profiles keep the window
+disabled. Those maxima must bound the device-resident sequence lengths.
+The profile admits maxima up to `2**30` to keep context/window arithmetic
+within I32; other requests retain their existing policy. No sequence metadata
+is copied to the host to choose the profile.
 
 `dispatch_attention(request).bind_torch(tensors, **scalars)` accepts caller-owned
 `q`, `k`, `v`, `out` and the selected metadata/auxiliary tensors. Despite the

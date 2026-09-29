@@ -534,3 +534,18 @@ def test_output_tiles_keep_full_qk_dimension_and_all_output_columns(layout, dtyp
         np.testing.assert_array_equal(actual[:3], np.zeros_like(actual[:3]))
     elif layout == "paged":
         np.testing.assert_array_equal(actual[1:], np.zeros_like(actual[1:]))
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
+@pytest.mark.parametrize("mask,seqlen_q", [("causal_topleft", 97), ("causal_bottomright", 65)])
+def test_dense_tail_profile_preserves_long_queries_and_empty_prefix(mask, seqlen_q):
+    case = _case(
+        name="dispatch_dense_tail_profile", group="dispatch", dtype="fp16", batch=2,
+        seqlen_q=seqlen_q, seqlen_k=33, heads_q=4, heads_kv=2, head_dim=64,
+        mask=mask, seed=106,
+    )
+    actual = _launch_and_check(case)
+    if mask == "causal_bottomright":
+        prefix = seqlen_q - case.seqlen_k
+        np.testing.assert_array_equal(actual[:, :prefix], np.zeros_like(actual[:, :prefix]))

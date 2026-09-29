@@ -86,13 +86,17 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
     )
     wide = transposed and seqlen_q >= 512 and seqlen_q % 32 == 0 and seqlen_k % 64 == 0
     maximum_length = max(seqlen_q, seqlen_k)
-    tuned_ragged = (
-        layout == "ragged" and req.dtype.strip().lower() == "fp16"
-        and int(req.hdim_q) == 64
-        and mask_type in (AttentionMaskType.TOP_LEFT_CAUSAL, AttentionMaskType.BOTTOM_RIGHT_CAUSAL)
+    tuned_small_head = (
+        req.dtype.strip().lower() == "fp16" and int(req.hdim_q) == 64
         and not (req.sliding_window or req.use_fp8 or req.use_softcap
                  or req.use_sinks or req.use_alibi or req.use_qq_bias)
         and maximum_length <= (1 << 30)
+        and (
+            (layout == "ragged" and mask_type in (
+                AttentionMaskType.TOP_LEFT_CAUSAL, AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+            ))
+            or (layout == "dense" and (query_tail or kv_tail))
+        )
     )
     query_groups = ((seqlen_q + 15) // 16) * int(req.nhead_q) * int(req.batch)
     tiled_values = (
@@ -115,12 +119,15 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
         mask_mode="none" if mask_type == AttentionMaskType.NO_MASK else "causal",
         # Equal maxima can still describe unequal packed sequence lengths.
         causal_bottom_right=mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
-        sliding_window=maximum_length if tuned_ragged else int(req.sliding_window),
-        v_lds_stage=tuned_ragged or (
+        sliding_window=(
+            maximum_length if tuned_small_head and mask_type != AttentionMaskType.NO_MASK
+            else int(req.sliding_window)
+        ),
+        v_lds_stage=tuned_small_head or (
             tiled_values and (short_query or mask_type == AttentionMaskType.NO_MASK)
         ),
         value_tile_size=value_tile_size,
-        scheduler_strategy="max-ilp" if tuned_ragged else None,
+        scheduler_strategy="max-ilp" if tuned_small_head else None,
         query_tail=query_tail,
         kv_tail=kv_tail,
         use_softcap=bool(req.use_softcap),
