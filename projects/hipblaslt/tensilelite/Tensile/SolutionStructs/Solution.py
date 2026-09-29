@@ -190,6 +190,49 @@ def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printR
   return True
 
 
+def _validateMXLocalReadWidth(state, asmCaps, printRejectionReason):
+  """Reject invalid MX scale units and undersized M-major local reads.
+
+  The WMMA_V3 in-memory-swizzle path reads one byte per MX scale. Every MX
+  local-read layout requires a positive ``MatrixInstK // MXBlock`` scale unit.
+  For an M-major LDS layout, one local read spans ``VectorWidth`` scale bytes;
+  a narrower read makes ``LocalReadMFMA.localReadMX`` compute zero tiles per
+  read.
+  """
+  if not asmCaps.get("HasWMMA_V3", False) \
+      or state["MXScaleFormat"] != "InMemorySwizzle":
+    return True
+
+  for tc in ("A", "B"):
+    mxBlock = state["ProblemType"][f"MXBlock{tc}"]
+    if not mxBlock:
+      continue
+
+    mxUnit = state["MatrixInstK"] // mxBlock
+    if mxUnit <= 0:
+      reject(
+          state,
+          printRejectionReason,
+          f"MX-scale local read for {tc} requires "
+          f"MatrixInstK >= MXBlock{tc} ({state['MatrixInstK']} < {mxBlock})")
+      return False
+
+    if state[f"UnrollMajorLDS{tc}"]:
+      continue
+
+    vectorWidth = state[f"VectorWidth{tc}"]
+    if vectorWidth < mxUnit:
+      reject(
+          state,
+          printRejectionReason,
+          f"M-major MX-scale local read for {tc} requires "
+          f"VectorWidth{tc} >= MatrixInstK // MXBlock{tc} ({mxUnit}), "
+          f"got {vectorWidth}")
+      return False
+
+  return True
+
+
 def _disableRuntimeStaggerU(state):
   state["StaggerU"] = 0
   state["StaggerUMapping"] = 0
@@ -1790,16 +1833,48 @@ class Solution(collections.abc.Mapping):
     return divisorName
 
   @staticmethod
-  def _assignCustomKernelParameters(state):
+  def _assignCustomKernelParameters(state: dict) -> None:
     """Minimal parameter setup for handwritten custom kernels.
 
     These kernels carry their own argument layout and don't go through the
     full assignDerivedParameters validation (which would reject them for
-    missing MatrixInstruction, etc.)."""
+    missing MatrixInstruction, etc.).
+
+    Args:
+      state: Solution state carrying a "CustomKernel" block. Mutated in place.
+
+    Returns:
+      None.
+
+    Raises:
+      RuntimeError: If a macrotile component is supplied by neither the
+        CustomKernel block nor the consuming logic file.
+    """
     ck = state["CustomKernel"]
-    state["MacroTile0"] = ck["macrotile"][0]
-    state["MacroTile1"] = ck["macrotile"][1]
-    state["DepthU"]     = ck["macrotile"][2]
+
+    # CustomKernels.py derives the macrotile from MatrixInstruction / MIWaveTile
+    # in custom.config, then from an MTxxx token in the kernel name. Any kernel
+    # that has neither infers 0 and must not overwrite
+    # the tile the consuming logic file already states. MacroTile0 == 0 reaches
+    # ContractionProblemGemm::getNumTiles() as an integer divide by zero, so
+    # dense enumeration (--algo_method 1) dies with SIGFPE as soon as that
+    # solution is costed. Kernels that already encode MT in the name
+    # or declare MI in custom.config are unchanged.
+    macrotile = list(ck.get("macrotile") or [])
+    macrotile += [0] * (3 - len(macrotile))
+    for i, key in enumerate(("MacroTile0", "MacroTile1", "DepthU")):
+      value = macrotile[i] if macrotile[i] > 0 else state.get(key, 0)
+      if not isinstance(value, int) or value <= 0:
+        raise RuntimeError(
+          f"Custom kernel '{ck.get('name', '?')}' has no usable {key}: it is absent "
+          f"from the kernel's custom.config, the kernel name encodes no MTxxx token, "
+          f"and the consuming logic file does not supply one.")
+      macrotile[i] = value
+      state[key]   = value
+    # Keep the block the C++ runtime deserializes in step with the solution:
+    # ContractionSolution reads customKernel.macrotile directly for custom-kernel
+    # tile and workspace sizing.
+    ck["macrotile"] = macrotile
 
     # Derive _GlobalAccumulation from GlobalSplitUAlgorithm so the C++
     # runtime sees a non-zero sizeMapping.globalAccumulation for GSU>1
@@ -3690,7 +3765,7 @@ class Solution(collections.abc.Mapping):
 
       iterModeMask = state["TDMIterateMode"]
       autoTdmIterateMode = iterModeMask == -1
-      if state["TDMInst"] and state["EnableMatrixInstruction"] and not state["ProblemType"]["Sparse"]:
+      if state["TDMInst"] and state["EnableMatrixInstruction"]:
         # Stage 1: decide iterate-mode per tensor.
         if iterModeMask == -1:
           state.pop("_TDMIterateModeA", None)
@@ -4465,6 +4540,10 @@ class Solution(collections.abc.Mapping):
         calLRVWFor950MX()
       else:
         calLRVW()
+
+      if not _validateMXLocalReadWidth(
+          state, isaInfoMap[isa].asmCaps, printRejectionReason):
+        return
 
       def calcOptGRVW(lrvw: int, unrollMajorLDS: bool, datatype: DataType) -> int:
         # with UnrollMajorLDS, GRVW need to less or equal than LRVW to have conflict free LDS read with padding.
