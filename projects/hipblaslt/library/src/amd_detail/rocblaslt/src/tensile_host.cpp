@@ -3919,6 +3919,11 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
 
             data->algoIndex = *solutionIndex;
             auto solution   = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+            if(!solution)
+            {
+                log_error(__func__, "No solution for index", *solutionIndex);
+                return rocblaslt_status_invalid_value;
+            }
 
             if(data->problem.getParams().uniformSummationOrder())
                 warnUniformSummationOrderBypass(__func__, tuning != nullptr);
@@ -3986,6 +3991,11 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             data->algoIndex = *solutionIndex;
             auto solution
                 = library->getSolutionByIndex(data->problem.gemms[0], *hardware, *solutionIndex);
+            if(!solution)
+            {
+                log_error(__func__, "No solution for index", *solutionIndex);
+                return rocblaslt_status_invalid_value;
+            }
 
             if(!data->problem.gemms.empty()
                && data->problem.gemms[0].getParams().uniformSummationOrder())
