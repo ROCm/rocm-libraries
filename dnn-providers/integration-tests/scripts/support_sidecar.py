@@ -46,7 +46,7 @@ def sidecar_path(bundle: str) -> PurePosixPath:
     if (
         len(parts) < 3
         or parts[0] != BUNDLE_DIR
-        or any(p in ("", ".", "..") for p in parts)
+        or any(p in ("", ".", "..") or "\\" in p for p in parts)
         or path.suffix != ".json"
     ):
         raise SidecarError(f"{bundle}: not a bundle under {BUNDLE_DIR}/")

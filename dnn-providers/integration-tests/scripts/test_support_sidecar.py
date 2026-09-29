@@ -41,6 +41,7 @@ class TestSidecarPath(unittest.TestCase):
             "integration-test-bundles/../scripts/x.json",
             "integration-test-bundles/quick/./Small.json",
             "integration-test-bundles/quick//Small.json",
+            r"integration-test-bundles/quick/..\..\..\x.json",
             "integration-test-bundles/quick/Small.bin",
         ):
             with self.subTest(bundle=bundle), self.assertRaises(SidecarError):
