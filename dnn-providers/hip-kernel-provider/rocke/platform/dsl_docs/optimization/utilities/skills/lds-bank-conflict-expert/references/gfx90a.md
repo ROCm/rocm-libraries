@@ -9,11 +9,13 @@ later target shares one or more prediction rules.
   `ds_read_b128`, `ds_write_b32`, `ds_write_b64`, and `ds_write_b128`
   operations.
 - Supply byte addresses and access widths exactly as issued by the layout being
-  analyzed.
+  analyzed. Align each address to its access width (4, 8, or 16 bytes), and keep
+  the full access within the 65,536-byte LDS capacity.
 - Treat broadcasts, lane-phase separation, and wave-partition separation as
   opcode-scoped semantics returned by the predictor.
-- Treat an unsupported opcode, width, wave size, or alignment as unsupported;
-  do not approximate it with the nearest supported operation.
+- Treat unavailable opcodes or wave sizes as unsupported, and access-width
+  mismatches or misaligned addresses as invalid request data. Do not approximate
+  either with the nearest supported operation.
 
 Query the production profile through prediction and use its errors for operations
 outside this reviewed set. Update this reference together with any reviewed profile

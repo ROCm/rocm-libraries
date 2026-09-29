@@ -32,6 +32,12 @@ Tests:
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
 
+- name: rot_extra
+  category: nightly
+  function: rot_extra
+  host_memory_gb: 1
+  device_memory_gb: 55
+
 - name: rot
   category: quick
   function: rot

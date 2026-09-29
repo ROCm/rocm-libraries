@@ -18,8 +18,10 @@ derive a second bank formula in this skill or in downstream analysis.
 3. Read the matching architecture reference linked from
    [references/index.md](references/index.md). Reject a target that has no
    registered profile.
-4. Run `scripts/predict.py` to produce canonical semantic JSON. Treat diagnostics
-   as part of the result, not as optional console commentary.
+4. From this skill directory, run `python scripts/predict.py request.json` using
+   an environment where `rocke` is importable. See [CLI invocation](references/index.md#cli-invocation)
+   for standard input and installed-test usage. Treat diagnostics as part of the
+   result, not as optional console commentary.
 5. Analyze classifications, group membership, multiplicity, and diagnostics from
    that semantic document without recomputing them.
 6. Read [references/comparison.md](references/comparison.md) before comparing

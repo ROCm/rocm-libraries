@@ -378,22 +378,22 @@ int main(int argc, char* argv[])
                    real_prob_factor,
                    "Probability multiplier for running individual real/complex transforms")
         ->default_val(1.0)
-        ->check(CLI::PositiveNumber);
+        ->check(CLI::Range(0.0, 1.0));
     app.add_option("--planar_prob",
                    complex_planar_prob_factor,
                    "Probability multiplier for running individual planar transforms")
         ->default_val(0.1)
-        ->check(CLI::PositiveNumber);
+        ->check(CLI::Range(0.0, 1.0));
     app.add_option(
            "--complex_interleaved_prob_factor",
            complex_interleaved_prob_factor,
            "Probability multiplier for running individual transforms with complex interleaved data")
         ->default_val(1)
-        ->check(CLI::PositiveNumber);
+        ->check(CLI::Range(0.0, 1.0));
     app.add_option("--callback_prob",
                    callback_prob_factor,
                    "Probability multiplier for running individual callback transforms")
-        ->default_val(0.1)
+        ->default_val(0.2)
         ->check(CLI::NonNegativeNumber);
     constexpr auto emulation_quick      = "quick";
     constexpr auto emulation_smoke      = "smoke";

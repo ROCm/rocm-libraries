@@ -5,6 +5,7 @@ This document describes the environment variables and runtime configuration opti
 ## Table of Contents
 
 - [Environment Variables](#environment-variables)
+  - [Backend Library Discovery](#backend-library-discovery)
   - [Plugin Discovery](#plugin-discovery)
   - [Heuristic Policy Selection](#heuristic-policy-selection)
   - [Benchmarking](#benchmarking)
@@ -21,6 +22,34 @@ This document describes the environment variables and runtime configuration opti
 ---
 
 ## Environment Variables
+
+### Backend Library Discovery
+
+A consumer that links `hipdnn_frontend_dynamic` resolves the backend shared library at first use rather than through a link-time dependency. hipDNN computes the path itself, in this order: the programmatic override, or this variable when the calling module set none, then the directory of the calling module (executable or shared library), then that directory's sibling `../lib` and `../lib64`, then the directory the HIP runtime was loaded from, and finally the bare library name left to the system loader.
+
+#### HIPDNN_BACKEND_LIBRARY_PATH
+
+Specifies the directory holding the hipDNN backend shared library. The filename is always hipDNN's own (`libhipdnn_backend.so` on Linux, `hipdnn_backend.dll` on Windows), so this variable selects a location, never a particular file.
+
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset)    | Resolve through the search order above                 |
+| `<path>`   | Look for the backend in this directory first           |
+
+The value must be a non-empty absolute directory; invalid values are reported on `stderr` and ignored. If the backend is absent or fails to load, resolution continues to the next location.
+
+**Example:**
+```bash
+export HIPDNN_BACKEND_LIBRARY_PATH=/opt/rocm/lib
+```
+
+**Notes:**
+- A consumer that links `hipdnn_frontend_dynamic` can call `hipdnn_frontend::setBackendLibraryPath_ext()`, declared in `<hipdnn_frontend/BackendLibraryPath.hpp>` and reachable through `<hipdnn_frontend.hpp>` in a runtime-load build. It applies to one calling module (executable or shared library) rather than the whole process, and takes precedence over this variable for that module.
+- The setter's directory is validated exactly as this variable's value is: non-empty and absolute, with anything else reported on `stderr` and ignored. A stored value also suppresses this variable, which is read only when the calling module stored none -- so a module that stored an empty or relative directory gets neither its own override nor the variable's.
+- Both are read once, at the calling module's first backend call. That call caches the outcome, failure included, and closes the setter before it starts searching: after a failed load, `setBackendLibraryPath_ext()` returns `false` and stores nothing, and trying a different directory requires a new process.
+- On Windows, whichever location supplied the directory the backend is loaded from -- this variable, the setter, the calling module's directory, its sibling `../lib` or `../lib64`, or the HIP runtime's directory -- is searched for the backend's own first-level dependents ahead of `System32`, so it must not be writable by lower-privileged principals. The altered order does not apply transitively to those dependents' own dependencies, and KnownDLLs still resolve from the system directory.
+- On Linux, secure execution (for example, a set-user-ID process) ignores this variable and skips module-relative and HIP-runtime locations. An explicit `setBackendLibraryPath_ext()` override is still honored before the system loader's hardened search.
+- The module-relative locations are used only when hipDNN can establish the calling module's own directory. If the loader reports no origin for it, or reports one that cannot be trusted -- a relative name, which would be interpreted against whatever working directory the process happens to have -- those locations are skipped and resolution continues with the remaining ones.
 
 ### Plugin Discovery
 
@@ -47,6 +76,7 @@ export HIPDNN_PLUGIN_DIR=/opt/rocm/lib/hipdnn/plugins/engines
 - Plugin libraries are typically named `libhipdnn_provider_*.so` (Linux) or `hipdnn_provider_*.dll` (Windows)
 - Only plugins whose API version major matches `HIPDNN_ENGINE_API_VERSION_MAJOR` (declared in `hipdnn_plugin_sdk/engine_api_version.h`) will be loaded
 - See the [Plugin Development Guide](PluginDevelopment.md) for details on creating engine plugins
+- On Linux, ignored in a secure execution environment (a set-user-ID or set-group-ID process, or one that gained capabilities across `execve`), since it replaces the default search set and every shared library in the named directory is then loaded. Windows has no equivalent execution mode, so this variable is always honored there.
 
 #### HIPDNN_HEURISTIC_PLUGIN_DIR
 
@@ -70,6 +100,7 @@ export HIPDNN_HEURISTIC_PLUGIN_DIR=/opt/rocm/lib/hipdnn/plugins/heuristics
 - Only plugins with API version matching the Heuristic API major version will be loaded
 - Each heuristic plugin must provide a unique policy ID and policy name
 - See the [Plugin Development Guide](PluginDevelopment.md) for details on creating heuristic plugins
+- Ignored in a secure execution environment, for the same reason as `HIPDNN_PLUGIN_DIR`
 
 ### Heuristic Policy Selection
 
@@ -210,7 +241,7 @@ export HIPDNN_FORCE_BENCHMARKING=0
 ```
 
 **Notes:**
-- With benchmarking on, the first `execute()` of a plan samples every knob-filtered candidate kernel before caching the winner for the plan's life, so it is slower than subsequent calls.
+- With benchmarking on and no matching ranking cached, the first `execute()` of a plan samples every knob-filtered candidate kernel, so it is slower than subsequent calls. The ingestor memoizes the ranking per (graph content, device); it survives the plan and persists across processes when disk caching is enabled.
 - The variable is process-wide, with no per-provider or per-engine granularity: a leaked value from one test or shell changes an unrelated run.
 - `HIPDNN_FORCE_BENCHMARKING=0` also defeats `Graph::autotune()` in EXHAUSTIVE mode, which otherwise sets `global.benchmarking=1` on its priming plans.
 - Sampling executes each candidate against the buffers you passed in, so benchmarking assumes idempotent execution or separate input and output buffers -- the same assumption `autotune()` documents. A graph whose output tensor is also one of its inputs is recomputed in place once per sample. The winner runs last, so the final contents are correct, but the buffer is written many times before that.

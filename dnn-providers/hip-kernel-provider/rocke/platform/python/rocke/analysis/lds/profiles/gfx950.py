@@ -22,6 +22,8 @@ class Gfx950Profile(Gfx90aProfile):
         default_factory=lambda: ProfileIdentity(target="gfx950", profile_version=1)
     )
 
+    lds_capacity_bytes: int = 163840
+
     def phase_key(self, opcode: str, lane: int) -> tuple[int, ...]:
         """Return the observed lane phase for one canonical opcode."""
 

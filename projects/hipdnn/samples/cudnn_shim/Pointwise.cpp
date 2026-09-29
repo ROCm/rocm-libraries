@@ -1,5 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+//
+// Portions derived from NVIDIA cuDNN frontend, used under the MIT license:
+//   samples/cpp/misc/pointwise.cpp
+//     Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
+// License text and pinned upstream version: frontend/THIRD_PARTY_LICENSES.md
+// (installed to share/doc/hipdnn_frontend).
 
 // Compile-and-run smoke of the cuDNN-shaped pointwise surface a hipified
 // consumer exercises. Mirrors cuDNN FE's samples/cpp/misc/pointwise.cpp: build a

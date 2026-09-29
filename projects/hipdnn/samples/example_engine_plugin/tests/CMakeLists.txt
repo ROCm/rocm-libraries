@@ -1,19 +1,60 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-include(FetchContent)
-
-FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG v1.14.0
-    SYSTEM
+option(ALLOW_FETCH_DEPS
+       "Allow fetching third-party dependencies the build environment does not provide"
+       OFF
 )
-# Prevent GoogleTest from overriding our compiler/linker options on Windows
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-# Prevent GoogleTest from being installed with cmake --install
-set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
+
+set(EXAMPLE_PROVIDER_GTEST_VERSION "1.17.0" CACHE STRING
+    "GoogleTest version fetched when no GTest package is available"
+)
+
+# The build environment is expected to provide GTest. Fetching is an opt-in
+# fallback when no package is available.
+find_package(GTest CONFIG QUIET)
+
+# These tests link GoogleMock, which a GTest package exports only when it was
+# built with BUILD_GMOCK=ON and INSTALL_GTEST=ON. A package without it is
+# unusable here, so it is treated as not found.
+if(GTest_FOUND AND NOT TARGET GTest::gmock)
+    message(STATUS
+        "Ignoring the GTest package at ${GTest_DIR}: it does not provide "
+        "GoogleMock (GTest::gmock), which these tests link."
+    )
+    set(GTest_FOUND FALSE)
+endif()
+
+if(NOT GTest_FOUND)
+    # An explicitly supplied source tree needs no acquisition.
+    if(NOT ALLOW_FETCH_DEPS AND
+       (NOT FETCHCONTENT_SOURCE_DIR_GOOGLETEST OR
+        NOT IS_DIRECTORY "${FETCHCONTENT_SOURCE_DIR_GOOGLETEST}"))
+        message(FATAL_ERROR
+            "GTest with GoogleMock (GTest::gmock) was not found, and "
+            "${PROJECT_NAME} does not fetch "
+            "third-party dependencies. They are provided by the build "
+            "environment: TheRock's third-party tree, or an install prefix on "
+            "CMAKE_PREFIX_PATH. Provide GTest, disable this project's tests, "
+            "or configure with -DALLOW_FETCH_DEPS=ON to fetch it. See "
+            "https://github.com/ROCm/TheRock/blob/main/docs/development/dependencies.md"
+        )
+    endif()
+
+    include(FetchContent)
+
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG v${EXAMPLE_PROVIDER_GTEST_VERSION}
+        SYSTEM
+    )
+    # Prevent GoogleTest from overriding our compiler/linker options on Windows
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    # Prevent GoogleTest from being installed with cmake --install
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+endif()
 
 # Disable clang-tidy on GoogleTest targets (clang-tidy reports naming/style issues
 # in third-party code when building the gtest/gmock libraries themselves)

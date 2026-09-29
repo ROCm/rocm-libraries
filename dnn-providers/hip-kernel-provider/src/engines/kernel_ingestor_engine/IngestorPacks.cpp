@@ -14,9 +14,10 @@ const std::vector<IngestorPack>& ingestorPacks()
     // in a way that matters before main().
     static const std::vector<IngestorPack> s_packs = {
         {"hipkernel:Pointwise", &registerPointwiseSymbols, &resetPointwiseModuleCache},
-        // No kpack archive: its kernels are embedded_source, so there is no module to
-        // drop and nothing for a reset to do.
-        {"hipkernel:ConvFwd", &registerConvFwdSymbols, nullptr},
+        {"hipkernel:ConvFwd", &registerConvFwdSymbols, &resetConvFwdModuleCache},
+        {"hipkernel:Gfx950AttentionDense",
+         &registerGfx950AttentionDenseSymbols,
+         &resetGfx950AttentionDenseModuleCache},
     };
     return s_packs;
 }

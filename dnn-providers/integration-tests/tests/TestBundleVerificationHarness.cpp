@@ -15,6 +15,7 @@
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "BundleFixtureFiles.hpp"
@@ -27,6 +28,7 @@
 
 using namespace hipdnn_integration_tests;
 using namespace hipdnn_integration_tests::bundle;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 
 namespace
 {
@@ -40,7 +42,7 @@ protected:
     void SetUp() override
     {
         testing_support::ensureTestConfigInitialized();
-        _scopedDir.emplace(scratch::makeDir("golden_harness_test_"));
+        _scopedDir.emplace(claimScratchDirectory("golden_harness"));
         _tempDir = _scopedDir->path();
     }
 
@@ -217,6 +219,31 @@ TEST_F(TestGoldenHarnessFixture, ExecutorDeclineYieldsSkip)
 
     EXPECT_TRUE(testing_support::anySkipped(results));
     EXPECT_FALSE(testing_support::anyFailed(results));
+}
+
+// A declined graph must not pay for its inputs. Sweep bundles carry no tensor data,
+// so the harness generates it -- and on the largest full-tier cases that fill alone
+// is seconds per test, which is what put whole provider suites past their CI wall
+// when every one of those cases was going to be declined anyway.
+TEST_F(TestGoldenHarnessFixture, DeclinedGraphSkipsWithoutFillingInputs)
+{
+    testing_support::HarnessMocks mocks;
+    ON_CALL(mocks.engineRunner, openGraph(::testing::_, ::testing::_))
+        .WillByDefault([](const IntegrationTestBundle&, const std::optional<LoadedEngine>&) {
+            return testing_support::declinedSession();
+        });
+
+    auto bundle = makeRuntimePbvFillBundle();
+    ASSERT_FALSE(bundle->tensors.has_value());
+
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks, bundle, &results);
+
+    EXPECT_TRUE(testing_support::anySkipped(results));
+    EXPECT_FALSE(testing_support::anyFailed(results));
+    EXPECT_NE(testing_support::allMessages(results).find("Engine could not execute bundle"),
+              std::string::npos);
+    EXPECT_FALSE(bundle->tensors.has_value());
 }
 
 TEST_F(TestGoldenHarnessFixture, MatchingOutputYieldsPass)
