@@ -143,10 +143,7 @@ could not be queried. No release metadata is substituted in either case.
 
 Python retains its successfully loaded library and query result for the process
 lifetime. Configure library selection before the first automatic lowering or
-compilation. All Python bindings, including the spec-based family entry points,
-resolve an automatic flavor through Python and pass a concrete flavor to C++.
-This keeps Python emission, native emission through Python, and Python runtime
-validation tied to the same COMGR selection.
+compilation.
 
 Standalone C++ AUTO is a convenience adapter: it discovers and retains a native
 COMGR candidate and queries that binary. Its diagnostics are implementation

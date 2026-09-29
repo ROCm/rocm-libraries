@@ -254,10 +254,21 @@ def _lower_via_cpp_engine(
     parse+lower endpoint). ``llvm_flavor`` pins the intrinsic-declaration
     shape, matching the Python lowerer's ``llvm_flavor`` parameter.
 
-    Resolve an omitted flavor through Python's loaded COMGR evidence before
-    passing it to the engine. The spec bindings use the same Python resolver;
-    standalone native candidate discovery does not own Python compilation.
-    An explicit flavor remains suitable for offline emission.
+    Flavor auto-resolution parity: when ``llvm_flavor is None`` we resolve
+    the flavor in *Python* (via :func:`lower_llvm._resolve_llvm_flavor`)
+    before handing it to the engine, rather than passing ``""`` (engine
+    AUTO). The C99 engine's own AUTO resolver only consults
+    ``$ROCKE_LLVM_FLAVOR`` -> ``/opt/rocm/.info/version`` -> default
+    llvm22; it cannot portably introspect ``torch.version.hip``. The Python
+    autodetector adds the torch step in between, which is what the bundled
+    comgr actually keys off. Resolving here makes ``backend="cpp"`` pick the
+    SAME flavor as ``backend="python"`` on a torch-rocm box where
+    ``/opt/rocm`` is absent or a different vintage; without it the two
+    backends emit non-byte-identical IR unless ``ROCKE_LLVM_FLAVOR`` is
+    forced. An explicit ``llvm_flavor`` argument still overrides. On a
+    torch-less box the torch step returns ``None`` and the Python resolver
+    falls through to ``/opt/rocm`` / default exactly as the engine would,
+    so behaviour is unchanged.
 
     Raises :class:`BackendError` if the engine extension is unavailable.
     """

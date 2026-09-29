@@ -31,8 +31,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "llvm_flavor.hpp"
-
 #include <cstdlib>
 #include <cstring>
 #include <deque>
@@ -250,7 +248,7 @@ std::string appendkv_lower(const py::dict& d, const std::string& arch)
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t s2
-        = rocke_lower_kernel_to_llvm_ex(k, resolve_python_llvm_flavor(), a, &ll, err, sizeof err);
+        = rocke_lower_kernel_to_llvm_ex(k, ROCKE_LLVM_FLAVOR_AUTO, a, &ll, err, sizeof err);
     rocke_ir_builder_free(&b);
     return take_ll(s2, ll, err, "rocke_engine.fmha_appendkv_lower_llvm");
 }
@@ -318,7 +316,7 @@ std::string paged_lower(const py::dict& d, const std::string& arch)
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t s2
-        = rocke_lower_kernel_to_llvm_ex(k, resolve_python_llvm_flavor(), a, &ll, err, sizeof err);
+        = rocke_lower_kernel_to_llvm_ex(k, ROCKE_LLVM_FLAVOR_AUTO, a, &ll, err, sizeof err);
     rocke_fmha_kernel_builder_free(&kb);
     return take_ll(s2, ll, err, "rocke_engine.fmha_paged_prefill_lower_llvm");
 }
@@ -393,7 +391,7 @@ std::string varlen_lower(const py::dict& d, const std::string& arch)
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t s2
-        = rocke_lower_kernel_to_llvm_ex(k, resolve_python_llvm_flavor(), a, &ll, err, sizeof err);
+        = rocke_lower_kernel_to_llvm_ex(k, ROCKE_LLVM_FLAVOR_AUTO, a, &ll, err, sizeof err);
     rocke_fmha_kernel_builder_free(&kb);
     return take_ll(s2, ll, err, "rocke_engine.fmha_varlen_lower_llvm");
 }
@@ -457,9 +455,9 @@ std::string splitkv_lower_one(const rocke_fmha_splitkv_decode_spec_t* s, const c
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t s2 = reduce ? rocke_fmha_splitkv_decode_reduce_lower_to_llvm(
-                                     s, a, resolve_python_llvm_flavor(), &ll, err, sizeof err)
+                                     s, a, ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err)
                                : rocke_fmha_splitkv_decode_segment_lower_to_llvm(
-                                     s, a, resolve_python_llvm_flavor(), &ll, err, sizeof err);
+                                     s, a, ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     return take_ll(s2, ll, err, "rocke_engine.fmha_splitkv_decode_lower_llvm");
 }
 std::string splitkv_lower(const py::dict& d, const std::string& arch)
