@@ -225,7 +225,7 @@ namespace rocsparse
         // the matching strides, and to broadcast A or B across batches the caller
         // passes batch_stride_A == 0 or batch_stride_B == 0.
         //
-        // grid.x is clamped against the device limit (rocsparse::sddmm_grid_size_x),
+        // grid.x is clamped against the device limit (rocsparse::get_grid_size_x),
         // so one sweep of the grid covers hipGridDim_x * ROWCOLS_PER_BLOCK rows
         // (CSR) or columns (CSC). Advance the block's panel base by that stride
         // until the whole row/column range is covered. Both the base and the stride
@@ -307,7 +307,7 @@ namespace rocsparse
         static constexpr bool row_oriented = (DIRECTION == rocsparse_direction_row);
 
         // Same clamp/stride contract as the main kernel above: grid.x is sized by
-        // rocsparse::sddmm_grid_size_x and therefore capped at the device limit, so
+        // rocsparse::get_grid_size_x and therefore capped at the device limit, so
         // the block walks its group base forward by hipGridDim_x * GROUPS_PER_BLOCK
         // until every row (CSR) or column (CSC) is sampled. The base and the stride
         // involve only hipBlockIdx_x, hipGridDim_x, the M/N arguments and compile

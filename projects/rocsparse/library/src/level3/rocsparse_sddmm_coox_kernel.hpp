@@ -166,7 +166,7 @@ namespace rocsparse
         // stride; these strides are computed by the caller and passed in
         // separately here.
         //
-        // grid.x is clamped against the device limit (rocsparse::sddmm_grid_size_x),
+        // grid.x is clamped against the device limit (rocsparse::get_grid_size_x),
         // so one sweep of the grid covers hipGridDim_x * NUM_COEFF nonzeros. Advance
         // the block's coefficient base by that stride until the whole nnz range is
         // covered. Both the base and the stride involve only hipBlockIdx_x,

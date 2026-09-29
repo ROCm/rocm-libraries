@@ -25,10 +25,11 @@
 //
 // Grid clamp / grid-stride coverage for rocsparse_sddmm (AISPARSE-673).
 //
-// Every sddmm launch now sizes grid.x through rocsparse::sddmm_grid_size_x,
-// which clamps the block count against handle->properties.maxGridSize[0], and
-// every kernel behind it grid-strides over grid.x. Reaching that clamp for real
-// would need ~2.7e11 nonzeros (COO / COO AoS / ELL) or ~1.7e10 rows (CSR / CSC),
+// Every sddmm launch now sizes grid.x through rocsparse::get_grid_size_x,
+// which clamps the block count to min(handle->properties.maxGridSize[0],
+// (2^32 - 1) / blockDim.x), and every kernel behind it grid-strides over
+// grid.x. Reaching that clamp for real would need ~1.1e9 nonzeros (COO / COO
+// AoS / ELL) or ~1.3e8 rows (CSR / CSC),
 // so these tests shrink the limit on the handle instead and drive a SMALL
 // problem through the same code path. The point is that the grid is smaller than
 // the work, not that the work is large. This is the AISPARSE-699/700/702 idiom.
@@ -48,14 +49,12 @@
 // Internal handle definition, for handle->properties.maxGridSize[0].
 #include "rocsparse_handle.hpp"
 
-// The host-pure grid sizing helper under test, and the dense-sample kernel that
-// is driven directly below (library/src/level3 is on this target's include path).
+// The dense-sample kernel that is driven directly below (library/src/level3 is
+// on this target's include path).
 #include "rocsparse_sddmm_csx_kernel.hpp"
-#include "rocsparse_sddmm_grid.hpp"
 
 #include <cstdint>
 #include <gtest/gtest.h>
-#include <limits>
 #include <utility>
 #include <vector>
 
@@ -279,39 +278,6 @@ namespace
 class SddmmGridClamp : public HandleTest
 {
 };
-
-// ---------------------------------------------------------------------------
-// Host-pure grid sizing (rocsparse_sddmm_grid.hpp).
-// ---------------------------------------------------------------------------
-
-TEST(internal_level3_sddmm_grid, grid_size_is_a_ceiling_division)
-{
-    constexpr int64_t no_limit = std::numeric_limits<int32_t>::max();
-
-    EXPECT_EQ(rocsparse::sddmm_grid_size_x(1, 128, no_limit), 1);
-    EXPECT_EQ(rocsparse::sddmm_grid_size_x(128, 128, no_limit), 1);
-    EXPECT_EQ(rocsparse::sddmm_grid_size_x(129, 128, no_limit), 2);
-    EXPECT_EQ(rocsparse::sddmm_grid_size_x(256, 128, no_limit), 2);
-
-    // An empty work space keeps the historical single (fully masked) block:
-    // dim3(0) is not a launchable grid.
-    EXPECT_EQ(rocsparse::sddmm_grid_size_x(0, 128, no_limit), 1);
-}
-
-TEST(internal_level3_sddmm_grid, grid_size_is_clamped_to_the_device_limit)
-{
-    EXPECT_EQ(rocsparse::sddmm_grid_size_x(1000, 1, 10), 10);
-    EXPECT_EQ(rocsparse::sddmm_grid_size_x(1000, 1, 1000), 1000);
-    EXPECT_EQ(rocsparse::sddmm_grid_size_x(1000, 1, 2000), 1000);
-
-    // The count is formed in 64 bits, so it is the clamp that limits it rather
-    // than an overflow: 4e11 nonzeros in blocks of 128 is 3.1e9 blocks, past the limit.
-    constexpr int64_t max_grid_x = std::numeric_limits<int32_t>::max();
-    EXPECT_EQ(rocsparse::sddmm_grid_size_x(int64_t{400000000000}, 128, max_grid_x), max_grid_x);
-
-    // A degenerate limit still yields a launchable grid.
-    EXPECT_EQ(rocsparse::sddmm_grid_size_x(1000, 1, 0), 1);
-}
 
 // ---------------------------------------------------------------------------
 // End to end, all five formats, with grid.x capped below what the work needs.
