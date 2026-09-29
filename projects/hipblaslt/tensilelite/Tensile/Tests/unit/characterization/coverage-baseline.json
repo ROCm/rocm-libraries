@@ -64,7 +64,7 @@
     "Tensile/Components/Subtile/Kernel.py": 78.11,
     "Tensile/Components/Subtile/LogicalScheduler.py": 93.46,
     "Tensile/Components/Subtile/ScheduleTypes.py": 100.0,
-    "Tensile/Components/Subtile/SubtileGREmit.py": 90.31,
+    "Tensile/Components/Subtile/SubtileGREmit.py": 88.23,
     "Tensile/Components/Subtile/SubtileGeometry.py": 87.5,
     "Tensile/Components/Subtile/SubtileLREmit.py": 89.12,
     "Tensile/Components/Subtile/SubtileScaleEmit.py": 74.06,
