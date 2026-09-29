@@ -5,9 +5,14 @@
 #include <iomanip>
 #include <sstream>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace hipblaslt_jit::json
 {
+    // Ordered member names and JSON-literal values.
+    using Members = std::vector<std::pair<std::string, std::string>>;
+
     inline std::string quote(const std::string& value)
     {
         std::ostringstream out;
@@ -46,5 +51,17 @@ namespace hipblaslt_jit::json
             out += literal(value);
         }
         return out + ']';
+    }
+
+    inline std::string object(const Members& members)
+    {
+        std::string out = "{";
+        for(const auto& [name, value] : members)
+        {
+            if(out.size() > 1)
+                out += ',';
+            out += quote(name) + ':' + value;
+        }
+        return out + '}';
     }
 }

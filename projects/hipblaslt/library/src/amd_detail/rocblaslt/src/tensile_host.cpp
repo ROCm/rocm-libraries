@@ -41,8 +41,8 @@
 #include "tensile_host.hpp"
 #ifdef HIPBLASLT_ENABLE_JIT
 #include "../../hipblaslt-jit-gemm-internal.hpp"
+#include "../../hipblaslt-jit-problem-type.hpp"
 #include "../../hipblaslt-jit-tensilelite-internal.hpp"
-#include "../../hipblaslt-jit-tensilelite-predictor.hpp"
 #include "../../hipblaslt_internal.hpp"
 namespace jit = hipblaslt_ext::experimental::jit::detail;
 #endif
@@ -5977,6 +5977,14 @@ std::atomic_bool& rocblaslt_internal_tensile_is_initialized()
 CREATECOMPATIBILITYFUNCTION(rocblaslt::RocTuningV2)
 
 #ifdef HIPBLASLT_ENABLE_JIT
+namespace hipblaslt_jit
+{
+    TensileLite::ContractionProblemGemm lowerForJit(const jit::GemmRequest& request)
+    {
+        return ConstructTensileProblem(request.problem);
+    }
+}
+
 namespace hipblaslt_ext::experimental::jit::tensilelite::detail
 {
     namespace
@@ -6015,19 +6023,6 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
                            : HIPBLAS_STATUS_EXECUTION_FAILED;
             }
         };
-    }
-
-    PredictionPlan planGemm(const jit::detail::GemmRequest& request,
-                            const jit::detail::Target&      target,
-                            const Options&                  options)
-    {
-        auto problem = ConstructTensileProblem(request.problem);
-        const auto hardware = TensileLite::hip::GetDevice(target.properties, target.device);
-        return predictGemmPlan(problem,
-                               *hardware,
-                               options,
-                               rocblaslt_scaling_format_to_string(request.problem.scaleAType),
-                               rocblaslt_scaling_format_to_string(request.problem.scaleBType));
     }
 
     hipblasStatus_t Bundle::support(const jit::detail::OperationRequest& operation,

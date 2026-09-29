@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "hipblaslt-jit-problem-type.hpp"
-#include "hipblaslt-jit-json.hpp"
 #include <Tensile/ContractionProblem.hpp>
 #include <stdexcept>
 
@@ -51,13 +50,12 @@ namespace hipblaslt_jit
         return gemm;
     }
 
-    std::vector<std::pair<std::string, std::string>>
-        problemTypeFields(const TensileLite::ContractionProblemGemm& problem)
+    json::Members problemTypeFields(const TensileLite::ContractionProblemGemm& problem)
     {
         using json::literal;
         using Type      = rocisa::DataType;
-        const auto gemm = canonicalGemm(problem);
-        std::vector<std::pair<std::string, std::string>> fields{
+        const auto    gemm = canonicalGemm(problem);
+        json::Members fields{
             {"OperationType", json::quote("GEMM")},
             {"Batched", literal(true)},
             {"StridedBatched", literal(true)},

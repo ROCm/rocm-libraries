@@ -126,6 +126,9 @@ namespace hipblaslt_jit
             = 0;
     };
 
+    std::shared_ptr<const Predictor>       makeOrigamiPredictor();
+    std::shared_ptr<const TuningKnowledge> makeTensileLiteDefaults();
+
     // A code object the backend has already built.
     struct BuildUnit
     {

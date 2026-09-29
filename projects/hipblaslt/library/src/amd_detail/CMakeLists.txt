@@ -17,7 +17,8 @@ if(HIPBLASLT_ENABLE_JIT)
     target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_JIT)
     target_sources(hipblaslt PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-tensilelite.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-tensilelite-predictor.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-tensilelite-defaults.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-origami-predictor.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-problem-type.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-component.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-gemm.cpp"

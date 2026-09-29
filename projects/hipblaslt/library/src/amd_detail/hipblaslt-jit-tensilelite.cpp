@@ -1,24 +1,30 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "hipblaslt-jit-component.hpp"
+#include "hipblaslt-jit-problem-type.hpp"
 #include "hipblaslt-jit-process.hpp"
 #include "hipblaslt-jit-tensilelite-artifacts.hpp"
 #include "hipblaslt-jit-tensilelite-internal.hpp"
-#include "hipblaslt-jit-tensilelite-predictor.hpp"
 #include "hipblaslt-jit-tensilelite.hpp"
 #include "hipblaslt_internal.hpp"
 #include "rocblaslt-functions.h"
 #include "rocblaslt.h"
 #include "tensile_host.hpp"
+#include "utility.hpp"
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <algorithm>
+#include <array>
+#include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <hipblaslt/hipblaslt-ext.hpp>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -137,6 +143,90 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                                          + request.logPath.u8string());
             }
         }
+
+        void requireRequest(bool condition, const std::string& message)
+        {
+            require(condition, "JIT GEMM prediction: " + message);
+        }
+
+        void writeFresh(const std::string& path, const std::string& contents)
+        {
+            const auto native = fs::u8path(path);
+#ifdef _WIN32
+            FILE* file = _wfopen(native.c_str(), L"wbx");
+#else
+            FILE* file = std::fopen(native.c_str(), "wbx");
+#endif
+            requireRequest(file, "cannot create " + path + ": " + std::strerror(errno));
+            const bool written
+                = std::fwrite(contents.data(), 1, contents.size(), file) == contents.size();
+            const int closed = std::fclose(file);
+            requireRequest(written && closed == 0, "cannot write request " + path);
+        }
+
+        // Writes <output>.request.json, the Tensile.JitGemm input, and returns its path.
+        std::string writeJitGemmRequest(const jit::detail::GemmRequest& request,
+                                        const Options&                  options,
+                                        const hipblaslt_jit::Prediction& prediction)
+        {
+            namespace json     = hipblaslt_jit::json;
+            const auto problem = hipblaslt_jit::lowerForJit(request);
+            const auto gemm    = hipblaslt_jit::canonicalGemm(problem);
+            const std::string output = fs::absolute(fs::u8path(options.outputPath)).u8string();
+            requireRequest(!fs::exists(fs::u8path(output))
+                               && !fs::exists(fs::u8path(output + ".yaml"))
+                               && !fs::exists(fs::u8path(output + ".prediction.json")),
+                           "output artifacts already exist");
+            const auto members = [](const std::vector<hipblaslt_jit::TuningParameter>& values) {
+                json::Members result;
+                for(const auto& value : values)
+                    result.emplace_back(value.name, value.json);
+                return json::object(result);
+            };
+            std::ostringstream out;
+            out << std::setprecision(17) << std::boolalpha;
+            out << "{\n\"schema_version\":1,\"modeled_contract\":" << json::quote(prediction.modeledContract)
+                << ",\"model\":" << json::quote(prediction.model)
+                << ",\"architecture\":" << json::quote(options.architecture)
+                << ",\"problem_type\":" << json::object(hipblaslt_jit::problemTypeFields(problem))
+                << ",\"problem\":{\"m\":" << gemm.m << ",\"n\":" << gemm.n << ",\"k\":" << gemm.k
+                << ",\"batch\":" << gemm.batch << ",\"transpose_a\":" << gemm.transA
+                << ",\"transpose_b\":" << gemm.transB << ",\"c_equals_d\":" << problem.cEqualsD()
+                << ",\"num_cus\":" << static_cast<size_t>(problem.getParams().smCountTarget());
+            if(problem.mxBlockA() || problem.mxBlockB())
+                out << ",\"scale_mode_a\":"
+                    << json::quote(rocblaslt_scaling_format_to_string(request.problem.scaleAType))
+                    << ",\"scale_mode_b\":"
+                    << json::quote(rocblaslt_scaling_format_to_string(request.problem.scaleBType));
+            const std::array<const TensileLite::TensorDescriptor*, 4> tensors{
+                &problem.a(), &problem.b(), &problem.c(), &problem.d()};
+            for(size_t i = 0; i != tensors.size(); ++i)
+                out << ",\"strides_" << char('a' + i) << "\":" << json::array(tensors[i]->strides())
+                    << ",\"sizes_" << char('a' + i) << "\":" << json::array(tensors[i]->sizes());
+            for(const auto& entry : {std::make_pair("mxsa", &problem.mxsa()),
+                                     std::make_pair("mxsb", &problem.mxsb())})
+            {
+                if(entry.second->empty())
+                    continue;
+                out << ",\"strides_" << entry.first << "\":"
+                    << json::array(entry.second->strides()) << ",\"sizes_" << entry.first
+                    << "\":" << json::array(entry.second->sizes());
+            }
+            out << "},\"hardware\":" << members(prediction.hardware)
+                << ",\"model_assumptions\":" << members(prediction.assumptions) << ",\"candidates\":[";
+            for(size_t i = 0; i != prediction.ranked.size(); ++i)
+            {
+                const auto& candidate = prediction.ranked[i];
+                out << (i ? "," : "") << "{\"id\":" << candidate.id
+                    << ",\"predicted_cycles\":" << candidate.predictedCycles
+                    << ",\"parameters\":" << members(candidate.parameters)
+                    << ",\"modeled\":" << members(candidate.modeled) << '}';
+            }
+            out << "]}\n";
+            const auto path = output + ".request.json";
+            writeFresh(path, out.str());
+            return path;
+        }
     }
 
     namespace
@@ -205,9 +295,13 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
 
         struct Provider final : jit::detail::BackendImplementation
         {
-            Options options;
+            Options                                               options;
+            std::shared_ptr<const hipblaslt_jit::Predictor>       predictor;
+            std::shared_ptr<const hipblaslt_jit::TuningKnowledge> knowledge;
             explicit Provider(const Options& value)
                 : options(value)
+                , predictor(hipblaslt_jit::makeOrigamiPredictor())
+                , knowledge(hipblaslt_jit::makeTensileLiteDefaults())
             {
             }
             std::string_view name() const noexcept override
@@ -239,15 +333,29 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                 }
                 try
                 {
-                    const bool             predict = configured.configPath.empty();
-                    detail::PredictionPlan plan;
+                    const bool  predict = configured.configPath.empty();
+                    std::string summary;
                     if(predict)
                     {
-                        plan = detail::planGemm(
+                        hipblaslt_jit::DeviceTarget device;
+                        auto status = hipblaslt_jit::DeviceTarget::make(target.device, device);
+                        hipblaslt_jit::Prediction prediction;
+                        if(status.ok())
+                            status = predictor->predict(request, device, *knowledge, prediction);
+                        if(!status.ok())
+                        {
+                            diagnostics.message = status.message;
+                            return status.code == hipblaslt_jit::Status::Code::NotSupported
+                                       ? HIPBLAS_STATUS_NOT_SUPPORTED
+                                       : HIPBLAS_STATUS_INTERNAL_ERROR;
+                        }
+                        configured.configPath = writeJitGemmRequest(
                             static_cast<const jit::detail::GemmRequest&>(request),
-                            target,
-                            configured);
-                        configured.configPath = plan.requestPath;
+                            configured,
+                            prediction);
+                        summary = "Origami ranked " + std::to_string(prediction.ranked.size())
+                                  + " parameter candidates; the first candidate accepted by "
+                                    "TensileLite was compiled";
                     }
                     generate(configured, predict ? "Tensile.JitGemm" : "Tensile.SingleSolution");
                     auto candidate
@@ -259,7 +367,7 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                     {
                         bundle = std::move(candidate);
                         if(predict)
-                            diagnostics.message = plan.summary;
+                            diagnostics.message = summary;
                     }
                     return status;
                 }
