@@ -106,3 +106,73 @@ TEST(HWModel, ConfiguredPassContextCachesMatchingModel) {
     ctx.setGemmTileConfig(cfg);
     EXPECT_EQ(&ctx.getHWModel(), &hwModelForArch(kGfx1250));
 }
+
+// ---------------------------------------------------------------------------
+// ds issue cost vs resident waves. A ds_load's ISA issue cost is quoted for one
+// wave; the issue pipe is shared, so resident waves round-robin it and a single
+// wave's issues are spaced out by however many share its pipe.
+// ---------------------------------------------------------------------------
+
+// gfx1250's pipe-sharing is temporarily disabled (wavesPerDsIssuePipe = 1, see
+// HWModel.cpp) after real-hardware measurement found it cost f8_tn_medium
+// ~17.5% and mxf4_tn_medium ~12.3% throughput. The tests below that exercise
+// the sharing math re-enable it on a local copy of the model, so the model
+// logic stays covered independent of whether the arch currently applies it.
+TEST(HWModelDsIssue, PipeSharingIsTemporarilyDisabled) {
+    const HWModel& hw = hwModelForArch({12, 5, 0});
+    EXPECT_EQ(hw.lds.wavesPerDsIssuePipe, 1)
+        << "re-enable only after hardware re-validation (see HWModel.cpp)";
+}
+
+TEST(HWModelDsIssue, SingleWaveKeepsTheIsaCost) {
+    const HWModel& hw = hwModelForArch({12, 5, 0});
+    EXPECT_EQ(dsIssueCyclesForWaves(hw, /*issueCycles=*/1, /*numWaves=*/1), 1);
+}
+
+TEST(HWModelDsIssue, FourWavesRunAsPairsSoTheCostDoubles) {
+    HWModel hw = hwModelForArch({12, 5, 0});
+    hw.lds.wavesPerDsIssuePipe = 2;  // re-enable for this test; see HWModel.cpp
+    // 4 waves over a 2-wave pipe is 2-2: a wave contends with one partner, not
+    // with all three others, so the cost saturates at the share rather than
+    // scaling with the wave count.
+    EXPECT_EQ(dsIssueCyclesForWaves(hw, /*issueCycles=*/1, /*numWaves=*/4), 2);
+    EXPECT_EQ(dsIssueCyclesForWaves(hw, /*issueCycles=*/1, /*numWaves=*/8), 2);
+}
+
+TEST(HWModelDsIssue, TwoWavesAreAssumedPaired) {
+    HWModel hw = hwModelForArch({12, 5, 0});
+    hw.lds.wavesPerDsIssuePipe = 2;  // re-enable for this test; see HWModel.cpp
+    // UNVERIFIED on hardware: the conservative reading is that two waves share
+    // one pipe. If they turn out to land on separate pipes this becomes 1, and
+    // this test is the one to flip.
+    EXPECT_EQ(dsIssueCyclesForWaves(hw, /*issueCycles=*/1, /*numWaves=*/2), 2);
+}
+
+TEST(HWModelDsIssue, NonsenseWaveCountFallsBackToTheIsaCost) {
+    const HWModel& hw = hwModelForArch({12, 5, 0});
+    // GemmTileConfig::NumWaves defaults to 1, so this is not the unconfigured
+    // path -- it guards a caller that passes something meaningless.
+    EXPECT_EQ(dsIssueCyclesForWaves(hw, /*issueCycles=*/1, /*numWaves=*/0), 1);
+    EXPECT_EQ(dsIssueCyclesForWaves(hw, /*issueCycles=*/4, /*numWaves=*/-3), 4);
+}
+
+TEST(HWModelDsIssue, DefaultConfigIsSingleWave) {
+    const HWModel& hw = hwModelForArch({12, 5, 0});
+    const GemmTileConfig defaults;
+    EXPECT_EQ(defaults.NumWaves, 1u) << "a default config must mean one wave, not a sentinel";
+    EXPECT_EQ(dsIssueCyclesForWaves(hw, /*issueCycles=*/1, static_cast<int>(defaults.NumWaves)), 1);
+    EXPECT_EQ(defaults.TileA0, 0u) << "0 is not a valid tile, so it marks an unset config";
+}
+
+TEST(HWModelDsIssue, ScalesAMultiCycleIssueCost) {
+    HWModel hw = hwModelForArch({12, 5, 0});
+    hw.lds.wavesPerDsIssuePipe = 2;  // re-enable for this test; see HWModel.cpp
+    EXPECT_EQ(dsIssueCyclesForWaves(hw, /*issueCycles=*/4, /*numWaves=*/4), 8);
+}
+
+TEST(HWModelDsIssue, UnmodelledShareIsInert) {
+    HWModel hw = hwModelForArch({12, 5, 0});
+    hw.lds.wavesPerDsIssuePipe = 0;
+    EXPECT_EQ(dsIssueCyclesForWaves(hw, /*issueCycles=*/1, /*numWaves=*/4), 1)
+        << "an arch that does not model pipe sharing must keep the ISA cost";
+}

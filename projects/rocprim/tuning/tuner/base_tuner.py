@@ -442,7 +442,6 @@ class BaseTuner(ABC):
     def _get_cache_file_path(self, key_type: str, value_type: str | None = None):
         "Return the path of the cache file"
         return self.output_dir / self._get_cache_file_name(key_type, value_type)
-
     def _get_key_type_name(self) -> str:
         return "key_type"
 
