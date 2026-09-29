@@ -12,6 +12,9 @@ using namespace hipdnn_gpu_ref;
 using namespace gpu_rmsnorm_ref_test;
 using namespace gpu_rmsnorm_bwd_ref_test;
 
+using HalfType = hipdnn_data_sdk::types::half;
+using BFloat16Type = hipdnn_data_sdk::types::bfloat16;
+
 TEST(TestGpuRMSNormBwdRefValidation, AcceptsValidParams3D)
 {
     SKIP_IF_NO_DEVICES();
@@ -429,55 +432,57 @@ TEST(TestGpuRMSNormBwdRefMixedType, FloatInputHalfScale)
 
     Tensor<float> dyTensor({2, 3, 4, 4});
     Tensor<float> xTensor({2, 3, 4, 4});
-    Tensor<half> scaleTensor({1, 3, 4, 4});
+    Tensor<HalfType> scaleTensor({1, 3, 4, 4});
     Tensor<double> invRmsTensor({2, 1, 1, 1});
     Tensor<float> dxCpu({2, 3, 4, 4});
     Tensor<float> dxGpu({2, 3, 4, 4});
-    Tensor<half> dscaleCpu({1, 3, 4, 4});
-    Tensor<half> dscaleGpu({1, 3, 4, 4});
+    Tensor<HalfType> dscaleCpu({1, 3, 4, 4});
+    Tensor<HalfType> dscaleGpu({1, 3, 4, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    dyTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
-    scaleTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed + 2);
-    invRmsTensor.fillWithRandomValues(0.1, 2.0, seed + 3);
+    fillWithRandomValues(dyTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(
+        scaleTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed + 2);
+    fillWithRandomValues(invRmsTensor, 0.1, 2.0, seed + 3);
 
-    CpuFpReferenceRMSNorm::backward<float, float, half, float, double>(
+    CpuFpReferenceRMSNorm::backward<float, float, HalfType, float, double>(
         dyTensor, xTensor, scaleTensor, invRmsTensor, dxCpu, dscaleCpu);
 
-    GpuFpReferenceRMSNorm::bprop<float, float, half, float, double>(
+    GpuFpReferenceRMSNorm::bprop<float, float, HalfType, float, double>(
         dyTensor, xTensor, scaleTensor, invRmsTensor, dxGpu, dscaleGpu);
 
     assertAllClose(dxCpu, dxGpu, getTolerance<float>());
-    assertAllClose(dscaleCpu, dscaleGpu, getTolerance<half>());
+    assertAllClose(dscaleCpu, dscaleGpu, getTolerance<HalfType>());
 }
 
 TEST(TestGpuRMSNormBwdRefMixedType, HalfInputFloatScale)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<half> dyTensor({2, 3, 4, 4});
-    Tensor<half> xTensor({2, 3, 4, 4});
+    Tensor<HalfType> dyTensor({2, 3, 4, 4});
+    Tensor<HalfType> xTensor({2, 3, 4, 4});
     Tensor<float> scaleTensor({1, 3, 4, 4});
     Tensor<double> invRmsTensor({2, 1, 1, 1});
-    Tensor<half> dxCpu({2, 3, 4, 4});
-    Tensor<half> dxGpu({2, 3, 4, 4});
+    Tensor<HalfType> dxCpu({2, 3, 4, 4});
+    Tensor<HalfType> dxGpu({2, 3, 4, 4});
     Tensor<float> dscaleCpu({1, 3, 4, 4});
     Tensor<float> dscaleGpu({1, 3, 4, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    dyTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed);
-    xTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed + 1);
-    scaleTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 2);
-    invRmsTensor.fillWithRandomValues(0.1, 2.0, seed + 3);
+    fillWithRandomValues(dyTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed);
+    fillWithRandomValues(
+        xTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed + 1);
+    fillWithRandomValues(scaleTensor, -1.0f, 1.0f, seed + 2);
+    fillWithRandomValues(invRmsTensor, 0.1, 2.0, seed + 3);
 
-    CpuFpReferenceRMSNorm::backward<half, half, float, half, double>(
+    CpuFpReferenceRMSNorm::backward<HalfType, HalfType, float, HalfType, double>(
         dyTensor, xTensor, scaleTensor, invRmsTensor, dxCpu, dscaleCpu);
 
-    GpuFpReferenceRMSNorm::bprop<half, half, float, half, double>(
+    GpuFpReferenceRMSNorm::bprop<HalfType, HalfType, float, HalfType, double>(
         dyTensor, xTensor, scaleTensor, invRmsTensor, dxGpu, dscaleGpu);
 
-    assertAllClose(dxCpu, dxGpu, getTolerance<half>());
+    assertAllClose(dxCpu, dxGpu, getTolerance<HalfType>());
     assertAllClose(dscaleCpu, dscaleGpu, getTolerance<float>());
 }
 
@@ -485,88 +490,93 @@ TEST(TestGpuRMSNormBwdRefMixedType, HalfInputHalfScale)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<half> dyTensor({2, 3, 4, 4});
-    Tensor<half> xTensor({2, 3, 4, 4});
-    Tensor<half> scaleTensor({1, 3, 4, 4});
+    Tensor<HalfType> dyTensor({2, 3, 4, 4});
+    Tensor<HalfType> xTensor({2, 3, 4, 4});
+    Tensor<HalfType> scaleTensor({1, 3, 4, 4});
     Tensor<double> invRmsTensor({2, 1, 1, 1});
-    Tensor<half> dxCpu({2, 3, 4, 4});
-    Tensor<half> dxGpu({2, 3, 4, 4});
-    Tensor<half> dscaleCpu({1, 3, 4, 4});
-    Tensor<half> dscaleGpu({1, 3, 4, 4});
+    Tensor<HalfType> dxCpu({2, 3, 4, 4});
+    Tensor<HalfType> dxGpu({2, 3, 4, 4});
+    Tensor<HalfType> dscaleCpu({1, 3, 4, 4});
+    Tensor<HalfType> dscaleGpu({1, 3, 4, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    dyTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed);
-    xTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed + 1);
-    scaleTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed + 2);
-    invRmsTensor.fillWithRandomValues(0.1, 2.0, seed + 3);
+    fillWithRandomValues(dyTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed);
+    fillWithRandomValues(
+        xTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed + 1);
+    fillWithRandomValues(
+        scaleTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed + 2);
+    fillWithRandomValues(invRmsTensor, 0.1, 2.0, seed + 3);
 
-    CpuFpReferenceRMSNorm::backward<half>(
+    CpuFpReferenceRMSNorm::backward<HalfType>(
         dyTensor, xTensor, scaleTensor, invRmsTensor, dxCpu, dscaleCpu);
-    GpuFpReferenceRMSNorm::bprop<half>(
+    GpuFpReferenceRMSNorm::bprop<HalfType>(
         dyTensor, xTensor, scaleTensor, invRmsTensor, dxGpu, dscaleGpu);
 
-    assertAllClose(dxCpu, dxGpu, getTolerance<half>());
-    assertAllClose(dscaleCpu, dscaleGpu, getTolerance<half>());
+    assertAllClose(dxCpu, dxGpu, getTolerance<HalfType>());
+    assertAllClose(dscaleCpu, dscaleGpu, getTolerance<HalfType>());
 }
 
 TEST(TestGpuRMSNormBwdRefMixedType, BfloatInputFloatGradInput)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<bfloat16> dyTensor({2, 3, 4, 4});
-    Tensor<bfloat16> xTensor({2, 3, 4, 4});
-    Tensor<bfloat16> scaleTensor({1, 3, 4, 4});
+    Tensor<BFloat16Type> dyTensor({2, 3, 4, 4});
+    Tensor<BFloat16Type> xTensor({2, 3, 4, 4});
+    Tensor<BFloat16Type> scaleTensor({1, 3, 4, 4});
     Tensor<double> invRmsTensor({2, 1, 1, 1});
     Tensor<float> dxCpu({2, 3, 4, 4});
     Tensor<float> dxGpu({2, 3, 4, 4});
-    Tensor<bfloat16> dscaleCpu({1, 3, 4, 4});
-    Tensor<bfloat16> dscaleGpu({1, 3, 4, 4});
+    Tensor<BFloat16Type> dscaleCpu({1, 3, 4, 4});
+    Tensor<BFloat16Type> dscaleGpu({1, 3, 4, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    dyTensor.fillWithRandomValues(static_cast<bfloat16>(-1.0f), static_cast<bfloat16>(1.0f), seed);
-    xTensor.fillWithRandomValues(
-        static_cast<bfloat16>(-1.0f), static_cast<bfloat16>(1.0f), seed + 1);
-    scaleTensor.fillWithRandomValues(
-        static_cast<bfloat16>(-1.0f), static_cast<bfloat16>(1.0f), seed + 2);
-    invRmsTensor.fillWithRandomValues(0.1, 2.0, seed + 3);
+    fillWithRandomValues(
+        dyTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed);
+    fillWithRandomValues(
+        xTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed + 1);
+    fillWithRandomValues(
+        scaleTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed + 2);
+    fillWithRandomValues(invRmsTensor, 0.1, 2.0, seed + 3);
 
-    CpuFpReferenceRMSNorm::backward<bfloat16, bfloat16, bfloat16, float, double>(
+    CpuFpReferenceRMSNorm::backward<BFloat16Type, BFloat16Type, BFloat16Type, float, double>(
         dyTensor, xTensor, scaleTensor, invRmsTensor, dxCpu, dscaleCpu);
 
-    GpuFpReferenceRMSNorm::bprop<bfloat16, bfloat16, bfloat16, float, double>(
+    GpuFpReferenceRMSNorm::bprop<BFloat16Type, BFloat16Type, BFloat16Type, float, double>(
         dyTensor, xTensor, scaleTensor, invRmsTensor, dxGpu, dscaleGpu);
 
     assertAllClose(dxCpu, dxGpu, getTolerance<float>());
-    assertAllClose(dscaleCpu, dscaleGpu, getTolerance<bfloat16>());
+    assertAllClose(dscaleCpu, dscaleGpu, getTolerance<BFloat16Type>());
 }
 
 TEST(TestGpuRMSNormBwdRefMixedType, BfloatInputHalfScale)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<bfloat16> dyTensor({2, 3, 4, 4});
-    Tensor<bfloat16> xTensor({2, 3, 4, 4});
-    Tensor<half> scaleTensor({1, 3, 4, 4});
+    Tensor<BFloat16Type> dyTensor({2, 3, 4, 4});
+    Tensor<BFloat16Type> xTensor({2, 3, 4, 4});
+    Tensor<HalfType> scaleTensor({1, 3, 4, 4});
     Tensor<double> invRmsTensor({2, 1, 1, 1});
-    Tensor<bfloat16> dxCpu({2, 3, 4, 4});
-    Tensor<bfloat16> dxGpu({2, 3, 4, 4});
-    Tensor<half> dscaleCpu({1, 3, 4, 4});
-    Tensor<half> dscaleGpu({1, 3, 4, 4});
+    Tensor<BFloat16Type> dxCpu({2, 3, 4, 4});
+    Tensor<BFloat16Type> dxGpu({2, 3, 4, 4});
+    Tensor<HalfType> dscaleCpu({1, 3, 4, 4});
+    Tensor<HalfType> dscaleGpu({1, 3, 4, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    dyTensor.fillWithRandomValues(static_cast<bfloat16>(-1.0f), static_cast<bfloat16>(1.0f), seed);
-    xTensor.fillWithRandomValues(
-        static_cast<bfloat16>(-1.0f), static_cast<bfloat16>(1.0f), seed + 1);
-    scaleTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed + 2);
-    invRmsTensor.fillWithRandomValues(0.1, 2.0, seed + 3);
+    fillWithRandomValues(
+        dyTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed);
+    fillWithRandomValues(
+        xTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed + 1);
+    fillWithRandomValues(
+        scaleTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed + 2);
+    fillWithRandomValues(invRmsTensor, 0.1, 2.0, seed + 3);
 
-    CpuFpReferenceRMSNorm::backward<bfloat16, bfloat16, half, bfloat16, double>(
+    CpuFpReferenceRMSNorm::backward<BFloat16Type, BFloat16Type, HalfType, BFloat16Type, double>(
         dyTensor, xTensor, scaleTensor, invRmsTensor, dxCpu, dscaleCpu);
-    GpuFpReferenceRMSNorm::bprop<bfloat16, bfloat16, half, bfloat16, double>(
+    GpuFpReferenceRMSNorm::bprop<BFloat16Type, BFloat16Type, HalfType, BFloat16Type, double>(
         dyTensor, xTensor, scaleTensor, invRmsTensor, dxGpu, dscaleGpu);
 
-    assertAllClose(dxCpu, dxGpu, getTolerance<bfloat16>());
-    assertAllClose(dscaleCpu, dscaleGpu, getTolerance<half>());
+    assertAllClose(dxCpu, dxGpu, getTolerance<BFloat16Type>());
+    assertAllClose(dscaleCpu, dscaleGpu, getTolerance<HalfType>());
 }
 
 // --- Optional argument tests ---
@@ -587,10 +597,10 @@ TEST(TestGpuRMSNormBwdRefOptionalArgs, WithBias)
     Tensor<float> dbiasGpu({1, 3, 4, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    dyTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
-    scaleTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 2);
-    invRmsTensor.fillWithRandomValues(0.1, 2.0, seed + 3);
+    fillWithRandomValues(dyTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(scaleTensor, -1.0f, 1.0f, seed + 2);
+    fillWithRandomValues(invRmsTensor, 0.1, 2.0, seed + 3);
 
     CpuFpReferenceRMSNorm::backward<float>(
         dyTensor, xTensor, scaleTensor, invRmsTensor, dxCpu, dscaleCpu, &dbiasCpu);
@@ -616,10 +626,10 @@ TEST(TestGpuRMSNormBwdRefOptionalArgs, WithoutBias)
     Tensor<float> dscaleGpu({1, 3, 4, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    dyTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
-    scaleTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 2);
-    invRmsTensor.fillWithRandomValues(0.1, 2.0, seed + 3);
+    fillWithRandomValues(dyTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(scaleTensor, -1.0f, 1.0f, seed + 2);
+    fillWithRandomValues(invRmsTensor, 0.1, 2.0, seed + 3);
 
     CpuFpReferenceRMSNorm::backward<float>(
         dyTensor, xTensor, scaleTensor, invRmsTensor, dxCpu, dscaleCpu);
@@ -645,10 +655,10 @@ TEST(TestGpuRMSNormBwdRefChannelLast, MatchesCpuRef)
     Tensor<float> dscaleGpu({1, 4, 8, 8}, TensorLayout::NHWC);
 
     const unsigned int seed = getGlobalTestSeed();
-    dyTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
-    scaleTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 2);
-    invRmsTensor.fillWithRandomValues(0.1, 2.0, seed + 3);
+    fillWithRandomValues(dyTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(scaleTensor, -1.0f, 1.0f, seed + 2);
+    fillWithRandomValues(invRmsTensor, 0.1, 2.0, seed + 3);
 
     CpuFpReferenceRMSNorm::backward<float>(
         dyTensor, xTensor, scaleTensor, invRmsTensor, dxCpu, dscaleCpu);
@@ -674,10 +684,10 @@ TEST(TestGpuRMSNormBwdRefChannelLast, MatchesCpuRefWithBias)
     Tensor<float> dbiasGpu({1, 4, 8, 8}, TensorLayout::NHWC);
 
     const unsigned int seed = getGlobalTestSeed();
-    dyTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
-    scaleTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 2);
-    invRmsTensor.fillWithRandomValues(0.1, 2.0, seed + 3);
+    fillWithRandomValues(dyTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(scaleTensor, -1.0f, 1.0f, seed + 2);
+    fillWithRandomValues(invRmsTensor, 0.1, 2.0, seed + 3);
 
     CpuFpReferenceRMSNorm::backward<float>(
         dyTensor, xTensor, scaleTensor, invRmsTensor, dxCpu, dscaleCpu, &dbiasCpu);
@@ -692,11 +702,11 @@ TEST(TestGpuRMSNormBwdRefChannelLast, MatchesCpuRefWithBias)
 // --- Test suite instantiations ---
 
 using TestGpuRMSNormBwdRef4DFp32 = RMSNormBwdShapeSuite<float>;
-using TestGpuRMSNormBwdRef4DFp16 = RMSNormBwdShapeSuite<half>;
-using TestGpuRMSNormBwdRef4DBfp16 = RMSNormBwdShapeSuite<bfloat16>;
+using TestGpuRMSNormBwdRef4DFp16 = RMSNormBwdShapeSuite<HalfType>;
+using TestGpuRMSNormBwdRef4DBfp16 = RMSNormBwdShapeSuite<BFloat16Type>;
 using TestGpuRMSNormBwdRef5DFp32 = RMSNormBwdShapeSuite<float>;
-using TestGpuRMSNormBwdRef5DFp16 = RMSNormBwdShapeSuite<half>;
-using TestGpuRMSNormBwdRef5DBfp16 = RMSNormBwdShapeSuite<bfloat16>;
+using TestGpuRMSNormBwdRef5DFp16 = RMSNormBwdShapeSuite<HalfType>;
+using TestGpuRMSNormBwdRef5DBfp16 = RMSNormBwdShapeSuite<BFloat16Type>;
 
 TEST_P(TestGpuRMSNormBwdRef4DFp32, MatchesCpuRef)
 {
@@ -998,10 +1008,10 @@ TEST(TestGpuRMSNormBwdRefEdgeCaseValidation, DISABLED_BeyondInt32InnerSizeIfMemo
     }
 
     const unsigned int seed = getGlobalTestSeed();
-    dy.fillWithRandomValues(-1.0f, 1.0f, seed);
-    x.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
-    scale.fillWithRandomValues(-1.0f, 1.0f, seed + 2);
-    invRms.fillWithRandomValues(1e-5, 1.0, seed + 3);
+    fillWithRandomValues(dy, -1.0f, 1.0f, seed);
+    fillWithRandomValues(x, -1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(scale, -1.0f, 1.0f, seed + 2);
+    fillWithRandomValues(invRms, 1e-5, 1.0, seed + 3);
 
     CpuFpReferenceRMSNorm::backward<float, float, float, float, double>(
         dy, x, scale, invRms, dxCpu, dscaleCpu, nullptr);
