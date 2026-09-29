@@ -43,7 +43,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [64, 128]
         - WavefrontSize: [32]
-        - ScheduleIterAlg: [4]
+        - ScheduleIterAlg: [3]
         - TransposeLDS: [-1]
         - SourceSwap: [False]
         - ExpandPointerSwap: [True]

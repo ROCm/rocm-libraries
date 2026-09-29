@@ -53,6 +53,9 @@
  * auto-allocated in Tensile
  *        `_initKernel`. -1 = not reserved / pass no-ops (also -1 for Stream-K /
  * non-gfx1250).
+ * @note TimePasses: print a per-pass wall-time report to stderr after the
+ * pipeline runs (Tensile `StinkyTofuTimePasses`, stinkytofu-opt
+ * `--time-passes`).
  */
 #define MODULE_OPTIONS_LIST(X)                    \
     X(DebugLevel, int)                            \
@@ -80,6 +83,7 @@
     X(DebugPass, std::string)                     \
     X(PassOrderSnapshotJson, std::string)         \
     X(VerifyEach, bool)                           \
+    X(TimePasses, bool)                           \
     X(EnableRemarks, bool)                        \
     X(EnableWaitCntInsertion, bool)               \
     X(EnableLoopCarriedTokenDeps, bool)           \
@@ -113,11 +117,12 @@
 // knobs via SchedulingKnobHeuristics before DAG scheduling / cluster-barrier
 // insertion (user value wins; degenerate main-loop IR falls back to today's
 // static HW/CDNA5/Rule3 defaults). See SchedulingKnobHeuristics.hpp.
-#define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)       \
-    X(DsReadThrottleTransitionFactor, double, 1.0) \
-    X(DsReadThrottleTransitionEntries, int, 0)     \
-    X(DsReadThrottleLatency, int, -1)              \
-    X(DsReadPerWmma, int, -1)                      \
+#define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                          \
+    X(DsReadThrottleTransitionFactor, double, 1.0)                    \
+    X(DsReadThrottleTransitionEntries, int, 0)                        \
+    X(DsReadThrottleLatency, int, -1)                                 \
+    X(DsReadPerCap, int, -1)                                          \
+    X(DsReadPerWmma, int, -1) /* deprecated alias for DsReadPerCap */ \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)
 
 namespace stinkytofu {

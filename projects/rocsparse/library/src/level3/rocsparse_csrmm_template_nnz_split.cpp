@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "csrmm/nnz_split/kernel_declarations.h"
@@ -146,7 +147,7 @@ namespace rocsparse
 #define LAUNCH_CSRMMNN_NNZ_SPLIT_MAIN_KERNEL(CSRMMNT_DIM, WF_SIZE)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                   \
         (rocsparse::csrmmnn_nnz_split_main_kernel<CSRMMNT_DIM, WF_SIZE>), \
-        dim3(grid_x, get_batch_grid_size<J>(batch_count_C)),              \
+        dim3(grid_x, get_grid_size_y<J>(handle, batch_count_C)),          \
         dim3(CSRMMNT_DIM),                                                \
         0,                                                                \
         handle->stream,                                                   \
@@ -181,7 +182,7 @@ namespace rocsparse
 #define LAUNCH_CSRMMNN_NNZ_SPLIT_REMAINDER_KERNEL(CSRMMNT_DIM, WF_SIZE)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                        \
         (rocsparse::csrmmnn_nnz_split_remainder_kernel<CSRMMNT_DIM, WF_SIZE>), \
-        dim3(grid_x, get_batch_grid_size<J>(batch_count_C)),                   \
+        dim3(grid_x, get_grid_size_y<J>(handle, batch_count_C)),               \
         dim3(CSRMMNT_DIM),                                                     \
         0,                                                                     \
         handle->stream,                                                        \
@@ -332,7 +333,7 @@ namespace rocsparse
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::csrmmnn_general_block_reduce<1024>),
-            dim3(reduce_grid_x, get_batch_grid_size<J>(batch_count_C)),
+            dim3(reduce_grid_x, get_grid_size_y<J>(handle, batch_count_C)),
             dim3(1024),
             0,
             handle->stream,
@@ -353,7 +354,7 @@ namespace rocsparse
 #define LAUNCH_CSRMMNT_NNZ_SPLIT_MAIN_KERNEL(CSRMMNT_DIM, WF_SIZE, LOOPS)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                          \
         (rocsparse::csrmmnt_nnz_split_main_kernel<CSRMMNT_DIM, WF_SIZE, LOOPS>), \
-        dim3(grid_x, get_batch_grid_size<J>(batch_count_C)),                     \
+        dim3(grid_x, get_grid_size_y<J>(handle, batch_count_C)),                 \
         dim3(CSRMMNT_DIM),                                                       \
         0,                                                                       \
         handle->stream,                                                          \
@@ -385,7 +386,7 @@ namespace rocsparse
 #define LAUNCH_CSRMMNT_NNZ_SPLIT_REMAINDER_KERNEL(CSRMMNT_DIM, WF_SIZE)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                        \
         (rocsparse::csrmmnt_nnz_split_remainder_kernel<CSRMMNT_DIM, WF_SIZE>), \
-        dim3(grid_x, get_batch_grid_size<J>(batch_count_C)),                   \
+        dim3(grid_x, get_grid_size_y<J>(handle, batch_count_C)),               \
         dim3(CSRMMNT_DIM),                                                     \
         0,                                                                     \
         handle->stream,                                                        \
