@@ -297,7 +297,7 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
     precedence over the positional ``problem_index``.
     """
     import rocisa  # noqa: F401  (ensures the singleton module is importable here)
-    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.tensilelite_create_library.run import generateKernelObjectsFromSolutions
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
@@ -338,7 +338,7 @@ def _emit_one(kwa, kernel, splitGSU, canonical):
     ``_prepare_kernel`` (sets BaseName), and ``canonicalize_asm`` so the emitted
     text matches the logic-driven harness exactly.
     """
-    from tensilelite.TensileCreateLibrary.Run import processKernelSource
+    from tensilelite.tensilelite_create_library.run import processKernelSource
 
     ri = _ch._init_rocisa_for(kernel)
     data = ri.getData()

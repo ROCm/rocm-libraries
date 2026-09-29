@@ -1,9 +1,9 @@
 ################################################################################
-# Characterization tests for tensilelite.TensileLogic — ParseArguments + small bits.
+# Characterization tests for tensilelite.tensilelite_logic — ParseArguments + small bits.
 #
-# ADD-ONLY. TensileLogic/Run._runChecks/_setup/main are the validation driver
-# (resistance). This pins TensileLogic/ParseArguments.parseArguments, the Check
-# NamedTuple, _progress_loop's stop path, and the TensileCreateLibrary/__main__
+# ADD-ONLY. tensilelite_logic/run._runChecks/_setup/main are the validation driver
+# (resistance). This pins tensilelite_logic/parse_arguments.parseArguments, the Check
+# NamedTuple, _progress_loop's stop path, and the tensilelite_create_library/__main__
 # import shim.
 ################################################################################
 import importlib
@@ -14,8 +14,8 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-PA = importlib.import_module("tensilelite.TensileLogic.ParseArguments")
-RUN = importlib.import_module("tensilelite.TensileLogic.Run")
+PA = importlib.import_module("tensilelite.tensilelite_logic.parse_arguments")
+RUN = importlib.import_module("tensilelite.tensilelite_logic.run")
 
 
 # ---------------------------------------------------------------------------
@@ -67,8 +67,8 @@ def test_progress_loop_stops(capsys):
 
 
 # ---------------------------------------------------------------------------
-# TensileCreateLibrary/__main__ import shim
+# tensilelite_create_library/__main__ import shim
 # ---------------------------------------------------------------------------
 def test_create_library_main_import():
-    mod = importlib.import_module("tensilelite.TensileCreateLibrary.__main__")
+    mod = importlib.import_module("tensilelite.tensilelite_create_library.__main__")
     assert hasattr(mod, "run")

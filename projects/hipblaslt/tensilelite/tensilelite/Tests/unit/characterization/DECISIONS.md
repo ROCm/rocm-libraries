@@ -180,12 +180,12 @@ equivalent source forms are fenced so mutmut does not keep reporting them:
 
 **M3 — accepted equivalent mutants (expanded mutation run).** These survivors
 are behaviorally equivalent on the specific public surface under test:
-- `tensilelite.TensileLogic.ValidWorkGroupMappingXCC.x__cu_count_from_path__mutmut_9` —
+- `tensilelite.tensilelite_logic.valid_work_group_mapping_xcc.x__cu_count_from_path__mutmut_9` —
   changing `cu` to `CU` inside the regex literal is equivalent because the search
   uses `re.IGNORECASE`.
 
 Two former survivors are intentionally no longer accepted equivalents:
-`tensilelite.TensileLogic.ValidWorkGroupMappingXCC.x__validateWorkGroupMappingXCC__mutmut_14`
+`tensilelite.tensilelite_logic.valid_work_group_mapping_xcc.x__validateWorkGroupMappingXCC__mutmut_14`
 is avoided by making the missing-key / `-1` sentinel branch explicit before
 reading the fixed `WorkGroupMappingXCC` value, and
 `tensilelite.Common.Utilities.xǁSpinnyThingǁincrement__mutmut_1` is killable because
@@ -371,13 +371,13 @@ fixing-via-the-test of anything that was a real code bug.
 
 **Two were real regressions; fixed the source, not the tests/goldens:**
 
-- **`TensileLogic/HandleCustomKernel.hasCustomKernel`** — the line-scanner's
+- **`tensilelite_logic/handle_custom_kernel.hasCustomKernel`** — the line-scanner's
   marker pattern was changed from `CustomKernelName:` (legacy flat key) to
   `name:` (matching the new `CustomKernel:` mapping's nested name field), but
   `handleCustomKernel()` itself still explicitly accepts *either* shape
   (`sol["CustomKernel"]["name"]` or `sol.get("CustomKernelName", "")`). The
   narrowed scanner is reachable from a live gating call site
-  (`TensileLogic/Run.py:105`, `if check.OnlyCustomKernels and
+  (`tensilelite_logic/run.py:105`, `if check.OnlyCustomKernels and
   hasCustomKernel(file): ...`) that decides whether a logic file's solutions
   get loaded at all under `--only-custom-kernels`-style checks — so a legacy
   `CustomKernelName:`-keyed logic file would have its custom-kernel solutions
@@ -417,7 +417,7 @@ their real counterparts do:**
   **`PublicInputSurface::test_platform_*_branch_*`** — two independently
   hand-rolled fake-`args` builders (`_args()` / `_make_args()`, one using
   `SimpleNamespace`, one using `argparse.Namespace` directly) both predate the
-  new `--validate-metadata` flag (`Tensile.py`'s `argUpdatedGlobalParameters`
+  new `--validate-metadata` flag (`tensilelite.py`'s `argUpdatedGlobalParameters`
   now reads `args.ValidateMetadata`). A *real* `argparse` parser always
   supplies a `store_true` flag's default (`False`), so this can't happen
   outside a test; added `ValidateMetadata=False` to both builders. Extended

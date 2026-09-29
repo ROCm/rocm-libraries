@@ -29,7 +29,7 @@ The flag is `--cpu-only` and **requires `--gpu-targets`** (you must name the
 target arch to spoof). It is plumbed through an internal global, not the
 documented `--global-parameters` surface.
 
-- **CLI flag** — `tensilelite/Tensile.py` (`--cpu-only`, `dest="cpuOnly"`). It is
+- **CLI flag** — `tensilelite/tensilelite.py` (`--cpu-only`, `dest="cpuOnly"`). It is
   stashed into internal plumbing: `globalParameters["CpuOnly"]` and the target
   arch into `globalParameters["CpuOnlyArch"]`.
 - **Plumbing keys** — `tensilelite/Common/GlobalParameters.py` defines
@@ -41,7 +41,7 @@ documented `--global-parameters` surface.
   when `CpuOnly` is set it returns a spoofed `IsaVersion` derived from
   `gfxToIsa(CpuOnlyArch)` instead of shelling out to `amdgpu-arch` /
   `rocm_agent_enumerator`, so `detectGlobalCurrentISA` no longer raises on a
-  GPU-less host and `tensilelite.Tensile()` runs CPU-only.
+  GPU-less host and `tensilelite.tensilelite()` runs CPU-only.
 - **Device-launch stub** — `tensilelite/ClientWriter.py::runClient`: when `CpuOnly`
   is set it writes the client config / run-script as usual but skips the
   device-bound client launch and returns returncode `0`.

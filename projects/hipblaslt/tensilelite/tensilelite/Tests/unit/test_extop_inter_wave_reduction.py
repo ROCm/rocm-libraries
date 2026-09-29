@@ -18,8 +18,7 @@ from gpu_test_helpers import init_rocisa  # noqa: E402
 from tensilelite.Common.Architectures import gfxToIsa  # noqa: E402
 from tensilelite.Common.DataType import DataType  # noqa: E402
 
-import AMaxGenerator  # noqa: E402
-import LayerNormGenerator  # noqa: E402
+from tensilelite._extops import amax_generator, layer_norm_generator  # noqa: E402
 
 
 def _amax_generator():
@@ -27,7 +26,7 @@ def _amax_generator():
     isa = gfxToIsa(target)
     init_rocisa(target=target, wavesize=64)
     half = DataType("H")
-    return AMaxGenerator.AMaxKernelGenerator(
+    return amax_generator.AMaxKernelGenerator(
         i_type=half,
         o_type=half,
         scale_type=DataType("S"),
@@ -45,7 +44,7 @@ def _layer_norm_generator():
     target = "gfx90a"
     isa = gfxToIsa(target)
     init_rocisa(target=target, wavesize=64)
-    return LayerNormGenerator.LayerNormKernelGenerator(
+    return layer_norm_generator.LayerNormKernelGenerator(
         io_type=DataType("S"),
         num_workitems=256,
         num_load_count=4,

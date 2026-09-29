@@ -28,7 +28,7 @@ from textwrap import dedent, indent
 import pytest
 
 import tensilelite
-import tensilelite.TensileLogic.HandleCustomKernel as hck_mod
+import tensilelite.tensilelite_logic.handle_custom_kernel as hck_mod
 from tensilelite.AddCustomConfig import (
     _fmt_yaml_args,
     _fmt_yaml_inline,

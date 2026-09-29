@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """
-ValidCorpusConsistency
+valid_corpus_consistency
 ---
 Cross-file consistency checks for the library logic tree, run by
 ``TensileLogic --check-all`` in addition to the existing per-file/per-solution
@@ -21,7 +21,7 @@ No known-bugs / quarantine escape hatch exists for these checks (unlike the
 per-solution validators, which can accept a documented ``known_bugs.yaml``
 entry). A violation here is always a hard failure. If a future violation
 needs a documented, temporary exception, extend the known-bugs schema (see
-``KnownBugs.py``) deliberately -- do not assume one already covers these
+``known_bugs.py``) deliberately -- do not assume one already covers these
 checks.
 """
 
@@ -115,10 +115,10 @@ def _chip_id_dir_suffix(yaml_path: Path, base_arch: str) -> Optional[str]:
     ``"gfx950_id75a3"``), or ``None`` if the file lives under the bare
     ``base_arch`` directory instead (the default/fallback tree). A chip-ID
     variant's header declares the *same* ScheduleName/ArchitectureName as the
-    default tree's -- ``ValidChipId.py``'s placement rules, not header
+    default tree's -- ``valid_chip_id.py``'s placement rules, not header
     content, are what distinguish per-chip-ID logic files, so the
     sibling-DeviceNames comparison must not merge them just because their
-    headers otherwise match. Mirrors ``ValidChipId.py``'s own
+    headers otherwise match. Mirrors ``valid_chip_id.py``'s own
     ``_chipIdDirFromPath``: walk ancestors nearest-first so an outer
     ``base_arch``-named segment (e.g. an enclosing checkout path) can't
     shadow a real variant directory closer to the file."""
@@ -222,7 +222,7 @@ def find_gfx1250v0_overlay_violations(
 
     ``files`` is the same caller-selected list ``find_sibling_device_names_
     violations`` takes (the full corpus by default, or the already
-    ``--architecture``/``Experimental``-filtered set ``Run.py`` passes) --
+    ``--architecture``/``Experimental``-filtered set ``run.py`` passes) --
     both the overlay-contents and outside-overlay scans below are scoped to
     it, not a fresh unconditional walk of ``logic_root``, so an excluded
     file can't trip a violation the caller never selected. The
@@ -258,7 +258,7 @@ def find_gfx1250v0_overlay_violations(
     can still be asked to build for architecture ``gfx1250v0`` without that
     request implying its corpus owns the overlay. Only hipBLASLt's dedicated
     gfx1250v0 device-library build (see ``device-library/CMakeLists.txt``,
-    and ``--require-gfx1250v0-overlay`` in ``ParseArguments.py``) sets this
+    and ``--require-gfx1250v0-overlay`` in ``parse_arguments.py``) sets this
     ``True``.
     """
     logic_root = _resolve_corpus_root(logic_root)
@@ -362,7 +362,7 @@ def check_corpus_invariants(
 def find_chip_id_arch_lock_violations(files: Sequence[Path]) -> List[str]:
     """Lock chip-ID-aware architectures to the current, audited set
     (``gfx950`` only). ``supportsChipIdPredicate`` gates both logic-file
-    placement rules (``ValidChipId.py``) and the ``SolutionLibrary`` placeholder
+    placement rules (``valid_chip_id.py``) and the ``SolutionLibrary`` placeholder
     suffix; a new architecture silently becoming chip-ID-aware (or ``gfx950``
     silently stopping being one) needs a deliberate re-audit of both, not a
     registry edit that just happens to flip this predicate.
