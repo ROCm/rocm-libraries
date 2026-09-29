@@ -59,9 +59,12 @@ namespace rocsparse
 
         for(int64_t bid = blockIdx.x; bid < static_cast<int64_t>(block_count); bid += gridDim.x)
         {
-            // Search starting/ending coordinates of the range for this block.
-            const I diagonal0 = (I)(bid * ITEMS_PER_THREAD);
-            const I diagonal1 = rocsparse::min((I)(M + nnz), (I)((bid + 1) * ITEMS_PER_THREAD));
+            // Search starting/ending coordinates of the range for this block. The
+            // diagonals run up to M + nnz, which exceeds INT32_MAX for I = J = int32_t,
+            // so the search is done in int64_t.
+            const int64_t diagonal0 = bid * ITEMS_PER_THREAD;
+            const int64_t diagonal1
+                = rocsparse::min(static_cast<int64_t>(total_work), (bid + 1) * ITEMS_PER_THREAD);
 
             // Coordinates are computed independently for each batch because the row
             // pointer data may differ between batches (offsets_batch_stride_A != 0).
@@ -77,14 +80,14 @@ namespace rocsparse
                 merge_path_search(diagonal0,
                                   load_pointer(csr_row_ptr, batch, offsets_batch_stride_A) + 1,
                                   nnz_indices0,
-                                  I(M),
-                                  nnz,
+                                  static_cast<int64_t>(M),
+                                  static_cast<int64_t>(nnz),
                                   load_pointer(coord0, batch, coords_per_batch)[bid]);
                 merge_path_search(diagonal1,
                                   load_pointer(csr_row_ptr, batch, offsets_batch_stride_A) + 1,
                                   nnz_indices1,
-                                  I(M),
-                                  nnz,
+                                  static_cast<int64_t>(M),
+                                  static_cast<int64_t>(nnz),
                                   load_pointer(coord1, batch, coords_per_batch)[bid]);
             }
         }
@@ -469,7 +472,7 @@ namespace rocsparse
         // Compute size of dense_C for 4-argument atomic_add
         const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc);
 
-        const uint64_t total_work  = static_cast<uint64_t>(M + nnz);
+        const uint64_t total_work  = static_cast<uint64_t>(M) + nnz;
         const uint64_t block_count = (total_work - 1) / ITEMS_PER_THREAD + 1;
 
         if(bid < static_cast<int64_t>(block_count))
@@ -690,7 +693,7 @@ namespace rocsparse
         // Compute size of dense_C for 4-argument atomic_add
         const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc);
 
-        const uint64_t total_work  = static_cast<uint64_t>(M + nnz);
+        const uint64_t total_work  = static_cast<uint64_t>(M) + nnz;
         const uint64_t block_count = (total_work - 1) / ITEMS_PER_THREAD + 1;
 
         if(bid < static_cast<int64_t>(block_count))
@@ -921,7 +924,7 @@ namespace rocsparse
         // Compute size of dense_C for 4-argument atomic_add
         const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc);
 
-        const uint64_t total_work  = static_cast<uint64_t>(M + nnz);
+        const uint64_t total_work  = static_cast<uint64_t>(M) + nnz;
         const uint64_t block_count = (total_work - 1) / ITEMS_PER_THREAD + 1;
 
         if(bid < static_cast<int64_t>(block_count))

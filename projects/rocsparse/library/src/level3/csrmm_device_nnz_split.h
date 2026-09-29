@@ -397,8 +397,9 @@ namespace rocsparse
 
             // Copy data to reduction buffers
             shared_row[tid] = (idx < nblocks) ? row_block_red[idx] : -1;
-            shared_val[tid]
-                = (idx < nblocks) ? val_block_red[idx + nblocks * col] : static_cast<T>(0);
+            shared_val[tid] = (idx < nblocks)
+                                  ? val_block_red[idx + static_cast<int64_t>(nblocks) * col]
+                                  : static_cast<T>(0);
 
             __syncthreads();
 
@@ -485,7 +486,7 @@ namespace rocsparse
         // would otherwise strand the strided iterations.
         const int64_t stride = static_cast<int64_t>(BLOCKSIZE) * hipGridDim_x;
 
-        for(int64_t gid = static_cast<int64_t>(hipThreadIdx_x) + BLOCKSIZE * hipBlockIdx_x;
+        for(int64_t gid = hipThreadIdx_x + static_cast<int64_t>(BLOCKSIZE) * hipBlockIdx_x;
             gid < static_cast<int64_t>(nblocks);
             gid += stride)
         {
