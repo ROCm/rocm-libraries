@@ -33,8 +33,10 @@ from ctypes_utils import (  # noqa: E402
 )
 from gemm_utils import GemmProblem, GpuGemmRunner, expand_sweep  # noqa: E402
 
-FP32_CI = GEMM_TE_DIR / "configs" / "default_ci_config_fp32.json"
-DEFAULT_CI = GEMM_TE_DIR / "configs" / "default_ci_config.json"
+CFG_DIR = GEMM_TE_DIR / "configs"
+FP32_CI = CFG_DIR / "default_ci_config_fp32.json"
+GFX1250_FP32_CI = CFG_DIR / "default_ci_config_gfx1250_fp32.json"
+DEFAULT_CI = CFG_DIR / "default_ci_config.json"
 
 
 # ---------------------------------------------------------------- driver data
@@ -46,16 +48,25 @@ def test_fp32_is_a_dtype_choice_but_not_for_preshuffle():
 
 
 @pytest.mark.parametrize(
-    "dtype, expected", [("fp32", FP32_CI), ("fp16", DEFAULT_CI), ("bf8", DEFAULT_CI)]
+    "arch, dtype, expected",
+    [
+        ("gfx950", "fp32", FP32_CI),
+        ("gfx950", "fp16", DEFAULT_CI),
+        ("gfx950", "bf8", DEFAULT_CI),
+        # Most specific first: <arch>_<dtype>, then <arch>, then <dtype>.
+        ("gfx1250", "fp32", GFX1250_FP32_CI),
+        ("gfx1250", "fp16", CFG_DIR / "default_ci_config_gfx1250.json"),
+        ("gfx1250", "fp8", CFG_DIR / "default_ci_config_gfx1250_fp8.json"),
+    ],
 )
-def test_ci_config_selected_by_dtype(dtype, expected):
+def test_ci_config_selected_by_arch_and_dtype(arch, dtype, expected):
     args = SimpleNamespace(configs=[], variant="gemm_universal", dtype=dtype)
-    assert drv.resolve_configs(args) == [str(expected)]
+    assert drv.resolve_configs(args, arch) == [str(expected)]
 
 
 def test_explicit_configs_win_over_dtype_ci_config():
     args = SimpleNamespace(configs=["x.json"], variant="gemm_universal", dtype="fp32")
-    assert drv.resolve_configs(args) == ["x.json"]
+    assert drv.resolve_configs(args, "gfx1250") == ["x.json"]
 
 
 def test_fp32_verify_tol_catches_an_fp16_downcast():
@@ -87,6 +98,20 @@ def test_fp32_ci_config_expands_to_exactly_the_listed_warp_tiles(arch):
     cfgs = expand_sweep(str(FP32_CI), arch, dtype="fp32", layout="rcr")
     got = {(c.warp_tile_m, c.warp_tile_n, c.warp_tile_k) for c in cfgs}
     assert got == {tuple(t) for t in listed_warp_tiles(arch, "fp32")[2]}
+
+
+def test_gfx1250_fp32_ci_config_adds_a_tdm_kernel_and_keeps_the_gates():
+    cfgs = expand_sweep(str(GFX1250_FP32_CI), "gfx1250", dtype="fp32", layout="rcr")
+    assert {(c.warp_tile_m, c.warp_tile_n, c.warp_tile_k) for c in cfgs} == {
+        (16, 16, 4)
+    }
+    tdm = [c for c in cfgs if c.pipeline == "comp_tdm_v2"]
+    # comp_tdm_v2 survives only as tdm epilogue + intrawave + non-persistent.
+    assert [(c.epilogue, c.scheduler, c.persistent) for c in tdm] == [
+        ("tdm", "intrawave", False)
+    ]
+    assert all(c.epilogue != "tdm" for c in cfgs if c.pipeline != "comp_tdm_v2")
+    assert all(c.wave_m * c.wave_n * c.wave_k == 4 for c in cfgs)
 
 
 # ------------------------------------------------------------ driver main()
@@ -125,6 +150,12 @@ def test_fp32_default_run_reaches_the_build(monkeypatch, capsys):
     assert all(c.dtype_a == "fp32" for c in built[0])
     assert str(FP32_CI) in out
     assert rc == 1  # the stubbed build returns no .so
+
+
+def test_gfx1250_fp32_default_run_uses_the_arch_config(monkeypatch, capsys):
+    _, out, built = _main(monkeypatch, capsys, "--dtype", "fp32", arch="gfx1250")
+    assert str(GFX1250_FP32_CI) in out
+    assert any(c.pipeline == "comp_tdm_v2" for c in built[0])
 
 
 # ---------------------------------------------------------- GpuGemmRunner

@@ -77,10 +77,15 @@ VARIANT_CONFIGS = {
 }
 DEFAULT_VARIANT = "gemm_universal"
 
-CI_CONFIG_NAME = "default_ci_config.json"
-# A dtype whose warp tiles differ from the default CI sweep ships its own
-# ``default_ci_config_<dtype>.json`` next to it; adding one is a data-only change.
-DTYPE_CI_CONFIG_NAME = "default_ci_config_{dtype}.json"
+# CI sweep config lookup, most specific first. An arch or dtype whose warp
+# tiles or pipelines differ from the default CI sweep ships its own file next to
+# it (e.g. default_ci_config_gfx1250_fp32.json); adding one is a data-only change.
+CI_CONFIG_NAMES = (
+    "default_ci_config_{arch}_{dtype}.json",
+    "default_ci_config_{arch}.json",
+    "default_ci_config_{dtype}.json",
+    "default_ci_config.json",
+)
 EXAMPLE_PROBLEMS_NAME = "example_problems.json"
 
 # Map the driver's --variant (a configs-dir selector) onto the single codegen/
@@ -159,15 +164,14 @@ def resolve_devices(spec):
     return [spec]
 
 
-def resolve_configs(args):
+def resolve_configs(args, arch):
     """Resolve positional configs -> concrete list of config paths."""
     if args.configs:
         return args.configs
     cfg_dir = _THIS_DIR / VARIANT_CONFIGS[args.variant]
-    cfg = cfg_dir / DTYPE_CI_CONFIG_NAME.format(dtype=args.dtype)
-    if not cfg.exists():
-        cfg = cfg_dir / CI_CONFIG_NAME
-    return [str(cfg)]
+    names = [n.format(arch=arch, dtype=args.dtype) for n in CI_CONFIG_NAMES]
+    return [str(next((cfg_dir / n for n in names if (cfg_dir / n).exists()),
+                     cfg_dir / names[-1]))]
 
 
 def load_problems(path, variant):
@@ -396,7 +400,8 @@ def main():
     if args.verify_tol is None:
         args.verify_tol = VERIFY_TOL.get(args.dtype, DEFAULT_VERIFY_TOL)
 
-    config_paths = resolve_configs(args)
+    arch = _resolve_arch(args.arch)
+    config_paths = resolve_configs(args, arch)
     devices = resolve_devices(args.devices)
 
     # ========================================================================
@@ -462,7 +467,6 @@ def main():
 
     # Reject a dtype the arch cannot generate with a clear message, instead of
     # letting every config be silently dropped by the warp-tile validator.
-    arch = _resolve_arch(args.arch)
     dtype_key, table_key, warp_tiles = listed_warp_tiles(
         arch, args.dtype, variant=codegen_variant
     )
