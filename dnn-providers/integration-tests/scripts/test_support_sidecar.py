@@ -64,7 +64,7 @@ class TestFiles(unittest.TestCase):
 
     def _write(self, name: str, data: object) -> Path:
         path = self.dir / name
-        path.write_text(_dump(data), encoding="utf-8")
+        path.write_bytes(_dump(data).encode("utf-8"))
         return path
 
     def test_missing_sidecar_has_no_claims(self):
@@ -115,7 +115,7 @@ class TestFiles(unittest.TestCase):
         )
         old = load(path)
         new = {Claim("a", "E", "gfx90a", "windows"), Claim("c", "F", "gfx90a", "linux")}
-        path.write_text(render(path, old | new), encoding="utf-8")
+        path.write_bytes(render(path, old | new).encode("utf-8"))
         self.assertEqual(load(path), old | new)
         self.assertLess(old, load(path))
 
@@ -141,7 +141,7 @@ class TestFiles(unittest.TestCase):
 
     def test_refuses_a_non_canonical_file(self):
         path = self.dir / "X.support.json"
-        path.write_text('{"version": 1, "claims": {}}\n', encoding="utf-8")
+        path.write_bytes(b'{"version": 1, "claims": {}}\n')
         with self.assertRaises(SidecarError):
             load(path)
 

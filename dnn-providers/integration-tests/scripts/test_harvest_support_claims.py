@@ -713,7 +713,7 @@ class TestWrite(unittest.TestCase):
 
     def test_without_write_names_the_changes_and_writes_nothing(self) -> None:
         old = {self._claim("2_8_3_3_fp16_nchw")}
-        self.sweep.write_text(render(self.sweep, old), encoding="utf-8")
+        self.sweep.write_bytes(render(self.sweep, old).encode("utf-8"))
         code, err = self._main(*self._LANE)
         self.assertEqual(code, 0)
         self.assertIn(f"would change {self._rel(self.sweep)} (+1)\n", err)
@@ -727,7 +727,7 @@ class TestWrite(unittest.TestCase):
             Claim("x", "MIOPEN_ENGINE", "gfx942", "linux"),
             Claim("2_8_3_3_fp16_nchw", "OTHER_ENGINE", "gfx1030", "windows"),
         }
-        self.sweep.write_text(render(self.sweep, old), encoding="utf-8")
+        self.sweep.write_bytes(render(self.sweep, old).encode("utf-8"))
         # Develop has one of the old claims: the sidecar is ahead, not behind.
         develop = {Claim("x", "MIOPEN_ENGINE", "gfx942", "linux")}
         self.git.develop = {self._rel(self.sweep): render(self.sweep, develop)}
@@ -794,12 +794,12 @@ class TestWrite(unittest.TestCase):
 
     def test_refused_sidecar_writes_nothing(self) -> None:
         text = '{"version": 1, "claims": {}}\n'
-        self.single.write_text(text, encoding="utf-8")
+        self.single.write_bytes(text.encode("utf-8"))
         code, err = self._main(*self._WRITE)
         self.assertEqual(code, 1)
         self.assertIn("not in the form this writer renders; wrote nothing", err)
         self.assertFalse(self.sweep.exists())
-        self.assertEqual(self.single.read_text("utf-8"), text)
+        self.assertEqual(self.single.read_bytes(), text.encode("utf-8"))
 
     def test_missing_bundle_writes_nothing(self) -> None:
         (self.root / _SINGLE).unlink()
