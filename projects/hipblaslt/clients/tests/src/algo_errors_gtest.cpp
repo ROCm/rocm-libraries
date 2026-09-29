@@ -113,4 +113,26 @@ namespace
                   HIPBLAS_STATUS_INVALID_VALUE);
         EXPECT_EQ(returned, 0);
     }
+
+    TEST_F(AlgoErrors, smoke_MatmulRejectsUnknownIndex)
+    {
+        const hipblasLtMatmulAlgo_t algo = algoWithUnknownIndex();
+        EXPECT_NE(hipblasLtMatmul(handle,
+                                  desc,
+                                  &alpha,
+                                  a,
+                                  layout,
+                                  b,
+                                  layout,
+                                  &beta,
+                                  c,
+                                  layout,
+                                  d,
+                                  layout,
+                                  &algo,
+                                  nullptr,
+                                  0,
+                                  nullptr),
+                  HIPBLAS_STATUS_SUCCESS);
+    }
 } // namespace
