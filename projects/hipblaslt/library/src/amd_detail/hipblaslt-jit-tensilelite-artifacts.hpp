@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <map>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -14,66 +14,10 @@
 namespace hipblaslt_ext::experimental::jit::tensilelite::detail::artifacts
 {
     namespace fs = std::filesystem;
-    using Tree   = std::map<std::string, std::string>;
     inline void require(bool condition, const std::string& message)
     {
         if(!condition)
             throw std::runtime_error(message);
-    }
-    inline uint32_t readCount(std::istream& input)
-    {
-        unsigned char bytes[4];
-        require(bool(input.read(reinterpret_cast<char*>(bytes), 4)), "Truncated loader envelope");
-        return uint32_t(bytes[0]) | uint32_t(bytes[1]) << 8 | uint32_t(bytes[2]) << 16
-               | uint32_t(bytes[3]) << 24;
-    }
-
-    inline std::string readString(std::istream& input)
-    {
-        auto size = readCount(input);
-        require(size > 0 && size <= 1048576, "Invalid loader field length");
-        std::string value(size, '\0');
-        require(bool(input.read(value.data(), size)) && value.find('\0') == std::string::npos,
-                "Invalid or truncated loader field");
-        return value;
-    }
-
-    inline Tree readEnvelope(const fs::path& path, std::vector<std::string>& objects)
-    {
-        require(fs::file_size(path) <= 16 * 1024 * 1024, "Loader envelope is too large");
-        std::ifstream input(path, std::ios::binary);
-        char          magic[8];
-        require(bool(input.read(magic, 8)) && std::string(magic, 8) == "TLJIT001",
-                "Unsupported loader envelope version");
-        const char* fields[] = {"schema_version",
-                                "counts.solutions",
-                                "counts.main_kernels",
-                                "solution.index",
-                                "main_kernel.name",
-                                "solution.kernel_name",
-                                "solution.name",
-                                "architecture.requested",
-                                "architecture.resolved",
-                                "architecture.compiler_target",
-                                "library.format",
-                                "main_kernel.code_object",
-                                "library.path",
-                                "library.logical_path"};
-        require(readCount(input) == std::size(fields), "Invalid loader field count");
-        Tree tree;
-        for(auto name : fields)
-            tree.emplace(name, readString(input));
-        auto count = readCount(input);
-        require(count > 0 && count <= 4096, "Invalid loader code object count");
-        for(uint32_t i = 0; i < count; ++i)
-            objects.push_back(readString(input));
-        require(input.peek() == std::char_traits<char>::eof(), "Trailing loader envelope data");
-        return tree;
-    }
-
-    inline const std::string& field(const Tree& tree, const char* name)
-    {
-        return tree.at(name);
     }
 
     inline fs::path artifact(const fs::path& bundle, const std::string& name, bool mustExist = true)
@@ -148,4 +92,60 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail::artifacts
         return decoded;
     }
 
+    struct SourceFile
+    {
+        std::string          name;
+        std::vector<uint8_t> bytes;
+    };
+
+    // The build inputs of a TensileLite source bundle, found by directory
+    // convention: library/TensileLibrary.* is the solution library entry,
+    // sources/*.s are the main kernels, sources/Kernels.cpp holds the helper
+    // kernels, and every other file in sources/ is a header they include.
+    struct SourceBundle
+    {
+        std::vector<uint8_t>    library; // decoded
+        std::vector<SourceFile> assembly; // by name
+        std::vector<SourceFile> helpers;
+        std::vector<SourceFile> headers; // by name
+    };
+
+    inline SourceBundle readSourceBundle(const fs::path& bundle)
+    {
+        constexpr size_t fileLimit = 1024, byteLimit = 256 * 1024 * 1024;
+        SourceBundle     result;
+        std::vector<fs::path> libraries;
+        for(const char* name : {"library/TensileLibrary.dat.zlib",
+                                "library/TensileLibrary.dat",
+                                "library/TensileLibrary.yaml"})
+            if(fs::exists(bundle / name))
+                libraries.push_back(artifact(bundle, name));
+        require(libraries.size() == 1,
+                "Expected one solution library in " + (bundle / "library").u8string());
+        result.library = readLibrary(libraries.front());
+
+        const auto sources = artifact(bundle, "sources", false);
+        require(fs::is_directory(sources), "Missing source directory: " + sources.u8string());
+        std::vector<std::string> names;
+        for(const auto& entry : fs::directory_iterator(sources))
+        {
+            require(names.size() < fileLimit, "Too many files in " + sources.u8string());
+            names.push_back(entry.path().filename().u8string());
+            require(entry.is_regular_file(), "Unexpected source entry: " + names.back());
+        }
+        std::sort(names.begin(), names.end());
+        size_t total = 0;
+        for(const auto& name : names)
+        {
+            SourceFile file{name, readArtifact(artifact(bundle, "sources/" + name))};
+            total += file.bytes.size();
+            require(total <= byteLimit, "Source bundle is too large: " + sources.u8string());
+            auto& files = fs::u8path(name).extension() == ".s" ? result.assembly
+                          : name == "Kernels.cpp"             ? result.helpers
+                                                              : result.headers;
+            files.push_back(std::move(file));
+        }
+        require(!result.assembly.empty(), "No main kernel assembly in " + sources.u8string());
+        return result;
+    }
 }

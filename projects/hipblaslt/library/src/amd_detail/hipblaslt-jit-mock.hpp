@@ -4,8 +4,9 @@
 
 #include "hipblaslt-jit.hpp"
 
-// Not installed. An in-process backend for JIT tests: it replays one bundle that
-// Tensile.SingleSolution wrote, without running a generator.
+// Not installed. An in-process backend for JIT tests: it replays one source
+// bundle that Tensile.SingleSolution or Tensile.JitGemm wrote, without running a
+// generator; the solution is still built with comgr.
 namespace hipblaslt_ext::experimental::jit::mock
 {
     struct Options
@@ -15,7 +16,7 @@ namespace hipblaslt_ext::experimental::jit::mock
         {
             None,
             Generate, // generation fails
-            Build, // the main code object is truncated, so building fails
+            Build, // the main kernel's source does not assemble
             Trap, // any generation aborts the process
         } fault = Fault::None;
     };

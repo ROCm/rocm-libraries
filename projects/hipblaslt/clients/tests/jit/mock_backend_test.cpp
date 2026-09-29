@@ -41,6 +41,23 @@ namespace
 #define HIP(expression) hip((expression), #expression)
 #define BLAS(expression) blas((expression), #expression)
 
+    // Reads "<key>": "<value>" from the "solution" object of the replayed
+    // bundle's provenance manifest, which the backend itself never reads.
+    std::string solutionField(const std::string& bundle, const std::string& key)
+    {
+        namespace artifacts = jit::tensilelite::detail::artifacts;
+        const auto bytes    = artifacts::readArtifact(
+            artifacts::artifact(std::filesystem::u8path(bundle), "manifest.json"));
+        const std::string manifest(bytes.begin(), bytes.end());
+        const auto        object = manifest.find("\"solution\": {");
+        const auto        end    = manifest.find('}', object);
+        const auto        start  = manifest.find("\"" + key + "\": \"", object);
+        require(object != std::string::npos && start < end,
+                "The replay manifest records no solution " + key);
+        const auto value = start + key.size() + 5;
+        return manifest.substr(value, manifest.find('"', value) - value);
+    }
+
     // The splitk-api replay: FP16 NN GEMM with FP32 compute and GlobalSplitU=4.
     constexpr int M = 256, N = 128, K = 512;
 
@@ -250,11 +267,8 @@ namespace
     {
         int device = -1;
         HIP(hipGetDevice(&device));
-        std::vector<std::string> objects;
-        const auto               envelope = jit::tensilelite::detail::artifacts::readEnvelope(
-            std::filesystem::u8path(replay) / "loader.bin", objects);
-        const auto kernelName   = envelope.at("main_kernel.name");
-        const auto solutionName = envelope.at("solution.name");
+        const auto kernelName   = solutionField(replay, "kernel_name");
+        const auto solutionName = solutionField(replay, "name");
         Problem    p;
 
         float alpha = 1.25f, beta = 0.5f;
@@ -508,7 +522,7 @@ namespace
 
         const std::pair<mock::Options::Fault, const char*> faults[]
             = {{mock::Options::Fault::Generate, "Mock generation fault"},
-               {mock::Options::Fault::Build, "is not an ELF file"}};
+               {mock::Options::Fault::Build, "comgr could not assemble"}};
         for(const auto& [fault, message] : faults)
         {
             const auto status = jit::getJitAlgo(

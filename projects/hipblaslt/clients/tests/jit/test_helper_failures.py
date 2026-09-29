@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Check public C/C++ GEMM helper failures before submission and state publication.
 
-Run with the existing venv after a source-built split-K bundle is available.
+Run with the existing venv after a split-K source bundle is available.
 The API test's --expect-helper-failure mode checks D/workspace sentinels and that
 failed reinitialization leaves the prior extension algorithm runnable.
 """
@@ -11,68 +11,39 @@ import argparse
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 
 
-def write_generator(path, source, case, readobj):
+def write_generator(path, source, case):
     path.write_text(
         f"#!{sys.executable}\n"
-        "import json, pathlib, shutil, struct, subprocess, sys, yaml\n"
+        "import json, pathlib, re, shutil, sys\n"
         f"source = pathlib.Path({str(source)!r})\n"
         f"case = {case!r}\n"
-        f"readobj = {readobj!r}\n"
         "bundle = pathlib.Path(sys.argv[4]) / 'bundle'\n"
         "shutil.copytree(source, bundle)\n"
-        "manifest = bundle / 'manifest.json'\n"
-        "data = json.loads(manifest.read_text())\n"
-        "main = data['main_kernel']['code_object']\n"
-        "helpers = [name for name in data['code_objects'] if name != main]\n"
-        "assert helpers, 'Expected a helper-inclusive split-K source bundle'\n"
+        "data = json.loads((bundle / 'manifest.json').read_text())\n"
+        "main = data['sources'][0]\n"
+        "helpers = [bundle / 'sources/Kernels.cpp', bundle / 'sources/Kernels.h']\n"
+        "assert helpers[0].is_file(), 'Expected a helper-inclusive split-K source bundle'\n"
         "changed = []\n"
-        "if case == 'unlisted-helper-modules':\n"
-        "    for name in helpers:\n"
-        "        (bundle / name).unlink()\n"
-        "        changed.append(name)\n"
-        "    data['code_objects'] = [main]\n"
-        "    data['helpers'] = []\n"
-        "    data['counts']['helper_generators'] = 0\n"
-        "    data['counts']['support_generators'] = 0\n"
+        "if case == 'missing-helper-source':\n"
+        "    helpers[0].unlink()\n"
+        "    changed.append('sources/Kernels.cpp')\n"
         "elif case == 'missing-helper-symbols':\n"
-        "    for relative in helpers:\n"
-        "        path = bundle / relative\n"
-        "        notes = subprocess.check_output([readobj, '--notes', str(path)], text=True)\n"
-        "        metadata = yaml.safe_load(notes.split('AMDGPU Metadata: ', 1)[1]"
-        ".split('...', 1)[0])\n"
-        "        content = path.read_bytes()\n"
-        "        for kernel in sorted(metadata.get('amdhsa.kernels', []),"
-        " key=lambda item: len(item['.name']), reverse=True):\n"
-        "            name = kernel['.name'].encode()\n"
-        "            assert name in content\n"
-        "            content = content.replace(name, b'X' + name[1:])\n"
-        "            changed.append(kernel['.name'])\n"
-        "        path.write_bytes(content)\n"
+        "    changed = re.findall(r'__global__ void (\\w+)\\(', helpers[0].read_text())\n"
+        "    for path in helpers:\n"
+        "        text = path.read_text()\n"
+        "        for name in changed:\n"
+        "            text = re.sub(r'\\b' + name + r'\\b', 'X' + name[1:], text)\n"
+        "        path.write_text(text)\n"
         "    assert changed, 'No helper entry points mutated'\n"
         "else:\n"
         "    assert case == 'valid'\n"
         "assert (bundle / main).read_bytes() == (source / main).read_bytes()\n"
         "assert (bundle / data['library']['path']).read_bytes() == "
         "(source / data['library']['path']).read_bytes()\n"
-        "loader = bundle / 'loader.bin'\n"
-        "raw = loader.read_bytes()\n"
-        "assert raw[:8] == b'TLJIT001'\n"
-        "count = struct.unpack_from('<I', raw, 8)[0]\n"
-        "offset = 12\n"
-        "for _ in range(count):\n"
-        "    length = struct.unpack_from('<I', raw, offset)[0]\n"
-        "    offset += 4 + length\n"
-        "encoded = raw[:offset] + struct.pack('<I', len(data['code_objects']))\n"
-        "for name in data['code_objects']:\n"
-        "    value = name.encode('utf-8')\n"
-        "    encoded += struct.pack('<I', len(value)) + value\n"
-        "loader.write_bytes(encoded)\n"
-        "manifest.write_text(json.dumps(data, indent=2) + '\\n')\n"
         "(bundle.parent / 'mutation.json').write_text(json.dumps("
         "dict(case=case, changed=changed, main_unchanged=True, library_unchanged=True), indent=2))\n"
     )
@@ -91,10 +62,7 @@ def main():
     parser.add_argument("--m", type=int, default=256)
     parser.add_argument("--n", type=int, default=128)
     parser.add_argument("--k", type=int, default=512)
-    parser.add_argument("--readobj", default=shutil.which("llvm-readobj"))
     args = parser.parse_args()
-    if not args.readobj:
-        parser.error("llvm-readobj is required for helper-symbol mutation")
     source = args.bundle.resolve(strict=True)
     manifest = json.loads((source / "manifest.json").read_text())
     if manifest["counts"]["helper_generators"] < 1:
@@ -109,11 +77,11 @@ def main():
         PYTHONDONTWRITEBYTECODE="1",
     )
     valid = output / "valid-generator"
-    write_generator(valid, source, "valid", args.readobj)
+    write_generator(valid, source, "valid")
     results = []
-    for case in ("unlisted-helper-modules", "missing-helper-symbols"):
+    for case in ("missing-helper-source", "missing-helper-symbols"):
         damaged = output / (case + "-generator")
-        write_generator(damaged, source, case, args.readobj)
+        write_generator(damaged, source, case)
         command = [
             str(args.executable.resolve(strict=True)),
             str(valid),

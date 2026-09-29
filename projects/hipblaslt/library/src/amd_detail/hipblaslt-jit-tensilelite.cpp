@@ -4,14 +4,12 @@
 #include "hipblaslt-jit-loader.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
 #include "hipblaslt-jit-process.hpp"
-#include "hipblaslt-jit-tensilelite-artifacts.hpp"
 #include "hipblaslt-jit-tensilelite.hpp"
 #include "hipblaslt_internal.hpp"
 #include "rocblaslt-functions.h"
 #include "rocblaslt.h"
 #include "tensile_host.hpp"
 #include "utility.hpp"
-#include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>
@@ -26,7 +24,6 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
-#include <map>
 #include <mutex>
 #include <random>
 #include <set>
@@ -39,20 +36,12 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
     namespace
     {
         namespace fs = std::filesystem;
-        using Tree   = std::map<std::string, std::string>;
-        using Master = TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>;
 
         void require(bool condition, const std::string& message)
         {
             if(!condition)
                 throw std::runtime_error(message);
         }
-
-        using detail::artifacts::artifact;
-        using detail::artifacts::field;
-        using detail::artifacts::readArtifact;
-        using detail::artifacts::readEnvelope;
-        using detail::artifacts::readLibrary;
 
         bool targetMatchesDevice(const std::string& target, const std::string& device)
         {
@@ -73,7 +62,7 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
             return true;
         }
 
-        void runGenerator(const Options& options, const char* module)
+        void runGenerator(const Options& options, const char* module, int codeObjectVersion)
         {
             require(!options.pythonExecutable.empty() && !options.tensileSourceDirectory.empty()
                         && !options.configPath.empty() && !options.outputPath.empty()
@@ -97,8 +86,9 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                    options.architecture,
                    "--cxx-compiler",
                    toolPath(options.cxxCompiler),
-                   "--offload-bundler",
-                   toolPath(options.offloadBundler),
+                   "--source-only",
+                   "--code-object-version",
+                   std::to_string(codeObjectVersion),
                    "--library-format",
 #ifdef TENSILE_YAML
                    "yaml"
@@ -158,9 +148,11 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
         }
 
         // Writes <output>.request.json, the Tensile.JitGemm input, and returns its path.
-        std::string writeJitGemmRequest(const jit::detail::GemmRequest& request,
-                                        const Options&                  options,
-                                        const hipblaslt_jit::Prediction& prediction)
+        std::string writeJitGemmRequest(const jit::detail::GemmRequest&  request,
+                                        const Options&                   options,
+                                        const hipblaslt_jit::Prediction& prediction,
+                                        size_t                           count,
+                                        const std::vector<std::string>&  excludeKernels)
         {
             namespace json     = hipblaslt_jit::json;
             const auto problem = hipblaslt_jit::lowerForJit(request);
@@ -215,7 +207,18 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                     << ",\"parameters\":" << members(candidate.parameters)
                     << ",\"modeled\":" << members(candidate.modeled) << '}';
             }
-            out << "]}\n";
+            out << ']';
+            count = std::min(count, prediction.ranked.size());
+            if(count > 1)
+                out << ",\"requested_solutions\":" << count;
+            if(!excludeKernels.empty())
+            {
+                out << ",\"exclude_kernel_names\":[";
+                for(size_t i = 0; i != excludeKernels.size(); ++i)
+                    out << (i ? "," : "") << json::quote(excludeKernels[i]);
+                out << ']';
+            }
+            out << "}\n";
             const auto path = output + ".request.json";
             writeFresh(path, out.str());
             return path;
@@ -224,64 +227,36 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
 
     namespace
     {
-        // Reads the TLJIT001 bundle the generator wrote as a library entry plus
-        // prebuilt code objects.
-        hipblaslt_jit::GeneratedSolution readGeneratedSolution(const Options&     options,
-                                                               const std::string& deviceTarget)
+        // Reads the generator's source bundles, best first: <output>/bundle-<rank>
+        // from Tensile.JitGemm, or <output>/bundle from Tensile.SingleSolution.
+        std::vector<hipblaslt_jit::GeneratedSolution>
+            readGeneratedSolutions(const Options&                  options,
+                                   bool                            ranked,
+                                   size_t                          count,
+                                   const std::vector<std::string>& excludeKernels)
         {
-            using hipblaslt_jit::BuildUnit;
-            hipblaslt_jit::GeneratedSolution result;
-            const auto bundle = fs::canonical(fs::u8path(options.outputPath) / "bundle");
-            std::vector<std::string> objectList;
-            const auto               tree = readEnvelope(bundle / "loader.bin", objectList);
-            require(field(tree, "schema_version") == "2" && field(tree, "counts.solutions") == "1"
-                        && field(tree, "counts.main_kernels") == "1"
-                        && field(tree, "solution.index") == "0",
-                    "Unsupported single-solution manifest schema/counts/index");
-            result.kernelName = field(tree, "main_kernel.name");
-            require(result.kernelName == field(tree, "solution.kernel_name"),
-                    "Manifest kernel names disagree");
-            require(field(tree, "architecture.requested") == options.architecture,
-                    "Bundle architecture differs from request");
-            require(targetMatchesDevice(field(tree, "architecture.resolved"), deviceTarget)
-                        && field(tree, "architecture.compiler_target")
-                               == field(tree, "architecture.resolved"),
-                    "Bundle architecture does not match device");
-#ifdef TENSILE_YAML
-            require(field(tree, "library.format") == "yaml", "Expected YAML library");
-#else
-            require(field(tree, "library.format") == "msgpack", "Expected MessagePack library");
-#endif
-            const auto codeObject = artifact(bundle, field(tree, "main_kernel.code_object"));
-            std::set<fs::path> codeObjects;
-            for(const auto& item : objectList)
-                require(codeObjects.insert(artifact(bundle, item)).second,
-                        "Duplicate code object artifact");
-            require(codeObjects.count(codeObject) == 1,
-                    "Main code object missing from code_objects");
-            const auto physicalLibrary = artifact(bundle, field(tree, "library.path"));
-            const auto logicalLibrary
-                = artifact(bundle, field(tree, "library.logical_path"), false);
-            require(physicalLibrary == logicalLibrary
-                        || physicalLibrary == fs::path(logicalLibrary).concat(".zlib"),
-                    "Manifest physical and logical library paths disagree");
-            result.entry = readLibrary(physicalLibrary);
-            const auto library
-                = std::dynamic_pointer_cast<Master>(
-                    TensileLite::LoadLibraryData<TensileLite::ContractionProblemGemm>(
-                        result.entry));
-            require(library && library->solutions.size() == 1 && library->solutions.count(0),
-                    "Expected a non-lazy library containing only local solution 0");
-            auto solution = library->solutions.at(0);
-            require(solution && solution->index == 0 && solution->kernelName == result.kernelName
-                        && solution->solutionName == field(tree, "solution.name"),
-                    "Library solution identity does not match manifest");
-            for(const auto& path : codeObjects)
-                result.units.push_back({path == codeObject ? BuildUnit::Role::Main
-                                                           : BuildUnit::Role::Helper,
-                                        path.filename().u8string(),
-                                        readArtifact(path)});
-            return result;
+            const auto            output = fs::u8path(options.outputPath);
+            std::vector<fs::path> bundles;
+            if(!ranked)
+                bundles.push_back(output / "bundle");
+            for(size_t rank = 0; ranked && rank < count; ++rank)
+            {
+                auto bundle = output / ("bundle-" + std::to_string(rank));
+                if(!fs::exists(bundle))
+                    break;
+                bundles.push_back(std::move(bundle));
+            }
+            require(!bundles.empty(), "The generator published no bundle in " + output.u8string());
+            std::vector<hipblaslt_jit::GeneratedSolution> solutions;
+            for(const auto& bundle : bundles)
+            {
+                auto solution = hipblaslt_jit::readTensileSourceBundle(bundle);
+                if(std::find(excludeKernels.begin(), excludeKernels.end(), solution.kernelName)
+                   == excludeKernels.end())
+                    solutions.push_back(std::move(solution));
+            }
+            require(!solutions.empty(), "Every generated kernel is excluded");
+            return solutions;
         }
 
         using hipblaslt_jit::Stage;
@@ -320,19 +295,30 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                             "Requested TensileLite architecture does not match device"};
                 try
                 {
+                    if(request.prediction)
+                        configured.configPath = writeJitGemmRequest(*gemm,
+                                                                    configured,
+                                                                    *request.prediction,
+                                                                    request.count,
+                                                                    request.excludeKernels);
+                    runGenerator(configured,
+                                 request.prediction ? "Tensile.JitGemm" : "Tensile.SingleSolution",
+                                 request.codeObjectVersion);
+                    solutions = readGeneratedSolutions(configured,
+                                                       request.prediction != nullptr,
+                                                       request.count,
+                                                       request.excludeKernels);
                     std::string summary;
                     if(request.prediction)
-                    {
-                        configured.configPath
-                            = writeJitGemmRequest(*gemm, configured, *request.prediction);
                         summary = "Origami ranked "
                                   + std::to_string(request.prediction->ranked.size())
-                                  + " parameter candidates; the first candidate accepted by "
-                                    "TensileLite was compiled";
-                    }
-                    runGenerator(configured,
-                                 request.prediction ? "Tensile.JitGemm" : "Tensile.SingleSolution");
-                    solutions.push_back(readGeneratedSolution(configured, request.target.targetId));
+                                  + " parameter candidates; "
+                                  + (solutions.size() == 1
+                                         ? std::string("the first candidate accepted by "
+                                                       "TensileLite was compiled")
+                                         : "the first " + std::to_string(solutions.size())
+                                               + " candidates accepted by TensileLite were "
+                                                 "compiled");
                     return {Status::Code::Success, Stage::Generate, std::move(summary)};
                 }
                 catch(const std::bad_alloc&)
@@ -374,7 +360,7 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                     std::make_shared<const TensileLiteBackend>(options),
                     hipblaslt_jit::makeOrigamiPredictor(),
                     hipblaslt_jit::makeTensileLiteDefaults(),
-                    hipblaslt_jit::makePrebuiltBuilder(),
+                    hipblaslt_jit::makeComgrBuilder(),
                     hipblaslt_jit::makeTensileLoader(),
                     nullptr}));
             return HIPBLAS_STATUS_SUCCESS;

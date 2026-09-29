@@ -25,20 +25,17 @@ void reject(const std::function<void()>& f)
     }
     check(failed, "Malformed artifact was accepted");
 }
-void number(std::string& output, uint32_t value)
-{
-    for(int i = 0; i < 4; ++i)
-        output.push_back(static_cast<char>(value >> (8 * i)));
-}
-void string(std::string& output, const std::string& value)
-{
-    number(output, value.size());
-    output += value;
-}
 void write(const fs::path& path, const std::string& bytes)
 {
     std::ofstream file(path, std::ios::binary);
     check(bool(file.write(bytes.data(), bytes.size())), "Cannot write fixture");
+}
+std::vector<std::string> names(const std::vector<a::SourceFile>& files)
+{
+    std::vector<std::string> result;
+    for(const auto& file : files)
+        result.push_back(file.name);
+    return result;
 }
 
 int main(int argc, char** argv)
@@ -47,61 +44,6 @@ try
     check(argc == 2, "Usage: artifact-test NEW_DIRECTORY");
     const auto root = fs::u8path(argv[1]);
     check(fs::create_directory(root), "Fixture directory already exists");
-    const auto  file  = root / fs::u8path("loader space π.bin");
-    std::string valid = "TLJIT001";
-    number(valid, 14);
-    const std::vector<std::string> fields = {"2",
-                                             "1",
-                                             "1",
-                                             "0",
-                                             "main",
-                                             "main",
-                                             "solution",
-                                             "gfx950",
-                                             "gfx950",
-                                             "gfx950",
-                                             "msgpack",
-                                             "main.co",
-                                             "library.dat.zlib",
-                                             "library.dat"};
-    for(const auto& value : fields)
-        string(valid, value);
-    number(valid, 2);
-    string(valid, "main.co");
-    string(valid, "helper.hsaco");
-    auto read = [&] {
-        std::vector<std::string> objects;
-        const auto               tree = a::readEnvelope(file, objects);
-        check(tree.at("solution.name") == "solution", "Envelope field ordering changed");
-        check(objects == std::vector<std::string>({"main.co", "helper.hsaco"}),
-              "Lost helper object");
-    };
-    write(file, valid);
-    read();
-    for(size_t end = 0; end < valid.size(); ++end)
-    {
-        write(file, valid.substr(0, end));
-        reject(read);
-    }
-    auto damaged = valid;
-    damaged[0]   = 'X';
-    write(file, damaged);
-    reject(read);
-    damaged    = valid;
-    damaged[8] = 13;
-    write(file, damaged);
-    reject(read);
-    damaged = valid;
-    damaged.replace(12, 4, std::string(4, '\xff'));
-    write(file, damaged);
-    reject(read);
-    damaged     = valid;
-    damaged[16] = '\0';
-    write(file, damaged);
-    reject(read);
-    write(file, valid + "trailing");
-    reject(read);
-    std::cout << "PASS loader version, fields, helpers, every truncation, length bounds and EOF\n";
 
     const auto        library = root / fs::u8path("library π.dat.zlib");
     const std::string payload = std::string(200000, 'x') + "serialized solution bytes";
@@ -142,6 +84,76 @@ try
     reject([&] { a::artifact(root, "escape/outside.co", false); });
 #endif
     std::cout << "PASS relative paths, missing artifacts and containment\n";
+
+    const auto bundle = root / fs::u8path("bundle π");
+    fs::create_directories(bundle / "library");
+    fs::create_directories(bundle / "sources");
+    write(bundle / "library/TensileLibrary.dat.zlib", compressed);
+    for(const auto* name : {"b.s", "a.s", "Kernels.cpp", "Kernels.h", "TensileTypes.h"})
+        write(bundle / "sources" / name, std::string("// ") + name + "\n");
+    const auto sources = a::readSourceBundle(bundle);
+    check(std::string(sources.library.begin(), sources.library.end()) == payload,
+          "Source bundle library changed");
+    check(names(sources.assembly) == std::vector<std::string>({"a.s", "b.s"}),
+          "Main assembly is not every sources/*.s by name");
+    check(names(sources.helpers) == std::vector<std::string>({"Kernels.cpp"}),
+          "Helper source is not sources/Kernels.cpp");
+    check(names(sources.headers) == std::vector<std::string>({"Kernels.h", "TensileTypes.h"}),
+          "Headers are not the other sources/ files by name");
+    check(std::string(sources.assembly[0].bytes.begin(), sources.assembly[0].bytes.end())
+              == "// a.s\n",
+          "Source bytes changed");
+    fs::remove(bundle / "sources/Kernels.cpp");
+    check(a::readSourceBundle(bundle).helpers.empty(), "A bundle without helpers was rejected");
+    auto damage = [&](const std::function<void()>& change, const std::function<void()>& undo) {
+        change();
+        reject([&] { a::readSourceBundle(bundle); });
+        undo();
+        a::readSourceBundle(bundle);
+    };
+    damage([&] { fs::rename(bundle / "sources", root / "moved"); },
+           [&] { fs::rename(root / "moved", bundle / "sources"); });
+    damage([&] { write(bundle / "library/TensileLibrary.yaml", "second library"); },
+           [&] { fs::remove(bundle / "library/TensileLibrary.yaml"); });
+    damage([&] { fs::rename(bundle / "library", root / "moved"); },
+           [&] { fs::rename(root / "moved", bundle / "library"); });
+    damage([&] { write(bundle / "library/TensileLibrary.dat.zlib", "not zlib"); },
+           [&] { write(bundle / "library/TensileLibrary.dat.zlib", compressed); });
+    damage(
+        [&] {
+            fs::rename(bundle / "sources/a.s", root / "a.s");
+            fs::rename(bundle / "sources/b.s", root / "b.s");
+        },
+        [&] {
+            fs::rename(root / "a.s", bundle / "sources/a.s");
+            fs::rename(root / "b.s", bundle / "sources/b.s");
+        });
+    damage([&] { fs::create_directory(bundle / "sources/nested"); },
+           [&] { fs::remove(bundle / "sources/nested"); });
+    damage([&] { write(bundle / "sources/empty.h", ""); },
+           [&] { fs::remove(bundle / "sources/empty.h"); });
+    damage(
+        [&] {
+            write(bundle / "sources/large.h", "x");
+            fs::resize_file(bundle / "sources/large.h", 64 * 1024 * 1024 + 1);
+        },
+        [&] { fs::remove(bundle / "sources/large.h"); });
+    damage(
+        [&] {
+            for(int i = 0; i < 1024; ++i)
+                write(bundle / "sources" / ("extra" + std::to_string(i) + ".h"), "x");
+        },
+        [&] {
+            for(int i = 0; i < 1024; ++i)
+                fs::remove(bundle / "sources" / ("extra" + std::to_string(i) + ".h"));
+        });
+#ifndef _WIN32
+    write(root / "outside.h", "outside");
+    damage(
+        [&] { fs::create_symlink(fs::absolute(root / "outside.h"), bundle / "sources/outside.h"); },
+        [&] { fs::remove(bundle / "sources/outside.h"); });
+#endif
+    std::cout << "PASS source bundle convention, containment, file and count caps\n";
     return 0;
 }
 catch(const std::exception& error)

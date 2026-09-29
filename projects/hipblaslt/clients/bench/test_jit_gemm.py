@@ -204,7 +204,7 @@ def check_provenance(stderr, stdout, case, artifact_root, architecture):
         request["candidates"] == ranked,
         "Ranking changed between C++ request and manifest",
     )
-    for relative in manifest["code_objects"] + [manifest["library"]["path"]]:
+    for relative in manifest["sources"] + [manifest["library"]["path"]]:
         artifact = (manifest_path.parent / relative).resolve(strict=True)
         require(
             artifact.is_relative_to(manifest_path.parent), "Nonlocal generated artifact"

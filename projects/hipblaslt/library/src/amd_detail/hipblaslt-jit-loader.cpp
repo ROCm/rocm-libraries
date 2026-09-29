@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "hipblaslt-jit-loader.hpp"
+#include "hipblaslt-jit-tensilelite-artifacts.hpp"
 #include <Tensile/Tensile.hpp>
-#include <cstring>
 #include <stdexcept>
 
 namespace hipblaslt_jit
@@ -23,39 +23,6 @@ namespace hipblaslt_jit
             if(status != hipSuccess)
                 throw std::runtime_error(std::string(operation) + ": " + hipGetErrorString(status));
         }
-
-        class PrebuiltBuilder final : public CodeObjectBuilder
-        {
-        public:
-            Status build(const GeneratedSolution& solution,
-                         const GenerationRequest&,
-                         BuiltSolution& built) const override
-            {
-                built           = {};
-                built.generated = solution;
-                size_t mains    = 0;
-                for(const auto& unit : solution.units)
-                {
-                    // An ELF64 header is 64 bytes and starts with the ELF magic.
-                    if(unit.bytes.size() < 64 || std::memcmp(unit.bytes.data(), "\x7f" "ELF", 4))
-                        return {Status::Code::Failed,
-                                Stage::Build,
-                                "Code object " + unit.name + " is not an ELF file"};
-                    if(unit.role == BuildUnit::Role::Main)
-                    {
-                        built.object.bytes = unit.bytes;
-                        ++mains;
-                    }
-                    else
-                        built.helpers.push_back({unit.bytes});
-                }
-                if(mains != 1)
-                    return {Status::Code::Failed,
-                            Stage::Build,
-                            "A generated solution needs exactly one main code object"};
-                return {};
-            }
-        };
 
         class TensileLoader final : public SolutionLoader
         {
@@ -123,9 +90,34 @@ namespace hipblaslt_jit
         };
     }
 
-    std::shared_ptr<const CodeObjectBuilder> makePrebuiltBuilder()
+    GeneratedSolution readTensileSourceBundle(const std::filesystem::path& bundle)
     {
-        return std::make_shared<const PrebuiltBuilder>();
+        namespace artifacts = hipblaslt_ext::experimental::jit::tensilelite::detail::artifacts;
+        auto              sources = artifacts::readSourceBundle(bundle);
+        GeneratedSolution result;
+        result.entry       = std::move(sources.library);
+        const auto library = std::dynamic_pointer_cast<Master>(
+            TensileLite::LoadLibraryData<TensileLite::ContractionProblemGemm>(result.entry));
+        require(library && library->solutions.size() == 1 && library->solutions.count(0)
+                    && library->solutions.at(0),
+                "Expected a non-lazy library containing only local solution 0");
+        result.kernelName = library->solutions.at(0)->kernelName;
+        for(auto& file : sources.assembly)
+            result.units.push_back({BuildUnit::Role::Main,
+                                    std::move(file.name),
+                                    std::move(file.bytes),
+                                    BuildUnit::Kind::Assembly,
+                                    {}});
+        std::vector<IncludeFile> includes;
+        for(auto& header : sources.headers)
+            includes.push_back({std::move(header.name), std::move(header.bytes)});
+        for(auto& file : sources.helpers)
+            result.units.push_back({BuildUnit::Role::Helper,
+                                    std::move(file.name),
+                                    std::move(file.bytes),
+                                    BuildUnit::Kind::Hip,
+                                    includes});
+        return result;
     }
 
     std::shared_ptr<const SolutionLoader> makeTensileLoader()

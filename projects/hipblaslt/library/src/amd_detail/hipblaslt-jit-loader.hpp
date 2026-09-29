@@ -43,8 +43,9 @@ namespace hipblaslt_jit
                                 Diagnostics&) const override;
     };
 
-    // Passes code objects the backend already built through unchanged.
-    std::shared_ptr<const CodeObjectBuilder> makePrebuiltBuilder();
+    // Reads a TensileLite source bundle by directory convention: its entry, every
+    // sources/*.s as a main unit, and sources/Kernels.cpp as the helper unit.
+    GeneratedSolution readTensileSourceBundle(const std::filesystem::path& bundle);
 
     // Loads CustomKernel entries from any backend into TensileBundles.
     std::shared_ptr<const SolutionLoader> makeTensileLoader();

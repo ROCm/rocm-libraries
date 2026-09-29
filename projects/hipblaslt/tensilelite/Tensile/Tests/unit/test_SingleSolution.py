@@ -165,27 +165,7 @@ def test_result_is_published_atomically_and_paths_survive_move(tmp_path, stub_bu
     manifest = json.loads(result.manifestPath.read_text())
     assert manifest["schema_version"] == 2
     assert not Path(manifest["main_kernel"]["code_object"]).is_absolute()
-    import struct
-
-    # Decode independently: version and field count precede length-prefixed UTF-8.
-    encoded = (result.bundlePath / "loader.bin").read_bytes()
-    assert encoded[:8] == b"TLJIT001"
-    assert struct.unpack_from("<I", encoded, 8)[0] == 14
-    values = []
-    offset = 12
-    for _ in range(14):
-        length = struct.unpack_from("<I", encoded, offset)[0]
-        offset += 4
-        values.append(encoded[offset:offset + length].decode("utf-8"))
-        offset += length
-    assert values[4:7] == ["single", "single", "solution"]
-    assert values[7:10] == ["gfx942"] * 3
-    assert values[10] == "msgpack"
-    assert struct.unpack_from("<I", encoded, offset)[0] == 1
-    offset += 4
-    length = struct.unpack_from("<I", encoded, offset)[0]
-    assert encoded[offset + 4:] == b"library/gfx942/single.co"
-    assert len(encoded) == offset + 4 + length
+    assert not (result.bundlePath / "loader.bin").exists()
     before = result.manifestPath.read_bytes()
     with pytest.raises(SS.SingleSolutionBuildError):
         SS.generateAndBuildSingleSolution(CONFIG, output, architecture="gfx942")

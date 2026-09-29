@@ -136,8 +136,7 @@ namespace hipblaslt_jit
         std::vector<uint8_t> bytes;
     };
 
-    // A source file for the comgr builder, or a code object the prebuilt builder
-    // passes through.
+    // A source file the builder assembles or compiles.
     struct BuildUnit
     {
         enum class Role
