@@ -23,7 +23,7 @@
 import pytest
 from typing import Set
 
-from Tensile.Components.CustomSchedule import (
+from tensilelite.Components.CustomSchedule import (
     hasCustomSchedule, ScheduleInfo, RegisterSchedule, TileConfig,
     CMSKernelInfo, _SCHEDULE_METADATA, _SCHEDULE_REGISTRY,
     isTN, isNT, isNN, isTT, is16bit, query_cms_kernels, get_available_layouts,

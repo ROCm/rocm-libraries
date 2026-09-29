@@ -8,7 +8,7 @@ Drives the designed globalwrite.yaml config (fp8n-bf16 + UseScaleAB=Vector +
 UseScaleAlphaVec + StorePriorityOpt fork) through the config-driven emit harness
 and asserts every emitted kernel is real gfx942 AMDGCN assembly with err==0.
 
-Target missing ranges in Tensile/Components/GlobalWriteBatch.py:
+Target missing ranges in tensilelite/Components/GlobalWriteBatch.py:
   - 224-231: UseScaleAB=Vector in globalStoreWait interleaved path
   - 229-231: UseScaleAlphaVec in globalStoreWait interleaved path
   - 286-291: UseScaleAB=Vector + UseScaleAlphaVec in non-interleaved wait path

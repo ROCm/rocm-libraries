@@ -17,7 +17,7 @@ import itertools
 
 import pytest
 
-from Tensile.Components.Subtile.SubtileGeometry import GRCoopSpread, planGRCoopSpread
+from tensilelite.Components.Subtile.SubtileGeometry import GRCoopSpread, planGRCoopSpread
 
 
 def _originalInline(wavesPerStrip, otherWaves, stripBytes, numWindows, bytesPerLoad):

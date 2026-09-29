@@ -4,7 +4,7 @@
 ################################################################################
 """R7 — LocalRead.py big-cluster coverage: DTL / wide-LRVW / transpose / ConvertAfterDS.
 
-Target missing ranges in Tensile/Components/LocalRead.py (miss=489, 54%):
+Target missing ranges in tensilelite/Components/LocalRead.py (miss=489, 54%):
   785-942  : enableLDSTr + HasWMMA_V3 arm. Subdivides by bpeDS:
                bpeDS==1  (FP8):     lines 835-883  — gfx1250 + LDSTrInst + FP8 A/B
                bpeDS==2  (FP16/BF16): lines 884-942 — gfx1250 + LDSTrInst + HHS

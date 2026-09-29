@@ -29,19 +29,19 @@ The flag is `--cpu-only` and **requires `--gpu-targets`** (you must name the
 target arch to spoof). It is plumbed through an internal global, not the
 documented `--global-parameters` surface.
 
-- **CLI flag** — `Tensile/Tensile.py` (`--cpu-only`, `dest="cpuOnly"`). It is
+- **CLI flag** — `Tensile/tensilelite.py` (`--cpu-only`, `dest="cpuOnly"`). It is
   stashed into internal plumbing: `globalParameters["CpuOnly"]` and the target
   arch into `globalParameters["CpuOnlyArch"]`.
-- **Plumbing keys** — `Tensile/Common/GlobalParameters.py` defines
+- **Plumbing keys** — `tensilelite/Common/GlobalParameters.py` defines
   `globalParameters["CpuOnly"]` (default `False`) and
   `globalParameters["CpuOnlyArch"]` (default `"gfx942"`); both reset via
   `restoreDefaultGlobalParameters()`. The flag is intentionally **not** exposed
   on the `--global-parameters` surface.
-- **ISA spoof** — `Tensile/Common/Architectures.py::_detectGlobalCurrentISA`:
+- **ISA spoof** — `tensilelite/Common/Architectures.py::_detectGlobalCurrentISA`:
   when `CpuOnly` is set it returns a spoofed `IsaVersion` derived from
   `gfxToIsa(CpuOnlyArch)` instead of shelling out to `amdgpu-arch` /
   `rocm_agent_enumerator`, so `detectGlobalCurrentISA` no longer raises on a
-  GPU-less host and `Tensile.Tensile()` runs CPU-only.
+  GPU-less host and `tensilelite.Tensile()` runs CPU-only.
 - **Device-launch stub** — `Tensile/ClientWriter.py::runClient`: when `CpuOnly`
   is set it writes the client config / run-script as usual but skips the
   device-bound client launch and returns returncode `0`.
@@ -73,7 +73,7 @@ Consequences:
   perf-meaningless.
 
 For this reason `--cpu-only` must never *silently* drive a real `LibraryLogic`
-generation step. The seam itself enforces this structurally: `Tensile.py`
+generation step. The seam itself enforces this structurally: `tensilelite.py`
 declines the efficiency-based (`UseEffLike`) frequency path — and therefore the
 real `LibraryLogic` winner-selection path — under `CpuOnly`, so synthetic perf
 is never consumed for tuning in the first place.

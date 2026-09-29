@@ -20,7 +20,7 @@ import re
 
 import pytest
 
-from Tensile.resources import custom_kernel_names, custom_kernel_text
+from tensilelite.resources import custom_kernel_names, custom_kernel_text
 
 pytestmark = pytest.mark.unit
 
@@ -67,7 +67,7 @@ _VOP1_MOV_LITERAL_MASK, _VOP1_MOV_LITERAL = 0xFE01FFFF, 0x7E0002FF
 
 @functools.lru_cache(maxsize=None)
 def generator_buffer_oob():
-    spec = importlib.util.find_spec("Tensile.KernelWriterAssembly")
+    spec = importlib.util.find_spec("tensilelite.KernelWriterAssembly")
     source = pathlib.Path(spec.origin).read_text(encoding="utf-8")
     match = re.search(r'ValueSet\(\s*"BufferOOB"\s*,\s*(0x[0-9a-fA-F]+|\d+)', source)
     assert match, "KernelWriterAssembly.py no longer emits BufferOOB through ValueSet"

@@ -24,7 +24,7 @@
 ################################################################################
 
 """Characterization tests for the validators in
-``Tensile.Common.ValidParameters``: ``checkParametersAreValid`` (the central
+``tensilelite.Common.ValidParameters``: ``checkParametersAreValid`` (the central
 parameter validator) and the two space-filling sub-validators
 ``checkSpaceFillAlgoIsValid`` / ``checkSpaceFillAlgoWGMIsValid``.
 

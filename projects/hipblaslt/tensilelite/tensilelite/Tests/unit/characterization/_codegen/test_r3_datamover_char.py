@@ -4,7 +4,7 @@
 ################################################################################
 """R3 — gfx1250 TensorDataMover non-wave-separated path characterization.
 
-Target: Tensile/Components/TensorDataMover.py (miss=158 before this test).
+Target: tensilelite/Components/TensorDataMover.py (miss=158 before this test).
 
 The existing gfx1250 emit suite (test_emit_gfx1250_char.py / F4_MX.yaml) only
 exercises the *wave-separated* code path because that logic file has

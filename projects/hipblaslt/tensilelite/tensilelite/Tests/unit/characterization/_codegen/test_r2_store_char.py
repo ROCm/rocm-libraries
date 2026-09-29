@@ -9,7 +9,7 @@ StoreRemapVectorWidth x StorePriorityOpt fork) through the config-driven emit
 harness and asserts every emitted kernel is real gfx942 AMDGCN assembly with
 err==0.
 
-Target missing ranges in Tensile/Components/GlobalWriteBatch.py:
+Target missing ranges in tensilelite/Components/GlobalWriteBatch.py:
   - 287-331  : UseScaleAB/UseScaleAlphaVec in globalStoreWait non-interleave
                path; _chooseAddForAtomic variants
   - 374-405  : alphaBeforeLoadC + codeMulAlpha path (StorePriorityOpt fork)

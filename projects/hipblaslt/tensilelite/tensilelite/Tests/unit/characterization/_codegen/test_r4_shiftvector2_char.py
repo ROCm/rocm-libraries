@@ -4,7 +4,7 @@
 ################################################################################
 """R4 — gfx942 ShiftVectorComponents advanced-feature characterization test.
 
-Targets Tensile/Components/ShiftVectorComponents.py ranges:
+Targets tensilelite/Components/ShiftVectorComponents.py ranges:
   - 47-200  : ShiftVectorComponentsVALU.__call__ (VALU edge-shift sweep)
   - 552-784 : ShiftVectorComponentsMFMAAllThread (dead-code analysis below)
 
