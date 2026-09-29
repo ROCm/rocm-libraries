@@ -7,7 +7,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from . import agreement, toolchain
+from . import agreement, provenance_sidecar, toolchain
 from .hip_compile import (
     compile_hip_variant,
     hip_source_relpath,
@@ -342,6 +342,29 @@ def _write_bytes_at(base, rel_dir, name, data):
 
 def _write_text_at(base, rel_dir, name, text):
     _dest_at(base, rel_dir, name).write_text(text, encoding="utf-8")
+
+
+def _compact_json(doc):
+    return json.dumps(doc, separators=(",", ":")) + "\n"
+
+
+def _write_packed_at(base, rel_dir, name, doc, sidecars):
+    """Write one packed descriptor compact, its UKDs' provenance to its sidecar.
+
+    `sidecars` holds every sidecar path this shard has written: a KDP and a
+    standalone UKD sharing a stem would name one sidecar, and the second write
+    would drop the first's provenance.
+    """
+    sidecar_name, data = provenance_sidecar.detach(name, doc)
+    sidecar = _dest_at(base, rel_dir, sidecar_name)
+    if sidecar in sidecars:
+        raise HkpPackError(
+            f"{Path(rel_dir) / name}: its provenance sidecar {sidecar_name} is "
+            "already written by another descriptor sharing its stem; rename one"
+        )
+    sidecars.add(sidecar)
+    sidecar.write_bytes(data)
+    _write_text_at(base, rel_dir, name, _compact_json(doc))
 
 
 @dataclass(frozen=True)
@@ -970,7 +993,7 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
             inter_arch_dir,
             kdp.rel_dir,
             kdp.path.name,
-            json.dumps(new_doc, indent=2) + "\n",
+            _compact_json(new_doc),
         )
         arch_kdps.append(
             ArchKDP(
@@ -1101,8 +1124,8 @@ def _rewrite_passthrough_ukd(passthrough, arch, source_label=None):
     build output. `rewritten` names the fields whose emitted value differs from
     the authored one. It holds nothing machine-specific and nothing
     time-varying, so two runs over one source tree write the same bytes. Nothing
-    at runtime reads it. It sits at the top level, because `kernel_source`
-    accepts only the keys the loader parses.
+    at runtime reads it. The caller moves it to the descriptor's provenance
+    sidecar, because `kernel_source` accepts only the keys the loader parses.
     """
     authored = passthrough.doc
     rel_dir = Path(passthrough.rel_dir).as_posix()
@@ -1163,13 +1186,15 @@ def pack_arch(
 
     Each distinct (source,build) variant .co is packed once under its own
     toc_key; inline UKDs are rewritten hsaco->kpack, stamping toc_key + sha256 +
-    signature and moving build into a sibling provenance block. Guarded against
-    toc_key collisions (distinct inputs mapping to one key).
+    signature and moving build into provenance. Guarded against toc_key
+    collisions (distinct inputs mapping to one key).
 
     A UKD of a pass-through kind takes the shard arch, keeps its authored
-    kernel_source, and carries a provenance block naming its authored values. A
-    shard with no compiled variant holds no archive and no `kpack/` directory,
-    and its ArchResult carries kpack_path=None.
+    kernel_source, and gets a provenance block naming its authored values. No
+    packed UKD carries provenance inline: each descriptor file's UKD provenance
+    ships in its `{stem}.provenance.json.gz` sidecar. A shard with no compiled
+    variant holds no archive and no `kpack/` directory, and its ArchResult
+    carries kpack_path=None.
 
     """
     arch = inter.arch
@@ -1264,6 +1289,7 @@ def pack_arch(
         kpack_path = kpack_dir / _kpack_filename(arch, group)
         archive.write(kpack_path)
 
+    sidecars = set()
     for kdp in inter.kdps:
         out_doc = dict(kdp.header)
         # Each shard targets exactly its own arch, so narrow the authored arch
@@ -1301,12 +1327,7 @@ def pack_arch(
                     )
                 )
         out_doc["kernelDescriptors"] = out_kds
-        _write_text_at(
-            out_arch_dir,
-            kdp.rel_dir,
-            kdp.filename,
-            json.dumps(out_doc, indent=2) + "\n",
-        )
+        _write_packed_at(out_arch_dir, kdp.rel_dir, kdp.filename, out_doc, sidecars)
 
     # A standalone UKD stays its own file in the shard, rewritten to kpack form
     # with this arch's kpack details. It is emitted only for arches whose
@@ -1323,23 +1344,13 @@ def pack_arch(
             rel_dir=ukd.rel_dir,
             group=group,
         )
-        _write_text_at(
-            out_arch_dir,
-            ukd.rel_dir,
-            ukd.filename,
-            json.dumps(out_doc, indent=2) + "\n",
-        )
+        _write_packed_at(out_arch_dir, ukd.rel_dir, ukd.filename, out_doc, sidecars)
 
     # A pass-through standalone UKD is its own file. It takes this shard's arch,
     # matching the KDP that references it.
     for ukd in inter.passthrough_standalone_ukds.values():
         out_doc = _rewrite_passthrough_ukd(ukd, arch, source_label)
-        _write_text_at(
-            out_arch_dir,
-            ukd.rel_dir,
-            ukd.filename,
-            json.dumps(out_doc, indent=2) + "\n",
-        )
+        _write_packed_at(out_arch_dir, ukd.rel_dir, ukd.filename, out_doc, sidecars)
 
     prune_result = prune(flat, arch)
     for generic in flat.generics():

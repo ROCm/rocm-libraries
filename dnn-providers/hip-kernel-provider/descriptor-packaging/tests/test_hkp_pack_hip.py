@@ -4,7 +4,7 @@ import shutil
 
 import pytest
 
-from hkp_pack import agreement
+from hkp_pack import agreement, provenance_sidecar
 from hkp_pack.hip_compile import hip_variant_key as variant_key
 from hkp_pack.descriptors import load_flat_input, reachable_generic_ids
 from hkp_pack.errors import HkpPackError
@@ -23,6 +23,14 @@ def _load_kpack(rocm_kpack_dir):
 
 def _read(path):
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _read_shipped(path):
+    """A packed descriptor with each UKD's provenance read back from its sidecar.
+
+    `attach` refuses a UKD that also carries provenance inline, so every caller
+    also asserts the shipped file holds none."""
+    return provenance_sidecar.attach(path, _read(path))
 
 
 def _inline_ukds(out_dir, kdp_name):
@@ -243,7 +251,9 @@ def test_symbol_in_round_tripped_blob(built, rocm_kpack_dir):
 
 
 def test_rewrite_kpack_form_and_provenance(built):
-    kdp = _read(built["out"] / "gfx942" / "pointwise.kdp.json")
+    path = built["out"] / "gfx942" / "pointwise.kdp.json"
+    assert not any("provenance" in e for e in _read(path)["kernelDescriptors"])
+    kdp = _read_shipped(path)
     ukd = kdp["kernelDescriptors"][0]
     ks = ukd["kernel_source"]
     assert ks["kind"] == "kpack"
@@ -694,7 +704,7 @@ def test_standalone_ukd_matches_inline_kpack_shape(built):
     # A standalone UKD's shipped kernel_source is kpack-form with the same
     # structure as an inline UKD's (library/toc_key/symbol/sha256/signature +
     # provenance).
-    ukd = _read(built["out"] / "gfx942" / _STANDALONE_UKD_FILE)
+    ukd = _read_shipped(built["out"] / "gfx942" / _STANDALONE_UKD_FILE)
     ks = ukd["kernel_source"]
     assert set(
         ["kind", "library", "toc_key", "symbol", "sha256", "signature"]
@@ -1134,7 +1144,9 @@ def test_authored_provenance_cannot_hijack(
     )
     p.write_text(json.dumps(doc), encoding="utf-8")
     _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
-    prov = _read(tmp_path / "out" / "gfx942" / _STANDALONE_UKD_FILE)["provenance"]
+    prov = _read_shipped(tmp_path / "out" / "gfx942" / _STANDALONE_UKD_FILE)[
+        "provenance"
+    ]
     assert prov["origin_kind"] == "hip"
     assert prov["source"] == "PointwiseAdd.cpp"
     assert prov["entry"] == "PointwiseAdd"
@@ -1180,7 +1192,7 @@ def test_kdp_level_contract_is_inherited_and_ships(
     _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
 
     out = tmp_path / "out" / "gfx942"
-    shipped = _read(out / "pointwise.kdp.json")
+    shipped = _read_shipped(out / "pointwise.kdp.json")
     assert "specialization_contract" in shipped["provenance"]
     inline = [e for e in shipped["kernelDescriptors"] if isinstance(e, dict)]
     assert inline
@@ -1196,7 +1208,7 @@ def test_kdp_level_contract_is_inherited_and_ships(
 
     # The standalone UKD the same KDP references keeps its own: it is its own
     # file and no KDP speaks for it.
-    standalone = _read(out / _STANDALONE_UKD_FILE)
+    standalone = _read_shipped(out / _STANDALONE_UKD_FILE)
     assert "specialization_contract" in standalone["provenance"]
 
 

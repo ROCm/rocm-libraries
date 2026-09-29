@@ -8,6 +8,7 @@ hand and invokes the script as a subprocess. Nothing imports the packer: a test
 that recomputed a key from the packer would pass on two sides of one mistake.
 """
 
+import gzip
 import json
 import subprocess
 import sys
@@ -51,13 +52,32 @@ def _provenance(rel_dir, authored, label=LABEL):
 
 
 def _write(path, doc):
+    """Write one descriptor as the packer ships it: compact, with each UKD's
+    provenance moved to the `{stem}.provenance.json.gz` sidecar beside it."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    if path.name.endswith(".kdp.json"):
+        kdp_id, stem = doc["id"], path.name[: -len(".kdp.json")]
+        ukds = [e for e in doc["kernelDescriptors"] if isinstance(e, dict)]
+    else:
+        kdp_id, stem = None, path.name[: -len(".ukd.json")]
+        ukds = [doc]
+    entries = {
+        ukd["id"]: {
+            "kernel_source_sha256": ukd["kernel_source"].get("sha256"),
+            "provenance": ukd.pop("provenance", {}),
+        }
+        for ukd in ukds
+    }
+    sidecar = json.dumps({"kdp_id": kdp_id, "entries": entries}, sort_keys=True)
+    path.with_name(f"{stem}.provenance.json.gz").write_bytes(
+        gzip.compress(sidecar.encode("utf-8"))
+    )
+    path.write_text(json.dumps(doc, separators=(",", ":")) + "\n", encoding="utf-8")
     return path
 
 
 def _ukd(shard, name, key, rel_dir=".", authored=None, provenance=True, label=LABEL):
-    """A standalone UKD, which carries both blocks at its document root."""
+    """A standalone UKD, whose provenance its own sidecar holds."""
     doc = {
         "version": "1.0",
         "id": name,
@@ -75,7 +95,7 @@ def _ukd(shard, name, key, rel_dir=".", authored=None, provenance=True, label=LA
 
 
 def _kdp(shard, name, keys, rel_dir="."):
-    """A KDP, whose provenance sits on each inline entry and not at its root."""
+    """A KDP, whose sidecar holds one provenance entry per inline entry."""
     entries = [
         {
             "version": "1.0",

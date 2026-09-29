@@ -15,6 +15,7 @@ machine.
 
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import subprocess
@@ -215,6 +216,20 @@ def _minimal_tree(tmp_path: Path, name: str = "descriptors") -> Path:
                 ],
             }
         )
+    )
+    # Packed trees carry each UKD's provenance in a sidecar beside the KDP; this
+    # kernel has none, so its entry is empty.
+    sidecar = {
+        "kdp_id": "66666666-6666-6666-6666-666666666666",
+        "entries": {
+            "77777777-7777-7777-7777-777777777777": {
+                "kernel_source_sha256": "a" * 64,
+                "provenance": {},
+            }
+        },
+    }
+    (root / "test_engine.provenance.json.gz").write_bytes(
+        gzip.compress(json.dumps(sidecar).encode("utf-8"))
     )
     return root
 

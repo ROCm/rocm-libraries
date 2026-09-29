@@ -30,7 +30,7 @@ import verify_variant_sets as gate_module  # noqa: E402
 
 sys.path.insert(0, str(gate_module._agreement_python_root()))
 
-from hkp_pack import agreement  # noqa: E402
+from hkp_pack import agreement, provenance_sidecar  # noqa: E402
 from hkp_pack.errors import HkpPackError  # noqa: E402
 from hkp_pack.kpack_resolver import load_kpack  # noqa: E402
 
@@ -143,6 +143,20 @@ def _kdp(descriptors, ident=_KDP_ID, engine=_UED_ID, arch=None) -> dict:
     return doc
 
 
+def _write_kdp(path: Path, doc: dict) -> None:
+    """Write `doc` as hkp_pack ships a KDP: each inline UKD's provenance goes to the
+    `{stem}.provenance.json.gz` sidecar beside it. `doc` itself is left unchanged."""
+    doc = copy.deepcopy(doc)
+    name, data = provenance_sidecar.detach(path.name, doc)
+    path.with_name(name).write_bytes(data)
+    path.write_text(json.dumps(doc))
+
+
+def _read_kdp(path: Path) -> dict:
+    """A KDP written by `_write_kdp`, its UKDs' sidecar provenance reattached."""
+    return provenance_sidecar.attach(path, json.loads(path.read_text()))
+
+
 @pytest.fixture
 def gate(tmp_path):
     """A working gate environment: an id-wired bundle and a nesting pair."""
@@ -152,9 +166,7 @@ def gate(tmp_path):
     def write(tag: str, descriptors: list[dict], fields=None, arch=None) -> Path:
         root = tmp_path / tag
         root.mkdir(parents=True, exist_ok=True)
-        (root / "test_engine.kdp.json").write_text(
-            json.dumps(_kdp(descriptors, arch=arch))
-        )
+        _write_kdp(root / "test_engine.kdp.json", _kdp(descriptors, arch=arch))
         (root / "test_engine.ued.json").write_text(json.dumps(_ued()))
         (root / "test_engine.kmd.json").write_text(json.dumps(_kmd(fields)))
         return root
@@ -219,8 +231,8 @@ class TestTheSchemaIsReachedByReference:
 
     def test_a_kdp_whose_engine_matches_nothing_fails_naming_the_hop(self, gate):
         root = gate.write("dangling_engine", gate.small)
-        (root / "test_engine.kdp.json").write_text(
-            json.dumps(_kdp(gate.small, engine="no-such-ued"))
+        _write_kdp(
+            root / "test_engine.kdp.json", _kdp(gate.small, engine="no-such-ued")
         )
         result = gate.run("bad", "dangling_engine")
         assert result.returncode == 1
@@ -252,7 +264,7 @@ class TestTheSchemaIsReachedByReference:
         root = gate.write("stem_only", gate.small)
         doc = _kdp(gate.small)
         doc.pop("engine")
-        (root / "test_engine.kdp.json").write_text(json.dumps(doc))
+        _write_kdp(root / "test_engine.kdp.json", doc)
         result = gate.run("bad", "stem_only")
         assert result.returncode == 1
         assert "engine" in (result.stdout + result.stderr)
@@ -667,7 +679,7 @@ def packed(tmp_path):
         root.mkdir(parents=True, exist_ok=True)
         (root / "test_engine.kmd.json").write_text(json.dumps(docs["kmd"]))
         (root / "test_engine.ued.json").write_text(json.dumps(docs["ued"]))
-        (root / "test_engine.kdp.json").write_text(json.dumps(docs["kdp"]))
+        _write_kdp(root / "test_engine.kdp.json", docs["kdp"])
         return root
 
     return build
@@ -814,7 +826,7 @@ class TestFullModeChecksTheProducingBuildRecord:
         root.mkdir(parents=True, exist_ok=True)
         (root / "test_engine.kmd.json").write_text(json.dumps(kmd))
         (root / "test_engine.ued.json").write_text(json.dumps(ued))
-        (root / "test_engine.kdp.json").write_text(json.dumps(kdp))
+        _write_kdp(root / "test_engine.kdp.json", kdp)
         failures, _ = _run_full(root)
         assert not failures, failures
 
@@ -841,7 +853,7 @@ class TestFullModeReportsAKernelWithNothingToBind:
         root.mkdir(parents=True, exist_ok=True)
         (root / "test_engine.kmd.json").write_text(json.dumps(kmd))
         (root / "test_engine.ued.json").write_text(json.dumps(ued))
-        (root / "test_engine.kdp.json").write_text(json.dumps(kdp))
+        _write_kdp(root / "test_engine.kdp.json", kdp)
         return root
 
     def test_it_is_reported_rather_than_failed(self, tmp_path):
@@ -887,11 +899,11 @@ class TestFullModeReportsAKernelWithNothingToBind:
         so the stamp is the only thing separating the origin cases."""
         root = self.tree(tmp_path, [], tag)
         path = root / "test_engine.kdp.json"
-        doc = json.loads(path.read_text())
+        doc = _read_kdp(path)
         provenance = doc["kernelDescriptors"][0]["provenance"]
         assert "effective_spec" not in provenance
         provenance["origin_kind"] = origin_kind
-        path.write_text(json.dumps(doc))
+        _write_kdp(path, doc)
         return root
 
     def test_a_rocke_origin_cannot_waive_its_own_evidence(
@@ -938,7 +950,7 @@ class TestFullModeReportsAKernelWithNothingToBind:
         origin at all, so reading rocKE out of the absence would fail them over evidence
         they were never asked to produce."""
         root = self.tree(tmp_path, [], "absent_origin")
-        doc = json.loads((root / "test_engine.kdp.json").read_text())
+        doc = _read_kdp(root / "test_engine.kdp.json")
         assert "origin_kind" not in doc["kernelDescriptors"][0]["provenance"]
         failures, unverified = self.verdict(root)
         assert failures == []
@@ -1169,8 +1181,8 @@ class TestRealArchiveSelectedConsumer:
         (root / "sibling.ued.json").write_text(json.dumps(sibling_engine))
         selected_path = root / "test_engine.kdp.json"
         sibling_path = root / "sibling.kdp.json"
-        selected_path.write_text(json.dumps(selected))
-        sibling_path.write_text(json.dumps(sibling))
+        _write_kdp(selected_path, selected)
+        _write_kdp(sibling_path, sibling)
         write_archive(root)
         control = self.run(root, python_dir, tmp_path)
         assert control.returncode == 0, control.stdout + control.stderr
@@ -1180,8 +1192,8 @@ class TestRealArchiveSelectedConsumer:
         # second KDP that declares nothing. The bytes and UKD binding still agree.
         selected.pop("provenance")
         agreement.publish(ukd, observations, agreement.canonical_records(records[1:]))
-        selected_path.write_text(json.dumps(selected))
-        sibling_path.write_text(json.dumps(sibling))
+        _write_kdp(selected_path, selected)
+        _write_kdp(sibling_path, sibling)
         result = self.run(root, python_dir, tmp_path)
         assert result.returncode == 1, result.stdout + result.stderr
         assert "no specialization declaration" in result.stdout
@@ -1190,17 +1202,17 @@ class TestRealArchiveSelectedConsumer:
         write_archive, python_dir = real_archive
         root = TestFullModeReportsAKernelWithNothingToBind.tree(tmp_path, [], "hip")
         path = root / "test_engine.kdp.json"
-        doc = json.loads(path.read_text())
+        doc = _read_kdp(path)
         ukd = doc["kernelDescriptors"][0]
         ukd["provenance"]["origin_kind"] = "hip"
-        path.write_text(json.dumps(doc))
+        _write_kdp(path, doc)
         write_archive(root)
         control = self.run(root, python_dir, tmp_path)
         assert control.returncode == 0, control.stdout + control.stderr
         assert "NOT VERIFIED HERE" in control.stdout
 
         ukd["kernel_source"]["kind"] = "hip"
-        path.write_text(json.dumps(doc))
+        _write_kdp(path, doc)
         result = self.run(root, python_dir, tmp_path)
         assert result.returncode == 1, result.stdout + result.stderr
         assert "packed dialect" in result.stdout

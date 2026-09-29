@@ -7,7 +7,7 @@ import glob
 import json
 import os
 
-from . import agreement
+from . import agreement, provenance_sidecar
 from .errors import HkpPackError
 
 _DESCRIPTOR_TYPES = ("kdp", "ukd", "kmd", "ued", "umd", "udd", "uhd")
@@ -57,6 +57,13 @@ class Index:
                 ) from exc
             if not isinstance(doc, dict):
                 raise DescriptorContextError(f"descriptor {path} is not a JSON object")
+            if dtype in ("kdp", "ukd"):
+                # A packed tree ships each UKD's provenance in a sidecar; put it
+                # back so every reader sees the document the packer digested.
+                try:
+                    provenance_sidecar.attach(path, doc)
+                except HkpPackError as exc:
+                    raise DescriptorContextError(str(exc)) from exc
             document = Document(path, doc, dtype)
             self.documents.append(document)
             ident = doc.get("id")

@@ -7,7 +7,8 @@ Consumes a flat authored source folder (KDPs with inline hip-form UKDs, by-Id
 generic descriptors, and HIP sources), compiles each kernel via hipcc --genco
 per targeted arch, prunes each per-arch intermediate to what that arch needs,
 packs the code objects into a per-arch rocm_kpack archive, and rewrites the UKDs
-into self-describing kpack form (library/toc_key/symbol/sha256 + provenance).
+into self-describing kpack form (library/toc_key/symbol/sha256), with each UKD's
+provenance in a `{stem}.provenance.json.gz` sidecar beside its descriptor.
 No manifest is emitted. Provider-internal; no public API.
 """
 

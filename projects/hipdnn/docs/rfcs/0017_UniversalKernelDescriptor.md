@@ -1787,8 +1787,11 @@ The two ingestion paths differ only in where a kernel's code comes from:
 
 - **Build-time (AOT).** Discover and validate descriptors, compile each kernel per target
   architecture, pack the code objects into per-arch bundles with a self-describing manifest, and
-  install them beside the provider. The manifest records provenance (architecture, toolchain,
-  build id) so incompatible bundles are rejected before load.
+  install them beside the provider. The manifest records the architecture, toolchain and build id
+  so incompatible bundles are rejected before load. Per-kernel provenance (authored source, spec,
+  producing compiler) is never read at load, so shipped UKDs carry none: the packer moves it to a
+  `{stem}.provenance.json.gz` sidecar beside each packed descriptor, keyed by UKD id and bound to
+  each UKD by its `kernel_source.sha256`.
 - **Runtime drop-in.** The path is opt-in and off by default. When enabled, the provider scans a
   dedicated drop-in location for custom bundles, compiles each descriptor to a matcher once on first
   use, and registers it the same way as an installed one. A single package may declare many
