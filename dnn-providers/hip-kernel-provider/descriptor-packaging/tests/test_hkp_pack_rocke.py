@@ -9,6 +9,7 @@ from typing import Literal, Optional
 import pytest
 
 from conftest import _arg, _kernel, _object, requires_msgpack
+from hkp_pack import provenance_sidecar
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.pipeline import run_pipeline
@@ -23,6 +24,14 @@ ARCH = "gfx950"
 
 def _read(path):
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _read_shipped(path):
+    """A packed descriptor with each UKD's provenance read back from its sidecar.
+
+    `attach` refuses a UKD that also carries provenance inline, so every caller
+    also asserts the shipped file holds none."""
+    return provenance_sidecar.attach(path, _read(path))
 
 
 def _copy_fixture(tmp_path, fixture):
@@ -547,7 +556,8 @@ def test_rocke_compiles_and_packs(
     tmp_path, rocke_fixture, hipcc, rocm_kpack_dir, rocke_available, rocke_ukd
 ):
     _run(rocke_fixture, tmp_path, hipcc, rocm_kpack_dir)
-    ukd = _read(tmp_path / "out" / ARCH / "attention.kdp.json")["kernelDescriptors"][0]
+    shipped = _read_shipped(tmp_path / "out" / ARCH / "attention.kdp.json")
+    ukd = shipped["kernelDescriptors"][0]
     ks = ukd["kernel_source"]
     assert ks["kind"] == "kpack"
     assert ks["library"] == f"kpack/hip_kernel_provider_{ARCH}.kpack"
@@ -615,7 +625,8 @@ def test_rocke_arch_scoping(
     _run(rocke_fixture, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942", ARCH])
     # gfx950 shard has the packed rocke UKD.
     assert (tmp_path / "out" / ARCH / "attention.kdp.json").exists()
-    ukd = _read(tmp_path / "out" / ARCH / "attention.kdp.json")["kernelDescriptors"][0]
+    shipped = _read_shipped(tmp_path / "out" / ARCH / "attention.kdp.json")
+    ukd = shipped["kernelDescriptors"][0]
     assert ukd["provenance"]["origin_kind"] == "rocke"
     # gfx942 has no applicable UKD: the shard is skipped entirely.
     assert not (tmp_path / "out" / "gfx942").exists()
