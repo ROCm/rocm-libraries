@@ -24,6 +24,7 @@
 
 #include "rocsparse_csric0_kernel_binsearch.hpp"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -265,7 +266,7 @@ namespace rocsparse
         const int64_t done_array_stride = A->rows;
 
         const dim3 csric0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1,
-                                 rocsparse::get_batch_grid_size(A->batch_count));
+                                 rocsparse::get_grid_size_y(handle, A->batch_count));
 
         const dim3 csric0_threads(BLOCKSIZE);
 

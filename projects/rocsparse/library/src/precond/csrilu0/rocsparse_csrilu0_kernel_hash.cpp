@@ -24,6 +24,7 @@
 
 #include "rocsparse_csrilu0_kernel_hash.hpp"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -359,7 +360,7 @@ namespace rocsparse
 
         int64_t stride = A->columns_values_batch_stride;
         dim3    csrilu0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1,
-                            rocsparse::get_batch_grid_size(A_batch_count));
+                            rocsparse::get_grid_size_y(handle, A_batch_count));
         dim3    csrilu0_threads(BLOCKSIZE);
 
         auto                         numeric_exact = csrilu0_info->get_singularity_numeric_exact();

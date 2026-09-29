@@ -25,6 +25,7 @@
 #include "rocsparse_bsric0_kernel_2_8_unrolled.hpp"
 #include "rocsparse_bsric0_info.hpp"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -471,7 +472,7 @@ namespace rocsparse
         auto          numeric_exact     = bsric0_info->get_singularity_numeric_exact();
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsric0_kernel_2_8_unrolled<BSRDIM>),
-            dim3(A->rows, rocsparse::get_batch_grid_size(A->batch_count)),
+            dim3(A->rows, rocsparse::get_grid_size_y(handle, A->batch_count)),
             dim3(BSRDIM, BSRDIM),
             0,
             handle->stream,

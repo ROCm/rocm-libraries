@@ -24,6 +24,7 @@
 
 #include "rocsparse_csrilu0_kernel_binsearch.hpp"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -300,7 +301,7 @@ namespace rocsparse
         const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
 
         dim3 csrilu0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1,
-                            rocsparse::get_batch_grid_size(A_batch_count));
+                            rocsparse::get_grid_size_y(handle, A_batch_count));
         dim3 csrilu0_threads(BLOCKSIZE);
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
