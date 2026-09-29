@@ -433,15 +433,16 @@ def build_attention_reduce(
     return _build
 
 
-def build_attention_dense(arch, **over):
+def build_attention_dense(arch, *, geometry=None, **over):
     """Dense flash-attn prefill spec (library ``kernels/gfx950/attention_dense``).
 
-    ``over`` patches the shared base spec; a small Sq keeps the IR compact while
-    still exercising the full pipeline (both the default one-CTA-per-q-block grid
-    and the persistent grid-stride grid).
+    ``geometry`` selects a shared tile geometry and ``over`` patches the base spec;
+    a small Sq keeps the IR compact while still exercising the full pipeline (both
+    the default one-CTA-per-q-block grid and the persistent grid-stride grid).
     """
 
     def _build():
+        from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
         from kernels.gfx950.attention_dense import (
             Gfx950AttentionDenseSpec,
             build_attention_dense as _build_dense,
@@ -457,6 +458,8 @@ def build_attention_dense(arch, **over):
             causal=True,
             dtype="bf16",
         )
+        if geometry is not None:
+            spec.update(DENSE_TILE_GEOMETRIES[geometry])
         spec.update(over)
         return _build_dense(Gfx950AttentionDenseSpec(**spec))
 
@@ -757,7 +760,9 @@ def build_deep(kind, arch, **kw):
 # C++ engine parity: direct-conv parity is gated via tools/check_byte_identity.py
 # (see tests/instances/parity/conv_direct_grouped_emit.* and the
 # conv_direct_grouped family in tests/instances/differential/golden/llvm_gfx_all.json).
-# All five variants (16c, 4c, 8c, 32c, depthwise) are covered as configs 0-8.
+# The existing direct-conv variants occupy configs 0-24; the wgrad variant is
+# configs 25-31 (25 mfma_k=32, 26 mfma_k=16, 27 multi-wave K/C/Q, 28-29 the two
+# gfx942 rejection paths, 30-31 bf16 at mfma_k=32 / 16).
 # If you add new direct-conv variants, add matching configs to both emitters and
 # re-bless the golden.
 # ---------------------------------------------------------------------------
@@ -2586,6 +2591,37 @@ def cases():
         ("fp16_h64_sq512", {"dtype": "fp16", "head_size": 64}),
         ("bn128_sq512", {"block_n": 128}),
         ("noncausal_sq512", {"causal": False}),
+        # --- bottom-right diagonal. Four cases pin the aligned and arbitrary
+        # shifted-diagonal routes, the sink composition, and the BM128 geometry.
+        (
+            "bottom_right_sq512",
+            {"seqlen_kv": 1024, "causal_bottom_right": True},
+        ),
+        (
+            "ragged_bottom_right_sq500",
+            {
+                "seqlen_q": 500,
+                "seqlen_kv": 1234,
+                "ragged": True,
+                "causal_bottom_right": True,
+            },
+        ),
+        (
+            "bottom_right_sinks_sq512",
+            {
+                "seqlen_kv": 1024,
+                "causal_bottom_right": True,
+                "use_sinks": True,
+            },
+        ),
+        (
+            "bottom_right_bm128_sq512",
+            {
+                "seqlen_kv": 1024,
+                "causal_bottom_right": True,
+                "geometry": "bm128",
+            },
+        ),
         # --- persistent (grid-stride) grid + decode variants ---
         ("persistent_causal_sq512", {"persistent": True, "num_persistent": 256}),
         (

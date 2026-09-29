@@ -25,6 +25,8 @@ def _bench_row(**overrides):
         "c_type": "f16_r",
         "d_type": "f16_r",
         "compute_type": "c_f32_r",
+        "scaleA": 1,
+        "scaleB": 1,
     }
     row.update(overrides)
     return row
@@ -285,6 +287,8 @@ def test_compare_happy_path_with_verify(monkeypatch: pytest.MonkeyPatch, tmp_pat
         "c_type": "f16_r",
         "d_type": "f16_r",
         "compute_type": "c_f32_r",
+        "scaleA": 1,
+        "scaleB": 1,
         "kernel": "k",
         "solution": "s",
         "solutionIdx": 7,
