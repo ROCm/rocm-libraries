@@ -190,42 +190,78 @@ void ROCBLAS_KERNEL_ILF rocblas_trsv_transpose(const rocblas_int n,
     }
 }
 
-template <rocblas_int n>
-inline constexpr bool equals_two = false;
+// Under ASan every shared memory access in the fully inlined inversion is instrumented,
+// making register allocation of the trsv kernels take tens of minutes per architecture.
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define ROCBLAS_TRSV_INVERT_ILF __device__ __attribute__((noinline))
+#endif
+#endif
+#ifndef ROCBLAS_TRSV_INVERT_ILF
+#define ROCBLAS_TRSV_INVERT_ILF ROCBLAS_KERNEL_ILF
+#endif
 
-template <>
-inline constexpr bool equals_two<2> = true;
-
-// Invert a 2x2 triangular section of A
+// Recursive invert to solve A^-1
 template <typename T,
           rocblas_int N,
           rocblas_int LDA,
-          rocblas_int threadsx,
-          rocblas_int threadsy,
+          rocblas_int DIM_X,
+          rocblas_int DIM_Y,
           bool        UNIT,
-          bool        TRANS,
-          std::enable_if_t<equals_two<N>, rocblas_int> = 0>
-void ROCBLAS_KERNEL_ILF rocblas_trsv_invert(T* const __restrict__ A, T* const __restrict__ sx)
+          bool        TRANS>
+void ROCBLAS_TRSV_INVERT_ILF rocblas_trsv_invert(T* const __restrict__ A, T* const __restrict__ sx)
 {
-    if(threadIdx.x == 0 && threadIdx.y == 0)
+    if constexpr(N == 2)
     {
-        if(UNIT)
+        // Invert a 2x2 triangular section of A
+        if(threadIdx.x == 0 && threadIdx.y == 0)
         {
-            A[0]       = 1;
-            A[LDA + 1] = 1;
+            if(UNIT)
+            {
+                A[0]       = 1;
+                A[LDA + 1] = 1;
+            }
+            else
+            {
+                // Diagonal is already stored as 1 / A[x], so A[0] and A[LDA + 1] are already done
+                // A[1] = -A[1] * (1 / A[0]) * (1 / A[LDA + 1])
+                A[1] = A[1] * (A[0] * A[LDA + 1]);
+            }
+            if(TRANS)
+            {
+                // For the transpose case, we can simply copy over the solved A[1]
+                // to the appropriate place
+                A[LDA] = A[1];
+            }
         }
-        else
-        {
-            // Diagonal is already stored as 1 / A[x], so A[0] and A[LDA + 1] are already done
-            // A[1] = -A[1] * (1 / A[0]) * (1 / A[LDA + 1])
-            A[1] = A[1] * (A[0] * A[LDA + 1]);
-        }
+    }
+    else
+    {
+        // A is broken down as:
+        // A = [ A_11 0    ]
+        //     [ A_21 A_22 ]
+
+        // A^-1 can be solved as:
+        // A^-1 = [ (A_11^-1)                   (0)     ]
+        //        [ (-A_21 * A_11^-1 * A_22^-1) (A_22^-1)]
+
+        // Invert A_11 section by breaking into smaller and smaller pieces
+        rocblas_trsv_invert<T, N / 2, LDA, DIM_X, DIM_Y, UNIT, TRANS>(A, sx);
+        __syncthreads();
+
+        // Solve A_21 section
+        rocblas_invert_solve_A21<T, N / 2, LDA, DIM_X, DIM_Y, UNIT>(
+            A, &A[N / 2], &A[(LDA + 1) * N / 2], sx);
+
         if(TRANS)
         {
-            // For the transpose case, we can simply copy over the solved A[1]
-            // to the appropriate place
-            A[LDA] = A[1];
+            __syncthreads();
+            rocblas_trsv_transpose<T, LDA>(N / 2, &A[N / 2], &A[(N / 2) * LDA]);
         }
+        __syncthreads();
+
+        // Invert A_22 section by breaking into smaller and smaller pieces
+        rocblas_trsv_invert<T, N / 2, LDA, DIM_X, DIM_Y, UNIT, TRANS>(&A[(LDA + 1) * N / 2], sx);
     }
 }
 
@@ -236,108 +272,65 @@ template <typename T,
           rocblas_int DIM_X,
           rocblas_int DIM_Y,
           bool        UNIT,
-          bool        TRANS,
-          std::enable_if_t<!equals_two<N>, rocblas_int> = 0>
-void ROCBLAS_KERNEL_ILF rocblas_trsv_invert(T* const __restrict__ A, T* const __restrict__ sx)
+          bool        TRANS>
+void ROCBLAS_TRSV_INVERT_ILF rocblas_trsv_invert_upper(T* const __restrict__ A,
+                                                       T* const __restrict__ sx)
 {
-    // A is broken down as:
-    // A = [ A_11 0    ]
-    //     [ A_21 A_22 ]
-
-    // A^-1 can be solved as:
-    // A^-1 = [ (A_11^-1)                   (0)     ]
-    //        [ (-A_21 * A_11^-1 * A_22^-1) (A_22^-1)]
-
-    // Invert A_11 section by breaking into smaller and smaller pieces
-    rocblas_trsv_invert<T, N / 2, LDA, DIM_X, DIM_Y, UNIT, TRANS>(A, sx);
-    __syncthreads();
-
-    // Solve A_21 section
-    rocblas_invert_solve_A21<T, N / 2, LDA, DIM_X, DIM_Y, UNIT>(
-        A, &A[N / 2], &A[(LDA + 1) * N / 2], sx);
-
-    if(TRANS)
+    if constexpr(N == 2)
     {
-        __syncthreads();
-        rocblas_trsv_transpose<T, LDA>(N / 2, &A[N / 2], &A[(N / 2) * LDA]);
+        // Invert a 2x2 triangular section of A
+        if(threadIdx.x == 0 && threadIdx.y == 0)
+        {
+            if(UNIT)
+            {
+                A[0]       = 1;
+                A[LDA + 1] = 1;
+            }
+            else
+            {
+                // Diagonal is already stored as 1 / A[x], so A[0] and A[LDA + 1] are already done
+                // A[1] = -A[1] * (1 / A[0]) * (1 / A[LDA + 1])
+                A[LDA] = A[LDA] * (A[0] * A[LDA + 1]);
+            }
+            if(TRANS)
+            {
+                // For the transpose case, we can simply copy over the solved A[1]
+                // to the appropriate place
+                A[1] = A[LDA];
+            }
+        }
     }
-    __syncthreads();
-
-    // Invert A_22 section by breaking into smaller and smaller pieces
-    rocblas_trsv_invert<T, N / 2, LDA, DIM_X, DIM_Y, UNIT, TRANS>(&A[(LDA + 1) * N / 2], sx);
-}
-
-// Invert a 2x2 triangular section of A
-template <typename T,
-          rocblas_int N,
-          rocblas_int LDA,
-          rocblas_int threadsx,
-          rocblas_int threadsy,
-          bool        UNIT,
-          bool        TRANS,
-          std::enable_if_t<equals_two<N>, rocblas_int> = 0>
-void ROCBLAS_KERNEL_ILF rocblas_trsv_invert_upper(T* const __restrict__ A, T* const __restrict__ sx)
-{
-    if(threadIdx.x == 0 && threadIdx.y == 0)
+    else
     {
-        if(UNIT)
-        {
-            A[0]       = 1;
-            A[LDA + 1] = 1;
-        }
-        else
-        {
-            // Diagonal is already stored as 1 / A[x], so A[0] and A[LDA + 1] are already done
-            // A[1] = -A[1] * (1 / A[0]) * (1 / A[LDA + 1])
-            A[LDA] = A[LDA] * (A[0] * A[LDA + 1]);
-        }
+        // A is broken down as:
+        // A = [ A_11 A_12 ]
+        //     [ 0    A_22 ]
+
+        // A^-1 can be solved as:
+        // A^-1 = [ (A_11^-1) (A_11^-1 * -A_12 * A_22^-1) ]
+        //        [ (0)       (A_22^-1)                   ]
+
+        // Invert A_22 section by breaking into smaller and smaller pieces
+        rocblas_trsv_invert_upper<T, N / 2, LDA, DIM_X, DIM_Y, UNIT, TRANS>(&A[(LDA + 1) * N / 2],
+                                                                            sx);
+        __syncthreads();
+        __threadfence();
+
+        // Solve A_21 section
+        //                                             A11, A12,             A22
+        rocblas_invert_solve_A12<T, N / 2, LDA, DIM_X, DIM_Y, UNIT>(
+            A, &A[(N / 2) * LDA], &A[(LDA + 1) * N / 2], sx);
+
         if(TRANS)
         {
-            // For the transpose case, we can simply copy over the solved A[1]
-            // to the appropriate place
-            A[1] = A[LDA];
+            __syncthreads();
+            rocblas_trsv_transpose<T, LDA>(N / 2, &A[(N / 2) * LDA], &A[(N / 2)]);
         }
-    }
-}
-
-// Recursive invert to solve A^-1
-template <typename T,
-          rocblas_int N,
-          rocblas_int LDA,
-          rocblas_int DIM_X,
-          rocblas_int DIM_Y,
-          bool        UNIT,
-          bool        TRANS,
-          std::enable_if_t<!equals_two<N>, rocblas_int> = 0>
-void ROCBLAS_KERNEL_ILF rocblas_trsv_invert_upper(T* const __restrict__ A, T* const __restrict__ sx)
-{
-    // A is broken down as:
-    // A = [ A_11 A_12 ]
-    //     [ 0    A_22 ]
-
-    // A^-1 can be solved as:
-    // A^-1 = [ (A_11^-1) (A_11^-1 * -A_12 * A_22^-1) ]
-    //        [ (0)       (A_22^-1)                   ]
-
-    // Invert A_22 section by breaking into smaller and smaller pieces
-    rocblas_trsv_invert_upper<T, N / 2, LDA, DIM_X, DIM_Y, UNIT, TRANS>(&A[(LDA + 1) * N / 2], sx);
-    __syncthreads();
-    __threadfence();
-
-    // Solve A_21 section
-    //                                             A11, A12,             A22
-    rocblas_invert_solve_A12<T, N / 2, LDA, DIM_X, DIM_Y, UNIT>(
-        A, &A[(N / 2) * LDA], &A[(LDA + 1) * N / 2], sx);
-
-    if(TRANS)
-    {
         __syncthreads();
-        rocblas_trsv_transpose<T, LDA>(N / 2, &A[(N / 2) * LDA], &A[(N / 2)]);
-    }
-    __syncthreads();
 
-    // Invert A_11 section by breaking into smaller and smaller pieces
-    rocblas_trsv_invert_upper<T, N / 2, LDA, DIM_X, DIM_Y, UNIT, TRANS>(A, sx);
+        // Invert A_11 section by breaking into smaller and smaller pieces
+        rocblas_trsv_invert_upper<T, N / 2, LDA, DIM_X, DIM_Y, UNIT, TRANS>(A, sx);
+    }
 }
 
 template <typename T, rocblas_int N, rocblas_int DIM_Y, bool UPPER>
