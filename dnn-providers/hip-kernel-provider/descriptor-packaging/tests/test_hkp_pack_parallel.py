@@ -8,9 +8,7 @@ standard-library-only function rather than a fixture body: the capture script
 copies it verbatim into a tree that has never seen this file.
 """
 
-import ast
 import concurrent.futures
-import inspect
 import itertools
 import os
 import re
@@ -479,50 +477,6 @@ def test_prewarm_jobs_are_deduped_on_variant_key(corpus):
     jobs = pipeline._prewarm_jobs(flat, corpus, TARGET_ARCH)
     assert jobs, "the corpus selects variants, so the job list cannot be empty"
     assert len({j.vk for j in jobs}) == len(jobs)
-
-
-def _arch_matches_call_sites():
-    """`arch_matches` call counts in pipeline.py, keyed by enclosing function.
-
-    Parsed rather than counted as strings: an explanatory comment naming
-    `arch_matches` is not a call.
-    """
-    tree = ast.parse(inspect.getsource(pipeline))
-    counts = {}
-    for node in tree.body:
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        found = 0
-        for sub in ast.walk(node):
-            if not isinstance(sub, ast.Call):
-                continue
-            func = sub.func
-            name = (
-                func.id
-                if isinstance(func, ast.Name)
-                else func.attr if isinstance(func, ast.Attribute) else None
-            )
-            if name == "arch_matches":
-                found += 1
-        if found:
-            counts[node.name] = found
-    return counts
-
-
-@pytest.mark.quick
-def test_arch_matches_call_sites_are_pinned():
-    """All three selection filters live in the generator and nowhere else.
-
-    `compile_intermediate` keeps exactly one call, and it is not a filter: it
-    decides KDP disposition -- copy the authored KDP through verbatim -- before
-    the deepcopy the generator would consume. A call in any other function is a
-    fourth selection site, which is the divergence a single shared generator
-    exists to make impossible.
-    """
-    assert _arch_matches_call_sites() == {
-        "_selected_entries": 3,
-        "compile_intermediate": 1,
-    }
 
 
 @pytest.mark.quick

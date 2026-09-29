@@ -17,6 +17,7 @@ from .rocke_compile import compile_rocke_variant, rocke_variant_key
 from .descriptors import (
     KPACK_DIR_NAME,
     arch_matches,
+    _selected_entries,
     kdp_survives,
     load_flat_input,
     reachable_generic_ids,
@@ -305,24 +306,6 @@ def _is_passthrough(ukd):
     return ukd["kernel_source"]["kind"] in _PASSTHROUGH_KINDS
 
 
-def _root_holds_compiling_source(flat):
-    """Whether the authored root holds a UKD that a producer compiles.
-
-    The complement of _is_passthrough over both authoring forms -- a standalone
-    `<name>.ukd.json` and an inline entry of a KDP's kernelDescriptors -- so the
-    two spellings of the same distinction cannot drift. Only such a UKD yields a
-    code object, so only a root holding one implies an archive.
-    """
-    for desc in flat.ukds():
-        if not _is_passthrough(desc.doc):
-            return True
-    for kdp in flat.kdps():
-        for entry in kdp.doc.get("kernelDescriptors", []):
-            if isinstance(entry, dict) and not _is_passthrough(entry):
-                return True
-    return False
-
-
 def _dest_at(base, rel_dir, name):
     """Destination for an authored file, preserving its subpath under base.
 
@@ -363,32 +346,6 @@ class _VariantJob:
     hipcc: str
     arch: str
     requests: dict = field(default_factory=dict)
-
-
-def _selected_entries(doc, arch, ukd_by_id):
-    """Yield the entries of doc that ship for arch.
-
-    Yields `(entry_id, ukd_doc, sdesc)`: for a standalone-UKD id ref, the id
-    string, that UKD's doc, and its Descriptor; for an inline UKD, `None`, the
-    entry dict itself, and `None`. The Descriptor rather than its rel_dir,
-    because the walk needs its `path.name` for the error context and for the
-    shipped filename as well as its `rel_dir` for the variant key.
-
-    All three arch filters live here and nowhere else, so the prewarm and the
-    serial walk cannot select different variant sets. `ukd_by_id` arrives as a
-    parameter rather than being reached for through `flat`, which leaves the
-    generator no way to enumerate a standalone UKD no KDP references: an orphan
-    is legal input the walk never compiles.
-    """
-    if not arch_matches(doc, arch):
-        return
-    for entry in doc["kernelDescriptors"]:
-        if isinstance(entry, str):
-            sdesc = ukd_by_id[entry]
-            if arch_matches(sdesc.doc, arch):
-                yield entry, sdesc.doc, sdesc
-        elif arch_matches(entry, arch):
-            yield None, entry, None
 
 
 def shipped_engines(flat, arches):
@@ -1552,18 +1509,22 @@ def run_pipeline(
         log(f"packing '{source_root}': nothing to pack for [{arch_list}], skipping")
         return results
 
-    # The archive clause keys on what the root holds rather than on what survived
-    # pruning: a compiling UKD that prunes out of every shard that shipped is
-    # indistinguishable downstream from one whose archive went missing. Only the
-    # packer knows the kinds it walked and which arches pruned.
-    if _root_holds_compiling_source(flat) and not any(
-        r.kpack_path for r in results.values()
-    ):
-        raise HkpPackError(
-            f"packing '{source_root}' wrote descriptors but no archive, while "
-            "the root holds at least one UKD of a compiling kind ('hip' or "
-            f"'rocke'). Requested arch(es) [{arch_list}]; none produced a "
-            "kpack. Either those UKDs pruned out of every shard that shipped, "
-            "or their KDPs ship without them."
-        )
+    # An internal invariant no input reaches: a shard that shipped a compiling UKD
+    # always writes an archive. Only the packer knows which shards shipped and
+    # what each selected.
+    ukd_by_id = flat.ukd_by_id()
+    for arch, result in results.items():
+        if result.skipped or result.kpack_path is not None:
+            continue
+        for kdp in flat.kdps():
+            if not kdp_survives(kdp.doc, flat, arch):
+                continue
+            for sid, ukd, _sdesc in _selected_entries(kdp.doc, arch, ukd_by_id):
+                if not _is_passthrough(ukd):
+                    raise HkpPackError(
+                        f"packing '{source_root}' wrote descriptors but no "
+                        f"archive for {arch}, whose shard selected UKD "
+                        f"'{sid or ukd.get('id')}' of a compiling kind "
+                        "('hip' or 'rocke')."
+                    )
     return results

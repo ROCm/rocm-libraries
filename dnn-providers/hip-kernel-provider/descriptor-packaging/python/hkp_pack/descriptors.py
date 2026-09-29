@@ -129,6 +129,32 @@ def arch_matches(kdp_doc, arch):
     return arch in archs
 
 
+def _selected_entries(doc, arch, ukd_by_id):
+    """Yield the entries of doc that ship for arch.
+
+    Yields `(entry_id, ukd_doc, sdesc)`: for a standalone-UKD id ref, the id
+    string, that UKD's doc, and its Descriptor; for an inline UKD, `None`, the
+    entry dict itself, and `None`. The Descriptor rather than its rel_dir,
+    because the walk needs its `path.name` for the error context and for the
+    shipped filename as well as its `rel_dir` for the variant key.
+
+    All three arch filters live here and nowhere else, so the prewarm and the
+    serial walk cannot select different variant sets. `ukd_by_id` arrives as a
+    parameter rather than being reached for through `flat`, which leaves the
+    generator no way to enumerate a standalone UKD no KDP references: an orphan
+    is legal input the walk never compiles.
+    """
+    if not arch_matches(doc, arch):
+        return
+    for entry in doc["kernelDescriptors"]:
+        if isinstance(entry, str):
+            sdesc = ukd_by_id[entry]
+            if arch_matches(sdesc.doc, arch):
+                yield entry, sdesc.doc, sdesc
+        elif arch_matches(entry, arch):
+            yield None, entry, None
+
+
 def _arch_subset_ok(ukd_arch, kdp_arch):
     """A UKD's arch is admissible under a referencing KDP's arch.
 
@@ -147,18 +173,9 @@ def kdp_survives(kdp_doc, flat, arch):
     A KDP ships iff it matches the arch and at least one of its UKD entries
     (an inline dict or a standalone resolved by id) also applies to that arch.
     A KDP whose UKDs all filter out for this arch is dropped from the shard.
+    Requires a validated `flat`: every by-id entry resolves.
     """
-    if not arch_matches(kdp_doc, arch):
-        return False
-    ukd_by_id = flat.ukd_by_id()
-    for entry in kdp_doc.get("kernelDescriptors", []):
-        if isinstance(entry, str):
-            sdesc = ukd_by_id.get(entry)
-            if sdesc is not None and arch_matches(sdesc.doc, arch):
-                return True
-        elif isinstance(entry, dict) and arch_matches(entry, arch):
-            return True
-    return False
+    return any(True for _ in _selected_entries(kdp_doc, arch, flat.ukd_by_id()))
 
 
 def validate_hip_build(build, where):
@@ -310,6 +327,11 @@ def _validate_ukd_fields(ukd, where, log=print):
     if not isinstance(ks, dict) or "kind" not in ks:
         raise HkpPackError(f"{where} kernel_source missing 'kind'")
     kind = ks["kind"]
+    if kind not in UKD_KINDS:
+        raise HkpPackError(
+            f"{where} kernel_source has unsupported kind '{kind}' "
+            f"(expected one of {', '.join(repr(k) for k in UKD_KINDS)})"
+        )
     _validate_provenance(ukd.get("provenance", {}), where, produced=kind == "kpack")
     if kind == "hip":
         _require(ks, ["source", "entry"], where)
@@ -323,14 +345,9 @@ def _validate_ukd_fields(ukd, where, log=print):
         _require(ks, ["file", "symbol"], where)
     elif kind == "kpack":
         _require(ks, ["library", "toc_key", "symbol", "sha256", "signature"], where)
-    elif kind == "embedded_source":
+    else:
         _require(ks, ["source_file", "entry_point"], where)
         _validate_embedded_source_file(ks["source_file"], where)
-    else:
-        raise HkpPackError(
-            f"{where} kernel_source has unsupported kind '{kind}' "
-            "(expected 'hip', 'rocke', 'hsaco', 'kpack', or 'embedded_source')"
-        )
 
 
 def _validate_inline_ukd(ukd, kdp_path, log=print):
@@ -522,6 +539,10 @@ def load_flat_input(root, log=print, *, exclude_folders=(), disabled_kinds=()):
             f"known kinds are {list(UKD_KINDS)}"
         )
 
+    child_folders = {p.name for p in root.iterdir() if p.is_dir()}
+    for name in sorted(set(exclude_folders) & child_folders):
+        log(f"excluding disabled family folder {name}/")
+
     descriptors = []
     for jp in sorted(root.rglob("*.json")):
         rel_path = jp.relative_to(root)
@@ -607,14 +628,20 @@ def _drop_disabled_kinds(flat, disabled_kinds, log):
             kdp.doc["kernelDescriptors"] = kept
         else:
             dropped.add(id(kdp))
-    flat.descriptors = [
-        d
-        for d in flat.descriptors
-        if id(d) not in dropped
-        and not (
-            d.type == UKD_TYPE and d.doc["kernel_source"]["kind"] in disabled_kinds
-        )
-    ]
+    kept_descriptors = []
+    for d in flat.descriptors:
+        if id(d) in dropped:
+            continue
+        if d.type == UKD_TYPE:
+            kind = d.doc["kernel_source"]["kind"]
+            if kind in disabled_kinds:
+                log(
+                    f"standalone UKD {d.path.name} (id '{d.doc.get('id')}'): "
+                    f"skipping disabled kind '{kind}'"
+                )
+                continue
+        kept_descriptors.append(d)
+    flat.descriptors = kept_descriptors
 
 
 def _reject_inline_standalone_collision(flat):

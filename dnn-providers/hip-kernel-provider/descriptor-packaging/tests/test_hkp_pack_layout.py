@@ -1843,35 +1843,57 @@ def test_a_passthrough_only_root_passes_with_no_archive(
     assert not list((tmp_path / "out").rglob("*.kpack"))
 
 
-@pytest.mark.quick
-def test_a_compiling_root_that_wrote_no_archive_is_a_failure(
-    tmp_path, empty_arch_fixture, rocm_kpack_dir
-):
-    """Descriptors alone are not enough once a compiling source is present.
-
-    A mixed root is the only shape that reaches this clause: the pass-through
-    half keeps a shard alive, so nothing is skipped and a descriptor count is
-    satisfied, while the hip half prunes out of the one arch packed and its
-    kernels ship nowhere.
-    """
+def _separate_kdps_root(tmp_path, fixture):
+    """A hip KDP pinned to ARCH beside a wildcard embedded KDP."""
     root = tmp_path / "root"
-    _nest(root, "hip/pointwise", empty_arch_fixture)
-    _embedded_copy(root, "embedded/pointwise", empty_arch_fixture, suffix="2")
+    _nest(root, "hip/pointwise", fixture)
+    _embedded_copy(root, "embedded/pointwise", fixture, suffix="2")
+    return root
 
-    with pytest.raises(HkpPackError) as excinfo:
-        _run(
-            root,
-            tmp_path,
-            "hipcc-not-invoked",
-            rocm_kpack_dir,
-            [OTHER_ARCH],
-            source_label=_LABEL,
-        )
 
-    message = str(excinfo.value)
-    assert str(root) in message
-    assert "no archive" in message
-    assert OTHER_ARCH in message
+def _one_kdp_root(tmp_path, fixture):
+    """One wildcard KDP holding embedded UKDs and a hip UKD pinned to ARCH."""
+    root = _embedded_root(tmp_path, fixture)
+    kdp_path = root / "pointwise" / "solo.kdp.json"
+    kdp = _read(kdp_path)
+    kdp["kernelDescriptors"].append(
+        {
+            "version": "0.1",
+            "id": "ukd-solo-hip-add-f32-b64",
+            "name": "PointwiseAdd f32 block64 (hip)",
+            "arch": [ARCH],
+            "kernel_source": {
+                "kind": "hip",
+                "source": "kernels/PointwiseAdd.cpp",
+                "entry": "PointwiseAdd",
+                "build": {"defines": {"HIP_PLUGIN_POINTWISE_ADD_TYPE": "float"}},
+            },
+            "metadata": {"dtype": "FLOAT", "block_size": 64},
+            "priority": 0,
+        }
+    )
+    kdp_path.write_text(json.dumps(kdp, indent=2) + "\n", encoding="utf-8")
+    return root
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "build_root",
+    [_separate_kdps_root, _one_kdp_root],
+    ids=["separate-kdps", "one-kdp"],
+)
+def test_an_arch_pruned_compiling_ukd_beside_a_passthrough_shard_packs_cleanly(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir, build_root
+):
+    """A compiling UKD that prunes out of the one arch packed leaves that arch's
+    pass-through shard whole and archive-less: nothing selected there needs a
+    producer, so a missing archive is not an error."""
+    root = build_root(tmp_path, empty_arch_fixture)
+
+    results = _pack_embedded(root, tmp_path, rocm_kpack_dir, [OTHER_ARCH])
+
+    assert not results[OTHER_ARCH].skipped
+    assert results[OTHER_ARCH].kpack_path is None
 
 
 # --- L. Disabled families and producer kinds (quick, compile-free) -------------
@@ -1924,7 +1946,14 @@ def test_a_disabled_kind_is_pruned_from_its_kdp_and_the_rest_ships(
     (kdp,) = [k for k in enabled.kdps() if k.path == kdp_path]
     assert _ROCKE_UKD_ID in _entry_ids(kdp), "the premise: rocKE UKD selected"
 
-    flat = load_flat_input(root, log=_silent, disabled_kinds=("rocke",))
+    logs = []
+    flat = load_flat_input(root, log=logs.append, disabled_kinds=("rocke",))
+    assert any(
+        m.startswith("pointwise.kdp.json: skipping 1 UKD(s) of a disabled kind")
+        for m in logs
+    )
+    if form == "standalone":
+        assert any(m.startswith("standalone UKD ") for m in logs)
     (kdp,) = [k for k in flat.kdps() if k.path == kdp_path]
     assert _ROCKE_UKD_ID not in _entry_ids(kdp)
     assert _entry_ids(kdp), "the hip entries stay"
@@ -1984,7 +2013,10 @@ def test_an_excluded_folder_is_never_read(tmp_path, main_fixture):
     with pytest.raises(HkpPackError, match="malformed"):
         load_flat_input(root, log=_silent, exclude_folders=("rocKE",))
     (root / "hip" / "rocKE" / "broken.kdp.json").unlink()
-    flat = load_flat_input(root, log=_silent, exclude_folders=("rocKE",))
+    logs = []
+    flat = load_flat_input(root, log=logs.append, exclude_folders=("rocKE",))
+    prefix = "excluding disabled family folder rocKE/"
+    assert len([m for m in logs if m.startswith(prefix)]) == 1
     assert not any("rocKE" in k.path.parts for k in flat.kdps())
     assert flat.kdps()
 
