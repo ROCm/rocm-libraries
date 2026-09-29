@@ -28,6 +28,7 @@ from hkp_pack.hip_compile import hip_variant_key
 from hkp_pack.pipeline import (
     _agreement_inputs,
     compile_intermediate,
+    offered_engines,
     run_pipeline,
     shipped_engines,
 )
@@ -1995,3 +1996,52 @@ def test_disabling_an_unknown_kind_is_an_error(tmp_path, main_fixture):
     _nest(root, "hip/pointwise", main_fixture)
     with pytest.raises(HkpPackError, match="unknown kernel_source kind"):
         load_flat_input(root, log=_silent, disabled_kinds=("rokce",))
+
+
+def _wildcard_solo(tmp_path, empty_arch_fixture, entry_arch):
+    """A copy of `empty_arch` whose KDP is a wildcard and whose inline entry is
+    scoped to `entry_arch` (a wildcard when None)."""
+    root = tmp_path / "wildcard"
+    shutil.copytree(empty_arch_fixture, root)
+    kdp_path = root / "solo.kdp.json"
+    doc = _read(kdp_path)
+    doc["arch"] = []
+    for entry in doc["kernelDescriptors"]:
+        entry.pop("arch", None)
+        if entry_arch is not None:
+            entry["arch"] = entry_arch
+    kdp_path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    return root
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "root_kind", ["rocke", "all-wildcard", "wildcard-kdp-pinned-ukd"]
+)
+def test_offered_engines_ignores_the_build_arches_but_honours_the_filters(
+    tmp_path, rocke_fixture, empty_arch_fixture, root_kind
+):
+    """What a root offers does not depend on the arches a build packs, so a
+    host-side gate reading it is the same for every `GPU_TARGETS`; the family and
+    kind filters still remove what they disable."""
+    if root_kind == "rocke":
+        root = tmp_path / "root"
+        shutil.copytree(rocke_fixture, root)
+        flat = load_flat_input(root, log=_silent)
+        assert "test_fixture:attention" in offered_engines(flat)
+        assert (
+            "test_fixture:attention" not in shipped_engines(flat, ["gfx90a"])["gfx90a"]
+        )
+
+        flat = load_flat_input(root, log=_silent, disabled_kinds=("rocke",))
+        assert offered_engines(flat) == []
+
+        fam = tmp_path / "fam"
+        _nest(fam, "rocKE", rocke_fixture)
+        flat = load_flat_input(fam, log=_silent, exclude_folders=("rocKE",))
+        assert offered_engines(flat) == []
+        return
+
+    entry_arch = None if root_kind == "all-wildcard" else [ROCKE_ARCH]
+    root = _wildcard_solo(tmp_path, empty_arch_fixture, entry_arch)
+    assert offered_engines(load_flat_input(root, log=_silent)) == ["test_fixture:solo"]

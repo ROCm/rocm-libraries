@@ -412,6 +412,36 @@ def shipped_engines(flat, arches):
     }
 
 
+def offered_engines(flat):
+    """The engine names `flat` carries for at least one arch, sorted.
+
+    The answer is independent of the build's arches: it is what host-side gates
+    read, since the host must not depend on which arch content a build packs. A
+    KDP is offered iff it survives some arch named anywhere under `flat` (a KDP or
+    UKD `arch` list, inline or standalone) or the wildcard sentinel `"*"`, which
+    `arch_matches` accepts only for wildcards. Names are built as in
+    `shipped_engines`, and `shipped_engines(flat, arches)` values are always a
+    subset of this list.
+    """
+    candidates = {"*"}
+    ukd_docs = [d.doc for d in flat.ukds()]
+    for k in flat.kdps():
+        candidates.update(k.doc.get("arch") or ())
+        ukd_docs.extend(
+            e for e in k.doc.get("kernelDescriptors", []) if isinstance(e, dict)
+        )
+    for doc in ukd_docs:
+        candidates.update(doc.get("arch") or ())
+    names = {d.id: d.doc.get("name", d.id) for d in flat.by_type("ued")}
+    return sorted(
+        {
+            names.get(k.doc.get("engine"), k.doc.get("engine"))
+            for k in flat.kdps()
+            if any(kdp_survives(k.doc, flat, a) for a in sorted(candidates))
+        }
+    )
+
+
 def _agreement_inputs(flat, arch):
     """Every consumer's declaration and observation request, before any compile.
 
