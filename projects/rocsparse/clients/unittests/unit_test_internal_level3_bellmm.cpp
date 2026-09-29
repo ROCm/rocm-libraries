@@ -61,7 +61,7 @@ using namespace rocsparse_ut;
 
 namespace
 {
-    // The launch clamps grid.y at this value through rocsparse::get_batch_grid_size,
+    // The launch clamps grid.y at this value through rocsparse::get_grid_size_y,
     // which is internal to the library, hence the value is duplicated here.
     constexpr int64_t bellmm_max_grid_y = 65535;
 

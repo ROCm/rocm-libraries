@@ -24,6 +24,7 @@
 
 #include "bellmm_device_general.h"
 #include "rocsparse_float16.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -226,19 +227,19 @@ namespace rocsparse
         descr->base,                                                                   \
         handle->pointer_mode == rocsparse_pointer_mode_host)
 
-#define ROCSPARSE_LAUNCH_BELLMM_GENERAL(TILE)                                                \
-    {                                                                                        \
-        const int64_t bellmm_panels = (static_cast<int64_t>(n) - 1) / (TILE) + 1;            \
-        dim3 bellmm_blocks((mb - 1) / 1 + 1, rocsparse::get_batch_grid_size(bellmm_panels)); \
-        dim3 bellmm_threads((TILE), (TILE), 1);                                              \
-        if(bellmm_panels > static_cast<int64_t>(bellmm_blocks.y))                            \
-        {                                                                                    \
-            ROCSPARSE_LAUNCH_BELLMM_GENERAL_IMPL(TILE, true);                                \
-        }                                                                                    \
-        else                                                                                 \
-        {                                                                                    \
-            ROCSPARSE_LAUNCH_BELLMM_GENERAL_IMPL(TILE, false);                               \
-        }                                                                                    \
+#define ROCSPARSE_LAUNCH_BELLMM_GENERAL(TILE)                                                    \
+    {                                                                                            \
+        const int64_t bellmm_panels = (static_cast<int64_t>(n) - 1) / (TILE) + 1;                \
+        dim3 bellmm_blocks((mb - 1) / 1 + 1, rocsparse::get_grid_size_y(handle, bellmm_panels)); \
+        dim3 bellmm_threads((TILE), (TILE), 1);                                                  \
+        if(bellmm_panels > static_cast<int64_t>(bellmm_blocks.y))                                \
+        {                                                                                        \
+            ROCSPARSE_LAUNCH_BELLMM_GENERAL_IMPL(TILE, true);                                    \
+        }                                                                                        \
+        else                                                                                     \
+        {                                                                                        \
+            ROCSPARSE_LAUNCH_BELLMM_GENERAL_IMPL(TILE, false);                                   \
+        }                                                                                        \
     }
 
         switch(tile)
