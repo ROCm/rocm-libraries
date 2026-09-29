@@ -1337,6 +1337,53 @@ class TestAttentionHelpers(unittest.TestCase):
             self.assertIn(req, names)
         self.assertIsNotNone(build_attention_dense(spec, arch="gfx950"))
 
+    def test_gfx950_signature_matches_the_built_kernels_params(self):
+        """gfx950 ``attention_dense_signature`` matches the built kernel's params.
+
+        The arms straddle the case where ``runtime_shape`` and
+        ``_has_shape_params`` disagree (the shape is a param AND baked), which a
+        launcher gating on the wrong predicate mis-binds on GPU only.
+        """
+        from rocke.core.ir import PtrType
+        from rocke.helpers.spec import ptr_type_str
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            _has_shape_params,
+            attention_dense_signature,
+            build_attention_dense,
+        )
+
+        def type_str(param):
+            if isinstance(param.type, PtrType):
+                return ptr_type_str(param.type.pointee.name, param.type.space)
+            return param.type.name
+
+        base = dict(batch=2, seqlen_q=2048, seqlen_kv=2048, num_query_heads=32,
+                    num_kv_heads=8, head_size=128, causal=True, dtype="fp16",
+                    block_n=64)
+        arms = {
+            "runtime-shape": AttentionDenseSpec(**base),
+            "sliding-window": AttentionDenseSpec(**base, sliding_window=512),
+            "bottom-right": AttentionDenseSpec(
+                **{**base, "seqlen_q": 1024}, causal_bottom_right=True),
+            "persistent": AttentionDenseSpec(
+                **base, persistent=True, num_persistent=256),
+        }
+        for arm, spec in arms.items():
+            with self.subTest(arm=arm):
+                params = build_attention_dense(spec, arch="gfx950").params
+                sig = attention_dense_signature(spec)
+                self.assertEqual([a["name"] for a in sig],
+                                 [p.name for p in params])
+                self.assertEqual([a["type"] for a in sig],
+                                 [type_str(p) for p in params])
+                self.assertEqual(_has_shape_params(spec),
+                                 "batch" in [p.name for p in params])
+        # The predicates really diverge on these arms.
+        self.assertEqual([arms[a].runtime_shape for a in
+                          ("runtime-shape", "sliding-window", "bottom-right")],
+                         [True, False, False])
+
     def test_gfx950_dense_paged_prefill_compiles_and_fits_budget(self):
         """comgr build + resource-budget net for the PAGED gfx950 dense prefill
         (fp16/bf16 D128 sliding-window, single-seq). Mirrors the non-paged dense

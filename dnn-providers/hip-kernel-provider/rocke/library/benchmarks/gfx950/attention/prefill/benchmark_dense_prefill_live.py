@@ -51,13 +51,14 @@ import torch  # noqa: E402
 
 from kernels.gfx950.attention_dense import (  # noqa: E402
     AttentionDenseSpec,
+    _has_shape_params,
     attention_dense_block,
     attention_dense_grid,
+    attention_dense_signature,
     build_attention_dense,
     supports_attention_dense,
 )
 from rocke.helpers.compile import compile_kernel  # noqa: E402
-from rocke.helpers.spec import SignatureBuilder  # noqa: E402
 from rocke.runtime import (  # noqa: E402
     KernelLauncher,
     LaunchConfig,
@@ -121,24 +122,12 @@ def _dense_launcher(spec: AttentionDenseSpec) -> KernelLauncher:
         backend="python",
         capture_ir_text=False,
     )
-    sb = (
-        SignatureBuilder()
-        .ptr("q_ptr", spec.dtype)
-        .ptr("k_ptr", spec.dtype)
-        .ptr("v_ptr", spec.dtype)
-        .ptr("o_ptr", spec.dtype)
-        .scalar("scale", "f32")
-    )
-    if spec.runtime_shape:
-        sb = (
-            sb.scalar("batch", "i32")
-            .scalar("seqlen_q", "i32")
-            .scalar("seqlen_kv", "i32")
-        )
-    if spec.varlen:
-        sb = sb.ptr("cu_seqlens_q", "i32").ptr("cu_seqlens_kv", "i32")
+    # The kernel module owns the ABI. A hand-rolled copy here gated the shape
+    # scalars on runtime_shape, which is narrower than _has_shape_params
+    # (varlen/ragged/paged/SWA), so those launches packed misaligned kernargs.
     lch = KernelLauncher(
-        hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sb.build()
+        hsaco=art.hsaco, kernel_name=art.kernel_name,
+        signature=attention_dense_signature(spec),
     )
     _LAUNCHER_CACHE[key] = lch
     return lch
@@ -244,7 +233,7 @@ def bench_dense(
             stream=stream,
         )
         vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": scale}
-        if spec.runtime_shape:
+        if _has_shape_params(spec):
             vals["batch"] = int(spec.batch)
             vals["seqlen_q"] = int(spec.seqlen_q)
             vals["seqlen_kv"] = int(spec.seqlen_kv)
