@@ -1264,6 +1264,49 @@ class TestFetch(unittest.TestCase):
             self.assertEqual(run_gh(["repos/x", "--paginate"]), b"{}")
         self.assertEqual(run.call_args.args[0], ["gh", "api", "repos/x", "--paginate"])
 
+    def test_run_gh_retries_a_body_refused_for_escape_sequences(self) -> None:
+        refused = mock.Mock(
+            returncode=1,
+            stdout=b"",
+            stderr=b"error: the response contains terminal escape sequences;"
+            b" pass --allow-escape-sequences to output it anyway\n",
+        )
+        done = mock.Mock(returncode=0, stdout=b"\x1b[0mlog", stderr=b"")
+        flagged = ["--allow-escape-sequences"]
+        with mock.patch("harvest_support_claims._gh_extra_args", new=[]):
+            with mock.patch("subprocess.run", side_effect=[refused, done, done]) as run:
+                self.assertEqual(run_gh(["repos/x/logs"]), b"\x1b[0mlog")
+                self.assertEqual(run_gh(["repos/y/logs"]), b"\x1b[0mlog")
+        self.assertEqual(
+            [call.args[0] for call in run.call_args_list],
+            [
+                ["gh", "api", "repos/x/logs"],
+                ["gh", "api", "repos/x/logs", *flagged],
+                ["gh", "api", "repos/y/logs", *flagged],
+            ],
+        )
+
+    def test_run_gh_without_the_refusal_never_sends_the_flag(self) -> None:
+        done = mock.Mock(returncode=0, stdout=b"\x1b[0mlog", stderr=b"")
+        with mock.patch("harvest_support_claims._gh_extra_args", new=[]):
+            with mock.patch("subprocess.run", return_value=done) as run:
+                run_gh(["repos/x/logs"])
+                run_gh(["repos/y/logs"])
+        self.assertEqual(
+            [call.args[0] for call in run.call_args_list],
+            [["gh", "api", "repos/x/logs"], ["gh", "api", "repos/y/logs"]],
+        )
+
+    def test_run_gh_refused_again_with_the_flag_fails(self) -> None:
+        refused = mock.Mock(
+            returncode=1, stdout=b"", stderr=b"pass --allow-escape-sequences\n"
+        )
+        with mock.patch("harvest_support_claims._gh_extra_args", new=[]):
+            with mock.patch("subprocess.run", return_value=refused) as run:
+                with self.assertRaisesRegex(FetchError, "allow-escape-sequences"):
+                    run_gh(["repos/x/logs"])
+        self.assertEqual(run.call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

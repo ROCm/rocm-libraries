@@ -651,21 +651,45 @@ def render_table(result: Harvest) -> str:
 
 Gh = Callable[[List[str]], bytes]
 
+_GH_ESCAPE_FLAG = "--allow-escape-sequences"
+
+# Holds _GH_ESCAPE_FLAG once gh has refused a body for its escape sequences.
+_gh_extra_args: List[str] = []
+
 
 class FetchError(RuntimeError):
     """A CI run, its job logs or develop could not be fetched."""
 
 
 def run_gh(args: List[str]) -> bytes:
-    """Runs `gh api ARGS`, whose first item is the endpoint, and returns stdout."""
+    """Runs `gh api ARGS`, whose first item is the endpoint, and returns stdout.
+
+    A gh that refuses to print a body with terminal escape sequences, such
+    as a job log, is run again with the flag that allows it, and every later
+    call sends the flag up front. A gh without that refusal does not know
+    the flag, so it is never sent to one.
+    """
     try:
-        done = subprocess.run(["gh", "api", *args], capture_output=True, check=False)
+        done = _run_gh_once(args)
+        if (
+            done.returncode != 0
+            and not _gh_extra_args
+            and _GH_ESCAPE_FLAG.encode() in done.stderr
+        ):
+            _gh_extra_args.append(_GH_ESCAPE_FLAG)
+            done = _run_gh_once(args)
     except FileNotFoundError as exc:
         raise FetchError("the GitHub CLI (gh) is not installed") from exc
     if done.returncode != 0:
         message = done.stderr.decode("utf-8", "replace").strip()
         raise FetchError(f"gh api {args[0]}: {message}")
     return done.stdout
+
+
+def _run_gh_once(args: List[str]) -> "subprocess.CompletedProcess[bytes]":
+    return subprocess.run(
+        ["gh", "api", *args, *_gh_extra_args], capture_output=True, check=False
+    )
 
 
 def latest_nightly(gh: Gh) -> int:
