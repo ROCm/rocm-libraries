@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
+"""Select the stage reuse mode for rocm-libraries Multi-Arch CI.
 
+Use the PR base branch for pull requests and the event branch for other runs.
+Release branches use off. Elsewhere, reuse-stage falls back to off when no
+baseline run ID is available. Write the effective mode to GITHUB_OUTPUT.
+"""
 
 import os
 from pathlib import Path
