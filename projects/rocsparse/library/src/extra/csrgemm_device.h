@@ -93,8 +93,8 @@ namespace rocsparse
 
         // Each (sub)wavefront processes a row, grid-strided so a grid clamped to
         // maxGridSize[0] still covers every row
-        for(J row = static_cast<J>(hipBlockIdx_x) * (BLOCKSIZE / WFSIZE) + wid; row < m;
-            row += static_cast<J>(hipGridDim_x) * (BLOCKSIZE / WFSIZE))
+        for(int64_t row = static_cast<int64_t>(hipBlockIdx_x) * (BLOCKSIZE / WFSIZE) + wid; row < m;
+            row += static_cast<int64_t>(hipGridDim_x) * (BLOCKSIZE / WFSIZE))
         {
             // Initialize intermediate product counter of current row
             I nprod = 0;
@@ -492,8 +492,8 @@ namespace rocsparse
         J* table = &stable[wid * HASHSIZE];
 
         // Grid-stride over the (sub)wavefront rows so a grid clamped to maxGridSize[0] covers all
-        for(J idx = static_cast<J>(hipBlockIdx_x) * (BLOCKSIZE / WFSIZE) + wid; idx < m;
-            idx += static_cast<J>(hipGridDim_x) * (BLOCKSIZE / WFSIZE))
+        for(int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * (BLOCKSIZE / WFSIZE) + wid; idx < m;
+            idx += static_cast<int64_t>(hipGridDim_x) * (BLOCKSIZE / WFSIZE))
         {
             // Initialize hash table
             for(uint32_t i = lid; i < HASHSIZE; i += WFSIZE)
@@ -504,7 +504,7 @@ namespace rocsparse
             __threadfence_block();
 
             // Apply permutation, if available
-            J row = perm ? perm[idx + *offset] : idx;
+            J row = perm ? perm[idx + *offset] : static_cast<J>(idx);
 
             // Initialize row nnz
             J nnz = 0;
