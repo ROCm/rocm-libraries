@@ -271,13 +271,13 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) trevc3_solve_kernel(const I n,
     T* X = XX + bid * strideX;
     const I i1 = i0 + nb;
 
-    // diagonal block of T in shared memory
+    // diagonal block of T in shared memory (zero outside the nb x nb block)
     __shared__ T Ts[NB * NB];
-    for(I e = hipThreadIdx_x; e < nb * nb; e += BS)
+    for(I e = hipThreadIdx_x; e < NB * NB; e += BS)
     {
-        const I c = e / nb;
-        const I r = e - c * nb;
-        Ts[r + c * NB] = A[(i0 + r) + (i0 + c) * size_t(ldt)];
+        const I c = e / NB;
+        const I r = e - c * NB;
+        Ts[e] = (r < nb && c < nb) ? A[(i0 + r) + (i0 + c) * size_t(ldt)] : T(0);
     }
     __syncthreads();
 
@@ -296,38 +296,39 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) trevc3_solve_kernel(const I n,
     const T* Rk = R + (k - p0) * NB;
     T* Xk = X + (k - p0) * size_t(n);
 
+    // x is indexed only with compile-time constants (fully unrolled loops), so that it stays
+    // in registers; the entries that are known to be zero (outside the block, and below
+    // (right) or above (left) the eigenvalue when k is in the block) take part in the
+    // products and the rescaling as exact zeros, which leaves the results unchanged
+    const bool inblk = (k >= i0 && k < i1);
+    const I kl = inblk ? k - i0 : 0;
     T x[NB];
-    I jfirst, jlast, lfirst, llast;
-    if(k >= i0 && k < i1)
+#pragma unroll
+    for(int j = 0; j < NB; j++)
     {
-        const I kl = k - i0;
-        for(I j = 0; j < nb; j++)
-            x[j] = T(0);
-        x[kl] = T(std::min(S(1), xbig));
-        jfirst = LEFT ? kl + 1 : kl - 1;
-        lfirst = LEFT ? kl : 0;
-        llast = LEFT ? nb - 1 : kl;
+        if(inblk)
+            x[j] = (j == kl) ? T(std::min(S(1), xbig)) : T(0);
+        else
+            x[j] = (j < nb) ? Rk[j] : T(0);
     }
-    else
-    {
-        for(I j = 0; j < nb; j++)
-            x[j] = Rk[j];
-        jfirst = LEFT ? 0 : nb - 1;
-        lfirst = 0;
-        llast = nb - 1;
-    }
-    jlast = LEFT ? nb - 1 : 0;
-    const I jstep = LEFT ? 1 : -1;
+    // rows to solve: jlo:jhi
+    const I jlo = (LEFT && inblk) ? kl + 1 : 0;
+    const I jhi = (!LEFT && inblk) ? kl - 1 : nb - 1;
 
     // substitution, with the entries of x (solved or right-hand side) kept below xbig
     S stot = 1;
-    for(I j = jfirst; LEFT ? j <= jlast : j >= jlast; j += jstep)
+#pragma unroll
+    for(int jj = 0; jj < NB; jj++)
     {
+        const int j = LEFT ? jj : NB - 1 - jj;
+        if(j < jlo || j > jhi)
+            continue;
         T s = x[j];
         T d;
         if(LEFT)
         {
-            for(I l = lfirst; l < j; l++)
+#pragma unroll
+            for(int l = 0; l < j; l++)
                 s -= conj(Ts[l + j * NB]) * x[l];
             d = Ts[j + j * NB] - lam;
             if(hqr_cabs1(d) < smin)
@@ -336,7 +337,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) trevc3_solve_kernel(const I n,
         }
         else
         {
-            for(I l = j + 1; l <= llast; l++)
+#pragma unroll
+            for(int l = j + 1; l < NB; l++)
                 s -= Ts[j + l * NB] * x[l];
             d = Ts[j + j * NB] - lam;
             if(hqr_cabs1(d) < smin)
@@ -348,7 +350,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) trevc3_solve_kernel(const I n,
         if(as > xbig * ad)
         {
             const S sc = (xbig * ad) / as;
-            for(I l = lfirst; l <= llast; l++)
+#pragma unroll
+            for(int l = 0; l < NB; l++)
                 x[l] *= sc;
             s *= sc;
             stot *= sc;
@@ -370,8 +373,10 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) trevc3_solve_kernel(const I n,
                 Xk[r] *= stot;
         }
     }
-    for(I j = 0; j < nb; j++)
-        Xk[i0 + j] = x[j];
+#pragma unroll
+    for(int j = 0; j < NB; j++)
+        if(j < nb)
+            Xk[i0 + j] = x[j];
 }
 
 /** TREVC3_NORMALIZE_KERNEL copies the columns c = 0:nc-1 of X (leading dimension n)
