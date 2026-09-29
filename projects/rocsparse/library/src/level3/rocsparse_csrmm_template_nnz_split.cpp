@@ -301,8 +301,7 @@ namespace rocsparse
             }
         }
 
-        const int64_t block_reduce_grid_x = rocsparse::min(
-            static_cast<int64_t>(n), static_cast<int64_t>(handle->properties.maxGridSize[0]));
+        const uint32_t block_reduce_grid_x = rocsparse::get_grid_size_x(handle, n, 1024);
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::csrmmnn_general_block_reduce<1024>),
