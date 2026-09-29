@@ -24,6 +24,7 @@
 
 #include "rocsparse_gtsv_no_pivot.hpp"
 #include "internal/precond/rocsparse_gtsv.h"
+#include "rocsparse_grid.hpp"
 
 #include "gtsv_nopivot_device.h"
 #include "gtsv_nopivot_medium_device.h"
@@ -530,7 +531,9 @@ namespace rocsparse
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::gtsv_no_pivot_pcr_tiled_backward_kernel<BLOCKSIZE, NUM_RHS>),
-            dim3((m - 1) / BLOCKSIZE + 1, rocsparse::get_batch_grid_size((n - 1) / NUM_RHS + 1), 1),
+            dim3((m - 1) / BLOCKSIZE + 1,
+                 rocsparse::get_grid_size_y(handle, (n - 1) / NUM_RHS + 1),
+                 1),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
@@ -568,7 +571,9 @@ namespace rocsparse
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::gtsv_no_pivot_pcr_tiled_forward_kernel<BLOCKSIZE, NUM_RHS>),
-            dim3((m - 1) / BLOCKSIZE + 1, rocsparse::get_batch_grid_size((n - 1) / NUM_RHS + 1), 1),
+            dim3((m - 1) / BLOCKSIZE + 1,
+                 rocsparse::get_grid_size_y(handle, (n - 1) / NUM_RHS + 1),
+                 1),
             dim3(BLOCKSIZE),
             0,
             handle->stream,

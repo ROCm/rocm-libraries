@@ -184,7 +184,7 @@ Tests:
 # hardware caps at 65535, and both kernels read hipBlockIdx_y with no loop. The same
 # routine therefore succeeded or failed depending only on the system size, because the
 # eleven small-path launches put batch_count on grid.x with proper bounds checks. The
-# medium path now clamps grid.y through rocsparse::get_batch_grid_size and both kernels
+# medium path now clamps grid.y through rocsparse::get_grid_size_y and both kernels
 # grid-stride over the batch.
 #
 # m = 1025 is the smallest size that forces the medium path: a small-m case passes
