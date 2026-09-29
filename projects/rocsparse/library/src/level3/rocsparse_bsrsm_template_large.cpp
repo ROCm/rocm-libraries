@@ -31,6 +31,7 @@
 #include "rocsparse_bsrsm.hpp"
 #include "rocsparse_common.h"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include <limits>
@@ -38,25 +39,23 @@
 namespace rocsparse
 {
     // wfsize * nnzb was a signed 32 bit product that overflowed at 33,554,431
-    // non-zero blocks with a 64 wide wavefront, so cast before the multiply. The
-    // clamp is a one line substitution for
-    //     rocsparse::get_grid_size(num_blocks, rocsparse::max_grid_size_x)
-    // once PR #11512 (AISPARSE-696) lands. rocsparse::bsr_gather grid-strides over
-    // whatever the clamp leaves behind; that kernel is shared with bsrsv, so this
-    // is deliberately the same expression AISPARSE-656 uses there (PR #11118).
-#define LAUNCH_BSRSM_GTHR_DIM(bsize, wfsize, dim)                                      \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                \
-        (rocsparse::bsr_gather<wfsize, bsize / wfsize, dim>),                          \
-        dim3(rocsparse::min((static_cast<int64_t>(wfsize) * nnzb - 1) / bsize + 1,     \
-                            static_cast<int64_t>(handle->properties.maxGridSize[0]))), \
-        dim3(wfsize, bsize / wfsize),                                                  \
-        0,                                                                             \
-        stream,                                                                        \
-        dir,                                                                           \
-        nnzb,                                                                          \
-        (const rocsparse_int*)trm_info->get_transposed_perm(),                         \
-        bsr_val,                                                                       \
-        bsrt_val,                                                                      \
+    // non-zero blocks with a 64 wide wavefront, so cast before the multiply.
+    // rocsparse::bsr_gather grid-strides over whatever the clamp leaves behind;
+    // that kernel is shared with bsrsv (AISPARSE-656, PR #11118). blockDim.x is
+    // wfsize, so that is the block size the clamp takes.
+#define LAUNCH_BSRSM_GTHR_DIM(bsize, wfsize, dim)                                    \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                              \
+        (rocsparse::bsr_gather<wfsize, bsize / wfsize, dim>),                        \
+        dim3(rocsparse::get_grid_size_x(                                             \
+            handle, (static_cast<int64_t>(wfsize) * nnzb - 1) / bsize + 1, wfsize)), \
+        dim3(wfsize, bsize / wfsize),                                                \
+        0,                                                                           \
+        stream,                                                                      \
+        dir,                                                                         \
+        nnzb,                                                                        \
+        (const rocsparse_int*)trm_info->get_transposed_perm(),                       \
+        bsr_val,                                                                     \
+        bsrt_val,                                                                    \
         block_dim)
 
 #define LAUNCH_BSRSM_GTHR(bsize, wfsize, dim) \
@@ -105,15 +104,18 @@ namespace rocsparse
 // formed in 64 bit and clamped to the device grid limit before it is narrowed;
 // the kernels grid-stride over whatever is left over.
 //
-// bsrsm_solve_grid_size returns at most maxGridSize[0], except when mb alone
-// exceeds it: then it returns mb so the launch fails with
-// hipErrorInvalidConfiguration instead of running a grid too small to hold one
-// RHS panel, which the kernels cannot stride. Saturate the narrowing so that
-// stays true if mb also exceeds UINT32_MAX, rather than wrapping into a legal
-// looking grid.
+// bsrsm_solve_grid_size returns at most the get_grid_size_x clamp, rounded down
+// to whole RHS panels, except when mb alone exceeds it: then it returns mb
+// rather than a grid too small to hold one RHS panel, which the kernels cannot
+// stride. Saturate the narrowing so that stays true if mb also exceeds
+// UINT32_MAX, rather than wrapping into a legal looking grid.
 #define LAUNCH_LARGE_KERNEL(K_, M_, S_)                                                        \
-    const int64_t bsrsm_grid_x                                                                 \
-        = rocsparse::bsrsm_solve_grid_size(mb, nrhs, NCOL, handle->properties.maxGridSize[0]); \
+    const int64_t bsrsm_grid_x = rocsparse::bsrsm_solve_grid_size(                             \
+        mb,                                                                                    \
+        nrhs,                                                                                  \
+        NCOL,                                                                                  \
+        rocsparse::get_grid_size_x(                                                            \
+            handle, rocsparse::bsrsm_num_blocks(mb, nrhs, NCOL), NCOL * M_));                  \
     dim3 bsrsm_blocks(static_cast<uint32_t>(rocsparse::min(                                    \
         bsrsm_grid_x, static_cast<int64_t>(std::numeric_limits<uint32_t>::max()))));           \
     dim3 bsrsm_threads(NCOL* M_);                                                              \
@@ -211,16 +213,14 @@ namespace rocsparse
             // Copy B into X and scale it with alpha.
             //
             // The grid is built from the 64 bit m_rows and clamped to the device
-            // limit -- another one line substitution for rocsparse::get_grid_size
-            // once PR #11512 (AISPARSE-696) lands -- and bsrsm_copy_scale
-            // grid-strides over the rows the clamp left behind. No panel rounding
+            // limit, and bsrsm_copy_scale grid-strides over the rows the clamp
+            // left behind. No panel rounding
             // is needed: that kernel has no cross-block dependencies, so any
             // stride covers all rows.
             static constexpr uint32_t COPY_BLOCKSIZE = 1024;
 
-            const int64_t copy_blocks
-                = rocsparse::min((m_rows - 1) / COPY_BLOCKSIZE + 1,
-                                 static_cast<int64_t>(handle->properties.maxGridSize[0]));
+            const int64_t copy_blocks = rocsparse::get_grid_size_x(
+                handle, (m_rows - 1) / COPY_BLOCKSIZE + 1, COPY_BLOCKSIZE);
 
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrsm_copy_scale<COPY_BLOCKSIZE>),
                                                dim3(static_cast<uint32_t>(copy_blocks)),

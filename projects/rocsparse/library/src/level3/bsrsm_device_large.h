@@ -42,16 +42,13 @@ namespace rocsparse
         return (mb > 0) ? ((nrhs - 1) / ncols + 1) * mb : 0;
     }
 
-    // grid.x for the bsrsm solve launch.
-    //
-    // The clamp is a one line substitution for
-    //     rocsparse::get_grid_size(num_blocks, rocsparse::max_grid_size_x)
-    // once PR #11512 (AISPARSE-696) lands; it is spelled out here so this fix does
-    // not have to touch rocsparse_common.hpp, which is a live conflict zone.
+    // grid.x for the bsrsm solve launch. max_grid_x is the largest grid.x the
+    // launch may use; the caller passes rocsparse::get_grid_size_x for the
+    // launch's block size.
     //
     // The clamped extent is then rounded DOWN to a whole number of RHS panels,
     // which is a correctness requirement rather than a tidiness one, and the part
-    // the ticket does not mention: maxGridSize[0] is almost never a multiple of mb,
+    // the ticket does not mention: max_grid_x is almost never a multiple of mb,
     // so clamping alone manufactures a ragged grid. The block owning
     // (panel, block row) spins on done_array until the block rows it depends on
     // have published their results; those rows are always in the same panel and
@@ -63,10 +60,8 @@ namespace rocsparse
     // block can end up waiting on a block that has not been dispatched yet, and the
     // solve hangs instead of returning (AISPARSE-669 found this in csrsm).
     //
-    // If mb alone exceeds max_grid_x the launch fails loudly with
-    // hipErrorInvalidConfiguration instead of silently computing garbage. Such a
-    // matrix needs a block row pointer array of more than 8 GB, so it is out of
-    // reach of any current device.
+    // If mb alone exceeds max_grid_x this returns mb, a grid past the limit,
+    // rather than one too small to hold a single RHS panel.
     __host__ __forceinline__ int64_t bsrsm_solve_grid_size(int64_t mb,
                                                            int64_t nrhs,
                                                            int64_t ncols,
@@ -289,9 +284,8 @@ namespace rocsparse
         // Fewer than mb blocks cannot be strided safely: a block would have to
         // change row-map slots between sweeps, and the done_array flag it then
         // waits on belongs to a block that has not been dispatched.
-        // bsrsm_solve_grid_size never returns less than mb (the launch fails with
-        // hipErrorInvalidConfiguration instead), so this is a contract violation;
-        // bail out rather than hang.
+        // bsrsm_solve_grid_size never returns less than mb, so this is a contract
+        // violation; bail out rather than hang.
         if(panels_per_sweep == 0)
         {
             return;
