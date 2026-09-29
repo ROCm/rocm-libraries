@@ -2242,11 +2242,12 @@ rocblaslt_status
 {
     // Check if handle is valid
     if(handle == nullptr || matmul_desc == nullptr || pref == nullptr || matA == nullptr
-       || matB == nullptr || matC == nullptr || matD == nullptr)
+       || matB == nullptr || matC == nullptr || matD == nullptr || returnAlgoCount == nullptr)
     {
         log_error(__func__, "invalid pointer");
         return rocblaslt_status_invalid_handle;
     }
+    *returnAlgoCount = 0;
 
     if(requestedAlgoCount < 1)
     {
