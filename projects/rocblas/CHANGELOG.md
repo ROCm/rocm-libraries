@@ -3,20 +3,19 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
-## rocBLAS 5.7.0
+## rocBLAS 5.8.0
+
+## rocBLAS 5.7.0 for ROCm 10.1.0
 
 ### Added
 
 * Level 3 grouped batched GEMM functions `rocblas_sgemm_grouped_batched`, `rocblas_dgemm_grouped_batched`, and `rocblas_gemm_grouped_batched_ex` for both C and FORTRAN, including ILP64 API (`_64` name suffix).
 
-### Changed
-
-* On gfx950, Level 3 `gemm`, `gemm_ex`, and the functions that internally use GEMM, for single- and double-precision now default to the hipBLASLt backend instead of Tensile. Complex types on gfx950 still default to Tensile. `ROCBLAS_USE_HIPBLASLT` continues to force or disable the hipBLASLt backend.
 
 ### Optimized
 
 * Improved the performance of Level 3 `gemm` for the problem sizes where `m == 1` or `n == 1` and `batch_count == 1` by using `gemv` kernels, previously applied only in `gemm_ex`. On gfx11 the per-precision heuristics guarding this path are also bypassed, except for the `1x1` case.
-* Improved the performance of Level 2 `gemv` non-transposed (`TransA == N`) for the problem sizes where `m` is small and `n` is large by splitting the reduction across the grid, as the transposed case already does.
+* Improved the performance of Level 2 `gemv` non-transposed (`TransA == N`) for the problem sizes where `m` is small and `n` is large by splitting the reduction across the grid, as the transposed case already does. The split is now selected from the launch shape rather than a fixed output-length crossover: it applies when the output grid has at most 8 tiles and the column split produces at least 2 parallel blocks, or when the output length is at or below the crossover.
 
 ### Resolved issues
 
@@ -30,7 +29,7 @@ rocBLAS documentation is available at
 * Fix a process hang on Windows exit when profile logging is enabled (`ROCBLAS_LAYER` bit 2, for example `ROCBLAS_LAYER=4`). The profile dump waited on a worker thread that the loader had already terminated during `DLL_PROCESS_DETACH`.
 
 
-## rocBLAS 5.6.0
+## rocBLAS 5.6.0 for ROCm 10.0.0
 
 ### Added
 

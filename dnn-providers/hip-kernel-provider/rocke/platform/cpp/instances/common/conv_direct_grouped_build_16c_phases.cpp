@@ -18,7 +18,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
+#include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
@@ -61,12 +63,19 @@ bool rocke_dconv16c_prologue(rocke_dconv_16c_ctx_t* ctx)
      * mirror the Python local binding explicitly). */
     ctx->p = spec->problem;
 
+    /* io_type = _io_type(p.dtype): f16 or bf16 IR type. */
+    ctx->io_type = rocke_b_io_ir_type(b, ctx->p.dtype ? ctx->p.dtype : "fp16");
+    if(ctx->io_type == NULL)
+    {
+        return false; /* builder sticky error already set by rocke_b_io_ir_type */
+    }
+
     /* ---- block-geometry scalars ---- */
     ctx->BLOCK_Q = spec->block_q;
     ctx->BLOCK_GROUPS = spec->block_groups;
     ctx->WAVE = spec->wave_size;
     ctx->THREADS = rocke_direct_conv_16c_threads_per_block(spec);
-    ctx->LDS_W = ctx->BLOCK_Q + ctx->p.KW - 1;
+    ctx->LDS_W = (ctx->BLOCK_Q - 1) * ctx->p.stride + ctx->p.KW;
     ctx->LDS_ROW_FP16 = ctx->LDS_W * ctx->BLOCK_GROUPS * ctx->p.cpg;
     ctx->LOAD_VEC = 4;
     ctx->NUM_VEC4 = ctx->LDS_ROW_FP16 / ctx->LOAD_VEC;
@@ -88,12 +97,12 @@ bool rocke_dconv16c_prologue(rocke_dconv_16c_ctx_t* ctx)
 
     /* ---- params ---- */
     {
-        const rocke_type_t* f16ptr = rocke_ptr_type(b, rocke_f16(), "global");
+        const rocke_type_t* io_ptr = rocke_ptr_type(b, ctx->io_type, "global");
         rocke_param_opts_t ro;
         rocke_param_opts_t wo;
         rocke_param_opts_t none;
 
-        /* A = b.param("A", PtrType(F16,"global"), noalias=True, readonly=True, align=16) */
+        /* A = b.param("A", PtrType(io_type,"global"), noalias=True, readonly=True, align=16) */
         ro = (rocke_param_opts_t){0};
         ro.noalias = true;
         ro.noalias_set = true;
@@ -101,10 +110,10 @@ bool rocke_dconv16c_prologue(rocke_dconv_16c_ctx_t* ctx)
         ro.readonly_set = true;
         ro.align = 16;
         ro.align_set = true;
-        ctx->A = rocke_b_param(b, "A", f16ptr, &ro);
-        ctx->Bp = rocke_b_param(b, "B", f16ptr, &ro);
+        ctx->A = rocke_b_param(b, "A", io_ptr, &ro);
+        ctx->Bp = rocke_b_param(b, "B", io_ptr, &ro);
 
-        /* D = b.param("D", PtrType(F16,"global"), noalias=True, writeonly=True, align=16) */
+        /* D = b.param("D", PtrType(io_type,"global"), noalias=True, writeonly=True, align=16) */
         wo = (rocke_param_opts_t){0};
         wo.noalias = true;
         wo.noalias_set = true;
@@ -112,7 +121,7 @@ bool rocke_dconv16c_prologue(rocke_dconv_16c_ctx_t* ctx)
         wo.writeonly_set = true;
         wo.align = 16;
         wo.align_set = true;
-        ctx->D = rocke_b_param(b, "D", f16ptr, &wo);
+        ctx->D = rocke_b_param(b, "D", io_ptr, &wo);
 
         none = (rocke_param_opts_t){0};
         ctx->A_bytes = rocke_b_param(b, "A_bytes", rocke_i32(), &none);
@@ -160,14 +169,14 @@ bool rocke_dconv16c_prologue(rocke_dconv_16c_ctx_t* ctx)
     ctx->q_tile_start = rocke_b_mul(b, ctx->bx, ctx->c_BQ);
 
     /* ---- LDS ping-pong buffers ---- */
-    ctx->lds_total_fp16 = ctx->PASSES * ctx->THREADS * ctx->LOAD_VEC;
+    ctx->lds_total_elems = ctx->PASSES * ctx->THREADS * ctx->LOAD_VEC;
     {
         int shape[2];
         shape[0] = 1;
-        shape[1] = ctx->lds_total_fp16;
-        ctx->A_smem = rocke_b_smem_alloc(b, rocke_f16(), shape, 2, "lds_a");
+        shape[1] = ctx->lds_total_elems;
+        ctx->A_smem = rocke_b_smem_alloc(b, ctx->io_type, shape, 2, "lds_a");
         if(spec->double_buffer)
-            ctx->B_smem = rocke_b_smem_alloc(b, rocke_f16(), shape, 2, "lds_b");
+            ctx->B_smem = rocke_b_smem_alloc(b, ctx->io_type, shape, 2, "lds_b");
         else
             ctx->B_smem = ctx->A_smem;
     }
@@ -179,7 +188,7 @@ bool rocke_dconv16c_prologue(rocke_dconv_16c_ctx_t* ctx)
 
     ctx->c_half_bytes = rocke_b_const_i32(b, 2);
     ctx->oob_sentinel = rocke_b_const_i32(b, ((int64_t)1 << 31) - 1);
-    ctx->fp16x4_zero = rocke_b_zero_vec_f16(b, 4);
+    ctx->io_vec4_zero = rocke_b_zero_vec(b, ctx->io_type, 4);
     ctx->zero_acc = rocke_b_zero_vec_f32(b, 4);
 
     return rocke_ir_builder_ok(b);
@@ -197,6 +206,7 @@ bool rocke_dconv16c_prologue(rocke_dconv_16c_ctx_t* ctx)
 void rocke_dconv16c_load_weights(rocke_dconv_16c_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
+    const int is_bf16 = ctx->p.dtype && strcmp(ctx->p.dtype, "bf16") == 0;
     int total_k = rocke_direct_conv_problem_total_k(&ctx->p);
 
     /* TensorDescriptor.naive("B", lengths=[total_k, KH, KW, cpg],
@@ -221,7 +231,7 @@ void rocke_dconv16c_load_weights(rocke_dconv_16c_ctx_t* ctx)
      * fp16x8_zero     = b.zero_vec_f16(8)
      * (emitted here, matching the Python SSA order, before the per-r loop). */
     ctx->lane_in_lo_half = rocke_b_cmp_lt(b, ctx->c4, rocke_b_const_i32(b, 2));
-    ctx->fp16x8_zero = rocke_b_zero_vec_f16(b, 8);
+    ctx->fp16x8_zero = rocke_b_zero_vec(b, ctx->io_type, 8);
 
     if(ctx->spec->fold_k32)
     {
@@ -246,8 +256,12 @@ void rocke_dconv16c_load_weights(rocke_dconv_16c_ctx_t* ctx)
                 rocke_transforms_descriptor_offset(
                     b, ctx->b_desc, in_names, in_values, 4, &w_off_k32, &valid);
             }
-            ctx->weights_k32[r_const] = rocke_b_buffer_load_vN_f16(
-                b, ctx->b_rsrc, rocke_b_mul(b, w_off_k32, ctx->c_half_bytes), ctx->c0, 4);
+            if(is_bf16)
+                ctx->weights_k32[r_const] = rocke_b_buffer_load_vN_bf16(
+                    b, ctx->b_rsrc, rocke_b_mul(b, w_off_k32, ctx->c_half_bytes), ctx->c0, 4);
+            else
+                ctx->weights_k32[r_const] = rocke_b_buffer_load_vN_f16(
+                    b, ctx->b_rsrc, rocke_b_mul(b, w_off_k32, ctx->c_half_bytes), ctx->c0, 4);
 
             /* Residual S=2 promoted to a zero-padded K=32 atom: low half
              * (c4 in {0,1}) carries B[k_out,r,2,0:8]/[8:16]; high half zero. */
@@ -261,8 +275,12 @@ void rocke_dconv16c_load_weights(rocke_dconv_16c_ctx_t* ctx)
                 rocke_transforms_descriptor_offset(
                     b, ctx->b_desc, in_names, in_values, 4, &w_off_s2, &valid);
             }
-            w_s2 = rocke_b_buffer_load_vN_f16(
-                b, ctx->b_rsrc, rocke_b_mul(b, w_off_s2, ctx->c_half_bytes), ctx->c0, 4);
+            if(is_bf16)
+                w_s2 = rocke_b_buffer_load_vN_bf16(
+                    b, ctx->b_rsrc, rocke_b_mul(b, w_off_s2, ctx->c_half_bytes), ctx->c0, 4);
+            else
+                w_s2 = rocke_b_buffer_load_vN_f16(
+                    b, ctx->b_rsrc, rocke_b_mul(b, w_off_s2, ctx->c_half_bytes), ctx->c0, 4);
             ctx->weights_s2_k32[r_const]
                 = rocke_b_select(b, ctx->lane_in_lo_half, w_s2, ctx->fp16x8_zero);
         }
@@ -287,8 +305,12 @@ void rocke_dconv16c_load_weights(rocke_dconv_16c_ctx_t* ctx)
                 in_values[3] = ctx->ch_lane_k16;
                 rocke_transforms_descriptor_offset(
                     b, ctx->b_desc, in_names, in_values, 4, &w_off, &valid);
-                ctx->weights[ctx->n_weights++] = rocke_b_buffer_load_vN_f16(
-                    b, ctx->b_rsrc, rocke_b_mul(b, w_off, ctx->c_half_bytes), ctx->c0, 2);
+                if(is_bf16)
+                    ctx->weights[ctx->n_weights++] = rocke_b_buffer_load_vN_bf16(
+                        b, ctx->b_rsrc, rocke_b_mul(b, w_off, ctx->c_half_bytes), ctx->c0, 2);
+                else
+                    ctx->weights[ctx->n_weights++] = rocke_b_buffer_load_vN_f16(
+                        b, ctx->b_rsrc, rocke_b_mul(b, w_off, ctx->c_half_bytes), ctx->c0, 2);
             }
         }
     }
@@ -406,11 +428,13 @@ void rocke_dconv16c_build_descriptors(rocke_dconv_16c_ctx_t* ctx)
             xforms[0]
                 = rocke_embed_bounded(b, h_upper, 1, "h", h_strides, -ctx->p.PAD, 0, ctx->p.H);
         }
-        /* embed(upper=("q_pos","W_lds_pos"), into="w", strides=(1,1),
+        /* embed(upper=("q_pos","W_lds_pos"), into="w", strides=(stride,1),
          *       offset=-PAD, lo=0, hi=W) */
         {
             static const char* const w_upper[2] = {"q_pos", "W_lds_pos"};
-            int w_strides[2] = {1, 1};
+            int w_strides[2];
+            w_strides[0] = ctx->p.stride;
+            w_strides[1] = 1;
             xforms[1]
                 = rocke_embed_bounded(b, w_upper, 2, "w", w_strides, -ctx->p.PAD, 0, ctx->p.W);
         }

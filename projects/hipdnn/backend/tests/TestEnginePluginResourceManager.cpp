@@ -19,6 +19,7 @@
 
 #include "HipdnnException.hpp"
 #include "PlatformUtils.hpp"
+#include "ScopedBackendWarningCapture.hpp"
 #include "TestPluginConstants.hpp"
 #include "descriptors/BackendDescriptor.hpp"
 #include "descriptors/DescriptorFactory.hpp"
@@ -2715,6 +2716,71 @@ TEST(TestEnginePluginResourceManager, NonRaggedGraphUnaffectedByRaggedVersionCon
     EXPECT_EQ(engineIds[0], 100);
 }
 
+// Ragged-offset-multiplier version gating: the multiplier floor
+// (K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION) dominates the ragged floor, so a
+// ragged-capable plugin one minor below it is still excluded, and a plugin at
+// the multiplier floor is included.
+TEST(TestEnginePluginResourceManager, RaggedOffsetMultiplierGraphExcludesPreMultiplierPlugin)
+{
+    auto plugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
+    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*plugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getAllEngineIds()).WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*plugin, name()).WillRepeatedly(::testing::Return("RaggedPlugin"));
+    EXPECT_CALL(*plugin, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION));
+    EXPECT_CALL(*plugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getApplicableEngineIds(_, _)).Times(0);
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillOnce(::testing::Return(fakeSerializedData));
+    programOverrideFlag(mockGraphDesc, /*flag=*/false);
+    EXPECT_CALL(mockGraphDesc, hasRaggedOffsetMultiplier()).WillRepeatedly(::testing::Return(true));
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+    auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
+    EXPECT_TRUE(engineIds.empty());
+}
+
+TEST(TestEnginePluginResourceManager, RaggedOffsetMultiplierGraphIncludesMultiplierCapablePlugin)
+{
+    auto plugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
+    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*plugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getAllEngineIds()).WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*plugin, name()).WillRepeatedly(::testing::Return("MultiplierPlugin"));
+    EXPECT_CALL(*plugin, apiVersion())
+        .WillRepeatedly(
+            ::testing::Return(hipdnn_plugin_sdk::K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION));
+    EXPECT_CALL(*plugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getApplicableEngineIds(hipdnnEnginePluginHandle_t(0xdeadbeef), _))
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillOnce(::testing::Return(fakeSerializedData));
+    programOverrideFlag(mockGraphDesc, /*flag=*/false);
+    EXPECT_CALL(mockGraphDesc, hasRaggedOffsetMultiplier()).WillRepeatedly(::testing::Return(true));
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+    auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
+    ASSERT_EQ(engineIds.size(), 1u);
+    EXPECT_EQ(engineIds[0], 100);
+}
+
 // =============================================================================
 // Ragged-tensor applicability filter (mock-based matrix).
 //
@@ -3596,54 +3662,6 @@ TEST(TestEnginePluginResourceManager, ResolveEngineNamePrefersEntryPointOverRegi
         EXPECT_NE(resolved, hipdnn_data_sdk::utilities::MIOPEN_ENGINE_NAME);
     }
 }
-
-namespace
-{
-
-/// Routes backend warnings to the isolated log recorder for the duration of a
-/// case, which is the only way to observe the resolver's diagnostics. Delivery
-/// is synchronous, so the assertions need no waiting.
-class ScopedBackendWarningCapture
-{
-public:
-    ScopedBackendWarningCapture()
-    {
-        EXPECT_EQ(hipdnn_backend::logging::getGlobalLogLevel(_originalLevel),
-                  HIPDNN_STATUS_SUCCESS);
-        EXPECT_EQ(setUserCallback(HIPDNN_SEV_WARN), HIPDNN_STATUS_SUCCESS);
-        EXPECT_EQ(hipdnn_backend::logging::setGlobalLogLevel(HIPDNN_SEV_WARN),
-                  HIPDNN_STATUS_SUCCESS);
-    }
-
-    ~ScopedBackendWarningCapture()
-    {
-        EXPECT_EQ(setUserCallback(HIPDNN_SEV_OFF), HIPDNN_STATUS_SUCCESS);
-        EXPECT_EQ(hipdnn_backend::logging::setGlobalLogLevel(_originalLevel),
-                  HIPDNN_STATUS_SUCCESS);
-    }
-
-    ScopedBackendWarningCapture(const ScopedBackendWarningCapture&) = delete;
-    ScopedBackendWarningCapture& operator=(const ScopedBackendWarningCapture&) = delete;
-    ScopedBackendWarningCapture(ScopedBackendWarningCapture&&) = delete;
-    ScopedBackendWarningCapture& operator=(ScopedBackendWarningCapture&&) = delete;
-
-private:
-    /// The callback and the handle together key the registration, so the same
-    /// pair has to come back for the SEV_OFF removal. A null handle is rejected
-    /// outright, which is why this passes the guard itself.
-    hipdnnStatus_t setUserCallback(hipdnnSeverity_t minLevel)
-    {
-        return hipdnn_backend::logging::setUserLogCallback(
-            hipdnn_test_sdk::utilities::IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
-            minLevel,
-            HIPDNN_LOG_CALLBACK_SYNC,
-            this);
-    }
-
-    hipdnnSeverity_t _originalLevel{HIPDNN_SEV_OFF};
-};
-
-} // namespace
 
 TEST(TestEnginePluginResourceManager, ResolveEngineNameReportsEntryPointAndDetailsNameDisagreement)
 {
