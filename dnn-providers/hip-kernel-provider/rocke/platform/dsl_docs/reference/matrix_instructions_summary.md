@@ -47,9 +47,8 @@ The last XML identifies itself as **AMD CDNA 5** in
 To locate a row, find its mnemonic under
 `ISA/Instructions/Instruction/InstructionName` (or an official alias), then read
 `InstructionEncodings/InstructionEncoding/Opcode` and `EncodingName`.
-The encoding layout is under `ISA/Encodings/Encoding`. These locators replace
-unversioned PDF page references. The paired WMMA scale-load entries below cite
-LLVM because they are absent from this XML archive.
+The encoding layout is under `ISA/Encodings/Encoding`. The paired WMMA scale-load
+entries below cite LLVM because they are absent from this XML archive.
 For gfx1250, `ENC_VOP3P` has an eight-bit `OP` field at **[23:16]**; use each
 architecture's encoding record rather than a universal seven-bit mask.
 
@@ -376,7 +375,7 @@ formats, and adds **F8F6F4/FP4** with per-block scaling (`V_WMMA_SCALE*` /
 
 > No native XF32 or F64 matrix instruction is present in this XML. LLVM gates
 > `V_WMMA_F64_16X16X4_F64` on `gfx1251-gemm-insts`, which gfx1250 lacks
-> (see the pinned sources above). It is not an unwired gfx1250 capability.
+> (see the pinned sources above).
 
 ### WMMA (dense)
 | Opcode | Instruction |
@@ -467,8 +466,7 @@ per-block **scale** operands. **No native XF32/TF32 or F64 matrix instruction.**
 > LLVM's real-instruction block for this target (`VOP3PInstructions.td`), which
 > runs contiguously over `0x033` and `0x05b`–`0x088` with `IU8` at `0x072` /
 > `0x07b` and no `IU4` opcode anywhere in it. Every `IU4` WMMA/SWMMAC definition
-> in LLVM is gated to the RDNA3/RDNA3.5/RDNA4 classes instead. This is a
-> confirmed absence, not an unverified entry.
+> in LLVM is gated to the RDNA3/RDNA3.5/RDNA4 classes instead.
 
 ---
 
@@ -491,8 +489,8 @@ per-block **scale** operands. **No native XF32/TF32 or F64 matrix instruction.**
 
 `✅` = enumerated in that architecture's opcode table; `❌` = not present in it.
 
-**INT4 note:** the CDNA5 `❌` is a positive finding, not a gap in this survey —
-see the per-section note above.
+**INT4 note:** CDNA5 has no IU4 matrix instruction in the pinned XML or LLVM
+target definitions; see the CDNA5 section for the evidence.
 
 **XF32 note:** `V_MFMA_F32_16X16X8_XF32` (opcode 62) and
 `V_MFMA_F32_32X32X4_XF32` (opcode 63) are present on gfx942, a supported rocKE
