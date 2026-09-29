@@ -19,6 +19,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -122,10 +123,11 @@ template <typename T>
 struct CatalogEntry
 {
     T descriptor;
-    /// Kept so a second file claiming the same id can be compared by content: parsed JSON
-    /// ignores key order/whitespace, unlike adding operator== to all seven struct types.
-    nlohmann::json source;
-    std::filesystem::path path; ///< first file that defined this id
+    /// First file that defined this id. A second file claiming the id is compared against
+    /// this one by re-parsing it: parsed JSON ignores key order/whitespace, unlike adding
+    /// operator== to all seven struct types, and keeping every file's DOM alive until the
+    /// catalog dies cost more than every parse put together.
+    std::filesystem::path path;
     /// The root this file was found under. Stamped by settleCatalog when the root's pass
     /// finishes, since that is the one place that already knows both the root and which
     /// entries it contributed -- the seven FileType insert rows do not see the root.
@@ -1127,6 +1129,26 @@ inline std::string keyDescription(const ArchKey& key)
     return text + "]";
 }
 
+/// Whether @p path still parses to @p document, read the way the walk reads it. A file
+/// that no longer opens or parses matches nothing, so its id is treated as contested.
+inline bool fileParsesTo(const std::filesystem::path& path, const nlohmann::json& document)
+{
+    try
+    {
+        std::ifstream file(path, std::ios::binary);
+        return file.is_open()
+               && nlohmann::json::parse(file,
+                                        nullptr,
+                                        /*allow_exceptions=*/true,
+                                        /*ignore_comments=*/true)
+                      == document;
+    }
+    catch(const std::exception&)
+    {
+        return false;
+    }
+}
+
 /// Inserts a freshly parsed descriptor, resolving a repeated key against what is already
 /// held: identical content is a duplicate shard and is dropped, differing content from a
 /// later root is refused, and differing content from the same root poisons the entry so
@@ -1142,7 +1164,7 @@ inline void insertCatalogEntry(Map& map,
     const std::string name = descriptor.name;
 
     auto [it, inserted] = map.try_emplace(
-        std::move(key), CatalogEntry<T>{std::move(descriptor), source, path, {}, false, false});
+        std::move(key), CatalogEntry<T>{std::move(descriptor), path, {}, false, false});
     if(inserted)
     {
         HIPDNN_PLUGIN_LOG_INFO("descriptor loader: loaded " << path << " " << description
@@ -1154,8 +1176,9 @@ inline void insertCatalogEntry(Map& map,
     // real collision would fail a duplicate shard over a formatting choice -- e.g. a
     // per-arch layout shipping one shared UED. RFC 0020 §10.2.1's drop-all rule exists
     // because keep-the-first leaves which definition won up to load order; with
-    // identical content there is no second definition to choose between.
-    if(it->second.source == source)
+    // identical content there is no second definition to choose between. The incumbent is
+    // re-read rather than retained; ids rarely repeat, so this almost never runs.
+    if(fileParsesTo(it->second.path, source))
     {
         HIPDNN_PLUGIN_LOG_INFO("descriptor loader: duplicate identical descriptor "
                                << path << " " << description << " name='" << name
@@ -1904,16 +1927,15 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
             // the failure at pack granularity, where every other malformed pack lands.
             if(reason.empty())
             {
-                std::vector<DescriptorId> seen;
+                std::unordered_set<DescriptorId, DescriptorIdHash> seen;
                 seen.reserve(pack.kernels.size());
                 for(const auto& kernel : pack.kernels)
                 {
-                    if(std::find(seen.begin(), seen.end(), kernel.id) != seen.end())
+                    if(!seen.insert(kernel.id).second)
                     {
                         reason = "names kernel " + toString(kernel.id) + " more than once";
                         break;
                     }
-                    seen.push_back(kernel.id);
                 }
             }
 
