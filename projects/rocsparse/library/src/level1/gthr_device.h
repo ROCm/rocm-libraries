@@ -32,12 +32,12 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void
         gthr_device(I nnz, const T* y, T* x_val, const I* x_ind, rocsparse_index_base idx_base)
     {
-        // Cast to I before the multiply so the index arithmetic does not wrap in
-        // 32-bit when nnz exceeds the range of unsigned int, and grid-stride so
-        // every element is gathered even when grid.x is clamped below the ideal
-        // block count.
-        const I stride = static_cast<I>(hipGridDim_x) * BLOCKSIZE;
-        for(I idx = static_cast<I>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; idx < nnz;
+        // Index in int64_t so neither the block offset nor the final grid-stride
+        // increment wraps for 32-bit nnz, and grid-stride so every element is
+        // gathered even when grid.x is clamped below the ideal block count.
+        const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
+        for(int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+            idx < nnz;
             idx += stride)
         {
             x_val[idx] = y[x_ind[idx] - idx_base];
