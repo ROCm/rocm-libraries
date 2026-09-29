@@ -194,11 +194,14 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
       for lc in config[0:]:
         if "ActivationArgs" in lc:
           activationEnums = lc["ActivationArgs"]
-          break
         if "FactorDimArgs" in lc:
           factorDimEnums = lc["FactorDimArgs"]
         if "ICacheFlush" in lc:
           icacheFlushArgs = lc["ICacheFlush"]
+        if "BiasTypeArgs" in lc and biasTypeArgs:
+          biasTypeArgs = BiasTypeArgs(problemType, lc["BiasTypeArgs"])
+        if "GateTypeArgs" in lc and gateTypeArgs:
+          gateTypeArgs = GateTypeArgs(problemType, lc["GateTypeArgs"])
     isForAll = True if problemType["ActivationType"] in ['all', 'hipblaslt_all'] else False
     activationArgs = ActivationArgs(problemType, activationEnums) if isForAll else ""
     factorDimArgs = FactorDimArgs(problemType, factorDimEnums)
@@ -219,7 +222,8 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
                                   deviceId=deviceId,
                                   gfxName=gfxName,
                                   tileAwareSelection=False,
-                                  libraryFile=libraryList[0]))
+                                  libraryFile=libraryList[0],
+                                  gateTypeArgs=gateTypeArgs))
 
   forBenchmark = False
   problemSizes = None
