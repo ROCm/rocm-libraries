@@ -8,6 +8,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn-gpu-ref/GpuReferenceValidationFactory.hpp>
 
 #include <cmath>
@@ -19,6 +20,10 @@ using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::types;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_gpu_ref;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
+
+using HalfType = hipdnn_data_sdk::types::half;
+using BFloat16Type = hipdnn_data_sdk::types::bfloat16;
 
 namespace
 {
@@ -32,7 +37,7 @@ class TestGpuFpValidation : public ::testing::Test
 {
 };
 
-using FpTypes = ::testing::Types<float, half, bfloat16, double>;
+using FpTypes = ::testing::Types<float, HalfType, BFloat16Type, double>;
 TYPED_TEST_SUITE(TestGpuFpValidation, FpTypes, );
 
 TYPED_TEST(TestGpuFpValidation, ExactMatchPasses)
@@ -42,7 +47,7 @@ TYPED_TEST(TestGpuFpValidation, ExactMatchPasses)
     Tensor<TypeParam> ref({2, 3, 4});
     Tensor<TypeParam> impl({2, 3, 4});
 
-    ref.fillWithRandomValues(static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
+    fillWithRandomValues(ref, static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
 
     // Copy ref data into impl so they are identical
     const auto* refHost = ref.memory().hostData();
@@ -63,7 +68,7 @@ TYPED_TEST(TestGpuFpValidation, WithinTolerancePasses)
     Tensor<TypeParam> ref({4, 4});
     Tensor<TypeParam> impl({4, 4});
 
-    ref.fillWithRandomValues(static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
+    fillWithRandomValues(ref, static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
 
     const auto* refHost = ref.memory().hostData();
     auto* implHost = impl.memory().hostData();
@@ -510,7 +515,7 @@ class TestGpuVsCpuValidation : public ::testing::Test
 {
 };
 
-using GpuCpuFpTypes = ::testing::Types<float, half, bfloat16>;
+using GpuCpuFpTypes = ::testing::Types<float, HalfType, BFloat16Type>;
 TYPED_TEST_SUITE(TestGpuVsCpuValidation, GpuCpuFpTypes, );
 
 TYPED_TEST(TestGpuVsCpuValidation, AgreeOnPass)
@@ -520,7 +525,7 @@ TYPED_TEST(TestGpuVsCpuValidation, AgreeOnPass)
     Tensor<TypeParam> ref({8, 8});
     Tensor<TypeParam> impl({8, 8});
 
-    ref.fillWithRandomValues(static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
+    fillWithRandomValues(ref, static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
 
     const auto* refHost = ref.memory().hostData();
     auto* implHost = impl.memory().hostData();
@@ -582,7 +587,7 @@ TEST(TestGpuFpValidationLargeTensor, LargeTensorExactMatch)
     Tensor<float> ref({64, 32, 32});
     Tensor<float> impl({64, 32, 32});
 
-    ref.fillWithRandomValues(-1.0f, 1.0f, 42);
+    fillWithRandomValues(ref, -1.0f, 1.0f, 42);
 
     const auto* refHost = ref.memory().hostData();
     auto* implHost = impl.memory().hostData();

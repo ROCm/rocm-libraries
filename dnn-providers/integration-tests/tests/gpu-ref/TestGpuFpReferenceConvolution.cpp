@@ -16,6 +16,9 @@
 using namespace gpu_conv_fwd_ref_test;
 using namespace gpu_conv_ref_test;
 
+using HalfType = hipdnn_data_sdk::types::half;
+using BFloat16Type = hipdnn_data_sdk::types::bfloat16;
+
 // One-liner subclasses — each creates a distinct GTest-visible type so that
 // INSTANTIATE_TEST_SUITE_P can use clean tier-only prefixes (Smoke, Standard, Comprehensive, Full)
 // while the suite name itself carries dimensionality and layout information.
@@ -30,22 +33,22 @@ class TestGpuConvFwdRef2dFp32 : public ConvFwdShapeSuite<float>
 class TestGpuConvFwdRef3dFp32 : public ConvFwdShapeSuite<float>
 {
 };
-class TestGpuConvFwdRef1dFp16 : public ConvFwdShapeSuite<half>
+class TestGpuConvFwdRef1dFp16 : public ConvFwdShapeSuite<HalfType>
 {
 };
-class TestGpuConvFwdRef2dFp16 : public ConvFwdShapeSuite<half>
+class TestGpuConvFwdRef2dFp16 : public ConvFwdShapeSuite<HalfType>
 {
 };
-class TestGpuConvFwdRef3dFp16 : public ConvFwdShapeSuite<half>
+class TestGpuConvFwdRef3dFp16 : public ConvFwdShapeSuite<HalfType>
 {
 };
-class TestGpuConvFwdRef1dBfp16 : public ConvFwdShapeSuite<bfloat16>
+class TestGpuConvFwdRef1dBfp16 : public ConvFwdShapeSuite<BFloat16Type>
 {
 };
-class TestGpuConvFwdRef2dBfp16 : public ConvFwdShapeSuite<bfloat16>
+class TestGpuConvFwdRef2dBfp16 : public ConvFwdShapeSuite<BFloat16Type>
 {
 };
-class TestGpuConvFwdRef3dBfp16 : public ConvFwdShapeSuite<bfloat16>
+class TestGpuConvFwdRef3dBfp16 : public ConvFwdShapeSuite<BFloat16Type>
 {
 };
 
@@ -59,22 +62,22 @@ class TestGpuConvFwdRefNhwc2dFp32 : public ConvFwdShapeSuite<float>
 class TestGpuConvFwdRefNdhwc3dFp32 : public ConvFwdShapeSuite<float>
 {
 };
-class TestGpuConvFwdRefNlc1dFp16 : public ConvFwdShapeSuite<half>
+class TestGpuConvFwdRefNlc1dFp16 : public ConvFwdShapeSuite<HalfType>
 {
 };
-class TestGpuConvFwdRefNhwc2dFp16 : public ConvFwdShapeSuite<half>
+class TestGpuConvFwdRefNhwc2dFp16 : public ConvFwdShapeSuite<HalfType>
 {
 };
-class TestGpuConvFwdRefNdhwc3dFp16 : public ConvFwdShapeSuite<half>
+class TestGpuConvFwdRefNdhwc3dFp16 : public ConvFwdShapeSuite<HalfType>
 {
 };
-class TestGpuConvFwdRefNlc1dBfp16 : public ConvFwdShapeSuite<bfloat16>
+class TestGpuConvFwdRefNlc1dBfp16 : public ConvFwdShapeSuite<BFloat16Type>
 {
 };
-class TestGpuConvFwdRefNhwc2dBfp16 : public ConvFwdShapeSuite<bfloat16>
+class TestGpuConvFwdRefNhwc2dBfp16 : public ConvFwdShapeSuite<BFloat16Type>
 {
 };
-class TestGpuConvFwdRefNdhwc3dBfp16 : public ConvFwdShapeSuite<bfloat16>
+class TestGpuConvFwdRefNdhwc3dBfp16 : public ConvFwdShapeSuite<BFloat16Type>
 {
 };
 
@@ -420,14 +423,14 @@ TEST(TestGpuConvFwdRefAsymPadFp32, MatchesCpuRef)
 TEST(TestGpuConvFwdRefAsymPadFp16, MatchesCpuRef)
 {
     SKIP_IF_NO_DEVICES();
-    runGpuVsCpuConvFwd<half>(
+    runGpuVsCpuConvFwd<HalfType>(
         {1, 1, 3, 3}, {1, 1, 3, 3}, {1, 1, 2, 2}, {1, 1}, {1, 1}, {1, 0}, {0, 1}, 5e-2f);
 }
 
 TEST(TestGpuConvFwdRefAsymPadBfp16, MatchesCpuRef)
 {
     SKIP_IF_NO_DEVICES();
-    runGpuVsCpuConvFwd<bfloat16>(
+    runGpuVsCpuConvFwd<BFloat16Type>(
         {1, 1, 3, 3}, {1, 1, 3, 3}, {1, 1, 2, 2}, {1, 1}, {1, 1}, {1, 0}, {0, 1}, 0.1f);
 }
 
@@ -447,8 +450,8 @@ TEST(TestGpuConvFwdRefAlphaBeta, AlphaOnly)
     Tensor<float> yScaled({1, 1, 2, 2});
 
     const unsigned int seed = 42;
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    wTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(wTensor, -1.0f, 1.0f, seed + 1);
 
     // Compute with alpha=1.0
     GpuFpReferenceConvolution::fprop<float>(xTensor, wTensor, yRef, {1, 1}, {1, 1}, {0, 0});
@@ -474,8 +477,8 @@ TEST(TestGpuConvFwdRefAlphaBeta, BetaAccumulate)
     Tensor<float> yTensor({1, 1, 2, 2});
 
     const unsigned int seed = 42;
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    wTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(wTensor, -1.0f, 1.0f, seed + 1);
     yTensor.fillWithValue(1.0f);
 
     // Pre-fill y with 1.0, then compute with alpha=1.0, beta=1.0
@@ -505,8 +508,8 @@ TEST(TestGpuConvFwdRefAlphaBeta, BetaZeroSkipsRead)
     Tensor<float> yDefault({1, 1, 2, 2});
 
     const unsigned int seed = 42;
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    wTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(wTensor, -1.0f, 1.0f, seed + 1);
 
     // Pre-fill with garbage — should be ignored when beta=0
     yBetaZero.fillWithValue(999.0f);
@@ -546,8 +549,8 @@ TEST(TestGpuConvFwdRefStridedFp32, NonPackedInput)
     Tensor<float> yGpu({1, 1, 2, 2});
 
     const unsigned int seed = 42;
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    wTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(wTensor, -1.0f, 1.0f, seed + 1);
 
     CpuFpReferenceConvolution::fprop<float, float, float, double>(
         xTensor, wTensor, yCpu, {1, 1}, {1, 1}, {0, 0});
@@ -572,8 +575,8 @@ TEST(TestGpuConvFwdRefStridedFp32, NonPackedOutput)
     Tensor<float> yGpu(yDims, yStrides);
 
     const unsigned int seed = 42;
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    wTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(wTensor, -1.0f, 1.0f, seed + 1);
 
     CpuFpReferenceConvolution::fprop<float, float, float, double>(
         xTensor, wTensor, yCpu, {1, 1}, {1, 1}, {0, 0});
@@ -601,8 +604,8 @@ TEST(TestGpuConvFwdRefStridedFp32, NonPackedInputAndOutput)
     Tensor<float> yGpu(yDims, yStrides);
 
     const unsigned int seed = 42;
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    wTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(wTensor, -1.0f, 1.0f, seed + 1);
 
     CpuFpReferenceConvolution::fprop<float, float, float, double>(
         xTensor, wTensor, yCpu, {1, 1}, {1, 1}, {0, 0});
@@ -627,8 +630,8 @@ TEST(TestGpuConvFwdRefStridedFp32, NonPackedWithPadding)
     Tensor<float> yGpu({1, 1, 3, 3});
 
     const unsigned int seed = 42;
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    wTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(wTensor, -1.0f, 1.0f, seed + 1);
 
     CpuFpReferenceConvolution::fprop<float, float, float, double>(
         xTensor, wTensor, yCpu, {1, 1}, {1, 1}, {1, 1});
@@ -742,8 +745,8 @@ TEST(TestGpuConvFwdRefTf32, DiffersFromNonTf32)
     Tensor<float> yTf32({1, 1, 2, 2});
 
     const unsigned int seed = 42;
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    wTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(wTensor, -1.0f, 1.0f, seed + 1);
 
     // Regular computation with float accumulation
     GpuFpReferenceConvolution::fprop<float, float, float, float>(
@@ -782,11 +785,11 @@ TEST(TestGpuConvFwdRefMixedType, FloatInputHalfWeight)
     SKIP_IF_NO_DEVICES();
 
     Tensor<float> xTensor({1, 1, 4, 4});
-    Tensor<half> wTensor({1, 1, 3, 3});
+    Tensor<HalfType> wTensor({1, 1, 3, 3});
     Tensor<float> yCpu({1, 1, 2, 2});
     Tensor<float> yGpu({1, 1, 2, 2});
 
-    compareGpuVsCpuConvFwd<float, half, float, double>(
+    compareGpuVsCpuConvFwd<float, HalfType, float, double>(
         xTensor, wTensor, yCpu, yGpu, {1, 1}, {1, 1}, {0, 0}, {0, 0}, 5e-2f, 1.0f);
 }
 
@@ -794,12 +797,12 @@ TEST(TestGpuConvFwdRefMixedType, HalfInputFloatWeight)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<half> xTensor({1, 1, 4, 4});
+    Tensor<HalfType> xTensor({1, 1, 4, 4});
     Tensor<float> wTensor({1, 1, 3, 3});
-    Tensor<half> yCpu({1, 1, 2, 2});
-    Tensor<half> yGpu({1, 1, 2, 2});
+    Tensor<HalfType> yCpu({1, 1, 2, 2});
+    Tensor<HalfType> yGpu({1, 1, 2, 2});
 
-    compareGpuVsCpuConvFwd<half, float, half, double>(
+    compareGpuVsCpuConvFwd<HalfType, float, HalfType, double>(
         xTensor, wTensor, yCpu, yGpu, {1, 1}, {1, 1}, {0, 0}, {0, 0}, 5e-2f, 1.0f);
 }
 

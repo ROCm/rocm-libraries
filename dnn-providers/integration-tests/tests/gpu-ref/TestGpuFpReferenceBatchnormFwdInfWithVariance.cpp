@@ -15,6 +15,9 @@ using namespace hipdnn_gpu_ref;
 using namespace gpu_batchnorm_ref_test;
 using namespace gpu_batchnorm_fwd_ref_test;
 
+using HalfType = hipdnn_data_sdk::types::half;
+using BFloat16Type = hipdnn_data_sdk::types::bfloat16;
+
 // --- Validation configurations ---
 
 TEST(TestGpuBatchnormFwdInfVarRefValidation, ThrowsOnInputRankTooSmall)
@@ -268,11 +271,11 @@ TEST(TestGpuBatchnormFwdInfVar3DShapes, Broadcast2D)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    variance.fillWithRandomValues(0.1f, 1.f, seed++);
+    fillWithRandomValues(x, -fillRange, fillRange, seed++);
+    fillWithRandomValues(scale, -fillRange, fillRange, seed++);
+    fillWithRandomValues(bias, -fillRange, fillRange, seed++);
+    fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
+    fillWithRandomValues(variance, 0.1f, 1.f, seed++);
 
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
     GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
@@ -294,11 +297,11 @@ TEST(TestGpuBatchnormFwdInfVar3DShapes, MaterialEpsilon)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    variance.fillWithRandomValues(0.1f, 1.f, seed++);
+    fillWithRandomValues(x, -fillRange, fillRange, seed++);
+    fillWithRandomValues(scale, -fillRange, fillRange, seed++);
+    fillWithRandomValues(bias, -fillRange, fillRange, seed++);
+    fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
+    fillWithRandomValues(variance, 0.1f, 1.f, seed++);
 
     const double epsilon = 0.1;
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
@@ -323,11 +326,11 @@ TEST(TestGpuBatchnormFwdInfVar4DShapes, Broadcast2D)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    variance.fillWithRandomValues(0.1f, 1.0f, seed++);
+    fillWithRandomValues(x, -fillRange, fillRange, seed++);
+    fillWithRandomValues(scale, -fillRange, fillRange, seed++);
+    fillWithRandomValues(bias, -fillRange, fillRange, seed++);
+    fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
+    fillWithRandomValues(variance, 0.1f, 1.0f, seed++);
 
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
     GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
@@ -349,11 +352,11 @@ TEST(TestGpuBatchnormFwdInfVar4DShapes, Broadcast3D)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    variance.fillWithRandomValues(0.1f, 1.0f, seed++);
+    fillWithRandomValues(x, -fillRange, fillRange, seed++);
+    fillWithRandomValues(scale, -fillRange, fillRange, seed++);
+    fillWithRandomValues(bias, -fillRange, fillRange, seed++);
+    fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
+    fillWithRandomValues(variance, 0.1f, 1.0f, seed++);
 
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
     GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
@@ -375,11 +378,11 @@ TEST(TestGpuBatchnormFwdInfVar4DShapes, MaterialEpsilon)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    variance.fillWithRandomValues(0.1f, 1.0f, seed++);
+    fillWithRandomValues(x, -fillRange, fillRange, seed++);
+    fillWithRandomValues(scale, -fillRange, fillRange, seed++);
+    fillWithRandomValues(bias, -fillRange, fillRange, seed++);
+    fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
+    fillWithRandomValues(variance, 0.1f, 1.0f, seed++);
 
     const double epsilon = 0.1;
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
@@ -404,11 +407,11 @@ TEST(TestGpuBatchnormFwdInfVar5DShapes, Broadcast2D)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    variance.fillWithRandomValues(0.1f, 1.0f, seed++);
+    fillWithRandomValues(x, -fillRange, fillRange, seed++);
+    fillWithRandomValues(scale, -fillRange, fillRange, seed++);
+    fillWithRandomValues(bias, -fillRange, fillRange, seed++);
+    fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
+    fillWithRandomValues(variance, 0.1f, 1.0f, seed++);
 
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
     GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
@@ -430,11 +433,11 @@ TEST(TestGpuBatchnormFwdInfVar5DShapes, Broadcast3D)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    variance.fillWithRandomValues(0.1f, 1.0f, seed++);
+    fillWithRandomValues(x, -fillRange, fillRange, seed++);
+    fillWithRandomValues(scale, -fillRange, fillRange, seed++);
+    fillWithRandomValues(bias, -fillRange, fillRange, seed++);
+    fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
+    fillWithRandomValues(variance, 0.1f, 1.0f, seed++);
 
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
     GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
@@ -456,11 +459,11 @@ TEST(TestGpuBatchnormFwdInfVar5DShapes, Broadcast4D)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    variance.fillWithRandomValues(0.1f, 1.0f, seed++);
+    fillWithRandomValues(x, -fillRange, fillRange, seed++);
+    fillWithRandomValues(scale, -fillRange, fillRange, seed++);
+    fillWithRandomValues(bias, -fillRange, fillRange, seed++);
+    fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
+    fillWithRandomValues(variance, 0.1f, 1.0f, seed++);
 
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
     GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
@@ -482,11 +485,11 @@ TEST(TestGpuBatchnormFwdInfVar5DShapes, MaterialEpsilon)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    variance.fillWithRandomValues(0.1f, 1.0f, seed++);
+    fillWithRandomValues(x, -fillRange, fillRange, seed++);
+    fillWithRandomValues(scale, -fillRange, fillRange, seed++);
+    fillWithRandomValues(bias, -fillRange, fillRange, seed++);
+    fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
+    fillWithRandomValues(variance, 0.1f, 1.0f, seed++);
 
     const double epsilon = 0.1;
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
@@ -504,26 +507,26 @@ TEST(TestGpuBatchnormFwdInfVar5DShapes, DISABLED_ExceedsUInt32MaxElements)
 {
     SKIP_IF_NO_DEVICES();
     // Test with 4,974,412,500 elements, which is greater than 4,294,967,295 UINT32_MAX
-    Tensor<half> x({255, 255, 255, 50, 6});
-    Tensor<half> scale({1, 255, 1, 1, 1});
-    Tensor<half> bias({1, 255, 1, 1, 1});
-    Tensor<half> estMean({1, 255, 1, 1, 1});
-    Tensor<half> variance({1, 255, 1, 1, 1});
-    Tensor<half> yCpu({255, 255, 255, 50, 6});
-    Tensor<half> yGpu({255, 255, 255, 50, 6});
+    Tensor<HalfType> x({255, 255, 255, 50, 6});
+    Tensor<HalfType> scale({1, 255, 1, 1, 1});
+    Tensor<HalfType> bias({1, 255, 1, 1, 1});
+    Tensor<HalfType> estMean({1, 255, 1, 1, 1});
+    Tensor<HalfType> variance({1, 255, 1, 1, 1});
+    Tensor<HalfType> yCpu({255, 255, 255, 50, 6});
+    Tensor<HalfType> yGpu({255, 255, 255, 50, 6});
 
     unsigned int seed = getGlobalTestSeed();
-    const half fillRange(1.0);
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    variance.fillWithRandomValues(half(0.1f), half(1.0f), seed++);
+    const HalfType fillRange(1.0);
+    fillWithRandomValues(x, -fillRange, fillRange, seed++);
+    fillWithRandomValues(scale, -fillRange, fillRange, seed++);
+    fillWithRandomValues(bias, -fillRange, fillRange, seed++);
+    fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
+    fillWithRandomValues(variance, HalfType(0.1f), HalfType(1.0f), seed++);
 
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
     GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
 
-    assertAllClose(yCpu, yGpu, getToleranceInferenceWithVariance<half>());
+    assertAllClose(yCpu, yGpu, getToleranceInferenceWithVariance<HalfType>());
 }
 
 // --- Test mixed precision ---
@@ -532,7 +535,7 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, UpcastX)
 {
     SKIP_IF_NO_DEVICES();
 
-    using XDataType = bfloat16;
+    using XDataType = BFloat16Type;
     using ScaleBiasType = float;
     using MeanVarType = float;
     using YDataType = float;
@@ -548,16 +551,20 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, UpcastX)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(
-        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
-    scale.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    bias.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    estMean.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    variance.fillWithRandomValues(
-        static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
+    fillWithRandomValues(
+        x, static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
+    fillWithRandomValues(scale,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(bias,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(
+        estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        variance, static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
 
     CpuFpReferenceBatchnorm::
         fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
@@ -574,9 +581,9 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastX)
     SKIP_IF_NO_DEVICES();
 
     using XDataType = float;
-    using ScaleBiasType = half;
-    using MeanVarType = half;
-    using YDataType = half;
+    using ScaleBiasType = HalfType;
+    using MeanVarType = HalfType;
+    using YDataType = HalfType;
     using ComputeDataType = float;
 
     Tensor<XDataType> x({1, 2, 2, 2});
@@ -589,16 +596,20 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastX)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(
-        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
-    scale.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    bias.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    estMean.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    variance.fillWithRandomValues(
-        static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
+    fillWithRandomValues(
+        x, static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
+    fillWithRandomValues(scale,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(bias,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(
+        estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        variance, static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
 
     CpuFpReferenceBatchnorm::
         fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
@@ -614,9 +625,9 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, UpcastY)
 {
     SKIP_IF_NO_DEVICES();
 
-    using XDataType = half;
-    using ScaleBiasType = half;
-    using MeanVarType = half;
+    using XDataType = HalfType;
+    using ScaleBiasType = HalfType;
+    using MeanVarType = HalfType;
     using YDataType = float;
     using ComputeDataType = float;
 
@@ -630,16 +641,20 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, UpcastY)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(
-        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
-    scale.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    bias.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    estMean.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    variance.fillWithRandomValues(
-        static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
+    fillWithRandomValues(
+        x, static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
+    fillWithRandomValues(scale,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(bias,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(
+        estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        variance, static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
 
     CpuFpReferenceBatchnorm::
         fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
@@ -658,7 +673,7 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastY)
     using XDataType = float;
     using ScaleBiasType = float;
     using MeanVarType = float;
-    using YDataType = bfloat16;
+    using YDataType = BFloat16Type;
     using ComputeDataType = float;
 
     Tensor<XDataType> x({1, 2, 2, 2});
@@ -671,16 +686,20 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastY)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(
-        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
-    scale.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    bias.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    estMean.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    variance.fillWithRandomValues(
-        static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
+    fillWithRandomValues(
+        x, static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
+    fillWithRandomValues(scale,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(bias,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(
+        estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        variance, static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
 
     CpuFpReferenceBatchnorm::
         fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
@@ -696,10 +715,10 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, UpcastAffine)
 {
     SKIP_IF_NO_DEVICES();
 
-    using XDataType = bfloat16;
+    using XDataType = BFloat16Type;
     using ScaleBiasType = float;
     using MeanVarType = float;
-    using YDataType = half;
+    using YDataType = HalfType;
     using ComputeDataType = float;
 
     Tensor<XDataType> x({1, 2, 2, 2});
@@ -712,16 +731,20 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, UpcastAffine)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(
-        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
-    scale.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    bias.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    estMean.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    variance.fillWithRandomValues(
-        static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
+    fillWithRandomValues(
+        x, static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
+    fillWithRandomValues(scale,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(bias,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(
+        estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        variance, static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
 
     CpuFpReferenceBatchnorm::
         fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
@@ -738,8 +761,8 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastAffine)
     SKIP_IF_NO_DEVICES();
 
     using XDataType = float;
-    using ScaleBiasType = half;
-    using MeanVarType = bfloat16;
+    using ScaleBiasType = HalfType;
+    using MeanVarType = BFloat16Type;
     using YDataType = float;
     using ComputeDataType = float;
 
@@ -753,16 +776,20 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastAffine)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(
-        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
-    scale.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    bias.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    estMean.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    variance.fillWithRandomValues(
-        static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
+    fillWithRandomValues(
+        x, static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
+    fillWithRandomValues(scale,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(bias,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(
+        estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        variance, static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
 
     CpuFpReferenceBatchnorm::
         fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
@@ -782,7 +809,7 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastComputeHalf)
     using ScaleBiasType = float;
     using MeanVarType = float;
     using YDataType = float;
-    using ComputeDataType = half;
+    using ComputeDataType = HalfType;
 
     Tensor<XDataType> x({1, 2, 2, 2});
     Tensor<ScaleBiasType> scale({1, 2, 1, 1});
@@ -794,16 +821,20 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastComputeHalf)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(
-        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
-    scale.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    bias.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    estMean.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    variance.fillWithRandomValues(
-        static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
+    fillWithRandomValues(
+        x, static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
+    fillWithRandomValues(scale,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(bias,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(
+        estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        variance, static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
 
     CpuFpReferenceBatchnorm::
         fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
@@ -827,7 +858,7 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastComputeBfloat)
     using ScaleBiasType = float;
     using MeanVarType = float;
     using YDataType = float;
-    using ComputeDataType = bfloat16;
+    using ComputeDataType = BFloat16Type;
 
     Tensor<XDataType> x({1, 2, 2, 2});
     Tensor<ScaleBiasType> scale({1, 2, 1, 1});
@@ -839,16 +870,20 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastComputeBfloat)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(
-        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
-    scale.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    bias.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    estMean.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    variance.fillWithRandomValues(
-        static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
+    fillWithRandomValues(
+        x, static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
+    fillWithRandomValues(scale,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(bias,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(
+        estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        variance, static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
 
     CpuFpReferenceBatchnorm::
         fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
@@ -867,14 +902,14 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastComputeBfloat)
 // --- Test suite instantiations ---
 
 using TestGpuBatchnormFwdInfVarRef3DFp32 = BatchnormFwdInfVarTestSuite<float>;
-using TestGpuBatchnormFwdInfVarRef3DFp16 = BatchnormFwdInfVarTestSuite<half>;
-using TestGpuBatchnormFwdInfVarRef3DBfp16 = BatchnormFwdInfVarTestSuite<bfloat16>;
+using TestGpuBatchnormFwdInfVarRef3DFp16 = BatchnormFwdInfVarTestSuite<HalfType>;
+using TestGpuBatchnormFwdInfVarRef3DBfp16 = BatchnormFwdInfVarTestSuite<BFloat16Type>;
 using TestGpuBatchnormFwdInfVarRef4DFp32 = BatchnormFwdInfVarTestSuite<float>;
-using TestGpuBatchnormFwdInfVarRef4DFp16 = BatchnormFwdInfVarTestSuite<half>;
-using TestGpuBatchnormFwdInfVarRef4DBfp16 = BatchnormFwdInfVarTestSuite<bfloat16>;
+using TestGpuBatchnormFwdInfVarRef4DFp16 = BatchnormFwdInfVarTestSuite<HalfType>;
+using TestGpuBatchnormFwdInfVarRef4DBfp16 = BatchnormFwdInfVarTestSuite<BFloat16Type>;
 using TestGpuBatchnormFwdInfVarRef5DFp32 = BatchnormFwdInfVarTestSuite<float>;
-using TestGpuBatchnormFwdInfVarRef5DFp16 = BatchnormFwdInfVarTestSuite<half>;
-using TestGpuBatchnormFwdInfVarRef5DBfp16 = BatchnormFwdInfVarTestSuite<bfloat16>;
+using TestGpuBatchnormFwdInfVarRef5DFp16 = BatchnormFwdInfVarTestSuite<HalfType>;
+using TestGpuBatchnormFwdInfVarRef5DBfp16 = BatchnormFwdInfVarTestSuite<BFloat16Type>;
 
 TEST_P(TestGpuBatchnormFwdInfVarRef3DFp32, MatchesCpuRef)
 {

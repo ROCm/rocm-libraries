@@ -10,6 +10,9 @@ using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_gpu_ref;
 using namespace gpu_reduction_ref_test;
 
+using HalfType = hipdnn_data_sdk::types::half;
+using BFloat16Type = hipdnn_data_sdk::types::bfloat16;
+
 // --- Valid configurations ---
 
 TEST(TestGpuReductionRefValidation, AcceptsValidParamsTensorRanks1to5)
@@ -154,7 +157,7 @@ TEST(TestGpuReductionRefMixedType, FloatInputFloatOutput)
     Tensor<float> yGpu({2, 3, 4, 1});
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
 
     CpuFpReferenceReduction::reduce<float, float, double>(xTensor, yCpu, ReductionMode::ADD);
     GpuFpReferenceReduction::reduce<float, float, double>(xTensor, yGpu, ReductionMode::ADD);
@@ -166,15 +169,15 @@ TEST(TestGpuReductionRefMixedType, HalfInputFloatOutput)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<half> xTensor({2, 3, 4, 4});
+    Tensor<HalfType> xTensor({2, 3, 4, 4});
     Tensor<float> yCpu({2, 3, 4, 1});
     Tensor<float> yGpu({2, 3, 4, 1});
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed);
+    fillWithRandomValues(xTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed);
 
-    CpuFpReferenceReduction::reduce<half, float, double>(xTensor, yCpu, ReductionMode::ADD);
-    GpuFpReferenceReduction::reduce<half, float, double>(xTensor, yGpu, ReductionMode::ADD);
+    CpuFpReferenceReduction::reduce<HalfType, float, double>(xTensor, yCpu, ReductionMode::ADD);
+    GpuFpReferenceReduction::reduce<HalfType, float, double>(xTensor, yGpu, ReductionMode::ADD);
 
     assertAllClose(yCpu, yGpu, getTolerance<float>());
 }
@@ -183,32 +186,33 @@ TEST(TestGpuReductionRefMixedType, HalfInputHalfOutput)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<half> xTensor({2, 3, 4, 4});
-    Tensor<half> yCpu({2, 3, 4, 1});
-    Tensor<half> yGpu({2, 3, 4, 1});
+    Tensor<HalfType> xTensor({2, 3, 4, 4});
+    Tensor<HalfType> yCpu({2, 3, 4, 1});
+    Tensor<HalfType> yGpu({2, 3, 4, 1});
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed);
+    fillWithRandomValues(xTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed);
 
-    CpuFpReferenceReduction::reduce<half, half, double>(xTensor, yCpu, ReductionMode::ADD);
-    GpuFpReferenceReduction::reduce<half, half, double>(xTensor, yGpu, ReductionMode::ADD);
+    CpuFpReferenceReduction::reduce<HalfType, HalfType, double>(xTensor, yCpu, ReductionMode::ADD);
+    GpuFpReferenceReduction::reduce<HalfType, HalfType, double>(xTensor, yGpu, ReductionMode::ADD);
 
-    assertAllClose(yCpu, yGpu, getTolerance<half>());
+    assertAllClose(yCpu, yGpu, getTolerance<HalfType>());
 }
 
 TEST(TestGpuReductionRefMixedType, BfloatInputFloatOutput)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<bfloat16> xTensor({2, 3, 4, 4});
+    Tensor<BFloat16Type> xTensor({2, 3, 4, 4});
     Tensor<float> yCpu({2, 3, 4, 1});
     Tensor<float> yGpu({2, 3, 4, 1});
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(static_cast<bfloat16>(-1.0f), static_cast<bfloat16>(1.0f), seed);
+    fillWithRandomValues(
+        xTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed);
 
-    CpuFpReferenceReduction::reduce<bfloat16, float, double>(xTensor, yCpu, ReductionMode::ADD);
-    GpuFpReferenceReduction::reduce<bfloat16, float, double>(xTensor, yGpu, ReductionMode::ADD);
+    CpuFpReferenceReduction::reduce<BFloat16Type, float, double>(xTensor, yCpu, ReductionMode::ADD);
+    GpuFpReferenceReduction::reduce<BFloat16Type, float, double>(xTensor, yGpu, ReductionMode::ADD);
 
     assertAllClose(yCpu, yGpu, getTolerance<float>());
 }
@@ -217,17 +221,20 @@ TEST(TestGpuReductionRefMixedType, BfloatInputBfloatOutput)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<bfloat16> xTensor({2, 3, 4, 4});
-    Tensor<bfloat16> yCpu({2, 3, 4, 1});
-    Tensor<bfloat16> yGpu({2, 3, 4, 1});
+    Tensor<BFloat16Type> xTensor({2, 3, 4, 4});
+    Tensor<BFloat16Type> yCpu({2, 3, 4, 1});
+    Tensor<BFloat16Type> yGpu({2, 3, 4, 1});
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(static_cast<bfloat16>(-1.0f), static_cast<bfloat16>(1.0f), seed);
+    fillWithRandomValues(
+        xTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed);
 
-    CpuFpReferenceReduction::reduce<bfloat16, bfloat16, double>(xTensor, yCpu, ReductionMode::ADD);
-    GpuFpReferenceReduction::reduce<bfloat16, bfloat16, double>(xTensor, yGpu, ReductionMode::ADD);
+    CpuFpReferenceReduction::reduce<BFloat16Type, BFloat16Type, double>(
+        xTensor, yCpu, ReductionMode::ADD);
+    GpuFpReferenceReduction::reduce<BFloat16Type, BFloat16Type, double>(
+        xTensor, yGpu, ReductionMode::ADD);
 
-    assertAllClose(yCpu, yGpu, getTolerance<bfloat16>());
+    assertAllClose(yCpu, yGpu, getTolerance<BFloat16Type>());
 }
 
 // --- Channel last layout tests ---
@@ -241,7 +248,7 @@ TEST(TestGpuReductionRefChannelLast, MatchesCpuRefReducingSpatialAxes)
     Tensor<float> yGpu({2, 4, 1, 1}, TensorLayout::NHWC);
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
 
     CpuFpReferenceReduction::reduce<float, float, double>(xTensor, yCpu, ReductionMode::ADD);
     GpuFpReferenceReduction::reduce<float, float, double>(xTensor, yGpu, ReductionMode::ADD);
@@ -258,7 +265,7 @@ TEST(TestGpuReductionRefChannelLast, MatchesCpuRefReducingChannelAxis)
     Tensor<float> yGpu({2, 1, 8, 8}, TensorLayout::NHWC);
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
 
     CpuFpReferenceReduction::reduce<float, float, double>(xTensor, yCpu, ReductionMode::ADD);
     GpuFpReferenceReduction::reduce<float, float, double>(xTensor, yGpu, ReductionMode::ADD);
@@ -275,7 +282,7 @@ TEST(TestGpuReductionRefChannelLast, MatchesCpuRefDifferentIOLayouts)
     Tensor<float> yGpu({2, 4, 1, 1}, TensorLayout::NHWC);
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
 
     CpuFpReferenceReduction::reduce<float, float, double>(xTensor, yCpu, ReductionMode::ADD);
     GpuFpReferenceReduction::reduce<float, float, double>(xTensor, yGpu, ReductionMode::ADD);
@@ -286,11 +293,11 @@ TEST(TestGpuReductionRefChannelLast, MatchesCpuRefDifferentIOLayouts)
 // --- Test suite instantiations ---
 
 using TestGpuReductionRef4DFp32 = ReductionTestSuite<float>;
-using TestGpuReductionRef4DFp16 = ReductionTestSuite<half>;
-using TestGpuReductionRef4DBfp16 = ReductionTestSuite<bfloat16>;
+using TestGpuReductionRef4DFp16 = ReductionTestSuite<HalfType>;
+using TestGpuReductionRef4DBfp16 = ReductionTestSuite<BFloat16Type>;
 using TestGpuReductionRef5DFp32 = ReductionTestSuite<float>;
-using TestGpuReductionRef5DFp16 = ReductionTestSuite<half>;
-using TestGpuReductionRef5DBfp16 = ReductionTestSuite<bfloat16>;
+using TestGpuReductionRef5DFp16 = ReductionTestSuite<HalfType>;
+using TestGpuReductionRef5DBfp16 = ReductionTestSuite<BFloat16Type>;
 
 TEST_P(TestGpuReductionRef4DFp32, MatchesCpuRef)
 {

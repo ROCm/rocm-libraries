@@ -5,6 +5,7 @@
 
 #include "MatmulShapeCatalog.hpp"
 #include <gtest/gtest.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn-gpu-ref/GpuFpReferenceMatmul.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
@@ -21,6 +22,7 @@ using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities::matmul;
 using namespace hipdnn_gpu_ref;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 template <typename ADataType,
           typename BDataType = ADataType,
@@ -38,11 +40,11 @@ void runGpuVsCpuMatmul(const std::vector<int64_t>& aDims,
     const unsigned int seed = getGlobalTestSeed();
 
     auto aTensor = Tensor<ADataType>(aDims, aStrides);
-    aTensor.fillWithRandomValues(
-        static_cast<ADataType>(-fillRange), static_cast<ADataType>(fillRange), seed);
+    fillWithRandomValues(
+        aTensor, static_cast<ADataType>(-fillRange), static_cast<ADataType>(fillRange), seed);
     auto bTensor = Tensor<BDataType>(bDims, bStrides);
-    bTensor.fillWithRandomValues(
-        static_cast<BDataType>(-fillRange), static_cast<BDataType>(fillRange), seed + 1);
+    fillWithRandomValues(
+        bTensor, static_cast<BDataType>(-fillRange), static_cast<BDataType>(fillRange), seed + 1);
     auto cGpu = Tensor<CDataType>(cDims, cStrides);
     auto cCpu = Tensor<CDataType>(cDims, cStrides);
 
