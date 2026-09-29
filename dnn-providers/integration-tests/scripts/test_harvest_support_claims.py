@@ -160,6 +160,11 @@ class TestSplitStreams(unittest.TestCase):
         text = _log((3, ["a1"]), (23, ["b1"]), (3, ["a2"]), (23, ["b2"]))
         self.assertEqual(split_streams(text), {"3": ["a1", "a2"], "23": ["b1", "b2"]})
 
+    def test_chunk_bom_before_timestamp_keeps_line_in_its_stream(self) -> None:
+        # GitHub starts each chunk of a job log with a UTF-8 BOM.
+        text = f"\ufeff{_TS}23: a1\n\ufeff{_TS}23: a2\n"
+        self.assertEqual(split_streams(text), {"23": ["a1", "a2"]})
+
 
 # ---------------------------------------------------------------------------
 # Block extraction

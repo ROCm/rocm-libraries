@@ -127,7 +127,8 @@ FETCHED_CONCLUSIONS = ("success", "failure")
 NIGHTLY_PAGE = 50
 INTEGRATION_TESTS = Path(__file__).resolve().parent.parent
 
-_TIMESTAMP = re.compile(r"^\d{4}-\d\d-\d\dT[\d:.]+Z ?")
+# GitHub starts each chunk of a job log with a UTF-8 BOM.
+_TIMESTAMP = re.compile(r"^\ufeff?\d{4}-\d\d-\d\dT[\d:.]+Z ?")
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _CTEST_PREFIX = re.compile(r"^(\d+): ")
 _SUMMARY_HEADER = re.compile(r"^==== SUPPORT CLAIM SUMMARY \((.+)\) ====$")
