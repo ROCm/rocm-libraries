@@ -34,16 +34,32 @@ include: rocblas_common.yaml
 # needs no guard and is 16 GiB. The test skips rather than fails where the device
 # cannot supply it.
 #
-# Category. stress, which is what every other row in the tree at this scale uses
-# -- rot_ILP64 in rot_gtest.yaml, asum_ILP64, axpy_ILP64 -- and not nightly.
-# 16 to 32 GiB is the footprint the stress category exists for and documents
-# ROCBLAS_CLIENT_RAM_GB_LIMIT against, while a nightly level-1 row is budgeted at
-# 70 to 200 seconds for a whole function. It also keeps these rows out of a bare
-# ./rocblas-test, which drops *stress* by default, and that is what excludes them
-# from a -DROCBLAS_DEV_TEST_ILP64 build: there c_i64_grid_X_chunk becomes 512
-# while n stays pinned at 2^31 by the defect, so the launcher would make 2^22
-# chunk calls for the same 16 to 32 GiB. The existing ILP64 stress rows have the
-# same property and are not guarded against that mode either.
+# Category. nightly, as a deliberate exception to the convention that a row at
+# this scale is stress -- rot_ILP64 in rot_gtest.yaml, asum_ILP64 and axpy_ILP64
+# all are. stress is currently wired to no lane: no <run> in rtest.xml selects
+# *stress*, ctest comprehensive and ctest full are both
+# *quick*:*pre_checkin*:*nightly*, osdb and cqe are nightly, code coverage
+# excludes *stress* by name, and the full entry in test_categories.yaml has its
+# *stress* pattern commented out above a note that CI does not match the stress
+# use case. A stress row therefore runs in no automated lane at all, and this is
+# the only coverage of the defect: no other row pairs a chunked n with a small
+# negative increment, since rot_ILP64's large-n row is all-positive and its
+# negative rows are N: 2 with |inc| above 32 bits, which take the other branch.
+#
+# Runtime is not the obstacle -- a case is about ten seconds on gfx90a-mi250, as
+# measured for the fix. The constraint is VRAM, and where the device cannot
+# supply it these rows skip rather than fail, so the cost on a smaller machine is
+# a skip and not a broken lane.
+#
+# -DROCBLAS_DEV_TEST_ILP64. These rows are not valid in that build, and the
+# category does not fence them off: rocblas_gtest_main.cpp drops a category only
+# when no --yaml is given and the filter is empty, so any explicit filter selects
+# them whatever the category is. In that mode c_i64_grid_X_chunk becomes 512 and
+# c_ILP64_i32_max becomes 0, while n here is a compile-time 2^31 chosen for the
+# production gate and does not follow: the launcher would make 2^22 chunk calls
+# for the same 16 to 32 GiB, and the guard below would no longer cover the
+# pre-fix overrun, which reaches 2^31 - 512 elements down rather than 7 * 2^28.
+# Do not run these rows in that mode.
 
 Tests:
 # Control. With both increments positive the offsets reduce to n_base * inc,
@@ -56,7 +72,7 @@ Tests:
 # is the last to be skipped for want of memory and the most likely to run on a
 # small device.
 - name: rot_ilp64_chunk_control_positive
-  category: stress
+  category: nightly
   arguments:
     - { incx: 1, incy: 1 }
   function:
@@ -64,7 +80,7 @@ Tests:
   os_flags: [ LINUX ]
 
 - name: rot_ilp64_chunk_neg_incx
-  category: stress
+  category: nightly
   arguments:
     - { incx: -1, incy: 1 }
   function:
@@ -72,7 +88,7 @@ Tests:
   os_flags: [ LINUX ]
 
 - name: rot_ilp64_chunk_neg_incy
-  category: stress
+  category: nightly
   arguments:
     - { incx: 1, incy: -1 }
   function:
@@ -82,7 +98,7 @@ Tests:
 # Largest footprint, so the first to skip on a smaller device. It is not the
 # only row for that reason.
 - name: rot_ilp64_chunk_neg_both
-  category: stress
+  category: nightly
   arguments:
     - { incx: -1, incy: -1 }
   function:

@@ -94,12 +94,16 @@ namespace
     // one chunk, and without a guard there that would be a fault rather than a
     // reported failure.
     //
-    // These are the production values of the library constants. A
-    // -DROCBLAS_DEV_TEST_ILP64 build drops c_i64_grid_X_chunk to 512 without
-    // moving n, which the defect pins at 2^31, so the chunk count rises to 2^22
-    // and the guard below is no longer the union of the out-of-bounds ranges.
-    // These rows are stress for that reason among others, and a build in that mode
-    // does not run stress by default; see the category note in the YAML.
+    // These are the production values of the library constants, and the test is
+    // only valid against them. A -DROCBLAS_DEV_TEST_ILP64 build sets
+    // c_i64_grid_X_chunk to 512 and c_ILP64_i32_max to 0, while c_n below stays a
+    // compile-time 2^31 chosen for the production gate: the launcher would then
+    // make 2^22 chunk calls for the same 16 to 32 GiB, and c_below would no longer
+    // cover the pre-fix overrun, which in that mode reaches 2^31 - 512 elements
+    // below the pointer rather than 7 * 2^28. Nothing fences these rows off from
+    // that build -- the category cannot, since the harness drops a category only
+    // when the filter is empty -- so a developer working in that mode should not
+    // run them.
     constexpr int64_t c_grid_x_chunk = int64_t(1) << 28; // c_i64_grid_X_chunk
     constexpr int64_t c_n            = int64_t(1) << 31; // 8 * c_grid_x_chunk
     constexpr int64_t c_below        = 7 * c_grid_x_chunk; // union of OOB chunks
@@ -386,7 +390,7 @@ namespace
         // non-sample element.
         //
         // The cost is a device-to-host pass over each operand, reusing the same
-        // slice-sized staging buffer as the guard scan. That is time on a stress
+        // slice-sized staging buffer as the guard scan. That is time on a nightly
         // row, not memory, and coverage is worth more than the time.
         auto expect_vector_correct = [&](const T* base, bool want_x, const char* which) {
             // Away from the sample sites the expectation is the same for every
@@ -486,9 +490,9 @@ namespace
     };
 
     // PrintToStringParamName already prefixes each test name with the YAML
-    // category, so this name must not be a category as well: calling it nightly
-    // would let --gtest_filter=*nightly* select rows the YAML marks stress. The
-    // other blas1 suites use the BLAS level here, which is what this follows.
+    // category, so this name carries the BLAS level rather than repeating one, as
+    // the other nine blas1 suites do. Naming it after a category would make that
+    // category's filter match these rows whatever the YAML says.
     TEST_P(rot_ilp64_chunk_gtest, blas1)
     {
         CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(
