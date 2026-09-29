@@ -1,12 +1,12 @@
-## Tensile Config Generator (Beta)
+## TensileLite Config Generator (Beta)
 
-The `tensile_config_generator.py` script is a tool designed to generate Tensile configuration files for hipBLASLt. These configuration files are essential for optimizing GEMM (General Matrix Multiplication) operations on AMD GPUs.
+The `tensile_config_generator.py` script is a tool designed to generate TensileLite configuration files for hipBLASLt. These configuration files are essential for optimizing GEMM (General Matrix Multiplication) operations on AMD GPUs.
 
 ### Purpose
 
 The main purpose of this script is to:
 1. Analyze the hipBLASLt logs for GEMM operations
-2. Generate optimized Tensile configurations based on the identified GEMM patterns
+2. Generate optimized TensileLite configurations based on the identified GEMM patterns
 3. Produce YAML files that can be used by hipBLASLt to tune GEMM operations
 
 ### Usage
@@ -29,7 +29,7 @@ To use the `tensile_config_generator.py` script, follow these steps:
    |--------|-------------|
    | `-h, --help` | Show this help message and exit |
    | `--hipblaslt_log HIPBLASLT_LOG` | Path to hipblaslt log file |
-   | `--tensile_config TENSILE_CONFIG` | Path to tensile config file |
+   | `--tensile_config TENSILE_CONFIG` | Path to TensileLite config file |
    | `--gpus GPUS` | Number of GPUs for tuning hipblaslt |
    | `--topk TOPK` | Top k GEMMs for tuning |
    | `--iters ITERS` | Max tuning iterations |
@@ -49,7 +49,7 @@ To use the `tensile_config_generator.py` script, follow these steps:
    python ./tensile_config_generator.py --gridbase_config ./gridbase_config_template.yaml --tensile_config ./tuning_template.yaml --gpus 4 --iters 100
    ```
 
-3. Install hipBLASLt and Tensile (change the path to the hipBLASLt repo):
+3. Install hipBLASLt and TensileLite (change the path to the hipBLASLt repo):
    ```
    inv build --install-deps --clients --install-pkg --architecture $(/opt/rocm/llvm/bin/offload-arch) --cpu-ref-lib=lapack
    ```

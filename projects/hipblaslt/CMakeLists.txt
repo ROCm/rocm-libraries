@@ -756,6 +756,7 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         PATTERN "__pycache__" EXCLUDE
         PATTERN ".pytest_cache" EXCLUDE
         PATTERN "*.pyc" EXCLUDE
+        PATTERN "source_only" EXCLUDE
     )
     install(
         FILES "${_tensilelite_src}/Tensile/__init__.py"
