@@ -9,6 +9,9 @@
       ],
       "gfx942": [
         "linux"
+      ],
+      "gfx950": [
+        "linux"
       ]
     },
     "MIOPEN_ENGINE": {
@@ -19,6 +22,9 @@
         "linux"
       ],
       "gfx942": [
+        "linux"
+      ],
+      "gfx950": [
         "linux"
       ]
     }

@@ -31,6 +31,9 @@
         "support": {
           "gfx1151": [
             "windows"
+          ],
+          "gfx950": [
+            "linux"
           ]
         }
       }

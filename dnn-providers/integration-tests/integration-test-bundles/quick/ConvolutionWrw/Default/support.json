@@ -122,6 +122,9 @@
           ],
           "gfx942": [
             "linux"
+          ],
+          "gfx950": [
+            "linux"
           ]
         }
       },
@@ -161,6 +164,9 @@
         "support": {
           "gfx1151": [
             "windows"
+          ],
+          "gfx950": [
+            "linux"
           ]
         }
       }
