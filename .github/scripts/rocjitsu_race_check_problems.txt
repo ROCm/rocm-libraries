@@ -1,0 +1,25 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# "Problems of interest" run under hipblaslt-bench in the rocjitsu race-check
+# sidecar (run_rocjitsu_hipblaslt_race_check.sh). One workload per line:
+#
+#   label | extra hipblaslt-bench arguments
+#
+# Each line's arguments are appended to a fixed base invocation
+# (--initialization hpl --verify --iters 1 --cold_iters 0) and run under the
+# rocjitsu race + logging plugins. Keep the set small and the sizes modest: this
+# job runs on every hipBLASLt PR and executes entirely under CPU emulation, so
+# runtime scales with m*n*k. Comment (#) and blank lines are ignored.
+#
+# label       | bench args
+f32_nt_128    | --precision f32_r --transA N --transB T -m 128 -n 128 -k 128
+f16_nn_128    | --precision f16_r --transA N --transB N -m 128 -n 128 -k 128
+bf16_tn_128   | --precision bf16_r --transA T --transB N -m 128 -n 128 -k 128
+#
+# f8 GEMMs use an arch-dependent format: gfx942 (CDNA3) needs the FNUZ types
+# (f8_fnuz_r/bf8_fnuz_r); OCP arches such as gfx950 use f8_r/bf8_r. This file is
+# shared across race-check targets, so no single f8 row is portable. Enable a
+# target-appropriate row once it is validated on that arch, e.g.:
+#   f8_nt_128   | --precision f16_r --compute_input_typeA f8_fnuz_r --compute_input_typeB f8_fnuz_r --transA N --transB T -m 128 -n 128 -k 128   # gfx942
+#   f8_nt_128   | --precision f16_r --compute_input_typeA f8_r --compute_input_typeB f8_r --transA N --transB T -m 128 -n 128 -k 128             # gfx950
