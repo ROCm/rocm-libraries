@@ -364,6 +364,12 @@ _INJECTIVITY_BASES = {
 _RUNTIME_PARAM_FIELDS = frozenset(_spec().runtime_param_fields)
 
 
+# Every persistent decode order the gfx942 body emits.
+_PERSIST_DECODES = sorted(
+    Gfx942AttentionDenseSpec.supported_persist_decodes() - {"auto"}
+)
+
+
 def _persistent_spec(**kw) -> Gfx942AttentionDenseSpec:
     """The persistent injectivity base, with overrides.
 
@@ -561,7 +567,7 @@ def test_kernel_name_covers_every_baked_parameter(field):
     )
 
 
-@pytest.mark.parametrize("decode", ["qb_major", "hkv_major"])
+@pytest.mark.parametrize("decode", _PERSIST_DECODES)
 def test_persistent_grid_shares_one_kernel_across_batches(decode):
     """The persistent grid reads batch from a kernel param too: every batch is ONE
     name, ONE body and ONE cache key, with no ``_b{N}`` token.
@@ -615,7 +621,7 @@ def test_build_emits_one_symbol_across_batches(make):
 _HEAD_CONFIGS = ((128, 8), (40, 8), (28, 4), (32, 32))
 
 
-@pytest.mark.parametrize("decode", ["qb_major", "hkv_major"])
+@pytest.mark.parametrize("decode", _PERSIST_DECODES)
 def test_persistent_grid_shares_one_kernel_across_head_configs(decode):
     """The persistent work decode divides by the runtime head counts (through the
     fast-division kernargs), so every head config -- pow2 and non-pow2 GQA, MHA --
@@ -1944,10 +1950,10 @@ def test_codegen_knob_rejections(overrides, reason):
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("d", [64, 128])
-@pytest.mark.parametrize("decode", ["qb_major", "hkv_major"])
+@pytest.mark.parametrize("decode", _PERSIST_DECODES)
 def test_persistent_builds_for_both_decodes(dtype, d, decode):
-    """P4: the persistent grid-stride body builds for every in-scope config and both
-    work-decode orders. The decode is a build-time (Python) branch, so both must emit;
+    """P4: the persistent grid-stride body builds for every in-scope config and every
+    work-decode order. The decode is a build-time (Python) branch, so each must emit;
     GPU numeric correctness (the decode bijection) is verified in the live cohort."""
     spec = _spec(
         head_size=d,
@@ -2010,7 +2016,7 @@ def _fastdiv(n: int, magic_i32: int, shift: int) -> int:
     return (((n * (magic_i32 & 0xFFFFFFFF)) >> 32) + n) >> shift
 
 
-@pytest.mark.parametrize("decode", ["qb_major", "hkv_major"])
+@pytest.mark.parametrize("decode", _PERSIST_DECODES)
 def test_persistent_kernarg_abi_carries_the_fastdiv_pairs(decode):
     """The persistent kernarg ABI is the five shape params, then one
     ``<divisor>_magic`` / ``<divisor>_shift`` i32 pair per divisor of the RESOLVED

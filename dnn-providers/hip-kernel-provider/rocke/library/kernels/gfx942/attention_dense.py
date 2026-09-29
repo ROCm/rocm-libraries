@@ -190,6 +190,12 @@ from rocke.core.ir import (
 from rocke.helpers.attention import mfma_32x32x8_for_dtype
 
 # Shared problem/geometry fields live in an architecture-neutral module.
+from kernels.common.attention_dense_decode import (
+    PERSIST_DECODES,
+    DecodeShape,
+    PersistHkvMajor,
+    PersistQbMajor,
+)
 from kernels.common.attention_dense_spec import (
     AttentionDenseSpec,
     DENSE_TILE_GEOMETRIES,
@@ -456,6 +462,18 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     #   off emits no new IR, so the shipped kernel and its goldens are unchanged.
     emit_lse: bool = field(default=False, kw_only=True)
 
+    @classmethod
+    def supported_persist_decodes(cls) -> frozenset[str]:
+        # The persistent body takes the shape at runtime, so only decodes with a
+        # runtime-operand form (no gqa_pair*, whose NP equals the baked work count).
+        return frozenset(
+            {
+                "auto",
+                PersistQbMajor.name,
+                PersistHkvMajor.name,
+            }
+        )
+
     def __post_init__(self) -> None:
         super().__post_init__()
         if type(self.emit_lse) is not bool:
@@ -562,18 +580,16 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
 
         Each one gets a host-computed magic multiplier and shift
         (:func:`_fastdiv_kernargs`), so the in-loop divide stays a mul-hi, an add and
-        a shift instead of the backend's software integer division. ``gqa`` is in
-        both orders: qb_major derives ``hkv = hq / gqa``, and hkv_major splits its
-        work index by ``gqa`` into the query head within the kv group.
+        a shift instead of the backend's software integer division. Each decode
+        class declares its own (``PersistDecode.fastdiv_divisors``); a decode
+        without the kv head as a digit lists ``gqa`` for ``hkv = hq / gqa``.
 
         A function of the resolved decode order only, never of the shape, so it is
         fixed by the cache key: the key carries the resolved order on the persistent
         grid (``attention_dense_cache_key``)."""
         if not (self.persistent and self.runtime_shape):
             return ()
-        if self.resolved_persist_decode == "hkv_major":
-            return ("batch", "gqa", "nqb")
-        return ("batch", "num_query_heads", "gqa")
+        return PERSIST_DECODES[self.resolved_persist_decode].fastdiv_divisors
 
     @property
     def runtime_kernarg_fields(self) -> tuple[str, ...]:
@@ -1412,9 +1428,19 @@ def _build_attention_dense_single_buffer(
         gqa_p = b.div(hq_p, hkv_p)
         stride_q_p = b.mul(hq_p, b.const_i32(D))
         stride_k_p = b.mul(hkv_p, b.const_i32(D))
+        # The runtime shape as the work decodes read it (DecodeShape).
+        shape_values = {
+            "batch": batch_p,
+            "seqlen_q": seqlen_q_p,
+            "seqlen_kv": seqlen_kv_p,
+            "num_query_heads": hq_p,
+            "num_kv_heads": hkv_p,
+            "gqa": gqa_p,
+        }
     else:
         batch_p = seqlen_q_p = seqlen_kv_p = None
         hq_p = hkv_p = gqa_p = stride_q_p = stride_k_p = None
+        shape_values = None
 
     # The baked branch emits each stride constant in place, at its use: the IR
     # builder is side-effecting, so sharing one const node would renumber every SSA
@@ -2165,30 +2191,18 @@ def _build_attention_dense_single_buffer(
         # constant, so this per-CTA divide strength-reduces.
         nqb_p = b.div(seqlen_q_p, b.const_i32(BLOCK_M))
         w_p = b.mul(b.mul(nqb_p, hq_p), batch_p)
-        divisor = {
-            "batch": batch_p,
-            "num_query_heads": hq_p,
-            "gqa": gqa_p,
-            "nqb": nqb_p,
-        }
 
         def _div(n, d):
             # (umulhi(n, magic) + n) >> shift, exact for n < 2**30 (the add is nsw);
-            # attention_dense_runtime_args holds W under that bound.
+            # attention_dense_runtime_args holds every decode dividend under that
+            # bound.
             return b.lshr(
                 b.add(b.umul_hi_i32(n, rt[f"{d}_magic"]), n), rt[f"{d}_shift"]
             )
 
-        def _divmod(n, d):
-            q = _div(n, d)
-            return q, b.sub(n, b.mul(q, divisor[d]))
-
-        if spec.resolved_persist_decode == "hkv_major":
-            half_p = b.lshr(nqb_p, b.const_i32(1))
-            fold_p = b.add(b.sub(nqb_p, b.const_i32(1)), half_p)  # NQB-1+half
-        elif spec.interleave and causal:
-            # NQB == 1 needs no gate: qb0 is then 0 and the flip yields 0 too.
-            nqb_m1_p = b.sub(nqb_p, b.const_i32(1))
+        work_shape = DecodeShape(
+            b, spec, {**shape_values, "nqb": nqb_p, "w": w_p}, fastdiv=_div
+        )
         cta_id = b.block_id_x()
         outer = b.scf_for(cta_id, w_p, b.const_i32(NP), iv_name="wi")
         with outer as wi:
@@ -2200,42 +2214,13 @@ def _build_attention_dense_single_buffer(
             # barrier suffices because there is no pending lgkm to sink here.
             b.s_waitcnt(vmcnt=0)
             b.s_barrier_bare()
-            if spec.resolved_persist_decode == "hkv_major":
-                # hkv-MAJOR + causal-balanced decode (gfx950 §):
-                #   wi = hkv*(NQB*gqa*B) + blk*(gqa*B) + hql*B + bt
-                # hkv in the MSB keeps each grid-stride phase within ~1 kv-head so the
-                # shared GQA K/V stays L2-resident across its gqa query heads; blk is
-                # folded so a CTA striding both halves of a kv-head does qb=X and
-                # qb=NQB-1-X (constant causal cost) -- qb_major's balance + L2 win.
-                rem, bt_v = _divmod(wi, "batch")
-                r2, hql = _divmod(rem, "gqa")
-                hkv_v, blk = _divmod(r2, "nqb")
-                hq_v = b.add(b.mul(hkv_v, gqa_p), hql)
-                qb_hi = b.sub(fold_p, blk)  # NQB-1-(blk-half)
-                qb_v = b.select(b.cmp_lt(blk, half_p), blk, qb_hi)
-            elif spec.resolved_persist_decode == "qb_major":
-                # qb-MAJOR decode: wi = qb*(Hq*B) + hq*B + bt. Putting qb (the
-                # triangular causal-cost index) in the MSB spreads cheap+expensive
-                # query blocks across each CTA under grid-stride. Optional interleave
-                # reverses qb for ODD hq to further balance the causal tail. Keying on
-                # hq (not rem = qb0*Hq + hq) keeps the map a bijection: each hq's qb
-                # range is either identity or reversed. For even Hq the two agree;
-                # for odd Hq rem parity aliases two qb0 onto one qb and skips another.
-                rem, bt_v = _divmod(wi, "batch")
-                qb0, hq_v = _divmod(rem, "num_query_heads")
-                hkv_v = _div(hq_v, "gqa")
-                if spec.interleave and causal:
-                    odd = b.cmp_eq(b.mod(hq_v, b.const_i32(2)), b.const_i32(1))
-                    qb_v = b.select(odd, b.sub(nqb_m1_p, qb0), qb0)
-                else:
-                    qb_v = qb0
-            else:
-                raise ValueError(
-                    "gfx942 attention_dense: persist_decode="
-                    f"{spec.resolved_persist_decode!r} is not implemented "
-                    "by this builder"
-                )
-            _run_work_item(qb_v, hq_v, bt_v, hkv=hkv_v)
+            d = PERSIST_DECODES[spec.resolved_persist_decode].emit_decode(
+                b, spec, wi, work_shape
+            )
+            # The kv head from the decode where it is a digit, else hq // gqa through
+            # the gqa fastdiv pair: no runtime division in the grid-stride loop.
+            hkv_v = d.hkv if d.hkv is not None else work_shape.div(d.hq, "gqa")
+            _run_work_item(d.qb, d.hq, d.bt, hkv=hkv_v)
     else:
         _run_work_item(b.block_id_x(), b.block_id_y(), b.block_id_z())
     b.ret()
@@ -2317,18 +2302,20 @@ def _fastdiv_kernargs(spec: Gfx942AttentionDenseSpec) -> dict[str, int]:
     is a uint32 passed as its two's-complement i32 bit pattern, which is what the
     kernel's unsigned mul-hi reads.
 
-    Raises when the work-item count reaches the fast-division dividend limit: every
-    decode dividend is below it, and past it the quotient is wrong with no fault."""
+    Raises when a decode dividend can reach the fast-division dividend limit (the
+    work-item count, or the decode's own bound): past it the quotient is wrong with
+    no fault."""
     if not spec.fastdiv_divisors:
         return {}
     from rocke.helpers.transforms import calculate_magic_numbers
 
     nqb = spec.seqlen_q // spec.block_m
-    work = nqb * spec.num_query_heads * spec.batch
-    if work >= _FASTDIV_DIVIDEND_LIMIT:
+    bound = PERSIST_DECODES[spec.resolved_persist_decode].fastdiv_dividend_bound(spec)
+    if bound >= _FASTDIV_DIVIDEND_LIMIT:
         raise ValueError(
-            f"gfx942 attention_dense: persistent work-item count {work} "
-            f"(nqb*Hq*B) must be below 2**30 for the work decode's fast division"
+            f"gfx942 attention_dense: persistent decode dividend bound {bound} "
+            f"(the work-item count nqb*Hq*B, or the decode's own) must be below "
+            f"2**30 for the work decode's fast division"
         )
     value = {
         "batch": spec.batch,

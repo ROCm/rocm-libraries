@@ -152,7 +152,7 @@ def add_dense_tuning_args(ap: argparse.ArgumentParser) -> None:
     ap.add_argument(
         "--persist-decode",
         dest="persist_decode",
-        choices=["auto", "qb_major", "hkv_major"],
+        choices=sorted(Gfx942AttentionDenseSpec.supported_persist_decodes()),
         default=None,
         help="persistent work-item decode; default = dispatch's 'auto'",
     )
