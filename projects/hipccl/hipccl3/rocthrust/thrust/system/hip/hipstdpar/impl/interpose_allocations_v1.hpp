@@ -331,7 +331,12 @@ extern "C" {
                     r, n, hipMemAdviseSetAccessedBy, d)) != hipSuccess) {
                 // MAP_FIXED has already replaced whatever was mapped there;
                 // unmapping would leave a hole inside a range the caller owns.
-                if (!(f & MAP_FIXED)) __hipstdpar_hidden_munmap(r, n);
+                // MAP_FIXED_NOREPLACE overrides it and only maps a free range.
+                bool replaced = f & MAP_FIXED;
+                #if defined(MAP_FIXED_NOREPLACE)
+                    if (f & MAP_FIXED_NOREPLACE) replaced = false;
+                #endif
+                if (!replaced) __hipstdpar_hidden_munmap(r, n);
                 errno = ENOMEM;
                 return MAP_FAILED;
             }

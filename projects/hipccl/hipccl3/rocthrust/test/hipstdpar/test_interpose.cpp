@@ -353,6 +353,38 @@ int main()
         }
       }
       munmap(reservation, reservation_size);
+
+#  if defined(MAP_FIXED_NOREPLACE)
+      // A rejected mapping that replaced nothing must be released instead.
+      // MAP_FIXED_NOREPLACE only maps a free range, even with MAP_FIXED set,
+      // and the range was released just above.
+      errno                    = 0;
+      const auto fresh_mapping = mmap(
+        reservation,
+        reservation_size,
+        PROT_NONE,
+        MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED | MAP_FIXED_NOREPLACE,
+        -1,
+        0);
+      if (fresh_mapping == MAP_FAILED && errno == EEXIST)
+      {
+        std::fputs("warning: MAP_FIXED_NOREPLACE rejection not exercised: the range was taken\n", stderr);
+      }
+      else if (fresh_mapping == MAP_FAILED)
+      {
+        unsigned char residency{};
+        if (errno != ENOMEM || mincore(reservation, 4096, &residency) == 0)
+        {
+          return EXIT_FAILURE;
+        }
+      }
+      else
+      {
+        std::fputs("warning: MAP_FIXED_NOREPLACE rejection not exercised: hipMemAdvise accepted the range\n", stderr);
+        munmap(fresh_mapping, reservation_size);
+      }
+#  endif
+
       if (hipPeekAtLastError() != hipSuccess)
       {
         return EXIT_FAILURE;
