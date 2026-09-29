@@ -235,6 +235,27 @@ def _pip_install_stinkytofu(c, force=False):
     print("Building and installing the standalone stinkytofu Python binding "
           "(rocisa stinkytofu backend)...")
     c.run(f"pip install {force_flag}{shlex.quote(str(src))}", env=env)
+    _pip_install_adaptor(c)
+
+
+def _pip_install_adaptor(c):
+    """Install the pure-Python rocisa_stinkytofu_adaptor package into the venv.
+
+    ``import rocisa`` on gfx1250 switches to this package after ``stinkytofu``
+    itself is importable. The source tree keeps it one directory deeper than
+    the import name, and it is not part of the rocisa wheel, so pip must
+    install that inner package explicitly.
+    """
+    src = _TASKS_DIR / "rocisa_stinkytofu_adaptor"
+    if not (src / "pyproject.toml").is_file():
+        print(
+            f"warning: {src / 'pyproject.toml'} not found; skipping "
+            "rocisa_stinkytofu_adaptor install.",
+            file=sys.stderr,
+        )
+        return
+    print("Installing rocisa_stinkytofu_adaptor (rocisa stinkytofu backend)...")
+    c.run(f"pip install --no-deps --disable-pip-version-check {shlex.quote(str(src))}")
 
 
 def _maybe_rebuild_rocisa(c, rocisa_dir=None):
