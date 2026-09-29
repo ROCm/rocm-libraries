@@ -81,44 +81,123 @@ __device__ S trevc3_block_max(S v, S* sred)
     return r;
 }
 
-/** TREVC3_NORMS_KERNEL computes, for each matrix of the batch, tmax/(4n), where tmax is
-    the largest row or column sum (with |Re| + |Im|) of the strictly upper triangular part
-    of T. The scaled sums cannot overflow for finite T (tmax itself, or even |Re| + |Im|
-    of one entry, can): each of the at most n-1 scaled terms of a sum is at most
-    huge/(2n), so the exact sum is below huge/2, which leaves a factor 2 for the rounding
-    errors of the summation (up to about n*ulp relative; a scaling by 1/(2n) would leave
-    only a factor n/(n-1), not enough for n in the thousands in single precision). **/
-template <int BS, typename T, typename I, typename S, typename U>
-ROCSOLVER_KERNEL void __launch_bounds__(BS) trevc3_norms_kernel(const I n,
-                                                                U TT,
-                                                                const rocblas_stride shiftT,
-                                                                const I ldt,
-                                                                const rocblas_stride strideT,
-                                                                S* tmax_s)
+/** TREVC3_NORMS computes, for each matrix of the batch, tmax/(4n), where tmax is the
+    largest row or column sum (with |Re| + |Im|) of the strictly upper triangular part of T.
+    The scaled sums cannot overflow for finite T (tmax itself, or even |Re| + |Im| of one
+    entry, can): each of the at most n-1 scaled terms of a sum is at most huge/(2n), so the
+    exact sum is below huge/2, which leaves a factor 2 for the rounding errors of the
+    summation (up to about n*ulp relative; a scaling by 1/(2n) would leave only a factor
+    n/(n-1), not enough for n in the thousands in single precision).
+    The column sums (trevc3_colsums_kernel, a wavefront per column) and the row sums
+    (trevc3_rowsums_kernel, a thread-block per 64 rows) are computed by many thread-blocks,
+    each sum in a fixed order; their maximum is taken with atomic operations on the bits of
+    the (non-negative) sums, whose order does not change it, so the result is deterministic.
+    Sums that are NaN are ignored. **/
+template <typename S>
+__device__ void trevc3_atomic_max(S* p, const S v)
 {
-    const I bid = hipBlockIdx_x;
-    T* A = load_ptr_batch<T>(TT, bid, shiftT, strideT);
-    __shared__ S sred[BS];
-    const S c = S(0.25) / S(n);
-    auto cabs1_s = [c](const T t) { return std::abs(t.real()) * c + std::abs(t.imag()) * c; };
+    if constexpr(sizeof(S) == 8)
+        atomicMax(reinterpret_cast<unsigned long long*>(p),
+                  static_cast<unsigned long long>(__double_as_longlong(v)));
+    else
+        atomicMax(reinterpret_cast<unsigned int*>(p), __float_as_uint(v));
+}
 
+template <int BS, typename T, typename I, typename S, typename U>
+ROCSOLVER_KERNEL void __launch_bounds__(BS) trevc3_colsums_kernel(const I n,
+                                                                  U TT,
+                                                                  const rocblas_stride shiftT,
+                                                                  const I ldt,
+                                                                  const rocblas_stride strideT,
+                                                                  S* tmax_s)
+{
+    const I bid = hipBlockIdx_y;
+    const T* A = load_ptr_batch<T>(TT, bid, shiftT, strideT);
+    const S c = S(0.25) / S(n);
+    const int lane = hipThreadIdx_x % warpSize;
+    const int nwaves = BS / warpSize;
+    const I wave = hipBlockIdx_x * nwaves + hipThreadIdx_x / warpSize;
     S m = 0;
-    for(I j = hipThreadIdx_x; j < n; j += BS)
+    for(I j = wave; j < n; j += I(hipGridDim_x) * nwaves)
     {
-        S cs = 0, rs = 0;
-        for(I l = 0; l < j; l++)
-            cs += cabs1_s(A[l + j * size_t(ldt)]);
-        for(I l = j + 1; l < n; l++)
-            rs += cabs1_s(A[j + l * size_t(ldt)]);
-        m = std::max(m, std::max(cs, rs));
+        S cs = 0;
+        for(I l = lane; l < j; l += warpSize)
+        {
+            const T t = A[l + j * size_t(ldt)];
+            cs += std::abs(t.real()) * c + std::abs(t.imag()) * c;
+        }
+        for(int off = warpSize / 2; off > 0; off /= 2)
+            cs += __shfl_down(cs, off);
+        if(cs > m)
+            m = cs;
     }
-    m = trevc3_block_max<BS>(m, sred);
-    if(hipThreadIdx_x == 0)
-        tmax_s[bid] = m;
+    if(lane == 0 && m > 0)
+        trevc3_atomic_max(tmax_s + bid, m);
+}
+
+template <int BS, typename T, typename I, typename S, typename U>
+ROCSOLVER_KERNEL void __launch_bounds__(BS) trevc3_rowsums_kernel(const I n,
+                                                                  U TT,
+                                                                  const rocblas_stride shiftT,
+                                                                  const I ldt,
+                                                                  const rocblas_stride strideT,
+                                                                  S* tmax_s)
+{
+    // (64 rows per thread-block, and BS/64 threads per row, which take the columns in turn,
+    // so that the threads of a wavefront read contiguous entries)
+    constexpr int RB = 64;
+    constexpr int NC = BS / RB;
+    const I bid = hipBlockIdx_y;
+    const T* A = load_ptr_batch<T>(TT, bid, shiftT, strideT);
+    const S c = S(0.25) / S(n);
+    const int r = hipThreadIdx_x % RB;
+    const int cl = hipThreadIdx_x / RB;
+    const I i0 = I(hipBlockIdx_x) * RB;
+    const I i = i0 + r;
+    S rs = 0;
+    for(I l = i0 + 1 + cl; l < n; l += NC)
+    {
+        if(i < n && l > i)
+        {
+            const T t = A[i + l * size_t(ldt)];
+            rs += std::abs(t.real()) * c + std::abs(t.imag()) * c;
+        }
+    }
+    __shared__ S part[BS];
+    part[hipThreadIdx_x] = rs;
+    __syncthreads();
+    if(cl == 0 && i < n)
+    {
+        for(int k = 1; k < NC; k++)
+            rs += part[r + k * RB];
+        if(rs > 0)
+            trevc3_atomic_max(tmax_s + bid, rs);
+    }
+}
+
+template <typename T, typename I, typename S, typename U>
+rocblas_status trevc3_norms(rocblas_handle handle,
+                            hipStream_t stream,
+                            const I n,
+                            U A,
+                            const rocblas_stride shiftT,
+                            const I ldt,
+                            const rocblas_stride strideT,
+                            const I batch_count,
+                            S* tmax_s)
+{
+    constexpr int BS = 256;
+    HIP_CHECK(hipMemsetAsync(tmax_s, 0, sizeof(S) * batch_count, stream));
+    const I ncb = std::min((n - 1) / (BS / 64) + 1, I(4096));
+    ROCSOLVER_LAUNCH_KERNEL((trevc3_colsums_kernel<BS, T>), dim3(ncb, batch_count), dim3(BS), 0,
+                            stream, n, A, shiftT, ldt, strideT, tmax_s);
+    ROCSOLVER_LAUNCH_KERNEL((trevc3_rowsums_kernel<BS, T>), dim3((n - 1) / 64 + 1, batch_count),
+                            dim3(BS), 0, stream, n, A, shiftT, ldt, strideT, tmax_s);
+    return rocblas_status_success;
 }
 
 /** TREVC3_XBIG returns the bound xbig = hugeval / 64 / max(1, tmax) on the entries of the
-    vectors, from tmax_s = tmax/(4n) (see trevc3_norms_kernel), as
+    vectors, from tmax_s = tmax/(4n) (see trevc3_norms), as
     (hugeval / (256n)) / max(1/(4n), tmax_s), without overflow (the quotient is at most
     hugeval/64) or harmful underflow (a tiny tmax_s loses to 1/(4n)). With it no product or
     sum in the solves or the coupling products overflows. **/
@@ -463,8 +542,7 @@ rocblas_status rocsolver_trevc3_template(rocblas_handle handle,
     const T zero = T(0);
 
     // bound on the row and column sums of the strictly upper triangular part of T
-    ROCSOLVER_LAUNCH_KERNEL((trevc3_norms_kernel<BS, T>), dim3(batch_count), dim3(BS), 0, stream, n,
-                            A, shiftT, ldt, strideT, tmaxS);
+    ROCBLAS_CHECK(trevc3_norms<T>(handle, stream, n, A, shiftT, ldt, strideT, batch_count, tmaxS));
 
     if(rightv)
     {
