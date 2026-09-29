@@ -104,9 +104,11 @@ def _parse_args(argv):
     )
     p.add_argument(
         "--inter-root",
-        default=None,
-        help="Build-only intermediate root (never shipped). Defaults beside "
-        "out-root.",
+        required=True,
+        help="Build-only intermediate root (never shipped). Required: the caller "
+        "owns where compile scratch lands. Deriving it from --out-root would put "
+        "scratch inside whatever tree the output is written to, which is now a "
+        "staged, installable directory.",
     )
     p.add_argument(
         "--kpack-python-dir",
@@ -122,6 +124,13 @@ def _parse_args(argv):
         "descriptor tree MUST NOT share a group -- otherwise the second "
         "overwrites the first and its descriptors name an archive that no "
         "longer holds their kernels. Defaults to the shipped group.",
+    )
+    p.add_argument(
+        "--source-label",
+        required=True,
+        help="The name of the build rule that packs this root. Recorded in "
+        "each pass-through descriptor's provenance, so a reader of the staged "
+        "tree can find the invocation that wrote the folder.",
     )
     p.add_argument(
         "--rocke-wheel-stamp",
@@ -142,9 +151,10 @@ def main(argv=None):
         out_root=Path(args.out_root),
         hipcc=args.hipcc,
         rocm_kpack_dir=args.kpack_python_dir,
-        inter_root=Path(args.inter_root) if args.inter_root else None,
+        inter_root=Path(args.inter_root),
         rocke_wheel_stamp=args.rocke_wheel_stamp,
         group=args.group,
+        source_label=args.source_label,
     )
     return 0
 

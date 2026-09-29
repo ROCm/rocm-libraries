@@ -8,8 +8,11 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
+
+import pytest
 
 import rocke
 from rocke.assets import dsl_docs_dir
@@ -97,3 +100,31 @@ def test_skill_cli_rejects_unregistered_target_without_fallback(tmp_path: Path):
     assert "unsupported LDS target 'gfx9999'" in completed.stderr
     assert "registered targets: gfx90a" in completed.stderr
     assert completed.stdout == ""
+
+
+@pytest.mark.parametrize(
+    ("address", "error"),
+    [(4, "16-byte aligned"), (65532, "exceeds.*LDS capacity")],
+)
+def test_skill_cli_rejects_invalid_vector_access(tmp_path: Path, address, error):
+    completed = _run(
+        {
+            "target": "gfx90a",
+            "opcode": "ds_read_b128",
+            "wave_size": 64,
+            "accesses": [
+                {
+                    "access_id": 0,
+                    "lane": 0,
+                    "lds_byte_address": address,
+                    "access_width_bytes": 16,
+                }
+            ],
+        },
+        cwd=tmp_path,
+    )
+
+    assert completed.returncode == 2
+    assert "Traceback" not in completed.stderr
+    assert completed.stdout == ""
+    assert re.search(error, completed.stderr)

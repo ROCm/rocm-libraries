@@ -27,7 +27,9 @@ def test_registry_selects_explicit_gfx942_profile():
     assert profile.identity.profile_version == 1
 
 
-@pytest.mark.parametrize("target", ["gfx950", "GFX942", " gfx942 ", ""])
+@pytest.mark.parametrize(
+    "target", ["gfx950", "GFX90A", " gfx90a ", "GFX942", " gfx942 ", ""]
+)
 def test_registry_rejects_unknown_targets_without_fallback(target):
     with pytest.raises(UnsupportedLdsTargetError, match="unsupported LDS target"):
         resolve_profile(target)

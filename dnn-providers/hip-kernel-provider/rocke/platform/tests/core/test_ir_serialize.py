@@ -90,7 +90,7 @@ def _build_corpus():
 
     kernels["elementwise"] = build_elementwise(ElementwiseSpec(op="add"))
 
-    from rocke.instances.common.conv_implicit_gemm import (
+    from kernels.common.conv_implicit_gemm import (
         ConvProblem,
         ImplicitGemmConvSpec,
         build_implicit_gemm_conv,

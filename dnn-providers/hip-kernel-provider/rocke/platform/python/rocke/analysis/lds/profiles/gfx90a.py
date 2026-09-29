@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..model import ProfileIdentity
-from ..opcodes import get_opcode_spec, supported_opcodes
+from ..opcodes import get_opcode_spec
 
 
 __all__ = ["GFX90A_PROFILE", "Gfx90aProfile"]
@@ -22,7 +22,17 @@ class Gfx90aProfile:
         default_factory=lambda: ProfileIdentity(target="gfx90a", profile_version=1)
     )
     supported_wave_sizes: frozenset[int] = frozenset({64})
-    supported_opcodes: frozenset[str] = frozenset(supported_opcodes())
+    lds_capacity_bytes: int = 65536
+    supported_opcodes: frozenset[str] = frozenset(
+        {
+            "ds_read_b32",
+            "ds_read_b64",
+            "ds_read_b128",
+            "ds_write_b32",
+            "ds_write_b64",
+            "ds_write_b128",
+        }
+    )
 
     def phase_key(self, opcode: str, lane: int) -> tuple[int, ...]:
         """Return the measured lane phase for one canonical opcode."""
