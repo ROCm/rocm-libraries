@@ -123,6 +123,9 @@
             "linux",
             "windows"
           ],
+          "gfx1201": [
+            "linux"
+          ],
           "gfx90a": [
             "linux"
           ],
@@ -177,6 +180,9 @@
           "gfx1151": [
             "linux",
             "windows"
+          ],
+          "gfx1201": [
+            "linux"
           ],
           "gfx950": [
             "linux"

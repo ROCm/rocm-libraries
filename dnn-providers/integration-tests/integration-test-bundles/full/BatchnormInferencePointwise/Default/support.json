@@ -156,6 +156,9 @@
             "linux",
             "windows"
           ],
+          "gfx1201": [
+            "linux"
+          ],
           "gfx90a": [
             "linux"
           ],

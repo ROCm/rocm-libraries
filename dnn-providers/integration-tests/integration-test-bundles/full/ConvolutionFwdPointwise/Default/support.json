@@ -237,6 +237,9 @@
             "linux",
             "windows"
           ],
+          "gfx1201": [
+            "linux"
+          ],
           "gfx942": [
             "linux"
           ],
