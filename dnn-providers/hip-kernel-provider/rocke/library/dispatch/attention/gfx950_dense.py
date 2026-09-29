@@ -70,7 +70,9 @@ GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
         DENSE_GRID_ALGORITHM,
         persistent=False,
         wide_lds_dma=False,
-        features=_FEATURES | {"causal_bottom_right"},
+        # fp8 KV is grid-only -- the spec rejects persistent/paged (so the
+        # persistent variants do not advertise it).
+        features=_FEATURES | {"causal_bottom_right", "fp8"},
     ),
     Gfx950DenseVariant(
         "persist",
@@ -184,6 +186,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         use_sinks=bool(req.use_sinks),
         wide_lds_dma=variant.wide_lds_dma,
         causal_bottom_right=moving_bottom_right,
+        kv_storage_dtype="fp8e4m3" if bool(req.use_fp8) else None,
     )
 
 
