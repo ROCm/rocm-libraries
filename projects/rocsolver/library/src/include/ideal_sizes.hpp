@@ -402,10 +402,19 @@
 #define TREVC3_NB 32
 #endif
 
-/*! \brief Determines the number of eigenvectors that TREVC3 computes (and
-    back-transforms) at a time.*/
+/*! \brief Determine the number of eigenvectors that TREVC3 computes (and
+    back-transforms) at a time: n/TREVC3_NC_DIV rounded down to a multiple of
+    TREVC3_NC, and between TREVC3_NC and TREVC3_NC_MAX (at most n). The blocks are
+    processed one after the other, so for large n wider blocks mean fewer (and larger)
+    steps; the workspace grows as n times the width.*/
 #ifndef TREVC3_NC
 #define TREVC3_NC 256
+#endif
+#ifndef TREVC3_NC_DIV
+#define TREVC3_NC_DIV 16
+#endif
+#ifndef TREVC3_NC_MAX
+#define TREVC3_NC_MAX 2048
 #endif
 
 /***************** sygs2/sygst and hegs2/hegst ********************************

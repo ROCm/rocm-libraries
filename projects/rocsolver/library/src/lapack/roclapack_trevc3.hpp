@@ -41,7 +41,7 @@ ROCSOLVER_BEGIN_NAMESPACE
 /*
  * ===========================================================================
  *    TREVC3 computes the eigenvectors of an upper triangular matrix T as in
- *    LAPACK ZTREVC3, for blocks of TREVC3_NC eigenvectors at a time. The
+ *    LAPACK ZTREVC3, for blocks of trevc3_nc(n) eigenvectors at a time. The
  *    triangular systems (T - lambda_k I) x = 0 (right) or
  *    (T - lambda_k I)^H y = 0 (left) of a block are solved by substitution over
  *    TREVC3_NB-row diagonal blocks of T: the coupling with the rows already
@@ -455,6 +455,18 @@ rocblas_status rocsolver_trevc3_argCheck(rocblas_handle handle,
     return rocblas_status_continue;
 }
 
+/** TREVC3_NC returns the number of eigenvectors of a block: n/TREVC3_NC_DIV rounded down to a
+    multiple of TREVC3_NC, between TREVC3_NC and TREVC3_NC_MAX (at most n). The blocks are
+    processed one after the other, each with about n/TREVC3_NB diagonal-block steps whose
+    solves run one thread per eigenvector of the block, so wider blocks for large n mean
+    fewer steps and more threads per step (the workspace grows as n times the width). **/
+template <typename I>
+I trevc3_nc(const I n)
+{
+    const I w = (n / (I(TREVC3_NC_DIV) * I(TREVC3_NC))) * I(TREVC3_NC);
+    return std::min(n, std::max(I(TREVC3_NC), std::min(w, I(TREVC3_NC_MAX))));
+}
+
 // (side does not change the sizes; it is kept for symmetry with the other arguments)
 template <bool BATCHED, typename T, typename I>
 void rocsolver_trevc3_getMemorySize(const rocblas_side side,
@@ -480,7 +492,7 @@ void rocsolver_trevc3_getMemorySize(const rocblas_side side,
         return;
     }
 
-    const I nc = std::min(n, I(TREVC3_NC));
+    const I nc = trevc3_nc(n);
     const bool over = (howmny == rocsolver_eigenvectors_backtransform);
 
     // vectors of a block of eigenvectors, their back-transformation, and the
@@ -537,7 +549,7 @@ rocblas_status rocsolver_trevc3_template(rocblas_handle handle,
     const bool leftv = (side != rocblas_side_right);
     const bool rightv = (side != rocblas_side_left);
     const bool over = (howmny == rocsolver_eigenvectors_backtransform);
-    const I ncmax = std::min(n, I(TREVC3_NC));
+    const I ncmax = trevc3_nc(n);
     const rocblas_stride strideX = rocblas_stride(n) * ncmax;
     const rocblas_stride strideR = rocblas_stride(NB) * ncmax;
     S* tmaxS = reinterpret_cast<S*>(tmax);
