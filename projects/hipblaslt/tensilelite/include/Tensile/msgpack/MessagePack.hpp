@@ -382,7 +382,16 @@ namespace TensileLite
 
                         return solution;
                     }
-                    catch(std::exception const&)
+                    // A malformed or wrong-typed blob is the only reason to report
+                    // this slice as unparseable and hand back null. Any other
+                    // exception (e.g. a device or logic error while materializing
+                    // the solution) is not a bad blob -- let it propagate rather
+                    // than silently masquerade as "solution unavailable".
+                    catch(msgpack::unpack_error const&)
+                    {
+                        return nullptr;
+                    }
+                    catch(msgpack::type_error const&)
                     {
                         return nullptr;
                     }
