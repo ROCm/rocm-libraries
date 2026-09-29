@@ -740,7 +740,7 @@ namespace rocsparse
 #define BSRGEMM_HASHSIZE 8
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
                 handle,
-                (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / 256 + 1,
+                (BSRGEMM_WFSIZE * static_cast<int64_t>(group_size[0]) - 1) / 256 + 1,
                 BSRGEMM_BLOCKSIZE,
                 [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -794,7 +794,7 @@ namespace rocsparse
 #define BSRGEMM_HASHSIZE 16
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
                 handle,
-                (BSRGEMM_WFSIZE * (int64_t)group_size[1] - 1) / 256 + 1,
+                (BSRGEMM_WFSIZE * static_cast<int64_t>(group_size[1]) - 1) / 256 + 1,
                 BSRGEMM_BLOCKSIZE,
                 [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -848,7 +848,7 @@ namespace rocsparse
 #define BSRGEMM_HASHSIZE 32
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
                 handle,
-                (BSRGEMM_WFSIZE * (int64_t)group_size[2] - 1) / 256 + 1,
+                (BSRGEMM_WFSIZE * static_cast<int64_t>(group_size[2]) - 1) / 256 + 1,
                 BSRGEMM_BLOCKSIZE,
                 [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -1204,7 +1204,7 @@ namespace rocsparse
 #define BSRGEMM_HASHSIZE 8
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
                 handle,
-                (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / BSRGEMM_BLOCKSIZE + 1,
+                (BSRGEMM_WFSIZE * static_cast<int64_t>(group_size[0]) - 1) / BSRGEMM_BLOCKSIZE + 1,
                 BSRGEMM_BLOCKSIZE,
                 [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -1260,7 +1260,7 @@ namespace rocsparse
 #define BSRGEMM_HASHSIZE 16
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
                 handle,
-                (BSRGEMM_WFSIZE * (int64_t)group_size[1] - 1) / BSRGEMM_BLOCKSIZE + 1,
+                (BSRGEMM_WFSIZE * static_cast<int64_t>(group_size[1]) - 1) / BSRGEMM_BLOCKSIZE + 1,
                 BSRGEMM_BLOCKSIZE,
                 [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -1692,7 +1692,7 @@ namespace rocsparse
 #define BSRGEMM_HASHSIZE 8
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
                 handle,
-                (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / BSRGEMM_BLOCKSIZE + 1,
+                (BSRGEMM_WFSIZE * static_cast<int64_t>(group_size[0]) - 1) / BSRGEMM_BLOCKSIZE + 1,
                 BSRGEMM_BLOCKSIZE,
                 [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
