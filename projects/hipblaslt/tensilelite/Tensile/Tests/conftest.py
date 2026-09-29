@@ -89,22 +89,81 @@ def builddir(pytestconfig, tmpdir_factory):
     return str(tmpdir_factory.mktemp("0_Build"))
 
 @pytest.fixture(scope="session")
-def worker_lock_path(tmp_path_factory, worker_id):
+def worker_gpu_id(worker_id):
+    """
+    Computes the GPU token this xdist worker is pinned to via
+    HIP_VISIBLE_DEVICES, mirroring the modulo-wrapping logic in
+    assign_gpu_to_worker(). The returned token also doubles as a stable
+    per-physical-GPU key for worker_lock_path. Returns None when there is no
+    xdist worker, or when running under the FFM emulator (where each worker
+    gets its own emulator instance instead of sharing a physical GPU).
+    """
+    if not worker_id or worker_id == "master":
+        return None
+    if os.environ.get("HSA_MODEL_MEMFILE"):
+        return None
+
+    import re
+    from Tensile.ParallelExecution import detectAvailableGpus
+
+    match = re.search(r'\d+', worker_id)
+    if not match:
+        return None
+    worker_num = int(match.group())
+
+    # amd-smi (used by detectAvailableGpus) enumerates every physical GPU on
+    # the system via the driver layer, ignoring ROCR_VISIBLE_DEVICES/
+    # HIP_VISIBLE_DEVICES (HSA-runtime-level restrictions that scope what
+    # HIP/HSA applications may use). Honor an existing restriction instead of
+    # amd-smi's system-wide count so workers only wrap onto devices the caller
+    # actually allowed.
+    #
+    # ROCR and HIP live in different index spaces, so the pinned token is
+    # derived differently:
+    #   * HIP_VISIBLE_DEVICES values are the ids HIP ultimately consumes (into
+    #     the ROCR-filtered set, if ROCR is also set, otherwise the physical
+    #     set), so assign the selected id itself, not a bare ordinal.
+    #   * ROCR_VISIBLE_DEVICES filters at the HSA layer and HIP re-indexes the
+    #     survivors from 0, so the token is the 0-based ordinal into that set.
+    def _parse(var):
+        value = os.environ.get(var)
+        return [d.strip() for d in value.split(",") if d.strip()] if value else []
+
+    hip_devices = _parse("HIP_VISIBLE_DEVICES")
+    if hip_devices:
+        return hip_devices[worker_num % len(hip_devices)]
+
+    rocr_devices = _parse("ROCR_VISIBLE_DEVICES")
+    if rocr_devices:
+        return str(worker_num % len(rocr_devices))
+
+    return str(worker_num % detectAvailableGpus())
+
+@pytest.fixture(scope="session")
+def worker_lock_path(tmp_path_factory, worker_id, worker_gpu_id):
     if not worker_id:
         return None
 
     # Under FFM each worker gets its own emulator instance, so there is
     # no GPU contention — give each worker a private lock so client
     # invocations can run in parallel across workers.
-    # On real hardware, assign_gpu_to_worker() assigns separate GPUs to
-    # each worker, so there is also no GPU contention — use per-worker locks.
     if os.environ.get("HSA_MODEL_MEMFILE"):
-      return tmp_path_factory.getbasetemp().parent / f"client_execution_{worker_id}.lock"
+        return tmp_path_factory.getbasetemp().parent / f"client_execution_{worker_id}.lock"
+
+    # On real hardware, workers only avoid GPU contention when
+    # assign_gpu_to_worker() gave them *distinct* physical GPUs. If the
+    # worker count exceeds the number of visible GPUs (e.g. a single GPU
+    # pinned via ROCR_VISIBLE_DEVICES), multiple workers wrap around onto
+    # the same physical device. Key the lock by GPU id rather than worker
+    # id so those workers still serialize their client subprocesses
+    # instead of racing unsynchronized on the same GPU.
+    if worker_gpu_id is not None:
+        return tmp_path_factory.getbasetemp().parent / f"client_execution_gpu{worker_gpu_id}.lock"
 
     return tmp_path_factory.getbasetemp().parent / f"client_execution_{worker_id}.lock"
 
 @pytest.fixture(scope="session", autouse=True)
-def assign_gpu_to_worker(worker_id):
+def assign_gpu_to_worker(worker_id, worker_gpu_id):
     """
     Assigns a GPU to each pytest-xdist worker using modulo arithmetic.
     Worker IDs are in format 'gw0', 'gw1', 'gw2', etc.
@@ -118,23 +177,15 @@ def assign_gpu_to_worker(worker_id):
         # Single worker or master process - use all GPUs
         return
 
-    import re
-    from Tensile.ParallelExecution import detectAvailableGpus
-
     base_memfile = os.environ.get("HSA_MODEL_MEMFILE", "")
     if base_memfile:
         os.environ["HSA_MODEL_MEMFILE"] = f"{base_memfile}_{worker_id}"
         print(f"Worker {worker_id}: HSA_MODEL_MEMFILE={os.environ['HSA_MODEL_MEMFILE']}")
         return
 
-    num_gpus = detectAvailableGpus()
-    # Extract numeric ID from worker_id (e.g., 'gw0' -> 0, 'gw1' -> 1)
-    match = re.search(r'\d+', worker_id)
-    if match:
-        worker_num = int(match.group())
-        gpu_id = worker_num % num_gpus  # Use modulo to wrap around available GPUs
-        os.environ['HIP_VISIBLE_DEVICES'] = str(gpu_id)
-        print(f"Worker {worker_id} assigned to GPU {gpu_id} (total GPUs: {num_gpus})")
+    if worker_gpu_id is not None:
+        os.environ['HIP_VISIBLE_DEVICES'] = str(worker_gpu_id)
+        print(f"Worker {worker_id} assigned to GPU {worker_gpu_id}")
     else:
         print(f"Warning: Could not parse worker_id '{worker_id}' for GPU assignment")
 

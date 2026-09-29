@@ -1,0 +1,73 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S06 _loopBody: DTV/pack bufferIdx offsets + usePLRPack hacks.
+#
+# Target: Tensile/KernelWriter.py (main-loop body block ~4515-4711 plus the
+# usePLRPack full-pack-code-prefetch arms and DTV pack offset emission).
+# Missing lines targeted include 4516,4517,4518,4519,4520,4629,4709,4711 and
+# the doFullPackCodePrefetch / usePLRPack ripple at ~9006-9042,9887-9925.
+#
+# Reachability analysis:
+#   * 4629 usePLRPackA / 4711 usePLRPackBNext / 4516 SubTileIdx hack all sit
+#     under doFullPackCodePrefetch = UsePLRPack and not UseCustomMainLoopSchedule
+#     (KernelWriter.py:8999). Non-CMS UsePLRPack is only kept when
+#     UseF32XEmulation AND ForceUnrollSubIter AND SIA3 AND MI (Solution.py:2832+).
+#   * ForceUnrollSubIter (Solution.py:2461) needs !ExpandPointerSwap,
+#     DepthU==MatrixInstK, PGR>0, !1LDSBuffer, MIWaveTile even & >2, !TDMInst,
+#     matching datatypes. gfx950 (HasMFMA -> UseMFMAF32XEmulation) keeps it.
+#
+# Mirrors the validated e2e Tests/common/gemm/gfx950/xfp32.yaml group-2
+# (F32X NT, UsePLRPack, ExpandPointerSwap=false, DepthU==MI-K=32, MIWaveTile
+# [4,4]) reduced to a tiny fork. CPU-only emit; gfx950.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # F32X (DataType S, F32XdlMathOp X) NT, gfx950 MFMA, UsePLRPack + SubIter
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: S
+      DestDataType: S
+      ComputeDataType: S
+      F32XdlMathOp: X
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 32, 1, 1, 6, 6, 2, 2]
+        - DepthU: [32]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [true]
+        - ClusterLocalRead: [1]
+        - ExpandPointerSwap: [false]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        - LocalReadVectorWidth: [-1]
+        - ScheduleIterAlg: [3]
+        - StaggerU: [0]
+        - DirectToLds: [1]
+        - UsePLRPack: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
