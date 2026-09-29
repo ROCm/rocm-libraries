@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from collections import Counter
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -719,7 +719,9 @@ class FakeGit:
 
     REV = "0123abc"
 
-    def __init__(self, develop: Optional[Dict[str, str]] = None, fail: bool = False):
+    def __init__(
+        self, develop: Optional[Dict[str, Union[str, bytes]]] = None, fail: bool = False
+    ):
         self.develop = develop or {}
         self.fail = fail
         self.calls: List[List[str]] = []
@@ -737,7 +739,8 @@ class FakeGit:
             names = [n for n in command[5:] if n in self.develop]
             return "".join(n + "\0" for n in names).encode()
         if command[:2] == ["cat-file", "blob"]:
-            return self.develop[command[2].split(":./", 1)[1]].encode()
+            blob = self.develop[command[2].split(":./", 1)[1]]
+            return blob if isinstance(blob, bytes) else blob.encode()
         raise AssertionError(f"unexpected git {args}")
 
 
@@ -838,6 +841,20 @@ class TestWrite(unittest.TestCase):
                     f" rebase onto develop{suffix}",
                     err,
                 )
+                self.assertFalse(self.sweep.exists() or self.single.exists())
+
+    def test_refused_develop_sidecar_is_named_at_develop(self) -> None:
+        rel = self._rel(self.single)
+        for blob, reason in (
+            (b'{"version": 1, "claims": {}}\n', "not in the form this writer renders"),
+            (b"\xff", "'utf-8' codec can't decode"),
+        ):
+            with self.subTest(blob=blob):
+                self.git.develop = {rel: blob}
+                code, err = self._main(*self._WRITE)
+                self.assertEqual(code, 1)
+                self.assertIn(f"{rel} at develop {FakeGit.REV}: {reason}", err)
+                self.assertNotIn(str(self.root), err)
                 self.assertFalse(self.sweep.exists() or self.single.exists())
 
     def test_unfetchable_develop_exits_2_and_writes_nothing(self) -> None:

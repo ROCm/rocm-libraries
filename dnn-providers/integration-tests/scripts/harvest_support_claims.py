@@ -739,6 +739,8 @@ def develop_claims(
     """The claims each sidecar under root has on the tip of develop.
 
     The fetch only sets FETCH_HEAD; no branch or remote-tracking ref moves.
+    A develop sidecar that parse refuses is named by its path and commit on
+    develop, not by the local file.
     """
     in_root = ["-C", str(root)]
     git([*in_root, "fetch", "--quiet", "--no-tags", *DEVELOP])
@@ -747,8 +749,13 @@ def develop_claims(
     listed = git([*in_root, "ls-tree", "-z", "--name-only", rev, "--", *names])
     claims: Dict[Path, Set[Claim]] = {path: set() for path in paths}
     for name in filter(None, listed.decode("utf-8").split("\0")):
-        text = git([*in_root, "cat-file", "blob", f"{rev}:./{name}"])
-        claims[names[name]] = parse(names[name], text.decode("utf-8"))
+        path = names[name]
+        blob = git([*in_root, "cat-file", "blob", f"{rev}:./{name}"])
+        try:
+            claims[path] = parse(path, blob.decode("utf-8"))
+        except (SidecarError, UnicodeDecodeError) as exc:
+            reason = str(exc).replace(f"{path}: ", "", 1)
+            raise SidecarError(f"{name} at develop {rev[:9]}: {reason}") from exc
     return claims
 
 
