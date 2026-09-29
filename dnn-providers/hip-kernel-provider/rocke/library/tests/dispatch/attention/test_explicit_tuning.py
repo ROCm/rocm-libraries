@@ -270,11 +270,11 @@ class TestAttentionTuningRegistry(unittest.TestCase):
         Production offers the three masks the curated stacks shipped. The full
         knob space offers every mask the kernel accepts.
         """
-        from dispatch.attention.tuning_common import (
+        from dispatch.attention.axes import (
             _PROD_SCHED_BARRIER_MASKS,
             _SCHED_BARRIER_MASKS,
-            configure_sweep,
         )
+        from rocke.dispatch.tuning.walk import configure_sweep
 
         prefix = "attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm"
         specs = self._specs_for(prefix)

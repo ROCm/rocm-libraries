@@ -289,7 +289,7 @@ def sweep(args) -> list[dict]:
             print(f"SKIP {label} Sk={s}: no registered combo", flush=True)
             continue
         for result in results:
-            is_dense = isinstance(result.spec, AttentionDenseSpec)
+            is_dense = getattr(result.spec, "path", "") == "dense"
             cus_list = [0] if is_dense else list(args.num_cus)
             for cus in cus_list:
                 req = replace(base, num_cus=int(cus))
@@ -317,7 +317,7 @@ def sweep(args) -> list[dict]:
                                 req,
                                 algorithm=result.candidate.algorithm,
                                 spec_id=result.candidate.spec_id,
-                                attention_tuning_id=getattr(
+                                tuning_id=getattr(
                                     result.spec, "tuning_id", "auto"
                                 ),
                             )

@@ -83,7 +83,7 @@ class TestSweepSpace(unittest.TestCase):
             manual = []
             seen = set()
             for _candidate, spec in registered_attention_combos(req, **_SAMPLE):
-                if not hasattr(spec, "path"):
+                if getattr(spec, "path", "") not in ("2d", "3d"):
                     continue
                 key = spec_identity(spec)
                 if key not in seen:

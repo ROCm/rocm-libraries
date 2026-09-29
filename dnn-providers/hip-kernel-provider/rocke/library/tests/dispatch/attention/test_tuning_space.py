@@ -13,15 +13,13 @@ from dispatch.attention import (
     AttentionRequest,
     attention_candidates,
     attention_execution_candidates,
+    attention_tuning_spec,
     dispatch_attention,
     dispatch_attention_all,
     iter_registered_attention_combos,
+    tuning_spec_with_knobs,
 )
-from dispatch.attention.gfx942_dense import (
-    dense_spec_for_request as gfx942_dense_spec,
-)
-from dispatch.attention.gfx950_dense import dense_spec_for_request
-from dispatch.attention.tuning_common import (
+from dispatch.attention.axes import (
     _CODEPATH_KNOBS,
     DENSE_BASE_RELATIVE_KNOBS,
     DENSE_LOOP_FIELDS,
@@ -29,13 +27,9 @@ from dispatch.attention.tuning_common import (
     DENSE_UNTUNABLE_KNOBS,
     DENSE_VARIANT_FIELDS,
     KNOWN_WRONG_KNOBS,
-    AttentionGeometryVariant,
-    _dense_knob_spec,
-    _gfx950_tuning_lds_bytes,
-    _supports_tuning_spec,
-    resolve_dense_num_persistent,
     tuning_axes,
 )
+from dispatch.attention.dense_rules import resolve_dense_num_persistent
 from dispatch.attention.tuning_specs import _SEMANTIC_FIELDS
 from kernels.common.attention_unified import _tiled_2d_impl, _tiled_3d_impl
 from kernels.gfx942.attention_dense import (
@@ -47,7 +41,6 @@ from kernels.gfx950.attention_dense import (
     Gfx950AttentionDenseSpec,
     supports_attention_dense,
 )
-from kernels.gfx950.attention_tiled_2d import UnifiedAttention2DTiledSpec as Gfx950Spec
 
 
 def _request(arch="gfx950", **kw):
@@ -96,15 +89,6 @@ _GEOMETRY_FIELDS = frozenset(
         "num_segments",
         "tile_size_override",
     }
-)
-
-
-_GFX950_2D_VARIANT = AttentionGeometryVariant(
-    arch="gfx950",
-    path="2d",
-    codepath="narrow",
-    builder_kind="tiled",
-    tile_policy="8x",
 )
 
 
@@ -173,16 +157,21 @@ class TestTuningSpace(unittest.TestCase):
             "attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm"
         )
         pinned = specs[0].tuning_id
-        again = candidate.select_spec(replace(req, attention_tuning_id=pinned))
+        again = candidate.select_spec(replace(req, tuning_id=pinned))
         self.assertEqual(again.tuning_id, pinned)
         results = dispatch_attention_all(
-            replace(req, attention_tuning_id=pinned),
+            replace(req, tuning_id=pinned),
             candidate_prefix=candidate.name,
         )
         matching = [r for r in results if r.spec.tuning_id == pinned]
         self.assertEqual(len(matching), 1)
 
-    def test_runtime_cache_size_refreshes_i64_spec_and_id(self):
+    def test_runtime_cache_size_specializes_i64_but_keeps_the_id(self):
+        """Addressing width is a runtime specialization: a different binary
+        (identity), the same configuration (tuning_id), so an id recorded after
+        binding still replays from the request."""
+        from rocke.dispatch.core import spec_identity
+
         _candidate, _req, specs = _specs_for(
             "attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm"
         )
@@ -192,7 +181,8 @@ class TestTuningSpace(unittest.TestCase):
         self.assertFalse(at_limit.kernel_spec.use_i64_kv_addr)
         self.assertEqual(at_limit.tuning_id, base.tuning_id)
         self.assertTrue(above_limit.kernel_spec.use_i64_kv_addr)
-        self.assertNotEqual(above_limit.tuning_id, base.tuning_id)
+        self.assertEqual(above_limit.tuning_id, base.tuning_id)
+        self.assertNotEqual(spec_identity(above_limit), spec_identity(base))
         self.assertEqual(above_limit.num_kv_blocks, 65537)
 
         _candidate, _req, split_specs = _specs_for(
@@ -204,7 +194,8 @@ class TestTuningSpace(unittest.TestCase):
         split_i64 = split.with_num_kv_blocks(65537)
         self.assertTrue(split_i64.kernel_spec.use_i64_kv_addr)
         self.assertEqual(split_i64.reduce_spec, split.reduce_spec)
-        self.assertNotEqual(split_i64.tuning_id, split.tuning_id)
+        self.assertEqual(split_i64.tuning_id, split.tuning_id)
+        self.assertNotEqual(spec_identity(split_i64), spec_identity(split))
 
         _candidate, _req, gfx942_split_specs = _specs_for(
             "attention_gfx942_u3d_splitkv_seg64_t1xb",
@@ -320,92 +311,6 @@ class TestTuningSpace(unittest.TestCase):
                     flags[name] = True
         self.assertTrue(all(flags.values()), flags)
 
-    def test_gfx950_lds_gate_matches_codegen_limit(self):
-        spec = Gfx950Spec(
-            head_size=128,
-            block_size=16,
-            num_query_heads=32,
-            num_kv_heads=8,
-            dtype="bf16",
-            use_sinks=False,
-            sliding_window=0,
-            has_softcap=False,
-            num_warps=8,
-            block_m_per_warp=16,
-            tile_size=128,
-        )
-        from rocke.core.arch import ArchTarget
-
-        budget = ArchTarget.from_gfx("gfx950").lds_capacity_bytes
-        base_bytes = _gfx950_tuning_lds_bytes(spec)
-        self.assertGreater(base_bytes, budget)
-        ok, why = _supports_tuning_spec(_GFX950_2D_VARIANT, spec)
-        self.assertFalse(ok)
-        self.assertIn("LDS budget", why)
-        self.assertGreater(
-            _gfx950_tuning_lds_bytes(replace(spec, use_v_double_buffer=True)),
-            base_bytes,
-        )
-
-    def test_gfx950_padded_k_rejects_q_alias(self):
-        spec = Gfx950Spec(
-            head_size=128,
-            block_size=16,
-            num_query_heads=32,
-            num_kv_heads=8,
-            dtype="bf16",
-            use_sinks=False,
-            sliding_window=0,
-            has_softcap=False,
-            num_warps=2,
-            block_m_per_warp=32,
-            tile_size=64,
-            use_mfma_32x32=True,
-            use_transposed_qk_32x32=True,
-            use_k_single_buffer=True,
-            use_kq_lds_pad=True,
-            kq_lds_pad_halves=16,
-        )
-        ok, why = _supports_tuning_spec(_GFX950_2D_VARIANT, spec)
-        self.assertFalse(ok)
-        self.assertIn("does not support aliased Q", why)
-        ok, why = _supports_tuning_spec(
-            _GFX950_2D_VARIANT, replace(spec, use_q_direct_reg=True)
-        )
-        self.assertTrue(ok, why)
-        ok, why = _supports_tuning_spec(
-            _GFX950_2D_VARIANT,
-            replace(
-                spec,
-                use_k_single_buffer=False,
-                use_q_direct_reg=True,
-            ),
-        )
-        self.assertFalse(ok)
-        self.assertIn("single-K", why)
-
-    def test_registered_gfx950_specs_pass_spec_complete_support(self):
-        for prefix, expect_specs in (
-            ("attention_gfx950_u2d_narrow_nw8_mw16_t8xb_llvm", True),
-            ("attention_gfx950_u2d_narrow_nw4_mw16_t8xb_hipcc", True),
-            # Curated production stacks have no single-K buffer on wide32, and
-            # the baseline exceeds LDS on this 8x tile.
-            ("attention_gfx950_u2d_wide32_nw4_mw32_t8xb_llvm", False),
-            ("attention_gfx950_u2d_transposed32_nw2_mw32_t4xb_llvm", True),
-        ):
-            with self.subTest(candidate=prefix):
-                _c, _req, specs = _specs_for(prefix)
-                self.assertEqual(bool(specs), expect_specs)
-                for tuning_spec in specs:
-                    ok, why = _supports_tuning_spec(
-                        _GFX950_2D_VARIANT, tuning_spec.kernel_spec
-                    )
-                    self.assertTrue(ok, (tuning_spec.tuning_id, why))
-                    ks = tuning_spec.kernel_spec
-                    if ks.use_kq_lds_pad:
-                        self.assertTrue(ks.use_k_single_buffer)
-                        self.assertTrue(ks.use_q_direct_reg or ks.use_q_reread)
-
     def test_execution_candidates_include_every_tuning_geometry(self):
         route = [c for c in attention_candidates() if c.algorithm == "unified_tuning"]
         execution = [
@@ -444,7 +349,7 @@ class TestTuningSpace(unittest.TestCase):
                 self.assertTrue(any(getattr(s.kernel_spec, knob) for s in specs))
 
     def test_production_sweep_excludes_dead_end_knobs(self):
-        from dispatch.attention.tuning_common import DEAD_END_KNOBS
+        from dispatch.attention.axes import DEAD_END_KNOBS
 
         cases = (
             (
@@ -467,21 +372,12 @@ class TestTuningSpace(unittest.TestCase):
                     for dead in DEAD_END_KNOBS[arch]:
                         self.assertFalse(getattr(spec.kernel_spec, dead, False), knob)
 
-    def test_full_space_wide32_8x_fits_with_single_k_buffer(self):
-        """Baseline exceeds LDS; the full space still fits via single-K."""
-        from dispatch.attention.tuning_common import configure_sweep
-
-        prefix = "attention_gfx950_u2d_wide32_nw4_mw32_t8xb_llvm"
-        configure_sweep("full", 0)
-        try:
-            _c, _req, specs = _specs_for(prefix, n=80)
-        finally:
-            configure_sweep("production", 0)
+    def test_dispatch_offers_what_the_kernel_accepts(self):
+        """No dispatcher gate is stricter than the kernel validators: the
+        wide32 8x baseline, which a dispatcher LDS estimate used to reject, is
+        offered because the tiled spec and supports_tiled_2d accept it."""
+        _c, _req, specs = _specs_for("attention_gfx950_u2d_wide32_nw4_mw32_t8xb_llvm")
         self.assertTrue(specs)
-        self.assertTrue(any(s.kernel_spec.use_k_single_buffer for s in specs))
-        for tuning_spec in specs:
-            ok, why = _supports_tuning_spec(_GFX950_2D_VARIANT, tuning_spec.kernel_spec)
-            self.assertTrue(ok, (tuning_spec.tuning_id, why))
 
 
 def _dense_request(**kw):
@@ -525,6 +421,7 @@ def _by_candidate(combos):
 
 
 def _changed_fields(spec, base):
+    spec, base = spec.kernel_spec, base.kernel_spec
     return {
         f.name
         for f in dataclasses.fields(spec)
@@ -621,8 +518,10 @@ class TestGfx950DenseTuningSpace(unittest.TestCase):
                 self.assertEqual(specs[0], candidate.select_spec(probe))
                 names = [spec.kernel_name() for spec in specs]
                 self.assertEqual(len(names), len(set(names)))
+                self.assertEqual(len({s.tuning_id for s in specs}), len(specs))
                 for spec in specs:
-                    ok, why = supports_attention_dense(spec, arch="gfx950")
+                    self.assertEqual(spec.path, "dense")
+                    ok, why = supports_attention_dense(spec.kernel_spec, arch="gfx950")
                     self.assertTrue(ok, (spec.kernel_name(), why))
 
     def test_causal_only_knobs_are_not_offered_without_causal(self):
@@ -636,43 +535,50 @@ class TestGfx950DenseTuningSpace(unittest.TestCase):
         self.assertNotIn("interleave", changed)
 
     def test_num_persistent_policies_reach_every_persistent_decode(self):
-        req = _dense_request(dense_persistent="on", dense_wide_lds_dma="off")
-        grouped = _by_candidate(_dense_combos(req))
+        grouped = _by_candidate(_dense_combos(_dense_request()))
         _candidate, specs = grouped["attention_gfx950_dense_persist_default"]
-        base = specs[0]
+        kernels = [spec.kernel_spec for spec in specs]
         self.assertEqual(
-            {spec.resolved_persist_decode for spec in specs},
+            {k.resolved_persist_decode for k in kernels},
             {"qb_major", "hkv_major", "gqa_pair", "gqa_pair_2phase"},
         )
-        swept_counts = {spec.num_persistent for spec in specs}
-        for policy in ("gqa_pair", "gqa_pair_2phase", "2x"):
-            self.assertIn(resolve_dense_num_persistent(base, policy), swept_counts)
+        swept_counts = {k.num_persistent for k in kernels}
+        for policy in ("gqa_pair", "gqa_pair_2phase", "0.75x", "1.25x", "2x"):
+            self.assertIn(resolve_dense_num_persistent(kernels[0], policy), swept_counts)
 
     def test_redundant_settings_are_pruned(self):
-        req = _dense_request(
-            dense_persistent="off", dense_tile="default", dense_wide_lds_dma="off"
-        )
-        base = dense_spec_for_request(req)
+        """A setting that compiles to the default is dropped by
+        canonicalization, so it can never mint a second id."""
+        req, spec_id = _dense_request(), "gfx950_dense_grid_default"
+        default = attention_tuning_spec(req, spec_id)
+        base = default.kernel_spec
 
-        def spec(**knobs):
-            return _dense_knob_spec(base, supports_attention_dense, "gfx950", knobs)
+        def canonical(**knobs):
+            return dict(tuning_spec_with_knobs(req, spec_id, knobs).knobs)
 
-        redundant = (
+        restated = (
             dict(pv_loop_order=base.resolved_pv_loop_order()),
             dict(exp_per_pv_step=base.resolved_exp_per_pv_step()),
             dict(iglp_mode=base.resolved_iglp_mode()),
-            dict(lazy_rescale=False, lazy_rescale_threshold=4.0),
-            dict(pv_sched_fence=False, pv_sched_fence_mask=0x008),
-            dict(pv_sched_group_template=False, pv_sched_group_ds_read=4),
-            dict(interleave=True),
+            dict(interleave=True),  # the grid body never reads it
             dict(persist_decode="hkv_major"),
         )
-        for knobs in redundant:
+        for knobs in restated:
             with self.subTest(**knobs):
-                self.assertIsNone(spec(**knobs))
-        self.assertIsNotNone(spec(pv_loop_order="k_major"))
-        self.assertIsNotNone(spec(pv_sched_fence_mask=0x008))
-        self.assertIsNotNone(spec(lazy_rescale=False))
+                self.assertEqual(canonical(**knobs), {})
+        inert_partner = (
+            (dict(lazy_rescale=False, lazy_rescale_threshold=4.0), "lazy_rescale_threshold"),
+            (dict(pv_sched_fence=False, pv_sched_fence_mask=0x008), "pv_sched_fence_mask"),
+            (
+                dict(pv_sched_group_template=False, pv_sched_group_ds_read=4),
+                "pv_sched_group_ds_read",
+            ),
+        )
+        for knobs, inert in inert_partner:
+            with self.subTest(**knobs):
+                self.assertNotIn(inert, canonical(**knobs))
+        self.assertEqual(canonical(pv_loop_order="k_major"), {"pv_loop_order": "k_major"})
+        self.assertEqual(canonical(lazy_rescale=False), {"lazy_rescale": False})
 
     def test_full_stream_and_samples_are_distinct_and_reproducible(self):
         req = _dense_request()
@@ -698,10 +604,33 @@ class TestGfx950DenseTuningSpace(unittest.TestCase):
             with self.subTest(candidate=name):
                 self.assertEqual(len(specs), 16)
 
-    def test_wpe_pin_holds_across_the_knob_space(self):
-        specs = [s for _c, s in _dense_combos(_dense_request(dense_waves_per_eu=3))]
-        self.assertGreater(len(specs), 6)
-        self.assertEqual({s.waves_per_eu for s in specs}, {3})
+    def test_tuning_ids_replay_through_dispatch(self):
+        """A dense config is served by pinning ``spec_id`` + tuning id, like a
+        unified tuning geometry; ``auto`` is the variant's default spec."""
+        req = _dense_request()
+        spec_id = "gfx950_dense_persist_widedma_bm128"
+        grouped = _by_candidate(_dense_combos(req))
+        _c, specs = grouped["attention_gfx950_dense_persist_widedma_bm128"]
+        self.assertEqual(attention_tuning_spec(req, spec_id), specs[0])
+        for spec in specs[:: max(1, len(specs) // 8)]:
+            with self.subTest(tuning_id=spec.tuning_id):
+                self.assertEqual(
+                    attention_tuning_spec(req, spec_id, spec.tuning_id), spec
+                )
+        wpe = {s.kernel_spec.waves_per_eu for s in specs}
+        self.assertGreater(len(wpe), 1)  # WPE is a knob, not a request field
+
+    def test_unpinned_requests_never_select_a_dense_variant(self):
+        for algorithm in ("auto", "attention_dense"):
+            with self.subTest(algorithm=algorithm):
+                req = _dense_request(algorithm=algorithm)
+                if algorithm == "auto":
+                    self.assertEqual(
+                        dispatch_attention(req).candidate.algorithm, "unified_2d"
+                    )
+                else:
+                    with self.assertRaises(ValueError):
+                        dispatch_attention(req)
 
 
 def _gfx942_request(**kw):
@@ -713,6 +642,10 @@ def _gfx942_request(**kw):
 def _gfx942_specs(req, level="production", limit=0, **kw):
     combos = _dense_combos(req, level=level, limit=limit, **kw)
     return [spec for _candidate, spec in combos]
+
+
+def gfx942_dense_spec(req):
+    return attention_tuning_spec(req, "gfx942_dense").kernel_spec
 
 
 class TestGfx942DenseTuningSpace(unittest.TestCase):
@@ -758,30 +691,29 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
         for req in (_gfx942_request(), _gfx942_request(seqlen_q=8192, seqlen_k=8192)):
             specs = _gfx942_specs(req)
             with self.subTest(seqlen=req.seqlen_q):
-                self.assertEqual(specs[0], gfx942_dense_spec(req))
+                self.assertEqual(specs[0].kernel_spec, gfx942_dense_spec(req))
                 names = [spec.kernel_name() for spec in specs]
                 self.assertEqual(len(names), len(set(names)))
-                for spec in specs:
+                kernels = [s.kernel_spec for s in specs]
+                for spec in kernels:
                     ok, why = supports_gfx942(spec, arch="gfx942")
                     self.assertTrue(ok, (spec.kernel_name(), why))
-                self.assertEqual({s.persistent for s in specs}, {True, False})
-                self.assertGreater(len({s.block_m for s in specs}), 1)
+                self.assertEqual({k.persistent for k in kernels}, {True, False})
+                self.assertGreater(len({k.block_m for k in kernels}), 1)
 
-    def test_request_pins_hold_across_the_knob_space(self):
-        grid = _gfx942_specs(_gfx942_request(dense_persistent="off"))
-        self.assertEqual({s.persistent for s in grid}, {False})
-        decoded = _gfx942_specs(
-            _gfx942_request(
-                seqlen_q=8192,
-                seqlen_k=8192,
-                dense_persistent="on",
-                dense_persist_decode="hkv_major",
-            )
-        )
-        self.assertEqual({s.persistent for s in decoded}, {True})
-        self.assertEqual({s.persist_decode for s in decoded}, {"hkv_major"})
-        pinned_wpe = _gfx942_specs(_gfx942_request(dense_waves_per_eu=3))
-        self.assertEqual({s.waves_per_eu for s in pinned_wpe}, {3})
+    def test_tuning_ids_replay_through_dispatch(self):
+        """Geometry, persistence and decode are knobs of the one candidate,
+        reached through its tuning ids rather than request fields."""
+        req = _gfx942_request(seqlen_q=8192, seqlen_k=8192)
+        specs = _gfx942_specs(req)
+        self.assertEqual(attention_tuning_spec(req, "gfx942_dense"), specs[0])
+        for spec in specs[:: max(1, len(specs) // 8)]:
+            with self.subTest(tuning_id=spec.tuning_id):
+                self.assertEqual(
+                    attention_tuning_spec(req, "gfx942_dense", spec.tuning_id), spec
+                )
+        decodes = {s.kernel_spec.persist_decode for s in specs}
+        self.assertIn("hkv_major", decodes)
 
     def test_redundant_settings_are_pruned(self):
         base = gfx942_dense_spec(_gfx942_request())
@@ -789,8 +721,11 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
             _gfx942_request(dtype="bf16", hdim_q=64, hdim_v=64, nhead_q=8, nhead_k=1)
         )
 
-        def spec(knobs, on=base):
-            return _dense_knob_spec(on, supports_gfx942, "gfx942", knobs)
+        req = _gfx942_request()
+        d64_req = _gfx942_request(dtype="bf16", hdim_q=64, hdim_v=64, nhead_q=8, nhead_k=1)
+
+        def canonical(knobs, r=req):
+            return tuning_spec_with_knobs(r, "gfx942_dense", knobs)
 
         redundant = (
             dict(use_cfvst=True),  # the policy already turns it on here
@@ -800,15 +735,19 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
             dict(persist_decode="hkv_major"),
             dict(interleave=True),
         )
+        default = attention_tuning_spec(req, "gfx942_dense")
         for knobs in redundant:
             with self.subTest(**knobs):
-                self.assertIsNone(spec(knobs))
+                self.assertEqual(canonical(knobs), default)
+        # No cfvst path at D64: the V knobs are out of scope, so dropped, not refused.
+        d64_default = attention_tuning_spec(d64_req, "gfx942_dense")
+        self.assertEqual(d64_default.kernel_spec, d64)
         for knobs in (dict(v_row_pad=16), dict(use_v_swizzle=False)):
             with self.subTest(d64=knobs):
-                self.assertIsNone(spec(knobs, on=d64))  # no cfvst path at D64
-        self.assertIsNotNone(spec(dict(use_cfvst=False)))
-        self.assertIsNotNone(spec(dict(pv_sched_fence_mask=0)))
-        self.assertIsNotNone(spec(dict(persistent=not base.persistent)))
+                self.assertEqual(canonical(knobs, d64_req), d64_default)
+        self.assertNotEqual(canonical(dict(use_cfvst=False)), default)
+        self.assertNotEqual(canonical(dict(pv_sched_fence_mask=0)), default)
+        self.assertNotEqual(canonical(dict(persistent=not base.persistent)), default)
 
     def test_full_stream_and_samples_are_distinct_and_reproducible(self):
         req = _gfx942_request()

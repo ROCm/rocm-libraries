@@ -18,7 +18,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import json
 import math
 import os
@@ -32,7 +31,7 @@ sys.path.insert(0, _RK + "/library")
 
 import torch  # noqa: E402
 
-from dispatch.attention import AttentionRequest, dense_spec_for_request  # noqa: E402
+from dispatch.attention import AttentionRequest, tuning_spec_with_knobs  # noqa: E402
 from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES  # noqa: E402
 from kernels.gfx950.attention_dense import (  # noqa: E402
     GFX950_DENSE_LAYOUTS,
@@ -108,9 +107,9 @@ def _causal_flops(spec: Gfx950AttentionDenseSpec) -> int:
     return 2 * 2 * B * Hq * D * Sq * Skv
 
 
-def _dense_tile_pin(shape: dict[str, Any]) -> str:
+def _dense_tile(shape: dict[str, Any]) -> str:
     if "block_m" not in shape:
-        return "auto"
+        return "default"
     bm = int(shape["block_m"])
     for name, geometry in DENSE_TILE_GEOMETRIES.items():
         if int(geometry["block_m"]) == bm:
@@ -121,18 +120,20 @@ def _dense_tile_pin(shape: dict[str, Any]) -> str:
     )
 
 
-def _on_off_auto_pin(shape: dict[str, Any], key: str, *, default: str) -> str:
-    if key not in shape:
-        return default
-    return "on" if bool(shape[key]) else "off"
+def _dense_spec_id(shape: dict[str, Any]) -> str:
+    """The gfx950 dense variant ``spec_id`` the shape's geometry names."""
+    persistent = bool(shape.get("persistent", False))
+    wide = bool(shape.get("wide_lds_dma", False))
+    kind = "persist" if persistent else "grid"
+    return f"gfx950_dense_{kind}{'_widedma' if wide else ''}_{_dense_tile(shape)}"
 
 
 def make_spec_from_shape(shape: dict[str, Any]) -> Gfx950AttentionDenseSpec:
-    """Resolve the gfx950 dispatch spec, then apply explicit harness overrides.
+    """The gfx950 dense variant the shape names, with its knob overrides applied.
 
-    Tile, persist, and wide-DMA are request pins (the dispatcher owns those
-    axes). Remaining builder-only knobs (V-pad, waves_per_eu, interleave,
-    lazy_rescale, block_n) still overlay via ``dataclasses.replace``.
+    Tile, persist, and wide DMA pick the variant (``spec_id``); every other
+    field in the shape is a knob of that variant, applied through
+    :func:`dispatch.attention.tuning_spec_with_knobs` so the kernel validates it.
     """
     req = AttentionRequest(
         batch=int(shape.get("batch", 1)),
@@ -145,28 +146,22 @@ def make_spec_from_shape(shape: dict[str, Any]) -> Gfx950AttentionDenseSpec:
         arch="gfx950",
         mask_type=1 if bool(shape.get("causal", True)) else 0,
         dtype=str(shape.get("dtype", "fp16")),
-        algorithm="attention_dense",
-        spec_id="gfx950_attention_dense",
-        dense_tile=_dense_tile_pin(shape),
-        dense_persistent=_on_off_auto_pin(shape, "persistent", default="off"),
-        dense_wide_lds_dma=_on_off_auto_pin(shape, "wide_lds_dma", default="auto"),
-        dense_num_persistent=int(shape.get("num_persistent", 256)),
-        dense_persist_decode=str(shape.get("persist_decode", "auto")),
         sliding_window=int(shape.get("sliding_window", 0)),
         use_sinks=bool(shape.get("use_sinks", False)),
     )
-    spec = dense_spec_for_request(req)
     coercers = {
         "block_n": int,
         "lds_v_row_pad": int,
         "waves_per_eu": int,
         "interleave": bool,
         "lazy_rescale": bool,
+        "num_persistent": int,
+        "persist_decode": str,
     }
-    overrides = {
+    knobs = {
         name: coerce(shape[name]) for name, coerce in coercers.items() if name in shape
     }
-    return dataclasses.replace(spec, **overrides)
+    return tuning_spec_with_knobs(req, _dense_spec_id(shape), knobs).kernel_spec
 
 
 def run_benchmark(

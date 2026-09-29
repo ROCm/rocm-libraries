@@ -77,15 +77,22 @@ def _spec(
     factory rather than hand-rolled.
 
     Deriving the spec from the factory means a future gfx950 tuning change is picked
-    up here with no edit. Only ``dense_persistent`` is pinned rather than left on
-    "auto": the cohort asserts BOTH grid variants at one fixed Sq.
+    up here with no edit. The variant is pinned by ``spec_id``: the cohort
+    asserts BOTH grid variants at one fixed Sq, and the persistent row runs wide
+    DMA wherever the kernel implements it (aligned causal D128, no sinks/SWA).
     """
     # Imported lazily: keeps module import (and hence CPU collection of this
     # gpu-marked file) independent of the dispatch package.
-    from dispatch.attention import AttentionRequest
-    from dispatch.attention.gfx950_dense import dense_spec_for_request
+    from dispatch.attention import AttentionRequest, attention_tuning_spec
 
-    return dense_spec_for_request(
+    wide = d == 128 and causal and not use_sinks and not sliding_window
+    if not persistent:
+        spec_id = "gfx950_dense_grid_default"
+    elif wide:
+        spec_id = "gfx950_dense_persist_widedma_default"
+    else:
+        spec_id = "gfx950_dense_persist_default"
+    return attention_tuning_spec(
         AttentionRequest(
             batch=batch,
             nhead_q=hq,
@@ -97,12 +104,11 @@ def _spec(
             arch="gfx950",
             mask_type=1 if causal else 0,
             dtype=dtype,
-            algorithm="attention_dense",
-            dense_persistent="on" if persistent else "off",
             use_sinks=use_sinks,
             sliding_window=sliding_window,
-        )
-    )
+        ),
+        spec_id,
+    ).kernel_spec
 
 
 def _launcher_for(spec):

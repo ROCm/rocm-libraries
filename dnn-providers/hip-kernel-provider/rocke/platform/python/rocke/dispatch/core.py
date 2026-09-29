@@ -33,14 +33,26 @@ def stable_json_hash(payload: Mapping[str, Any], *, n: int = 16) -> str:
     return hashlib.sha256(blob).hexdigest()[:n]
 
 
+def _spec_payload(spec: Any) -> Any:
+    """What a spec's hash covers: its explicit ``identity()`` when it declares
+    one (so wrapper metadata stays out), else every dataclass field."""
+    identity = getattr(spec, "identity", None)
+    if callable(identity):
+        return identity()
+    return asdict(spec)
+
+
 def spec_identity(spec: Any) -> str:
     """Stable identity for one sweep spec, used to dedupe ``sweep_space``.
 
-    Dataclass specs hash through :func:`stable_json_hash`; everything else falls
+    Specs with an ``identity()`` method hash that payload; other dataclass specs
+    hash every field through :func:`stable_json_hash`; everything else falls
     back to ``kernel_name()`` or ``repr``. Family wrappers that already have a
     tighter key (MoE's ``_struct``, grouped-conv kernel names) pass that key
     instead of this default.
     """
+    if callable(getattr(spec, "identity", None)):
+        return stable_json_hash(spec.identity(), n=16)
     if is_dataclass(spec) and not isinstance(spec, type):
         try:
             return stable_json_hash(asdict(spec), n=16)
@@ -76,6 +88,49 @@ def opt_in_probe(
         return replace(request, **updates)
     except TypeError:
         return request
+
+
+def pin_to_spec(
+    request: OperatorRequest, candidate: KernelCandidate, spec: Any
+) -> OperatorRequest:
+    """``request`` pinned to exactly ``spec``: the candidate's selectors, and
+    for a tuned spec on a tunable request its ``tuning_id`` and knobs, so the
+    request reselects what ran and ``request_hash`` tells configurations apart.
+    """
+    pinned = opt_in_probe(request, candidate)
+    tuned = str(getattr(spec, "tuning_id", "") or "")
+    if tuned and hasattr(pinned, "tuning_id") and hasattr(pinned, "tuning_knobs"):
+        try:
+            return replace(
+                pinned, tuning_id=tuned, tuning_knobs=getattr(spec, "knobs", ())
+            )
+        except TypeError:
+            return pinned
+    return pinned
+
+
+class PinRefused(ValueError):
+    """A request that pins a ``spec_id`` (and possibly a tuning id and knobs)
+    that the registry cannot honor.
+
+    Selection never falls back to another kernel for a pinned request: the
+    caller gets this, with the pinned candidate's own reason, and decides
+    whether to re-sweep or retry with ``algorithm="auto"``. ``refusals`` maps
+    each candidate carrying ``spec_id`` to why it refused; it is empty when no
+    registered candidate carries that ``spec_id`` any more.
+    """
+
+    def __init__(self, request, spec_id: str, refusals: Mapping[str, str]):
+        self.request = request
+        self.spec_id = spec_id
+        self.tuning_id = str(getattr(request, "tuning_id", "") or "")
+        self.refusals = dict(refusals)
+        if self.refusals:
+            detail = "; ".join(f"{name}: {why}" for name, why in self.refusals.items())
+            message = f"pinned spec_id {spec_id!r} refused the request: {detail}"
+        else:
+            message = f"no registered candidate has spec_id {spec_id!r}"
+        super().__init__(message)
 
 
 def _request_selector(request: OperatorRequest, field: str) -> str:
@@ -298,6 +353,9 @@ class KernelId:
     abi_version: str
     request_hash: str
     spec_hash: str
+    # Configuration identity for tuned specs (empty otherwise): the same on
+    # every problem, unlike spec_hash, which names the compiled binary.
+    tuning_id: str = ""
 
     @property
     def compile_key(self) -> str:
@@ -590,7 +648,40 @@ def make_kernel_id(
         arch=request.arch,
         abi_version=candidate.abi_version,
         request_hash=stable_json_hash(request.normalized(), n=16),
-        spec_hash=stable_json_hash(asdict(spec), n=16),
+        spec_hash=stable_json_hash(_spec_payload(spec), n=16),
+        tuning_id=str(getattr(spec, "tuning_id", "") or ""),
+    )
+
+
+def make_dispatch_result(
+    request: OperatorRequest,
+    candidate: KernelCandidate,
+    spec: Any,
+    *,
+    kernel_id: KernelId,
+    headline: str,
+) -> DispatchResult:
+    """One :class:`DispatchResult`, with the explanation every family shares."""
+    explanation = [
+        headline,
+        f"algorithm={candidate.algorithm}",
+        f"spec_id={candidate.spec_id}",
+    ]
+    if kernel_id.tuning_id:
+        explanation.append(f"tuning_id={kernel_id.tuning_id}")
+    explanation += [
+        f"spec_hash={kernel_id.spec_hash}",
+        f"request_hash={kernel_id.request_hash}",
+    ]
+    return DispatchResult(
+        request=request,
+        candidate=candidate,
+        spec=spec,
+        kernel_id=kernel_id,
+        grid=candidate.grid(spec, request),
+        block=candidate.block(spec),
+        signature=tuple(candidate.signature(spec)),
+        explanation=tuple(explanation),
     )
 
 
@@ -939,7 +1030,7 @@ class CandidateRegistry:
                 specs.append(spec)
         return tuple(specs)
 
-    def dispatch_all(
+    def iter_dispatch_all(
         self,
         request: OperatorRequest,
         *,
@@ -949,45 +1040,49 @@ class CandidateRegistry:
         selector_ok: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
         spec_id_alias: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
         spec_filter: Callable[[Any], bool] | None = None,
-    ) -> Tuple[DispatchResult, ...]:
-        """One :class:`DispatchResult` per :meth:`combos` entry.
+        sample: int = 0,
+        seed: int = 0,
+        pin_request: Callable[[OperatorRequest, KernelCandidate, Any], OperatorRequest]
+        | None = None,
+    ) -> Iterable[DispatchResult]:
+        """One :class:`DispatchResult` per :meth:`iter_combos` entry.
 
         The documented autotune primitive: every eligible kernel, including
         opt-in candidates and each candidate's ``sweep_space`` variants, as an
         independently buildable/launchable result. Does not rank or collapse.
+
+        Each result's request is pinned to its spec (:func:`pin_to_spec` unless
+        ``pin_request`` overrides it), so the stored request reselects what ran
+        and ``request_hash`` tells configurations apart.
         """
-        results: list[DispatchResult] = []
-        for candidate, spec in self.combos(
+        if pin_request is None:
+            pin_request = pin_to_spec
+        for candidate, spec in self.iter_combos(
             request,
             candidate_prefix=candidate_prefix,
             include_opt_in=include_opt_in,
             selector_ok=selector_ok,
             spec_id_alias=spec_id_alias,
+            sample=sample,
+            seed=seed,
         ):
             if spec_filter is not None and not spec_filter(spec):
                 continue
-            probe = opt_in_probe(request, candidate) if include_opt_in else request
-            kid = kernel_id(probe, candidate, spec)
-            results.append(
-                DispatchResult(
-                    request=probe,
-                    candidate=candidate,
-                    spec=spec,
-                    kernel_id=kid,
-                    grid=candidate.grid(spec, probe),
-                    block=candidate.block(spec),
-                    signature=tuple(candidate.signature(spec)),
-                    explanation=(
-                        f"sweep {candidate.name} ({candidate.algorithm}) on "
-                        f"{getattr(request, 'arch', '')}",
-                        f"algorithm={candidate.algorithm}",
-                        f"spec_id={candidate.spec_id}",
-                        f"spec_hash={kid.spec_hash}",
-                        f"request_hash={kid.request_hash}",
-                    ),
-                )
+            probe = pin_request(request, candidate, spec) if include_opt_in else request
+            yield make_dispatch_result(
+                probe,
+                candidate,
+                spec,
+                kernel_id=kernel_id(probe, candidate, spec),
+                headline=(
+                    f"sweep {candidate.name} ({candidate.algorithm}) on "
+                    f"{getattr(request, 'arch', '')}"
+                ),
             )
-        return tuple(results)
+
+    def dispatch_all(self, request: OperatorRequest, **kwargs) -> Tuple[DispatchResult, ...]:
+        """Materialized :meth:`iter_dispatch_all`."""
+        return tuple(self.iter_dispatch_all(request, **kwargs))
 
     def select(
         self, request: OperatorRequest, *, ranker: Ranker | None = None
@@ -1006,6 +1101,11 @@ class CandidateRegistry:
                         f"ranker returned unsupported candidate {candidate.name!r}"
                     )
             return ranked[0]
+        spec_id = _request_selector(request, "spec_id")
+        if spec_id != "auto":
+            named = [c for c in self.candidates() if normalize_selector(c.spec_id) == spec_id]
+            refusals = {c.name: c.admits(request)[1] for c in named}
+            raise PinRefused(request, spec_id, refusals)
         reasons = []
         for candidate in self.candidates():
             ok, why = candidate.admits(request)

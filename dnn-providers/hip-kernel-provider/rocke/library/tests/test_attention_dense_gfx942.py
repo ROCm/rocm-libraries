@@ -544,7 +544,7 @@ def test_supports_rejects_non_gfx942():
 def test_supports_rejects_modes_deferred_to_later_phases(kw, marker):
     """P0 implements the default-grid uniform dense path only. These modes must be
     rejected by ``supports`` -- not merely by ``build`` -- or dispatch selects a spec
-    it cannot build (``_dense_spec`` sets ragged=True for any non-256-multiple
+    it cannot build (``gfx942_dense._base_spec`` sets ragged=True for any non-256-multiple
     self-attention length, which is most real serving shapes)."""
     ok, why = supports_attention_dense(_spec(**kw), arch="gfx942")
     assert not ok, f"{marker} must be rejected at the supports layer"
@@ -1339,17 +1339,24 @@ def test_build_bakes_the_tuned_waves_per_eu_attribute():
 def test_dispatch_applies_gfx942_waves_per_eu_and_leaves_gfx950_alone():
     """The gfx942 dispatch spec factory applies the tune; gfx950 stays at the default.
 
-    The tune lives in gfx942's OWN ``_dense_spec`` (``dispatch/attention/gfx942_dense.py``),
+    The tune lives in gfx942's OWN ``_base_spec`` (``dispatch/attention/gfx942_dense.py``),
     so the kernel_name ``wpe`` tag and the emitted attribute agree on the dispatched
-    path (``dense_spec_for_request`` -> ``run_attention_dense_torch``). gfx950 has a
+    path (``attention_tuning_spec`` -> ``run_attention_dense_torch``). gfx950 has a
     separate factory in its own arch module which MUST keep the spec default
     (waves_per_eu=2) -- this is the do-not-touch-gfx950 guard as an executable
     assertion. Both are exercised here precisely because they are now two functions:
     the guard is that they stayed different in the intended direction only.
     """
     from dispatch.attention import AttentionRequest
-    from dispatch.attention.gfx942_dense import _dense_spec
-    from dispatch.attention.gfx950_dense import _dense_spec as _dense_spec_gfx950
+    from dispatch.attention import attention_tuning_spec, tuning_spec_with_knobs
+
+    def _dense_spec(req, **knobs):
+        if knobs:
+            return tuning_spec_with_knobs(req, "gfx942_dense", knobs).kernel_spec
+        return attention_tuning_spec(req, "gfx942_dense").kernel_spec
+
+    def _dense_spec_gfx950(req):
+        return attention_tuning_spec(req, "gfx950_dense_grid_default").kernel_spec
 
     # The gfx942 tune is an OVERRIDE relative to the shared spec's default; if that
     # default (owned by the gfx950 file) ever shifts, the "== 2" baseline below would
@@ -1381,8 +1388,6 @@ def test_dispatch_applies_gfx942_waves_per_eu_and_leaves_gfx950_alone():
             arch=arch,
             mask_type=1,
             dtype=dtype,
-            algorithm="attention_dense",
-            dense_persistent="off",
         )
 
     # gfx942: only bf16 D64 is bumped to 4.
@@ -1461,8 +1466,15 @@ def test_dispatch_ships_the_padded_d64_path_without_restating_the_pad():
     let the two drift. gfx950's own factory is exercised alongside to pin that this
     branch changed nothing for it."""
     from dispatch.attention import AttentionRequest
-    from dispatch.attention.gfx942_dense import _dense_spec
-    from dispatch.attention.gfx950_dense import _dense_spec as _dense_spec_gfx950
+    from dispatch.attention import attention_tuning_spec, tuning_spec_with_knobs
+
+    def _dense_spec(req, **knobs):
+        if knobs:
+            return tuning_spec_with_knobs(req, "gfx942_dense", knobs).kernel_spec
+        return attention_tuning_spec(req, "gfx942_dense").kernel_spec
+
+    def _dense_spec_gfx950(req):
+        return attention_tuning_spec(req, "gfx950_dense_grid_default").kernel_spec
 
     # Pin the shared default: every assertion below is relative to it, so a silent
     # upstream change to the pad amount must fail loudly here rather than downstream.
@@ -1493,8 +1505,6 @@ def test_dispatch_ships_the_padded_d64_path_without_restating_the_pad():
             arch=arch,
             mask_type=1,
             dtype=dtype,
-            algorithm="attention_dense",
-            dense_persistent="off",
         )
 
     # D64 ships padded on both dtypes; D128 is inert.
@@ -1770,15 +1780,22 @@ def test_persistent_and_default_share_one_inner_body():
 
 
 def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
-    """P4 dispatch: ``dense_persistent='auto'`` resolves to persistent once the work
+    """P4 dispatch: the default spec turns persistent on once the work
     (nqb*Hq*B) fills the gfx942 persistent grid (num_persistent defaulted to 304), and
-    stays off for small Sq. Explicit on/off are honored; gfx950 keeps its 256 default
+    stays off for small Sq. The ``persistent`` knob is honored; gfx950 keeps its 256 default
     and is otherwise untouched."""
     from dispatch.attention import AttentionRequest
-    from dispatch.attention.gfx942_dense import _dense_spec
-    from dispatch.attention.gfx950_dense import _dense_spec as _dense_spec_gfx950
+    from dispatch.attention import attention_tuning_spec, tuning_spec_with_knobs
 
-    def _req(sq, arch, persist="auto"):
+    def _dense_spec(req, **knobs):
+        if knobs:
+            return tuning_spec_with_knobs(req, "gfx942_dense", knobs).kernel_spec
+        return attention_tuning_spec(req, "gfx942_dense").kernel_spec
+
+    def _dense_spec_gfx950(req):
+        return attention_tuning_spec(req, "gfx950_dense_grid_default").kernel_spec
+
+    def _req(sq, arch):
         return AttentionRequest(
             batch=1,
             nhead_q=16,
@@ -1790,8 +1807,6 @@ def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
             arch=arch,
             mask_type=1,
             dtype="fp16",
-            algorithm="attention_dense",
-            dense_persistent=persist,
         )
 
     # gfx942 num_persistent defaulted to the 304-CU part's CU count.
@@ -1800,8 +1815,8 @@ def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
     assert _dense_spec(_req(8192, "gfx942")).persistent is True
     assert _dense_spec(_req(2048, "gfx942")).persistent is False  # 8*16 = 128 < 304
     # explicit modes honored.
-    assert _dense_spec(_req(8192, "gfx942", "off")).persistent is False
-    assert _dense_spec(_req(256, "gfx942", "on")).persistent is True
+    assert _dense_spec(_req(8192, "gfx942"), persistent=False).persistent is False
+    assert _dense_spec(_req(256, "gfx942"), persistent=True).persistent is True
     # gfx950 untouched: keeps the 256 default (not the gfx942 304 override).
     assert _dense_spec_gfx950(_req(8192, "gfx950")).num_persistent == 256
 

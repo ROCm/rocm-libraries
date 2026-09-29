@@ -491,7 +491,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         A plain read of the INHERITED field, kept as a named accessor because the
         builder, the name tag and :func:`supports_attention_dense` all need the same
         int and the shared field is typed loosely enough to be worth normalizing in
-        one place. ``dispatch.attention.gfx942_dense._dense_spec`` fills it from
+        one place. ``dispatch.attention.gfx942_dense._base_spec`` fills it from
         :func:`_tuned_waves_per_eu`, so the shipped value tracks the measured policy
         without this class restating it."""
         return int(self.waves_per_eu)
@@ -830,7 +830,7 @@ def _tuned_waves_per_eu(head_size: int, dtype: str) -> int:
         reaches a 2nd WG/CU. Occupancy there is an LDS-footprint problem (P3 K/V-pad
         or single-buffer work), not a waves-per-eu knob.
 
-    Consumed by the gfx942 dispatch spec factory (``_dense_spec``) so the kernel_name
+    Consumed by the gfx942 dispatch base spec (``_base_spec``) so the kernel_name
     ``wpe{N}`` tag and the emitted ``amdgpu-waves-per-eu`` attribute always agree.
     """
     if dtype == "bf16" and head_size == 64:
