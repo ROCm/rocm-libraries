@@ -76,9 +76,9 @@ try
 
     for(I isweep = 0; isweep < nsweep; isweep++)
     {
-        auto const bid = isweep * bid_inc;
-        auto const bid_end = std::min(batch_count_arg, bid + bid_inc);
-        auto const batch_count = bid_end - bid;
+        I const bid = isweep * bid_inc;
+        I const bid_end = bid + std::min(batch_count_arg - bid, bid_inc);
+        I const batch_count = bid_end - bid;
 
         auto const A = (A_arg == nullptr) ? nullptr : A_arg + bid;
         auto const ipiv = (ipiv_arg == nullptr) ? nullptr : ipiv_arg + bid * strideP;

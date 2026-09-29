@@ -77,7 +77,7 @@ try
     for(I isweep = 0; isweep < nsweep; isweep++)
     {
         I const bid = isweep * bid_inc;
-        I const bid_end = std::min(batch_count_arg, bid + bid_inc);
+        I const bid_end = bid + std::min(batch_count_arg - bid, bid_inc);
         I const batch_count = bid_end - bid;
 
         auto const info = (info_arg == nullptr) ? nullptr : info_arg + bid;
