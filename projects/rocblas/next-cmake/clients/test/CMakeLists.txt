@@ -38,6 +38,7 @@ set(yaml_test_files
     "${_CMAKE_CURRENT_SOURCE_DIR}/copy_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/dgmm_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/dot_gtest.yaml"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/dot_ilp64_chunk_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/gbmv_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/geam_ex_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/geam_gtest.yaml"

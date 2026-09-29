@@ -87,11 +87,13 @@ namespace
     template <typename T>
     struct device_buffer
     {
-        T* device = nullptr;
+        T*         device = nullptr;
+        hipError_t status = hipSuccess;
 
         explicit device_buffer(size_t count)
         {
-            if((hipMalloc)(&device, count * sizeof(T)) != hipSuccess)
+            status = (hipMalloc)(&device, count * sizeof(T));
+            if(status != hipSuccess)
                 device = nullptr;
         }
 
@@ -139,14 +141,14 @@ namespace
         const size_t x_total = x_live + 1;
 
         size_t free_bytes = 0, total_bytes = 0;
-        if(hipMemGetInfo(&free_bytes, &total_bytes) != hipSuccess
-           || free_bytes < y_total * sizeof(T) + (64u << 20))
+        CHECK_HIP_ERROR(hipMemGetInfo(&free_bytes, &total_bytes));
+        if(free_bytes < y_total * sizeof(T) + (64u << 20))
             GTEST_SKIP() << LIMITED_VRAM_STRING;
 
         device_buffer<T> x_buf(x_total);
+        CHECK_DEVICE_ALLOCATION(x_buf.status);
         device_buffer<T> y_buf(y_total);
-        if(!x_buf.device || !y_buf.device)
-            GTEST_SKIP() << LIMITED_VRAM_STRING;
+        CHECK_DEVICE_ALLOCATION(y_buf.status);
         T* const dx = x_buf.device;
         T* const dy = y_buf.device;
 
