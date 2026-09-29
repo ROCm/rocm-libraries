@@ -20,10 +20,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from typing import List, Optional, OrderedDict, Callable
+from typing import Optional, OrderedDict, Callable
 import sys
+import os
 
-sys.path.append("../")
+sys.path.append(f"{os.path.dirname(__file__)}/../")
 
 from utils import TYPE_CONFIGS
 from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_VALUE_TYPES, COMMON_KEY_TYPES

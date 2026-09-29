@@ -22,6 +22,8 @@ hipDNN is a graph-based deep learning library for AMD GPUs that leverages a flex
 - [Project Structure](#project-structure)
 - [API Documentation](#api-documentation)
 - [Contributing](#contributing)
+- [Security](#security)
+- [License](#license)
 
 ---
 
@@ -49,10 +51,10 @@ The fastest way to get started with hipDNN is to follow the [quick start steps i
 - **[Roadmap](./docs/Roadmap.md)** - Feature priorities and development plans
 
 ### Testing
-- **[Testing](./docs/Testing.md)** - Synopsis of testing information
-- **[Testing Strategy](./docs/testing/TestingStrategy.md)** - Specific testing approach
-- **[Test Plan](./docs/testing/TestPlan.md)** - Detailed test planning
-- **[Test Run Template](./docs/testing/TestRunTemplate.md)** - Guidelines for test execution
+- **[Testing](./docs/TESTING.md)** - Synopsis of testing information
+- **[Testing Strategy](./docs/testing/TESTING_STRATEGY.md)** - Specific testing approach
+- **[Feature Release Test Plan](./docs/feature_release/TestPlan.md)** - Detailed test planning
+- **[Feature Release Run Template](./docs/feature_release/TestRunTemplate.md)** - Guidelines for test execution
 
 ---
 
@@ -118,3 +120,15 @@ The documentation covers the frontend API including:
 ## Contributing
 
 For information about contributing to the hipDNN project, please see the [Contributing Guide](./CONTRIBUTING.md).
+
+---
+
+## Security
+
+Please follow [SECURITY.md](./SECURITY.md) for reporting vulnerabilities.
+
+---
+
+## License
+
+This project is licensed under the terms described in [LICENSE](./LICENSE).
