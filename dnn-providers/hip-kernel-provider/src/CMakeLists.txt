@@ -1,6 +1,9 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+# Used for managing clang-tidy target for embedded kernel sources
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KernelTidy.cmake")
+
 # OBJECT library with all implementation
 add_library(
     hip_kernel_provider_impl OBJECT
@@ -33,6 +36,9 @@ set_target_properties(hip_kernel_provider_impl PROPERTIES
 )
 clang_tidy_check(hip_kernel_provider_impl)
 add_clang_tidy_custom_target()
+
+# Attached clang-tidy target for embedded sources to general 'tidy' target
+hip_kernel_provider_tidy_dependencies()
 
 # Static library for unit tests to link against (provides access to internal implementation)
 add_library(hip_kernel_provider_private STATIC
