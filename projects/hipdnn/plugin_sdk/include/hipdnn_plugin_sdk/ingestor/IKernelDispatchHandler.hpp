@@ -31,6 +31,14 @@ class IKernelDispatchHandler
 public:
     virtual ~IKernelDispatchHandler() = default;
 
+    /// Source representations this handler can prepare. Existing adapters retain
+    /// their previous admission policy unless they explicitly extend it.
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
+    virtual bool supportsSourceKind(KernelSourceKind kind) const
+    {
+        return kind == KernelSourceKind::EMBEDDED_SOURCE || kind == KernelSourceKind::KPACK;
+    }
+
     /// Global scratch this kernel requires, in bytes. Lives on this interface
     /// because the query arrives before a kernel is chosen.
     // NOLINTNEXTLINE(portability-template-virtual-member-function)

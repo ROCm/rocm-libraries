@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "5401c084-c18f-4d39-8ed3-d6fa44eb29c3",
+  "name": "SDPA recipe admission",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.rocke_sdpa.kernel_match"
+}
