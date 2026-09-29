@@ -30,34 +30,11 @@
 #include "csrgemm_numeric_device.h"
 
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {
-    // Clamp a bucket launch grid against the device's maximum grid dimension. A bucket
-    // whose (block-row or wavefront-block) count exceeds maxGridSize[0] would otherwise
-    // silently truncate the one-block-per-row grid and skip the tail of the bucket. This
-    // is only reachable with 64-bit index types (rocsparse_spgemm + rocsparse_indextype_i64)
-    // since it needs more than maxGridSize[0] block rows in a single bucket. The kernels
-    // pair this clamp with a grid-stride loop so a clamped grid still covers every row.
-    // See AISPARSE-677.
-    template <typename I>
-    static inline uint32_t csrgemm_clamp_grid_size(rocsparse_handle handle, I num_blocks)
-    {
-        const int64_t max_grid = static_cast<int64_t>(handle->properties.maxGridSize[0]);
-        const int64_t blocks   = static_cast<int64_t>(num_blocks);
-        return static_cast<uint32_t>((blocks < max_grid) ? blocks : max_grid);
-    }
-
-    // True when the grid was clamped below the natural block count (the kernel must
-    // grid-stride); false lets the kernel take the straight-line single-sweep path.
-    template <typename I>
-    static inline bool csrgemm_grid_clamped(rocsparse_handle handle, I num_blocks)
-    {
-        return static_cast<int64_t>(num_blocks)
-               > static_cast<int64_t>(handle->properties.maxGridSize[0]);
-    }
-
     template <uint32_t BLOCKSIZE,
               uint32_t WFSIZE,
               uint32_t HASHSIZE,
@@ -373,7 +350,8 @@ namespace rocsparse
                                                                              J,
                                                                              T>()));
 
-            if(rocsparse::csrgemm_grid_clamped(handle, group_size))
+            if(rocsparse::get_grid_size_x(handle, group_size, CSRGEMM_DIM)
+               < static_cast<int64_t>(group_size))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::csrgemm_numeric_fill_block_per_row_kernel<CSRGEMM_DIM,
@@ -382,7 +360,7 @@ namespace rocsparse
                                                                           CSRGEMM_FLL_HASH,
                                                                           CSRGEMM_WARPSIZE,
                                                                           true>),
-                    dim3(rocsparse::csrgemm_clamp_grid_size(handle, group_size)),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size, CSRGEMM_DIM)),
                     dim3(CSRGEMM_DIM),
                     (csrgemm_numeric_fill_block_per_row_kernel_shared_memory_size<CSRGEMM_HASHSIZE,
                                                                                   J,
@@ -423,7 +401,7 @@ namespace rocsparse
                                                                           CSRGEMM_FLL_HASH,
                                                                           CSRGEMM_WARPSIZE,
                                                                           false>),
-                    dim3(rocsparse::csrgemm_clamp_grid_size(handle, group_size)),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size, CSRGEMM_DIM)),
                     dim3(CSRGEMM_DIM),
                     (csrgemm_numeric_fill_block_per_row_kernel_shared_memory_size<CSRGEMM_HASHSIZE,
                                                                                   J,
@@ -481,7 +459,8 @@ namespace rocsparse
 
             if(handle->wavefront_size == 32)
             {
-                if(rocsparse::csrgemm_grid_clamped(handle, group_size))
+                if(rocsparse::get_grid_size_x(handle, group_size, CSRGEMM_DIM)
+                   < static_cast<int64_t>(group_size))
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                         (rocsparse::csrgemm_numeric_fill_block_per_row_multipass_kernel<
@@ -490,7 +469,7 @@ namespace rocsparse
                             CSRGEMM_CHUNKSIZE,
                             32,
                             true>),
-                        dim3(rocsparse::csrgemm_clamp_grid_size(handle, group_size)),
+                        dim3(rocsparse::get_grid_size_x(handle, group_size, CSRGEMM_DIM)),
                         dim3(CSRGEMM_DIM),
                         0,
                         handle->stream,
@@ -530,7 +509,7 @@ namespace rocsparse
                             CSRGEMM_CHUNKSIZE,
                             32,
                             false>),
-                        dim3(rocsparse::csrgemm_clamp_grid_size(handle, group_size)),
+                        dim3(rocsparse::get_grid_size_x(handle, group_size, CSRGEMM_DIM)),
                         dim3(CSRGEMM_DIM),
                         0,
                         handle->stream,
@@ -564,7 +543,8 @@ namespace rocsparse
             }
             else
             {
-                if(rocsparse::csrgemm_grid_clamped(handle, group_size))
+                if(rocsparse::get_grid_size_x(handle, group_size, CSRGEMM_DIM)
+                   < static_cast<int64_t>(group_size))
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                         (rocsparse::csrgemm_numeric_fill_block_per_row_multipass_kernel<
@@ -573,7 +553,7 @@ namespace rocsparse
                             CSRGEMM_CHUNKSIZE,
                             64,
                             true>),
-                        dim3(rocsparse::csrgemm_clamp_grid_size(handle, group_size)),
+                        dim3(rocsparse::get_grid_size_x(handle, group_size, CSRGEMM_DIM)),
                         dim3(CSRGEMM_DIM),
                         0,
                         handle->stream,
@@ -613,7 +593,7 @@ namespace rocsparse
                             CSRGEMM_CHUNKSIZE,
                             64,
                             false>),
-                        dim3(rocsparse::csrgemm_clamp_grid_size(handle, group_size)),
+                        dim3(rocsparse::get_grid_size_x(handle, group_size, CSRGEMM_DIM)),
                         dim3(CSRGEMM_DIM),
                         0,
                         handle->stream,
@@ -741,7 +721,7 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
                                                               CSRGEMM_FLL_HASH,                   \
                                                               CSRGEMM_WARPSIZE,                   \
                                                               GS>),                               \
-        dim3(rocsparse::csrgemm_clamp_grid_size(handle, h_group_size[GROUP_SIZE_ID])),            \
+        dim3(rocsparse::get_grid_size_x(handle, h_group_size[GROUP_SIZE_ID], CSRGEMM_DIM)),       \
         dim3(CSRGEMM_DIM),                                                                        \
         (csrgemm_numeric_fill_block_per_row_kernel_shared_memory_size<CSRGEMM_HASHSIZE, J, T>()), \
         stream,                                                                                   \
@@ -774,7 +754,8 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
 // Dispatch the straight-line variant unless the clamp binds (AISPARSE-677).
 #define CSRGEMM_NUMERIC_FILL_BLOCK_PER_ROW(                                                      \
     GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE)                 \
-    if(rocsparse::csrgemm_grid_clamped(handle, h_group_size[GROUP_SIZE_ID]))                     \
+    if(rocsparse::get_grid_size_x(handle, h_group_size[GROUP_SIZE_ID], CSRGEMM_DIM)              \
+       < static_cast<int64_t>(h_group_size[GROUP_SIZE_ID]))                                      \
     {                                                                                            \
         CSRGEMM_NUMERIC_FILL_BLOCK_PER_ROW_IMPL(                                                 \
             GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE, true);  \
@@ -825,8 +806,9 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
 #define CSRGEMM_DIM 256
 #define CSRGEMM_SUB 8
 #define CSRGEMM_HASHSIZE 16
-        if(rocsparse::csrgemm_grid_clamped(handle,
-                                           (h_group_size[0] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1))
+        if(rocsparse::get_grid_size_x(
+               handle, (h_group_size[0] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1, CSRGEMM_DIM)
+           < static_cast<int64_t>((h_group_size[0] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1))
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrgemm_numeric_fill_wf_per_row_kernel<CSRGEMM_DIM,
@@ -834,8 +816,8 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
                                                                    CSRGEMM_HASHSIZE,
                                                                    CSRGEMM_FLL_HASH,
                                                                    true>),
-                dim3(rocsparse::csrgemm_clamp_grid_size(
-                    handle, (h_group_size[0] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1)),
+                dim3(rocsparse::get_grid_size_x(
+                    handle, (h_group_size[0] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1, CSRGEMM_DIM)),
                 dim3(CSRGEMM_DIM),
                 0,
                 stream,
@@ -873,8 +855,8 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
                                                                    CSRGEMM_HASHSIZE,
                                                                    CSRGEMM_FLL_HASH,
                                                                    false>),
-                dim3(rocsparse::csrgemm_clamp_grid_size(
-                    handle, (h_group_size[0] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1)),
+                dim3(rocsparse::get_grid_size_x(
+                    handle, (h_group_size[0] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1, CSRGEMM_DIM)),
                 dim3(CSRGEMM_DIM),
                 0,
                 stream,
@@ -915,8 +897,9 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
 #define CSRGEMM_DIM 256
 #define CSRGEMM_SUB 16
 #define CSRGEMM_HASHSIZE 32
-        if(rocsparse::csrgemm_grid_clamped(handle,
-                                           (h_group_size[1] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1))
+        if(rocsparse::get_grid_size_x(
+               handle, (h_group_size[1] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1, CSRGEMM_DIM)
+           < static_cast<int64_t>((h_group_size[1] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1))
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrgemm_numeric_fill_wf_per_row_kernel<CSRGEMM_DIM,
@@ -924,8 +907,8 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
                                                                    CSRGEMM_HASHSIZE,
                                                                    CSRGEMM_FLL_HASH,
                                                                    true>),
-                dim3(rocsparse::csrgemm_clamp_grid_size(
-                    handle, (h_group_size[1] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1)),
+                dim3(rocsparse::get_grid_size_x(
+                    handle, (h_group_size[1] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1, CSRGEMM_DIM)),
                 dim3(CSRGEMM_DIM),
                 0,
                 stream,
@@ -963,8 +946,8 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
                                                                    CSRGEMM_HASHSIZE,
                                                                    CSRGEMM_FLL_HASH,
                                                                    false>),
-                dim3(rocsparse::csrgemm_clamp_grid_size(
-                    handle, (h_group_size[1] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1)),
+                dim3(rocsparse::get_grid_size_x(
+                    handle, (h_group_size[1] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1, CSRGEMM_DIM)),
                 dim3(CSRGEMM_DIM),
                 0,
                 stream,
@@ -1152,7 +1135,8 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
 
         if(handle->wavefront_size == 32)
         {
-            if(rocsparse::csrgemm_grid_clamped(handle, h_group_size[10]))
+            if(rocsparse::get_grid_size_x(handle, h_group_size[10], CSRGEMM_DIM)
+               < static_cast<int64_t>(h_group_size[10]))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::csrgemm_numeric_fill_block_per_row_multipass_kernel<
@@ -1161,7 +1145,7 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
                         CSRGEMM_CHUNKSIZE,
                         32,
                         true>),
-                    dim3(rocsparse::csrgemm_clamp_grid_size(handle, h_group_size[10])),
+                    dim3(rocsparse::get_grid_size_x(handle, h_group_size[10], CSRGEMM_DIM)),
                     dim3(CSRGEMM_DIM),
                     0,
                     stream,
@@ -1201,7 +1185,7 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
                         CSRGEMM_CHUNKSIZE,
                         32,
                         false>),
-                    dim3(rocsparse::csrgemm_clamp_grid_size(handle, h_group_size[10])),
+                    dim3(rocsparse::get_grid_size_x(handle, h_group_size[10], CSRGEMM_DIM)),
                     dim3(CSRGEMM_DIM),
                     0,
                     stream,
@@ -1235,7 +1219,8 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
         }
         else
         {
-            if(rocsparse::csrgemm_grid_clamped(handle, h_group_size[10]))
+            if(rocsparse::get_grid_size_x(handle, h_group_size[10], CSRGEMM_DIM)
+               < static_cast<int64_t>(h_group_size[10]))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::csrgemm_numeric_fill_block_per_row_multipass_kernel<
@@ -1244,7 +1229,7 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
                         CSRGEMM_CHUNKSIZE,
                         64,
                         true>),
-                    dim3(rocsparse::csrgemm_clamp_grid_size(handle, h_group_size[10])),
+                    dim3(rocsparse::get_grid_size_x(handle, h_group_size[10], CSRGEMM_DIM)),
                     dim3(CSRGEMM_DIM),
                     0,
                     stream,
@@ -1284,7 +1269,7 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
                         CSRGEMM_CHUNKSIZE,
                         64,
                         false>),
-                    dim3(rocsparse::csrgemm_clamp_grid_size(handle, h_group_size[10])),
+                    dim3(rocsparse::get_grid_size_x(handle, h_group_size[10], CSRGEMM_DIM)),
                     dim3(CSRGEMM_DIM),
                     0,
                     stream,

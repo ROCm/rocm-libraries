@@ -30,6 +30,7 @@
 #include "rocsparse_bsrgemm.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "rocsparse_primitives.hpp"
@@ -40,30 +41,6 @@
 
 namespace rocsparse
 {
-    // Clamp a bucket launch grid against the device's maximum grid dimension. A bucket
-    // whose (block-row or wavefront-block) count exceeds maxGridSize[0] would otherwise
-    // silently truncate the one-block-per-row grid and skip the tail of the bucket. This
-    // is only reachable with 64-bit index types (rocsparse_spgemm + rocsparse_indextype_i64)
-    // since it needs more than maxGridSize[0] block rows in a single bucket. The kernels
-    // pair this clamp with a grid-stride loop so a clamped grid still covers every row.
-    // See AISPARSE-677.
-    template <typename I>
-    static inline uint32_t bsrgemm_clamp_grid_size(rocsparse_handle handle, I num_blocks)
-    {
-        const int64_t max_grid = static_cast<int64_t>(handle->properties.maxGridSize[0]);
-        const int64_t blocks   = static_cast<int64_t>(num_blocks);
-        return static_cast<uint32_t>((blocks < max_grid) ? blocks : max_grid);
-    }
-
-    // True when the grid was clamped below the natural block count (the kernel must
-    // grid-stride); false lets the kernel take the straight-line single-sweep path.
-    template <typename I>
-    static inline bool bsrgemm_grid_clamped(rocsparse_handle handle, I num_blocks)
-    {
-        return static_cast<int64_t>(num_blocks)
-               > static_cast<int64_t>(handle->properties.maxGridSize[0]);
-    }
-
     template <uint32_t BLOCKSIZE,
               uint32_t WF_SIZE,
               uint32_t HASHSIZE,
@@ -665,7 +642,8 @@ namespace rocsparse
             hipFuncAttributeMaxDynamicSharedMemorySize,
             bsrgemm_fill_block_per_row_2x2_shared_memory_size<J, T, BSRGEMM_HASHSIZE>()));
 
-        if(rocsparse::bsrgemm_grid_clamped(handle, group_size))
+        if(rocsparse::get_grid_size_x(handle, group_size, BSRGEMM_BLOCKSIZE)
+           < static_cast<int64_t>(group_size))
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::bsrgemm_fill_block_per_row_2x2<BSRGEMM_BLOCKSIZE,
@@ -673,7 +651,7 @@ namespace rocsparse
                                                            BSRGEMM_HASHSIZE,
                                                            BSRGEMM_FLL_HASH,
                                                            true>),
-                dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size)),
+                dim3(rocsparse::get_grid_size_x(handle, group_size, BSRGEMM_BLOCKSIZE)),
                 dim3(BSRGEMM_BLOCKSIZE),
                 (bsrgemm_fill_block_per_row_2x2_shared_memory_size<J, T, BSRGEMM_HASHSIZE>()),
                 handle->stream,
@@ -712,7 +690,7 @@ namespace rocsparse
                                                            BSRGEMM_HASHSIZE,
                                                            BSRGEMM_FLL_HASH,
                                                            false>),
-                dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size)),
+                dim3(rocsparse::get_grid_size_x(handle, group_size, BSRGEMM_BLOCKSIZE)),
                 dim3(BSRGEMM_BLOCKSIZE),
                 (bsrgemm_fill_block_per_row_2x2_shared_memory_size<J, T, BSRGEMM_HASHSIZE>()),
                 handle->stream,
@@ -805,8 +783,10 @@ namespace rocsparse
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_WFSIZE 16
 #define BSRGEMM_HASHSIZE 8
-            if(rocsparse::bsrgemm_grid_clamped(
-                   handle, (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / 256 + 1))
+            if(rocsparse::get_grid_size_x(handle,
+                                          (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / 256 + 1,
+                                          BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>((BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / 256 + 1))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_fill_wf_per_row_2x2<BSRGEMM_BLOCKSIZE,
@@ -814,8 +794,10 @@ namespace rocsparse
                                                             BSRGEMM_HASHSIZE,
                                                             BSRGEMM_FLL_HASH,
                                                             true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(
-                        handle, (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / 256 + 1)),
+                    dim3(rocsparse::get_grid_size_x(
+                        handle,
+                        (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / 256 + 1,
+                        BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -854,8 +836,10 @@ namespace rocsparse
                                                             BSRGEMM_HASHSIZE,
                                                             BSRGEMM_FLL_HASH,
                                                             false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(
-                        handle, (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / 256 + 1)),
+                    dim3(rocsparse::get_grid_size_x(
+                        handle,
+                        (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / 256 + 1,
+                        BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -897,8 +881,10 @@ namespace rocsparse
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_WFSIZE 16
 #define BSRGEMM_HASHSIZE 16
-            if(rocsparse::bsrgemm_grid_clamped(
-                   handle, (BSRGEMM_WFSIZE * (int64_t)group_size[1] - 1) / 256 + 1))
+            if(rocsparse::get_grid_size_x(handle,
+                                          (BSRGEMM_WFSIZE * (int64_t)group_size[1] - 1) / 256 + 1,
+                                          BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>((BSRGEMM_WFSIZE * (int64_t)group_size[1] - 1) / 256 + 1))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_fill_wf_per_row_2x2<BSRGEMM_BLOCKSIZE,
@@ -906,8 +892,10 @@ namespace rocsparse
                                                             BSRGEMM_HASHSIZE,
                                                             BSRGEMM_FLL_HASH,
                                                             true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(
-                        handle, (BSRGEMM_WFSIZE * (int64_t)group_size[1] - 1) / 256 + 1)),
+                    dim3(rocsparse::get_grid_size_x(
+                        handle,
+                        (BSRGEMM_WFSIZE * (int64_t)group_size[1] - 1) / 256 + 1,
+                        BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -946,8 +934,10 @@ namespace rocsparse
                                                             BSRGEMM_HASHSIZE,
                                                             BSRGEMM_FLL_HASH,
                                                             false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(
-                        handle, (BSRGEMM_WFSIZE * (int64_t)group_size[1] - 1) / 256 + 1)),
+                    dim3(rocsparse::get_grid_size_x(
+                        handle,
+                        (BSRGEMM_WFSIZE * (int64_t)group_size[1] - 1) / 256 + 1,
+                        BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -989,8 +979,10 @@ namespace rocsparse
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_WFSIZE 16
 #define BSRGEMM_HASHSIZE 32
-            if(rocsparse::bsrgemm_grid_clamped(
-                   handle, (BSRGEMM_WFSIZE * (int64_t)group_size[2] - 1) / 256 + 1))
+            if(rocsparse::get_grid_size_x(handle,
+                                          (BSRGEMM_WFSIZE * (int64_t)group_size[2] - 1) / 256 + 1,
+                                          BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>((BSRGEMM_WFSIZE * (int64_t)group_size[2] - 1) / 256 + 1))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_fill_wf_per_row_2x2<BSRGEMM_BLOCKSIZE,
@@ -998,8 +990,10 @@ namespace rocsparse
                                                             BSRGEMM_HASHSIZE,
                                                             BSRGEMM_FLL_HASH,
                                                             true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(
-                        handle, (BSRGEMM_WFSIZE * (int64_t)group_size[2] - 1) / 256 + 1)),
+                    dim3(rocsparse::get_grid_size_x(
+                        handle,
+                        (BSRGEMM_WFSIZE * (int64_t)group_size[2] - 1) / 256 + 1,
+                        BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -1038,8 +1032,10 @@ namespace rocsparse
                                                             BSRGEMM_HASHSIZE,
                                                             BSRGEMM_FLL_HASH,
                                                             false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(
-                        handle, (BSRGEMM_WFSIZE * (int64_t)group_size[2] - 1) / 256 + 1)),
+                    dim3(rocsparse::get_grid_size_x(
+                        handle,
+                        (BSRGEMM_WFSIZE * (int64_t)group_size[2] - 1) / 256 + 1,
+                        BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -1080,7 +1076,8 @@ namespace rocsparse
         {
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_HASHSIZE 64
-            if(rocsparse::bsrgemm_grid_clamped(handle, group_size[3]))
+            if(rocsparse::get_grid_size_x(handle, group_size[3], BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>(group_size[3]))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_fill_block_per_row_2x2<BSRGEMM_BLOCKSIZE,
@@ -1088,7 +1085,7 @@ namespace rocsparse
                                                                BSRGEMM_HASHSIZE,
                                                                BSRGEMM_FLL_HASH,
                                                                true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[3])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[3], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     (bsrgemm_fill_block_per_row_2x2_shared_memory_size<J, T, BSRGEMM_HASHSIZE>()),
                     stream,
@@ -1127,7 +1124,7 @@ namespace rocsparse
                                                                BSRGEMM_HASHSIZE,
                                                                BSRGEMM_FLL_HASH,
                                                                false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[3])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[3], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     (bsrgemm_fill_block_per_row_2x2_shared_memory_size<J, T, BSRGEMM_HASHSIZE>()),
                     stream,
@@ -1167,7 +1164,8 @@ namespace rocsparse
         {
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_HASHSIZE 128
-            if(rocsparse::bsrgemm_grid_clamped(handle, group_size[4]))
+            if(rocsparse::get_grid_size_x(handle, group_size[4], BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>(group_size[4]))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_fill_block_per_row_2x2<BSRGEMM_BLOCKSIZE,
@@ -1175,7 +1173,7 @@ namespace rocsparse
                                                                BSRGEMM_HASHSIZE,
                                                                BSRGEMM_FLL_HASH,
                                                                true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[4])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[4], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     (bsrgemm_fill_block_per_row_2x2_shared_memory_size<J, T, BSRGEMM_HASHSIZE>()),
                     stream,
@@ -1214,7 +1212,7 @@ namespace rocsparse
                                                                BSRGEMM_HASHSIZE,
                                                                BSRGEMM_FLL_HASH,
                                                                false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[4])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[4], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     (bsrgemm_fill_block_per_row_2x2_shared_memory_size<J, T, BSRGEMM_HASHSIZE>()),
                     stream,
@@ -1254,7 +1252,8 @@ namespace rocsparse
         {
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_HASHSIZE 256
-            if(rocsparse::bsrgemm_grid_clamped(handle, group_size[5]))
+            if(rocsparse::get_grid_size_x(handle, group_size[5], BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>(group_size[5]))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_fill_block_per_row_2x2<BSRGEMM_BLOCKSIZE,
@@ -1262,7 +1261,7 @@ namespace rocsparse
                                                                BSRGEMM_HASHSIZE,
                                                                BSRGEMM_FLL_HASH,
                                                                true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[5])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[5], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     (bsrgemm_fill_block_per_row_2x2_shared_memory_size<J, T, BSRGEMM_HASHSIZE>()),
                     stream,
@@ -1301,7 +1300,7 @@ namespace rocsparse
                                                                BSRGEMM_HASHSIZE,
                                                                BSRGEMM_FLL_HASH,
                                                                false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[5])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[5], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     (bsrgemm_fill_block_per_row_2x2_shared_memory_size<J, T, BSRGEMM_HASHSIZE>()),
                     stream,
@@ -1375,14 +1374,15 @@ namespace rocsparse
         {
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_CHUNKSIZE 256
-            if(rocsparse::bsrgemm_grid_clamped(handle, group_size[7]))
+            if(rocsparse::get_grid_size_x(handle, group_size[7], BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>(group_size[7]))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_block_per_row_atomic_multipass<BSRGEMM_BLOCKSIZE,
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        2,
                                                                        true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[7])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[7], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -1422,7 +1422,7 @@ namespace rocsparse
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        2,
                                                                        false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[7])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[7], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -1517,8 +1517,12 @@ namespace rocsparse
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_WFSIZE 64
 #define BSRGEMM_HASHSIZE 8
-            if(rocsparse::bsrgemm_grid_clamped(
-                   handle, (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / BSRGEMM_BLOCKSIZE + 1))
+            if(rocsparse::get_grid_size_x(
+                   handle,
+                   (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / BSRGEMM_BLOCKSIZE + 1,
+                   BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>(
+                   (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / BSRGEMM_BLOCKSIZE + 1))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_fill_wf_per_row<BSRGEMM_BLOCKSIZE,
@@ -1527,9 +1531,10 @@ namespace rocsparse
                                                         BSRGEMM_FLL_HASH,
                                                         4,
                                                         true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(
+                    dim3(rocsparse::get_grid_size_x(
                         handle,
-                        (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / BSRGEMM_BLOCKSIZE + 1)),
+                        (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / BSRGEMM_BLOCKSIZE + 1,
+                        BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -1570,9 +1575,10 @@ namespace rocsparse
                                                         BSRGEMM_FLL_HASH,
                                                         4,
                                                         false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(
+                    dim3(rocsparse::get_grid_size_x(
                         handle,
-                        (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / BSRGEMM_BLOCKSIZE + 1)),
+                        (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / BSRGEMM_BLOCKSIZE + 1,
+                        BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -1615,8 +1621,12 @@ namespace rocsparse
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_WFSIZE 64
 #define BSRGEMM_HASHSIZE 16
-            if(rocsparse::bsrgemm_grid_clamped(
-                   handle, (BSRGEMM_WFSIZE * (int64_t)group_size[1] - 1) / BSRGEMM_BLOCKSIZE + 1))
+            if(rocsparse::get_grid_size_x(
+                   handle,
+                   (BSRGEMM_WFSIZE * (int64_t)group_size[1] - 1) / BSRGEMM_BLOCKSIZE + 1,
+                   BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>(
+                   (BSRGEMM_WFSIZE * (int64_t)group_size[1] - 1) / BSRGEMM_BLOCKSIZE + 1))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_fill_wf_per_row<BSRGEMM_BLOCKSIZE,
@@ -1625,9 +1635,10 @@ namespace rocsparse
                                                         BSRGEMM_FLL_HASH,
                                                         4,
                                                         true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(
+                    dim3(rocsparse::get_grid_size_x(
                         handle,
-                        (BSRGEMM_WFSIZE * (int64_t)group_size[1] - 1) / BSRGEMM_BLOCKSIZE + 1)),
+                        (BSRGEMM_WFSIZE * (int64_t)group_size[1] - 1) / BSRGEMM_BLOCKSIZE + 1,
+                        BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -1668,9 +1679,10 @@ namespace rocsparse
                                                         BSRGEMM_FLL_HASH,
                                                         4,
                                                         false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(
+                    dim3(rocsparse::get_grid_size_x(
                         handle,
-                        (BSRGEMM_WFSIZE * (int64_t)group_size[1] - 1) / BSRGEMM_BLOCKSIZE + 1)),
+                        (BSRGEMM_WFSIZE * (int64_t)group_size[1] - 1) / BSRGEMM_BLOCKSIZE + 1,
+                        BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -1712,14 +1724,15 @@ namespace rocsparse
         {
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_CHUNKSIZE 32
-            if(rocsparse::bsrgemm_grid_clamped(handle, group_size[2]))
+            if(rocsparse::get_grid_size_x(handle, group_size[2], BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>(group_size[2]))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_block_per_row_atomic_multipass<BSRGEMM_BLOCKSIZE,
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        4,
                                                                        true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[2])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[2], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -1759,7 +1772,7 @@ namespace rocsparse
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        4,
                                                                        false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[2])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[2], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -1801,14 +1814,15 @@ namespace rocsparse
         {
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_CHUNKSIZE 64
-            if(rocsparse::bsrgemm_grid_clamped(handle, group_size[3]))
+            if(rocsparse::get_grid_size_x(handle, group_size[3], BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>(group_size[3]))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_block_per_row_atomic_multipass<BSRGEMM_BLOCKSIZE,
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        4,
                                                                        true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[3])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[3], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -1848,7 +1862,7 @@ namespace rocsparse
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        4,
                                                                        false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[3])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[3], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -1890,14 +1904,15 @@ namespace rocsparse
         {
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_CHUNKSIZE 128
-            if(rocsparse::bsrgemm_grid_clamped(handle, group_size[4]))
+            if(rocsparse::get_grid_size_x(handle, group_size[4], BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>(group_size[4]))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_block_per_row_atomic_multipass<BSRGEMM_BLOCKSIZE,
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        4,
                                                                        true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[4])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[4], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -1937,7 +1952,7 @@ namespace rocsparse
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        4,
                                                                        false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[4])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[4], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -1979,14 +1994,15 @@ namespace rocsparse
         {
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_CHUNKSIZE 128
-            if(rocsparse::bsrgemm_grid_clamped(handle, group_size[5]))
+            if(rocsparse::get_grid_size_x(handle, group_size[5], BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>(group_size[5]))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_block_per_row_atomic_multipass<BSRGEMM_BLOCKSIZE,
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        4,
                                                                        true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[5])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[5], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2026,7 +2042,7 @@ namespace rocsparse
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        4,
                                                                        false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[5])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[5], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2068,14 +2084,15 @@ namespace rocsparse
         {
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_CHUNKSIZE 128
-            if(rocsparse::bsrgemm_grid_clamped(handle, group_size[6]))
+            if(rocsparse::get_grid_size_x(handle, group_size[6], BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>(group_size[6]))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_block_per_row_atomic_multipass<BSRGEMM_BLOCKSIZE,
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        4,
                                                                        true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[6])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[6], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2115,7 +2132,7 @@ namespace rocsparse
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        4,
                                                                        false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[6])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[6], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2157,14 +2174,15 @@ namespace rocsparse
         {
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_CHUNKSIZE 128
-            if(rocsparse::bsrgemm_grid_clamped(handle, group_size[7]))
+            if(rocsparse::get_grid_size_x(handle, group_size[7], BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>(group_size[7]))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_block_per_row_atomic_multipass<BSRGEMM_BLOCKSIZE,
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        4,
                                                                        true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[7])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[7], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2204,7 +2222,7 @@ namespace rocsparse
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        4,
                                                                        false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[7])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[7], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2299,8 +2317,12 @@ namespace rocsparse
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_WFSIZE 64
 #define BSRGEMM_HASHSIZE 8
-            if(rocsparse::bsrgemm_grid_clamped(
-                   handle, (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / BSRGEMM_BLOCKSIZE + 1))
+            if(rocsparse::get_grid_size_x(
+                   handle,
+                   (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / BSRGEMM_BLOCKSIZE + 1,
+                   BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>(
+                   (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / BSRGEMM_BLOCKSIZE + 1))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_fill_wf_per_row<BSRGEMM_BLOCKSIZE,
@@ -2309,9 +2331,10 @@ namespace rocsparse
                                                         BSRGEMM_FLL_HASH,
                                                         8,
                                                         true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(
+                    dim3(rocsparse::get_grid_size_x(
                         handle,
-                        (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / BSRGEMM_BLOCKSIZE + 1)),
+                        (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / BSRGEMM_BLOCKSIZE + 1,
+                        BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2352,9 +2375,10 @@ namespace rocsparse
                                                         BSRGEMM_FLL_HASH,
                                                         8,
                                                         false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(
+                    dim3(rocsparse::get_grid_size_x(
                         handle,
-                        (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / BSRGEMM_BLOCKSIZE + 1)),
+                        (BSRGEMM_WFSIZE * (int64_t)group_size[0] - 1) / BSRGEMM_BLOCKSIZE + 1,
+                        BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2396,14 +2420,15 @@ namespace rocsparse
         {
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_CHUNKSIZE 16
-            if(rocsparse::bsrgemm_grid_clamped(handle, group_size[1]))
+            if(rocsparse::get_grid_size_x(handle, group_size[1], BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>(group_size[1]))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_block_per_row_atomic_multipass<BSRGEMM_BLOCKSIZE,
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        8,
                                                                        true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[1])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[1], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2443,7 +2468,7 @@ namespace rocsparse
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        8,
                                                                        false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[1])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[1], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2485,14 +2510,15 @@ namespace rocsparse
         {
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_CHUNKSIZE 32
-            if(rocsparse::bsrgemm_grid_clamped(handle, group_size[2]))
+            if(rocsparse::get_grid_size_x(handle, group_size[2], BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>(group_size[2]))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_block_per_row_atomic_multipass<BSRGEMM_BLOCKSIZE,
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        8,
                                                                        true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[2])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[2], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2532,7 +2558,7 @@ namespace rocsparse
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        8,
                                                                        false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[2])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[2], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2574,14 +2600,15 @@ namespace rocsparse
         {
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_CHUNKSIZE 32
-            if(rocsparse::bsrgemm_grid_clamped(handle, group_size[3]))
+            if(rocsparse::get_grid_size_x(handle, group_size[3], BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>(group_size[3]))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_block_per_row_atomic_multipass<BSRGEMM_BLOCKSIZE,
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        8,
                                                                        true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[3])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[3], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2621,7 +2648,7 @@ namespace rocsparse
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        8,
                                                                        false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[3])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[3], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2663,14 +2690,15 @@ namespace rocsparse
         {
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_CHUNKSIZE 32
-            if(rocsparse::bsrgemm_grid_clamped(handle, group_size[4]))
+            if(rocsparse::get_grid_size_x(handle, group_size[4], BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>(group_size[4]))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_block_per_row_atomic_multipass<BSRGEMM_BLOCKSIZE,
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        8,
                                                                        true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[4])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[4], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2710,7 +2738,7 @@ namespace rocsparse
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        8,
                                                                        false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[4])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[4], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2752,14 +2780,15 @@ namespace rocsparse
         {
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_CHUNKSIZE 32
-            if(rocsparse::bsrgemm_grid_clamped(handle, group_size[5]))
+            if(rocsparse::get_grid_size_x(handle, group_size[5], BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>(group_size[5]))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_block_per_row_atomic_multipass<BSRGEMM_BLOCKSIZE,
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        8,
                                                                        true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[5])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[5], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2799,7 +2828,7 @@ namespace rocsparse
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        8,
                                                                        false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[5])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[5], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2841,14 +2870,15 @@ namespace rocsparse
         {
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_CHUNKSIZE 32
-            if(rocsparse::bsrgemm_grid_clamped(handle, group_size[6]))
+            if(rocsparse::get_grid_size_x(handle, group_size[6], BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>(group_size[6]))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_block_per_row_atomic_multipass<BSRGEMM_BLOCKSIZE,
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        8,
                                                                        true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[6])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[6], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2888,7 +2918,7 @@ namespace rocsparse
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        8,
                                                                        false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[6])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[6], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2930,14 +2960,15 @@ namespace rocsparse
         {
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_CHUNKSIZE 32
-            if(rocsparse::bsrgemm_grid_clamped(handle, group_size[7]))
+            if(rocsparse::get_grid_size_x(handle, group_size[7], BSRGEMM_BLOCKSIZE)
+               < static_cast<int64_t>(group_size[7]))
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrgemm_block_per_row_atomic_multipass<BSRGEMM_BLOCKSIZE,
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        8,
                                                                        true>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[7])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[7], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -2977,7 +3008,7 @@ namespace rocsparse
                                                                        BSRGEMM_CHUNKSIZE,
                                                                        8,
                                                                        false>),
-                    dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[7])),
+                    dim3(rocsparse::get_grid_size_x(handle, group_size[7], BSRGEMM_BLOCKSIZE)),
                     dim3(BSRGEMM_BLOCKSIZE),
                     0,
                     stream,
@@ -3068,14 +3099,15 @@ namespace rocsparse
 
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_CHUNKSIZE 8
-        if(rocsparse::bsrgemm_grid_clamped(handle, group_size[0]))
+        if(rocsparse::get_grid_size_x(handle, group_size[0], BSRGEMM_BLOCKSIZE)
+           < static_cast<int64_t>(group_size[0]))
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::bsrgemm_block_per_row_multipass<BSRGEMM_BLOCKSIZE,
                                                             BSRGEMM_CHUNKSIZE,
                                                             16,
                                                             true>),
-                dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[0])),
+                dim3(rocsparse::get_grid_size_x(handle, group_size[0], BSRGEMM_BLOCKSIZE)),
                 dim3(BSRGEMM_BLOCKSIZE),
                 0,
                 stream,
@@ -3115,7 +3147,7 @@ namespace rocsparse
                                                             BSRGEMM_CHUNKSIZE,
                                                             16,
                                                             false>),
-                dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[0])),
+                dim3(rocsparse::get_grid_size_x(handle, group_size[0], BSRGEMM_BLOCKSIZE)),
                 dim3(BSRGEMM_BLOCKSIZE),
                 0,
                 stream,
@@ -3205,14 +3237,15 @@ namespace rocsparse
 
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_CHUNKSIZE 2
-        if(rocsparse::bsrgemm_grid_clamped(handle, group_size[0]))
+        if(rocsparse::get_grid_size_x(handle, group_size[0], BSRGEMM_BLOCKSIZE)
+           < static_cast<int64_t>(group_size[0]))
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::bsrgemm_block_per_row_multipass<BSRGEMM_BLOCKSIZE,
                                                             BSRGEMM_CHUNKSIZE,
                                                             32,
                                                             true>),
-                dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[0])),
+                dim3(rocsparse::get_grid_size_x(handle, group_size[0], BSRGEMM_BLOCKSIZE)),
                 dim3(BSRGEMM_BLOCKSIZE),
                 0,
                 stream,
@@ -3252,7 +3285,7 @@ namespace rocsparse
                                                             BSRGEMM_CHUNKSIZE,
                                                             32,
                                                             false>),
-                dim3(rocsparse::bsrgemm_clamp_grid_size(handle, group_size[0])),
+                dim3(rocsparse::get_grid_size_x(handle, group_size[0], BSRGEMM_BLOCKSIZE)),
                 dim3(BSRGEMM_BLOCKSIZE),
                 0,
                 stream,
