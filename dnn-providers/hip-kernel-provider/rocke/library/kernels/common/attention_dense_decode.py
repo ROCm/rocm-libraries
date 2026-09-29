@@ -262,9 +262,11 @@ class PersistDecode:
 
 class PersistQbMajor(PersistDecode):
     """``wi = qb*(Hq*B) + hq*B + bt``: the query block is the slowest digit, so
-    grid-stride spreads cheap and expensive blocks over each CTA. ``interleave``
-    reverses the block for odd ``hq``. Keying the reversal on ``hq`` keeps it a
-    bijection: each head's blocks are either in order or reversed."""
+    grid-stride spreads cheap and expensive blocks over each CTA. Under causal
+    masking the blocks are folded; ``interleave``
+    instead reverses the block for odd ``hq`` (measured behind the fold, so auto
+    never sets it). Keying the reversal on ``hq`` keeps it a bijection: each head's
+    blocks are either in order or reversed."""
 
     name = "qb_major"
     fastdiv_divisors = ("batch", "num_query_heads", "gqa")
@@ -280,7 +282,9 @@ class PersistQbMajor(PersistDecode):
             last = b.sub(shape.val("nqb"), b.const_i32(1))
             qb = b.select(odd, b.sub(last, qb0), qb0)
         else:
-            qb = qb0
+            qb = shape.branch(
+                shape.balance(), lambda: emit_fold(b, qb0, shape), lambda: qb0
+            )
         return Decoded(qb, hq, bt)
 
 
@@ -348,7 +352,8 @@ def _aligned_causal_error(spec, name: str):
 class PersistGqaPair(PersistDecode):
     """NP = NQB*Hkv*B CTAs; two neighbouring CTAs cover one (qb pair, hkv, bt)
     group, each half the local query heads at both complementary blocks, so the
-    two costs sum to a constant."""
+    two costs sum to a constant. Not auto-selected: behind the best order on
+    every shape auto used to pick it for."""
 
     name = "gqa_pair"
     tag = "gqapair"
@@ -391,7 +396,9 @@ class PersistGqaPair(PersistDecode):
 
 class PersistGqaPair2Phase(PersistDecode):
     """NP = W/2 CTAs; gqa neighbouring CTAs cover all local query heads of one
-    (qb pair, hkv, bt), and phase 0/1 selects the complementary blocks."""
+    (qb pair, hkv, bt), and phase 0/1 selects the complementary blocks. Not
+    auto-selected: behind the best order on every shape auto used to pick it
+    for."""
 
     name = "gqa_pair_2phase"
     tag = "gqapair2"

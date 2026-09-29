@@ -210,74 +210,80 @@ class TestDenseWavesPerEuWiring(unittest.TestCase):
 
 
 class TestDenseGqaPairWiring(unittest.TestCase):
-    """Invariant-compatible shapes select a balanced GQA-local decode."""
+    """Invariant-compatible shapes accept an explicit balanced GQA-local decode;
+    auto picks the L2-local one."""
 
-    def test_exact_llama3_8b_prefill_auto_selects_gqa_pair(self):
-        spec = _spec(_gfx950_dense_req(**_LLAMA_8K), _WIDE)
+    def test_exact_llama3_8b_prefill_explicit_gqa_pair(self):
+        spec = _spec(_gfx950_dense_req(**_LLAMA_8K), _WIDE, persist_decode="gqa_pair")
         self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
         self.assertIn("gqapair", spec.kernel_name())
         self.assertTrue(spec.wide_lds_dma)
         self.assertIn("wdma", spec.kernel_name())
         self.assertEqual(spec.num_persistent, 256)
 
-    def test_explicit_gqa_pair_knob_canonicalizes_to_the_default(self):
+    def test_explicit_auto_decode_knob_canonicalizes_to_the_default(self):
         """Pinning the decode auto already picks is the default kernel: the
         knob is dropped, so the id is the default's and no duplicate is minted."""
         req = _gfx950_dense_req(**_LLAMA_8K)
-        pinned = tuning_spec_with_knobs(req, _WIDE, {"persist_decode": "gqa_pair"})
-        self.assertEqual(pinned, attention_tuning_spec(req, _WIDE))
+        default = attention_tuning_spec(req, _WIDE)
+        self.assertEqual(default.kernel_spec.resolved_persist_decode, "bt_hkv_minor")
+        pinned = tuning_spec_with_knobs(req, _WIDE, {"persist_decode": "bt_hkv_minor"})
+        self.assertEqual(pinned, default)
         # Wide DMA records its problem-dependent default tile.
         self.assertEqual(pinned.knobs, (("block_m", 256),))
-        self.assertEqual(pinned.kernel_spec.resolved_persist_decode, "gqa_pair")
-        self.assertIn("gqapair", pinned.kernel_name())
 
     def test_invalid_dense_decode_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "persist_decode"):
             _spec(_gfx950_dense_req(), _PERSIST, persist_decode="not-a-decode")
 
-    def test_s4096_shape_selects_two_phase_pair_and_wide_dma(self):
+    def test_s4096_shape_accepts_two_phase_pair_and_wide_dma(self):
         req = _gfx950_dense_req(**{**_LLAMA_8K, "seqlen_q": 4096, "seqlen_k": 4096})
-        spec = _spec(req, _WIDE)
+        spec = _spec(req, _WIDE, persist_decode="gqa_pair_2phase")
         self.assertEqual(spec.resolved_persist_decode, "gqa_pair_2phase")
         self.assertTrue(spec.wide_lds_dma)
         self.assertIn("gqapair2", spec.kernel_name())
         self.assertIn("wdma", spec.kernel_name())
 
     def test_bf16_shape_uses_invariant_compatible_fast_path(self):
-        spec = _spec(_gfx950_dense_req(**{**_LLAMA_8K, "dtype": "bf16"}), _WIDE)
+        spec = _spec(
+            _gfx950_dense_req(**{**_LLAMA_8K, "dtype": "bf16"}),
+            _WIDE,
+            persist_decode="gqa_pair",
+        )
         self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
         self.assertTrue(spec.wide_lds_dma)
 
-    def test_s2048_h64_selects_two_phase_pair(self):
+    def test_s2048_h64_accepts_two_phase_pair(self):
         req = _gfx950_dense_req(
             **{**_LLAMA_8K, "nhead_q": 64, "seqlen_q": 2048, "seqlen_k": 2048}
         )
-        spec = _spec(req, _WIDE)
+        spec = _spec(req, _WIDE, persist_decode="gqa_pair_2phase")
         self.assertEqual(spec.resolved_persist_decode, "gqa_pair_2phase")
         self.assertTrue(spec.wide_lds_dma)
 
-    def test_explicit_two_phase_pair_knob_canonicalizes_to_the_default(self):
+    def test_explicit_pair_decodes_are_kept_with_their_own_ids(self):
+        """A decode auto does not pick is kept, and gets its own id."""
         req = _gfx950_dense_req(**{**_LLAMA_8K, "seqlen_q": 4096, "seqlen_k": 4096})
-        pinned = tuning_spec_with_knobs(
-            req, _WIDE, {"persist_decode": "gqa_pair_2phase"}
-        )
-        self.assertEqual(pinned, attention_tuning_spec(req, _WIDE))
-        self.assertEqual(pinned.kernel_spec.resolved_persist_decode, "gqa_pair_2phase")
-        # A decode auto does not pick is kept, and gets its own id.
-        other = tuning_spec_with_knobs(req, _WIDE, {"persist_decode": "hkv_major"})
-        self.assertEqual(
-            dict(other.knobs), {"block_m": 256, "persist_decode": "hkv_major"}
-        )
-        self.assertNotEqual(other.tuning_id, pinned.tuning_id)
+        default = attention_tuning_spec(req, _WIDE)
+        ids = {default.tuning_id}
+        for decode in ("gqa_pair_2phase", "hkv_major"):
+            with self.subTest(decode=decode):
+                pinned = tuning_spec_with_knobs(req, _WIDE, {"persist_decode": decode})
+                self.assertEqual(
+                    dict(pinned.knobs), {"block_m": 256, "persist_decode": decode}
+                )
+                self.assertEqual(pinned.kernel_spec.resolved_persist_decode, decode)
+                self.assertNotIn(pinned.tuning_id, ids)
+                ids.add(pinned.tuning_id)
 
     def test_exact_shape_with_sinks_keeps_gqa_pair(self):
         req = _gfx950_dense_req(**_LLAMA_8K, use_sinks=True)
-        spec = _spec(req, _PERSIST)
+        spec = _spec(req, _PERSIST, persist_decode="gqa_pair")
         self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
         self.assertTrue(spec.use_sinks)
         self.assertFalse(spec.wide_lds_dma)
         # No dispatch gate stricter than the kernel: wide DMA admits sinks too.
-        self.assertTrue(_spec(req, _WIDE).use_sinks)
+        self.assertTrue(_spec(req, _WIDE, persist_decode="gqa_pair").use_sinks)
 
     def test_sliding_window_falls_back_to_qb_major(self):
         req = _gfx950_dense_req(**_LLAMA_8K, sliding_window=512)
@@ -287,9 +293,9 @@ class TestDenseGqaPairWiring(unittest.TestCase):
                     _spec(req, spec_id).resolved_persist_decode, "qb_major"
                 )
 
-    def test_mha_falls_back_to_qb_major(self):
+    def test_mha_selects_bt_hkv_minor(self):
         spec = _spec(_gfx950_dense_req(**{**_LLAMA_8K, "nhead_k": 32}), _WIDE)
-        self.assertEqual(spec.resolved_persist_decode, "qb_major")
+        self.assertEqual(spec.resolved_persist_decode, "bt_hkv_minor")
         self.assertTrue(spec.wide_lds_dma)
         self.assertNotIn("gqapair", spec.kernel_name())
 
@@ -336,7 +342,7 @@ class TestDenseBottomRightWiring(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "bottom.right"):
                         _spec(self._moving_req(mask_type), spec_id)
 
-    def test_equal_length_bottom_right_preserves_gqa_pair_and_wide_dma(self):
+    def test_equal_length_bottom_right_preserves_decode_and_wide_dma(self):
         mask_pairs = (
             (AttentionMaskType.TOP_LEFT_CAUSAL, 2),
             (1, AttentionMaskType.BOTTOM_RIGHT_CAUSAL),
@@ -352,7 +358,9 @@ class TestDenseBottomRightWiring(unittest.TestCase):
                 self.assertEqual(bottom_right_spec, top_left_spec)
                 self.assertFalse(bottom_right_spec.causal_bottom_right)
                 self.assertTrue(bottom_right_spec.persistent)
-                self.assertEqual(bottom_right_spec.resolved_persist_decode, "gqa_pair")
+                self.assertEqual(
+                    bottom_right_spec.resolved_persist_decode, "bt_hkv_minor"
+                )
                 self.assertTrue(bottom_right_spec.wide_lds_dma)
 
 
@@ -392,7 +400,7 @@ class TestDenseGeometrySpec(unittest.TestCase):
         self.assertEqual(spec.lds_v_row_pad, layout["lds_v_row_pad"])
 
     def test_block_m_controls_grid_and_kernel_identity(self):
-        default = self._spec()
+        default = replace(self._spec(), nonpersist_decode="qb_minor")
         bm128 = replace(default, block_m=128)
         self.assertEqual(attention_dense_grid(default), (2, 32, 1))
         self.assertEqual(attention_dense_grid(bm128), (4, 32, 1))
@@ -973,7 +981,7 @@ class TestGfx950DenseCandidates(unittest.TestCase):
         self.assertEqual(spec.block_m, 256)
         self.assertTrue(spec.persistent)
         self.assertTrue(spec.wide_lds_dma)
-        self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
+        self.assertEqual(spec.resolved_persist_decode, "bt_hkv_minor")
 
     def test_registered_combos_include_dense_not_unified_2d(self):
         from dispatch.attention import registered_attention_combos
