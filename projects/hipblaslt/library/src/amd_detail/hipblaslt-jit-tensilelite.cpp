@@ -1,11 +1,10 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "hipblaslt-jit-component.hpp"
+#include "hipblaslt-jit-loader.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
 #include "hipblaslt-jit-process.hpp"
 #include "hipblaslt-jit-tensilelite-artifacts.hpp"
-#include "hipblaslt-jit-tensilelite-internal.hpp"
 #include "hipblaslt-jit-tensilelite.hpp"
 #include "hipblaslt_internal.hpp"
 #include "rocblaslt-functions.h"
@@ -47,12 +46,6 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
         {
             if(!condition)
                 throw std::runtime_error(message);
-        }
-
-        void checkHip(hipError_t status, const char* operation)
-        {
-            if(status != hipSuccess)
-                throw std::runtime_error(std::string(operation) + ": " + hipGetErrorString(status));
         }
 
         using detail::artifacts::artifact;
@@ -231,29 +224,26 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
 
     namespace
     {
-        std::shared_ptr<detail::Bundle> loadGeneratedBundle(const Options&         options,
-                                                            const hipDeviceProp_t& properties,
-                                                            int                    device)
+        // Reads the TLJIT001 bundle the generator wrote as a library entry plus
+        // prebuilt code objects.
+        hipblaslt_jit::GeneratedSolution readGeneratedSolution(const Options&     options,
+                                                               const std::string& deviceTarget)
         {
-            auto  context     = std::make_shared<detail::Bundle>();
-            auto& p           = *context;
-            p.device          = device;
-            p.properties      = properties;
+            using hipblaslt_jit::BuildUnit;
+            hipblaslt_jit::GeneratedSolution result;
             const auto bundle = fs::canonical(fs::u8path(options.outputPath) / "bundle");
-            p.manifest        = (bundle / "manifest.json").u8string();
             std::vector<std::string> objectList;
             const auto               tree = readEnvelope(bundle / "loader.bin", objectList);
             require(field(tree, "schema_version") == "2" && field(tree, "counts.solutions") == "1"
                         && field(tree, "counts.main_kernels") == "1"
                         && field(tree, "solution.index") == "0",
                     "Unsupported single-solution manifest schema/counts/index");
-            p.kernel = field(tree, "main_kernel.name");
-            require(p.kernel == field(tree, "solution.kernel_name"),
+            result.kernelName = field(tree, "main_kernel.name");
+            require(result.kernelName == field(tree, "solution.kernel_name"),
                     "Manifest kernel names disagree");
-            std::string architecture(properties.gcnArchName);
             require(field(tree, "architecture.requested") == options.architecture,
                     "Bundle architecture differs from request");
-            require(targetMatchesDevice(field(tree, "architecture.resolved"), architecture)
+            require(targetMatchesDevice(field(tree, "architecture.resolved"), deviceTarget)
                         && field(tree, "architecture.compiler_target")
                                == field(tree, "architecture.resolved"),
                     "Bundle architecture does not match device");
@@ -275,33 +265,38 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
             require(physicalLibrary == logicalLibrary
                         || physicalLibrary == fs::path(logicalLibrary).concat(".zlib"),
                     "Manifest physical and logical library paths disagree");
-            p.hardware = TensileLite::hip::GetDevice(properties, p.device);
-            p.library  = std::dynamic_pointer_cast<Master>(
-                TensileLite::LoadLibraryData<TensileLite::ContractionProblemGemm>(
-                    readLibrary(physicalLibrary)));
-            require(p.library && p.library->solutions.size() == 1 && p.library->solutions.count(0),
+            result.entry = readLibrary(physicalLibrary);
+            const auto library
+                = std::dynamic_pointer_cast<Master>(
+                    TensileLite::LoadLibraryData<TensileLite::ContractionProblemGemm>(
+                        result.entry));
+            require(library && library->solutions.size() == 1 && library->solutions.count(0),
                     "Expected a non-lazy library containing only local solution 0");
-            auto solution = p.library->solutions.at(0);
-            require(solution && solution->index == 0 && solution->kernelName == p.kernel
+            auto solution = library->solutions.at(0);
+            require(solution && solution->index == 0 && solution->kernelName == result.kernelName
                         && solution->solutionName == field(tree, "solution.name"),
                     "Library solution identity does not match manifest");
-            p.adapter = std::make_shared<TensileLite::hip::SolutionAdapter>(false, "jit-gemm");
             for(const auto& path : codeObjects)
-                checkHip(p.adapter->loadCodeObjectBytes(readArtifact(path)),
-                         "Load generated code object");
-            checkHip(p.adapter->initKernel(p.kernel), "Resolve generated kernel symbol");
-            return context;
+                result.units.push_back({path == codeObject ? BuildUnit::Role::Main
+                                                           : BuildUnit::Role::Helper,
+                                        path.filename().u8string(),
+                                        readArtifact(path)});
+            return result;
         }
 
         struct Provider final : jit::detail::BackendImplementation
         {
-            Options                                               options;
-            std::shared_ptr<const hipblaslt_jit::Predictor>       predictor;
-            std::shared_ptr<const hipblaslt_jit::TuningKnowledge> knowledge;
+            Options                                                 options;
+            std::shared_ptr<const hipblaslt_jit::Predictor>         predictor;
+            std::shared_ptr<const hipblaslt_jit::TuningKnowledge>   knowledge;
+            std::shared_ptr<const hipblaslt_jit::CodeObjectBuilder> builder;
+            std::shared_ptr<const hipblaslt_jit::SolutionLoader>    loader;
             explicit Provider(const Options& value)
                 : options(value)
                 , predictor(hipblaslt_jit::makeOrigamiPredictor())
                 , knowledge(hipblaslt_jit::makeTensileLiteDefaults())
+                , builder(hipblaslt_jit::makePrebuiltBuilder())
+                , loader(hipblaslt_jit::makeTensileLoader())
             {
             }
             std::string_view name() const noexcept override
@@ -333,22 +328,24 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                 }
                 try
                 {
+                    const auto failed = [&](const hipblaslt_jit::Status& status) {
+                        diagnostics.message = status.message;
+                        return status.code == hipblaslt_jit::Status::Code::NotSupported
+                                   ? HIPBLAS_STATUS_NOT_SUPPORTED
+                                   : HIPBLAS_STATUS_INTERNAL_ERROR;
+                    };
+                    hipblaslt_jit::DeviceTarget device;
+                    auto status = hipblaslt_jit::DeviceTarget::make(target.device, device);
+                    if(!status.ok())
+                        return failed(status);
                     const bool  predict = configured.configPath.empty();
                     std::string summary;
                     if(predict)
                     {
-                        hipblaslt_jit::DeviceTarget device;
-                        auto status = hipblaslt_jit::DeviceTarget::make(target.device, device);
                         hipblaslt_jit::Prediction prediction;
-                        if(status.ok())
-                            status = predictor->predict(request, device, *knowledge, prediction);
+                        status = predictor->predict(request, device, *knowledge, prediction);
                         if(!status.ok())
-                        {
-                            diagnostics.message = status.message;
-                            return status.code == hipblaslt_jit::Status::Code::NotSupported
-                                       ? HIPBLAS_STATUS_NOT_SUPPORTED
-                                       : HIPBLAS_STATUS_INTERNAL_ERROR;
-                        }
+                            return failed(status);
                         configured.configPath = writeJitGemmRequest(
                             static_cast<const jit::detail::GemmRequest&>(request),
                             configured,
@@ -358,18 +355,22 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                                     "TensileLite was compiled";
                     }
                     generate(configured, predict ? "Tensile.JitGemm" : "Tensile.SingleSolution");
-                    auto candidate
-                        = loadGeneratedBundle(configured, target.properties, target.device);
-                    size_t workspace = 0;
-                    auto   status
-                        = candidate->support(request, workspaceLimit, workspace, diagnostics);
-                    if(status == HIPBLAS_STATUS_SUCCESS)
-                    {
-                        bundle = std::move(candidate);
-                        if(predict)
-                            diagnostics.message = summary;
-                    }
-                    return status;
+                    const auto generated = readGeneratedSolution(configured, device.targetId);
+                    const hipblaslt_jit::GenerationRequest generation{
+                        request, device, nullptr, 1, workspaceLimit, {}, {}};
+                    hipblaslt_jit::BuiltSolution built;
+                    status = builder->build(generated, generation, built);
+                    if(status.ok())
+                        status = loader->support(built, request, device, workspaceLimit);
+                    std::shared_ptr<const jit::detail::KernelBundle> loaded;
+                    if(status.ok())
+                        status = loader->load(built, request, device, workspaceLimit, loaded);
+                    if(!status.ok())
+                        return failed(status);
+                    bundle = std::move(loaded);
+                    if(predict)
+                        diagnostics.message = summary;
+                    return HIPBLAS_STATUS_SUCCESS;
                 }
                 catch(const std::bad_alloc&)
                 {

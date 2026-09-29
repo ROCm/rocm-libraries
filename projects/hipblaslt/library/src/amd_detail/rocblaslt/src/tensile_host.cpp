@@ -41,8 +41,8 @@
 #include "tensile_host.hpp"
 #ifdef HIPBLASLT_ENABLE_JIT
 #include "../../hipblaslt-jit-gemm-internal.hpp"
+#include "../../hipblaslt-jit-loader.hpp"
 #include "../../hipblaslt-jit-problem-type.hpp"
-#include "../../hipblaslt-jit-tensilelite-internal.hpp"
 #include "../../hipblaslt_internal.hpp"
 namespace jit = hipblaslt_ext::experimental::jit::detail;
 #endif
@@ -5983,15 +5983,13 @@ namespace hipblaslt_jit
     {
         return ConstructTensileProblem(request.problem);
     }
-}
 
-namespace hipblaslt_ext::experimental::jit::tensilelite::detail
-{
     namespace
     {
         // Physical layout is a property of the supplied tensor. Architecture/type
         // legality remains in Tensile's solution validators and runtime predicates.
-        bool scaleLayoutMatches(const Bundle& bundle, const RocblasltContractionProblem& problem)
+        bool scaleLayoutMatches(const TensileBundle&               bundle,
+                                const RocblasltContractionProblem& problem)
         {
             using Format        = RocblasltContractionProblem::ScalingFormat;
             const auto expected = bundle.library->solutions.at(0)->problemType.mxScaleFormat;
@@ -6006,7 +6004,7 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
             return true;
         }
 
-        struct Launch final : jit::detail::PreparedLaunch
+        struct Launch final : jit::PreparedLaunch
         {
             std::shared_ptr<TensileLite::hip::SolutionAdapter> adapter;
             std::vector<TensileLite::KernelInvocation>         kernels;
@@ -6025,15 +6023,15 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
         };
     }
 
-    hipblasStatus_t Bundle::support(const jit::detail::OperationRequest& operation,
-                                    size_t                               limit,
-                                    size_t&                              workspace,
-                                    jit::Diagnostics&                         diagnostics) const
+    hipblasStatus_t TensileBundle::support(const OperationRequest& operation,
+                                           size_t                  limit,
+                                           size_t&                 workspace,
+                                           Diagnostics&            diagnostics) const
     {
         workspace           = 0;
         diagnostics.backend = "TensileLite";
-        const auto* request = dynamic_cast<const jit::detail::GemmRequest*>(&operation);
-        if(!request || operation.kind() != jit::detail::GemmRequest::operation)
+        const auto* request = dynamic_cast<const jit::GemmRequest*>(&operation);
+        if(!request || operation.kind() != jit::GemmRequest::operation)
         {
             diagnostics.message = "TensileLite does not implement this operation";
             return HIPBLAS_STATUS_NOT_SUPPORTED;
@@ -6076,17 +6074,17 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
         return HIPBLAS_STATUS_SUCCESS;
     }
 
-    hipblasStatus_t Bundle::prepare(const jit::detail::OperationRequest&                operation,
-                                    const jit::detail::ExecutionContext&                execution,
-                                    std::shared_ptr<const jit::detail::PreparedLaunch>& prepared,
-                                    jit::Diagnostics& diagnostics) const
+    hipblasStatus_t TensileBundle::prepare(const OperationRequest&                operation,
+                                           const ExecutionContext&                execution,
+                                           std::shared_ptr<const PreparedLaunch>& prepared,
+                                           Diagnostics&                           diagnostics) const
     {
         prepared.reset();
         size_t workspace = 0;
         auto   status    = support(operation, execution.workspaceBytes, workspace, diagnostics);
         if(status != HIPBLAS_STATUS_SUCCESS)
             return status;
-        const auto& request = static_cast<const jit::detail::GemmRequest&>(operation);
+        const auto& request = static_cast<const jit::GemmRequest&>(operation);
         auto        raw = request.problem; // Scalar storage remains owned by request for this call.
         raw.workspace   = execution.workspace;
         raw.workspaceSize = execution.workspaceBytes;
