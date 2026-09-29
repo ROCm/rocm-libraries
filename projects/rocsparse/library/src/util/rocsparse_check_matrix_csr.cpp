@@ -24,6 +24,7 @@
 #include "internal/util/rocsparse_check_matrix_csr.h"
 #include "rocsparse_check_matrix_csr.hpp"
 #include "rocsparse_enum_utils.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "check_matrix_csr_device.h"
@@ -63,19 +64,14 @@
 //      never wrapped but the ceil-divide could exceed the 32-bit dim3 field and
 //      be truncated on the way into the launch.
 //
-// Once PR #11512 lands, the rocsparse::min(...) expression below is a one-line
-// substitution for
-//     rocsparse::get_grid_size(static_cast<int64_t>(wf_size) * m, block_size)
-// which performs the same overflow-safe ceil-divide and grid clamp.
+// rocsparse::get_grid_size_x applies both limits. The grid-stride variant runs
+// exactly when that clamp is below the natural block count.
 #define LAUNCH_CHECK_MATRIX_CSR(block_size, wf_size)                                               \
     do                                                                                             \
     {                                                                                              \
-        static constexpr int64_t max_work_items = 0xffffffffLL;                                    \
-        const int64_t            max_blocks_x                                                      \
-            = rocsparse::min(static_cast<int64_t>(handle->properties.maxGridSize[0]),              \
-                             max_work_items / (block_size));                                       \
         const int64_t natural_blocks_x = (static_cast<int64_t>(wf_size) * m - 1) / block_size + 1; \
-        const int64_t num_blocks_x     = rocsparse::min(natural_blocks_x, max_blocks_x);           \
+        const int64_t num_blocks_x                                                                 \
+            = rocsparse::get_grid_size_x(handle, natural_blocks_x, block_size);                    \
         if(num_blocks_x < natural_blocks_x)                                                        \
         {                                                                                          \
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                    \
