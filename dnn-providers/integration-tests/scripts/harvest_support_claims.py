@@ -26,14 +26,19 @@ Log handling
 
 Runs
 ----
-4. Each RUN argument is one CI run: a job log, or a directory of *.log job
-   logs.  A log with a rejected block contributes nothing, and the exit
-   status is 1.  A cell is claimed when it is kept in at least --min-runs
-   runs and dropped in none; a single drop anywhere vetoes it.
-5. claim_failures and failed_in_use are listed for a human; they are never
+4. A run is one CI workflow run.  Each RUN argument is a run read from disk:
+   a job log, or a directory of *.log job logs.  Each --run ID is a run
+   fetched from GitHub with the gh CLI: the logs of its jobs whose name
+   matches --jobs and that succeeded or failed.  With neither, the latest
+   completed scheduled run of the develop nightly is fetched.
+5. A log with a rejected block contributes nothing, and the exit status is
+   1.  A cell is claimed when it is kept in at least --min-runs runs and
+   dropped in none; a single drop anywhere vetoes it.
+6. claim_failures and failed_in_use are listed for a human; they are never
    claims.
 
-Exit status: 0 on success, 1 if any log was rejected, 2 on a usage error.
+Exit status: 0 on success, 1 if any log was rejected, 2 on a usage error or
+when a run cannot be fetched.
 """
 
 from __future__ import annotations
@@ -41,11 +46,23 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Dict, FrozenSet, List, NamedTuple, Optional, Sequence, Set, Tuple
+from typing import (
+    Callable,
+    Dict,
+    FrozenSet,
+    List,
+    NamedTuple,
+    Optional,
+    Pattern,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 VALID_PLATFORMS = {"linux", "windows"}
 SCHEMA_VERSION = 1
@@ -65,6 +82,12 @@ DROP_SHORTFALL = "reached below required"
 DROP_NO_DEPTH = "depth missing or unknown"
 DROP_BAD_PATH = "bundle outside integration-test-bundles/"
 DROP_MIN_RUNS = "kept in fewer than --min-runs runs"
+
+REPO = "ROCm/rocm-libraries"
+NIGHTLY_WORKFLOW = "therock-multi-arch-ci-nightly.yml"
+DEFAULT_JOBS = "Test miopenprovider"
+FETCHED_CONCLUSIONS = ("success", "failure")
+NIGHTLY_PAGE = 50
 
 _TIMESTAMP = re.compile(r"^\d{4}-\d\d-\d\dT[\d:.]+Z ?")
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -513,6 +536,87 @@ def render_table(result: Harvest) -> str:
     return "\n".join(out)
 
 
+Gh = Callable[[List[str]], bytes]
+
+
+class FetchError(RuntimeError):
+    """A CI run or its job logs could not be fetched."""
+
+
+def run_gh(args: List[str]) -> bytes:
+    """Runs `gh api ARGS`, whose first item is the endpoint, and returns stdout."""
+    try:
+        done = subprocess.run(["gh", "api", *args], capture_output=True, check=False)
+    except FileNotFoundError as exc:
+        raise FetchError("the GitHub CLI (gh) is not installed") from exc
+    if done.returncode != 0:
+        message = done.stderr.decode("utf-8", "replace").strip()
+        raise FetchError(f"gh api {args[0]}: {message}")
+    return done.stdout
+
+
+def latest_nightly(gh: Gh) -> int:
+    """Returns the ID of the latest completed scheduled nightly run on develop.
+
+    GitHub's branch, event and status filters on this endpoint return stale
+    and varying run lists, so none is sent: the newest NIGHTLY_PAGE runs are
+    listed and checked here.
+    """
+    endpoint = (
+        f"repos/{REPO}/actions/workflows/{NIGHTLY_WORKFLOW}/runs"
+        f"?per_page={NIGHTLY_PAGE}"
+    )
+    for run in json.loads(gh([endpoint])).get("workflow_runs") or []:
+        if (
+            run.get("event") == "schedule"
+            and run.get("head_branch") == "develop"
+            and run.get("status") == "completed"
+        ):
+            return int(run["id"])
+    raise FetchError(
+        f"no completed scheduled {NIGHTLY_WORKFLOW} run on develop"
+        f" among its newest {NIGHTLY_PAGE} runs"
+    )
+
+
+def fetch_run(run_id: int, jobs: Pattern[str], gh: Gh) -> List[Tuple[str, str]]:
+    """Returns (label, log text) for each job of RUN_ID that matches JOBS.
+
+    Jobs that neither succeeded nor failed have no complete log; each one is
+    named on stderr and skipped.
+    """
+    status = json.loads(gh([f"repos/{REPO}/actions/runs/{run_id}"])).get("status")
+    if status != "completed":
+        raise FetchError(f"run {run_id} is {status}, not completed")
+    listing = gh(
+        [
+            f"repos/{REPO}/actions/runs/{run_id}/jobs?per_page=100",
+            "--paginate",
+            "--jq",
+            ".jobs[] | {id, name, conclusion}",
+        ]
+    )
+    matched = [
+        job
+        for job in (json.loads(line) for line in listing.decode().splitlines() if line)
+        if jobs.search(job["name"])
+    ]
+    if not matched:
+        raise FetchError(f"run {run_id} has no job matching {jobs.pattern!r}")
+
+    logs = []
+    for job in sorted(matched, key=lambda j: j["id"]):
+        label = f"run {run_id} job {job['id']}"
+        if job["conclusion"] not in FETCHED_CONCLUSIONS:
+            print(f"skipped {label}: {job['conclusion']}", file=sys.stderr)
+            continue
+        text = gh([f"repos/{REPO}/actions/jobs/{job['id']}/logs"])
+        logs.append((label, text.decode("utf-8", "replace")))
+    if not logs:
+        raise FetchError(f"run {run_id} has no succeeded or failed matching job")
+    return logs
+
+
 def _lane_arg(text: str) -> str:
     if not _LANE.match(text):
         raise argparse.ArgumentTypeError(
@@ -531,6 +635,13 @@ def _positive_int(text: str) -> int:
     return value
 
 
+def _regex(text: str) -> Pattern[str]:
+    try:
+        return re.compile(text)
+    except re.error as exc:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a regex: {exc}")
+
+
 def _read_run(path: Path) -> List[Tuple[str, str]]:
     files = sorted(path.glob("*.log")) if path.is_dir() else [path]
     if not files:
@@ -538,15 +649,31 @@ def _read_run(path: Path) -> List[Tuple[str, str]]:
     return [(str(f), f.read_text(encoding="utf-8", errors="replace")) for f in files]
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Optional[Sequence[str]] = None, gh: Gh = run_gh) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
         "runs",
-        nargs="+",
+        nargs="*",
         metavar="RUN",
         help="one CI run: a job log, or a directory of *.log job logs",
+    )
+    parser.add_argument(
+        "--run",
+        dest="run_ids",
+        type=_positive_int,
+        action="append",
+        default=[],
+        metavar="ID",
+        help="one CI run fetched from GitHub by its run ID (repeatable)",
+    )
+    parser.add_argument(
+        "--jobs",
+        type=_regex,
+        default=re.compile(DEFAULT_JOBS),
+        metavar="REGEX",
+        help=f"fetch the jobs whose name matches this (default: {DEFAULT_JOBS!r})",
     )
     parser.add_argument(
         "--min-runs",
@@ -560,15 +687,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--format", choices=("table", "json"), default="table")
     args = parser.parse_args(argv)
 
-    if args.min_runs > len(args.runs):
+    repeated = sorted(i for i, n in Counter(args.run_ids).items() if n > 1)
+    if repeated:
+        print(f"error: --run given twice for {repeated}", file=sys.stderr)
+        return 2
+    count = len(args.runs) + len(args.run_ids) or 1
+    if args.min_runs > count:
         print(
-            f"error: --min-runs {args.min_runs} exceeds the {len(args.runs)} runs given",
+            f"error: --min-runs {args.min_runs} exceeds the {count} runs given",
             file=sys.stderr,
         )
         return 2
     try:
+        run_ids = args.run_ids
+        if not args.runs and not run_ids:
+            run_ids = [latest_nightly(gh)]
+            print(f"latest nightly: run {run_ids[0]}", file=sys.stderr)
         runs = [_read_run(Path(p)) for p in args.runs]
-    except OSError as exc:
+        runs += [fetch_run(i, args.jobs, gh) for i in run_ids]
+    except (OSError, FetchError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 

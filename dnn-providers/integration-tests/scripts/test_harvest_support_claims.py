@@ -10,7 +10,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -21,6 +22,7 @@ from harvest_support_claims import (
     DROP_NOT_PASSED,
     DROP_SHORTFALL,
     Cell,
+    FetchError,
     MalformedSummary,
     block_cells,
     extract_blocks,
@@ -28,6 +30,7 @@ from harvest_support_claims import (
     harvest,
     main,
     read_log,
+    run_gh,
     split_streams,
 )
 
@@ -558,11 +561,12 @@ class TestMain(unittest.TestCase):
         path.write_text(text, encoding="utf-8")
         return str(path)
 
-    def _main(self, *argv: str) -> tuple:
+    def _main(self, *argv: str, gh: Optional["FakeGh"] = None) -> tuple:
+        gh = gh or FakeGh()
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             try:
-                code = main(list(argv))
+                code = main(list(argv), gh)
             except SystemExit as exc:
                 code = exc.code
         return code, out.getvalue(), err.getvalue()
@@ -612,11 +616,176 @@ class TestMain(unittest.TestCase):
             "min-runs zero": [log, "--min-runs", "0"],
             "lane without platform": [log, "--lane", "gfx942"],
             "lane with bad platform": [log, "--lane", "gfx942/macos"],
-            "no runs": [],
+            "min-runs above the default nightly": ["--min-runs", "2"],
+            "run ID zero": ["--run", "0"],
+            "run ID twice": ["--run", "7", "--run", "7"],
+            "jobs not a regex": ["--run", "7", "--jobs", "("],
         }
         for name, argv in cases.items():
             with self.subTest(name):
-                self.assertEqual(self._main(*argv)[0], 2)
+                gh = FakeGh()
+                self.assertEqual(self._main(*argv, gh=gh)[0], 2)
+                self.assertEqual(gh.calls, [])
+
+
+_JOB = "Test miopenprovider (gfx1030, windows)"
+
+
+def _nightly(
+    run_id: int,
+    event: str = "schedule",
+    branch: str = "develop",
+    status: str = "completed",
+) -> dict:
+    return {"id": run_id, "event": event, "head_branch": branch, "status": status}
+
+
+class FakeGh:
+    """Serves `gh api` requests from in-memory runs, jobs and logs."""
+
+    def __init__(
+        self,
+        nightly: Optional[List[dict]] = None,
+        runs: Optional[Dict[int, Tuple[str, List[Tuple[int, str, str]]]]] = None,
+        logs: Optional[Dict[int, str]] = None,
+    ) -> None:
+        self.nightly = nightly or []
+        self.runs = runs or {}
+        self.logs = logs or {}
+        self.calls: List[List[str]] = []
+
+    def __call__(self, args: List[str]) -> bytes:
+        self.calls.append(args)
+        path = args[0].split("?")[0].split("/")
+        if path[-1] == "runs" and path[-2] == "therock-multi-arch-ci-nightly.yml":
+            return json.dumps({"workflow_runs": self.nightly}).encode()
+        if path[-2] == "runs" and int(path[-1]) in self.runs:
+            return json.dumps({"status": self.runs[int(path[-1])][0]}).encode()
+        if path[-1] == "jobs" and int(path[-2]) in self.runs:
+            jobs = self.runs[int(path[-2])][1]
+            return "".join(
+                json.dumps({"id": i, "name": n, "conclusion": c}) + "\n"
+                for i, n, c in jobs
+            ).encode()
+        if path[-1] == "logs" and int(path[-2]) in self.logs:
+            return self.logs[int(path[-2])].encode()
+        raise FetchError(f"gh api {args[0]}: HTTP 404: Not Found")
+
+    def fetched_logs(self) -> List[str]:
+        return [a[0].split("/")[-2] for a in self.calls if a[0].endswith("/logs")]
+
+
+class TestFetch(unittest.TestCase):
+    def _gh(self, status: str = "completed", **overrides: str) -> FakeGh:
+        conclusions = {"11": "success", "12": "success", "13": "cancelled"}
+        conclusions.update(overrides)
+        jobs = [
+            (13, _JOB + " retry", conclusions["13"]),
+            (11, _JOB, conclusions["11"]),
+            (12, "Build miopenprovider", conclusions["12"]),
+        ]
+        text = _single_log(_summary())
+        nightly = [
+            _nightly(10, event="workflow_dispatch"),
+            _nightly(9, status="in_progress"),
+            _nightly(8, branch="users/x/nightly-toggle"),
+            _nightly(7),
+        ]
+        return FakeGh(nightly, {7: (status, jobs)}, {11: text, 12: text, 13: text})
+
+    def _main(self, gh: FakeGh, *argv: str) -> tuple:
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = main(list(argv), gh)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_no_runs_fetches_latest_nightly(self) -> None:
+        gh = self._gh()
+        code, out, err = self._main(gh)
+        self.assertEqual(code, 0)
+        self.assertIn("latest nightly: run 7", err)
+        self.assertIn("skipped run 7 job 13: cancelled", err)
+        self.assertIn("run 7 job 11  1 block", out)
+        self.assertIn("gfx1030/windows        3 claims", out)
+        self.assertEqual(gh.fetched_logs(), ["11"])
+        self.assertTrue(gh.calls[0][0].endswith("/runs?per_page=50"))
+
+    def test_run_is_fetched_by_id(self) -> None:
+        gh = self._gh()
+        code, out, err = self._main(gh, "--run", "7")
+        self.assertEqual(code, 0)
+        self.assertNotIn("latest nightly", err)
+        self.assertIn("run 7 job 11", out)
+        self.assertFalse(any("workflows" in a[0] for a in gh.calls))
+
+    def test_fetched_and_read_runs_count_together(self) -> None:
+        log = tempfile.NamedTemporaryFile("w", suffix=".log", delete=False)
+        self.addCleanup(Path(log.name).unlink)
+        with log:
+            log.write(_single_log(_summary()))
+        code, out, _ = self._main(self._gh(), log.name, "--run", "7", "--min-runs", "2")
+        self.assertEqual(code, 0)
+        self.assertIn("gfx1030/windows        3 claims", out)
+
+    def test_jobs_selects_by_name(self) -> None:
+        gh = self._gh()
+        code, _, _ = self._main(gh, "--run", "7", "--jobs", "^Build")
+        self.assertEqual(code, 0)
+        self.assertEqual(gh.fetched_logs(), ["12"])
+
+    def test_failed_job_is_fetched(self) -> None:
+        gh = self._gh(**{"11": "failure"})
+        self.assertEqual(self._main(gh, "--run", "7")[0], 0)
+        self.assertEqual(gh.fetched_logs(), ["11"])
+
+    def test_unfetchable_runs_exit_2(self) -> None:
+        cases = {
+            "no nightly": (FakeGh(), [], "no completed"),
+            "no completed develop nightly": (
+                FakeGh(
+                    [
+                        _nightly(10, event="workflow_dispatch"),
+                        _nightly(9, status="queued"),
+                        _nightly(8, branch="main"),
+                    ]
+                ),
+                [],
+                "no completed",
+            ),
+            "unknown run": (self._gh(), ["--run", "8"], "HTTP 404"),
+            "run in progress": (
+                self._gh("in_progress"),
+                ["--run", "7"],
+                "not completed",
+            ),
+            "no matching job": (self._gh(), ["--run", "7", "--jobs", "Lint"], "no job"),
+            "no finished job": (
+                self._gh(**{"11": "skipped"}),
+                ["--run", "7"],
+                "no succeeded or failed",
+            ),
+        }
+        for name, (gh, argv, message) in cases.items():
+            with self.subTest(name):
+                code, out, err = self._main(gh, *argv)
+                self.assertEqual(code, 2)
+                self.assertEqual(out, "")
+                self.assertIn(message, err)
+
+    def test_run_gh_errors(self) -> None:
+        with mock.patch("subprocess.run", side_effect=FileNotFoundError):
+            with self.assertRaisesRegex(FetchError, "not installed"):
+                run_gh(["repos/x"])
+        failed = mock.Mock(returncode=1, stdout=b"", stderr=b"HTTP 403: Forbidden\n")
+        with mock.patch("subprocess.run", return_value=failed):
+            with self.assertRaisesRegex(FetchError, "^gh api repos/x: HTTP 403"):
+                run_gh(["repos/x"])
+
+    def test_run_gh_returns_stdout(self) -> None:
+        done = mock.Mock(returncode=0, stdout=b"{}", stderr=b"")
+        with mock.patch("subprocess.run", return_value=done) as run:
+            self.assertEqual(run_gh(["repos/x", "--paginate"]), b"{}")
+        self.assertEqual(run.call_args.args[0], ["gh", "api", "repos/x", "--paginate"])
 
 
 if __name__ == "__main__":
