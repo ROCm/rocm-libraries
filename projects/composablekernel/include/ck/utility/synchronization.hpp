@@ -13,10 +13,11 @@ __device__ void llvm_amdgcn_s_wait_dscnt(short cnt) __asm("llvm.amdgcn.s.wait.ds
 #endif
 #endif
 
-__device__ void wait_dscnt()
+template <index_t cnt = 0>
+__device__ void wait_dscnt(Number<cnt> = {})
 {
 #if defined(__gfx12__)
-    llvm_amdgcn_s_wait_dscnt(0);
+    llvm_amdgcn_s_wait_dscnt(cnt);
 #elif defined(__gfx11__)
     __builtin_amdgcn_s_waitcnt(0xfc07);
 #else

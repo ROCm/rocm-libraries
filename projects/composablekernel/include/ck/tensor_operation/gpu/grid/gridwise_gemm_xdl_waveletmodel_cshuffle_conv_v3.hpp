@@ -810,6 +810,15 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                                const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
                                    c_grid_desc_mblock_mperblock_nblock_nperblock)
     {
+        __shared__ __amdgpu_named_workgroup_barrier_t math_barrier;
+
+        if(threadIdx.x == 0)
+        {
+            __builtin_amdgcn_s_barrier_init(&math_barrier, 8);
+        }
+
+        block_sync_lds();
+
         const CElementwiseOperation c_element_op{};
 
         const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
@@ -974,7 +983,12 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
             auto c_thread_buf = blockwise_gemm.GetCThreadBuffer();
 
             GridwiseGemmMath::template RunMathWavePipeline<HasMainKBlockLoop, TailNum>(
-                a_block_bufs, b_block_bufs, blockwise_gemm, c_thread_buf, num_k_block_main_loop);
+                a_block_bufs,
+                b_block_bufs,
+                blockwise_gemm,
+                c_thread_buf,
+                num_k_block_main_loop,
+                &math_barrier);
 
             Base::template RunEpilogue<CGlobalMemoryDataOperation, false, true>(
                 blockwise_gemm,
