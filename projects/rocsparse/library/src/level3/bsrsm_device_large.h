@@ -95,7 +95,7 @@ namespace rocsparse
                                                              const T*             bsr_val,
                                                              rocsparse_int        block_dim,
                                                              T*                   X,
-                                                             rocsparse_int        ldx,
+                                                             int64_t              ldx,
                                                              int*                 done_array,
                                                              const rocsparse_int* map,
                                                              rocsparse_int*       zero_pivot,
@@ -122,7 +122,8 @@ namespace rocsparse
         const rocsparse_int row_begin = bsr_row_ptr[row] - idx_base;
         const rocsparse_int row_end   = bsr_row_ptr[row + 1] - idx_base;
 
-        // Column index (rhs) into X
+        // Column index (rhs) into X. The X offsets below are formed in 64 bit: X
+        // holds m * nrhs elements, which passes INT32_MAX before bsrsm_num_blocks does.
         const rocsparse_int col_X
             = static_cast<rocsparse_int>((block_id / mb) * NCOLS + threadIdx.x / WFSIZE);
 
@@ -170,13 +171,14 @@ namespace rocsparse
                     // Loop over columns of the BSR block
                     for(int bj = 0; bj < block_dim; ++bj)
                     {
-                        sum = rocsparse::fma(bsr_val[BSR_IND(j, bi, bj, dir)],
-                                             X[(block_dim * local_col + bj) * ldx + col_X],
-                                             sum);
+                        sum = rocsparse::fma(
+                            bsr_val[BSR_IND(j, bi, bj, dir)],
+                            X[(static_cast<int64_t>(block_dim) * local_col + bj) * ldx + col_X],
+                            sum);
                     }
 
                     // Write local sum to X
-                    X[(block_dim * row + bi) * ldx + col_X] -= sum;
+                    X[(static_cast<int64_t>(block_dim) * row + bi) * ldx + col_X] -= sum;
                 }
             }
         }
@@ -195,7 +197,7 @@ namespace rocsparse
                                    : static_cast<T>(1);
 
                 // Load result of bi-th BSR row
-                T val = X[(block_dim * row + bi) * ldx + col_X];
+                T val = X[(static_cast<int64_t>(block_dim) * row + bi) * ldx + col_X];
 
                 // Check for numerical pivot
                 if(diag == static_cast<T>(0))
@@ -205,13 +207,13 @@ namespace rocsparse
                 else
                 {
                     // Divide result of bi-th BSR row by diagonal entry
-                    X[(block_dim * row + bi) * ldx + col_X] = val /= diag;
+                    X[(static_cast<int64_t>(block_dim) * row + bi) * ldx + col_X] = val /= diag;
                 }
 
                 // Update remaining non-diagonal entries
                 for(int bj = lid; bj < bi; bj += WFSIZE)
                 {
-                    X[(block_dim * row + bj) * ldx + col_X]
+                    X[(static_cast<int64_t>(block_dim) * row + bj) * ldx + col_X]
                         -= val * bsr_val[BSR_IND(j, bj, bi, dir)];
                 }
             }
@@ -245,7 +247,7 @@ namespace rocsparse
                                   const T*             bsr_val,
                                   rocsparse_int        block_dim,
                                   T*                   X,
-                                  rocsparse_int        ldx,
+                                  int64_t              ldx,
                                   int*                 done_array,
                                   const rocsparse_int* map,
                                   rocsparse_int*       zero_pivot,
@@ -336,7 +338,7 @@ namespace rocsparse
                                                              const T*             bsr_val,
                                                              rocsparse_int        block_dim,
                                                              T*                   X,
-                                                             rocsparse_int        ldx,
+                                                             int64_t              ldx,
                                                              int*                 done_array,
                                                              const rocsparse_int* map,
                                                              rocsparse_int*       zero_pivot,
@@ -363,7 +365,7 @@ namespace rocsparse
         const rocsparse_int row_begin = bsr_row_ptr[row] - idx_base;
         const rocsparse_int row_end   = bsr_row_ptr[row + 1] - idx_base;
 
-        // Column index into X
+        // Column index into X; the X offsets are 64 bit as in the upper solve.
         const rocsparse_int col_X
             = static_cast<rocsparse_int>((block_id / mb) * NCOLS + threadIdx.x / WFSIZE);
 
@@ -411,13 +413,14 @@ namespace rocsparse
                     // Loop over columns of the BSR block
                     for(int bj = 0; bj < block_dim; ++bj)
                     {
-                        sum = rocsparse::fma(bsr_val[BSR_IND(j, bi, bj, dir)],
-                                             X[(block_dim * local_col + bj) * ldx + col_X],
-                                             sum);
+                        sum = rocsparse::fma(
+                            bsr_val[BSR_IND(j, bi, bj, dir)],
+                            X[(static_cast<int64_t>(block_dim) * local_col + bj) * ldx + col_X],
+                            sum);
                     }
 
                     // Write local sum to X
-                    X[(block_dim * row + bi) * ldx + col_X] -= sum;
+                    X[(static_cast<int64_t>(block_dim) * row + bi) * ldx + col_X] -= sum;
                 }
             }
         }
@@ -436,7 +439,7 @@ namespace rocsparse
                              : static_cast<T>(1);
 
                 // Load result of bi-th BSR row
-                T val = X[(block_dim * row + bi) * ldx + col_X];
+                T val = X[(static_cast<int64_t>(block_dim) * row + bi) * ldx + col_X];
 
                 // Check for numerical pivot
                 if(diag == static_cast<T>(0))
@@ -446,13 +449,13 @@ namespace rocsparse
                 else
                 {
                     // Divide result of bi-th BSR row by diagonal entry
-                    X[(block_dim * row + bi) * ldx + col_X] = val /= diag;
+                    X[(static_cast<int64_t>(block_dim) * row + bi) * ldx + col_X] = val /= diag;
                 }
 
                 // Update remaining non-diagonal entries
                 for(int bj = bi + lid + 1; bj < block_dim; bj += WFSIZE)
                 {
-                    X[(block_dim * row + bj) * ldx + col_X]
+                    X[(static_cast<int64_t>(block_dim) * row + bj) * ldx + col_X]
                         -= val * bsr_val[BSR_IND(j, bj, bi, dir)];
                 }
             }
@@ -486,7 +489,7 @@ namespace rocsparse
                                   const T*             bsr_val,
                                   rocsparse_int        block_dim,
                                   T*                   X,
-                                  rocsparse_int        ldx,
+                                  int64_t              ldx,
                                   int*                 done_array,
                                   const rocsparse_int* map,
                                   rocsparse_int*       zero_pivot,
