@@ -31,6 +31,17 @@ Then pick the bundle kind:
 When in doubt, `import_graph.py` decides: it appends to a sweep whose skeleton
 matches and falls back to a new bundle otherwise.
 
+Whatever the kind, a bundle is not complete until it has all three required
+parts ([formats](file-formats.md#map)):
+
+1. **The graph** — `{Name}.json`, or `graph.template.json` plus a `sweep.json` case.
+2. **Metadata** — `{Name}.meta.json`, or `cases[].metadata` on every sweep case.
+3. **A support-claim sidecar** — `{Name}.support.json`, or the sweep's
+   `support.json` — even if it claims nothing yet. See
+   [Updating support claims](#updating-support-claims).
+
+Golden data is the only optional part.
+
 ## Add a bundle
 
 ### From a graph you already have
@@ -193,7 +204,7 @@ record which engines accept which graphs on which arch and platform. They are
 | Trigger | Action |
 |---|---|
 | A run's `SUPPORT CLAIM SUMMARY` lists entries under **`unclaimed_support`** | The engine accepts graphs nobody has claimed. Record them — this is the main trigger. |
-| You added bundles | New bundles start with no claims; add them for the engines and archs you can run. |
+| You added bundles | Every new bundle ships with a sidecar. Record claims for the engines and archs you can run; if none accepts it, commit an [empty sidecar](#when-no-engine-accepts-the-graph-yet). |
 | `unenforced.no_applicable_claim` covers every claim-bearing graph | This arch/platform has no claims yet (typical on a bring-up ASIC); record them. |
 | An engine gained support for an op | The enforcing lane will show it as `unclaimed_support`; record it. |
 | `CLAIM_BROKEN` and dropping the support is **intended** | Retract the claim by hand — see below. Otherwise fix the engine. |
@@ -242,8 +253,9 @@ records the engine **as supporting the graph if it is ranked**, and skips the
 test (`support-claim authoring run (--write-support-claims)`). It does not
 execute or compare anything. It only ever **adds** claims for the running
 machine's base arch token and platform, merges them into existing sidecars,
-creates a sidecar only when there is something to claim, and writes canonical
-JSON — a run that changes nothing leaves no git diff.
+and writes canonical JSON — a run that changes nothing leaves no git diff. It
+does not create a sidecar for a graph no engine accepted; see
+[When no engine accepts the graph yet](#when-no-engine-accepts-the-graph-yet).
 
 It prints a summary instead of the claim summary:
 
@@ -274,6 +286,23 @@ were; they do not fail the run.
 
 Each machine can only claim its own cell. Claims for other archs or platforms
 come from runs on those machines.
+
+### When no engine accepts the graph yet
+
+A bundle still needs a sidecar when no engine you can run accepts it — a new op
+whose engine support has not landed, or a graph for hardware you do not have.
+Commit an empty one, in canonical form (note the trailing newline):
+
+```json
+{
+  "claims": {},
+  "version": 1
+}
+```
+
+It records that the bundle was reviewed and nothing is claimed yet. The first
+run that sees an engine accept the graph reports it under `unclaimed_support`,
+and `--write-support-claims` fills the claims in.
 
 ### Retract a claim
 
@@ -350,6 +379,8 @@ extend.
       `TEST COVERAGE SUMMARY` and `SUPPORT CLAIM SUMMARY` — not just the exit code.
 - [ ] `unclaimed_support` for your new bundles is recorded in sidecars, and none
       of the new claims is in `failed_in_use`.
+- [ ] Every new bundle has its metadata (`.meta.json`, or `cases[].metadata` on
+      every new sweep case) and a support-claim sidecar, even an empty one.
 - [ ] Golden data, if any, is `dvc commit`ted and `dvc push`ed; only `.json` and
       `.dvc` files are in git.
 - [ ] `verify-support-claims` passes (it runs in pre-commit).

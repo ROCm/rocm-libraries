@@ -15,14 +15,14 @@ dnn-providers/integration-tests/
     {tier}/                                 # quick | standard | comprehensive | full
       {Op}/{Layout}/{DataType}/{Name}/      # a single-graph bundle
         {Name}.json                         #   graph
-        {Name}.meta.json                    #   metadata sidecar         (optional)
-        {Name}.support.json                 #   support-claim sidecar    (optional)
+        {Name}.meta.json                    #   metadata sidecar         (required)
+        {Name}.support.json                 #   support-claim sidecar    (required)
         {Name}.tensors.dvc                  #   golden-data pointer      (optional)
         {Name}.tensor<uid>.bin              #   golden tensors, via DVC  (not in git)
       {Op}/{Topology}/                      # a template-sweep bundle
         graph.template.json                 #   topology with ${case.*} placeholders
-        sweep.json                          #   case matrix (+ per-case metadata)
-        support.json                        #   support-claim sidecar    (optional)
+        sweep.json                          #   case matrix (+ required per-case metadata)
+        support.json                        #   support-claim sidecar    (required)
         golden/{CaseId}/tensors.dvc         #   golden-data pointer      (optional, per case)
         golden/{CaseId}/tensor<uid>.bin     #   golden tensors, via DVC  (not in git)
   test_categories.yaml                      # CTest tiers for this project's own binaries
@@ -40,6 +40,9 @@ Two words used throughout:
   `graph.template.json` expanded once per case in `sweep.json`).
 - A **case** is one registered test. A single-graph bundle is one case; a sweep is
   one case per `cases[]` entry.
+
+Every bundle carries its graph, its **metadata**, and a **support-claim
+sidecar**. Golden data is the only optional part.
 
 ## Discovery and test names
 
@@ -204,9 +207,9 @@ expanded graph. A tensor left with `is_runtime_pass_by_value: true` and a
 
 ## Metadata sidecar — `{Name}.meta.json`
 
-Provenance and run guards for a single-graph bundle. A sweep case carries the
-same object inline as `cases[].metadata`. Parsed by
-`src/harness/BundleMetadata.hpp`.
+Provenance and run guards for a single-graph bundle. **Every single-graph bundle
+has one.** A sweep case carries the same object inline as `cases[].metadata`,
+required on every case. Parsed by `src/harness/BundleMetadata.hpp`.
 
 | Field | Type | Effect |
 |---|---|---|
@@ -218,10 +221,10 @@ same object inline as `cases[].metadata`. Parsed by
 | `inputs` | object | Per-input overrides keyed by tensor uid as a string (`"3"`); non-numeric keys are skipped with a warning. |
 | `generator`, `generator_version`, `generated_at`, `reference_source`, `reference_source_hash`, `reference_strategy`, `rocm_version`, `operation`, `generation_command`, `notes` | string | Provenance only; no effect on the run. |
 
-A missing `.meta.json` is fine for a single-graph bundle (older bundles predate
-it). A present-but-unparseable one is logged and ignored. Generators may write
-extra keys (`config`, `input_range`, …); the harness ignores keys it does not
-know.
+A bundle without its metadata is an error. `format_version` is the only field
+the parser itself requires; record the provenance fields too, so a reviewer can
+tell where the graph came from. Generators may write extra keys (`config`,
+`input_range`, …); the harness ignores keys it does not know.
 
 ## Golden data — `.tensors.dvc` and `.bin`
 
@@ -317,12 +320,16 @@ Rules:
 - In a sweep sidecar a case id may appear in at most one group per engine.
   `--write-support-claims` groups cases whose `support` maps are identical. A
   case named in no group is simply unclaimed.
-- A sidecar claims nothing about engines, archs or platforms it does not list.
-  The absence of a claim is not a claim of non-support.
+- **Every bundle has a sidecar.** A sidecar claims nothing about engines, archs
+  or platforms it does not list; the absence of a claim is not a claim of
+  non-support. A bundle that no engine accepts yet still carries a sidecar with
+  an empty `claims` object — see
+  [Adding Tests](adding-tests.md#when-no-engine-accepts-the-graph-yet).
 - Sidecars are **machine-written** by `--write-support-claims`, which emits a
   canonical form (sorted keys, 2-space indent, trailing newline, LF line
   endings). The pre-commit verifier rejects anything else, so hand edits are
-  limited to *retracting* a claim — and then must keep that exact form.
+  limited to *retracting* a claim or writing an empty sidecar — and then must
+  keep that exact form.
 
 The pre-commit hook `verify-support-claims`
 (`scripts/verify_support_claims.py`) runs on any change under
@@ -447,8 +454,8 @@ execution_settings:
 |---|---|---|
 | Graph `.json` | `IntegrationTestBundle.hpp` | Load error for that case |
 | `graph.template.json` + `sweep.json` | `BundleDiscovery.hpp`, `IntegrationTestBundle.hpp` | A malformed `sweep.json` or bad/duplicate id aborts registration; a bad case fails that case only |
-| `.meta.json` / `cases[].metadata` | `BundleMetadata.hpp` | Metadata ignored with a warning; missing sweep metadata fails the case |
-| `.support.json` / `support.json` | `SupportClaims.cpp` at run time; `scripts/verify_support_claims.py` at commit | Test failure at run time; pre-commit rejection |
+| `.meta.json` / `cases[].metadata` | `BundleMetadata.hpp` | Required for every bundle and every sweep case; a missing file or block is an error |
+| `.support.json` / `support.json` | `SupportClaims.cpp` at run time; `scripts/verify_support_claims.py` at commit | Required for every bundle; a missing sidecar is an error. A broken claim fails the test at run time; a malformed sidecar is rejected at commit |
 | Golden `.bin` / `.dvc` | `IntegrationTestBundle.hpp`; `reference-data-scripts/verify_golden_bundles.py` | Falls back to a reference in `auto` mode; fails in `golden` mode |
 | Engine `.toml` | `TestSettings.hpp` | Binary exits 1 at startup |
 | `test_categories*.yaml` | `shared/ctest/parse_test_categories.py` | CMake configure error |
