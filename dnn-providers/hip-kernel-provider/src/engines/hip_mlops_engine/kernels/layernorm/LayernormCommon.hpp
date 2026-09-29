@@ -32,9 +32,9 @@ __forceinline__ __device__ void calculateMeanRstd(__shared__ float ltmp1[LOCAL_S
 
     for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
     {
-        size_t x_idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
+        size_t xIdx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
 
-        float px = hip_kernel_provider::cast<float>(x[x_idx]);
+        float px = hip_kernel_provider::cast<float>(x[xIdx]);
         ++pcount;
         float delta = px - pmean;
         pmean += delta / static_cast<float>(pcount);

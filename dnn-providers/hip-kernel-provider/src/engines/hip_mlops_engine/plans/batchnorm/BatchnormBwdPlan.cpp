@@ -271,7 +271,7 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         options.update("HIP_PLUGIN_BN_VEC_SIZE", config.vectorsize);
 
         _compiledProgram = kernelCompiler.compile("BatchNormBwdSpatial.cpp", options);
-        _runnableKernels.push_back(_compiledProgram->getKernel("BatchNormBwdSpatial"));
+        _runnableKernels.push_back(_compiledProgram->getKernel("batchNormBwdSpatial"));
         _runnableKernels[0]->setBlockSize(static_cast<unsigned int>(xlocalsize), 1, 1);
         _runnableKernels[0]->setGridSize(static_cast<unsigned int>(xgridsize / xlocalsize), 1, 1);
     }

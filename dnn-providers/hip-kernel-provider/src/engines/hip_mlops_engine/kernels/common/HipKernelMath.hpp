@@ -113,9 +113,9 @@ __forceinline__ __device__ _Float16 pow(_Float16 x, _Float16 y)
 }
 __forceinline__ __device__ _Float16 tanh(_Float16 x)
 {
-    float x_scaled = static_cast<float>(x) * 1.4426950408889634f; // 0x1.715476p+0f = log2(e)
-    float a = __builtin_amdgcn_exp2f(x_scaled);
-    float b = __builtin_amdgcn_exp2f(-x_scaled);
+    float xScaled = static_cast<float>(x) * 1.4426950408889634f; // 0x1.715476p+0f = log2(e)
+    float a = __builtin_amdgcn_exp2f(xScaled);
+    float b = __builtin_amdgcn_exp2f(-xScaled);
 
     _Float16 ret = static_cast<_Float16>((a - b) * __builtin_amdgcn_rcpf(a + b));
     _Float16 one = __builtin_copysignf(1.0f, x);

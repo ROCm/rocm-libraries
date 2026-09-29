@@ -411,7 +411,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     _compiledProgram = kernelCompiler.compile("BatchNormFwdTrainSpatial.cpp", options);
     if(variant != 2)
     {
-        _runnableKernels.push_back(_compiledProgram->getKernel("BatchNormFwdTrainSpatial"));
+        _runnableKernels.push_back(_compiledProgram->getKernel("batchNormFwdTrainSpatial"));
         _runnableKernels[0]->setBlockSize(static_cast<unsigned int>(xlocalsize),
                                           static_cast<unsigned int>(ylocalsize),
                                           static_cast<unsigned int>(zlocalsize));

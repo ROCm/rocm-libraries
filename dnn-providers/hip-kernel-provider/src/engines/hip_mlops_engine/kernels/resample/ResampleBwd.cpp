@@ -93,7 +93,7 @@ __device__ __forceinline__ int64_t
     return count;
 }
 
-extern "C" __global__ void ResampleBwd(const DyType* __restrict__ dy,
+extern "C" __global__ void resampleBwd(const DyType* __restrict__ dy,
                                        const IndexType* __restrict__ index,
                                        DxType* __restrict__ dx)
 {

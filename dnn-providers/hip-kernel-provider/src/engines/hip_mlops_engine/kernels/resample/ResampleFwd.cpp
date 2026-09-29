@@ -85,7 +85,7 @@ __device__ __forceinline__ IndexType flattenSpatialIndex(int64_t d, int64_t h, i
     }
 }
 
-extern "C" __global__ void ResampleFwd(const InputType* __restrict__ x,
+extern "C" __global__ void resampleFwd(const InputType* __restrict__ x,
                                        OutputType* __restrict__ y,
                                        IndexType* __restrict__ index)
 {

@@ -11,7 +11,7 @@ using MeanVarType = HIP_PLUGIN_BN_MEAN_VAR_TYPE;
 using ComputeType = float;
 
 // determine block size using parameters passed from the host
-constexpr int blockSize = HIP_PLUGIN_BN_GRP0 * HIP_PLUGIN_BN_GRP1 * HIP_PLUGIN_BN_GRP2;
+constexpr int BLOCK_SIZE = HIP_PLUGIN_BN_GRP0 * HIP_PLUGIN_BN_GRP1 * HIP_PLUGIN_BN_GRP2;
 
 // define types for vectorized loads/stores
 using InputVecType =
@@ -26,7 +26,7 @@ using ComputeVecType =
     typename hip_kernel_provider::mapped_vector_type<ComputeType, HIP_PLUGIN_BN_VEC_SIZE>::type;
 
 template <unsigned int vecSizeX, unsigned int vecSizeY>
-__device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
+__device__ __forceinline__ void bnFwdInferSpatialImpl(unsigned int tidx,
                                                       unsigned int tidy,
                                                       const InputType* in,
                                                       OutputType* out,
@@ -97,7 +97,7 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
 }
 
 extern "C" __global__ void __launch_bounds__(blockSize)
-    BatchNormFwdInferSpatialEst(const InputType* __restrict in,
+    batchNormFwdInferSpatialEst(const InputType* __restrict in,
                                 OutputType* __restrict out,
                                 const MeanVarType* __restrict estimatedMean,
                                 const MeanVarType* __restrict estimatedVariance,
@@ -118,17 +118,17 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     unsigned int tidz = blockIdx.z;
 
     // decide vector sizes based on problem layout
-    constexpr unsigned int vecSizeX = HIP_PLUGIN_LAYOUT_NHWC ? HIP_PLUGIN_BN_VEC_SIZE : 1;
-    constexpr unsigned int vecSizeY = HIP_PLUGIN_LAYOUT_NHWC ? 1 : HIP_PLUGIN_BN_VEC_SIZE;
+    constexpr unsigned int VEC_SIZE_X = HIP_PLUGIN_LAYOUT_NHWC ? HIP_PLUGIN_BN_VEC_SIZE : 1;
+    constexpr unsigned int VEC_SIZE_Y = HIP_PLUGIN_LAYOUT_NHWC ? 1 : HIP_PLUGIN_BN_VEC_SIZE;
 
     // skip execution for out-of-bound threads
-    if(tidx * vecSizeX >= c || tidy * vecSizeY >= hw || tidz >= batchSize)
+    if(tidx * VEC_SIZE_X >= c || tidy * VEC_SIZE_Y >= hw || tidz >= batchSize)
     {
         return;
     }
 
     // indices for current thread
-    unsigned int adjIndex = tidx * vecSizeX;
+    unsigned int adjIndex = tidx * VEC_SIZE_X;
 
     // batch parameters and values for current thread
     MeanVarType mean[HIP_PLUGIN_BN_VEC_SIZE];
@@ -149,17 +149,17 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     }
     else // NCHW layout
     {
-        const auto mean_val = estimatedMean[adjIndex];
-        const auto variance_val = estimatedVariance[adjIndex];
-        const auto pscale_val = scale[adjIndex];
-        const auto pbias_val = bias[adjIndex];
+        const auto meanVal = estimatedMean[adjIndex];
+        const auto varianceVal = estimatedVariance[adjIndex];
+        const auto pscaleVal = scale[adjIndex];
+        const auto pbiasVal = bias[adjIndex];
 #pragma unroll
         for(unsigned int i = 0; i < HIP_PLUGIN_BN_VEC_SIZE; ++i)
         {
-            mean[i] = mean_val;
-            variance[i] = variance_val;
-            pscale[i] = pscale_val;
-            pbias[i] = pbias_val;
+            mean[i] = meanVal;
+            variance[i] = varianceVal;
+            pscale[i] = pscaleVal;
+            pbias[i] = pbiasVal;
         }
     }
 #pragma unroll
@@ -169,7 +169,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                                     + static_cast<ComputeType>(epsilon)));
     }
 
-    BNFwdInferSpatialImpl<vecSizeX, vecSizeY>(tidx,
+    bnFwdInferSpatialImpl<VEC_SIZE_X, VEC_SIZE_Y>(tidx,
                                               tidy,
                                               in,
                                               out,
@@ -188,7 +188,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 // Uses estimated inverse variance rather than inverse variance, which avoids need for an
 // epsilon parameter and rsqrt() operations.
 extern "C" __global__ void __launch_bounds__(blockSize)
-    BatchNormFwdInferSpatialEstInvVar(const InputType* __restrict in,
+    batchNormFwdInferSpatialEstInvVar(const InputType* __restrict in,
                                       OutputType* __restrict out,
                                       const MeanVarType* __restrict estimatedMean,
                                       const MeanVarType* __restrict estimatedInvVariance,
@@ -208,17 +208,17 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     unsigned int tidz = blockIdx.z;
 
     // decide vector sizes based on problem layout
-    constexpr unsigned int vecSizeX = HIP_PLUGIN_LAYOUT_NHWC ? HIP_PLUGIN_BN_VEC_SIZE : 1;
-    constexpr unsigned int vecSizeY = HIP_PLUGIN_LAYOUT_NHWC ? 1 : HIP_PLUGIN_BN_VEC_SIZE;
+    constexpr unsigned int VEC_SIZE_X = HIP_PLUGIN_LAYOUT_NHWC ? HIP_PLUGIN_BN_VEC_SIZE : 1;
+    constexpr unsigned int VEC_SIZE_Y = HIP_PLUGIN_LAYOUT_NHWC ? 1 : HIP_PLUGIN_BN_VEC_SIZE;
 
     // skip execution for out-of-bound threads
-    if(tidx * vecSizeX >= c || tidy * vecSizeY >= hw || tidz >= batchSize)
+    if(tidx * VEC_SIZE_X >= c || tidy * VEC_SIZE_Y >= hw || tidz >= batchSize)
     {
         return;
     }
 
     // indices for current thread
-    unsigned int adjIndex = tidx * vecSizeX;
+    unsigned int adjIndex = tidx * VEC_SIZE_X;
 
     // batch parameters and values for current thread
     MeanVarType mean[HIP_PLUGIN_BN_VEC_SIZE];
@@ -238,21 +238,21 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     }
     else // NCHW layout
     {
-        const auto mean_val = estimatedMean[adjIndex];
-        const auto invVariance_val = estimatedInvVariance[adjIndex];
-        const auto pscale_val = scale[adjIndex];
-        const auto pbias_val = bias[adjIndex];
+        const auto meanVal = estimatedMean[adjIndex];
+        const auto invVarianceVal = estimatedInvVariance[adjIndex];
+        const auto pscaleVal = scale[adjIndex];
+        const auto pbiasVal = bias[adjIndex];
 #pragma unroll
         for(unsigned int i = 0; i < HIP_PLUGIN_BN_VEC_SIZE; ++i)
         {
-            mean[i] = mean_val;
-            invVariance[i] = invVariance_val;
-            pscale[i] = pscale_val;
-            pbias[i] = pbias_val;
+            mean[i] = meanVal;
+            invVariance[i] = invVarianceVal;
+            pscale[i] = pscaleVal;
+            pbias[i] = pbiasVal;
         }
     }
 
-    BNFwdInferSpatialImpl<vecSizeX, vecSizeY>(tidx,
+    bnFwdInferSpatialImpl<VEC_SIZE_X, VEC_SIZE_Y>(tidx,
                                               tidy,
                                               in,
                                               out,

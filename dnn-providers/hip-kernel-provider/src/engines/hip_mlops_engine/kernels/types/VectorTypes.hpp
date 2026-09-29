@@ -86,7 +86,7 @@ template <>
 struct mapped_vector_info<__half>
 {
     using UnderlyingType = _Float16;
-    static constexpr size_t size = 1;
+    static constexpr size_t SIZE = 1;
 };
 
 template <>
@@ -138,26 +138,26 @@ __forceinline__ __device__ __host__ OutType cast(InType input)
     using InTypeInfo = mapped_vector_info<InType>;
     using OutTypeInfo = mapped_vector_info<OutType>;
 
-    constexpr auto inSize = InTypeInfo::size;
-    constexpr auto outSize = OutTypeInfo::size;
+    constexpr auto IN_SIZE = InTypeInfo::size;
+    constexpr auto OUT_SIZE = OutTypeInfo::size;
 
-    if constexpr(inSize == outSize && outSize == 4)
+    if constexpr(IN_SIZE == OUT_SIZE && OUT_SIZE == 4)
     {
         return OutType{detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.x),
                        detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.y),
                        detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.z),
                        detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.w)};
     }
-    else if constexpr(inSize == outSize && outSize == 2)
+    else if constexpr(IN_SIZE == OUT_SIZE && OUT_SIZE == 2)
     {
         return OutType{detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.x),
                        detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.y)};
     }
-    else if constexpr(inSize == outSize && outSize == 1)
+    else if constexpr(IN_SIZE == OUT_SIZE && OUT_SIZE == 1)
     {
         return detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input);
     }
-    else if constexpr(inSize == 1 && outSize > 1)
+    else if constexpr(IN_SIZE == 1 && OUT_SIZE > 1)
     {
         return detail::broadcast<OutType>(input);
     }

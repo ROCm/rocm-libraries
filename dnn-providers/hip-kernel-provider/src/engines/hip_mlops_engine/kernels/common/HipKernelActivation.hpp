@@ -66,7 +66,7 @@ __forceinline__ __device__ T applyActivation(T const& value, T const& alpha, T c
 /// @return Gradient with respect to input
 template <typename T, ActivationMode Mode>
 __forceinline__ __device__ T
-    applyActivationGradient(T const& dy, T const& input_value, T const& alpha, T const& beta)
+    applyActivationGradient(T const& dy, T const& inputValue, T const& alpha, T const& beta)
 {
     static_assert(Mode == ActivationMode::PASTHRU || Mode == ActivationMode::RELU
                       || Mode == ActivationMode::CLIPPED_RELU || Mode == ActivationMode::CLAMP,
@@ -78,15 +78,15 @@ __forceinline__ __device__ T
     }
     else if constexpr(Mode == ActivationMode::RELU)
     {
-        return (input_value > T(0)) ? dy : T(0);
+        return (inputValue > T(0)) ? dy : T(0);
     }
     else if constexpr(Mode == ActivationMode::CLIPPED_RELU)
     {
-        return (input_value > T(0) && input_value <= alpha) ? dy : T(0);
+        return (inputValue > T(0) && inputValue <= alpha) ? dy : T(0);
     }
     else if constexpr(Mode == ActivationMode::CLAMP)
     {
-        return (input_value > alpha && input_value <= beta) ? dy : T(0);
+        return (inputValue > alpha && inputValue <= beta) ? dy : T(0);
     }
 }
 

@@ -16,7 +16,7 @@ using ScaleType = HIP_PLUGIN_RMSNORM_SCALE_TYPE;
 using ComputeType = HIP_PLUGIN_RMSNORM_COMPUTE_TYPE;
 using YType = HIP_PLUGIN_RMSNORM_Y_TYPE;
 
-extern "C" __global__ void RMSnormBwdScaleBias(const DyType* __restrict__ dy,
+extern "C" __global__ void rmSnormBwdScaleBias(const DyType* __restrict__ dy,
                                                const XType* __restrict__ x,
                                                const ComputeType* __restrict__ rstd,
                                                ScaleType* __restrict__ dscale,
@@ -35,8 +35,8 @@ extern "C" __global__ void RMSnormBwdScaleBias(const DyType* __restrict__ dy,
         return;
     }
 
-    float sum_dscale = 0.0f;
-    float sum_dbias = 0.0f;
+    float sumDscale = 0.0f;
+    float sumDbias = 0.0f;
 
     // backward scale calculation
     for(unsigned int o = 0; o < OUTER_SIZE; ++o)
@@ -58,19 +58,19 @@ extern "C" __global__ void RMSnormBwdScaleBias(const DyType* __restrict__ dy,
                     pdy, py, alpha, beta);
             }
 
-            sum_dscale += pdy * px * prstd;
-            sum_dbias += pdy;
+            sumDscale += pdy * px * prstd;
+            sumDbias += pdy;
         }
     }
 
-    dscale[tidx] = hip_kernel_provider::cast<ScaleType>(sum_dscale);
+    dscale[tidx] = hip_kernel_provider::cast<ScaleType>(sumDscale);
     if(dbias)
     {
-        dbias[tidx] = hip_kernel_provider::cast<ScaleType>(sum_dbias);
+        dbias[tidx] = hip_kernel_provider::cast<ScaleType>(sumDbias);
     }
 }
 
-extern "C" __global__ void RMSnormBwdData(const DyType* __restrict__ dy,
+extern "C" __global__ void rmSnormBwdData(const DyType* __restrict__ dy,
                                           const XType* __restrict__ x,
                                           const ScaleType* __restrict__ scale,
                                           const ComputeType* __restrict__ rstd,
@@ -87,7 +87,7 @@ extern "C" __global__ void RMSnormBwdData(const DyType* __restrict__ dy,
     const unsigned int o = gid / STRIDE;
     const unsigned int s = gid % STRIDE;
 
-    __shared__ float ltmp[LOCAL_SIZE];
+    __shared__ float s_ltmp[LOCAL_SIZE];
     float mean = 0.0f;
 
     // reduce sum
@@ -111,19 +111,19 @@ extern "C" __global__ void RMSnormBwdData(const DyType* __restrict__ dy,
         mean += pdy * pscale * px;
     }
 
-    ltmp[lid] = mean;
+    s_ltmp[lid] = mean;
     __syncthreads();
 
     for(unsigned int i = LOCAL_SIZE >> 1; i > 0; i >>= 1)
     {
         if(lid < i)
         {
-            ltmp[lid] += ltmp[lid + i];
+            s_ltmp[lid] += s_ltmp[lid + i];
         }
         __syncthreads();
     }
 
-    mean = ltmp[0] / INNER_SIZE;
+    mean = s_ltmp[0] / INNER_SIZE;
     float prstd = rstd[gid];
 
     // backward data calculation
@@ -144,7 +144,7 @@ extern "C" __global__ void RMSnormBwdData(const DyType* __restrict__ dy,
                 pdy, py, alpha, beta);
         }
 
-        float dx_val = (pdy * pscale * prstd) - (mean * px * prstd * prstd * prstd);
-        dx[idx] = hip_kernel_provider::cast<DxType>(dx_val);
+        float dxVal = (pdy * pscale * prstd) - (mean * px * prstd * prstd * prstd);
+        dx[idx] = hip_kernel_provider::cast<DxType>(dxVal);
     }
 }

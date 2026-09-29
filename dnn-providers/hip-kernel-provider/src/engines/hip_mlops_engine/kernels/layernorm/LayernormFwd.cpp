@@ -3,7 +3,7 @@
 
 #include "LayernormCommon.hpp"
 
-extern "C" __global__ void LayernormFwd(const InputType* __restrict__ x,
+extern "C" __global__ void layernormFwd(const InputType* __restrict__ x,
                                         OutputType* __restrict__ y,
                                         const ScaleBiasType* __restrict__ scale,
                                         const ScaleBiasType* __restrict__ bias,
@@ -16,12 +16,12 @@ extern "C" __global__ void LayernormFwd(const InputType* __restrict__ x,
     const unsigned int o = gid / STRIDE;
     const unsigned int s = gid % STRIDE;
 
-    __shared__ float ltmp1[LOCAL_SIZE];
-    __shared__ float ltmp2[LOCAL_SIZE];
-    __shared__ unsigned int ltmp3[LOCAL_SIZE];
+    __shared__ float s_ltmp1[LOCAL_SIZE];
+    __shared__ float s_ltmp2[LOCAL_SIZE];
+    __shared__ unsigned int s_ltmp3[LOCAL_SIZE];
     float pmean;
     float prstd;
-    calculateMeanRstd(ltmp1, ltmp2, ltmp3, x, eps, lid, o, s, pmean, prstd);
+    calculateMeanRstd(s_ltmp1, s_ltmp2, s_ltmp3, x, eps, lid, o, s, pmean, prstd);
 
     if(lid == 0)
     {

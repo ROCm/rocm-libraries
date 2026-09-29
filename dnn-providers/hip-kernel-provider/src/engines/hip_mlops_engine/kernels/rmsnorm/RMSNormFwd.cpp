@@ -13,7 +13,7 @@ using OutputType = HIP_PLUGIN_RMSNORM_OUTPUT_TYPE;
 using ScaleType = HIP_PLUGIN_RMSNORM_SCALE_TYPE;
 using ComputeType = HIP_PLUGIN_RMSNORM_COMPUTE_TYPE;
 
-extern "C" __global__ void RMSnormFwd(const InputType* __restrict__ x,
+extern "C" __global__ void rmSnormFwd(const InputType* __restrict__ x,
                                       const ScaleType* __restrict__ scale,
                                       const ScaleType* __restrict__ bias,
                                       OutputType* __restrict__ y,
@@ -32,7 +32,7 @@ extern "C" __global__ void RMSnormFwd(const InputType* __restrict__ x,
     const unsigned int s = gid % STRIDE;
 
     float pvar = 0.0f;
-    __shared__ float ltmp[LOCAL_SIZE];
+    __shared__ float s_ltmp[LOCAL_SIZE];
 
     // reduce sum
     for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
@@ -42,18 +42,18 @@ extern "C" __global__ void RMSnormFwd(const InputType* __restrict__ x,
         pvar += tmp * tmp;
     }
 
-    ltmp[lid] = pvar;
+    s_ltmp[lid] = pvar;
     __syncthreads();
     for(unsigned int i = LOCAL_SIZE >> 1; i > 0; i >>= 1)
     {
         if(lid < i)
         {
-            ltmp[lid] += ltmp[lid + i];
+            s_ltmp[lid] += s_ltmp[lid + i];
         }
         __syncthreads();
     }
 
-    pvar = ltmp[0] / INNER_SIZE;
+    pvar = s_ltmp[0] / INNER_SIZE;
     float prstd = rsqrtf(pvar + eps);
 
     if(lid == 0 && rstd)
@@ -65,15 +65,15 @@ extern "C" __global__ void RMSnormFwd(const InputType* __restrict__ x,
     for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
     {
         size_t idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
-        float y_val = hip_kernel_provider::cast<float>(x[idx]) * prstd
+        float yVal = hip_kernel_provider::cast<float>(x[idx]) * prstd
                       * hip_kernel_provider::cast<float>(scale[i]);
         if(bias != nullptr)
         {
-            y_val += hip_kernel_provider::cast<float>(bias[i]);
+            yVal += hip_kernel_provider::cast<float>(bias[i]);
         }
-        y_val = hip_kernel_provider::applyActivation<
+        yVal = hip_kernel_provider::applyActivation<
             float,
-            hip_kernel_provider::ActivationMode{HIP_PLUGIN_RMSNORM_NRN_OP_ID}>(y_val, alpha, beta);
-        y[idx] = hip_kernel_provider::cast<OutputType>(y_val);
+            hip_kernel_provider::ActivationMode{HIP_PLUGIN_RMSNORM_NRN_OP_ID}>(yVal, alpha, beta);
+        y[idx] = hip_kernel_provider::cast<OutputType>(yVal);
     }
 }
