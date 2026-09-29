@@ -1,6 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import importlib.util
 from pathlib import Path
 import shlex
 import subprocess
@@ -15,6 +16,20 @@ import tasks
 pytestmark = pytest.mark.unit
 
 _SOURCE_ROOT = Path(__file__).resolve().parents[4]
+REVISION_OPT = "-DHIPBLASLT_ASIC_REVISION"
+
+
+def _load_hipblaslt_tasks():
+    spec = importlib.util.spec_from_file_location(
+        "hipblaslt_tasks", _SOURCE_ROOT.parent / "tasks.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+hipblaslt_tasks = _load_hipblaslt_tasks()
 
 
 def test_invoke_install_is_a_discoverable_developer_workflow():
@@ -75,6 +90,177 @@ def test_rocisa_install_uses_the_invoking_python_and_selected_rocm_compilers(
         "pip",
         "install",
     ]
+
+
+def test_build_client_forwards_the_selected_rocm_root(tmp_path, monkeypatch):
+    class RecordingContext:
+        def __init__(self):
+            self.commands = []
+
+        def run(self, command):
+            self.commands.append(command)
+
+    rocm_root = tmp_path / "rocm"
+    compiler_dir = rocm_root / "bin"
+    compiler_dir.mkdir(parents=True)
+    monkeypatch.setattr(tasks.subprocess, "run", lambda *args, **kwargs: None)
+    context = RecordingContext()
+
+    tasks.build_client.body(
+        context,
+        build_dir=str(tmp_path / "build"),
+        gpu_targets="gfx942",
+        rocm_path=str(rocm_root),
+        build=False,
+    )
+
+    configure_command = context.commands[0]
+    assert f"-DROCM_PATH={rocm_root}" in configure_command
+    assert f"-DCMAKE_C_COMPILER={compiler_dir / 'amdclang'}" in configure_command
+    assert f"-DCMAKE_CXX_COMPILER={compiler_dir / 'amdclang++'}" in configure_command
+
+
+class TestTargetsIncludeGfx1250:
+    """Which --architecture values can produce gfx1250, and so are worth the
+    probe's hipcc compile and device open."""
+
+    @pytest.mark.parametrize(
+        "architecture",
+        [
+            "gfx1250",
+            "gfx942;gfx1250",
+            "gfx1250:xnack-",
+            "gfx1250[cu=64]",
+            " gfx1250 ",
+            # 'all' (the default) and an empty list both expand to
+            # BASE_ARCHITECTURES, which contains gfx1250; disagreeing would skip the
+            # probe for a build that does produce it.
+            "all",
+            "gfx942;all",
+            "",
+            None,
+        ],
+    )
+    def test_targets_that_can_produce_gfx1250(self, architecture):
+        assert hipblaslt_tasks._targets_include_gfx1250(architecture)
+
+    @pytest.mark.parametrize(
+        "architecture",
+        [
+            "gfx942",
+            "gfx942;gfx950",
+            "gfx1200",
+            "gfx12501",
+            "gfx1250v0",  # substring matches would make these look benign
+        ],
+    )
+    def test_targets_that_cannot(self, architecture):
+        assert not hipblaslt_tasks._targets_include_gfx1250(architecture)
+
+
+class TestAsicRevisionOption:
+    """What reaches CMake. A gfx1250 build ships both revisions' trees by
+    default and lets the runtime pick by asicRevision, so the build machine no
+    longer decides anything and is never probed. The option is emitted even when
+    its value is empty: the CMake cache variable is sticky across incremental
+    builds, so an unset one would keep a directory once pinned to v0 building
+    only v0."""
+
+    def test_the_default_builds_both_trees(self):
+        assert hipblaslt_tasks._asic_revision_option(
+            "gfx1250", None
+        ) == f"{REVISION_OPT}="
+
+    def test_the_default_does_not_look_at_the_local_gpu(self):
+        # The build is machine-independent by construction: nothing here may
+        # reach for a device, or two CI runners produce different packages.
+        assert not hasattr(hipblaslt_tasks, "_detect_asic_revision")
+
+    def test_a_build_without_gfx1250_emits_nothing(self):
+        assert hipblaslt_tasks._asic_revision_option("gfx942", None) is None
+
+    @pytest.mark.parametrize("pinned", ["v0", "v1"])
+    def test_an_explicit_revision_prunes_to_one_tree(self, pinned):
+        assert hipblaslt_tasks._asic_revision_option(
+            "gfx1250", pinned
+        ) == f"{REVISION_OPT}={pinned}"
+
+    def test_an_explicit_revision_applies_even_without_gfx1250_targets(self):
+        # Cross-building: the caller decides, so a target list naming no gfx1250
+        # still emits the option (to keep the cache from going stale).
+        assert hipblaslt_tasks._asic_revision_option(
+            "gfx942", "v0"
+        ) == f"{REVISION_OPT}=v0"
+
+    @pytest.mark.parametrize("bogus", ["0", "v2", "V0", "gfx1250v0"])
+    def test_an_unrecognized_revision_is_rejected(self, bogus):
+        # Anything else reaches CMake as a comparison matching neither branch,
+        # which would quietly build the wrong set of trees.
+        with pytest.raises(SystemExit) as exit_info:
+            hipblaslt_tasks._asic_revision_option("gfx1250", bogus)
+        assert exit_info.value.code == 2
+
+
+class TestTheBuildSaysWhichRevisionItChose:
+    """The log line is the only record of which trees an install actually got;
+    the failure it guards against is a v0 part finding no library of its own."""
+
+    def _option(self, capsys, architecture, pinned):
+        hipblaslt_tasks._asic_revision_option(architecture, pinned)
+        return capsys.readouterr().out
+
+    def test_the_default_says_both_and_who_decides(self, capsys):
+        out = self._option(capsys, "gfx1250", None)
+        assert "gfx1250 ASIC revision: both" in out
+        assert "runtime selects by asicRevision" in out
+
+    def test_a_pinned_revision_says_it_was_pinned(self, capsys):
+        out = self._option(capsys, "gfx1250", "v1")
+        assert "gfx1250 ASIC revision: v1" in out
+        assert "pinned by --asic-revision" in out
+        assert "no gfx1250" not in out  # that caveat is for gfx1250-free builds
+
+    def test_pinning_v1_does_not_read_as_the_default(self, capsys):
+        # Pruning to the v1 tree leaves v0 silicon with no library of its
+        # own, so it must not be reported the same way the both-trees default is.
+        out = self._option(capsys, "gfx1250", "v1")
+        assert "both" not in out
+        assert "asicRevision" not in out
+
+    def test_a_pinned_revision_without_gfx1250_targets_says_so(self, capsys):
+        out = self._option(capsys, "gfx942", "v0")
+        assert "gfx1250 ASIC revision: v0" in out
+        assert "these targets contain no gfx1250" in out
+
+    def test_a_build_that_cannot_produce_gfx1250_says_nothing(self, capsys):
+        assert "ASIC revision" not in self._option(capsys, "gfx942", None)
+
+
+class TestBuildTaskCommandLine:
+    """invoke assigns short flags in signature order, so a new parameter's
+    position is part of the interface: placed too early it steals a letter."""
+
+    def _short_flags(self, flag):
+        from invoke.parser import Context as ParserContext
+
+        context = ParserContext(
+            name="build", args=hipblaslt_tasks.build.get_arguments()
+        )
+        return context.flags[flag].nicknames
+
+    @pytest.mark.parametrize(
+        "flag,short",
+        [
+            ("--logic-filter", "f"),  # the first casualty if -g is stolen
+            ("--gprof", "g"),
+            ("--architecture", "a"),
+        ],
+    )
+    def test_existing_short_flags_are_unchanged(self, flag, short):
+        assert self._short_flags(flag) == (short,)
+
+    def test_the_revision_option_takes_no_letter(self):
+        assert self._short_flags("--asic-revision") == ()
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="invoke install is Linux-only")

@@ -4,6 +4,7 @@
 """Regression checks for TensileLite's distributable package metadata."""
 
 import configparser
+import runpy
 import subprocess
 import sys
 import tomllib
@@ -15,10 +16,18 @@ import pytest
 pytestmark = pytest.mark.unit
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
+_STAGER = _PROJECT_ROOT / "scripts/stage_release_source.py"
+
+
+def _isolated_source(tmp_path):
+    destination = tmp_path / "source"
+    runpy.run_path(str(_STAGER))["stage_source"](_PROJECT_ROOT, destination)
+    return destination
 
 
 def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatch):
     """rocisa is currently provisioned from source, not resolved by pip."""
+    source_root = _isolated_source(tmp_path)
     rocm_root = tmp_path / "rocm"
     (rocm_root / ".info").mkdir(parents=True)
     (rocm_root / ".info/version").write_text("7.2.4\n", encoding="utf-8")
@@ -37,7 +46,7 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
             str(tmp_path),
             ".",
         ],
-        cwd=_PROJECT_ROOT,
+        cwd=source_root,
         check=True,
         capture_output=True,
         text=True,
@@ -53,7 +62,7 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
             next(name for name in archive.namelist() if name.endswith(".dist-info/entry_points.txt"))
         ).decode("utf-8")
 
-    component_version = (_PROJECT_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    component_version = (source_root / "VERSION").read_text(encoding="utf-8").strip()
     assert f"Version: {component_version}+rocm7.2.4" in metadata
     assert "Requires-Dist: rocisa" not in metadata
 
@@ -62,12 +71,6 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
     parsed_entry_points.read_string(entry_points)
     assert dict(parsed_entry_points["console_scripts"]) == {
         "tensilelite": "tensilelite.cli:main",
-        "Tensile": "tensilelite.tensilelite:main",
-        "TensileCreateLibrary": "tensilelite.tensilelite_create_library:run",
-        "TensileVerifyStinkyElfText": "tensilelite.verify_stinky_comment_vs_elf_text:main",
-        "TensileGetPath": "tensilelite:PrintTensileRoot",
-        "TensileBenchmarkCluster": "tensilelite.benchmark_cluster:main",
-        "TensileRetuneLibrary": "tensilelite.retune_library:main",
         "tensilelite-configure-client": "tensilelite_configure_client:main",
     }
     assert "_tensilelite_client_binding.py" in archived_names
@@ -81,7 +84,13 @@ def test_uv_lock_matches_dynamic_package_metadata():
     assert "version" not in package
     runtime_dependencies = {dependency["name"] for dependency in package["dependencies"]}
     assert "rocisa" not in runtime_dependencies
-    assert set(package["optional-dependencies"]) == {"hip-query", "profile"}
+    assert set(package["optional-dependencies"]) == {
+        "hip-query",
+        "orjson",
+        "profile",
+        "simplejson",
+        "ujson",
+    }
 
     requires_dist = package["metadata"]["requires-dist"]
     assert not any(dependency["name"] == "rocisa" for dependency in requires_dist)
@@ -91,6 +100,9 @@ def test_uv_lock_matches_dynamic_package_metadata():
         if "extra ==" in dependency.get("marker", "")
     } == {
         ("hip-python", "extra == 'hip-query'"),
+        ("orjson", "extra == 'orjson'"),
+        ("simplejson", "extra == 'simplejson'"),
+        ("ujson", "extra == 'ujson'"),
         ("yappi", "extra == 'profile'"),
     }
 
@@ -142,13 +154,32 @@ def test_client_version_metadata_is_scoped_and_checked_exactly():
         encoding="utf-8"
     )
 
+    version_condition = (
+        "if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT\n"
+        "        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)"
+    )
     version_block = top_cmake.split(
-        'if(TENSILELITE_ENABLE_CLIENT)\n    set(_tensilelite_source_root', 1
+        f"{version_condition}\n    set(_tensilelite_source_root", 1
     )[1].split("\nendif()", 1)[0]
     assert "TENSILELITE_DISTRIBUTION_VERSION" in version_block
-    assert "HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT" not in top_cmake
+    assert version_condition in top_cmake
     assert '"-DEXPECTED_VERSION=${TENSILELITE_DISTRIBUTION_VERSION}"' in tests_cmake
     assert "actual_version STREQUAL EXPECTED_VERSION" in version_check
+
+
+def test_wheel_rebuild_depends_on_top_level_runtime_modules():
+    cmake = (_PROJECT_ROOT.parent / "CMakeLists.txt").read_text(encoding="utf-8")
+
+    assert '"${_tensilelite_src}/_tensilelite_client_binding.py"' in cmake
+    assert '"${_tensilelite_src}/tensilelite_configure_client.py"' in cmake
+
+
+def test_cmake_wheel_builds_use_isolated_source_trees():
+    cmake = (_PROJECT_ROOT.parent / "CMakeLists.txt").read_text(encoding="utf-8")
+
+    assert cmake.count("scripts/stage_release_source.py") >= 4
+    assert '"${_tensilelite_canonical_source}"' in cmake
+    assert '"${_tensilelite_compatibility_source}/compat"' in cmake
 
 
 def test_removed_source_autobuild_option_is_not_referenced():
