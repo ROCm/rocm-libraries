@@ -19,6 +19,7 @@
  * Every spine helper below is fully ported from its Python counterpart; no
  * stub bodies remain in this file.
  */
+#include "rocke/arch_target.h"
 #include "rocke/lower_llvm_internal.h"
 
 #include <stdarg.h>
@@ -2238,9 +2239,13 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
 
     /* attributes #0. */
     int max_wg = L->kernel ? rocke_kernel_max_workgroup_size(L->kernel) : 256;
+    const rocke_arch_target_t* target = rocke_arch_target_from_gfx(L->backend->gfx);
+    if(target == NULL)
+        rocke_ll_fail(L, ROCKE_ERR_KEY, "arch metadata not present for %s", L->backend->gfx);
+    int min_wg = target->wave_size < max_wg ? target->wave_size : max_wg;
     rocke_strbuf_append(out, "attributes #0 = { ");
     rocke_strbuf_append(out, "\"uniform-work-group-size\"=\"true\" ");
-    rocke_strbuf_appendf(out, "\"amdgpu-flat-work-group-size\"=\"64,%d\"", max_wg);
+    rocke_strbuf_appendf(out, "\"amdgpu-flat-work-group-size\"=\"%d,%d\"", min_wg, max_wg);
 
     if(L->kernel)
     {

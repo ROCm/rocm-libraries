@@ -344,3 +344,31 @@ def test_packed_boundaries_preserve_guards_and_ignore_poison(layout, dtype, v_st
         if module is not None:
             module.unload()
         buffers.close()
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU")
+def test_compiled_wmma_preserves_declared_workgroup_limit():
+    """The driver must see the requested limit, not a discarded LLVM hint."""
+    import ctypes
+    from kernels.gfx1151.wmma_fmha_fwd import WmmaFmhaFwdSpec, build_wmma_fmha_fwd
+    from rocke.helpers import compile_kernel
+    from rocke.runtime import hip_module
+
+    spec = WmmaFmhaFwdSpec(head_size=128, num_query_heads=4)
+    artifact = compile_kernel(build_wmma_fmha_fwd(spec), arch="gfx1151", backend="python")
+    rt = hip_module.Runtime()
+    module = rt.load_module(artifact.hsaco)
+    try:
+        function = module.get_function(artifact.kernel_name)
+        query = hip_module._resolve_hip().hipFuncGetAttribute
+        query.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_int, ctypes.c_void_p]
+        query.restype = ctypes.c_int
+        maximum = ctypes.c_int()
+        # HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK is ordinal zero.
+        status = query(ctypes.byref(maximum), 0, ctypes.c_void_p(function.p))
+        if status:
+            raise RuntimeError(f"hipFuncGetAttribute failed: {status}")
+        assert maximum.value == spec.block_size
+    finally:
+        module.unload()

@@ -143,6 +143,17 @@ configurations retain their ABI and emitted code. Numeric regressions cover
 empty query/KV sequences, mixed lengths, shuffled pages, poisoned padding,
 output guards, both dtypes, and both V-staging choices.
 
+### Compiler launch bounds
+
+LLVM launch bounds use the target's wave size as the minimum, capped by the
+kernel's declared maximum. A single-wave gfx1151 kernel therefore declares
+`32,32`, not an inverted `64,32` range. LLVM
+[discards invalid ranges](https://llvm.org/docs/doxygen/AMDGPUSubtarget_8cpp_source.html#l00157)
+and substitutes its defaults, which loses the intended register-allocation
+constraint. Both engines emit the corrected bounds. The GPU regression queries
+the compiled function's maximum block size through HIP rather than checking
+source text.
+
 ### FP8 KV storage
 
 Set `kv_dtype="fp8e4m3"` for OCP E4M3FN byte storage with FP16/BF16 Q and O.
