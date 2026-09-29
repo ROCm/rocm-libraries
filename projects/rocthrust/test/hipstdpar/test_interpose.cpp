@@ -23,6 +23,7 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <limits>
 #include <new>
@@ -302,16 +303,31 @@ int main()
     // A MAP_FIXED mapping that the interposer rejects must leave the range
     // mapped. The reservation bypasses interposition through the raw syscall,
     // and exceeds system memory so that hipMemAdvise refuses to advise it.
+    // Failing to reserve the range, or hipMemAdvise accepting it, is not an
+    // interposer error, so those cases are reported instead of failed.
     constexpr std::size_t reservation_size = std::size_t{1} << 44;
     const auto reservation                 = reinterpret_cast<void*>(
       syscall(SYS_mmap, nullptr, reservation_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0));
-    if (reservation != MAP_FAILED)
+    if (reservation == MAP_FAILED)
     {
-      if (mmap(reservation, reservation_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0)
-          == MAP_FAILED)
+      std::fputs("warning: MAP_FIXED rejection not exercised: the address range could not be reserved\n", stderr);
+    }
+    else
+    {
+      const auto fixed_mapping =
+        mmap(reservation, reservation_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0);
+      if (fixed_mapping == MAP_FAILED)
       {
         unsigned char residency{};
         if (mincore(reservation, 4096, &residency) != 0)
+        {
+          return EXIT_FAILURE;
+        }
+      }
+      else
+      {
+        std::fputs("warning: MAP_FIXED rejection not exercised: hipMemAdvise accepted the range\n", stderr);
+        if (fixed_mapping != reservation)
         {
           return EXIT_FAILURE;
         }
