@@ -67,7 +67,7 @@ extern "C" {
 
 namespace hipstd
 {
-inline static const bool __initialised{hipInit(0) == hipSuccess};
+inline const bool __initialised{hipInit(0) == hipSuccess};
 
 // Clears a HIP failure that the interposer handles itself; left pending, it
 // would be reported by the next unrelated HIP call, such as a kernel launch.
