@@ -4,8 +4,10 @@
 /*! \file
  * \brief Post-launch dirty-buffer check for the shared Synchronizer buffer.
  *
- * StreamK, GSU MultipleBufferSingleKernel, and output-amax kernels share one
- * Synchronizer allocation across launches and must leave it at zero on exit.
+ * The standalone benchmark client reuses each problem's Synchronizer
+ * buffer across solutions. Stream-K uses it for queue counters and fixup
+ * flags; GSU MultipleBufferSingleKernel and output-amax use it for
+ * synchronization. Each consumer must leave the buffer at zero on exit.
  * Residue is silent -- it corrupts a later launch, not the one that left it --
  * so this listener reads the buffer back, fails the run on any nonzero int,
  * and clears it so it is reported once. Buffers declared too narrow to scan
@@ -13,7 +15,7 @@
  *
  * On by default (GlobalParameters CheckSynchronizer); --check-synchronizer=0
  * turns it off. A default must not change what a config does, so the listener
- * is passive and skips solutions handed no Synchronizer.
+ * is passive and skips solutions known not to use the Synchronizer.
  */
 
 #pragma once
@@ -153,19 +155,19 @@ namespace TensileLite
             virtual void clearBuffer(void* device, size_t bytes);
 
             /// Whether the check should do anything right now: switched on, and
-            /// the solution in hand actually touches the Synchronizer.
+            /// the solution in hand may use the Synchronizer.
             bool active() const
             {
-                return m_enabled && m_usesSynchronizer;
+                return m_enabled && m_mayUseSynchronizer;
             }
 
             // Protected so a test-only subclass can drive these without a GPU.
-            bool m_dirtyInSolution = false;
+            bool m_failedInSolution = false;
             int  m_errorsReported  = 0;
-            // Whether the solution in hand is a Synchronizer consumer. True for
+            // Whether the solution in hand may use the Synchronizer. True for
             // an unknown solution, so an unrecognised launch is scanned rather
             // than silently skipped.
-            bool m_usesSynchronizer = true;
+            bool m_mayUseSynchronizer = true;
         };
     } // namespace Client
 } // namespace TensileLite

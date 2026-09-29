@@ -48,15 +48,15 @@ namespace
     {
     public:
         using SynchronizerValidator::SynchronizerValidator;
-        void markDirty()
+        void markFailed()
         {
-            m_dirtyInSolution = true;
+            m_failedInSolution = true;
         }
         // The listener is passive, so the gate is not visible through
         // needMoreRunsInSolution; read it directly.
-        bool usesSynchronizer() const
+        bool mayUseSynchronizer() const
         {
-            return m_usesSynchronizer;
+            return m_mayUseSynchronizer;
         }
         bool isActive() const
         {
@@ -103,7 +103,7 @@ TEST(SynchronizerValidatorReporting, ValidatorNeverDrivesARun)
     setSolution(solution, 3, 0); // a consumer, so this is not the gate talking
 
     validator.preSolution(&solution);
-    ASSERT_TRUE(validator.usesSynchronizer());
+    ASSERT_TRUE(validator.mayUseSynchronizer());
     EXPECT_FALSE(validator.needMoreRunsInSolution());
     EXPECT_EQ(validator.numWarmupRuns(), 0u);
 }
@@ -116,7 +116,7 @@ TEST(SynchronizerValidatorReporting, DisabledValidatorChecksNothing)
     setSolution(solution, 3, 0);
 
     validator.preSolution(&solution);
-    EXPECT_TRUE(validator.usesSynchronizer());
+    EXPECT_TRUE(validator.mayUseSynchronizer());
     EXPECT_FALSE(validator.isActive());
 }
 
@@ -128,7 +128,7 @@ TEST(SynchronizerValidatorReporting, StreamKSolutionIsChecked)
     setSolution(solution, 3, 0);
 
     validator.preSolution(&solution);
-    EXPECT_TRUE(validator.usesSynchronizer());
+    EXPECT_TRUE(validator.mayUseSynchronizer());
 }
 
 // GSU MultipleBufferSingleKernel is the other consumer and is not StreamK, so
@@ -140,7 +140,7 @@ TEST(SynchronizerValidatorReporting, MbskSolutionIsChecked)
     setSolution(solution, 0, 3);
 
     validator.preSolution(&solution);
-    EXPECT_TRUE(validator.usesSynchronizer());
+    EXPECT_TRUE(validator.mayUseSynchronizer());
 }
 
 // Unknown solution means unknown answer; scan rather than skip.
@@ -149,7 +149,7 @@ TEST(SynchronizerValidatorReporting, UnknownSolutionIsChecked)
     TestableSynchronizerValidator validator(enabledArgs());
 
     validator.preSolution(nullptr);
-    EXPECT_TRUE(validator.usesSynchronizer());
+    EXPECT_TRUE(validator.mayUseSynchronizer());
 }
 
 // amaxD is the third consumer: the dispatcher appends the buffer as AmaxSync
@@ -162,7 +162,7 @@ TEST(SynchronizerValidatorReporting, AmaxDSolutionIsChecked)
     solution.problemType.outputAmaxD = true;
 
     validator.preSolution(&solution);
-    EXPECT_TRUE(validator.usesSynchronizer());
+    EXPECT_TRUE(validator.mayUseSynchronizer());
 }
 
 // Atomic StreamK reduces in place; the dispatcher never appends Flags for it.
@@ -173,7 +173,7 @@ TEST(SynchronizerValidatorReporting, AtomicStreamKSolutionIsSkipped)
     setSolution(solution, 3, 0, /*streamKAtomic=*/1);
 
     validator.preSolution(&solution);
-    EXPECT_FALSE(validator.usesSynchronizer());
+    EXPECT_FALSE(validator.mayUseSynchronizer());
 }
 
 // StreamKForceDPOnly kernels drop AddressWS/AddressFlags from the SGPR define
@@ -185,7 +185,7 @@ TEST(SynchronizerValidatorReporting, ForceDPOnlyStreamKSolutionIsSkipped)
     setSolution(solution, 3, 0, /*streamKAtomic=*/0, /*streamKForceDPOnly=*/1);
 
     validator.preSolution(&solution);
-    EXPECT_FALSE(validator.usesSynchronizer());
+    EXPECT_FALSE(validator.mayUseSynchronizer());
 }
 
 // Everything else never receives the buffer, so a scan could only come back
@@ -197,7 +197,7 @@ TEST(SynchronizerValidatorReporting, NonConsumerSolutionIsSkipped)
     setSolution(solution, 0, 0);
 
     validator.preSolution(&solution);
-    EXPECT_FALSE(validator.usesSynchronizer());
+    EXPECT_FALSE(validator.mayUseSynchronizer());
 }
 
 TEST(SynchronizerValidatorReporting, CleanSolutionReportsNothing)
@@ -220,7 +220,7 @@ TEST(SynchronizerValidatorReporting, DirtySolutionReportsFailureOnce)
     validator.setReporter(reporter);
 
     validator.preSolution(nullptr);
-    validator.markDirty();
+    validator.markFailed();
     validator.postSolution();
 
     EXPECT_EQ(validator.error(), 1);

@@ -57,19 +57,18 @@ namespace TensileLite
 
         void SynchronizerValidator::preSolution(ContractionSolution* const solution)
         {
-            m_dirtyInSolution = false;
-            // Mirrors the three conditions under which the dispatcher appends
-            // the pointer: Flags in singleCallArgs for StreamK, the
-            // dstD/Synchronizer block for MBSK, and AmaxSync for amaxD. Any
-            // other solution is never handed the buffer, so its scan could only
-            // come back clean. Not reproduced here is sk.reduction == parallel,
-            // which also passes a null Flags but needs a Problem and Hardware to
-            // evaluate; scanning it reports nothing.
+            m_failedInSolution = false;
+            // Covers the three possible uses of the pointer: Flags in
+            // singleCallArgs for StreamK, the dstD/Synchronizer block for
+            // MBSK, and AmaxSync for amaxD.
+            // Parallel Stream-K reduction passes Flags=nullptr, but excluding it
+            // requires the problem- and hardware-dependent reduction decision.
+            // We conservatively scan its buffer too; it normally remains zero.
             //
             // An unknown solution is scanned rather than skipped.
             if(solution == nullptr)
             {
-                m_usesSynchronizer = true;
+                m_mayUseSynchronizer = true;
                 return;
             }
 
@@ -77,12 +76,12 @@ namespace TensileLite
             bool const  streamK = sm.streamK > 0 && sm.streamKAtomic == 0
                                  && sm.streamKForceDPOnly == 0;
             bool const mbsk    = sm.globalAccumulation == 3;
-            m_usesSynchronizer = streamK || mbsk || solution->problemType.outputAmaxD;
+            m_mayUseSynchronizer = streamK || mbsk || solution->problemType.outputAmaxD;
         }
 
         void SynchronizerValidator::postSolution()
         {
-            if(m_dirtyInSolution)
+            if(m_failedInSolution)
             {
                 m_errorsReported++;
                 // Overrides the reference verdict so the CSV and library logic
@@ -90,7 +89,7 @@ namespace TensileLite
                 m_reporter->report(ResultKey::Validation, "FAILED");
             }
 
-            m_dirtyInSolution = false;
+            m_failedInSolution = false;
         }
 
         void SynchronizerValidator::validateWarmups(std::shared_ptr<ProblemInputs> inputs,
@@ -103,9 +102,9 @@ namespace TensileLite
             }
             catch(...)
             {
-                // main catches checker errors, so preserve a failing verdict
-                // for postSolution and the client's exit status before rethrowing.
-                m_dirtyInSolution = true;
+                // main catches checker exceptions and continues to postSolution.
+                // Preserve failure even when the buffer's contents could not be checked.
+                m_failedInSolution = true;
                 throw;
             }
         }
@@ -122,14 +121,14 @@ namespace TensileLite
                 for(size_t j = 0; j < problems->gemms.size(); j++)
                 {
                     if(!checkBuffer(problems->gemms[j], result.grouped[j].Synchronizer, stage, j))
-                        m_dirtyInSolution = true;
+                        m_failedInSolution = true;
                 }
             }
             else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
             {
                 auto const& result = dynamic_cast<ContractionInputs const&>(*inputs);
                 if(!checkBuffer(*problem, result.Synchronizer, stage, 0))
-                    m_dirtyInSolution = true;
+                    m_failedInSolution = true;
             }
             else
             {
@@ -195,7 +194,7 @@ namespace TensileLite
                 {
                     m_narrowAlphaWarned = true;
                     std::ostringstream msg;
-                    msg << "Synchronizer is declared with a type narrower than int (" << bytes
+                    msg << "Warning: Synchronizer is declared with a type narrower than int (" << bytes
                         << " bytes for " << tensor.totalAllocatedElements()
                         << " elements); --check-synchronizer cannot cover the range the kernel "
                            "uses and is skipped for these problems.\n";
