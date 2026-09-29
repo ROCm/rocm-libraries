@@ -32,6 +32,20 @@ option(ROCISA_USE_STABLE_ABI
 
 option(ROCISA_ENABLE_COVERAGE "Enable code coverage instrumentation for rocisa" OFF)
 
+function(_rocisa_set_python_package_output_directory target output_directory)
+    set_target_properties(${target} PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${output_directory}"
+        RUNTIME_OUTPUT_DIRECTORY "${output_directory}"
+    )
+    foreach(_config IN LISTS CMAKE_CONFIGURATION_TYPES)
+        string(TOUPPER "${_config}" _config_upper)
+        set_target_properties(${target} PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY_${_config_upper} "${output_directory}"
+            RUNTIME_OUTPUT_DIRECTORY_${_config_upper} "${output_directory}"
+        )
+    endforeach()
+endfunction()
+
 # Compiles StinkyTofu's example HelloWorldPass plugin directly into _rocisa (LLVM-style
 # static-plugin pattern: object code linked into the host, registered via an explicit
 # call rather than dlopen). This is independent of whether stinkytofu itself was built
@@ -60,7 +74,10 @@ target_include_directories(rocisa-cpp
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
 )
 
-block()
+# Device generation always owns the in-tree extension. ROCISA_BUILD_PYTHON
+# retains a root-project rocisa-only configuration; the standalone project
+# remains independently buildable by Python packaging.
+if(HIPBLASLT_ENABLE_DEVICE OR ROCISA_BUILD_PYTHON OR ROCISA_STANDALONE)
     if(ROCISA_STANDALONE)
         # scikit-build-core pre-installs nanobind (from build-system.requires)
         # and injects its CMake path, so find_package works without FetchContent.
@@ -146,6 +163,12 @@ block()
                             ${ROCISAINST_SOURCE}
                             ${ROCISAPASS_SOURCE}
                             ${ROCISAFUNC_SOURCE})
+    if(NOT ROCISA_STANDALONE)
+        configure_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py"
+            "${CMAKE_CURRENT_BINARY_DIR}/rocisa/__init__.py"
+            COPYONLY)
+    endif()
     target_include_directories(_rocisa PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include"
     )
@@ -245,8 +268,9 @@ block()
     # (build output dir) and the imported package target (IMPORTED_LOCATION_<CONFIG>)
     # without hand-matching configs.
     set(_st_lib_dir "$<TARGET_FILE_DIR:stinkytofu::stinkytofu>")
+    _rocisa_set_python_package_output_directory(
+        _rocisa "${CMAKE_CURRENT_BINARY_DIR}/rocisa")
     set_target_properties(_rocisa PROPERTIES
-        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/rocisa"
         BUILD_RPATH "${_st_lib_dir}"
     )
     if(ROCISA_STANDALONE AND _stinkytofu_shared)
@@ -304,8 +328,9 @@ block()
     if(TARGET stinkytofu_python)
         add_dependencies(_rocisa stinkytofu_python)
 
+        _rocisa_set_python_package_output_directory(
+            stinkytofu_python "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu")
         set_target_properties(stinkytofu_python PROPERTIES
-            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu"
             BUILD_RPATH "$ORIGIN"
             INSTALL_RPATH "$ORIGIN"
         )
@@ -385,4 +410,4 @@ block()
         install(TARGETS stinkytofu-plugin-helloworld
             DESTINATION "rocisa/${STINKYTOFU_PLUGIN_INSTALL_RELDIR}")
     endif()
-endblock()
+endif()
