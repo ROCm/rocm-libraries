@@ -5,6 +5,7 @@
 import copy
 import csv
 import io
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -13,37 +14,57 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 import zlib
 
 import msgpack
 import rocjitsu_race_sweep as sweep
+import rocjitsu_sweep_plan as plan
 
 
-def solution(index):
+def solution(index, tile=(64, 96, 1), depth=32):
     return {
         "index": index,
         "name": f"solution-{index}",
         "kernelName": f"kernel-{index}",
         "problemType": {
+            "operationIdentifier": "Contraction_l_Ailk_Bjlk_Cijk_Dijk",
             "aType": "Float",
             "bType": "Float",
             "cType": "Float",
             "dType": "Float",
+            "computeType": "Float",
+            "transA": False,
+            "transB": True,
+            "biasDataTypeWhiteList": [],
+            "biasSrcWhiteList": [3],
         },
         "hardwarePredicate": {"type": "Processor", "value": "gfx942"},
+        "problemPredicate": {"type": "And", "value": []},
+        "sizeMapping": {
+            "macroTile": list(tile),
+            "depthU": depth,
+            "globalSplitU": 1,
+            "streamK": 0,
+        },
     }
 
 
 def job():
+    s = solution(7)
     return {
         "id": 0,
         "solutions": [{"index": 7, "name": "solution-7", "kernel": "kernel-7"}],
+        "cases": plan.derive_cases(s),
+        "problem_type": s["problemType"],
+        "library": "library.dat",
     }
 
 
 def success_log():
     stream = io.StringIO()
-    for n, shape in enumerate(sweep.SHAPES):
+    for n, case in enumerate(job()["cases"]):
         stream.write('[rocjitsu] Kernel dispatch: "kernel-7" symbol="kernel-7"\n')
         csv.writer(stream, lineterminator="\n").writerow(
             [
@@ -51,7 +72,7 @@ def success_log():
                 f"{n}/3",
                 "7/7",
                 "Contraction",
-                "(" + ",".join(map(str, shape)) + ")",
+                "(" + ",".join(map(str, case["shape"])) + ")",
                 "None",
                 "",
                 "None",
@@ -62,24 +83,32 @@ def success_log():
     return stream.getvalue()
 
 
+def bench_log():
+    lines = []
+    for case in job()["cases"]:
+        m, n, batch, k = case["shape"]
+        lines += ['[rocjitsu] Kernel dispatch: "kernel-7"'] * 2
+        lines += [
+            "[0]:m,n,batch_count,k,norm_error,atol,rtol",
+            f"    {m},{n},{batch},{k},0,0.00001,0.00001",
+            "    --Solution index: 7",
+            "    --Solution name:  solution-7",
+            "    --kernel name:    kernel-7",
+        ]
+    return "\n".join(lines) + "\n"
+
+
 class SweepTests(unittest.TestCase):
     def test_native_and_compressed_messagepack(self):
         with tempfile.TemporaryDirectory() as tmp:
+            payload = msgpack.packb({"solutions": [solution(7)]}, use_bin_type=True)
             for name, data in [
-                (
-                    "lib.dat",
-                    msgpack.packb({"solutions": [solution(7)]}, use_bin_type=True),
-                ),
-                (
-                    "lib.dat.zlib",
-                    zlib.compress(
-                        msgpack.packb({"solutions": [solution(7)]}, use_bin_type=True)
-                    ),
-                ),
+                ("lib.dat", payload),
+                ("lib.dat.zlib", zlib.compress(payload)),
             ]:
                 path = Path(tmp) / name
                 path.write_bytes(data)
-                self.assertEqual(sweep.read_library(path)["solutions"][0]["index"], 7)
+                self.assertEqual(plan.read_library(path)["solutions"][0]["index"], 7)
 
     def test_hardware_constraints_are_not_bypassed(self):
         device = {"device_id": 0x74A1, "simd_count": 1216, "simd_per_cu": 4}
@@ -93,47 +122,178 @@ class SweepTests(unittest.TestCase):
                 ],
             },
         }
-        self.assertTrue(sweep.matches_hardware(predicate, "gfx942", device))
-        self.assertFalse(sweep.matches_hardware(predicate, "gfx950", device))
-        self.assertFalse(sweep.matches_hardware({"type": "Unknown"}, "gfx942", device))
-        device["simd_count"] = 256 * 4
-        self.assertFalse(sweep.matches_hardware(predicate, "gfx942", device))
+        self.assertTrue(plan.matches_hardware(predicate, "gfx942", device))
+        self.assertFalse(plan.matches_hardware(predicate, "gfx950", device))
+        self.assertFalse(plan.matches_hardware({"type": "Unknown"}, "gfx942", device))
 
-    def test_batches_are_contiguous_and_distinct(self):
-        groups = {("a.dat", "type", "hw"): [solution(i) for i in range(30)]}
-        result = sweep.select_batches(groups, 20, 10)
+    def test_random_sample_is_seeded_distinct_and_order_independent(self):
+        solutions = [solution(i) for i in range(100)]
+        alias = copy.deepcopy(solutions[0])
+        alias["index"] = 1000
+        solutions.append(alias)
+
+        def choose(seed, values):
+            sampler = plan.KernelSample(10, seed)
+            for s in values:
+                sampler.consider(Path("library.dat"), s)
+            return [s["index"] for _, s in sampler.selected()]
+
         self.assertEqual(
-            [[s["index"] for s in j["solutions"]] for j in result],
-            [list(range(10)), list(range(10, 20))],
+            choose("pr-a", solutions), choose("pr-a", list(reversed(solutions)))
         )
-        aliased = copy.deepcopy(groups)
-        aliased[("a.dat", "type", "hw")][10]["kernelName"] = "kernel-0"
-        result = sweep.select_batches(aliased, 20, 10)
-        self.assertEqual(len({s["kernel"] for j in result for s in j["solutions"]}), 20)
-        self.assertEqual(result[1]["solutions"][0]["index"], 11)
+        self.assertNotEqual(choose("pr-a", solutions), choose("pr-b", solutions))
+        self.assertEqual(len(set(choose("pr-a", solutions))), 10)
+        sampler = plan.KernelSample(2, "seed")
+        for s in [solution(0), alias]:
+            sampler.consider(Path("library.dat"), s)
+        with self.assertRaisesRegex(ValueError, "found only 1"):
+            sampler.selected()
 
-    def test_missing_inventory_is_not_silently_a_smaller_sweep(self):
-        with self.assertRaisesRegex(ValueError, "selected only"):
-            sweep.select_batches(
-                {("a.dat", "type", "hw"): [solution(i) for i in range(9)]}, 100, 10
+    def test_shapes_follow_each_kernels_tile_and_depth(self):
+        first, second = plan.derive_cases(solution(0)), plan.derive_cases(
+            solution(1, (128, 32, 1), 64)
+        )
+        self.assertEqual(first[0]["shape"], [64, 96, 1, 32])
+        self.assertEqual(second[0]["shape"], [128, 32, 1, 64])
+        self.assertTrue(
+            first[2]["m_tail"] and first[2]["n_tail"] and first[3]["k_tail"]
+        )
+        self.assertEqual(len({tuple(c["shape"]) for c in first}), 4)
+
+    def test_size_constraints_adjust_shapes_without_bypassing_them(self):
+        s = solution(0)
+        s["problemPredicate"]["value"] = [
+            {"type": "LeadingFree0SizesGreaterOrEqual", "value": 128},
+            {"type": "Free0SizeMultiple", "index": 0, "value": 8},
+            {"type": "BoundSizeMultiple", "index": -1, "value": 32},
+            {"type": "GlobalSplitUCheckMinK", "value": [32, 4]},
+        ]
+        cases = plan.derive_cases(s)
+        self.assertTrue(
+            all(
+                c["shape"][0] >= 128 and c["shape"][0] % 8 == 0 and c["shape"][3] >= 128
+                for c in cases
             )
+        )
+        self.assertTrue(all(not c["k_tail"] for c in cases))
+        s["problemPredicate"]["value"].append(
+            {"type": "SizeLessThan", "index": 0, "value": 64}
+        )
+        with self.assertRaisesRegex(ValueError, "constraints"):
+            plan.derive_cases(s)
+
+    def test_jit_plan_uses_current_metadata_and_keeps_unschedulable_sample(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "library_gfx942.dat.zlib"
+            (root / "library_gfx942.co").write_bytes(b"object")
+            s = solution(7)
+
+            def write(s):
+                path.write_bytes(
+                    zlib.compress(msgpack.packb({"solutions": [s]}, use_bin_type=True))
+                )
+
+            write(s)
+            device = {"device_id": 0x74A1, "simd_count": 1216, "simd_per_cu": 4}
+            first = plan.make_plan(root, "gfx942", device, 1, "seed")
+            s["sizeMapping"]["depthU"] = 64
+            write(s)
+            second = plan.make_plan(root, "gfx942", device, 1, "seed")
+            self.assertNotEqual(
+                first["artifact_fingerprint"], second["artifact_fingerprint"]
+            )
+            self.assertNotEqual(first["jobs"][0]["cases"], second["jobs"][0]["cases"])
+            s["sizeMapping"]["macroTile"] = [8192, 8192, 1]
+            write(s)
+            failed = plan.make_plan(root, "gfx942", device, 1, "seed")
+            self.assertEqual(failed["jobs"][0]["solutions"][0]["index"], 7)
+            self.assertIn("planning_error", failed["jobs"][0])
+            self.assertEqual(len(failed["jobs"][0]["cases"]), 4)
+
+    def test_native_metadata_stays_authoritative_for_each_adapter(self):
+        j = job()
+        self.assertEqual(
+            sweep.client_options(j, Path("results"))["solution-start-idx"], 7
+        )
+        rows = sweep.bench_options(j)
+        self.assertEqual([r["K"] for r in rows], [c["shape"][3] for c in j["cases"]])
+        self.assertTrue(
+            all(r["solution_index"] == 7 and r["algo_method"] == 2 for r in rows)
+        )
+        self.assertTrue(
+            all(
+                r["norm_check"] and r["norm_check_assert"] and r["allclose_check"]
+                for r in rows
+            )
+        )
+
+    def test_duplicate_artifact_indices_fail_before_execution(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for shard in ("first", "second"):
+                (root / f"{shard}_gfx942.dat").write_bytes(
+                    msgpack.packb({"solutions": [solution(7)]}, use_bin_type=True)
+                )
+            with self.assertRaisesRegex(ValueError, "Duplicate solution index 7"):
+                plan.make_plan(root, "gfx942", {}, 1, "seed")
+
+    def test_run_accounts_for_unsupported_and_unstarted_cases(self):
+        jobs = [job(), job()]
+        jobs[0]["planning_error"] = "No bounded shapes"
+        jobs[0]["cases"] = [{"id": c["id"], "shape": None} for c in jobs[0]["cases"]]
+        jobs[1]["id"] = 1
+        manifest = {
+            "jobs": jobs,
+            "library_dir": "unused",
+            "artifact_fingerprint": "test",
+            "planned_cases": 8,
+        }
+        for backend in ("tensile", "bench"):
+            with tempfile.TemporaryDirectory() as tmp:
+                args = SimpleNamespace(
+                    reports=Path(tmp) / "reports",
+                    backend=backend,
+                    workers=1,
+                    timeout=1,
+                    seed="test",
+                )
+                with (
+                    patch.object(sweep, "prepare", return_value=(manifest, None)),
+                    patch.object(sweep, "physical_cpus", return_value=[0]),
+                    patch.object(sweep, "execute_command") as execute,
+                ):
+                    self.assertEqual(sweep.run(args), 1)
+                    execute.assert_not_called()
+                summary = json.loads((args.reports / "summary.json").read_text())
+                self.assertEqual(summary["counts"], {"UNSUPPORTED_CASE": 4})
+                self.assertEqual(len(summary["unstarted_cases"]), 4)
+                self.assertEqual(summary["missing"], [])
+                self.assertEqual(summary["accounted_cases"], 8)
+                self.assertFalse(summary["passed"])
 
     def test_numerical_and_dispatch_evidence_required(self):
-        text = success_log()
-        self.assertFalse(sweep.classify(job(), text, 0)["failed"])
+        for classify, text in [
+            (sweep.classify_tensile, success_log()),
+            (sweep.classify_bench, bench_log()),
+        ]:
+            self.assertFalse(classify(job(), text, 0)["failed"])
+            self.assertTrue(classify(job(), text, 1)["failed"])
+            self.assertTrue(
+                classify(
+                    job(), text.replace("[rocjitsu] Kernel dispatch:", "missing:", 1), 0
+                )["failed"]
+            )
+            for suffix in [
+                "RACE kernel=? dispatch=9\nEND_RACE\n",
+                "[rj warn] unsupported HW_ID\n",
+            ]:
+                self.assertTrue(classify(job(), text + suffix, 0)["failed"])
         self.assertTrue(
-            sweep.classify(job(), text.replace(",PASSED", ",NO_CHECK", 1), 0)["failed"]
-        )
-        self.assertTrue(
-            sweep.classify(
-                job(),
-                text.replace(
-                    '[rocjitsu] Kernel dispatch: "kernel-7" symbol="kernel-7"\n', "", 1
-                ),
-                0,
+            sweep.classify_tensile(
+                job(), success_log().replace(",PASSED", ",NO_CHECK", 1), 0
             )["failed"]
         )
-        self.assertTrue(sweep.classify(job(), text, 1)["failed"])
 
     def test_missing_duplicate_and_rejected_cases_fail(self):
         text = success_log()
@@ -143,16 +303,16 @@ class SweepTests(unittest.TestCase):
             text + record + "\n",
             text.replace(",PASSED", ",DID_NOT_SATISFY_ASSERTS", 1),
         ]:
-            self.assertTrue(sweep.classify(job(), changed, 0)["failed"])
-
-    def test_races_and_warnings_remain_visible_and_fail(self):
-        for suffix in [
-            "RACE kernel=? dispatch=9\nEND_RACE\n",
-            "[rj warn] unsupported HW_ID\n",
+            self.assertTrue(sweep.classify_tensile(job(), changed, 0)["failed"])
+        text = bench_log()
+        for changed in [
+            text.replace("index: 7", "index: 8", 1),
+            text.replace("kernel name:    kernel-7", "kernel name:    wrong", 1),
+            text.replace("0.00001", "failed", 1),
+            text.replace("0.00001", "nan", 1),
+            text + text,
         ]:
-            result = sweep.classify(job(), success_log() + suffix, 0)
-            self.assertTrue(result["failed"])
-            self.assertTrue(result["race_headers"] or result["warnings"])
+            self.assertTrue(sweep.classify_bench(job(), changed, 0)["failed"])
 
     def test_four_workers_and_no_duplicate_assignment(self):
         gate = threading.Barrier(4)
@@ -212,7 +372,7 @@ class SweepTests(unittest.TestCase):
                 state = stat.read_text().split(") ")[1].split()[0]
             except FileNotFoundError:
                 state = "exited"
-            self.assertIn(state, {"exited", "Z"})
+            self.assertIn(state, {"exited", "Z", "X"})
 
     def test_progress_failure_stops_queue_and_is_reported(self):
         def progress(value):
@@ -238,6 +398,8 @@ set -euo pipefail
 check_status=0
 ROCJITSU_BIN=emulator
 TENSILELITE_CLIENT=client
+HIPBLASLT_BENCH=bench
+ROCJITSU_SWEEP_SEED=pr-revision
 ROCJITSU_CONFIG=config
 ROCJITSU_GPU_TARGET=gfx942
 ROCM_PATH=artifact
@@ -245,25 +407,37 @@ RACE_REPORT_DIR=reports
 run_timed() { echo "STAGE: $1"; shift; "$@"; }
 run_hipblaslt_bench_check() { return "$BENCH_STATUS"; }
 run_tensilelite_client_check() { return "$CLIENT_STATUS"; }
-python3() { printf 'ARG: %s\n' "$@"; return "$SWEEP_STATUS"; }
+python3() { printf 'ARG: %s\n' "$@"; if [[ "$3" == tensile ]]; then return "$TENSILE_SWEEP_STATUS"; else return "$BENCH_SWEEP_STATUS"; fi; }
 """
-        for bench, client, sweep_status in [(0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1)]:
-            with self.subTest(statuses=(bench, client, sweep_status)):
+        for statuses in [
+            (0, 0, 0, 0),
+            (1, 0, 0, 0),
+            (0, 1, 0, 0),
+            (0, 0, 1, 0),
+            (0, 0, 0, 1),
+        ]:
+            with self.subTest(statuses=statuses):
                 result = subprocess.run(
                     ["bash", "-c", setup + stages],
                     env={
                         **os.environ,
-                        "BENCH_STATUS": str(bench),
-                        "CLIENT_STATUS": str(client),
-                        "SWEEP_STATUS": str(sweep_status),
+                        **dict(
+                            zip(
+                                [
+                                    "BENCH_STATUS",
+                                    "CLIENT_STATUS",
+                                    "TENSILE_SWEEP_STATUS",
+                                    "BENCH_SWEEP_STATUS",
+                                ],
+                                map(str, statuses),
+                            )
+                        ),
                     },
                     text=True,
                     capture_output=True,
                     timeout=10,
                 )
-                self.assertEqual(
-                    result.returncode, int(any((bench, client, sweep_status)))
-                )
+                self.assertEqual(result.returncode, int(any(statuses)), result.stderr)
                 self.assertEqual(
                     [
                         line
@@ -273,15 +447,21 @@ python3() { printf 'ARG: %s\n' "$@"; return "$SWEEP_STATUS"; }
                     [
                         "STAGE: hipblaslt-bench race check",
                         "STAGE: tensilelite-client race check",
-                        "STAGE: 100-kernel toy race sweep",
+                        "STAGE: TensileLite sampled race sweep",
+                        "STAGE: hipBLASLt-bench sampled race sweep",
                     ],
                 )
-                for flag, value in (
+                for flag, value in [
                     ("--workers", "4"),
                     ("--kernels", "100"),
                     ("--target", "gfx942"),
-                ):
-                    self.assertIn(f"ARG: {flag}\nARG: {value}\n", result.stdout)
+                    ("--seed", "pr-revision"),
+                ]:
+                    self.assertEqual(
+                        result.stdout.count(f"ARG: {flag}\nARG: {value}\n"), 2
+                    )
+                self.assertIn("ARG: reports/sweep-tensile", result.stdout)
+                self.assertIn("ARG: reports/sweep-bench", result.stdout)
 
 
 if __name__ == "__main__":
