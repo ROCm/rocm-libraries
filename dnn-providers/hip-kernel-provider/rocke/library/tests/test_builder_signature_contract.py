@@ -294,6 +294,7 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.conv_direct_grouped.DirectReorganizeWeightsSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectCoalescedWeightsDgradSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectMfmaDgradSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectConvWgradSpec": ("problem",),
     "kernels.common.deep_fused_conv_pool.FusedConvPoolProblem": ("conv",),
     "kernels.common.deep_fused_conv_pool.DeepFusedConvPoolSpec": ("problem",),
     "kernels.common.img2col.Img2ColSpec": ("problem",),
