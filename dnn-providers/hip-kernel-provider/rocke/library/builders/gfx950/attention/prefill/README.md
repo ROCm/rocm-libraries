@@ -38,8 +38,9 @@ Non-persistent kernels still take the shape parameters; that ABI does not make
 a baked diagonal safe to reuse for a different sequence-length difference.
 
 Tile/resource knobs are `block_n`, `waves_per_eu`, and `lds_k_group_pad`;
-persistent scheduling knobs are `num_persistent`, `persist_decode`, `interleave`,
-and `wide_lds_dma`.
+persistent scheduling knobs are `num_persistent`, `interleave`, and `wide_lds_dma`;
+block-order knobs are `persist_decode`, `nonpersist_decode`, and
+`chiplet_num_xcds` (see `../ALGORITHM.md` §8.2).
 
 ## Persistent (grid-stride) mode
 
@@ -49,15 +50,11 @@ a 1-D grid of `num_persistent` long-lived CTAs grid-strides over the
 setup + K/V-prime cold-start is amortized once per CU instead of once per query-block.
 This closes the causal fixed-cost amortization gap. `num_persistent=256` = one 8-wave
 block per CU on MI355X (256 CUs) at 2 waves/SIMD; larger oversubscribes the CUs (tail
-loss). The work-item decode is `persist_decode="auto"` by default. Auto selects:
-
-1. **gqa-pair** when its one-phase balance equation
-   (`NP == NQB*Hkv*B`, with even `NQB` and GQA ratio) holds;
-2. **gqa-pair-2phase** when its two-phase balance equation
-   (`NP == NQB*Hkv*B*gqa/2`, with even `NQB`) holds;
-3. **hkv-major** when its broader GQA balance condition
-   (`gqa*NQB*B >= 2*NP`) holds; or
-4. **qb-major** otherwise.
+loss). The work-item decode is `persist_decode="auto"` by default. For aligned
+causal attention auto selects `bt_hkv_minor` below `chiplet_num_xcds` batches and
+`qb_major` from there on, both with folded query blocks; otherwise `hkv_major`
+when `gqa*NQB*B >= 2*NP`, else `qb_major`. The GQA-pair decodes below are explicit
+only.
 
 ### Balanced GQA-pair decode
 
@@ -69,16 +66,12 @@ through L2.
 
 The explicit mode requires persistent causal attention, aligned sequence lengths,
 even `NQB` and GQA ratio, and `NP == NQB*Hkv*B`. It composes numerically with
-`interleave`, attention sinks, and aligned sliding-window attention. Auto uses it
-for aligned non-windowed causal shapes whenever the balance equation holds.
-Sliding-window requests fall back to qb-major because complementary query blocks
-do not have constant combined work under a finite window. MHA (`Hq == Hkv`) also
-falls back because it has no grouped query heads to reuse.
+`interleave`, attention sinks, and aligned sliding-window attention. Auto does not
+select it: on the shapes it fits, the default block orders measured ahead.
 
 `persist_decode="gqa_pair_2phase"` assigns one query head to each CTA and processes
-complementary query blocks in two grid-stride phases. Auto selects it when
-`NP == NQB*Hkv*B*gqa/2`; this covers, for example, the D128 Hq32/Hkv8 S4096 and
-Hq64/Hkv8 S2048 dashboard shapes at NP=256.
+complementary query blocks in two grid-stride phases. It requires
+`NP == NQB*Hkv*B*gqa/2` and, like `gqa_pair`, is explicit only.
 
 ### Wide LDS DMA
 
@@ -92,11 +85,15 @@ per-row 32-bit DMA layout into FlyDSL-compatible slabs:
 - IGLP-1 instead of the narrow path's manual scheduling directives.
 
 The dispatcher enables it for aligned persistent causal D128/BN64 fp16 and bf16
-shapes without sliding windows, sinks, or ragged lengths. GQA-pair selection is
-independent: MHA and GQA shapes whose pair equations do not hold still use wide
-DMA with qb-major or hkv-major work ordering.
+shapes without sliding windows, sinks, or ragged lengths, whatever the block
+order.
 
 ## Measured (MI355X, bf16, D=128, Hq=128, Hkv=8, causal, Sq=8192)
+
+> These measurements predate the current block orders. Where they show
+> `hkv-major` as the default or `gqa-pair` as auto-selected, auto now picks
+> `bt_hkv_minor` / `qb_major`, which measured ahead of the pair decodes on
+> their shapes.
 
 Absolute MI355X TFLOPS swing **±25–30% with auto-clock**, so only **same-session
 ratios are load-bearing**; the table below is one representative session, with each
@@ -268,11 +265,12 @@ There are two algorithms, one per body, and three candidates:
 
 Nothing is chosen for the caller: an unpinned request keeps the unified 2D/3D
 path. The tile (`block_m` 128 or 256, `block_n`) and knobs such as
-`num_persistent`, `persist_decode` (`gqa_pair` / `gqa_pair_2phase`),
-`interleave` and `waves_per_eu` are spec fields of the candidate; set them with
-`tuning_spec_with_knobs(req, spec_id, knobs)` or replay a swept `tuning_id`.
-The kernel name exposes the persistent decisions through `wdma`, `gqapair`, or
-`gqapair2` tokens.
+`num_persistent`, `persist_decode` (including `gqa_pair` / `gqa_pair_2phase`),
+`interleave`, `nonpersist_decode` (grid body) and `waves_per_eu` are spec
+fields of the candidate; set them with `tuning_spec_with_knobs(req, spec_id,
+knobs)` or replay a swept `tuning_id`. The kernel name exposes the decisions
+through `wdma` and the block-order tokens (e.g. `bthkvmin`, `gqapair`,
+`nphqminswz`).
 
 For bottom-right masking, set `mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL`
 (exported by `dispatch.attention`). With unequal Q/K lengths, only the grid
