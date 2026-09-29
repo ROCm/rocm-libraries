@@ -37,6 +37,7 @@
 
 #include <algorithm>
 #include <array>
+#include <optional>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -3020,32 +3021,37 @@ namespace TensileLite
                 };
                 // value = [XCC, XCCG]
                 std::array<int, 2> value;
-                size_t             cuCount;
+                // Target device CU count; used only when value[1] == -1. Queried
+                // lazily (cuCount()) so deserialization needs no live GPU.
+                mutable std::optional<size_t> cuCountCache;
 
-                WorkgroupMappingXCCCheck()
-                {
-                    auto pHardware = hip::GetCurrentDevice();
-                    assert(pHardware != nullptr);
-                    Hardware const& hardware = *pHardware;
-                    AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
-                    cuCount                  = pAMDGPU->computeUnitCount;
-                }
+                WorkgroupMappingXCCCheck() = default;
                 WorkgroupMappingXCCCheck(std::array<int, 2> value)
                     : value(value)
                 {
-                    auto pHardware = hip::GetCurrentDevice();
-                    assert(pHardware != nullptr);
-                    Hardware const& hardware = *pHardware;
-                    AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
-                    cuCount                  = pAMDGPU->computeUnitCount;
                 }
 
                 /// Constructor for testing: inject cuCount so selection logic can be
                 /// unit-tested without a GPU (e.g. ROCM-2963: 38-CU partition alignment).
                 WorkgroupMappingXCCCheck(std::array<int, 2> value, size_t cuCountForTest)
                     : value(value)
-                    , cuCount(cuCountForTest)
+                    , cuCountCache(cuCountForTest)
                 {
+                }
+
+                // Query the device CU count once, at eval time (always on a GPU).
+                // Keeping it out of the ctor lets solutions deserialize GPU-free.
+                size_t cuCount() const
+                {
+                    if(!cuCountCache)
+                    {
+                        auto pHardware = hip::GetCurrentDevice();
+                        assert(pHardware != nullptr);
+                        AMDGPU const* pAMDGPU
+                            = dynamic_cast<AMDGPU const*>(pHardware.get());
+                        cuCountCache = pAMDGPU->computeUnitCount;
+                    }
+                    return *cuCountCache;
                 }
 
                 static std::string Type()
@@ -3064,7 +3070,7 @@ namespace TensileLite
                     // But we also have to notice we are passing the correct XCC to kernel.
                     // (i.e. Remember to do param.setWGMXCC(1) when running the kernel)
                     size_t XCC  = (problem.getParams().fallbackStatus()) ? 1 : value[0];
-                    size_t XCCG = (value[1] == -1) ? cuCount : value[1];
+                    size_t XCCG = (value[1] == -1) ? cuCount() : value[1];
                     return ((XCC & (XCC - 1)) == 0) && XCCG % XCC == 0;
                 }
 
@@ -3074,7 +3080,7 @@ namespace TensileLite
                     if(value[0] == -1)
                         return true;
                     size_t XCC  = (problem.getParams().fallbackStatus()) ? 1 : value[0];
-                    size_t XCCG = (value[1] == -1) ? cuCount : value[1];
+                    size_t XCCG = (value[1] == -1) ? cuCount() : value[1];
                     return debugEvalCmp(problem,
                                         stream,
                                         "WGMXCCG",
