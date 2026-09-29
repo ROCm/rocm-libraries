@@ -96,12 +96,12 @@ findings, native rejection, packaging problems and possible kernel races.
 
 Use Linux, Python 3.11+, `msgpack`, `PyYAML`, `taskset` and matching client/runtime
 artifacts. CMake's `HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS` installs this tool
-and its tests under `share/hipblaslt/rocjitsu`. Set runtime library paths as in
+and its tests under `share/hipblaslt/tensilelite/rocjitsu`. Set runtime library paths as in
 `.github/scripts/run_rocjitsu_hipblaslt_race_check.sh`.
 
 ```bash
 export PYTHONPATH="$ROCM_PATH/share/hipblaslt/tensilelite${PYTHONPATH:+:$PYTHONPATH}"
-sweep="$ROCM_PATH/share/hipblaslt/rocjitsu"
+sweep="$ROCM_PATH/share/hipblaslt/tensilelite/rocjitsu"
 python3 -B "$sweep/test_rocjitsu_race_sweep.py"
 python3 -B "$sweep/rocjitsu_race_sweep.py" \
   --backend tensile --seed "$PR_REVISION" \
