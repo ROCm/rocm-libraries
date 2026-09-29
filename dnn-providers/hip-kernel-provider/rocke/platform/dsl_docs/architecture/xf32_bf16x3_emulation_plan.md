@@ -266,8 +266,8 @@ from this plan.
 | 2 | Register `xf32` logical dtype in both dtype registries; test that it is rejected for memory ops | `core/dtypes.py`, `cpp/core/dtypes.cpp` (**not** `cpp/core/ir/core_types.cpp` — see the step note) | | ✅ [step 2](xf32_bf16x3_steps/step-02-xf32-logical-dtype.md) |
 | 3 | Add `emulation` descriptor to catalog schema; derive frag/layout from `physical_op_id`; native-preferred comparator in `MmaCatalog.enumerate` | `core/arch/target.py`, catalog JSON + C mirror | after 1 | ✅ [step 3](xf32_bf16x3_steps/step-03-emulation-descriptor.md) |
 | 4 | Add the two gfx950 emulated rows | catalog JSON + C mirror | after 3 | ✅ [step 4](xf32_bf16x3_steps/step-04-gfx950-xf32-rows.md) |
-| 5 | BF16x3 expansion in the Python lowering | `core/lower_llvm.py` | after 4 |
-| 6 | Same expansion, byte-identical, in the C++ engine | `cpp/core/lower_llvm/mma.cpp` | same change as 5 |
+| 5 | BF16x3 expansion in the Python lowering | `core/lower_llvm.py` | after 4 | ✅ [steps 5+6](xf32_bf16x3_steps/step-05-bf16x3-lowering.md) |
+| 6 | Same expansion, byte-identical, in the C++ engine | `cpp/core/lower_llvm/mma.cpp` | same change as 5 | ✅ [steps 5+6](xf32_bf16x3_steps/step-05-bf16x3-lowering.md) |
 | 7 | FP32-selection-unchanged regression test | `tests/` | after 3 |
 | 8 | COMGR compile gate for gfx950 | `tests/` | after 6 |
 | 9 | GPU numeric regression: vs FP32 reference **and** vs CK packed-path reference | `library/builders/**` or `examples/common/*parity*` | after 8 |

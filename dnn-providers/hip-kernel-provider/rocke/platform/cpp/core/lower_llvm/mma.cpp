@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "rocke/arch_target.h"
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/lower_llvm_internal.h"
@@ -70,6 +71,243 @@ static const char* mma_result_name(rocke_lower_t* L, const rocke_op_t* op)
 }
 
 /* ====================================================================== */
+/* Emulated atoms: BF16x3 expansion (Python _expand_emulated_mma)          */
+/* ====================================================================== */
+
+/* The catalog atom for op_id on the arch being lowered, when it needs
+ * expansion; NULL when it is natively encoded (every atom predating XF32) or
+ * absent. Per-arch, not a bare-op_id table: the same logical atom may be native
+ * on one target and emulated on another, so the arch being lowered is the one
+ * asked. Mirrors Python _emulated_mma_atom. */
+static const rocke_mma_op_t* _emulated_mma_atom(rocke_lower_t* L, const char* op_id)
+{
+    const rocke_arch_target_t* arch;
+    const rocke_mma_op_t* atom;
+    if(!L->backend || !L->backend->gfx)
+    {
+        return NULL;
+    }
+    arch = rocke_arch_target_from_gfx(L->backend->gfx);
+    if(!arch)
+    {
+        return NULL;
+    }
+    atom = rocke_mma_catalog_by_op_id(&arch->mma, op_id);
+    if(!atom || rocke_arch_mma_op_is_native(atom))
+    {
+        return NULL;
+    }
+    return atom;
+}
+
+/* Dekker-style split of an fp32 fragment into two bf16 fragments (Python
+ * _split_f32_to_bf16). ``big`` is v rounded to bf16; ``small`` is what that
+ * rounding threw away, itself rounded to bf16.
+ *
+ * Both conversions are `fptrunc ... to bfloat`, which is round-to-nearest-even
+ * -- LLVM has no other fp32->bf16 rounding -- and the AMDGPU backend selects the
+ * packed v_cvt_pk_bf16_f32 for the vector form on gfx950. That is CK's shipping
+ * packed path; CK's *scalar* fallback truncates instead and is deliberately not
+ * the parity target. */
+static void _split_f32_to_bf16(rocke_lower_t* L,
+                               const rocke_value_t* v,
+                               const char* hint,
+                               int n,
+                               const rocke_type_t* bf16_vec,
+                               rocke_value_t* out_big,
+                               rocke_value_t* out_small)
+{
+    char f32v[24];
+    char bf16v[24];
+    char name_hint[32];
+    const char* src = rocke_ll_operand(L, v);
+    const char* big;
+    const char* big_f32;
+    const char* diff;
+    const char* small;
+
+    snprintf(f32v, sizeof(f32v), "<%d x float>", n);
+    snprintf(bf16v, sizeof(bf16v), "<%d x bfloat>", n);
+
+    /* Fresh names are allocated in emission order, so the temp counter matches
+     * the Python lowerer's and the two engines agree byte for byte. */
+    snprintf(name_hint, sizeof(name_hint), "%s_big", hint);
+    big = rocke_ll_fresh(L, name_hint);
+    snprintf(name_hint, sizeof(name_hint), "%s_big_f32", hint);
+    big_f32 = rocke_ll_fresh(L, name_hint);
+    snprintf(name_hint, sizeof(name_hint), "%s_diff", hint);
+    diff = rocke_ll_fresh(L, name_hint);
+    snprintf(name_hint, sizeof(name_hint), "%s_small", hint);
+    small = rocke_ll_fresh(L, name_hint);
+
+    rocke_ll_emitf(L, "  %s = fptrunc %s %s to %s", big, f32v, src, bf16v);
+    rocke_ll_emitf(L, "  %s = fpext %s %s to %s", big_f32, bf16v, big, f32v);
+    rocke_ll_emitf(L, "  %s = fsub %s %s, %s", diff, f32v, src, big_f32);
+    rocke_ll_emitf(L, "  %s = fptrunc %s %s to %s", small, f32v, diff, bf16v);
+
+    out_big->name = big;
+    out_big->type = bf16_vec;
+    out_big->op = NULL;
+    out_small->name = small;
+    out_small->type = bf16_vec;
+    out_small->op = NULL;
+}
+
+/* Expand an emulated tile.mma in place; return whether it was one. Mirrors
+ * Python _expand_emulated_mma.
+ *
+ * BF16x3: split both fp32 operands, then issue three BF16 MMAs threading a
+ * single fp32 accumulator. The small*small term is dropped -- its magnitude is
+ * the same order as the split's own representation error, so computing it buys
+ * nothing.
+ *
+ * The term ORDER is load-bearing. fp32 accumulation is not associative, so
+ * issuing these three in any other order produces different result bits and
+ * breaks parity with CK. */
+static bool _expand_emulated_mma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id)
+{
+    const rocke_mma_op_t* atom = _emulated_mma_atom(L, op_id);
+    const rocke_value_t *a, *b, *c;
+    rocke_value_t a_big, a_small, b_big, b_small;
+    rocke_value_t acc_tmp[2];
+    rocke_type_t bf16_vec;
+    char bf16_vec_name[24];
+    const rocke_value_t* acc;
+    const char* physical;
+    int n;
+    int i;
+
+    if(atom == NULL)
+    {
+        return false;
+    }
+    /* rocke_ll_fail is [[noreturn]]; nothing after a fail call runs. */
+    if(atom->emulation_recipe != ROCKE_MMA_EMULATION_BF16X3)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "tile.mma %s: no lowering for emulation recipe %d",
+                      atom->op_id,
+                      (int)atom->emulation_recipe);
+    }
+    if(op->num_operands != 3 || op->num_results != 1)
+    {
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "tile.mma %s expects 3 operands and 1 result", atom->op_id);
+    }
+    a = op->operands[0];
+    b = op->operands[1];
+    c = op->operands[2];
+    for(i = 0; i < 2; ++i)
+    {
+        const rocke_value_t* v = (i == 0) ? a : b;
+        if(!v->type || v->type->kind != ROCKE_TYPE_VECTOR || !v->type->elem
+           || v->type->elem->scalar != ROCKE_SCALAR_F32)
+        {
+            rocke_ll_fail(L,
+                          ROCKE_ERR_VALUE,
+                          "tile.mma %s: BF16x3 emulation needs an fp32 vector for "
+                          "operand %s, got %s",
+                          atom->op_id,
+                          (i == 0) ? "a" : "b",
+                          (v->type && v->type->name) ? v->type->name : "(none)");
+        }
+    }
+    if(a->type->count != b->type->count)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "tile.mma %s: operand fragments disagree (%d vs %d elements)",
+                      atom->op_id,
+                      a->type->count,
+                      b->type->count);
+    }
+    n = a->type->count;
+
+    snprintf(bf16_vec_name, sizeof(bf16_vec_name), "vec<bf16x%d>", n);
+    memset(&bf16_vec, 0, sizeof(bf16_vec));
+    bf16_vec.kind = ROCKE_TYPE_VECTOR;
+    bf16_vec.name = bf16_vec_name;
+    bf16_vec.elem = rocke_scalar_by_name("bf16");
+    bf16_vec.count = n;
+
+    _split_f32_to_bf16(L, a, "xf32_a", n, &bf16_vec, &a_big, &a_small);
+    _split_f32_to_bf16(L, b, "xf32_b", n, &bf16_vec, &b_big, &b_small);
+    if(!rocke_ll_live(L))
+    {
+        return true;
+    }
+
+    physical = rocke_arch_mma_op_physical_op_id(atom);
+    {
+        const rocke_value_t* terms[3][2]
+            = {{&a_small, &b_big}, {&a_big, &b_small}, {&a_big, &b_big}};
+        acc = c;
+        for(i = 0; i < 3; ++i)
+        {
+            /* The last term must land in the caller's SSA value; the earlier two
+             * thread through temporaries. */
+            const bool last = (i == 2);
+            rocke_value_t* out = last ? NULL : &acc_tmp[i];
+            rocke_value_t* result;
+            rocke_op_t sub;
+            rocke_value_t* operands[3];
+            rocke_value_t* results[1];
+
+            if(!last)
+            {
+                out->name = rocke_ll_fresh(L, "xf32_acc");
+                out->type = c->type;
+                out->op = NULL;
+                result = out;
+            }
+            else
+            {
+                result = op->results[0];
+            }
+
+            operands[0] = const_cast<rocke_value_t*>(terms[i][0]);
+            operands[1] = const_cast<rocke_value_t*>(terms[i][1]);
+            operands[2] = const_cast<rocke_value_t*>(acc);
+            results[0] = result;
+
+            memset(&sub, 0, sizeof(sub));
+            sub.opcode = op->opcode;
+            sub.name = op->name;
+            sub.operands = operands;
+            sub.num_operands = 3;
+            sub.results = results;
+            sub.num_results = 1;
+            sub.loc = op->loc;
+
+            /* The physical atom is native by construction -- the catalog
+             * refuses an expansion chain -- so the dense table resolves it and
+             * the text is identical to a hand-written physical tile.mma.
+             *
+             * Python reaches the same emission through backend.emit_mma, which
+             * also covers WMMA. Every emulated row shipped today is MFMA, so
+             * the two engines cannot disagree on bytes; a future WMMA-arch row
+             * would land in the fail below rather than emit something wrong. */
+            if(!_try_emit_mfma_table(L, &sub, physical))
+            {
+                rocke_ll_fail(L,
+                              ROCKE_ERR_NOTIMPL,
+                              "tile.mma %s: physical atom '%s' has no dense MFMA "
+                              "emission",
+                              atom->op_id,
+                              physical);
+            }
+            if(!rocke_ll_live(L))
+            {
+                return true;
+            }
+            acc = result;
+        }
+    }
+    return true;
+}
+
+/* ====================================================================== */
 /* tile.mma routing (Python _op_tile_mma -> ISABackend.emit_mma)          */
 /* ====================================================================== */
 
@@ -88,6 +326,15 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
     if(!op_id)
     {
         rocke_ll_fail(L, ROCKE_ERR_KEY, "tile.mma: missing op_id attribute");
+    }
+
+    /* An emulated atom is expanded here, before ISA dispatch, so the expansion
+     * is written once rather than per ISA family. Native atoms -- every atom
+     * that predates XF32 -- fall straight through, so their emission is
+     * unchanged. */
+    if(_expand_emulated_mma(L, op, op_id))
+    {
+        return;
     }
 
     /* f16 / bf16 / f32 dense atoms resolve from the table; the scaled / fp4 /
