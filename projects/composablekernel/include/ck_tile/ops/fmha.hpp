@@ -37,6 +37,7 @@
 #include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_pipeline_problem.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_pipeline_tdm_policy.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_pipeline_trload_default_policy.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_pipeline_trload_tdm_policy.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_fwd_appendkv_pipeline.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_fwd_appendkv_pipeline_default_policy.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_fwd_pagedkv_pipeline_qr_ks_vs.hpp"
