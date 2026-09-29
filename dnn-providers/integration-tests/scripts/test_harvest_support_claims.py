@@ -896,9 +896,19 @@ class TestFetch(unittest.TestCase):
         gh = self._gh()
         code, out, err = self._main(gh)
         self.assertEqual(code, 0)
-        self.assertIn("latest nightly: run 7", err)
-        self.assertIn("skipped run 7 job 13: cancelled", err)
-        self.assertIn("run 7 job 11  1 block", out)
+        self.assertIn(
+            "latest nightly: run 7\n"
+            "  https://github.com/ROCm/rocm-libraries/actions/runs/7\n",
+            err,
+        )
+        self.assertIn(
+            "skipped https://github.com/ROCm/rocm-libraries/actions/runs/7/job/13: cancelled",
+            err,
+        )
+        self.assertIn(
+            "https://github.com/ROCm/rocm-libraries/actions/runs/7/job/11  1 block",
+            out,
+        )
         self.assertIn("gfx1030/windows        3 claims", out)
         self.assertEqual(gh.fetched_logs(), ["11"])
         self.assertTrue(gh.calls[0][0].endswith("/runs?per_page=50"))
@@ -908,7 +918,7 @@ class TestFetch(unittest.TestCase):
         code, out, err = self._main(gh, "--run", "7")
         self.assertEqual(code, 0)
         self.assertNotIn("latest nightly", err)
-        self.assertIn("run 7 job 11", out)
+        self.assertIn("actions/runs/7/job/11", out)
         self.assertFalse(any("workflows" in a[0] for a in gh.calls))
 
     def test_fetched_and_read_runs_count_together(self) -> None:

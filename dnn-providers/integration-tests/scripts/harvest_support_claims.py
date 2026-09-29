@@ -99,6 +99,7 @@ DROP_MIN_RUNS = "kept in fewer than --min-runs runs"
 
 REPO = "ROCm/rocm-libraries"
 DEVELOP = (f"https://github.com/{REPO}.git", "develop")
+RUN_URL = f"https://github.com/{REPO}/actions/runs"
 NIGHTLY_WORKFLOW = "therock-multi-arch-ci-nightly.yml"
 DEFAULT_JOBS = r"Test \w+provider\b"  # every provider's engines, on every GPU
 FETCHED_CONCLUSIONS = ("success", "failure")
@@ -596,7 +597,7 @@ def latest_nightly(gh: Gh) -> int:
 
 
 def fetch_run(run_id: int, jobs: Pattern[str], gh: Gh) -> List[Tuple[str, str]]:
-    """Returns (label, log text) for each job of RUN_ID that matches JOBS.
+    """Returns (job URL, log text) for each job of RUN_ID that matches JOBS.
 
     Jobs that neither succeeded nor failed have no complete log; each one is
     named on stderr and skipped.
@@ -622,7 +623,7 @@ def fetch_run(run_id: int, jobs: Pattern[str], gh: Gh) -> List[Tuple[str, str]]:
 
     logs = []
     for job in sorted(matched, key=lambda j: j["id"]):
-        label = f"run {run_id} job {job['id']}"
+        label = f"{RUN_URL}/{run_id}/job/{job['id']}"
         if job["conclusion"] not in FETCHED_CONCLUSIONS:
             print(f"skipped {label}: {job['conclusion']}", file=sys.stderr)
             continue
@@ -803,6 +804,7 @@ def main(
         if not args.runs and not run_ids:
             run_ids = [latest_nightly(gh)]
             print(f"latest nightly: run {run_ids[0]}", file=sys.stderr)
+            print(f"  {RUN_URL}/{run_ids[0]}", file=sys.stderr)
         runs = [_read_run(Path(p)) for p in args.runs]
         runs += [fetch_run(i, args.jobs, gh) for i in run_ids]
     except (OSError, FetchError) as exc:
