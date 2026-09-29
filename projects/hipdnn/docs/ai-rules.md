@@ -35,6 +35,9 @@ When a user asks for a workflow covered by a project skill, tell them the projec
 - `tools/ai/skills/hipdnn-superbuild-test/SKILL.md`
   - Runs tests against an existing superbuild with per-component selection (`hipdnn`, `miopen`, `hipblaslt`, `hip-kernel`, `integration-tests`, or `all`), unit/integration scope, optional `--filter=<gtest_pattern>`, `--verbose`, and `--keep-going`. Handles Windows DLL PATH and the `hip-kernel-provider` target naming quirk automatically.
   - Suggest this skill when the user asks to run, filter, or triage tests against a superbuild they have already configured. It does not configure or build — pair it with `$hipdnn-superbuild` in Codex or `/hipdnn-superbuild` in Claude first.
+- `tools/ai/skills/hipdnn-trigger-ci/SKILL.md`
+  - Dispatches TheRock CI, TheRock Multi-Arch CI, or the hipDNN superbuild CI on a rocm-libraries branch with chosen GPU families, projects, and test labels, and checks or watches the resulting runs. It always prints a `--dry-run` command first and dispatches only after explicit user approval.
+  - Suggest this skill when the user asks to trigger or re-run CI on a branch or PR with specific GPU families or hipDNN/provider test labels, or to check or watch CI status.
 
 ## Commit & PR Conventions
 
