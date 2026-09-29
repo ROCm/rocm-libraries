@@ -82,49 +82,6 @@ namespace hipblaslt_ext::experimental
                     return HIPBLAS_STATUS_INTERNAL_ERROR;
                 }
             }
-
-            struct JitImplementation final : BackendImplementation
-            {
-                std::shared_ptr<const hipblaslt_jit::Jit> jit;
-                explicit JitImplementation(std::shared_ptr<const hipblaslt_jit::Jit> value)
-                    : jit(std::move(value))
-                {
-                }
-                std::string_view name() const noexcept override
-                {
-                    return jit->components().backend->info().name;
-                }
-                hipblasStatus_t compile(const OperationRequest&              request,
-                                        const Target&                        target,
-                                        size_t                               workspaceLimit,
-                                        std::shared_ptr<const KernelBundle>& bundle,
-                                        Diagnostics&                         diagnostics) const override
-                {
-                    bundle.reset();
-                    hipblaslt_jit::DeviceTarget device;
-                    auto status = hipblaslt_jit::DeviceTarget::make(target.device, device);
-                    if(status.ok())
-                    {
-                        auto outcome = jit->generate(request, device, 1, workspaceLimit, {});
-                        if(!outcome.unpublished.empty())
-                        {
-                            bundle              = std::move(outcome.unpublished.front());
-                            diagnostics.message = std::move(outcome.summary);
-                            return HIPBLAS_STATUS_SUCCESS;
-                        }
-                        if(outcome.failures.empty())
-                            return HIPBLAS_STATUS_INTERNAL_ERROR;
-                        status = std::move(outcome.failures.front());
-                    }
-                    diagnostics.message = status.message;
-                    return toHipStatus(status.code);
-                }
-            };
-        }
-
-        Backend BackendAccess::make(std::shared_ptr<const hipblaslt_jit::Jit> jit)
-        {
-            return make(std::make_shared<const JitImplementation>(std::move(jit)));
         }
 
         uint64_t registerBundle(std::shared_ptr<const CompiledSolution> bundle)
@@ -368,46 +325,56 @@ namespace hipblaslt_ext::experimental
             diagnostics = {};
             try
             {
-                auto implementation = detail::BackendAccess::get(backend);
-                auto operation      = detail::RequestAccess::get(request);
-                if(!operation || !implementation)
+                auto jit       = detail::BackendAccess::get(backend);
+                auto operation = detail::RequestAccess::get(request);
+                if(!operation || !jit)
                 {
                     diagnostics.message = "A valid request and backend are required";
                     return HIPBLAS_STATUS_INVALID_VALUE;
                 }
-                diagnostics.backend = implementation->name();
-                detail::Target target;
-                if(hipGetDevice(&target.device) != hipSuccess)
+                diagnostics.backend = jit->components().backend->info().name;
+                int current         = -1;
+                if(hipGetDevice(&current) != hipSuccess)
                     return HIPBLAS_STATUS_INTERNAL_ERROR;
-                if(target.device != device)
+                if(current != device)
                 {
                     diagnostics.message = "Compile on the requested HIP device";
                     return HIPBLAS_STATUS_INVALID_VALUE;
                 }
-                if(hipGetDeviceProperties(&target.properties, device) != hipSuccess)
-                    return HIPBLAS_STATUS_INTERNAL_ERROR;
-                std::shared_ptr<const detail::KernelBundle> bundle;
-                auto                                        status = implementation->compile(
-                    *operation, target, workspaceLimit, bundle, diagnostics);
-                if(status != HIPBLAS_STATUS_SUCCESS)
-                    return status;
-                if(!bundle)
-                    return HIPBLAS_STATUS_INTERNAL_ERROR;
+                hipblaslt_jit::DeviceTarget target;
+                hipblaslt_jit::Jit::Outcome outcome;
+                auto status = hipblaslt_jit::DeviceTarget::make(device, target);
+                if(status.ok())
+                    outcome = jit->generate(*operation, target, 1, workspaceLimit, {});
+                if(status.ok() && outcome.unpublished.empty())
+                {
+                    if(outcome.failures.empty())
+                        return HIPBLAS_STATUS_INTERNAL_ERROR;
+                    status = std::move(outcome.failures.front());
+                }
+                if(!status.ok())
+                {
+                    diagnostics.message = std::move(status.message);
+                    return detail::toHipStatus(status.code);
+                }
+                auto bundle         = std::move(outcome.unpublished.front());
+                diagnostics.message = std::move(outcome.summary);
                 if(bundle->operationKind() != operation->kind())
                 {
                     diagnostics.message = "Bundle does not implement the requested operation";
                     return HIPBLAS_STATUS_NOT_SUPPORTED;
                 }
-                size_t required = 0;
-                status = bundle->support(*operation, workspaceLimit, required, diagnostics);
-                if(status != HIPBLAS_STATUS_SUCCESS)
-                    return status;
+                size_t     required = 0;
+                const auto supported
+                    = bundle->support(*operation, workspaceLimit, required, diagnostics);
+                if(supported != HIPBLAS_STATUS_SUCCESS)
+                    return supported;
                 if(required > workspaceLimit)
                     return HIPBLAS_STATUS_INVALID_VALUE;
                 auto compiled            = std::make_shared<detail::CompiledSolution>();
-                compiled->target         = target;
+                compiled->target         = std::move(target);
                 compiled->request        = std::move(operation);
-                compiled->backend        = std::move(implementation);
+                compiled->jit            = std::move(jit);
                 compiled->bundle         = std::move(bundle);
                 compiled->process        = detail::processId();
                 compiled->workspaceLimit = workspaceLimit;
@@ -446,7 +413,7 @@ namespace hipblaslt_ext::experimental
                 auto compiled = detail::SolutionAccess::get(solution);
                 if(!compiled)
                     return finish(HIPBLAS_STATUS_INVALID_VALUE);
-                diagnostics.backend = compiled->backend->name();
+                diagnostics.backend = compiled->jit->components().backend->info().name;
                 int device          = -1;
                 if(compiled->process != detail::processId() || hipGetDevice(&device) != hipSuccess
                    || device != compiled->target.device)

@@ -274,3 +274,17 @@ namespace hipblaslt_jit
         Components m_components;
     };
 }
+
+namespace hipblaslt_ext::experimental::jit::detail
+{
+    struct CompiledSolution
+    {
+        hipblaslt_jit::DeviceTarget               target;
+        std::shared_ptr<const OperationRequest>   request;
+        std::shared_ptr<const hipblaslt_jit::Jit> jit;
+        std::shared_ptr<const KernelBundle>       bundle;
+        uint64_t                                  process        = 0;
+        size_t                                    workspaceLimit = 0;
+        size_t                                    workspaceBytes = 0;
+    };
+}

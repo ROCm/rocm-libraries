@@ -1,5 +1,6 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+#include "hipblaslt-jit-component.hpp"
 #include "hipblaslt-jit-gemm-internal.hpp"
 #include "hipblaslt-jit-mock.hpp"
 #include "hipblaslt-jit-tensilelite-artifacts.hpp"

@@ -6,13 +6,17 @@
 #include <memory>
 #include <string>
 
+namespace hipblaslt_jit
+{
+    class Jit;
+}
+
 // Not installed. The entry points stay exported because the JIT test binaries
 // and hipblaslt-bench --jit-gemm link against the shared library.
 namespace hipblaslt_ext::experimental::jit
 {
     namespace detail
     {
-        struct BackendImplementation;
         struct BackendAccess;
         struct OperationRequest;
         struct RequestAccess;
@@ -20,14 +24,14 @@ namespace hipblaslt_ext::experimental::jit
         struct SolutionAccess;
     }
 
-    // Provider factories configure an opaque, copyable kernel generator.
+    // Backend factories configure an opaque, copyable solution generator.
     class Backend
     {
     public:
         Backend() = default;
 
     private:
-        std::shared_ptr<const detail::BackendImplementation> implementation;
+        std::shared_ptr<const hipblaslt_jit::Jit> jit;
         friend struct detail::BackendAccess;
     };
 
@@ -43,7 +47,7 @@ namespace hipblaslt_ext::experimental::jit
         friend struct detail::RequestAccess;
     };
 
-    // Owns an executable kernel bundle, including its provider and helper modules.
+    // Owns an executable kernel bundle, including its backend and helper modules.
     // An operation adapter converts it to an execution API's algorithm type.
     class Solution
     {

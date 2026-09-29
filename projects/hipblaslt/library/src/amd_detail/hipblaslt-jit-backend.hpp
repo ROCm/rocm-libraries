@@ -6,11 +6,6 @@
 #include <memory>
 #include <string_view>
 
-namespace hipblaslt_jit
-{
-    class Jit;
-}
-
 // Private, compiled-in provider interface. This is not a stable plugin ABI.
 namespace hipblaslt_ext::experimental::jit::detail
 {
@@ -18,12 +13,6 @@ namespace hipblaslt_ext::experimental::jit::detail
     {
         virtual ~OperationRequest()                    = default;
         virtual std::string_view kind() const noexcept = 0;
-    };
-
-    struct Target
-    {
-        int             device = -1;
-        hipDeviceProp_t properties{};
     };
 
     struct ExecutionContext
@@ -60,41 +49,18 @@ namespace hipblaslt_ext::experimental::jit::detail
             = 0;
     };
 
-    struct BackendImplementation
-    {
-        virtual ~BackendImplementation()               = default;
-        virtual std::string_view name() const noexcept = 0;
-        virtual hipblasStatus_t  compile(const OperationRequest&              request,
-                                         const Target&                        target,
-                                         size_t                               workspaceLimit,
-                                         std::shared_ptr<const KernelBundle>& bundle,
-                                         Diagnostics&                         diagnostics) const
-            = 0;
-    };
-
     struct BackendAccess
     {
-        static Backend make(std::shared_ptr<const BackendImplementation> implementation)
+        static Backend make(std::shared_ptr<const hipblaslt_jit::Jit> jit)
         {
             Backend backend;
-            backend.implementation = std::move(implementation);
+            backend.jit = std::move(jit);
             return backend;
         }
-        static Backend make(std::shared_ptr<const hipblaslt_jit::Jit> jit);
         static const auto& get(const Backend& backend)
         {
-            return backend.implementation;
+            return backend.jit;
         }
-    };
-    struct CompiledSolution
-    {
-        Target                                       target;
-        std::shared_ptr<const OperationRequest>      request;
-        std::shared_ptr<const BackendImplementation> backend;
-        std::shared_ptr<const KernelBundle>          bundle;
-        uint64_t                                     process        = 0;
-        size_t                                       workspaceLimit = 0;
-        size_t                                       workspaceBytes = 0;
     };
 
     struct RequestAccess
