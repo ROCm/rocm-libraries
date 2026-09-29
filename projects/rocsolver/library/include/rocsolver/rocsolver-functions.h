@@ -19099,6 +19099,10 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehrd_strided_batched(rocblas_handle 
     (the permutations and the scaling factors found so far are applied, and ilo, ihi and scale
     describe them), where LAPACK returns an error (info = -3).
 
+    For n >= 256 (and a job other than rocsolver_balance_none), several kernels are launched per
+    matrix, and the host synchronizes with the stream after the permutation step and after each
+    sweep of the scaling step.
+
     @param[in]
     handle      rocblas_handle.
     @param[in]
@@ -19202,6 +19206,10 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgebal(rocblas_handle handle,
     the presence of NaN: if a row or column norm is NaN during the scaling, the balancing stops
     (the permutations and the scaling factors found so far are applied, and ilo, ihi and scale
     describe them), where LAPACK returns an error (info = -3).
+
+    For n >= 256 (and a job other than rocsolver_balance_none), several kernels are launched per
+    matrix, and the host synchronizes with the stream after the permutation step and after each
+    sweep of the scaling step.
 
     @param[in]
     handle      rocblas_handle.
@@ -19320,6 +19328,10 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgebal_batched(rocblas_handle handle,
     the presence of NaN: if a row or column norm is NaN during the scaling, the balancing stops
     (the permutations and the scaling factors found so far are applied, and ilo, ihi and scale
     describe them), where LAPACK returns an error (info = -3).
+
+    For n >= 256 (and a job other than rocsolver_balance_none), several kernels are launched per
+    matrix, and the host synchronizes with the stream after the permutation step and after each
+    sweep of the scaling step.
 
     @param[in]
     handle      rocblas_handle.
