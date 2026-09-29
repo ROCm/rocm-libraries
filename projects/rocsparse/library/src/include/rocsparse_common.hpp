@@ -60,16 +60,6 @@
 
 namespace rocsparse
 {
-    // Maximum extent supported by the y/z grid dimensions on all supported
-    // architectures. Batched launches map the batch onto grid.y (and, where
-    // applicable, grid.z), so the requested batch_count can exceed this value.
-    static constexpr int64_t max_batch_grid_size = 65535;
-
-    // Maximum extent supported by the x grid dimension on all supported
-    // architectures. A 64-bit count sized onto grid.x narrows into the unsigned
-    // int dim3 field, so it must be clamped against this bound.
-    static constexpr int64_t max_grid_size_x = 2147483647;
-
     // Overflow-safe ceiling division. Evaluated in 64-bit and written in the
     // (count - 1) / block_size + 1 form, which never overflows before the
     // divide. This is the canonical rounding form for the library; the
@@ -78,26 +68,6 @@ namespace rocsparse
     static inline int64_t ceil_div(int64_t count, int64_t block_size)
     {
         return (count > 0) ? ((count - 1) / block_size + 1) : 0;
-    }
-
-    // Clamp a grid extent to a hardware axis maximum, returning a value that
-    // fits the unsigned int dim3 field. Any kernel launched with a clamped
-    // extent MUST grid-stride over the full count.
-    template <typename J>
-    static inline uint32_t get_grid_size(J count, int64_t max_extent)
-    {
-        const int64_t extent = static_cast<int64_t>(count);
-        return static_cast<uint32_t>((extent > max_extent) ? max_extent : extent);
-    }
-
-    // Clamp a batch/grid dimension to the hardware maximum grid.y/z extent so a
-    // launch can never fail with hipErrorInvalidConfiguration for large batches.
-    // Any kernel launched with the clamped extent MUST grid-stride over the full
-    // count, e.g. for(int64_t b = hipBlockIdx_y; b < count; b += hipGridDim_y).
-    template <typename J>
-    static inline uint32_t get_batch_grid_size(J batch_count)
-    {
-        return rocsparse::get_grid_size(batch_count, max_batch_grid_size);
     }
 
     // Compile-time log2 for power-of-2 (e.g. log2_pow2<32>::value == 5). Use for WF_SIZE, etc.
@@ -252,17 +222,33 @@ namespace rocsparse
                                         __shfl_down(std::imag(var), src_lane, width));
     }
 
+    // __builtin_amdgcn_readfirstlane is a 32-bit op. Wider types must be
+    // broadcast one 32-bit half at a time; floating-point types go through
+    // their bit pattern so they are not rounded to int.
+    __device__ __forceinline__ uint32_t read_first_lane_b32(uint32_t var)
+    {
+        return static_cast<uint32_t>(__builtin_amdgcn_readfirstlane(static_cast<int32_t>(var)));
+    }
+    __device__ __forceinline__ uint64_t read_first_lane_b64(uint64_t var)
+    {
+        const uint32_t lo = read_first_lane_b32(static_cast<uint32_t>(var));
+        const uint32_t hi = read_first_lane_b32(static_cast<uint32_t>(var >> 32));
+        return (static_cast<uint64_t>(hi) << 32) | static_cast<uint64_t>(lo);
+    }
+
     __device__ __forceinline__ _Float16 read_first_lane(_Float16 var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        const uint32_t bits
+            = read_first_lane_b32(static_cast<uint32_t>(__builtin_bit_cast(uint16_t, var)));
+        return __builtin_bit_cast(_Float16, static_cast<uint16_t>(bits));
     }
     __device__ __forceinline__ float read_first_lane(float var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        return __builtin_bit_cast(float, read_first_lane_b32(__builtin_bit_cast(uint32_t, var)));
     }
     __device__ __forceinline__ double read_first_lane(double var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        return __builtin_bit_cast(double, read_first_lane_b64(__builtin_bit_cast(uint64_t, var)));
     }
     __device__ __forceinline__ int8_t read_first_lane(int8_t var)
     {
@@ -274,7 +260,7 @@ namespace rocsparse
     }
     __device__ __forceinline__ int64_t read_first_lane(int64_t var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        return static_cast<int64_t>(read_first_lane_b64(static_cast<uint64_t>(var)));
     }
     __device__ __forceinline__ uint8_t read_first_lane(uint8_t var)
     {
@@ -282,11 +268,11 @@ namespace rocsparse
     }
     __device__ __forceinline__ uint32_t read_first_lane(uint32_t var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        return read_first_lane_b32(var);
     }
     __device__ __forceinline__ uint64_t read_first_lane(uint64_t var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        return read_first_lane_b64(var);
     }
 
     __device__ __forceinline__ int any(int predicate)
@@ -2847,39 +2833,30 @@ namespace rocsparse
     __device__ __forceinline__ double assign_ilu0_boost_value(const double& value,
                                                               const double& boost_value)
     {
-#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
         // Apply the boost magnitude (>= 0) along the sign of the original pivot,
         // i.e. copysign(|boost_value|, value). Using the magnitude guarantees a
         // negative boost can never swap the pivot sign (preserving inertia).
         const double abs_value = rocsparse::abs(value);
         const double abs_boost = rocsparse::abs(boost_value);
         return (abs_value > 0.0) ? (abs_boost * (value / abs_value)) : abs_boost;
-#else
-        return boost_value;
-#endif
     }
 
     template <>
     __device__ __forceinline__ float assign_ilu0_boost_value(const float& value,
                                                              const float& boost_value)
     {
-#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
         // Apply the boost magnitude (>= 0) along the sign of the original pivot,
         // i.e. copysign(|boost_value|, value). Using the magnitude guarantees a
         // negative boost can never swap the pivot sign (preserving inertia).
         const float abs_value = rocsparse::abs(value);
         const float abs_boost = rocsparse::abs(boost_value);
         return (abs_value > 0.f) ? (abs_boost * (value / abs_value)) : abs_boost;
-#else
-        return boost_value;
-#endif
     }
 
     template <>
     __device__ __forceinline__ rocsparse_float_complex assign_ilu0_boost_value(
         const rocsparse_float_complex& value, const rocsparse_float_complex& boost_value)
     {
-#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
         // Apply the boost magnitude (>= 0) along the phase of the original pivot:
         // |boost_value| * value / |value|. Using the magnitude guarantees the
         // pivot direction (and hence inertia) cannot be swapped by the boost.
@@ -2888,16 +2865,12 @@ namespace rocsparse
         return (abs_value > static_cast<float>(0))
                    ? (static_cast<rocsparse_float_complex>(abs_boost) * (value / abs_value))
                    : static_cast<rocsparse_float_complex>(abs_boost);
-#else
-        return boost_value;
-#endif
     }
 
     template <>
     __device__ __forceinline__ rocsparse_double_complex assign_ilu0_boost_value(
         const rocsparse_double_complex& value, const rocsparse_double_complex& boost_value)
     {
-#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
         // Apply the boost magnitude (>= 0) along the phase of the original pivot:
         // |boost_value| * value / |value|. Using the magnitude guarantees the
         // pivot direction (and hence inertia) cannot be swapped by the boost.
@@ -2906,9 +2879,5 @@ namespace rocsparse
         return (abs_value > static_cast<double>(0))
                    ? (static_cast<rocsparse_double_complex>(abs_boost) * (value / abs_value))
                    : static_cast<rocsparse_double_complex>(abs_boost);
-#else
-        return boost_value;
-#endif
     }
-
 }

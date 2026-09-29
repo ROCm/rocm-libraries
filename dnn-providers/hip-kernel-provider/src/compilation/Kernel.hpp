@@ -15,6 +15,13 @@ class Program;
 class Kernel : public IRunnableKernel
 {
 public:
+    /// Carried by Program-sourced kernels, which launch on whatever device is current: a
+    /// Program loads its module without binding and HipMlopsModuleCache keys on (file,
+    /// options) with no ordinal, so one Program is legitimately shared across every device.
+    /// Remembering an ordinal here would pin every launch to whichever device compiled
+    /// first; giving that cache a device is ALMIOPEN-2550's job.
+    static constexpr int NO_DEVICE = -1;
+
     Kernel(const Program& program, const std::string& kernelName);
 
     /// Wraps a function handle resolved elsewhere -- by a kpack archive's module rather
@@ -24,7 +31,8 @@ public:
     ///
     /// The caller owns the module the function belongs to and must keep it alive for
     /// this Kernel's lifetime; hipFunction_t is a non-owning view into a hipModule_t.
-    Kernel(hipFunction_t kernel, std::string kernelName);
+    /// `deviceOrdinal` is the device that module was loaded on; launches rebind to it.
+    Kernel(hipFunction_t kernel, std::string kernelName, int deviceOrdinal);
 
     void setBlockSize(unsigned int x, unsigned int y = 1, unsigned int z = 1) override;
     void setGridSize(unsigned int x, unsigned int y = 1, unsigned int z = 1) override;
@@ -38,6 +46,7 @@ protected:
 private:
     std::string _kernelName;
     hipFunction_t _kernel;
+    int _deviceOrdinal = NO_DEVICE;
     unsigned int _blockX = 1;
     unsigned int _blockY = 1;
     unsigned int _blockZ = 1;

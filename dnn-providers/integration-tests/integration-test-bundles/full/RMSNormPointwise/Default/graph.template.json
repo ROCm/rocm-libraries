@@ -1,0 +1,125 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "float",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": false,
+  "min_required_engine_api_version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "name": "RMSNormActivationTest",
+  "nodes": [
+    {
+      "compute_data_type": "float",
+      "forward_phase": "TRAINING",
+      "inputs": {
+        "bias_tensor_uid": 3,
+        "epsilon_tensor_uid": 4,
+        "scale_tensor_uid": 5,
+        "x_tensor_uid": 6
+      },
+      "name": "RMSNorm_0",
+      "outputs": {
+        "inv_rms_tensor_uid": 1,
+        "y_tensor_uid": 2
+      },
+      "type": "RMSNormAttributes"
+    },
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "axis_tensor_uid": null,
+        "elu_alpha": null,
+        "in_0_tensor_uid": 2,
+        "in_1_tensor_uid": null,
+        "in_2_tensor_uid": null,
+        "operation": "relu_fwd",
+        "relu_lower_clip": "${case.attributes.relu_lower_clip}",
+        "relu_lower_clip_slope": "${case.attributes.relu_lower_clip_slope}",
+        "relu_upper_clip": "${case.attributes.relu_upper_clip}",
+        "softplus_beta": null,
+        "swish_beta": null
+      },
+      "name": "Pointwise_1",
+      "outputs": {
+        "out_0_tensor_uid": 0
+      },
+      "type": "PointwiseAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Pointwise_1::OUT_0",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "RMSNorm_0::INV_RMS",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "RMSNorm_0::Y",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": true
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "bias",
+      "strides": "${case.strides}",
+      "uid": 3,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "epsilon",
+      "strides": "${case.strides}",
+      "uid": 4,
+      "value": 9.999999747378752e-06,
+      "value_type": "Float32Value",
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "scale",
+      "strides": "${case.strides}",
+      "uid": 5,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "x",
+      "strides": "${case.strides}",
+      "uid": 6,
+      "virtual": false
+    }
+  ]
+}

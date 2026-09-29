@@ -24,6 +24,7 @@
 
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "coomm/segmented/kernel_declarations.h"
@@ -63,8 +64,8 @@ namespace rocsparse
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                  \
         (rocsparse::coommnn_segmented_main_kernel<COOMMNN_DIM, WF_SIZE, LOOPS, TRANSB>), \
         dim3(nblocks,                                                                    \
-             get_grid_size<I>((main - 1) / WF_SIZE + 1, max_batch_grid_size),            \
-             get_batch_grid_size<I>(batch_count_C)),                                     \
+             get_grid_size_y<I>(handle, (main - 1) / WF_SIZE + 1),                       \
+             get_grid_size_z<I>(handle, batch_count_C)),                                 \
         dim3(COOMMNN_DIM),                                                               \
         0,                                                                               \
         stream,                                                                          \
@@ -95,7 +96,7 @@ namespace rocsparse
 #define LAUNCH_COOMMNN_SEGMENTED_REMAINDER_KERNEL(COOMMNN_DIM, WF_SIZE, LOOPS, TRANSB)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                       \
         (rocsparse::coommnn_segmented_remainder_kernel<COOMMNN_DIM, WF_SIZE, LOOPS, TRANSB>), \
-        dim3(nblocks, 1, get_batch_grid_size<I>(batch_count_C)),                              \
+        dim3(nblocks, 1, get_grid_size_z<I>(handle, batch_count_C)),                          \
         dim3(COOMMNN_DIM),                                                                    \
         0,                                                                                    \
         stream,                                                                               \
@@ -298,20 +299,21 @@ namespace rocsparse
 #undef COOMMN_DIM
 #undef LOOPS
 
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::coommnn_general_block_reduce<1024>),
-                                               dim3(n, 1, get_batch_grid_size<I>(batch_count_C)),
-                                               1024,
-                                               0,
-                                               stream,
-                                               n,
-                                               nblocks,
-                                               row_block_red,
-                                               val_block_red,
-                                               dense_C,
-                                               ldc,
-                                               batch_stride_C,
-                                               order_C,
-                                               batch_count_C);
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::coommnn_general_block_reduce<1024>),
+                dim3(n, 1, get_grid_size_z<I>(handle, batch_count_C)),
+                1024,
+                0,
+                stream,
+                n,
+                nblocks,
+                row_block_red,
+                val_block_red,
+                dense_C,
+                ldc,
+                batch_stride_C,
+                order_C,
+                batch_count_C);
         }
         else
         {

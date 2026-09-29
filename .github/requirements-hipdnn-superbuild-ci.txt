@@ -1,0 +1,12 @@
+# Installed by hipdnn-superbuild-ci.yml into the venv it passes as
+# -DPython3_EXECUTABLE, before "Configure superbuild"; that step explains why the
+# ordering matters for pytest.
+#
+# pytest -- the descriptor-packaging suite, and the frontend wheel tests.
+# build  -- the PEP 517 frontend that packs the frontend wheel.
+# numpy  -- imported by frontend_wheel_package/tests, not by the build.
+#
+# Installed with --upgrade, so nothing is pinned here.
+pytest
+build
+numpy

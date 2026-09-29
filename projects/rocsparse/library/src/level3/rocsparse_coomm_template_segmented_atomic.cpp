@@ -24,6 +24,7 @@
 
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "coomm/segmented_atomic/kernel_declarations.h"
@@ -35,8 +36,8 @@ namespace rocsparse
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                       \
         (rocsparse::coommnn_segmented_atomic<WF_SIZE, LOOPS, COLS, NT, T>),   \
         dim3(nblocks,                                                         \
-             get_grid_size<I>((main - 1) / COLS + 1, max_batch_grid_size),    \
-             get_batch_grid_size<I>(batch_count_C)),                          \
+             get_grid_size_y<I>(handle, (main - 1) / COLS + 1),               \
+             get_grid_size_z<I>(handle, batch_count_C)),                      \
         dim3(WF_SIZE),                                                        \
         0,                                                                    \
         stream,                                                               \
@@ -64,7 +65,7 @@ namespace rocsparse
 #define LAUNCH_COOMMNN_SEGMENTED_ATOMIC_REMAINDER_KERNEL(WF_SIZE, LOOPS, COLS, NT) \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                            \
         (rocsparse::coommnn_segmented_atomic<WF_SIZE, LOOPS, COLS, NT, T>),        \
-        dim3(nblocks, 1, get_batch_grid_size<I>(batch_count_C)),                   \
+        dim3(nblocks, 1, get_grid_size_z<I>(handle, batch_count_C)),               \
         dim3(WF_SIZE),                                                             \
         0,                                                                         \
         stream,                                                                    \

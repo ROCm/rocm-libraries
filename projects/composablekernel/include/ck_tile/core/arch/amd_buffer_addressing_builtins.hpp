@@ -2890,6 +2890,7 @@ __device__ void amd_async_global_load_to_lds(CK_TILE_LDS_ADDR T* smem_ptr,
             (std::is_same_v<T, bf16_t> && (N == 2 || N == 4 || N == 8)) ||
             (std::is_same_v<T, fp8_t> && (N == 1 || N == 4 || N == 8 || N == 16)) ||
             (std::is_same_v<T, bf8_t> && (N == 1 || N == 4 || N == 8 || N == 16)) ||
+            (std::is_same_v<T, pk_fp4_t> && (N == 1 || N == 4 || N == 8 || N == 12 || N == 16)) ||
             (std::is_same_v<T, int8_t> && (N == 1 || N == 4 || N == 8 || N == 12 || N == 16)) ||
             (std::is_same_v<T, uint8_t> && (N == 1 || N == 4 || N == 8 || N == 12 || N == 16)),
         "wrong! not implemented");
@@ -3352,7 +3353,6 @@ __device__ auto amd_transpose_load_to_vgpr(const T* __restrict__ in_ptr)
     if constexpr(std::is_same_v<remove_cvref_t<T>, ck_tile::half_t>)
     {
 #if defined(__gfx950__)
-        typedef __attribute__((__vector_size__(4 * sizeof(__fp16)))) __fp16 llvm_fp16x4_t;
         auto lds_ptr = reinterpret_cast<__LDS_ADDR llvm_fp16x4_t*>(in_ptr_);
         return bit_cast<thread_buffer<T, N>>(__builtin_amdgcn_ds_read_tr16_b64_v4f16(lds_ptr));
 #elif defined(__gfx125__)
