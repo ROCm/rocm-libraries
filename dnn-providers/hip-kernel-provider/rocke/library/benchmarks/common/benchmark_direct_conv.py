@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: MIT
 """Tile sweep benchmark for the parametric direct convolution kernels.
 
-Two kernel families are covered:
-  cpg == 1  (groups == C == K) — depthwise: ``DirectDepthwiseSpec``, scalar fma.
-  cpg >= 4, cpg % 4 == 0      — grouped:   ``DirectConvSpec``, mfma_f32_16x16x16_f16.
+Three kernel families are covered:
+  cpg == 1  (groups == C == K) — depthwise:   ``DirectDepthwiseSpec``, scalar fma.
+  groups == 1                  — non-grouped: ``DirectNhwcConvSpec``, LDS halo
+                                 reuse + mfma_f32_32x32x16.
+  cpg >= 4, cpg % 4 == 0       — grouped:     ``DirectConvSpec``, mfma_f32_16x16x16.
 
 The variant is selected automatically from C / groups.
 
@@ -41,6 +43,10 @@ _DOUBLE_BUFFER = (True, False)
 _DW_BLOCK_W = (4, 8, 16, 32)
 _DW_BLOCK_WAVES = (1, 2, 4)
 
+# The non-grouped (groups == 1) geometry sweep lives next to the kernel, in
+# ``kernels.common.conv_direct_nhwc.nongrouped_specs``, because the useful
+# tile widths depend on Wo.
+
 
 # ---------------------------------------------------------------------------
 # Result records
@@ -53,6 +59,16 @@ class Result:
     block_q: int
     block_groups: int
     double_buffer: bool
+    ms: float
+    tflops: float
+    gbps: float
+    passed: "bool | None" = None
+
+
+@dataclass
+class NonGroupedResult:
+    kernel_name: str
+    label: str
     ms: float
     tflops: float
     gbps: float
@@ -860,6 +876,224 @@ def _run_sweep(
 
     results.sort(key=lambda r: r.tflops, reverse=True)
     _print_results(results, args.top, arch, p, args.verify, dtype=dtype)
+    return 0, results
+
+
+# ---------------------------------------------------------------------------
+# Non-grouped (groups == 1) sweep
+# ---------------------------------------------------------------------------
+
+
+def _run_nongrouped_sweep(
+    *,
+    args,
+    problem,
+    dtype: str = "fp16",
+    arch: str,
+    compile_kernel,
+    jobs: int,
+    synchronize_and_release,
+    time_launches,
+    Runtime,
+    KernelLauncher,
+    LaunchConfig,
+    u8,
+) -> "tuple[int, List[NonGroupedResult]]":
+    """Sweep :class:`DirectNhwcConvSpec` over tile / wave / swizzle geometry.
+
+    The grouped ``DirectConvSpec`` draws its parallelism from the ``groups``
+    axis and collapses to a single wave per output row when ``groups == 1``,
+    so it is not a usable fallback here.
+    """
+    import torch
+
+    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_direct_nhwc import (
+        build_direct_conv_nhwc,
+        nongrouped_specs,
+    )
+    from rocke.runtime.hip_module import HipError
+
+    p = problem
+
+    torch.manual_seed(42)
+    _torch_dtype = torch.bfloat16 if dtype == "bf16" else torch.float16
+    A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype).uniform_(-1.0, 1.0)
+    B_t = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=_torch_dtype).uniform_(
+        -1.0, 1.0
+    )
+    D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype)
+
+    bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
+    flop = float(p.flops)
+    sig = conv_args_signature(dtype)
+
+    specs = nongrouped_specs(p, arch=arch, name="rocke_bench_direct_conv_nhwc")
+    if args.sample is not None:
+        total = len(specs)
+        specs = _sample_combos(specs, args.sample, args.seed)
+        print(
+            f"Sampling {len(specs)}/{total} combinations "
+            f"({args.sample*100:.0f}%, seed={args.seed}).",
+            flush=True,
+        )
+
+    print(
+        f"Sweeping {len(specs)} non-grouped combinations for {arch} {dtype} "
+        f"{p.short()} (C={p.cpg}, K={p.kpg}) ...",
+        flush=True,
+    )
+
+    n_skipped = 0
+    pending = []
+    for spec in specs:
+        try:
+            kernel = build_direct_conv_nhwc(spec, arch=arch)
+        except ValueError:
+            n_skipped += 1
+            continue
+        pending.append((spec, kernel))
+
+    if not pending:
+        print("No valid non-grouped configurations for this shape.", file=sys.stderr)
+        return 1, []
+
+    artifact_map = _compile_kernels_parallel(
+        [k for _, k in pending], compile_kernel, arch, jobs
+    )
+    n_built = len(artifact_map)
+
+    rt = Runtime()
+    A_dev = rt.alloc(A_t.nbytes)
+    B_dev = rt.alloc(B_t.nbytes)
+    D_dev = rt.alloc(D_t.nbytes)
+    rt.memcpy_h2d(A_dev, u8(A_t), A_t.nbytes)
+    rt.memcpy_h2d(B_dev, u8(B_t), B_t.nbytes)
+    rt.memset(D_dev, 0, D_t.nbytes)
+
+    ref_out = None
+    if args.verify or args.dump_fail:
+        ref_out = _conv_reference(A_t, B_t, _DirectConvProblemAdapter(p))
+        print(
+            f"Reference computed via torch ({tuple(ref_out.shape)}, {ref_out.dtype}).",
+            flush=True,
+        )
+
+    values = {
+        "A": A_dev,
+        "B": B_dev,
+        "D": D_dev,
+        "A_bytes": A_t.nbytes,
+        "B_bytes": B_t.nbytes,
+        "D_bytes": D_t.nbytes,
+    }
+
+    results: List[NonGroupedResult] = []
+    n_run = 0
+    for spec, kernel in pending:
+        artifact = artifact_map.get(kernel.name)
+        if artifact is None:
+            n_skipped += 1
+            continue
+        try:
+            launcher = KernelLauncher(
+                hsaco=artifact.hsaco,
+                kernel_name=artifact.kernel_name,
+                signature=sig,
+            )
+        except HipError as e:
+            n_skipped += 1
+            print(
+                f"[skip] kernel load failed for {artifact.kernel_name}: {e}",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
+
+        grid = spec.grid()
+        block = (spec.threads_per_block, 1, 1)
+        stream = 0
+        cfg = LaunchConfig(grid=grid, block=block, stream=stream)
+
+        kernel_passed = None
+        if args.verify or args.dump_fail:
+            rt.memset(D_dev, 0, D_t.nbytes)
+            stopped, kernel_passed = _verify_kernel(
+                rt=rt,
+                launcher=launcher,
+                values=values,
+                grid=grid,
+                block=block,
+                out_dev=D_dev,
+                out_t=D_t,
+                ref_out=ref_out,
+                kernel_name=artifact.kernel_name,
+                dump_fail=args.dump_fail,
+                u8=u8,
+            )
+            if stopped:
+                rt.free(A_dev)
+                rt.free(B_dev)
+                rt.free(D_dev)
+                return 1, []
+            rt.memset(D_dev, 0, D_t.nbytes)
+
+        ms = time_launches(
+            lambda: launcher(values, config=cfg),
+            warmup=args.warmup,
+            iters=args.iters,
+            stream=stream,
+        )
+        synchronize_and_release(stream)
+
+        label = (
+            f"th{spec.tile_h} tw{spec.tile_w} tk{spec.tile_k} ck{spec.ck} "
+            f"w{spec.waves_m}x{spec.waves_n} a{spec.atom} "
+            f"wgm{spec.swizzle_wgm} iglp{spec.iglp} we{spec.waves_per_eu}"
+        )
+        n_run += 1
+        results.append(
+            NonGroupedResult(
+                kernel_name=artifact.kernel_name,
+                label=label,
+                ms=ms,
+                tflops=(flop / ms) * 1e-9,
+                gbps=(bytes_xfer / ms) * 1e-6,
+                passed=kernel_passed,
+            )
+        )
+        print(
+            f"[{n_run:4d}] {label}  {results[-1].tflops:6.1f} TFLOPS  {ms:.3f} ms",
+            flush=True,
+        )
+
+    rt.free(A_dev)
+    rt.free(B_dev)
+    rt.free(D_dev)
+    print(f"\nSweep done: {n_built} compiled, {n_skipped} skipped.", flush=True)
+
+    if not results:
+        print("No valid configurations found.", file=sys.stderr)
+        return 1, []
+
+    results.sort(key=lambda r: r.tflops, reverse=True)
+    top_n = min(args.top, len(results))
+    width = 110
+    print(f"\n{'='*width}")
+    print(f"Top {top_n} non-grouped configurations for {arch} {dtype} {p.short()}")
+    print(f"{'='*width}")
+    print(
+        f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  "
+        + (f"{'verify':>6}  " if args.verify else "")
+        + "config"
+    )
+    print("-" * width)
+    for rank, r in enumerate(results[:top_n], 1):
+        v = f"{'PASS' if r.passed else 'FAIL':>6}  " if args.verify else ""
+        print(
+            f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {v}{r.label}"
+        )
+    print(f"\nBest: {results[0].tflops:.1f} TFLOPS — {results[0].kernel_name}")
     return 0, results
 
 
@@ -1722,6 +1956,8 @@ def main() -> int:
             rc, _ = _run_dgrad_sweep(problem=problem, dtype=dtype, **_common)
         elif cpg == 1:
             rc, _ = _run_depthwise_sweep(problem=problem, dtype=dtype, **_common)
+        elif problem.groups == 1:
+            rc, _ = _run_nongrouped_sweep(problem=problem, dtype=dtype, **_common)
         else:
             rc, _ = _run_sweep(problem=problem, dtype=dtype, **_common)
         all_rc = all_rc or rc

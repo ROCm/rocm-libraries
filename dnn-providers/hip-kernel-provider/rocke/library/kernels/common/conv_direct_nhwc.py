@@ -1,0 +1,848 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""Direct NHWC convolution for the non-grouped (``groups == 1``) case.
+
+Why a second direct-conv family
+-------------------------------
+:mod:`kernels.common.conv_direct_grouped` draws all of its parallelism from the
+``groups`` axis: one wave owns one convolution group, and the accumulator tile is
+``ceil(kpg/16)`` M-tiles deep.
+
+This module is the ``groups == 1`` counterpart.  It keeps the property that
+makes a direct conv beat implicit GEMM on 3x3 stride<=2 shapes: the input tile
+is staged in LDS **once per channel chunk, with its halo**, and all ``KH*KW``
+filter taps read shifted sub-tiles out of that one staged copy.  An
+implicit-GEMM formulation re-reads the activations once per tap, so its A-side
+traffic is ~``KH*KW`` times larger, and the L2 has to absorb that redundancy.
+
+Shape of the computation
+------------------------
+Per workgroup, with M = output channels and N = output pixels::
+
+    tile_k          output channels   (M, multiple of 32)
+    tile_h x tile_w output pixels     (N, tile_w a multiple of 32)
+    ck              input channels reduced per LDS stage
+
+    for c0 in range(0, C, ck):          # runtime scf.for, accumulators carried
+        stage X[(tile_h-1)*s+KH, (tile_w-1)*s+KW, ck] -> LDS   (halo included)
+        stage W[tile_k, KH, KW, ck]                   -> LDS   (fragment order)
+        for (r, s) in taps:             # Python-unrolled
+            for m_tile, n_tile, k_atom:
+                acc = mfma_f32_32x32xK(W_lds, X_lds, acc)
+
+LDS layouts
+-----------
+``X`` is stored ``[pos][c]`` with ``pos = ih_lds * LDS_IN_W + iw_lds`` and a
+channel stride of ``ck + lds_pad``.  The pad is what keeps the 32 lanes of a
+``ds_read_b128`` on distinct bank quads: with ``ck=16, pad=8`` the stride is
+24 halves = 12 dwords, so lanes 0..7 land on bank quads 0,12,24,4,16,28,8,20 --
+eight distinct quads covering the full 128-byte LDS service width.
+
+``W`` is stored **pre-swizzled into MFMA fragment order**: fragment slot
+``((tap * M_TILES + m_tile) * KATOMS + k_atom) * 64 + lane`` holds exactly the
+``FRAG`` halves that ``lane`` feeds to the MFMA.  Both the staging store and the
+consuming read are then linear in ``lane``, so no padding is needed and neither
+side can bank-conflict.  The staging thread's global read is ``FRAG`` contiguous
+channels of one ``k_out`` row, which is what the KRSC layout makes contiguous.
+
+Software pipeline
+-----------------
+The global loads for chunk ``i+1`` are issued immediately after the barrier that
+publishes chunk ``i``, and travel to the next iteration as loop-carried registers.
+The MFMAs of chunk ``i`` therefore cover the DRAM latency of chunk ``i+1``.  The
+tail iteration loads one chunk past ``C``; the result is discarded, and buffer
+loads clamp rather than fault, so no masking is needed on that path.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import List, Tuple
+
+from rocke.core.ir import (
+    F32,
+    I32,
+    IRBuilder,
+    KernelDef,
+    PtrType,
+    Value,
+)
+
+from kernels.common.conv_direct_grouped import (
+    DirectConvProblem,
+    _buf_load_vN,
+    _buf_store_vN,
+    _io_type,
+    _mfma,
+    _trunc_f32,
+)
+
+# Global load width for the activation staging path, in halves (dwordx4).
+_X_LOAD_VEC = 8
+
+# Atom name -> (tile, K, frag). All supported atoms are square (M == N == tile),
+# which is what lets one code path serve them: a lane's operand row/column is
+# ``lane % tile`` and its K slice is ``(lane // tile) * frag``. ``frag`` is the
+# per-lane operand width in halves, and ``tile * tile / 64`` accumulator floats
+# per lane follow from the shape.
+#
+# The 16-wide atoms exist for output widths that are not a multiple of 32: with
+# a 32-wide pixel tile the last tile in each row computes columns past ``Wo``,
+# and that wasted MFMA work is spread over every block of the row.
+_ATOMS = {
+    "32x32x16": (32, 16, 8),
+    "32x32x8": (32, 8, 4),
+    "16x16x32": (16, 32, 8),
+    "16x16x16": (16, 16, 4),
+}
+
+
+@dataclass(frozen=True)
+class DirectNhwcConvSpec:
+    """One concrete non-grouped direct-conv kernel configuration.
+
+    ``problem.groups`` must be 1; the grouped families in
+    :mod:`kernels.common.conv_direct_grouped` cover ``groups > 1``.
+    """
+
+    problem: DirectConvProblem
+    name: str = "direct_conv_nhwc"
+
+    tile_h: int = 16  # output rows per workgroup
+    tile_w: int = 32  # output cols per workgroup (multiple of 32)
+    tile_k: int = 128  # output channels per workgroup (multiple of 32)
+    ck: int = 16  # input channels staged per LDS chunk
+
+    waves_m: int = 2  # waves splitting tile_k
+    waves_n: int = 4  # waves splitting tile_h (each keeps all tile_w columns)
+
+    atom: str = "32x32x16"
+    wave_size: int = 64
+    lds_pad: int = 8  # extra halves on the LDS activation channel stride
+
+    # Grid swizzle. The launch grid is flattened to 1-D and remapped so that the
+    # workgroups a single XCD receives share operands. ``swizzle_wgm`` is the
+    # number of *channel* tiles grouped per spatial cell: wgm = n_k_tiles walks
+    # every output-channel tile of one spatial cell back to back (activation tile
+    # loaded into that XCD's L2 once), wgm = 1 walks every spatial cell of one
+    # channel tile (weight slab loaded once). Intermediate values trade between.
+    chiplet_swizzle: bool = True
+    swizzle_wgm: int = 8
+    chiplet_chunk: int = 64
+    num_xcds: int = 8
+
+    # Ping-pong the staged tiles across two LDS buffers. Single-buffered, the
+    # channel loop needs two barriers per chunk with nothing but ds_writes
+    # between them; ping-ponged, chunk i+1 is written while chunk i is still
+    # feeding MFMAs and one barrier per chunk suffices. Costs 2x LDS.
+    double_buffer: bool = False
+    # ``iglp_opt`` level for the channel loop, or None to leave the backend
+    # scheduler alone. 0 is the canned GEMM MFMA/memory interleave.
+    iglp: "int | None" = None
+    # ``amdgpu-waves-per-eu`` occupancy hint. The prefetch registers carried
+    # across the channel loop can push register use high enough to leave one
+    # wave per SIMD, which leaves nothing to cover the barriers per chunk.
+    waves_per_eu: "int | None" = None
+
+    # ---- derived geometry -------------------------------------------------
+
+    @property
+    def atom_tile(self) -> int:
+        """MFMA M == N (channels per M-tile, pixels per N-tile)."""
+        return _ATOMS[self.atom][0]
+
+    @property
+    def atom_k(self) -> int:
+        return _ATOMS[self.atom][1]
+
+    @property
+    def frag(self) -> int:
+        """Halves per lane in an A/B operand fragment."""
+        return _ATOMS[self.atom][2]
+
+    @property
+    def acc_per_lane(self) -> int:
+        t = self.atom_tile
+        return t * t // self.wave_size
+
+    @property
+    def n_col_blocks(self) -> int:
+        return self.tile_w // self.atom_tile
+
+    @property
+    def m_tiles_total(self) -> int:
+        return self.tile_k // self.atom_tile
+
+    @property
+    def k_atoms(self) -> int:
+        return self.ck // self.atom_k
+
+    @property
+    def rows_per_wave(self) -> int:
+        return self.tile_h // self.waves_n
+
+    @property
+    def m_tiles_per_wave(self) -> int:
+        return self.m_tiles_total // self.waves_m
+
+    @property
+    def n_tiles_per_wave(self) -> int:
+        return self.rows_per_wave * self.n_col_blocks
+
+    @property
+    def threads_per_block(self) -> int:
+        return self.waves_m * self.waves_n * self.wave_size
+
+    @property
+    def lds_in_h(self) -> int:
+        p = self.problem
+        return (self.tile_h - 1) * p.stride + p.KH
+
+    @property
+    def lds_in_w(self) -> int:
+        p = self.problem
+        return (self.tile_w - 1) * p.stride + p.KW
+
+    @property
+    def c_stride(self) -> int:
+        """LDS channel stride of the staged activation tile, in halves."""
+        return self.ck + self.lds_pad
+
+    @property
+    def lds_x_halves(self) -> int:
+        return self.lds_in_h * self.lds_in_w * self.c_stride
+
+    @property
+    def lds_w_halves(self) -> int:
+        p = self.problem
+        return self.tile_k * p.KH * p.KW * self.ck
+
+    @property
+    def lds_bytes(self) -> int:
+        # + one scratch fragment per array (see build_direct_conv_nhwc).
+        one = self.lds_x_halves + _X_LOAD_VEC + self.lds_w_halves + self.frag
+        return 2 * one * (2 if self.double_buffer else 1)
+
+    @property
+    def acc_vgprs(self) -> int:
+        """f32 accumulator registers per lane."""
+        return self.m_tiles_per_wave * self.n_tiles_per_wave * self.acc_per_lane
+
+    @property
+    def tile_counts(self) -> Tuple[int, int, int]:
+        """``(n_w_tiles, n_h_tiles, n_k_tiles)``."""
+        p = self.problem
+        return (
+            (p.Wo + self.tile_w - 1) // self.tile_w,
+            (p.Ho + self.tile_h - 1) // self.tile_h,
+            (p.kpg + self.tile_k - 1) // self.tile_k,
+        )
+
+    def grid(self) -> Tuple[int, int, int]:
+        n_wt, n_ht, n_kt = self.tile_counts
+        return (n_wt * n_ht * self.problem.N * n_kt, 1, 1)
+
+    def kernel_name(self) -> str:
+        from rocke.helpers.spec import kernel_name_join
+
+        p = self.problem
+        return kernel_name_join(
+            self.name,
+            p.short(),
+            f"t{self.tile_h}x{self.tile_w}x{self.tile_k}",
+            f"ck{self.ck}",
+            f"w{self.waves_m}x{self.waves_n}",
+            f"a{self.atom}",
+            f"g{self.swizzle_wgm}" if self.chiplet_swizzle else "gnone",
+            "db" if self.double_buffer else "",
+            f"iglp{self.iglp}" if self.iglp is not None else "",
+            f"we{self.waves_per_eu}" if self.waves_per_eu is not None else "",
+            "bf16" if p.dtype == "bf16" else "",
+        )
+
+    def validate(self) -> None:
+        p = self.problem
+        if p.dtype not in ("fp16", "bf16"):
+            raise ValueError(f"DirectNhwcConvSpec: unsupported dtype {p.dtype!r}")
+        if p.groups != 1:
+            raise ValueError(
+                f"DirectNhwcConvSpec is the groups==1 family (got groups={p.groups}); "
+                f"use conv_direct_grouped for grouped shapes"
+            )
+        if self.atom not in _ATOMS:
+            raise ValueError(
+                f"unknown atom {self.atom!r}; expected one of {list(_ATOMS)}"
+            )
+        t = self.atom_tile
+        if self.tile_w % t != 0:
+            raise ValueError(f"tile_w must be a multiple of {t} (got {self.tile_w})")
+        if self.tile_k % t != 0:
+            raise ValueError(f"tile_k must be a multiple of {t} (got {self.tile_k})")
+        if self.tile_h % self.waves_n != 0:
+            raise ValueError(
+                f"tile_h {self.tile_h} not divisible by waves_n {self.waves_n}"
+            )
+        if self.m_tiles_total % self.waves_m != 0:
+            raise ValueError(
+                f"tile_k/{self.atom_tile} = {self.m_tiles_total} not divisible by "
+                f"waves_m {self.waves_m}"
+            )
+        if self.ck % self.atom_k != 0:
+            raise ValueError(f"ck {self.ck} not divisible by atom K {self.atom_k}")
+        if self.ck % _X_LOAD_VEC != 0:
+            raise ValueError(f"ck {self.ck} not divisible by {_X_LOAD_VEC}")
+        if p.cpg % self.ck != 0:
+            raise ValueError(f"C {p.cpg} not divisible by ck {self.ck}")
+        if p.kpg % self.atom_tile != 0:
+            raise ValueError(
+                f"K {p.kpg} must be a multiple of {self.atom_tile} (got {p.kpg})"
+            )
+        if p.cpg % _X_LOAD_VEC != 0:
+            raise ValueError(f"C {p.cpg} must be a multiple of {_X_LOAD_VEC}")
+        if self.threads_per_block > 1024:
+            raise ValueError(f"threads_per_block {self.threads_per_block} > 1024")
+        if self.lds_pad % 2 != 0:
+            raise ValueError("lds_pad must be even to keep ds_read_b128 aligned")
+        if self.swizzle_wgm < 1:
+            raise ValueError(f"swizzle_wgm must be >= 1 (got {self.swizzle_wgm})")
+        if self.acc_vgprs > 256:
+            # A lane cannot hold more than the 256-entry accumulator file; past
+            # that the config is not merely slow, it makes the backend
+            # scheduler blow up (a 2048-accumulator tile hung the compiler).
+            raise ValueError(
+                f"accumulator tile needs {self.acc_vgprs} registers per lane "
+                f"(max 256): shrink tile_k/tile_h/tile_w or add waves"
+            )
+
+
+def is_valid_nhwc_spec(
+    spec: DirectNhwcConvSpec, arch: str = "gfx950"
+) -> Tuple[bool, str]:
+    """Return ``(ok, reason)`` for ``spec`` on ``arch`` without raising."""
+    from rocke.core.arch import ArchTarget
+
+    try:
+        target = ArchTarget.from_gfx(arch)
+    except KeyError as e:  # pragma: no cover - arch table lookup
+        return False, str(e)
+
+    try:
+        spec.validate()
+    except ValueError as e:
+        return False, str(e)
+
+    p = spec.problem
+    if p.stride not in (1, 2):
+        return False, f"stride {p.stride} is not supported (expected 1 or 2)"
+    ab = "bf16" if p.dtype == "bf16" else "f16"
+    t, k = spec.atom_tile, spec.atom_k
+    if not target.mma.has_shape(a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=t, n=t, k=k):
+        return False, f"missing mfma_f32_{spec.atom}_{ab} on {arch}"
+    if spec.wave_size != target.wave_size:
+        return False, f"wave_size {spec.wave_size} != {arch} wave {target.wave_size}"
+    if spec.threads_per_block > target.max_threads_per_block:
+        return False, f"threads_per_block {spec.threads_per_block} exceeds arch limit"
+    if not target.fits_lds(spec.lds_bytes):
+        return False, f"LDS {spec.lds_bytes} B exceeds {target.lds_capacity_bytes} B"
+    return True, "ok"
+
+
+# ---------------------------------------------------------------------------
+# Candidate generation
+# ---------------------------------------------------------------------------
+
+# Swept geometry. ``tile_w`` is not in this table because the useful values
+# depend on ``Wo``: when ``Wo`` is not a multiple of ``tile_w``, the last tile in
+# each row spends MFMA work on pixels past the image edge.
+# ``tile_h`` stops at 8 because a shorter tile re-reads a larger share of halo
+# rows per output row (``KH - 1`` extra rows amortised over ``tile_h``).
+_SWEEP_TILE_H = (8, 16)
+_SWEEP_TILE_K = (32, 64, 128, 256)
+_SWEEP_CK = (16, 32, 64)
+_SWEEP_WAVES = ((2, 2), (1, 4), (2, 4), (4, 2), (1, 8))
+_SWEEP_ATOMS = ("32x32x16", "16x16x32")
+
+
+def tile_w_candidates(Wo: int, atom_tile: int, max_mult: int = 6) -> "list[int]":
+    """Widths worth trying for ``Wo`` with an ``atom_tile``-wide MFMA N dimension.
+
+    Prefers widths that tile ``Wo`` with no wasted columns; if none do, falls
+    back to the single width with the least waste so the shape is still covered.
+    """
+    cands = [atom_tile * m for m in range(1, max_mult + 1)]
+    exact = [w for w in cands if Wo % w == 0]
+    if exact:
+        return exact
+    return [min(cands, key=lambda w: -(-Wo // w) * w)]
+
+
+def nongrouped_specs(
+    problem: DirectConvProblem,
+    *,
+    arch: str = "gfx950",
+    name: str = "direct_conv_nhwc",
+    iglp: "tuple[int | None, ...]" = (0,),
+    waves_per_eu: "tuple[int | None, ...]" = (None, 3),
+    swizzle_wgm: "tuple[int, ...]" = (8,),
+) -> "list[DirectNhwcConvSpec]":
+    """Every valid :class:`DirectNhwcConvSpec` worth benchmarking for ``problem``.
+
+    Deduplicated by kernel name, so callers can compile the list directly.
+    """
+    import itertools
+
+    out: "list[DirectNhwcConvSpec]" = []
+    seen = set()
+    for atom in _SWEEP_ATOMS:
+        at = _ATOMS[atom][0]
+        for tw in tile_w_candidates(problem.Wo, at):
+            for th, tk, ck, (wm, wn), wgm, ig, we in itertools.product(
+                _SWEEP_TILE_H,
+                _SWEEP_TILE_K,
+                _SWEEP_CK,
+                _SWEEP_WAVES,
+                swizzle_wgm,
+                iglp,
+                waves_per_eu,
+            ):
+                spec = DirectNhwcConvSpec(
+                    problem=problem,
+                    name=name,
+                    tile_h=th,
+                    tile_w=tw,
+                    tile_k=tk,
+                    ck=ck,
+                    waves_m=wm,
+                    waves_n=wn,
+                    atom=atom,
+                    swizzle_wgm=wgm,
+                    iglp=ig,
+                    waves_per_eu=we,
+                )
+                ok, _ = is_valid_nhwc_spec(spec, arch=arch)
+                if not ok:
+                    continue
+                key = spec.kernel_name()
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(spec)
+    return out
+
+
+def build_direct_conv_nhwc(spec: DirectNhwcConvSpec, arch: str = "gfx950") -> KernelDef:
+    """Build the IR for one non-grouped NHWC direct convolution kernel."""
+    ok, why = is_valid_nhwc_spec(spec, arch=arch)
+    if not ok:
+        raise ValueError(f"invalid DirectNhwcConvSpec for {arch}: {why}")
+
+    p = spec.problem
+    io_type = _io_type(p.dtype)
+    dtype = p.dtype
+
+    C, K = p.cpg, p.kpg
+    KH, KW, S, PAD = p.KH, p.KW, p.stride, p.PAD
+    Ho, Wo = p.Ho, p.Wo
+    N_TAPS = KH * KW
+
+    TH, TW, TK, CK = spec.tile_h, spec.tile_w, spec.tile_k, spec.ck
+    THREADS = spec.threads_per_block
+    WAVE = spec.wave_size
+    FRAG = spec.frag
+    AK = spec.atom_k
+    AT = spec.atom_tile  # MFMA M == N
+    ACC = spec.acc_per_lane
+    QUADS = ACC // 4  # accumulator slots come in quads of consecutive channels
+    NCB = spec.n_col_blocks
+    M_TILES = spec.m_tiles_total
+    KATOMS = spec.k_atoms
+    ROWS_W = spec.rows_per_wave
+    MT_W = spec.m_tiles_per_wave
+    NT_W = spec.n_tiles_per_wave
+    CSTRIDE = spec.c_stride
+    LDS_IN_H, LDS_IN_W = spec.lds_in_h, spec.lds_in_w
+
+    # Staging pass counts.
+    X_CV = CK // _X_LOAD_VEC  # channel vectors per staged pixel
+    X_VECS = LDS_IN_H * LDS_IN_W * X_CV
+    X_PASSES = (X_VECS + THREADS - 1) // THREADS
+    W_SLOTS = N_TAPS * M_TILES * KATOMS * WAVE
+    W_PASSES = (W_SLOTS + THREADS - 1) // THREADS
+
+    N_CHUNKS = C // CK
+
+    b = IRBuilder(spec.kernel_name())
+    b.kernel.attrs["max_workgroup_size"] = THREADS
+    if spec.waves_per_eu is not None:
+        b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
+
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
+    A_bytes = b.param("A_bytes", I32)
+    B_bytes = b.param("B_bytes", I32)
+    D_bytes = b.param("D_bytes", I32)
+
+    c0 = b.const_i32(0)
+    c1 = b.const_i32(1)
+    c_half = b.const_i32(2)
+    oob = b.const_i32((1 << 31) - 1)
+    # Predication for the staging loads is loop-invariant, so it is folded into
+    # the *base* offset once, before the channel loop, rather than re-selected
+    # every iteration. ``_OOB_BASE`` is far past any tensor this kernel accepts
+    # yet leaves headroom for ``+ c_off`` (at most ``2*C`` bytes) without
+    # wrapping i32, so ``base + c_off`` stays out of range for the whole loop.
+    # A buffer load whose voffset exceeds num_records returns zero, which is
+    # exactly the value a padded pixel or an out-of-range filter row needs --
+    # so the masked *value* select disappears from the loop as well.
+    _OOB_BASE = 0x7F000000
+    oob_base = b.const_i32(_OOB_BASE)
+
+    a_rsrc = b.buffer_rsrc(A, A_bytes)
+    b_rsrc = b.buffer_rsrc(Bp, B_bytes)
+    d_rsrc = b.buffer_rsrc(D, D_bytes)
+
+    # The staging loops are sized in whole thread-passes, so the last pass can
+    # own slots past the end of the tile. Those slots write into a scratch tail
+    # instead of running off the array (and over the neighbouring allocation).
+    DB = spec.double_buffer
+    x_stage = spec.lds_x_halves + _X_LOAD_VEC
+    w_stage = spec.lds_w_halves + FRAG
+    x_dump = spec.lds_x_halves
+    w_dump = spec.lds_w_halves
+    nbuf = 2 if DB else 1
+    X_smem = b.smem_alloc(io_type, [1, x_stage * nbuf], name_hint="lds_x")
+    W_smem = b.smem_alloc(io_type, [1, w_stage * nbuf], name_hint="lds_w")
+
+    # ---- thread / wave decomposition -------------------------------------
+    tid = b.thread_id_x()
+    lane = b.mod(tid, b.const_i32(WAVE))
+    wave_id = b.div(tid, b.const_i32(WAVE))
+    wave_m = b.div(wave_id, b.const_i32(spec.waves_n))
+    wave_n = b.mod(wave_id, b.const_i32(spec.waves_n))
+    lane_lo = b.mod(lane, b.const_i32(AT))  # M row / N column inside the atom
+    lane_hi = b.div(lane, b.const_i32(AT))  # K slice inside the atom
+
+    # ---- grid decode ------------------------------------------------------
+    # Flat 1-D grid of (spatial cell x channel tile). The swizzle decides which
+    # of the two a single XCD walks contiguously; see DirectNhwcConvSpec.
+    n_wt, n_ht, n_kt = spec.tile_counts
+    n_cells = n_wt * n_ht * p.N
+    total_wgs = n_cells * n_kt
+
+    wgid = b.block_id_x()
+    if spec.chiplet_swizzle:
+        from rocke.helpers.grid import chiplet_transform_chunked, super_tile_swizzle
+
+        wgid = chiplet_transform_chunked(
+            b,
+            wgid,
+            num_wgs=total_wgs,
+            num_xcds=spec.num_xcds,
+            chunk_size=spec.chiplet_chunk,
+        )
+        sw = super_tile_swizzle(
+            b,
+            wgid,
+            num_pid_m=n_kt,
+            num_pid_n=n_cells,
+            wgm=min(spec.swizzle_wgm, n_kt),
+        )
+        k_tile, cell = sw.row, sw.col
+    else:
+        k_tile = b.mod(wgid, b.const_i32(n_kt))
+        cell = b.div(wgid, b.const_i32(n_kt))
+
+    n_img = b.div(cell, b.const_i32(n_wt * n_ht))
+    st = b.mod(cell, b.const_i32(n_wt * n_ht))
+    w_tile = b.mod(st, b.const_i32(n_wt))
+    h_tile = b.div(st, b.const_i32(n_wt))
+
+    # Output-tile origins.
+    out_h0 = b.mul(h_tile, b.const_i32(TH))
+    out_w0 = b.mul(w_tile, b.const_i32(TW))
+    k_base = b.mul(k_tile, b.const_i32(TK))
+
+    # Input origin of the staged (halo-inclusive) activation tile.
+    in_h0 = b.sub(b.mul(out_h0, b.const_i32(S)), b.const_i32(PAD))
+    in_w0 = b.sub(b.mul(out_w0, b.const_i32(S)), b.const_i32(PAD))
+
+    # ---- staging metadata (channel-independent; hoisted out of the C loop) --
+
+    def _x_pass_meta():
+        """Per-pass (global byte offset base, valid, LDS half index) for X."""
+        meta = []
+        img_base = b.mul(n_img, b.const_i32(p.H * p.W * C))
+        for j in range(X_PASSES):
+            v = b.add(tid, b.const_i32(j * THREADS))
+            cv = b.mod(v, b.const_i32(X_CV))
+            pos = b.div(v, b.const_i32(X_CV))
+            ih_l = b.div(pos, b.const_i32(LDS_IN_W))
+            iw_l = b.mod(pos, b.const_i32(LDS_IN_W))
+            ih = b.add(in_h0, ih_l)
+            iw = b.add(in_w0, iw_l)
+            ok_h = b.land(b.cmp_ge(ih, c0), b.cmp_lt(ih, b.const_i32(p.H)))
+            ok_w = b.land(b.cmp_ge(iw, c0), b.cmp_lt(iw, b.const_i32(p.W)))
+            valid = b.land(ok_h, ok_w)
+            if X_VECS % THREADS != 0:
+                in_tile = b.cmp_lt(v, b.const_i32(X_VECS))
+                valid = b.land(valid, in_tile)
+            else:
+                in_tile = None
+            # base = ((n*H + ih)*W + iw)*C + cv*VEC; chunk offset added per iter.
+            elems = b.add(
+                b.add(
+                    img_base,
+                    b.mul(b.add(b.mul(ih, b.const_i32(p.W)), iw), b.const_i32(C)),
+                ),
+                b.mul(cv, b.const_i32(_X_LOAD_VEC)),
+            )
+            lds_idx = b.add(
+                b.mul(pos, b.const_i32(CSTRIDE)), b.mul(cv, b.const_i32(_X_LOAD_VEC))
+            )
+            if in_tile is not None:
+                lds_idx = b.select(in_tile, lds_idx, b.const_i32(x_dump))
+            base = b.select(valid, b.mul(elems, c_half), oob_base)
+            meta.append((base, lds_idx))
+        return meta
+
+    def _w_pass_meta():
+        """Per-pass (global byte offset base, valid, LDS half index) for W.
+
+        Slot ``g`` decodes to the MFMA fragment that lane ``g % 64`` consumes for
+        ``(tap, m_tile, k_atom)``, so the LDS index is simply ``g * FRAG``.
+        """
+        meta = []
+        for j in range(W_PASSES):
+            g = b.add(tid, b.const_i32(j * THREADS))
+            g_lane = b.mod(g, b.const_i32(WAVE))
+            rest = b.div(g, b.const_i32(WAVE))
+            katom = b.mod(rest, b.const_i32(KATOMS))
+            rest2 = b.div(rest, b.const_i32(KATOMS))
+            m_tile = b.mod(rest2, b.const_i32(M_TILES))
+            tap = b.div(rest2, b.const_i32(M_TILES))
+            r = b.div(tap, b.const_i32(KW))
+            s = b.mod(tap, b.const_i32(KW))
+
+            k_out = b.add(
+                k_base,
+                b.add(
+                    b.mul(m_tile, b.const_i32(AT)),
+                    b.mod(g_lane, b.const_i32(AT)),
+                ),
+            )
+            c_in_chunk = b.add(
+                b.mul(katom, b.const_i32(AK)),
+                b.mul(b.div(g_lane, b.const_i32(AT)), b.const_i32(FRAG)),
+            )
+            valid = b.cmp_lt(k_out, b.const_i32(K))
+            if W_SLOTS % THREADS != 0:
+                in_tile = b.cmp_lt(g, b.const_i32(W_SLOTS))
+                valid = b.land(valid, in_tile)
+            else:
+                in_tile = None
+            # base = ((k_out*KH + r)*KW + s)*C + c_in_chunk
+            krs_h = b.mul(k_out, b.const_i32(KH))
+            krs_hr = b.add(krs_h, r)
+            krs_w = b.mul(krs_hr, b.const_i32(KW))
+            krs = b.add(krs_w, s)
+            elems = b.add(b.mul(krs, b.const_i32(C)), c_in_chunk)
+            lds_idx = b.mul(g, b.const_i32(FRAG))
+            if in_tile is not None:
+                lds_idx = b.select(in_tile, lds_idx, b.const_i32(w_dump))
+            base = b.select(valid, b.mul(elems, c_half), oob_base)
+            meta.append((base, lds_idx))
+        return meta
+
+    x_meta = _x_pass_meta()
+    w_meta = _w_pass_meta()
+
+    x_dwords = _X_LOAD_VEC // 2
+    w_dwords = FRAG // 2
+
+    def issue_stage_loads(c_off: Value):
+        """Issue the global loads for one channel chunk; returns raw registers."""
+        xs = [
+            _buf_load_vN(b, dtype, a_rsrc, b.add(base, c_off), c0, x_dwords)
+            for base, _ in x_meta
+        ]
+        ws = [
+            _buf_load_vN(b, dtype, b_rsrc, b.add(base, c_off), c0, w_dwords)
+            for base, _ in w_meta
+        ]
+        return xs, ws
+
+    def commit_stage(xs, ws, x_buf=None, w_buf=None):
+        for (_, lds_idx), val in zip(x_meta, xs):
+            idx = lds_idx if x_buf is None else b.add(lds_idx, x_buf)
+            b.smem_store_vN(X_smem, [c0, idx], val, _X_LOAD_VEC)
+        for (_, lds_idx), val in zip(w_meta, ws):
+            idx = lds_idx if w_buf is None else b.add(lds_idx, w_buf)
+            b.smem_store_vN(W_smem, [c0, idx], val, FRAG)
+
+    # ---- per-lane LDS read bases -----------------------------------------
+    # X: idx = wave row term + lane term + compile-time term.
+    x_wave_term = b.mul(
+        b.mul(wave_n, b.const_i32(ROWS_W * S)), b.const_i32(LDS_IN_W * CSTRIDE)
+    )
+    x_lane_term = b.add(
+        b.mul(lane_lo, b.const_i32(S * CSTRIDE)), b.mul(lane_hi, b.const_i32(FRAG))
+    )
+    x_read_base = b.add(x_wave_term, x_lane_term)
+    # W: idx = wave_m block + lane*FRAG + compile-time term.
+    w_read_base = b.add(
+        b.mul(wave_m, b.const_i32(MT_W * KATOMS * WAVE * FRAG)),
+        b.mul(lane, b.const_i32(FRAG)),
+    )
+
+    def read_a_frag(base: Value, tap: int, mt: int, katom: int) -> Value:
+        off = ((tap * M_TILES + mt) * KATOMS + katom) * WAVE * FRAG
+        idx = b.add(base, b.const_i32(off))
+        return b.smem_load_vN(W_smem, c0, idx, dtype=io_type, n=FRAG)
+
+    def read_b_frag(base: Value, in_row: int, cb: int, s: int, katom: int) -> Value:
+        """One activation fragment, addressed by *input* row inside the wave window.
+
+        Taps share activations: output row ``row`` at tap row ``r`` reads input
+        row ``row * stride + r``, so the ``KH`` taps of a column only need
+        ``(ROWS_W - 1) * stride + KH`` distinct fragments instead of
+        ``ROWS_W * KH``.  Indexing by input row is what makes that reuse
+        expressible.
+        """
+        pos = in_row * LDS_IN_W + cb * AT * S + s
+        off = pos * CSTRIDE + katom * AK
+        idx = b.add(base, b.const_i32(off))
+        return b.smem_load_vN(X_smem, c0, idx, dtype=io_type, n=FRAG)
+
+    # ---- main channel loop ------------------------------------------------
+    zero_acc = b.zero_vec_f32(ACC)
+    n_acc = MT_W * NT_W
+    n_in_rows = (ROWS_W - 1) * S + KH
+
+    def emit_mfmas(accs, x_base, w_base):
+        """One channel chunk of MFMAs against the staged tiles.
+
+        Filter-column (``s``) outermost: every activation fragment loaded for
+        one ``(s, k_atom)`` is consumed by all ``KH`` tap rows and all ``MT_W``
+        channel tiles.
+        """
+        for katom in range(KATOMS):
+            for s_c in range(KW):
+                b_frags = [
+                    [read_b_frag(x_base, ir, cb, s_c, katom) for cb in range(NCB)]
+                    for ir in range(n_in_rows)
+                ]
+                for r_c in range(KH):
+                    tap = r_c * KW + s_c
+                    a_frags = [
+                        read_a_frag(w_base, tap, mt, katom) for mt in range(MT_W)
+                    ]
+                    for row in range(ROWS_W):
+                        bf_row = b_frags[row * S + r_c]
+                        for cb in range(NCB):
+                            nt = row * NCB + cb
+                            for mt in range(MT_W):
+                                idx = mt * NT_W + nt
+                                accs[idx] = _mfma(
+                                    b,
+                                    dtype,
+                                    spec.atom,
+                                    a_frags[mt],
+                                    bf_row[cb],
+                                    accs[idx],
+                                )
+
+    c_ck_bytes = b.const_i32(CK * 2)
+    xs0, ws0 = issue_stage_loads(c0)
+
+    if DB:
+        # Prologue: publish chunk 0 into buffer 0 and have chunk 1 in flight.
+        commit_stage(xs0, ws0)
+        xs0, ws0 = issue_stage_loads(c_ck_bytes)
+
+    iter_args: List[Tuple[str, Value]] = [(f"acc{i}", zero_acc) for i in range(n_acc)]
+    iter_args += [(f"xs{i}", v) for i, v in enumerate(xs0)]
+    iter_args += [(f"ws{i}", v) for i, v in enumerate(ws0)]
+
+    loop = b.scf_for_iter(
+        c0,
+        b.const_i32(N_CHUNKS),
+        c1,
+        iter_args,
+        iv_name="c_iter",
+        elide_trailing_barrier=False,
+    )
+    with loop as (c_iv, carried):
+        accs = list(carried[:n_acc])
+        xs = list(carried[n_acc : n_acc + X_PASSES])
+        ws = list(carried[n_acc + X_PASSES :])
+
+        if spec.iglp is not None:
+            b.iglp_opt(spec.iglp)
+
+        if DB:
+            # Parity of the induction variable picks the live buffer; every
+            # fragment offset stays a compile-time constant off these bases.
+            par = b.mod(c_iv, b.const_i32(2))
+            cur_x = b.mul(par, b.const_i32(x_stage))
+            cur_w = b.mul(par, b.const_i32(w_stage))
+            nxt_x = b.sub(b.const_i32(x_stage), cur_x)
+            nxt_w = b.sub(b.const_i32(w_stage), cur_w)
+
+            b.sync()
+            # Stage chunk i+1 into the idle buffer while chunk i still feeds MFMAs.
+            commit_stage(xs, ws, nxt_x, nxt_w)
+            c_off = b.mul(b.add(c_iv, b.const_i32(2)), c_ck_bytes)
+            xs_n, ws_n = issue_stage_loads(c_off)
+            emit_mfmas(accs, b.add(x_read_base, cur_x), b.add(w_read_base, cur_w))
+        else:
+            # Publish the chunk prefetched during the previous iteration.
+            b.sync()
+            commit_stage(xs, ws)
+            b.sync()
+            c_off = b.mul(b.add(c_iv, c1), c_ck_bytes)
+            xs_n, ws_n = issue_stage_loads(c_off)
+            emit_mfmas(accs, x_read_base, w_read_base)
+
+        b.scf_yield(*accs, *xs_n, *ws_n)
+
+    accs_out = list(loop.results[:n_acc])
+
+    # ---- epilogue ---------------------------------------------------------
+    # Square-atom accumulator: slot i -> row = (i//4)*(AT//4) + lane_hi*4 + (i%4),
+    # col = lane_lo.  Slots 4q..4q+3 are four consecutive output channels, so a
+    # quad packs into one dwordx2 store.  (AT=32 -> 4 quads spaced 8 channels
+    # apart; AT=16 -> a single quad.)
+    k_lane_base = b.add(
+        b.add(k_base, b.mul(wave_m, b.const_i32(MT_W * AT))),
+        b.mul(lane_hi, b.const_i32(4)),
+    )
+    row_base = b.add(out_h0, b.mul(wave_n, b.const_i32(ROWS_W)))
+    img_out_base = b.mul(n_img, b.const_i32(Ho * Wo * K))
+
+    for mt in range(MT_W):
+        k_mt = b.add(k_lane_base, b.const_i32(mt * AT))
+        for row in range(ROWS_W):
+            out_h = b.add(row_base, b.const_i32(row))
+            h_ok = b.cmp_lt(out_h, b.const_i32(Ho))
+            for cb in range(NCB):
+                nt = row * NCB + cb
+                acc = accs_out[mt * NT_W + nt]
+                out_w = b.add(b.add(out_w0, b.const_i32(cb * AT)), lane_lo)
+                hw_ok = b.land(h_ok, b.cmp_lt(out_w, b.const_i32(Wo)))
+                pix = b.add(b.mul(out_h, b.const_i32(Wo)), out_w)
+                base_off = b.add(img_out_base, b.mul(pix, b.const_i32(K)))
+                for q in range(QUADS):
+                    k_out = b.add(k_mt, b.const_i32(q * (AT // 4)))
+                    valid = b.land(hw_ok, b.cmp_lt(k_out, b.const_i32(K)))
+                    d_off = b.mul(b.add(base_off, k_out), c_half)
+                    safe = b.select(valid, d_off, oob)
+                    quad = b.vec_pack(
+                        [b.vec_extract(acc, 4 * q + j) for j in range(4)], F32
+                    )
+                    _buf_store_vN(
+                        b, dtype, d_rsrc, safe, c0, _trunc_f32(b, dtype, quad), 2
+                    )
+
+    return b.kernel
