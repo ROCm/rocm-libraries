@@ -38,7 +38,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from . import GENERATOR_VERSION
+from . import GENERATOR_VERSION as __version__
 from .Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
                            LIBRARY_LOGIC_DIR, setVerbosity, IsaInfo, makeDebugConfig, \
                            DebugConfig, IsaVersion, coVersionMap
@@ -51,7 +51,7 @@ from .Common.GlobalParameters import globalParameters, assignGlobalParameters, \
 from .Common.TimingInstrumentation import timing_context, flush_timing_buffer
 from .Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
 from .Toolchain.Source import SourceToolchain, makeSourceToolchain
-from .Toolchain.Validators import validateToolchain, ToolchainDefaults
+from .Toolchain.Validators import deviceEnumeratorCandidates, validateToolchain, ToolchainDefaults
 from .Utilities.Decorators.Profile import profile
 from . import BenchmarkProblems
 from . import ClientWriter
@@ -62,6 +62,13 @@ from . import LibraryLogic
 TENSILE_SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 TENSILE_CLIENT_PATH = Path('build_tmp') / 'tensilelite' / 'client' / 'tensilelite-client'
 TENSILE_CLIENT_PATH = TENSILE_SCRIPT_DIR.parent / TENSILE_CLIENT_PATH
+
+
+def _device_enumerator_candidates(gpu_targets, explicit):
+    if gpu_targets:
+        return None
+    return deviceEnumeratorCandidates(explicit)
+
 
 ###############################################################################
 # Execute Steps in Config
@@ -240,8 +247,13 @@ def addCommonArguments(argParser):
         action="store", default=ToolchainDefaults.ASSEMBLER, help="select which assembler to use")
     argParser.add_argument("--offload-bundler", dest="OffloadBundler", \
         action="store", default=ToolchainDefaults.OFFLOAD_BUNDLER, help="select which offload bundler to use")
-    argParser.add_argument("--device-enumerator", dest="DeviceEnumerator", \
-        action="store", default=ToolchainDefaults.DEVICE_ENUMERATOR, help="select which device enumerator to use")
+    argParser.add_argument(
+        "--device-enumerator",
+        "--rocm-agent-enumerator",
+        dest="device_enumerator",
+        default=None,
+        help="select a device enumerator instead of the selected ROCm fallback order",
+    )
     argParser.add_argument("--logic-format", dest="LogicFormat", choices=["yaml", "json"], \
         action="store", default="yaml", help="select which logic format to use")
     argParser.add_argument("--library-format", dest="LibraryFormat", choices=["yaml", "msgpack", "msgpack-indexed"], \
@@ -251,7 +263,6 @@ def addCommonArguments(argParser):
         type=os.path.abspath, help="Specify the full path to a pre-built tensilelite-client executable")
     argParser.add_argument("--mx-scale-format", dest="MXScaleFormat", type=int, default=0, \
         help="MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
-    argParser.add_argument("--rocm-agent-enumerator", default=None, action="store", dest="rocm_agent_enumerator")
     argParser.add_argument("--cpu-only", dest="cpuOnly", action="store_true", default=False, \
         help="Run the benchmark flow GPU-less for a target arch (requires --gpu-targets): spoof ISA "
              "detection, skip the GPU clock-frequency probe, and stub the client launch with a "
@@ -511,7 +522,7 @@ def tensilelite(userArgs):
     print1("")
     print1(HR)
     print1("#")
-    print1("#  TensileLite v%s" % (GENERATOR_VERSION))
+    print1("#  TensileLite v%s" % (__version__))
 
     argParser = argparse.ArgumentParser(prog="tensilelite run")
     argParser.add_argument("ConfigFile", type=os.path.realpath, nargs="+",
@@ -519,7 +530,7 @@ def tensilelite(userArgs):
     argParser.add_argument("OutputPath", \
             help="Path to conduct benchmark and write output files")
     argParser.add_argument("--version", action="version", \
-            version="%(prog)s {version}".format(version=GENERATOR_VERSION))
+            version="%(prog)s {version}".format(version=__version__))
     argParser.add_argument("--alternate-format", dest="AlternateFormat", action="store_true",
             help="Alternate format for config_file(s): first file is alternate config "
             "and optional second file is size list")
@@ -670,10 +681,7 @@ def tensilelite(userArgs):
                                        args.CCompiler,
                                        args.OffloadBundler)
 
-    if args.gpuTargets:
-        enumerator = None  # not needed — ISA comes from --gpu-targets
-    else:
-        enumerator = validateToolchain(ToolchainDefaults.DEVICE_ENUMERATOR if args.rocm_agent_enumerator is None else args.rocm_agent_enumerator)
+    enumerator = _device_enumerator_candidates(args.gpuTargets, args.device_enumerator)
 
     asmToolchain = makeAssemblyToolchain(
         cxxCompiler,

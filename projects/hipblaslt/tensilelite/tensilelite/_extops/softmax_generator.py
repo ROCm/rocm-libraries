@@ -44,7 +44,7 @@ from tensilelite.Common.DataType import DataType
 from tensilelite.Common.GlobalParameters import restoreDefaultGlobalParameters, assignGlobalParameters
 from tensilelite.Common.RegisterPool import allocTmpGpr
 from tensilelite.Common.Types import IsaVersion
-from tensilelite.Toolchain.Validators import ToolchainDefaults, validateToolchain
+from tensilelite.Toolchain.Validators import ToolchainDefaults, deviceEnumeratorCandidates, validateToolchain
 
 def record_num_calls(f):
     @wraps(f)
@@ -734,7 +734,7 @@ if __name__ == '__main__':
     if any([not i for i in (arch, toolchain_path, isa)]):
         restoreDefaultGlobalParameters()
         assignGlobalParameters({})
-        enumerator = validateToolchain(ToolchainDefaults.DEVICE_ENUMERATOR)
+        enumerator = deviceEnumeratorCandidates()
         isa = detectGlobalCurrentISA(0, enumerator)
         arch = isaToGfx(isa)
         toolchain_path = validateToolchain(ToolchainDefaults.CXX_COMPILER)
