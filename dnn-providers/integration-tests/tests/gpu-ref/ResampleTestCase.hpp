@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn-gpu-ref/GpuFpReferenceValidation.hpp>
+#include <hipdnn-gpu-ref/GpuIntReferenceValidation.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/resample_fwd_attributes_generated.h>
 
@@ -126,12 +127,32 @@ constexpr float getTolerance()
     }
 }
 
-template <typename T>
+template <
+    typename T,
+    typename std::enable_if_t<std::disjunction_v<std::is_same<T, float>,
+                                                 std::is_same<T, double>,
+                                                 std::is_same<T, hipdnn_data_sdk::types::half>,
+                                                 std::is_same<T, hipdnn_data_sdk::types::bfloat16>>,
+                              int>
+    = 0>
 void assertAllClose(hipdnn_data_sdk::utilities::TensorBase<T>& expected,
                     hipdnn_data_sdk::utilities::TensorBase<T>& actual,
                     float tolerance)
 {
     auto validator = hipdnn_gpu_ref::GpuFpReferenceValidation<T>(tolerance, 0.0f);
+    ASSERT_TRUE(validator.allClose(expected, actual));
+}
+
+template <typename T,
+          typename std::enable_if_t<std::disjunction_v<std::is_same<T, int8_t>,
+                                                       std::is_same<T, uint8_t>,
+                                                       std::is_same<T, int32_t>>,
+                                    int>
+          = 0>
+void assertAllExact(hipdnn_data_sdk::utilities::TensorBase<T>& expected,
+                    hipdnn_data_sdk::utilities::TensorBase<T>& actual)
+{
+    auto validator = hipdnn_gpu_ref::GpuIntReferenceValidation<T>();
     ASSERT_TRUE(validator.allClose(expected, actual));
 }
 

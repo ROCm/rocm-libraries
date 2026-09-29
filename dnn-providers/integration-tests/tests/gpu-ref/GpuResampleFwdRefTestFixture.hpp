@@ -70,14 +70,7 @@ void runGpuVsCpuResampleFwd(const std::vector<int64_t>& xDims,
     assertAllClose(yCpu, yGpu, getTolerance<YDataType>());
     if(includeIndex)
     {
-        const auto* indexCpuData = static_cast<IndexDataType*>(indexCpu.rawHostData());
-        const auto* indexGpuData = static_cast<IndexDataType*>(indexGpu.rawHostData());
-        for(size_t i = 0; i < indexCpu.elementSpace(); ++i)
-        {
-            ASSERT_EQ(indexCpuData[i], indexGpuData[i])
-                << "Index tensor value mismatch at linear index " << i
-                << ". Expected: " << indexCpuData[i] << ", Actual: " << indexGpuData[i];
-        }
+        assertAllExact(indexCpu, indexGpu);
     }
 }
 
