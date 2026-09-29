@@ -32,10 +32,10 @@
 #include <utility>
 
 #include <malloc.h>
+#include <unistd.h>
 #if defined(__HIPSTDPAR_INTERPOSE_ALLOC_CAN_MMAP__)
 #  include <sys/mman.h>
 #  include <sys/syscall.h>
-#  include <unistd.h>
 #endif
 
 extern "C" void* __libc_calloc(std::size_t, std::size_t);
@@ -203,11 +203,10 @@ int main()
       }
     }
     {
-      // A zero-sized request may yield either nullptr or a unique pointer, but
-      // must store one of them.
+      // A zero-sized request yields a unique pointer, as in glibc.
       int sentinel{};
       void* p = &sentinel;
-      if (posix_memalign(&p, alignof(std::max_align_t), 0) != 0 || p == &sentinel)
+      if (posix_memalign(&p, alignof(std::max_align_t), 0) != 0 || !p || p == &sentinel)
       {
         return EXIT_FAILURE;
       }
@@ -347,7 +346,8 @@ int main()
 
     // Freeing must not leave a HIP error pending either, including for a
     // page-aligned block, which v1 fails to un-advise.
-    auto page_aligned = runtime_aligned_alloc(4096, 4096);
+    const auto page_size = static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
+    auto page_aligned    = runtime_aligned_alloc(page_size, page_size);
     if (!page_aligned)
     {
       return EXIT_FAILURE;
@@ -382,13 +382,13 @@ int main()
     // that HIP failure pending.
     {
       auto pages = static_cast<unsigned char*>(
-        mmap(nullptr, 2 * 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
-      if (pages == MAP_FAILED || munmap(pages + 4096, 4096) != 0 || munmap(pages, 2 * 4096) != 0)
+        mmap(nullptr, 2 * page_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+      if (pages == MAP_FAILED || munmap(pages + page_size, page_size) != 0 || munmap(pages, 2 * page_size) != 0)
       {
         return EXIT_FAILURE;
       }
       unsigned char residency{};
-      if (mincore(pages, 4096, &residency) == 0 || hipPeekAtLastError() != hipSuccess)
+      if (mincore(pages, page_size, &residency) == 0 || hipPeekAtLastError() != hipSuccess)
       {
         return EXIT_FAILURE;
       }
