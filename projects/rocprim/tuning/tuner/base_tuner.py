@@ -306,13 +306,17 @@ class BaseTuner(ABC):
             )
             return
 
+        # This contains the key-values of the existing config.
         default_tune_params = {
             k: [v] for k, v in config.items() if k not in [self._get_key_type_name(), self._get_value_type_name()]
         }
 
-        # Check
-        required_keys = self._get_tune_params(self._get_key_type_name(), self._get_value_type_name()).keys()
-        if any(required_key in default_tune_params for required_key in required_keys):
+        # The required keys contain all the keys a matching pre-existing config needs.
+        required_keys = self._get_tune_params(key_type, value_type).keys()
+
+        # If any required key is not in the pre-existing config, then we need to warn the user
+        # and skip running the default case. 
+        if any((not required_key in default_tune_params) for required_key in required_keys):
             warnings.warn(
                 "Existing default configuration does not match tunable parameters."
             )
