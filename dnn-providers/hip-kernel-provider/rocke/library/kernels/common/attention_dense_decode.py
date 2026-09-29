@@ -6,8 +6,9 @@
 A decode maps a CTA's work index to the (query block, query head, batch) it
 computes. Every decode is a bijection onto the work space, so the choice only
 moves which items run together (L2 locality, causal load balance), never the
-result. One class per ``persist_decode`` value keeps each decode's IR, legality check and kernel-name
-tag together; both arch builders call the same class.
+result. One class per ``persist_decode`` / ``nonpersist_decode`` value keeps
+each decode's IR, grid, legality check and kernel-name tag together; both arch
+builders call the same class.
 
 The shape reaches a decode through :class:`DecodeShape`: each extent is either
 baked (emitted as a constant at its use) or a runtime value from the kernel's
@@ -121,6 +122,97 @@ class DecodeShape:
         if self.fastdiv is None:
             return b.mod(n, self.val(name))
         return b.sub(n, b.mul(self.div(n, name), self.val(name)))
+
+    def balance(self):
+        """Whether the decodes balance causal work (longest-first, fold, pair
+        fold): under causal masking. A bool, fixed at compile time."""
+        return bool(self.spec.causal)
+
+    def branch(self, flag, then, other):
+        """``then()`` if ``flag`` else ``other()``: only the taken side is
+        emitted when ``flag`` is a bool; with an i1 both are emitted and the
+        results (a value or a tuple of values) selected."""
+        if isinstance(flag, bool):
+            return then() if flag else other()
+        t, o = then(), other()
+        if isinstance(t, tuple):
+            return tuple(self.b.select(flag, x, y) for x, y in zip(t, o))
+        return self.b.select(flag, t, o)
+
+
+# --------------------------------------------------------------------------- #
+# Non-persistent grid: one CTA per work item.
+# --------------------------------------------------------------------------- #
+
+
+def emit_reverse(b, blk, shape: DecodeShape):
+    """Longest-first query-block order for causal cost: ``NQB-1-blk``.
+
+    Under a runtime shape one binary serves every seqlen, so NQB must come from
+    the param; a baked NQB would reverse against the wrong extent.
+    """
+    return b.sub(b.sub(shape.val("nqb"), b.const_i32(1)), blk)
+
+
+class NonpersistDecode:
+    """Block ids -> work item, for the one-CTA-per-item grid.
+
+    The hardware dispatches workgroups x-fastest and round-robins them over the
+    XCDs, so the grid shape and the decode together decide which items share an
+    XCD's L2 and which run last.
+    """
+
+    name: ClassVar[str]
+    tag: ClassVar[str] = ""  # kernel-name part; "" = none
+
+    def check(self, spec) -> str | None:
+        """Why ``spec`` cannot use this decode, or None."""
+        return None
+
+    def grid(self, spec) -> tuple[int, int, int]:
+        """Launch grid, from the spec's actual (host-side) shape."""
+        raise NotImplementedError
+
+    def emit_decode(self, b, spec, bx, by, bz, shape: DecodeShape) -> Decoded:
+        raise NotImplementedError
+
+
+class NonpersistQbMinor(NonpersistDecode):
+    """Grid ``(nqb, Hq, B)``: the query block is the fastest digit."""
+
+    name = "qb_minor"
+
+    def grid(self, spec):
+        return (_spec_nqb(spec), spec.num_query_heads, spec.batch)
+
+    def emit_decode(self, b, spec, bx, by, bz, shape):
+        return Decoded(bx, by, bz)
+
+
+class NonpersistBtHkvMinor(NonpersistDecode):
+    """Grid ``(B, Hq, nqb)`` with the kv head as the low digit of the head axis:
+    batch, then kv head, are the fastest digits, so the XCD round-robin spreads
+    distinct K/V streams over the XCDs. Query blocks run longest-first under
+    causal masking."""
+
+    name = "bt_hkv_minor"
+    tag = "npbthkvmin"
+
+    def grid(self, spec):
+        return (spec.batch, spec.num_query_heads, _spec_nqb(spec))
+
+    def emit_decode(self, b, spec, bx, by, bz, shape):
+        hq = b.add(
+            b.mul(shape.mod(by, "num_kv_heads"), shape.val("gqa")),
+            shape.div(by, "num_kv_heads"),
+        )
+        qb = shape.branch(
+            shape.balance(), lambda: emit_reverse(b, bz, shape), lambda: bz
+        )
+        return Decoded(qb, hq, bx)
+
+
+NONPERSIST_DECODES = _registry(NonpersistQbMinor, NonpersistBtHkvMinor)
 
 
 # --------------------------------------------------------------------------- #

@@ -17,7 +17,9 @@ from rocke.core.ir import BF16, F16
 from rocke.helpers.spec import kernel_name_join
 
 from kernels.common.attention_dense_decode import (
+    NONPERSIST_DECODES,
     PERSIST_DECODES,
+    NonpersistQbMinor,
     PersistHkvMajor,
     PersistQbMajor,
 )
@@ -80,12 +82,20 @@ class AttentionDenseSpec:
     use_sinks: bool = False
     # Appended for positional compatibility with existing concrete specs.
     causal_bottom_right: bool = field(default=False, kw_only=True)
+    # Block order of the non-persistent grid; ignored on the persistent one.
+    nonpersist_decode: str = field(default="auto", kw_only=True)
 
     @classmethod
     def supported_persist_decodes(cls) -> frozenset[str]:
         """``persist_decode`` values the concrete kernel type can emit. The shared
         spec accepts every known decode; each arch's spec lists its own."""
         return frozenset({"auto", *PERSIST_DECODES})
+
+    @classmethod
+    def supported_nonpersist_decodes(cls) -> frozenset[str]:
+        """``nonpersist_decode`` values the concrete kernel type can emit; every
+        arch emits every grid decode."""
+        return frozenset({"auto", *NONPERSIST_DECODES})
 
     def __post_init__(self) -> None:
         if self.dtype not in _DTYPE_IR:
@@ -145,11 +155,19 @@ class AttentionDenseSpec:
                 f"num_query_heads ({self.num_query_heads}) must be a positive "
                 f"multiple of num_kv_heads ({self.num_kv_heads})"
             )
+        # Both decode fields always hold a known value; only the grid in use
+        # checks its decode against the shape.
         if self.persist_decode not in self.supported_persist_decodes():
             raise ValueError(
                 f"persist_decode must be one of "
                 f"{sorted(self.supported_persist_decodes())}, "
                 f"got {self.persist_decode!r}"
+            )
+        if self.nonpersist_decode not in self.supported_nonpersist_decodes():
+            raise ValueError(
+                f"nonpersist_decode must be one of "
+                f"{sorted(self.supported_nonpersist_decodes())}, "
+                f"got {self.nonpersist_decode!r}"
             )
         if self.persistent:
             if self.num_persistent <= 0:
@@ -160,6 +178,10 @@ class AttentionDenseSpec:
                 why = PERSIST_DECODES[self.persist_decode].check(self)
                 if why:
                     raise ValueError(why)
+        elif self.nonpersist_decode != "auto":
+            why = NONPERSIST_DECODES[self.nonpersist_decode].check(self)
+            if why:
+                raise ValueError(why)
         if self.sliding_window < 0:
             raise ValueError(f"sliding_window must be >= 0, got {self.sliding_window}")
         if self.sliding_window > 0:
@@ -257,6 +279,13 @@ class AttentionDenseSpec:
         return PersistQbMajor.name
 
     @property
+    def resolved_nonpersist_decode(self) -> str:
+        """Resolve the non-persistent auto policy."""
+        if self.nonpersist_decode != "auto":
+            return self.nonpersist_decode
+        return NonpersistQbMinor.name
+
+    @property
     def runtime_param_fields(self) -> tuple[str, ...]:
         """Spec fields this kernel reads as runtime kernel params instead of
         baking into the body, so they must NOT split cache identity -- one
@@ -342,6 +371,10 @@ class AttentionDenseSpec:
                 parts.append(decode)
             if self.interleave:
                 parts.append("intl")
+        else:
+            decode = NONPERSIST_DECODES[self.resolved_nonpersist_decode].tag
+            if decode:
+                parts.append(decode)
         return kernel_name_join(*parts)
 
 
@@ -362,10 +395,11 @@ def attention_dense_cache_key(spec: AttentionDenseSpec, *, arch: str) -> tuple:
     stringly-typing it; if a stable on-disk identity is ever needed, that wants
     ``__qualname__`` or a digest instead.
 
-    On the persistent grid ``persist_decode`` is keyed by its resolved order:
-    ``"auto"`` resolves from the shape, and the order picks the work-decode body,
-    so once the shape leaves the key the raw ``"auto"`` would let two shapes that
-    resolve differently share one slot.
+    The decode the body uses is keyed by its resolved order: ``persist_decode`` on
+    the persistent grid, ``nonpersist_decode`` on the default grid. ``"auto"``
+    resolves from the shape, and the order picks the work-decode body, so once the
+    shape leaves the key the raw ``"auto"`` would let two shapes that resolve
+    differently share one slot.
     """
     if not arch:
         raise ValueError("attention dense cache identity requires an explicit arch")
@@ -374,6 +408,8 @@ def attention_dense_cache_key(spec: AttentionDenseSpec, *, arch: str) -> tuple:
     def _value(name: str):
         if name == "persist_decode" and spec.persistent:
             return spec.resolved_persist_decode
+        if name == "nonpersist_decode" and not spec.persistent:
+            return spec.resolved_nonpersist_decode
         return getattr(spec, name)
 
     rest = tuple(
