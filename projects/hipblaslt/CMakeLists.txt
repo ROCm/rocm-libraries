@@ -778,6 +778,14 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         PATTERN "source_only" EXCLUDE
     )
 
+    install(
+        FILES
+            "${_tensilelite_src}/_tensilelite_client_binding.py"
+            "${_tensilelite_src}/tensilelite_configure_client.py"
+        DESTINATION "${_tensilelite_install_dest}"
+        COMPONENT tests
+    )
+
     # Scripts used by unit tests
     install(
         FILES
