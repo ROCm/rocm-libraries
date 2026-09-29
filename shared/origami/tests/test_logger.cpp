@@ -102,7 +102,7 @@ TEST_CASE("Logger: text log writes debug messages when enabled", "[logger]") {
 
       auto hardware = make_hardware(gpu_arch);
       auto problem  = make_problem(2048, 2048, 1024);
-      auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
+      auto config   = gpu_arch == 942 ? make_config(128, 128, 64, 16, 16, 16, false, 1) : make_config(128, 128, 64, 16, 16, 32, false, 1);
 
       origami::gemm::compute_total_latency(problem, hardware, config);
       origami::Logger::instance().flush();
@@ -281,7 +281,7 @@ TEST_CASE("Logger: debug logging produces consistent latency values", "[logger]"
     DYNAMIC_SECTION("gfx" << gpu_arch) {
       auto hardware = make_hardware(gpu_arch);
       auto problem  = make_problem(2048, 2048, 1024);
-      auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
+      auto config   = gpu_arch == 942 ? make_config(128, 128, 64, 16, 16, 16, false, 1) : make_config(128, 128, 64, 16, 16, 32, false, 1);
 
       double latency1 = origami::gemm::compute_total_latency(problem, hardware, config);
       double latency2 = origami::gemm::compute_total_latency(problem, hardware, config);
@@ -300,7 +300,7 @@ TEST_CASE("Logger: latency matches between debug enabled and disabled", "[logger
     DYNAMIC_SECTION("gfx" << gpu_arch) {
       auto hardware = make_hardware(gpu_arch);
       auto problem  = make_problem(4096, 4096, 2048);
-      auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
+      auto config   = gpu_arch == 942 ? make_config(128, 128, 64, 16, 16, 16, false, 1) : make_config(128, 128, 64, 16, 16, 32, false, 1);
 
       portable_unsetenv("ANALYTICAL_GEMM_DEBUG");
       origami::runtime_options::get().update_from_env();

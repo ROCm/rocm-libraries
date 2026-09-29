@@ -65,6 +65,7 @@ option(TENSILELITE_BUILD_SHARED_LIBS "Build the TensileLite host library as shar
 option(HIPBLASLT_ENABLE_FETCH "Fetch dependencies using fetch content" OFF)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
 option(HIPBLASLT_ENABLE_THEROCK "Build hipBLASLt for TheRock." OFF)
+option(ORIGAMI_ENABLE_NN "Build origami with NN inference support." OFF)
 option(HIPBLASLT_VALIDATE_INSTALL "Run post-install per-base layout / .dat integrity checks on the install tree." OFF)
 option(HIPBLASLT_ENABLE_GEMM_A2A_FUSION "Build experimental fused GEMM + all-to-all support." OFF)
 
