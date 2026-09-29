@@ -331,18 +331,54 @@ struct SelVTag
 // qr_tdm shapes, so kSubQKHeaddim keeps QK's true length (96 -> 96, 160 -> 160,
 // 128/192 unchanged) instead of the shared rounded value. Includes the asymmetric
 // 192/128 (QK=192, VN1=128). M0=128 prefill path.
+template <ck_tile::index_t M, ck_tile::index_t QK, ck_tile::index_t VN1>
+using HeadDimShapeM = ck_tile::TileFmhaShape<ck_tile::sequence<M, 64, 32, VN1, 32, QK>,
+                                             ck_tile::sequence<4, 1, 1>,
+                                             ck_tile::sequence<16, 16, 32>,
+                                             ck_tile::sequence<4, 1, 1>,
+                                             ck_tile::sequence<16, 16, 32>,
+                                             true,
+                                             /*UseTdmCeil=*/true>;
+
 template <ck_tile::index_t QK, ck_tile::index_t VN1>
-using AlignedHeadDimShape = ck_tile::TileFmhaShape<ck_tile::sequence<128, 64, 32, VN1, 32, QK>,
-                                                   ck_tile::sequence<4, 1, 1>,
-                                                   ck_tile::sequence<16, 16, 32>,
-                                                   ck_tile::sequence<4, 1, 1>,
-                                                   ck_tile::sequence<16, 16, 32>,
-                                                   true,
-                                                   /*UseTdmCeil=*/true>;
+using AlignedHeadDimShape = HeadDimShapeM<128, QK, VN1>;
 
 template <typename DataType, ck_tile::index_t QK, ck_tile::index_t VN1>
 using AlignedHeadDimProblem =
     TestProblemWithShape<TestFmhaProblem<DataType, 128>, AlignedHeadDimShape<QK, VN1>>;
+
+// Same, but with M0 and the buffering mode spelled out, so head dims whose
+// production tile is M0=64 (d256, and later d512) can be described exactly.
+template <typename DataType,
+          ck_tile::index_t M,
+          ck_tile::index_t QK,
+          ck_tile::index_t VN1,
+          bool UseDoubleKVLdsBuffer = false,
+          bool ProgressiveDsLoadK   = false>
+using HeadDimProblemM =
+    TestProblemWithShape<TestFmhaProblem<DataType, M, UseDoubleKVLdsBuffer, ProgressiveDsLoadK>,
+                         HeadDimShapeM<M, QK, VN1>>;
+
+// The padding gate is head-dim aware only for the double-buffer arena: that one
+// already fills the LDS budget at d256, so adding a pad per row would not fit.
+// The single-buffer arena has room, and dropping its padding costs real bank
+// conflicts -- so the gate must look at the buffering mode, not just at the head
+// dim. These lock both halves of that condition down.
+template <typename DataType, ck_tile::index_t M, ck_tile::index_t QK, bool Double>
+using PaddingGateSelection =
+    ck_tile::detail::QrTdmPaddingSelection<HeadDimProblemM<DataType, M, QK, QK, Double>>;
+
+template <typename DataType, ck_tile::index_t M, ck_tile::index_t QK>
+constexpr bool has_single_buffer_kv_padding()
+{
+    using Sel = PaddingGateSelection<DataType, M, QK, false>;
+    return Sel::K::kEnabled && Sel::V::kEnabled;
+}
+
+// d256 single buffer: K/V padded. Losing this is the bank-conflict regression.
+static_assert(has_single_buffer_kv_padding<ck_tile::bf16_t, 64, 256>());
+// d256 double buffer: still unpadded, i.e. the gate was narrowed, not widened.
+static_assert(is_disabled_selection<PaddingGateSelection<ck_tile::bf16_t, 64, 256, true>>());
 
 // Validate issue geometry + reader segments for an aligned head dim, using the
 // head-dim-correct padding config. Only meaningful for dims TDM stores un-rounded
