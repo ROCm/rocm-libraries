@@ -2394,14 +2394,14 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     PASS_DEBUG(std::cerr << "[CDNA5 dsCap] dsReadPerCap=" << dsReadPerCap()
                          << " span=" << dsIssueCapSpan() << "\n");
 
-    // Every ds_load in this region issues in the pre-scan dsReadPriority
-    // order. Barrier membership is not consulted. Lower number first; equal
-    // priority keeps DAG id order. A later load stays unready until every
-    // earlier one has issued, so a ready lower-priority load cannot skip
-    // ahead. A priority edge that would contradict a real dependence is
-    // dropped as a cycle, one pair at a time. These edges are not part of
-    // the Layer 2 overlap contract.
-    {
+    // ModuleOptions::LockDsReadOrder. Every ds_load in this region issues in
+    // the pre-scan dsReadPriority order. Barrier membership is not consulted.
+    // Lower number first; equal priority keeps DAG id order. A later load
+    // stays unready until every earlier one has issued, so a ready
+    // lower-priority load cannot skip ahead. A priority edge that would
+    // contradict a real dependence is dropped as a cycle, one pair at a time.
+    // These edges are not part of the Layer 2 overlap contract.
+    if (getPassContext().getPassFeatureConfig().dagFeatures.lockDsReadOrder) {
         auto dsReadPriorityOf = [&](StinkyInstruction* inst) -> unsigned {
             auto it = deps.dag.instToId.find(inst);
             if (it == deps.dag.instToId.end()) return std::numeric_limits<unsigned>::max();
