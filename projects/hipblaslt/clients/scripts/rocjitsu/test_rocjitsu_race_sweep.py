@@ -8,7 +8,6 @@ import io
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 import tempfile
 import threading
@@ -19,7 +18,6 @@ from types import SimpleNamespace
 import zlib
 
 import msgpack
-import yaml
 import rocjitsu_race_sweep as sweep
 import rocjitsu_sweep_plan as plan
 
@@ -110,6 +108,23 @@ class SweepTests(unittest.TestCase):
                 path = Path(tmp) / name
                 path.write_bytes(data)
                 self.assertEqual(plan.read_library(path)["solutions"][0]["index"], 7)
+
+    def test_corrupt_metadata_is_rejected_before_inventory(self):
+        payload = msgpack.packb({"solutions": [solution(7)]}, use_bin_type=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "lib.dat.zlib"
+            for data in (
+                zlib.compress(payload) + b"trailing",
+                zlib.compress(payload)[:-1],
+            ):
+                with self.subTest(data=data[-8:]):
+                    path.write_bytes(data)
+                    with self.assertRaises(zlib.error):
+                        plan.read_library(path)
+            path = Path(tmp) / "lib.dat"
+            path.write_bytes(payload + payload)
+            with self.assertRaises(msgpack.ExtraData):
+                plan.read_library(path)
 
     def test_hardware_constraints_are_not_bypassed(self):
         device = {"device_id": 0x74A1, "simd_count": 1216, "simd_per_cu": 4}
@@ -211,6 +226,31 @@ class SweepTests(unittest.TestCase):
             self.assertEqual(failed["jobs"][0]["solutions"][0]["index"], 7)
             self.assertIn("planning_error", failed["jobs"][0])
             self.assertEqual(len(failed["jobs"][0]["cases"]), 4)
+
+    def test_explicit_indices_include_aliases_and_keep_unsupported_solutions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first, alias, unsupported = solution(7), solution(8), solution(9)
+            alias["kernelName"] = first["kernelName"]
+            unsupported["problemType"]["groupedGemm"] = True
+            (root / "library_gfx942.dat").write_bytes(
+                msgpack.packb(
+                    {"solutions": [first, alias, unsupported]}, use_bin_type=True
+                )
+            )
+            (root / "library_gfx942.co").write_bytes(b"object")
+            result = plan.make_plan(root, "gfx942", {}, 100, "seed", [9, 8, 7])
+            self.assertEqual(result["selection"], "solution-indices")
+            self.assertEqual(result["kernels"], 2)
+            self.assertEqual(result["planned_cases"], 12)
+            self.assertEqual(
+                [j["solutions"][0]["index"] for j in result["jobs"]], [7, 8, 9]
+            )
+            self.assertIn(
+                "outside the client adapter scope", result["jobs"][2]["planning_error"]
+            )
+            with self.assertRaisesRegex(ValueError, "indices not found:.*10"):
+                plan.make_plan(root, "gfx942", {}, 100, "seed", [7, 10])
 
     def test_native_metadata_stays_authoritative_for_each_adapter(self):
         j = job()
@@ -535,7 +575,7 @@ class SweepTests(unittest.TestCase):
             stat = Path("/proc") / childfile.read_text() / "stat"
             try:
                 state = stat.read_text().split(") ")[1].split()[0]
-            except FileNotFoundError:
+            except (FileNotFoundError, ProcessLookupError):
                 state = "exited"
             self.assertIn(state, {"exited", "Z", "X"})
 
@@ -553,114 +593,6 @@ class SweepTests(unittest.TestCase):
         self.assertEqual(result["stop"]["trigger_job"], 0)
         self.assertTrue(result["results"][0]["failed"])
         self.assertIn("No space left", result["results"][0]["errors"][0])
-
-    def test_driver_runs_all_stages_and_propagates_each_failure(self):
-        driver = Path(__file__).with_name("run_rocjitsu_hipblaslt_race_check.sh")
-        # Exercise the real post-setup stage sequence with lightweight workloads.
-        stages = driver.read_text().split("\ncheck_status=0\n", 1)[1]
-        setup = """
-set -euo pipefail
-check_status=0
-ROCJITSU_BIN=emulator
-TENSILELITE_CLIENT=client
-HIPBLASLT_BENCH=bench
-ROCJITSU_SWEEP_SEED=pr-revision
-ROCJITSU_CONFIG=config
-ROCJITSU_GPU_TARGET=gfx942
-ROCM_PATH=artifact
-RACE_REPORT_DIR=reports
-run_timed() { echo "STAGE: $1"; shift; "$@"; }
-run_hipblaslt_bench_check() { return "$BENCH_STATUS"; }
-run_tensilelite_client_check() { return "$CLIENT_STATUS"; }
-python3() { printf 'ARG: %s\n' "$@"; if [[ "$3" == tensile ]]; then return "$TENSILE_SWEEP_STATUS"; else return "$BENCH_SWEEP_STATUS"; fi; }
-"""
-        for statuses in [
-            (0, 0, 0, 0),
-            (1, 0, 0, 0),
-            (0, 1, 0, 0),
-            (0, 0, 1, 0),
-            (0, 0, 0, 1),
-        ]:
-            with self.subTest(statuses=statuses):
-                result = subprocess.run(
-                    ["bash", "-c", setup + stages],
-                    env={
-                        **os.environ,
-                        **dict(
-                            zip(
-                                [
-                                    "BENCH_STATUS",
-                                    "CLIENT_STATUS",
-                                    "TENSILE_SWEEP_STATUS",
-                                    "BENCH_SWEEP_STATUS",
-                                ],
-                                map(str, statuses),
-                            )
-                        ),
-                    },
-                    text=True,
-                    capture_output=True,
-                    timeout=10,
-                )
-                self.assertEqual(result.returncode, int(any(statuses)), result.stderr)
-                self.assertEqual(
-                    [
-                        line
-                        for line in result.stdout.splitlines()
-                        if line.startswith("STAGE:")
-                    ],
-                    [
-                        "STAGE: hipblaslt-bench race check",
-                        "STAGE: tensilelite-client race check",
-                        "STAGE: TensileLite sampled race sweep",
-                        "STAGE: hipBLASLt-bench sampled race sweep",
-                    ],
-                )
-                for flag, value in [
-                    ("--workers", "4"),
-                    ("--kernels", "100"),
-                    ("--target", "gfx942"),
-                    ("--seed", "pr-revision"),
-                    ("--suite-timeout", "1500"),
-                ]:
-                    self.assertEqual(
-                        result.stdout.count(f"ARG: {flag}\nARG: {value}\n"), 2
-                    )
-                self.assertIn("ARG: reports/sweep-tensile", result.stdout)
-                self.assertIn("ARG: reports/sweep-bench", result.stdout)
-
-    def test_ci_publishes_partial_and_missing_reports(self):
-        workflow = (
-            Path(__file__).parents[1]
-            / "workflows/therock-rocjitsu-race-check-linux.yml"
-        )
-        steps = yaml.safe_load(workflow.read_text())["jobs"][
-            "rocjitsu-race-check-linux"
-        ]["steps"]
-        publish = next(
-            s for s in steps if s["name"] == "Publish sampled solution results"
-        )
-        self.assertEqual(publish["if"], "${{ always() }}")
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "sweep-tensile").mkdir()
-            report = "| 7 | FAIL | 4/4 | 4/4 |\nRun incomplete.\n"
-            (root / "sweep-tensile/summary.md").write_text(report)
-            subprocess.run(
-                ["bash", "-euc", publish["run"]],
-                env={
-                    **os.environ,
-                    "RACE_REPORT_DIR": str(root),
-                    "GITHUB_STEP_SUMMARY": str(root / "job.md"),
-                },
-                check=True,
-                capture_output=True,
-                timeout=10,
-            )
-            text = (root / "job.md").read_text()
-            self.assertIn(report, text)
-            self.assertIn("bench sampled race sweep", text)
-            self.assertIn("No report", text)
 
 
 if __name__ == "__main__":

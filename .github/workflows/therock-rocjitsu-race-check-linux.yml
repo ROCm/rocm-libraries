@@ -131,8 +131,11 @@ jobs:
           python ./build_tools/install_additional_requirements.py \
             --requirements-files "${ROCM_PATH}/share/hipblaslt/tensilelite/requirements-test.txt"
 
-      - name: Check toy sweep harness
-        run: python3 -B rocm-libraries/.github/scripts/test_rocjitsu_race_sweep.py
+      - name: Check race sweep tooling
+        run: |
+          export PYTHONPATH="${ROCM_PATH}/share/hipblaslt/tensilelite${PYTHONPATH:+:${PYTHONPATH}}"
+          python3 -B "${ROCM_PATH}/share/hipblaslt/rocjitsu/test_rocjitsu_race_sweep.py"
+          python3 -B rocm-libraries/.github/scripts/test_rocjitsu_race_check.py
 
       - name: Run rocjitsu race check
         timeout-minutes: 75
