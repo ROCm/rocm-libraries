@@ -42,6 +42,7 @@ class Installation:
 class ClientCandidate:
     path: Path
     source: str
+    validated: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -126,12 +127,25 @@ def selected_client(
 def default_client_candidate(
     executable_search_paths: tuple[Path, ...],
     source: str,
+    expected_version: str,
 ) -> ClientCandidate:
-    """Find tensilelite-client in the selected executable search paths."""
+    """Find the first compatible client in the selected executable paths."""
+    rejected: list[str] = []
     for directory in executable_search_paths:
         candidate = directory / _CLIENT_EXECUTABLE
-        if candidate.is_file():
-            return ClientCandidate(candidate, source)
+        if not candidate.is_file():
+            continue
+        try:
+            validate_client(candidate, expected_version)
+        except ClientBindingError as exc:
+            rejected.append(f"  {candidate}: {exc}")
+            continue
+        return ClientCandidate(candidate, source, validated=True)
+    if rejected:
+        raise ClientBindingError(
+            "No compatible tensilelite-client was found in the selected executable paths:\n"
+            + "\n".join(rejected)
+        )
     raise ClientBindingError(
         "tensilelite-client was not found in the selected executable paths:\n"
         f"  selected by: {source}\n"

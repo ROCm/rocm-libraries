@@ -31,10 +31,11 @@ from copy import deepcopy
 from typing import Dict
 
 from .. import GENERATOR_VERSION as __version__
+from .. import _runtime
 
 from .Architectures import isaToGfx
 from .Types import IsaVersion, IsaInfo
-from .Utilities import locateExe, versionIsCompatible, print1, print2, printExit, printWarning, \
+from .Utilities import isExe, versionIsCompatible, print1, print2, printExit, printWarning, \
      getVerbosity
 from .ValidParameters import validParameters
 
@@ -913,15 +914,21 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
         globalParameters["CmakeCCompiler"] = os.environ.get("CMAKE_C_COMPILER")
 
     globalParameters["ROCmBinPath"] = os.path.join(globalParameters["ROCmPath"], "bin")
-    try:
-        globalParameters["AMDSMIPath"] = locateExe(globalParameters["ROCmBinPath"], "amd-smi")
-    except OSError:
+    amdsmi_path = next(
+        (
+            str(path / "amd-smi")
+            for path in _runtime.executable_search_paths()
+            if isExe(path / "amd-smi")
+        ),
+        None,
+    )
+    globalParameters["AMDSMIPath"] = amdsmi_path
+    if amdsmi_path is None:
         # amd-smi is only needed at runtime to pin clocks/fans during benchmarking
         # and tuning; it is not required to build libraries or validate logic.
         # It is also not presently supported on Windows. Treat a missing amd-smi as
         # non-fatal: leave AMDSMIPath unset (None) so that clock pinning is skipped,
         # rather than aborting the build in environments that do not ship amd-smi.
-        globalParameters["AMDSMIPath"] = None
         if os.name != "nt":
             printWarning(
                 "Could not locate amd-smi; GPU clock/fan pinning will be disabled. "
