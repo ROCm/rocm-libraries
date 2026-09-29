@@ -67,9 +67,10 @@ The one registration a generated engine needs is the **kernel source**, and only
 
 | Group | Kinds | What happens |
 |---|---|---|
-| Compilation inputs | `hip`, `rocke` | Authored, lowered to a code object at pack time. The packer has exactly these two producer arms; anything else reaches its unsupported-kind raise. No CMake registration. |
+| Compilation inputs | `hip`, `rocke` | Authored, lowered to a code object at pack time. No CMake registration. |
+| Prebuilt input | `hsaco` | Authored as `{file, symbol}`, packed byte-for-byte: no compile, no CMake registration. Restrict it to the arch its object was built for. |
 | Passthrough | `embedded_source` | Shipped as authored, no producer runs, no archive entry. **Needs the registration below.** |
-| Runtime descriptor forms | `hsaco`, `kpack` | Written *by* the packer, never authored. `hsaco` is its intermediate between compile and archive; `kpack` is the shipped runtime form. |
+| Runtime descriptor form | `kpack` | Written *by* the packer and shipped; the runtime sees only this. The packer's intermediate also uses `kind: hsaco` for compiled variants. |
 
 ```cmake
 # In P/src/tests/CMakeLists.txt, beside base's existing calls. Required ONLY for

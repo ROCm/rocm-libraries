@@ -15,7 +15,7 @@
 ##
 {% if config.is_packaged %}
 ## This is a PACKAGED bundle: the runtime loader does not read its descriptors as
-## authored. hkp_pack walks the shipped source root recursively, compiles or lowers
+## authored. hkp_pack walks the shipped source root recursively, compiles or packs
 ## each UKD, and writes the descriptors into the per-arch tree, rewriting
 ## `kind: {{ config.kernel_source_kind }}` to `kind: kpack`. A second, unlowered copy
 ## would hand the loader a kind it rejects ("no implementation yet"), dropping the pack

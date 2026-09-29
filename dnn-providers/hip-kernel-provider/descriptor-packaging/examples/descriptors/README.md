@@ -71,8 +71,16 @@ descriptor cannot supply them and they would be silently frozen at their
 defaults. `spec` is constructed into the builder's own spec dataclass, so its
 fields and their validation are the builder's, not ours.
 
-**The launch symbol is never authored.** It is captured from the compiled
-artifact. Authoring it would let the descriptor disagree with the kernel.
+**For rocKE, the launch symbol is never authored.** It is captured from the
+compiled artifact. Authoring it would let the descriptor disagree with the kernel.
+
+**For `kind: "hsaco"`, `file` names a prebuilt code object and `symbol` IS
+authored.** `file` resolves relative to the descriptor that names it, must stay
+inside the source root, and has no root-relative fallback, like a hip `source`.
+The object is packed as-is, with no compile. This tree contains no hsaco example.
+Restrict each hsaco UKD with `arch` to the arch its object was built for: an
+unrestricted one repeats its bytes in every arch's shard, where they fail at
+module load on the wrong device.
 
 **`arch` filters which shard a descriptor ships in.** It does not select a
 builder: naming `gfx942` does not make a gfx950 builder produce gfx942 code.

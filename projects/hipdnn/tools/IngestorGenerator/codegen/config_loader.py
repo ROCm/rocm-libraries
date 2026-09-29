@@ -307,6 +307,8 @@ def load_config(path: Path) -> IngestorConfig:
                         build=dict(ks_raw.get("build", {})),
                         builder=ks_raw.get("builder", ""),
                         spec=dict(ks_raw.get("spec", {})),
+                        file=ks_raw.get("file", ""),
+                        symbol=ks_raw.get("symbol", ""),
                     ),
                     metadata=dict(kernel_raw.get("metadata", {})),
                     priority=kernel_raw.get("priority", 0),
@@ -977,6 +979,7 @@ _REQUIRED_KERNEL_SOURCE_FIELDS: dict = {
     KERNEL_SOURCE_KIND_EMBEDDED: ("source_file", "entry_point"),
     KERNEL_SOURCE_KIND_HIP: ("source", "entry"),
     KERNEL_SOURCE_KIND_ROCKE: ("source", "builder", "spec"),
+    KERNEL_SOURCE_KIND_HSACO: ("file", "symbol"),
 }
 #: The fields a kind owns but may omit -- ``KernelSource.as_document`` writes them
 #: for that kind, and nothing requires them.
@@ -1527,7 +1530,7 @@ def _check_kernel_source_kind_implemented(config: IngestorConfig) -> None:
         if kind_source in emittable:
             continue
 
-        if kind_source in (KERNEL_SOURCE_KIND_HSACO_FILE, KERNEL_SOURCE_KIND_HSACO):
+        if kind_source == KERNEL_SOURCE_KIND_HSACO_FILE:
             raise ConfigError(
                 f"{where} is '{kind_source}', which no adapter implements on "
                 f"either path. The runtime needs supportsSourceKind() on "
@@ -1539,11 +1542,12 @@ def _check_kernel_source_kind_implemented(config: IngestorConfig) -> None:
                 f"{where} is 'kpack', which is a PRODUCED kind, never an "
                 f"authored one. hkp_pack writes it -- stamping library, "
                 f"toc_key, symbol and sha256 from the artifact it actually "
-                f"built -- when it lowers a 'hip' or 'rocke' descriptor. "
+                f"built -- when it lowers a 'hip', 'rocke' or 'hsaco' descriptor. "
                 f"Authoring those four by hand would be a second source of "
                 f"truth that silently disagrees with the archive. Author "
-                f"'{KERNEL_SOURCE_KIND_ROCKE}' or '{KERNEL_SOURCE_KIND_HIP}' "
-                f"under dialect '{DIALECT_PACKAGED}' instead."
+                f"'{KERNEL_SOURCE_KIND_ROCKE}', '{KERNEL_SOURCE_KIND_HIP}' or "
+                f"'{KERNEL_SOURCE_KIND_HSACO}' under dialect '{DIALECT_PACKAGED}' "
+                f"instead."
             )
         if kind_source == KERNEL_SOURCE_KIND_ROCKE_BUILDER:
             raise ConfigError(
@@ -1608,7 +1612,7 @@ def _check_specialization_declaration(config: IngestorConfig) -> None:
     The partition over ``kmd_fields`` is exhaustive and disjoint: each field is
     either consumed by the builder (``metadata_fields``, with a binding) or
     matcher-only. A ``rocke`` kernel's spec keys reached the compiler, so they
-    cannot be matcher-only; direct-load and ``hip`` state
+    cannot be matcher-only; direct-load, ``hip`` and ``hsaco`` state
     ``metadata_fields: []`` explicitly. Presence is enforced at emission.
     """
     declaration = config.specialization
@@ -1732,8 +1736,9 @@ def _check_specialization_declaration(config: IngestorConfig) -> None:
         raise ConfigError(
             f"'specialization.metadata_fields' names {sorted(checked)}, but no "
             f"kernel in this config is built from a compiled specialization "
-            f"(kinds: {sorted(kinds)}). The direct-load and "
-            f"'{KERNEL_SOURCE_KIND_HIP}' paths hydrate no builder object, so there "
+            f"(kinds: {sorted(kinds)}). The direct-load, "
+            f"'{KERNEL_SOURCE_KIND_HIP}' and '{KERNEL_SOURCE_KIND_HSACO}' paths "
+            f"hydrate no builder object, so there "
             f"is nothing for a binding to read back and no agreement to check. "
             f"Declare 'metadata_fields: []' and list every field under "
             f"'matcher_only_fields'."

@@ -606,6 +606,8 @@ def _round_trip(original: dict, compact: dict) -> None:
             ("entry_point", a.kernel_source.entry_point, b.kernel_source.entry_point),
             ("entry", a.kernel_source.entry, b.kernel_source.entry),
             ("build", a.kernel_source.build, b.kernel_source.build),
+            ("file", a.kernel_source.file, b.kernel_source.file),
+            ("symbol", a.kernel_source.symbol, b.kernel_source.symbol),
             ("arch", a.arch, b.arch),
             ("priority", a.priority, b.priority),
         ):

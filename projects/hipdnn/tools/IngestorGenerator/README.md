@@ -240,8 +240,8 @@ to the binary meant to read it. Authors repoint only
 An `embedded_source` engine additionally needs an
 `add_kernels_for_embedding(TARGET … FILES … KEYS …)` entry in
 `.../src/tests/CMakeLists.txt`, each `KEYS` value equal to the `source_file` string its
-descriptor authors; that belongs to the kernel source, so no fragment carries it. The
-`hip`, `rocke`, `hsaco` and `kpack` kinds lower at pack time.
+descriptor authors; that belongs to the kernel source, so no fragment carries it. Authored
+`hip`, `rocke` and `hsaco` are packaged into the shipped `kpack`.
 
 **Both `IngestorPacks.hpp` and `IngestorPacks.cpp` edits are required.** A pack registered
 in the header but missing from the `.cpp` `s_packs` table silently vanishes from the
@@ -460,7 +460,8 @@ graph_match:                      # documentation of shape, not consumed by temp
 
 dialect: direct_load | packaged   # optional, default "direct_load"
 kernel_source_kind: embedded_source   # direct-load example; packaged sources use
-                                        # their build-time source kind
+                                        # their build-time source kind: hip | rocke |
+                                        # hsaco
 authored_subpath: unit            # REQUIRED for direct_load, naming one of the four
                                     # authored sets: shared | unit | integration |
                                     # archive_fixture. Each is a separate pack target
@@ -511,8 +512,15 @@ implementations:
   candidate KMD fields (externally-supplied `HIP_PLUGIN_*` defines, template parameters).
 
 `rocke` authoring uses the packaged path, its effective policy observations belonging to the
-producing compiler. `hsaco_file` is rejected explicitly, naming `supportsSourceKind()` as the
-missing prerequisite on `IKernelDispatchHandler`.
+producing compiler. `hsaco` authoring also uses the packaged path: `kernel_source` is
+`{kind: hsaco, file, symbol}`, `file` naming a prebuilt code object relative to the
+descriptor that names it and `symbol` its kernel. `file` must stay inside the source root,
+with no root-relative fallback. `hkp_pack` packs that object as-is, without compiling, so
+like `hip` the specialization declares `metadata_fields: []`. The packer does not check the
+object's format or target processor: an hsaco kernel must carry a per-kernel `arch` (or sit
+in a single-arch pack) matching its object, otherwise the same file enters every shard.
+`hsaco_file` is rejected explicitly, naming `supportsSourceKind()` as the missing
+prerequisite on `IKernelDispatchHandler`.
 
 ## Tests
 

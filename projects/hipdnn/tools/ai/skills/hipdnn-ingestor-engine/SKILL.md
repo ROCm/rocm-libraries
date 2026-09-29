@@ -31,10 +31,19 @@ per-run evidence directory as described in [RUNBOOK.md](RUNBOOK.md#paths-and-int
 
 | | `direct_load` | `packaged` |
 |---|---|---|
-| Authored source | `embedded_source` | `rocke` or `hip` |
+| Authored source | `embedded_source` | `rocke`, `hip` or `hsaco` |
 | Authored under | `test_descriptors/<set>/<slug>`, `<set>` one of `shared`, `unit`, `integration`, `archive_fixture`; staged, not shipped | `descriptors/<subpath>`, defaulting to `<kind>/<slug>`; ships |
 | Runtime descriptors | Per-arch shard, kind unchanged (passthrough) | Per-arch shard, rewritten to `kind: kpack` |
-| Kernel source | `add_kernels_for_embedding()` key table, compiled into the binary | Lowered at pack time into one archive per arch |
+| Kernel source | `add_kernels_for_embedding()` key table, compiled into the binary | `rocke` and `hip` are lowered at pack time; `hsaco` is packed as authored; one archive per arch |
+
+An authored `hsaco` source is `{kind: "hsaco", file, symbol}`: `file` is a prebuilt
+AMDGPU code object resolved relative to the descriptor that names it (inside the source
+root, no root-relative fallback) and `symbol` is authored. The packer copies the bytes
+as-is into the arch's archive with no compile step, reads the signature from the
+object's metadata, and declares `metadata_fields: []`. It does not check the object's
+format or target processor, so restrict each `hsaco` KDP to the arch its object was
+built for; an unrestricted one ships the same bytes to every shard and fails at module
+load on the wrong device. `hsaco_file` (direct load) remains unsupported.
 
 Both dialects are packed and staged per architecture, and **neither registers a
 descriptor in CMake**: the authored subpath is the whole mechanism. Only
