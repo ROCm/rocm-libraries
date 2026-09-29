@@ -266,21 +266,16 @@ def _detect_llvm_flavor() -> str:
     Loading and querying are owned by runtime.comgr, which caches the result
     for its loaded handle. ROCm package versions and compiler executables on
     PATH are not evidence about that compiler. If COMGR cannot be loaded or
-    queried, retain the llvm22 offline default; callers can pin a flavor with
-    ROCKE_LLVM_FLAVOR or the lowering API's llvm_flavor argument.
+    queried, raise; offline callers must pin a flavor with ROCKE_LLVM_FLAVOR
+    or the lowering API's llvm_flavor argument.
     """
     env = os.environ.get("ROCKE_LLVM_FLAVOR", "").strip().lower()
     if env in LLVM_FLAVORS:
         return env
-    try:
-        from ..runtime.comgr import loaded_compiler_info
+    from ..runtime.comgr import _require_compiler_info
 
-        info = loaded_compiler_info()
-        if info is not None and info.llvm_version is not None:
-            return _flavor_for_llvm(info.llvm_version[0])
-    except Exception:  # noqa: BLE001 - preserve best-effort automatic detection
-        pass
-    return LLVM_FLAVOR_LLVM22
+    info = _require_compiler_info()
+    return _flavor_for_llvm(info.llvm_version[0])
 
 
 def _resolve_llvm_flavor() -> str:

@@ -342,30 +342,38 @@ def loaded_compiler_info() -> CompilerInfo | None:
         return info
 
 
+def _require_compiler_info() -> CompilerInfo:
+    """Require version evidence before automatic lowering or compilation."""
+    info = loaded_compiler_info()
+    if info is None or info.llvm_version is None:
+        reason = "COMGR could not be loaded" if info is None else info.describe()
+        raise ComgrError(
+            f"Cannot determine LLVM flavor: {reason}. "
+            "Select a queryable COMGR library for compilation, or set an explicit "
+            "LLVM flavor for offline IR emission."
+        )
+    return info
+
+
 def _assert_ir_flavor_matches_lib(ir_text: str) -> None:
     """Reject a known p8-generation mismatch against the loaded compiler.
 
     The guard is independent of emission overrides: selecting a flavor does
     not change the compiler that will consume it. Unknown compiler evidence
-    or an unrecognised input layout leaves validation to COMGR.
+    is an error; with a known compiler, unrecognised IR layouts are left to COMGR.
     """
-    try:
-        from ..core.lower_llvm import (
-            _datalayout_kind_for_flavor,
-            _datalayout_kind_from_ir,
-            _flavor_for_llvm,
-        )
+    from ..core.lower_llvm import (
+        _datalayout_kind_for_flavor,
+        _datalayout_kind_from_ir,
+        _flavor_for_llvm,
+    )
 
-        ir_kind = _datalayout_kind_from_ir(ir_text)
-        if ir_kind is None:
-            return
-        info = loaded_compiler_info()
-        if info is None or info.llvm_version is None:
-            return
-        lib_flavor = _flavor_for_llvm(info.llvm_version[0])
-        lib_kind = _datalayout_kind_for_flavor(lib_flavor)
-    except Exception:  # noqa: BLE001 - leave unknown compatibility to COMGR
+    info = _require_compiler_info()
+    ir_kind = _datalayout_kind_from_ir(ir_text)
+    if ir_kind is None:
         return
+    lib_flavor = _flavor_for_llvm(info.llvm_version[0])
+    lib_kind = _datalayout_kind_for_flavor(lib_flavor)
     if lib_kind is None or lib_kind is ir_kind:
         return
     raise ComgrError(

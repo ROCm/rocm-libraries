@@ -132,7 +132,7 @@ bool rocke_ll_flavor_is_modern(rocke_llvm_flavor_t flavor)
 
 /* Resolve from the compiler loaded by COMGR. Explicit flavors keep offline
  * emission independent of a runtime installation. If no compiler can be
- * queried, preserve the llvm22 default without inferring a version from files.
+ * queried, reject AUTO; offline callers must supply an explicit flavor.
  * Python-driven C++ lowering passes its resolved flavor explicitly. */
 static rocke_llvm_flavor_t ll_resolve_flavor(void)
 {
@@ -145,7 +145,9 @@ static rocke_llvm_flavor_t ll_resolve_flavor(void)
     }
     const ckc::CompilerInfo* info = ckc::candidate_compiler_info();
     if(!info || !info->llvm_major)
-        return ROCKE_LLVM_FLAVOR_LLVM22;
+        throw ckc::ValueError(
+            "Cannot determine LLVM flavor: COMGR could not be loaded or queried. "
+            "Select a queryable COMGR library or an explicit LLVM flavor for offline IR emission.");
     for(int i = ROCKE_LL_FLAVOR_LADDER_COUNT - 1; i >= 0; --i)
     {
         if(info->llvm_major >= ROCKE_LL_FLAVOR_LADDER[i].min_llvm_major)

@@ -96,16 +96,19 @@ def test_unqueryable_loaded_library_is_unknown_not_another_install(monkeypatch):
         info = comgr.loaded_compiler_info()
         assert info.llvm_version is None
         assert info.source == "unavailable"
-        assert lower_llvm._resolve_llvm_flavor() == "llvm22"
-        comgr._assert_ir_flavor_matches_lib(
-            f'target datalayout = "{lower_llvm._datalayout_for_flavor("llvm23")}"'
-        )
+        with pytest.raises(comgr.ComgrError, match="Cannot determine LLVM flavor"):
+            lower_llvm._resolve_llvm_flavor()
+        with pytest.raises(comgr.ComgrError, match="Cannot determine LLVM flavor"):
+            comgr._assert_ir_flavor_matches_lib(
+                f'target datalayout = "{lower_llvm._datalayout_for_flavor("llvm23")}"'
+            )
 
 
 def test_unavailable_library_does_not_prevent_offline_emission(monkeypatch):
     with patch.object(comgr, "_resolve_lib", side_effect=comgr.ComgrError("missing")):
         assert comgr.loaded_compiler_info() is None
-        assert lower_llvm._resolve_llvm_flavor() == "llvm22"
+        with pytest.raises(comgr.ComgrError, match="could not be loaded"):
+            lower_llvm._resolve_llvm_flavor()
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm23")
     with patch.object(comgr, "_resolve_lib", side_effect=AssertionError("offline")):
         assert lower_llvm._resolve_llvm_flavor() == "llvm23"
@@ -191,3 +194,53 @@ def test_failed_preprocessing_releases_acquired_handles():
     with pytest.raises(comgr.ComgrError, match="status=1"):
         comgr._probe_llvm_version(lib)
     assert released == list(reversed(acquired))
+
+
+@pytest.mark.parametrize("version", [None, (20, 0, 0)])
+@pytest.mark.parametrize("with_layout", [False, True])
+def test_compilation_requires_version_evidence_before_creating_inputs(
+    monkeypatch, version, with_layout
+):
+    info = comgr.CompilerInfo(version, "fixture", "compiler.so", None, None)
+    monkeypatch.setattr(comgr, "_resolve_lib", lambda: object())
+    monkeypatch.setattr(comgr, "loaded_compiler_info", lambda: info)
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm20")
+    create = Mock(side_effect=RuntimeError("reached compiler input creation"))
+    monkeypatch.setattr(comgr, "_create_data_set", create)
+    ir = "define void @k() {}"
+    if with_layout:
+        ir = (
+            f'target datalayout = "{lower_llvm._datalayout_for_flavor("llvm20")}"\n'
+            + ir
+        )
+    if version is None:
+        with pytest.raises(comgr.ComgrError, match="Cannot determine LLVM flavor"):
+            comgr.build_hsaco_from_llvm_ir(ir)
+        create.assert_not_called()
+    else:
+        with pytest.raises(RuntimeError, match="reached compiler input creation"):
+            comgr.build_hsaco_from_llvm_ir(ir)
+        create.assert_called_once()
+
+
+def test_explicit_offline_lowering_never_queries_comgr(monkeypatch):
+    from rocke.core.ir import IRBuilder
+
+    query = Mock(side_effect=AssertionError("offline emission queried COMGR"))
+    monkeypatch.setattr(comgr, "loaded_compiler_info", query)
+    ir = lower_llvm.lower_kernel_to_llvm(
+        IRBuilder("offline").kernel, llvm_flavor="llvm20"
+    )
+    assert lower_llvm._datalayout_for_flavor("llvm20") in ir
+    query.assert_not_called()
+
+
+def test_load_failure_rejects_compilation_before_creating_inputs(monkeypatch):
+    monkeypatch.setattr(
+        comgr, "_resolve_lib", Mock(side_effect=comgr.ComgrError("COMGR unavailable"))
+    )
+    create = Mock()
+    monkeypatch.setattr(comgr, "_create_data_set", create)
+    with pytest.raises(comgr.ComgrError, match="COMGR unavailable"):
+        comgr.build_hsaco_from_llvm_ir("define void @k() {}")
+    create.assert_not_called()
