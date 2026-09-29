@@ -159,10 +159,11 @@ def plsinStoreCol128Active(kernel, weaveGroups) -> bool:
     Requires the permlane16 shuffle: the merge is defined against the row order
     that ``(lane_group&1)*12`` produces, not against the ds_bpermute path's.
 
-    Opt-in while it is being measured:
-    ``TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_COL128=1"``.
+    Enabled by default on this PoC branch. Set
+    ``TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_COL128=0"`` to recover the parent
+    fold-vgpr layout for an A/B comparison.
     """
-    if plsinDebugEnv("TENSILE_PLSIN_COL128", "0") == "0":
+    if plsinDebugEnv("TENSILE_PLSIN_COL128", "1") == "0":
         return False
     # An N group holds MIWaveTile[0]//2 paired stores. Requiring that to be even
     # means every store has an M-adjacent partner to merge with, so there is no

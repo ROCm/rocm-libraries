@@ -17867,10 +17867,14 @@ class KernelWriterAssembly(KernelWriter):
         miwt = kernel.get("MIWaveTile", [0, 0])
         maxVgpr = self.states.regCaps["MaxVgpr"]
         foldFits = (self.vgprPool.size() + 9) <= maxVgpr
+        col128Requested = (kernel.get("UseSubtileImpl")
+                           and plsinStoreCol128Active(
+                             kernel, True if self.states.subtileFusedFullTileStore else None))
         isSubtileFold = (kernel.get("DPPStoreFold")
                          and kernel.get("UseSubtileImpl")
                          and len(miwt) >= 2 and miwt[0] >= 4
-                         and (miwt[0] == 8 or foldFits))
+                         and (miwt[0] == 8 or foldFits)
+                         and not col128Requested)
         # Running cursor over the cvt block.  +0..+6 are the shared staging window; each
         # active feature appends its own disjoint sub-window, so no two offsets collide.
         base = 7 if kernel.get("UseSubtileImpl") else 4
@@ -17884,8 +17888,7 @@ class KernelWriterAssembly(KernelWriter):
           scalarAddrOff, scalarRingOff = nxt, nxt + 1
           nxt += 1 + 2 * packPairs
         col128Base = -1
-        if kernel.get("UseSubtileImpl") and \
-           plsinStoreCol128Active(kernel, True if self.states.subtileFusedFullTileStore else None):
+        if col128Requested:
           col128Base = (nxt + 1) & ~1   # 2-align the second pack quad
           nxt = col128Base + 7
         numCvtVgprs = nxt if kernel.get("UseSubtileImpl") else 4
