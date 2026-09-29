@@ -421,7 +421,7 @@ identity, versioning, and the feature contract without understanding the ranking
     "$device.cu_count", "$device.lds_size",            // device props → arch-aware
     "$kernel.tile_m", "$kernel.split_k",               // KMD fields, exposed as knobs (Section 3.2)
     "$q.dims[3]", "$q.dims[2]",                        // positional tensor dims (Section 6.1)
-    {"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]},     // computed inline — no $derived.* (Section 6.4)
+    {"/": ["$graph.flops", "$graph.logical_bytes"]},   // computed inline — no $derived.* (Section 6.4)
     {"ceil_div": ["$q.dims[2]", "$kernel.tile_m"]}    // tile quantization, also inline
   ],
   "categorical_encoding": { … },                       // string → code maps, generated (Section 6.5)
@@ -431,7 +431,8 @@ identity, versioning, and the feature contract without understanding the ranking
   "trained_against": {
     "kmd": {"id": "5a1c0000-…", "revision": "2.1"},
     "ued": {"id": "7f30b911-…", "revision": "1.3"},
-    "umd": [{"id": "1a7f52c8-…", "revision": "1.0"}] // one entry per matcher
+    "umd": [{"id": "1a7f52c8-…", "revision": "1.0"}], // one entry per matcher
+    "feature_semantics_revision": 1                   // what the published features mean (Section 6.9)
   },
 
   "objective": "max",                                  // higher predicted score wins
@@ -485,7 +486,7 @@ The normative header. A loader can validate every row here without instantiating
 | `features_signature` | if the adapter features | ordered list | Model inputs, in training order ([Section 6.2](#62-the-features_signature)). |
 | `categorical_encoding` | if a feature reads a string field | field → (value → code) | Generated during training; makes string→number conversion explicit ([Section 6.5](#65-categorical-encoding)). |
 | `features_hash` | if `features_signature` | `sha256:` + 16 hex | Fingerprint of the **resolved feature contract** — the canonicalized signature *and* `categorical_encoding`, truncated to 64 bits ([Section 6.3](#63-contract-enforcement)). |
-| `trained_against` | if the adapter features | descriptor refs, or `selector_revision` | What this heuristic was generated against: the `{id, revision}` **content revisions** of the `ued`, `kmd`, and every `umd`, or — for an engine that has no descriptor set — the opaque provider revision whose behaviour was measured ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). |
+| `trained_against` | if the adapter features | descriptor refs, or `selector_revision`; optionally `feature_semantics_revision` | What this heuristic was generated against: the `{id, revision}` **content revisions** of the `ued`, `kmd`, and every `umd`, or — for an engine that has no descriptor set — the opaque provider revision whose behaviour was measured ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). Either form may also record the integer revision of the feature semantics the model was trained on; absent means 1 ([Section 6.9](#69-feature-semantics-revision)). |
 | `objective` | if the adapter scores | `max` \| `min` | Direction of the winning score, applied when the ranking is ordered. An adapter returns its model's raw value; the sign is the consumer's to apply, so a `min` model needs no trainer-side negation ([Section 5](#5-selection-flow)). |
 | `score` | no | object | `metric`, `calibrated`, and a `transform` drawn from the closed invertible set — lets a consumer recover the metric's value in its registered units ([Section 4.4](#44-ranking-metrics), [Section 11.3](#113-cross-engine-comparison)). `metric` names a registered ranking metric and fixes the units and the winning direction, so `objective` must agree with it. A `calibrated` score requires a `metric`. |
 | `<adapter>` | yes | object | Adapter-scoped body; its key **must** equal `adapter`. A body naming a model file may also carry that file's `hash` ([Section 7.2](#72-default-tree_data)). |
@@ -586,7 +587,10 @@ file drives both the build-time and runtime checks.
         "umd": { "description": "One entry per matcher; empty records that none narrowed the catalog.",
                  "type": "array", "uniqueItems": true,
                  "items": { "$ref": "#/definitions/descriptor_ref" } },
-        "selector_revision": { "type": "string", "minLength": 1 }
+        "selector_revision": { "type": "string", "minLength": 1 },
+        "feature_semantics_revision": {
+          "description": "Revision of the published feature semantics; absent means 1 (section 6.9).",
+          "type": "integer", "minimum": 1 }
       }
     },
     "objective": { "enum": ["max", "min"] },
@@ -692,6 +696,9 @@ naming, because each needs an explicit construct rather than falling out of the 
   others are all rejected at the point they would otherwise pass as "present". An empty `umd` **array**
   is accepted, because it is a claim rather than an omission
   ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)).
+  An optional `feature_semantics_revision` may accompany either shape but satisfies neither, so a
+  document recording only it still lacks provenance; it is an integer, so `"1"` and `true` are refused
+  ([Section 6.9](#69-feature-semantics-revision)).
 - **Direction is the metric's, not the author's.** A `score` naming a `metric` requires the
   `objective` that metric's registry entry fixes ([Section 4.4](#44-ranking-metrics)) — `max` for
   `tflops`, `min` for `time` — and a `calibrated` score must name its metric. The pairing is checked
@@ -812,8 +819,8 @@ lives beside the policy names in the data SDK, and each entry fixes three things
 
 | Metric | Units | Better | Status |
 |---|---|---|---|
-| `tflops` | TFLOPS (10^12 FLOP/s, FLOPs taken from the binding layer) | higher | Defined. The default metric, and the only one before this section. |
-| `time` | milliseconds of device time for one execution | lower | Defined. Trained on `avgTimeMs` directly, not derived from throughput. |
+| `tflops` | TFLOPS (10^12 FLOP/s over the graph's logical FLOPs, `$graph.flops`, [Section 6.8](#68-the-work-model)) | higher | Defined. The default metric, and the only one before this section. A graph whose work is unknown has no `tflops` label. |
+| `time` | milliseconds of device time for one execution | lower | Defined. Trained on `avgTimeMs` directly, not derived from throughput, so it never depends on a FLOP count. |
 | `accuracy.*` | per definition | per definition | **Reserved.** Each accuracy metric names its definition, e.g. `accuracy.max_rel_error`; none is registered until its reference and tolerance are settled ([Open Question 20](#ranking-metrics)). |
 
 - **The metric fixes units and direction; the UHD only names it.** `objective` must equal the registered
@@ -1036,13 +1043,14 @@ defines. Kernel features are the compilation knobs the engine's KMD declares
 and are what make argmax meaningful.
 
 **The graph namespace carries whole-graph facts and indexed node access.** `$graph.node_count` and
-`$graph.tensor_count` describe the shape of the graph itself; `$graph.flops` and per-node
-`$graph.nodes[i].flops` carry the op-intrinsic work counts a physics feature divides
-([Section 13.6](#136-auto-deriving-a-first-pass-features_signature)). A node's tensors are reachable
-positionally through the same namespace, so a signature can read a shape without the engine's pattern
-having named that tensor as a top-level variable. The two spellings coexist deliberately: a pattern
-variable is the readable form for an engine whose pattern names its tensors, and indexed node access is
-what an engine reaching across a multi-node graph has.
+`$graph.tensor_count` describe the shape of the graph itself; `$graph.flops`, per-node
+`$graph.nodes[i].flops`, and `$graph.logical_bytes` are the work model a physics feature divides
+([Section 6.8](#68-the-work-model)). A node's operands and attributes are reachable through the same
+namespace by position and schema role — `$graph.nodes[0].x.dims[1]` — generated for every node type
+from the op schemas ([Section 6.7](#67-per-node-operand-features)), so a signature can read a shape
+without the engine's pattern having named that tensor as a top-level variable. The two spellings
+coexist deliberately: a pattern variable is the readable form for an engine whose pattern names its
+tensors, and indexed node access is what an engine reaching across a multi-node graph has.
 
 **Two `$kernel.*` entries are not KMD fields.** `$kernel.priority` is bound, because a kernel's declared
 priority is a fact about the candidate that a model may legitimately weigh. `$kernel.id` is not bound: a
@@ -1080,7 +1088,7 @@ Order and form must match training exactly.
   {"log2": ["$q.dims[2]"]},
   {"/": ["$q.dims[2]", "$k.dims[2]"]},                           // aspect ratio
   {"ceil_div": ["$q.dims[2]", "$kernel.tile_m"]},                // tile quantization
-  {"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]}                  // arithmetic intensity (Section 13.6)
+  {"/": ["$graph.flops", "$graph.logical_bytes"]}                // arithmetic intensity (Section 6.8)
 ]
 ```
 
@@ -1146,14 +1154,16 @@ the [Section 6.3](#63-contract-enforcement) contract check mechanical rather tha
 **Derived features commonly needed:**
 
 - **Arithmetic / algorithmic intensity** (FLOPs ÷ bytes) — the single most important derived feature
-  for predicting compute-bound vs. memory-bound behavior.
+  for predicting compute-bound vs. memory-bound behavior. Published directly as
+  `$graph.arithmetic_intensity`, with both terms beside it ([Section 6.8](#68-the-work-model)).
 - **Tile/wave quantization** — `num_tiles_*`, `total_output_tiles`, `tile_efficiency` (problem-vs-grid
   remainder waste). In GEMM sweeps this family is as predictive as intensity.
 - **Aspect ratios** — `M/N`, `M/K`, `N/K` (shape skew).
 - **Occupancy proxy** — `lds_usage_ratio` (and register pressure if available) → waves/CU.
 - **Padding-fit** — `needs_padding_*` / `has_padding_when_needed_*` (problem × kernel padding interaction).
 
-**OPEN:** See [Open Question 4](#schema-and-training) (derived feature set).
+Which of these a model reads is its signature's choice, pruned per model by feature selection; what the
+binding must supply for them is settled ([Open Question 4](#schema-and-training), resolved).
 
 ### 6.3 Contract Enforcement
 
@@ -1243,6 +1253,11 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
    definitions back in to detect the change. The categorical encoding is folded in for the same reason,
    as [Section 6.5](#65-categorical-encoding) changes value semantics without changing feature names.
 
+   What `features_hash` cannot cover is the extractor itself. The C++ that computes `$graph.flops` is
+   not in any descriptor, so a changed FLOP convention changes a feature's value while the signature,
+   and therefore the hash, stays byte-identical. The feature-semantics revision recorded in
+   `trained_against` covers that half of the contract ([Section 6.9](#69-feature-semantics-revision)).
+
    **The canonical form is normative and shared.** `canonical()` serializes the signature compactly,
    in the order written, with object keys in a fixed order and numbers and strings in a fixed
    representation, so that whitespace and key order do not produce spurious mismatches. The categorical
@@ -1309,8 +1324,8 @@ author ergonomics, which tooling covers, for one fewer runtime mechanism.
 
 The dim↔tile correspondence is engine-specific (the tile field names are the engine's), so it does not
 belong on the shared op vocabulary. The FLOP and byte terms are op-intrinsic and belong there instead, as
-precomputed fields the binding system provides for every op rather than anything the UHD declares
-([Section 13.6](#136-auto-deriving-a-first-pass-features_signature)).
+the work model the plugin SDK publishes for every graph rather than anything the UHD declares
+([Section 6.8](#68-the-work-model)).
 
 ### 6.5 Categorical Encoding
 
@@ -1375,7 +1390,7 @@ Everything else is either `$device.*` (hardware) or an inline computation over t
 | `log2_batch … log2_hdim_v` (7) | computed: `{"log2": ["$q.<dim>"]}` |
 | `gqa_ratio` = nhead_q/nhead_k | `{"/": ["$q.dims[1]", "$k.dims[1]"]}` |
 | `aspect_sq_sk` = seqlen_q/seqlen_k | `{"/": ["$q.dims[2]", "$k.dims[2]"]}` |
-| `log2_ops` | `{"log2": ["$sdpa_fwd.flops"]}` |
+| `log2_ops` | `{"log2": ["$graph.flops"]}` |
 | `decode_flag` = (seqlen_q ≤ 1) | `{"<=": ["$q.dims[2]", 1]}` |
 
 **Kernel — `$kernel.*` (from the `kernel` dict = KMD fields) — 20**
@@ -1392,7 +1407,7 @@ Everything else is either `$device.*` (hardware) or an inline computation over t
 
 | rocKE feature | RFC inline expression (schematic) |
 |---|---|
-| `arithmetic_intensity` | `ops / mem`, where `ops = 2·batch·nhead_q·seqlen_q·seqlen_k·(hdim_q+hdim_v)` and `mem` sums Q/K/V/O bytes — the `{"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]}` of [Section 13.6](#136-auto-deriving-a-first-pass-features_signature) |
+| `arithmetic_intensity` | `ops / mem`, where `ops = 2·batch·nhead_q·seqlen_q·seqlen_k·(hdim_q+hdim_v)` and `mem` sums Q/K/V/O bytes — the counterpart of `$graph.arithmetic_intensity` ([Section 6.8](#68-the-work-model)), whose conventions differ in detail: it counts only the attended pairs under a causal mask, and sums every non-virtual tensor of the graph |
 | `num_tiles_m` = ⌈seqlen_q/tile_m0⌉ | `{"ceil_div": ["$q.dims[2]", "$kernel.tile_m0"]}` |
 | `num_tiles_k` = ⌈seqlen_k/tile_n0⌉ | `{"ceil_div": ["$k.dims[2]", "$kernel.tile_n0"]}` |
 | `total_tiles` = batch·nhead_q·num_tiles_m·num_tiles_k | product of the above with `$q.*` |
@@ -1433,6 +1448,181 @@ of [Section 6.1](#61-feature-sources)).
   graph) — a shared-prefix context feature, not a per-candidate discriminator; the algorithm-level
   differences are carried by the `$kernel.*` tile fields and the quantization derivations, exactly as
   [Section 13.6](#136-auto-deriving-a-first-pass-features_signature) describes.
+
+### 6.7 Per-Node Operand Features
+
+Every node of the graph publishes its operands under `$graph.nodes[i].*`, **generated from the op
+schemas** rather than written per op. The schema pass that reads the `(cache_uid)` annotations for the
+winner cache also emits a per-node-type visitor (`scripts/gen_node_operands.py` →
+`node_operands_generated.h`), and the plugin SDK binds what it reports (`EngineFeatures.hpp`). A node
+type added to the schema publishes its operands with no per-op code, and a schema change regenerates
+the set.
+
+| Schema field | Published as (`$graph.nodes[i].…`) |
+|---|---|
+| tensor reference, e.g. `x_tensor_uid` (`cache_uid`) | `x.data_type`, `x.rank`, `x.numel`, `x.virtual`, `x.dims[d]`, `x.strides[d]` |
+| tensor-reference vector, e.g. `input_tensor_uids` | the same per element, under `input[k].…` |
+| scalar, enum, or bool attribute | its field name — integers and enums as integers, floats as doubles, bools as bools |
+| numeric vector attribute (convolution `stride`, resample `window`) | `name[k]` per element |
+| string, nested table or struct, union, byte vector | nothing |
+
+Beside those, each node publishes `type` (its `NodeAttributes` member), `compute_data_type`,
+`data_dependent` (below), and `flops` when its work is known ([Section 6.8](#68-the-work-model)); SDPA
+adds two derived flags no schema field carries, `has_attention_mask` and `has_variable_lengths`. Graph
+tensors are also reachable by position, as `$graph.tensors[j].{data_type, rank, dims[d], strides[d]}`.
+
+- **A role is the field name without `_tensor_uid`.** `$graph.nodes[0].x.dims[1]` is the second dim of
+  a convolution's input; what the dim means is positional, as for a pattern variable
+  ([Section 6.1](#61-feature-sources)).
+- **Absent is not zero.** An absent optional operand or attribute publishes nothing; a signature that
+  tolerates it tests `present` or supplies `value_or_default` ([Section 6.2](#62-the-features_signature)).
+  A non-optional scalar left unset publishes its schema default. `numel` is absent when a dim is
+  negative or the product overflows.
+- **The pre-existing names are held.** Matmul, ConvolutionFwd, and SDPA published hand-written operand
+  features before the generator existed. Its names and values match theirs exactly, because shipped
+  models read them, and a parity test holds them.
+- **`data_dependent` comes from a schema annotation, never from a field name.** A `(cache_uid)` field
+  annotated `work_data_dependent` references a tensor whose *contents* decide how much work the node
+  does: SDPA's `seq_len_q`/`seq_len_kv`, page tables, and block mask; MoE's `first_token_offset`; and
+  `TensorAttributes.ragged_offset_tensor_uid`, which marks every node reading or writing a ragged tensor.
+  An operand read densely whatever its values — an additive attention bias, a dropout seed, MoE's
+  `token_index` — is not annotated. A node with an annotated operand present publishes
+  `data_dependent = true`. The generator rejects the annotation anywhere its visitor would not report
+  it, so a misplaced one cannot compile and silently mark nothing.
+
+### 6.8 The Work Model
+
+The work features — `$graph.flops`, `$graph.nodes[i].flops`, `$graph.flops_by_type.*`,
+`$graph.logical_bytes`, and `$graph.arithmetic_intensity` — are the one family of problem features that
+is computed from the graph rather than read off it, and `$graph.flops` is also the numerator of the
+`tflops` label ([Section 4.4](#44-ranking-metrics)). Their conventions are fixed here, so every engine,
+the trainer, and the runtime compute the same number.
+
+1. **FLOPs are the logical work of the problem**, not the work an implementation executes. Padding a
+   tile, recomputing in a backward pass, or skipping a masked block changes what an engine does, not
+   what the problem asks for, so the same graph has the same count for every engine and a `tflops`
+   label is comparable across them ([Section 11.3](#113-cross-engine-comparison)). The conventions must
+   be consistent rather than exact: a model absorbs a fixed scale, but not a count that moves between
+   engines.
+2. **Counting.** A multiply-add is 2 FLOPs, elementwise work is 1 per output element, and a
+   transcendental is 1.
+3. **A graph's work is the sum of its nodes', all or nothing.** `$graph.flops` sums every node, virtual
+   intermediates included, so a fused convolution + bias + ReLU is the convolution plus two pointwise
+   nodes. If any node's work is unknown, `$graph.flops` is **absent**, never a partial sum: divided by
+   the whole graph's time, a partial count reports a throughput the engine did not achieve. Each known
+   node still publishes its `$graph.nodes[i].flops`. A graph with override shapes publishes no
+   graph-level work features, because the shapes it declares are not the ones it executes.
+4. **Content-dependent work is unknown.** A node whose `data_dependent` is true
+   ([Section 6.7](#67-per-node-operand-features)) has no count: its shapes bound its work without
+   determining it. A bound, where one is worth publishing, takes its own name (`…flops_upper_bound`) and
+   never `flops`. Matmul, ConvolutionFwd, and SDPA, which published counts before this rule, keep their
+   own refusal lists at revision 1 — SDPA's already refuses its content-dependent operands — so a ragged
+   operand does not yet suppress their count. Bringing them under the generic rule changes published
+   values, which is a revision bump ([Section 6.9](#69-feature-semantics-revision)).
+5. **One formula per node type**, over the operand roles of
+   [Section 6.7](#67-per-node-operand-features):
+
+   | Node type | FLOPs | Notes |
+   |---|---|---|
+   | `MatmulAttributes` | `2·c.numel·a.dims[-1]` | Batch broadcast is inside `c.numel`. |
+   | `ConvolutionFwdAttributes` | `2·y.numel·w.numel / w.dims[0]` | Groups via `w = [K, C/g, …]`. |
+   | `ConvolutionBwdAttributes` (data) | `2·dy.numel·w.numel / w.dims[0]` | Same iteration space as forward. |
+   | `ConvolutionWrwAttributes` | `2·dy.numel·dw.numel / dw.dims[0]` | Same iteration space as forward. |
+   | `PointwiseAttributes` | `out_0.numel` | |
+   | `ReductionAttributes` | `in.numel` | |
+   | `BatchnormInferenceAttributes`, `BatchnormInferenceAttributesVarianceExt` | `2·x.numel` | |
+   | `BatchnormAttributes` (training) | `5·x.numel` | |
+   | `BatchnormBackwardAttributes` | `8·x.numel` | |
+   | `LayernormAttributes` / `LayernormBackwardAttributes` | `5·x.numel` / `8·x.numel` | |
+   | `RMSNormAttributes` / `RMSNormBackwardAttributes` | `3·x.numel` / `6·x.numel` | |
+   | `ResampleFwdAttributes` | `y.numel · Π window[i]` | One positive `window` entry per spatial dim. |
+   | `ResampleBwdAttributes` | `dy.numel · Π window[i]` | |
+   | `BlockScaleQuantizeAttributes`, `BlockScaleDequantizeAttributes` | `2·x.numel` | |
+   | `SdpaAttributes` | `2·B·H·pairs·(Dq + Dv)` | `pairs` is `Sq·Sk`, or the attended pairs under a causal mask. |
+   | `SdpaBackwardAttributes` | `2.5 ×` the forward count on its `q`/`k`/`v`/`o` | The FlashAttention convention. |
+   | `MoeGroupedMatmulAttributes`, `MoeGroupedMatmulBwdAttributes` | unknown | `first_token_offset` decides how many rows are computed. |
+   | `CustomOpAttributes` | unknown | Opaque to hipDNN. |
+
+   The per-element constants for the normalizations, resampling, and SDPA backward are conventions,
+   chosen once and held; what matters is that every engine counts the same. A formula refuses — the
+   node's work is unknown — when its operands are inconsistent: a missing tensor, a non-positive dim, or
+   shapes that do not compose. The convolutions, Matmul, and SDPA forward and backward also require
+   floating-point operands. So 20 of the 23 node types have a static count; whether a given graph has one
+   is still rule 3's to decide.
+6. **Bytes are a declared convention, and three different quantities are kept apart.**
+   - **Logical footprint** — `$graph.logical_bytes`, a feature. The sum over the graph's non-virtual
+     tensors, each counted once however many nodes read it, of element count × element size. Sub-byte
+     types count fractionally (fp4 and int4 as 0.5 byte, fp6 as 0.75); virtual intermediates are
+     excluded, since keeping them out of memory is what fusion is for. Absent when any non-virtual
+     tensor's footprint is unknown — missing or negative dims, an unset data type, or a ragged tensor,
+     whose dims are only its padded bound. A zero-extent tensor contributes 0.
+   - **Allocation size** — strides, alignment, rounding, and workspace, in whole bytes. What corpus
+     generation's memory-safety accounting budgets; not a feature, and not derived from the footprint.
+   - **Measured traffic** — what the device actually moved, re-reads and cache effects included. Never
+     inferred from the graph; a model learns its effect from the label.
+7. **`$graph.arithmetic_intensity`** is `$graph.flops / $graph.logical_bytes`, published when both are
+   and the footprint is positive. It is the problem's intensity, identical for every candidate, so it
+   belongs to the shared prefix rather than separating kernels
+   ([Section 6.6](#66-example-mapping-the-current-rocke-sdpa-features)).
+8. **`$graph.flops_by_type.<member>`**, one per `NodeAttributes` member spelled as the schema spells it
+   (`$graph.flops_by_type.ConvolutionFwdAttributes`), sums the work of that type's nodes. It is **0**
+   when the graph has no node of that type and **absent** when any node of that type has unknown work;
+   an unknown node of one type does not suppress another type's entry. A mixed-op model can therefore
+   read how much of a graph is convolution even when a custom op elsewhere leaves `$graph.flops` absent.
+9. **Absent, zero, and unknown are different values.** "No node of this type" aggregates to 0; "this
+   work is unknown" is absent and never silently becomes 0. A signature that must tolerate absence says
+   so with `present` or `value_or_default` ([Section 6.2](#62-the-features_signature)): the default is the
+   model's choice, recorded in its signature, not the extractor's.
+10. **`time` never depends on FLOPs.** The `time` label is measured device time
+    ([Section 4.4](#44-ranking-metrics)), and collecting it requires no work count; a graph with unknown
+    work loses its `tflops` label and its work features, nothing else.
+
+**One place computes all of it.** `EngineFeatures.hpp` in the plugin SDK holds one function per node
+type. Every provider, `hipdnn_bench`, `hipdnn_corpus_gen`, and the `hipdnn_uhd_features` evaluator the
+trainer calls are built against it, and `uhd_gen` reads the `$graph.flops` the bench publishes rather
+than recomputing it ([Open Question 4](#schema-and-training), resolved). A golden value per node type,
+and parity with the three counts that predate this section, are held by test beside the
+feature-semantics revision they were computed under ([Section 6.9](#69-feature-semantics-revision)).
+
+### 6.9 Feature Semantics Revision
+
+`features_hash` fingerprints what a model reads — the signature and its encoding
+([Section 6.3](#63-contract-enforcement)) — not the code that computes each value. A changed FLOP
+convention changes what `$graph.flops` means while every signature, and so the hash, stays
+byte-identical, and a model trained on the old values would score the new ones without complaint. The
+feature-semantics revision covers that half of the contract.
+
+- **The constant.** `FEATURE_SEMANTICS_REVISION`
+  (`hipdnn_plugin_sdk/heuristics/FeatureSemantics.hpp`) is an integer, 1 today, compiled into
+  everything built against the plugin SDK, with or without the kernel ingestor. The
+  `hipdnn_uhd_features` evaluator reports it with every response, so the trainer takes the value from
+  the build that computed its features rather than from a copy.
+- **The record.** Training stamps it into the UHD as `trained_against.feature_semantics_revision`, an
+  integer ≥ 1, beside either provenance form ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)).
+  It never satisfies `trained_against` on its own. **Absent means 1**, the revision the field was
+  introduced at, so every model trained before it stays valid without a restamp.
+- **The check is exact equality.** There is no additive component: a feature either means what the
+  model was trained on or it does not, and a model newer than the build is as wrong as one older. A
+  model that declares a `features_signature` and whose recorded revision differs from the build's is
+  refused in every role it is bound to — the engine estimate and the catalog ranker alike — at the
+  point descriptor provenance is checked, with an error naming both revisions ("trained against
+  feature semantics revision 2, this build computes revision 1"). The engine's estimate for that
+  metric and architecture is **UNAVAILABLE**, catalog ranking falls back to the declared order, and the
+  request never fails ([Section 5](#5-selection-flow)).
+  Promotion and offline evaluation apply the same check, so a stale model is refused before it ships
+  rather than at a user's load.
+  A model with no `features_signature` (`static_order`, or a `native` comparator over kernel metadata
+  compiled into the same build) reads no published feature, so no bump refuses it.
+- **The bump rule.** Bump the revision in the same change that alters the value or the meaning of any
+  feature already published — a FLOP or byte convention, a refusal that removes a value, a unit, an
+  encoding — and retrain the models that ship with it. Adding a feature name, or publishing a value
+  where none was published before (a node type gaining a formula), does not bump: no model could have
+  read it. The one signature such an addition changes is one that branches on absence (`present`,
+  `value_or_default`); that is a coverage change, like an additive descriptor revision
+  ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)), answered by regenerating rather than by
+  refusing.
+- **A test enforces it.** The golden FLOP and feature values sit beside an assertion on the revision, so
+  changing a golden value fails until the revision and the assertion move together.
 
 ---
 
@@ -1670,6 +1860,18 @@ granularity: it would expire every model on every commit to the repository, incl
 cannot affect the engine in question, and no model could ever ship alongside the source that produced
 it. The revision an engine reports moves when what it wraps moves, which is the event a retrain is
 actually coupled to.
+
+**Either form may also record what the features meant.** Descriptor revisions and a
+`selector_revision` say which selector was measured; neither says how the plugin SDK computed the
+features the model read. An integer `feature_semantics_revision` records that, beside either form:
+
+```jsonc
+"trained_against": {"selector_revision": "hip-kernel-provider/0.2.0/asm-sdpa-untuned-v1",
+                    "feature_semantics_revision": 1}
+```
+
+It is compared for exact equality rather than by the breaking/additive rule below, and an absent entry
+reads as 1 ([Section 6.9](#69-feature-semantics-revision)).
 
 **Enforcement — the concrete rule.** At load, for every revision recorded in `trained_against`:
 
@@ -2250,7 +2452,8 @@ Because selection is data-driven, it must be inspectable — consistent with
 - **Selection trace:** Candidates, scores, the ranked order, winner, and whether the model or a fallback
   decided
 - **Model provenance:** UHD id, adapter, model artifact version, `features_hash`,
-  `trained_against` (UED/UMD/KMD content revisions, each named by id), training provenance
+  `trained_against` (UED/UMD/KMD content revisions, each named by id, or the selector revision; and the
+  feature-semantics revision), training provenance
 - **Contract diagnostics:** A clear **error** (not a warning) naming which of the three checks failed and
   why, plus the fact that ranking degraded to `static_order` and the estimate was reported as 0
 - **Coverage warnings:** When a scored candidate or device falls outside what the model was trained on
@@ -2603,7 +2806,7 @@ The tool auto-derives Layer 1 and proposes a Layer-2 first pass from it, in thre
 |---|---|---|---|
 | 1 | Raw fields (`$kernel.*` = KMD fields; tensor dims/attrs = the engine's published symbols; `$device.*`) | KMD schema + the UED's published symbol set + device vocab | **none** |
 | 2 | Generic transforms (logs, ratios) and **tile/wave quantization** | Tier 1 + an expression pairing a problem dim with a `$kernel.*` tile axis | the **dim↔tile correspondence** — which dim goes with which tile field |
-| 3 | **Physics** — arithmetic intensity, roofline bound | the op's FLOP and byte counts, divided inline | **none** — supplied as precomputed op fields (below) |
+| 3 | **Physics** — arithmetic intensity, roofline bound | the graph's FLOP and byte counts, read directly or divided inline | **none** — published by the work model (below) |
 
 The tile/wave quantization (Tier 2) is not auto-inferable — the tool cannot guess that `seqlen_q` pairs
 with `tile_m0`. It is the one genuine author input, and it is small: a list of (problem dim, tile field)
@@ -2611,54 +2814,55 @@ pairs. From that list the tool writes the quantization entries into the `feature
 ([Section 6.4](#64-computed-features)); the author supplies correspondences, not expressions.
 
 **Arithmetic intensity, and where the FLOP/byte counts come from.** Intensity is
-`total_FLOPs / total_bytes_moved` (FLOP/byte) — the roofline x-axis that separates compute-bound from
+`logical FLOPs / logical bytes` (FLOP/byte) — the roofline x-axis that separates compute-bound from
 memory-bound problems, which is exactly the split that decides which kernel wins. Both terms are
 closed-form over the bound dims and dtype sizes, but they are **op-specific** and cannot be inferred
 from the KMD field list, so something has to supply them per op.
 
-**They are precomputed fields, declared in the hipDNN schema.** The binding layer already publishes
+**They are precomputed features, computed in the plugin SDK.** The binding layer already publishes
 derived values that no descriptor declares: `$q.stride_order` and `$q.packed` stand in for
 contiguous-stride arithmetic, and `$q.value_f32` coerces a tensor's compile-time value to a single typed
-token. Each is declared in the schema like any other field and versioned with it, so adding one is an
-additive schema change rather than a per-pack extension point
-([RFC 0020 §6](0020_UniversalEngineDescriptor.md#6-symbol-binding-what-the-pattern-publishes)). FLOP and
-byte counts fit that mechanism, as per-op precomputed fields:
+token ([RFC 0020 §6](0020_UniversalEngineDescriptor.md#6-symbol-binding-what-the-pattern-publishes)).
+Work counts fit that mechanism. The plugin SDK's work model ([Section 6.8](#68-the-work-model)) computes
+them once per graph, with one function per node type, and publishes them under `$graph.*`:
 
 ```jsonc
-// available wherever an sdpa_fwd node is bound — no descriptor declares these
-"$sdpa_fwd.flops"        // 4·B·H·Sq·Sk·D for SDPA forward
-"$sdpa_fwd.bytes"        // sum over Q/K/V/O of element_count × that tensor's dtype size
+// published for every graph whose work is known — no descriptor declares these
+"$graph.nodes[0].flops"        // per node; SDPA forward: 2·B·H·Sq·Sk·(Dq + Dv), causal pairs only
+"$graph.flops"                 // the sum over every node, all or nothing
+"$graph.logical_bytes"         // the sum over non-virtual tensors of element count × element size
+"$graph.arithmetic_intensity"  // the ratio of the two
 
-// so a features_signature entry just divides them
-"arithmetic_intensity": {"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]}
+// so a features_signature entry reads the ratio, or divides the terms itself
+{"/": ["$graph.flops", "$graph.logical_bytes"]}
 ```
 
-These are **not** authored as expression strings in table-level `.fbs` annotations. Embedding an
-expression language inside the schema file is awkward, and changing an `.fbs` requires codegen plus a
-recompile regardless — so a schema annotation buys none of the data-driven flexibility that would
-justify it. What needs a rebuild to change belongs in code, as a precomputed binding field.
+These are **not** authored as expression strings in table-level `.fbs` annotations, nor shipped as a
+per-op data file. Embedding an expression language inside the schema file is awkward, and changing an
+`.fbs` requires codegen plus a recompile regardless — so a schema annotation buys none of the
+data-driven flexibility that would justify it. A data file would buy that flexibility and have no use
+for it: every consumer of the counts is built against the plugin SDK, and a changed convention
+invalidates every model trained on the old one however it ships
+([Open Question 4](#schema-and-training), resolved). What needs a rebuild to change belongs in code, as
+a precomputed feature.
 
 Because they are **op-intrinsic** (SDPA's two GEMMs do `2·B·H·Sq·Sk·(hdim_q + hdim_v)` FLOPs regardless
 of engine or package — the familiar `4·B·H·Sq·Sk·D` is the specialization where the Q and V head
-dimensions are equal, which the frontend does not require), these fields live at Layer 1 and are shared
-by every package of that op — defined once per op-family.
-A `features_signature` then references intensity *identically* to a raw dim like `$q.dims[2]`, and the
-Tier-3 "physics" distinction disappears at the point of use.
-
-> **Coordinate with the UMD.** This says the op vocabulary should carry a *set* of useful precomputed
-> fields — some universal across ops, some per-op — of which FLOPs and bytes are two. Where that set is
-> defined and how per-op entries are registered is the UMD's to specify, not this RFC's; the requirement
-> here is only that FLOP and byte counts be among them. See [Open Question 4](#schema-and-training).
+dimensions are equal, which the frontend does not require), these features live at Layer 1 and are
+shared by every package of every op. A `features_signature` then references intensity *identically* to
+a raw dim like `$q.dims[2]`, and the Tier-3 "physics" distinction disappears at the point of use.
 
 Caveats:
 
 - **Mixed-dtype ops** (e.g. fp8 in / fp16 accumulate, or differing I/O dtypes) make the byte count a sum
-  over *per-tensor* dtype sizes, not one global `dtype_bytes`. Each tensor must contribute its own dtype
-  — a single-dtype shortcut is wrong for quantized kernels.
-- **Not every op has a clean closed form.** Ragged or data-dependent shapes (variable-length sequences,
-  data-dependent masking) may make an exact count impossible; the field should then expose a documented
-  upper bound or be absent rather than silently wrong, and a UHD that needs better can compute its own
-  inline in the signature.
+  over *per-tensor* element sizes, not one global `dtype_bytes`. `$graph.logical_bytes` takes each
+  tensor's own size, fractional for sub-byte types — a single-dtype shortcut is wrong for quantized
+  kernels.
+- **Not every op has a clean closed form.** Ragged or data-dependent work (variable-length sequences,
+  page tables, MoE routing) cannot be counted from shapes; the count is then absent rather than
+  silently wrong ([Section 6.8](#68-the-work-model)). A bound, where one is useful, is published under its
+  own name and never as the count, and a UHD that needs better can compute its own inline in the
+  signature.
 - **Auto-derivation yields a *superset*.** Deriving every raw field and generic transform produces a
   bloated, noisy vector that can hurt a small-data model; the sweep's feature-importance (or a curated
   per-op template) prunes it. Auto-derivation proposes; data or a template trims.
@@ -2901,21 +3105,32 @@ dependency-gated and land only when a concrete need appears.
    [Open Question 16](#operational) required rather than forcing a later format change.
    *(Impacts [Section 7.2](#72-default-tree_data).)*
 
-4. **Derived feature set.** Arithmetic intensity, tile quantization, aspect ratios, occupancy,
-   padding-fit — are there others? Candidates: memory-footprint / working-set vs. cache and HBM
-   capacity; a compute-vs-memory-bound flag from intensity vs. the device's roofline ridge point;
-   wave-quantization *tail* (last-wave occupancy); K-splitting overhead for split-K variants.
-   Enumerate the final set against real per-op sweeps before freezing.
-   *(The expression-op question is resolved — the UMD's operator set already covers the derived
-   features.)* *(Impacts [Section 6.2](#62-the-features_signature).)*
-   **Auto-derivation dependency:** the physics features (arithmetic intensity, roofline bound) need
-   per-op **FLOP and byte counts as precomputed fields**, declared in the hipDNN schema alongside the
-   existing precomputed values such as `$q.stride_order` and `$q.packed`
-   ([Section 13.6](#136-auto-deriving-a-first-pass-features_signature)). The mechanism and its home are
-   settled; what remains open is which per-op counts to declare, and the mixed-dtype byte convention. Tier-2 quantization (the
-   dim↔tile correspondence) is written inline in the signature
-   ([Section 6.4](#64-computed-features)), from an author-supplied list of (problem dim, tile field)
-   pairs.
+4. **Derived feature set and per-op work counts — RESOLVED: computed in the plugin SDK.** Arithmetic
+   intensity, tile quantization, aspect ratios, occupancy, and padding-fit are inline expressions a
+   signature chooses ([Section 6.4](#64-computed-features)), and which of them a model reads is pruned
+   per model by feature selection ([Section 13.6](#136-auto-deriving-a-first-pass-features_signature)),
+   so this RFC does not freeze a list. What it had to settle is the one dependency the physics features
+   have on the binding: per-op **FLOP and byte counts as precomputed values**. The options were (a) ship
+   them as data — a per-op table, or expression annotations beside the schema — or (b) compute them in
+   one C++ place every consumer is built against. (b) is what shipped: `EngineFeatures.hpp` in the
+   plugin SDK holds one function per node type and publishes `$graph.flops`, `$graph.nodes[i].flops`,
+   `$graph.flops_by_type.*`, `$graph.logical_bytes`, and `$graph.arithmetic_intensity` under the
+   conventions of [Section 6.8](#68-the-work-model). It is **one source**: providers, `hipdnn_bench`,
+   `hipdnn_corpus_gen`, and the `hipdnn_uhd_features` evaluator the trainer calls are all C++ built
+   against the plugin SDK, and `uhd_gen` reads the `$graph.flops` the bench publishes, so no consumer
+   exists that a data file would reach and the header would not. It is **typed**: each formula reads the
+   node's FlatBuffer attributes and operand tensors directly and refuses inconsistent shapes, rather than
+   a second expression dialect over string names. It is **tested**: a golden value per node type, parity
+   for the three types that published before it, and the golden set pinned to the feature-semantics
+   revision ([Section 6.9](#69-feature-semantics-revision)). The flexibility a data file would add is not
+   usable anyway, because a changed convention invalidates every model trained on the old one however
+   the convention ships. The mixed-dtype byte convention is each tensor's own element size, fractional
+   below a byte. Of the remaining candidates, footprint against capacity, wave-quantization tails, and
+   split-K overhead are expressible inline over published values; a roofline-bound flag needs a device
+   peak-throughput fact `$device.*` does not publish yet, which is an additive device-namespace change
+   ([Section 6.1](#61-feature-sources)).
+   *(Impacts [Section 6.2](#62-the-features_signature), [Section 6.8](#68-the-work-model),
+   [Section 13.6](#136-auto-deriving-a-first-pass-features_signature).)*
 
 ### Structural
 
@@ -3174,7 +3389,18 @@ dependency-gated and land only when a concrete need appears.
   several independently revised matchers. Checked at load (breaking `==`, additive `<=`) to disable a
   model whose descriptors have moved under it. A content revision is a separate axis from the
   file-format `version` the accept rule gates on
-  ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)).
+  ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). Either form may also carry the
+  `feature_semantics_revision` the model was trained under.
+
+- **Feature-semantics revision:** The plugin SDK's `FEATURE_SEMANTICS_REVISION`, bumped whenever a
+  published feature's value or meaning changes, and recorded in a UHD's `trained_against` (absent
+  means 1). A model that reads published features and records a different revision from the build's is
+  refused ([Section 6.9](#69-feature-semantics-revision)).
+
+- **Work model:** The conventions by which the plugin SDK counts a graph's logical FLOPs and bytes —
+  multiply-add = 2, graph = Σ nodes all or nothing, content-dependent work unknown — published as
+  `$graph.flops`, `$graph.logical_bytes`, and the features built from them
+  ([Section 6.8](#68-the-work-model)).
 
 - **Dispatch-only field:** A KMD field that is *not* a knob, and therefore not in the UHD's feature set —
   launch geometry or workspace detail a UDD consumes. Invisible to selection
