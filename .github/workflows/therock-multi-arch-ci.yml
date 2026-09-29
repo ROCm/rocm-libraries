@@ -150,8 +150,9 @@ jobs:
       repository: ROCm/TheRock
       ref: users/geomin12/path-based-external-2
       # Pass external repo info for stage-impact analysis and path-based CI skip.
-      # TheRock checks out the external repo and runs git diff to get changed files,
-      # then evaluates against skip_ci_config patterns to determine if CI can be skipped.
+      # TheRock uses the GitHub compare API with base_sha/head_sha to get changed
+      # files (fast, no full checkout needed), then evaluates against skip_ci_config
+      # patterns to determine if CI can be skipped.
       #
       # Keep extra_cmake_options constant: the flag state file participates in
       # every subproject's configure fingerprint, and stage reuse does not key
@@ -160,6 +161,8 @@ jobs:
         {
           "repository": "${{ github.repository }}",
           "ref": "${{ github.sha }}",
+          "base_sha": "${{ github.event.pull_request.base.sha || github.event.before }}",
+          "head_sha": "${{ github.sha }}",
           "event_name": "${{ github.event_name }}",
           "skip_ci_config": ".github/skip-ci-config.toml",
           "projects_config": ".github/repos-config.json",
