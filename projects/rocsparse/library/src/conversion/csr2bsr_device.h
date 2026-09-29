@@ -137,13 +137,15 @@ namespace rocsparse
                         {
                             if(dir == rocsparse_direction_row)
                             {
-                                bsr_val[int64_t(block_dim) * block_dim * block_row_begin
+                                bsr_val[static_cast<int64_t>(block_dim) * block_dim
+                                            * block_row_begin
                                         + block_dim * r + (c + i)]
                                     = data[BLOCKDIM * BLOCKDIM * wid + BLOCKDIM * r + (c + i)];
                             }
                             else
                             {
-                                bsr_val[int64_t(block_dim) * block_dim * block_row_begin
+                                bsr_val[static_cast<int64_t>(block_dim) * block_dim
+                                            * block_row_begin
                                         + block_dim * (c + i) + r]
                                     = data[BLOCKDIM * BLOCKDIM * wid + BLOCKDIM * r + (c + i)];
                             }
@@ -263,13 +265,15 @@ namespace rocsparse
                         {
                             if(dir == rocsparse_direction_row)
                             {
-                                bsr_val[int64_t(block_dim) * block_dim * block_row_begin
+                                bsr_val[static_cast<int64_t>(block_dim) * block_dim
+                                            * block_row_begin
                                         + block_dim * wid + i + lid]
                                     = data[BLOCKDIM * wid + i + lid];
                             }
                             else
                             {
-                                bsr_val[int64_t(block_dim) * block_dim * block_row_begin
+                                bsr_val[static_cast<int64_t>(block_dim) * block_dim
+                                            * block_row_begin
                                         + block_dim * (i + lid) + wid]
                                     = data[BLOCKDIM * wid + i + lid];
                             }
@@ -415,19 +419,19 @@ namespace rocsparse
                     {
                         if(direction == rocsparse_direction_row)
                         {
-                            int64_t k
-                                = int64_t(bsr_row_start + nnzb_per_row - 1) * block_dim * block_dim
-                                  + (BLOCKSIZE * j + lane_id) * block_dim
-                                  + csr_col_index[j] % block_dim;
+                            int64_t k = static_cast<int64_t>(bsr_row_start + nnzb_per_row - 1)
+                                            * block_dim * block_dim
+                                        + (BLOCKSIZE * j + lane_id) * block_dim
+                                        + csr_col_index[j] % block_dim;
 
                             bsr_val[k] = csr_value[j];
                         }
                         else
                         {
-                            int64_t k
-                                = int64_t(bsr_row_start + nnzb_per_row - 1) * block_dim * block_dim
-                                  + (csr_col_index[j] % block_dim) * block_dim
-                                  + (BLOCKSIZE * j + lane_id);
+                            int64_t k = static_cast<int64_t>(bsr_row_start + nnzb_per_row - 1)
+                                            * block_dim * block_dim
+                                        + (csr_col_index[j] % block_dim) * block_dim
+                                        + (BLOCKSIZE * j + lane_id);
                             bsr_val[k] = csr_value[j];
                         }
                     }
