@@ -98,12 +98,45 @@ __device__ void hseqr_set_nonfinite(const I ilo, const I ihi, T* W)
         W[j] = T(nan, nan);
 }
 
+/** HSEQR_ANY_NONFINITE_KERNEL sets flag[b] to 1 if the Hessenberg part of the active block
+    ilo:ihi of matrix b contains a NaN or an infinite entry (flag must be 0 on entry). It
+    reads the matrix with many thread-blocks (grid = (columns, batch_count)), so that
+    hseqr_check_kernel, whose exact search runs on one thread-block per matrix, only needs to
+    run when there is such an entry. **/
+template <int BS, typename T, typename I, typename UH>
+ROCSOLVER_KERNEL void __launch_bounds__(BS) hseqr_any_nonfinite_kernel(const I n,
+                                                                       const I* iloA,
+                                                                       const I* ihiA,
+                                                                       UH HH,
+                                                                       const rocblas_stride shiftH,
+                                                                       const I ldh,
+                                                                       const rocblas_stride strideH,
+                                                                       I* flag)
+{
+    const I bid = hipBlockIdx_y;
+    const I ilo = std::min(std::max(iloA[bid], I(1)), n);
+    const I ihi = std::min(std::max(ihiA[bid], ilo), n);
+    const T* H = load_ptr_batch<T>(HH, bid, shiftH, strideH);
+    int bad = 0;
+    for(I j = ilo + hipBlockIdx_x; j <= ihi; j += hipGridDim_x)
+        for(I i = ilo + hipThreadIdx_x; i <= std::min(j + 1, ihi); i += BS)
+        {
+            const T h = H[idx2D(i - 1, j - 1, ldh)];
+            if(!std::isfinite(h.real()) || !std::isfinite(h.imag()))
+                bad = 1;
+        }
+    if(__syncthreads_or(bad) && hipThreadIdx_x == 0)
+        flag[bid] = 1;
+}
+
 /** HSEQR_CHECK_KERNEL finds, for each matrix of the batch (multishift path), the last row
     ibad of the lowest diagonal block of size > 1 of the active block with a NaN or an
     infinite entry (see hseqr_nonfinite_bottom); if there is one, the eigenvalues W(ilo:ibad)
     are set to NaN (and W(ihi) = H(ihi,ihi) if ibad = ihi-1: the 1x1 block ihi is left, and
     there is nothing to iterate on).
-    flag is set to ibad, or to 0 if there is no such block. **/
+    flag is set to ibad, or to 0 if there is no such block. On entry, flag must be 0 if the
+    active block has no NaN or infinite entry (see hseqr_any_nonfinite_kernel), and then
+    there is nothing to do. **/
 template <int BS, typename T, typename I, typename UH>
 ROCSOLVER_KERNEL void __launch_bounds__(BS) hseqr_check_kernel(const I n,
                                                                const I* iloA,
@@ -117,6 +150,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) hseqr_check_kernel(const I n,
                                                                I* flag)
 {
     const I bid = hipBlockIdx_x;
+    if(flag[bid] == 0)
+        return;
     const I ilo = std::min(std::max(iloA[bid], I(1)), n);
     const I ihi = std::min(std::max(ihiA[bid], ilo), n);
     const T* H = load_ptr_batch<T>(HH, bid, shiftH, strideH);
@@ -1250,6 +1285,10 @@ rocblas_status rocsolver_hseqr_template(rocblas_handle handle,
     I* dflag = work + LAQR0_STATUS_SIZE;
     unsigned* dbar = reinterpret_cast<unsigned*>(dflag + batch_count);
     HIP_CHECK(hipMemsetAsync(dbar, 0, 2 * sizeof(unsigned), stream));
+    HIP_CHECK(hipMemsetAsync(dflag, 0, sizeof(I) * batch_count, stream));
+    ROCSOLVER_LAUNCH_KERNEL((hseqr_any_nonfinite_kernel<HSEQR_BLOCKSIZE, T>),
+                            dim3(std::min(n, I(1024)), batch_count), dim3(HSEQR_BLOCKSIZE), 0,
+                            stream, n, ilo, ihi, H, shiftH, ldh, strideH, dflag);
     ROCSOLVER_LAUNCH_KERNEL((hseqr_check_kernel<HSEQR_BLOCKSIZE, T>), dim3(batch_count),
                             dim3(HSEQR_BLOCKSIZE), 0, stream, n, ilo, ihi, H, shiftH, ldh, strideH,
                             W, strideW, dflag);
