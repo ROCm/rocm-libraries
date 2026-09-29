@@ -305,15 +305,18 @@ class BaseTuner(ABC):
         # Get the base tuning archs and force set the range of the tune parameters
         # to the single-element lists 'default_tune_params'. We also change the
         # strategy to bruteforce and clear any set strategy options.
+
+        # This contains the key-values of the existing config.
         default_tune_params = {
             k: [v] for k, v in config.items() if k not in set(types.keys())
         }
 
-        # The existing config is only applicable if it provides a value for each
-        # tunable parameter of the current tuner. If it does not (e.g. a config
-        # from an older tuner missing new parameters), do not run the default config.
+        # The required keys contain all the keys a matching pre-existing config needs.
         required_keys = self._get_tune_params(types).keys()
-        if any(required_key not in default_tune_params for required_key in required_keys):
+
+        # If any required key is not in the pre-existing config, then we need to warn the user
+        # and skip running the default case.
+        if any((not required_key in default_tune_params) for required_key in required_keys):
             warnings.warn(
                 "Existing default configuration does not match tunable parameters."
             )
