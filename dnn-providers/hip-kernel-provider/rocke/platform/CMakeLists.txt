@@ -437,9 +437,15 @@ if(ROCKE_INSTALL_TESTS)
     # because it is the only suite here with a tiered label -- see
     # ROCKE_ENGINE_test_categories_external.yaml, which places it at `standard`
     # (the `quick` tier is documented as <5s total combined, and this compiles a
-    # kernel before it launches one). Without that yaml entry the target carries
-    # no tier and drops out of `ctest -L standard` entirely, reporting green by
-    # never running.
+    # kernel before it launches one).
+    #
+    # The tier is defensive, not load-bearing today: the runner this component
+    # actually resolves to, test/therock/test_hipkernelprovider.py, ctests the
+    # installed directory with no -L and no -R, so it runs every entry here
+    # regardless of label. The generic test/therock/test_runner.py does select
+    # with `ctest -L <category>`, so the label matters if this component is ever
+    # routed through it -- note that runner also ANDs in `-L ex_gpu_<arch>` when
+    # a GPU is present, which this entry does not carry and would need.
     #
     # The test itself needs numpy only and self-skips via requires_gfx942_gpu, so
     # a host-only runner passes the byte-budget case and skips the replay. The
