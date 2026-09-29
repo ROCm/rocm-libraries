@@ -23,6 +23,13 @@ set -uo pipefail
 
 BRANCH=${UHD_BRANCH:-users/jscampb/uhd-integration-test-branch}
 SRC=/tmp/uhd/src
+# The descriptor root the provider packs as `product`. Unset keeps the provider's own
+# default, the shipped root (src/engines/kernel_ingestor_engine/descriptors) that carries
+# hipkernel:Gfx950AttentionDense; UHD_PRODUCTION_ROOT=<path relative to the checkout>
+# packs another tree instead, e.g. the descriptor-packaging examples fixture tree.
+PRODUCTION_ROOT_ARGS=()
+[ -n "${UHD_PRODUCTION_ROOT:-}" ] && \
+    PRODUCTION_ROOT_ARGS=(-DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$SRC/$UHD_PRODUCTION_ROOT")
 BUILD=/tmp/uhd/build
 OUT=/tmp/uhd/out
 CORPUS=${UHD_CORPUS:?set UHD_CORPUS}
@@ -88,7 +95,7 @@ HKP_ARGS=()
 if [[ "+$PROVIDERS+" == *"+hip-kernel-provider+"* ]]; then
     HKP_ARGS=(-DHIPKERNELPROVIDER_ENABLE_ROCKE=ON -DHIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE=ON
               -DHIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON
-              -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$SRC/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors")
+              "${PRODUCTION_ROOT_ARGS[@]}")
 fi
 cmake -S "$SRC" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH="${ROCM_PATH:-/opt/rocm}" -DROCM_PATH="${ROCM_PATH:-/opt/rocm}" \

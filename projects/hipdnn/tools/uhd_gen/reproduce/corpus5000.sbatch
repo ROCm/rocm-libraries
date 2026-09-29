@@ -29,6 +29,13 @@
 set -uo pipefail
 
 SRC=${UHD_SRC:-/tmp/uhd/src}
+# The descriptor root the provider packs as `product`. Unset keeps the provider's own
+# default, the shipped root (src/engines/kernel_ingestor_engine/descriptors) that carries
+# hipkernel:Gfx950AttentionDense; UHD_PRODUCTION_ROOT=<path relative to the checkout>
+# packs another tree instead, e.g. the descriptor-packaging examples fixture tree.
+PRODUCTION_ROOT_ARGS=()
+[ -n "${UHD_PRODUCTION_ROOT:-}" ] && \
+    PRODUCTION_ROOT_ARGS=(-DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$SRC/$UHD_PRODUCTION_ROOT")
 BUILD=${UHD_BUILD:-/tmp/uhd/build}
 OUT=${UHD_OUT:-/exchange/corpus-5000}
 # sbatch's --output lands in the job's OWN view of the submit directory, which inside a
@@ -87,7 +94,7 @@ if [ -z "${UHD_BUILD:-}" ]; then
         -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPDNN_ENABLE_SDPA=ON \
         -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON -DHIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE=ON \
         -DHIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON \
-        -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$SRC/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors" \
+        "${PRODUCTION_ROOT_ARGS[@]}" \
         -DGPU_TARGETS="$ARCH" -DCMAKE_HIP_ARCHITECTURES="$ARCH" \
         -DENABLE_CLANG_FORMAT=OFF -DENABLE_CLANG_TIDY=OFF > /tmp/uhd/configure.log 2>&1
     echo "configure rc=$?"

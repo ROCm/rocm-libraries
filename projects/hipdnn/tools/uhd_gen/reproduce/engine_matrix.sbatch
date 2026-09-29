@@ -15,6 +15,13 @@ set -uo pipefail
 BRANCH=${UHD_BRANCH:-users/jascampb/uhd-integration-test-branch}
 CORPUS=${UHD_CORPUS:-/exchange/corpus-small}
 SRC=/tmp/uhd/src
+# The descriptor root the provider packs as `product`. Unset keeps the provider's own
+# default, the shipped root (src/engines/kernel_ingestor_engine/descriptors) that carries
+# hipkernel:Gfx950AttentionDense; UHD_PRODUCTION_ROOT=<path relative to the checkout>
+# packs another tree instead, e.g. the descriptor-packaging examples fixture tree.
+PRODUCTION_ROOT_ARGS=()
+[ -n "${UHD_PRODUCTION_ROOT:-}" ] && \
+    PRODUCTION_ROOT_ARGS=(-DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$SRC/$UHD_PRODUCTION_ROOT")
 BUILD=/tmp/uhd/build
 OUT=/tmp/uhd/out
 step() { echo; echo "===== $* ====="; date -Is; }
@@ -71,7 +78,7 @@ cmake -S "$SRC" -B "$BUILD" -G Ninja \
     -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPDNN_ENABLE_SDPA=ON \
     -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON -DHIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE=ON \
     -DHIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON \
-    -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$SRC/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors" \
+    "${PRODUCTION_ROOT_ARGS[@]}" \
     -DGPU_TARGETS="${UHD_GPU_TARGETS:-gfx942}" -DCMAKE_HIP_ARCHITECTURES="${UHD_GPU_TARGETS:-gfx942}" \
     -DENABLE_CLANG_FORMAT=OFF -DENABLE_CLANG_TIDY=OFF > /tmp/uhd/configure.log 2>&1
 echo "configure rc=$?"
