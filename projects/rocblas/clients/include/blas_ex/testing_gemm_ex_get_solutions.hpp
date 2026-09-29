@@ -25,6 +25,54 @@
 #define ROCBLAS_BETA_FEATURES_API
 #include "testing_common.hpp"
 
+// Largest absolute element value an initialization pattern can produce for type T.
+// The client initializers fill from fixed, known ranges, so the bound is a constant
+// per (init, type) pair -- no need to scan the matrix. Complex entries take both
+// components from the same range, so the magnitude bound is sqrt(2) * component bound.
+template <typename T>
+double init_abs_bound(rocblas_initialization init)
+{
+    double comp; // bound on a single (real) component
+    switch(init)
+    {
+    case rocblas_initialization::rand_int:
+        // float/double: [1,10]; half/bfloat16: [-2,2]; int8: [1,3]
+        if(std::is_same_v<T, rocblas_half> || std::is_same_v<T, rocblas_bfloat16>)
+            comp = 2.0;
+        else if(std::is_same_v<T, int8_t>)
+            comp = 3.0;
+        else
+            comp = 10.0;
+        break;
+    case rocblas_initialization::hpl:
+        comp = 0.5; // [-0.5, 0.5]
+        break;
+    case rocblas_initialization::trig_float:
+    case rocblas_initialization::rand_int_zero_one:
+        comp = 1.0; // sin/cos in [-1,1]; zero_one in [0,1]
+        break;
+    case rocblas_initialization::zero:
+        comp = 0.0;
+        break;
+    default:
+        // denorm and any future pattern: fall back to a safe unit bound.
+        comp = 1.0;
+        break;
+    }
+    return rocblas_is_complex<T> ? comp * 1.4142135623730951 : comp;
+}
+
+// Analytical bound on |D|_max for D = alpha*op(A)*op(B) + beta*C, derived from the
+// init ranges of A, B and C -- O(1), never touches the matrices or their padding.
+template <typename Ti, typename To, typename Tc>
+double gemm_result_abs_bound(rocblas_initialization init, int64_t K, Tc alpha, Tc beta)
+{
+    const double a = init_abs_bound<Ti>(init);
+    const double b = init_abs_bound<Ti>(init);
+    const double c = init_abs_bound<To>(init);
+    return double(rocblas_abs(alpha)) * double(K) * a * b + double(rocblas_abs(beta)) * c;
+}
+
 template <typename Ti, typename To, typename Tc>
 void testing_gemm_ex_get_solutions(const Arguments& arg)
 {
@@ -53,9 +101,13 @@ void testing_gemm_ex_get_solutions(const Arguments& arg)
     auto                 B_col  = transB == rocblas_operation_none ? N : std::max(K, 1);
     auto                 d_type = arg.d_type;
 
-    // rocblas_local_handle{arg} already applied arg.math_mode; read it back to
-    // decide whether the CPU reference must down-cast A/B to xfloat32 (TF32).
+    // Read back the effective math mode: rocblas_set_math_mode silently keeps the
+    // default when the requested mode is unsupported on this arch (xf32 is gfx942-only).
+    // The CPU reference must down-cast A/B to xfloat32 only when the GPU actually used
+    // TF32, otherwise fp32 hardware output and an xf32 reference would falsely mismatch.
     rocblas_math_mode math_mode = rocblas_math_mode(arg.math_mode);
+    CHECK_ROCBLAS_ERROR(rocblas_set_math_mode(handle, math_mode));
+    CHECK_ROCBLAS_ERROR(rocblas_get_math_mode(handle, &math_mode));
 
     // check for invalid sizes
     bool invalid_size = M < 0 || N < 0 || K < 0 || lda < A_row || ldb < B_row || ldc < M || ldd < M;
@@ -168,11 +220,19 @@ void testing_gemm_ex_get_solutions(const Arguments& arg)
                                  ldd,
                                  rocblas_bfloat16::rocblas_truncate_t::rocblas_round_near_even);
 
-        // Per-element near_check tolerance, matching the reduction path in
-        // testing_gemm/testing_gemm_ex. Absorbs each solution's own accumulation-order
-        // rounding, while a gross error (e.g. a dropped alpha or beta term) stays well
-        // above the bound and still fails.
-        check_tol = K * sum_error_tolerance<Tc>;
+        // Magnitude-scaled near_check tolerance. Each solution reduces in its own
+        // accumulation order, so a valid result differs from the reference by about
+        // K*eps *relative* to the result magnitude. Rather than scanning the matrix
+        // (which would be O(M*N) and could read leading-dim padding), bound |D|_max
+        // analytically from the init ranges -- O(1). A gross error such as a dropped
+        // alpha or beta term stays well above this bound and still fails. gfx11 needs a
+        // looser per-eps bound for 16-bit inputs.
+        const double result_bound
+            = gemm_result_abs_bound<Ti, To, Tc>(arg.initialization, K, h_alpha_Tc, h_beta_Tc);
+        const double eps_bound = (rocblas_handle(handle)->getArchMajor() == 11 && sizeof(Ti) == 2)
+                                     ? sum_error_tolerance_for_gfx11<Tc, Ti, To>
+                                     : sum_error_tolerance<Tc>;
+        check_tol = result_bound * K * eps_bound;
     }
 
 #define GEMM_EX_ARGS                                                                        \
@@ -230,10 +290,10 @@ void testing_gemm_ex_get_solutions(const Arguments& arg)
         if(arg.outofplace)
             CHECK_HIP_ERROR(dDref.transfer_from(hD));
 
-        // The get_solutions query reports support without launching, so an enumerated
-        // solution can still error when actually run. Skip the numeric compare for such
-        // a solution rather than failing the whole test on it.
+        // A solution reported by the query must also run successfully; record a failure
+        // if it does not, then skip only the numeric compare for that solution.
         rocblas_status status = rocblas_gemm_exM(GEMM_EX_ARGS, sol, rocblas_gemm_flags_none);
+        EXPECT_ROCBLAS_STATUS(status, rocblas_status_success);
         if(status != rocblas_status_success)
             return;
 
@@ -243,9 +303,12 @@ void testing_gemm_ex_get_solutions(const Arguments& arg)
         near_check_general<To, To_hpa>(M, N, ldd, hD_gold, hD, check_tol);
     };
 
-    for(auto sol : ary)
+    // ary is padded to 2*size with trailing zeros; only the first `size` entries are
+    // real solutions. Running the padding zeros would launch a full GEMM per default
+    // solution for no added coverage.
+    for(rocblas_int i = 0; i < size; i++)
     {
-        check_solution(sol);
+        check_solution(ary[i]);
     }
 
     // Testing 0 and -1 values work (uses default solution)

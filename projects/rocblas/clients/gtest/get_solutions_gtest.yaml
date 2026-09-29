@@ -42,9 +42,12 @@ Tests:
   ldb: 100
   ldc: 128
   ldd: 128
-  alpha: 2
-  beta: 3
+  # Non-integer alpha with fractional (hpl) inputs so TF32 and fp32 differ; an integer
+  # setup would compute identical results and could not exercise the math_mode path.
+  alpha: 1.2
+  beta: 1.0
   math_mode: 1
+  initialization: hpl
   pointer_mode_device: false
 
 - name: gemm_strided_batched_ex_get_solutions
