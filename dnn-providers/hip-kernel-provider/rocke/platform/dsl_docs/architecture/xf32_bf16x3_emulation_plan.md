@@ -269,7 +269,7 @@ from this plan.
 | 5 | BF16x3 expansion in the Python lowering | `core/lower_llvm.py` | after 4 | ✅ [steps 5+6](xf32_bf16x3_steps/step-05-bf16x3-lowering.md) |
 | 6 | Same expansion, byte-identical, in the C++ engine | `cpp/core/lower_llvm/mma.cpp` | same change as 5 | ✅ [steps 5+6](xf32_bf16x3_steps/step-05-bf16x3-lowering.md) |
 | 7 | FP32-selection-unchanged regression test | `tests/` | after 3 | ✅ [step 7](xf32_bf16x3_steps/step-07-selection-regression.md) |
-| 8 | COMGR compile gate for gfx950 | `tests/` | after 6 |
+| 8 | COMGR compile gate for gfx950 | `tests/` | after 6 | ✅ [step 8](xf32_bf16x3_steps/step-08-comgr-compile-gate.md) |
 | 9 | GPU numeric regression: vs FP32 reference **and** vs CK packed-path reference | `library/builders/**` or `examples/common/*parity*` | after 8 |
 | 10 | Re-bless byte-identity goldens; run both LLVM flavors | `tools/check_byte_identity.py` | last |
 
