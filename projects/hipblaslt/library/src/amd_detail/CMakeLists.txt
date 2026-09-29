@@ -19,6 +19,7 @@ if(HIPBLASLT_ENABLE_JIT)
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-tensilelite.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-tensilelite-predictor.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-problem-type.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-component.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-gemm.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-backend.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-process.cpp")

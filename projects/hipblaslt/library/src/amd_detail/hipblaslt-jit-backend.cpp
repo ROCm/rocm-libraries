@@ -1,9 +1,12 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "hipblaslt-jit-component.hpp"
 #include "hipblaslt-jit-gemm-internal.hpp"
 #include "hipblaslt_internal.hpp"
 #include "rocblaslt.h"
+#include "rocblaslt_arch_revision.hpp"
+#include <Tensile/hip/HipHardware.hpp>
 #include <mutex>
 #include <random>
 #include <stdexcept>
@@ -13,6 +16,28 @@
 #else
 #include <unistd.h>
 #endif
+
+namespace hipblaslt_jit
+{
+    Status DeviceTarget::make(int device, DeviceTarget& target)
+    {
+        target        = {};
+        target.device = device;
+        const auto error = hipGetDeviceProperties(&target.properties, device);
+        if(error != hipSuccess)
+            return {Status::Code::Failed,
+                    Stage::Configure,
+                    std::string("Cannot query HIP device properties: ") + hipGetErrorString(error)};
+        target.targetId      = target.properties.gcnArchName;
+        target.isa           = target.targetId.substr(0, target.targetId.find(':'));
+        target.libraryArch   = rocblaslt_revisioned_arch_name(target.isa,
+                                                            target.properties.asicRevision);
+        target.wavefrontSize = target.properties.warpSize;
+        target.cuCount       = target.properties.multiProcessorCount;
+        target.hardware      = TensileLite::hip::GetDevice(target.properties, device);
+        return {};
+    }
+}
 
 namespace hipblaslt_ext::experimental
 {
