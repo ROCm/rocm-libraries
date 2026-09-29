@@ -146,7 +146,7 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
         const ComputePtrOffset compute_ptr_offset_of_groups,
         const ComputePtrOffset compute_ptr_offset_of_n)
 {
-#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__)
+#if defined(__gfx950__) || defined(__gfx125__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
         // offset base pointer for each work-group
@@ -171,26 +171,22 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
         __shared__ char p_shared_1[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
 
         // only direct load pipeline with double buffer supported
-        {
-#if defined(__gfx950__) || defined(__gfx125__)
-            GridwiseGemm::template Run<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
-                karg.p_a_grid + a_group_offset + a_n_offset,
-                karg.p_b_grid + b_group_offset,
-                karg.p_c_grid + e_group_offset + e_n_offset,
-                p_shared_0,
-                p_shared_1,
-                karg,
-                GridwiseGemm::template TransformGrid<decltype(a_grid_desc_ak0_m_ak1),
-                                                     GridwiseGemm::AK0Number,
-                                                     GridwiseGemm::AK1Number>(a_grid_desc_ak0_m_ak1,
-                                                                              get_device_arch()),
-                GridwiseGemm::template TransformGrid<decltype(b_grid_desc_bk0_n_bk1),
-                                                     GridwiseGemm::BK0Number,
-                                                     GridwiseGemm::BK1Number>(b_grid_desc_bk0_n_bk1,
-                                                                              get_device_arch()),
-                c_grid_desc_m_n);
-#endif
-        }
+        GridwiseGemm::template Run<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
+            karg.p_a_grid + a_group_offset + a_n_offset,
+            karg.p_b_grid + b_group_offset,
+            karg.p_c_grid + e_group_offset + e_n_offset,
+            p_shared_0,
+            p_shared_1,
+            karg,
+            GridwiseGemm::template TransformGrid<decltype(a_grid_desc_ak0_m_ak1),
+                                                 GridwiseGemm::AK0Number,
+                                                 GridwiseGemm::AK1Number>(a_grid_desc_ak0_m_ak1,
+                                                                          get_device_arch()),
+            GridwiseGemm::template TransformGrid<decltype(b_grid_desc_bk0_n_bk1),
+                                                 GridwiseGemm::BK0Number,
+                                                 GridwiseGemm::BK1Number>(b_grid_desc_bk0_n_bk1,
+                                                                          get_device_arch()),
+            c_grid_desc_m_n);
     }
 #else
     ignore = karg;
