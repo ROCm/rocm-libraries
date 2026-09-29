@@ -277,9 +277,9 @@ __device__ inline void stedc_scale_pow2(S* v, const I count, const int e, const 
 //--------------------------------------------------------------------------------------//
 /** STEDC_NORMALIZE_KERNEL scales D and E so that the largest element lies in [1/2, 1),
     recording the exponent for STEDC_RESCALE_KERNEL. The deflation tolerance used by the
-    merge is only meaningful on a matrix of norm about one; this is the equivalent of the
-    DLANST/DLASCL that LAPACK's STEDC applies before entering DLAED0. The factor is a
-    power of two so that it and its inverse are exact.
+    merge is only meaningful on a matrix of norm about one. Unlike LAPACK's STEDC, which
+    applies DLANST/DLASCL to each split block, this normalizes the whole matrix at once. The
+    factor is a power of two so that it and its inverse are exact.
         - Call this kernel with batch_count groups in y. Groups are size STEDC_BDIM **/
 template <typename S, typename I>
 ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)

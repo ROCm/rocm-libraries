@@ -18,11 +18,8 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Optimized
 ### Resolved issues
 
-* Fixed a loss of accuracy in STEDC, and therefore in SYEVD and HEEVD, for matrices whose
-  norm is much smaller than one. The tridiagonal matrix is now normalized before the
-  divide-and-conquer phase, as LAPACK's STEDC does, so that the deflation tolerance used
-  during the merge stays proportional to the norm of the matrix. Set the environment variable
-  `ROCSOLVER_STEDC_NOSCALE=1` to disable the normalization.
+* Fixed a loss of accuracy in STEDC, and therefore in SYEVD and HEEVD, observed when the input
+  matrix is scaled by a small number.
 
 ### Known issues
 ### Upcoming changes
