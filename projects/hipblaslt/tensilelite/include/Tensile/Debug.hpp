@@ -35,8 +35,6 @@
 #include <roctracer/roctx.h>
 #endif
 
-#include <Tensile/Singleton.hpp>
-
 namespace TensileLite
 {
     using StringSet = std::set<std::string>;
@@ -44,9 +42,15 @@ namespace TensileLite
     /**
      * @brief Common place for defining flags which enable debug behaviour.
      */
-    class TENSILELITEHOST_EXPORT Debug : public LazySingleton<Debug>
+    class TENSILELITEHOST_EXPORT Debug
     {
     public:
+        // Must stay defined out of line in Debug.cpp. An inline accessor gets
+        // hidden visibility under VISIBILITY_INLINES_HIDDEN, so libhipblaslt and
+        // a shared libtensilelite-host would each own a separate Debug instance
+        // and state such as excludedLibFromGetAll() would not cross between them.
+        static Debug& Instance();
+
         bool printPropertyEvaluation() const;
         bool printPredicateEvaluation() const;
         bool printPredicateEvaluationVerbose() const;
@@ -168,8 +172,6 @@ namespace TensileLite
         }
 
     private:
-        friend LazySingleton<Debug>;
-
         int         m_value;
         int         m_value2;
         bool        m_naivePropertySearch = false;

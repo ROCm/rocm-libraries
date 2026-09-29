@@ -72,9 +72,9 @@ namespace TensileLite
  */
     struct ScalarValueTypeInfo
     {
-        static ScalarValueTypeInfo const& Get(int index);
-        static ScalarValueTypeInfo const& Get(ScalarValue t);
-        static ScalarValueTypeInfo const& Get(std::string const& str);
+        TENSILELITEHOST_EXPORT static ScalarValueTypeInfo const& Get(int index);
+        TENSILELITEHOST_EXPORT static ScalarValueTypeInfo const& Get(ScalarValue t);
+        TENSILELITEHOST_EXPORT static ScalarValueTypeInfo const& Get(std::string const& str);
 
         ScalarValue m_value;
         std::string name;

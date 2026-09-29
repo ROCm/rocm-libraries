@@ -205,6 +205,13 @@ namespace TensileLite
         m_excludedFromGetAll = excludedSet;
     }
 
+    Debug& Debug::Instance()
+    {
+        static Debug instance;
+
+        return instance;
+    }
+
     Debug::Debug()
         : m_value(DEBUG_SM)
         , m_value2(DEBUG_SM2)
@@ -305,6 +312,15 @@ namespace TensileLite
             if(end != sk5Force && *end == '\0' && val >= -1 && val <= 1)
                 m_streamK5ForceMode = static_cast<int>(val);
         }
+    }
+
+    // Test-only probe, declared for tests in tests/include/DebugInstanceProbe.hpp
+    // rather than a public header. Keep the two declarations in sync.
+    TENSILELITEHOST_EXPORT const void* debugInstanceAddress();
+
+    const void* debugInstanceAddress()
+    {
+        return &Debug::Instance();
     }
 
 } // namespace TensileLite

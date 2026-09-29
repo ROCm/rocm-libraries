@@ -28,6 +28,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInit_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExactLogicLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitor_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/DebugInstanceProbe.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/RunGEMMKernelTest.hpp"
@@ -43,6 +44,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultComparison_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceMXFastPath_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SingletonIdentity_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SolutionValidation_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/StreamKLaunchSummary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorDescriptor_test.cpp"
@@ -87,6 +89,21 @@ if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
 endif()
 
 target_link_libraries(tensilelite-tests PUBLIC GTest::gtest)
+
+# SingletonIdentity_test is only meaningful across a shared-library boundary.
+target_compile_definitions(tensilelite-tests
+    PRIVATE
+        $<$<STREQUAL:$<TARGET_PROPERTY:tensilelite-host,TYPE>,SHARED_LIBRARY>:TENSILELITE_HOST_IS_SHARED>
+)
+
+# In YAML builds the serialization templates are instantiated in these test
+# translation units, not only inside tensilelite-host. tensilelite-host links
+# LLVMObjectYAML PRIVATE and, when shared, is linked with --exclude-libs,ALL,
+# so it does not re-export those symbols.
+if(HIPBLASLT_ENABLE_YAML)
+    target_link_libraries(tensilelite-tests PRIVATE LLVMObjectYAML)
+    target_include_directories(tensilelite-tests PRIVATE ${LLVM_INCLUDE_DIRS})
+endif()
 
 # LaunchDimGuard_test asserts different outcomes for a cluster launch depending
 # on whether SolutionAdapter::launchKernel was compiled with the cluster path,
