@@ -25,8 +25,13 @@ function(add_thrust_benchmark BENCHMARK_NAME BENCHMARK_SOURCE NOT_INTERNAL)
     add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
 
     target_compile_options(${BENCHMARK_TARGET} PRIVATE ${COMPILE_OPTIONS})
+    # NOTE(hipccl3): PRIVATE, not INTERFACE - same defect as
+    # ../test/CMakeLists.txt (see the note there). ${BENCHMARK_TARGET} is an
+    # executable, so INTERFACE usage requirements never reach its own compile
+    # line. Latent rather than actively broken, since this branch only runs
+    # with GRAFT_THRUST_ONTO_BINARIES=ON.
     if(GRAFT_THRUST_ONTO_BINARIES)
-        target_link_libraries(${BENCHMARK_TARGET} INTERFACE CCCL::CCCL)
+        target_link_libraries(${BENCHMARK_TARGET} PRIVATE CCCL::CCCL)
     else()
         target_link_libraries(${BENCHMARK_TARGET}
           PRIVATE

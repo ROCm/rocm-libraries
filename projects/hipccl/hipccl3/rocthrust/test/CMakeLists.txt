@@ -64,10 +64,20 @@ function(add_rocthrust_test TEST)
             ${sqlite_local_SOURCE_DIR}
     )
 
+    # NOTE(hipccl3): PRIVATE, not INTERFACE. ${TEST_TARGET} is an *executable*
+    # (add_executable above), so INTERFACE usage requirements only apply to
+    # hypothetical consumers of the executable - they never reach its own
+    # compile line. With INTERFACE these two branches silently dropped the
+    # thrust include directories and every test in this directory failed with
+    # "fatal error: 'thrust/...' file not found". Only the else() branch was
+    # correct, which is why the default (non-USE_SYSTEM_LIB) path worked and
+    # this went unnoticed. ../testing/CMakeLists.txt uses the same block
+    # correctly, because there it applies to
+    # add_library(testing_common INTERFACE) - a real INTERFACE library.
     if(GRAFT_THRUST_ONTO_BINARIES)
-        target_link_libraries(${TEST_TARGET} INTERFACE CCCL::CCCL)
+        target_link_libraries(${TEST_TARGET} PRIVATE CCCL::CCCL)
     elseif(USE_SYSTEM_LIB)
-        target_link_libraries(${TEST_TARGET} INTERFACE roc::rocthrust)
+        target_link_libraries(${TEST_TARGET} PRIVATE roc::rocthrust)
     else()
         target_link_libraries(${TEST_TARGET}
             PRIVATE
