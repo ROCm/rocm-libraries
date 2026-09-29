@@ -2163,12 +2163,15 @@ struct BlockFmhaBwdPipelineDefaultPolicy
                 LDS_WRITE_INST / MFMA_INST >= 1 ? LDS_WRITE_INST / MFMA_INST : 1;
             constexpr index_t MFMA_INST_LDS_WRITE = LDS_WRITE_INST / LDS_WRITE_PER_MFMA;
 
-            constexpr index_t LDS_READ_PER_MFMA =
-                (MFMA_INST - MFMA_INST_LDS_WRITE) > 0
-                    ? LDS_READ_INST / (MFMA_INST - MFMA_INST_LDS_WRITE) > 0
-                          ? LDS_READ_INST / (MFMA_INST - MFMA_INST_LDS_WRITE)
-                          : 1
-                    : 0;
+            // Tiles whose LDS writes outnumber their MFMAs leave nothing for the DS read groups.
+            constexpr index_t MFMA_INST_LDS_READ =
+                MFMA_INST > MFMA_INST_LDS_WRITE ? MFMA_INST - MFMA_INST_LDS_WRITE : 0;
+
+            constexpr index_t LDS_READ_PER_MFMA = MFMA_INST_LDS_READ > 0
+                                                      ? LDS_READ_INST / MFMA_INST_LDS_READ > 0
+                                                            ? LDS_READ_INST / MFMA_INST_LDS_READ
+                                                            : 1
+                                                      : 0;
 
             static_for<0, MFMA_INST_LDS_WRITE, 1>{}([&](auto i) {
                 ignore = i;
@@ -2176,7 +2179,7 @@ struct BlockFmhaBwdPipelineDefaultPolicy
                 __builtin_amdgcn_sched_group_barrier(0x200, LDS_WRITE_PER_MFMA, 0); // DS Write
             });
 
-            static_for<0, MFMA_INST - MFMA_INST_LDS_WRITE, 1>{}([&](auto i) {
+            static_for<0, MFMA_INST_LDS_READ, 1>{}([&](auto i) {
                 ignore = i;
                 __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);                 // MFMA
                 __builtin_amdgcn_sched_group_barrier(0x100, LDS_READ_PER_MFMA, 0); // DS Read
@@ -2216,8 +2219,15 @@ struct BlockFmhaBwdPipelineDefaultPolicy
             Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{});
         static constexpr index_t WarpGemmN =
             Problem::BlockFmhaShape::Gemm0WarpTile::at(number<1>{});
-        static constexpr index_t WarpGemmK =
-            Problem::BlockFmhaShape::Gemm0WarpTile::at(number<2>{});
+
+        // The counts below feed sched_group_barrier, so they must count *instructions*: K here
+        // is the K of one warp gemm instruction, not of the warp tile. A 16x16x32 tile is a
+        // single instruction on gfx950 and gfx1250 but two 16x16x16 MFMAs on gfx90a/gfx942.
+        using Gemm0WarpGemm =
+            remove_cvref_t<decltype(remove_cvref_t<decltype(GetQKBlockGemm<Problem>())>::Policy::
+                                        template GetWarpGemmMWarpNWarp<Problem>()
+                                            .template at<0>())>;
+        static constexpr index_t WarpGemmK = Gemm0WarpGemm::WarpGemmAttribute::Impl::kK;
         static constexpr index_t Gemm4MWarp =
             Problem::BlockFmhaShape::Gemm4BlockWarps::at(number<0>{});
         static constexpr index_t Gemm4NWarp =
