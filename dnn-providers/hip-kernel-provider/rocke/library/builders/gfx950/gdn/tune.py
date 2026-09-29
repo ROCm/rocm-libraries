@@ -30,16 +30,15 @@ import sys
 
 
 from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode, dispatch_gdn_decode_all
+from dispatch.gdn.gfx950 import BLOCKS_PER_V_DIM, NUM_WARPS, WARP_THREADS_K
 from kernels.gfx950.gdn_decode import GdnDecodeSpec, is_valid_spec
 
 ARCH = "gfx950"
 DEFAULT_BATCHES = (1, 16, 64, 256)
 
-# KDA's study deliberately searches this whole tile space. GDN production uses
-# the registry instead, so its sweep only receives registry dispatch results.
-_NUM_WARPS = (1, 2, 4, 8, 16)
-_WARP_THREADS_K = (1, 2, 4, 8, 16, 32)
-_BLOCKS_PER_V = (1, 2, 4, 8, 16, 32)
+# KDA's study deliberately searches the registry's configured tile space. GDN
+# production uses the registry instead, so its sweep only receives registry
+# dispatch results.
 
 
 def device_is_visible() -> bool:
@@ -64,9 +63,9 @@ def device_is_visible() -> bool:
 def legal_configs(base: GdnDecodeSpec):
     """Every validator-admitted tile for KDA's exhaustive tuning study."""
     out = []
-    for num_warps in _NUM_WARPS:
-        for warp_threads_k in _WARP_THREADS_K:
-            for blocks_per_v_dim in _BLOCKS_PER_V:
+    for num_warps in NUM_WARPS:
+        for warp_threads_k in WARP_THREADS_K:
+            for blocks_per_v_dim in BLOCKS_PER_V_DIM:
                 spec = dc.replace(
                     base,
                     num_warps=num_warps,
@@ -267,7 +266,12 @@ def main() -> int:
                 # KDA's measured table is work-keyed, but the study must test
                 # every validator-admitted tile rather than the current band's
                 # dispatcher result.
-                auto = dispatch_gdn_decode(request)
+                try:
+                    auto = dispatch_gdn_decode(request)
+                except ValueError:
+                    print(f"batch {batch}: no candidate was both correct and timeable")
+                    failed = True
+                    continue
                 base = auto.spec
                 configs = legal_configs(base)
                 print(f"legal KDA configurations for batch {batch}: {len(configs)}")

@@ -10,14 +10,19 @@ from itertools import product
 from types import SimpleNamespace
 
 from builders.gfx950.gdn import tune
+from dispatch.gdn.gfx950 import BLOCKS_PER_V_DIM, NUM_WARPS, WARP_THREADS_K
 from kernels.gfx950.gdn_decode import GdnDecodeSpec, is_valid_spec
 
 
-def test_legal_configs_enumerates_every_validator_admitted_kda_tile():
+def test_legal_configs_reuses_registry_tile_space():
+    assert tune.NUM_WARPS is NUM_WARPS
+    assert tune.WARP_THREADS_K is WARP_THREADS_K
+    assert tune.BLOCKS_PER_V_DIM is BLOCKS_PER_V_DIM
+
     base = dc.replace(GdnDecodeSpec(), gate_kind="kda", num_k_heads=16, num_v_heads=32)
     expected = [
         tile
-        for tile in product(tune._NUM_WARPS, tune._WARP_THREADS_K, tune._BLOCKS_PER_V)
+        for tile in product(NUM_WARPS, WARP_THREADS_K, BLOCKS_PER_V_DIM)
         if is_valid_spec(
             dc.replace(
                 base,
@@ -84,4 +89,25 @@ def test_main_fails_when_any_requested_registry_cell_is_missing(monkeypatch, cap
     assert tune.main() == 1
     assert (
         "batch 2: no candidate was both correct and timeable" in capsys.readouterr().out
+    )
+
+
+def test_main_reports_unsupported_kda_geometry_without_traceback(monkeypatch, capsys):
+    monkeypatch.setattr(tune, "device_is_visible", lambda: True)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "tune.py",
+            "--gate-kind",
+            "kda",
+            "--geometries",
+            "33/32",
+            "--batches",
+            "1",
+        ],
+    )
+
+    assert tune.main() == 1
+    assert (
+        "batch 1: no candidate was both correct and timeable" in capsys.readouterr().out
     )

@@ -121,8 +121,6 @@ def main() -> int:
         print("no HIP device visible", file=sys.stderr)
         return 2
 
-    from builders.gfx950.gdn.gdn_decode import TOL, check
-
     print(
         f"{'batch':>6} {'arm':>5} {'tile':>10} {'spec_id':>22} {'grid':>8} "
         f"{'eager_us':>10} {'device_us':>10}  correctness"
@@ -131,7 +129,6 @@ def main() -> int:
     failures = 0
     for batch in (int(x) for x in args.batches.split(",")):
         request = GdnDecodeRequest(batch=batch, arch=ARCH)
-        auto = dispatch_gdn_decode(request)
         results = registered_results(request)
         if len(results) != 54:
             print(
@@ -140,6 +137,9 @@ def main() -> int:
             )
             failures += 1
             continue
+        from builders.gfx950.gdn.gdn_decode import TOL, check
+
+        auto = dispatch_gdn_decode(request)
         for result in (auto, *results):
             spec: GdnDecodeSpec = result.spec
             arm = "auto" if result is auto else "cand"

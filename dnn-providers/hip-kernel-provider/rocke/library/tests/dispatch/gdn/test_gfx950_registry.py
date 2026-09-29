@@ -154,3 +154,35 @@ def test_registry_and_benchmark_enumeration_have_identity_bijection():
 
     assert len(registry) == len(benchmark) == 54
     assert identities(registry) == identities(benchmark)
+
+
+def test_benchmark_reports_missing_candidates_before_selecting_auto(
+    monkeypatch, capsys
+):
+    import sys
+    from types import SimpleNamespace
+
+    from benchmarks.gfx950.gdn import benchmark_gdn_decode
+
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: True)),
+    )
+    monkeypatch.setattr(benchmark_gdn_decode, "registered_results", lambda request: ())
+    monkeypatch.setattr(
+        benchmark_gdn_decode,
+        "dispatch_gdn_decode",
+        lambda request: pytest.fail("auto must not be selected without candidates"),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["benchmark_gdn_decode.py", "--batches", "1"],
+    )
+
+    assert benchmark_gdn_decode.main() == 1
+    assert (
+        "batch 1: expected 54 legal registry candidates, got 0"
+        in capsys.readouterr().err
+    )
