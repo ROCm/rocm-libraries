@@ -271,7 +271,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     endif()
 
     set(_asm_sdpa_external_category_args "")
-    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED AND ENABLE_ASM_SDPA_ENGINE)
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED AND ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA)
         list(APPEND _asm_sdpa_external_category_args
             TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
             INSTALL_TEST_FILE "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
@@ -280,7 +280,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         )
     endif()
 
-    if(ENABLE_ASM_SDPA_ENGINE AND TARGET hipdnn_integration_tests)
+    if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA AND TARGET hipdnn_integration_tests)
         add_external_integration_test_target(
             TARGET_NAME    ${PROJECT_NAME}-asm-sdpa-external-integration-check
             PLUGIN_TARGET  hip_kernel_provider
@@ -303,6 +303,8 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         # _asm_sdpa_external_category_args above.
     elseif(NOT ENABLE_ASM_SDPA_ENGINE)
         message(STATUS "ASM SDPA engine disabled - skipping asm-sdpa-external-integration-check")
+    elseif(NOT HIPDNN_ENABLE_SDPA)
+        message(STATUS "hipDNN built with HIPDNN_ENABLE_SDPA=OFF - skipping asm-sdpa-external-integration-check")
     else()
         message(STATUS "hipdnn_integration_tests not found - skipping asm-sdpa-external-integration-check")
     endif()
