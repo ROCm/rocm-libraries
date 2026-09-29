@@ -12,8 +12,8 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from Tensile.Common.GlobalParameters import defaultBenchmarkCommonParameters
-from Tensile.Common.ValidParameters import (
+from tensilelite.Common.GlobalParameters import defaultBenchmarkCommonParameters
+from tensilelite.Common.ValidParameters import (
     validParameters,
     normalizeSwInstructionPrefetch,
     resolveSwInstructionPrefetch,
@@ -163,7 +163,7 @@ def _run_piap(state):
     so a minimal state reaches it; a non-rejecting mode falls through and later
     raises on the missing ProblemType (unrelated to this feature).
     """
-    from Tensile.SolutionStructs.Solution import Solution
+    from tensilelite.SolutionStructs.Solution import Solution
 
     Solution.assignProblemIndependentDerivedParameters(state, False, {})
     return state

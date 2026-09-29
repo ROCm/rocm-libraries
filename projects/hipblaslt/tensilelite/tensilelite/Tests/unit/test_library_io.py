@@ -22,14 +22,14 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Unit tests for Tensile.LibraryIO.writeMsgPack."""
+"""Unit tests for tensilelite.LibraryIO.writeMsgPack."""
 
 import copy
 import zlib
 import msgpack
 import pytest
 
-from Tensile.LibraryIO import write, writeMsgPack, writeMsgPackIndexed
+from tensilelite.LibraryIO import write, writeMsgPack, writeMsgPackIndexed
 
 
 def test_writeMsgPack_produces_zlib_file(tmp_path):

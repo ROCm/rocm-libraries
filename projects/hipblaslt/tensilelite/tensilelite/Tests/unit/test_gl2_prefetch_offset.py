@@ -599,8 +599,8 @@ def _make_kernel(cfg):
 
 def _make_writer(kernel):
     """Mock writer that binds the real KernelWriterAssembly methods GL2Prefetch needs."""
-    from Tensile.Common import INDEX_CHARS
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly as KWA
+    from tensilelite.Common import INDEX_CHARS
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly as KWA
     from rocisa.label import LabelManager
     from rocisa.register import RegisterPool
     from rocisa.enum import RegisterType
@@ -650,7 +650,7 @@ def build_kernel(cfg):
     from rocisa.code import Module, TextBlock, Label
     from rocisa.container import sgpr, ContinuousRegister
     from rocisa.instruction import SMovB32, SCmpLeU32, SCBranchSCC1
-    from Tensile.KernelWriterAssembly import GL2PrefetchLoad
+    from tensilelite.KernelWriterAssembly import GL2PrefetchLoad
 
     init_rocisa(target=TARGET, wavesize=WAVESIZE)
     kernel = _make_kernel(cfg)
