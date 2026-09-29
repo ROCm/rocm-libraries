@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "hipblaslt-jit-tensilelite-predictor.hpp"
+#include "hipblaslt-jit-json.hpp"
+#include "hipblaslt-jit-problem-type.hpp"
 #include <Tensile/UtilsOrigami.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 #include <algorithm>
@@ -22,42 +24,12 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
 {
     namespace
     {
+        namespace json = hipblaslt_jit::json;
+
         void require(bool condition, const std::string& message)
         {
             if(!condition)
                 throw std::runtime_error("JIT GEMM prediction: " + message);
-        }
-
-        std::string jsonString(const std::string& value)
-        {
-            std::ostringstream out;
-            out << '"';
-            for(unsigned char c : value)
-            {
-                if(c == '"' || c == '\\')
-                    out << '\\' << c;
-                else if(c < 0x20)
-                    out << "\\u00" << std::hex << std::setw(2) << std::setfill('0') << int(c);
-                else
-                    out << c;
-            }
-            out << '"';
-            return out.str();
-        }
-
-        template <typename Values>
-        void array(std::ostream& out, const Values& values)
-        {
-            out << '[';
-            bool first = true;
-            for(const auto value : values)
-            {
-                if(!first)
-                    out << ',';
-                out << value;
-                first = false;
-            }
-            out << ']';
         }
 
         void writeFresh(const std::string& path, const std::string& contents)
@@ -165,32 +137,19 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
         require(analytical.N_CU && analytical.NUM_XCD && analytical.lds_capacity
                     && analytical.rf_capacity && analytical.compute_clock_ghz > 0,
                 "actual device resource limits are unavailable");
-        require(problem.stridedBatched() && !problem.groupedGemm(),
-                "prediction requires a single strided GEMM; grouped GEMM is not implemented");
-        require(problem.c().dataType() == problem.d().dataType(),
-                "Tensile ProblemType requires matching C and D datatypes");
-        const auto conjugate = [](const TensileLite::TensorOps& ops) {
-            require(ops.empty()
-                        || (ops.size() == 1
-                            && ops.front().type == TensileLite::TensorOp::Type::ComplexConjugate),
-                    "the input tensor operation cannot be represented by Tensile ProblemType");
-            return !ops.empty();
-        };
-        const bool conjugateA = conjugate(problem.aOps());
-        const bool conjugateB = conjugate(problem.bOps());
-        require(problem.cOps().empty() && problem.dOps().empty(),
-                "Tensile ProblemType does not describe C/D tensor operations");
-        require(problem.freeIndicesA().size() == 1 && problem.freeIndicesB().size() == 1
-                    && problem.boundIndices().size() == 1 && problem.batchIndices().size() == 1
-                    && !problem.transposeC01(),
-                "expected canonical batched GEMM indices");
-        for(const auto* tensor : {&problem.a(), &problem.b(), &problem.c(), &problem.d()})
-            require(tensor->dimensions() == 3 && tensor->strides().at(0) == 1,
-                    "expected three-dimensional column-major tensor descriptors");
-        const bool   transA = problem.freeIndicesA()[0].i == 1;
-        const bool   transB = problem.freeIndicesB()[0].i == 0;
-        const size_t m = problem.freeSizeA(0), n = problem.freeSizeB(0);
-        const size_t k = problem.boundSize(0), batch = problem.batchSize(0);
+        hipblaslt_jit::CanonicalGemm                     gemm;
+        std::vector<std::pair<std::string, std::string>> problemType;
+        try
+        {
+            gemm        = hipblaslt_jit::canonicalGemm(problem);
+            problemType = hipblaslt_jit::problemTypeFields(problem);
+        }
+        catch(const std::runtime_error& e)
+        {
+            throw std::runtime_error("JIT GEMM prediction: " + std::string(e.what()));
+        }
+        const bool   transA = gemm.transA, transB = gemm.transB;
+        const size_t m = gemm.m, n = gemm.n, k = gemm.k, batch = gemm.batch;
         require(batch, "a GEMM must describe at least one batch");
 
         origami::problem_t request;
@@ -242,100 +201,51 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
                     && !fs::exists(fs::u8path(output + ".prediction.json")),
                 "output artifacts already exist");
 
-        std::ostringstream json;
-        json << std::setprecision(17) << std::boolalpha;
-        json << "{\n\"schema_version\":1,\"modeled_contract\":\"origami.gemm.dp.v1\",\"model\":" << jsonString("origami.gemm.estimation")
-             << ",\"architecture\":" << jsonString(options.architecture)
-             << ",\"problem_type\":{\"OperationType\":\"GEMM\",\"Batched\":true,"
-                "\"StridedBatched\":true,\"TransposeA\":"
-             << transA << ",\"TransposeB\":" << transB << ",\"ComplexConjugateA\":" << conjugateA
-             << ",\"ComplexConjugateB\":" << conjugateB;
-        const auto dataType = [&](const char* key, Type value) {
-            json << "," << jsonString(key) << ':' << static_cast<int>(value);
-        };
-        dataType("DataType", problem.computeInputTypeA());
-        dataType("DataTypeA", problem.a().dataType());
-        dataType("DataTypeB", problem.b().dataType());
-        dataType("MacDataTypeA", problem.computeInputTypeA());
-        dataType("MacDataTypeB", problem.computeInputTypeB());
-        dataType("DestDataType", problem.d().dataType());
-        dataType("ComputeDataType", problem.computeType());
-        dataType("F32XdlMathOp", problem.f32XdlMathOp());
-        if(problem.mxBlockA())
-            dataType("DataTypeMXSA", problem.mxTypeA());
-        if(problem.mxBlockB())
-            dataType("DataTypeMXSB", problem.mxTypeB());
-        json << ",\"HighPrecisionAccumulate\":" << problem.highPrecisionAccumulate()
-             << ",\"UseBias\":" << problem.useBias() << ",\"UseE\":" << problem.useE()
-             << ",\"Gradient\":" << problem.useGradient()
-             << ",\"UseScaleAB\":" << jsonString(problem.useScaleAB())
-             << ",\"UseScaleCD\":" << problem.useScaleCD()
-             << ",\"UseScaleAlphaVec\":" << problem.useScaleAlphaVec()
-             << ",\"OutputAmaxD\":" << problem.outputAmaxD()
-             << ",\"MXBlockA\":" << problem.mxBlockA() << ",\"MXBlockB\":" << problem.mxBlockB()
-             << ",\"Sparse\":" << problem.sparse()
-             << ",\"SwizzleTensorA\":" << problem.swizzleTensorA()
-             << ",\"SwizzleTensorB\":" << problem.swizzleTensorB()
-             << ",\"UseGateResidual\":" << problem.useGateResidual();
-        if(problem.useBias())
-            json << ",\"BiasDataTypeList\":[" << static_cast<int>(problem.bias().dataType())
-                 << "],\"BiasSrc\":" << jsonString(std::string(1, 'A' + problem.biasSrc()));
-        if(problem.useGateResidual())
-            json << ",\"GateResidualDataTypeList\":["
-                 << static_cast<int>(problem.gateResidual().dataType()) << ']';
-        if(problem.useE())
-            dataType("DataTypeE", problem.e().dataType());
-        if(problem.outputAmaxD())
-            dataType("DataTypeAmaxD", problem.amaxd().dataType());
-        if(problem.activationType() != TensileLite::ActivationType::None)
-        {
-            json << ",\"Activation\":true,\"ActivationType\":\"hipblaslt_all\"";
-            dataType("ActivationComputeDataType", problem.activationComputeType());
-        }
-        json << "},\"problem\":{\"m\":" << m << ",\"n\":" << n << ",\"k\":" << k
-             << ",\"batch\":" << batch << ",\"transpose_a\":" << transA
-             << ",\"transpose_b\":" << transB << ",\"c_equals_d\":" << problem.cEqualsD()
-             << ",\"num_cus\":" << request.num_cus;
+        std::ostringstream out;
+        out << std::setprecision(17) << std::boolalpha;
+        out << "{\n\"schema_version\":1,\"modeled_contract\":\"origami.gemm.dp.v1\",\"model\":" << json::quote("origami.gemm.estimation")
+            << ",\"architecture\":" << json::quote(options.architecture) << ",\"problem_type\":{";
+        for(size_t i = 0; i != problemType.size(); ++i)
+            out << (i ? "," : "") << json::quote(problemType[i].first) << ':'
+                << problemType[i].second;
+        out << "},\"problem\":{\"m\":" << m << ",\"n\":" << n << ",\"k\":" << k
+            << ",\"batch\":" << batch << ",\"transpose_a\":" << transA
+            << ",\"transpose_b\":" << transB << ",\"c_equals_d\":" << problem.cEqualsD()
+            << ",\"num_cus\":" << request.num_cus;
         if(problem.mxBlockA() || problem.mxBlockB())
-            json << ",\"scale_mode_a\":" << jsonString(scaleModeA)
-                 << ",\"scale_mode_b\":" << jsonString(scaleModeB);
+            out << ",\"scale_mode_a\":" << json::quote(scaleModeA)
+                << ",\"scale_mode_b\":" << json::quote(scaleModeB);
         const std::array<const TensileLite::TensorDescriptor*, 4> tensors{
             &problem.a(), &problem.b(), &problem.c(), &problem.d()};
         for(size_t i = 0; i != tensors.size(); ++i)
-        {
-            json << ",\"strides_" << char('a' + i) << "\":";
-            array(json, tensors[i]->strides());
-            json << ",\"sizes_" << char('a' + i) << "\":";
-            array(json, tensors[i]->sizes());
-        }
+            out << ",\"strides_" << char('a' + i) << "\":" << json::array(tensors[i]->strides())
+                << ",\"sizes_" << char('a' + i) << "\":" << json::array(tensors[i]->sizes());
         for(const auto& entry :
             {std::make_pair("mxsa", &problem.mxsa()), std::make_pair("mxsb", &problem.mxsb())})
         {
             if(entry.second->empty())
                 continue;
-            json << ",\"strides_" << entry.first << "\":";
-            array(json, entry.second->strides());
-            json << ",\"sizes_" << entry.first << "\":";
-            array(json, entry.second->sizes());
+            out << ",\"strides_" << entry.first << "\":" << json::array(entry.second->strides())
+                << ",\"sizes_" << entry.first << "\":" << json::array(entry.second->sizes());
         }
-        json << "},\"hardware\":{\"device_id\":" << device->deviceId
-             << ",\"cu_count\":" << analytical.N_CU << ",\"xcd_count\":" << analytical.NUM_XCD
-             << ",\"compute_clock_ghz\":" << analytical.compute_clock_ghz
-             << ",\"lds_capacity\":" << analytical.lds_capacity
-             << ",\"rf_capacity\":" << analytical.rf_capacity
-             << "},\"model_assumptions\":{\"occupancy\":1,\"stream_k\":0,"
-                "\"stream_k_origin\":\"caller-selected data-parallel domain; Origami does not select enablement\","
-                "\"workgroup_mapping\":\"select_workgroup_mapping; unsupported transport rejects the candidate\","
-                "\"stagger\":\"select_staggerU; all three outputs including zeros are preserved\","
-                "\"vector_widths\":\"not predicted by estimation; Tensile derives actual widths\","
-                "\"epilogue\":\"bias, activation, auxiliary outputs and scaling overhead are not "
-                "modeled\","
-                "\"architecture_constants\":"
-             << jsonString(analytical.arch == Arch::gfx1250
+        out << "},\"hardware\":{\"device_id\":" << device->deviceId
+            << ",\"cu_count\":" << analytical.N_CU << ",\"xcd_count\":" << analytical.NUM_XCD
+            << ",\"compute_clock_ghz\":" << analytical.compute_clock_ghz
+            << ",\"lds_capacity\":" << analytical.lds_capacity
+            << ",\"rf_capacity\":" << analytical.rf_capacity
+            << "},\"model_assumptions\":{\"occupancy\":1,\"stream_k\":0,"
+               "\"stream_k_origin\":\"caller-selected data-parallel domain; Origami does not select enablement\","
+               "\"workgroup_mapping\":\"select_workgroup_mapping; unsupported transport rejects the candidate\","
+               "\"stagger\":\"select_staggerU; all three outputs including zeros are preserved\","
+               "\"vector_widths\":\"not predicted by estimation; Tensile derives actual widths\","
+               "\"epilogue\":\"bias, activation, auxiliary outputs and scaling overhead are not "
+               "modeled\","
+               "\"architecture_constants\":"
+            << json::quote(analytical.arch == Arch::gfx1250
                                ? "Origami gfx1250 provisional model: upstream memory constants "
                                  "reuse gfx950 with gfx1250 overrides; not calibrated for gfx1250"
                                : "Origami native architecture model")
-             << "},\"candidates\":[";
+            << "},\"candidates\":[";
         size_t count = 0;
         for(const auto& result : ranked)
         {
@@ -351,28 +261,27 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
             require(mapping.wgm != 0, "Origami returned a zero workgroup mapping");
             const auto stagger = origami::select_staggerU(request, analytical, config, grid, mapping.wgm);
             if(count++)
-                json << ',';
-            json << "{\"id\":" << result.config.index << ",\"predicted_cycles\":" << result.latency
-                 << ",\"parameters\":{\"MatrixInstruction\":";
-            array(json, recipe.matrixInstruction);
-            json << ",\"DepthU\":" << config.mt.k
-                 << ",\"NonTemporalA\":" << config.cache_hints_a
-                 << ",\"NonTemporalB\":" << config.cache_hints_b
-                 << "},\"modeled\":{\"macro_tile\":[" << config.mt.m << ',' << config.mt.n << ',' << config.mt.k
-                 << "],\"workgroup_mapping\":{\"wgm\":" << mapping.wgm
-                 << ",\"wgmxcc\":" << mapping.wgmxcc
-                 << ",\"wgmxccchunk\":" << mapping.wgmxccchunk
-                 << ",\"wgmxccsplitk\":" << mapping.wgmxccsplitk
-                 << "},\"stagger\":{\"staggerU\":" << stagger.staggerU
-                 << ",\"staggerUMapping\":" << stagger.staggerUMapping
-                 << ",\"staggerUStrideShift\":" << stagger.staggerUStrideShift
-                 << "},\"launch\":{\"stream_k\":0,\"reduction\":\"none\",\"grid\":" << grid
-                 << ",\"active_cus\":" << activeCUs << ",\"timesteps\":" << timesteps
-                 << ",\"split_factor\":" << split << "}}}";
+                out << ',';
+            out << "{\"id\":" << result.config.index << ",\"predicted_cycles\":" << result.latency
+                << ",\"parameters\":{\"MatrixInstruction\":" << json::array(recipe.matrixInstruction)
+                << ",\"DepthU\":" << config.mt.k
+                << ",\"NonTemporalA\":" << config.cache_hints_a
+                << ",\"NonTemporalB\":" << config.cache_hints_b
+                << "},\"modeled\":{\"macro_tile\":[" << config.mt.m << ',' << config.mt.n << ',' << config.mt.k
+                << "],\"workgroup_mapping\":{\"wgm\":" << mapping.wgm
+                << ",\"wgmxcc\":" << mapping.wgmxcc
+                << ",\"wgmxccchunk\":" << mapping.wgmxccchunk
+                << ",\"wgmxccsplitk\":" << mapping.wgmxccsplitk
+                << "},\"stagger\":{\"staggerU\":" << stagger.staggerU
+                << ",\"staggerUMapping\":" << stagger.staggerUMapping
+                << ",\"staggerUStrideShift\":" << stagger.staggerUStrideShift
+                << "},\"launch\":{\"stream_k\":0,\"reduction\":\"none\",\"grid\":" << grid
+                << ",\"active_cus\":" << activeCUs << ",\"timesteps\":" << timesteps
+                << ",\"split_factor\":" << split << "}}}";
         }
-        json << "]}\n";
+        out << "]}\n";
         const auto requestPath = output + ".request.json";
-        writeFresh(requestPath, json.str());
+        writeFresh(requestPath, out.str());
         plan.requestPath = requestPath;
         plan.summary
             = "Origami ranked " + std::to_string(count)
