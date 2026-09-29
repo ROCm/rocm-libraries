@@ -58,6 +58,83 @@ def isSubtileMultiDU(kernel) -> bool:
     du = kernel["DepthU"]
     return kernel.get("_DepthUA", du) < du or kernel.get("_DepthUB", du) < du
 
+
+def plsinEarlyStoreTile(kernel) -> bool:
+    """Whether this tile's fused arm may carry early-store work at all.
+
+    A property of the tile alone, so the knobs that reshape the fused epilogue
+    can all be scoped the same way and a tile that can never benefit keeps its
+    shipped schedule and its paired dwordx4 byte-for-byte.
+
+    Excludes MT>256x256, which lends its K=0 operand registers to the store (it
+    needs 284 VGPRs against a 256 cap without them); any store moved earlier
+    would run while those registers are still being read.
+    """
+    if not kernel.get("UseSubtileImpl"):
+        return False
+    if not plsinSubtileTypes(kernel):
+        return False
+    return kernel["MacroTile0"] <= 256 and kernel["MacroTile1"] <= 256
+
+
+def plsinSubtileTypes(kernel) -> bool:
+    """Whether this kernel has the operand types the PLSIN store work was built for.
+
+    MXF4 in, bf16 out. The store reshaping reasons about a specific accumulator
+    and pack layout, and the register budget it spends is only available at this
+    combination: a bf16-input kernel of the same tile fills the VGPR file with
+    accumulators, so the same pack ring overflows it and the kernel cannot be
+    assembled. Tile scope alone does not separate the two, since both reach
+    MT256x256, so the types are checked as well.
+    """
+    pt = kernel["ProblemType"]
+    return pt["DataTypeA"].isFloat4() and pt["DataTypeB"].isFloat4() \
+        and pt["DestDataType"].isBFloat16()
+
+
+def isMxf4SubtilePath(kernel) -> bool:
+    """Single scope gate for the MXF4 subtile optimizations.
+
+    UseSubtileImpl alone is too wide: it is enabled on gfx1250 as well as
+    gfx950, and gfx950 MX merely *requires* it rather than being the only thing
+    that sets it. Gating on UseSubtileImpl would therefore change codegen for
+    non-MXF4 subtile kernels. Every optimization added here is scoped through
+    this predicate so kernels outside MXF4-in/bf16-out are generated exactly as
+    they are on develop.
+
+    Tolerant of partially-built state: naming runs on dicts whose data types may
+    still be raw values rather than DataType objects, and treats anything it
+    cannot classify as "not MXF4", which is the conservative answer.
+    """
+    try:
+        return bool(kernel.get("UseSubtileImpl")) and plsinSubtileTypes(kernel)
+    except (KeyError, TypeError, AttributeError):
+        return False
+
+
+def plsinBlockSchedTile(kernel) -> bool:
+    """Whether block scheduling may be built for this tile.
+
+    Block scheduling is the partitioned K reduction, the staged fused store and
+    the NGLL/NLL merge taken together: the tile is cut into N blocks, each block
+    runs its whole K reduction and then stores while the next block's MFMAs are
+    already issuing.
+
+    Scoped to MT256x256, the single geometry it has been measured on. Every
+    other tile keeps its shipped schedule, which is what lets this ride
+    alongside tiles that are being tuned separately. The scope is deliberately
+    an equality rather than a bound -- MT192x256 also satisfies
+    ``plsinEarlyStoreTile`` and would otherwise be dragged in untested.
+    """
+    if not plsinEarlyStoreTile(kernel):
+        return False
+    return kernel["MacroTile0"] == 256 and kernel["MacroTile1"] == 256
+
+
+def plsinStagingEligible(kernel) -> bool:
+    """Whether the per-partition staged store may be built for this kernel."""
+    return plsinBlockSchedTile(kernel)
+
 # Global
 _global_ti = rocIsa.getInstance()
 
@@ -529,13 +606,15 @@ def swizzleGeometry(solution, tc: str) -> dict:
     `solution` may be a partly derived state; only MIInputPerThread{tc}, MatrixInst{M,N,K},
     WavefrontSize and ProblemType.DataType{tc} are read.
     """
-    bpe       = int(solution["ProblemType"][f"DataType{tc}"].numBytes())
+    # bpe may be sub-byte (0.5 for F4); keep it fractional so we don't truncate to 0.
+    bpe       = solution["ProblemType"][f"DataType{tc}"].numBytes()
     miInput   = solution[f"MIInputPerThread{tc}"]
     miMorN    = solution["MatrixInstM"] if tc == "A" else solution["MatrixInstN"]
     # Pack several MI steps into one load when one operand is narrower than a dwordx4.
-    packK     = max(1, SWIZZLE_LOAD_BYTES // miInput // bpe)
+    # Multiply the divisor terms first so a sub-byte bpe doesn't cause a divide-by-zero.
+    packK     = max(1, int(SWIZZLE_LOAD_BYTES // (miInput * bpe)))
     miOperand = miInput * packK
-    laneSize  = min(miOperand, SWIZZLE_LOAD_BYTES // bpe)
+    laneSize  = min(miOperand, int(SWIZZLE_LOAD_BYTES // bpe))
     # Elements the wave holds vs. distinct elements the instruction consumes.
     dupFactor = max(1, (solution["WavefrontSize"] * miInput) // (miMorN * solution["MatrixInstK"]))
     lanesUsed = solution["WavefrontSize"] // dupFactor
