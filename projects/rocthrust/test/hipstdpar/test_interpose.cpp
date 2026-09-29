@@ -105,6 +105,11 @@ __attribute__((noinline)) void* runtime_memalign(std::size_t alignment, std::siz
   return __libc_memalign(alignment, size);
 }
 
+__attribute__((noinline)) void* runtime_aligned_alloc(std::size_t alignment, std::size_t size)
+{
+  return std::aligned_alloc(alignment, size);
+}
+
 __attribute__((noinline)) void runtime_free(void* p)
 {
   std::free(p);
@@ -335,6 +340,23 @@ int main()
     // free(nullptr) is required to be a no-op.
     void* volatile null_pointer = nullptr;
     runtime_free(null_pointer);
+    if (hipPeekAtLastError() != hipSuccess)
+    {
+      return EXIT_FAILURE;
+    }
+
+    // Freeing must not leave a HIP error pending either, including for a
+    // page-aligned block, which v1 fails to un-advise.
+    auto page_aligned = runtime_aligned_alloc(4096, 4096);
+    if (!page_aligned)
+    {
+      return EXIT_FAILURE;
+    }
+    runtime_free(page_aligned);
+    if (hipPeekAtLastError() != hipSuccess)
+    {
+      return EXIT_FAILURE;
+    }
 
 #if defined(__HIPSTDPAR_INTERPOSE_ALLOC_CAN_MMAP__)
     // mmap reports failure with MAP_FAILED, not nullptr.
