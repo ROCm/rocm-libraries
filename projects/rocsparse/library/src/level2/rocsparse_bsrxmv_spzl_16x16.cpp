@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_bsrxmv_spzl.hpp"
+#include "rocsparse_grid.hpp"
 
 namespace rocsparse
 {
@@ -244,12 +245,8 @@ void rocsparse::bsrxmvn_16x16(rocsparse_handle     handle,
     // (instantiated as int64_t), so handing it to dim3 unclamped narrows it to
     // unsigned int and silently drops most of the matrix. The kernel grid-strides
     // over the block rows, so an undersized grid still covers [0, size).
-    // Replace with rocsparse::get_grid_size(size, handle->properties.maxGridSize[0])
-    // once PR #11512 lands.
-    const int64_t num_blocks_x = rocsparse::min(
-        static_cast<int64_t>(size), static_cast<int64_t>(handle->properties.maxGridSize[0]));
     THROW_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrxmvn_16x16_kernel<256, T>),
-                                      dim3(num_blocks_x),
+                                      dim3(rocsparse::get_grid_size_x(handle, size, 256)),
                                       dim3(256),
                                       0,
                                       handle->stream,
