@@ -166,31 +166,31 @@ using default_or_custom_config =
 enum class target_arch : unsigned int
 {
     // This must be zero, to initialize the device -> architecture cache
-    invalid = 0,
-    gfx803  = 803,
-    gfx900  = 900,
-    gfx906  = 906,
-    gfx908  = 908,
-    gfx90a  = 910,
-    gfx942  = 942,
-    gfx950  = 950,
-    gfx1010 = 1010,
-    gfx1011 = 1011,
-    gfx1012 = 1012,
-    gfx1030 = 1030,
-    gfx1100 = 1100,
-    gfx1101 = 1101,
-    gfx1102 = 1102,
-    gfx1103 = 1103,
-    gfx1150 = 1150,
-    gfx1151 = 1151,
-    gfx1152 = 1152,
-    gfx1153 = 1153,
-    gfx1200 = 1200,
-    gfx1201 = 1201,
-    gfx1250 = 1250,
+    invalid        = 0,
+    gfx803         = 803,
+    gfx900         = 900,
+    gfx906         = 906,
+    gfx908         = 908,
+    gfx90a         = 910,
+    gfx942         = 942,
+    gfx950         = 950,
+    gfx1010        = 1010,
+    gfx1011        = 1011,
+    gfx1012        = 1012,
+    gfx1030        = 1030,
+    gfx1100        = 1100,
+    gfx1101        = 1101,
+    gfx1102        = 1102,
+    gfx1103        = 1103,
+    gfx1150        = 1150,
+    gfx1151        = 1151,
+    gfx1152        = 1152,
+    gfx1153        = 1153,
+    gfx1200        = 1200,
+    gfx1201        = 1201,
+    gfx1250        = 1250,
     gfx1250_strict = 1250,
-    unknown = std::numeric_limits<unsigned int>::max(),
+    unknown        = std::numeric_limits<unsigned int>::max(),
 };
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
@@ -232,6 +232,7 @@ enum class gpu
     mi308x,
     mi325x,
     mi350x,
+    mi355x,
     mi455x
 };
 
@@ -260,7 +261,8 @@ constexpr gen gen_from_target_arch(target_arch i)
         case target_arch::gfx1153: return gen::rdna3;
         case target_arch::gfx1200:
         case target_arch::gfx1201: return gen::rdna4;
-        case target_arch::gfx1250: return gen::cdna5; // this also covers gfx1250-strict as it also maps to gfx1250
+        case target_arch::gfx1250:
+            return gen::cdna5; // this also covers gfx1250-strict as it also maps to gfx1250
         case target_arch::unknown:
         case target_arch::invalid: return gen::unknown;
     }
@@ -269,6 +271,7 @@ constexpr gen gen_from_target_arch(target_arch i)
 constexpr std::tuple<std::string_view, gpu> target_gpu_names[] = {
     std::make_tuple<std::string_view, gpu>("MI455X", gpu::mi455x),
     std::make_tuple<std::string_view, gpu>("MI350X", gpu::mi350x),
+    std::make_tuple<std::string_view, gpu>("MI355X", gpu::mi355x),
     std::make_tuple<std::string_view, gpu>("MI325X", gpu::mi325x),
     std::make_tuple<std::string_view, gpu>("MI308X", gpu::mi308x),
     std::make_tuple<std::string_view, gpu>("MI300A", gpu::mi300a),
@@ -379,9 +382,9 @@ inline hipError_t get_device_arch(int device_id, target_arch& arch)
     }
 
     // `gfx1250-strict` isn't valid C++ syntax, so if gcnArchName is `gfx1250-strict`, it will be converted to `gfx1250_strict` in parse_gcn_arch.
-    char* arch_name = device_props.gcnArchName;
-    char hyphen = '-';
-    char underscore = '_';
+    char* arch_name     = device_props.gcnArchName;
+    char  hyphen        = '-';
+    char  underscore    = '_';
     char* arch_name_end = arch_name + std::strlen(arch_name);
     std::replace(arch_name, arch_name_end, hyphen, underscore);
 
@@ -533,14 +536,14 @@ struct target
                      gpu          s         = gpu::generic,
                      rep          r         = rep::amdgcn,
                      unsigned int warp_size = arch::wavefront::min_size())
-        : g(gen_from_target_arch(i)), i(i), s(s), r(r), warp_size(warp_size){};
+        : g(gen_from_target_arch(i)), i(i), s(s), r(r), warp_size(warp_size) {};
 
     constexpr target(gen          g         = gen::unknown,
                      target_arch  i         = target_arch::unknown,
                      gpu          s         = gpu::generic,
                      rep          r         = rep::amdgcn,
                      unsigned int warp_size = arch::wavefront::min_size())
-        : g(g), i(i), s(s), r(r), warp_size(warp_size){};
+        : g(g), i(i), s(s), r(r), warp_size(warp_size) {};
 
     // Host runtime constructor
     target(const hipStream_t stream)
