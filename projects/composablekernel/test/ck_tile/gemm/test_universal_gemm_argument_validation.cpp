@@ -14,10 +14,11 @@ using Col = ck_tile::tensor_layout::gemm::ColumnMajor;
 
 struct MockBlockGemmShape
 {
-    static constexpr ck_tile::index_t kclusterM = 1;
-    static constexpr ck_tile::index_t kclusterN = 1;
-    static constexpr ck_tile::index_t kclusterK = 1;
-    static constexpr bool PermuteA              = false;
+    [[maybe_unused]] static constexpr ck_tile::index_t kclusterM = 1;
+    [[maybe_unused]] static constexpr ck_tile::index_t kclusterN = 1;
+    [[maybe_unused]] static constexpr ck_tile::index_t kclusterK = 1;
+    static constexpr bool PermuteA                               = false;
+    static constexpr bool PermuteB                               = false;
 
     struct WarpTile
     {
@@ -55,10 +56,11 @@ struct MockGemmPipeline
     using BElementWise   = ck_tile::element_wise::PassThrough;
     using BlockGemmShape = MockBlockGemmShape;
 
-    static constexpr ck_tile::index_t BlockSize = 64;
-    static constexpr bool kPadM                 = false;
-    static constexpr bool kPadN                 = false;
-    static constexpr bool kPadK                 = false;
+    [[maybe_unused]] static constexpr ck_tile::index_t BlockSize = 64;
+    static constexpr bool kPadM                                  = false;
+    static constexpr bool kPadN                                  = false;
+    static constexpr bool kPadK                                  = false;
+    static constexpr bool Preshuffle                             = false;
 
     template <bool>
     static constexpr ck_tile::index_t GetVectorSizeA()
