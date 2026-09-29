@@ -19,7 +19,7 @@ estimates, shipping order, and acceptance checklists are maintained separately.
 | | |
 |---|---|
 | **Basis** | Source review against `develop` at [26b228bb57890bb9a2016d0c8d5d55eaa1b4b1ef](https://github.com/ROCm/rocm-libraries/commit/26b228bb57890bb9a2016d0c8d5d55eaa1b4b1ef), 2026-09-17. Every `file:line` anchor and both §4B atom tables are valid against **that tree**; public ISA XML checked 2026-09-23. **Re-verify after any rebase that advances the base** — see "Keeping it current". |
-| **Method** | Initial review: source exploration of both engines. Scores in §2.4 use the criteria in §2.2 and source anchors in §2.6. Review corrections: public ISA XML and pinned LLVM source comparison, plus a Python host-side block-scale GEMM validator, signature, and IR-parameter probe. No GPU execution or numerical validation. Silicon claims come from [`matrix_instructions_summary.md`](./matrix_instructions_summary.md); declared atoms come from [arch_specs.json](../../python/rocke/core/arch/data/arch_specs.json). |
+| **Method** | Source inspection of both engines, comparison with public ISA XML and pinned LLVM sources, and Python host-side checks of the block-scale GEMM validator, signature, and IR parameters. Scores use §2.2's criteria and §2.6's source anchors. No GPU execution or numerical validation. Silicon claims come from [`matrix_instructions_summary.md`](./matrix_instructions_summary.md); declared atoms come from [arch_specs.json](../../python/rocke/core/arch/data/arch_specs.json). |
 | **Out of scope** | Runtime/dispatch dtype validation, the provider's C-api surface, and any measurement. |
 | **Keeping it current** | When a dtype's support changes at any layer, update the affected row(s) and the §2.6 anchors in the same change. The criteria (§2.2) and rubric (§2.3) are the stable part; the scores are not. **Line anchors and the §4B atom tables are hand-maintained mirrors of the basis tree and go stale on rebase** — an arch entry gaining or losing atoms upstream silently invalidates §4B without touching this file. Re-check both against the new base before merging any rebase. |
 
@@ -62,11 +62,10 @@ helpers/atoms, never as first-class `Type` objects (see §4).
 > and `pk_bf6_t = pk_float6_e3m2_t` (`pk_f6.hpp:294-295`), `pk_int4_t`
 > (`pk_int4.hpp:17`), `e8m0_t` and `e5m3_t` for MX scales (`e8m0.hpp:54`,
 > `e5m3.hpp:37`), and `tf32_t = tfloat32_t` (`tfloat32.hpp:68`) — each with a
-> `native_t<>` specialization mapping the logical type to its storage. That
-> separation of *logical type* from *storage width* is what lets a sub-byte format
-> be named in an API signature without becoming an LLVM scalar type, and it is the
-> missing ingredient behind the C5=0 scores in §2.4. Noted as a design reference,
-> not a proposal in this document's scope.
+> `native_t<>` specialization mapping the logical type to its storage. This
+> separates the logical format named in an API from its storage representation.
+> rocKE's dedicated packed-format paths can provide support without a first-class
+> IR `Type`; C5 separately measures whether kernel families accept the format.
 
 **Reduced-precision compute (the "tf32 request") is a mode, not a storage type.**
 It never appears as a tensor dtype: storage stays `f32` and the *precision* is
@@ -93,8 +92,7 @@ or TF32-request mapping currently exists.
 `u8/u16/u32/u64`, and a distinct `bool` (predicates reuse `i1`). No engine
 references them.
 
-Engine parity: **10/10 identical** — no dtype exists in one engine but not the
-other. This is the byte-identity invariant working as intended.
+Both engines define the same set of **10 scalar IR types**.
 
 ---
 
@@ -118,7 +116,7 @@ provider whose accepted dtype set defines the must-not-regress floor).
 
 | # | Criterion | What it asks | Rationale — where the requirement comes from |
 |---|---|---|---|
-| **C1** | **IR representability** | Is the dtype a first-class `Type` in *both* engines, byte-identically? | hipDNN attaches a `DataType` to every tensor descriptor; if rocKE cannot *name* the type, no descriptor carrying it can ever be honored. CK makes the same choice — every supported type is a real C++ type (`half_t`, `bhalf_t`, `f8_t`, …), not an untyped byte blob. This is the gate all other criteria sit behind. |
+| **C1** | **IR representability** | Is the dtype a first-class `Type` in *both* engines, byte-identically? | hipDNN's `DataType` enum and CK's named C++ types provide logical type identities. C1 measures first-class representation in rocKE's IR, separately from physical storage. Dedicated helpers and atoms can support packed formats with C1=0; C2–C6 are assessed independently. |
 | **C2** | **Compute + MMA lowering** | Can the emitter lower arithmetic on it, and does a matrix atom (MFMA/WMMA) accept it on some target arch? | This is the difference between "storable" and "fast." CK dispatches its xdlops/wmma pipelines per dtype; MIOpen's conv solvers are keyed by dtype for the same reason. A dtype with no atom can only ever be a storage/epilogue type, which caps every downstream family. |
 | **C3** | **Conversion completeness** | Are casts to **and** from the `f32` hub present, plus the direct sibling casts that avoid a double bounce, with correct rounding/saturation? | Every hipDNN plan in this repo asserts `computeDataType() == DataType::FLOAT` (SDPA, RMSNorm, batchnorm, resample), so *every* tensor dtype must round-trip through f32 or it cannot participate. CK's `type_convert<Dst,Src>` is deliberately **total** over its type set; partial conversion coverage is the single most common way a dtype is "supported" on paper but unusable in a fusion. |
 | **C4** | **Memory I/O plumbing** | Scalar load/store, vectorised (`n∈{2,4,8}`) load/store, and pack/unpack at the helper surface — not just raw IR primitives. | A tensor dtype is only usable if a kernel can move it. CK exposes `buffer_load`/`buffer_store` at every vector width for each supported type; rocKE's equivalent is `helpers/io.py`. If `io.py` raises `ValueError` on a dtype, every small-op family (norm, reduce, elementwise, transpose) is closed to it regardless of what the compiler can express. |
@@ -155,13 +153,10 @@ planning questions and deliberately live outside this document (see
 "Scope" at the top). A 0% row is not automatically more urgent than a
 94% row.
 
-> Sourcing note: the hipDNN and MIOpen statements are cited from files in this
-> repo (paths given inline). **CK** is also in this monorepo
-> (`projects/composablekernel`), so CK claims below are line-cited too. Note that
-> "CK" covers two type vocabularies that differ on exactly the points this
-> document leans on: **classic CK** (`include/ck/`) and **CK-Tile**
-> (`include/ck_tile/`). Where they disagree — notably on FP8 dialect modelling —
-> both are named explicitly rather than merged.
+> Source references use repository-relative paths. CK resides under
+> `projects/composablekernel`; references distinguish classic CK (`include/ck/`)
+> from CK-Tile (`include/ck_tile/`), particularly where their FP8 dialect models
+> differ.
 
 ### 2.4 Scored matrix
 
@@ -213,16 +208,12 @@ mode. The missing selector and precision contract are described in §2.5.
   for both.
 - **`fp8e4m3` / `bf8e5m2` C3=1** — `↔f32` only. No `→f16`, `→bf16`, or `→i8`,
   which is exactly the cast a mixed-precision attention inner loop wants.
-- **`fp8e4m3` / `bf8e5m2` C4=1** — one surface only, in one direction. The
-  *generic* helpers are closed: `helpers/io.py:51-62` (`io_ir_type`) raises
-  `ValueError` for anything outside f16/fp16/bf16, which shuts `load_scalar`,
-  `load_vec`, `store_scalar`, `store_vec` and `pack_f32_to` to fp8/bf8. But a
-  **packed store path does exist**: `pack_quant_chunk_f32` (`io.py:260-297`)
-  accepts `qdtype ∈ {"fp8","fp8e4m3","bf8","bf8e5m2","i8"}` and emits
-  `cvt_pk_{fp8,bf8,i8}_f32x4`, and `store_packed_chunk` (`io.py:300-315`) writes
-  the result. So a kernel *can* move fp8/bf8 out through the helper layer — it
-  just cannot read it back in, and has no scalar or arbitrary-width form. That is
-  Partial (1), not Absent (0).
+- **`fp8e4m3` / `bf8e5m2` C4=1** — packed output helpers are available.
+  `pack_quant_chunk_f32` (`io.py:260-297`) accepts `fp8`, `fp8e4m3`, `bf8`,
+  `bf8e5m2`, and `i8`, emits `cvt_pk_{fp8,bf8,i8}_f32x4`, and supplies the result
+  to `store_packed_chunk` (`io.py:300-315`). The generic `load_scalar`, `load_vec`,
+  `store_scalar`, `store_vec`, and `pack_f32_to` helpers reject FP8/BF8 through
+  `io_ir_type` (`io.py:51-62`). Coverage is limited to packed output.
 - **`fp8e4m3` / `bf8e5m2` C5=1** — present in block-scale GEMM A/B, MoE-fp8, and
   attention K/V, but **absent from universal GEMM** (`gemm_universal.py:659`
   raises `NotImplementedError` for any dtype that is not `F16`/`BF16`) and from
@@ -250,8 +241,7 @@ mode. The missing selector and precision contract are described in §2.5.
   **C5=1** — quant epilogues and the gfx1151 integer WMMA GEMM instances in §5
   exist. Matrix-family reach remains limited to targets with the `iu8` WMMA
   atom and packed-input builders; universal/MFMA GEMM and attention do not
-  expose i8. The score remains Partial, but is not an assertion that integer
-  GEMM is absent.
+  expose i8.
   **C6=2 — `i8` is the one integer row where C6 applies.** Unlike `i32`/`i16`/
   `i64`, `i8` here is a *quantized* type with a real numeric contract: rounding
   is RNE and saturation is a symmetric ±127 clamp (`quant.py:66-70,141-204`), and
@@ -428,9 +418,9 @@ Verbatim at the basis commit:
 | `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `..._16x16x64_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8 (+ fp8 block-scaled) |
 | `gfx11-generic` | same as `gfx1151` | f16, bf16, iu8, iu4 |
 
-- **`gfx1250` is fully present in the catalog.** It carries a complete entry —
-  target family, memory model, limits, and nine matrix atoms including the fp8
-  `SCALE`/`SCALE16` block-scaled slice. §4C.1 lists the omitted atoms.
+- The `gfx1250` catalog entry defines its target family, memory model, limits,
+  and nine matrix atoms, including FP8 `SCALE`/`SCALE16` forms. §4C.1 lists the
+  omitted block-scaled formats.
 - **No integer MFMA atom is declared on any CDNA arch**, even though the silicon
   has shipped `V_MFMA_I32_*_I8` since CDNA1. Integer matrix on CDNA is unwired
   software, not absent hardware.
@@ -445,9 +435,7 @@ separately in §4D.
 The part carries `V_WMMA_F32_16X16X128_F8F6F4`, a dedicated
 `V_WMMA_F32_32X16X128_F4`, and block-size-16 scaling. The catalog declares only the
 **fp8×fp8** `SCALE`/`SCALE16` slice; the entry's own comment records that
-"FP4/FP6/BF6 block-scaled forms remain intentionally omitted." The gap is therefore
-**the fp4/fp6 block-scaled WMMA atoms specifically**, within an otherwise complete
-and validated arch entry — it is not an absence of gfx1250 support.
+"FP4/FP6/BF6 block-scaled forms remain intentionally omitted."
 
 #### 4C.2 gfx1201 — fp8/bf8 WMMA is in silicon but undeclared
 RDNA4 provides `V_WMMA_F32_16X16X16_{FP8,BF8}_{FP8,BF8}` and the matching SWMMAC
@@ -460,7 +448,6 @@ undeclared rather than unavailable.
 them on any CDNA arch. This is why `i8` scores C2=2 and C5=1 (§2.5).
 
 #### 4C.4 RDNA4 / CDNA5 — integer WMMA is in silicon but undeclared
-The same gap exists on the WMMA side, and §4C.3 alone would understate it.
 gfx1201 provides `V_WMMA_I32_16X16X16_IU8` and `V_WMMA_I32_16X16X16_IU4` (plus a
 K32 `IU4` form and the matching `V_SWMMAC_*` sparse variants); gfx1250 provides
 `V_WMMA_I32_16X16X64_IU8` and `V_SWMMAC_I32_16X16X128_IU8`. rocKE declares no
