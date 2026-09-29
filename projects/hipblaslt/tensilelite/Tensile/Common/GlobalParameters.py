@@ -417,7 +417,7 @@ globalParameters["StinkyTofuCostOutputDir"] = ""
 #                  verdict is re-judged against the count that comes out
 # Higher values clamp to 3. Only mode 3 changes which kernels are accepted;
 # 1 and 2 change only how the accepted ones are coloured.
-globalParameters["StinkyTofuRegisterAllocation"] = 0
+globalParameters["StinkyTofuRegisterAllocation"] = 2
 
 globalParameters["DisableSTWaitCnt"] = True
 
