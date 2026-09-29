@@ -1,9 +1,9 @@
 # This reusable workflow is a narrow post-build instrumentation job for
 # hipBLASLt. It fetches BLAS artifacts from the just-finished TheRock build and
-# runs two small workloads and a four-worker / 100-kernel packaged-library
-# sweep under rocjitsu's race detector. The workloads run entirely under
-# CPU-side emulation, so the workflow uses the CPU build runner
-# instead of consuming GPU test capacity.
+# runs two small workloads and independent TensileLite/hipBLASLt-bench
+# packaged-library sweeps (four workers, 100 sampled kernels each) under
+# rocjitsu's race detector. The workloads run entirely under CPU-side emulation,
+# so the workflow uses the CPU build runner instead of consuming GPU test capacity.
 
 name: TheRock rocjitsu race check Linux
 
@@ -140,9 +140,9 @@ jobs:
 
       # Upload even on failure. The report directory contains the per-workload
       # stdout logs, rocjitsu sink files, race.log files, generated reduced
-      # TensileLite input/output, toy-sweep manifest/results/reproducers, and
-      # timing.tsv; without this artifact a failed detector run is usually not
-      # actionable from the console log alone.
+      # TensileLite input/output, independent sweep manifests/results/reproducers,
+      # and timing.tsv; without this artifact a failed detector run is usually
+      # not actionable from the console log alone.
       - name: Upload race reports
         if: ${{ always() }}
         uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2

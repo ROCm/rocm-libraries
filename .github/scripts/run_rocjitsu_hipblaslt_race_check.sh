@@ -7,8 +7,8 @@ set -euo pipefail
 # TODO(newling) Until rocjitsu is packaged as a complete runnable TheRock
 # artifact, we build the rocjitsu CLI locally. Monitor progress on packaging rocjitsu.
 #
-# The script runs small hipBLASLt and TensileLite GEMMs, followed by a bounded
-# four-worker / 100-kernel sweep of the same packaged device library.
+# The script runs small hipBLASLt and TensileLite GEMMs, followed by bounded
+# independent four-worker / 100-kernel sweeps through both clients.
 #
 # Basic flow:
 #   1. Use the TheRock artifact tree unpacked at ROCM_PATH.
@@ -16,7 +16,8 @@ set -euo pipefail
 #   3. Select a rocjitsu config for gfx942 or gfx950.
 #   4. Run hipblaslt-bench and a reduced TensileLite smoke with the race and
 #      logging plugins enabled in per-workload configs.
-#   5. Sweep 100 packaged kernels with four cases each; see rocjitsu_race_sweep.md.
+#   5. Reconstruct, sample and exercise packaged kernels through each client;
+#      see rocjitsu_race_sweep.md for the metadata-derived case policy.
 
 # These defaults match the GitHub Actions workspace layout: ROCM_PATH is the
 # unpacked TheRock artifact tree, ROCJITSU_SOURCE_DIR is the checked-out
@@ -512,7 +513,7 @@ run_timed "rocjitsu version" show_rocjitsu_version
 
 check_status=0
 
-# Run all three workload checks even if an earlier one fails. That gives the uploaded
+# Run all four workload checks even if an earlier one fails. That gives the uploaded
 # race-reports artifact a complete picture for the failing CI attempt instead of
 # forcing a second long run just to learn whether the other workload also broke.
 set +e
@@ -520,19 +521,28 @@ run_timed "hipblaslt-bench race check" run_hipblaslt_bench_check
 hipblaslt_status=$?
 run_timed "tensilelite-client race check" run_tensilelite_client_check
 tensilelite_status=$?
-# Reuse the emulator, client, runtime paths and target already prepared above.
-# Keep this inside the advisory job and preserve its diagnostics even when an
-# earlier workload failed. No separate device-library build or package is used.
-run_timed "100-kernel toy race sweep" \
+# Each backend reconstructs its inventory independently from the PR artifact.
+# Share only policy/seed so their sampled cases are comparable. A backend failure
+# never prevents the other backend from running. At most four workers run at once.
+sweep_seed="${ROCJITSU_SWEEP_SEED:-${GITHUB_SHA:-local}}"
+run_timed "TensileLite sampled race sweep" \
   python3 "$(dirname "${BASH_SOURCE[0]}")/rocjitsu_race_sweep.py" \
-    --rocjitsu "${ROCJITSU_BIN}" \
-    --client "${TENSILELITE_CLIENT}" \
-    --config "${ROCJITSU_CONFIG}" \
-    --target "${ROCJITSU_GPU_TARGET}" \
+    --backend tensile --seed "${sweep_seed}" \
+    --rocjitsu "${ROCJITSU_BIN}" --client "${TENSILELITE_CLIENT}" \
+    --config "${ROCJITSU_CONFIG}" --target "${ROCJITSU_GPU_TARGET}" \
     --library-dir "${ROCM_PATH}/lib/hipblaslt/library" \
-    --reports "${RACE_REPORT_DIR}/toy-sweep" \
-    --workers 4 --kernels 100 --batch-size 10 --timeout 120
-sweep_status=$?
+    --reports "${RACE_REPORT_DIR}/sweep-tensile" \
+    --workers 4 --kernels 100 --timeout 120
+tensile_sweep_status=$?
+run_timed "hipBLASLt-bench sampled race sweep" \
+  python3 "$(dirname "${BASH_SOURCE[0]}")/rocjitsu_race_sweep.py" \
+    --backend bench --seed "${sweep_seed}" \
+    --rocjitsu "${ROCJITSU_BIN}" --client "${HIPBLASLT_BENCH}" \
+    --config "${ROCJITSU_CONFIG}" --target "${ROCJITSU_GPU_TARGET}" \
+    --library-dir "${ROCM_PATH}/lib/hipblaslt/library" \
+    --reports "${RACE_REPORT_DIR}/sweep-bench" \
+    --workers 4 --kernels 100 --timeout 120
+bench_sweep_status=$?
 set -e
 
 if [[ "${hipblaslt_status}" -ne 0 ]]; then
@@ -545,8 +555,8 @@ if [[ "${tensilelite_status}" -ne 0 ]]; then
   check_status=1
 fi
 
-if [[ "${sweep_status}" -ne 0 ]]; then
-  echo "toy race sweep failed with status ${sweep_status}; see toy-sweep reports" >&2
+if [[ "${tensile_sweep_status}" -ne 0 || "${bench_sweep_status}" -ne 0 ]]; then
+  echo "sampled sweeps: tensile=${tensile_sweep_status}, bench=${bench_sweep_status}; see separate sweep reports" >&2
   check_status=1
 fi
 
