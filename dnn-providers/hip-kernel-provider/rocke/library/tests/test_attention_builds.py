@@ -3389,7 +3389,7 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         gfx942 IR golden: this fails fast with a readable message if the
         predicate is ever loosened, instead of surfacing as an opaque hash diff.
         """
-        from dispatch.attention.gfx942_dense import _dense_spec
+        from dispatch.attention import attention_tuning_spec
         from dispatch.attention.common import AttentionRequest
 
         req = AttentionRequest(
@@ -3404,7 +3404,7 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
             dtype="bf16",
             mask_type=1,  # causal
         )
-        spec = _dense_spec(req)
+        spec = attention_tuning_spec(req, "gfx942_dense").kernel_spec
         if not spec.persistent:
             self.skipTest(
                 "shipped gfx942 dispatch no longer selects persistent for this "

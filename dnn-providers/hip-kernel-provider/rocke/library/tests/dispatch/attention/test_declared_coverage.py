@@ -113,7 +113,7 @@ class TestDeclaredCoverage(unittest.TestCase):
             by_name["attention_gfx942_dense_pipe"]["capability"]["arches"], ["gfx942"]
         )
         self.assertEqual(
-            by_name["attention_gfx950_dense"]["capability"]["arches"], ["gfx950"]
+            by_name["attention_gfx950_dense_persist_widedma_default"]["capability"]["arches"], ["gfx950"]
         )
         self.assertEqual(
             by_name["attention_gfx950_d256"]["capability"]["arches"], ["gfx950"]

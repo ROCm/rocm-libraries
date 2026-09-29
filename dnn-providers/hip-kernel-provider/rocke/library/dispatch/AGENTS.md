@@ -18,15 +18,15 @@ passed from Python, it does not recompute it.
 
 **Standalone candidates are a bounded exception.** A candidate that owns its own
 kernel module builds that kernel's own spec here, tuning included:
-`gfx950_dense.py::_dense_spec` resolves tile geometry from the frozen variant plus persist /
-wide-DMA, and `gfx942_dense.py::_dense_spec` resolves those plus `waves_per_eu`. Those specs
+`gfx950_dense.py::_base_spec` resolves tile geometry from the frozen variant plus persist /
+wide-DMA, and `gfx942_dense.py::_base_spec` resolves those plus `waves_per_eu`. Those specs
 are consumed only by their own builder and never enter the C++ parity identity. One
 rule governs the exception: **any value the kernel bakes into its `kernel_name` must
 be resolved into the concrete spec before build**. The default must come from the
-kernel's policy function; an explicit request/sweep override may replace it only
-when the body, symbol, and cache all read that same spec field. `gfx942_dense.py` calls
-`kernels.gfx942.attention_dense._tuned_waves_per_eu` for the default, then applies
-the shared `dense_waves_per_eu` override. The gfx942 symbol always carries WPE;
+kernel's policy function; a swept knob value may replace it only when the
+body, symbol, and cache all read that same spec field. `gfx942_dense.py` calls
+`kernels.gfx942.attention_dense._tuned_waves_per_eu` for the default, and the
+sweep's WPE loop varies it from there. The gfx942 symbol always carries WPE;
 gfx950 appends it when non-default. This keeps the emitted attribute and identity
 in lockstep for runtime caches and AOT packaging.
 
@@ -39,10 +39,10 @@ params). Correctness rests entirely on the key.
 
 | priority | candidate | declared arches | module | scope |
 |---|---|---|---|---|
-| 3 | `attention_gfx942_dense` | gfx942 | `gfx942_dense.py` | bf16/fp16 D64/D128 dense prefill, default **and** persistent grids (opt-in only) |
-| 3 | `attention_gfx950_dense` | gfx950 | `gfx950_dense.py` | persist + wide-DMA, default 256×64 tile (opt-in; production name) |
-| 3 | `attention_gfx950_dense_grid_default` | gfx950 | `gfx950_dense.py` | dense grid, default tile (opt-in) |
-| 3 | `attention_gfx950_dense_persist_default` | gfx950 | `gfx950_dense.py` | dense persist, default tile, no wide-DMA (opt-in) |
+| 3 | `attention_gfx942_dense` | gfx942 | `gfx942_dense.py` | bf16/fp16 D64/D128 dense prefill; grid and persistence are knobs (`spec_id=gfx942_dense`, opt-in) |
+| 3 | `attention_gfx950_dense_grid_default` | gfx950 | `gfx950_dense.py` | dense grid, 256×64 tile (`spec_id=gfx950_dense_grid_default`, opt-in) |
+| 3 | `attention_gfx950_dense_persist_default` | gfx950 | `gfx950_dense.py` | dense persist, 256×64 tile (opt-in) |
+| 3 | `attention_gfx950_dense_persist_widedma_default` | gfx950 | `gfx950_dense.py` | persist + wide-DMA, 256×64 tile (opt-in) |
 | 3 | `attention_gfx950_dense_grid_bm128` | gfx950 | `gfx950_dense.py` | dense grid, 128×64 tile (opt-in) |
 | 3 | `attention_gfx950_dense_persist_bm128` | gfx950 | `gfx950_dense.py` | dense persist, 128×64 tile (opt-in) |
 | 3 | `attention_gfx950_dense_persist_widedma_bm128` | gfx950 | `gfx950_dense.py` | persist + wide-DMA, 128×64 tile (opt-in) |
@@ -60,7 +60,7 @@ fallback for everything a specialized candidate does not claim.
 The priority-30 tuning candidates are generated from
 `GFX942_TUNING_VARIANTS` and `GFX950_TUNING_VARIANTS` (geometry: codepath,
 tile, warps, rows per warp, segments, compile backend). Every other tuning
-field on the tiled kernel specs is a declared `KnobAxis` in `tuning_common.py`
+field on the tiled kernel specs is a declared `KnobAxis` in `axes.py`
 (`_GFX950_2D_AXES`, `_GFX942_2D_AXES`, `_3D_AXES`); `test_tuning_space.py`
 fails if a kernel field is on no axis. Axes are ordered prerequisites-first,
 and the space is walked depth-first with the kernel's own spec validator
@@ -68,10 +68,11 @@ pruning illegal prefixes. There is no size cap: the full space is millions of
 specs per shape on the transposed paths, so `sweep_space` is a lazy stream and
 `sample_space(req, n, seed)` draws `n` random legal specs per candidate. Held
 out on purpose: `KNOWN_WRONG_KNOBS` (gfx942 `use_k_hbm_direct`). They reject
-`algorithm="auto"` before constructing a spec, so normal dispatch does not pay
-the enumeration cost and the historical winner is unchanged. Sweeps probe them
-with `algorithm="unified_tuning"` and execute the returned
-`AttentionTuningSpec`, which also owns its build, cache key, and launch grid.
+any request that does not pin both `algorithm="unified_tuning"` and their own
+`spec_id` before constructing a spec, so normal dispatch does not pay the
+enumeration cost and the historical winner is unchanged. Sweeps probe them
+through `opt_in_probe` and execute the returned `AttentionTuningSpec`, which
+also owns its build, cache key, and launch grid.
 
 Production `dispatch_attention` uses `ATTENTION_ROUTE_REGISTRY` (path labels
 plus pin-able specialized candidates). `registered_attention_combos` /
@@ -87,31 +88,67 @@ are accepted or rejected by the concrete spec and `supports_tiled_*` validators.
 This is deliberately separate from the heuristic production builders.
 
 Four candidate families are **opt-in only** and never win under `algorithm="auto"`:
-`attention_gfx942_dense`, every `attention_gfx950_dense*` variant, and
+`attention_gfx942_dense`, every `attention_gfx950_dense_*` variant, and
 `attention_gfx1250_wmma`, plus every priority-30 unified tuning candidate.
 Registering a kernel makes it reachable; making it an
 arch's default is a separate decision that wants benchmark evidence, so none
 of them silently displaces the unified path its arch routes to today.
 
-gfx950 dense is six frozen `(tile × persist × wide-DMA)` candidates sharing
-`algorithm="attention_dense"`. The production name `attention_gfx950_dense` is
-the persist + wide-DMA default-tile combo (`spec_id=gfx950_attention_dense`).
-Wide-DMA variants do not admit SWA or sinks; `dispatch_attention` uses
-`attention_ranker` so an unpinned request still follows the historical auto
-policy (default tile, persist once `nqb*Hq*B >= num_persistent`, wide DMA on
-aligned causal D128) rather than always picking the production name. Pin
-`dense_tile` / `dense_persistent` / `dense_wide_lds_dma` on `AttentionRequest`
-to filter, and `dense_waves_per_eu=1..8` to override the shipped WPE policy.
+### Dense and unified share one selection model
+
+A dense or unified tuning spec is an `AttentionTuningSpec` (path `dense`, `2d`
+or `3d`): a registered variant plus a canonical knob dict, named by
+`tuning_id = {variant_id}_wpe{N}@{config_key}`. `config_key` hashes an explicit,
+versioned payload (arch, path, variant, knobs) and is the same on every problem;
+the platform `ARCHITECTURE.md` section 11.1 has the full contract. Selection
+pins a spec on `AttentionRequest`:
+
+1. `algorithm` + `spec_id` name the candidate; an opt-in candidate admits a
+   request only when **both** match. The algorithm values are per family:
+   `attention_dense` for every dense variant, `unified_tuning` for every
+   unified tuning geometry, `wmma_attention_fwd` for the gfx1250 WMMA kernel.
+2. `tuning_knobs` (the knob dict recorded next to the id) rebuilds
+   the configuration directly; it must reproduce `tuning_id` unless
+   that is `auto`.
+3. Otherwise `tuning_id`: `auto` is the variant's default spec; any
+   other id is looked up in the production set only (a full-space id needs
+   its knobs). Ids are matched on their `config_key`, never the display stem.
+
+A pin that no longer resolves raises `rocke.dispatch.core.PinRefused` with the
+candidate's reason and never falls back to another kernel.
+
+There is no auto policy for dense: an unpinned request routes to the unified
+path, and nothing picks a tile, persistence or wide DMA on the caller's
+behalf. `attention_tuning_spec(req, spec_id, tuning_id, knobs)` and
+`tuning_spec_with_knobs(req, spec_id, knobs)` in `dispatch.attention` are the
+two helpers callers use; both go through dispatch, so they return exactly what
+a pinned request selects.
+
+Every spec a tuning candidate hands out comes from one canonicalize step,
+the shared `rocke.dispatch.tuning.KnobSpace.canonicalize` (attention's
+subclasses are `DenseSpace` in `dense_rules.py` and `UnifiedSpace` in
+`unified_rules.py`), whether it was swept,
+sampled, pinned by knobs, or found by id. Knobs that compile to the default
+are dropped (default values, restated policies, knobs the body does not read);
+illegal ones are refused with the reason (`KNOWN_WRONG_KNOBS`, fields on no
+axis, codepath-fixed knobs, kernel-validator rejections). So one kernel has
+one id, and a knob pin cannot reach a configuration a sweep would not.
+
+gfx950 dense is six frozen `(tile × persist × wide-DMA)` variants. The gate is
+the kernel's own `supports_attention_dense`: dispatch adds no eligibility rule
+of its own, so wide DMA is offered on every shape the kernel accepts.
 
 Each dense variant's `sweep_space` / `sample_space` walks the gfx950 dense knob
-space declared as `_GFX950_DENSE_AXES` in `tuning_common.py` (registered as
+space declared as `_GFX950_DENSE_AXES` in `axes.py` (registered as
 `("gfx950", "dense")`): K/V LDS pads, lazy rescale and its threshold, the PV
-schedule (IGLP versus the manual fence / sched_group template, one combined
-axis because they are mutually exclusive), exp2 and PV-loop codegen, the O
-store width, `num_persistent` (symbolic policies such as `gqa_pair` resolved
-per problem), `persist_decode`, and `interleave`. `production` sets every
-applicable knob to each legal value one at a time from the shipped spec;
-`full` walks or samples the pruned product. An explicit value equal to its
+scheduling knobs (`iglp_mode`, the fence and its mask, the sched_group
+template and its DS-read count, each on its own axis), exp2 and PV-loop
+codegen, the O store width, `num_persistent` (symbolic policies such as
+`gqa_pair` and CU multiples, resolved per problem), `persist_decode`, and
+`interleave`. `production` sets every applicable knob to each legal value one
+at a time from the default spec, pairing a value with its prerequisite when it
+is illegal alone; `full` walks or samples the pruned product. The kernel's
+spec validator is the only legality gate. An explicit value equal to its
 policy, or a knob the body does not read for that spec, re-emits the same IR
 under a new symbol, so `_dense_redundant_knob` prunes it. The field-coverage
 test in `test_tuning_space.py` classifies every `Gfx950AttentionDenseSpec`
@@ -121,14 +158,12 @@ gfx942 dense uses the same walk over `_GFX942_DENSE_AXES`
 (`("gfx942", "dense")`). It registers one candidate, so geometry
 (`persistent`, `block_m`, `block_n`) is swept rather than fixed by a variant,
 and the persistent-only knobs are pruned per spec. Its knobs are the K row and
-V row pads, the D64 K group pad, the conflict-free-V store and its swizzle
-(policy-on only, so the knobs can only turn them off), exp2, IGLP versus the
-PV fence (one axis), `pv_priority`, `pv_loop_order`, the bf16 O store width,
-and `causal_diag_split`. The LDS-saving knobs lead as enablers so an
-over-budget tile can still reach the setting that fits. Untunable here:
-`lds_num_buffers` (only 1 is implemented) and `lazy_rescale` (the body never
-reads it). `dense_persistent` / `dense_persist_decode` set away from `auto` pin
-their axes on both arches (`dense_pinned_axes`).
+V row pads, the D64 K group pad, the conflict-free-V store and its swizzle,
+exp2, `iglp` / `iglp_mode`, the PV fence mask, `pv_priority`,
+`pv_loop_order`, the bf16 O store width, and `causal_diag_split`. The
+LDS-saving knobs lead as enablers so an over-budget tile can still reach the
+setting that fits. Untunable here: `lds_num_buffers` (only 1 is implemented)
+and `lazy_rescale` (the body never reads it).
 `registered_attention_combos(req)` is the multi-engine bench
 entry: it probes `ATTENTION_EXECUTION_REGISTRY` for `req.arch` and flattens each
 candidate's `sweep_space` (dense, WMMA, and unified tuning). Routing-only
@@ -143,15 +178,31 @@ candidate has to carry it.
 
 ## Layout
 
-One module per architecture, each owning its candidates and exporting a
-`register(registry)`; `__init__.py` holds the request type, the registry
-assembly, and the entry points. gfx942 and gfx950 are split by kernel family:
+One module per architecture, each owning its candidates and exporting
+`register(route, execution)`: routing labels go on the route registry, anything
+with `build` and `bind_torch` on the execution registry too. `__init__.py`
+holds the registry assembly (one loop over the modules) and the entry points. gfx942 and gfx950 are split by kernel family:
 `gfx{942,950}_dense.py` own the standalone dense kernel's candidates, and
 `gfx{942,950}_unified.py` own every candidate that runs the unified tiled
 kernels (gfx942 `dense_pipe`, the gfx950 D256 fast path, and each arch's
-priority-30 tuning catalog). `common.py` holds what every candidate shares
-(request, spec, gates) and imports none of the arch modules, so assembly order
-does not matter. `generic.py` is for candidates declaring more than one arch --
+priority-30 tuning catalog). Both dense modules build their candidates with
+`candidate.make_dense_candidate`, and both unified catalogs with
+`candidate.make_tuning_candidate`; an arch module supplies only its base spec,
+validator, variants and features. The family-neutral machinery (axis
+helpers, the walk and sampler, `config_key` / `tuning_id`, `KnobSpace`,
+`make_tuned_candidate`, the conformance kit) is `rocke.dispatch.tuning` in the
+platform; attention keeps only its data and rules: `axes.py` (knob axes,
+production stacks, held-out knobs), `dense_rules.py` / `unified_rules.py` (the
+`KnobSpace` subclasses), and `candidate.py` (the two factories).
+`tests/dispatch/attention/test_tuning_contract.py` runs the conformance kit.
+
+**Adding a tuned family** (any operator, not only attention): follow the
+template in the platform `ARCHITECTURE.md` section 14 -- request and tuned
+spec in `common.py`, axes as data, a `KnobSpace` subclass with the kernel's
+rules, one `make_tuned_candidate` per variant, grid and block owned by the
+spec, and a test that calls `assert_tuning_contract`. `common.py` holds what every candidate
+shares (request, spec, gates) and imports none of the arch modules, so assembly
+order does not matter. `generic.py` is for candidates declaring more than one arch --
 the two unified paths and `d256_decode` -- which is not the same as portable:
 each still lists its arches explicitly, because there is no family wildcard.
 
@@ -182,7 +233,7 @@ Follow the `_make_d256_decode_candidate()` pattern in `generic.py`:
    `_selector_matches` → `supports_native_unified_attention` → cohort predicate →
    path check (`select_path() == "2d"` or `"3d"`).
 
-4. **Register** it from that module's `register(registry)`. A new arch module
+4. **Register** it from that module's `register(route, execution)`. A new arch module
    also needs one line in `__init__.py` to join the assembly loop.
 
    Point `build` at the real builder if the candidate has one. The unified
@@ -213,10 +264,8 @@ support `req` in two stages:
 2. A **ranker** — `Callable[(request, supported) -> reordered]` — reorders them
    best-first; `dispatch_attention` takes `ranked[0]`.
 
-When no ranker is supplied, the named default `attention_ranker` is used: gfx950
-dense variants are reordered so the auto-policy combo is first; every other
-candidate keeps registered `(priority, name)` order (`priority_ranker` is still
-the identity pass). A heuristic ranker is a **drop-in replacement** that
+When no ranker is supplied, `priority_ranker` (the identity pass) keeps
+registered `(priority, name)` order. A heuristic ranker is a **drop-in replacement** that
 scores candidates against problem metadata (or offline benchmark data) and sorts
 by score — no change to the registry or candidates. Safety invariant enforced by
 the registry: a ranker may reorder or drop candidates but **cannot introduce one
@@ -317,8 +366,8 @@ random walk uniform at each knob decision, not uniform over the whole legal
 set. `production` ignores `tuning_sample`.
 
 Dense candidates share the level context but own a small WPE axis: production
-walks the shipped policy plus WPE 2 and 4; full walks WPE 1 through 4. An
-explicit `dense_waves_per_eu` pin collapses either level to that one value.
+walks the shipped policy plus WPE 2 and 4; full walks WPE 1 through 4. WPE is
+part of the `tuning_id`, so an id replays one value.
 
 Every consumer takes `sweep_level` plus `candidate_prefix` / `tuning_id_prefix`:
 `run_sweep` (exposed as `--sweep-level` / `--sweep-tuning-sample` /

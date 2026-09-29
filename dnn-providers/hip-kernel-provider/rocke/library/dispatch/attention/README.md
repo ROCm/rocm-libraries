@@ -115,8 +115,12 @@ candidate            one geometry variant, fixed at registration
              = one concrete spec: validated, never a duplicate, stable identity
 ```
 
-Everything below lives in `tuning_common.py` except the geometry catalogs,
-which live in the arch modules.
+The axes and production stacks are data in `axes.py`; `dense_rules.py` and
+`unified_rules.py` state attention's legality rules as `KnobSpace`
+subclasses; `candidate.py` turns a variant into a registered candidate.
+Walking, sampling, canonicalizing and naming are the shared
+`rocke.dispatch.tuning` (platform `ARCHITECTURE.md` section 14). Geometry
+catalogs live in the arch modules.
 
 ### Variants: what a candidate fixes
 
@@ -133,10 +137,13 @@ Unified variant names are `attention_{arch}_u{path}_{variant_id}`, for example
 and `use_transposed_qk_32x32`. The gfx942 `gfx942_4warp_gqa` builder reads no
 tuning knobs, so its variant has no axes.
 
-The base spec is what the candidate would launch unswept. Unified tuning
-candidates build it with `tuning_specs.py` from the request and the variant.
-Dense candidates use their production factory (`_dense_spec`), so the first
-swept spec is always the shipped one.
+The base spec is what the candidate would launch unswept, and what
+`tuning_id="auto"` selects. Unified tuning candidates build it with
+`tuning_specs.py` from the request and the variant. Dense candidates build it
+in the arch module's `_base_spec` from the request and the variant's geometry;
+`candidate.make_dense_candidate` wraps it in an `AttentionTuningSpec` with
+`path="dense"`, so dense and unified specs carry the same `tuning_id`, build,
+cache key and launch methods.
 
 ### Axes: the knob space as data
 
@@ -151,8 +158,10 @@ tuple of `(field, value)` pairs, and `choices[0]` is always `()`, meaning
   vary while it is off.
 - `_choices_axis(name, values)`: every value, the base's included, for axes
   whose base comes from the request or a policy (dense geometry).
-- Combined axes, when knobs are mutually exclusive: dense `pv_schedule` puts
-  IGLP and the manual PV fence / sched_group template in one decision.
+
+Every knob is its own axis, on dense as on unified. Knobs the kernel refuses
+to combine (for example gfx950 IGLP with the manual PV fence) are separate
+axes, and the kernel's validator prunes the illegal combinations.
 
 `_AXES[(arch, path)]` holds the list for `2d`, `3d` and `dense` on each arch.
 The unified test `test_every_kernel_tuning_field_is_swept` and the dense
@@ -180,15 +189,15 @@ Some knobs are held out:
 A walk asks `is_valid(knobs)` for each prefix, with undecided axes at their
 base values. The checks run in this order:
 
-- **Unified:** `_policy_conflict` rejects exclusive knobs and knobs that only
-  exist on another codepath (softmax interleave off the transposed body,
-  `sched_barrier` off the 16x16 loop). Then `tuning_specs.py` builds the kernel
-  spec, so the spec's `__post_init__` and the kernel's `supports_tiled_*` run.
-  Last, on gfx950 2D, `_supports_tuning_spec` checks KQ-pad eligibility and a
-  static LDS model against the arch's LDS capacity.
-- **Dense:** `_dense_knob_spec` applies the knobs to the base spec, so the
-  dataclass validators run. It then drops any setting that would compile to
-  the same IR as another under a new symbol:
+- **Unified:** `_policy_conflict` rejects knobs that only exist on another
+  codepath (softmax interleave off the transposed body, `sched_barrier` off
+  the 16x16 loop), because they would re-emit the same IR under a new name.
+  Then `tuning_specs.py` builds the kernel spec, so the spec's `__post_init__`
+  and the kernel's `supports_tiled_*` run. Dispatch adds no legality rule of
+  its own: whatever the kernel accepts is offered.
+- **Dense:** `DenseSpace` (through `KnobSpace.canonicalize`) applies the
+  knobs to the base spec, so the dataclass validators run. It drops any
+  setting that would compile to the same IR as another under a new symbol:
   - a choice equal to the base value;
   - a changed `num_persistent` on a non-persistent spec;
   - an explicit value equal to what its `resolved_*` policy picks;
@@ -204,10 +213,28 @@ Because every relation points at an earlier axis, a failing prefix cannot be
 repaired later and its whole subtree is skipped. The one exception: while
 enabler axes are undecided, an invalid prefix is kept.
 
-Two more filters apply to dense before walking. `_DENSE_ARCH[arch].scope`
+### Canonicalization: one kernel, one id
+
+The walk prunes; canonicalization normalizes. Every spec a candidate hands out
+-- swept, sampled, pinned by knobs, or found by id -- is made by one function
+`KnobSpace.canonicalize` (through `DenseSpace` or `UnifiedSpace`), from the
+knob dict (`waves_per_eu` included):
+
+- **dropped**, because the result compiles to the kernel without them: values
+  equal to the default spec (or to the codepath's fixed value); on dense,
+  restated policies and the inert rules above; on unified, knobs only another
+  codepath emits and gated sub-knobs whose gate is off;
+- **refused**, with the reason: `KNOWN_WRONG_KNOBS`, fields no axis of that
+  variant sets (problem fields, variant geometry, untunable knobs, knobs out
+  of scope for the problem), changing a knob the codepath fixes, and whatever
+  the kernel spec or validator rejects.
+
+What remains is the canonical knob dict the spec carries as `knobs`, and the
+input to its `tuning_id`.
+
+One more filter applies to dense before walking. `_DENSE_ARCH[arch].scope`
 drops axes the base spec's problem or variant never reads, such as K/V row pads
-at head size 64. `dense_pinned_axes(request)` drops axes the request pins:
-`dense_persistent` or `dense_persist_decode` set to anything but `auto`.
+at head size 64.
 
 ### Walks: production, full, sample
 
@@ -227,29 +254,63 @@ returns the sample count, which is always 0 at `production`.
 `CandidateRegistry.iter_combos` calls `sample_space(req, n, seed)` when that
 count is positive and `sweep_space(req)` otherwise.
 
-Pins narrow a walk to one point on an axis:
+Selection pins a spec the same way for dense and unified:
 
-- `AttentionRequest.dense_waves_per_eu=1..8` pins dense WPE.
-- `dense_persistent` / `dense_persist_decode` pin those dense axes.
-- `algorithm` + `spec_id` pin a candidate.
-- `attention_tuning_id` makes a unified tuning candidate's `select_spec`
-  return exactly that spec. It searches the production specs first, then the
-  full space, so a sampled id still replays.
+- `algorithm` (`attention_dense` or `unified_tuning`) plus `spec_id` pin a
+  candidate. An opt-in candidate admits a request only when both name it, so
+  an unpinned request always routes to the unified path.
+- `tuning_knobs`, when set, is canonicalized directly into the spec:
+  constant time, no walk. With a non-`auto` `tuning_id` it must
+  reproduce that id, or the candidate refuses the request.
+- A bare `tuning_id` is looked up in the production set only; a full-space
+  (sampled) id must be pinned with its knobs. Ids match on `config_key`, not
+  the display stem. A pin that no longer resolves raises `PinRefused` with the
+  reason; nothing falls back. An id from
+  another variant is rejected before the search.
+- `tuning_id="auto"` selects the candidate's base spec.
 
-With `attention_tuning_id="auto"`, unified tuning candidates select their first
-production spec. Dense candidates always select the base spec.
+A candidate resolves a request once: `support` and `select_spec` share a
+per-candidate cache, so a pin is not resolved twice.
+
+The request carries no individual tuning fields: tile, persistence, wide DMA,
+`interleave`, `num_persistent` and `waves_per_eu` are all spec fields, reached
+through the knob dict. Callers use `attention_tuning_spec(req, spec_id,
+tuning_id, knobs)` to replay a recorded configuration, or
+`tuning_spec_with_knobs(req, spec_id, knobs)` to set knob values on the base
+spec. Both go through dispatch.
 
 ### Identity and deduplication
 
-Unified tuning specs carry `tuning_id`, a readable geometry/WPE prefix plus a
-hash of the complete spec (see "Concrete tuning specs" below). Dense specs are
-identified by `kernel_name()`, which tags every knob away from its default:
-gfx950 folds the codegen knobs into one `cg<hash>` token, and gfx942 appends a
-tag per knob. Samplers deduplicate by these identities. The benchmark lanes
-add a backstop: the combo sweep and dense table sweep hash the lowered IR with
-the kernel name blanked, and record a match as `duplicate` instead of running
-it. Their rows also carry `knobs`, the non-default dense fields in readable
-form.
+Every tuning spec carries `variant_id`, its canonical `knobs`, and
+
+```text
+tuning_id  = "{variant_id}_wpe{N}@{config_key}"
+config_key = hash(TUNING_ID_VERSION, ABI, arch, path, variant_id, knobs,
+                  fingerprint(the variant's defaults))
+```
+
+`config_key` hashes that explicit list, never the spec's dataclass fields, so
+it is the same on every problem the variant admits and does not move when a
+kernel spec gains a field (a change to the payload or the canonicalization
+rules bumps `TUNING_ID_VERSION` in `rocke.dispatch.tuning.identity`). gfx942
+dense resolves `persistent` and `waves_per_eu` per problem, so those two are
+always recorded with their effective value. The `wpe{N}` stem is
+display only and is never parsed back. The compiled binary has a separate
+identity: `AttentionTuningSpec.identity()` (the kernel cache key), which
+`KernelId.spec_hash` hashes.
+
+Dense kernel specs are also named by `kernel_name()`, which tags every knob
+away from its default: gfx950 folds the codegen knobs into one `cg<hash>`
+token, and gfx942 appends a tag per knob. Both samplers deduplicate by
+`tuning_id`. The benchmark lanes add a backstop: the combo sweep and dense
+table sweep hash the lowered IR with the kernel name blanked, and record a
+match as `duplicate` instead of running it. Their rows carry `knobs` next to
+`tuning_id`, which is what replays the row (`--run-knobs` for the isolated
+child, `tuning_knobs` for any caller).
+
+Dispatch results carry the configuration too: `KernelId.tuning_id`, and a
+stored request pinned to the spec's id and knobs, so `request_hash` differs per
+configuration and `dispatch_attention(result.request)` reselects what ran.
 
 ### From the knob space to the benchmarks
 
@@ -268,14 +329,15 @@ candidate.sweep_space / sample_space
 
 - **New unified knob:** add a defaulted field to the tiled kernel spec. Add
   its `KnobAxis` to the arch's 2D or 3D list after its prerequisites; make it
-  an enabler only if it can make a geometry legal. Add a `_policy_conflict`
-  entry if it is inert on some codepath, and add it to a production stack if
-  it should be timed by default.
+  an enabler only if it can make a geometry legal. Add it to
+  `_TRANSPOSED_ONLY_KNOBS` / `_NARROW_ONLY_KNOBS` if it is inert on some
+  codepath, and add it to a production stack if it should be timed by
+  default.
 - **New dense knob:** add a defaulted, name-tagged field to the dense spec.
   Add its axis to `_GFX9xx_DENSE_AXES`. If it only applies to some problems,
   add a scope rule in `_DENSE_ARCH`; if it depends on another knob, add an
-  inert rule there. List it in `DENSE_UNTUNABLE_KNOBS` instead if it has
-  nothing to sweep.
+  inert rule there (it names the knob, so canonicalization can drop it). List
+  it in `DENSE_UNTUNABLE_KNOBS` instead if it has nothing to sweep.
 - **New geometry:** add an `AttentionGeometryVariant` to the arch's unified
   catalog, or a `Gfx950DenseVariant` to the gfx950 dense tuple. gfx942 dense
   geometry values live in `_GFX942_BLOCK_M` / `_GFX942_BLOCK_N`.
@@ -303,11 +365,9 @@ between fields or candidate-specific policy:
 - shape cohorts and 2D/3D path compatibility;
 - whether a geometry candidate produces any valid concrete tuning spec.
 
-Explicit tuning also applies a per-spec support verdict in `tuning_common.py`.
-This is where dispatcher-owned constraints such as gfx950 LDS capacity,
-buffering combinations, active K-LDS padding, and padded-K/Q-alias exclusions
-are enforced. Unsupported points are omitted before they enter `sweep_space`.
-Kernel builders are not responsible for repairing dispatcher tuning points.
+Per tuning spec, the kernel's own validators are the only legality gate.
+Points they reject are omitted before they enter `sweep_space`; kernel
+builders are not responsible for repairing dispatcher tuning points.
 
 ## Concrete tuning specs
 
@@ -316,25 +376,14 @@ gfx950 candidates. It accepts explicit geometry and codegen knobs and derives
 only problem semantics such as dtype, masks, heads, and cache addressing.
 
 It does **not** call production selection heuristics or silently resize an
-invalid point. Concrete kernel validators remain the final structural gate;
-dispatcher support in `tuning_common.py` applies tuning-policy exclusions.
+invalid point. Concrete kernel validators remain the structural gate.
 
 The resulting `AttentionTuningSpec` is also the runtime's launch contract:
 `run_unified_attention_torch(tuning_spec=...)` compiles `spec.build()` under
 `spec.cache_key()` and launches with `spec.launch_grid(problem)` /
-`spec.launch_block()`. The runtime never decodes `builder_kind`, and the
-dispatcher's `grid` / `block` call the same methods.
-
-Each `AttentionTuningSpec.tuning_id` contains a readable geometry/WPE prefix
-plus a stable hash over:
-
-- ABI and architecture;
-- path and builder kind;
-- compile backend;
-- the complete kernel spec;
-- the reduce spec, when present.
-
-An exact `attention_tuning_id` therefore replays one configuration.
+`spec.launch_block()`. The runtime never decodes `builder_kind`. The spec is
+the one owner of grid and block: the dispatcher's `grid` / `block` and the
+Torch bindings all call these methods.
 
 ## Torch bindings
 
@@ -359,7 +408,9 @@ trusted callers that enforce immutable, bounds-checked metadata externally.
 
 Physical K/V cache size is not known during request-only dispatch. Once binding
 sees `k.shape[0]`, it refreshes the explicit kernel spec's i32/i64 addressing
-mode and stable tuning identity before compilation/cache lookup. FP8 OCP versus
+mode before compilation/cache lookup. That is a runtime specialization: it
+changes the kernel identity and cache key, never `tuning_id`, so an id recorded
+after binding still replays from the request. FP8 OCP versus
 FNUZ is a property of the architecture: the tuning wrapper records the request
 encoding so a mismatch is rejected, and the kernel name derives the FNUZ suffix
 from the gfx942 spec rather than from a free field.
@@ -375,12 +426,17 @@ from the gfx942 spec rather than from a free field.
 - `gfx942_unified.py` — gfx942 unified-kernel candidates: the fp16 `dense_pipe`
   flash path and the finite tuning geometry catalog.
 - `gfx950_dense.py` — gfx950 dense-kernel candidates (frozen tile × persist ×
-  wide-DMA variants and the dense ranker).
+  wide-DMA variants).
 - `gfx950_unified.py` — gfx950 unified-kernel candidates: the D256 prefill fast
   path and the finite tuning geometry catalog.
-- `tuning_common.py` — candidate construction, the per-arch knob axes, the
-  pruned depth-first enumeration and random sampler, support filtering,
-  stable IDs, and sweep expansion.
+- `axes.py` — the tuning space as data: knob axes, codepath knobs,
+  production stacks, and the held-out knob sets.
+- `dense_rules.py` — dense scope, policy and inert-knob rules, stated as
+  the `DenseSpace` hooks.
+- `unified_rules.py` — unified geometry variants and codepath rules, stated
+  as the `UnifiedSpace` hooks.
+- `candidate.py` — `make_tuning_candidate` and `make_dense_candidate`, both
+  over `rocke.dispatch.tuning.make_tuned_candidate`.
 - `tuning_specs.py` — shared explicit kernel-spec/build construction.
 - `bindings.py` — shared Torch execution adapters.
 
@@ -389,9 +445,10 @@ accounting lives in `benchmarks/common/attention_flops.py`.
 
 ## Adding a candidate
 
-Follow [`../AGENTS.md`](../AGENTS.md). Attention adds two registration lines:
-routing labels go on `ATTENTION_ROUTE_REGISTRY`, and anything with `build` and
-`bind_torch` also goes on `ATTENTION_EXECUTION_REGISTRY`. Set `opt_in=True` on
+Follow [`../AGENTS.md`](../AGENTS.md). Each module exports
+`register(route, execution)`: routing labels go on `ATTENTION_ROUTE_REGISTRY`,
+and anything with `build` and `bind_torch` also goes on
+`ATTENTION_EXECUTION_REGISTRY`. Set `opt_in=True` on
 sweep-only candidates so `algorithm="auto"` cannot select them.
 
 ## Current production boundary

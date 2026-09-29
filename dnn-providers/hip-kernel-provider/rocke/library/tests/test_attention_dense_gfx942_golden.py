@@ -16,7 +16,7 @@ Both D64 K-LDS layouts are pinned so drift on either is caught:
   * ``default_d64_*``  -- specs built DIRECTLY with ``lds_k_group_pad=0``: the UNPADDED
     layout, i.e. the A/B baseline the pad's ~2x is measured against.
   * ``dispatch_d64_*`` -- specs built through the gfx942 dispatch factory
-    (``_dense_spec``), which inherits the shared default pad -> this GUARDS the padded
+    (``attention_tuning_spec(req, "gfx942_dense")``), which inherits the shared default pad -> this GUARDS the padded
     IR the shipped D64 path actually emits. Building via the dispatch spec (rather than
     hard-coding the pad) means these cases auto-track any future D64 tuning change, so
     re-blessing stays a one-command operation across the kernel's evolution.
@@ -69,7 +69,7 @@ def _cases():
         that layout is the A/B baseline, and nothing else in the fixture covers it now
         that the shared field defaults the pad ON.
       * ``mk_dispatch`` routes a request through the gfx942 dispatch factory
-        (``_dense_spec``), so the emitted spec carries whatever the SHIPPED path folds in
+        (``attention_tuning_spec(req, "gfx942_dense")``), so the emitted spec carries whatever the SHIPPED path folds in
         (for D64: the inherited K row-group pad + the bf16 ``waves_per_eu`` bump). These
         GUARD the IR that actually ships. Because they re-derive the spec from the
         dispatch policy rather than hard-coding the levers, a future D64 tuning change is
@@ -78,8 +78,7 @@ def _cases():
         AttentionDenseSpec,
         build_attention_dense,
     )
-    from dispatch.attention import AttentionRequest
-    from dispatch.attention.gfx942_dense import _dense_spec
+    from dispatch.attention import AttentionRequest, attention_tuning_spec
 
     base = dict(
         batch=1,
@@ -115,9 +114,10 @@ def _cases():
             mask_type=1 if over.get("causal", base["causal"]) else 0,
             dtype=over.get("dtype", base["dtype"]),
             sliding_window=over.get("sliding_window", 0),
-            algorithm="attention_dense",
         )
-        return lambda: build_attention_dense(_dense_spec(req), arch=_ARCH)
+        return lambda: build_attention_dense(
+            attention_tuning_spec(req, "gfx942_dense").kernel_spec, arch=_ARCH
+        )
 
     return {
         # --- default grid: dtype x head_size x causal/full x GQA/MHA x block_n ---
@@ -180,7 +180,7 @@ def _cases():
         # --- sliding-window (SWA): start_tile KV-loop prune + in-tile lower mask.
         #     W % block_n == 0 (128, 256 = 2, 4 tiles at block_n=64). Default and
         #     persistent grids both pruned per work item; dispatch case guards the
-        #     _dense_spec sliding_window threading end to end. ---
+        #     gfx942_dense sliding_window threading end to end. ---
         "attention_dense_gfx942/swa_d128_bf16_w128": mk(sliding_window=128),
         "attention_dense_gfx942/swa_d128_fp16_w256": mk(
             dtype="fp16", sliding_window=256

@@ -31,7 +31,8 @@ from .common import (
     _request_errors,
     _selector_matches,
 )
-from .tuning_common import AttentionGeometryVariant, make_tuning_candidate
+from .candidate import make_tuning_candidate
+from .unified_rules import AttentionGeometryVariant
 
 
 # Absolute T=64/128 points are already represented by one of these multipliers
@@ -178,16 +179,10 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
     return candidate
 
 
-def register_route(registry: CandidateRegistry) -> None:
-    registry.register(_make_gfx942_dense_pipe_candidate())
+def register(route: CandidateRegistry, execution: CandidateRegistry) -> None:
+    """The dense_pipe path routes only; each tuning geometry goes on both."""
+    route.register(_make_gfx942_dense_pipe_candidate())
     for variant in GFX942_TUNING_VARIANTS:
-        registry.register(make_tuning_candidate(variant))
-
-
-def register_execution(registry: CandidateRegistry) -> None:
-    for variant in GFX942_TUNING_VARIANTS:
-        registry.register(make_tuning_candidate(variant))
-
-
-def register(registry: CandidateRegistry) -> None:
-    register_route(registry)
+        candidate = make_tuning_candidate(variant)
+        route.register(candidate)
+        execution.register(candidate)

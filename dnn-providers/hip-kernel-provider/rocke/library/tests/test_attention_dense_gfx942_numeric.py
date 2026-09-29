@@ -94,7 +94,7 @@ def _spec(
     dtype, d, hq, hkv, persistent, *, causal=True, batch=1, sq=512, sliding_window=0
 ):
     """The SHIPPED gfx942 dense spec for a cohort row, built through the dispatch
-    factory (``dispatch.attention.gfx942_dense._dense_spec``) rather than hand-rolled.
+    candidate (``gfx942_dense`` via ``dispatch.attention``) rather than hand-rolled.
 
     Hand-rolling the spec silently pins every tuned lever to the shared (gfx950)
     dataclass default, so the lane would assert on configs that do not ship. The
@@ -105,24 +105,23 @@ def _spec(
     ``amdgpu-waves-per-eu`` attribute, changes register allocation, and is tagged into
     ``gfx942_kernel_name`` as ``wpe{N}``, so wpe2 and wpe4 are DIFFERENT binaries.
     ``num_persistent`` was likewise hard-coded to 304 beside a dispatch constant that
-    already resolves to 304 -- left at the request default here so ``_dense_spec``
-    substitutes the gfx942 CU count itself and the two cannot drift apart.
+    already resolves to 304 -- left at the candidate default here so dispatch
+    supplies the gfx942 CU count itself and the two cannot drift apart.
 
     Deriving the spec from the factory (the pattern
     ``test_attention_dense_gfx942_golden.py::mk_dispatch`` uses for its D64 cases)
     also means a future gfx942 tuning change is picked up here with no edit.
 
-    Only ``dense_persistent`` is pinned rather than left on "auto": the cohort asserts
-    BOTH grid variants at one fixed Sq, where "auto" would pick a single one. Every
+    Only the ``persistent`` knob is set rather than left at the default: the cohort
+    asserts BOTH grid variants at one fixed Sq, where the default picks one. Every
     other lever -- block_n, the D64 K row-group pad, persist_decode, ragged -- is
     whatever the shipped path folds in.
     """
     # Imported lazily, mirroring the golden sibling: keeps module import (and hence
     # CPU collection of this gpu-marked file) independent of the dispatch package.
-    from dispatch.attention import AttentionRequest
-    from dispatch.attention.gfx942_dense import _dense_spec
+    from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
 
-    return _dense_spec(
+    return tuning_spec_with_knobs(
         AttentionRequest(
             batch=batch,
             nhead_q=hq,
@@ -135,10 +134,10 @@ def _spec(
             mask_type=1 if causal else 0,
             dtype=dtype,
             sliding_window=sliding_window,
-            algorithm="attention_dense",
-            dense_persistent="on" if persistent else "off",
-        )
-    )
+        ),
+        "gfx942_dense",
+        {"persistent": bool(persistent)},
+    ).kernel_spec
 
 
 @requires_gfx942_gpu
