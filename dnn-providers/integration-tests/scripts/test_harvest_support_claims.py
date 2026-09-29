@@ -20,6 +20,7 @@ from harvest_support_claims import (
     DROP_BAD_PATH,
     DROP_MIN_RUNS,
     DROP_NO_DEPTH,
+    DROP_NO_OK,
     DROP_NOT_PASSED,
     DROP_SHORTFALL,
     Cell,
@@ -83,15 +84,37 @@ def _summary(**overrides: object) -> dict:
     return summary
 
 
+def _summary_names(summary: object) -> List[str]:
+    """The gtest name of every unclaimed_support cell a summary lists."""
+    entries = summary.get("unclaimed_support") if isinstance(summary, dict) else None
+    names = []
+    for entry in entries if isinstance(entries, list) else []:
+        cases = entry.get("cases", [""]) if isinstance(entry, dict) else None
+        for case in cases if isinstance(cases, list) else []:
+            name = gtest_name(entry.get("bundle", ""), case)
+            if name is not None:
+                names.append(name)
+    return names
+
+
 def _gtest_output(
     summary: object,
     failed: Optional[List[str]] = None,
     skipped: Optional[List[str]] = None,
+    passed: Optional[List[str]] = None,
     ran_line: bool = True,
     mode: str = "ENFORCING",
 ) -> List[str]:
-    """Output of one bundle-harness run, as the harness prints it."""
+    """Output of one bundle-harness run, as the harness prints it.
+
+    passed defaults to every cell of the summary not failed or skipped.
+    """
+    if passed is None:
+        not_passed = set(failed or []) | set(skipped or [])
+        passed = [n for n in _summary_names(summary) if n not in not_passed]
     lines = ["[==========] Running 3 tests from 2 test suites."]
+    for name in passed:
+        lines.append(f"[       OK ] {name} (12 ms)")
     for name in skipped or []:
         lines.append(f"[  SKIPPED ] {name} (0 ms)")
     for name in failed or []:
@@ -166,6 +189,11 @@ class TestExtractBlocks(unittest.TestCase):
         (block,) = extract_blocks(_log((23, output)))
         self.assertEqual(block.not_passed, {"quick_A.x", "quick_A.y", "quick_B.z"})
 
+    def test_ok_names_are_collected(self) -> None:
+        (block,) = extract_blocks(_log((23, _gtest_output(_summary()))))
+        self.assertEqual(block.passed, set(_summary_names(_summary())))
+        self.assertEqual(len(block.passed), 3)
+
     def test_failed_count_line_is_not_a_test_name(self) -> None:
         output = _gtest_output(_summary(), failed=["quick_A.x"])
         (block,) = extract_blocks(_log((23, output)))
@@ -173,11 +201,13 @@ class TestExtractBlocks(unittest.TestCase):
 
     def test_results_of_other_ctest_streams_are_not_attached(self) -> None:
         other = [
+            "[       OK ] TestGpuPlanBuilder.Plan (0 ms)",
             "[  SKIPPED ] TestGpuPlanBuilder.Fusion (0 ms)",
-            "[==========] 1 test from 1 test suite ran. (0 ms total)",
+            "[==========] 2 tests from 1 test suite ran. (0 ms total)",
         ]
         (block,) = extract_blocks(_log((3, other), (23, _gtest_output(_summary()))))
         self.assertEqual(block.not_passed, frozenset())
+        self.assertNotIn("TestGpuPlanBuilder.Plan", block.passed)
 
     def test_interleaved_streams_still_parse(self) -> None:
         output = _gtest_output(_summary())
@@ -374,6 +404,24 @@ class TestBlockCells(unittest.TestCase):
         cells = block_cells(_block(_summary(), skipped=[skipped]))
         self.assertEqual(cells.dropped, {_cell(_SINGLE): DROP_NOT_PASSED})
         self.assertEqual(cells.drops, {DROP_NOT_PASSED: 1})
+
+    def test_cell_without_ok_line_is_dropped(self) -> None:
+        cells = block_cells(_block(_summary(), passed=[]))
+        self.assertEqual(cells.kept, set())
+        self.assertEqual(cells.drops, {DROP_NO_OK: 3})
+
+    def test_ok_line_under_another_name_does_not_keep_the_cell(self) -> None:
+        drifted = [f"Bundles/{n}" for n in _summary_names(_summary())]
+        cells = block_cells(_block(_summary(), passed=drifted))
+        self.assertEqual(cells.kept, set())
+        self.assertEqual(cells.drops, {DROP_NO_OK: 3})
+
+    def test_ok_line_in_another_stream_does_not_keep_the_cell(self) -> None:
+        names = _summary_names(_summary())
+        other = [f"[       OK ] {n} (1 ms)" for n in names]
+        text = _log((3, other), (23, _gtest_output(_summary(), passed=[])))
+        (block,) = extract_blocks(text)
+        self.assertEqual(block_cells(block).drops, {DROP_NO_OK: 3})
 
     def test_depth_shortfall_and_missing_depth_are_dropped(self) -> None:
         summary = _summary(

@@ -24,9 +24,10 @@ Log handling
    enforcing one: both report the same results.
 3. Each unclaimed_support entry becomes one cell per case: (bundle, case,
    arch, platform, engine).  "reached: verified" means the comparison ran,
-   not that it passed, so a cell whose gtest FAILED or was SKIPPED in the
-   same stream is dropped.  So is a cell whose reached depth is below its
-   required depth, or either depth is missing.
+   not that it passed, so a cell is kept only when its gtest printed an OK
+   line in the same stream.  A cell whose gtest FAILED or was SKIPPED, or
+   printed no OK line, is dropped.  So is a cell whose reached depth is
+   below its required depth, or either depth is missing.
 
 Runs
 ----
@@ -100,6 +101,7 @@ DEPTHS = {
 }
 
 DROP_NOT_PASSED = "gtest failed or skipped"
+DROP_NO_OK = "no gtest OK line"
 DROP_SHORTFALL = "reached below required"
 DROP_NO_DEPTH = "depth missing or unknown"
 DROP_BAD_PATH = "bundle outside integration-test-bundles/"
@@ -119,6 +121,7 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _CTEST_PREFIX = re.compile(r"^(\d+): ")
 _SUMMARY_HEADER = re.compile(r"^==== SUPPORT CLAIM SUMMARY \((.+)\) ====$")
 _GTEST_NOT_PASSED = re.compile(r"^\[\s+(?:FAILED|SKIPPED)\s+\] ([^\s,]+\.[^\s,]+)")
+_GTEST_OK = re.compile(r"^\[\s+OK\s+\] ([^\s,]+\.[^\s,]+)")
 _GTEST_RAN = re.compile(r"^\[==========\] \d+ tests? from \d+ test suites? ran\.")
 _ARCH = re.compile(r"^gfx[0-9a-f]+$")
 
@@ -130,12 +133,14 @@ class Block:
     log: str
     stream: str
     summary: Optional[dict] = None
+    passed: FrozenSet[str] = frozenset()
     not_passed: FrozenSet[str] = frozenset()
     error: Optional[str] = None
 
 
 @dataclass
 class _StreamState:
+    passed: Set[str] = field(default_factory=set)
     not_passed: Set[str] = field(default_factory=set)
     saw_ran_line: bool = False
 
@@ -204,6 +209,10 @@ def extract_blocks(text: str, log: str = "") -> List[Block]:
         state = _StreamState()
         for index, line in enumerate(lines):
             stripped = line.strip()
+            match = _GTEST_OK.match(stripped)
+            if match:
+                state.passed.add(match.group(1))
+                continue
             match = _GTEST_NOT_PASSED.match(stripped)
             if match:
                 state.not_passed.add(match.group(1))
@@ -215,7 +224,10 @@ def extract_blocks(text: str, log: str = "") -> List[Block]:
                 continue
 
             block = Block(
-                log=log, stream=stream, not_passed=frozenset(state.not_passed)
+                log=log,
+                stream=stream,
+                passed=frozenset(state.passed),
+                not_passed=frozenset(state.not_passed),
             )
             if not state.saw_ran_line:
                 block.error = "no gtest '[==========] ... ran.' line before the summary"
@@ -349,6 +361,8 @@ def block_cells(block: Block) -> BlockCells:
                 reason = DROP_SHORTFALL
             elif name in block.not_passed:
                 reason = DROP_NOT_PASSED
+            elif name not in block.passed:
+                reason = DROP_NO_OK
             else:
                 result.kept.add(cell)
                 continue
@@ -445,7 +459,12 @@ def read_log(path: str, text: str) -> Tuple[LogReport, List[BlockCells]]:
         report.arch_platforms.add(f"{run['arch']}/{run['platform']}")
         report.modes.add(block.summary["mode"])
     report.blocks = len(blocks)
-    report.unique = len({_canonical([b.summary, sorted(b.not_passed)]) for b in blocks})
+    report.unique = len(
+        {
+            _canonical([b.summary, sorted(b.passed), sorted(b.not_passed)])
+            for b in blocks
+        }
+    )
     return report, cells
 
 
