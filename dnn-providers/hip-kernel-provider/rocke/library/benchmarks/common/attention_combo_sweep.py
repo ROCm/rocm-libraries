@@ -85,6 +85,7 @@ def _requests(args):
                     sliding_window=args.sliding_window,
                     num_cus=args.num_cus,
                     dense_waves_per_eu=int(getattr(args, "dense_waves_per_eu", 0) or 0),
+                    use_fp8=bool(getattr(args, "use_fp8", False)),
                 )
 
 
@@ -120,9 +121,11 @@ def _reference(q, k, v, *, causal: bool, sliding_window: int):
     import torch
 
     hq, hkv = q.shape[2], k.shape[2]
+    # .float() first so fp8 KV dequants before repeat_interleave (which some
+    # float8 builds do not support); no-op for bf16/fp16.
     qh = q.transpose(1, 2).float()
-    kh = k.transpose(1, 2).repeat_interleave(hq // hkv, 1).float()
-    vh = v.transpose(1, 2).repeat_interleave(hq // hkv, 1).float()
+    kh = k.transpose(1, 2).float().repeat_interleave(hq // hkv, 1)
+    vh = v.transpose(1, 2).float().repeat_interleave(hq // hkv, 1)
     sq, sk = q.shape[1], k.shape[1]
     scores = torch.matmul(qh, kh.transpose(-1, -2)) / math.sqrt(q.shape[-1])
     qi = torch.arange(sq, device=q.device)[:, None]
@@ -170,6 +173,13 @@ def _tensors(req, seed: int):
         * 0.2
     ).contiguous()
     v = (torch.randn_like(k) * 0.2).contiguous()
+    if bool(getattr(req, "use_fp8", False)):
+        # fp8 KV storage: randn*0.2 fits e4m3's range, so a direct cast at unit
+        # scale keeps the kernels' default k_scale/v_scale=1.0 correct. Both the
+        # dense [B,S,H,D] arm and the unified paged arm consume these; _reference
+        # dequants via .float().
+        k = k.to(torch.float8_e4m3fn).contiguous()
+        v = v.to(torch.float8_e4m3fn).contiguous()
     return q, k, v
 
 
@@ -522,6 +532,8 @@ def _child_argv(args, req, result) -> list:
     argv += ["--causal"] if args.causal else ["--no-causal"]
     if args.no_check:
         argv += ["--no-check"]
+    if getattr(args, "use_fp8", False):
+        argv += ["--use-fp8"]
     return argv
 
 
@@ -790,6 +802,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--arch", default=None)
     ap.add_argument("--dtype", default="bf16", choices=UNIFIED_DTYPES)
+    ap.add_argument(
+        "--use-fp8",
+        action="store_true",
+        help="fp8 KV storage (K/V float8_e4m3fn, Q + compute at --dtype). Sweeps "
+        "dense and unified 2D fp8 engines on the same shapes for x-factors.",
+    )
     ap.add_argument("--batch", type=int, default=1)
     ap.add_argument("--heads", type=int, default=32)
     ap.add_argument("--kv-heads", type=int, default=8)
