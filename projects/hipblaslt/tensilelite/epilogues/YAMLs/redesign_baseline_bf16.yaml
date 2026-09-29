@@ -1,26 +1,34 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
+# Pinned single-solution baseline for the SubtileMegaFusedEmit.py batched/
+# prefetched redesign (see epilogues/docs/SUBTILE_MEGAFUSED_BATCHED_REDESIGN.md).
 # Fused: bf16 PartialRMS+ResidualAdd+StoreBf16D — RMSEpilogue path.
-# UseRMSEpilogue enables the fused problem type and selects the fused code path.
-
-TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+#
+# Both shapes below share the same winning tile from the full benchmark_k1_bf16.yaml
+# sweep (MT512x128, MI16x16x32, MIWaveTile[16,4], MIWaveGroup[2,2], PGR2) — they
+# have equal total FLOPs (M*N*K), so the same solution wins both. Pinning it here
+# (rather than re-sweeping) gives a fixed, reproducible before/after benchmarking
+# target for the redesign's code changes.
 
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
-  NumElementsToValidate: -1
-  ExitOnFails: 1
-  PrintSolutionRejectionReason: True
-  KernelTime: True
-  KeepBuildTmp: True
+  SleepPercent: 0
+  EnqueuesPerSync: 20
+  NumWarmups: 20
+  KernelTime: true
+  NumElementsToValidate: 0
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeD: 12
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
+  PreciseKernelTime: false
+  Device: 0
+  KeepBuildTmp: true
+  RotatingBufferSize: 1024
 
 BenchmarkProblems:
-
-  ########################################
-  # bf16 in, bf16 out — PartialRMS + ResidualAdd + StoreBf16D
-  # Fused path (RMSEpilogue=True). Winner tile MT 384x256.
-  ########################################
   -
     -
       OperationType: GEMM
@@ -47,10 +55,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-            - [16, 16, 32, 1,  1, 12, 8, 2, 2] # MT 384x256
-            - [16, 16, 32, 1, 1, 10, 10, 2, 2] # MT0=320  MT1=320
-            - [16, 16, 32, 1, 1, 8, 8, 2, 2]   # MT0=256  MT1=256
-            - [16, 16, 32, 1, 1, 6, 6, 2, 2]   # MT0=192  256=192
+          - [16, 16, 32, 1,  1, 16, 4, 2, 2]  # MT 512x128 (winner for both shapes below)
         - RMSEpilogue: [True]
         - StreamK: [3]
         - StreamKForceDPOnly: [1]
@@ -73,13 +78,11 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-            - Exact: [640, 640, 1, 640]
-            - Exact: [768, 640, 1, 512]
-            - Exact: [521, 521, 1, 521]
-            - Exact: [532, 64, 1, 64]
+            - Exact: [2048, 16384, 1, 2048]
+            - Exact: [4096, 4096, 1, 4096]
 
 LibraryLogic:
-  ScheduleName: "bench_fused_bf16_partialrms_residualadd"
-  DeviceNames: ["Device 75a0", "Device 75b0", "Device 75a2", "Device 75b2", "Device 75a3", "Device 75b3", "Device 75a8", "Device 75b8"]
+  ScheduleName: "epilogues_rms_bf16_redesign_baseline"
+  DeviceNames: ["Device 75a0"]
   ArchitectureName: "gfx950"
-  LibraryType: "Prediction"
+  LibraryType: "Equality"

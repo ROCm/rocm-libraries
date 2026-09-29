@@ -21,7 +21,7 @@ TestParameters:
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   NumElementsToValidate: -1
-  ExitOnFails: 0
+  ExitOnFails: 1
   PrintLevel: 3
   KernelTime: True
   PrintSolutionRejectionReason: True

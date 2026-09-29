@@ -2257,34 +2257,36 @@ namespace
         // the TensileLite selector flags. Full RMSNorm and the decomposed producer use the K1
         // PartialRMS path. The decomposed consumer (RMSNorm scale-apply) applies the per-row
         // rstd through the ScaleAlphaVec path.
-        RocblasltFusedEpilogueInfo fusedInfo;
-        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo))
         {
-            const bool partialRMS = fusedInfo.hasRMSNorm || fusedInfo.hasPartialRMSStats;
-            // Full RMSNorm flow and the decomposed producer (partial stats) both run K1.
-            // rmsEpilogue=true unconditionally implies residual-add and bf16 residual-out store.
-            tensileProblem.setRMSEpilogue(partialRMS);
-            // Decomposed consumer (Kernel 3 RstdScale): apply the per-token rstd to GEMM2's
-            // output through the N-direction ScaleAlphaVec.
-            // Use UseScaleAlphaVec=2 with the column-vector length d.sizes()[1] (= tokens = rstd
-            // length). Re-issue setScaleAlphaVec after enabling the flag because the earlier
-            // setScaleAlphaVec call ran while useScaleAlphaVec was still false.
-            if(fusedInfo.hasRMSNormScaleApply)
+            RocblasltFusedEpilogueInfo fusedInfo;
+            if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo))
             {
-                tensileProblem.setUseScaleAlphaVec(2);
-                tensileProblem.setScaleAlphaVec(compute_type, d.sizes()[1]);
-            }
-            // MXFP8 quant is derived from rmsEpilogue=true + F8 D type; set the MX scale
-            // tensor dimensions. Scale grid convention (see client's Reference.cpp):
-            // rows = free1/q1 tiles (padded×32), cols = free0/q0 tiles (padded×8).
-            if(fusedInfo.hasRequant
-               && fusedInfo.requantGranularity == HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX)
-            {
-                const int32_t q0          = partialRMS ? fusedInfo.requantMxBlockSize : 1;
-                const int32_t q1          = partialRMS ? 1 : fusedInfo.requantMxBlockSize;
-                const int64_t kBlockTiles = (static_cast<int64_t>(prob.m) + q0 - 1) / q0;
-                const int64_t freeTiles   = (static_cast<int64_t>(prob.n) + q1 - 1) / q1;
-                tensileProblem.setMxScale(freeTiles, kBlockTiles);
+                const bool partialRMS = fusedInfo.hasRMSNorm || fusedInfo.hasPartialRMSStats;
+                // Full RMSNorm flow and the decomposed producer (partial stats) both run K1.
+                // rmsEpilogue=true unconditionally implies residual-add and bf16 residual-out store.
+                tensileProblem.setRMSEpilogue(partialRMS);
+                // Decomposed consumer (Kernel 3 RstdScale): apply the per-token rstd to GEMM2's
+                // output through the N-direction ScaleAlphaVec.
+                // Use UseScaleAlphaVec=2 with the column-vector length d.sizes()[1] (= tokens = rstd
+                // length). Re-issue setScaleAlphaVec after enabling the flag because the earlier
+                // setScaleAlphaVec call ran while useScaleAlphaVec was still false.
+                if(fusedInfo.hasRMSNormScaleApply)
+                {
+                    tensileProblem.setUseScaleAlphaVec(2);
+                    tensileProblem.setScaleAlphaVec(compute_type, d.sizes()[1]);
+                }
+                // MXFP8 quant is derived from rmsEpilogue=true + F8 D type; set the MX scale
+                // tensor dimensions. Scale grid convention (see client's Reference.cpp):
+                // rows = free1/q1 tiles (padded×32), cols = free0/q0 tiles (padded×8).
+                if(fusedInfo.hasRequant
+                   && fusedInfo.requantGranularity == HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX)
+                {
+                    const int32_t q0          = partialRMS ? fusedInfo.requantMxBlockSize : 1;
+                    const int32_t q1          = partialRMS ? 1 : fusedInfo.requantMxBlockSize;
+                    const int64_t kBlockTiles = (static_cast<int64_t>(prob.m) + q0 - 1) / q0;
+                    const int64_t freeTiles   = (static_cast<int64_t>(prob.n) + q1 - 1) / q1;
+                    tensileProblem.setMxScale(freeTiles, kBlockTiles);
+                }
             }
         }
 

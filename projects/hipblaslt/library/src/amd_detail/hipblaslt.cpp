@@ -1053,9 +1053,9 @@ try
             log_error(__func__, "invalid all-to-all completion mode buf size", sizeInBytes);
             return HIPBLAS_STATUS_INVALID_VALUE;
         }
-        hipblasLtA2ACompletionMode_t mode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL;
+        hipblasLtA2ACompletionMode_t mode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
         memcpy(&mode, value, sizeof(mode));
-        if(mode != HIPBLASLT_A2A_COMPLETION_IN_KERNEL)
+        if(mode != HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL)
         {
             log_error(__func__, "unsupported all-to-all completion mode", (int)mode);
             return HIPBLAS_STATUS_INVALID_VALUE;
@@ -1185,7 +1185,7 @@ try
         // checked for completeness: the descriptor stops being a work in progress here.
         if(fused != nullptr)
         {
-            hipblasStatus_t attach_status = validate_fused_epilogue_attach(fused);
+            hipblasStatus_t attach_status = validate_fused_epilogue_contents(fused);
             if(attach_status != HIPBLAS_STATUS_SUCCESS)
             {
                 rocblaslt::Debug::Instance().markerStop();
