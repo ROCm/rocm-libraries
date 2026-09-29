@@ -13,9 +13,12 @@ target_sources(hipblaslt
 
 if(HIPBLASLT_ENABLE_JIT)
     find_package(ZLIB REQUIRED)
-    target_link_libraries(hipblaslt PRIVATE ZLIB::ZLIB)
+    find_package(amd_comgr CONFIG REQUIRED)
+    target_link_libraries(hipblaslt PRIVATE ZLIB::ZLIB amd_comgr)
     target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_JIT)
     target_sources(hipblaslt PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-code-object.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-builder.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-tensilelite.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-tensilelite-defaults.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-origami-predictor.cpp"

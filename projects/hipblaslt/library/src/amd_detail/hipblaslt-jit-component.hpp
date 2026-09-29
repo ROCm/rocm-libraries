@@ -129,7 +129,15 @@ namespace hipblaslt_jit
     std::shared_ptr<const Predictor>       makeOrigamiPredictor();
     std::shared_ptr<const TuningKnowledge> makeTensileLiteDefaults();
 
-    // A code object the backend has already built.
+    // A header a HIP unit includes by name.
+    struct IncludeFile
+    {
+        std::string          name;
+        std::vector<uint8_t> bytes;
+    };
+
+    // A source file for the comgr builder, or a code object the prebuilt builder
+    // passes through.
     struct BuildUnit
     {
         enum class Role
@@ -137,9 +145,16 @@ namespace hipblaslt_jit
             Main,
             Helper,
         };
-        Role                 role = Role::Main;
-        std::string          name;
-        std::vector<uint8_t> bytes;
+        enum class Kind
+        {
+            Assembly,
+            Hip,
+        };
+        Role                     role = Role::Main;
+        std::string              name;
+        std::vector<uint8_t>     bytes;
+        Kind                     kind = Kind::Assembly;
+        std::vector<IncludeFile> includes; // Hip only
     };
 
     // One CustomKernel library entry plus the code that defines it.
@@ -160,6 +175,7 @@ namespace hipblaslt_jit
         size_t                   workspaceLimit = 0;
         std::vector<std::string> excludeKernels; // kernels the caller already has
         std::filesystem::path    scratch; // private directory owned by this call
+        int                      codeObjectVersion = 4; // for generators and the builder
     };
 
     struct BackendInfo
@@ -199,6 +215,10 @@ namespace hipblaslt_jit
         virtual Status
             build(const GeneratedSolution&, const GenerationRequest&, BuiltSolution&) const = 0;
     };
+
+    // Builds every unit of a solution with comgr and links them into one code
+    // object for GenerationRequest::target.
+    std::shared_ptr<const CodeObjectBuilder> makeComgrBuilder();
 
     class SolutionLoader
     {
