@@ -524,6 +524,8 @@ tensilelite_status=$?
 # Each backend reconstructs its inventory independently from the PR artifact.
 # Share only policy/seed so their sampled cases are comparable. A backend failure
 # never prevents the other backend from running. At most four workers run at once.
+# Each backend gets 25 minutes, leaving 25 minutes of the enclosing CI step for
+# the emulator build, old smokes and reporting. Preparation consumes that budget.
 sweep_seed="${ROCJITSU_SWEEP_SEED:-${GITHUB_SHA:-local}}"
 run_timed "TensileLite sampled race sweep" \
   python3 "$(dirname "${BASH_SOURCE[0]}")/rocjitsu_race_sweep.py" \
@@ -532,7 +534,7 @@ run_timed "TensileLite sampled race sweep" \
     --config "${ROCJITSU_CONFIG}" --target "${ROCJITSU_GPU_TARGET}" \
     --library-dir "${ROCM_PATH}/lib/hipblaslt/library" \
     --reports "${RACE_REPORT_DIR}/sweep-tensile" \
-    --workers 4 --kernels 100 --timeout 120
+    --workers 4 --kernels 100 --timeout 120 --suite-timeout 1500
 tensile_sweep_status=$?
 run_timed "hipBLASLt-bench sampled race sweep" \
   python3 "$(dirname "${BASH_SOURCE[0]}")/rocjitsu_race_sweep.py" \
@@ -541,7 +543,7 @@ run_timed "hipBLASLt-bench sampled race sweep" \
     --config "${ROCJITSU_CONFIG}" --target "${ROCJITSU_GPU_TARGET}" \
     --library-dir "${ROCM_PATH}/lib/hipblaslt/library" \
     --reports "${RACE_REPORT_DIR}/sweep-bench" \
-    --workers 4 --kernels 100 --timeout 120
+    --workers 4 --kernels 100 --timeout 120 --suite-timeout 1500
 bench_sweep_status=$?
 set -e
 
