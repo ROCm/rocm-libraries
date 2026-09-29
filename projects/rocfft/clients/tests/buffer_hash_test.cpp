@@ -431,3 +431,30 @@ TEST(rocfft_UnitTest, buffer_hashing_double)
         GTEST_SKIP() << e.what();
     }
 }
+
+// The buffer hash must be a fixed function of the data (no std::hash), so a
+// known buffer always produces the same fingerprint on every toolchain.
+template <typename Tfloat>
+static hash_output<size_t> hash_known_real_buffer(rocfft_precision precision)
+{
+    std::vector<hostbuf> buf(1);
+    buf[0].alloc(4 * sizeof(Tfloat));
+    auto data = static_cast<Tfloat*>(buf[0].data());
+    for(size_t i = 0; i < 4; ++i)
+        data[i] = static_cast<Tfloat>(i + 1); // {1, 2, 3, 4}
+    auto hash_in  = hash_input(precision, {4}, {1}, 4, rocfft_array_type_real, 1);
+    auto hash_out = hash_output<size_t>();
+    compute_hash(buf, hash_in, hash_out);
+    return hash_out;
+}
+
+TEST(rocfft_UnitTest, buffer_hash_golden_values)
+{
+    auto h_single = hash_known_real_buffer<float>(rocfft_precision_single);
+    EXPECT_EQ(h_single.buffer_real, 2361707016405055129ULL);
+    EXPECT_EQ(h_single.buffer_imag, 0u);
+
+    auto h_double = hash_known_real_buffer<double>(rocfft_precision_double);
+    EXPECT_EQ(h_double.buffer_real, 1843873780199609224ULL);
+    EXPECT_EQ(h_double.buffer_imag, 0u);
+}
