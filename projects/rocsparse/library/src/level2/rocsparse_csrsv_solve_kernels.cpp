@@ -38,7 +38,7 @@
 #include "csrsv_device.h"
 #include "rocsparse_assign_async.hpp"
 #include "rocsparse_common.h"
-#include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 
 #include "rocsparse_csrsv_solve_kernel.hpp"
 #include "rocsparse_determine_indextype.hpp"
@@ -129,7 +129,7 @@ namespace rocsparse
     {
         auto alpha = reinterpret_cast<const T*>(alpha_);
         dim3 csrsv_blocks((m * handle->wavefront_size - 1) / BLOCKSIZE + 1,
-                          get_batch_grid_size(batch_count));
+                          rocsparse::get_grid_size_y(handle, batch_count));
         dim3 csrsv_threads(BLOCKSIZE);
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::csrsv_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J, T>),
@@ -183,7 +183,7 @@ namespace rocsparse
     {
         auto          alpha = reinterpret_cast<const T*>(alpha_);
         dim3          csrsv_blocks((m * handle->wavefront_size - 1) / BLOCKSIZE + 1,
-                          get_batch_grid_size(batch_count));
+                          rocsparse::get_grid_size_y(handle, batch_count));
         dim3          csrsv_threads(BLOCKSIZE);
         const int64_t csr_val_inc = static_cast<int64_t>(1);
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(

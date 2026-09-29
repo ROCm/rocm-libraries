@@ -24,6 +24,7 @@
 
 #include "rocsparse_common.h"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -64,7 +65,7 @@ namespace rocsparse
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::conjugate_kernel<256, T, T*>),
-            dim3((length - 1) / 256 + 1, rocsparse::get_batch_grid_size(batch_count)),
+            dim3((length - 1) / 256 + 1, rocsparse::get_grid_size_y(handle, batch_count)),
             dim3(256),
             0,
             handle->stream,

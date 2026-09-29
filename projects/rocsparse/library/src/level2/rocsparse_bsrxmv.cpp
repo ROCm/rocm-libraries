@@ -25,6 +25,7 @@
 #include "internal/level2/rocsparse_bsrxmv.h"
 #include "rocsparse_bsrxmv.hpp"
 #include "rocsparse_bsrxmv_spzl.hpp"
+#include "rocsparse_grid.hpp"
 
 template <typename T, typename I, typename J>
 rocsparse_status rocsparse::bsrxmv_template_dispatch(rocsparse_handle          handle,
@@ -316,8 +317,7 @@ rocsparse_status rocsparse::bsrxmv_template(rocsparse_handle          handle,
                 return rocsparse_status_invalid_pointer;
             }
 
-            const int64_t nblocks = rocsparse::min(
-                (ysize - 1) / 256 + 1, static_cast<int64_t>(handle->properties.maxGridSize[0]));
+            const uint32_t nblocks = rocsparse::get_grid_size_x(handle, (ysize - 1) / 256 + 1, 256);
 
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrxmv_scale_array<256>),
                                                dim3(nblocks),

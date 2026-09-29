@@ -26,6 +26,7 @@
 #include "rocsparse_gthr.hpp"
 
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "gthr_device.h"
@@ -63,11 +64,8 @@ rocsparse_status rocsparse::gthr_strided_batched_template(rocsparse_handle     h
 #define GTHR_DIM 512
     // Clamp both grid dimensions against the device limits; the kernel grid-strides
     // over nnz (x) and batch_count (y) so oversized problems are handled correctly.
-    const int64_t gthr_blocks_x = rocsparse::min(
-        (nnz - 1) / GTHR_DIM + 1, static_cast<int64_t>(handle->properties.maxGridSize[0]));
-    const int64_t gthr_blocks_y
-        = rocsparse::min(batch_count, static_cast<int64_t>(handle->properties.maxGridSize[1]));
-    dim3 gthr_blocks(gthr_blocks_x, gthr_blocks_y);
+    dim3 gthr_blocks(rocsparse::get_grid_size_x(handle, (nnz - 1) / GTHR_DIM + 1, GTHR_DIM),
+                     rocsparse::get_grid_size_y(handle, batch_count));
     dim3 gthr_threads(GTHR_DIM);
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gthr_kernel<GTHR_DIM, I, T>),
