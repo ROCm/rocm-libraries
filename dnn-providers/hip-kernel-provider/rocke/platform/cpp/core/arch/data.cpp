@@ -968,9 +968,13 @@ int rocke_arch_mma_c_frag_len(const char* op_id)
  *   family, a_dtype, b_dtype, c_dtype, m, n, k, op_id,
  *   a_frag_len, b_frag_len, c_frag_len, wave_size, a_layout, b_layout, c_layout
  *
- * The trailing scale fields and d_dtype are left to zero-init below: every atom
- * here is unscaled unless it spells its scale metadata, and every one produces
- * the dtype it accumulates (d_dtype NULL => D == C, see rocke_arch_mma_op_d_dtype).
+ * The trailing scale, d_dtype and emulation fields are left to zero-init below:
+ * every atom here is unscaled unless it spells its scale metadata, every one
+ * produces the dtype it accumulates (d_dtype NULL => D == C, see
+ * rocke_arch_mma_op_d_dtype), and every one is natively encoded
+ * (emulation_recipe NONE, see rocke_arch_mma_op_is_native). A row that is none
+ * of those must spell its fields positionally through to the last one it needs
+ * -- C++ forbids mixing designated and positional initializers in one list.
  *
  * Low-bit spellings normalize to explicit exponent/mantissa catalog keys.
  */

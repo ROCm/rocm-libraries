@@ -214,6 +214,57 @@ static bool rocke_ati_op_matches(const rocke_mma_op_t* op,
     return rocke_ati_scales_match(op, scales);
 }
 
+/* Mirrors target._prefer_native: an emulated atom is dropped when a native atom
+ * of the same shape also satisfies the query, because the native one is always
+ * the better choice -- fewer instructions, no less accurate. The shape test is
+ * per-atom rather than catalog-wide so an emulated shape with no native
+ * counterpart survives.
+ *
+ * A native atom short-circuits, so a catalog with no emulated rows -- every
+ * catalog predating XF32 -- never reaches the scan and selection is unchanged. */
+static bool rocke_ati_op_shadowed_by_native(const rocke_mma_catalog_t* cat,
+                                            const rocke_mma_op_t* op,
+                                            const char* family,
+                                            const char* a,
+                                            const char* b,
+                                            const char* c,
+                                            int m,
+                                            int n,
+                                            const rocke_mma_scale_filter_t* scales)
+{
+    int i;
+    if(rocke_arch_mma_op_is_native(op))
+        return false;
+    for(i = 0; i < cat->num_ops; ++i)
+    {
+        const rocke_mma_op_t* other = &cat->ops[i];
+        if(!rocke_arch_mma_op_is_native(other))
+            continue;
+        if(other->m != op->m || other->n != op->n || other->k != op->k)
+            continue;
+        if(rocke_ati_op_matches(other, family, a, b, c, m, n, scales))
+            return true;
+    }
+    return false;
+}
+
+/* The single predicate every selection entry point filters on: matches the
+ * query AND is not shadowed by a native atom. Keeping the two joined here is
+ * what stops one entry point from forgetting the preference rule. */
+static bool rocke_ati_op_selectable(const rocke_mma_catalog_t* cat,
+                                    const rocke_mma_op_t* op,
+                                    const char* family,
+                                    const char* a,
+                                    const char* b,
+                                    const char* c,
+                                    int m,
+                                    int n,
+                                    const rocke_mma_scale_filter_t* scales)
+{
+    return rocke_ati_op_matches(op, family, a, b, c, m, n, scales)
+           && !rocke_ati_op_shadowed_by_native(cat, op, family, a, b, c, m, n, scales);
+}
+
 int rocke_mma_catalog_enumerate(const rocke_mma_catalog_t* cat,
                                 const char* family,
                                 const char* a_dtype,
@@ -240,7 +291,7 @@ int rocke_mma_catalog_enumerate(const rocke_mma_catalog_t* cat,
     for(i = 0; i < cat->num_ops; ++i)
     {
         const rocke_mma_op_t* op = &cat->ops[i];
-        if(!rocke_ati_op_matches(op, fam, a, bd, c, m, n, scales))
+        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, m, n, scales))
             continue;
         if(out && total < cap)
             out[total] = op;
@@ -275,7 +326,7 @@ bool rocke_mma_catalog_has_shape(const rocke_mma_catalog_t* cat,
     for(i = 0; i < cat->num_ops; ++i)
     {
         const rocke_mma_op_t* op = &cat->ops[i];
-        if(!rocke_ati_op_matches(op, fam, a, bd, c, m, n, scales))
+        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, m, n, scales))
             continue;
         if(op->m == m && op->n == n && op->k == k)
             return true;
@@ -310,7 +361,7 @@ const rocke_mma_op_t* rocke_mma_catalog_select_largest_k(const rocke_mma_catalog
     for(i = 0; i < cat->num_ops; ++i)
     {
         const rocke_mma_op_t* op = &cat->ops[i];
-        if(!rocke_ati_op_matches(op, fam, a, bd, c, m, n, scales))
+        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, m, n, scales))
             continue;
         if(k_max >= 0 && op->k > k_max)
             continue; /* Python: k_max is None || op.k <= k_max */
@@ -369,7 +420,7 @@ const rocke_mma_op_t* rocke_mma_catalog_op_for_shape(const rocke_mma_catalog_t* 
     for(i = 0; i < cat->num_ops; ++i)
     {
         const rocke_mma_op_t* op = &cat->ops[i];
-        if(!rocke_ati_op_matches(op, fam, a, bd, c, m, n, scales))
+        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, m, n, scales))
             continue;
         if(op->k == k)
         {
@@ -428,6 +479,28 @@ const char* rocke_arch_mma_op_d_dtype(const rocke_mma_op_t* op)
         return NULL;
     }
     return op->d_dtype ? op->d_dtype : op->c_dtype;
+}
+
+bool rocke_arch_mma_op_is_native(const rocke_mma_op_t* op)
+{
+    /* Mirrors MmaOp.is_native. A NULL op is native by the same reasoning the
+     * header gives: there is no expansion for a row we do not have. */
+    if(!op)
+    {
+        return true;
+    }
+    return op->emulation_recipe == ROCKE_MMA_EMULATION_NONE;
+}
+
+const char* rocke_arch_mma_op_physical_op_id(const rocke_mma_op_t* op)
+{
+    /* Mirrors MmaOp.emulation.physical_op_id, with "native" folded into the
+     * same NULL answer: either way there is no other instruction to issue. */
+    if(rocke_arch_mma_op_is_native(op))
+    {
+        return NULL;
+    }
+    return op->emulation_physical_op_id;
 }
 
 const char* rocke_arch_mma_op_id_d_dtype(const char* op_id)

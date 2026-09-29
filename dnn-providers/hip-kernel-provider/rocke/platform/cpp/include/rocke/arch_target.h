@@ -112,6 +112,17 @@ typedef enum rocke_mma_scale_block_k
     ROCKE_MMA_SCALE_K32 = 32
 } rocke_mma_scale_block_k_t;
 
+/* How an emulated atom expands into physical matrix instructions. NONE is the
+ * natively-encoded sentinel, so zero-init means "native". Mirrors
+ * MmaEmulationRecipe. BF16X3 is three BF16 MMAs over a Dekker-style split of
+ * each fp32 operand, threading one fp32 accumulator; the small*small cross term
+ * is dropped as it is the same order as the split's own error. */
+typedef enum rocke_mma_emulation_recipe
+{
+    ROCKE_MMA_EMULATION_NONE = 0,
+    ROCKE_MMA_EMULATION_BF16X3 = 1
+} rocke_mma_emulation_recipe_t;
+
 /* Complete scale query: independent A/B types, shared K-group size.
  * {NULL, NULL, 0} selects unscaled atoms. */
 typedef struct rocke_mma_scale_filter
@@ -160,6 +171,15 @@ typedef struct rocke_mma_op
      * meaning and zero-init it. Read via rocke_arch_mma_op_d_dtype, never
      * directly. Appended ABI field: native consumers must rebuild. */
     const char* d_dtype;
+    /* Expansion descriptor for an atom with no native encoding. Both fields are
+     * NULL/NONE on a natively-encoded atom, which is every atom that predates
+     * XF32; zero-init therefore gives the right answer for all of them.
+     * emulation_physical_op_id names the instruction actually issued, and is the
+     * SSOT for this row's frag lengths and layout maps -- those are copied from
+     * it at catalog-build time, never restated. Test via
+     * rocke_arch_mma_op_is_native. Appended ABI fields: consumers must rebuild. */
+    rocke_mma_emulation_recipe_t emulation_recipe;
+    const char* emulation_physical_op_id;
 } rocke_mma_op_t;
 
 /* MmaOp.shape -> (m, n, k) via out params. */
@@ -306,6 +326,16 @@ const char* rocke_arch_mma_op_d_dtype(const rocke_mma_op_t* op);
  * its accumulator dtype. Returns NULL for an op_id absent from every catalog.
  * The returned string is an interned canonical key; do not free. */
 const char* rocke_arch_mma_op_id_d_dtype(const char* op_id);
+
+/* True when the hardware encodes this atom directly, mirroring MmaOp.is_native.
+ * A NULL op is reported native: callers that lost the row have no expansion to
+ * perform. Prefer this over comparing emulation_recipe yourself. */
+bool rocke_arch_mma_op_is_native(const rocke_mma_op_t* op);
+
+/* The op_id of the instruction an emulated atom actually issues, mirroring
+ * MmaOp.emulation.physical_op_id. Returns NULL for a native atom (and for a
+ * NULL op), which is the same answer: nothing else to issue. Do not free. */
+const char* rocke_arch_mma_op_physical_op_id(const rocke_mma_op_t* op);
 
 /* Target-independent family projection. Unknown/NULL IDs return NULL;
  * conflicting families for one ID raise ROCKE_ERR_VALUE. */

@@ -129,6 +129,41 @@ class MmaScaleBlockK(IntEnum):
     K32 = 32
 
 
+class MmaEmulationRecipe(str, Enum):
+    """How an emulated atom is expanded into physical matrix instructions."""
+
+    # Three BF16 MMAs over a Dekker-style split of each fp32 operand into a
+    # bf16 "big" part and a bf16 "small" remainder, threading one fp32
+    # accumulator. The small*small cross term is dropped: it is the same order
+    # as the split's own representation error, so computing it buys nothing.
+    BF16X3 = "bf16x3"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+@dataclass(frozen=True)
+class MmaEmulation:
+    """An atom's expansion into a physical atom, when it has no native encoding.
+
+    ``physical_op_id`` names the atom actually issued. It is the SSOT for the
+    emulated atom's fragment lengths and layout maps: those are *derived* from
+    it at load time rather than restated, so the logical row and the instruction
+    it lowers to can never drift apart. Only the element type differs between
+    them -- the logical A fragment occupies the same ``(row, k)`` coordinates.
+    """
+
+    recipe: MmaEmulationRecipe
+    physical_op_id: str
+
+    def __post_init__(self) -> None:
+        # Spelled recipes are validated here rather than at use: an unknown one
+        # must fail at catalog load, not silently reach the lowering.
+        object.__setattr__(self, "recipe", MmaEmulationRecipe(self.recipe))
+        if not self.physical_op_id:
+            raise ValueError("MMA emulation requires a physical_op_id")
+
+
 def _normalize_mma_scales(
     a_dtype: str | None, b_dtype: str | None, block_k: int | None
 ) -> tuple[MmaScaleDType | None, MmaScaleDType | None, MmaScaleBlockK | None]:
@@ -166,6 +201,12 @@ class MmaOp:
     produces the same dtype, so ``d_dtype`` is ``None`` on all of them and
     :attr:`result_dtype` falls back to ``c_dtype``. The two are named apart so
     an atom whose D differs from its C needs no schema change to represent.
+
+    ``emulation`` is ``None`` for an atom the hardware encodes directly. When
+    set, the atom has no native encoding and the lowering expands it into
+    repeated issues of ``emulation.physical_op_id``; the frag lengths and layout
+    maps on this row are inherited from that physical atom. Prefer
+    :attr:`is_native` over testing the field.
     """
 
     family: str  # "mma" | "wmma" | "wmma_scaled"
@@ -207,6 +248,10 @@ class MmaOp:
         default=None, repr=False, compare=False
     )
 
+    # ``None`` means natively encoded. See the class docstring; read through
+    # :attr:`is_native` when all you need is "does the hardware do this".
+    emulation: Optional[MmaEmulation] = None
+
     def __post_init__(self) -> None:
         a, b, block_k = _normalize_mma_scales(
             self.a_scale_dtype, self.b_scale_dtype, self.scale_block_k
@@ -235,6 +280,11 @@ class MmaOp:
     def result_dtype(self) -> str:
         """The dtype this atom produces (D), defaulting to the accumulator (C)."""
         return self.d_dtype or self.c_dtype
+
+    @property
+    def is_native(self) -> bool:
+        """True when the hardware encodes this atom directly (no expansion)."""
+        return self.emulation is None
 
     # --- physical-layout accessors ---------------------------------------
     def a_layout(self) -> LayoutMap:
@@ -930,6 +980,24 @@ class ResourceLimits:
     sgprs: int
 
 
+def _prefer_native(ops: List[MmaOp]) -> List[MmaOp]:
+    """Drop emulated atoms that a native atom of the same shape already covers.
+
+    A native atom is always the better choice at equal shape: the emulated one
+    costs several instructions to produce a result no more accurate. Filtering
+    per shape rather than globally keeps an emulated shape the hardware has no
+    native encoding for.
+
+    Order is preserved, and a list with no emulated atoms is returned unchanged
+    -- which is every query against the pre-XF32 catalog, so this cannot perturb
+    existing selection.
+    """
+    if all(op.is_native for op in ops):
+        return ops
+    native_shapes = {op.shape for op in ops if op.is_native}
+    return [op for op in ops if op.is_native or op.shape not in native_shapes]
+
+
 class MmaCatalog:
     """The arch-selected MMA atoms, with optional exact A/B scale filtering.
 
@@ -982,7 +1050,7 @@ class MmaCatalog:
             if n is not None and op.n != n:
                 continue
             out.append(op)
-        return out
+        return _prefer_native(out)
 
     def has_shape(
         self,
@@ -1231,7 +1299,12 @@ def _build_mma_op(o: dict) -> MmaOp:
     """Construct an :class:`MmaOp` from one catalog JSON row, attaching the
     physical fragment lengths and layout maps registered for its op_id."""
     op_id = o["op_id"]
-    info = _frag_info(op_id)
+    emulation = _build_mma_emulation(o.get("emulation"))
+    # An emulated atom has no fragment layout of its own: it borrows the one
+    # belonging to the instruction it actually issues. Deriving here (rather
+    # than duplicating a row in _MMA_FRAGMENT_INFO) is what makes it impossible
+    # for the logical atom and its physical atom to drift apart.
+    info = _frag_info(emulation.physical_op_id if emulation else op_id)
 
     def _mk(role: str, frag_len: int, fn: _LaneCoordFn) -> Optional[LayoutMap]:
         if fn is None or frag_len <= 0:
@@ -1264,7 +1337,40 @@ def _build_mma_op(o: dict) -> MmaOp:
         b_scale_frag_len=info.b_scale_frag_len,
         _a_scale_layout=_mk("a_scale", info.a_scale_frag_len, info.a_scale_fn),
         _b_scale_layout=_mk("b_scale", info.b_scale_frag_len, info.b_scale_fn),
+        emulation=emulation,
     )
+
+
+def _build_mma_emulation(spec: Optional[dict]) -> Optional[MmaEmulation]:
+    """Build the emulation descriptor for one catalog row, if it has one.
+
+    An absent ``emulation`` key means the atom is natively encoded, which is
+    every atom the catalog shipped before XF32.
+    """
+    if spec is None:
+        return None
+    unknown = set(spec) - {"recipe", "physical_op_id"}
+    if unknown:
+        raise ValueError(f"unknown MMA emulation keys: {sorted(unknown)}")
+    try:
+        emulation = MmaEmulation(
+            recipe=spec["recipe"], physical_op_id=spec["physical_op_id"]
+        )
+    except KeyError as exc:
+        raise ValueError(f"MMA emulation is missing required key {exc}") from None
+    except ValueError:
+        raise ValueError(
+            f"unknown MMA emulation recipe {spec['recipe']!r}; expected one of "
+            f"{[str(r) for r in MmaEmulationRecipe]}"
+        ) from None
+    # The physical atom must be frag-registered, or the emulated row would
+    # silently inherit the zero-length fallback and produce wrong vector widths.
+    if emulation.physical_op_id not in _MMA_FRAGMENT_INFO:
+        raise ValueError(
+            f"MMA emulation physical_op_id {emulation.physical_op_id!r} is not "
+            f"registered in _MMA_FRAGMENT_INFO; add its fragment metadata first"
+        )
+    return emulation
 
 
 @lru_cache(maxsize=None)
