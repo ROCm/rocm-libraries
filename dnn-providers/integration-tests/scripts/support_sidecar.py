@@ -65,7 +65,7 @@ def load(path: Path) -> Set[Claim]:
         return set()
     try:
         text = path.read_bytes().decode("utf-8")
-    except UnicodeDecodeError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         raise SidecarError(f"{path}: unreadable: {exc!r}") from exc
     return parse(path, text)
 

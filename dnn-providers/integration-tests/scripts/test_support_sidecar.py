@@ -166,6 +166,12 @@ class TestFiles(unittest.TestCase):
         with self.assertRaisesRegex(SidecarError, "unreadable"):
             load(path)
 
+    def test_refuses_a_sidecar_it_cannot_read(self):
+        path = self.dir / "X.support.json"
+        path.mkdir()
+        with self.assertRaisesRegex(SidecarError, "X.support.json: unreadable"):
+            load(path)
+
     def test_refuses_invalid_json(self):
         path = self.dir / "X.support.json"
         path.write_text("{", encoding="utf-8")
