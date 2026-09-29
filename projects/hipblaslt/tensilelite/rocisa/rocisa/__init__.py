@@ -173,6 +173,46 @@ _BACKEND = _BACKEND_RAW if _BACKEND_RAW else _detect_default_backend()
 _ADAPTER_PKG = "rocisa_stinkytofu_adaptor"
 
 
+def _unwrap_source_tree_adapter(adapter):
+    """Return the real adaptor when the source tree was imported as a namespace.
+
+    The package lives at ``rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor``.
+    CMake copies the inner directory next to ``rocisa/`` so a build PYTHONPATH
+    imports it normally. Pytest instead puts the tensilelite root on
+    ``sys.path``, and the outer directory has no ``__init__.py``, so the import
+    binds an empty namespace package (``__file__ is None``) that does not
+    define ``rocIsa``. Load the inner package under the public name before any
+    relative import runs.
+    """
+    if getattr(adapter, "__file__", None):
+        return adapter
+    init_py = None
+    for entry in list(getattr(adapter, "__path__", ())):
+        candidate = os.path.join(entry, _ADAPTER_PKG, "__init__.py")
+        if os.path.isfile(candidate):
+            init_py = candidate
+            break
+    if init_py is None:
+        return adapter
+
+    import importlib.util
+
+    for key in list(sys.modules):
+        if key == _ADAPTER_PKG or key.startswith(_ADAPTER_PKG + "."):
+            del sys.modules[key]
+    spec = importlib.util.spec_from_file_location(
+        _ADAPTER_PKG,
+        init_py,
+        submodule_search_locations=[os.path.dirname(init_py)],
+    )
+    if spec is None or spec.loader is None:
+        return adapter
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[_ADAPTER_PKG] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def _load_stinkytofu_adapter() -> "tuple[bool, str]":
     """Try to install the rocisa_stinkytofu_adaptor as the ``rocisa`` module.
 
@@ -186,8 +226,14 @@ def _load_stinkytofu_adapter() -> "tuple[bool, str]":
     """
     try:
         import rocisa_stinkytofu_adaptor as _adapter  # noqa: F401
+        _adapter = _unwrap_source_tree_adapter(_adapter)
     except Exception as exc:
         return False, f"import failed: {exc!r}"
+    if not hasattr(_adapter, "rocIsa"):
+        return False, (
+            "import failed: rocisa_stinkytofu_adaptor does not define rocIsa "
+            "(the source-tree directory shadowed the real package)"
+        )
 
     # Install the adapter as ``rocisa`` and re-export each
     # ``rocisa_stinkytofu_adaptor.*`` submodule under ``rocisa.*`` in
