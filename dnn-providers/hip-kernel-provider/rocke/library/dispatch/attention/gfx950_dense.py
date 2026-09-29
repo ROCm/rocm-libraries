@@ -69,7 +69,9 @@ GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
         DENSE_GRID_ALGORITHM,
         persistent=False,
         wide_lds_dma=False,
-        features=_FEATURES | {"causal_bottom_right"},
+        # fp8 KV is grid-only -- the spec rejects persistent/paged (so the
+        # persistent variants do not advertise it).
+        features=_FEATURES | {"causal_bottom_right", "fp8"},
     ),
     # The grid body at the qb_minor block order: the grid the hipDNN kernel ingestor
     # launches.
@@ -205,6 +207,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         causal_bottom_right=moving_bottom_right,
         emit_lse=bool(req.emit_lse),
         right_bound=right_bound,
+        kv_storage_dtype="fp8e4m3" if bool(req.use_fp8) else None,
     )
 
 
