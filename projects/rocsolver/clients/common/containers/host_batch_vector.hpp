@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include <cstring>
 #include <ostream>
 #include <string.h>
 
@@ -237,20 +238,16 @@ private:
                 {
                     break;
                 }
-#ifdef NDEBUG
-#else
-                // -------------------------------
-                // set initial data to NaN or 0xFF
-                // to assist in debugging
-                // -------------------------------
-                int const val = 0xFF;
-                size_t const nbytes = nmemb * sizeof(T);
-                void* dst = (void*)(this->m_data[batch_index]);
-                void* istat = memset(dst, val, nbytes);
-                bool const isok = (istat == dst);
-                if(!isok)
+#ifndef NDEBUG
                 {
-                    break;
+                    // -------------------------------
+                    // set initial data to NaN or 0xFF
+                    // to assist in debugging
+                    // -------------------------------
+                    int const val = 0xFF;
+                    size_t const nbytes = nmemb * sizeof(T);
+                    void* dst = (void*)(this->m_data[batch_index]);
+                    static_cast<void>(std::memset(dst, val, nbytes));
                 }
 #endif
             }
