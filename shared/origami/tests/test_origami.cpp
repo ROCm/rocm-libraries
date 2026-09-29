@@ -1090,6 +1090,50 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
   }
 }
 
+TEST_CASE("Origami: config_t cluster_dim defaults to 1x1x1", "[origami][config][cluster_dim]") {
+  origami::config_t config;
+  config.mt.m        = 256;
+  config.mt.n        = 256;
+  config.mt.k        = 64;
+  config.mi          = {16, 16, 16};
+  config.occupancy   = 4;
+
+  REQUIRE(config.cluster_dim.m == 1);
+  REQUIRE(config.cluster_dim.n == 1);
+  REQUIRE(config.cluster_dim.k == 1);
+
+  const auto from_helper = make_config(256, 256, 64);
+  REQUIRE(from_helper.cluster_dim.m == 1);
+  REQUIRE(from_helper.cluster_dim.n == 1);
+  REQUIRE(from_helper.cluster_dim.k == 1);
+}
+
+TEST_CASE("Origami: config_t operator== distinguishes cluster_dim",
+          "[origami][config][cluster_dim]") {
+  origami::config_t base;
+  base.mt        = {256, 256, 64};
+  base.mi        = {16, 16, 16};
+  base.occupancy = 4;
+
+  auto other = base;
+  other.cluster_dim = {2, 1, 1};
+
+  REQUIRE(base == base);
+  REQUIRE(!(base == other));
+
+  other = base;
+  other.cluster_dim = {1, 2, 1};
+  REQUIRE(!(base == other));
+
+  other = base;
+  other.cluster_dim = {1, 1, 2};
+  REQUIRE(!(base == other));
+
+  other.cluster_dim = {2, 1, 1};
+  const auto same = other;
+  REQUIRE(other == same);
+}
+
 TEST_CASE("Origami: config_t hash function", "[origami]") {
   SECTION("hash works with no backend (monostate)") {
     origami::config_t config1;
@@ -1173,6 +1217,38 @@ TEST_CASE("Origami: config_t hash function", "[origami]") {
     config2.tensile().depth_u = 32;  // Different depth_u
 
     REQUIRE(config1.hash() != config2.hash());
+  }
+
+  SECTION("different cluster_dim produces different hashes") {
+    origami::config_t config1;
+    config1.mt           = {256, 256, 32};
+    config1.mi           = {16, 16, 16};
+    config1.occupancy    = 4;
+    config1.cluster_dim  = {1, 1, 1};
+
+    origami::config_t config2 = config1;
+    config2.cluster_dim       = {2, 1, 1};
+
+    origami::config_t config3 = config1;
+    config3.cluster_dim       = {1, 2, 1};
+
+    origami::config_t config4 = config1;
+    config4.cluster_dim       = {1, 1, 2};
+
+    REQUIRE(config1.hash() != config2.hash());
+    REQUIRE(config1.hash() != config3.hash());
+    REQUIRE(config1.hash() != config4.hash());
+  }
+
+  SECTION("identical cluster_dim preserves hash") {
+    origami::config_t config1;
+    config1.mt           = {256, 256, 32};
+    config1.mi           = {16, 16, 16};
+    config1.occupancy    = 4;
+    config1.cluster_dim  = {2, 2, 1};
+
+    origami::config_t config2 = config1;
+    REQUIRE(config1.hash() == config2.hash());
   }
 }
 

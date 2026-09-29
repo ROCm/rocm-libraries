@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: MIT
 # Fused GEMM+A2A (FusedGemmA2A=1) config for gfx950.
 
+TestParameters:
+  marks: [skip-gfx1250] # gfx950-only
+
 GlobalParameters:
   SyncsPerBenchmark: 0
   SleepPercent: 0
