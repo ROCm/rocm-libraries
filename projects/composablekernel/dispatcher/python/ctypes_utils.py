@@ -205,6 +205,46 @@ class ValidationResult:
                 print(f"{indent}    {key}: {val}")
 
 
+def listed_warp_tiles(
+    arch: str,
+    dtype_a: str,
+    dtype_b: Optional[str] = None,
+    dtype_acc: Optional[str] = None,
+    variant: str = "standard",
+) -> Tuple[str, str, List[List[int]]]:
+    """Return (dtype_key, table_key, warp tiles) listed for *arch* and dtypes.
+
+    An empty list means the arch has no warp tiles for this dtype, i.e. the
+    dtype cannot be generated on that arch.
+    """
+    # The arch_specs tables key on the ACCUMULATOR dtype (e.g. "fp8_fp8_fp32",
+    # "int8_int8_int32"), not the input dtype repeated -- using
+    # f"{dtype}_{dtype}_{dtype}" silently missed every non-fp16 key and fell
+    # through to the permissive default, admitting warp tiles the codegen rejects.
+    #
+    # The key is "{dtype_a}_{dtype_b}_{dtype_acc}". This shared standard path also
+    # serves mixed-A/B-dtype configs (e.g. fp8_bf8). The tables are indexed
+    # by the (dtype_a, dtype_b) pair, so both must be threaded through -- building
+    # the key from dtype_a repeated would silently look up the wrong (or a
+    # nonexistent) entry for a mixed-dtype caller and fall through to the
+    # permissive default. Preshuffle's own scope pins dtype_a == dtype_b, but this
+    # helper lives on the shared path, so key on both explicitly.
+    dtype_b = dtype_b or dtype_a
+    dtype_acc = dtype_acc or ("int32" if dtype_a == "int8" else "fp32")
+    dtype_key = f"{dtype_a}_{dtype_b}_{dtype_acc}"
+    # Preshuffle consults its own (smaller) whitelist; other variants use the
+    # standard GEMM warp-tile table.
+    table_key = (
+        "preshuffle_warp_tile_combos"
+        if variant == "preshuffle"
+        else "warp_tile_combos"
+    )
+    arch_data = get_arch_filter_data()
+    return dtype_key, table_key, arch_data.get(table_key, {}).get(arch, {}).get(
+        dtype_key, []
+    )
+
+
 def validate_kernel_config(config: "KernelConfig") -> ValidationResult:
     """
     Validate a KernelConfig against arch filter rules.
@@ -275,31 +315,10 @@ def validate_kernel_config(config: "KernelConfig") -> ValidationResult:
             suggested_fixes["wave_k"] = warp_combos[0][2]
 
     # Check warp tile configuration for this arch and dtype.
-    # The arch_specs tables key on the ACCUMULATOR dtype (e.g. "fp8_fp8_fp32",
-    # "int8_int8_int32"), not the input dtype repeated -- using
-    # f"{dtype}_{dtype}_{dtype}" silently missed every non-fp16 key and fell
-    # through to the permissive default, admitting warp tiles the codegen rejects.
-    #
-    # The key is "{dtype_a}_{dtype_b}_{dtype_acc}". This shared standard path also
-    # serves mixed-A/B-dtype configs (e.g. fp8_bf8). The tables above are indexed
-    # by the (dtype_a, dtype_b) pair, so both must be threaded through -- building
-    # the key from dtype_a repeated would silently look up the wrong (or a
-    # nonexistent) entry for a mixed-dtype caller and fall through to the
-    # permissive default. Preshuffle's own scope pins dtype_a == dtype_b, but this
-    # helper lives on the shared path, so key on both explicitly.
     dtype_b = getattr(config, "dtype_b", None) or dtype
-    dtype_acc = getattr(config, "dtype_acc", None) or (
-        "int32" if dtype == "int8" else "fp32"
+    dtype_key, table_key, warp_tile_combos = listed_warp_tiles(
+        arch, dtype, dtype_b, getattr(config, "dtype_acc", None), variant
     )
-    dtype_key = f"{dtype}_{dtype_b}_{dtype_acc}"
-    # Preshuffle consults its own (smaller) whitelist; other variants use the
-    # standard GEMM warp-tile table.
-    table_key = (
-        "preshuffle_warp_tile_combos"
-        if variant == "preshuffle"
-        else "warp_tile_combos"
-    )
-    warp_tile_combos = arch_data.get(table_key, {}).get(arch, {}).get(dtype_key, [])
     warp_cfg = [warp_m, warp_n, warp_k]
     if not warp_tile_combos:
         errors.append(

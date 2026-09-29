@@ -299,6 +299,21 @@ set_tests_properties(dispatcher_test_gemm_result_status PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# fp32 through the tile_engine GEMM sweep driver: dtype choice, per-dtype CI
+# config and verify tolerance, per-arch rejection, 0-config error, and fp32
+# host buffers in GpuGemmRunner. Driver build and ctypes lib are mocked.
+add_test(
+    NAME dispatcher_test_gemm_driver_fp32
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_gemm_driver_fp32.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gemm_driver_fp32 PROPERTIES
+    LABELS "dispatcher;python;gemm;validation"
+    TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # MX bridge host tests and CMake configuration tests. Report missing host build
 # tools as a skipped CMake test rather than an all-skipped pass.
 foreach(_mx_test bridge cmake)
