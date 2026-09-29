@@ -1007,6 +1007,8 @@ namespace rocsparse
         const int lid = tid & (WF_SIZE - 1);
         const int wid = tid / WF_SIZE;
 
+        const J bin_start = n_rows_bins[bin_id];
+
         // One wavefront reduces one row. The launch grid is clamped to the device's maximum
         // grid size, so iterate with a grid-stride loop (in units of wavefronts) to cover every
         // row. This kernel uses no block-wide barriers, so divergent iteration counts are safe.
@@ -1014,8 +1016,7 @@ namespace rocsparse
         for(int64_t gid = (int64_t)(BLOCKSIZE / WF_SIZE) * bid + wid; gid < count;
             gid += warps_per_grid)
         {
-            const J bin_start = n_rows_bins[bin_id];
-            const J row       = rows_bins[bin_start + gid];
+            const J row = rows_bins[bin_start + gid];
 
             T       temp_sum = static_cast<T>(0);
             const I vecStart = csr_row_ptr[row] - idx_base;
