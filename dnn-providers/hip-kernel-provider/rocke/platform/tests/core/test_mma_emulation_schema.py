@@ -149,19 +149,25 @@ class TestPreferNative(unittest.TestCase):
 
 
 class TestShippedCatalogUnaffected(unittest.TestCase):
-    def test_every_shipped_atom_is_native(self):
-        """No catalog row declares emulation yet, so selection cannot have moved."""
+    def test_emulation_is_confined_to_the_xf32_rows(self):
+        """Every atom that predates XF32 is still native, so selection held still."""
         for gfx in known_arches():
             for op in ArchTarget.from_gfx(gfx).mma.ops:
                 with self.subTest(gfx=gfx, op_id=op.op_id):
-                    self.assertTrue(op.is_native)
-                    self.assertIsNone(op.emulation)
+                    if op.a_dtype == "xf32":
+                        self.assertIsNotNone(op.emulation)
+                    else:
+                        self.assertTrue(op.is_native)
+                        self.assertIsNone(op.emulation)
 
-    def test_enumerate_is_unchanged_when_nothing_is_emulated(self):
+    def test_enumerate_is_unchanged_for_every_shipped_query(self):
         """Guards the comparator against perturbing existing selection.
 
         Compares live enumerate() output against the same filter with the
-        preference rule bypassed entirely.
+        preference rule bypassed entirely. The emulated rows are reachable only
+        through an xf32 query, so no pre-existing query may move -- and the
+        xf32 queries must not move either, there being no native atom to shadow
+        them.
         """
         for gfx in known_arches():
             catalog = ArchTarget.from_gfx(gfx).mma

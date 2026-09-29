@@ -380,11 +380,59 @@ static int test_scale_layouts_and_families()
     return 0;
 }
 
+/* An emulated row restates the physical atom's fragment metadata -- this static
+ * table has no build step to derive it, unlike the Python catalog. That makes
+ * drift possible, so pin it: same frag lengths, same wave size, and the *same*
+ * layout objects (pointer equality, not a copy). Also refuse an expansion chain:
+ * the physical atom must itself be native, so one hop reaches real hardware. */
+static int test_emulated_rows_mirror_physical()
+{
+    int checked = 0;
+    for(const char* gfx : {"gfx942", "gfx950", "gfx1151", "gfx1201", "gfx1250"})
+    {
+        const rocke_arch_target_t* arch = rocke_arch_target_from_gfx(gfx);
+        if(!arch)
+            continue;
+        for(int i = 0; i < arch->mma.num_ops; ++i)
+        {
+            const rocke_mma_op_t* op = &arch->mma.ops[i];
+            if(rocke_arch_mma_op_is_native(op))
+                continue;
+            const char* physical_id = rocke_arch_mma_op_physical_op_id(op);
+            CHECK(physical_id != NULL);
+            const rocke_mma_op_t* physical = NULL;
+            for(int j = 0; j < arch->mma.num_ops; ++j)
+            {
+                if(strcmp(arch->mma.ops[j].op_id, physical_id) == 0)
+                    physical = &arch->mma.ops[j];
+            }
+            if(!physical)
+            {
+                fprintf(stderr, "%s: physical atom %s absent from %s\n", op->op_id, physical_id, gfx);
+                return 1;
+            }
+            CHECK(rocke_arch_mma_op_is_native(physical));
+            CHECK(op->m == physical->m && op->n == physical->n && op->k == physical->k);
+            CHECK(op->a_frag_len == physical->a_frag_len);
+            CHECK(op->b_frag_len == physical->b_frag_len);
+            CHECK(op->c_frag_len == physical->c_frag_len);
+            CHECK(op->wave_size == physical->wave_size);
+            CHECK(op->a_layout == physical->a_layout);
+            CHECK(op->b_layout == physical->b_layout);
+            CHECK(op->c_layout == physical->c_layout);
+            ++checked;
+        }
+    }
+    printf("emulated rows: %d mirrored their physical atom\n", checked);
+    return 0;
+}
+
 int main()
 {
     // Keep this first: no previous query may prime the shared family index.
     if(test_family_index_first_use() || test_family_index_duplicates() || test_mma_result_names()
-       || test_scale_contracts() || test_scale_layouts_and_families())
+       || test_scale_contracts() || test_scale_layouts_and_families()
+       || test_emulated_rows_mirror_physical())
         return 1;
     int checked = 0;
     for(const char* gfx : {"gfx950", "gfx1250"})

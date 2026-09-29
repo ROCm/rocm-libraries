@@ -51,17 +51,38 @@ def test_memory_ops_reject_it():
             io_ir_type(spelling)
 
 
-def test_no_shipped_catalog_atom_claims_it_yet():
-    """Registering the name alone must not enable selection on any arch.
+def test_xf32_appears_only_as_an_operand_dtype():
+    """`xf32` selects a matrix path; it never names a result.
 
-    Catalog rows land in a later step; until then every atom's operand and
-    accumulator dtypes stay fp32/bf16/etc. so ordinary fp32 GEMM selection is
-    provably unchanged by this commit.
+    An atom may take xf32 on A and B -- that is the whole point of the tag --
+    but C and D describe values that really exist in registers, and no such
+    value is ever "xf32". This is what keeps the tag out of any code that would
+    need a representation for it.
     """
     from rocke.core.arch import ArchTarget
     from rocke.core.arch.target import known_arches
 
     for gfx in known_arches():
         for op in ArchTarget.from_gfx(gfx).mma.ops:
-            for field in (op.a_dtype, op.b_dtype, op.c_dtype, op.result_dtype):
-                assert field != "xf32", f"{gfx}: {op.op_id} already claims xf32"
+            for field in (op.c_dtype, op.result_dtype):
+                assert field != "xf32", f"{gfx}: {op.op_id} accumulates into xf32"
+
+
+def test_xf32_operands_are_confined_to_gfx950_emulated_rows():
+    """Pins the blast radius of enabling the tag.
+
+    Only gfx950 ships XF32 today, and only as emulation. Every other arch's
+    selection is untouched by construction, and an accidental native-looking
+    xf32 row (one with no expansion behind it) is caught here rather than in
+    the lowering.
+    """
+    from rocke.core.arch import ArchTarget
+    from rocke.core.arch.target import known_arches
+
+    for gfx in known_arches():
+        for op in ArchTarget.from_gfx(gfx).mma.ops:
+            if "xf32" not in (op.a_dtype, op.b_dtype):
+                continue
+            assert gfx == "gfx950", f"{gfx}: unexpected xf32 atom {op.op_id}"
+            assert op.a_dtype == op.b_dtype == "xf32", f"{op.op_id}: mixed operands"
+            assert not op.is_native, f"{op.op_id}: xf32 atom claims a native encoding"

@@ -175,8 +175,11 @@ typedef struct rocke_mma_op
      * NULL/NONE on a natively-encoded atom, which is every atom that predates
      * XF32; zero-init therefore gives the right answer for all of them.
      * emulation_physical_op_id names the instruction actually issued, and is the
-     * SSOT for this row's frag lengths and layout maps -- those are copied from
-     * it at catalog-build time, never restated. Test via
+     * SSOT for this row's frag lengths, wave size and layout maps: Python derives
+     * them from it at catalog-build time, and because this static table has no
+     * build step its rows restate them, pinned equal by
+     * tests/core/test_mma_catalog_lookup.cpp (and test_xf32_catalog_rows.py on
+     * the Python side). Test via
      * rocke_arch_mma_op_is_native. Appended ABI fields: consumers must rebuild. */
     rocke_mma_emulation_recipe_t emulation_recipe;
     const char* emulation_physical_op_id;

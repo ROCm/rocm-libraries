@@ -1444,6 +1444,68 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      NULL,
      NULL,
      NULL},
+    /* XF32 via BF16x3 emulation. No native encoding: each row issues three
+     * mfma_*_bf16 over a Dekker-style split of its fp32 operands. Frag lengths,
+     * wave size and layout maps are inherited verbatim from the physical atom --
+     * they are the *same* fragment, differing only in the element type handed to
+     * the instruction -- and tests/core/test_xf32_catalog_rows.py pins them equal
+     * to the bf16 rows above so the two cannot drift.
+     *
+     * These two rows must be spelled fully positionally, through
+     * emulation_physical_op_id: C++ forbids mixing designated and positional
+     * initializers in one braced-init-list, so reaching a trailing member means
+     * naming every member before it. The NULL/0/NONE run is the unscaled,
+     * D-same-as-C default that every other row gets from zero-init. */
+    {"mma",
+     "xf32",
+     "xf32",
+     "fp32",
+     16,
+     16,
+     32,
+     "xf32_bf16x3_f32_16x16x32",
+     8,
+     8,
+     4,
+     64,
+     &lm_mfma_16x16x32_a,
+     &lm_mfma_16x16x32_b,
+     &lm_mfma_16x16x32_c,
+     NULL,
+     NULL,
+     ROCKE_MMA_SCALE_NONE,
+     0,
+     0,
+     NULL,
+     NULL,
+     NULL,
+     ROCKE_MMA_EMULATION_BF16X3,
+     "mfma_f32_16x16x32_bf16"},
+    {"mma",
+     "xf32",
+     "xf32",
+     "fp32",
+     32,
+     32,
+     16,
+     "xf32_bf16x3_f32_32x32x16",
+     8,
+     8,
+     16,
+     64,
+     &lm_mfma_32x32x16_a,
+     &lm_mfma_32x32x16_b,
+     &lm_mfma_32x32x16_c,
+     NULL,
+     NULL,
+     ROCKE_MMA_SCALE_NONE,
+     0,
+     0,
+     NULL,
+     NULL,
+     NULL,
+     ROCKE_MMA_EMULATION_BF16X3,
+     "mfma_f32_32x32x16_bf16"},
 };
 
 /* ----------------------------- gfx1151 (RDNA3.5) ------------------------- */
