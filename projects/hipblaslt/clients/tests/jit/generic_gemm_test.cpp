@@ -1,13 +1,13 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "hipblaslt-jit-tensilelite.hpp"
+#include "hipblaslt-jit.hpp"
 #include <algorithm>
 #include <cmath>
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
-#include <hipblaslt/hipblaslt-jit-tensilelite.hpp>
-#include <hipblaslt/hipblaslt-jit.hpp>
 #include <iostream>
 #include <limits>
 #include <stdexcept>

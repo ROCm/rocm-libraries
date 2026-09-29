@@ -14,6 +14,9 @@ if(HIPBLASLT_ENABLE_JIT)
         message(FATAL_ERROR "hipblaslt-bench JIT requires the local _rocisa target")
     endif()
     add_dependencies(hipblaslt-clients-common _rocisa)
+    # --jit-gemm uses the internal, uninstalled JIT headers until HIPBLASLT_JIT replaces it.
+    target_include_directories(hipblaslt-clients-common PUBLIC
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail>)
     target_compile_definitions(hipblaslt-clients-common PRIVATE
         HIPBLASLT_JIT_PYTHON="${Python_EXECUTABLE}"
         HIPBLASLT_JIT_TENSILE_SOURCE="${PROJECT_SOURCE_DIR}/tensilelite"
@@ -250,21 +253,6 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     endif()
 
     add_subdirectory(tests)
-endif()
-if(HIPBLASLT_ENABLE_JIT)
-    add_executable(hipblaslt-jit-gemm
-        samples/29_hipblaslt_jit_gemm/sample_hipblaslt_jit_gemm.cpp)
-    target_link_libraries(hipblaslt-jit-gemm PRIVATE hipblaslt hip::device)
-    target_compile_features(hipblaslt-jit-gemm PRIVATE cxx_std_17)
-    set_target_properties(hipblaslt-jit-gemm PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/staging")
-    add_executable(hipblaslt-generic-jit-gemm
-        samples/30_hipblaslt_generic_jit_gemm/sample_hipblaslt_generic_jit_gemm.cpp)
-    target_link_libraries(hipblaslt-generic-jit-gemm PRIVATE hipblaslt hip::device)
-    target_compile_features(hipblaslt-generic-jit-gemm PRIVATE cxx_std_17)
-    set_target_properties(hipblaslt-generic-jit-gemm PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/staging")
-
 endif()
 
 if(HIPBLASLT_ENABLE_SAMPLES)

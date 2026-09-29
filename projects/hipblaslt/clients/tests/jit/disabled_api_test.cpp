@@ -1,67 +1,22 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-#include <cstring>
-#include <hipblaslt/hipblaslt-jit-tensilelite.hpp>
-#include <hipblaslt/hipblaslt-jit.hpp>
+#include <hipblaslt/hipblaslt-ext.hpp>
 #include <iostream>
+
+// Every installed header lives in the public include directory, so a JIT header
+// found there could be installed.
+#if __has_include(<hipblaslt/hipblaslt-jit.hpp>) \
+    || __has_include(<hipblaslt/hipblaslt-jit-tensilelite.hpp>)
+#error "JIT headers must not be part of the public hipBLASLt include tree"
+#endif
 
 int main()
 {
-    namespace tl = hipblaslt_ext::experimental::jit::tensilelite;
-    tl::Diagnostics                  diagnostics{"stale"};
-    hipblasLtMatmulHeuristicResult_t result;
-    std::memset(&result, 0xa5, sizeof(result));
-    const auto unsupported = HIPBLAS_STATUS_NOT_SUPPORTED;
-    if(tl::getGemmAlgo(nullptr,
-                       nullptr,
-                       nullptr,
-                       nullptr,
-                       nullptr,
-                       nullptr,
-                       nullptr,
-                       nullptr,
-                       nullptr,
-                       nullptr,
-                       nullptr,
-                       nullptr,
-                       {},
-                       0,
-                       result,
-                       diagnostics)
-           != unsupported
-       || result.state != unsupported || result.workspaceSize != 0)
+    hipblaslt_ext::GemmPreference preference;
+    preference.setMaxWorkspaceBytes(4096);
+    hipblasLtMatmulAlgo_t algo{};
+    if(preference.getMaxWorkspaceBytes() != 4096 || hipblaslt_ext::getIndexFromAlgo(algo) != 0)
         return 1;
-    hipblasLtMatmulAlgo_t empty{};
-    if(std::memcmp(&result.algo, &empty, sizeof(empty)) != 0 || diagnostics.message.empty())
-        return 1;
-    namespace jit = hipblaslt_ext::experimental::jit;
-    jit::Backend     backend;
-    jit::Request     request;
-    jit::Solution    solution;
-    jit::Diagnostics genericDiagnostics{"stale", "stale"};
-    std::memset(&result, 0xa5, sizeof(result));
-    if(tl::createBackend({}, backend, genericDiagnostics) != unsupported
-       || jit::makeGemmRequest(nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               request,
-                               genericDiagnostics)
-              != unsupported
-       || jit::getJitAlgo(0, request, backend, 0, solution, genericDiagnostics) != unsupported
-       || jit::getGemmAlgo(solution, result, genericDiagnostics) != unsupported
-       || result.state != unsupported || result.workspaceSize != 0
-       || std::memcmp(&result.algo, &empty, sizeof(empty)) != 0
-       || genericDiagnostics.message.empty())
-        return 1;
-    std::cout << "PASS disabled direct and generic APIs and cleared results\n";
+    std::cout << "PASS public headers exclude JIT and the extension API links without it\n";
     return 0;
 }

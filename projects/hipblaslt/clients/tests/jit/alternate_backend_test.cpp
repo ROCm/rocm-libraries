@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: MIT
 #include "hipblaslt-jit-backend.hpp"
 #include "hipblaslt-jit-gemm-internal.hpp"
+#include "hipblaslt-jit.hpp"
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
-#include <hipblaslt/hipblaslt-jit.hpp>
 
 #include <cmath>
 #include <cstring>

@@ -28,11 +28,11 @@ KernelFromAnywhere (KFA) assessment and the timing/progress plans.
 
 ## Summary
 
-Today, JIT generation is an explicit, application-driven path. The application
-calls a JIT entry point with its GEMM descriptors, hipBLASLt compiles one
-solution through TensileLite, and the application passes the returned algorithm
-to `hipblasLtMatmul` or `hipblaslt_ext::Gemm`. An ordinary heuristic query or
-matmul call does not initiate this path. The separate, existing rocRoller
+Today, JIT generation is an explicit path behind internal entry points. The JIT
+test binaries and `hipblaslt-bench --jit-gemm` call an entry point with GEMM
+descriptors, hipBLASLt compiles one solution through TensileLite, and the caller
+passes the returned algorithm to `hipblasLtMatmul` or `hipblaslt_ext::Gemm`. An
+ordinary heuristic query or matmul call does not initiate this path. The separate, existing rocRoller
 integration has its own runtime generation path and can compile during normal
 library use.
 
@@ -40,25 +40,27 @@ In the target design, JIT generation moves behind the existing heuristic query.
 `hipblasLtMatmulAlgoGetHeuristic` and `GemmInstance::algoGetHeuristic` consult
 the pre-tuned libraries first. When the environment variable `HIPBLASLT_JIT`
 enables it, they fill a shortfall from a persistent JIT solution library and
-then from newly generated solutions. The explicit JIT entry points leave the
-public API and remain as internal interfaces used by tests.
+then from newly generated solutions. The explicit JIT entry points have already
+left the public API and remain internal interfaces used by tests.
 
 ## Current behavior
 
 ### Entry points
 
-Two JIT entry points are installed on this branch today. Both share one
-TensileLite provider implementation and one process-local algorithm registry,
-and both return an algorithm for the existing C/C++ GEMM execution APIs.
+Two internal JIT entry points exist on this branch. Both share one TensileLite
+provider implementation and one process-local algorithm registry, and both
+return an algorithm for the existing C/C++ GEMM execution APIs.
 
 | Entry point | Header | Behavior |
 | --- | --- | --- |
-| Direct TensileLite | `hipblaslt/hipblaslt-jit-tensilelite.hpp` | `hipblaslt_ext::experimental::jit::tensilelite::getGemmAlgo` compiles one required, explicit YAML (YAML Ain't Markup Language) recipe and returns a `hipblasLtMatmulHeuristicResult_t`. Sample `29_hipblaslt_jit_gemm` exercises it. See the [TensileLite backend guide](JIT_TENSILELITE.md). |
-| Generic request/backend/solution | `hipblaslt/hipblaslt-jit.hpp` | `jit::tensilelite::createBackend` configures the provider. `jit::makeGemmRequest` captures existing GEMM descriptors and host scalars, `jit::getJitAlgo` compiles on the selected device and returns an owned `Solution`, and `jit::getGemmAlgo` adapts it to the algorithm accepted by `hipblasLtMatmul` and `Gemm`. Sample `30_hipblaslt_generic_jit_gemm` exercises it. |
+| Direct TensileLite | `library/src/amd_detail/hipblaslt-jit-tensilelite.hpp` | `hipblaslt_ext::experimental::jit::tensilelite::getGemmAlgo` compiles one required, explicit YAML (YAML Ain't Markup Language) recipe and returns a `hipblasLtMatmulHeuristicResult_t`. The `hipblaslt-jit-direct-gemm-test` binary exercises it. See the [TensileLite backend guide](JIT_TENSILELITE.md). |
+| Generic request/backend/solution | `library/src/amd_detail/hipblaslt-jit.hpp` | `jit::tensilelite::createBackend` configures the provider. `jit::makeGemmRequest` captures existing GEMM descriptors and host scalars, `jit::getJitAlgo` compiles on the selected device and returns an owned `Solution`, and `jit::getGemmAlgo` adapts it to the algorithm accepted by `hipblasLtMatmul` and `Gemm`. The `hipblaslt-jit-generic-gemm-test` binary exercises it. |
 
-`hipblaslt-ext.hpp` includes both headers, and `library/include/CMakeLists.txt`
-installs them. [Step 1](#roadmap), now in progress, removes both from the public
-surface.
+[Step 1](#roadmap) made both headers internal: they are not installed and
+`hipblaslt-ext.hpp` does not include them. The five functions keep
+`HIPBLASLT_EXPORT`, so `libhipblaslt.so` still exports them for the JIT test
+binaries and `hipblaslt-bench --jit-gemm`, which link against the shared
+library. No installed header declares them, and they are not a supported API.
 
 Python, compiler, recipe and output paths belong to the provider's
 `tensilelite::Options`. The application owns its buffers and workspace. The
@@ -82,9 +84,9 @@ a general owning executable object.
 | One-solution builder | One recipe and target produce complete main/helper artifacts through `Tensile.SingleSolution` and the existing TensileLite generators, validators and compiler tools. |
 | Ranked recipe selector | Supplied candidates and problem facts produce one validated recipe or rejection reasons. `Tensile.JitGemm` calls the builder without running a model. |
 | C++ predictor | `hipblaslt-jit-tensilelite-predictor.cpp` enumerates synthetic candidates from the target's instruction, tile, depth and cache-hint catalog, ranks them with Origami, and emits the `origami.gemm.dp.v1` modeled contract (workgroup mapping, stagger and launch outputs) to `Tensile.JitGemm`. |
-| Direct API and sample | An explicit recipe and GEMM descriptors produce a checked algorithm. Sample `29_hipblaslt_jit_gemm` exercises C/C++ execution independently of the generic API. |
-| Generic API and adapters | `makeGemmRequest`, `getJitAlgo` and `getGemmAlgo` connect the provider to existing execution. Sample `30_hipblaslt_generic_jit_gemm` covers this flow. |
-| Benchmark | `hipblaslt-bench --jit-gemm` uses the generic TensileLite backend with prediction, completing selection and compilation before correctness checks and execution timing. See the [benchmark guide](clients/bench/README.jit.md). |
+| Direct entry point and test | An explicit recipe and GEMM descriptors produce a checked algorithm. `hipblaslt-jit-direct-gemm-test` exercises C/C++ execution independently of the generic entry point. |
+| Generic entry point and adapters | `makeGemmRequest`, `getJitAlgo` and `getGemmAlgo` connect the provider to existing execution. `hipblaslt-jit-generic-gemm-test` covers this flow. |
+| Benchmark | `hipblaslt-bench --jit-gemm` uses the generic TensileLite backend with prediction, completing selection and compilation before correctness checks and execution timing. It includes the internal headers until step 5 removes the option. See the [benchmark guide](clients/bench/README.jit.md). |
 | Independent test provider | The `alternate-backend` driver case in `clients/tests/jit` uses a HIP provider with no Tensile metadata. It demonstrates the generic seam; it is not a second production compiler. |
 
 The host runs the Python generator as a child process: POSIX spawning on Linux
@@ -175,9 +177,8 @@ or by default for eligible block-scaled problems), `getBestSolutions` and
 
 ### Build
 
-`HIPBLASLT_ENABLE_JIT` is disabled by default. The declarations remain
-available when disabled, and selection returns `HIPBLAS_STATUS_NOT_SUPPORTED`.
-The enabled implementation requires the host library and ROCm. The TensileLite
+`HIPBLASLT_ENABLE_JIT` is disabled by default. A disabled build compiles and
+exports no JIT entry points. The enabled implementation requires the host library and ROCm. The TensileLite
 provider also requires its Python dependencies and the local rocisa extension.
 Additional Python import paths use the platform separator (`:` or `;`). Using an
 existing configured build and Python environment:
@@ -234,9 +235,12 @@ The earlier review stacks are closed without merging; see
 [SESSION_HANDOFF.md](../../SESSION_HANDOFF.md) for historical revisions and
 evidence. Recorded direct validation passed ten routes on native Linux gfx950,
 and generic validation passed twelve routes with affected failure checks rerun.
-Direct and generic samples passed C/C++ checks over 32,768 elements with zero
-maximum error. Prediction/benchmark checks passed sixteen targeted cases. The
+Direct and generic samples, now the `direct-gemm` and `generic-gemm` test
+binaries, passed C/C++ checks over 32,768 elements with zero maximum error. Prediction/benchmark checks passed sixteen targeted cases. The
 `ScheduleIterAlg=4` gfx1250 fixture has generation/compilation evidence only.
+After step 1, the shared driver passed 13 of 14 routes on native gfx950. The
+`bench` route stops at its `half-gelu-aux` case with a NaN `norm_error`, which
+the pre-change baseline shows too.
 
 The shared `hipblaslt-jit-gemm-ci.yml` workflow configures gfx90a, gfx942,
 gfx950 and gfx1250 runners. Configured targets are distinct from completed
@@ -429,16 +433,19 @@ one-time warning when it is set.
 
 ### Public API changes
 
-Step 1 demotes the explicit JIT entry points:
+Step 1, which is Done, demoted the explicit JIT entry points:
 
 - `getJitAlgo`, `makeGemmRequest`, both `getGemmAlgo` functions (generic and
-  TensileLite direct) and `createBackend` leave the public and extension API.
+  TensileLite direct) and `createBackend` left the public and extension API.
 - `hipblaslt-jit.hpp` and `hipblaslt-jit-tensilelite.hpp` are no longer installed
-  or included from `hipblaslt-ext.hpp`. They become internal headers under
-  `library/src/amd_detail/` used by unit tests.
-- Samples 29 and 30 become standalone test binaries under `clients/tests/jit`,
-  run by `.github/scripts/test_hipblaslt_jit.py`.
-- `hipblaslt-bench --jit-gemm` keeps working through the internal header until
+  or included from `hipblaslt-ext.hpp`. They are internal headers under
+  `library/src/amd_detail/` used by the JIT tests. The functions stay exported
+  from the shared library only so those tests can link; see
+  [Entry points](#entry-points).
+- Samples 29 and 30 became the `hipblaslt-jit-direct-gemm-test` and
+  `hipblaslt-jit-generic-gemm-test` binaries under `clients/tests/jit`, run by
+  `.github/scripts/test_hipblaslt_jit.py`.
+- `hipblaslt-bench --jit-gemm` keeps working through the internal headers until
   step 5, which removes the option once `HIPBLASLT_JIT` exists.
 
 Applications then reach JIT only through the heuristic query and
@@ -467,7 +474,7 @@ above for review; it is not a ticket-closure plan.
 
 | Step | Status | Scope | Related tickets |
 | --- | --- | --- | --- |
-| 1. Demote the public API | In progress | Stop installing `hipblaslt-jit.hpp` and `hipblaslt-jit-tensilelite.hpp` and remove their includes from `hipblaslt-ext.hpp`; move them to internal headers used by unit tests. Convert samples 29 and 30 to test binaries under `clients/tests/jit` run by the shared driver. `hipblaslt-bench --jit-gemm` uses the internal header until step 5. | AIHPBLAS-4801 |
+| 1. Demote the public API | Done | Stop installing `hipblaslt-jit.hpp` and `hipblaslt-jit-tensilelite.hpp` and remove their includes from `hipblaslt-ext.hpp`; move them to internal headers used by unit tests. Convert samples 29 and 30 to test binaries under `clients/tests/jit` run by the shared driver. `hipblaslt-bench --jit-gemm` uses the internal header until step 5. | AIHPBLAS-4801 |
 | 2. Jit component and interfaces | Planned | Add Jit, the backend interface, the mock backend, and the Predictor and TuningKnowledge interfaces. Wrap the existing TensileLite provider and C++ predictor behind them; TuningKnowledge returns TensileLite defaults. | AIHPBLAS-4801, AIHPBLAS-4551, AIHPBLAS-4554 |
 | 3. comgr code-object builder | Planned | Build code objects in hipBLASLt through comgr, adapted from rocRoller's `InProcessAssembler`. TensileLite emits only assembly, helper source and metadata. | AIHPBLAS-4801 |
 | 4. JIT solution library | Planned | Per-`ProblemType` library under `HIPBLASLT_JIT_LIBRARY_PATH`, merged under a file lock with atomic rename, loaded as a second master library, with reserved solution indices. | AIHPBLAS-4552 |

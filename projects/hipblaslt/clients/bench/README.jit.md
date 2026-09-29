@@ -14,7 +14,8 @@ prediction process.
 
 The components interact in this order:
 
-1. The benchmark creates ordinary matrix descriptors and a generic JIT request.
+1. The benchmark creates ordinary matrix descriptors and a generic JIT request
+   through the internal JIT entry points.
 2. The library-owned TensileLite backend translates that request and asks Origami
    for ranked tuning parameters. Its private selection plan names the ranked
    request consumed by the builder.
@@ -24,14 +25,16 @@ The components interact in this order:
    existing C or C++ execution path checks and times it.
 
 The benchmark does not own prediction policy or launch generated code directly.
-The request, backend, solution, and operation adapter are described in the
-[JIT API guide](../../JIT.md).
+The request, backend, solution, and operation adapter are internal: their
+headers are not installed, and the benchmark includes them from
+`library/src/amd_detail`. The [JIT guide](../../JIT.md#entry-points) describes
+them.
 
 ## Build and run
 
 JIT GEMM is a build-time opt-in feature enabled by
 `HIPBLASLT_ENABLE_JIT=ON`. Building `hipblaslt-bench` also requires
-`HIPBLASLT_ENABLE_CLIENT=ON`. The [JIT API build instructions](../../JIT.md#build)
+`HIPBLASLT_ENABLE_CLIENT=ON`. The [JIT build instructions](../../JIT.md#build)
 describe the required host library, Python dependencies, and compiler setup.
 The JIT path does not require a prebuilt hipBLASLt device library.
 
@@ -100,7 +103,7 @@ These affect ranking; TensileLite still checks whether the chosen recipe is lega
 Predicted recipes keep `GlobalSplitU: 1` and `StreamK: 0`, so they do not split
 the K reduction across workgroups. Exploring split-K and Stream-K during
 prediction is outside this initial policy. For an exact recipe, use the
-[`hipblaslt-jit-gemm` sample](../samples/29_hipblaslt_jit_gemm/README.md) or
+`direct-gemm` case in the [JIT tests](../tests/jit/README.md) or
 `python -m Tensile.SingleSolution`. Explicit YAML bypasses prediction and can
 select split-K or Stream-K recipes accepted by the generator and runtime.
 

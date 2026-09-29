@@ -6,6 +6,8 @@
 #include <memory>
 #include <string>
 
+// Not installed. The entry points stay exported because the JIT test binaries
+// and hipblaslt-bench --jit-gemm link against the shared library.
 namespace hipblaslt_ext::experimental::jit
 {
     namespace detail
@@ -62,7 +64,6 @@ namespace hipblaslt_ext::experimental::jit
     // Compile synchronously on the current HIP device (which must equal device).
     // Call before stream capture. Unsupported operation/backend pairs return
     // NOT_SUPPORTED. There is no persistent cache or reload across invocations.
-    // The disabled build returns NOT_SUPPORTED and clears solution.
     HIPBLASLT_EXPORT hipblasStatus_t getJitAlgo(int            device,
                                                 const Request& request,
                                                 const Backend& backend,

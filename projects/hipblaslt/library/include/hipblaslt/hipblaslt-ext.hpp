@@ -31,8 +31,6 @@
 
 #pragma once
 #include "hipblaslt/hipblaslt.h"
-#include <hipblaslt/hipblaslt-jit.hpp>
-#include <hipblaslt/hipblaslt-jit-tensilelite.hpp>
 
 #include <memory>
 #include <string>

@@ -40,6 +40,9 @@
 #include "hipblaslt_random.hpp"
 #include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
+#ifdef HIPBLASLT_ENABLE_JIT
+#include "hipblaslt-jit.hpp"
+#endif
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include "mxDataGen.hpp"
 #endif

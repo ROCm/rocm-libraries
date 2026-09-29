@@ -1,10 +1,10 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "hipblaslt-jit-tensilelite.hpp"
+#include "hipblaslt-jit.hpp"
 #include "hipblaslt_internal.hpp"
 #include "rocblaslt.h"
-#include <hipblaslt/hipblaslt-jit-tensilelite.hpp>
-#include <hipblaslt/hipblaslt-jit.hpp>
 
 namespace hipblaslt_ext::experimental::jit::tensilelite
 {

@@ -1,12 +1,14 @@
 # Validate the JIT implementation
 
-The JIT tests cover both application entry points: the direct TensileLite call
-with an explicit YAML recipe and the optional generic backend/request/solution
-API layered above it. Each path reaches the existing C/C++ GEMM execution APIs.
-Samples `29_hipblaslt_jit_gemm` and `30_hipblaslt_generic_jit_gemm` illustrate the
-direct and generic paths; the tests here exercise failures, repeated calls and
-ownership changes. The [roadmap](../../../JIT.md#roadmap)
-distinguishes the implemented layers from planned work.
+The JIT tests cover both internal entry points: the direct TensileLite call
+with an explicit YAML recipe and the generic backend/request/solution interface
+layered above it. Neither header is installed. The tests include them from
+`library/src/amd_detail` and link against `libhipblaslt.so`, which still exports
+the entry points. Each path reaches the existing C/C++ GEMM execution APIs. The
+`direct-gemm` and `generic-gemm` binaries run each path once from start to
+finish; the other cases exercise failures, repeated calls and ownership changes.
+The [roadmap](../../../JIT.md#roadmap) distinguishes the implemented layers from
+planned work.
 
 ## Build and run from a checkout
 
@@ -21,7 +23,7 @@ cmake -S projects/hipblaslt -B "$project_build" \
   -DHIPBLASLT_ENABLE_JIT=ON -DHIPBLASLT_BUILD_TESTING=ON \
   -DHIPBLASLT_ENABLE_CLIENT=ON
 cmake --build "$project_build" --parallel 8 --target \
-  _rocisa hipblaslt-bench hipblaslt-jit-gemm hipblaslt-generic-jit-gemm \
+  _rocisa hipblaslt-bench hipblaslt-jit-direct-gemm-test hipblaslt-jit-generic-gemm-test \
   hipblaslt-jit-api-test hipblaslt-jit-generic-api-test hipblaslt-jit-backend-test \
   hipblaslt-jit-process-test hipblaslt-jit-artifacts-test
 python .github/scripts/test_hipblaslt_jit.py \
@@ -48,26 +50,67 @@ build a valid split-K test bundle before damaging its artifacts.
 | `process-runner` | Shell-free process arguments, environment and working directory; output capture, failures and descriptor cleanup |
 | `artifact-loader` | Bounded envelope parsing, truncation and malformed fields, native Unicode paths, compressed library bytes and path containment |
 | `alternate-backend` | An independent HIP provider with no Tensile metadata, owned scalar values, C/C++ execution, helper preparation and bundle lifetime; a non-GEMM request passes through generic compilation |
-| `sample` | Direct explicit-recipe TensileLite call followed by checked C and C++ GEMM execution |
-| `generic-sample` | Backend/request/solution flow followed by checked C and C++ GEMM execution |
+| `direct-gemm` | Direct explicit-recipe TensileLite call followed by checked C and C++ GEMM execution |
+| `generic-gemm` | Backend/request/solution flow followed by checked C and C++ GEMM execution |
 | `generic-api` | Shared execution, ownership and failure assertions from the direct API test, selected through the generic interface |
 | `streamk-api`, `amax-api`, `splitk-api` | Public execution, copied algorithms, workspace rules, repeated calls and state retained after failed preparation |
 | `alpha-zero-api` | Alpha=0 with nonzero descriptor K and null A/B still computes beta*C and output-amax through both public APIs |
 | `helper-failures` | Missing helper modules or symbols are detected before output/workspace writes; an earlier C++ launch remains usable |
 | `bundle-failures` | Corrupt envelopes, library identities, code objects and unsupported problems are rejected through the public API |
 | `bench` | Genuine Origami ranking and first-valid selection, unchanged numerical checks, compilation outside timing, and explicit failure when ranking or validation cannot produce a recipe |
-| `disabled-api` | Installed API declarations remain usable; the disabled library and benchmark report that JIT is unavailable |
+| `disabled-api` | The JIT headers are absent from the public include tree, `hipblaslt-ext.hpp` compiles without them, and the extension API links against the disabled library; the disabled benchmark reports that JIT is unavailable |
 
 The C/C++ routes use `hipblasLtMatmul` and `hipblaslt_ext::Gemm`. They are distinct
 from the benchmark case, which drives the same interfaces through benchmark
 problem setup and timing. A standalone generator test establishes compilation;
 GPU execution is needed to establish numerical results.
 
+## Direct and generic GEMM tests
+
+`hipblaslt-jit-direct-gemm-test` and `hipblaslt-jit-generic-gemm-test` replace
+the former samples 29 and 30. Both compile one supplied TensileLite recipe for
+M=256, N=128, K=512, column-major NN FP16 input/output, FP32 accumulation,
+alpha=1.25 and beta=0.5. They then execute the result through `hipblasLtMatmul`
+and `hipblaslt_ext::Gemm`, poisoning the output before each run and comparing
+every element with a CPU reference. A passing run reports both
+`hipblasLtMatmul PASS` and `hipblaslt_ext::Gemm PASS` with zero maximum error.
+No prebuilt device library is required.
+
+The direct test makes one `tensilelite::getGemmAlgo` call. The generic test
+follows five steps:
+
+1. Configure the TensileLite backend with `jit::tensilelite::createBackend`.
+2. Capture GEMM descriptors and host scalars with `jit::makeGemmRequest`.
+3. Compile an owned solution with `jit::getJitAlgo`.
+4. Adapt the solution to a GEMM algorithm with `jit::getGemmAlgo`.
+5. Allocate the reported workspace and execute through the C and C++ APIs.
+
+Both binaries take the same seven arguments. The driver supplies
+`single_solution_splitk.yaml` from
+`tensilelite/Tensile/Tests/unit/test_data`, or its `_gfx1250` variant on
+gfx1250. To run one directly from the repository root:
+
+```bash
+tensile_source="$PWD/projects/hipblaslt/tensilelite"
+"$project_build/clients/staging/hipblaslt-jit-direct-gemm-test" \
+  "$project_python" "$tensile_source" "$PYTHONPATH" \
+  "$tensile_source/Tensile/Tests/unit/test_data/single_solution_splitk.yaml" \
+  /tmp/jit-direct-gemm gfx950 "$ROCM_PATH/bin/amdclang++"
+```
+
+Use the compiler and architecture for the local device. The output path must
+not exist and its parent must exist. Generator diagnostics are retained in
+`<output>.log`, with process scratch files in `<output>.cwd` and generated files
+under `<output>/bundle`. With the generic provider's `Options::configPath`
+empty, TensileLite instead asks Origami for ranked candidates and compiles the
+first one its validators accept; the [benchmark guide](../../bench/README.jit.md)
+covers that selection and its limits.
+
 ## Shared automation and remaining coverage
 
-The shared `hipblaslt-jit-gemm-ci.yml` workflow starts with the basic direct
-sample/CI layer. The generic layer adds generic API and alternate-provider
-checks, followed by the separate generic sample and prediction/benchmark layers. The workflow obtains native
+The shared `hipblaslt-jit-gemm-ci.yml` workflow builds the JIT test binaries and
+the benchmark, then runs the driver: direct and generic GEMM tests,
+alternate-provider checks, and the prediction/benchmark layer. The workflow obtains native
 runner labels from the shared GPU map for gfx90a, gfx942, gfx950 and gfx1250.
 Missing native runners fail setup instead of silently substituting another GPU.
 The SDK supplies build dependencies; project libraries are built from the source

@@ -28,8 +28,8 @@ def main():
         action="append",
         choices=(
             "bench",
-            "sample",
-            "generic-sample",
+            "direct-gemm",
+            "generic-gemm",
             "generic-api",
             "alternate-backend",
             "streamk-api",
@@ -51,7 +51,7 @@ def main():
     output.mkdir(parents=True, exist_ok=False)
     tensile = source / "projects/hipblaslt/tensilelite"
     fixtures = tensile / "Tensile/Tests/unit/test_data"
-    sample = build / "clients/staging/hipblaslt-jit-api-test"
+    api_test = build / "clients/staging/hipblaslt-jit-api-test"
     env = dict(os.environ)
     for key in tuple(env):
         if key.startswith(("HIPBLASLT_JIT_", "TENSILE_STREAMK_")):
@@ -68,9 +68,9 @@ def main():
 
     # The SDK supplies dependencies; all project code must come from this checkout.
     linkage = subprocess.run(
-        ["ldd", str(sample)], env=env, text=True, capture_output=True, check=True
+        ["ldd", str(api_test)], env=env, text=True, capture_output=True, check=True
     )
-    (output / "sample-ldd.txt").write_text(linkage.stdout)
+    (output / "api-test-ldd.txt").write_text(linkage.stdout)
     libraries = re.findall(
         r"(lib(?:hipblaslt|tensilelite)[^\s]*) => (\S+)", linkage.stdout, re.I
     )
@@ -155,40 +155,24 @@ def main():
         )
 
     fixture_suffix = "_gfx1250" if args.architecture == "gfx1250" else ""
-    commands.append(
-        (
-            "sample",
-            [
-                str(staging / "hipblaslt-jit-gemm"),
-                sys.executable,
-                str(tensile),
-                env["PYTHONPATH"],
-                str(fixtures / f"single_solution_splitk{fixture_suffix}.yaml"),
-                str(output / "sample"),
-                args.architecture,
-                compiler,
-            ],
-            {},
-            420,
+    for name in ("direct-gemm", "generic-gemm"):
+        commands.append(
+            (
+                name,
+                [
+                    str(staging / f"hipblaslt-jit-{name}-test"),
+                    sys.executable,
+                    str(tensile),
+                    env["PYTHONPATH"],
+                    str(fixtures / f"single_solution_splitk{fixture_suffix}.yaml"),
+                    str(output / name),
+                    args.architecture,
+                    compiler,
+                ],
+                {},
+                420,
+            )
         )
-    )
-    commands.append(
-        (
-            "generic-sample",
-            [
-                str(staging / "hipblaslt-generic-jit-gemm"),
-                sys.executable,
-                str(tensile),
-                env["PYTHONPATH"],
-                str(fixtures / f"single_solution_splitk{fixture_suffix}.yaml"),
-                str(output / "generic-sample"),
-                args.architecture,
-                compiler,
-            ],
-            {},
-            420,
-        )
-    )
     commands.append(
         (
             "generic-api",
@@ -209,7 +193,7 @@ def main():
     ]:
         name = f"{feature}-api"
         command = [
-            str(sample),
+            str(api_test),
             sys.executable,
             str(tensile),
             env["PYTHONPATH"],
@@ -238,7 +222,7 @@ def main():
             (
                 "splitk-api",
                 [
-                    str(sample),
+                    str(api_test),
                     sys.executable,
                     str(tensile),
                     env["PYTHONPATH"],
@@ -262,7 +246,7 @@ def main():
                         source
                         / "projects/hipblaslt/clients/tests/jit/test_helper_failures.py"
                     ),
-                    str(sample),
+                    str(api_test),
                     str(output / "splitk-api/bundle"),
                     str(output / "helper-failures"),
                 ],
@@ -280,7 +264,7 @@ def main():
                         source
                         / "projects/hipblaslt/clients/tests/jit/test_bundle_failures.py"
                     ),
-                    str(sample),
+                    str(api_test),
                     str(output / "splitk-api/bundle"),
                     str(output / "bundle-failures"),
                     "--architecture",

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include <hipblaslt/hipblaslt-jit.hpp>
+#include "hipblaslt-jit.hpp"
 #include <memory>
 #include <string_view>
 

@@ -5,6 +5,7 @@
 #include "hipblaslt-jit-tensilelite-artifacts.hpp"
 #include "hipblaslt-jit-tensilelite-internal.hpp"
 #include "hipblaslt-jit-tensilelite-predictor.hpp"
+#include "hipblaslt-jit-tensilelite.hpp"
 #include "hipblaslt_internal.hpp"
 #include "rocblaslt-functions.h"
 #include "rocblaslt.h"
@@ -18,7 +19,6 @@
 #include <filesystem>
 #include <fstream>
 #include <hipblaslt/hipblaslt-ext.hpp>
-#include <hipblaslt/hipblaslt-jit-tensilelite.hpp>
 #include <iostream>
 #include <limits>
 #include <map>

@@ -139,10 +139,10 @@ For non-GEMM work, first define the operation payload, support checks, argument
 binding, ordered helpers, workspace initialization, and lifetime. Reuse
 `KernelArguments`, `KernelInvocation`, and HIP `SolutionAdapter` where sufficient.
 Shared generic handles do not establish a non-GEMM KFA profile or execution adapter.
-The target design removes `getJitAlgo(device, request, backend, maxWorkspaceBytes,
+Roadmap step 1 removed `getJitAlgo(device, request, backend, maxWorkspaceBytes,
 solution, diagnostics)`, `makeGemmRequest`, both `getGemmAlgo` functions and
-`createBackend` from the public API (roadmap step 1). Their headers become internal
-and are used by unit tests, and Jit takes over backend invocation (step 2). Evaluate
+`createBackend` from the public API. Their headers are now internal and used by
+unit tests, and Jit takes over backend invocation in step 2. Evaluate
 these reuse choices against that internal contract.
 
 ## rocRoller: existing integration and proposed KFA adaptation
@@ -219,7 +219,7 @@ replaces that alternative:
 - With `HIPBLASLT_JIT=2`, JIT is the only source: Equality, Prediction, the other
   pre-tuned libraries and the rocRoller early route are skipped. The JIT solution
   library is consulted before generation.
-- The explicit entry points leave the public API (step 1). Deterministic backend
+- The explicit entry points left the public API in step 1. Deterministic backend
   choice and prewarming remain available to unit tests through the internal headers.
 
 JIT.md now also defines the failure rules (JIT failures are always reported),

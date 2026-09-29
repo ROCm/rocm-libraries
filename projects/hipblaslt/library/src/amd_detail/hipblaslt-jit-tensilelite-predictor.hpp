@@ -3,7 +3,7 @@
 #pragma once
 
 #include "hipblaslt-jit-tensilelite-internal.hpp"
-#include <hipblaslt/hipblaslt-jit-tensilelite.hpp>
+#include "hipblaslt-jit-tensilelite.hpp"
 
 namespace hipblaslt_ext::experimental::jit::tensilelite::detail
 {

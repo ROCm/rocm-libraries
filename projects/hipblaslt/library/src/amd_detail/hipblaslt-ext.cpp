@@ -27,7 +27,6 @@
 #include "hipblaslt/hipblaslt-ext.hpp"
 #include "exceptions.hpp"
 #include "hipblaslt_internal.hpp"
-#include <hipblaslt/hipblaslt-jit-tensilelite.hpp>
 #ifdef HIPBLASLT_ENABLE_JIT
 #include "hipblaslt-jit-gemm-tag.hpp"
 #endif
@@ -1595,79 +1594,4 @@ namespace hipblaslt_ext
         }
         return HIPBLAS_STATUS_SUCCESS;
     }
-#ifndef HIPBLASLT_ENABLE_JIT
-    namespace experimental::jit
-    {
-        hipblasStatus_t getJitAlgo(int,
-                                   const Request&,
-                                   const Backend&,
-                                   size_t,
-                                   Solution&    solution,
-                                   Diagnostics& diagnostics)
-        {
-            solution    = {};
-            diagnostics = {"", "JIT requires HIPBLASLT_ENABLE_JIT=ON"};
-            return HIPBLAS_STATUS_NOT_SUPPORTED;
-        }
-        hipblasStatus_t makeGemmRequest(hipblasLtHandle_t,
-                                        hipblasLtMatmulDesc_t,
-                                        const void*,
-                                        const void*,
-                                        hipblasLtMatrixLayout_t,
-                                        const void*,
-                                        hipblasLtMatrixLayout_t,
-                                        const void*,
-                                        const void*,
-                                        hipblasLtMatrixLayout_t,
-                                        void*,
-                                        hipblasLtMatrixLayout_t,
-                                        Request&     request,
-                                        Diagnostics& diagnostics)
-        {
-            request     = {};
-            diagnostics = {"", "JIT requires HIPBLASLT_ENABLE_JIT=ON"};
-            return HIPBLAS_STATUS_NOT_SUPPORTED;
-        }
-        hipblasStatus_t getGemmAlgo(const Solution&,
-                                    hipblasLtMatmulHeuristicResult_t& result,
-                                    Diagnostics&                      diagnostics)
-        {
-            result       = {};
-            result.state = HIPBLAS_STATUS_NOT_SUPPORTED;
-            diagnostics  = {"", "JIT requires HIPBLASLT_ENABLE_JIT=ON"};
-            return HIPBLAS_STATUS_NOT_SUPPORTED;
-        }
-    }
-    namespace experimental::jit::tensilelite
-    {
-        hipblasStatus_t getGemmAlgo(hipblasLtHandle_t handle,
-                                                hipblasLtMatmulDesc_t desc,
-                                                const void* alpha,
-                                                const void* A,
-                                                hipblasLtMatrixLayout_t layoutA,
-                                                const void* B,
-                                                hipblasLtMatrixLayout_t layoutB,
-                                                const void* beta,
-                                                const void* C,
-                                                hipblasLtMatrixLayout_t layoutC,
-                                                void* D,
-                                                hipblasLtMatrixLayout_t layoutD,
-                                                const Options& options,
-                                                size_t maxWorkspaceBytes,
-                                                hipblasLtMatmulHeuristicResult_t& result,
-                                                Diagnostics& diagnostics)
-        {
-            result = {};
-            result.state = HIPBLAS_STATUS_NOT_SUPPORTED;
-            diagnostics.message = "JIT requires HIPBLASLT_ENABLE_JIT=ON";
-            return HIPBLAS_STATUS_NOT_SUPPORTED;
-        }
-        hipblasStatus_t createBackend(const Options&, Backend& backend, jit::Diagnostics& diagnostics)
-        {
-            backend     = {};
-            diagnostics = {"TensileLite", "JIT requires HIPBLASLT_ENABLE_JIT=ON"};
-            return HIPBLAS_STATUS_NOT_SUPPORTED;
-        }
-    }
-#endif
 } // End of namespace hipblasltext

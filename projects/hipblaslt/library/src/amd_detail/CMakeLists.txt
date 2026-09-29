@@ -27,10 +27,18 @@ if(HIPBLASLT_BUILD_TESTING)
     if(HIPBLASLT_ENABLE_JIT)
         add_executable(hipblaslt-jit-api-test
             "${PROJECT_SOURCE_DIR}/clients/tests/jit/public_gemm_test.cpp")
-        target_link_libraries(hipblaslt-jit-api-test PRIVATE roc::hipblaslt hip::device)
-        target_compile_features(hipblaslt-jit-api-test PRIVATE cxx_std_17)
-        set_target_properties(hipblaslt-jit-api-test PROPERTIES
-            RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging")
+        add_executable(hipblaslt-jit-direct-gemm-test
+            "${PROJECT_SOURCE_DIR}/clients/tests/jit/direct_gemm_test.cpp")
+        add_executable(hipblaslt-jit-generic-gemm-test
+            "${PROJECT_SOURCE_DIR}/clients/tests/jit/generic_gemm_test.cpp")
+        foreach(test_target hipblaslt-jit-api-test hipblaslt-jit-direct-gemm-test
+                            hipblaslt-jit-generic-gemm-test)
+            target_include_directories(${test_target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+            target_link_libraries(${test_target} PRIVATE roc::hipblaslt hip::device)
+            target_compile_features(${test_target} PRIVATE cxx_std_17)
+            set_target_properties(${test_target} PROPERTIES
+                RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging")
+        endforeach()
     else()
         add_executable(hipblaslt-jit-disabled-test
             "${PROJECT_SOURCE_DIR}/clients/tests/jit/disabled_api_test.cpp")
@@ -75,6 +83,7 @@ if(HIPBLASLT_ENABLE_JIT AND HIPBLASLT_BUILD_TESTING)
 
     add_executable(hipblaslt-jit-generic-api-test
         "${PROJECT_SOURCE_DIR}/clients/tests/jit/public_gemm_test.cpp")
+    target_include_directories(hipblaslt-jit-generic-api-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_definitions(hipblaslt-jit-generic-api-test PRIVATE HIPBLASLT_TEST_GENERIC_JIT)
     target_compile_features(hipblaslt-jit-generic-api-test PRIVATE cxx_std_17)
     target_link_libraries(hipblaslt-jit-generic-api-test PRIVATE roc::hipblaslt hip::device)

@@ -9,11 +9,11 @@ TensileLite is the live JIT backend. This page describes its current direct
 entry point, which compiles one explicit YAML (YAML Ain't Markup Language)
 recipe, and its planned role behind the Jit backend interface.
 
-**Status:** the direct entry point below is public on this branch today.
-[Step 1](JIT.md#roadmap), now in progress, moves `hipblaslt-jit-tensilelite.hpp`
-to an internal header used by unit tests. Once step 5 lands, applications reach
-TensileLite generation through `hipblasLtMatmulAlgoGetHeuristic` with
-`HIPBLASLT_JIT`. The usage below remains accurate until step 1 lands.
+**Status:** the direct entry point below is internal. [Step 1](JIT.md#roadmap)
+moved `hipblaslt-jit-tensilelite.hpp` to `library/src/amd_detail/`; it is not
+installed, and only the JIT tests and `hipblaslt-bench --jit-gemm` use it. Once
+step 5 lands, applications reach TensileLite generation through
+`hipblasLtMatmulAlgoGetHeuristic` with `HIPBLASLT_JIT`.
 
 ## Current direct entry point
 
@@ -23,12 +23,13 @@ Use that result with `hipblasLtMatmul` or the C++ `hipblaslt_ext::Gemm` class.
 Compilation happens synchronously before general matrix multiplication (GEMM)
 execution.
 
-Include `<hipblaslt/hipblaslt-jit-tensilelite.hpp>` and call
+In-tree code includes `"hipblaslt-jit-tensilelite.hpp"` with
+`library/src/amd_detail` on its include path and calls
 `hipblaslt_ext::experimental::jit::tensilelite::getGemmAlgo`. The call takes the
 ordinary GEMM descriptors, scalars and buffers, generation options, and a
 workspace limit. TensileLite must accept the recipe for that problem and device.
-The [sample](clients/samples/29_hipblaslt_jit_gemm/README.md) shows the whole
-flow.
+The `direct-gemm` case in the [JIT tests](clients/tests/jit/README.md) shows the
+whole flow.
 
 ### Build requirements
 
@@ -48,8 +49,7 @@ that interpreter and the compiler/offload-bundler paths through `Options`.
 The generated path loads its own code objects; it does not require a prebuilt
 hipBLASLt device library.
 
-The declaration remains available when JIT is disabled. Calling it then
-returns `HIPBLAS_STATUS_NOT_SUPPORTED` and a diagnostic naming the build option.
+A build with JIT disabled does not compile or export the entry point.
 
 ### Describe and compile the GEMM
 
@@ -59,7 +59,7 @@ The following fragment assumes those objects exist and that `check` reports a
 failed HIP or hipBLASLt status:
 
 ```cpp
-#include <hipblaslt/hipblaslt-jit-tensilelite.hpp>
+#include "hipblaslt-jit-tensilelite.hpp"
 #include <stdexcept>
 
 namespace tl = hipblaslt_ext::experimental::jit::tensilelite;
@@ -160,7 +160,7 @@ the roadmap step that changes it.
 
 | Concern | Current | Planned |
 | --- | --- | --- |
-| Entry point | Public direct `tensilelite::getGemmAlgo`, and the generic provider created by `tensilelite::createBackend`. | An internal backend behind Jit, reached from the heuristic query. The headers remain for unit tests (step 1, step 2). |
+| Entry point | Internal direct `tensilelite::getGemmAlgo`, and the generic provider created by `tensilelite::createBackend`, both used by tests and the benchmark since step 1. | An internal backend behind Jit, reached from the heuristic query. The headers remain for unit tests (step 2). |
 | Backend input | An explicit recipe, or problem facts plus Origami-ranked candidates in the generic provider. | Algorithm parameters (M, N, K, datatypes, scale types, layout, activation and the rest of the GEMM description) plus the gfx target, with ranked candidates from the Predictor (step 2). |
 | Unmodeled knobs | TensileLite defaults and derivation. | Supplied through TuningKnowledge, which initially returns the same TensileLite defaults (step 2). |
 | Backend output | A complete bundle: `Tensile.SingleSolution` assembles, links and compiles code objects with the configured compiler and offload bundler. | Assembly, HIP helper source and metadata only. hipBLASLt builds raw, uncompressed code objects through AMD comgr (step 3). |

@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <string>
 #ifdef HIPBLASLT_ENABLE_JIT
-#include <hipblaslt/hipblaslt-jit-tensilelite.hpp>
+#include "hipblaslt-jit-tensilelite.hpp"
 #endif
 
 // Process-wide CLI knobs that hipblaslt-bench forwards into the matmul

@@ -30,12 +30,14 @@ design and record source evidence.
 
 The investigations identify inspected revisions; earlier discovery and timing
 line numbers remain historical anchors. The timing plans predate the target
-design. Roadmap step 1 makes the headers they cite internal, and step 3 moves
+design. Roadmap step 1 made the headers they cite internal (now under
+`library/src/amd_detail/`), and step 3 moves
 assembly, linking and helper compilation from Python-launched tools into
 hipBLASLt. Re-derive their compile-stage boundaries when timing work begins.
 
-These notes do not implement the target design, KFA convergence or the timing
-features; the [roadmap](../JIT.md#roadmap) records implementation status. The external Confluence reference is a format/tone example, not an
+These notes do not implement the target design beyond roadmap step 1, KFA
+convergence or the timing features; the [roadmap](../JIT.md#roadmap) records
+implementation status. The external Confluence reference is a format/tone example, not an
 identified publication destination; see the discussion draft for its access
 limitation.
 

@@ -5,6 +5,7 @@
 #include <hipblaslt/hipblaslt.h>
 #include <string>
 
+// Not installed; exported for the same consumers as hipblaslt-jit.hpp.
 namespace hipblaslt_ext::experimental::jit
 {
     class Backend;
@@ -45,7 +46,7 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
     // this process/device. Never persist algorithm bytes or treat them as a
     // prebuilt solution index. Workspace and stream rules of those APIs apply.
     // Empty output returns NOT_SUPPORTED; K=0 still generates beta*C. Failure
-    // clears result and sets result.state. A disabled build returns NOT_SUPPORTED.
+    // clears result and sets result.state.
     HIPBLASLT_EXPORT hipblasStatus_t getGemmAlgo(hipblasLtHandle_t       handle,
                                                  hipblasLtMatmulDesc_t   desc,
                                                  const void*             alpha,
