@@ -27,6 +27,7 @@
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csr2ell.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "csr2ell_device.h"
@@ -149,10 +150,10 @@ rocsparse_status rocsparse::csr2ell_strided_batched_core(rocsparse_handle       
     hipStream_t stream = handle->stream;
 
 #define CSR2ELL_STRIDED_BATCHED_DIM 512
-    // Clamp the batch extent to the 65,535 grid.y hardware cap; the kernel
+    // Clamp the batch extent to the device grid.y limit; the kernel
     // grid-strides over batch_count so the whole batch is still covered.
     dim3 csr2ell_strided_batched_blocks((m - 1) / CSR2ELL_STRIDED_BATCHED_DIM + 1,
-                                        rocsparse::get_batch_grid_size(batch_count));
+                                        rocsparse::get_grid_size_y(handle, batch_count));
     dim3 csr2ell_strided_batched_threads(CSR2ELL_STRIDED_BATCHED_DIM);
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(

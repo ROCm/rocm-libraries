@@ -29,7 +29,7 @@
 // at 65535 (hipDeviceProp_t::maxGridSize[1]), and csr2ell_strided_batched_kernel
 // read the batch index as a bare blockIdx.y with no stride. Large batch counts
 // therefore died at launch with hipErrorInvalidConfiguration. The launch now
-// clamps grid.y through rocsparse::get_batch_grid_size and the kernel
+// clamps grid.y through rocsparse::get_grid_size_y and the kernel
 // grid-strides over batch_count.
 //
 // Both batch counts below exceed the clamp, so the tail batches are reachable
