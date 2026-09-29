@@ -21,6 +21,9 @@
 # Notes:
 # - This workflow requires GitHub App credentials (APP_ID and APP_PRIVATE_KEY)
 # - The resulting monorepo PR is a draft and includes attribution to the original author
+# - Security: all subrepo-PR metadata (title, body, head ref) is attacker-controlled and is
+#   therefore passed to shell steps via `env:` and referenced only as quoted "$VARS",
+#   never interpolated as ${{ ... }} directly inside `run:` scripts (script-injection safe).
 
 name: Import Subrepo PR
 
@@ -54,13 +57,15 @@ jobs:
       - name: Validate maintainer permissions
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          REPO: ${{ github.repository }}
         run: |
-          echo "Actor is: ${{ github.actor }}"
+          echo "Actor is: $ACTOR"
           PERMISSION=$(gh api \
-            repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission \
+            "repos/$REPO/collaborators/$ACTOR/permission" \
             --jq .permission)
           if [[ "$PERMISSION" != "admin" && "$PERMISSION" != "maintain" ]]; then
-            echo "❌ User ${{ github.actor }} is not authorized to run this workflow"
+            echo "❌ User $ACTOR is not authorized to run this workflow"
             exit 1
           fi
 
@@ -91,58 +96,76 @@ jobs:
         id: prdata
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          SUBREPO_PR_NUMBER: ${{ github.event.inputs.subrepo-pr-number }}
+          SUBREPO_UPSTREAM: ${{ github.event.inputs.subrepo-upstream }}
         run: |
-          PR_JSON=$(gh pr view ${{ github.event.inputs.subrepo-pr-number }} \
-            --repo ${{ github.event.inputs.subrepo-upstream }} \
+          PR_JSON=$(gh pr view "$SUBREPO_PR_NUMBER" \
+            --repo "$SUBREPO_UPSTREAM" \
             --json title,body,headRefName,headRepository,isDraft \
             --jq '{title: .title, body: .body, head_ref: .headRefName, head_repo: .headRepository.cloneUrl, is_draft: .isDraft}')
 
           echo "$PR_JSON" > pr.json
 
-          # properly escape backticks in title
-          TITLE=$(jq -r .title pr.json | sed 's/`/\\`/g')
-          echo "title=$TITLE" >> $GITHUB_OUTPUT
+          # Write multi-line / attacker-controlled values to GITHUB_OUTPUT using a
+          # random heredoc delimiter so the value cannot forge the delimiter or
+          # inject extra output keys.
+          DELIM="ghout_$(openssl rand -hex 16)"
 
           {
-            echo 'body<<EOF'
+            echo "title<<$DELIM"
+            jq -r .title pr.json
+            echo "$DELIM"
+            echo "body<<$DELIM"
             jq -r .body pr.json
-            echo 'EOF'
-          } >> $GITHUB_OUTPUT
+            echo "$DELIM"
+          } >> "$GITHUB_OUTPUT"
 
-          echo "head_ref=$(jq -r .head_ref pr.json)" >> $GITHUB_OUTPUT
-          echo "head_repo=$(jq -r .head_repo pr.json)" >> $GITHUB_OUTPUT
-          echo "is_draft=$(jq -r .is_draft pr.json)" >> $GITHUB_OUTPUT
+          echo "head_ref=$(jq -r .head_ref pr.json)" >> "$GITHUB_OUTPUT"
+          echo "head_repo=$(jq -r .head_repo pr.json)" >> "$GITHUB_OUTPUT"
+          echo "is_draft=$(jq -r .is_draft pr.json)" >> "$GITHUB_OUTPUT"
 
       - name: Create new branch for import
         id: import-branch
+        env:
+          TARGET_BRANCH: ${{ github.event.inputs.monorepo-target-branch }}
+          SUBREPO_REPO: ${{ github.event.inputs.subrepo-repo }}
+          HEAD_REF: ${{ steps.prdata.outputs.head_ref }}
         run: |
-          git fetch origin ${{ github.event.inputs.monorepo-target-branch }}
-          git checkout ${{ github.event.inputs.monorepo-target-branch }}
-          SANITIZED_BASE=$(echo "${{ github.event.inputs.monorepo-target-branch }}" | sed 's|/|_|g')
-          SANITIZED_REPO=$(echo "${{ github.event.inputs.subrepo-repo }}" | sed 's|/|_|g')
-          SANITIZED_REF=$(echo "${{ steps.prdata.outputs.head_ref }}" | sed 's|/|_|g')
+          git fetch origin "$TARGET_BRANCH"
+          git checkout "$TARGET_BRANCH"
+          SANITIZED_BASE=$(echo "$TARGET_BRANCH" | sed 's|/|_|g')
+          SANITIZED_REPO=$(echo "$SUBREPO_REPO" | sed 's|/|_|g')
+          SANITIZED_REF=$(echo "$HEAD_REF" | sed 's|/|_|g')
           IMPORT_BRANCH="import/${SANITIZED_BASE}/${SANITIZED_REPO}/${SANITIZED_REF}"
-          echo "import_branch=$IMPORT_BRANCH" >> $GITHUB_OUTPUT
+          echo "import_branch=$IMPORT_BRANCH" >> "$GITHUB_OUTPUT"
           git checkout -b "$IMPORT_BRANCH"
 
       - name: Split subrepo prefix from main branch
+        env:
+          SUBREPO_PREFIX: ${{ github.event.inputs.subrepo-prefix }}
+          SUBREPO_REPO: ${{ github.event.inputs.subrepo-repo }}
+          HEAD_REF: ${{ steps.prdata.outputs.head_ref }}
+          IMPORT_BRANCH: ${{ steps.import-branch.outputs.import_branch }}
         run: |
-          git subtree pull --prefix=${{ github.event.inputs.subrepo-prefix }} https://github.com/${{ github.event.inputs.subrepo-repo }} ${{ steps.prdata.outputs.head_ref }}
-          git push origin ${{ steps.import-branch.outputs.import_branch }}
+          git subtree pull --prefix="$SUBREPO_PREFIX" "https://github.com/$SUBREPO_REPO" "$HEAD_REF"
+          git push origin "$IMPORT_BRANCH"
 
       - name: Create monorepo PR
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          PR_TITLE: ${{ steps.prdata.outputs.title }}
+          PR_BODY: ${{ steps.prdata.outputs.body }}
+          IS_DRAFT: ${{ steps.prdata.outputs.is_draft }}
+          TARGET_BRANCH: ${{ github.event.inputs.monorepo-target-branch }}
+          IMPORT_BRANCH: ${{ steps.import-branch.outputs.import_branch }}
+          UPSTREAM_REPO: ${{ github.event.inputs.subrepo-upstream }}
+          SUBREPO_PR_NUMBER: ${{ github.event.inputs.subrepo-pr-number }}
         run: |
-          IMPORT_BRANCH="import/${{ github.event.inputs.subrepo-prefix }}/pr-${{ github.event.inputs.subrepo-pr-number }}"
-          PR_TITLE="${{ steps.prdata.outputs.title }}"
-          UPSTREAM_REPO="${{ github.event.inputs.subrepo-upstream }}"
-          SUBREPO_REPO="${{ github.event.inputs.subrepo-repo }}"
-          SUBREPO_PR_NUMBER="${{ github.event.inputs.subrepo-pr-number }}"
           SUBREPO_URL="https://github.com/$UPSTREAM_REPO/pull/$SUBREPO_PR_NUMBER"
           AUTHOR=$(gh pr view "$SUBREPO_PR_NUMBER" --repo "$UPSTREAM_REPO" --json author --jq .author.login)
 
-          echo "${{ steps.prdata.outputs.body }}" > pr_body.txt
+          # printf (not echo) so bodies with leading dashes or backslashes are preserved verbatim.
+          printf '%s\n' "$PR_BODY" > pr_body.txt
           {
             echo ""
             echo "---"
@@ -151,13 +174,13 @@ jobs:
           } >> pr_body.txt
 
           DRAFT_FLAG=""
-          if [[ "${{ steps.prdata.outputs.is_draft }}" == "true" ]]; then
+          if [[ "$IS_DRAFT" == "true" ]]; then
             DRAFT_FLAG="--draft"
           fi
 
           gh pr create \
-            --base "${{ github.event.inputs.monorepo-target-branch }}" \
-            --head "${{ steps.import-branch.outputs.import_branch }}" \
+            --base "$TARGET_BRANCH" \
+            --head "$IMPORT_BRANCH" \
             --title "$PR_TITLE" \
             --label "imported pr" \
             $DRAFT_FLAG \

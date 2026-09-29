@@ -38,7 +38,8 @@ ROCSOLVER_BEGIN_NAMESPACE
 
 //------------------------------------------------------------------------------
 template <bool BATCHED, typename T, typename I>
-void rocsolver_sy2sb_he2hb_getMemorySize(const I n,
+void rocsolver_sy2sb_he2hb_getMemorySize(const rocblas_fill uplo,
+                                         const I n,
                                          const I kd,
                                          const I nb,
                                          const I batch_count,

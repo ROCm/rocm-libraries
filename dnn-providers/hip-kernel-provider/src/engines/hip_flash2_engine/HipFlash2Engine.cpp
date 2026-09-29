@@ -25,7 +25,9 @@ bool HipFlash2Engine::isApplicable(
     for(const auto& pb : _planBuilders)
     {
         if(pb->isApplicable(handle, opGraph))
+        {
             return true;
+        }
     }
     return false;
 }
@@ -55,7 +57,9 @@ size_t HipFlash2Engine::getMaxWorkspaceSize(
     for(const auto& pb : _planBuilders)
     {
         if(pb->isApplicable(handle, opGraph))
+        {
             return pb->getMaxWorkspaceSize(handle, opGraph, Settings{});
+        }
     }
     HIPDNN_PLUGIN_LOG_ERROR("HipFlash2Engine::getMaxWorkspaceSize: no applicable plan builder");
     return 0;

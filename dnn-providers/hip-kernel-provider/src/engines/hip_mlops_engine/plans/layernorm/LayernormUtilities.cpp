@@ -4,18 +4,56 @@
 #include "LayernormUtilities.hpp"
 
 #include <cstdint>
+#include <flatbuffers/base.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 
 #include "core/Utils.hpp"
 
 namespace hip_kernel_provider::layernorm
 {
 
+namespace
+{
+
+std::vector<int64_t>
+    getAffineDims(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* ioAttr,
+                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* affineAttr)
+{
+    std::vector<int64_t> affineDims(std::max(ioAttr->dims()->size(), affineAttr->dims()->size()),
+                                    1);
+    const size_t startIndex = ioAttr->dims()->size() > affineAttr->dims()->size()
+                                  ? ioAttr->dims()->size() - affineAttr->dims()->size()
+                                  : 0;
+    for(size_t i = 0; i < affineAttr->dims()->size(); ++i)
+    {
+        affineDims[i + startIndex]
+            = affineAttr->dims()->Get(static_cast<flatbuffers::uoffset_t>(i));
+    }
+    return affineDims;
+}
+
+std::vector<int64_t>
+    getStatDims(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* ioAttr,
+                const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* statAttr)
+{
+    std::vector<int64_t> statDims(std::max(ioAttr->dims()->size(), statAttr->dims()->size()), 1);
+    for(size_t i = 0; i < statAttr->dims()->size(); ++i)
+    {
+        statDims[i] = statAttr->dims()->Get(static_cast<flatbuffers::uoffset_t>(i));
+    }
+    return statDims;
+}
+
+} // namespace
+
 size_t getMinNormalizedDimFromAffine(
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* ioAttr,
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* affineAttr)
 {
     const std::vector<int64_t> ioDims(ioAttr->dims()->begin(), ioAttr->dims()->end());
-    const std::vector<int64_t> affineDims(affineAttr->dims()->begin(), affineAttr->dims()->end());
+    const auto affineDims = getAffineDims(ioAttr, affineAttr);
 
     size_t affineNormalizedDimMin = 0;
     for(size_t i = 0; i < affineDims.size(); ++i)
@@ -51,7 +89,7 @@ size_t getMaxNormalizedDimFromAffine(
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* affineAttr)
 {
     const std::vector<int64_t> ioDims(ioAttr->dims()->begin(), ioAttr->dims()->end());
-    const std::vector<int64_t> affineDims(affineAttr->dims()->begin(), affineAttr->dims()->end());
+    const auto affineDims = getAffineDims(ioAttr, affineAttr);
 
     auto affineNormalizedDimMax = affineDims.size();
     for(auto i = static_cast<int>(affineDims.size()) - 1; i >= 0; --i)
@@ -92,7 +130,7 @@ size_t getMinNormalizedDimFromStat(
     }
 
     const std::vector<int64_t> ioDims(ioAttr->dims()->begin(), ioAttr->dims()->end());
-    const std::vector<int64_t> statDims(statAttr->dims()->begin(), statAttr->dims()->end());
+    const auto statDims = getStatDims(ioAttr, statAttr);
 
     size_t statNormalizedDimMin = 0;
     for(size_t i = 0; i < statDims.size(); ++i)
@@ -132,7 +170,7 @@ size_t getMaxNormalizedDimFromStat(
     {
         return ioDims.size();
     }
-    const std::vector<int64_t> statDims(statAttr->dims()->begin(), statAttr->dims()->end());
+    const auto statDims = getStatDims(ioAttr, statAttr);
 
     auto statNormalizedDimMax = statDims.size();
     for(auto i = static_cast<int>(statDims.size()) - 1; i >= 0; --i)
@@ -182,6 +220,43 @@ size_t guessNormalizedDim(
     const size_t normalizedDimMax = std::min(affineNormalizedDimMax, statNormalizedDimMax);
 
     return normalizedDimMin > 0 ? normalizedDimMin : normalizedDimMax;
+}
+
+ProblemDescription::ProblemDescription(
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* ioAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* affineAttr,
+    std::optional<const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*> statAttr,
+    Direction direction)
+    : _direction(direction)
+    , _normalizedDim(guessNormalizedDim(ioAttr, affineAttr, statAttr))
+{
+    const auto* dims = ioAttr->dims();
+    const auto* strides = ioAttr->strides();
+    const auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(
+        std::vector<int64_t>(strides->begin(), strides->end()));
+    const auto layoutNHWC = hipdnn_data_sdk::utilities::TensorLayout::NHWC;
+    const auto layoutNDHWC = hipdnn_data_sdk::utilities::TensorLayout::NDHWC;
+
+    if(_normalizedDim > 1
+       && (strideOrder == layoutNHWC.strideOrder || strideOrder == layoutNDHWC.strideOrder))
+    {
+        _stride = dims->Get(1);
+    }
+
+    for(unsigned int i = 0; i < dims->size(); ++i)
+    {
+        if(i < _normalizedDim)
+        {
+            if(_stride == 1 || i != 1)
+            {
+                _outerSize *= dims->Get(i);
+            }
+        }
+        else
+        {
+            _innerSize *= dims->Get(i);
+        }
+    }
 }
 
 } // namespace hip_kernel_provider::layernorm

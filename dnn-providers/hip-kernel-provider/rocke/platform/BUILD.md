@@ -18,7 +18,16 @@ silently".
 ```bash
 # build the engine fresh AND run the byte-identity gate (the definition-of-done):
 python <rocke/platform>/tools/check_byte_identity.py
+
+# the portable-IR replay contract, carried through to object code (what CI runs):
+python <rocke/platform>/tools/run_portable_ir_gates.py
 ```
+
+The first proves the C++ engine emits the same LLVM-IR as the Python engine. The
+second proves the *replay* paths — the C++ importer and the recipe VM, including
+parametric recipes replayed at values the roller never recorded — reproduce the
+Python lowerer byte for byte, at `.ll` and then at HSACO. Both are device-free;
+the second needs comgr.
 
 `check_byte_identity.py` builds the engine fresh as a Release static archive
 (`librocke_core.a`) and then proves its LLVM-IR emission is byte-identical to the
@@ -63,6 +72,27 @@ The top-level `<rocke/platform>/CMakeLists.txt` globs `cpp/**/*.cpp` (excluding
 
 Optional sanitizer build for diagnostics (not for shipping): `-DROCKE_SANITIZE=ON`.
 
+### The shared engine (`librocke.so`)
+
+The portable-IR replay tooling reaches the C++ importer, recipe VM and lowerer
+through ctypes, so it needs a shared library rather than the archive:
+
+```bash
+cmake -S <rocke/platform> -B <build> -DCMAKE_BUILD_TYPE=Release \
+      -DROCKE_BUILD_SHARED_ENGINE=ON
+cmake --build <build> --target rocke_shared -j$(nproc)
+# -> <build>/librocke.so   (point ROCKE_ONLINE_LIB at this)
+```
+
+`--whole-archive` is applied for you. It is not optional: nothing in the `.so`
+references the engine's entry points, so without it the linker discards every
+object as unused and emits a valid library with no symbols in it.
+
+`online.build_lib()` produces an equivalent library on demand, which is more
+convenient interactively. Prefer the target when the resulting library needs to
+be identifiable — CI points `ROCKE_ONLINE_LIB` at it, and a named library that
+does not exist is now an error rather than a cue to go and find another one.
+
 > **Toolchain/runtime flags.** Codegen is driven by the `comgr` in use, and the
 > emitted IR flavor must match it: set `ROCKE_LLVM_FLAVOR=llvm22` for a ROCm 7.2
 > `comgr` if `/opt/rocm` is older (avoids a `COMPILE_SOURCE_TO_BC` rejection).
@@ -74,7 +104,7 @@ Optional sanitizer build for diagnostics (not for shipping): `-DROCKE_SANITIZE=O
 
 In-process compile + launch needs the ROCm shared libs at runtime. The Python
 runtime resolves them WITHOUT importing torch
-(`Python/rocke/runtime/runtime_coexistence._candidate_lib_paths` /
+(`python/rocke/runtime/runtime_coexistence._candidate_lib_paths` /
 `_rocm_root_libdirs`), in priority order:
 
 1. explicit full-path override env var: `ROCKE_COMGR_LIB`, `ROCKE_HIP_LIB`;

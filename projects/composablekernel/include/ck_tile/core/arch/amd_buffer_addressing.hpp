@@ -157,8 +157,8 @@ struct buffer_load<16, pre_nop>
         using mbuf_t = typename impl::buffer_load_trait<16, T>::payload_t;
 #if HAS_RAW_BUFFER_BUILTINS
         index_t s_offset                 = i_offset;
-        reinterpret_cast<mbuf_t&>(value) = __builtin_amdgcn_raw_buffer_load_b128(
-            cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
+        reinterpret_cast<mbuf_t&>(value) = bit_cast<mbuf_t>(__builtin_amdgcn_raw_buffer_load_b128(
+            cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0));
 #else
         if constexpr(pre_nop)
             asm volatile("s_nop 4\n"
@@ -191,8 +191,8 @@ struct buffer_load<8, pre_nop>
         using mbuf_t = typename impl::buffer_load_trait<8, T>::payload_t;
 #if HAS_RAW_BUFFER_BUILTINS
         index_t s_offset                 = i_offset;
-        reinterpret_cast<mbuf_t&>(value) = __builtin_amdgcn_raw_buffer_load_b64(
-            cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
+        reinterpret_cast<mbuf_t&>(value) = bit_cast<mbuf_t>(__builtin_amdgcn_raw_buffer_load_b64(
+            cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0));
 #else
         if constexpr(pre_nop)
             asm volatile("s_nop 4\n"
@@ -3057,7 +3057,6 @@ __device__ auto amd_transpose_load_to_vgpr(const T* __restrict__ in_ptr)
 #endif
     if constexpr(std::is_same_v<remove_cvref_t<T>, ck_tile::half_t>)
     {
-        typedef __attribute__((__vector_size__(4 * sizeof(__fp16)))) __fp16 llvm_fp16x4_t;
         auto lds_ptr = reinterpret_cast<__LDS_ADDR llvm_fp16x4_t*>(in_ptr_);
         return bit_cast<thread_buffer<T, N>>(__builtin_amdgcn_ds_read_tr16_b64_v4f16(lds_ptr));
     }
@@ -3104,7 +3103,7 @@ amd_tdm_load(const TDMDescriptor<DataType, TensorRank, IsGatherMode>& descriptor
     static constexpr auto I4 = number<4>{};
 
     auto tdm_desc_grp = descriptor.getResourceDescriptorGroup();
-    __builtin_amdgcn_tensor_load_to_lds(tdm_desc_grp.get(I0),
+    __builtin_amdgcn_tensor_load_to_lds(bit_cast<uint32x4_t>(tdm_desc_grp.get(I0)),
                                         tdm_desc_grp.get(I1),
                                         tdm_desc_grp.get(I2),
                                         tdm_desc_grp.get(I3),
@@ -3130,7 +3129,7 @@ amd_tdm_store(const TDMDescriptor<DataType, TensorRank, IsGatherMode>& descripto
     static constexpr auto I4 = number<4>{};
 
     auto tdm_desc_grp = descriptor.getResourceDescriptorGroup();
-    __builtin_amdgcn_tensor_store_from_lds(tdm_desc_grp.get(I0),
+    __builtin_amdgcn_tensor_store_from_lds(bit_cast<uint32x4_t>(tdm_desc_grp.get(I0)),
                                            tdm_desc_grp.get(I1),
                                            tdm_desc_grp.get(I2),
                                            tdm_desc_grp.get(I3),

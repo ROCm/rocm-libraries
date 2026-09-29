@@ -138,6 +138,48 @@ class TestMoeFusedMegaWmma(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_moe_fused_mega_wmma(self._spec("bf16"), arch="gfx950")
 
+    def test_lds_accounting_matches_emitted_pool(self):
+        from rocke.core import lower_llvm
+        from rocke.instances.common._moe_fused_mega_lds import mega_lds_pool_bytes
+        from rocke.instances.gfx1250.fused_moe_mega_wmma import (
+            FusedMegaWmmaSpec,
+            _lds_allocs,
+            build_moe_fused_mega_wmma,
+        )
+
+        for kw in ({}, {"double_buffer": True}, {"tile_n_down": 128}):
+            with self.subTest(**kw):
+                spec = FusedMegaWmmaSpec(name="mega_lds", dtype="bf16", **kw)
+                kd = build_moe_fused_mega_wmma(spec, arch="gfx1250")
+                low = lower_llvm._Lowerer(kd, arch="gfx1250")
+                low._collect_smem(kd.body)
+                low._compute_smem_layout()
+                self.assertEqual(
+                    mega_lds_pool_bytes(_lds_allocs(spec)), low._smem_pool_size
+                )
+
+    def test_rejects_over_budget_spec(self):
+        from rocke.core.arch import ArchTarget
+        from rocke.instances.gfx1250.fused_moe_mega_wmma import (
+            FusedMegaWmmaSpec,
+            build_moe_fused_mega_wmma,
+        )
+
+        # Both GEMM sub-specs fit on their own; doubling all three operand tiles
+        # at the wide inter slice only overruns once Hidden_smem is counted too.
+        spec = FusedMegaWmmaSpec(
+            name="mega_over",
+            dtype="bf16",
+            tile_n_inter=512,
+            tile_n_down=512,
+            double_buffer=True,
+        )
+        with self.assertRaises(ValueError) as cm:
+            build_moe_fused_mega_wmma(spec, arch="gfx1250")
+        msg = str(cm.exception)
+        self.assertIn(str(ArchTarget.from_gfx("gfx1250").lds_capacity_bytes), msg)
+        self.assertIn("Hidden_smem", msg)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -93,14 +93,15 @@ TEST(TestPackedFp4Tensor, OddElementCountLeavesFinalHighNibbleUnused)
 }
 
 // The reason this class exists: its randomization must agree value-for-value with
-// the unpacked Tensor<fp4_e2m1> given the same (seed, min, max). Bounds are chosen
-// exactly FP4-representable so both fills draw an identical RNG sequence.
+// the unpacked Tensor<fp4_e2m1> given the same (seed, min, max). Bounds deliberately
+// not FP4-representable (3.5 rounds to 4.0): Tensor<T> rounds them through T before
+// building the distribution, so a raw-float writer would diverge here.
 TEST(TestPackedFp4Tensor, FillWithRandomValuesMirrorsUnpackedTensor)
 {
     const std::vector<int64_t> dims = {3, 8};
     const std::vector<int64_t> strides = {8, 1};
-    const float minValue = -6.0f;
-    const float maxValue = 6.0f;
+    const float minValue = -3.5f;
+    const float maxValue = 3.5f;
     const unsigned int seedValue = 1337u;
 
     PackedFp4Tensor packed(dims, strides);

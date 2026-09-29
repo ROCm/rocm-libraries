@@ -38,6 +38,7 @@
 #include "stinkytofu/hardware/GfxIsa.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/ir/asm/StinkyRegister.hpp"
+#include "stinkytofu/ir/asm/ssa/StinkyOpOperand.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
 namespace stinkytofu {
@@ -78,6 +79,7 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
     // addRegistersToInstruction() in ToStinkyTofuUtils.cpp.
     std::vector<StinkyRegister> destRegs;
     std::vector<StinkyRegister> srcRegs;
+    std::optional<AttachedSSA> attachedSSA_;
 
     StinkyInstruction(const HwInstDesc* mcid)
         : IRBase(IRType::StinkyTofu),
@@ -86,7 +88,9 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
           latencyCycles(mcid->latency),
           coIssueWindow(mcid->coIssueWindow) {}
 
-    ~StinkyInstruction() override = default;
+    ~StinkyInstruction() override {
+        clearAttachedSSA();
+    }
 
    public:
     void addSrcReg(const StinkyRegister& srcReg) {
@@ -117,12 +121,14 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
         return srcRegs.size();
     }
 
-    /// Get instructions that use the value defined by this instruction (def-use chain)
+    /// Get instructions that use the value defined by this instruction (def-use
+    /// chain)
     const std::vector<StinkyInstruction*>& getUsers() const {
         return users;
     }
 
-    /// Get instructions that define the operands used by this instruction (def-use chain)
+    /// Get instructions that define the operands used by this instruction
+    /// (def-use chain)
     const std::vector<StinkyInstruction*>& getSources() const {
         return sources;
     }
@@ -227,13 +233,29 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
         destRegs.resize(size);
     }
 
+    bool hasAttachedSSA() const {
+        return attachedSSA_.has_value();
+    }
+    void attachSSA(AttachedSSA ssa);
+    void clearAttachedSSA();
+
+    size_t getNumSSAResults() const;
+    StinkySSAValue* getSSAResult(size_t i) const;
+    size_t getNumSSAOperands() const;
+    StinkyOpOperand* getSSAOperand(size_t i);
+    const StinkyOpOperand* getSSAOperand(size_t i) const;
+    StinkySSAValue* getSSAOperandValue(size_t i) const;
+    void setSSAOperandValue(size_t i, StinkySSAValue* v);
+
     /**
      * @brief Clone this instruction (deep copy)
      *
-     * Creates a new instruction with the same descriptor, registers, and modifiers.
+     * Creates a new instruction with the same descriptor, registers, and
+     * modifiers.
      *
      * Notes:
-     * - Modifiers are deep copied using copy constructors (works for POD modifiers)
+     * - Modifiers are deep copied using copy constructors (works for POD
+     * modifiers)
      * - users/sources are NOT copied (dependency tracking should be rebuilt)
      *
      * This is needed because StinkyInstruction inherits from IntrusiveListNode
@@ -253,13 +275,14 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
         cloned->latencyCycles = latencyCycles;
         cloned->coIssueWindow = coIssueWindow;
 
-        // Deep copy modifiers via virtual clone() (TypedModifier implements it per type).
+        // Deep copy modifiers via virtual clone() (TypedModifier implements it per
+        // type).
         for (const auto& mod : modifiers) {
             cloned->modifiers.push_back(mod->clone());
         }
 
-        // Note: users/sources are intentionally NOT copied
-        // These are dependency tracking and should be rebuilt if needed
+        // Note: users/sources and attached SSA are intentionally NOT copied.
+        // Def-use chains and SSA use-lists must be rebuilt or reattached.
 
         return cloned;
     }
@@ -277,7 +300,8 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
 
     StinkyInstruction* create(const HwInstDesc* mcid, IRBase* insertBefore = nullptr) {
         assert(mcid != nullptr &&
-               "Cannot create instruction with null descriptor - instruction not supported "
+               "Cannot create instruction with null descriptor "
+               "- instruction not supported "
                "on this architecture");
 
         if (insertBefore == nullptr) return createIR<StinkyInstruction>(mcid);
@@ -285,7 +309,8 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
         return createIR<StinkyInstruction>(insertBefore, mcid);
     }
 
-    /// Creates a LABEL instruction. TODO: remove when basic-block labels are supported.
+    /// Creates a LABEL instruction. TODO: remove when basic-block labels are
+    /// supported.
     StinkyInstruction* createLabel(const std::string& label, uint16_t alignment = 1);
 
     /// PHI instruction properties:
@@ -310,8 +335,8 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
     }
 
     /// Creates a pseudo marker for the ASM placement of a function body.
-    /// It records where the named function should appear in the final linear ASM stream.
-    /// e.g.
+    /// It records where the named function should appear in the final linear ASM
+    /// stream. e.g.
     ///   st.func @entry() {
     ///     ^label_ASM_End:
     ///       FUNCTION_ASM_PLACEMENT_MARKER "label_Activation_Relu_VW1"
@@ -321,8 +346,8 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
     ///     ...
     ///   }
     ///
-    ///   This means that the function body will be placed at the ^label_ASM_End position in the
-    ///   final linear ASM stream.
+    ///   This means that the function body will be placed at the ^label_ASM_End
+    ///   position in the final linear ASM stream.
     StinkyInstruction* createFunctionAsmPlacementMarker(const std::string& functionName) {
         static const HwInstDesc functionAsmPlacementMarkerMCID{
             GFX::FUNCTION_ASM_PLACEMENT_MARKER,
@@ -338,9 +363,10 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
         return inst;
     }
 
-    /// Opaque pseudo-instruction that groups a narrow-exec-write..full-mask-reset span
-    /// so the DAG scheduler treats it as one atomic node. Own descriptor carries no
-    /// IF_HasSideEffect; hasSideEffect() below still inherits it from children.
+    /// Opaque pseudo-instruction that groups a narrow-exec-write..full-mask-reset
+    /// span so the DAG scheduler treats it as one atomic node. Own descriptor
+    /// carries no IF_HasSideEffect; hasSideEffect() below still inherits it from
+    /// children.
     StinkyInstruction* createExecMaskGroup(IRBase* insertBefore) {
         static const HwInstDesc execGroupMCID{GFX::EXEC_GROUP, GFX::EXEC_GROUP, 0, 0, 0, 0,
                                               "EXEC_GROUP",    makeFlagSet({})};
@@ -603,9 +629,9 @@ inline bool isUnconditionalBranch(const StinkyInstruction& inst) {
     return isBranch(inst) && !isConditionalBranch(inst);
 }
 
-/// True when the instruction ends the current Function: kernel exit (`s_endpgm`)
-/// or a register-target `s_setpc_b64` return. Annotated `s_setpc_b64` is a
-/// branch to a known label, not a function return.
+/// True when the instruction ends the current Function: kernel exit
+/// (`s_endpgm`) or a register-target `s_setpc_b64` return. Annotated
+/// `s_setpc_b64` is a branch to a known label, not a function return.
 inline bool isEndOfFunction(const StinkyInstruction& inst) {
     if (inst.getUnifiedOpcode() == GFX::s_endpgm) return true;
     return inst.getUnifiedOpcode() == GFX::s_setpc_b64 && inst.getModifier<LabelData>() == nullptr;
@@ -615,19 +641,22 @@ inline bool isIndirectBranch(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_IndirectBranch);
 }
 
-/// True for call-like control transfers (IF_Call, e.g. s_swappc_b64), not branches.
+/// True for call-like control transfers (IF_Call, e.g. s_swappc_b64), not
+/// branches.
 inline bool isCall(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_Call);
 }
 
-/// Any intra-function control effect that is not ordinary dataflow: branches or calls.
+/// Any intra-function control effect that is not ordinary dataflow: branches or
+/// calls.
 inline bool isControlTransfer(const StinkyInstruction& inst) {
     return isBranch(inst) || isCall(inst);
 }
 
 /// Possible callee entry labels for a call site (`s_swappc_b64` with optional
 /// `CallTargetData` from the rocisa producer). Empty when unknown or omitted.
-/// This is for call-graph / scheduling analysis only; it is not a CFG successor list.
+/// This is for call-graph / scheduling analysis only; it is not a CFG successor
+/// list.
 inline std::vector<std::string> getCallTargets(const StinkyInstruction& inst) {
     if (!isCall(inst)) return {};
     if (const auto* meta = inst.getModifier<CallTargetData>()) {
@@ -645,8 +674,10 @@ inline std::vector<std::string> getCallTargets(const StinkyInstruction& inst) {
 //   - Not a branch → {}
 //   - LabelData{label} → {label} (rocisa converter or LongBranchLoweringPass)
 //   - IF_IndirectBranch without LabelData → {}
-//   - Calls (`IF_Call`, e.g. `s_swappc_b64`) are not branches; use getCallTargets().
-//   - First src is LiteralString → {that string} (raw .s s_branch / s_cbranch_*)
+//   - Calls (`IF_Call`, e.g. `s_swappc_b64`) are not branches; use
+//   getCallTargets().
+//   - First src is LiteralString → {that string} (raw .s s_branch /
+//   s_cbranch_*)
 //   - Otherwise → {}
 inline std::vector<std::string> getBranchTargets(const StinkyInstruction& inst) {
     if (!isBranch(inst)) return {};
@@ -757,16 +788,17 @@ inline bool isLabel(const StinkyInstruction& inst) {
 
 /// Determines if an instruction must be preserved and cannot be eliminated.
 ///
-/// This is a comprehensive check that covers all instructions with observable effects,
-/// including memory operations, control flow, barriers, and instructions explicitly
-/// marked with side effects.
+/// This is a comprehensive check that covers all instructions with observable
+/// effects, including memory operations, control flow, barriers, and
+/// instructions explicitly marked with side effects.
 ///
 /// This function is distinct from isHasSideEffect() which only checks the
-/// IF_HasSideEffect flag. This function performs a broader classification suitable
-/// for optimization passes like dead code elimination.
+/// IF_HasSideEffect flag. This function performs a broader classification
+/// suitable for optimization passes like dead code elimination.
 ///
 /// @param inst The instruction to check
-/// @return true if the instruction must be preserved, false if it can be eliminated
+/// @return true if the instruction must be preserved, false if it can be
+/// eliminated
 inline bool mustPreserveInstruction(const StinkyInstruction& inst) {
     // Memory operations (loads/stores)
     if (isGlobalMemLoad(inst) || isGlobalMemStore(inst)) return true;

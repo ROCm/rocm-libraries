@@ -1,5 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+//
+// Portions derived from NVIDIA cuDNN frontend, used under the MIT license:
+//   include/cudnn_frontend_utils.h
+//     Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
+// License text and pinned upstream version: THIRD_PARTY_LICENSES.md
+// (installed to share/doc/hipdnn_frontend).
 
 /**
  * @file Types.hpp
@@ -21,8 +27,6 @@
  *
  * This file also contains conversion utilities between frontend types and
  * the backend C API types (hipdnn_backend.h).
- *
- * Portions derived from NVIDIA cuDNN frontend, used under the MIT license.
  */
 
 #pragma once
@@ -54,6 +58,8 @@ namespace hipdnn_frontend
 {
 using hipdnn_data_sdk::types::bfloat16;
 using hipdnn_data_sdk::types::fp4_e2m1;
+using hipdnn_data_sdk::types::fp6_e2m3;
+using hipdnn_data_sdk::types::fp6_e3m2;
 using hipdnn_data_sdk::types::fp8_e4m3;
 using hipdnn_data_sdk::types::fp8_e4m3_fnuz;
 using hipdnn_data_sdk::types::fp8_e5m2;
@@ -446,6 +452,14 @@ DataType getDataTypeEnumFromType()
     else if constexpr(std::is_same_v<T, fp4_e2m1>)
     {
         return DataType::FP4_E2M1;
+    }
+    else if constexpr(std::is_same_v<T, fp6_e2m3>)
+    {
+        return DataType::FP6_E2M3;
+    }
+    else if constexpr(std::is_same_v<T, fp6_e3m2>)
+    {
+        return DataType::FP6_E3M2;
     }
     else if constexpr(std::is_same_v<T, fp8_e4m3>)
     {

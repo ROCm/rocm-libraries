@@ -429,9 +429,13 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->A_smem = rocke_b_smem_alloc(b, rocke_f16(), a_shape, 2, "A_smem");
         ctx->B_smem = rocke_b_smem_alloc(b, rocke_f16(), b_shape, 2, "B_smem");
 
-        /* double_buffer = compv4 || async_dma || unroll_k */
-        ctx->double_buffer = (spec->pipeline != NULL && strcmp(spec->pipeline, "compv4") == 0)
-                             || spec->async_dma || spec->unroll_k;
+        /* Only async_dma and unroll_k reach a K-loop that alternates buffers:
+         * async_dma takes the SoftwarePipeline branch and unroll_k hand-rolls a
+         * ping-pong.  "compv4" alone shares the plain single-buffer loop with
+         * "mem"/"compv3" and differs only in scheduling hints, so allocating a
+         * second A/B tile for it was dead and charged LDS the kernel never used.
+         * Mirrors the Python double_buffer condition. */
+        ctx->double_buffer = spec->async_dma || spec->unroll_k;
         if(ctx->double_buffer)
         {
             ctx->A_smem2 = rocke_b_smem_alloc(b, rocke_f16(), a_shape, 2, "A_smem2");
@@ -571,10 +575,15 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
 
     if(ctx->async_dma)
     {
+        /* contig_cols = cpg: the tile's col axis is the reduction index (y, x, c)
+         * and only the inner c is stride-1, so a chunk wider than cpg -- or one
+         * that does not divide it -- would straddle a filter position and fetch
+         * the wrong elements with no diagnostic. Mirrors the Python call. */
+        const int cpg = rocke_conv_problem_cpg(&spec->problem);
         rocke_status_t sa = rocke_async_tile_loader_from_tile(
-            ctx->block_m, ctx->block_k, ctx->threads, spec->wave_size, 4, &ctx->a_loader);
+            ctx->block_m, ctx->block_k, ctx->threads, spec->wave_size, 4, cpg, &ctx->a_loader);
         rocke_status_t sb = rocke_async_tile_loader_from_tile(
-            ctx->block_n, ctx->block_k, ctx->threads, spec->wave_size, 4, &ctx->b_loader);
+            ctx->block_n, ctx->block_k, ctx->threads, spec->wave_size, 4, cpg, &ctx->b_loader);
         if(sa != ROCKE_OK || sb != ROCKE_OK)
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv: async tile loader from_tile failed");
@@ -705,22 +714,18 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
     /* ---- K-loop driver selection (1276-1347) ----
      *
      * The driver is chosen by K-loop *structure*, not by pipeline name.
-     * "mem", "compv3", and "compv4" all use the same scf.for_iter shape
-     * (load->sync->mfma->sync per tile) and therefore share kloop_simple.
-     * Their behavioural differences (scheduling hints, double-buffering) are
-     * encoded in ctx->schedule and ctx->double_buffer, which are consulted
-     * inside emit_mfma_phase and the LDS allocation respectively -- no
-     * K-loop structural change is needed for those pipelines.
+     * "mem", "compv3", "compv4", and "basic" all use the same scf.for_iter
+     * shape (load->sync->mfma->sync per tile) and therefore share kloop_simple.
+     * Their behavioural differences (scheduling hints) are encoded in
+     * ctx->schedule, which is consulted inside emit_mfma_phase -- no K-loop
+     * structural change is needed for those pipelines.
      *
      * A new driver is only justified when the K-loop itself has a different
      * shape that cannot be expressed inside kloop_simple:
      *
      *   unroll_k     -> kloop_unroll  (Python-unrolled prologue+ping-pong;
      *                                  2 LDS buffers; no scf.for_iter)
-     *   pipeline="basic"-> kloop_basic (split global_read/lds_write;
-     *                                   single LDS buffer; no scf.for_iter;
-     *                                   VMEM/compute overlap without double-buf)
-     *   else no async -> kloop_simple (scf.for_iter; mem/compv3/compv4 all
+     *   else no async -> kloop_simple (scf.for_iter; mem/compv3/compv4/basic
      *                                  share this; pipeline string only
      *                                  affects schedule hints inside mfma)
      *   else (async)  -> kloop_async  (SoftwarePipeline.run_ping_pong over
@@ -728,10 +733,6 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
     if(spec->unroll_k)
     {
         rocke_conv_emit_kloop_unroll(&ctx);
-    }
-    else if(spec->pipeline != NULL && strcmp(spec->pipeline, "basic") == 0)
-    {
-        rocke_conv_emit_kloop_basic(&ctx);
     }
     else if(spec->pipeline != NULL && strcmp(spec->pipeline, "wavelet") == 0)
     {

@@ -38,6 +38,7 @@
 #include <miopen/simple_hash.hpp>
 #include <miopen/solver_id.hpp>
 #include <miopen/stringutils.hpp>
+#include <miopen/stream_tracker.hpp>
 #include <miopen/target_properties.hpp>
 
 #include <cstdio>
@@ -93,6 +94,19 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     void SetStream(miopenAcceleratorQueue_t streamID) const;
     void SetStreamFromPool(int streamID) const;
     void ReserveExtraStreamsInPool(int cnt) const;
+
+    /// Creates a stream that belongs to the caller rather than to this Handle's
+    /// index-addressed stream pool.
+    StreamTracker::StreamPtr CreateExclusiveStream() const;
+
+    /// Redirects GetStream() on the calling thread to \p stream, overriding the
+    /// stream-pool index. Pass nullptr to restore the index-selected stream.
+    /// Only valid for work that never reaches rocBLAS or hipBLASLt, whose
+    /// handles remain bound to the pool stream and will throw while an
+    /// exclusive stream is set.
+    void SetExclusiveStream(miopenAcceleratorQueue_t stream) const;
+
+    StreamTracker& GetStreamTracker() const;
 
     void SetAllocator(miopenAllocatorFunction allocator,
                       miopenDeallocatorFunction deallocator,
@@ -162,6 +176,8 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     std::size_t GetLocalMemorySize() const;
     std::size_t GetGlobalMemorySize() const;
     std::size_t GetImage3dMaxWidth() const;
+    std::size_t GetL2CacheSize() const;
+    std::size_t GetClockRateKhz() const;
     virtual std::size_t GetWavefrontWidth() const;
     virtual std::size_t GetMaxComputeUnits() const;
     std::size_t GetMaxHardwareComputeUnits() const
@@ -182,6 +198,7 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     void Copy(ConstData_t src, Data_t dest, std::size_t size) const;
 
     Allocator::ManageDataPtr Create(std::size_t sz) const;
+    std::shared_ptr<ScratchAllocation> GetScratchBuffer(std::size_t sz) const;
     Allocator::ManageDataPtr&
     WriteTo(const void* data, Allocator::ManageDataPtr& ddata, std::size_t sz) const;
     void WriteTo(const void* data, Data_t ddata, std::size_t sz) const;

@@ -67,6 +67,7 @@ public:
     std::shared_ptr<_rocsparse_bsrsm_info>     get_shared_bsrsm_info();
     std::shared_ptr<_rocsparse_bsrilu0_info>   get_shared_bsrilu0_info();
     std::shared_ptr<_rocsparse_bsric0_info>    get_shared_bsric0_info();
+    std::shared_ptr<_rocsparse_ellsv_info>     get_shared_ellsv_info();
     void                                       clear_csrsv_info();
     void                                       clear_csrsm_info();
     void                                       clear_csrilu0_info();
@@ -76,6 +77,7 @@ public:
     void                                       clear_bsrsm_info();
     void                                       clear_bsrilu0_info();
     void                                       clear_bsric0_info();
+    void                                       clear_ellsv_info();
 
     rocsparse_bsric0_info  get_bsric0_info();
     rocsparse::trm_info_t* get_bsric0_info(rocsparse_operation operation,
@@ -137,6 +139,13 @@ public:
     rocsparse::trm_info_t* get_bsrsm_info(rocsparse_operation operation,
                                           rocsparse_fill_mode fill_mode);
     void                   set_bsrsm_info(rocsparse_operation    operation,
+                                          rocsparse_fill_mode    fill_mode,
+                                          rocsparse::trm_info_t* trm_info);
+
+    rocsparse_ellsv_info   get_ellsv_info();
+    rocsparse::trm_info_t* get_ellsv_info(rocsparse_operation operation,
+                                          rocsparse_fill_mode fill_mode);
+    void                   set_ellsv_info(rocsparse_operation    operation,
                                           rocsparse_fill_mode    fill_mode,
                                           rocsparse::trm_info_t* trm_info);
 

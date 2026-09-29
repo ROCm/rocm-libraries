@@ -1,0 +1,31 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass --DumpStinkyModulePass=ssaForm,stdout
+#
+# LiftAsmRegistersToSSAPass: unsupported input leaves the function untouched.
+#
+# Accumulator registers are not lifted yet: on some architectures an AGPR and a
+# VGPR name the same storage, and building two SSA values over one physical
+# register would be unsound. So nothing is attached to this function.
+#
+# That is the fallback contract: lifting reports a missed optimization rather
+# than failing the compilation, and a function with no attached SSA is a valid
+# pre-lift function. The physical instruction stream must survive unchanged so
+# the legacy path still works, which is also why an ssaForm dump of an unlifted
+# function is just the physical program.
+#
+# CHECK-LABEL: st.func @lift_asm_registers_to_ssa_unsupported
+#
+# No block arguments, because nothing was lifted.
+# CHECK-NEXT: ^entry:
+#
+# The physical program is intact, accumulator operand included.
+# CHECK-NEXT: a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], a[10:17])
+# CHECK-NEXT: v3 = "st.v_add_f32"(v2, v1)
+#
+# Nothing partial was attached: no SSA value names appear at all.
+# CHECK-NOT: %
+
+st.func @lift_asm_registers_to_ssa_unsupported() {
+^entry:
+  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], a[10:17])
+  v3 = "st.v_add_f32"(v2, v1)
+}

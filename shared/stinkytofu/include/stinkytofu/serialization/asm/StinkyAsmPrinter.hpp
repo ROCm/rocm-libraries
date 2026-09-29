@@ -38,6 +38,14 @@ class StinkyAsmModule;
 struct AsmPrinterOptions {
     // Indentation for nested structures
     int indent = 2;
+
+    /// Print attached SSA instead of physical registers.
+    ///
+    /// Diagnostic only: the parser accepts the physical form, so an ssaForm dump
+    /// does not round-trip. Operands that were never lifted (literals, hwreg,
+    /// special registers) and instructions with no attached SSA keep their
+    /// physical spelling, so a partially lifted function is still readable.
+    bool ssaForm = false;
 };
 
 class STINKYTOFU_EXPORT AsmPrinter {
@@ -71,6 +79,18 @@ class STINKYTOFU_EXPORT AsmPrinter {
     void printInstruction(const StinkyInstruction& inst, int baseIndent);
     void printDirective(const AsmDirective& directive, int baseIndent);
     void printSuccessorsLine(const BasicBlock& bb, int baseIndent);
+
+    /// True when this instruction's operands should print as SSA values.
+    bool printsSSA(const StinkyInstruction& inst) const;
+    void printSSAValue(const StinkySSAValue* value);
+    /// Block-argument list on the block header, MLIR style.
+    void printBlockArgumentList(const BasicBlock& bb);
+    /// One `%id = phi(^pred: %id, ...)` line per argument that merges edges.
+    void printBlockArgumentSources(const BasicBlock& bb, int baseIndent);
+    /// Operands of \p inst, substituting SSA values for lifted registers.
+    /// \p cursor walks the flat AttachedSSA slot list alongside the operands.
+    void printSSAOperandGroup(const StinkyInstruction& inst, const StinkyRegister& reg,
+                              bool isDestination, size_t& cursor);
 
     /// Print modifier as structured dict: { key = value, ... }. Returns true if printed.
     bool printModifierAsDict(const Modifier& mod);

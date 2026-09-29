@@ -44,8 +44,6 @@ exclude: |
     # ==========================================================================
     # Permanent exclusions
     # ==========================================================================
-    # Auto-generated GitHub Agentic Workflow lock files
-    \.github/workflows/.*\.lock\.yml$|
     # Binary files
     projects/hipdnn/.*\.bin$|
     # Generated hipDNN FlatBuffers headers
@@ -59,6 +57,14 @@ exclude: |
     projects/miopen/.*\.s$|
     projects/miopen/.*\.inc$|
     projects/miopen/.*\.model$|
+    # Machine-generated LGBM assets: native LightGBM text models + baked
+    # catalog/metadata + golden parity fixtures (large, not human-authored;
+    # exceed check-added-large-files and are not lintable/end-of-file-fixable).
+    # Match every lgbm_* asset under kernels/ so new metadata/model files stay
+    # covered without touching this list.
+    projects/miopen/src/conv/heuristics/lgbm_models/.*|
+    projects/miopen/src/conv/heuristics/lgbm_pcfg_models/.*|
+    projects/miopen/src/kernels/lgbm_.*\.(json|txt|bin)|
     # RPP exclusion list - raw test data with no early NUL byte, which pre-commit would
     # otherwise treat as text and corrupt. Matched by extension so new data stays covered.
     projects/rpp/.*\.(bin|rgb|yuv)$
@@ -144,11 +150,39 @@ repos:
         files: ^projects/hipdnn/flatbuffers_sdk/schemas/.*\.fbs$|^projects/hipdnn/scripts/gen_cache_key\.py$|^projects/hipdnn/cmake/default_flatc_version\.txt$
         pass_filenames: false
 
+      - id: verify-support-claims
+        name: Verify hipDNN support-claim sidecars (RFC 0015)
+        entry: python dnn-providers/integration-tests/scripts/verify_support_claims.py
+        language: python
+        pass_filenames: false
+        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(test_)?verify_support_claims\.py)$
+
       - id: gtest-format-miopen
         name: GTest naming conventions (MIOpen)
         entry: python projects/miopen/test/utils/gtest_formating_checks.py
         language: python
         files: ^projects/miopen/test/gtest/.*\.cpp$
+        pass_filenames: false
+
+      - id: miopen-public-private-headers
+        name: MIOpen public/private header consistency
+        entry: python projects/miopen/script/check_public_abi.py check-headers
+        language: python
+        files: ^(projects/miopen/(include/miopen/miopen\.h|src/private/(miopen_impl\.h|miopen_private_rename\.h|wrapper\.cpp)|src/convolution_api\.cpp|test/gtest/conv_workspace_size_range\.cpp)|dnn-providers/miopen-provider/MiopenApi(PrivateRename)?\.hpp)$
+        pass_filenames: false
+
+      # The check above is the only one that can see signature drift in the
+      # split, and it reads C declarations with a hand-rolled parser rather
+      # than a compiler. These are that parser's own tests. They work on string
+      # fixtures, so they run here -- where pre-commit provides pytest in an
+      # isolated environment -- rather than in the MIOpen component CI job,
+      # which installs no Python packages.
+      - id: miopen-public-private-header-check-tests
+        name: MIOpen public/private header check self-tests
+        entry: python -m pytest projects/miopen/script/test_check_public_abi.py -q
+        language: python
+        additional_dependencies: ["pytest==8.4.2"]
+        files: ^projects/miopen/script/(check_public_abi|test_check_public_abi)\.py$
         pass_filenames: false
 
       - id: kpack-pin-sync

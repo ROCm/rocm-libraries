@@ -407,3 +407,9 @@ Tests:
   filename: [Chebyshev4,
              shipsec1,
              scircuit]
+
+- name: spmv_coo_aos_extra
+  category: nightly
+  function: spmv_coo_aos_extra
+  host_memory_gb: 1
+  device_memory_gb: 90

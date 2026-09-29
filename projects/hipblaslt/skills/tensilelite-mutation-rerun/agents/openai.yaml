@@ -1,0 +1,7 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+interface:
+  display_name: "TensileLite Mutation Rerun"
+  short_description: "Find characterization gaps with mutation analysis"
+  default_prompt: "Use $tensilelite-mutation-rerun to investigate a TensileLite mutation survivor and turn any confirmed coverage gap into a focused characterization test."

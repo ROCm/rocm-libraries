@@ -13,6 +13,7 @@ gfx950 body.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Tuple
 
 from kernels.common.attention_unified import supports_native_unified_attention
@@ -29,11 +30,14 @@ from .common import (
     ATTENTION_FEATURES,
     UNIFIED_BLOCK_SIZES,
     UNIFIED_HEAD_SIZES,
+    AttentionMaskType,
     AttentionRequest,
     AttentionSpec,
     FAMILY,
+    _parse_attention_mask_type,
     _problem,
     _request_errors,
+    _resolve_dense_waves_per_eu,
     _selector_matches,
 )
 
@@ -118,10 +122,8 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
                 ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),
                 ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
             ),
-            # ``_enable_gfx942_fp16_flash`` is the real narrowing; nothing here
-            # claims a feature it turns down. fp8 is the one exception -- this is
-            # an fp16-only flash path with no fp8 dequant kernel -- so it is
-            # dropped rather than left for the dtype gate to catch by accident.
+            # ``_enable_gfx942_fp16_flash`` is the real narrowing; fp8 is
+            # unsupported, but the unified body already shifts causal masking.
             supports_features=ATTENTION_FEATURES - {"fp8"},
         ),
         _supports=support,
@@ -152,33 +154,44 @@ def _dense_spec(req: OperatorRequest):
       rule this factory follows, not a one-off: any value the kernel bakes into its
       ``kernel_name`` must be resolved by the kernel's policy, or the name tag and
       the compiled binary can disagree and the name-keyed launcher cache serves the
-      wrong HSACO.
+      wrong HSACO. ``batch`` / ``seqlen_q`` / ``seqlen_kv`` are the exception on the
+      non-persistent grid: ``runtime_shape`` reads them as kernel params, so they
+      stay on the spec for the launch but drop out of the name and the cache key.
     The D64 K row-group pad is deliberately NOT set here: it is the shared
     ``lds_k_group_pad`` field, whose default (8) is already the value gfx942 wants,
     and which the gfx942 builder reads directly. Restating it would reintroduce the
     per-arch duplicate that collapsing the two fields removed.
 
-    Nothing here touches ``Gfx942DenseTuning``: every gfx942-private codegen knob
-    (block_m, the two LDS pads, cfvst / exp2_fast forcing, iglp) stays at its shipped
-    default, so those knobs are sweep-visible and dispatch-invisible. Wiring one of
-    them into this factory would make it a production path and would need its own
-    measured verdict first.
-
-    The spec dataclass itself is REUSED from the gfx950 kernel module (as the gfx942
-    kernel body reuses it); it is arch-neutral, only its tuned values differ.
+    Nothing here overrides a gfx942-private codegen knob: LDS layout, cfvst,
+    exp2_fast, and IGLP stay at the concrete spec's measured defaults. The factory
+    returns :class:`Gfx942AttentionDenseSpec` directly so unsupported gfx950 knobs
+    cannot enter this path and no later promotion can change its meaning.
     """
-    from kernels.gfx942.attention_dense import _tuned_waves_per_eu
-    from kernels.gfx950.attention_dense import AttentionDenseSpec, _BLOCK_M
+    from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
+    from kernels.gfx942.attention_dense import (
+        Gfx942AttentionDenseSpec,
+        _tuned_waves_per_eu,
+    )
 
     assert isinstance(req, AttentionRequest)
+    if req.arch != "gfx942":
+        raise ValueError(
+            f"gfx942 dense spec factory requires arch='gfx942', got {req.arch!r}"
+        )
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
+    mask_type = _parse_attention_mask_type(req.mask_type)
+    causal = mask_type != AttentionMaskType.NO_MASK
+    causal_bottom_right = (
+        mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL and sq != sk
+    )
+    bm = int(DENSE_TILE_GEOMETRIES["default"]["block_m"])
     bn = _DENSE_BLOCK_N
     head_size = int(req.hdim_q)
     dtype = req.dtype.lower()
     # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
     # not a 256/block_n multiple). Cross-attention ragged is left to the validator.
-    ragged = (sq == sk) and ((sq % _BLOCK_M != 0) or (sk % bn != 0))
-    nqb = (sq + _BLOCK_M - 1) // _BLOCK_M
+    ragged = (sq == sk) and ((sq % bm != 0) or (sk % bn != 0))
+    nqb = (sq + bm - 1) // bm
     work = nqb * int(req.nhead_q) * int(req.batch)
     np = int(req.dense_num_persistent)
     if np == _SHARED_NUM_PERSISTENT_DEFAULT:
@@ -194,34 +207,35 @@ def _dense_spec(req: OperatorRequest):
         raise ValueError(
             f"dense_persistent must be 'auto'/'on'/'off', got {req.dense_persistent!r}"
         )
-    return AttentionDenseSpec(
+    return Gfx942AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
         seqlen_kv=sk,
         num_query_heads=int(req.nhead_q),
         num_kv_heads=int(req.nhead_k),
         head_size=head_size,
-        causal=(int(req.mask_type) != 0),
+        causal=causal,
+        causal_bottom_right=causal_bottom_right,
         dtype=dtype,
+        block_m=bm,
         block_n=bn,
         persistent=persistent,
         num_persistent=np,
         persist_decode=req.dense_persist_decode.strip().lower(),
         ragged=ragged,
-        waves_per_eu=_tuned_waves_per_eu(head_size, dtype),
+        sliding_window=int(req.sliding_window),
+        waves_per_eu=_resolve_dense_waves_per_eu(
+            req, _tuned_waves_per_eu(head_size, dtype)
+        ),
     )
 
 
 def dense_spec_for_request(req: AttentionRequest):
-    """Public builder: the launch-ready gfx942 ``AttentionDenseSpec`` for ``req``
-    at its best config (see :func:`_dense_spec`). Pair with
-    ``run_attention_dense_torch`` to execute the dispatched dense candidate.
+    """Return the launch-ready concrete gfx942 dense spec for ``req``.
 
-    Import it from THIS module, not from the ``dispatch.attention`` package: the
-    package-level re-export of that name is gfx950's, and it would silently hand a
-    gfx942 request the untuned spec (256 CTAs, no waves-per-eu bump). The K row-group
-    pad is NOT in that list: it is the shared field's default, so both factories
-    produce it.
+    The package-level ``dispatch.attention.dense_spec_for_request`` now routes
+    here from an explicit ``req.arch``; this direct entry point remains for
+    architecture-local callers.
     """
     return _dense_spec(req)
 
@@ -236,6 +250,13 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
     shape -- and at priority 3 it is the only thing keeping this candidate off the
     default path.
 
+    The non-persistent body reads ``batch``, ``seqlen_q``, and ``seqlen_kv`` from
+    kernel params (``Gfx942AttentionDenseSpec.runtime_shape``). ``signature`` is
+    ``attention_dense_signature``, which appends those three i32s, and
+    ``bind_torch`` launches through ``run_attention_dense_torch``, which packs
+    them. The persistent grid declares no shape params and keeps batch in the
+    kernel name.
+
     Carries the port's P1-P5 levers: the 32x32x8 atom with K-loop doubling,
     conflict-free V (D128 fp16), exp2_fast + fused softmax rescale, per-config
     waves-per-eu and the D64 K-bank-conflict pad, and the persistent grid-stride
@@ -244,10 +265,10 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
     ``builders/gfx942/attention/prefill/README.md``.
 
     Scope is delegated entirely to ``supports_attention_dense``, which rejects every
-    spec the builder cannot emit (varlen / ragged / sliding-window are later
-    follow-ups; plus block_n, LDS-budget and 32-bit-extent limits). That keeps
-    ``admits`` and ``build`` in agreement, so an out-of-scope request falls through
-    to another candidate instead of being selected and then failing to build.
+    spec the builder cannot emit (varlen / ragged / sinks are later follow-ups;
+    plus block_n, LDS-budget and 32-bit-extent limits). That keeps ``admits`` and
+    ``build`` in agreement, so an out-of-scope request falls through to another
+    candidate instead of being selected and then failing to build.
     """
     spec_id = "gfx942_attention_dense"
     name = "attention_gfx942_dense"
@@ -273,28 +294,49 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
             return False, why
         return True, "ok"
 
-    def select(req: OperatorRequest) -> AttentionSpec:
+    def select(req: OperatorRequest):
         ok, why = candidate.admits(req)
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
-        assert isinstance(req, AttentionRequest)
-        from kernels.gfx942.attention_dense import gfx942_kernel_name
+        return _dense_spec(req)
 
-        problem = _problem(req)
-        dense_spec = _dense_spec(req)
-        return AttentionSpec(
-            path="2d",
-            head_size=problem.head_size,
-            block_size=problem.block_size,
-            dtype=problem.dtype,
-            num_query_heads=problem.num_query_heads,
-            num_kv_heads=problem.num_kv_heads,
-            name="rocke_attention_dense_gfx942",
-            # batch-unique: the kernel bakes batch into its buffer extents, which
-            # the shared AttentionDenseSpec.kernel_name() omits -- two batches would
-            # otherwise collide in the name cache. gfx942_kernel_name adds it, plus the
-            # wpe/kpad tags for the tuning folded in above.
-            kernel_name_override=gfx942_kernel_name(dense_spec),
+    def build(spec, arch):
+        from kernels.gfx942.attention_dense import build_attention_dense
+
+        return build_attention_dense(spec, arch=arch)
+
+    def signature(spec):
+        from kernels.gfx942.attention_dense import attention_dense_signature
+
+        return attention_dense_signature(spec)
+
+    def grid(spec, req):
+        from kernels.gfx942.attention_dense import attention_dense_grid
+
+        return attention_dense_grid(spec)
+
+    def block(spec):
+        from kernels.gfx942.attention_dense import attention_dense_block
+
+        return attention_dense_block(spec)
+
+    def bind_torch(request, spec, tensors, **kwargs):
+        from .bindings import bind_dense_attention_torch
+
+        return bind_dense_attention_torch(request, spec, tensors, **kwargs)
+
+    def sweep(req: OperatorRequest):
+        if not candidate.admits(req)[0]:
+            return ()
+        spec = select(req)
+        assert isinstance(req, AttentionRequest)
+        if int(req.dense_waves_per_eu) != 0:
+            return (spec,)
+        from .tuning_common import dense_waves_per_eu_sweep_values
+
+        return tuple(
+            replace(spec, waves_per_eu=waves_per_eu)
+            for waves_per_eu in dense_waves_per_eu_sweep_values(spec.waves_per_eu)
         )
 
     candidate = KernelCandidate(
@@ -307,22 +349,33 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         capability=Capability(
             arches=("gfx942",),
             dtypes=("bf16", "fp16"),
-            # Dense: no sliding-window, no sinks. Causal is a mask, not a feature
-            # this path turns down. Head size stays out -- D64/D128 coverage is
+            # Dense: causal + sliding-window; no sinks or moving bottom-right
+            # diagonal. The latter is a distinct request feature, absent here.
+            # Head size stays out -- D64/D128 coverage is
             # ``supports_attention_dense``'s call, and it reads the built spec
             # (LDS budget, block_n divisibility), which a ShapeRange cannot.
-            supports_features=frozenset({"causal"}),
+            supports_features=frozenset({"causal", "sliding_window"}),
         ),
         _supports=support,
         select_spec=select,
-        signature=lambda _spec: (),
-        grid=lambda spec, req: (0, 0, 0),
-        block=lambda spec: (0, 0, 0),
-        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        signature=signature,
+        grid=grid,
+        block=block,
+        sweep_space=sweep,
+        build=build,
+        bind_torch=bind_torch,
     )
     return candidate
 
 
-def register(registry: CandidateRegistry) -> None:
+def register_route(registry: CandidateRegistry) -> None:
     registry.register(_make_gfx942_attention_dense_candidate())
     registry.register(_make_gfx942_dense_pipe_candidate())
+
+
+def register_execution(registry: CandidateRegistry) -> None:
+    registry.register(_make_gfx942_attention_dense_candidate())
+
+
+def register(registry: CandidateRegistry) -> None:
+    register_route(registry)

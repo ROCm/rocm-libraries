@@ -143,13 +143,24 @@ def configMarks(filepath, rootDir, availableArchs):
         marks.append(markNamed(arch_in_name.group(1)))
 
     # Architecture specific xfail marks
+    under_ffm = bool(os.environ.get("HSA_MODEL_MEMFILE"))
     for arch in availableArchs:
         ArchFail = "xfail-%s" % arch
         if markNamed(ArchFail) in marks:
-            marks.append(pytest.mark.xfail)
+            # xfail-<arch> encodes a real-hardware expectation. Under FFM the config
+            # often passes (no CheckASMCodeSize / emulated exec), which xfail_strict
+            # would turn into an XPASS failure. Skip the arch-xfail under FFM; a config
+            # that ALSO fails under emulation carries ffm_fail (handled below).
+            if not under_ffm:
+                marks.append(pytest.mark.xfail)
         ArchSkip = "skip-%s" % arch
         if markNamed(ArchSkip) in marks:
             marks.append(pytest.mark.skip)
+
+    # Backend-specific skip (e.g. subtile tests not yet supported on stinkytofu)
+    rocisa_backend = os.environ.get("ROCISA_BACKEND", "").strip().lower()
+    if rocisa_backend == "stinkytofu" and markNamed("skip-stinkytofu") in marks:
+        marks.append(pytest.mark.skip(reason="Not yet supported in stinkytofu backend"))
 
     # FFM-specific xfail: a config marked ``ffm_fail`` passes on real HW but
     # fails under FFM emulation only. Turn it into an xfail only when running 
@@ -209,7 +220,19 @@ def findAvailableArchs(gpu_targets=None):
         List of architecture strings (e.g. ["gfx942"]).
     """
     if gpu_targets:
-        return [t.strip() for t in gpu_targets.split(";") if t.strip()]
+        # A versioned target ("gfx1250v0") also matches its base "gfx1250" marks: return
+        # both so configMarks matches each; findConfigs strips back to the base for codegen.
+        archs = []
+        for t in gpu_targets.split(";"):
+            t = t.strip()
+            if not t:
+                continue
+            if t not in archs:
+                archs.append(t)
+            base = re.sub(r"v\d+$", "", t)
+            if base not in archs:
+                archs.append(base)
+        return archs
 
     from Tensile.Tests.gpu_detection import get_available_archs
     return get_available_archs()
@@ -233,7 +256,9 @@ def findConfigs(rootDir=None, availableArchs=None):
 
     if availableArchs is None:
         availableArchs = findAvailableArchs()
-    globalParamArchsStr = ';'.join(availableArchs)
+    # Codegen uses the base gfx arch; strip any trailing version suffix (and dedup).
+    buildArchs = list(dict.fromkeys(re.sub(r"v\d+$", "", a) for a in availableArchs))
+    globalParamArchsStr = ';'.join(buildArchs)
     os.environ["PyTestBuildArchNames"] = globalParamArchsStr
 
     rocm_version = get_rocm_version_or_none()

@@ -10,6 +10,8 @@ add_library(
     core/Utils.cpp
     compilation/Kernel.cpp
     compilation/Program.cpp
+    utilities/Digest.cpp
+    utilities/sha256.cpp
 )
 
 add_subdirectory(engines)
@@ -20,6 +22,7 @@ target_include_directories(hip_kernel_provider_impl PUBLIC
     ${CMAKE_BINARY_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}/engines/
 )
+
 dnn_provider_generate_version_header(hip_kernel_provider hip_kernel_provider_impl ${CMAKE_CURRENT_LIST_DIR}/..)
 target_link_libraries(hip_kernel_provider_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
 
@@ -32,7 +35,9 @@ clang_tidy_check(hip_kernel_provider_impl)
 add_clang_tidy_custom_target()
 
 # Static library for unit tests to link against (provides access to internal implementation)
-add_library(hip_kernel_provider_private STATIC $<TARGET_OBJECTS:hip_kernel_provider_impl>)
+add_library(hip_kernel_provider_private STATIC
+    $<TARGET_OBJECTS:hip_kernel_provider_impl>
+)
 target_include_directories(hip_kernel_provider_private PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}/include
@@ -60,8 +65,13 @@ if(ENABLE_HIP_FLASH2_ENGINE)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_FLASH2=1)
     # Defect E fix: copy .co files to build tree so build-tree test runs work without
     # manual HIP_FLASH2_KERNEL_DIR export (mirrors asm_sdpa_engine pattern)
-    file(COPY
-        ${CMAKE_CURRENT_SOURCE_DIR}/engines/hip_flash2_engine/kernels/hip_flash2_fwd_gfx942.co
+    # Copy every .co present, not just the legacy object: naming only the
+    # legacy one meant a build-tree ctest could never exercise a variant even
+    # when the install was correct (S. Reeder had to stage objects by hand to
+    # test the dispatcher at all).
+    file(GLOB _f2_build_cos
+         ${CMAKE_CURRENT_SOURCE_DIR}/engines/hip_flash2_engine/kernels/*.co)
+    file(COPY ${_f2_build_cos}
         DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/hip_flash2_kernels)
     # Override HIP_FLASH2_KERNEL_DIR at test time to point to build tree
     set(HIP_FLASH2_KERNEL_DIR_BUILD "${CMAKE_CURRENT_BINARY_DIR}/hip_flash2_kernels"
@@ -74,11 +84,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # happened to exist, which also means nothing would ever exercise the installed copy.
     # Build-tree runs set HIPDNN_DESCRIPTOR_DIR instead; the test targets do it for ctest.
     target_compile_definitions(hip_kernel_provider_impl PRIVATE
-        HIPDNN_DESCRIPTOR_INSTALL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}"
+        HIPKERNELPROVIDER_DESCRIPTOR_INSTALL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
         # Container.cpp resolves this relative to the loaded .so first, so a
         # DESTDIR-staged, relocated, or repackaged install still finds its own
-        # descriptors; HIPDNN_DESCRIPTOR_INSTALL_DIR above is only its fallback.
-        HIPDNN_DESCRIPTOR_SUBDIR="${HIPDNN_DESCRIPTOR_SUBDIR}"
+        # descriptors; HIPKERNELPROVIDER_DESCRIPTOR_INSTALL_DIR above is only its fallback.
+        HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
     )
 
     # The kpack kernel source adapter. Listed here rather than beside Kernel.cpp above
@@ -98,7 +108,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
 endif()
 
 # hip_kernel_provider - SHARED library (the actual plugin)
-add_library(hip_kernel_provider SHARED $<TARGET_OBJECTS:hip_kernel_provider_impl>)
+add_library(hip_kernel_provider SHARED
+    $<TARGET_OBJECTS:hip_kernel_provider_impl>
+)
 target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
@@ -229,6 +241,11 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                          "\n# External integration test (cross-provider suite)\n${_external_staging}"
                     )
                 endif()
+                # Consumed. A second drain further down catches external targets
+                # registered below this point; emptying the property here is what stops
+                # that pass re-emitting everything above.
+                set_property(GLOBAL PROPERTY
+                    "EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider" "")
                 # Install tree.
                 apply_ctest_category_labels(
                     "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
@@ -293,23 +310,167 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "hipdnn_integration_tests not found - skipping asm-sdpa-external-integration-check")
     endif()
 
+    # The gfx950 dense attention suites are engine-pinned, so their installed entries
+    # belong in the gfx950 shard rather than the common arch-neutral file, for the reason
+    # the gpu_ref registration in src/integration_tests/CMakeLists.txt sets out.
+    # Categorized suites reach the install tree by being appended to INSTALL_TEST_FILE, so
+    # the routing is that file: a per-arch one that hkp_finalize_census_install() folds
+    # into the shard. Truncated here because apply_test_category_labels() appends, and a
+    # stale file would carry entries from a previous configure into this one.
+    set(_hkp_gfx950_external_ctest
+        "${CMAKE_CURRENT_BINARY_DIR}/census_external_gfx950_CTestTestfile.cmake")
+    file(WRITE "${_hkp_gfx950_external_ctest}" "")
+    set_property(GLOBAL PROPERTY
+                 HKP_CENSUS_EXTERNAL_TEST_FILE_gfx950 "${_hkp_gfx950_external_ctest}")
+
+    set(_gfx950_attention_dense_category_args "")
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
+       AND DEFINED HIPKERNELPROVIDER_GFX950_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML)
+        list(APPEND _gfx950_attention_dense_category_args
+            TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_GFX950_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML}"
+            INSTALL_TEST_FILE "${_hkp_gfx950_external_ctest}"
+            TEST_NAME_PREFIX ${PROJECT_NAME}-gfx950-attention-dense-external-integration
+        )
+    endif()
+
+    # The same predicate the census uses: the feature flags alone would register this
+    # engine-pinned target on a build whose `product` root ships another bundle, where it
+    # fails as a missing engine rather than reading as absent. It lives in
+    # HkpPackaging.cmake, which only an ingestor build includes -- hence the guard.
+    set(_hkp_gfx950_attention_dense FALSE)
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_gfx950_attention_dense_available(_hkp_gfx950_attention_dense)
+    endif()
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+       AND HIPKERNELPROVIDER_ENABLE_ROCKE
+       AND _hkp_gfx950_attention_dense
+       AND TARGET hipdnn_integration_tests)
+        # Route the installed entry and its TOML into the gfx950 shard, so pruning to
+        # another architecture removes them along with the engine they name. Reserved
+        # here rather than earlier so the shard is claimed exactly when something is
+        # registered into it.
+        #
+        # Both YAML modes. Each gets a common entrypoint further down -- the categorized
+        # file, or the one install_provider_ctest_files() writes -- and the discovery
+        # stub is appended to whichever it is, so a sharded entry is reachable either
+        # way. Both keywords move together: the staging key alone would divert the
+        # uncategorized fallback out of the drain that serves that path.
+        hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950)
+        set(_gfx950_shard_args
+            INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
+            INSTALL_STAGING_KEY hkp_census_gfx950)
+
+        # GTEST_FILTER and ENVIRONMENT belong here rather than in
+        # _gfx950_attention_dense_category_args: that list is populated only under YAML
+        # categorization, so anything folded into it is absent from a legacy-label build,
+        # which then enumerates the whole bundle tree pinned to this engine and runs
+        # without TEST_ENVIRONMENT (ASAN symbolizer, HSA_XNACK). The filter matches the
+        # gpu_ref registration in integration_tests/CMakeLists.txt.
+        add_external_integration_test_target(
+            TARGET_NAME    ${PROJECT_NAME}-gfx950-attention-dense-external-integration-check
+            PLUGIN_TARGET  hip_kernel_provider
+            ENGINE_NAME    "hipkernel:Gfx950AttentionDense"
+            INSTALL_SUBDIR hip_kernel_provider
+            ${_gfx950_shard_args}
+            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950AttentionDense.toml
+            GTEST_FILTER   "quick_SdpaFwd_bshd_*:standard_SdpaFwd_bshd_*"
+            ENVIRONMENT    ${TEST_ENVIRONMENT}
+            ${_gfx950_attention_dense_category_args}
+        )
+        message(STATUS "Created ${PROJECT_NAME}-gfx950-attention-dense-external-integration-check target")
+    else()
+        message(STATUS "hipkernel:Gfx950AttentionDense is not shipped for gfx950 by this configuration - skipping gfx950-attention-dense-external-integration-check")
+    endif()
+
+    # Second drain of the common external staging, after every registration above.
+    #
+    # The first drain sits beside the cross-provider target, far higher up, so it can
+    # only carry what was staged before it, and the property is emptied when consumed --
+    # anything here is by definition late. Nothing is today, both gfx950 registrations
+    # routing to their own architecture's shard, but an external target registered below
+    # that first drain would otherwise never reach the install tree.
+    #
+    # Only the YAML path needs it. Without categorization there is no common file to
+    # append to and install_provider_ctest_files() below does its own drain, which
+    # already runs after every registration.
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED AND HIPKERNELPROVIDER_CTEST_INSTALL_FILE)
+        get_property(_late_external_staging GLOBAL
+            PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider"
+        )
+        if(_late_external_staging)
+            file(APPEND "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                 "\n# External integration tests registered after the first drain\n${_late_external_staging}"
+            )
+            set_property(GLOBAL PROPERTY
+                "EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider" "")
+
+            # Label what was just folded in. The parser keys on add_test() names in the
+            # file, so entries appended after the earlier pass carry no tier until it is
+            # run again over the grown file. Re-labelling an already-labelled entry is
+            # harmless: ctest honours the last set_tests_properties() per test, which is
+            # the same property the earlier pass relies on.
+            if(COMMAND apply_ctest_category_labels)
+                apply_ctest_category_labels(
+                    "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
+                    "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                )
+            endif()
+        endif()
+    endif()
+
     # Install the ctest files. When YAML-based categorization is active, install the
     # generated install_CTestTestfile.cmake to bin/hip_kernel_provider/ so TheRock CI's
     # test_runner.py can drive `ctest -L quick` (etc.) from the artifact's install tree.
     # Otherwise, fall back to the project's own install_provider_ctest_files() which
     # emits an unlabeled CTestTestfile.cmake.
+    #
+    # Either way the result is the common entrypoint the census discovery stub is
+    # appended to.
     if(HIPKERNELPROVIDER_CTEST_INSTALL_FILE)
         install(FILES "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
                 DESTINATION "${CMAKE_INSTALL_BINDIR}/hip_kernel_provider"
                 RENAME "CTestTestfile.cmake"
         )
+        set(_hkp_common_ctest "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}")
     else()
         install_provider_ctest_files("hip_kernel_provider")
+        # The name that function writes in its caller's binary directory. Both modes
+        # ship their entrypoint with install(FILES), which copies at install time rather
+        # than at configure time, so appending below still reaches the artifact.
+        set(_hkp_common_ctest "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install")
+    endif()
+
+    # Materialise the installed census now that every registration has run and the
+    # common entrypoint exists.
+    #
+    # Placed after the install block, not before it, because the non-categorized
+    # entrypoint does not exist until install_provider_ctest_files() writes it -- and
+    # that function truncates, so a stub appended earlier would be lost.
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_finalize_census_install(
+            COMMON_TEST_FILE   "${_hkp_common_ctest}"
+            BINDIR             "${CMAKE_INSTALL_BINDIR}"
+            PLUGIN_ENGINE_DIR  "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}"
+        )
     endif()
 endif()
 
 # Process all kernels marked for inlining
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KernelEmbedding.cmake")
+
+# The plugin embeds production kernels only. A test descriptor set names its sources for
+# the test binary alone, so a test source registered here would ship in the shared
+# library.
+get_target_property(_plugin_kernel_files hip_kernel_provider_impl KERNELEMBEDDING_KERNEL_FILES)
+foreach(_plugin_kernel_file IN LISTS _plugin_kernel_files)
+    if(_plugin_kernel_file MATCHES "(^|/)test_descriptors(/|$)")
+        message(FATAL_ERROR
+                "hip_kernel_provider_impl embeds a test descriptor set's kernel source:\n"
+                "  ${_plugin_kernel_file}\n"
+                "Register it on the test binary instead.")
+    endif()
+endforeach()
+
 # Generate embedded kernel sources and includes at configure time
 embed_kernel_sources(
     TARGET hip_kernel_provider_impl
@@ -326,3 +487,11 @@ set(HIP_KERNEL_PROVIDER_GENERATED_SOURCES
 set_source_files_properties(${HIP_KERNEL_PROVIDER_GENERATED_SOURCES} TARGET_DIRECTORY hip_kernel_provider_impl PROPERTIES COMPILE_OPTIONS "-Wno-overlength-strings")
 
 target_sources(hip_kernel_provider_impl PRIVATE "${HIP_KERNEL_PROVIDER_GENERATED_SOURCES}")
+
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    hkp_verify_embedded_sources(
+        TARGET hip_kernel_provider_impl
+        STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}
+        PACK_NAMES product
+    )
+endif()
