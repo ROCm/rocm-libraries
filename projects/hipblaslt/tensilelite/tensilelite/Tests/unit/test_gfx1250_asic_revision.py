@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-from Tensile.Common.Architectures import (
+from tensilelite.Common.Architectures import (
     ARCH_CAP_OVERRIDES,
     ARCH_COMPILER_TARGET,
     SUPPORTED_GFX,
@@ -39,11 +39,11 @@ from Tensile.Common.Architectures import (
     gfxToIsa,
     isaToGfx,
 )
-from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.Common.Types import IsaInfo, IsaVersion
-from Tensile.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin
-from Tensile.SolutionStructs.Solution import Solution
+from tensilelite.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+from tensilelite.Common.GlobalParameters import defaultSolution
+from tensilelite.Common.Types import IsaInfo, IsaVersion
+from tensilelite.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin
+from tensilelite.SolutionStructs.Solution import Solution
 
 pytestmark = pytest.mark.unit
 
@@ -285,7 +285,7 @@ def test_makeisainfomap_keeps_its_two_argument_signature():
 @pytest.fixture(scope="module")
 def gfx1250_cxx():
     """The compiler the capability probe assembles with, or a clean skip."""
-    from Tensile.Toolchain.Validators import validateToolchain
+    from tensilelite.Toolchain.Validators import validateToolchain
 
     try:
         return validateToolchain("amdclang++")
@@ -344,8 +344,8 @@ def test_xcnt_is_a_really_probed_archcap_v0_inherits(gfx1250_iim):
 
 @pytest.fixture(scope="module")
 def assembler(gfx1250_cxx):
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
+    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+    from tensilelite.Toolchain.Validators import ToolchainDefaults, validateToolchain
 
     bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
     return makeAssemblyToolchain(gfx1250_cxx, bundler, "default").assembler
@@ -353,8 +353,8 @@ def assembler(gfx1250_cxx):
 
 @pytest.fixture(scope="module")
 def _gp_gfx1250(gfx1250_iim):
-    from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
-    from Tensile.Common.ValidParameters import validParameters
+    from tensilelite.Common.GlobalParameters import assignGlobalParameters, globalParameters
+    from tensilelite.Common.ValidParameters import validParameters
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
@@ -391,7 +391,7 @@ def _problem_type():
 
 
 def _make_params(iim, mi, **overrides):
-    from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
     )
 
@@ -594,7 +594,7 @@ def test_sk_multicast_loads_forced_off_on_gfx1250v0(
     _gp_gfx1250, gfx1250v0_iim, assembler, capsys
 ):
     """SK3 ForceDPOnly cluster stays Valid on v0; streamKMulticast is off."""
-    from Tensile.Common import streamKCluster, streamKMulticast
+    from tensilelite.Common import streamKCluster, streamKMulticast
 
     sol, out = _derive(
         gfx1250v0_iim, assembler, capsys, MULTICAST_MI,
@@ -639,9 +639,9 @@ MULTICAST_MARKERS = ("MulticastMask", "multicast mask")
 
 
 def _emit(archName):
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.TensileCreateLibrary.Run import (
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.TensileCreateLibrary.Run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )
@@ -737,11 +737,11 @@ def _emit_streamk_srcs(asic_revision):
         sys.path.insert(0, _CODEGEN_DIR)
     import codegen_harness as ch
     import config_harness as cfgh
-    from Tensile.Common.GlobalParameters import globalParameters
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.SolutionStructs.Naming import getKernelFileBase
-    from Tensile.TensileCreateLibrary.Run import (
+    from tensilelite.Common.GlobalParameters import globalParameters
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite.TensileCreateLibrary.Run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )
@@ -797,8 +797,8 @@ def test_gfx1250v0_streamk_keeps_the_xcnt_drain(gfx1250_cxx):
 def test_multicast_rederived_from_build_caps_after_yaml_roundtrip(
     _gp_gfx1250, gfx1250_iim, gfx1250v0_iim, assembler, capsys, tmp_path
 ):
-    from Tensile import LibraryIO
-    from Tensile.SolutionStructs import ProblemSizes
+    from tensilelite import LibraryIO
+    from tensilelite.SolutionStructs import ProblemSizes
 
     sol, out = _derive(gfx1250v0_iim, assembler, capsys, MULTICAST_MI, ClusterDim=[2, 1])
     assert sol.get("Valid") is True, f"base solution rejected: {out!r}"
@@ -864,7 +864,7 @@ def _stub_iim():
 
 @pytest.fixture
 def restore_global_parameters():
-    from Tensile.Common.GlobalParameters import globalParameters
+    from tensilelite.Common.GlobalParameters import globalParameters
 
     saved = copy.deepcopy(dict(globalParameters))
     yield globalParameters
@@ -896,7 +896,7 @@ def _stub_tensile_pipeline(monkeypatch, captured):
     pipeline is handed. Mirrors the stub set in test_tensile_backend_config.py."""
     import types
 
-    from Tensile import Tensile as TensileModule
+    from tensilelite import Tensile as TensileModule
 
     monkeypatch.setattr(
         TensileModule, "validateToolchain", lambda *a: ("cxx", "cc", "bundler")
@@ -1156,7 +1156,7 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=()):
     """
     from unittest.mock import MagicMock
 
-    import Tensile.TensileCreateLibrary.Run as RunModule
+    import tensilelite.TensileCreateLibrary.Run as RunModule
 
     logic_dir = tmp_path / "logic"
     logic_dir.mkdir()
@@ -1505,7 +1505,7 @@ def test_a_complete_revision_tree_is_reported_without_a_warning(
 # the ASIC revision can be lost after being correctly applied everywhere else.
 # =========================================================================== #
 def _buildTargetGfx(archNames):
-    from Tensile.ClientWriter import buildTargetGfx
+    from tensilelite.ClientWriter import buildTargetGfx
 
     return buildTargetGfx(_stub_iim(), archNames)
 
@@ -1521,7 +1521,7 @@ def test_client_library_target_falls_back_to_the_isa_derived_name():
     assert _buildTargetGfx([]) == GFX1250
     assert _buildTargetGfx(None) == GFX1250
 
-    from Tensile.ClientWriter import buildTargetGfx
+    from tensilelite.ClientWriter import buildTargetGfx
 
     assert buildTargetGfx(_stub_iim()) == GFX1250
 
@@ -1540,7 +1540,7 @@ def test_client_library_target_ignores_qualifiers_of_other_architectures():
     at build time."""
     iim = {IsaVersion(9, 4, 2): IsaInfo({"SupportedISA": True}, {}, {}, {})}
 
-    from Tensile.ClientWriter import buildTargetGfx
+    from tensilelite.ClientWriter import buildTargetGfx
 
     assert buildTargetGfx(iim, ["gfx942:xnack+"]) == "gfx942"
 
@@ -1559,7 +1559,7 @@ def test_client_library_target_picks_the_name_matching_the_rebuilt_isa():
     Taking the sole requested name, or the first one, would rebuild v0's client
     library against the shipping ASIC revision the moment a second architecture is asked
     for -- silently, since the name it lands on is still a valid target."""
-    from Tensile.ClientWriter import buildTargetGfx
+    from tensilelite.ClientWriter import buildTargetGfx
 
     caps = ({"SupportedISA": True}, {}, {}, {})
     both = ["gfx942", GFX1250V0]
@@ -1580,7 +1580,7 @@ def test_client_writer_receives_the_requested_names(monkeypatch, tmp_path):
     and the re-spawn."""
     import types
 
-    from Tensile import Tensile as TensileModule
+    from tensilelite import Tensile as TensileModule
 
     captured = {}
     monkeypatch.setattr(
@@ -1623,7 +1623,7 @@ def _restore_type_mismatch_collector():
     mismatch collector and replaces it with its own aggregate. Sibling suites reset
     it in setup rather than teardown, so today nothing breaks -- restore it anyway
     rather than depend on that."""
-    from Tensile.SolutionStructs.Solution import (
+    from tensilelite.SolutionStructs.Solution import (
         getTypeMismatchCollector,
         mergeTypeMismatchCollector,
         resetTypeMismatchCollector,
@@ -1644,8 +1644,8 @@ def _generateLogicData(monkeypatch, *architectureNames):
     """
     from unittest.mock import MagicMock
 
-    import Tensile.LibraryIO as LibraryIO
-    import Tensile.TensileCreateLibrary.Run as RunModule
+    import tensilelite.LibraryIO as LibraryIO
+    import tensilelite.TensileCreateLibrary.Run as RunModule
 
     libraries = {}
     parsed = []
@@ -1739,7 +1739,7 @@ def test_fallback_logic_is_still_merged_and_popped(
 def test_output_arch_names_is_identity_for_ordinary_archs():
     """An ordinary build maps every architecture to itself, so threading the map
     through the writers cannot move or rename a single non-stepping artifact."""
-    from Tensile.TensileCreateLibrary.Run import computeOutputArchNames
+    from tensilelite.TensileCreateLibrary.Run import computeOutputArchNames
 
     assert computeOutputArchNames(["gfx942"]) == {"gfx942": "gfx942"}
     assert computeOutputArchNames(["gfx90a", "gfx942"]) == {
@@ -1754,7 +1754,7 @@ def test_output_arch_names_maps_a_stepping_to_its_own_subtree():
     """gfx1250v0 shares gfx1250's ISA, so its base is gfx1250, but the value is the
     stepping name: that is what redirects its master/mapping/shard writes into
     library/gfx1250v0/ while leaving the ISA-keyed internals on gfx1250."""
-    from Tensile.TensileCreateLibrary.Run import computeOutputArchNames
+    from tensilelite.TensileCreateLibrary.Run import computeOutputArchNames
 
     assert computeOutputArchNames([GFX1250V0]) == {GFX1250: GFX1250V0}
     # The plain architecture is still the identity, so a v1 build is unchanged.
@@ -1766,7 +1766,7 @@ def test_output_arch_names_rejects_two_names_sharing_one_isa():
     for one ISA, so the map cannot pick one. Reject it here rather than silently
     resolve it by dict-insertion order, since the inverse the helper cache relies
     on would otherwise be ill-defined."""
-    from Tensile.TensileCreateLibrary.Run import computeOutputArchNames
+    from tensilelite.TensileCreateLibrary.Run import computeOutputArchNames
 
     with pytest.raises(ValueError, match="share an ISA"):
         computeOutputArchNames([GFX1250, GFX1250V0])
@@ -1786,7 +1786,7 @@ def _run_createlibrary_to_writes(
     """
     from unittest.mock import MagicMock
 
-    import Tensile.TensileCreateLibrary.Run as RunModule
+    import tensilelite.TensileCreateLibrary.Run as RunModule
 
     logic_dir = tmp_path / "logic"
     logic_dir.mkdir()
@@ -1945,7 +1945,7 @@ def test_a_v0_build_forwards_the_output_map_into_both_code_object_builders(
     both buildAssemblyCodeObjectFiles and buildSourceCodeObjectFiles."""
     from unittest.mock import MagicMock
 
-    import Tensile.TensileCreateLibrary.Run as RunModule
+    import tensilelite.TensileCreateLibrary.Run as RunModule
 
     seen = {}
 
@@ -2028,7 +2028,7 @@ def test_ordinary_build_output_paths_are_unchanged(
 def test_assembly_co_routes_to_the_output_subtree_keeping_the_isa_token(tmp_path):
     from unittest.mock import MagicMock
 
-    from Tensile.Toolchain.Assembly import buildAssemblyCodeObjectFiles
+    from tensilelite.Toolchain.Assembly import buildAssemblyCodeObjectFiles
 
     kernel = {
         "ISA": ISA_GFX1250,
@@ -2055,7 +2055,7 @@ def test_assembly_co_routes_to_the_output_subtree_keeping_the_isa_token(tmp_path
 def test_assembly_co_is_unchanged_for_ordinary_archs(tmp_path):
     from unittest.mock import MagicMock
 
-    from Tensile.Toolchain.Assembly import buildAssemblyCodeObjectFiles
+    from tensilelite.Toolchain.Assembly import buildAssemblyCodeObjectFiles
 
     kernel = {
         "ISA": gfxToIsa("gfx942"),
@@ -2073,7 +2073,7 @@ def test_assembly_co_is_unchanged_for_ordinary_archs(tmp_path):
 def _run_build_source(tmp_path, monkeypatch, bundlerTarget, cmdlineArchs, outputArchNames):
     from unittest.mock import MagicMock
 
-    from Tensile.Toolchain import Source as SourceMod
+    from tensilelite.Toolchain import Source as SourceMod
 
     monkeypatch.setenv("TENSILE_DISABLE_HELPER_CACHE", "1")
     monkeypatch.setattr(SourceMod.shutil, "move", lambda s, d: None)
@@ -2119,7 +2119,7 @@ def test_helper_cache_restore_routes_to_the_output_subtree(tmp_path, monkeypatch
     stepping's subtree, not the ISA-derived one the cache entry was stored under."""
     from unittest.mock import MagicMock
 
-    from Tensile.Toolchain import HelperKernelCache as HKC
+    from tensilelite.Toolchain import HelperKernelCache as HKC
 
     monkeypatch.setattr(HKC, "_computeCacheKey", lambda *a, **kw: "KEY")
     entry = tmp_path / "cache" / "KEY" / GFX1250
@@ -2152,7 +2152,7 @@ def _cacheAfterAV0Store(tmp_path, monkeypatch):
     the name that must not become the stored one."""
     from unittest.mock import MagicMock
 
-    from Tensile.Toolchain import HelperKernelCache as HKC
+    from tensilelite.Toolchain import HelperKernelCache as HKC
 
     monkeypatch.setattr(HKC, "_computeCacheKey", lambda *a, **kw: "KEY")
     cacheRoot = tmp_path / "cache"
@@ -2201,7 +2201,7 @@ def test_a_v1_build_restores_a_v0_builds_cache_entry_into_its_own_subtree(
     would silently deposit it in library/gfx1250v0/ and ship a v1 tree with none."""
     from unittest.mock import MagicMock
 
-    from Tensile.Toolchain import HelperKernelCache as HKC
+    from tensilelite.Toolchain import HelperKernelCache as HKC
 
     _cacheAfterAV0Store(tmp_path, monkeypatch)
 
@@ -2226,7 +2226,7 @@ def test_helper_cache_store_is_unchanged_for_ordinary_archs(tmp_path, monkeypatc
     the directory layout, exactly as before."""
     from unittest.mock import MagicMock
 
-    from Tensile.Toolchain import HelperKernelCache as HKC
+    from tensilelite.Toolchain import HelperKernelCache as HKC
 
     monkeypatch.setattr(HKC, "_computeCacheKey", lambda *a, **kw: "KEY")
     cacheRoot = tmp_path / "cache"
