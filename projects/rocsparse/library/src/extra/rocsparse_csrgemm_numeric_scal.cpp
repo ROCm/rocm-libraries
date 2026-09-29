@@ -58,8 +58,9 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void
         csrgemm_numeric_copy_scale_device(I size, T alpha, const T* in, T* out)
     {
-        for(I idx = static_cast<I>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; idx < size;
-            idx += static_cast<I>(hipGridDim_x) * BLOCKSIZE)
+        for(int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+            idx < size;
+            idx += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
         {
             out[idx] = alpha * in[idx];
         }

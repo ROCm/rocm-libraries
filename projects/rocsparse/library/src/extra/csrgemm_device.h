@@ -45,8 +45,9 @@ namespace rocsparse
                       rocsparse_index_base idx_base_in,
                       rocsparse_index_base idx_base_out)
     {
-        for(I idx = static_cast<I>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; idx < size;
-            idx += static_cast<I>(hipGridDim_x) * BLOCKSIZE)
+        for(int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+            idx < size;
+            idx += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
         {
             out[idx] = in[idx] - idx_base_in + idx_base_out;
         }
@@ -56,8 +57,9 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename I, typename T>
     ROCSPARSE_DEVICE_ILF void csrgemm_copy_scale_device(I size, T alpha, const T* in, T* out)
     {
-        for(I idx = static_cast<I>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; idx < size;
-            idx += static_cast<I>(hipGridDim_x) * BLOCKSIZE)
+        for(int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+            idx < size;
+            idx += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
         {
             out[idx] = alpha * in[idx];
         }
