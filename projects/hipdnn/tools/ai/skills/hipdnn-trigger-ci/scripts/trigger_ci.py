@@ -18,10 +18,6 @@ Examples:
     # Multi-arch CI with test labels
     python3 .github/scripts/trigger_ci.py dispatch -w multi-arch --gfx gfx94X,gfx950
 
-    # Add PR labels to trigger CI via the normal PR path
-    python3 .github/scripts/trigger_ci.py --pr 10770 label \\
-        --add test:integration-tests --add test_type:comprehensive
-
     # Check CI status for a PR
     python3 .github/scripts/trigger_ci.py --pr 10770 status
 
@@ -33,10 +29,6 @@ Examples:
 
     # Watch a specific run by ID
     python3 .github/scripts/trigger_ci.py watch --run-id 33443403983
-
-    # Clean up labels
-    python3 .github/scripts/trigger_ci.py --pr 10770 label \\
-        --remove test:integration-tests
 """
 
 import json
@@ -233,42 +225,6 @@ def find_active_run(ref):
     return None
 
 
-def add_labels(pr_number, labels):
-    for label in labels:
-        run_cmd(
-            [
-                "gh",
-                "pr",
-                "edit",
-                str(pr_number),
-                "--repo",
-                REPO,
-                "--add-label",
-                label,
-            ],
-            capture=False,
-        )
-        print(f"  added label: {label}")
-
-
-def remove_labels(pr_number, labels):
-    for label in labels:
-        run_cmd(
-            [
-                "gh",
-                "pr",
-                "edit",
-                str(pr_number),
-                "--repo",
-                REPO,
-                "--remove-label",
-                label,
-            ],
-            capture=False,
-        )
-        print(f"  removed label: {label}")
-
-
 def cmd_dispatch(args):
     ref = resolve_branch(args)
     wf = WORKFLOWS[args.workflow]
@@ -279,19 +235,6 @@ def cmd_dispatch(args):
             inputs[INPUT_MAP[field]] = value
     print(f"Dispatching '{args.workflow}' on '{ref}':")
     dispatch_workflow(wf["file"], ref, inputs, dry_run=args.dry_run)
-
-
-def cmd_label(args):
-    if not args.pr:
-        print("error: --pr is required for label operations", file=sys.stderr)
-        sys.exit(1)
-    if args.add:
-        add_labels(args.pr, args.add)
-    if args.remove:
-        remove_labels(args.pr, args.remove)
-    if not args.add and not args.remove:
-        print("error: specify --add or --remove", file=sys.stderr)
-        sys.exit(1)
 
 
 def cmd_status(args):
@@ -376,7 +319,7 @@ available test_type:    test_type:quick, test_type:standard, test_type:comprehen
         "--pr",
         type=int,
         default=None,
-        help="PR number (required for label, optional for dispatch/status)",
+        help="PR number; its head branch is used when --branch is not given",
     )
 
     sub = parser.add_subparsers(dest="command")
@@ -414,14 +357,6 @@ available test_type:    test_type:quick, test_type:standard, test_type:comprehen
         "--dry-run", action="store_true", help="Print the gh command without executing"
     )
 
-    label = sub.add_parser("label", help="Add/remove PR labels to trigger CI")
-    label.add_argument(
-        "--add", action="append", default=[], help="Label to add (repeatable)"
-    )
-    label.add_argument(
-        "--remove", action="append", default=[], help="Label to remove (repeatable)"
-    )
-
     sub.add_parser("status", help="Show CI check status for a PR or branch")
 
     watch = sub.add_parser("watch", help="Watch an active CI run until it completes")
@@ -438,10 +373,11 @@ available test_type:    test_type:quick, test_type:standard, test_type:comprehen
 
     {
         "dispatch": cmd_dispatch,
-        "label": cmd_label,
         "status": cmd_status,
         "watch": cmd_watch,
-    }[args.command](args)
+    }[
+        args.command
+    ](args)
 
 
 if __name__ == "__main__":
