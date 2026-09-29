@@ -1322,15 +1322,16 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // WMMA contributes another window's DS budget. Phase G remains the progress
     // fallback when no normally pickable instruction exists.
     const bool dsBudgetAllowsIssue = !dsLoadBudgetEnabled || dsLoadBudgetPending;
-    // mode2 WAR gate: hold back a ds_load too close after its WMMA reader (while WMMAs remain),
-    // unless the region is behind the ds issue rate its totals imply. Cumulative, so a ratio of
-    // 1.19 paces differently from 2.0 -- a per-window integer share truncates both to 1.
+    // mode2 WAR gate: hold back a ds_load too close after its WMMA reader, unless the region is
+    // behind the ds issue rate its totals imply. Cumulative, so a ratio of 1.19 paces differently
+    // from 2.0 -- a per-window integer share truncates both to 1. Counts, not readiness: once the
+    // region's last WMMA issues, expectedDs reaches the region total and the relief lifts the gate.
     const int expectedDs =
         wmmaTotalThisRegion_ > 0
             ? dsTotalThisRegion_ * wmmaIssuedCountThisRegion_ / wmmaTotalThisRegion_
             : 0;
     const bool warGateRelief = dsIssuedThisRegion_ < expectedDs;
-    const bool warTooClose = !wmmaQueue.empty() && !warGateRelief && pipeOpGateBlocks(pickedDS);
+    const bool warTooClose = !warGateRelief && pipeOpGateBlocks(pickedDS);
     const bool dsBaseOk =
         pickedDS && dsBudgetAllowsIssue && !warTooClose && !destOverlapsActiveWmmaSrc(pickedDS);
     int dsThrottleWait = 0;
@@ -2427,7 +2428,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // new region starts with all regs "very old" (no spurious deferrals from a
     // prior region).
     regLastTouch_.clear();
-    // pipeOpGates_ NOT cleared here — they persist across regions (cleared per-BB).
+    // pipeOpGates_ NOT cleared here — they persist across regions (cleared per-BB). A later
+    // WMMA region still needs them, and a WMMA-free region defers a gated ds_load to its end.
     clock_ = 0;
     // Per-region: MSB state is not carried across a region boundary (side-effect
     // cut).
