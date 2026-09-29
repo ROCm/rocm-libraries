@@ -31,6 +31,7 @@ namespace hipblaslt_jit
         Build,
         Support,
         Load,
+        Lookup,
         Publish,
     };
 
@@ -165,6 +166,8 @@ namespace hipblaslt_jit
         std::vector<BuildUnit> units;
     };
 
+    constexpr int jitCodeObjectVersion = 4;
+
     struct GenerationRequest
     {
         const OperationRequest&  request;
@@ -174,7 +177,7 @@ namespace hipblaslt_jit
         size_t                   workspaceLimit = 0;
         std::vector<std::string> excludeKernels; // kernels the caller already has
         std::filesystem::path    scratch; // private directory owned by this call
-        int                      codeObjectVersion = 4; // for generators and the builder
+        int codeObjectVersion = jitCodeObjectVersion; // for generators and the builder
     };
 
     struct BackendInfo
@@ -182,6 +185,7 @@ namespace hipblaslt_jit
         std::string id;
         std::string name; // reported as Diagnostics::backend
         std::string consumesPrediction; // modeled contract, or empty
+        std::string version; // changes whenever the generated solutions can change
     };
 
     class Backend

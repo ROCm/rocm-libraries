@@ -3,6 +3,7 @@
 
 #include "hipblaslt-jit-component.hpp"
 #include "hipblaslt-jit-gemm-internal.hpp"
+#include "hipblaslt-jit-library.hpp"
 #include "hipblaslt_internal.hpp"
 #include "rocblaslt.h"
 #include "rocblaslt_arch_revision.hpp"
@@ -36,6 +37,18 @@ namespace hipblaslt_jit
         target.cuCount       = target.properties.multiProcessorCount;
         target.hardware      = TensileLite::hip::GetDevice(target.properties, device);
         return {};
+    }
+
+    JitLibrary& JitLibrary::process()
+    {
+        static auto* library = new JitLibrary(defaultRoot(), [](int device, CacheKey& key) {
+            DeviceTarget target;
+            auto         status = DeviceTarget::make(device, target);
+            if(status.ok())
+                key = CacheKey::make(target, BackendInfo{}, jitCodeObjectVersion);
+            return status;
+        });
+        return *library;
     }
 }
 
