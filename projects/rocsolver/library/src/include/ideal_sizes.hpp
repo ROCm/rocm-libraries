@@ -275,11 +275,10 @@
 
     \details With m >= LAHR2_SPLIT_MIN_ROWS rows, the product is computed by
     about LAHR2_SPLIT_BLOCKS_PER_CU thread-blocks per compute unit, splitting the
-    columns into at most LAHR2_MAX_SPLIT chunks (and at most the number of columns
-    of the block still to be computed, whose storage holds the partial sums), so that
-    the compute units stay busy when m is small compared with their number. For smaller m
-    the split gains little bandwidth, and the extra kernel launch per column makes it
-    slower overall. */
+    columns into at most LAHR2_MAX_SPLIT chunks (the partial sums are kept in the
+    workspace, m * LAHR2_MAX_SPLIT entries per matrix), so that the compute units stay busy
+    when m is small compared with their number. For smaller m the split gains little
+    bandwidth, and the extra kernel launch per column makes it slower overall. */
 #ifndef LAHR2_SPLIT_MIN_ROWS
 #define LAHR2_SPLIT_MIN_ROWS 8000
 #endif

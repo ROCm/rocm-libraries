@@ -153,12 +153,12 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
 
 /***** Column of Y for large matrices, in two passes *****/
 /*********************************************************/
-// The product A1 * x1 of lahr2_computeY_kernel is split over nsplit chunks of the columns of
-// A1 (grid = dim3(ceil(m / DIM_X), nsplit, batch_count), block = dim3(DIM_X, DIM_Y)), so that
-// all the compute units are busy when m is small compared with their number; the partial
-// sums are stored in the columns c+1:c+nsplit of Y (not yet computed), and
-// lahr2_computeY_sum_kernel adds them (in a fixed order, so that the result is
-// deterministic), subtracts A2 * x2 and scales by t.
+// For m >= LAHR2_SPLIT_MIN_ROWS, the product A1 * x1 of lahr2_computeY_kernel is split over
+// nsplit chunks of the columns of A1 (grid = dim3(ceil(m / DIM_X), nsplit, batch_count),
+// block = dim3(DIM_X, DIM_Y)), so that all the compute units are busy when m is small
+// compared with their number; the partial sums are stored in the workspace P (m-by-nsplit
+// per matrix), and lahr2_computeY_sum_kernel adds them (in a fixed order, so that the result
+// is deterministic), subtracts A2 * x2 and scales by t.
 template <rocblas_int DIM_X, rocblas_int DIM_Y, typename T, typename U>
 ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
     lahr2_computeY_part_kernel(const rocblas_int mm,
@@ -169,10 +169,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
                                const rocblas_stride shiftA,
                                const rocblas_int lda,
                                const rocblas_stride strideA,
-                               T* __restrict__ YA,
-                               const rocblas_stride shiftY,
-                               const rocblas_int ldy,
-                               const rocblas_stride strideY)
+                               T* __restrict__ P,
+                               const rocblas_stride strideP)
 {
     const int bid = hipBlockIdx_z;
     const int tidr = hipThreadIdx_x;
@@ -181,15 +179,13 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
     const int s = hipBlockIdx_y;
 
     T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
-    T* Y = load_ptr_batch<T>(YA, bid, shiftY, strideY);
 
     // A1 = A(k:mm-1, c+1:mm-k), x1 = A(k+c:mm-1, c); partial sum over the columns
-    // j0:j1-1 of A1, stored in P = Y(k:mm-1, c+1+s)
+    // j0:j1-1 of A1, stored in column s of P
     const int m = mm - k;
     const int n1 = mm - k - c;
     const T* A1 = A + idx2D(k, c + 1, lda);
     const T* x1 = A + idx2D(k + c, c, lda);
-    T* P = Y + idx2D(k, c + 1 + s, ldy);
     const int j0 = s * chunk;
     const int j1 = std::min(n1, j0 + chunk);
 
@@ -210,7 +206,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
     }
 
     if(tidc == 0 && i < m)
-        P[i] = acs[tidr];
+        P[bid * strideP + s * size_t(m) + i] = acs[tidr];
 }
 
 template <typename T>
@@ -218,6 +214,8 @@ ROCSOLVER_KERNEL void lahr2_computeY_sum_kernel(const rocblas_int mm,
                                                 const rocblas_int k,
                                                 const rocblas_int c,
                                                 const rocblas_int nsplit,
+                                                const T* __restrict__ P,
+                                                const rocblas_stride strideP,
                                                 T* __restrict__ YA,
                                                 const rocblas_stride shiftY,
                                                 const rocblas_int ldy,
@@ -241,10 +239,10 @@ ROCSOLVER_KERNEL void lahr2_computeY_sum_kernel(const rocblas_int mm,
     const int m = mm - k;
     if(i < m)
     {
-        const T* P = Y + idx2D(k, c + 1, ldy);
+        const T* Pb = P + bid * strideP;
         T ac = 0;
         for(int s = 0; s < nsplit; s++)
-            ac += P[i + s * size_t(ldy)];
+            ac += Pb[i + s * size_t(m)];
         const T* A2 = Y + idx2D(k, 0, ldy);
         const T* x2 = F + idx2D(0, c, ldf);
         for(int j = 0; j < c; j++)
@@ -320,6 +318,11 @@ void rocsolver_lahr2_getMemorySize(const rocblas_int n,
 
     // extra requirements for calling larfg
     rocsolver_larfg_getMemorySize<T>(n - k, batch_count, &s2, size_norms);
+
+    // partial sums of the products with the trailing matrix, for large matrices (see
+    // lahr2_computeY_part_kernel); norms is free after larfg
+    if(n - k >= LAHR2_SPLIT_MIN_ROWS)
+        *size_norms = std::max(*size_norms, sizeof(T) * n * LAHR2_MAX_SPLIT * batch_count);
 
     // work_workArr also used as trmv scratch (length nb per batch)
     *size_work_workArr = std::max({s1, s2, sizeof(T) * nb * batch_count});
@@ -512,25 +515,28 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
         }
 
         // Y(k:n-1, j) = t * (A(k:n-1, j+1:n-k) * A(k+j:n-1, j) - Y(k:n-1, 0:j-1) * T(0:j-1, j))
-        // (for large matrices, the product with A is split over the columns, with the
-        // partial sums in the columns of Y not yet computed, to use all the compute units)
-        constexpr rocblas_int PART_DIM_X = 64;
-        constexpr rocblas_int PART_DIM_Y = 16;
+        // (for large matrices, the product with A is split over the columns, with the partial
+        // sums in the workspace norms, which is free after larfg, to use all the compute units)
         const rocblas_int m = n - k;
-        const rocblas_int rowblocks = (m - 1) / PART_DIM_X + 1;
-        rocblas_int nsplit = (LAHR2_SPLIT_BLOCKS_PER_CU * ncu + rowblocks - 1) / rowblocks;
-        nsplit = std::min({nsplit, nb - 1 - j, rocblas_int(LAHR2_MAX_SPLIT)});
-        if(m >= LAHR2_SPLIT_MIN_ROWS && nsplit >= 2)
+        if(m >= LAHR2_SPLIT_MIN_ROWS)
         {
-            const rocblas_int chunk = (m - j - 1) / nsplit + 1;
+            constexpr rocblas_int PART_DIM_X = 64;
+            constexpr rocblas_int PART_DIM_Y = 4;
+            const rocblas_int n1 = m - j;
+            const rocblas_int rowblocks = (m - 1) / PART_DIM_X + 1;
+            rocblas_int nsplit = (LAHR2_SPLIT_BLOCKS_PER_CU * ncu + rowblocks - 1) / rowblocks;
+            nsplit = std::max(rocblas_int(1), std::min({nsplit, n1, rocblas_int(LAHR2_MAX_SPLIT)}));
+            const rocblas_int chunk = (n1 - 1) / nsplit + 1;
+            nsplit = (n1 - 1) / chunk + 1;
+            const rocblas_stride strideP = rocblas_stride(n) * LAHR2_MAX_SPLIT;
             ROCSOLVER_LAUNCH_KERNEL((lahr2_computeY_part_kernel<PART_DIM_X, PART_DIM_Y, T>),
                                     dim3(rowblocks, nsplit, batch_count),
                                     dim3(PART_DIM_X, PART_DIM_Y), 0, stream, n, k, j, chunk, A,
-                                    shiftA, lda, strideA, Y, shiftY, ldy, strideY);
+                                    shiftA, lda, strideA, norms, strideP);
             ROCSOLVER_LAUNCH_KERNEL((lahr2_computeY_sum_kernel<T>),
                                     dim3((m - 1) / BS1 + 1, 1, batch_count), dim3(BS1), 0, stream,
-                                    n, k, j, nsplit, Y, shiftY, ldy, strideY, F, 0, ldf, strideF,
-                                    tau, strideT);
+                                    n, k, j, nsplit, (const T*)norms, strideP, Y, shiftY, ldy,
+                                    strideY, F, 0, ldf, strideF, tau, strideT);
         }
         else
         {
