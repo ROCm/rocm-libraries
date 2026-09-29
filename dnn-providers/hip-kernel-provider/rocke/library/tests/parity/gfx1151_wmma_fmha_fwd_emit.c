@@ -64,8 +64,11 @@ static int make_spec(int idx, rocke_wmma_fmha_fwd_spec_t* spec)
     }
     if(idx >= 94 && idx < 99)
     {
-        static const char* strategies[] = {
-            "max-ilp", "max-memory-clause", "iterative-ilp", "iterative-minreg", "iterative-maxocc"};
+        static const char* strategies[] = {"max-ilp",
+                                           "max-memory-clause",
+                                           "iterative-ilp",
+                                           "iterative-minreg",
+                                           "iterative-maxocc"};
         spec->head_size = 64;
         spec->num_query_heads = 8;
         spec->num_kv_heads = 8;

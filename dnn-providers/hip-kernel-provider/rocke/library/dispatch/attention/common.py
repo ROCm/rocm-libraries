@@ -158,7 +158,9 @@ class AttentionRequest(OperatorRequest):
         d["dtype"] = self.dtype.lower()
         # IntEnum and raw-int callers describe the same request/cache identity.
         d["mask_type"] = _parse_attention_mask_type(self.mask_type).value
-        d["layout"] = self.layout.strip().lower() if isinstance(self.layout, str) else ""
+        d["layout"] = (
+            self.layout.strip().lower() if isinstance(self.layout, str) else ""
+        )
         return d
 
     def dims(self) -> dict[str, int]:

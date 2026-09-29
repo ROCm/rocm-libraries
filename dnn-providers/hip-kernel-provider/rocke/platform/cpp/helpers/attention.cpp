@@ -192,7 +192,8 @@ rocke_value_t* rocke_decode_fp8e4m3fn_to_f32(rocke_ir_builder_t* b, rocke_value_
     rocke_value_t* subnormal_f = rocke_b_sitofp_f32(b, magnitude);
     rocke_value_t* subnormal = rocke_b_fmul(b, subnormal_f, rocke_b_const_f32(b, 0.001953125));
     rocke_value_t* is_subnormal = rocke_b_cmp_lt(b, magnitude, rocke_b_const_i32(b, 8));
-    rocke_value_t* result = rocke_b_select(b, is_subnormal, rocke_b_bitcast(b, subnormal, rocke_i32()), normal);
+    rocke_value_t* result
+        = rocke_b_select(b, is_subnormal, rocke_b_bitcast(b, subnormal, rocke_i32()), normal);
     rocke_value_t* is_nan = rocke_b_cmp_eq(b, magnitude, rocke_b_const_i32(b, 0x7F));
     result = rocke_b_select(b, is_nan, rocke_b_const_i32(b, 0x7FC00000), result);
     return rocke_b_bitcast(b, rocke_b_lor(b, result, sign), rocke_f32());

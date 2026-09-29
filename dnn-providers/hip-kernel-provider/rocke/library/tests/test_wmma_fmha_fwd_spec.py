@@ -37,15 +37,21 @@ class TestWmmaFmhaFwdSpec(unittest.TestCase):
     def test_bottom_right_requires_causal_mask(self):
         with self.assertRaises(ValueError):
             WmmaFmhaFwdSpec(
-                head_size=64, num_query_heads=4, causal_bottom_right=True,
+                head_size=64,
+                num_query_heads=4,
+                causal_bottom_right=True,
             )
 
     def test_causal_alignment_cache_keys(self):
         top_left = WmmaFmhaFwdSpec(
-            head_size=64, num_query_heads=4, mask_mode="causal",
+            head_size=64,
+            num_query_heads=4,
+            mask_mode="causal",
         )
         bottom_right = WmmaFmhaFwdSpec(
-            head_size=64, num_query_heads=4, mask_mode="causal",
+            head_size=64,
+            num_query_heads=4,
+            mask_mode="causal",
             causal_bottom_right=True,
         )
         self.assertNotEqual(top_left.kernel_name(), bottom_right.kernel_name())
@@ -74,7 +80,12 @@ class TestWmmaFmhaFwdSpec(unittest.TestCase):
     def test_window_requires_causal_mask(self):
         for mask, width in (("none", 1), ("causal", -1)):
             with self.subTest(mask=mask, width=width), self.assertRaises(ValueError):
-                WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, mask_mode=mask, sliding_window=width)
+                WmmaFmhaFwdSpec(
+                    head_size=64,
+                    num_query_heads=4,
+                    mask_mode=mask,
+                    sliding_window=width,
+                )
 
     def test_score_features_have_distinct_cache_keys(self):
         base = WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, mask_mode="causal")
@@ -89,27 +100,42 @@ class TestWmmaFmhaFwdSpec(unittest.TestCase):
 
     def test_layout_page_size_contract(self):
         for layout, page in (
-            ("unknown", 0), ("dense", 16), ("ragged", 16),
-            ("paged", 0), ("paged", -16), ("paged", 3),
+            ("unknown", 0),
+            ("dense", 16),
+            ("ragged", 16),
+            ("paged", 0),
+            ("paged", -16),
+            ("paged", 3),
         ):
             with self.subTest(layout=layout, page=page), self.assertRaises(ValueError):
                 WmmaFmhaFwdSpec(
-                    head_size=64, num_query_heads=4, layout=layout, page_block_size=page,
+                    head_size=64,
+                    num_query_heads=4,
+                    layout=layout,
+                    page_block_size=page,
                 )
 
     def test_packed_grids_cover_longest_sequence(self):
         for layout, page in (("ragged", 0), ("paged", 16)):
             spec = WmmaFmhaFwdSpec(
-                head_size=64, num_query_heads=4, layout=layout, page_block_size=page,
+                head_size=64,
+                num_query_heads=4,
+                layout=layout,
+                page_block_size=page,
             )
             for length, tiles in ((1, 1), (16, 1), (17, 2)):
                 with self.subTest(layout=layout, length=length):
-                    self.assertEqual(wmma_fmha_fwd_grid(spec, seqlen_q=length, batch=3), (tiles, 4, 3))
+                    self.assertEqual(
+                        wmma_fmha_fwd_grid(spec, seqlen_q=length, batch=3),
+                        (tiles, 4, 3),
+                    )
 
     def test_layout_cache_keys_separate_addressing(self):
         base = WmmaFmhaFwdSpec(head_size=64, num_query_heads=4)
         variants = [base, replace(base, layout="ragged")]
-        variants += [replace(base, layout="paged", page_block_size=page) for page in (16, 32, 64)]
+        variants += [
+            replace(base, layout="paged", page_block_size=page) for page in (16, 32, 64)
+        ]
         variants += [replace(spec, kv_dtype="fp8e4m3") for spec in variants]
         for left, right in combinations(variants, 2):
             self.assertNotEqual(left.kernel_name(), right.kernel_name())
@@ -122,17 +148,28 @@ class TestWmmaFmhaFwdSpec(unittest.TestCase):
     def test_transposed_qk_rejects_unimplemented_combinations(self):
         base = dict(head_size=64, num_query_heads=4, transposed_qk=True)
         for changes in (
-            {"dtype": "bf16"}, {"head_size": 256}, {"block_n": 16}, {"num_waves": 4},
-            {"layout": "ragged"}, {"kv_dtype": "fp8e4m3"}, {"query_tail": True},
-            {"kv_tail": True}, {"v_lds_stage": True}, {"use_sinks": True},
-            {"use_softcap": True}, {"use_alibi": True}, {"use_qq_bias": True},
+            {"dtype": "bf16"},
+            {"head_size": 256},
+            {"block_n": 16},
+            {"num_waves": 4},
+            {"layout": "ragged"},
+            {"kv_dtype": "fp8e4m3"},
+            {"query_tail": True},
+            {"kv_tail": True},
+            {"v_lds_stage": True},
+            {"use_sinks": True},
+            {"use_softcap": True},
+            {"use_alibi": True},
+            {"use_qq_bias": True},
             {"mask_mode": "causal", "sliding_window": 32},
         ):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 WmmaFmhaFwdSpec(**dict(base, **changes))
 
     def test_transposed_query_grid_covers_whole_wave_groups(self):
-        spec = WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, transposed_qk=True, num_waves=2)
+        spec = WmmaFmhaFwdSpec(
+            head_size=64, num_query_heads=4, transposed_qk=True, num_waves=2
+        )
         with self.assertRaises(ValueError):
             wmma_fmha_fwd_grid(spec, seqlen_q=48, batch=2)
         self.assertEqual(wmma_fmha_fwd_grid(spec, seqlen_q=64, batch=2), (2, 4, 2))
@@ -141,7 +178,8 @@ class TestWmmaFmhaFwdSpec(unittest.TestCase):
         base = WmmaFmhaFwdSpec(head_size=64, num_query_heads=4)
         variants = [base] + [
             replace(base, transposed_qk=True, block_n=block, num_waves=waves)
-            for block in (32, 64) for waves in (1, 2)
+            for block in (32, 64)
+            for waves in (1, 2)
         ]
         for left, right in combinations(variants, 2):
             self.assertNotEqual(left.kernel_name(), right.kernel_name())
@@ -150,23 +188,31 @@ class TestWmmaFmhaFwdSpec(unittest.TestCase):
         from rocke.core.codegen_policy import SchedulerStrategy
 
         base = WmmaFmhaFwdSpec(head_size=64, num_query_heads=4)
-        variants = [base] + [replace(base, scheduler_strategy=strategy) for strategy in SchedulerStrategy]
+        variants = [base] + [
+            replace(base, scheduler_strategy=strategy) for strategy in SchedulerStrategy
+        ]
         for left, right in combinations(variants, 2):
             self.assertNotEqual(left.kernel_name(), right.kernel_name())
 
     def test_unknown_scheduler_policy_is_rejected(self):
         with self.assertRaises(ValueError):
-            WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, scheduler_strategy="unknown")
+            WmmaFmhaFwdSpec(
+                head_size=64, num_query_heads=4, scheduler_strategy="unknown"
+            )
 
     def test_output_tiles_require_complete_nonoverlapping_head_partition(self):
         for tile in (-16, 1, 48, 96, 256, 512):
             with self.subTest(tile=tile), self.assertRaises(ValueError):
                 WmmaFmhaFwdSpec(head_size=256, num_query_heads=4, value_tile_size=tile)
         with self.assertRaises(ValueError):
-            WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, transposed_qk=True, value_tile_size=32)
+            WmmaFmhaFwdSpec(
+                head_size=64, num_query_heads=4, transposed_qk=True, value_tile_size=32
+            )
 
     def test_output_tile_grid_preserves_batch_and_bounds(self):
-        spec = WmmaFmhaFwdSpec(head_size=256, num_query_heads=4, value_tile_size=64, query_tail=True)
+        spec = WmmaFmhaFwdSpec(
+            head_size=256, num_query_heads=4, value_tile_size=64, query_tail=True
+        )
         self.assertEqual(wmma_fmha_fwd_grid(spec, seqlen_q=17, batch=3), (2, 4, 12))
         for batch in (-1, 0x7FFFFFFF // 4 + 1):
             with self.subTest(batch=batch), self.assertRaises(ValueError):
@@ -174,7 +220,9 @@ class TestWmmaFmhaFwdSpec(unittest.TestCase):
 
     def test_output_tile_cache_keys_separate_partitions(self):
         base = WmmaFmhaFwdSpec(head_size=256, num_query_heads=4)
-        variants = [replace(base, value_tile_size=tile) for tile in (0, 16, 32, 64, 128)]
+        variants = [
+            replace(base, value_tile_size=tile) for tile in (0, 16, 32, 64, 128)
+        ]
         for left, right in combinations(variants, 2):
             self.assertNotEqual(left.kernel_name(), right.kernel_name())
 

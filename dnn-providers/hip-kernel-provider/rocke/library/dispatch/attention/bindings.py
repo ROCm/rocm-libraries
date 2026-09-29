@@ -462,6 +462,7 @@ def bind_wmma_attention_torch(
 
     return TorchBinding(launch=launch, grid=grid, block=block)
 
+
 # Cached modules stay alive across bindings; asynchronous launches retain the
 # supplied tensor owners through KernelLauncher until the caller's stream drain.
 
@@ -534,7 +535,9 @@ def _check_gfx1151_device(tensors: Mapping[str, Any]) -> None:
         raise ValueError("gfx1151 attention tensors must be on a HIP/CUDA device")
 
 
-def _check_gfx1151_qo(tensor, name: str, kind: str, num_heads: int, head_size: int) -> None:
+def _check_gfx1151_qo(
+    tensor, name: str, kind: str, num_heads: int, head_size: int
+) -> None:
     actual = _dtype_kind(tensor, name)
     if actual != kind:
         raise ValueError(f"{name} dtype must be {kind}, got {actual}")
@@ -546,17 +549,23 @@ def _check_gfx1151_qo(tensor, name: str, kind: str, num_heads: int, head_size: i
     _check_last_dim_contiguous(tensor, name)
 
 
-def _check_gfx1151_vector_alignment(tensor, name: str, itemsize: int, width: int) -> None:
+def _check_gfx1151_vector_alignment(
+    tensor, name: str, itemsize: int, width: int
+) -> None:
     alignment = max(16, itemsize * width)
     if int(tensor.data_ptr()) % alignment:
         raise ValueError(f"{name} base address must be aligned to {alignment} bytes")
     if width > 1:
         for axis in range(len(tensor.shape) - 1):
             if int(tensor.stride(axis)) % width:
-                raise ValueError(f"{name} strides must preserve {width}-element vector alignment")
+                raise ValueError(
+                    f"{name} strides must preserve {width}-element vector alignment"
+                )
 
 
-def _gfx1151_validate_and_collect(request, spec, tensors: Mapping[str, Any]) -> Dict[str, Any]:
+def _gfx1151_validate_and_collect(
+    request, spec, tensors: Mapping[str, Any]
+) -> Dict[str, Any]:
     """Structural (shape/dtype/stride) gate for a gfx1151 WMMA launch.
 
     Deliberately never reads tensor *contents* (``cu_seqlens_q``/``cu_seqlens_k``/
@@ -605,14 +614,21 @@ def _gfx1151_validate_and_collect(request, spec, tensors: Mapping[str, Any]) -> 
         raise ValueError("v shape must match k shape")
     _check_gfx1151_vector_alignment(q, "q", 2, 16)
     _check_gfx1151_vector_alignment(k, "k", 1 if spec.kv_dtype else 2, 16)
-    _check_gfx1151_vector_alignment(v, "v", 1 if spec.kv_dtype else 2, 8 if spec.v_lds_stage else 1)
+    _check_gfx1151_vector_alignment(
+        v, "v", 1 if spec.kv_dtype else 2, 8 if spec.v_lds_stage else 1
+    )
     _check_gfx1151_vector_alignment(out, "out", 2, 1)
-    if int(out.stride(-2)) < spec.head_size or int(out.stride(-3)) < spec.num_query_heads * int(out.stride(-2)):
+    if int(out.stride(-2)) < spec.head_size or int(
+        out.stride(-3)
+    ) < spec.num_query_heads * int(out.stride(-2)):
         raise ValueError("out token/head strides must not overlap")
     _check_gfx1151_device(tensors)
 
     values: Dict[str, Any] = {
-        "Q": q, "K": k, "V": v, "O": out,
+        "Q": q,
+        "K": k,
+        "V": v,
+        "O": out,
         "seqlen_q": _fits_i32(request.seqlen_q, "seqlen_q"),
         "seqlen_k": _fits_i32(request.seqlen_k, "seqlen_k"),
     }
@@ -622,12 +638,16 @@ def _gfx1151_validate_and_collect(request, spec, tensors: Mapping[str, Any]) -> 
         seqlen_q = int(request.seqlen_q)
         seqlen_k = int(request.seqlen_k)
         for tensor, name, shape0, seqlen in (
-            (q, "q", batch, seqlen_q), (out, "out", batch, seqlen_q),
-            (k, "k", batch, seqlen_k), (v, "v", batch, seqlen_k),
+            (q, "q", batch, seqlen_q),
+            (out, "out", batch, seqlen_q),
+            (k, "k", batch, seqlen_k),
+            (v, "v", batch, seqlen_k),
         ):
             shape = _shape(tensor, name)
             if len(shape) != 4:
-                raise ValueError(f"{name} must be rank-4 [B, S, H, D] for dense layout, got {shape}")
+                raise ValueError(
+                    f"{name} must be rank-4 [B, S, H, D] for dense layout, got {shape}"
+                )
             if shape[0] != shape0 or shape[1] != seqlen:
                 raise ValueError(
                     f"{name} shape[0:2] must be [{shape0}, {seqlen}], got {shape[:2]}"
@@ -641,27 +661,33 @@ def _gfx1151_validate_and_collect(request, spec, tensors: Mapping[str, Any]) -> 
                     f"seqlen*token_stride ({seqlen}*{token_stride}) for the "
                     "gfx1151 dense batch-folded ABI"
                 )
-        values.update({
-            "stride_q_token": _fits_i32(q.stride(1), "stride_q_token"),
-            "stride_q_head": _fits_i32(q.stride(2), "stride_q_head"),
-            "stride_k_token": _fits_i32(k.stride(1), "stride_k_token"),
-            "stride_k_head": _fits_i32(k.stride(2), "stride_k_head"),
-            "stride_v_token": _fits_i32(v.stride(1), "stride_v_token"),
-            "stride_v_head": _fits_i32(v.stride(2), "stride_v_head"),
-            "stride_o_token": _fits_i32(out.stride(1), "stride_o_token"),
-            "stride_o_head": _fits_i32(out.stride(2), "stride_o_head"),
-        })
+        values.update(
+            {
+                "stride_q_token": _fits_i32(q.stride(1), "stride_q_token"),
+                "stride_q_head": _fits_i32(q.stride(2), "stride_q_head"),
+                "stride_k_token": _fits_i32(k.stride(1), "stride_k_token"),
+                "stride_k_head": _fits_i32(k.stride(2), "stride_k_head"),
+                "stride_v_token": _fits_i32(v.stride(1), "stride_v_token"),
+                "stride_v_head": _fits_i32(v.stride(2), "stride_v_head"),
+                "stride_o_token": _fits_i32(out.stride(1), "stride_o_token"),
+                "stride_o_head": _fits_i32(out.stride(2), "stride_o_head"),
+            }
+        )
     else:
         for tensor, name in ((q, "q"), (out, "out")):
             shape = _shape(tensor, name)
             if len(shape) != 3:
-                raise ValueError(f"{name} must be rank-3 [tokens, H, D] for a packed layout, got {shape}")
-        values.update({
-            "stride_q_token": _fits_i32(q.stride(0), "stride_q_token"),
-            "stride_q_head": _fits_i32(q.stride(1), "stride_q_head"),
-            "stride_o_token": _fits_i32(out.stride(0), "stride_o_token"),
-            "stride_o_head": _fits_i32(out.stride(1), "stride_o_head"),
-        })
+                raise ValueError(
+                    f"{name} must be rank-3 [tokens, H, D] for a packed layout, got {shape}"
+                )
+        values.update(
+            {
+                "stride_q_token": _fits_i32(q.stride(0), "stride_q_token"),
+                "stride_q_head": _fits_i32(q.stride(1), "stride_q_head"),
+                "stride_o_token": _fits_i32(out.stride(0), "stride_o_token"),
+                "stride_o_head": _fits_i32(out.stride(1), "stride_o_head"),
+            }
+        )
         cu_seqlens_q = tensors.get("cu_seqlens_q")
         if cu_seqlens_q is None:
             raise ValueError(f"{layout} layout requires tensors['cu_seqlens_q']")
@@ -684,7 +710,9 @@ def _gfx1151_validate_and_collect(request, spec, tensors: Mapping[str, Any]) -> 
             _check_last_dim_contiguous(cu_seqlens_k, "cu_seqlens_k")
             k_shape = _shape(k, "k")
             if len(k_shape) != 3:
-                raise ValueError(f"k must be rank-3 [tokens, H, D] for ragged layout, got {k_shape}")
+                raise ValueError(
+                    f"k must be rank-3 [tokens, H, D] for ragged layout, got {k_shape}"
+                )
             values["cu_seqlens_k"] = cu_seqlens_k
             values["stride_k_token"] = _fits_i32(k.stride(0), "stride_k_token")
             values["stride_k_head"] = _fits_i32(k.stride(1), "stride_k_head")
@@ -724,7 +752,9 @@ def _gfx1151_validate_and_collect(request, spec, tensors: Mapping[str, Any]) -> 
                     f"k cache must be rank-4 [pages, {spec.page_block_size}, H, D], got {k_shape}"
                 )
             if v_shape != k_shape:
-                raise ValueError(f"v cache shape {v_shape} must match k cache shape {k_shape}")
+                raise ValueError(
+                    f"v cache shape {v_shape} must match k cache shape {k_shape}"
+                )
             values["seqused_k"] = seqused_k
             values["block_table"] = block_table
             values["block_table_stride"] = row_stride
@@ -740,7 +770,9 @@ def _gfx1151_validate_and_collect(request, spec, tensors: Mapping[str, Any]) -> 
         if sinks is None:
             raise ValueError("spec.use_sinks requires tensors['sinks']")
         if _dtype_kind(sinks, "sinks") != q_kind:
-            raise ValueError(f"sinks dtype must be {q_kind}, got {_dtype_kind(sinks, 'sinks')}")
+            raise ValueError(
+                f"sinks dtype must be {q_kind}, got {_dtype_kind(sinks, 'sinks')}"
+            )
         if _shape(sinks, "sinks") != (spec.num_query_heads,):
             raise ValueError(f"sinks must have shape [{spec.num_query_heads}]")
         _check_last_dim_contiguous(sinks, "sinks")
@@ -802,7 +834,9 @@ def bind_gfx1151_attention_torch(
 
     arch = str(request.arch)
     base_values = _gfx1151_validate_and_collect(request, spec, tensors)
-    grid = wmma_fmha_fwd_grid(spec, seqlen_q=int(request.seqlen_q), batch=int(request.batch))
+    grid = wmma_fmha_fwd_grid(
+        spec, seqlen_q=int(request.seqlen_q), batch=int(request.batch)
+    )
     block = (int(spec.block_size), 1, 1)
 
     kv_dtype = spec.kv_dtype
@@ -834,7 +868,9 @@ def bind_gfx1151_attention_torch(
         from rocke.runtime.launcher import LaunchConfig
 
         values = dict(base_values)
-        values["scale_log2"] = float(_kw.get("softmax_scale", softmax_scale_default)) * _LOG2E
+        values["scale_log2"] = (
+            float(_kw.get("softmax_scale", softmax_scale_default)) * _LOG2E
+        )
         if spec.use_softcap:
             softcap = float(_kw.get("softcap", softcap_default))
             if not math.isfinite(softcap) or softcap <= 0:
@@ -854,5 +890,3 @@ def bind_gfx1151_attention_torch(
         return tensors["out"]
 
     return TorchBinding(launch=launch, grid=grid, block=block)
-
-

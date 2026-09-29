@@ -34,9 +34,10 @@
 #define ROCKE_SWAPQK_MAX_NI32 8
 #define ROCKE_SWAPQK_MAX_ALLS (ROCKE_SWAPQK_MAX_NS * ROCKE_SWAPQK_MAX_CFRAG)
 
-extern "C"
-{
-    typedef rocke_value_t* (*rocke_swapqk_binop_fn)(rocke_ir_builder_t*, rocke_value_t*, rocke_value_t*);
+extern "C" {
+typedef rocke_value_t* (*rocke_swapqk_binop_fn)(rocke_ir_builder_t*,
+                                                rocke_value_t*,
+                                                rocke_value_t*);
 }
 
 /* ---------------------------------------------------------- permx16_f32 *
@@ -215,7 +216,8 @@ static rocke_value_t* rocke_swapqk_dual_gather_issue(rocke_ir_builder_t* b,
     rocke_value_t* half16 = rocke_b_mul(b, half, c16);
     rocke_value_t* half16_col = rocke_b_add(b, half16, col);
     rocke_value_t* d_col = rocke_b_add(b, d16, half16_col);
-    return rocke_swapqk_load_col(b, v_rsrc, kvh_off, stride_v_token, c2, soff_list, a_frag, k_base, d_col);
+    return rocke_swapqk_load_col(
+        b, v_rsrc, kvh_off, stride_v_token, c2, soff_list, a_frag, k_base, d_col);
 }
 
 /* ----------------------------------------------------- dual_gather_finish *
@@ -300,13 +302,15 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
     const char* arch = (p->arch != NULL) ? p->arch : "gfx1151";
     if(strcmp(arch, "gfx1151") != 0)
     {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "wmma_swapqk is a gfx1151 (RDNA3.5) kernel; got arch=%s", arch);
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "wmma_swapqk is a gfx1151 (RDNA3.5) kernel; got arch=%s", arch);
         return ROCKE_ERR_VALUE;
     }
     int head_size = p->head_size;
     if(head_size != 64 && head_size != 128)
     {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "wmma_swapqk head_size must be 64 or 128 (got %d)", head_size);
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "wmma_swapqk head_size must be 64 or 128 (got %d)", head_size);
         return ROCKE_ERR_VALUE;
     }
     if(block_n != 32 && block_n != 64)
@@ -339,8 +343,10 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
     const rocke_mma_op_t* op = rocke_mma_catalog_by_op_id(&target->mma, "wmma_f32_16x16x16_f16");
     if(op == NULL || op->a_layout == NULL || op->b_layout == NULL || op->c_layout == NULL)
     {
-        rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "wmma_swapqk: wmma_f32_16x16x16_f16 atom/layout absent on %s", arch);
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "wmma_swapqk: wmma_f32_16x16x16_f16 atom/layout absent on %s",
+                        arch);
         return ROCKE_ERR_VALUE;
     }
     const int wave = op->wave_size; /* 32 */
@@ -389,8 +395,8 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
 
     /* Q/K: (head, token, dim), dim contiguous. O^T view: (head, dim, token). */
     int qkv_shape[3] = {1, 1, hs};
-    rocke_stride_t q_strides[3]
-        = {rocke_stride_value(stride_q_head), rocke_stride_value(stride_q_token), rocke_stride_imm(1)};
+    rocke_stride_t q_strides[3] = {
+        rocke_stride_value(stride_q_head), rocke_stride_value(stride_q_token), rocke_stride_imm(1)};
     rocke_tensor_view_t Q_view;
     rocke_make_global_view(&Q_view, Q, qkv_shape, 3, rocke_f16(), q_strides);
     rocke_stride_t k_strides[3]
@@ -398,8 +404,8 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
     rocke_tensor_view_t K_view;
     rocke_make_global_view(&K_view, K, qkv_shape, 3, rocke_f16(), k_strides);
     int o_shape[3] = {1, hs, 1};
-    rocke_stride_t o_strides[3]
-        = {rocke_stride_value(stride_o_head), rocke_stride_imm(1), rocke_stride_value(stride_o_token)};
+    rocke_stride_t o_strides[3] = {
+        rocke_stride_value(stride_o_head), rocke_stride_imm(1), rocke_stride_value(stride_o_token)};
     rocke_tensor_view_t O_T_view;
     rocke_make_global_view(&O_T_view, O, o_shape, 3, rocke_f16(), o_strides);
 
@@ -473,7 +479,8 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
     rocke_value_t* c2 = rocke_b_const_i32(b, 2);
     rocke_value_t* buf_max = rocke_b_const_i32(b, 0x7FFFFFFF);
     rocke_value_t* v_rsrc = rocke_b_buffer_rsrc(b, V, buf_max);
-    rocke_value_t* sv2 = rocke_b_mul(b, stride_v_token, c2); /* bytes per kv step (loop-invariant) */
+    rocke_value_t* sv2
+        = rocke_b_mul(b, stride_v_token, c2); /* bytes per kv step (loop-invariant) */
     rocke_value_t* soff_list[ROCKE_SWAPQK_MAX_AFRAG];
     for(int j = 0; j < a_frag; ++j)
     {
@@ -486,7 +493,8 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
     rocke_value_t* kvh_off = rocke_b_add(b, v_token_offset_elems, v_head_elems);
 
     rocke_value_t* kloop_step = rocke_b_const_i32(b, 1);
-    rocke_for_t kloop = rocke_b_scf_for_iter(b, c0, loop_stop, kloop_step, iter_args, n_ia, "kt", false, true);
+    rocke_for_t kloop
+        = rocke_b_scf_for_iter(b, c0, loop_stop, kloop_step, iter_args, n_ia, "kt", false, true);
     rocke_b_region_enter(b, kloop.body);
     {
         rocke_value_t* m_i = kloop.iter_vars[0];
@@ -512,15 +520,18 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
             subs[ns] = rocke_b_zero_vec_f32(b, c_frag);
         for(int d = 0; d < n_dk; ++d)
         {
-            rocke_value_t* q_tile = rocke_swapqk_load_operand(b, &qwin, op, lane, c0, false, d * 16);
+            rocke_value_t* q_tile
+                = rocke_swapqk_load_operand(b, &qwin, op, lane, c0, false, d * 16);
             for(int ns = 0; ns < n_kv_sub; ++ns)
             {
-                rocke_value_t* k_frag = rocke_swapqk_load_operand(b, &kwins[ns], op, lane, c0, true, d * 16);
+                rocke_value_t* k_frag
+                    = rocke_swapqk_load_operand(b, &kwins[ns], op, lane, c0, true, d * 16);
                 subs[ns] = rocke_b_mma(b, op->op_id, k_frag, q_tile, subs[ns], NULL, 0);
             }
         }
         rocke_b_s_setprio(b, 0);
-        rocke_b_s_setprio(b, 0); /* mirrors the pinned kernel's redundant post-compute_qk setprio(0) */
+        rocke_b_s_setprio(b,
+                          0); /* mirrors the pinned kernel's redundant post-compute_qk setprio(0) */
 
         rocke_value_t* k_bases[ROCKE_SWAPQK_MAX_NS];
         for(int ns = 0; ns < n_kv_sub; ++ns)
@@ -545,9 +556,14 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
                 rocke_value_t* s_i = rocke_b_fmul(b, slot, scale_log2);
                 rocke_value_t* k_idx = rocke_b_add(b, kv_base, kv_rel);
                 rocke_value_t* query_pos = rocke_b_add(b, q_pos_local, q_rel);
-                s_i = rocke_apply_attention_mask(
-                    b, s_i, p->mask_mode, k_idx, query_pos, 0,
-                    p->causal_ctx_offset, strict ? neg_inf : NULL);
+                s_i = rocke_apply_attention_mask(b,
+                                                 s_i,
+                                                 p->mask_mode,
+                                                 k_idx,
+                                                 query_pos,
+                                                 0,
+                                                 p->causal_ctx_offset,
+                                                 strict ? neg_inf : NULL);
                 s_sub[ns][i] = s_i;
             }
         }
@@ -604,7 +620,8 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
             alpha_vec = rocke_b_vec_insert(b, alpha_vec, alpha, i);
         rocke_value_t* p_tiles[ROCKE_SWAPQK_MAX_NS];
         for(int ns = 0; ns < n_kv_sub; ++ns)
-            p_tiles[ns] = rocke_swapqk_p_transpose_reg(b, ps_sub[ns], c_frag, a_frag, c16, sel0, sel1);
+            p_tiles[ns]
+                = rocke_swapqk_p_transpose_reg(b, ps_sub[ns], c_frag, a_frag, c16, sel0, sel1);
 
         /* ---- rescale the O^T accumulators by alpha ONCE per block_n keys ---- */
         /* wave-uniform 0/1-trip loop: run the n_dk rescale muls only when the
@@ -620,7 +637,8 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
             r_iter_args[d].init = accs[d];
         }
         rocke_value_t* rloop_step = rocke_b_const_i32(b, 1);
-        rocke_for_t rloop = rocke_b_scf_for_iter(b, c0, n_res, rloop_step, r_iter_args, n_dk, "rsc", false, true);
+        rocke_for_t rloop
+            = rocke_b_scf_for_iter(b, c0, n_res, rloop_step, r_iter_args, n_dk, "rsc", false, true);
         rocke_b_region_enter(b, rloop.body);
         {
             rocke_value_t* out_vals[ROCKE_SWAPQK_MAX_DK];
@@ -639,14 +657,26 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
         {
             for(int dp = 0; dp < n_dk; dp += 2)
             {
-                rocke_value_t* loaded
-                    = rocke_swapqk_dual_gather_issue(b, v_rsrc, kvh_off, stride_v_token, c2, soff_list,
-                                                     a_frag, lane, col, c16, k_bases[ns], dp);
+                rocke_value_t* loaded = rocke_swapqk_dual_gather_issue(b,
+                                                                       v_rsrc,
+                                                                       kvh_off,
+                                                                       stride_v_token,
+                                                                       c2,
+                                                                       soff_list,
+                                                                       a_frag,
+                                                                       lane,
+                                                                       col,
+                                                                       c16,
+                                                                       k_bases[ns],
+                                                                       dp);
                 rocke_value_t* frag_d = NULL;
                 rocke_value_t* frag_d1 = NULL;
-                rocke_swapqk_dual_gather_finish(b, loaded, a_frag / 2, a_frag, lane_lt16, &frag_d, &frag_d1);
-                new_accs[dp] = rocke_b_mma(b, op->op_id, frag_d, p_tiles[ns], new_accs[dp], NULL, 0);
-                new_accs[dp + 1] = rocke_b_mma(b, op->op_id, frag_d1, p_tiles[ns], new_accs[dp + 1], NULL, 0);
+                rocke_swapqk_dual_gather_finish(
+                    b, loaded, a_frag / 2, a_frag, lane_lt16, &frag_d, &frag_d1);
+                new_accs[dp]
+                    = rocke_b_mma(b, op->op_id, frag_d, p_tiles[ns], new_accs[dp], NULL, 0);
+                new_accs[dp + 1]
+                    = rocke_b_mma(b, op->op_id, frag_d1, p_tiles[ns], new_accs[dp + 1], NULL, 0);
             }
         }
         rocke_b_s_setprio(b, 0);

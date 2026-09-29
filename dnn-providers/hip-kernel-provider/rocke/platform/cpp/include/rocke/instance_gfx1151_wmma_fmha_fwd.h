@@ -93,7 +93,8 @@ typedef struct rocke_wmma_fmha_fwd_spec
     bool transposed_qk; /* FP16 D64/D128, aligned dense none/either causal alignment */
     int block_n; /* transposed-QK key tile: 32 or 64; default 32 */
     int num_waves; /* transposed-QK waves per CTA: 1 or 2; default 1 */
-    const char* scheduler_strategy; /* NULL: backend default; otherwise a validated codegen policy */
+    const char*
+        scheduler_strategy; /* NULL: backend default; otherwise a validated codegen policy */
     int value_tile_size; /* 0 => full head; proper multiple-of-16 head divisor otherwise */
 } rocke_wmma_fmha_fwd_spec_t;
 

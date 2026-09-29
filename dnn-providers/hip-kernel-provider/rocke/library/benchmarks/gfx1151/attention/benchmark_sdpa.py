@@ -82,13 +82,18 @@ class DeviceBuffers:
             while array.ndim < rank:
                 array = array[None, ...]
         names = {
-            "float16": "fp16", "bfloat16": "bf16", "float32": "fp32",
-            "int32": "i32", "uint64": "u64",
+            "float16": "fp16",
+            "bfloat16": "bf16",
+            "float32": "fp32",
+            "int32": "i32",
+            "uint64": "u64",
         }
         dtype = names.get(str(array.dtype), str(array.dtype))
         return TensorView(
-            ptr=self.ptrs[name], shape=tuple(array.shape),
-            strides=tuple(s // array.itemsize for s in array.strides), dtype=dtype,
+            ptr=self.ptrs[name],
+            shape=tuple(array.shape),
+            strides=tuple(s // array.itemsize for s in array.strides),
+            dtype=dtype,
         )
 
     def close(self):
@@ -109,11 +114,18 @@ class HipGraphs:
         self.rt = rt
         lib = hip_module._resolve_hip()
         signatures = {
-            "hipStreamCreateWithFlags": [ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint],
+            "hipStreamCreateWithFlags": [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.c_uint,
+            ],
             "hipStreamDestroy": [ctypes.c_void_p],
             "hipStreamBeginCapture": [ctypes.c_void_p, ctypes.c_int],
             "hipStreamEndCapture": [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)],
-            "hipGraphInstantiateWithFlags": [ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p, ctypes.c_ulonglong],
+            "hipGraphInstantiateWithFlags": [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.c_void_p,
+                ctypes.c_ulonglong,
+            ],
             "hipGraphLaunch": [ctypes.c_void_p, ctypes.c_void_p],
             "hipGraphExecDestroy": [ctypes.c_void_p],
             "hipGraphDestroy": [ctypes.c_void_p],
@@ -151,7 +163,9 @@ class HipGraphs:
         self.call("hipStreamEndCapture", self.stream, ctypes.byref(graph))
         executable = ctypes.c_void_p()
         try:
-            self.call("hipGraphInstantiateWithFlags", ctypes.byref(executable), graph, 0)
+            self.call(
+                "hipGraphInstantiateWithFlags", ctypes.byref(executable), graph, 0
+            )
         except BaseException:
             self.functions["hipGraphDestroy"](graph)
             raise
@@ -188,7 +202,9 @@ class HipGraphs:
 
 def _prepare_aot(aot, case, buffers, stack):
     if case.layout == "paged":
-        raise UnsupportedCase("AOTriton v3 has no paged-KV input API; no free densification")
+        raise UnsupportedCase(
+            "AOTriton v3 has no paged-KV input API; no free densification"
+        )
     if case.kv_dtype not in ("", case.dtype):
         raise UnsupportedCase("AOTriton v3 forward has no FP8 KV input")
     if case.softcap:
@@ -196,11 +212,17 @@ def _prepare_aot(aot, case, buffers, stack):
     if case.sinks:
         raise UnsupportedCase("AOTriton v3 forward has no attention-sink parameter")
     if case.qq_bias and (case.layout != "dense" or case.seqlen_q != case.seqlen_k):
-        raise UnsupportedCase("AOTriton additive bias is not packed context-relative QQ bias")
+        raise UnsupportedCase(
+            "AOTriton additive bias is not packed context-relative QQ bias"
+        )
     if case.qq_bias and buffers.arrays["qq_bias"].dtype != buffers.arrays["q"].dtype:
-        raise UnsupportedCase("AOTriton requires bias dtype == Q; rocKE QQ-bias is float32")
+        raise UnsupportedCase(
+            "AOTriton requires bias dtype == Q; rocKE QQ-bias is float32"
+        )
     if case.layout == "ragged" and case.window and case.mask == "causal_bottomright":
-        raise UnsupportedCase("AOTriton finite window needs per-sequence left diagonals for this packed layout")
+        raise UnsupportedCase(
+            "AOTriton finite window needs per-sequence left diagonals for this packed layout"
+        )
     if case.alibi:
         raise UnsupportedCase("AOTriton v3 has no native ALiBi parameter")
     prepared = aot.prepare(
@@ -208,11 +230,17 @@ def _prepare_aot(aot, case, buffers, stack):
         k=buffers.tensor("k", attention=True),
         v=buffers.tensor("v", attention=True),
         out=buffers.tensor("aot_out", attention=True),
-        scale=case.scale, mask=case.mask, window=case.window,
+        scale=case.scale,
+        mask=case.mask,
+        window=case.window,
         bias=buffers.tensor("qq_bias", rank=4),
         sinks=buffers.tensor("sinks", rank=2),
-        cu_seqlens_q=buffers.tensor("cu_seqlens_q") if case.layout == "ragged" else None,
-        cu_seqlens_k=buffers.tensor("cu_seqlens_k") if case.layout == "ragged" else None,
+        cu_seqlens_q=(
+            buffers.tensor("cu_seqlens_q") if case.layout == "ragged" else None
+        ),
+        cu_seqlens_k=(
+            buffers.tensor("cu_seqlens_k") if case.layout == "ragged" else None
+        ),
         seqused_k=None,
         max_seqlen_q=max(case.q_lengths, default=case.seqlen_q),
         max_seqlen_k=max(case.k_lengths, default=case.seqlen_k),
@@ -233,7 +261,9 @@ def _check_output(buffers, name, expected, atol):
     rms = float(np.sqrt(np.mean(difference.astype(np.float64) ** 2)))
     return {
         "status": "passed" if maximum <= atol else "incorrect",
-        "max_abs_error": maximum, "rms_error": rms, "atol": atol,
+        "max_abs_error": maximum,
+        "rms_error": rms,
+        "atol": atol,
     }
 
 
@@ -267,7 +297,9 @@ def _case_result(case, rt, kernels, aot, graph_count, repeats):
             except UnsupportedCase as error:
                 row[arm].update(status="unsupported", reason=str(error))
             except Exception as error:
-                row[arm].update(status="error", reason=f"{type(error).__name__}: {error}")
+                row[arm].update(
+                    status="error", reason=f"{type(error).__name__}: {error}"
+                )
         timings = {arm: [] for arm in launches}
         for repeat in range(repeats):
             order = list(launches)
@@ -281,7 +313,9 @@ def _case_result(case, rt, kernels, aot, graph_count, repeats):
             if row[arm]["status"] == "passed":
                 row[arm]["us"] = statistics.median(samples)
                 row[arm]["samples_us"] = samples
-                row[arm]["spread_pct"] = 100.0 * (max(samples) - min(samples)) / row[arm]["us"]
+                row[arm]["spread_pct"] = (
+                    100.0 * (max(samples) - min(samples)) / row[arm]["us"]
+                )
         if all(row[arm].get("status") == "passed" for arm in ("rocke", "aotriton")):
             row["speedup"] = row["aotriton"]["us"] / row["rocke"]["us"]
     return row
@@ -295,24 +329,43 @@ def _report(rows):
     groups = defaultdict(list)
     for row in rows:
         groups[row["case"]["group"]].append(row)
-    print("\n| Operation / features | rocKE pass/required | AOT pass/required | Paired rocKE us | Paired AOT us | Speedup | Gaps |")
+    print(
+        "\n| Operation / features | rocKE pass/required | AOT pass/required | Paired rocKE us | Paired AOT us | Speedup | Gaps |"
+    )
     print("|---|---:|---:|---:|---:|---:|---|")
     for group, members in groups.items():
         pairs = [r for r in members if "speedup" in r]
         passed = sum(r["rocke"]["status"] == "passed" for r in members)
         aot_passed = sum(r["aotriton"]["status"] == "passed" for r in members)
-        gaps = sorted({r[arm]["status"] for r in members for arm in ("rocke", "aotriton") if r[arm]["status"] != "passed"})
-        numbers = [_geomean([r[arm]["us"] for r in pairs]) for arm in ("rocke", "aotriton")]
+        gaps = sorted(
+            {
+                r[arm]["status"]
+                for r in members
+                for arm in ("rocke", "aotriton")
+                if r[arm]["status"] != "passed"
+            }
+        )
+        numbers = [
+            _geomean([r[arm]["us"] for r in pairs]) for arm in ("rocke", "aotriton")
+        ]
         speedup = _geomean([r["speedup"] for r in pairs])
         values = [f"{n:.3f}" if n is not None else "N/A" for n in (*numbers, speedup)]
-        print(f"| {group} | {passed}/{len(members)} | {aot_passed}/{len(members)} | {' | '.join(values)} | {', '.join(gaps) or 'none'} |")
+        print(
+            f"| {group} | {passed}/{len(members)} | {aot_passed}/{len(members)} | {' | '.join(values)} | {', '.join(gaps) or 'none'} |"
+        )
     pairs = [r for r in rows if "speedup" in r]
     ratios = [r["speedup"] for r in pairs]
     metrics = {
         "coverage_passed": sum(r["rocke"]["status"] == "passed" for r in rows),
         "coverage_total": len(rows),
-        "correctness_failures": sum(r[arm]["status"] == "incorrect" for r in rows for arm in ("rocke", "aotriton")),
-        "execution_errors": sum(r[arm]["status"] == "error" for r in rows for arm in ("rocke", "aotriton")),
+        "correctness_failures": sum(
+            r[arm]["status"] == "incorrect"
+            for r in rows
+            for arm in ("rocke", "aotriton")
+        ),
+        "execution_errors": sum(
+            r[arm]["status"] == "error" for r in rows for arm in ("rocke", "aotriton")
+        ),
         "unsupported_cases": sum(r["rocke"]["status"] == "unsupported" for r in rows),
         "aotriton_passed": sum(r["aotriton"]["status"] == "passed" for r in rows),
         "comparable_cases": len(pairs),
@@ -338,29 +391,53 @@ def main(argv=None):
         raise RuntimeError(f"Expected gfx1151, got {get_device_arch()!r}")
     import ml_dtypes
 
-    print("PROVENANCE " + json.dumps({
-        "source_sha256": args.source_hash, "suite_sha256": suite_hash(),
-        "arch": "gfx1151", "compute_units": get_device_num_cus(),
-        "python": sys.version.split()[0], "numpy": np.__version__,
-        "ml_dtypes": ml_dtypes.__version__, "llvm_flavor": os.environ.get("ROCKE_LLVM_FLAVOR"),
-        "aotriton": "0.14.2b", "measurement": "HIP graph replay, alternating arms, median batches",
-        "graph_count": args.graph_count, "repeats": args.repeats,
-        "scope": "inference; public rocKE attention dispatch and tensor binding",
-    }, sort_keys=True), flush=True)
+    print(
+        "PROVENANCE "
+        + json.dumps(
+            {
+                "source_sha256": args.source_hash,
+                "suite_sha256": suite_hash(),
+                "arch": "gfx1151",
+                "compute_units": get_device_num_cus(),
+                "python": sys.version.split()[0],
+                "numpy": np.__version__,
+                "ml_dtypes": ml_dtypes.__version__,
+                "llvm_flavor": os.environ.get("ROCKE_LLVM_FLAVOR"),
+                "aotriton": "0.14.2b",
+                "measurement": "HIP graph replay, alternating arms, median batches",
+                "graph_count": args.graph_count,
+                "repeats": args.repeats,
+                "scope": "inference; public rocKE attention dispatch and tensor binding",
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
     rt = Runtime()
     kernels = RockeKernels(rt)
     aot = Aotriton(args.aotriton_shim)
-    print("AOTRITON_BUILD " + json.dumps({
-        "release": "0.14.2b", "runtime_version": aot.version,
-        "runtime_git_sha1": aot.git_sha1, "namespace_suffix": aot.name_suffix,
-        "forward_params_version": aot.params_version,
-    }, sort_keys=True), flush=True)
+    print(
+        "AOTRITON_BUILD "
+        + json.dumps(
+            {
+                "release": "0.14.2b",
+                "runtime_version": aot.version,
+                "runtime_git_sha1": aot.git_sha1,
+                "namespace_suffix": aot.name_suffix,
+                "forward_params_version": aot.params_version,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
     rows = []
     try:
         for case in CASES:
             row = _case_result(case, rt, kernels, aot, args.graph_count, args.repeats)
             rows.append(row)
-            print("CASE " + json.dumps(row, sort_keys=True, allow_nan=False), flush=True)
+            print(
+                "CASE " + json.dumps(row, sort_keys=True, allow_nan=False), flush=True
+            )
     finally:
         kernels.close()
     if [r["case"]["name"] for r in rows] != [case.name for case in CASES]:

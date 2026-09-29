@@ -213,7 +213,10 @@ def _dtype_code(name: str) -> int:
     try:
         return _DTYPE_CODES[name]
     except KeyError as exc:
-        raise AotritonError(None, f"unknown TensorView dtype {name!r}; expected one of {sorted(_DTYPE_CODES)}") from exc
+        raise AotritonError(
+            None,
+            f"unknown TensorView dtype {name!r}; expected one of {sorted(_DTYPE_CODES)}",
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -254,15 +257,21 @@ class _CFwdDesc(ctypes.Structure):
     ]
 
 
-def _pack_tensor(view: Optional[TensorView], *, expect_rank: Optional[int] = None) -> _CTensorDesc:
+def _pack_tensor(
+    view: Optional[TensorView], *, expect_rank: Optional[int] = None
+) -> _CTensorDesc:
     desc = _CTensorDesc()
     if view is None:
         return desc  # all-zero: ptr==0 means "absent" to the C++ side
     rank = len(view.shape)
     if rank not in (1, 2, 4):
-        raise AotritonError(None, f"TensorView rank {rank} is not one attn_fwd_params uses (1, 2 or 4)")
+        raise AotritonError(
+            None, f"TensorView rank {rank} is not one attn_fwd_params uses (1, 2 or 4)"
+        )
     if expect_rank is not None and rank != expect_rank:
-        raise AotritonError(None, f"expected rank {expect_rank} TensorView, got rank {rank}")
+        raise AotritonError(
+            None, f"expected rank {expect_rank} TensorView, got rank {rank}"
+        )
     if len(view.strides) != rank:
         raise AotritonError(None, "TensorView shape/strides length mismatch")
     desc.ptr = view.ptr
@@ -293,13 +302,17 @@ class Aotriton:
         self._validate_abi()
 
         major, minor, patch = ctypes.c_int32(), ctypes.c_int32(), ctypes.c_int32()
-        self._lib.aotriton_get_version(ctypes.byref(major), ctypes.byref(minor), ctypes.byref(patch))
+        self._lib.aotriton_get_version(
+            ctypes.byref(major), ctypes.byref(minor), ctypes.byref(patch)
+        )
         self.version: Tuple[int, int, int] = (major.value, minor.value, patch.value)
 
         git_sha1 = self._lib.aotriton_get_git_sha1()
         self.git_sha1: str = git_sha1.decode("utf-8", "replace") if git_sha1 else ""
         name_suffix = self._lib.aotriton_get_name_suffix()
-        self.name_suffix: str = name_suffix.decode("utf-8", "replace") if name_suffix else ""
+        self.name_suffix: str = (
+            name_suffix.decode("utf-8", "replace") if name_suffix else ""
+        )
         self.params_version: int = self._lib.aotriton_fwd_params_version()
 
     def _bind(self) -> None:
@@ -320,9 +333,17 @@ class Aotriton:
         lib.aotriton_last_error.argtypes = []
         lib.aotriton_last_error.restype = ctypes.c_char_p
 
-        lib.aotriton_prepare.argtypes = [ctypes.POINTER(_CFwdDesc), ctypes.POINTER(ctypes.c_void_p)]
+        lib.aotriton_prepare.argtypes = [
+            ctypes.POINTER(_CFwdDesc),
+            ctypes.POINTER(ctypes.c_void_p),
+        ]
         lib.aotriton_prepare.restype = ctypes.c_int32
-        lib.aotriton_launch.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int32, ctypes.POINTER(ctypes.c_int32)]
+        lib.aotriton_launch.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_int32,
+            ctypes.POINTER(ctypes.c_int32),
+        ]
         lib.aotriton_launch.restype = ctypes.c_int32
         lib.aotriton_destroy.argtypes = [ctypes.c_void_p]
         lib.aotriton_destroy.restype = None
@@ -330,7 +351,9 @@ class Aotriton:
     def _validate_abi(self) -> None:
         native_tensor_desc = self._lib.aotriton_abi_sizeof_tensor_desc()
         native_fwd_desc = self._lib.aotriton_abi_sizeof_fwd_desc()
-        if native_tensor_desc != ctypes.sizeof(_CTensorDesc) or native_fwd_desc != ctypes.sizeof(_CFwdDesc):
+        if native_tensor_desc != ctypes.sizeof(
+            _CTensorDesc
+        ) or native_fwd_desc != ctypes.sizeof(_CFwdDesc):
             raise AotritonError(
                 None,
                 "aotriton_bridge ABI mismatch: native sizeof(AotritonTensorDesc)="
@@ -375,20 +398,30 @@ class Aotriton:
                 "Rejecting rather than silently ignoring the tensor.",
             )
         if mask not in _MASK_CODES:
-            raise AotritonError(None, f"unknown mask {mask!r}; expected one of {sorted(_MASK_CODES)}")
+            raise AotritonError(
+                None, f"unknown mask {mask!r}; expected one of {sorted(_MASK_CODES)}"
+            )
         if window < 0:
             raise AotritonError(None, "window must be >= 0 (0 disables windowing)")
         if window and mask == "none":
             raise AotritonError(None, "finite window requires a causal mask")
         if window and mask == "causal_bottomright" and cu_seqlens_q is not None:
-            raise AotritonError(None, "packed bottom-right finite windows need per-sequence left diagonals")
+            raise AotritonError(
+                None,
+                "packed bottom-right finite windows need per-sequence left diagonals",
+            )
         if bias is not None and bias.dtype != q.dtype:
-            raise AotritonError(None, "AOTriton 0.14.2b requires bias and Q to share their dtype")
+            raise AotritonError(
+                None, "AOTriton 0.14.2b requires bias and Q to share their dtype"
+            )
         if (cu_seqlens_q is None) != (cu_seqlens_k is None):
-            raise AotritonError(None, "cu_seqlens_q and cu_seqlens_k must both be given or both omitted")
+            raise AotritonError(
+                None, "cu_seqlens_q and cu_seqlens_k must both be given or both omitted"
+            )
         if seqused_k is not None and cu_seqlens_q is None:
             raise AotritonError(
-                None, "seqused_k requires cu_seqlens_q/cu_seqlens_k (it pairs with cu_seqlens_k for KV-cache addressing)"
+                None,
+                "seqused_k requires cu_seqlens_q/cu_seqlens_k (it pairs with cu_seqlens_k for KV-cache addressing)",
             )
 
         desc = _CFwdDesc()
@@ -436,10 +469,14 @@ class PreparedCall:
         if self._closed:
             raise AotritonError(None, "launch() called on a closed PreparedCall")
         hip_status = ctypes.c_int32()
-        status = self._lib.aotriton_launch(self._handle, ctypes.c_void_p(stream), backend, ctypes.byref(hip_status))
+        status = self._lib.aotriton_launch(
+            self._handle, ctypes.c_void_p(stream), backend, ctypes.byref(hip_status)
+        )
         if status != 0:
             msg = self._lib.aotriton_last_error()
-            raise AotritonError(hip_status.value, msg.decode("utf-8", "replace") if msg else "")
+            raise AotritonError(
+                hip_status.value, msg.decode("utf-8", "replace") if msg else ""
+            )
 
     def close(self) -> None:
         if not self._closed:
@@ -453,7 +490,9 @@ class PreparedCall:
         self.close()
         return False
 
-    def __del__(self) -> None:  # best-effort; explicit close()/context-manager is the real contract
+    def __del__(
+        self,
+    ) -> None:  # best-effort; explicit close()/context-manager is the real contract
         try:
             self.close()
         except Exception:

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from dispatch.attention import AttentionMaskType, AttentionRequest, dispatch_attention
 from rocke.runtime.launcher import release_retained_for_stream
 
+
 class UnsupportedCase(Exception):
     """A documented absence of an implementation, not an execution failure."""
 
@@ -24,7 +25,9 @@ class _HipTensor:
         self.shape = self._array.shape
         self.ndim = self._array.ndim
         self.dtype = self._array.dtype
-        self.strides = tuple(stride // self._array.itemsize for stride in self._array.strides)
+        self.strides = tuple(
+            stride // self._array.itemsize for stride in self._array.strides
+        )
 
     def data_ptr(self):
         return self._pointer
@@ -52,14 +55,23 @@ class RockeKernels:
             "causal_bottomright": AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
         }
         request = AttentionRequest(
-            batch=case.batch, nhead_q=case.heads_q, nhead_k=case.heads_kv,
+            batch=case.batch,
+            nhead_q=case.heads_q,
+            nhead_k=case.heads_kv,
             seqlen_q=max(case.q_lengths, default=case.seqlen_q),
             seqlen_k=max(case.k_lengths, default=case.seqlen_k),
-            hdim_q=case.head_dim, hdim_v=case.head_dim,
-            arch="gfx1151", dtype=case.dtype, mask_type=masks[case.mask],
-            layout=case.layout, kv_block_size=case.block_size or 16,
-            sliding_window=case.window, use_softcap=case.softcap > 0,
-            use_sinks=case.sinks, use_alibi=case.alibi, use_qq_bias=case.qq_bias,
+            hdim_q=case.head_dim,
+            hdim_v=case.head_dim,
+            arch="gfx1151",
+            dtype=case.dtype,
+            mask_type=masks[case.mask],
+            layout=case.layout,
+            kv_block_size=case.block_size or 16,
+            sliding_window=case.window,
+            use_softcap=case.softcap > 0,
+            use_sinks=case.sinks,
+            use_alibi=case.alibi,
+            use_qq_bias=case.qq_bias,
             use_fp8=bool(case.kv_dtype),
         )
         if request not in self.cache:
@@ -68,8 +80,16 @@ class RockeKernels:
         tensors = {
             name: _HipTensor(buffers, name)
             for name in (
-                "q", "k", "v", "cu_seqlens_q", "cu_seqlens_k", "seqused_k",
-                "block_table", "sinks", "alibi_slopes", "qq_bias",
+                "q",
+                "k",
+                "v",
+                "cu_seqlens_q",
+                "cu_seqlens_k",
+                "seqused_k",
+                "block_table",
+                "sinks",
+                "alibi_slopes",
+                "qq_bias",
             )
             if name in buffers.ptrs
         }
@@ -98,5 +118,3 @@ class RockeKernels:
         for stream in tuple(self._streams):
             self.release(stream)
         self.cache.clear()
-
-

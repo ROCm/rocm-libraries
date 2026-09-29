@@ -15,7 +15,6 @@ from dispatch.attention import (
 )
 
 
-
 def _attn(arch="gfx950", **kw):
     base = dict(
         batch=2,
@@ -230,7 +229,6 @@ class TestAttentionDispatch(unittest.TestCase):
                         fp8_fnuz=fnuz,
                     )
                 )
-
 
     def test_large_grid_routes_2d(self):
         # many seqs/heads -> num_2d > target -> 2d even with long kv.

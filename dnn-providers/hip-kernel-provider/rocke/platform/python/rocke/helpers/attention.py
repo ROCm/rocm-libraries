@@ -744,9 +744,13 @@ def decode_fp8e4m3fn_to_f32(b: IRBuilder, byte: Value) -> Value:
     magnitude = b.land(bits, b.const_i32(0x7F))
     sign = b.shl(b.land(bits, b.const_i32(0x80)), b.const_i32(24))
     normal = b.add(b.shl(magnitude, b.const_i32(20)), b.const_i32(120 << 23))
-    subnormal = b.fmul(b.sitofp_f32(magnitude), b.const_f32(2.0 ** -9))
-    result = b.select(b.cmp_lt(magnitude, b.const_i32(8)), b.bitcast(subnormal, I32), normal)
-    result = b.select(b.cmp_eq(magnitude, b.const_i32(0x7F)), b.const_i32(0x7FC00000), result)
+    subnormal = b.fmul(b.sitofp_f32(magnitude), b.const_f32(2.0**-9))
+    result = b.select(
+        b.cmp_lt(magnitude, b.const_i32(8)), b.bitcast(subnormal, I32), normal
+    )
+    result = b.select(
+        b.cmp_eq(magnitude, b.const_i32(0x7F)), b.const_i32(0x7FC00000), result
+    )
     return b.bitcast(b.lor(result, sign), F32)
 
 

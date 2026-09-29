@@ -35,7 +35,9 @@ from dispatch.attention import AttentionMaskType, AttentionRequest, dispatch_att
 from rocke.runtime import hip_module
 from rocke.runtime.hip_module import Runtime, get_device_arch
 
-_NEEDS_GPU = pytest.mark.skipif(get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU")
+_NEEDS_GPU = pytest.mark.skipif(
+    get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU"
+)
 
 
 # ---------------------------------------------------------------------
@@ -102,9 +104,21 @@ def _view(buffers, name: str) -> _DeviceTensor:
 
 
 def _tensors_for(buffers, case) -> dict:
-    tensors = {"q": _view(buffers, "q"), "k": _view(buffers, "k"), "v": _view(buffers, "v")}
+    tensors = {
+        "q": _view(buffers, "q"),
+        "k": _view(buffers, "k"),
+        "v": _view(buffers, "v"),
+    }
     tensors["out"] = _view(buffers, "rocke_out")
-    for name in ("cu_seqlens_q", "cu_seqlens_k", "seqused_k", "block_table", "sinks", "alibi_slopes", "qq_bias"):
+    for name in (
+        "cu_seqlens_q",
+        "cu_seqlens_k",
+        "seqused_k",
+        "block_table",
+        "sinks",
+        "alibi_slopes",
+        "qq_bias",
+    ):
         if name in buffers.ptrs:
             tensors[name] = _view(buffers, name)
     return tensors
@@ -170,7 +184,9 @@ def _request_for(case) -> AttentionRequest:
     )
 
 
-def _launch_and_check(case, *, stream: int = 0, fp8_scales=None, inputs=None, spec_overrides=None):
+def _launch_and_check(
+    case, *, stream: int = 0, fp8_scales=None, inputs=None, spec_overrides=None
+):
     from benchmarks.gfx1151.attention.benchmark_sdpa import DeviceBuffers
     from benchmarks.gfx1151.attention.cases import make_inputs, reference
     from rocke.runtime.launcher import release_retained_for_stream
@@ -199,13 +215,17 @@ def _launch_and_check(case, *, stream: int = 0, fp8_scales=None, inputs=None, sp
             from dispatch.attention.bindings import bind_gfx1151_attention_torch
 
             spec = dataclasses.replace(result.spec, **spec_overrides)
-            binding = bind_gfx1151_attention_torch(req, spec, _tensors_for(buffers, case), **kwargs)
+            binding = bind_gfx1151_attention_torch(
+                req, spec, _tensors_for(buffers, case), **kwargs
+            )
         binding.launch()
         rt.stream_sync(stream)
         release_retained_for_stream(stream)
         actual = buffers.read_output("rocke_out")
         expected = reference(case, inputs)
-        np.testing.assert_allclose(actual, expected, rtol=0, atol=case.atol, equal_nan=False)
+        np.testing.assert_allclose(
+            actual, expected, rtol=0, atol=case.atol, equal_nan=False
+        )
         return actual
     finally:
         rt.sync()
@@ -226,9 +246,17 @@ def test_dispatch_dense_partial_tail_nondefault_stream(dtype):
     """Dense request with a non-multiple-of-16 Q/K tail, launched on an
     explicit non-default HIP stream through the public dispatch surface."""
     case = _case(
-        name="dispatch_dense_tail", group="dispatch", dtype=dtype, batch=2,
-        seqlen_q=17, seqlen_k=19, heads_q=4, heads_kv=2, head_dim=64,
-        mask="causal_bottomright", seed=101,
+        name="dispatch_dense_tail",
+        group="dispatch",
+        dtype=dtype,
+        batch=2,
+        seqlen_q=17,
+        seqlen_k=19,
+        heads_q=4,
+        heads_kv=2,
+        head_dim=64,
+        mask="causal_bottomright",
+        seed=101,
     )
     stream = _create_stream()
     try:
@@ -244,10 +272,20 @@ def test_dispatch_ragged_empty_and_mixed_lengths(dtype):
     """Ragged batch with an empty sequence (no queries, but real keys) and
     unequal per-sequence Q/K lengths."""
     case = _case(
-        name="dispatch_ragged_mixed", group="dispatch", dtype=dtype, batch=5,
-        seqlen_q=0, seqlen_k=0, heads_q=4, heads_kv=2, head_dim=64,
-        layout="ragged", mask="causal_bottomright",
-        q_lengths=(0, 17, 1, 3, 0), k_lengths=(9, 17, 5, 2, 0), seed=27,
+        name="dispatch_ragged_mixed",
+        group="dispatch",
+        dtype=dtype,
+        batch=5,
+        seqlen_q=0,
+        seqlen_k=0,
+        heads_q=4,
+        heads_kv=2,
+        head_dim=64,
+        layout="ragged",
+        mask="causal_bottomright",
+        q_lengths=(0, 17, 1, 3, 0),
+        k_lengths=(9, 17, 5, 2, 0),
+        seed=27,
     )
     _launch_and_check(case)
 
@@ -259,10 +297,21 @@ def test_dispatch_paged_shuffled_partial_page(dtype):
     """Paged KV with a shuffled (non-identity) block table and a partial
     last page, through the public dispatch surface."""
     case = _case(
-        name="dispatch_paged_shuffled", group="dispatch", dtype=dtype, batch=5,
-        seqlen_q=0, seqlen_k=0, heads_q=4, heads_kv=2, head_dim=64,
-        layout="paged", block_size=16, mask="causal_bottomright",
-        q_lengths=(0, 17, 1, 3, 0), k_lengths=(9, 19, 1, 0, 0), seed=27,
+        name="dispatch_paged_shuffled",
+        group="dispatch",
+        dtype=dtype,
+        batch=5,
+        seqlen_q=0,
+        seqlen_k=0,
+        heads_q=4,
+        heads_kv=2,
+        head_dim=64,
+        layout="paged",
+        block_size=16,
+        mask="causal_bottomright",
+        q_lengths=(0, 17, 1, 3, 0),
+        k_lengths=(9, 19, 1, 0, 0),
+        seed=27,
     )
     _launch_and_check(case)
 
@@ -274,9 +323,18 @@ def test_dispatch_dense_fp8_kv():
     through the public dispatch surface (``use_fp8=True`` -> ``kv_dtype``)."""
     pytest.importorskip("ml_dtypes")
     case = _case(
-        name="dispatch_dense_fp8_kv", group="dispatch", dtype="fp16", batch=1,
-        seqlen_q=32, seqlen_k=32, heads_q=2, heads_kv=2, head_dim=64,
-        mask="causal_topleft", kv_dtype="fp8e4m3", seed=7,
+        name="dispatch_dense_fp8_kv",
+        group="dispatch",
+        dtype="fp16",
+        batch=1,
+        seqlen_q=32,
+        seqlen_k=32,
+        heads_q=2,
+        heads_kv=2,
+        head_dim=64,
+        mask="causal_topleft",
+        kv_dtype="fp8e4m3",
+        seed=7,
     )
     _launch_and_check(case, fp8_scales=(0.3, 0.7))
 
@@ -298,8 +356,12 @@ def _fake_tensor(shape, dtype="float16", strides=None, device="cuda:0"):
         return strides if dim is None else strides[dim]
 
     return SimpleNamespace(
-        shape=tuple(shape), dtype=dtype, device=SimpleNamespace(type=device.split(":")[0]),
-        stride=stride, is_contiguous=lambda: strides[-1] == 1, data_ptr=lambda: 0x1000,
+        shape=tuple(shape),
+        dtype=dtype,
+        device=SimpleNamespace(type=device.split(":")[0]),
+        stride=stride,
+        is_contiguous=lambda: strides[-1] == 1,
+        data_ptr=lambda: 0x1000,
     )
 
 
@@ -313,8 +375,15 @@ def _dense_spec(**kw):
 
 def _dense_request(**kw):
     base = dict(
-        batch=2, nhead_q=4, nhead_k=2, seqlen_q=32, seqlen_k=32,
-        hdim_q=64, hdim_v=64, arch="gfx1151", dtype="fp16",
+        batch=2,
+        nhead_q=4,
+        nhead_k=2,
+        seqlen_q=32,
+        seqlen_k=32,
+        hdim_q=64,
+        hdim_v=64,
+        arch="gfx1151",
+        dtype="fp16",
     )
     base.update(kw)
     return AttentionRequest(**base)
@@ -338,7 +407,9 @@ class TestMetadataSafety(unittest.TestCase):
         ABI folds the batch offset into ``batch * seqlen * stride_token``
         with no separate batch-stride argument."""
         q = _fake_tensor((2, 32, 4, 64))
-        gapped_k = _fake_tensor((2, 32, 2, 64), strides=(32 * 2 * 64 + 64, 2 * 64, 64, 1))
+        gapped_k = _fake_tensor(
+            (2, 32, 2, 64), strides=(32 * 2 * 64 + 64, 2 * 64, 64, 1)
+        )
         with self.assertRaisesRegex(ValueError, "batch stride"):
             self._bind({"q": q, "k": gapped_k, "v": gapped_k, "out": q})
 
@@ -350,8 +421,11 @@ class TestMetadataSafety(unittest.TestCase):
         spec = _dense_spec(kv_dtype="fp8e4m3")
         with self.assertRaisesRegex(ValueError, "dtype must be fp8"):
             bind_gfx1151_attention_torch(
-                _dense_request(use_fp8=True), spec, {"q": q, "k": k, "v": k, "out": q},
-                k_scale=0.5, v_scale=0.25,
+                _dense_request(use_fp8=True),
+                spec,
+                {"q": q, "k": k, "v": k, "out": q},
+                k_scale=0.5,
+                v_scale=0.25,
             )
 
     def test_rejects_fnuz_fp8_kv(self):
@@ -362,8 +436,11 @@ class TestMetadataSafety(unittest.TestCase):
         spec = _dense_spec(kv_dtype="fp8e4m3")
         with self.assertRaisesRegex(ValueError, "not FNUZ"):
             bind_gfx1151_attention_torch(
-                _dense_request(use_fp8=True), spec, {"q": q, "k": k, "v": k, "out": q},
-                k_scale=0.5, v_scale=0.25,
+                _dense_request(use_fp8=True),
+                spec,
+                {"q": q, "k": k, "v": k, "out": q},
+                k_scale=0.5,
+                v_scale=0.25,
             )
 
     def test_requires_k_scale_v_scale_for_fp8_kv(self):
@@ -374,7 +451,9 @@ class TestMetadataSafety(unittest.TestCase):
         spec = _dense_spec(kv_dtype="fp8e4m3")
         with self.assertRaisesRegex(ValueError, "k_scale.*v_scale"):
             bind_gfx1151_attention_torch(
-                _dense_request(use_fp8=True), spec, {"q": q, "k": k, "v": k, "out": q},
+                _dense_request(use_fp8=True),
+                spec,
+                {"q": q, "k": k, "v": k, "out": q},
             )
 
     def test_ragged_requires_cu_seqlens_k(self):
@@ -386,7 +465,8 @@ class TestMetadataSafety(unittest.TestCase):
         spec = _dense_spec(layout="ragged", query_tail=True, kv_tail=True)
         with self.assertRaisesRegex(ValueError, "cu_seqlens_k"):
             bind_gfx1151_attention_torch(
-                _dense_request(batch=2, layout="ragged"), spec,
+                _dense_request(batch=2, layout="ragged"),
+                spec,
                 {"q": q, "k": k, "v": k, "out": q, "cu_seqlens_q": cu_q},
             )
 
@@ -398,13 +478,21 @@ class TestMetadataSafety(unittest.TestCase):
         cu_q = _fake_tensor((3,), dtype="int32")
         used = _fake_tensor((2,), dtype="int32")
         table = _fake_tensor((2, 4), dtype="int32")
-        spec = _dense_spec(layout="paged", page_block_size=16, query_tail=True, kv_tail=True)
+        spec = _dense_spec(
+            layout="paged", page_block_size=16, query_tail=True, kv_tail=True
+        )
         with self.assertRaisesRegex(ValueError, "page"):
             bind_gfx1151_attention_torch(
-                _dense_request(batch=2, layout="paged"), spec,
+                _dense_request(batch=2, layout="paged"),
+                spec,
                 {
-                    "q": q, "k": k, "v": k, "out": q, "cu_seqlens_q": cu_q,
-                    "seqused_k": used, "block_table": table,
+                    "q": q,
+                    "k": k,
+                    "v": k,
+                    "out": q,
+                    "cu_seqlens_q": cu_q,
+                    "seqused_k": used,
+                    "block_table": table,
                 },
             )
 
@@ -414,11 +502,22 @@ class TestMetadataSafety(unittest.TestCase):
         q = _fake_tensor((10, 4, 64))
         k = _fake_tensor((12, 2, 64))
         cu = _fake_tensor((3,), dtype="int32")
-        tensors = {"q": q, "k": k, "v": k, "out": q, "cu_seqlens_q": cu, "cu_seqlens_k": cu}
-        for name, value in (("out", _fake_tensor((9, 4, 64))), ("v", _fake_tensor((11, 2, 64)))):
+        tensors = {
+            "q": q,
+            "k": k,
+            "v": k,
+            "out": q,
+            "cu_seqlens_q": cu,
+            "cu_seqlens_k": cu,
+        }
+        for name, value in (
+            ("out", _fake_tensor((9, 4, 64))),
+            ("v", _fake_tensor((11, 2, 64))),
+        ):
             with self.subTest(tensor=name), self.assertRaises(ValueError):
                 bind_gfx1151_attention_torch(
-                    _dense_request(layout="ragged"), _dense_spec(layout="ragged"),
+                    _dense_request(layout="ragged"),
+                    _dense_spec(layout="ragged"),
                     dict(tensors, **{name: value}),
                 )
 
@@ -428,12 +527,23 @@ class TestMetadataSafety(unittest.TestCase):
         q = _fake_tensor((10, 4, 64))
         k = _fake_tensor((12, 2, 64))
         cu = _fake_tensor((3,), dtype="int32")
-        tensors = {"q": q, "k": k, "v": k, "out": q, "cu_seqlens_q": cu, "cu_seqlens_k": cu}
+        tensors = {
+            "q": q,
+            "k": k,
+            "v": k,
+            "out": q,
+            "cu_seqlens_q": cu,
+            "cu_seqlens_k": cu,
+        }
         for name in ("cu_seqlens_q", "cu_seqlens_k"):
             with self.subTest(tensor=name), self.assertRaises(ValueError):
                 bind_gfx1151_attention_torch(
-                    _dense_request(layout="ragged"), _dense_spec(layout="ragged"),
-                    dict(tensors, **{name: _fake_tensor((3,), dtype="int32", strides=(2,))}),
+                    _dense_request(layout="ragged"),
+                    _dense_spec(layout="ragged"),
+                    dict(
+                        tensors,
+                        **{name: _fake_tensor((3,), dtype="int32", strides=(2,))},
+                    ),
                 )
 
     def test_rejects_rows_that_break_vector_alignment(self):
@@ -449,7 +559,8 @@ class TestMetadataSafety(unittest.TestCase):
         k = _fake_tensor((2, 48, 2, 64))
         with self.assertRaises(ValueError):
             bind_gfx1151_attention_torch(
-                _dense_request(seqlen_k=48), _dense_spec(transposed_qk=True, block_n=64),
+                _dense_request(seqlen_k=48),
+                _dense_spec(transposed_qk=True, block_n=64),
                 {"q": q, "k": k, "v": k, "out": q},
             )
 
@@ -458,9 +569,17 @@ class TestMetadataSafety(unittest.TestCase):
 @_NEEDS_GPU
 def test_dispatch_aligned_gqa_on_nondefault_stream():
     case = _case(
-        name="dispatch_aligned_gqa", group="dispatch", dtype="fp16", batch=2,
-        seqlen_q=32, seqlen_k=96, heads_q=6, heads_kv=2, head_dim=128,
-        mask="causal_topleft", seed=103,
+        name="dispatch_aligned_gqa",
+        group="dispatch",
+        dtype="fp16",
+        batch=2,
+        seqlen_q=32,
+        seqlen_k=96,
+        heads_q=6,
+        heads_kv=2,
+        head_dim=128,
+        mask="causal_topleft",
+        seed=103,
     )
     stream = _create_stream()
     try:
@@ -480,15 +599,28 @@ def test_dispatch_aligned_gqa_on_nondefault_stream():
 )
 def test_ragged_full_window_preserves_all_causal_keys(mask, q_lengths, k_lengths):
     case = _case(
-        name="dispatch_ragged_full_window", group="dispatch", dtype="fp16", batch=2,
-        seqlen_q=0, seqlen_k=0, heads_q=8, heads_kv=2, head_dim=64,
-        layout="ragged", mask=mask, q_lengths=q_lengths, k_lengths=k_lengths, seed=104,
+        name="dispatch_ragged_full_window",
+        group="dispatch",
+        dtype="fp16",
+        batch=2,
+        seqlen_q=0,
+        seqlen_k=0,
+        heads_q=8,
+        heads_kv=2,
+        head_dim=64,
+        layout="ragged",
+        mask=mask,
+        q_lengths=q_lengths,
+        k_lengths=k_lengths,
+        seed=104,
     )
     actual = _launch_and_check(case)
     if mask == "causal_bottomright":
         begin = q_lengths[0]
         end = begin + q_lengths[1] - k_lengths[1]
-        np.testing.assert_array_equal(actual[begin:end], np.zeros_like(actual[begin:end]))
+        np.testing.assert_array_equal(
+            actual[begin:end], np.zeros_like(actual[begin:end])
+        )
 
 
 @pytest.mark.gpu
@@ -502,20 +634,45 @@ def test_ragged_full_window_preserves_all_causal_keys(mask, q_lengths, k_lengths
         ("paged", "bf16", "fp8e4m3", 16, False),
     ],
 )
-def test_output_tiles_keep_full_qk_dimension_and_all_output_columns(layout, dtype, storage, tile, vlds):
+def test_output_tiles_keep_full_qk_dimension_and_all_output_columns(
+    layout, dtype, storage, tile, vlds
+):
     from benchmarks.gfx1151.attention.cases import make_inputs
 
     lengths = (
-        dict(batch=3, seqlen_q=0, seqlen_k=0, q_lengths=(0, 3, 17), k_lengths=(0, 0, 31))
-        if layout == "ragged" else
-        dict(batch=2, seqlen_q=0, seqlen_k=0, q_lengths=(1, 3), k_lengths=(17, 0), block_size=16)
-        if layout == "paged" else
-        dict(batch=2, seqlen_q=1 if dtype == "fp16" else 17, seqlen_k=32 if dtype == "fp16" else 19)
+        dict(
+            batch=3, seqlen_q=0, seqlen_k=0, q_lengths=(0, 3, 17), k_lengths=(0, 0, 31)
+        )
+        if layout == "ragged"
+        else (
+            dict(
+                batch=2,
+                seqlen_q=0,
+                seqlen_k=0,
+                q_lengths=(1, 3),
+                k_lengths=(17, 0),
+                block_size=16,
+            )
+            if layout == "paged"
+            else dict(
+                batch=2,
+                seqlen_q=1 if dtype == "fp16" else 17,
+                seqlen_k=32 if dtype == "fp16" else 19,
+            )
+        )
     )
     case = _case(
-        name="dispatch_output_tiles", group="dispatch", dtype=dtype, heads_q=4,
-        heads_kv=2, head_dim=256, layout=layout, kv_dtype=storage,
-        mask="causal_bottomright", seed=105, **lengths,
+        name="dispatch_output_tiles",
+        group="dispatch",
+        dtype=dtype,
+        heads_q=4,
+        heads_kv=2,
+        head_dim=256,
+        layout=layout,
+        kv_dtype=storage,
+        mask="causal_bottomright",
+        seed=105,
+        **lengths,
     )
     inputs = make_inputs(case)
     # The last QK dimension affects even the first output tile. Truncating QK
@@ -527,7 +684,8 @@ def test_output_tiles_keep_full_qk_dimension_and_all_output_columns(layout, dtyp
     inputs.k[..., -1] = signs * 8
     inputs.v[...] = signs[..., None] + np.arange(256, dtype=np.float32) / 512
     actual = _launch_and_check(
-        case, inputs=inputs,
+        case,
+        inputs=inputs,
         spec_overrides=dict(value_tile_size=tile, v_lds_stage=vlds),
     )
     if layout == "ragged":
@@ -538,14 +696,26 @@ def test_output_tiles_keep_full_qk_dimension_and_all_output_columns(layout, dtyp
 
 @pytest.mark.gpu
 @_NEEDS_GPU
-@pytest.mark.parametrize("mask,seqlen_q", [("causal_topleft", 97), ("causal_bottomright", 65)])
+@pytest.mark.parametrize(
+    "mask,seqlen_q", [("causal_topleft", 97), ("causal_bottomright", 65)]
+)
 def test_dense_tail_profile_preserves_long_queries_and_empty_prefix(mask, seqlen_q):
     case = _case(
-        name="dispatch_dense_tail_profile", group="dispatch", dtype="fp16", batch=2,
-        seqlen_q=seqlen_q, seqlen_k=33, heads_q=4, heads_kv=2, head_dim=64,
-        mask=mask, seed=106,
+        name="dispatch_dense_tail_profile",
+        group="dispatch",
+        dtype="fp16",
+        batch=2,
+        seqlen_q=seqlen_q,
+        seqlen_k=33,
+        heads_q=4,
+        heads_kv=2,
+        head_dim=64,
+        mask=mask,
+        seed=106,
     )
     actual = _launch_and_check(case)
     if mask == "causal_bottomright":
         prefix = seqlen_q - case.seqlen_k
-        np.testing.assert_array_equal(actual[:, :prefix], np.zeros_like(actual[:, :prefix]))
+        np.testing.assert_array_equal(
+            actual[:, :prefix], np.zeros_like(actual[:, :prefix])
+        )

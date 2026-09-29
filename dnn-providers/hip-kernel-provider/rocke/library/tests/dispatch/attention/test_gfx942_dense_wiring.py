@@ -87,7 +87,6 @@ class TestGfx942DenseRegistration(unittest.TestCase):
         self.assertEqual(c.algorithm, "attention_dense")
 
 
-
 class TestGfx942DenseOptIn(unittest.TestCase):
     def test_auto_algorithm_never_selects_it(self):
         with _Gfx942Arch():

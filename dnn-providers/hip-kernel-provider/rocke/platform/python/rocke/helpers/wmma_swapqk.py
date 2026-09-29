@@ -114,7 +114,9 @@ def wmma_swapqk_fwd_inner_body(
     ``block_n`` (32 or 64) and ``n_waves`` (1 or 2) are the only tunables.
     """
     if arch != "gfx1151":
-        raise ValueError(f"wmma_swapqk is a gfx1151 (RDNA3.5) kernel; got arch={arch!r}")
+        raise ValueError(
+            f"wmma_swapqk is a gfx1151 (RDNA3.5) kernel; got arch={arch!r}"
+        )
     if head_size not in (64, 128):
         raise ValueError(f"wmma_swapqk head_size must be 64 or 128 (got {head_size})")
     if block_n not in (32, 64):
@@ -200,9 +202,7 @@ def wmma_swapqk_fwd_inner_body(
             query_stop = b.add(query_stop, causal_ctx_offset)
             query_stop = b.select(b.cmp_lt(query_stop, c0), c0, query_stop)
             # Exclusive visible-key bound; empty query groups scan no KV tiles.
-            causal_stop = b.div(
-                b.add(query_stop, b.const_i32(block_n - 1)), c_block_n
-            )
+            causal_stop = b.div(b.add(query_stop, b.const_i32(block_n - 1)), c_block_n)
         loop_stop = b.select(b.cmp_lt(causal_stop, loop_stop), causal_stop, loop_stop)
 
     # ---- buffer-descriptor D16 V-gather (address in the memory unit, no VALU) ----
@@ -242,7 +242,9 @@ def wmma_swapqk_fwd_inner_body(
         voff = b.mul(elem0, c2)
         v_a = b.undef_vec(F16, a_frag)  # fully overwritten by the 16 loads
         for j in range(a_frag):
-            v_a = b.vec_insert(v_a, b.buffer_load_f16_d16(v_rsrc, voff, soff_list[j]), j)
+            v_a = b.vec_insert(
+                v_a, b.buffer_load_f16_d16(v_rsrc, voff, soff_list[j]), j
+            )
         return v_a
 
     def dual_gather_issue(k_base, d):
@@ -287,10 +289,15 @@ def wmma_swapqk_fwd_inner_body(
         n_kv_sub accumulator chains stay mutually independent (their own ILP)
         and only n_dk Q loads are issued per K-tile."""
         b.s_setprio(1)
-        kwins = [k_window(b.add(k_block_base, b.const_i32(ns * 16))) for ns in range(n_kv_sub)]
+        kwins = [
+            k_window(b.add(k_block_base, b.const_i32(ns * 16)))
+            for ns in range(n_kv_sub)
+        ]
         subs = [WmmaTensor.zero_acc(b, atom, arch=arch) for _ in range(n_kv_sub)]
         for d in range(n_dk):
-            q_tile = load_wmma_tile(b, qwin, atom, lane, role="b", k_offset=d * 16, lead=[c0])
+            q_tile = load_wmma_tile(
+                b, qwin, atom, lane, role="b", k_offset=d * 16, lead=[c0]
+            )
             for ns in range(n_kv_sub):
                 k_frag = load_wmma_tile(
                     b, kwins[ns], atom, lane, role="a", k_offset=d * 16, lead=[c0]
@@ -299,7 +306,9 @@ def wmma_swapqk_fwd_inner_body(
         b.s_setprio(0)
         return subs
 
-    kloop = b.scf_for_iter(c0, loop_stop, b.const_i32(1), iter_args=iter_args, iv_name="kt")
+    kloop = b.scf_for_iter(
+        c0, loop_stop, b.const_i32(1), iter_args=iter_args, iv_name="kt"
+    )
     with kloop as (kt, state):
         m_i, l_i, accs = unpack(state)
         k_block_base = b.mul(kt, c_block_n)
@@ -365,7 +374,8 @@ def wmma_swapqk_fwd_inner_body(
         for i in range(c_frag):
             alpha_vec = b.vec_insert(alpha_vec, alpha, i)
         p_tiles = [
-            WmmaTensor(atom, "b", p_transpose_reg(ps_sub[ns]), arch) for ns in range(n_kv_sub)
+            WmmaTensor(atom, "b", p_transpose_reg(ps_sub[ns]), arch)
+            for ns in range(n_kv_sub)
         ]
 
         # ---- rescale the O^T accumulators by alpha ONCE per block_n keys ----
@@ -397,7 +407,10 @@ def wmma_swapqk_fwd_inner_body(
                     b, WmmaTensor(atom, "a", frag_d, arch), p_tiles[ns], new_accs[dp]
                 )
                 new_accs[dp + 1] = wmma_mma(
-                    b, WmmaTensor(atom, "a", frag_d1, arch), p_tiles[ns], new_accs[dp + 1]
+                    b,
+                    WmmaTensor(atom, "a", frag_d1, arch),
+                    p_tiles[ns],
+                    new_accs[dp + 1],
                 )
         b.s_setprio(0)
         new_acc_vals = [a.value for a in new_accs]
@@ -418,4 +431,6 @@ def wmma_swapqk_fwd_inner_body(
             O_T_view, (1, 16, 16), origin=(head_idx, b.const_i32(d * 16), q_token_base)
         )
         acc_wt = WmmaTensor(atom, "c", accs_f[d], arch)
-        store_wmma_tile(b, owin, acc_wt, lane, col_offset=0, lead=[c0], align=2, transform=_rescale)
+        store_wmma_tile(
+            b, owin, acc_wt, lane, col_offset=0, lead=[c0], align=2, transform=_rescale
+        )

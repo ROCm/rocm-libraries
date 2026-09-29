@@ -33,7 +33,9 @@ def test_all_fp8_bytes_and_non_power_of_two_scales(dtype, scale):
     index = b.add(b.mul(b.block_id_x(), b.const_i32(32)), b.thread_id_x())
     value = decode_fp8e4m3fn_to_f32(b, b.global_load(source, index, FP8E4M3, align=1))
     b.global_store(decoded, index, value, align=4)
-    b.global_store(converted, index, b.cast_f32_to(b.fmul(value, factor), target), align=2)
+    b.global_store(
+        converted, index, b.cast_f32_to(b.fmul(value, factor), target), align=2
+    )
     b.ret()
 
     raw = np.arange(256, dtype=np.uint8)
@@ -54,9 +56,13 @@ def test_all_fp8_bytes_and_non_power_of_two_scales(dtype, scale):
             rt.memcpy_h2d(pointers[name], host, array.nbytes)
         artifact = compile_kernel(b.kernel, arch="gfx1151", backend="python")
         module = rt.load_module(artifact.hsaco)
-        signature = [{"name": param.name, "type": param.type.name} for param in b.kernel.params]
+        signature = [
+            {"name": param.name, "type": param.type.name} for param in b.kernel.params
+        ]
         args = pack_args(signature, dict(pointers, scale=scale))
-        rt.launch(module.get_function(artifact.kernel_name), (8, 1, 1), (32, 1, 1), args)
+        rt.launch(
+            module.get_function(artifact.kernel_name), (8, 1, 1), (32, 1, 1), args
+        )
         rt.sync()
         for name in ("decoded", "converted"):
             array = arrays[name]
@@ -64,7 +70,9 @@ def test_all_fp8_bytes_and_non_power_of_two_scales(dtype, scale):
             rt.memcpy_d2h(host, pointers[name], array.nbytes)
         finite = np.isfinite(expected)
         actual = arrays["decoded"]
-        np.testing.assert_array_equal(actual[finite].view(np.uint32), expected[finite].view(np.uint32))
+        np.testing.assert_array_equal(
+            actual[finite].view(np.uint32), expected[finite].view(np.uint32)
+        )
         np.testing.assert_array_equal(np.isnan(actual), ~finite)
         rounded = arrays["converted"].astype(np.float32)
         # The existing gfx1151 FP16 fptrunc normalizes -0 to +0. Decode is

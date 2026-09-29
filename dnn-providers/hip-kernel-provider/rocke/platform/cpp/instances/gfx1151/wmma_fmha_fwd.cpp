@@ -73,8 +73,9 @@ static bool wmma_valid_kv_dtype(const rocke_wmma_fmha_fwd_spec_t* spec)
 static bool wmma_valid_value_tile(const rocke_wmma_fmha_fwd_spec_t* spec)
 {
     int tile = spec->value_tile_size;
-    return tile == 0 || (tile >= 16 && tile % 16 == 0 && tile < spec->head_size
-                         && spec->head_size % tile == 0 && !spec->transposed_qk);
+    return tile == 0
+           || (tile >= 16 && tile % 16 == 0 && tile < spec->head_size && spec->head_size % tile == 0
+               && !spec->transposed_qk);
 }
 
 /* WmmaFmhaFwdSpec.kv_heads property: num_kv_heads or num_query_heads. */
@@ -141,13 +142,13 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
 {
     const char* name;
     const char* mask;
-    char h[32], hq[32], hk[32], window[32], page[32], block_n[32], waves[32], scheduler[32], value_tile[32];
+    char h[32], hq[32], hk[32], window[32], page[32], block_n[32], waves[32], scheduler[32],
+        value_tile[32];
     const char* parts[15];
     const char* dtype = wmma_dtype(spec);
 
-    if(spec == NULL || out == NULL || dtype == NULL
-       || !wmma_valid_layout(spec) || !wmma_valid_kv_dtype(spec)
-       || !rocke_scheduler_strategy_is_valid(spec->scheduler_strategy)
+    if(spec == NULL || out == NULL || dtype == NULL || !wmma_valid_layout(spec)
+       || !wmma_valid_kv_dtype(spec) || !rocke_scheduler_strategy_is_valid(spec->scheduler_strategy)
        || !wmma_valid_value_tile(spec))
     {
         return ROCKE_ERR_VALUE;
@@ -208,9 +209,14 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
         parts[num_parts++] = value_tile;
     }
     const char* flag_names[] = {"qtail", "kvtail", "softcap", "sinks", "alibi", "qqbias"};
-    const int flag_on[] = {spec->query_tail || packed, spec->kv_tail || packed,
-                          spec->use_softcap, spec->use_sinks, spec->use_alibi, spec->use_qq_bias};
-    return rocke_kernel_name_join(name, parts, num_parts, flag_names, flag_on, 6, out, out_cap, NULL);
+    const int flag_on[] = {spec->query_tail || packed,
+                           spec->kv_tail || packed,
+                           spec->use_softcap,
+                           spec->use_sinks,
+                           spec->use_alibi,
+                           spec->use_qq_bias};
+    return rocke_kernel_name_join(
+        name, parts, num_parts, flag_names, flag_on, 6, out, out_cap, NULL);
 }
 
 /* --------------------------------------------------------------------------- *
@@ -280,12 +286,17 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
     if(spec->sliding_window < 0
        || (spec->sliding_window > 0 && spec->mask_mode != ROCKE_FMHA_MASK_CAUSAL))
     {
-        wmma_set_reason(reason, reason_cap, "sliding-window attention requires a nonnegative width and causal masking");
+        wmma_set_reason(reason,
+                        reason_cap,
+                        "sliding-window attention requires a nonnegative width and causal masking");
         return false;
     }
     if(!wmma_valid_layout(spec))
     {
-        wmma_set_reason(reason, reason_cap, "layout must be dense/ragged with page size zero, or paged with a positive power-of-two page size");
+        wmma_set_reason(reason,
+                        reason_cap,
+                        "layout must be dense/ragged with page size zero, or paged with a positive "
+                        "power-of-two page size");
         return false;
     }
     if(spec->transposed_qk)
@@ -295,15 +306,20 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
            || (spec->block_n != 32 && spec->block_n != 64)
            || (spec->num_waves != 1 && spec->num_waves != 2))
         {
-            wmma_set_reason(reason, reason_cap, "transposed QK requires gfx1151 FP16 D64/D128, block_n 32/64 and one or two waves");
+            wmma_set_reason(
+                reason,
+                reason_cap,
+                "transposed QK requires gfx1151 FP16 D64/D128, block_n 32/64 and one or two waves");
             return false;
         }
-        if(strcmp(spec->layout, "dense") != 0 || spec->kv_dtype[0] != '\0'
-           || spec->query_tail || spec->kv_tail
-           || spec->v_lds_stage || spec->sliding_window || spec->use_softcap
+        if(strcmp(spec->layout, "dense") != 0 || spec->kv_dtype[0] != '\0' || spec->query_tail
+           || spec->kv_tail || spec->v_lds_stage || spec->sliding_window || spec->use_softcap
            || spec->use_sinks || spec->use_alibi || spec->use_qq_bias)
         {
-            wmma_set_reason(reason, reason_cap, "transposed QK requires aligned dense inputs without extra score features");
+            wmma_set_reason(
+                reason,
+                reason_cap,
+                "transposed QK requires aligned dense inputs without extra score features");
             return false;
         }
     }
@@ -323,11 +339,10 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
     }
 
     const bool bf16 = strcmp(dtype, "bf16") == 0;
-    const char* op_id = strcmp(arch, "gfx1201") == 0
-                           ? (bf16 ? "wmma_gfx12_f32_16x16x16_bf16"
-                                   : "wmma_gfx12_f32_16x16x16_f16")
-                           : (bf16 ? "wmma_f32_16x16x16_bf16"
-                                   : "wmma_f32_16x16x16_f16");
+    const char* op_id
+        = strcmp(arch, "gfx1201") == 0
+              ? (bf16 ? "wmma_gfx12_f32_16x16x16_bf16" : "wmma_gfx12_f32_16x16x16_f16")
+              : (bf16 ? "wmma_f32_16x16x16_bf16" : "wmma_f32_16x16x16_f16");
     op = rocke_archtarget_by_op_id(target, op_id);
     if(op == NULL || op->family == NULL || strcmp(op->family, "wmma") != 0)
     {
@@ -407,8 +422,8 @@ static void wmma_declare_params(rocke_ir_builder_t* b, const rocke_wmma_fmha_fwd
     rocke_param_opts_t opts;
     const rocke_type_t* ptr_io
         = rocke_ptr_type(b, rocke_mfma_attn_ir_type_for_dtype(b, dtype), "global");
-    const rocke_type_t* ptr_kv = spec->kv_dtype[0] != '\0'
-                                   ? rocke_ptr_type(b, rocke_fp8e4m3(), "global") : ptr_io;
+    const rocke_type_t* ptr_kv
+        = spec->kv_dtype[0] != '\0' ? rocke_ptr_type(b, rocke_fp8e4m3(), "global") : ptr_io;
 
     /* Q uses the selected 16-bit type; FP8 K/V are byte storage. */
     memset(&opts, 0, sizeof(opts));
@@ -508,9 +523,13 @@ struct wmma_score_context
     rocke_value_t* zero_i;
 };
 
-static rocke_value_t* wmma_score_transform(
-    rocke_ir_builder_t* b, rocke_value_t* score, rocke_value_t* kt, int row,
-    rocke_value_t* query_pos, rocke_value_t* key_pos, void* user)
+static rocke_value_t* wmma_score_transform(rocke_ir_builder_t* b,
+                                           rocke_value_t* score,
+                                           rocke_value_t* kt,
+                                           int row,
+                                           rocke_value_t* query_pos,
+                                           rocke_value_t* key_pos,
+                                           void* user)
 {
     (void)kt;
     (void)row;
@@ -521,7 +540,8 @@ static rocke_value_t* wmma_score_transform(
     if(c->slope != NULL || c->qq_bias != NULL)
         relative_k = rocke_b_sub(b, key_pos, c->context);
     if(c->slope != NULL)
-        score = rocke_b_fadd(b, score, rocke_b_fmul(b, c->slope, rocke_b_sitofp_f32(b, relative_k)));
+        score
+            = rocke_b_fadd(b, score, rocke_b_fmul(b, c->slope, rocke_b_sitofp_f32(b, relative_k)));
     if(c->qq_bias != NULL)
     {
         rocke_value_t* q_ok = rocke_b_cmp_lt(b, query_pos, c->qq_rows);
@@ -529,8 +549,8 @@ static rocke_value_t* wmma_score_transform(
         rocke_value_t* k_hi = rocke_b_cmp_lt(b, relative_k, c->qq_cols);
         rocke_value_t* keep = rocke_b_land(b, q_ok, rocke_b_land(b, k_lo, k_hi));
         rocke_value_t* index = rocke_b_add(b, rocke_b_mul(b, query_pos, c->qq_stride), relative_k);
-        rocke_value_t* bias = rocke_b_masked_global_load(
-            b, c->qq_bias, index, keep, c->zero_f, rocke_f32(), 4);
+        rocke_value_t* bias
+            = rocke_b_masked_global_load(b, c->qq_bias, index, keep, c->zero_f, rocke_f32(), 4);
         score = rocke_b_fadd(b, score, rocke_b_fmul(b, bias, c->log2e));
     }
     return score;
@@ -602,8 +622,10 @@ static rocke_status_t
     }
     wave = target->wave_size; /* 32 for WMMA */
 
-    rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size",
-                      wave * (spec->transposed_qk ? spec->num_waves : 1));
+    rocke_attr_set_int(b,
+                       &b->kernel->attrs,
+                       "max_workgroup_size",
+                       wave * (spec->transposed_qk ? spec->num_waves : 1));
     if(spec->scheduler_strategy != NULL)
         rocke_attr_set_str(b, &b->kernel->attrs, "scheduler_strategy", spec->scheduler_strategy);
 
@@ -642,18 +664,18 @@ static rocke_status_t
     seqlen_k = rocke_b_get_param(b, "seqlen_k");
 
     /* per-batch shifts (Python op order). */
-    rocke_value_t* q_step = spec->transposed_qk
-                               ? rocke_b_const_i32(b, ROCKE_WMMA_FMHA_FWD_BLOCK_M * spec->num_waves)
-                               : c16;
+    rocke_value_t* q_step
+        = spec->transposed_qk ? rocke_b_const_i32(b, ROCKE_WMMA_FMHA_FWD_BLOCK_M * spec->num_waves)
+                              : c16;
     q_row0 = rocke_b_mul(b, q_tile, q_step);
     const bool packed = strcmp(spec->layout, "dense") != 0;
     if(!packed)
     {
         batch_row_q = rocke_b_mul(b, batch, seqlen_q);
-        batch_off_k
-            = rocke_b_mul(b, rocke_b_mul(b, batch, seqlen_k), rocke_b_get_param(b, "stride_k_token"));
-        batch_off_v
-            = rocke_b_mul(b, rocke_b_mul(b, batch, seqlen_k), rocke_b_get_param(b, "stride_v_token"));
+        batch_off_k = rocke_b_mul(
+            b, rocke_b_mul(b, batch, seqlen_k), rocke_b_get_param(b, "stride_k_token"));
+        batch_off_v = rocke_b_mul(
+            b, rocke_b_mul(b, batch, seqlen_k), rocke_b_get_param(b, "stride_v_token"));
     }
     else
     {
@@ -708,13 +730,11 @@ static rocke_status_t
     p.dtype = wmma_dtype(spec);
     p.mask_mode = wmma_to_attn_mask(spec->mask_mode);
     p.sliding_window = spec->sliding_window;
-    p.causal_ctx_offset = spec->causal_bottom_right
-                              ? rocke_b_sub(b, seqlen_k, seqlen_q)
-                              : rocke_b_const_i32(b, 0);
+    p.causal_ctx_offset
+        = spec->causal_bottom_right ? rocke_b_sub(b, seqlen_k, seqlen_q) : rocke_b_const_i32(b, 0);
     const bool score_features = spec->use_softcap || spec->use_alibi || spec->use_qq_bias;
-    const bool strict = spec->causal_bottom_right || strcmp(p.dtype, "bf16") == 0
-                        || spec->kv_tail || spec->sliding_window > 0
-                        || score_features || spec->use_sinks || packed;
+    const bool strict = spec->causal_bottom_right || strcmp(p.dtype, "bf16") == 0 || spec->kv_tail
+                        || spec->sliding_window > 0 || score_features || spec->use_sinks || packed;
     p.mask_neg_inf = strict ? rocke_b_const_f32(b, -INFINITY) : NULL;
     wmma_score_context features{};
     features.context = p.causal_ctx_offset;
@@ -726,8 +746,8 @@ static rocke_status_t
         if(spec->use_sinks)
         {
             const rocke_type_t* elem = rocke_mfma_attn_ir_type_for_dtype(b, p.dtype);
-            rocke_value_t* value = rocke_b_global_load(
-                b, rocke_b_get_param(b, "sink_ptr"), head, elem, 2);
+            rocke_value_t* value
+                = rocke_b_global_load(b, rocke_b_get_param(b, "sink_ptr"), head, elem, 2);
             p.sink_log2 = rocke_b_fmul(b, rocke_b_cast_to_f32(b, value), features.log2e);
         }
         if(spec->use_alibi)
@@ -775,13 +795,22 @@ static rocke_status_t
         rocke_value_t* page_log2 = rocke_b_const_i32(
             b, std::countr_zero(static_cast<unsigned int>(spec->page_block_size)));
         rocke_value_t* page_mask = rocke_b_const_i32(b, spec->page_block_size - 1);
-        rocke_value_t* table_row = rocke_b_mul(b, batch, rocke_b_get_param(b, "block_table_stride"));
+        rocke_value_t* table_row
+            = rocke_b_mul(b, batch, rocke_b_get_param(b, "block_table_stride"));
         rocke_value_t* table = rocke_b_get_param(b, "block_table");
-        paged_k = {table, table_row, page_log2, page_mask,
-                   rocke_b_get_param(b, "stride_k_block"), p.stride_k_token,
+        paged_k = {table,
+                   table_row,
+                   page_log2,
+                   page_mask,
+                   rocke_b_get_param(b, "stride_k_block"),
+                   p.stride_k_token,
                    rocke_b_mul(b, kv_head, p.stride_k_head)};
-        paged_v = {table, table_row, page_log2, page_mask,
-                   rocke_b_get_param(b, "stride_v_block"), p.stride_v_token,
+        paged_v = {table,
+                   table_row,
+                   page_log2,
+                   page_mask,
+                   rocke_b_get_param(b, "stride_v_block"),
+                   p.stride_v_token,
                    rocke_b_mul(b, kv_head, p.stride_v_head)};
         p.k_row_base_fn = wmma_paged_row;
         p.k_row_base_user = &paged_k;
@@ -871,8 +900,7 @@ rocke_status_t rocke_wmma_fmha_fwd_grid(const rocke_wmma_fmha_fwd_spec_t* spec,
     if(spec->transposed_qk && spec->num_waves != 1 && spec->num_waves != 2)
         return ROCKE_ERR_VALUE;
     int block_m = ROCKE_WMMA_FMHA_FWD_BLOCK_M * (spec->transposed_qk ? spec->num_waves : 1);
-    if(strcmp(spec->layout, "dense") == 0 && !spec->query_tail
-       && seqlen_q % block_m != 0)
+    if(strcmp(spec->layout, "dense") == 0 && !spec->query_tail && seqlen_q % block_m != 0)
     {
         return ROCKE_ERR_VALUE;
     }
@@ -922,7 +950,8 @@ rocke_status_t rocke_wmma_fmha_fwd_signature(const rocke_wmma_fmha_fwd_spec_t* s
         const rocke_param_t* param = b.kernel->params[i];
         const rocke_type_t* type = param->type;
         if(type->kind == ROCKE_TYPE_PTR)
-            status = rocke_sig_param(arena, param->name, type->pointee->name, type->space, &items[i]);
+            status
+                = rocke_sig_param(arena, param->name, type->pointee->name, type->space, &items[i]);
         else
             status = rocke_sig_scalar(arena, param->name, type->name, &items[i]);
         if(status != ROCKE_OK)

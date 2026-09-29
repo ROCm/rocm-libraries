@@ -34,9 +34,13 @@ def _snapshot(source, destination):
         if not root.is_dir():
             raise FileNotFoundError(root)
         files.extend(
-            path for path in root.rglob("*")
+            path
+            for path in root.rglob("*")
             if path.is_file()
-            and not any(part == "__pycache__" or part.endswith(".egg-info") for part in path.parts)
+            and not any(
+                part == "__pycache__" or part.endswith(".egg-info")
+                for part in path.parts
+            )
             and path.suffix not in (".pyc", ".pyo")
         )
     # The package asset resolver uses these source-tree markers.
@@ -69,10 +73,16 @@ def _job_script(config, source, build, digest):
     bridge = build / "aotriton_bridge.so"
     environment = {
         "PYTHONPATH": f"{source}/platform/python:{source}/library",
-        "PYTHONNOUSERSITE": "1", "PYTHONHASHSEED": "0", "PYTHONUNBUFFERED": "1",
-        "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
-        "ROCKE_BACKEND": "python", "ROCKE_LLVM_FLAVOR": config["llvm_flavor"],
-        "ROCM_PATH": str(rocm), "ROCM_HOME": str(rocm),
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONHASHSEED": "0",
+        "PYTHONUNBUFFERED": "1",
+        "OMP_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "ROCKE_BACKEND": "python",
+        "ROCKE_LLVM_FLAVOR": config["llvm_flavor"],
+        "ROCM_PATH": str(rocm),
+        "ROCM_HOME": str(rocm),
         "ROCKE_HIP_LIB": str(rocm / "lib/libamdhip64.so"),
         "ROCKE_COMGR_LIB": str(rocm / "lib/libamd_comgr.so"),
         "LD_LIBRARY_PATH": f"{aot}/lib:{rocm}/lib",
@@ -85,16 +95,38 @@ def _job_script(config, source, build, digest):
         "assert actual == expected, 'AOTriton release archive checksum changed'"
     )
     compile_command = [
-        "hipcc", "-std=c++17", "-O2", "-fPIC", "-shared", str(bridge_source),
-        "-I" + str(aot / "include"), "-L" + str(aot / "lib"),
-        "-laotriton_v2", "-Wl,-rpath," + str(aot / "lib"), "-o", str(bridge),
+        "hipcc",
+        "-std=c++17",
+        "-O2",
+        "-fPIC",
+        "-shared",
+        str(bridge_source),
+        "-I" + str(aot / "include"),
+        "-L" + str(aot / "lib"),
+        "-laotriton_v2",
+        "-Wl,-rpath," + str(aot / "lib"),
+        "-o",
+        str(bridge),
     ]
     run_command = [
-        config["python"], "-u", "-m", "benchmarks.gfx1151.attention.benchmark_sdpa",
-        "--aotriton-shim", str(bridge), "--source-hash", digest,
+        config["python"],
+        "-u",
+        "-m",
+        "benchmarks.gfx1151.attention.benchmark_sdpa",
+        "--aotriton-shim",
+        str(bridge),
+        "--source-hash",
+        digest,
     ]
-    lines = ["#!/usr/bin/env bash", "set -euo pipefail", "umask 077", "unset HSA_OVERRIDE_GFX_VERSION"]
-    lines.extend(f"export {key}={shlex.quote(value)}" for key, value in environment.items())
+    lines = [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "umask 077",
+        "unset HSA_OVERRIDE_GFX_VERSION",
+    ]
+    lines.extend(
+        f"export {key}={shlex.quote(value)}" for key, value in environment.items()
+    )
     lines.append(shlex.join([config["python"], "-c", verify]))
     lines.append(shlex.join(["mkdir", "-p", str(build)]))
     lines.append(f"if [ ! -f {shlex.quote(str(bridge))} ]; then")
@@ -110,7 +142,15 @@ def main(argv=None):
     args = parser.parse_args(argv)
     config = json.loads(args.site.read_text(encoding="utf-8"))
     source = Path(config["source_root"]).resolve()
-    ssh = ["ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", config["ssh_host"]]
+    ssh = [
+        "ssh",
+        "-T",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=15",
+        config["ssh_host"],
+    ]
     login_root = PurePosixPath(config["login_root"])
     compute_root = PurePosixPath(config["compute_root"])
     # A run ID separates private logs, not workloads, random seeds, or measurements.
@@ -123,25 +163,40 @@ def main(argv=None):
         login_snapshot = login_root / "sources" / digest
         compute_snapshot = compute_root / "sources" / digest
         upload = (
-            "umask 077; " + shlex.join(["mkdir", "-p", str(login_snapshot), str(login_run)])
-            + " && " + shlex.join(["tar", "-xf", "-", "-C", str(login_snapshot)])
+            "umask 077; "
+            + shlex.join(["mkdir", "-p", str(login_snapshot), str(login_run)])
+            + " && "
+            + shlex.join(["tar", "-xf", "-", "-C", str(login_snapshot)])
         )
         with archive.open("rb") as data:
             subprocess.run(ssh + [upload], stdin=data, check=True)
-        job = _job_script(config, compute_snapshot / "rocke", compute_root / "build" / digest, digest)
+        job = _job_script(
+            config, compute_snapshot / "rocke", compute_root / "build" / digest, digest
+        )
         command = [
-            "sbatch", "--parsable", "--wait", "--exclusive", "--nodes=1", "--ntasks=1",
-            "--partition=" + config["partition"], "--nodelist=" + config["node"],
-            "--gres=gpu:gfx1151:1", "--cpus-per-task=" + str(config["cpus"]),
-            "--mem=" + config["memory"], "--time=" + config["job_time"],
-            "--job-name=rocke-sdpa", "--chdir=" + str(compute_snapshot / "rocke"),
+            "sbatch",
+            "--parsable",
+            "--wait",
+            "--exclusive",
+            "--nodes=1",
+            "--ntasks=1",
+            "--partition=" + config["partition"],
+            "--nodelist=" + config["node"],
+            "--gres=gpu:gfx1151:1",
+            "--cpus-per-task=" + str(config["cpus"]),
+            "--mem=" + config["memory"],
+            "--time=" + config["job_time"],
+            "--job-name=rocke-sdpa",
+            "--chdir=" + str(compute_snapshot / "rocke"),
             "--output=" + str(compute_run / "output.log"),
             "--error=" + str(compute_run / "output.log"),
         ]
         print(f"ASI source_sha256={digest}", flush=True)
         process = subprocess.Popen(
-            ssh + [shlex.join(command)], stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            ssh + [shlex.join(command)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
         )
         job_id = None
         try:

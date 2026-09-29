@@ -125,11 +125,13 @@ class WmmaFmhaFwdSpec:
     def __post_init__(self) -> None:
         from rocke.core.codegen_policy import normalize_scheduler_strategy
 
-        object.__setattr__(self, "scheduler_strategy", normalize_scheduler_strategy(self.scheduler_strategy))
+        object.__setattr__(
+            self,
+            "scheduler_strategy",
+            normalize_scheduler_strategy(self.scheduler_strategy),
+        )
         if self.dtype not in ("fp16", "f16", "bf16"):
-            raise ValueError(
-                f"WmmaFmhaFwdSpec supports fp16/bf16, got {self.dtype!r}"
-            )
+            raise ValueError(f"WmmaFmhaFwdSpec supports fp16/bf16, got {self.dtype!r}")
         if self.kv_dtype not in ("", "fp8e4m3"):
             raise ValueError("KV storage must match Q or use OCP fp8e4m3")
         if self.head_size % 16 != 0:
@@ -137,38 +139,60 @@ class WmmaFmhaFwdSpec:
                 f"head_size must be a multiple of 16, got {self.head_size}"
             )
         if self.value_tile_size and (
-            self.value_tile_size < 16 or self.value_tile_size % 16
-            or self.value_tile_size >= self.head_size or self.head_size % self.value_tile_size
+            self.value_tile_size < 16
+            or self.value_tile_size % 16
+            or self.value_tile_size >= self.head_size
+            or self.head_size % self.value_tile_size
             or self.transposed_qk
         ):
-            raise ValueError("value_tile_size must be a proper multiple-of-16 head divisor on the standard WMMA path")
+            raise ValueError(
+                "value_tile_size must be a proper multiple-of-16 head divisor on the standard WMMA path"
+            )
         if self.mask_mode not in ("none", "causal"):
             raise ValueError(
                 f"WMMA FMHA supports mask_mode 'none'/'causal', got {self.mask_mode!r}"
             )
         if self.causal_bottom_right and self.mask_mode != "causal":
             raise ValueError("bottom-right alignment requires causal masking")
-        if self.sliding_window < 0 or (self.sliding_window and self.mask_mode != "causal"):
-            raise ValueError("sliding-window attention requires a nonnegative width and causal masking")
+        if self.sliding_window < 0 or (
+            self.sliding_window and self.mask_mode != "causal"
+        ):
+            raise ValueError(
+                "sliding-window attention requires a nonnegative width and causal masking"
+            )
         if self.layout not in ("dense", "ragged", "paged"):
             raise ValueError(f"unsupported attention layout {self.layout!r}")
         if self.layout == "paged":
-            if self.page_block_size <= 0 or self.page_block_size & (self.page_block_size - 1):
-                raise ValueError("paged attention requires a positive power-of-two page size")
+            if self.page_block_size <= 0 or self.page_block_size & (
+                self.page_block_size - 1
+            ):
+                raise ValueError(
+                    "paged attention requires a positive power-of-two page size"
+                )
         elif self.page_block_size:
             raise ValueError("page_block_size is only valid for paged attention")
         if self.transposed_qk:
             if self.dtype not in ("fp16", "f16") or self.head_size not in (64, 128):
                 raise ValueError("transposed QK supports FP16 D64/D128")
             if self.block_n not in (32, 64) or self.num_waves not in (1, 2):
-                raise ValueError("transposed QK requires block_n 32/64 and one or two waves")
+                raise ValueError(
+                    "transposed QK requires block_n 32/64 and one or two waves"
+                )
             if (
-                self.layout != "dense" or self.kv_dtype
-                or self.query_tail or self.kv_tail or self.v_lds_stage
-                or self.sliding_window or self.use_softcap or self.use_sinks
-                or self.use_alibi or self.use_qq_bias
+                self.layout != "dense"
+                or self.kv_dtype
+                or self.query_tail
+                or self.kv_tail
+                or self.v_lds_stage
+                or self.sliding_window
+                or self.use_softcap
+                or self.use_sinks
+                or self.use_alibi
+                or self.use_qq_bias
             ):
-                raise ValueError("transposed QK requires aligned dense inputs without extra score features")
+                raise ValueError(
+                    "transposed QK requires aligned dense inputs without extra score features"
+                )
         elif self.block_n != 32 or self.num_waves != 1:
             raise ValueError("block_n and num_waves are transposed-QK options")
         if self.num_kv_heads and self.num_query_heads % self.num_kv_heads != 0:
@@ -213,13 +237,19 @@ class WmmaFmhaFwdSpec:
             f"kv{self.kv_dtype}" if self.kv_dtype else "",
             f"bn{self.block_n}" if self.transposed_qk else "",
             f"w{self.num_waves}" if self.transposed_qk else "",
-            "sched_" + self.scheduler_strategy.replace("-", "_") if self.scheduler_strategy else "",
+            (
+                "sched_" + self.scheduler_strategy.replace("-", "_")
+                if self.scheduler_strategy
+                else ""
+            ),
             f"dv{self.value_tile_size}" if self.value_tile_size else "",
             flags={
                 "qtail": self.query_tail or self.layout != "dense",
                 "kvtail": self.kv_tail or self.layout != "dense",
-                "softcap": self.use_softcap, "sinks": self.use_sinks,
-                "alibi": self.use_alibi, "qqbias": self.use_qq_bias,
+                "softcap": self.use_softcap,
+                "sinks": self.use_sinks,
+                "alibi": self.use_alibi,
+                "qqbias": self.use_qq_bias,
             },
         )
 
@@ -311,32 +341,52 @@ def _declare_params(b: IRBuilder, spec: WmmaFmhaFwdSpec):
     if spec.use_softcap:
         params["softcap"] = b.param("softcap", F32)
     if spec.use_sinks:
-        params["sink_ptr"] = b.param("sink_ptr", PtrType(elem, "global"), readonly=True, align=2)
+        params["sink_ptr"] = b.param(
+            "sink_ptr", PtrType(elem, "global"), readonly=True, align=2
+        )
     if spec.use_alibi:
         params["alibi_slopes_ptr"] = b.param(
-            "alibi_slopes_ptr", PtrType(F32, "global"), readonly=True, align=4,
+            "alibi_slopes_ptr",
+            PtrType(F32, "global"),
+            readonly=True,
+            align=4,
         )
     if spec.use_qq_bias:
         params["qq_bias_ptr"] = b.param(
-            "qq_bias_ptr", PtrType(F32, "global"), readonly=True, align=4,
+            "qq_bias_ptr",
+            PtrType(F32, "global"),
+            readonly=True,
+            align=4,
         )
         params["qq_bias_rows"] = b.param("qq_bias_rows", I32)
         params["qq_bias_cols"] = b.param("qq_bias_cols", I32)
         params["qq_bias_stride"] = b.param("qq_bias_stride", I32)
     if spec.layout != "dense":
         params["cu_seqlens_q"] = b.param(
-            "cu_seqlens_q", PtrType(I32, "global"), readonly=True, align=4,
+            "cu_seqlens_q",
+            PtrType(I32, "global"),
+            readonly=True,
+            align=4,
         )
         if spec.layout == "ragged":
             params["cu_seqlens_k"] = b.param(
-                "cu_seqlens_k", PtrType(I32, "global"), readonly=True, align=4,
+                "cu_seqlens_k",
+                PtrType(I32, "global"),
+                readonly=True,
+                align=4,
             )
         else:
             params["seqused_k"] = b.param(
-                "seqused_k", PtrType(I32, "global"), readonly=True, align=4,
+                "seqused_k",
+                PtrType(I32, "global"),
+                readonly=True,
+                align=4,
             )
             params["block_table"] = b.param(
-                "block_table", PtrType(I32, "global"), readonly=True, align=4,
+                "block_table",
+                PtrType(I32, "global"),
+                readonly=True,
+                align=4,
             )
             params["block_table_stride"] = b.param("block_table_stride", I32)
             params["stride_k_block"] = b.param("stride_k_block", I32)
@@ -355,30 +405,46 @@ def _score_features(b, spec, params, head, context):
     sink = None
     if spec.use_sinks:
         elem = BF16 if spec.dtype == "bf16" else F16
-        sink = b.fmul(b.cast_to_f32(b.global_load(params["sink_ptr"], head, elem, align=2)), log2e)
+        sink = b.fmul(
+            b.cast_to_f32(b.global_load(params["sink_ptr"], head, elem, align=2)), log2e
+        )
     slope = None
     if spec.use_alibi:
-        slope = b.fmul(b.global_load(params["alibi_slopes_ptr"], head, F32, align=4), log2e)
+        slope = b.fmul(
+            b.global_load(params["alibi_slopes_ptr"], head, F32, align=4), log2e
+        )
     zero_f = b.const_f32(0.0) if spec.use_qq_bias else None
     zero_i = b.const_i32(0) if spec.use_qq_bias else None
 
     def transform(builder, score, _kt, _row, query_pos, key_pos):
         if cap is not None:
             score = builder.fmul(cap, builder.tanh(builder.fdiv(score, cap)))
-        relative_k = builder.sub(key_pos, context) if slope is not None or spec.use_qq_bias else None
+        relative_k = (
+            builder.sub(key_pos, context)
+            if slope is not None or spec.use_qq_bias
+            else None
+        )
         if slope is not None:
-            score = builder.fadd(score, builder.fmul(slope, builder.sitofp_f32(relative_k)))
+            score = builder.fadd(
+                score, builder.fmul(slope, builder.sitofp_f32(relative_k))
+            )
         if spec.use_qq_bias:
             q_ok = builder.cmp_lt(query_pos, params["qq_bias_rows"])
             k_lo = builder.cmp_ge(relative_k, zero_i)
             k_hi = builder.cmp_lt(relative_k, params["qq_bias_cols"])
             keep = builder.land(q_ok, builder.land(k_lo, k_hi))
-            index = builder.add(builder.mul(query_pos, params["qq_bias_stride"]), relative_k)
-            bias = builder.masked_global_load(params["qq_bias_ptr"], index, keep, zero_f, F32, align=4)
+            index = builder.add(
+                builder.mul(query_pos, params["qq_bias_stride"]), relative_k
+            )
+            bias = builder.masked_global_load(
+                params["qq_bias_ptr"], index, keep, zero_f, F32, align=4
+            )
             score = builder.fadd(score, builder.fmul(bias, log2e))
         return score
 
-    return transform if spec.use_softcap or spec.use_alibi or spec.use_qq_bias else None, sink
+    return (
+        transform if spec.use_softcap or spec.use_alibi or spec.use_qq_bias else None
+    ), sink
 
 
 def _window_tiles(b, width, query_start, query_length, key_length, context, tile):
@@ -412,18 +478,25 @@ def _paged_rows(b, spec, params, batch, kv_head):
             logical_block = b.lshr(token, page_log2)
             page_token = b.land(token, page_mask)
             physical_block = b.global_load_i32(
-                params["block_table"], b.add(table_row, logical_block),
+                params["block_table"],
+                b.add(table_row, logical_block),
             )
             return b.add(
-                b.add(b.mul(physical_block, stride_block), b.mul(page_token, stride_token)),
+                b.add(
+                    b.mul(physical_block, stride_block), b.mul(page_token, stride_token)
+                ),
                 head_offset,
             )
 
         return row
 
     return (
-        rows(params["stride_k_block"], params["stride_k_token"], params["stride_k_head"]),
-        rows(params["stride_v_block"], params["stride_v_token"], params["stride_v_head"]),
+        rows(
+            params["stride_k_block"], params["stride_k_token"], params["stride_k_head"]
+        ),
+        rows(
+            params["stride_v_block"], params["stride_v_token"], params["stride_v_head"]
+        ),
     )
 
 
@@ -450,8 +523,12 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
     wave = target.wave_size  # 32 for WMMA
 
     b = IRBuilder(spec.kernel_name())
-    b.kernel.attrs["max_workgroup_size"] = wave * (spec.num_waves if spec.transposed_qk else 1)
-    apply_codegen_policy(b.kernel, CodegenPolicy(scheduler_strategy=spec.scheduler_strategy))
+    b.kernel.attrs["max_workgroup_size"] = wave * (
+        spec.num_waves if spec.transposed_qk else 1
+    )
+    apply_codegen_policy(
+        b.kernel, CodegenPolicy(scheduler_strategy=spec.scheduler_strategy)
+    )
     p = _declare_params(b, spec)
 
     c16 = b.const_i32(16)
@@ -509,14 +586,26 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
     q_global = b.add(q_row0, batch_row_q)
     context = b.sub(seqlen_k, seqlen_q) if spec.causal_bottom_right else b.const_i32(0)
     strict = (
-        spec.causal_bottom_right or spec.dtype == "bf16" or spec.kv_tail
-        or spec.sliding_window or spec.use_softcap or spec.use_sinks
-        or spec.use_alibi or spec.use_qq_bias or spec.layout != "dense"
+        spec.causal_bottom_right
+        or spec.dtype == "bf16"
+        or spec.kv_tail
+        or spec.sliding_window
+        or spec.use_softcap
+        or spec.use_sinks
+        or spec.use_alibi
+        or spec.use_qq_bias
+        or spec.layout != "dense"
     )
     masked = b.const_f32(float("-inf")) if strict else None
     score_transform, sink = _score_features(b, spec, p, head, context)
     tile_start, tile_stop = _window_tiles(
-        b, spec.sliding_window, q_row0, seqlen_q, seqlen_k, context, c16,
+        b,
+        spec.sliding_window,
+        q_row0,
+        seqlen_q,
+        seqlen_k,
+        context,
+        c16,
     )
     k_row, v_row = (None, None)
     if spec.layout == "paged":
@@ -526,16 +615,32 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         from rocke.helpers.wmma_swapqk import wmma_swapqk_fwd_inner_body
 
         wmma_swapqk_fwd_inner_body(
-            b, Q=p["Q"], K=p["K"], V=p["V"], O=p["O"],
-            head_size=spec.head_size, seqlen_k=seqlen_k,
-            q_tile_base=q_global, q_pos_base=q_row0, head_idx=head, kv_head_idx=kv_head,
-            stride_q_token=p["stride_q_token"], stride_q_head=p["stride_q_head"],
-            stride_k_token=p["stride_k_token"], stride_k_head=p["stride_k_head"],
-            stride_v_token=p["stride_v_token"], stride_v_head=p["stride_v_head"],
-            stride_o_token=p["stride_o_token"], stride_o_head=p["stride_o_head"],
-            scale_log2=p["scale_log2"], k_token_offset_elems=batch_off_k,
-            v_token_offset_elems=batch_off_v, mask_mode=spec.mask_mode,
-            block_n=spec.block_n, n_waves=spec.num_waves, arch=arch,
+            b,
+            Q=p["Q"],
+            K=p["K"],
+            V=p["V"],
+            O=p["O"],
+            head_size=spec.head_size,
+            seqlen_k=seqlen_k,
+            q_tile_base=q_global,
+            q_pos_base=q_row0,
+            head_idx=head,
+            kv_head_idx=kv_head,
+            stride_q_token=p["stride_q_token"],
+            stride_q_head=p["stride_q_head"],
+            stride_k_token=p["stride_k_token"],
+            stride_k_head=p["stride_k_head"],
+            stride_v_token=p["stride_v_token"],
+            stride_v_head=p["stride_v_head"],
+            stride_o_token=p["stride_o_token"],
+            stride_o_head=p["stride_o_head"],
+            scale_log2=p["scale_log2"],
+            k_token_offset_elems=batch_off_k,
+            v_token_offset_elems=batch_off_v,
+            mask_mode=spec.mask_mode,
+            block_n=spec.block_n,
+            n_waves=spec.num_waves,
+            arch=arch,
             causal_ctx_offset=context if spec.causal_bottom_right else None,
             mask_neg_inf=masked,
         )
@@ -599,11 +704,17 @@ def wmma_fmha_fwd_grid(spec: WmmaFmhaFwdSpec, *, seqlen_q: int, batch: int):
         raise ValueError(f"seqlen_q {seqlen_q} must be a multiple of {block_m}")
     if spec.value_tile_size and not 0 <= batch <= 0x7FFFFFFF // spec.value_tiles:
         raise ValueError("batch/output-tile grid does not fit I32")
-    return ((seqlen_q + block_m - 1) // block_m, spec.num_query_heads, batch * spec.value_tiles)
+    return (
+        (seqlen_q + block_m - 1) // block_m,
+        spec.num_query_heads,
+        batch * spec.value_tiles,
+    )
 
 
 def wmma_fmha_fwd_signature(spec: WmmaFmhaFwdSpec):
     """Return the specialized ABI without emitting the attention body."""
     b = IRBuilder(spec.kernel_name())
     _declare_params(b, spec)
-    return tuple({"name": param.name, "type": param.type.name} for param in b.kernel.params)
+    return tuple(
+        {"name": param.name, "type": param.type.name} for param in b.kernel.params
+    )

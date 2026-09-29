@@ -756,7 +756,8 @@ def mfma_attention_fwd_inner_body(
             # score to -inf so the softmax exponential collapses to 0.
             if keep_tile is not None:
                 s_r_scaled = b.select(
-                    keep_tile, s_r_scaled,
+                    keep_tile,
+                    s_r_scaled,
                     mask_neg_inf if mask_neg_inf is not None else neg_inf,
                 )
             # 16-lane row-max reduce via the distribution-driven
@@ -961,7 +962,8 @@ def _load_wmma_fp8(b, source, address, count, scale, dtype):
     raw = b.global_load_vN(source, address, FP8E4M3, count, align=count)
     values = [
         b.cast_f32_to(
-            b.fmul(decode_fp8e4m3fn_to_f32(b, b.vec_extract(raw, i)), scale), dtype,
+            b.fmul(decode_fp8e4m3fn_to_f32(b, b.vec_extract(raw, i)), scale),
+            dtype,
         )
         for i in range(count)
     ]
@@ -1000,7 +1002,9 @@ def _wmma_attention_fwd_inner_body(
     v_row_base_fn: Optional[Callable[[IRBuilder, Value], Value]],
     k_tile_start: Optional[Value],
     k_tile_stop: Optional[Value],
-    extra_score_transform: Optional[Callable[[IRBuilder, Value, Value, int, Value, Value], Value]],
+    extra_score_transform: Optional[
+        Callable[[IRBuilder, Value, Value, int, Value, Value], Value]
+    ],
     extra_mask_predicate: Optional[Callable[[IRBuilder, Value], Value]],
     extra_skip_predicate: Optional[Callable[[IRBuilder, Value], Value]],
     k_block_iter_fn: Optional[Callable[[IRBuilder, Value], Value]],
@@ -1047,7 +1051,9 @@ def _wmma_attention_fwd_inner_body(
     n_dk = head_size // 16
     value_head_size = value_tile_size or head_size
     if value_head_size <= 0 or value_head_size > head_size or value_head_size % 16:
-        raise ValueError("WMMA value tile must be a positive multiple of 16 within the head")
+        raise ValueError(
+            "WMMA value tile must be a positive multiple of 16 within the head"
+        )
     n_dv = value_head_size // 16
 
     # Row reduction across the 16 lanes that share one accumulator row. The
@@ -1108,7 +1114,9 @@ def _wmma_attention_fwd_inner_body(
 
     k_zero = b.zero_vec(dtype_ir, a_frag) if kv_tail else None
     v_zero = b.zero_vec(dtype_ir, 8) if kv_tail and v_lds_stage else None
-    v_zero_scalar = b.cast_f32_to(zero_f, dtype_ir) if kv_tail and not v_lds_stage else None
+    v_zero_scalar = (
+        b.cast_f32_to(zero_f, dtype_ir) if kv_tail and not v_lds_stage else None
+    )
 
     # ---- LDS staging tiles ----
     # P_lds transposes the score acc layout -> the PV A-operand layout.
@@ -1137,7 +1145,9 @@ def _wmma_attention_fwd_inner_body(
     if k_tile_stop is not None:
         loop_stop = k_tile_stop
     elif kv_tail:
-        loop_stop = b.div(b.add(seqlen_k, b.const_i32(MFMA_ATTN_BLOCK_K - 1)), c_block_k)
+        loop_stop = b.div(
+            b.add(seqlen_k, b.const_i32(MFMA_ATTN_BLOCK_K - 1)), c_block_k
+        )
     else:
         loop_stop = b.div(seqlen_k, c_block_k)
 
@@ -1223,15 +1233,21 @@ def _wmma_attention_fwd_inner_body(
             )
             if mask_mode == "causal" and sliding_window > 0:
                 s_r = apply_attention_mask(
-                    b, s_r, mask_mode="sliding_window", k_idx=k_col_pos,
-                    query_pos=row_q_pos, sliding_window=sliding_window,
-                    context_len=causal_ctx_offset, neg_inf=mask_neg_inf,
+                    b,
+                    s_r,
+                    mask_mode="sliding_window",
+                    k_idx=k_col_pos,
+                    query_pos=row_q_pos,
+                    sliding_window=sliding_window,
+                    context_len=causal_ctx_offset,
+                    neg_inf=mask_neg_inf,
                 )
             if kv_tail:
                 s_r = b.select(b.cmp_lt(k_col_pos, seqlen_k), s_r, neg_inf)
             if keep_tile is not None:
                 s_r = b.select(
-                    keep_tile, s_r,
+                    keep_tile,
+                    s_r,
                     mask_neg_inf if mask_neg_inf is not None else neg_inf,
                 )
             # Per-row reduce across the 16 k-columns of this wave32 half. The
@@ -1280,11 +1296,20 @@ def _wmma_attention_fwd_inner_body(
             for e in range(value_head_size // 8):
                 if fp8_kv:
                     v_g = _load_wmma_fp8(
-                        b, V, b.add(v_stage_base, b.const_i32(e * 8)), 8, v_scale, dtype_ir,
+                        b,
+                        V,
+                        b.add(v_stage_base, b.const_i32(e * 8)),
+                        8,
+                        v_scale,
+                        dtype_ir,
                     )
                 else:
                     v_g = b.global_load_vN(
-                        V, b.add(v_stage_base, b.const_i32(e * 8)), dtype_ir, 8, align=16
+                        V,
+                        b.add(v_stage_base, b.const_i32(e * 8)),
+                        dtype_ir,
+                        8,
+                        align=16,
                     )
                 if k_valid is not None:
                     v_g = b.select(k_valid, v_g, v_zero)
@@ -1313,7 +1338,9 @@ def _wmma_attention_fwd_inner_body(
             p_a = b.vec_insert(p_a, p_v, j)
 
         for d in range(n_dv):
-            d_col = b.add(b.const_i32(d * 16), col)  # local LDS column, or global V column below
+            d_col = b.add(
+                b.const_i32(d * 16), col
+            )  # local LDS column, or global V column below
             if not v_lds_stage and value_offset is not None:
                 d_col = b.add(d_col, value_offset)
             v_b = b.zero_vec(dtype_ir, a_frag)
@@ -1353,9 +1380,12 @@ def _wmma_attention_fwd_inner_body(
                             v_off,
                         )
                     if fp8_kv:
-                        raw = b.global_load(V, b.add(v_row_base, d_col), FP8E4M3, align=1)
+                        raw = b.global_load(
+                            V, b.add(v_row_base, d_col), FP8E4M3, align=1
+                        )
                         v_elem = b.cast_f32_to(
-                            b.fmul(decode_fp8e4m3fn_to_f32(b, raw), v_scale), dtype_ir,
+                            b.fmul(decode_fp8e4m3fn_to_f32(b, raw), v_scale),
+                            dtype_ir,
                         )
                     else:
                         v_elem = b.global_load(
