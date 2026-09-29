@@ -39,14 +39,15 @@ namespace {
 
 constexpr std::array<int, 3> kGfx1250 = {12, 5, 0};
 
-SchedulingFeatures makeFeatures(int wmma, int ds, int firstWmmaLatency = 0,
-                                int sumWmmaLatency = 0) {
+SchedulingFeatures makeFeatures(int wmma, int ds, int firstWmmaLatency = 0, int sumWmmaLatency = 0,
+                                int dsLoadLatency = 0) {
     SchedulingFeatures features;
     features.arch = kGfx1250;
     features.stats.wmmaCount = wmma;
     features.stats.dsLoadCount = ds;
     features.stats.firstWmmaLatencyCycles = firstWmmaLatency;
     features.stats.sumWmmaLatencyCycles = sumWmmaLatency;
+    features.stats.dsLoadLatencyCycles = dsLoadLatency;
     return features;
 }
 
@@ -157,6 +158,19 @@ TEST(SchedulingKnobHeuristics, ThrottleClampedSoEveryDsLoadCanIssue) {
     EXPECT_EQ(resolved.dsReadThrottleLatencySource, SchedulingKnobSource::Policy);
 }
 
+TEST(SchedulingKnobHeuristics, ThrottleFinishBudgetAddsOneDsLoadLatency) {
+    HeuristicSchedulingKnobPolicy policy;
+    SchedulingKnobOverrides overrides;
+    // Same shape as ThrottleClampedSoEveryDsLoadCanIssue, plus one ds_load
+    // latency of 16. cycles per ds = (64+16)/16=5, finish budget=5*16=80.
+    // The arch floor 72 is under that budget, so it is no longer clamped to 64.
+    const SchedulingFeatures features = makeFeatures(
+        /*wmma=*/4, /*ds=*/16, /*firstWmmaLatency=*/3, /*sumWmmaLatency=*/64,
+        /*dsLoadLatency=*/16);
+    const ResolvedSchedulingKnobs resolved = resolveSchedulingKnobs(features, overrides, policy);
+    EXPECT_EQ(resolved.dsReadThrottleLatency, 72);
+}
+
 TEST(SchedulingKnobHeuristics, ThrottleKeepsComputedValueBelowFinishBudget) {
     HeuristicSchedulingKnobPolicy policy;
     SchedulingKnobOverrides overrides;
@@ -167,13 +181,25 @@ TEST(SchedulingKnobHeuristics, ThrottleKeepsComputedValueBelowFinishBudget) {
     EXPECT_EQ(resolved.dsReadThrottleLatency, 160);
 }
 
+TEST(SchedulingKnobHeuristics, ThrottleFinishBudgetKeepsFractionalCycles) {
+    HeuristicSchedulingKnobPolicy policy;
+    SchedulingKnobOverrides overrides;
+    // Integer (568/162)*16 is 3*16=48. Float 568/162*16 is 56.09, truncated
+    // to 56, which replaces the arch floor 72.
+    const SchedulingFeatures features = makeFeatures(
+        /*wmma=*/128, /*ds=*/162, /*firstWmmaLatency=*/4, /*sumWmmaLatency=*/512,
+        /*dsLoadLatency=*/56);
+    const ResolvedSchedulingKnobs resolved = resolveSchedulingKnobs(features, overrides, policy);
+    EXPECT_EQ(resolved.dsReadThrottleLatency, 56);
+}
+
 TEST(SchedulingKnobHeuristics, ThrottleBudgetOfZeroUsesSmallestHonoredValue) {
     HeuristicSchedulingKnobPolicy policy;
     SchedulingKnobOverrides overrides;
-    // sum/ds truncates to 0, so the finish budget is 0. 1 is the smallest
-    // positive throttle the accessor will not replace with the arch floor.
+    // (1/10000)*16 is 0.0016 and truncates to 0. 1 is the smallest positive
+    // throttle the accessor will not replace with the arch floor.
     const SchedulingFeatures features =
-        makeFeatures(/*wmma=*/4, /*ds=*/16, /*firstWmmaLatency=*/32, /*sumWmmaLatency=*/8);
+        makeFeatures(/*wmma=*/4, /*ds=*/10000, /*firstWmmaLatency=*/32, /*sumWmmaLatency=*/1);
     const ResolvedSchedulingKnobs resolved = resolveSchedulingKnobs(features, overrides, policy);
     EXPECT_EQ(resolved.dsReadThrottleLatency, 1);
 }

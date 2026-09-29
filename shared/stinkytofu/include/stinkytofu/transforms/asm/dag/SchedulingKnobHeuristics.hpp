@@ -69,6 +69,9 @@ struct SchedulingIRStats {
     int sumWmmaLatencyCycles = 0;
     /// `latencyCycles` of the first main-loop matrix instruction (0 if none).
     int firstWmmaLatencyCycles = 0;
+    /// `latencyCycles` of the first main-loop ds_load (0 if none). Used by the
+    /// throttle finish budget. gfx1250 `ds_load_b128` is 56.
+    int dsLoadLatencyCycles = 0;
     /// ds_loads in `loopWithPrefetch` whose dest VGPR overlaps the src VGPR of
     /// any matrix instruction earlier in that group. Program order, one count
     /// per ds_load. Does not affect the knob formulas.

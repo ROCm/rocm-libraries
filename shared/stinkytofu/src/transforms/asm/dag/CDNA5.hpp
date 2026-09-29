@@ -1272,9 +1272,8 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
             }
         }
         const bool outOfWmmaWindow = activeWmmaLatency_ <= 0 && dsReadThrottleWait() == 0;
-        return outOfWmmaWindow ||
-               (schedulingPos < activeWmmaLatency_ &&
-                throttleWait + dsIssueCost(*node->inst) <= schedulingSpace);
+        return outOfWmmaWindow || (schedulingPos < activeWmmaLatency_ &&
+                                   throttleWait + dsIssueCost(*node->inst) <= schedulingSpace);
     };
     DAGNode* dsCand = nullptr;
     int dsWait = 0;

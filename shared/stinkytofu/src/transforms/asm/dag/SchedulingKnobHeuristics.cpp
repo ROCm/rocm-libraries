@@ -93,6 +93,7 @@ SchedulingIRStats countMainLoopSchedulingIRStats(const StinkyAsmModule& module) 
             collectVgprIndices(inst->getSrcRegs(), priorWmmaSrcVgpr);
             priorWmmaSrcs.push_back(std::move(srcVgpr));
         } else if (isDSRead(*inst)) {
+            if (stats.dsLoadCount == 0) stats.dsLoadLatencyCycles = inst->latencyCycles;
             ++stats.dsLoadCount;
             const bool overlaps = destVgprHits(*inst, priorWmmaSrcVgpr);
             if (overlaps) ++stats.dsLoadDestOverlapsPriorWmmaSrc;
@@ -188,10 +189,12 @@ ResolvedSchedulingKnobs HeuristicSchedulingKnobPolicy::propose(const SchedulingF
     // ceil ratio, then (firstWmmaLatency / perCap) * queueDepth, floored at
     // the arch's static readThrottleLatency (72 on gfx1250; queueDepth is 16).
     // A saturated queue issues one ds_read every dsReadThrottleLatency/queueDepth
-    // cycles. The main loop only has sumWmmaLatencyCycles/dsLoadCount cycles per
-    // ds_load, so a throttle above (sum/ds)*queueDepth cannot issue every load.
-    // That budget wins over the arch floor. Zero (sum < ds) becomes 1, the
-    // smallest value dsReadThrottleLatency() honors instead of falling back.
+    // cycles. The issue window is the WMMA latency sum plus one ds_load
+    // latency. Divide in float so the remainder survives the multiply by
+    // queueDepth, then truncate to an int throttle. A throttle above that
+    // budget cannot issue every load, so it wins over the arch floor. A
+    // product that truncates to 0 becomes 1, the smallest value
+    // dsReadThrottleLatency() honors instead of the arch floor.
     const int perCapForThrottle = std::min(perCapCeiling, ceilDivPositive(ds, wmma));
     const int queueDepth = std::max(1, hw.lds.readQueueDepth);
     const int throttleFloor =
@@ -201,7 +204,10 @@ ResolvedSchedulingKnobs HeuristicSchedulingKnobPolicy::propose(const SchedulingF
     int throttle = std::max(throttleFloor, computedThrottle);
     const int sumWmmaLatency = std::max(0, features.stats.sumWmmaLatencyCycles);
     if (sumWmmaLatency > 0) {
-        const int finishBudget = (sumWmmaLatency / ds) * queueDepth;
+        const int dsLoadLatency = std::max(0, features.stats.dsLoadLatencyCycles);
+        const float cyclesPerDs =
+            static_cast<float>(sumWmmaLatency - dsLoadLatency) / static_cast<float>(ds);
+        const int finishBudget = static_cast<int>(cyclesPerDs * static_cast<float>(queueDepth));
         if (throttle > finishBudget) throttle = std::max(1, finishBudget);
     }
     out.dsReadThrottleLatency = throttle;
@@ -301,6 +307,7 @@ void logResolvedSchedulingKnobs(std::ostream& os, std::string_view moduleName,
        << " dsOverlapsPriorWmmaSrc=" << features.stats.dsLoadDestOverlapsPriorWmmaSrc
        << " firstWmmaLat=" << features.stats.firstWmmaLatencyCycles
        << " sumWmmaLat=" << features.stats.sumWmmaLatencyCycles
+       << " dsLoadLat=" << features.stats.dsLoadLatencyCycles
        << " dsReadThrottleLatency=" << resolved.dsReadThrottleLatency << "("
        << schedulingKnobSourceName(resolved.dsReadThrottleLatencySource) << ")"
        << " dsReadPerCap=" << resolved.dsReadPerCap << "("
