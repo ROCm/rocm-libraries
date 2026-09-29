@@ -8,6 +8,10 @@ specs and compares against a checked-in per-flavor golden fixture, catching any
 unintended codegen drift across the P1-P4 lever set. Pure text lowering -- no GPU / no
 comgr required.
 
+Every flavor in ``LLVM_FLAVORS`` is checked from any host, through the shared
+``rocke.core.ir_golden`` comparator, so a newly added flavor fails here until the
+fixture is re-blessed.
+
 Covers the acceptance matrix: D64/D128 x bf16/fp16 x default/persistent x GQA, causal
 and full. Every case is in the gfx942 supported set (varlen / ragged / sliding-window
 are rejected on gfx942, so -- unlike the gfx950 sibling -- they are absent here).
@@ -47,7 +51,6 @@ from pathlib import Path
 _GOLDEN = (
     Path(__file__).resolve().parent / "golden" / "attention_dense_gfx942_ir_sha256.json"
 )
-_FLAVORS = ("llvm20", "llvm22")
 _ARCH = "gfx942"
 
 # Pin the ``library/`` root ahead of everything on sys.path. When this file is run
@@ -202,12 +205,6 @@ def _cases():
     }
 
 
-def _current_flavor():
-    from rocke.core.lower_llvm import _resolve_llvm_flavor
-
-    return _resolve_llvm_flavor()
-
-
 def _sha_for(build, flavor):
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
@@ -216,38 +213,38 @@ def _sha_for(build, flavor):
     return hashlib.sha256(data).hexdigest(), len(data)
 
 
+def _run(flavor, *, record_errors=False):
+    """One flavor's golden sub-document. The test lets a build error propagate
+    with its traceback; ``--write`` records it in the fixture instead."""
+    cases = {}
+    for cid, build in _cases().items():
+        try:
+            sha, nbytes = _sha_for(build, flavor)
+        except Exception as e:  # pragma: no cover - diagnostic
+            if not record_errors:
+                raise
+            cases[cid] = {"error": str(e)[:160]}
+            continue
+        cases[cid] = {"sha256": sha, "bytes": nbytes}
+    return {"cases": cases}
+
+
 def _build_doc():
-    doc = {"schema": "attention_dense_gfx942.ir_golden_sha256/v1", "flavors": {}}
-    for flavor in _FLAVORS:
-        cases = {}
-        for cid, build in _cases().items():
-            try:
-                sha, nbytes = _sha_for(build, flavor)
-                cases[cid] = {"sha256": sha, "bytes": nbytes}
-            except Exception as e:  # pragma: no cover - diagnostic
-                cases[cid] = {"error": str(e)[:160]}
-        doc["flavors"][flavor] = {"cases": cases}
-    return doc
+    from rocke.core.ir_golden import GOLDEN_FLAVORS
+
+    return {
+        "schema": "attention_dense_gfx942.ir_golden_sha256/v1",
+        "flavors": {fl: _run(fl, record_errors=True) for fl in GOLDEN_FLAVORS},
+    }
 
 
 def test_attention_dense_gfx942_ir_matches_golden():
     import pytest
+    from rocke.core.ir_golden import check_golden
 
     if not _GOLDEN.exists():
         pytest.skip("gfx942 golden fixture missing; generate with --write")
-    golden = json.loads(_GOLDEN.read_text())
-    flavor = _current_flavor()
-    gflav = golden.get("flavors", {}).get(flavor)
-    if not gflav:
-        pytest.skip(f"no gfx942 golden recorded for llvm flavor {flavor!r}")
-    drift = []
-    for cid, build in _cases().items():
-        want = gflav["cases"].get(cid, {}).get("sha256")
-        if want is None:
-            continue
-        got, _ = _sha_for(build, flavor)
-        if got != want:
-            drift.append(f"{cid}: {want} -> {got}")
+    drift = check_golden(_GOLDEN, _run)
     assert not drift, "gfx942 attention_dense IR drift vs golden:\n  " + "\n  ".join(
         drift
     )

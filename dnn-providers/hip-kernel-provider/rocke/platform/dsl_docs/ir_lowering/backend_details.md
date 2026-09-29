@@ -61,7 +61,7 @@ Resolution is *lazy and import-order-robust*: `_LLVM_FLAVOR` stays `None` at mod
 
 Tests / callers who need a specific flavor pass `lower_kernel_to_llvm(kernel, llvm_flavor=LLVM_FLAVOR_LLVM20)` (or `LLVM_FLAVOR_LLVM22` / `LLVM_FLAVOR_LLVM23`). All three constants live in `core/lower_llvm.py`. Adding a new intrinsic that changes shape across versions: add the LLVM 20 signature to `_INTRINSIC_DECLS`, the LLVM 21+ override to `_INTRINSIC_DECLS_LLVM22_OVERRIDES` (and to `_INTRINSIC_DECLS_LLVM23_OVERRIDES` if LLVM 23 differs again — it currently just copies the llvm22 table), and branch on `self._flavor` inside the `_op_*` handler (see `_op_tile_buffer_rsrc` and `_lower_mfma_fp8_bf8` for working examples). Prefer `_is_modern_flavor(self._flavor)` over naming flavors in the branch: `test_no_hand_rolled_flavor_membership_lists` rejects a literal listing two or more flavor constants, because that is the shape that silently left `llvm23` out.
 
-The committed golden (`tests/golden/rocke_representative_ir_sha256.json`) holds one sub-document per flavor and `check_golden` verifies **all** of them from any host, so an llvm23 hash cannot go stale just because CI runs on ROCm 7.2.
+The committed golden (`tests/golden/rocke_representative_ir_sha256.json`) holds one sub-document per flavor and `check_golden` verifies **all** of them from any host, so an llvm23 hash cannot go stale just because CI runs on ROCm 7.2. The comparator lives in `core/ir_golden.py` and takes its flavor list straight from `LLVM_FLAVORS`, so adding a flavor fails every golden that uses it (this one and the library's gfx942 `attention_dense` fixture) until they are re-blessed, with no golden-test edit.
 
 ## Wave Size
 
