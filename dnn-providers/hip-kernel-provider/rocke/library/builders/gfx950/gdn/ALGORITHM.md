@@ -375,21 +375,21 @@ without going through `prepare()` gets neither this host validation nor a device
 production launch path must call `prepare()`, or replicate its shape and index-range checks,
 before launch.
 
-### 4.6 Tile selection
+### 4.6 Registry and tile selection
 
-GDN and KDA use the same legal tile space but separate tuned tables because the
-per-channel KDA gate adds loads and registers that the scalar GDN gate does not.
+GDN exposes the Cartesian product of:
 
-GDN keeps its original batch-keyed table:
+- `num_warps ∈ {1, 2, 4, 8, 16}`;
+- `warp_threads_k ∈ {1, 2, 4, 8, 16, 32}`;
+- `blocks_per_v_dim ∈ {1, 2, 4, 8, 16, 32}`.
 
-| Band | Batch | `(num_warps, warp_threads_k, blocks_per_v_dim)` |
-| --- | --- | --- |
-| `b4` | `≤ 4` | `(4, 16, 8)` |
-| `b32` | `≤ 32` | `(2, 8, 2)` |
-| `b128` | `≤ 128` | `(1, 8, 1)` |
-| `b_large` | larger | `(8, 16, 1)` |
+This produces 180 stable identities. `is_valid_spec()` is the only legality
+authority and admits 54 GDN candidates for the default D128 shape. Production
+`auto` deterministically prefers `(2, 16, 8)` whenever legal; batch changes
+grid size, not GDN tile selection. A caller may pin an exact candidate with
+`nw<num_warps>_wtk<warp_threads_k>_bpv<blocks_per_v_dim>`.
 
-KDA keys its table on `work = batch × num_v_heads`. Tensor-parallel sharding
+KDA remains keyed on `work = batch × num_v_heads`. Tensor-parallel sharding
 changes `num_v_heads` per rank, so two launches with the same batch can expose
 different amounts of GPU work:
 
@@ -399,10 +399,10 @@ different amounts of GPU work:
 | `kda_w512` | `≤ 512` | `(1, 16, 4)` |
 | `kda_w_large` | larger | `(2, 16, 1)` |
 
-`BPV` manufactures workgroups when the natural grid is too small. Both tables
-come from exhaustive sweeps of the legal tile space with each candidate
-correctness-gated before timing. Band edges between measured anchors are
-interpolation; exact measurements live in the protected performance record.
+`BPV` manufactures workgroups when the natural grid is too small. KDA's table
+comes from exhaustive legal-tile sweeps with every candidate correctness-gated
+before timing. Its band edges interpolate measured anchors; exact measurements
+live in the protected performance record.
 
 ### 4.7 The reference path
 
