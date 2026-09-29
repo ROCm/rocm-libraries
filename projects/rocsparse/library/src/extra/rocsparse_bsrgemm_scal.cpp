@@ -31,6 +31,7 @@
 #include "rocsparse_bsrgemm_calc.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -103,7 +104,8 @@ rocsparse_status rocsparse::bsrgemm_scal_core(rocsparse_handle          handle,
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsrgemm_copy<BSRGEMM_DIM>),
-            rocsparse::csrgemm_scal_copy_blocks<BSRGEMM_DIM>(handle, nnzb_D),
+            dim3(rocsparse::get_grid_size_x(
+                handle, (static_cast<int64_t>(nnzb_D) - 1) / BSRGEMM_DIM + 1, BSRGEMM_DIM)),
             dim3(BSRGEMM_DIM),
             0,
             stream,

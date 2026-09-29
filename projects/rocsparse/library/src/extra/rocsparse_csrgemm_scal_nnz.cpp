@@ -27,6 +27,7 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm_nnz_calc.hpp"
 #include "rocsparse_csrgemm_scal.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 template <typename I>
@@ -128,7 +129,8 @@ rocsparse_status rocsparse::csrgemm_scal_nnz_core(rocsparse_handle          hand
 #define CSRGEMM_DIM 1024
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::csrgemm_copy<CSRGEMM_DIM>),
-            rocsparse::csrgemm_scal_copy_blocks<CSRGEMM_DIM>(handle, m + 1),
+            dim3(rocsparse::get_grid_size_x(
+                handle, static_cast<int64_t>(m) / CSRGEMM_DIM + 1, CSRGEMM_DIM)),
             dim3(CSRGEMM_DIM),
             0,
             stream,
