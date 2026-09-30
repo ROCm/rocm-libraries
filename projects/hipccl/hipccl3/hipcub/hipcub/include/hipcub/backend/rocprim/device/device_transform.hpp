@@ -33,6 +33,7 @@
 
 #include "../../../config.hpp"
 #include "../../../tuple.hpp"
+#include "../detail/util_env.hpp"
 
 #include <rocprim/device/device_transform.hpp>
 #include <rocprim/iterator/counting_iterator.hpp>
@@ -90,20 +91,26 @@ struct DeviceTransform
     template<typename... RandomAccessIteratorsIn,
              typename RandomAccessIteratorOut,
              typename NumItemsT,
-             typename TransformOp>
+             typename TransformOp,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t Transform(hipcub::tuple<RandomAccessIteratorsIn...> inputs,
                                 RandomAccessIteratorOut                   output,
                                 NumItemsT                                 num_items,
                                 TransformOp                               transform_op,
-                                hipStream_t                               stream = nullptr)
+                                EnvT                                      env = {})
     {
-        return ::rocprim::transform(inputs,
-                                    output,
-                                    num_items,
-                                    transform_op,
-                                    stream,
-                                    HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
+        return detail::env_invoke(
+            env,
+            [&](void* /*d_temp_storage*/, size_t& /*temp_storage_bytes*/, auto stream)
+            {
+                return ::rocprim::transform(inputs,
+                                            output,
+                                            num_items,
+                                            transform_op,
+                                            stream,
+                                            HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
+            });
     }
 
     template<typename... RandomAccessIteratorsIn,
@@ -130,20 +137,26 @@ struct DeviceTransform
     template<typename RandomAccessIteratorIn,
              typename RandomAccessIteratorOut,
              typename NumItemsT,
-             typename TransformOp>
+             typename TransformOp,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t Transform(RandomAccessIteratorIn  input,
                                 RandomAccessIteratorOut output,
                                 NumItemsT               num_items,
                                 TransformOp             transform_op,
-                                hipStream_t             stream = nullptr)
+                                EnvT                    env = {})
     {
-        return ::rocprim::transform(input,
-                                    output,
-                                    num_items,
-                                    transform_op,
-                                    stream,
-                                    HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
+        return detail::env_invoke(
+            env,
+            [&](void* /*d_temp_storage*/, size_t& /*temp_storage_bytes*/, auto stream)
+            {
+                return ::rocprim::transform(input,
+                                            output,
+                                            num_items,
+                                            transform_op,
+                                            stream,
+                                            HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
+            });
     }
 
     template<typename RandomAccessIteratorIn,
@@ -167,14 +180,20 @@ struct DeviceTransform
                                     HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
     }
 
-    template<typename RandomAccessIteratorOut, typename NumItemsT, typename Generator>
+    template<typename RandomAccessIteratorOut,
+             typename NumItemsT,
+             typename Generator,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
    HIPCUB_RUNTIME_FUNCTION
     static hipError_t Generate(RandomAccessIteratorOut output,
                                NumItemsT               num_items,
                                Generator               generator,
-                               hipStream_t             stream = nullptr)
+                               EnvT                    env = {})
     {
-        return ::rocprim::generate(output, num_items, generator, stream);
+        return detail::env_invoke(
+            env,
+            [&](void* /*d_temp_storage*/, size_t& /*temp_storage_bytes*/, auto stream)
+            { return ::rocprim::generate(output, num_items, generator, stream); });
     }
 
     template<typename RandomAccessIteratorOut, typename NumItemsT, typename Generator>
@@ -189,14 +208,23 @@ struct DeviceTransform
         return ::rocprim::generate(output, num_items, generator, stream);
     }
 
-    template<typename RandomAccessIteratorOut, typename NumItemsT, typename Value>
-  HIPCUB_RUNTIME_FUNCTION
-    static hipError_t Fill(RandomAccessIteratorOut output,
-                           NumItemsT               num_items,
-                           Value                   value,
-                           hipStream_t             stream = nullptr)
+    template<typename RandomAccessIteratorOut,
+             typename NumItemsT,
+             typename Value,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t
+        Fill(RandomAccessIteratorOut output, NumItemsT num_items, Value value, EnvT env = {})
     {
-        return Generate(output, num_items, detail::constant_generator<Value>{value}, stream);
+        return detail::env_invoke(
+            env,
+            [&](void* /*d_temp_storage*/, size_t& /*temp_storage_bytes*/, auto stream)
+            {
+                return ::rocprim::generate(output,
+                                           num_items,
+                                           detail::constant_generator<Value>{value},
+                                           stream);
+            });
     }
 
     template<typename RandomAccessIteratorOut, typename NumItemsT, typename Value>
@@ -215,16 +243,26 @@ struct DeviceTransform
              typename RandomAccessIteratorOut,
              typename Predicate,
              typename NumItemsT,
-             typename TransformOp>
+             typename TransformOp,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
    HIPCUB_RUNTIME_FUNCTION
     static hipError_t TransformIf(hipcub::tuple<RandomAccessIteratorsIn...> inputs,
                                   RandomAccessIteratorOut                   output,
                                   NumItemsT                                 num_items,
                                   Predicate                                 predicate,
                                   TransformOp                               transform_op,
-                                  hipStream_t                               stream = nullptr)
+                                  EnvT                                      env = {})
     {
-        return ::rocprim::transform(inputs, output, num_items, predicate, transform_op, stream);
+        return detail::env_invoke(
+            env,
+            [&](void* /*d_temp_storage*/, size_t& /*temp_storage_bytes*/, auto stream) {
+                return ::rocprim::transform(inputs,
+                                            output,
+                                            num_items,
+                                            predicate,
+                                            transform_op,
+                                            stream);
+            });
     }
 
     template<typename... RandomAccessIteratorsIn,
@@ -249,16 +287,26 @@ struct DeviceTransform
              typename RandomAccessIteratorOut,
              typename Predicate,
              typename NumItemsT,
-             typename TransformOp>
+             typename TransformOp,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
    HIPCUB_RUNTIME_FUNCTION
     static hipError_t TransformIf(RandomAccessIteratorsIn input,
                                   RandomAccessIteratorOut output,
                                   NumItemsT               num_items,
                                   Predicate               predicate,
                                   TransformOp             transform_op,
-                                  hipStream_t             stream = nullptr)
+                                  EnvT                    env = {})
     {
-        return ::rocprim::transform(input, output, num_items, predicate, transform_op, stream);
+        return detail::env_invoke(
+            env,
+            [&](void* /*d_temp_storage*/, size_t& /*temp_storage_bytes*/, auto stream) {
+                return ::rocprim::transform(input,
+                                            output,
+                                            num_items,
+                                            predicate,
+                                            transform_op,
+                                            stream);
+            });
     }
 
     template<typename RandomAccessIteratorsIn,
@@ -282,21 +330,27 @@ struct DeviceTransform
     template<typename... RandomAccessIteratorsIn,
              typename RandomAccessIteratorOut,
              typename NumItemsT,
-             typename TransformOp>
+             typename TransformOp,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t
         TransformStableArgumentAddresses(hipcub::tuple<RandomAccessIteratorsIn...> inputs,
                                          RandomAccessIteratorOut                   output,
                                          NumItemsT                                 num_items,
                                          TransformOp                               transform_op,
-                                         hipStream_t                               stream = nullptr)
+                                         EnvT                                      env = {})
     {
-        return ::rocprim::transform(inputs,
-                                    output,
-                                    num_items,
-                                    transform_op,
-                                    stream,
-                                    HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
+        return detail::env_invoke(
+            env,
+            [&](void* /*d_temp_storage*/, size_t& /*temp_storage_bytes*/, auto stream)
+            {
+                return ::rocprim::transform(inputs,
+                                            output,
+                                            num_items,
+                                            transform_op,
+                                            stream,
+                                            HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
+            });
     }
 
     template<typename... RandomAccessIteratorsIn,
@@ -323,19 +377,25 @@ struct DeviceTransform
     template<typename RandomAccessIteratorIn,
              typename RandomAccessIteratorOut,
              typename NumItemsT,
-             typename TransformOp>
+             typename TransformOp,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t TransformStableArgumentAddresses(RandomAccessIteratorIn  input,
                                                        RandomAccessIteratorOut output,
                                                        NumItemsT               num_items,
                                                        TransformOp             transform_op,
-                                                       hipStream_t             stream = nullptr)
+                                                       EnvT                    env = {})
     {
-        return detail::TransformStableAddrsImpl{}.doit(rocprim::make_tuple(input),
-                                                       output,
-                                                       num_items,
-                                                       transform_op,
-                                                       stream);
+        return detail::env_invoke(
+            env,
+            [&](void* /*d_temp_storage*/, size_t& /*temp_storage_bytes*/, auto stream)
+            {
+                return detail::TransformStableAddrsImpl{}.doit(rocprim::make_tuple(input),
+                                                               output,
+                                                               num_items,
+                                                               transform_op,
+                                                               stream);
+            });
     }
 
     template<typename RandomAccessIteratorIn,
