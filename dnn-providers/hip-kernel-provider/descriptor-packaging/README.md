@@ -71,9 +71,8 @@ dormant still leaves cases in that binary that expect its descriptors.
 Two rules govern the walk:
 
 - **Hidden paths are skipped, and said so.** A dot-prefixed path segment or filename is
-  warned and skipped, as is a `*.json` whose name carries no type token. The production
-  content gate drops the same segments, so a KDP under a hidden path does not wire
-  packaging. A type-tagged descriptor that is malformed, missing a field, of unknown
+  warned and skipped, as is a `*.json` whose name carries no type token. A root whose
+  only KDP sits under a hidden path therefore probes empty and goes dormant. A type-tagged descriptor that is malformed, missing a field, of unknown
   type or carrying a dangling reference still fails.
 - **An `embedded_source` `source_file` must act as an identity.** It is never
   normalised, so `..` is rejected (one file would take two identities) and an absolute
