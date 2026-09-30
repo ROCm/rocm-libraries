@@ -3905,56 +3905,13 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     return status;
 }
 
-rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
-                            std::shared_ptr<void>&             gemmData,
-                            size_t&                            gemmCount)
+namespace
 {
-#ifdef HIPBLASLT_ENABLE_JIT
-    // Check if pointer is valid
-    // Update for the valid case: (alpha=0 && (A=NULL || B=NULL))
-    if(problem.alpha == nullptr || problem.beta == nullptr || problem.C == nullptr
-       || problem.D == nullptr
-       || ((*((float*)problem.alpha)) && (problem.A == nullptr || problem.B == nullptr)))
+    // Solution selection depends on the path when alpha is zero: updating a reused
+    // problem keeps K, constructing a new one sets K to zero.
+    void setTensileGemmProblem(RocblasltContractionProblem const& problem,
+                               std::shared_ptr<void>&             gemmData)
     {
-        log_error(__func__, "invalid data pointer");
-        return rocblaslt_status_invalid_pointer;
-    }
-    try
-    {
-        auto request = std::make_shared<jit::GemmRequest>(problem);
-        if(!gemmData)
-            gemmData = std::make_shared<TensileDataGemm>();
-        auto data        = std::static_pointer_cast<TensileDataGemm>(gemmData);
-        data->jitRequest = std::move(request);
-        data->jitLaunch.reset();
-        data->selectedAlgo = {};
-        data->kernels.clear();
-        data->needsTensileLowering = true;
-        data->enableEpilogue       = problem.epilogue != ROCBLASLT_EPILOGUE_DEFAULT;
-        data->scaleAType           = problem.scaleAType;
-        data->scaleBType           = problem.scaleBType;
-        gemmCount                  = 1;
-        return rocblaslt_status_success;
-    }
-    catch(const std::bad_alloc&)
-    {
-        return rocblaslt_status_memory_error;
-    }
-#else
-
-    rocblaslt_status status = rocblaslt_status_internal_error;
-    try
-    {
-        // Check if pointer is valid
-        // Update for the valid case: (alpha=0 && (A=NULL || B=NULL))
-        if(problem.alpha == nullptr || problem.beta == nullptr || problem.C == nullptr
-           || problem.D == nullptr
-           || ((*((float*)problem.alpha)) && (problem.A == nullptr || problem.B == nullptr)))
-        {
-            log_error(__func__, "invalid data pointer");
-            return rocblaslt_status_invalid_pointer;
-        }
-        gemmCount = 1;
         if(gemmData)
         {
             std::shared_ptr<TensileDataGemm> data = getTensileData(gemmData);
@@ -3971,13 +3928,51 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
 
             gemmData = std::static_pointer_cast<void>(std::make_shared<TensileDataGemm>(data));
         }
+    }
+}
 
-        auto data = getTensileData(gemmData);
+rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
+                            std::shared_ptr<void>&             gemmData,
+                            size_t&                            gemmCount)
+{
+    rocblaslt_status status = rocblaslt_status_internal_error;
+    try
+    {
+        // Check if pointer is valid
+        // Update for the valid case: (alpha=0 && (A=NULL || B=NULL))
+        if(problem.alpha == nullptr || problem.beta == nullptr || problem.C == nullptr
+           || problem.D == nullptr
+           || ((*((float*)problem.alpha)) && (problem.A == nullptr || problem.B == nullptr)))
+        {
+            log_error(__func__, "invalid data pointer");
+            return rocblaslt_status_invalid_pointer;
+        }
+        gemmCount = 1;
 #ifdef HIPBLASLT_ENABLE_JIT
-        data->jitRequest = std::make_shared<jit::GemmRequest>(problem);
+        auto request = std::make_shared<jit::GemmRequest>(problem);
+        try
+        {
+            setTensileGemmProblem(problem, gemmData);
+        }
+        catch(const std::exception&)
+        {
+            // An active JIT provider may accept a request that Tensile cannot represent.
+            if(hipblaslt_jit::mode() == hipblaslt_jit::Mode::Off)
+                throw;
+            if(!gemmData)
+                gemmData = std::make_shared<TensileDataGemm>();
+            auto data                  = std::static_pointer_cast<TensileDataGemm>(gemmData);
+            data->needsTensileLowering = true;
+            data->enableEpilogue       = problem.epilogue != ROCBLASLT_EPILOGUE_DEFAULT;
+        }
+        auto data        = std::static_pointer_cast<TensileDataGemm>(gemmData);
+        data->jitRequest = std::move(request);
         data->jitLaunch.reset();
         data->selectedAlgo = {};
         data->kernels.clear();
+#else
+        setTensileGemmProblem(problem, gemmData);
+        auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
 #endif
         data->scaleAType = problem.scaleAType;
         data->scaleBType = problem.scaleBType;
@@ -4002,7 +3997,6 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
     }
 
     return status;
-#endif
 }
 
 rocblaslt_status groupedGemmCreate(std::vector<RocblasltContractionProblem>& probs,
