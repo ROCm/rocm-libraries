@@ -268,7 +268,7 @@ def test_output_layout_contiguous_bhsd_query_stays_contiguous():
 
 
 def test_output_layout_bshd_view_query_gives_bshd_output():
-    # [B,S,H,D] storage viewed as [B,H,S,D], the usual packed-QKV permutation.
+    # A dense [B,S,H,D] tensor viewed as [B,H,S,D] with transpose(1, 2).
     q_shape, q_stride = (2, 8, 128, 64), (65536, 64, 512, 1)
     alloc_dims, inverse = _output_layout(q_shape, q_stride, 64)
     assert alloc_dims == [2, 128, 8, 64]
