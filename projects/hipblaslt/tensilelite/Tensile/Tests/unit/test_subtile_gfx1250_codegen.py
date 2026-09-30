@@ -574,8 +574,7 @@ class TestGfx1250MxSubtileTdm:
         tiA.allocOffsetRegisters(writer, kernel)
         tiB.allocOffsetRegisters(writer, kernel)
         asm = str(lraTileAssignment(writer, kernel))
-        assert "A: WMMA base row = laneId % 8" in asm
-        assert "A: identity-LDS row" in asm
+        assert "A: WMMA row = laneId % 16" in asm
         assert "B: WMMA row = laneId % 16" in asm
         assert "A: WMMA K quarter = laneId / 16" in asm
         assert "A: WMMA read 0 byte offset" in asm

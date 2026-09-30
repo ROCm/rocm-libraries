@@ -7,8 +7,10 @@ configs/tensile_mxf4_att.yaml    Tensile ATT config (256x256, 4096^2x8192, no va
 configs/tensile_mxf4_smoke.yaml  symlink to the common-test yaml (smoke + bench sizes)
 configs/rocprof_att.yaml         rocprofv3 Advanced Thread Trace
 configs/rocprof_pmc.yaml         kernel-trace + LDS PMC
+configs/regress_subtile_mxf4.yaml  correctness sweep beyond the common-test shapes
 logs/<stamp>/                    Tensile working dir + rocprof dumps
 run.sh                           tensile | att | pmc
+KNOWN_ISSUES.md                  open correctness failures
 ```
 
 ## Setup
@@ -36,7 +38,7 @@ which is where `invoke build-client` leaves the compiled `_rocisa*.so`.
 
 ```bash
 cd bench/gfx1250_mxf4
-# Pins physical GPU 2 via HIP_VISIBLE_DEVICES / ROCR_VISIBLE_DEVICES (override with GPU_ID=N).
+# Pins physical GPU 3 via HIP_VISIBLE_DEVICES (override with GPU_ID=N).
 ./run.sh tensile          # compile + one timed launch, ISA under tensile/ (KeepBuildTmp)
 ./run.sh att              # ATT on the latest ClientParameters.ini
 ./run.sh pmc              # TX_VMW LDS bank / address / segment-conflict counters
@@ -46,8 +48,25 @@ cd bench/gfx1250_mxf4
 Each invocation creates `logs/YYYYMMDD-HHMMSS/`. ATT writes `rocprof/`; Tensile writes `tensile/`.
 
 Only one GPU filter is set. `ROCR_VISIBLE_DEVICES` already renumbers the surviving card to 0,
-so setting it *and* `HIP_VISIBLE_DEVICES=2` filters the filtered list and the client dies with
+so setting it *and* `HIP_VISIBLE_DEVICES=3` filters the filtered list and the client dies with
 `hipErrorNoDevice`.
+
+## Enabling the TX_VMW LDS counters
+
+The `TX_PERF_SEL_VMW_*` counters read 0 until a per-XCC register is set on the card being
+profiled. umr's `-i` is the DRM instance, not the HIP device index; map them with
+`sudo cat /sys/kernel/debug/dri/<N>/name` against `rocm-smi --showbus`. On this box GPU 3
+(PCI `0004:01:00.0`) is instance 25 (GPU 0 is 1, GPU 1 is 9, GPU 2 is 17):
+
+```bash
+for r in 0x3b120 0x7b120 0xbb120 0xfb120 0x13b120 0x17b120 0x1bb120 0x1fb120; do
+  sudo env LD_LIBRARY_PATH=$ROCM_PATH/lib/llvm/lib umr -i 25 -go 0 -vmp -w $r 0x400
+done
+```
+
+Check liveness with the positive control (`control/lds_bank_conflict` under
+`configs/rocprof_lds_control.yaml`): `lds_conflict` must show a nonzero
+`TX_PERF_SEL_VMW_LDS_BANK_CONFLICT`.
 
 ## gfx1250 profiling caveats
 

@@ -1,11 +1,11 @@
-# Timing-only: MT 256x256x256 MXF4 bank-conflict bench.
-# Correctness already covered by subtile_mxf4_gfx1250.yaml (PASSED).
+# Reference: non-subtile MXF4, same MT/MI/WG/DepthU/TDM as tensile_mxf4_mt256_timing.yaml.
+# Used to compare the A/B local-read lane->row mapping and LDS conflict counters.
 GlobalParameters:
   SyncsPerBenchmark: 1
-  EnqueuesPerSync: 100
-  NumWarmups: 100
+  EnqueuesPerSync: 10
+  NumWarmups: 10
   NumElementsToValidate: 0
-  PrintLevel: 3
+  PrintLevel: 2
   Device: 0
   CMakeBuildType: Release
   KernelTime: True
@@ -48,16 +48,13 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [true]
         - MatrixInstruction:
           - [32, 16, 128, 1,  1, 4, 8,  2, 2]  # MT 256x256  WG 2x2  WT 4x8
-          # - [16, 16, 32, 1,  1, 8, 8,  2, 2]  # MT 256x256  WG 2x2  WT 4x8
         - DepthU: [256]
         - WavefrontSize: [32]
         - PrefetchGlobalRead: [2]
         - ScheduleIterAlg: [3]
-        - UseSubtileImpl: [true]
+        - UseSubtileImpl: [false]
         - StreamK: [3]
         - TDMInst: [3]
         - SourceSwap: [false]
@@ -72,13 +69,10 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - GlobalSplitU: [1]
-        - DirectToVgprA: [False]
-        - DirectToVgprB: [False]
         - PreloadKernArgs: [False]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          # - Exact: [4096, 4096, 1, 8192]
-          - Exact: [4096, 4096, 1, 65536]
+          - Exact: [4096, 4096, 1, 8192]

@@ -654,8 +654,10 @@ def _emitWmma32x16TdmLROffsets(module, writer, kernel, tileInfo):
 
   The instruction does not consume one complete matrix row per lane. Lanes
   0..15 and 16..31 own alternating 32-element K quarters, and A additionally
-  pairs M rows r and r+16 in each lane. This matches the established non-subtile
-  local-read order while reading the row-major LDS image produced by TDM.
+  pairs M rows r and r+16 in each lane. Each half-wave reads 16 consecutive
+  rows so the 16B TDM pad spreads a b128 read across all LDS banks; the
+  resulting accumulator row order is fixed up after the loop by
+  emitWmma32x16AccRowFixup.
   """
   tc = tileInfo.tc
   rowStride = int(tileInfo.depthUBytes)
@@ -667,21 +669,8 @@ def _emitWmma32x16TdmLROffsets(module, writer, kernel, tileInfo):
   base = writer.vgprPool.checkOut(3, tag="_emitWmma32x16TdmLROffsets")
   laneRow, laneHalf, rowBase = base, base + 1, base + 2
 
-  if tc == 'A':
-    # WMMA's 32-row output order is [0:8,16:24,8:16,24:32].
-    # Pre-permute identity-LDS rows so the accumulator's native order is
-    # logical M order: lanes 0:8 pair rows r/r+8, lanes 8:16 pair r+16/r+24.
-    module.add(VAndB32(dst=vgpr(laneRow), src0=vgpr("Serial"), src1=7,
-                       comment="A: WMMA base row = laneId % 8"))
-    module.add(VAndB32(dst=vgpr(laneHalf), src0=vgpr("Serial"), src1=8,
-                       comment="A: lane row block"))
-    module.add(VLShiftLeftB32(dst=vgpr(laneHalf), shiftHex=hex(1),
-                              src=vgpr(laneHalf), comment="A: row block * 2"))
-    module.add(VAddU32(dst=vgpr(laneRow), src0=vgpr(laneRow), src1=vgpr(laneHalf),
-                       comment="A: identity-LDS row"))
-  else:
-    module.add(VAndB32(dst=vgpr(laneRow), src0=vgpr("Serial"), src1=15,
-                       comment="B: WMMA row = laneId % 16"))
+  module.add(VAndB32(dst=vgpr(laneRow), src0=vgpr("Serial"), src1=15,
+                     comment=f"{tc}: WMMA row = laneId % 16"))
   module.add(VAndB32(dst=vgpr(laneHalf), src0=vgpr("Serial"), src1=kernel["WavefrontSize"] - 1,
                      comment=f"{tc}: laneId"))
   module.add(VLShiftRightB32(dst=vgpr(laneHalf), shiftHex=hex(4),
@@ -700,7 +689,7 @@ def _emitWmma32x16TdmLROffsets(module, writer, kernel, tileInfo):
     # complementary quarters for lanes 16..31). A's second pair supplies
     # the corresponding data for row r+16.
     kOffset = mmaTile * tileKBytes + (readIdx % 2) * 32
-    rowOffset = (readIdx // 2) * 8 * rowStride if tc == 'A' else 0
+    rowOffset = (readIdx // 2) * 16 * rowStride if tc == 'A' else 0
     byteOffset = kOffset + rowOffset
     module.add(VAddU32(dst=vgpr(dst), src0=vgpr(rowBase), src1=byteOffset,
                        comment=f"{tc}: WMMA read {offsetIdx} byte offset"))
@@ -717,6 +706,36 @@ def _emitWmma32x16TdmLROffsets(module, writer, kernel, tileInfo):
   writer.vgprPool.checkIn(base)
 
 
+def isWmma32x16Tdm(writer, kernel):
+  return (not writer.states.subtileLdsSwizzle
+          and kernel.get("WavefrontSize") == 32
+          and kernel.get("MatrixInstM") == 32
+          and kernel.get("MatrixInstN") == 16)
+
+
+def emitWmma32x16AccRowFixup(writer, kernel):
+  """Reorder 32x16 accumulators into the row order the subtile store expects.
+
+  With A rows r / r+16 fed per lane, VGPR v of lane group g holds M row
+  (v // 8) * 16 + g * 8 + v % 8. The store expects row g * 16 + v, so swap the
+  upper lane group of VGPR v with the lower lane group of VGPR v + 8.
+  """
+  module = Module("wmma32x16AccRowFixup")
+  if not (kernel.get("UseSubtileImpl") and isWmma32x16Tdm(writer, kernel)):
+    return module
+  regsPerTile = 16
+  numVgprValu = writer.states.c.numVgprValu
+  assert numVgprValu % regsPerTile == 0, \
+    "32x16 accumulators: %u VGPRs not a multiple of %u" % (numVgprValu, regsPerTile)
+  module.addComment1("32x16 WMMA: reorder accumulator rows for store")
+  for tileBase in range(0, numVgprValu, regsPerTile):
+    for v in range(regsPerTile // 2):
+      module.add(VPermlane16SwapB32(dst=vgpr("ValuC+%u" % (tileBase + v)),
+                                    src=vgpr("ValuC+%u" % (tileBase + v + regsPerTile // 2)),
+                                    comment="rows 8:16 <-> 16:24"))
+  return module
+
+
 def _lraTileAssignment_legacy(writer, kernel):
   module = Module()
   module.addComment0("LR Offset Calculation for Subtile Based Tiling")
@@ -725,11 +744,7 @@ def _lraTileAssignment_legacy(writer, kernel):
   if tileInfoA.bpe == 1:  # FP8: block-swap swizzle, no VPermlane16Swap
     return _lraTileAssignment_fp8_legacy(writer, kernel, module)
   swizzled = writer.states.subtileLdsSwizzle
-  rectangularWmmaTdm = (not swizzled
-                        and kernel.get("WavefrontSize") == 32
-                        and kernel.get("MatrixInstM") == 32
-                        and kernel.get("MatrixInstN") == 16)
-  if rectangularWmmaTdm:
+  if isWmma32x16Tdm(writer, kernel):
     _emitWmma32x16TdmLROffsets(module, writer, kernel, tileInfoA)
     _emitWmma32x16TdmLROffsets(module, writer, kernel, tileInfoB)
   else:

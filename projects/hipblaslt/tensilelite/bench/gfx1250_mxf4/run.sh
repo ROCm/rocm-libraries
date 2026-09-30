@@ -11,7 +11,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TENSILELITE="$(cd "$ROOT/../.." && pwd)"
 CONFIGS="$ROOT/configs"
 LOGS="$ROOT/logs"
-TENSILE_YAML="$CONFIGS/tensile_mxf4_att.yaml"
+TENSILE_YAML="${TENSILE_YAML:-$CONFIGS/tensile_mxf4_att.yaml}"
 ATT_YAML="$CONFIGS/rocprof_att.yaml"
 PMC_YAML="$CONFIGS/rocprof_pmc.yaml"
 
@@ -30,10 +30,17 @@ PYTHON="${PYTHON:-python3}"
 ROCISA_BUILD="$TENSILELITE/build_tmp/tensilelite/rocisa"
 export PYTHONPATH="${TENSILELITE}:${ROCISA_BUILD}${PYTHONPATH:+:$PYTHONPATH}"
 
-# Physical GPU 2 only. Tensile Device: 0 and rocprof att_gpu_index 0 then mean that card.
+# tensilelite-client links libomp.so, which lives in the ROCm LLVM tree, not on the default path.
+ROCM_ROOT="${ROCM_PATH:-$(dirname "$(dirname "$(readlink -f "$(command -v rocprofv3 || echo /opt/rocm/bin/rocprofv3)")")")}"
+LIBOMP_DIR="$(dirname "$(find "$ROCM_ROOT/lib/llvm/lib" -name libomp.so -print -quit 2>/dev/null || echo .)")"
+export LD_LIBRARY_PATH="${LIBOMP_DIR}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+# Physical GPU 3 only (PCI 0004:01:00.0, umr -i 25). Tensile Device: 0 and rocprof
+# att_gpu_index 0 then mean that card. The TX_VMW LDS counters only count after the
+# umr register writes for that card's DRM instance (see README).
 # Set exactly one filter: ROCR_VISIBLE_DEVICES already renumbers the survivor to 0, so
-# also setting HIP_VISIBLE_DEVICES=2 would filter the filtered list and yield hipErrorNoDevice.
-GPU_ID="${GPU_ID:-2}"
+# also setting HIP_VISIBLE_DEVICES=3 would filter the filtered list and yield hipErrorNoDevice.
+GPU_ID="${GPU_ID:-3}"
 export HIP_VISIBLE_DEVICES="$GPU_ID"
 unset ROCR_VISIBLE_DEVICES
 echo "==> HIP_VISIBLE_DEVICES=$GPU_ID"
@@ -41,7 +48,7 @@ echo "==> HIP_VISIBLE_DEVICES=$GPU_ID"
 usage() {
   sed -n '2,8p' "$0" | sed 's/^# \?//'
   echo
-  echo "Env: GPU_ID (default 2), ROCPROFV3, TENSILE_CLIENT, PYTHON, PYTHONPATH"
+  echo "Env: GPU_ID (default 3), TENSILE_YAML, ROCPROFV3, TENSILE_CLIENT, PYTHON, PYTHONPATH"
   echo "Logs: $LOGS/<stamp>/"
   exit 1
 }
