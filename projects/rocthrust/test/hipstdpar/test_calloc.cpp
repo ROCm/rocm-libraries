@@ -109,6 +109,18 @@ int main()
   {
     return EXIT_FAILURE;
   }
+  // An error the application has not read yet must still be reported after
+  // such a failure, although HIP replaces its code.
+  static_cast<void>(hipSetDevice(-1));
+  if (auto p = runtime_calloc(1, max_size / 2))
+  {
+    std::free(p);
+    return EXIT_FAILURE;
+  }
+  if (hipGetLastError() == hipSuccess)
+  {
+    return EXIT_FAILURE;
+  }
 
   // A successful allocation must still be fully zero-initialized.
   constexpr std::size_t count = 128;

@@ -67,12 +67,13 @@ struct Header
   std::size_t align;
 };
 
-// Clears a HIP failure that the interposer handles itself. Left pending, it
-// would be returned by the next hipGetLastError, which rocPRIM calls after
-// every kernel launch, and make an unrelated algorithm fail.
-inline hipError_t __consume_error(hipError_t e) noexcept
+// Clears a HIP failure that the interposer handles itself, unless an error was
+// already pending before its HIP calls, as captured by hipPeekAtLastError in
+// pending. The next hipGetLastError, which rocPRIM calls after every kernel
+// launch, then reports an error exactly when it would have without them.
+inline hipError_t __consume_error(hipError_t e, hipError_t pending) noexcept
 {
-  if (e != hipSuccess)
+  if (e != hipSuccess && pending == hipSuccess)
   {
     static_cast<void>(hipGetLastError());
   }
@@ -86,7 +87,8 @@ inline std::pmr::synchronized_pool_resource heap{
       void* do_allocate(std::size_t n, std::size_t a) override
       {
         void* r{};
-        if (__consume_error(hipMallocManaged(&r, n)) != hipSuccess || !r)
+        const auto pending = hipPeekAtLastError();
+        if (__consume_error(hipMallocManaged(&r, n), pending) != hipSuccess || !r)
         {
           throw std::bad_alloc{};
         }
@@ -96,7 +98,8 @@ inline std::pmr::synchronized_pool_resource heap{
 
       void do_deallocate(void* p, std::size_t, std::size_t) override
       {
-        static_cast<void>(__consume_error(hipFree(p)));
+        const auto pending = hipPeekAtLastError();
+        static_cast<void>(__consume_error(hipFree(p), pending));
       }
 
       bool do_is_equal(const std::pmr::memory_resource& x) const noexcept override
@@ -114,7 +117,8 @@ inline std::pmr::synchronized_pool_resource heap{
 inline bool __is_pool_allocation(const void* p) noexcept
 {
   hipPointerAttribute_t tmp{};
-  static_cast<void>(__consume_error(hipPointerGetAttributes(&tmp, p)));
+  const auto pending = hipPeekAtLastError();
+  static_cast<void>(__consume_error(hipPointerGetAttributes(&tmp, p), pending));
 
   return tmp.isManaged;
 }

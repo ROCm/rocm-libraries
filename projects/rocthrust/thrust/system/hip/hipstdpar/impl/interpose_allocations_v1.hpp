@@ -69,12 +69,14 @@ namespace hipstd
 {
 inline const bool __initialised{hipInit(0) == hipSuccess};
 
-// Clears a HIP failure that the interposer handles itself. Left pending, it
-// would be returned by the next hipGetLastError, which rocPRIM calls after
-// every kernel launch, and make an unrelated algorithm fail.
-inline hipError_t __consume_error(hipError_t e) noexcept
+// Clears a HIP failure that the interposer handles itself, unless an error was
+// already pending before its HIP calls, as captured by hipPeekAtLastError in
+// pending. The next hipGetLastError, which rocPRIM calls after every kernel
+// launch, then reports an error exactly when it would have without them.
+inline hipError_t __consume_error(hipError_t e, hipError_t pending) noexcept
 {
-    if (e != hipSuccess) static_cast<void>(hipGetLastError());
+    if (e != hipSuccess && pending == hipSuccess)
+        static_cast<void>(hipGetLastError());
     return e;
 }
 
@@ -147,10 +149,11 @@ extern "C" {
         // hipMemAdvise rejects zero-length ranges; nothing to advise.
         if (!r || !hipstd::__initialised || n == 0) return r;
 
+        const auto pending = hipPeekAtLastError();
         hipDevice_t d{};
-        if (hipstd::__consume_error(hipGetDevice(&d)) != hipSuccess ||
+        if (hipstd::__consume_error(hipGetDevice(&d), pending) != hipSuccess ||
             hipstd::__consume_error(hipMemAdvise(
-                r, n, hipMemAdviseSetAccessedBy, d)) != hipSuccess) {
+                r, n, hipMemAdviseSetAccessedBy, d), pending) != hipSuccess) {
             __hipstdpar_hidden_free(r);
             errno = ENOMEM;
             return nullptr;
@@ -197,10 +200,11 @@ extern "C" {
         if (!p) return;
 
         if (hipstd::__initialised) {
+            const auto pending = hipPeekAtLastError();
             hipDevice_t d{};
-            if (hipstd::__consume_error(hipGetDevice(&d)) == hipSuccess)
+            if (hipstd::__consume_error(hipGetDevice(&d), pending) == hipSuccess)
                 static_cast<void>(hipstd::__consume_error(hipMemAdvise(
-                    p, UINT64_MAX, hipMemAdviseUnsetAccessedBy, d)));
+                    p, UINT64_MAX, hipMemAdviseUnsetAccessedBy, d), pending));
         }
         return __hipstdpar_hidden_free(p);
     }
@@ -315,10 +319,11 @@ extern "C" {
             auto r = __hipstdpar_hidden_mmap(p, n, prot, f, fd, dx);
             if (r == MAP_FAILED || !hipstd::__initialised) return r;
 
+            const auto pending = hipPeekAtLastError();
             hipDevice_t d{};
-            if (hipstd::__consume_error(hipGetDevice(&d)) != hipSuccess ||
+            if (hipstd::__consume_error(hipGetDevice(&d), pending) != hipSuccess ||
                 hipstd::__consume_error(hipMemAdvise(
-                    r, n, hipMemAdviseSetAccessedBy, d)) != hipSuccess) {
+                    r, n, hipMemAdviseSetAccessedBy, d), pending) != hipSuccess) {
                 // MAP_FIXED has already replaced whatever was mapped there;
                 // unmapping would leave a hole inside a range the caller owns.
                 // MAP_FIXED_NOREPLACE overrides it and only maps a free range.
@@ -338,10 +343,11 @@ extern "C" {
         int __hipstdpar_munmap(void* p, std::size_t n) noexcept
         {
             if (hipstd::__initialised) {
+                const auto pending = hipPeekAtLastError();
                 hipDevice_t d{};
-                if (hipstd::__consume_error(hipGetDevice(&d)) == hipSuccess)
+                if (hipstd::__consume_error(hipGetDevice(&d), pending) == hipSuccess)
                     static_cast<void>(hipstd::__consume_error(hipMemAdvise(
-                        p, n, hipMemAdviseUnsetAccessedBy, d)));
+                        p, n, hipMemAdviseUnsetAccessedBy, d), pending));
             }
             return __hipstdpar_hidden_munmap(p, n);
         }
