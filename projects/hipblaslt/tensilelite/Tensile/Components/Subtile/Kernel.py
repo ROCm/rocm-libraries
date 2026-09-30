@@ -10,10 +10,10 @@ from functools import singledispatch
 from typing import Dict, List, NamedTuple, Optional, Tuple, Type
 from Tensile.Components.Subtile.LogicalScheduler import (
       LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
-      ReadGranularity, GRPlacementStrategy)
+      ReadGranularity, GRPlacementStrategy, plsinTailOwnTiles)
 
 from ...Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
-  INDEX_CHARS, IsaVersion
+  INDEX_CHARS, IsaVersion, ceilDivide, plsinStagingEligible
 
 
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, Label
@@ -200,8 +200,8 @@ class ABGRTile:
   def emitLDSBufferSwap(self, ti, writer, kernel):
     return _emitGRLDSBufferSwap(self.config.tag, self, ti, writer, kernel)
 
-  def emitPtrUpdate(self, ti, writer, kernel):
-    return _emitGRPtrUpdate(self.config.tag, self, ti, writer, kernel)
+  def emitPtrUpdate(self, ti, writer, kernel, holdOnLastIter=False):
+    return _emitGRPtrUpdate(self.config.tag, self, ti, writer, kernel, holdOnLastIter)
 
 
 class ABLRTile:
@@ -711,6 +711,10 @@ class TileInfo:
       if i % numMMATilesPerReg != 0:
         continue
       vstart = pool.checkOutAligned(numDword, numDword, tag="allocVgprTileRegisters_legacy_vstart")
+      if isDTile and pool is writer.vgprPool:
+        # D tile spilled out of the agpr file into arch vgprs; record it so the
+        # store paths can assert they never target a live accumulator.
+        writer.states.subtileSpilledDRanges.append((vstart, vstart + numDword))
       for k in range(numDword):
         self.vgprTiles[-1].append(vstart + k)
 
@@ -775,9 +779,9 @@ class TileInfo:
       return self.gr.emitLDSBufferSwap(self, writer, kernel)
     return Module()
 
-  def emitGRPtrUpdate(self, writer, kernel):
+  def emitGRPtrUpdate(self, writer, kernel, holdOnLastIter=False):
     if self.gr is not None:
-      return self.gr.emitPtrUpdate(self, writer, kernel)
+      return self.gr.emitPtrUpdate(self, writer, kernel, holdOnLastIter)
     return Module()
 
   def emitStoreD(self, writer, kernel):
@@ -898,6 +902,19 @@ class RegisterTileInfo:
 
   def __str__(self):
     return str(self.regList)
+
+
+def _zeroRegRangeMfmaCount(totalRegs, writer) -> int:
+    """Return the number of distributable MFMA instructions for a register range.
+
+    The seed chunk (scalar writes + optional SNop) and the final MFMA chunk that
+    doubles as the zero-source must stay together at the canonical initC site.
+    Only the preceding ``numInst - 1`` MFMAs are distributable as filler.
+    Returns 0 when the range is too small for any MFMA (falls back to scalar).
+    """
+    regsPerInst = 8 if writer.states.asmCaps.get("HasWMMA_AccImmZero", False) else 16
+    numInst = totalRegs // regsPerInst
+    return max(0, numInst - 1)
 
 
 def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
@@ -1360,6 +1377,37 @@ def mainLoop(writer, kernel):
   M = tiA.localMMATileGrid[0]
   N = tiB.localMMATileGrid[0]
   candidates = [(M, N)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
+  # Partitioning is normally a VGPR-pressure escape valve: the full-size candidate is
+  # first and wins whenever it fits, so every kernel schedules as one partition. A
+  # partition owns a disjoint set of D tiles and runs its whole K reduction before the
+  # next one starts, which is the staggered-completion structure the staged store needs,
+  # so allow asking for a floor on the partition count while that is being measured.
+  # Scoped to staging-eligible tiles: a kernel that cannot stage gains nothing
+  # from a finer split and pays the extra LDS re-reads, and MT>256x256 is also
+  # pushed off its full-size candidate onto an uneven N split, which breaks the
+  # lending weave. Only candidates staging can actually cut on are kept -- an
+  # N-only split (sizeM == M) into equal groups (N % sizeN == 0).
+  # Block-scheduling tiles want the split for its own sake, so they ask for four
+  # blocks rather than accepting the one-partition candidate that always fits.
+  minParts = 4 if plsinStagingEligible(kernel) else 1
+  wider = []
+  if minParts > 1 and pgr != 0 and plsinStagingEligible(kernel):
+    def _stageable(sizeM, sizeN):
+      return sizeM == M and N % sizeN == 0 and ceilDivide(N, sizeN) >= minParts
+    wider = [c for c in candidates if _stageable(*c)]
+  # The tail-own-tiles split moves the partitioning off the mainloop and onto the
+  # four-deep tail, which is the only body that stores. The mainloop then takes
+  # the one-partition candidate and comes out identical to baseline. Confined to
+  # kernels the staged store could actually cut: elsewhere there is no tail to
+  # carry the split, and forcing one costs registers for nothing.
+  # A stageable candidate is not enough on its own. Tiles above 256 take the
+  # Lend path, and _plsinStagedStoreCount returns 0 for any lending store, so
+  # those kernels would give up the mainloop split without staging anything.
+  lendStore = kernel["MacroTile0"] > 256 or kernel["MacroTile1"] > 256
+  tailOwnTiles = plsinTailOwnTiles() and bool(wider) and not lendStore
+  tailPartitionSizeN = wider[0][1] if tailOwnTiles else 0
+  if wider and not tailOwnTiles:
+      candidates = wider
   for partSizeM, partSizeN in candidates:
       hasTDM = bool(kernel.get("enableTDMA")) and bool(kernel.get("enableTDMB"))
       grPlacement = (GRPlacementStrategy.BUNCHED if hasTDM
@@ -1381,6 +1429,9 @@ def mainLoop(writer, kernel):
           pgr=schedulerPgr,
           grPlacement=grPlacement,
           pgl=kernel.get("PrefetchGL2", 0),
+          blockSched=plsinStagingEligible(kernel),
+          tailOwnTiles=tailOwnTiles,
+          tailPartitionSizeN=tailPartitionSizeN,
       )
 
       scheduler = LogicalScheduler(cfg)

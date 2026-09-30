@@ -330,6 +330,8 @@ def make_writer_and_tileinfos(kernel, fp4=False):
         unrollIdx=0,
         laneSGPRCount=1 if is_gfx1250 else 2,
         subtileLdsSwizzle=not is_gfx1250,
+        # D-tile ranges the subtile store spilled to scratch; none in this stub.
+        subtileSpilledDRanges=[],
     )
     if is_gfx1250:
         writer.sgprPool.checkOut(12)
@@ -658,14 +660,17 @@ class TestPlaceLRs:
         _assert_slot_lrs(p0[0], ['A', 'B', 'SA'])
         _assert_slot_lrs(p0[1], ['A', 'B', 'SB'])
         _assert_slot_lrs(p0[2], ['A', 'B', 'SA'])
-        _assert_slot_lrs(p0[3], ['A'])
+        _assert_slot_lrs(p0[3], ['A', 'B', 'SB'])
 
-        # P3: last partition — last 2 slots load for MT n+1
+        # A and B now issue in every slot rather than alternating across
+        # partitions, so the last partition is no longer idle and the MT n+1
+        # scales both land in its final slot. Measured on the emitted assembly,
+        # this costs 4.4% more ds_read at DepthU 512 (2.6% at 256).
         p3 = partitions[3]
-        assert len(p3[0].lrs) == 0
-        assert len(p3[1].lrs) == 0
-        _assert_slot_lrs(p3[2], ['SA'])
-        _assert_slot_lrs(p3[3], ['A', 'B', 'SB'])
+        _assert_slot_lrs(p3[0], ['A', 'B'])
+        _assert_slot_lrs(p3[1], ['A', 'B'])
+        _assert_slot_lrs(p3[2], ['A', 'B'])
+        _assert_slot_lrs(p3[3], ['A', 'B', 'SA', 'SB'])
         _assert_lr(p3[3], 'A', 1,0, 1, 0, 4)
         _assert_lr(p3[3], 'B', 1,0, 1, 0, 4)
 
@@ -1388,10 +1393,12 @@ class TestAnnotateDeps:
         assert ('LR', 'A', 3, 3, -1) in mfma_p0_s0
         assert len(mfma_p0_s0) == 4
 
-        # P3 MFMA(k=0): deps on LRs that loaded subIterK=0 data for P3 tiles
+        # P3 MFMA(k=0): deps on LRs that loaded subIterK=0 data for P3 tiles.
+        # A and B issue in every slot now, so the feeding loads are the previous
+        # partition's last slots rather than P0's.
         mfma_p3_s0 = _dep_refs(parts[3][0].mfma)
-        assert ('LR', 'A', 0, 3, 0) in mfma_p3_s0
-        assert ('LR', 'SA', 0, 2, 0) in mfma_p3_s0
+        assert ('LR', 'A', 2, 3, 0) in mfma_p3_s0
+        assert ('LR', 'SA', 2, 2, 0) in mfma_p3_s0
 
     def test_1x1_multi_du_unroll2_AB(self):
         """Multi-DU: uid=0 and uid=1 GRs get correct collision deps.
@@ -1569,9 +1576,10 @@ class TestRemoveCrossDeps:
         lr_a_p3_s3 = _get_lr(parts[3][3], 'A')
         assert lr_a_p3_s3.preOps[0].wait_gr_counts.A == 20
 
-        # LR SA @P3:s2: wait_gr_sync with SA=1
-        lr_sa_p3_s2 = _get_lr(parts[3][2], 'SA')
-        assert lr_sa_p3_s2.preOps[0].wait_gr_counts.SA == 1
+        # LR SA @P3:s3: wait_gr_sync with SA=1. The scales sit in the final slot
+        # now that A/B occupy every slot; the count itself is unchanged.
+        lr_sa_p3_s3 = _get_lr(parts[3][3], 'SA')
+        assert lr_sa_p3_s3.preOps[0].wait_gr_counts.SA == 1
 
     def test_320x256_5part_reanchor_pi1(self):
         """Single-DU 5-partition: wait_gr counts match develop legacy inflight walk."""

@@ -424,6 +424,22 @@ def _computeLROffset(module, tileInfo, colOffset, rowOffset, swizzled):
     module.add(VLShiftLeftB32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), shiftHex=hex(loadWidth.bit_length()-1), src=vgpr(tileInfo.sharedVgprLROffset[vgprId]), comment="%s: colOffset*loadWidth"%tc))
     module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src1=vgpr(rowOffset), comment="%s: row + col"%tc))
 
+
+def _computeLROffsetLinear(module, kernel, writer, tileInfo):
+  """Map a host-pre-shuffled MFMA tile linearly from LDS into operand VGPRs."""
+  laneId = writer.vgprPool.checkOut(1, tag="_computeLROffsetLinear_laneId")
+  module.add(VAndB32(dst=vgpr(laneId), src0=vgpr("Serial"),
+                     src1=kernel["WavefrontSize"] - 1,
+                     comment="%s: laneId within wave" % tileInfo.tc))
+  module.add(VLShiftLeftB32(dst=vgpr(laneId), shiftHex=hex(4), src=vgpr(laneId),
+                            comment="%s: laneId * 16 bytes" % tileInfo.tc))
+  for i, lrOffset in enumerate(tileInfo.sharedVgprLROffset):
+    module.add(VAddU32(dst=vgpr(lrOffset), src0=hex(i * tileInfo.mmaTileSize),
+                       src1=vgpr(laneId),
+                       comment="%s: linear pre-shuffled LR offset %u" % (tileInfo.tc, i)))
+  writer.vgprPool.checkIn(laneId)
+
+
 def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
   """Apply wave-based partition offset to LR offsets.
 

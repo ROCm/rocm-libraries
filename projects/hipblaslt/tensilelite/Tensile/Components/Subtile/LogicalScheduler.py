@@ -29,6 +29,8 @@ from bisect import bisect_left
 import copy
 import io
 import math
+import os
+import sys
 
 from rocisa.code import Module
 from .ScheduleTypes import (
@@ -38,11 +40,50 @@ from .ScheduleTypes import (
     LogicalSchedule,
     PartitionSchedule,
 )
+from rocisa.instruction import Instruction, SAddCU32, SSubBU32, SCSelectB32, SCSelectB64, \
+    MFMAInstruction, MXMFMAInstruction, VCvtPkF32toBF16, VCvtPkF32toFP16
 
 from ...Common.GlobalParameters import globalParameters
+from ...Common import isMxf4SubtilePath
+
+
+def plsinTailOwnTiles() -> bool:
+    """Whether the four-deep tail gets its own VGPR tile layout.
+
+    Merging the tail's peaks into the mainloop's takes a per-tensor maximum,
+    so the kernel pays for A at the tail's depth and B at the mainloop's width
+    at the same time even though the two bodies never run together. Giving the
+    tail its own layout lets it reuse the registers the mainloop held for B,
+    which is what makes an unpartitioned (baseline) mainloop affordable: the
+    mainloop needs A16/B16 and the tail A32/B4, so the larger body is 48 tiles
+    rather than the 64 the merged layout asks for.
+
+    On by default: the alternative spans in the parent, which partitions the
+    mainloop, and that measured a 1.7% geomean loss against baseline (down to
+    0.951x) on the swapAB-swizzleA shapes. Spanning only in the sub-scheduler
+    leaves the mainloop byte-identical to baseline and measured 1.0038x.
+    """
+    return True
 
 # ds_load_b128 reads 4 contiguous VGPRs.
 DS_B128_VGPRS = 4
+
+# PostLoopStoreInNll store-init weave unit kinds (B2): the split-unit contract
+# between the producer KernelWriterAssembly._splitHoistableStoreInit and the
+# consumer _weaveStoreInitIntoLoop (below). Each hoistable unit is a 2-tuple:
+#   (WEAVE_UNIT_ALU,   inst)      one scatterable pure-ALU / RegSet instruction,
+#                                 dropped one-per-MFMA-gap (SCC carry chains kept
+#                                 together via _readsScc)
+#   (WEAVE_UNIT_BLOCK, [insts])   a self-contained branch/label/compare region,
+#                                 dropped CONTIGUOUSLY into one gap so a taken
+#                                 branch never jumps across an interleaved loop MFMA
+WEAVE_UNIT_ALU = 'alu'
+WEAVE_UNIT_BLOCK = 'block'
+
+# Number of MT0 buffer_load atoms per cluster in the preloop GR interleave.
+# Every tuned solution that set the former PreloopGRClusterSize parameter used 6
+# with no variation, so it is a constant rather than a tuning axis.
+PRELOOP_GR_CLUSTER_SIZE = 6
 
 def _checkout_tile(pool, numRegs, tag):
     """Check out one VGPR tile as a single contiguous, min(numRegs, 4)-aligned block (b128-aligned when numRegs >= 4)."""
@@ -233,6 +274,17 @@ class SchedulerConfig:
     pgr: int = 2              # Prefetch Global Read
     grPlacement: GRPlacementStrategy = GRPlacementStrategy.SPREAD
     pgl: int = 0              # Prefetch GL2 (0=off, 1 or 2 tiles ahead)
+    blockSched: bool = False  # Tile is scoped for block scheduling (see plsinBlockSchedTile)
+    # Forces spanNgllMerge instead of reading the environment. The four-deep
+    # tail is scheduled by its own LogicalScheduler, and under
+    # under tail-own-tiles that sub-scheduler is the only one that spans
+    # -- the parent stays on the baseline schedule and allocation.
+    spanTailOverride: Optional[bool] = None
+    # Set by the kernel-level partition choice, not read from the environment
+    # here: only kernels whose store the tail can actually stage qualify, and
+    # that test needs the tile geometry.
+    tailOwnTiles: bool = False
+    tailPartitionSizeN: int = 0
 
     # Resolve a partition spec into per-partition sizes along one dimension.
     # spec is either:
@@ -331,8 +383,38 @@ class SchedulerConfig:
 
         self.plr = 0 if self.pgr == 0 else 1
         self.offsetPartition = 1 if self.pgr >= 2 else 0
+        if self.spanNgllMerge:
+            # A partition whose target wraps past the last one is loading for
+            # the macro tile after next, so its GRs come out at mtIteration 2.
+            # Offsetting by the whole partition count makes every partition
+            # wrap, which is what puts *every* load two macro tiles ahead
+            # rather than just B's last slice. The four-deep tail needs that:
+            # it reaches its second DepthU in partition 0, far too early to
+            # issue the loads that fill it, so they have to have been issued a
+            # whole macro tile earlier and be resident by the time it starts.
+            self.offsetPartition = self.numPartitions
         if self.pgr == 0:
             assert self.numPartitions == 1, "pgr=0 requires numPartitions=1"
+
+    @property
+    def spanNgllMerge(self) -> bool:
+        """Does the tail run all four of a partition's k-subiterations?
+
+        Asked from two very distant places -- here, where it sets the prefetch
+        distance, and again at register allocation and emission -- so it lives
+        on the config and is read nowhere else. The two used to read the
+        environment separately with different defaults, and the build quietly
+        reserved registers for a tail it then declined to emit.
+        """
+        if self.spanTailOverride is not None:
+            return self.spanTailOverride
+        if self.pgr < 2 or not self.blockSched:
+            return False
+        if self.tailOwnTiles:
+            # The parent keeps the baseline schedule and allocation; only the
+            # sub-scheduler built in _build_tail_merged spans.
+            return False
+        return True
 
     @property
     def partitionSizesM(self) -> List[int]:
@@ -481,8 +563,22 @@ class WaitGRCounts:
     B: int = 0
     SA: int = 0
     SB: int = 0
+    # When True, emit_wait_gr resolves the count as
+    # tileInfoA.numGRTotal + tileInfoB.numGRTotal + SA_count + SB_count
+    # — the exact number of buffer_load instructions in flight.
+    # Used for the PGR=2 preloop GR reorder (single-partition fast path).
+    use_num_gr_total: bool = False
+    # When True, A/B/SA/SB hold raw GRPlacement counts (one per subtile atom).
+    # emit_wait_gr converts to buffer_loads via ceil(count / loadRatioGR),
+    # which is exact for any partition/GR-subtile geometry.
+    # Used for the PGR=2 preloop GR reorder when numPartitions > 1.
+    use_gr_placement_counts: bool = False
 
     def __str__(self):
+        if self.use_gr_placement_counts:
+            return f"mt1_gr_placements(A={self.A} B={self.B} SA={self.SA} SB={self.SB})"
+        if self.use_num_gr_total:
+            return "num_gr_total"
         parts = []
         for t in ('A', 'B', 'SA', 'SB'):
             v = getattr(self, t)
@@ -577,6 +673,9 @@ class GRIncOp(BaseOp):
     """Pointer update + LDS swap for global reads on a specific tensor."""
     tensor: str = ""
     unrollId: int = 0
+    # Set on the PGR=2 pre-loop advance between the two prefetch clusters, where
+    # the SRD must stay put when the summation fits in one DepthU. See emitSrdAdvance.
+    holdOnLastIter: bool = False
 
     def __post_init__(self):
         self.kind = 'gr_inc'
@@ -703,12 +802,19 @@ class LogicalScheduler:
         self._preloop_emitted: Optional[EmittedSchedule] = None
         self._ngll_emitted: Optional[EmittedSchedule] = None
         self._nll_emitted: Optional[EmittedSchedule] = None
+        # The four-deep tail (see build_tail_merged) and the scheduler that
+        # produced it; the latter owns the tile maps the emitter needs.
+        self._tail_merged_emitted: Optional[EmittedSchedule] = None
+        self._tail_own_peaks: Optional[dict] = None
+        self._tail_prime_emitted: Optional[list] = None
+        self._tail_merged_scheduler: Optional['LogicalScheduler'] = None
         # Tail-loop tile bookkeeping. Tail loop only use a subset of tiles, so we track which tileIds are
         # unused or freed for reuse within the tail loop.
         self._tail_unused_tile_ids: Dict[str, set] = {'A': set(), 'B': set(),
                                                       'SA': set(), 'SB': set()}
         self._tail_freed_tile_ids: Dict[str, set] = {'A': set(), 'B': set(),
                                                      'SA': set(), 'SB': set()}
+        self._kernel = None
 
     # ── Place LRs ─────────────────────────────────────────
 
@@ -748,6 +854,14 @@ class LogicalScheduler:
         numP = cfg.numPartitions
         part_ranges = [self._partition_tile_range(pi) for pi in range(numP)]
 
+        # Skipping a re-read is only sound for tensors whose registers still
+        # hold the data when the next partition wants it; the rest reload.
+        retained = self._lr_tensors_retained_across_partitions()
+        side_retained = {
+            side: all(t in retained for t, _ in self._lr_tensors()
+                      if TENSOR_SIDE[t] == side)
+            for side in ('A', 'B')}
+
         # Track which tile ranges are currently loaded in VGPR (for wrapping decisions).
         loaded_ranges = {'A': {part_ranges[0]['A']},
                          'B': {part_ranges[0]['B']}}
@@ -762,9 +876,11 @@ class LogicalScheduler:
 
             load = {}
             for side in ('A', 'B'):
-                load[side] = is_last or nxt[side] not in loaded_ranges[side]
+                load[side] = (is_last or not side_retained[side]
+                              or nxt[side] not in loaded_ranges[side])
 
-            slots = self._place_LRs_for_partition(cur, nxt, is_last, load, placed)
+            slots = self._place_LRs_for_partition(cur, nxt, is_last, load,
+                                                  placed, retained)
             for slot in slots:
                 for lr in slot.lrs:
                     lr.partition = pi
@@ -776,6 +892,98 @@ class LogicalScheduler:
 
         self._partitions = partitions
         return partitions
+
+    def _lr_tensors_retained_across_partitions(self) -> set:
+        """Tensors a later partition may read out of registers, not from LDS.
+
+        A partition re-reading what an earlier one already loaded is pure waste
+        -- it is the whole reason partitioning costs LDS bandwidth -- but the
+        read can only be skipped while the registers still hold the data.
+
+        The deterministic allocator gives each tile group two register sets and
+        puts k chunk c in set c % 2, so a tensor with more than two chunks per
+        unroll iteration overwrites its own earliest chunks before the
+        partition loop comes back around; one whose chunks fit in the two sets
+        has the entire iteration live at once. That is the difference between
+        MT128x128x512 (four chunks, must reload) and MT256x256x256 (two chunks,
+        need not), and it is why sharing the dedup unconditionally computed the
+        tail chunks twice and the first ones never.
+
+        The free-list allocator retains everything instead: it frees a tile at
+        its last read across the whole partition sequence, so carrying one from
+        partition 0 to partition 3 just gives it a longer live range rather
+        than letting something else land on it. PGR=0 retains nothing -- one
+        set, no prefetch, nothing to carry.
+        """
+        cfg = self.config
+        if cfg.pgr == 0:
+            return set()
+        grans = [(t, g) for t, g in self._lr_tensors() if g is not None]
+        if self._use_free_list_vgpr_allocation():
+            return {t for t, _ in grans}
+        return {t for t, g in grans
+                if (cfg.numSubIterK // g.k)
+                <= self._lr_tile_set_count(cfg.numSubIterK // g.k, t)}
+
+    def _span_ngll_merge_enabled(self) -> bool:
+        """Does the tail run all four of a partition's k-subiterations?
+
+        Register allocation and emission both ask, and they have to agree:
+        allocating for a tail that is never emitted only wastes registers, but
+        emitting one that allocation did not plan for aliases the two unroll
+        iterations onto one set of tiles. This deliberately ignores the
+        emission-side nll_ft condition; it is the conservative direction.
+
+        Off by default while the four-deep tail (build_tail_merged) is being
+        brought up. It costs A the registers to stay live across four k-steps,
+        and several library tiles already sit within single digits of the 256
+        cap, where an overflow is a hard build failure rather than a silent drop.
+        """
+        return self.config.spanNgllMerge
+
+    def _lr_tile_set_count(self, num_k_groups: int = 1,
+                           tensor: Optional[str] = None) -> int:
+        """Register sets per tile group for a tensor with num_k_groups chunks.
+
+        Two sets is one per k chunk of a single unroll iteration, which is all
+        the mainloop ever needs: chunk c lands in set c % 2 and an iteration
+        never collides with itself.
+
+        The merged tail breaks that assumption for a tensor every partition
+        reads. It runs the NGLL's unroll iteration and the NLL's back to back
+        into one accumulator block, so both iterations' chunks are live at once
+        and two sets alias the NLL's onto the NGLL's -- partition 0's NLL then
+        overwrites tiles partitions 1..3 have not read yet. Giving such a
+        tensor twice its chunk count separates them: iteration i takes sets
+        [0, nkg) and i+1 takes [nkg, 2*nkg).
+
+        Scaling with nkg rather than pinning 4 keeps the set index's period in
+        unroll_iter at exactly 2 for every tensor. A flat 4 would give the
+        nkg=1 scale tensors a period of 4 and force unroll_factor to 4, which
+        emits four mainloop copies to buy separation they already had at 2.
+
+        A tensor whose slice differs per partition is reloaded by each one, so
+        nobody reads its iteration-i tiles after that partition's iteration-i
+        MFMAs and the extra sets would only widen a live range that already
+        ended. It keeps two.
+        """
+        if self.config.pgr == 0:
+            return 1
+        if not self._span_ngll_merge_enabled():
+            return 2
+        if tensor is not None and self._varies_across_partitions(tensor):
+            return 2
+        return 2 * num_k_groups
+
+    def _varies_across_partitions(self, tensor: str) -> bool:
+        """Does this tensor's slice change from one partition to the next?
+
+        Only the side being split moves: under N-blocking every partition reads
+        the identical A and scale-A, and a different B and scale-B.
+        """
+        cfg = self.config
+        return (cfg.numPartitionsM > 1 if TENSOR_SIDE[tensor] == 'A'
+                else cfg.numPartitionsN > 1)
 
     def _create_partition_slots(self, cur: dict) -> List[SubIterKSlot]:
         """Create SubIterKSlots with MFMAs placed for one partition."""
@@ -832,11 +1040,16 @@ class LogicalScheduler:
     def _place_LRs_for_partition(self, cur: tuple, nxt: tuple,
                                   is_last: bool,
                                   load: dict,
-                                  placed: set) -> List[SubIterKSlot]:
+                                  placed: set,
+                                  retained: set = frozenset()) -> List[SubIterKSlot]:
         """Place MFMAs and LRs for one partition."""
         cfg = self.config
         numK = cfg.numSubIterK
         multi_part = cfg.numPartitions > 1
+
+        # A tensor that does not survive the trip between partitions still
+        # dedups against itself, just not against what an earlier partition read.
+        placed_local = set()
 
         slots = self._create_partition_slots(cur)
         slot_mt = {}  # slot_k → lr_mt string, for MT-homogeneity enforcement
@@ -892,10 +1105,11 @@ class LogicalScheduler:
                             if not load[side_key]:
                                 continue
                         else:
+                            pool = placed if tensor in retained else placed_local
                             lr_key = (tensor, lr_k_start, lr_k_end, ts, te)
-                            if lr_key in placed:
+                            if lr_key in pool:
                                 continue
-                            placed.add(lr_key)
+                            pool.add(lr_key)
 
                         lr = LRPlacement(
                             tensor=tensor,
@@ -1101,39 +1315,76 @@ class LogicalScheduler:
 
         part_ranges = [self._partition_tile_range(pi) for pi in range(numP)]
 
+        # Positions are either global -- every partition's group gets its own,
+        # so a tensor holds all partitions at once -- or local, reused across
+        # partitions so it only ever holds one partition's worth.
+        #
+        # A tensor with a single k chunk takes its set index from unroll_iter
+        # alone, so within one iteration nothing else tells two partitions
+        # apart and it has to go global. The verdict is normally taken for the
+        # whole kernel the moment ANY tensor is in that position, which is why
+        # B costs one set of tiles per partition even though its own k chunks
+        # already separate it.
+        #
+        # The merge cannot afford that blanket: it doubles the sets, so a
+        # global B would double too (the +128 VGPRs that made this look
+        # unreachable). Under the merge each tensor answers for itself, which
+        # leaves B holding one partition -- FlyDSL's streamed operand, arrived
+        # at from the other side.
+        #
+        # Local positions alone are not enough for B, though. The partitions
+        # want different N slices, so sharing one set of registers lets the
+        # next partition's prefetched read land on the slice the current one
+        # is still multiplying. Alternating by partition parity below restores
+        # the separation global positions used to give, at two partitions'
+        # worth of registers instead of all four.
+        # Both questions below turn on the same fact: whether a tensor's slice
+        # actually changes from one partition to the next. Only the side being
+        # split does -- under N-blocking every partition reads the identical A
+        # and scale-A, so keeping a copy per partition buys nothing.
+        varies = {t: self._varies_across_partitions(t) for t in self.tensors}
+
         any_single_k_chunk = any(
             numK // lr_grans[t].k == 1 for t in self.tensors)
-        use_global_pos = (numP > 1) and any_single_k_chunk
+        if self._span_ngll_merge_enabled():
+            use_global_pos = {t: varies[t] and numK // lr_grans[t].k == 1
+                              for t in self.tensors}
+        else:
+            use_global_pos = {t: (numP > 1) and any_single_k_chunk
+                              for t in self.tensors}
+
+        # A tensor that varies but separates itself by k chunk takes the
+        # cheaper alternation instead of a full copy per partition.
+        parity_double_buffer = {
+            t: self._span_ngll_merge_enabled() and varies[t]
+               and not use_global_pos[t]
+            for t in self.tensors}
 
         group_to_pos = {t: {} for t in self.tensors}
         max_groups = {t: 0 for t in self.tensors}
 
-        if use_global_pos:
-            for pi in range(numP):
-                for tensor in self.tensors:
-                    side = TENSOR_SIDE[tensor]
-                    start, end = part_ranges[pi][side]
-                    gran = lr_grans[tensor]
-                    groups = sorted(set(
-                        (t // gran.mn) * gran.mn for t in range(start, end)))
+        for pi in range(numP):
+            for tensor in self.tensors:
+                side = TENSOR_SIDE[tensor]
+                start, end = part_ranges[pi][side]
+                gran = lr_grans[tensor]
+                groups = sorted(set(
+                    (t // gran.mn) * gran.mn for t in range(start, end)))
+                if use_global_pos[tensor]:
                     for g in groups:
                         if g not in group_to_pos[tensor]:
                             group_to_pos[tensor][g] = max_groups[tensor]
                             max_groups[tensor] += 1
-        else:
-            for pi in range(numP):
-                for tensor in self.tensors:
-                    side = TENSOR_SIDE[tensor]
-                    start, end = part_ranges[pi][side]
-                    gran = lr_grans[tensor]
-                    groups = sorted(set(
-                        (t // gran.mn) * gran.mn for t in range(start, end)))
+                else:
+                    phase = ((pi % 2) * len(groups)
+                             if parity_double_buffer[tensor] else 0)
                     local_pos = 0
                     for g in groups:
                         if g not in group_to_pos[tensor]:
-                            group_to_pos[tensor][g] = local_pos
+                            group_to_pos[tensor][g] = local_pos + phase
                         local_pos += 1
-                    max_groups[tensor] = max(max_groups[tensor], local_pos)
+                    max_groups[tensor] = max(max_groups[tensor],
+                                             local_pos + phase)
 
         num_k_groups = {}
         for tensor in self.tensors:
@@ -1144,17 +1395,26 @@ class LogicalScheduler:
             if num_k_groups[tensor] % 2 != 0:
                 unroll_factor = 2
                 break
+        if self._span_ngll_merge_enabled():
+            # A merging tensor holds sets [0, nkg) for one unroll iteration and
+            # [nkg, 2*nkg) for the next, so the assignment only closes after two
+            # iterations. Emitting one would leave the second half unwritten and
+            # hand the NLL the NGLL's tiles again.
+            unroll_factor = max(unroll_factor, 2)
         pgr0 = cfg.pgr == 0
         if pgr0:
             unroll_factor = 1
+
+        num_sets = {t: self._lr_tile_set_count(num_k_groups[t], t)
+                    for t in self.tensors}
 
         def _tile_set_idx(tensor, unroll_iter, k_chunk, gran):
             if pgr0:
                 return 0
             nkg = num_k_groups[tensor]
-            return (unroll_iter * nkg + k_chunk // gran.k) % 2
+            return (unroll_iter * nkg + k_chunk // gran.k) % num_sets[tensor]
 
-        def _tile_id(tensor, set_idx, pos):
+        def _tile_id(tensor, set_idx, pos, k_chunk=0):
             return set_idx * max_groups[tensor] + pos
 
         for unroll_iter in range(unroll_factor):
@@ -1173,7 +1433,7 @@ class LogicalScheduler:
                             for t in tileRange.tileId_list:
                                 group = (t // gran.mn) * gran.mn
                                 pos = group_to_pos[tensor][group]
-                                tile_map[group] = _tile_id(tensor, set_idx, pos)
+                                tile_map[group] = _tile_id(tensor, set_idx, pos, k)
                             slot.mfma.vgpr_tile_maps.setdefault(
                                 tensor, []).append(tile_map)
 
@@ -1190,11 +1450,11 @@ class LogicalScheduler:
                             if group in tile_map:
                                 continue
                             pos = group_to_pos[tensor][group]
-                            tile_map[group] = _tile_id(tensor, set_idx, pos)
+                            tile_map[group] = _tile_id(tensor, set_idx, pos, target_k)
                         lr.vgpr_tile_map.append(tile_map)
 
-        num_sets = 1 if pgr0 else 2
-        self.tile_peaks = {t: num_sets * max_groups[t] for t in self.tensors}
+        self.tile_peaks = {t: (1 if pgr0 else num_sets[t]) * max_groups[t]
+                           for t in self.tensors}
         self.compact_b_overlay = False
         self.unroll_factor = unroll_factor
         self.needs_unrolling = unroll_factor > 1
@@ -1641,9 +1901,24 @@ class LogicalScheduler:
                 for t in self.tensors:
                     deps_for_t = []
                     for lr in lr_by_tensor.get(t, []):
-                        if _tiles_overlap(slot.mfma, t, lr.tiles):
-                            deps_for_t.append(Dep(
-                                ref=lr, mt_offset=_mt_offset(pi, k, 'MFMA', lr)))
+                        if not _tiles_overlap(slot.mfma, t, lr.tiles):
+                            continue
+                        # The instance of this LR that runs before the MFMA is
+                        # _slot_offset iterations back and carries data
+                        # mtIteration ahead; it only feeds the MFMA when those
+                        # cancel. Without the check, a later partition
+                        # re-reading the same tiles for the current MT scores as
+                        # the most recent producer and the MFMA ends up waiting
+                        # on an LR that has not run yet.
+                        #
+                        # PLR0 is exempt: it does not prefetch, so an LR sits in
+                        # its own consumer's slot and feeds it directly, against
+                        # the MFMA-before-LR order _slot_offset assumes.
+                        if cfg.plr != 0 and \
+                                _slot_offset(pi, k, 'MFMA', lr) + lr.mtIteration != 0:
+                            continue
+                        deps_for_t.append(Dep(
+                            ref=lr, mt_offset=_mt_offset(pi, k, 'MFMA', lr)))
                     slot.mfma.deps.extend(_dedup_deps(deps_for_t))
 
             # LR: depends on GR (data must be in LDS before reading)
@@ -2876,20 +3151,40 @@ class LogicalScheduler:
         self._ngll_emitted = ngll
         return ngll
 
-    def build_nll(self) -> EmittedSchedule:
+    def build_nll(self, dropRedundantSync: bool = False) -> EmittedSchedule:
         """NLL (No Load Loop): mainloop without GR, LR(n+1), GR_INC, LR_INC,
         WaitGR(n+1)+Sync. Keeps LR(n), MFMAs, WaitGR(n). WaitGR counts are
-        zeroed only when no LR(n) remains in the last subIterK slot."""
+        zeroed only when no LR(n) remains in the last subIterK slot.
+
+        ``dropRedundantSync`` drops the barriers that survive on those zeroed
+        WaitGRs, keeping only the last one in the body. A WaitGR carries a
+        barrier because an LR reading LDS needs every *other* wave's loads to
+        have landed, which vmcnt cannot say. Strip the GRs and that hazard goes
+        with them: the counts are zeroed right below precisely because nothing
+        is in flight any more, and the body issues no load that could refill a
+        buffer. The barrier is then asserting a fact already established before
+        the body was entered.
+
+        The last one stays. It is not doing the WaitGR's job -- it is the only
+        thing standing between this body's final LDS read and the next macro
+        tile's global reads, which overwrite that buffer. The preloop cannot
+        cover that: its barrier sits after its GRs, not before them.
+
+        Off by default. The split NLL reaches its barriers with the NGLL's
+        loads still in flight behind it, so the same argument needs checking
+        there separately; only the four-deep tail asks for this today.
+        """
         assert self._emitted is not None, "call build() first"
 
         if self.config.pgr == 0:
             self._nll_emitted = [[[]]]
             return self._nll_emitted
 
-        nll = []
+        # (partition index, new_emitted, removed) in emission order, so the
+        # "keep the last barrier" decision below can see the whole body.
+        pending: List[Tuple[int, list, set]] = []
         numK = self.config.numSubIterK
-        for partition_emitted in self._emitted:
-            part_nll = []
+        for pi, partition_emitted in enumerate(self._emitted):
             for k, emitted in enumerate(partition_emitted):
                 new_emitted = copy.deepcopy(emitted)
                 removed = set()
@@ -2940,11 +3235,189 @@ class LogicalScheduler:
                                 and em.moduleId not in depended_on:
                             removed.add(em.moduleId)
 
-                part_nll.append(self._rewire_before(new_emitted, removed))
-            nll.append(part_nll)
+                pending.append((pi, new_emitted, removed))
+
+        if dropRedundantSync:
+            survivors = [
+                (idx, em)
+                for idx, (_, new_emitted, removed) in enumerate(pending)
+                for em in new_emitted
+                if em.opType == 'sync' and em.moduleId not in removed
+            ]
+            for idx, em in survivors[:-1]:
+                pending[idx][2].add(em.moduleId)
+
+        nll: EmittedSchedule = []
+        for pi, new_emitted, removed in pending:
+            while len(nll) <= pi:
+                nll.append([])
+            nll[pi].append(self._rewire_before(new_emitted, removed))
 
         self._nll_emitted = nll
         return nll
+
+    def build_tail_merged(self) -> Optional[EmittedSchedule]:
+        """Schedule the last two DepthU as one body, four k-subiterations deep.
+
+        The tail is the one place a partition can run more than one DepthU: by
+        then the global loads have stopped, so both halves of the double buffer
+        are readable at once and together hold four k-steps of data that is
+        already resident. Running them back to back is what lets partition p
+        reach its final accumulator early enough for its store to drain
+        underneath partition p+1's MFMAs.
+
+        Splicing the NGLL and NLL schedules to get there does not work, and the
+        reason generalises: place_LRs places each read one partition ahead of
+        the MFMAs that consume it, so a schedule carries a skew measured against
+        the body it was built for. Two bodies of length two cannot be joined
+        into one of length four without invalidating both skews -- 48 of the 64
+        accumulators ended up reading a different LDS offset. So this schedules
+        the four-deep body outright and takes its NLL, which is already "no
+        global loads, no reads for the next macro tile" -- exactly the tail.
+
+        Doubling numSubIterK alone would describe one 512-deep buffer. Pinning
+        numUnroll to 2 is what makes it two 256-deep ones: it halves _per_uid_k,
+        so insert_gr_lr_inc emits its unroll-swap LRInc at the k1/k2 boundary
+        and the body switches buffers in its middle, which is the physical
+        layout we actually have. The scales need the same pin even though
+        multi-DU proper leaves them at 1 -- multi-DU gets a scale region that is
+        genuinely twice as deep, whereas here the region is the one the
+        surrounding kernel reserved and the second half has to cross over.
+        """
+        assert self._emitted is not None, "call build() first"
+        ownTiles = self.config.tailOwnTiles
+        if self.config.pgr < 2 or not (self._span_ngll_merge_enabled() or ownTiles):
+            self._tail_merged_emitted = None
+            self._tail_prime_emitted = None
+            return None
+
+        cfg = copy.deepcopy(self.config)
+        cfg.numSubIterK = self.config.numSubIterK * 2
+        if ownTiles:
+            # The parent is unpartitioned so its mainloop stays baseline; the
+            # split lives here, where it is what keeps B narrow enough for the
+            # four-deep body's doubled A to fit.
+            cfg.spanTailOverride = True
+            cfg.partitionSizeM = self.config.numMFMATilesM
+            cfg.partitionSizeN = self.config.tailPartitionSizeN
+            # The partition sizes above are inputs to the derived per-partition
+            # lists, and deepcopy carries the parent's derivation rather than
+            # redoing it, so the split only takes effect once post-init reruns.
+            # Post-init also rewrites numUnroll, so the pin has to follow it.
+            cfg.__post_init__()
+        cfg.numUnroll = {t: 2 for t in self.config.numUnroll}
+
+        sub = LogicalScheduler(cfg)
+        sub.build()
+        # The fact these barriers assert is established on entry either way:
+        # the partitioned mainloop does it implicitly, and under tailOwnTiles
+        # the FourDeepTailEntry sequence does it explicitly with its own waitcnt
+        # and barrier. The body itself issues no global read, so nothing inside
+        # can recreate the hazard.
+        sub.build_nll(dropRedundantSync=True)
+
+        self._tail_merged_scheduler = sub
+        self._tail_merged_emitted = sub._nll_emitted
+        self._tail_prime_emitted = sub._build_tail_prime() if ownTiles else None
+        # Both bodies index the same physical tile lists, so the allocation has
+        # to cover whichever of them needs more. The four-deep body trades here
+        # rather than simply costing more: A doubles because it stays live
+        # across all four k-steps, while B's peak drops, because a partition now
+        # consumes its whole B slice in one go instead of holding it across the
+        # round robin.
+        if ownTiles:
+            self._tail_own_peaks = dict(sub.tile_peaks)
+        else:
+            for tensor, peak in sub.tile_peaks.items():
+                self.tile_peaks[tensor] = max(self.tile_peaks.get(tensor, 0), peak)
+        return self._tail_merged_emitted
+
+    def _build_tail_prime(self) -> List[EmittedModule]:
+        """Prime this body's local-read pipeline the way the preloop primes the
+        mainloop's.
+
+        At plr=1 a body's opening MFMA consumes operands read by whatever ran
+        before it -- the mainloop's last iteration, out of the tile registers
+        the two bodies share. The four-deep tail under tailOwnTiles shares
+        neither: it reallocates at entry, so those registers are not the ones
+        the mainloop wrote. Reading them here instead makes the body depend on
+        LDS alone, which is what lets the mainloop stay unpartitioned.
+
+        This is the same set build_preloop issues before the mainloop, against
+        this scheduler's own partition 0, and _make_lr_all_tensors already
+        carries the right semantic: tiles for the first MFMA rather than for
+        the next subIterK.
+
+        Switching the body to plr=0 would also remove the dependency, but it
+        costs the cross-partition retention that keeps A read once instead of
+        once per partition -- 512 ds_reads against 260 for this tile.
+        """
+        cfg = self.config
+        part0 = self._partition_tile_range(0)
+        lr_tiles = {
+            'A': MFMATileRange(0, cfg.lrA.k, *part0['A']),
+            'B': MFMATileRange(0, cfg.lrB.k, *part0['B']),
+        }
+        if cfg.hasScale:
+            lr_tiles['SA'] = MFMATileRange(0, cfg.lrSA.k, *part0['A'])
+            lr_tiles['SB'] = MFMATileRange(0, cfg.lrSB.k, *part0['B'])
+        return self._to_emitted([
+            *self._make_lr_all_tensors(lr_tiles),
+            WaitLROp(),
+        ])
+
+    def _tailEntryInflightBound(self) -> int:
+        """How many mainloop loads may still be in flight when the tail starts.
+
+        The mainloop issues one batch of loads per DepthU and the four-deep
+        tail reads the last two batches, so at entry the data it is about to
+        read is partly still on the wire. Which part decides the count.
+
+        Reads are hoisted ahead of the MFMAs that consume them, and the scales
+        are hoisted furthest: ``LR SA k[2,3]`` sits in the tail's very first
+        slot, four k-steps ahead of its consumer. So the entry wait has to
+        cover the scale loads of the *second* batch, and with them everything
+        issued before. What it does not have to cover is whatever the mainloop
+        issues after those scales -- the trailing slices of B, which no read
+        reaches until partition 1, behind a wait the scheduler placed itself.
+
+        That trailing count is the bound. For MT256x256 fp4 it is 6 of the
+        batch's 18 loads, which the verify sweep agrees with: 8 fails, 4 (an
+        earlier guess) passes only because it is stricter than 6.
+
+        Returns 0 -- wait for everything, always safe -- when the schedule does
+        not look like the one this argument is about.
+        """
+        import math
+        emitter = self._emitter
+        if emitter is None or self._emitted is None:
+            return 0
+
+        grs = [em.source for partition in self._emitted
+               for slot in partition for em in slot if em.opType == 'gr']
+        scaleIdx = [i for i, gr in enumerate(grs) if gr.tensor in ('SA', 'SB')]
+        if not scaleIdx:
+            return 0
+
+        def _loads(gr):
+            info = emitter.tileInfoMap.get(gr.tensor)
+            if info is None:
+                return 0
+            if gr.tensor in ('SA', 'SB'):
+                return info.numGRTotal
+            span = gr.tiles.tileId_end - gr.tiles.tileId_start
+            ratio = getattr(info, 'loadRatioGR', 1.0) or 1.0
+            return max(1, math.ceil(span / ratio))
+
+        # The per-tensor totals are the batch size stated independently of the
+        # GR list, so disagreement means _loads does not model this geometry
+        # and the derived count would be a guess.
+        expected = sum(info.numGRTotal
+                       for info in emitter.tileInfoMap.values() if info)
+        if sum(_loads(gr) for gr in grs) != expected:
+            return 0
+
+        return sum(_loads(gr) for gr in grs[max(scaleIdx) + 1:])
 
     def build_tailloop_pgr0(self) -> List[List[List[EmittedModule]]]:
         """Template for Tailloop based on PGR0 schedule.
@@ -3078,6 +3551,37 @@ class LogicalScheduler:
         """Wrap Emittable objects (Placements / BaseOps) into EmittedModules."""
         return [EmittedModule(moduleId=mid, source=op) for mid, op in enumerate(ops)]
 
+    def _make_preloop_gr_placements(self, tensor: str, mt: int,
+                                    tiles: MFMATileRange, uid: int) -> List[GRPlacement]:
+        """Build preloop GR placements."""
+        return [
+            GRPlacement(tensor=tensor, mtIteration=mt, tiles=tiles,
+                        subIterK_slot=tiles.subIterK_start,
+                        unrollId=uid)
+        ]
+
+    def _gr1_wait_counts(self, gr1_ops) -> 'WaitGRCounts':
+        """Compute WaitGRCounts for MT1 GR ops hoisted before WaitGR.
+
+        For single-partition kernels uses use_num_gr_total (fast path: exact
+        buffer_load count from tileInfo, avoids the grMap formula which
+        miscounts when loadRatioGR >= 1).  For multi-partition kernels counts
+        GRPlacement atoms per tensor and uses use_gr_placement_counts so the
+        emitter converts via ceil(count / loadRatioGR).
+
+        Mirrors _mt1_wait_gr_counts from plsin-mt1-clustered-reads.
+        """
+        if self.config.numPartitions == 1:
+            return WaitGRCounts(use_num_gr_total=True)
+        counts = {'A': 0, 'B': 0, 'SA': 0, 'SB': 0}
+        for op in gr1_ops:
+            if isinstance(op, GRPlacement):
+                counts[op.tensor] = counts.get(op.tensor, 0) + 1
+        return WaitGRCounts(
+            use_gr_placement_counts=True,
+            A=counts['A'], B=counts['B'], SA=counts['SA'], SB=counts['SB'],
+        )
+
     def _make_gr_all_tensors(self, mt: int, tiles: dict) -> List[GRPlacement]:
         """Create GR placements for all tensors and uids at the given MT iteration.
 
@@ -3101,9 +3605,8 @@ class LogicalScheduler:
                                              tile.tileId_start, tile.tileId_end)
                 else:
                     uid_tile = tile
-                result.append(GRPlacement(tensor=tensor, mtIteration=mt,
-                                          tiles=uid_tile, subIterK_slot=0,
-                                          unrollId=uid))
+                result.extend(self._make_preloop_gr_placements(
+                    tensor, mt, uid_tile, uid))
         return result
 
     def _make_lr_all_tensors(self, tiles: dict) -> List[LRPlacement]:
@@ -3127,10 +3630,10 @@ class LogicalScheduler:
             placements.append(lr)
         return placements
 
-    def _make_depops_all_tensors(self, cls) -> List[BaseOp]:
+    def _make_depops_all_tensors(self, cls, holdOnLastIter=False) -> List[BaseOp]:
         """Create a BaseOp subclass instance for each tensor (and uid for GRIncOp)."""
         if cls is GRIncOp:
-            return [GRIncOp(tensor=t, unrollId=uid)
+            return [GRIncOp(tensor=t, unrollId=uid, holdOnLastIter=holdOnLastIter)
                     for t in self.tensors
                     for uid in range(self.config.numUnroll.get(t, 1))]
         return [cls(tensor=tensor) for tensor in self.tensors]
@@ -3157,12 +3660,11 @@ class LogicalScheduler:
                                          tile.tileId_start, tile.tileId_end)
             else:
                 uid_tile = tile
-            result.append(GRPlacement(tensor=tensor, mtIteration=mt,
-                                      tiles=uid_tile, subIterK_slot=0,
-                                      unrollId=uid))
+            result.extend(self._make_preloop_gr_placements(
+                tensor, mt, uid_tile, uid))
         return result
 
-    def _make_depops_uid(self, cls, uid: int) -> List[BaseOp]:
+    def _make_depops_uid(self, cls, uid: int, holdOnLastIter=False) -> List[BaseOp]:
         """Create a BaseOp subclass instance for a single uid across all tensors.
 
         Only emits for tensors where uid < numUnroll[tensor].
@@ -3173,7 +3675,8 @@ class LogicalScheduler:
             if uid >= nUnroll:
                 continue
             if cls is GRIncOp:
-                result.append(GRIncOp(tensor=tensor, unrollId=uid))
+                result.append(GRIncOp(tensor=tensor, unrollId=uid,
+                                      holdOnLastIter=holdOnLastIter))
             else:
                 result.append(cls(tensor=tensor))
         return result
@@ -3288,6 +3791,193 @@ class LogicalScheduler:
                                        emitter.dtileInfo)
         return InlineModuleOp(build=_build_initC, label="initC_overlap")
 
+    def _interleave_preloop_filler(self, em_list, writer) -> bool:
+        """Instruction-level filler interleave for the fast-path preloop.
+
+        Replaces the fragile op-level clustering (_build_clustered_preloop_ops +
+        _inject_lra_filler_into_clustered_preloop) with a single dependency-aware
+        pass that rewrites the already-populated preloop `em_list` in place.
+
+        It clusters the MT0 buffer_load atoms in groups of PRELOOP_GR_CLUSTER_SIZE and
+        distributes GR-independent filler between clusters, respecting real deps:
+          - LRA offset VALU (writer._deferredPreloopLraModules): fully free.
+          - initD zeroing MFMAs: free once all seed (acc) writes precede them.
+          - initD seed writes (all acc writes, incl. zero-source + output tiles) +
+            hazard s_nop: ALL pinned to gap 0. Placing any v_accvgpr_write after a
+            v_mfma contends for the acc write port and deterministically corrupts
+            the accumulation result (hardware data hazard on CDNA).
+          - SRD depops (per-tensor GRIncOp): windowed — placed after that tensor's
+            last MT0 load and before its first MT1 load (staggered per tensor).
+
+        Returns True if the interleave ran (caller must then skip the legacy LRA
+        re-injection and use self._canonicalInitCInstrs for the slow-path copy).
+
+        Single-DU only; caller gates on cluster_size>0 and max(numUnroll)==1.
+        The canonical initC_overlap EmittedModule is left present but emptied on the
+        fast path; the full initC instruction list is stashed on
+        self._canonicalInitCInstrs for the slow-path duplicate.
+        """
+        from rocisa.instruction import (MFMAInstruction, MXMFMAInstruction,
+                                         CommonInstruction, GlobalReadInstruction)
+
+        if not (self._kernel and isMxf4SubtilePath(self._kernel)):
+            return False
+        cluster_size = PRELOOP_GR_CLUSTER_SIZE
+
+        _is_mfma = lambda x: isinstance(x, (MFMAInstruction, MXMFMAInstruction))
+        _is_m0 = lambda x: (isinstance(x, CommonInstruction) and hasattr(x, 'dst')
+                            and getattr(x.dst, 'regType', None) == 'm')
+        _is_load = lambda x: isinstance(x, GlobalReadInstruction)
+
+        # ── Locate the clustered region: MT0 gr modules, gr_inc modules, initC ──
+        mt0_idx, grinc_idx, initc_i = [], [], None
+        for i, em in enumerate(em_list):
+            lbl = getattr(em.source, 'label', None)
+            if em.opType == 'gr' and getattr(em.source, 'mtIteration', None) == 0:
+                mt0_idx.append(i)
+            elif em.opType == 'gr_inc':
+                grinc_idx.append(i)
+            elif lbl == 'initC_overlap' and initc_i is None:
+                initc_i = i
+        if not mt0_idx or initc_i is None:
+            return False
+        region_start = mt0_idx[0]
+        region_end = initc_i  # inclusive; MT1 grs follow at initc_i+1
+
+        # ── Extract MT0 atoms (split each module at m0-update boundaries) ──
+        def _atomize(instrs):
+            atoms, cur = [], []
+            for inst in instrs:
+                if _is_m0(inst) and cur:
+                    atoms.append(cur); cur = [inst]
+                else:
+                    cur.append(inst)
+            if cur:
+                atoms.append(cur)
+            return atoms
+
+        atoms = []  # list of (tensor, [instrs])
+        for i in mt0_idx:
+            t = getattr(em_list[i].source, 'tensor', '')
+            for a in _atomize(list(em_list[i].instructions)):
+                atoms.append((t, a))
+        n_atoms = len(atoms)
+        n_clusters = (n_atoms + cluster_size - 1) // cluster_size
+        n_gaps = max(0, n_clusters - 1)
+
+        # ── SRD depop pool, per tensor ──
+        srd_by_tensor = {}
+        for i in grinc_idx:
+            t = getattr(em_list[i].source, 'tensor', '')
+            srd_by_tensor.setdefault(t, []).extend(list(em_list[i].instructions))
+
+        # ── initC split: pinned seed (all acc writes) vs free MFMA ──
+        initc_full = list(em_list[initc_i].instructions)
+        self._canonicalInitCInstrs = list(initc_full)
+        # ALL seed (acc) writes are pinned to gap 0, ahead of every initD MFMA.
+        # A v_accvgpr_write issued after an MFMA — even to a disjoint acc — contends
+        # with the in-flight MFMA for the acc write port and deterministically
+        # corrupts the accumulation (the codebase elsewhere guards the symmetric
+        # MFMA->accvgpr_read latency window). Distributing seed-output writes into
+        # post-MFMA gaps is therefore illegal; free_seed_out stays empty.
+        pinned, free_mfma, free_seed_out = [], [], []
+        for inst in initc_full:
+            if _is_mfma(inst):
+                free_mfma.append(inst)
+            elif isinstance(inst, CommonInstruction) and hasattr(inst, 'dst') \
+                    and getattr(inst.dst, 'regType', None) in ('v', 'acc'):
+                pinned.append(inst)  # seed-source AND seed-output → before first MFMA
+            else:
+                # s_nop / s_wait_alu hazards, comments — keep with pinned lead
+                pinned.append(inst)
+
+        # ── LRA pool ──
+        lra = list(getattr(writer, '_deferredPreloopLraModules', None) or [])
+
+        # ── Per-tensor SRD windows: open at gap after tensor's last MT0 atom ──
+        last_mt0_atom = {}
+        for k, (t, _a) in enumerate(atoms):
+            last_mt0_atom[t] = k
+        # window_open[t] = index of the first inter-cluster gap that lies AFTER
+        # tensor T's last MT0 load (= floor(last_atom / cluster_size)). NOT clamped:
+        # if T's last MT0 load is in the final cluster, window_open >= n_gaps, meaning
+        # no inter-cluster gap is legal — its SRD must go to the trailing block (after
+        # all clusters, still before MT1), which srd_leftover handles.
+        window_open = {t: last_mt0_atom[t] // cluster_size for t in last_mt0_atom}
+
+        # ── Proportional fill ──
+        gap_fill = [[] for _ in range(n_gaps)]
+        # SRD: place each tensor's whole group in the earliest legal gap of its window.
+        # Tensors whose window opens at/after n_gaps (last MT0 load in the final
+        # cluster, e.g. the scale tensors) are left in srd_by_tensor and emitted in
+        # the trailing block — placing them in any earlier gap would advance Srd{tc}
+        # before that tensor's own MT0 load reads it (wrong-address load).
+        for t in self.tensors:
+            grp = srd_by_tensor.get(t)
+            wo = window_open.get(t, 0)
+            if grp and n_gaps > 0 and wo < n_gaps:
+                gap_fill[wo].extend(grp)
+                srd_by_tensor[t] = []
+        # Pre-split free pools evenly across gaps so each gap gets a proportional
+        # share of LRA *and* MFMAs rather than front-loading LRA into gap 0.
+        # Each pool is split into n_gaps slices (floor/ceil); then within each gap
+        # the gap's LRA slice is emitted first (covers HBM latency), MFMAs second.
+        def _split(pool, n):
+            """Return list of n slices, distributing remainder to early gaps."""
+            base_n, rem_n = divmod(len(pool), n) if n else (0, 0)
+            slices, i = [], 0
+            for g in range(n):
+                cnt = base_n + (1 if g < rem_n else 0)
+                slices.append(pool[i:i + cnt])
+                i += cnt
+            return slices
+
+        lra_slices  = _split(lra,       n_gaps) if n_gaps else []
+        mfma_slices = _split(free_mfma, n_gaps) if n_gaps else []
+        if n_gaps > 0:
+            lra[:] = []        # consumed into slices; clear to avoid double-emit
+            free_mfma[:] = []
+
+        for g in range(n_gaps):
+            if g == 0:
+                gap_fill[g] = pinned + gap_fill[g]  # pinned lead precedes all MFMA
+                pinned = []
+            gap_fill[g].extend(lra_slices[g])
+            gap_fill[g].extend(mfma_slices[g])
+
+        # Leftovers (incl. the single-cluster n_gaps==0 case) → one trailing module
+        # emitted before the (now empty) initC, still ahead of MT1 grs so any
+        # unplaced SRD stays inside its window (window closes at first MT1 load).
+        srd_leftover = [inst for t in self.tensors
+                        for inst in (srd_by_tensor.get(t) or [])]
+        trailing = pinned + srd_leftover + list(free_mfma) + list(lra) + list(free_seed_out)
+
+        # ── Rebuild the region in place ──
+        next_id = max((em.moduleId for em in em_list), default=-1) + 1
+        new_region = []
+        for c in range(n_clusters):
+            chunk = atoms[c * cluster_size:(c + 1) * cluster_size]
+            cluster_instrs = [inst for (_t, a) in chunk for inst in a]
+            new_region.append(EmittedModule(moduleId=next_id,
+                                            instructions=cluster_instrs, source=None))
+            next_id += 1
+            if c < n_gaps and gap_fill[c]:
+                new_region.append(EmittedModule(moduleId=next_id,
+                                                instructions=gap_fill[c], source=None))
+                next_id += 1
+        if trailing:
+            new_region.append(EmittedModule(moduleId=next_id,
+                                            instructions=trailing, source=None))
+            next_id += 1
+        # Keep the canonical initC_overlap module present (split asserts on it) but
+        # emptied on the fast path; its full content lives in _canonicalInitCInstrs.
+        initc_mod = em_list[initc_i]
+        initc_mod.instructions = []
+        new_region.append(initc_mod)
+
+        em_list[region_start:region_end + 1] = new_region
+        return True
+
     def build_preloop(self) -> EmittedSchedule:
         """Build preloop: pipeline initialization sequence before mainloop.
 
@@ -3371,53 +4061,111 @@ class LogicalScheduler:
                     gl2_preloop_ops.append(GL2PrefetchIncOp())
                     gl2_preloop_ops.append(GL2PrefetchOp())
             maxUnroll = max(cfg.numUnroll.values()) if cfg.numUnroll else 1
+            # GR reorder: hoist MT1 GRs before WaitGR with a partial
+            # vmcnt(N_gr1) so both prefetch batches are in flight at once. This
+            # is independent of the MT0 clustering above. Off outside MXF4 so
+            # other subtile kernels keep develop's emission order.
+            do_reorder = bool(self._kernel) and isMxf4SubtilePath(self._kernel)
             if maxUnroll > 1:
                 preloop_ops = []
                 for uid in range(maxUnroll):
                     preloop_ops.extend(self._make_gr_all_tensors_uid(0, all_tiles, uid))
-                    preloop_ops.extend(self._make_depops_uid(GRIncOp, uid))
+                    preloop_ops.extend(self._make_depops_uid(GRIncOp, uid,
+                                                             holdOnLastIter=True))
                 mt1_ops = []
+                mt1_grs_only = []
                 for uid in range(maxUnroll):
-                    mt1_ops.extend(self._make_preloop_mt1_grs_uid(uid))
+                    uid_grs = self._make_preloop_mt1_grs_uid(uid)
+                    mt1_grs_only.extend(uid_grs)
+                    mt1_ops.extend(uid_grs)
                     mt1_ops.extend(self._make_depops_uid(GRIncOp, uid))
-                emitted = self._to_emitted([
-                    *preloop_ops,
-                    initC_op,
-                    WaitGROp(wait_gr_counts=WaitGRCounts()),
-                    SyncOp(),
-                    *self._make_lr_all_tensors(lr_tiles),
-                    SkipOp(compare='LE', value=1, target='NLL'),
-                    *mt1_ops,
-                    *gl2_preloop_ops,
-                    SkipOp(compare='LE', value=2, target='NGLL'),
-                ])
+                if do_reorder:
+                    # GR reorder (Experiment 3): MT1 GRs issued before WaitGR so both
+                    # MT0 and MT1 prefetch batches are in-flight simultaneously.
+                    # vmcnt is set to N_gr1 (not 0) so GR0 is drained while GR1 remains
+                    # in-flight past the barrier, to be drained by the mainloop's own
+                    # per-subIterK WaitGROp before ds_reads(MT1).
+                    emitted = self._to_emitted([
+                        *preloop_ops,
+                        initC_op,
+                        *mt1_ops,                              # ← moved before WaitGR
+                        WaitGROp(wait_gr_counts=self._gr1_wait_counts(mt1_grs_only)),
+                        SyncOp(),
+                        *self._make_lr_all_tensors(lr_tiles),
+                        SkipOp(compare='LE', value=1, target='NLL'),
+                        *gl2_preloop_ops,
+                        SkipOp(compare='LE', value=2, target='NGLL'),
+                    ])
+                else:
+                    # Reorder off: MT1 after the NLL skip, full vmcnt(0) drain.
+                    emitted = self._to_emitted([
+                        *preloop_ops,
+                        initC_op,
+                        WaitGROp(wait_gr_counts=WaitGRCounts()),
+                        SyncOp(),
+                        *self._make_lr_all_tensors(lr_tiles),
+                        SkipOp(compare='LE', value=1, target='NLL'),
+                        *mt1_ops,
+                        *gl2_preloop_ops,
+                        SkipOp(compare='LE', value=2, target='NGLL'),
+                    ])
             else:
-                emitted = self._to_emitted([
-                    *self._make_gr_all_tensors(0, all_tiles),
-                    *self._make_depops_all_tensors(GRIncOp),
-                    initC_op,
-                    WaitGROp(wait_gr_counts=WaitGRCounts()),
-                    SyncOp(),
-                    *self._make_lr_all_tensors(lr_tiles),
-                    SkipOp(compare='LE', value=1, target='NLL'),
-                    *self._make_preloop_mt1_grs(),
-                    *gl2_preloop_ops,
-                    SkipOp(compare='LE', value=2, target='NGLL'),
-                ])
+                mt1_grs = self._make_preloop_mt1_grs()
+                if do_reorder:
+                    # Emit the clean, unclustered GR-reorder op list. On the
+                    # single-DU MXF4 path, the post-populate pass
+                    # _interleave_preloop_filler (called from emitMainAndExitLoops)
+                    # rewrites this into clusters with distributed filler at the
+                    # INSTRUCTION level, where it can respect per-tensor SRD windows and
+                    # the initC seed→MFMA ordering that op-level clustering could not.
+                    emitted = self._to_emitted([
+                        *self._make_gr_all_tensors(0, all_tiles),
+                        *self._make_depops_all_tensors(GRIncOp, holdOnLastIter=True),
+                        initC_op,
+                        *mt1_grs,                              # ← moved before WaitGR
+                        WaitGROp(wait_gr_counts=self._gr1_wait_counts(mt1_grs)),
+                        SyncOp(),
+                        *self._make_lr_all_tensors(lr_tiles),
+                        SkipOp(compare='LE', value=1, target='NLL'),
+                        *gl2_preloop_ops,
+                        SkipOp(compare='LE', value=2, target='NGLL'),
+                    ])
+                else:
+                    # Reorder off: MT1 after the NLL skip, full vmcnt(0) drain at the
+                    # barrier. PGRCS MT0 clustering still applies — the region up to
+                    # initC is unchanged, so _interleave_preloop_filler still rewrites it.
+                    emitted = self._to_emitted([
+                        *self._make_gr_all_tensors(0, all_tiles),
+                        *self._make_depops_all_tensors(GRIncOp, holdOnLastIter=True),
+                        initC_op,
+                        WaitGROp(wait_gr_counts=WaitGRCounts()),
+                        SyncOp(),
+                        *self._make_lr_all_tensors(lr_tiles),
+                        SkipOp(compare='LE', value=1, target='NLL'),
+                        *mt1_grs,
+                        *gl2_preloop_ops,
+                        SkipOp(compare='LE', value=2, target='NGLL'),
+                    ])
 
         self._preloop_emitted = [[emitted]]
         return self._preloop_emitted
 
-    def _emitLoop(self, writer, kernel, label, emitted_3d, schedule=True):
+    def _emitLoop(self, writer, kernel, label, emitted_3d, schedule=True,
+                  injectAfterPartition=None):
         """Emit a loop section from a 3D emitted structure.
 
         emitted_3d: [partition][subIterK][EmittedModule]
+
+        injectAfterPartition: {partition index: Module} spliced in once that
+        partition's K reduction is complete. The staged fused store uses this to
+        drain partition p's D tiles while partition p+1 is still accumulating.
 
         When schedule=True and a group has MFMAs, calls instructionSchedule
         for interleaving. When schedule=False, emits instructions sequentially.
         """
         from Tensile.Components.Subtile.InstructionScheduler import (
             instructionSchedule,
+            relaxWaitGrForOutstandingStores,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250,
         )
@@ -3444,9 +4192,16 @@ class LogicalScheduler:
         pap_merge_label = Label("SubtilePAPPreloopFirstGRMerge", "") if use_pap_preloop_skip else None
         skipping_first_gr_group = False
         first_gr_group_done = False
+        # Partition p's drain rides inside partition p+1 rather than in front of it,
+        # so it is built into a per-partition module first and only appended once the
+        # scatter has had its chance. Carried across one partition, never further:
+        # holding it longer would keep the store's source registers live across more
+        # of the loop for no extra cover.
+        pendingDrain = None
         for pi, partition_emitted in enumerate(emitted_3d):
+            partModule = Module(f"{label}_part{pi}") if pendingDrain else module
             for k, em_list in enumerate(partition_emitted):
-                module.addComment0(f"partition={pi} subIterK={k}")
+                partModule.addComment0(f"partition={pi} subIterK={k}")
                 has_mfma = any(em.opType == 'mfma' for em in em_list)
 
                 if schedule and em_list and has_mfma:
@@ -3454,29 +4209,69 @@ class LogicalScheduler:
                         em_list,
                         multiDU=self._is_multi_du(),
                         minGapDsReadToWait=minGapDsReadToWait)
-                    module.add(scheduled)
+                    partModule.add(scheduled)
                 else:
                     for em in em_list:
                         if use_pap_preloop_skip and not first_gr_group_done:
                             if em.opType == 'gr':
                                 if not skipping_first_gr_group:
-                                    module.add(SCmpEQU32(src0=sgpr("SkPrefetchPrimed"), src1=0,
+                                    partModule.add(SCmpEQU32(src0=sgpr("SkPrefetchPrimed"), src1=0,
                                                          comment="Subtile PAP: first PRELOOP GR already issued?"))
-                                    module.add(SCBranchSCC0(labelName=pap_merge_label.getLabelName(),
+                                    partModule.add(SCBranchSCC0(labelName=pap_merge_label.getLabelName(),
                                                             comment="skip first PRELOOP GR group if primed"))
                                     skipping_first_gr_group = True
                             elif skipping_first_gr_group:
-                                module.add(pap_merge_label)
-                                module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
+                                partModule.add(pap_merge_label)
+                                partModule.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
                                                    comment="Subtile PAP: clear after first PRELOOP GR merge"))
                                 first_gr_group_done = True
                         for inst in em.instructions:
-                            module.add(inst)
+                            partModule.add(inst)
+            # What partition pi's own drain can still weave into: pi's module with
+            # pi-1's drain already scattered through it. Held back from `module`
+            # until pi's drain has had its chance at those same MFMAs.
+            selfCover = None
+            if pendingDrain is not None:
+                selfCover = self._weaveStagedDrainIntoPartition(partModule, pendingDrain, f"{label}_p{pi}")
+                if selfCover is None:  # no MFMA to hide behind: keep the drain in order
+                    module.add(partModule)
+                    for unit in pendingDrain:
+                        for item in unit:
+                            module.add(item)
+                pendingDrain = None
+            if injectAfterPartition is not None:
+                staged = injectAfterPartition.get(pi)
+                if staged is not None:
+                    units = self._plsinStageDrainUnits(staged)
+                    if units and pi + 1 < len(emitted_3d):
+                        pendingDrain = units  # defer to the next partition's MFMAs
+                    else:
+                        # No next partition to defer to, so the partition's own
+                        # trailing MFMAs are the last cover available: they finalize
+                        # the later subtiles while the earlier ones are already
+                        # storable, so the drain can ride them subtile by subtile.
+                        lastWoven = (self._weaveLastPartitionDrain(selfCover, units,
+                                                                  f"{label}_p{pi}",
+                                                                  writer.states.subtileAbsRowAddr)
+                                     if units and selfCover is not None else None)
+                        if lastWoven is not None:
+                            selfCover = lastWoven
+                        else:
+                            if selfCover is not None:
+                                module.add(selfCover)
+                                selfCover = None
+                            module.add(staged)
+            if selfCover is not None:
+                module.add(selfCover)
         if use_pap_preloop_skip and skipping_first_gr_group and not first_gr_group_done:
             module.add(pap_merge_label)
             module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
                                comment="Subtile PAP: clear after first PRELOOP GR merge"))
         module.addComment0(f"{label} end")
+        # The staged drain is woven in above, after each subIterK was scheduled,
+        # so this is the first point at which the D stores and the wait_gr counts
+        # are visible together.
+        module = relaxWaitGrForOutstandingStores(module)
         # SCHED_MODE 2: guard the LR offset-swap -> ds_read RAW hazard once, against
         # the final post-schedule order (no-op on other archs).
         module = insertLRSwapRawWaitAlu(module, writer, kernel)
@@ -3533,6 +4328,1225 @@ class LogicalScheduler:
                 comment=f"PGR=2 tail align: parity-swap LW_base for {tc}"))
         return module
 
+    def _emitNgllMaybeFused(self, writer, kernel, label, emitted_3d):
+        """Emit the NGLL, optionally as a PostLoopInitInNGLL/plainNGLL dual variant.
+
+        Foundation for the PostLoopStoreInNll init-hoist: the fused NLL store's
+        data-independent prologue (coord0/1, coutRowPtrD, ds_permute partner-lane
+        address -- the VALU work before the first accvgpr_read) is expensive and today
+        runs serially at the top of the fused NLL store. This scaffold splits the NGLL
+        into two runtime arms so a later stage can weave that prologue between the
+        PostLoopInitInNGLL arm's terminal MFMAs (hiding its latency behind the NGLL
+        MFMA window), while non-owner WGs keep the lean plainNGLL.
+
+        The arm is chosen by the SAME loop-invariant guard as the fused NLL store
+        (emitFusedStoreGuard: no-tail && beta==0 && full-tile owner), so NGLL and NLL
+        can never disagree about which WG is the fused owner.
+
+        Gating:
+          * non-fused kernels -> return
+            the stock single _emitLoop (byte-identical to today's NGLL);
+          * enabled -> emit the guard + dual arms. STAGE 1: the two arms are identical
+            (no prologue woven yet) -- this only establishes and exercises the branch/
+            label/guard plumbing so it is validated before any init actually moves.
+        """
+        from rocisa.code import Module, Label
+        from rocisa.instruction import SBranch
+
+        plain = self._emitLoop(writer, kernel, label, emitted_3d)
+        if not getattr(writer.states, "postLoopStoreInNll", False):
+            return plain
+
+        module = Module(f"{label}_MaybeFused")
+        doneLabel = Label(f"{label}_PostInitNGLL", "")
+        plainLabel = Label(f"{label}_PlainNGLL", "")
+        # Owner falls through to PostLoopInitInNGLL; every other WG -> plainNGLL.
+        module.add(self._emitFusedFrontGuard(writer, kernel, label, plainLabel))
+        module.addComment0(f"{label}_PostLoopInitInNGLL")
+        initEmitted = copy.deepcopy(emitted_3d)
+        # Stage 2 (init-hoist): compute the fused store's write indices (coord0/1,
+        # cinRowPtr, coutRowPtrD) in the owner's PostLoopInitInNGLL arm. This is pure
+        # data-independent VALU (reads Serial / WorkGroup0/1 / strides only — see
+        # ComputeStoreVgprsMFMA), so it can be INTERLEAVED into the NGLL MFMA stream:
+        # the coord VALU is issued into the gaps AFTER each v_mfma_scale, hiding under
+        # the (long) MFMA compute latency instead of running as an exposed serial
+        # block before the store (the measured ~72-104 exposed VALU cyc/tile before
+        # the first accvgpr_read). The FUSED store then reuses these VGPRs and skips
+        # its own notLocalSplitUGlobalWriteIndices; cleanupGlobalWrite in the store
+        # checks them in exactly once, completing the checkout(NGLL)/checkin(store)
+        # pairing (each NGLL_Cui/NLL_Cui pair is emitted contiguously, so the pool
+        # watermark only grows by the 4 coord VGPRs held across the NLL body, never
+        # accumulates across copies). Restricted to tiles <= 256x256: larger tiles
+        # already peak at the arch-VGPR occupancy budget in the loop and cannot afford
+        # the extra live coord registers. Restricted to <=256x256 tiles so the
+        # coord-hoist delta is measurable independently of the Stage-1 dual scaffold.
+        largeTile = (kernel["MacroTile0"] > 256) or (kernel["MacroTile1"] > 256)
+        ngllInit = self._emitLoop(writer, kernel, f"{label}_INIT", initEmitted)
+        # Coord-hoist weaving applies to eligible (<=256x256) PLSIN tiles; spill tiles
+        # are already excluded upstream, so largeTile never trips for an eligible kernel
+        # and is kept as a defensive guard.
+        if not largeTile:
+            from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
+            # Generate the coord instructions (also checks out the persistent coord
+            # VGPRs via the writer register pool — that side effect must happen here).
+            coordInsts = list(writer.notLocalSplitUGlobalWriteIndices(kernel).flatitems())
+            writer.states.subtileHoistedWriteIndices = {
+                "coord0":         writer.vgprs.coord0,
+                "coord1":         writer.vgprs.coord1,
+                "cinRowPtr":      writer.vgprs.cinRowPtr,
+                "coutRowPtrD":    writer.vgprs.coutRowPtrD,
+                "coord0InMT":     writer.vgprs.coord0InMT,
+                "coord1InMT":     writer.vgprs.coord1InMT,
+                "coutRowPtrE":    writer.vgprs.coutRowPtrE,
+                "coutRowPtrBias": writer.vgprs.coutRowPtrBias,
+            }
+            # Weave coordInsts into the NGLL MFMA gaps: after each MFMA, drop up to
+            # perGap coord instrs (round-robin, preserving their relative RAW order —
+            # the MFMAs write acc/other regs and never touch the coord temps, so
+            # interleaving is register-safe). perGap is kept small so a gap's total
+            # fillers (existing ds_read + these) stay under the MFMA compute latency
+            # and never delay the next MFMA issue (i.e. never slow the NGLL loop).
+            perGap = 2
+            woven = Module(f"{label}_INIT_hoistwoven")
+            def _emitCoord(_i, _woven):
+                _woven.add(coordInsts[_i])
+                return _i + 1
+            self._weaveFillersIntoMfmaGaps(list(ngllInit.flatitems()), len(coordInsts),
+                                           _emitCoord, woven, perGap=perGap)
+            module.add(woven)
+        else:
+            module.add(ngllInit)
+        # plainNGLL body is small (MFMA/ds_read only) -> short forward branch suffices.
+        module.add(SBranch(labelName=doneLabel.getLabelName(),
+                   comment="PostLoopStoreInNll: PostLoopInitInNGLL done, skip plainNGLL"))
+        module.add(plainLabel)
+        module.add(plain)
+        module.add(doneLabel)
+        return module
+
+    def _lastKLiveTileIds(self, unroll_iter: int) -> Dict[str, set]:
+        """VGPR tile ids read by last-subIterK MFMAs at ``unroll_iter``.
+
+        Those tiles stay live while the fused store weaves last-K MFMAs.
+        K=0 A/B (and the n+1 scale ping-pong half) are the complement.
+        """
+        live = {t: set() for t in self.tensors}
+        last_k = self.config.numSubIterK - 1
+        if last_k < 0 or not self._partitions:
+            return live
+        for slots in self._partitions:
+            if last_k >= len(slots) or not slots[last_k].mfma:
+                continue
+            maps = slots[last_k].mfma.vgpr_tile_maps
+            for tensor in self.tensors:
+                mlist = maps.get(tensor, [{}])
+                ui = unroll_iter if unroll_iter < len(mlist) else 0
+                live[tensor].update(mlist[ui].values())
+        return live
+
+    def _deadOperandTileIds(self, unroll_iter: int) -> Dict[str, set]:
+        """Operand tile ids not read by last-K MFMAs (K=0 A/B + unused scale)."""
+        live = self._lastKLiveTileIds(unroll_iter)
+        peaks = getattr(self, "tile_peaks", {})
+        return {t: set(range(peaks.get(t, 0))) - live.get(t, set())
+                for t in self.tensors}
+
+    def _operandLendVgprs(self, tile_ids_by_tensor: Optional[Dict[str, set]] = None):
+        """``(base, size)`` for allocated A/B/SA/SB tiles.
+
+        ``tile_ids_by_tensor=None`` lends every allocated operand tile (full
+        Lend). Otherwise only the requested ids (last-K Weave holes).
+        """
+        tiles_by = {
+            "A":  getattr(self, "vgprTilesA", []),
+            "B":  getattr(self, "vgprTilesB", []),
+            "SA": getattr(self, "vgprTilesSA", []),
+            "SB": getattr(self, "vgprTilesSB", []),
+        }
+        lend = []
+        for tensor, tile_list in tiles_by.items():
+            wanted = None if tile_ids_by_tensor is None else tile_ids_by_tensor.get(tensor)
+            for tid, tile in enumerate(tile_list):
+                if wanted is not None and tid not in wanted:
+                    continue
+                if getattr(tile.regList, "is_vgpr", False) and tile.regList.indices:
+                    lend.append((tile.regList.indices[0], len(tile.regList.indices)))
+        return lend
+
+    def _selectPlsinFusedStorePolicy(self, kernel, unroll_iter: int = 0):
+        """Return ``(weaveGroups, lendTiles)`` for the fused NLL store.
+
+        * Large-MT Weave (MT>256x256): last-K MFMAs move into store gaps; lend
+          K=0 A/B (+ unused scale) so store temps reuse those holes while
+          last-K sources stay live. Falls back to lending every operand tile if
+          there are no A/B holes (single-K tiles).
+        * Small-MT Weave: planner weave, no lend (loop already has headroom).
+        """
+        largeTile = (kernel["MacroTile0"] > 256) or (kernel["MacroTile1"] > 256)
+        if largeTile:
+            # Lending the K=0 tiles assumes the store runs after every MFMA has
+            # retired, which a per-partition staged store breaks: stage p issues
+            # while partition p+1 still needs its operands. Partitioning is itself
+            # a VGPR-pressure relief, so with enough partitions the store temps may
+            # fit without borrowing -- which makes the large tiles behave like the
+            # small ones (weave, no lend) and removes the hazard outright.
+            dead_ids = self._deadOperandTileIds(unroll_iter)
+            has_ab_holes = bool(dead_ids.get("A") or dead_ids.get("B"))
+            if self.config.numSubIterK >= 2 and has_ab_holes:
+                return {}, self._operandLendVgprs(dead_ids)
+            return None, self._operandLendVgprs(None)
+        return {}, []
+
+    def _plsinStagedStoreCount(self, weaveGroups, lendTiles, storeCfg=None):
+        """Number of per-partition store stages for the fused arm (0 = monolithic).
+
+        Staging only lines up with the store when the partitions split along N. The
+        store enumerates its elements N-group-outermost, so an N split makes each
+        partition's D tiles a contiguous run that can be cut on, while an M split
+        interleaves the partitions throughout the element list.
+
+        Tiles that lend operand registers to the store are excluded: a stage runs
+        while the next partition is still reading those registers. That is exactly
+        the MT>256x256 set, which cannot give the lending up either -- without it
+        those kernels need 284 VGPRs against a 256 cap.
+        """
+        # Same scope Kernel.py used to pick the partition count, so a tile that
+        # was split for staging always gets the stages. Reading the env a second
+        # time here would let the two drift: the split would happen and the drain
+        # would stay monolithic, which is the worst of both -- the extra LDS
+        # re-reads of a partitioned loop with none of the overlap that pays for
+        # them.
+        if not self.config.blockSched:
+            return 0
+        if weaveGroups != {} or lendTiles:
+            return 0
+        # The stages cut the body being fused, so the split that matters is the
+        # one that body was scheduled with. They coincide except under
+        # tail-own-tiles, where only the four-deep tail is split.
+        cfg = storeCfg if storeCfg is not None else self.config
+        if cfg.numPartitionsM != 1 or cfg.numPartitionsN < 2:
+            return 0
+        if len(set(cfg._partitionSizesN)) != 1:
+            return 0
+        return cfg.numPartitionsN
+
+    @staticmethod
+    def _hasStageMarker(mod):
+        from rocisa.code import Module
+        for item in mod.items():
+            if isinstance(item, Module) and (
+                    item.name.startswith("PlsinStageBoundary")
+                    or LogicalScheduler._hasStageMarker(item)):
+                return True
+        return False
+
+    @staticmethod
+    def _splitOnStageMarkers(mod, stages, cur):
+        """Sort mod's items into stages, cutting at each PlsinStageBoundary marker.
+
+        Sub-modules that contain a marker are flattened into the surrounding stages,
+        since a marker means the module spans a cut. Returns the stage index reached,
+        or None if a marker named a stage that does not exist.
+        """
+        from rocisa.code import Module
+        for item in mod.items():
+            if isinstance(item, Module):
+                if item.name.startswith("PlsinStageBoundary"):
+                    cur = int(item.name[len("PlsinStageBoundary"):])
+                    if not 0 <= cur < len(stages):
+                        return None
+                    continue
+                if LogicalScheduler._hasStageMarker(item):
+                    cur = LogicalScheduler._splitOnStageMarkers(item, stages, cur)
+                    if cur is None:
+                        return None
+                    continue
+            stages[cur].add(item)
+        return cur
+
+    def _buildStagedStoreStages(self, fusedStore, seam, nStages):
+        """Cut the fused store into {partition index: Module} for loop injection.
+
+        Items before the seam are the one-time prologue and ride with stage 0; items
+        after it are the one-time epilogue and ride with the last stage. Returns None
+        if the markers did not yield every stage, which leaves the caller on the
+        monolithic store.
+        """
+        from rocisa.code import Module
+        items = fusedStore.items()
+        stages = [Module(f"PlsinStage{p}") for p in range(nStages)]
+        if self._splitOnStageMarkers(items[seam], stages, 0) != nStages - 1:
+            return None
+        if any(stage.itemsSize() == 0 for stage in stages):
+            return None
+        head = Module("PlsinStage0")
+        head.addItems(items[:seam])
+        head.add(stages[0])
+        stages[0] = head
+        stages[-1].addItems(items[seam + 1:])
+        def nStores(mod):
+            return sum(1 for i in mod.flatitems()
+                       if type(i).__name__.startswith("BufferStore"))
+        return dict(enumerate(stages))
+
+    def _emitNllMaybeFused(self, writer, kernel, label, emitted_3d, fusedExitLabel=None,
+                           unroll_iter=0, storeCfg=None, fusedPrelude=None,
+                           plainOverride=None):
+        """Emit the NLL, optionally as a FUSED/PLAIN dual variant (PostLoopStoreInNll).
+
+        Non-fused kernels: byte-identical to the stock single-NLL emission (early
+        return of the plain `_emitLoop`).
+
+        Fused kernels: emit a runtime front guard, then the FUSED copy, then the
+        PLAIN copy. The guard (Step 4d-2) selects FUSED only when the NLL is terminal
+        (no tail) and beta==0; every other case falls through to PLAIN. In Step 4d-2
+        the FUSED copy is still identical to PLAIN (no stores injected yet) and both
+        arms fall through to the unchanged post-loop store, so GPU output is correct
+        regardless of which arm runs — this just makes the FUSED block reachable so it
+        is actually exercised. Step 4d-3a relocates the store into the FUSED copy and
+        adds the NonEdge condition + stored_flag dedup.         FUSED/guard labels carry the
+        site suffix so the two per-unroll emit sites never collide.
+
+        plainOverride/fusedPrelude let the two arms come from different bodies.
+        The four-deep tail needs that: it is the FUSED arm's schedule, and a wave
+        that fails the guard has to take the baseline NGLL/NLL pair instead.
+        fusedPrelude then holds the entry sync and local-read prime that only the
+        four-deep body needs, so the plain arm never runs them.
+        """
+        from rocisa.code import Module, Label
+        from rocisa.instruction import SBranch
+
+        plain = (plainOverride if plainOverride is not None
+                 else self._emitLoop(writer, kernel, label, emitted_3d))
+        if not getattr(writer.states, "postLoopStoreInNll", False):
+            return plain
+
+        module = Module(f"{label}_MaybeFused")
+        doneLabel = Label(f"{label}_PostFusedNLL", "")
+        plainLabel = Label(f"{label}_PlainNLL", "")
+        # Runtime front guard: fall through to FUSED only when both hold, else PLAIN.
+        module.add(self._emitFusedFrontGuard(writer, kernel, label, plainLabel))
+        if fusedPrelude is not None:
+            module.add(fusedPrelude)
+        # The woven store is generated in capture mode first. Its actual ACC-read
+        # instructions and Phase1/Phase2 gaps then drive terminal-MFMA placement.
+        fusedEmitted = copy.deepcopy(emitted_3d)
+        # The fused epilogue weaves: the planner moves last-subIterK MFMAs into
+        # store gaps. Tiles <=256x256 have occupancy headroom; MT>256x256
+        # (256x320 and 320x256) first lends K=0 A/B (+ unused scale) so store
+        # temps reuse those holes while last-K sources stay live.
+        # buildSubtileFusedStore still skips any lent tile that overlaps spilled D.
+        weaveGroups, lendTiles = self._selectPlsinFusedStorePolicy(kernel, unroll_iter)
+        # Staged store: cut the store into one stage per compute partition and issue
+        # each stage as soon as its partition's K reduction is done, so partition p's
+        # stores are in flight across the whole of partition p+1's MFMAs. That makes
+        # the weave redundant -- its job was to find a few instructions of cover for
+        # the store inside 4-deep gaps -- so drop it and keep every MFMA in the loop.
+        stagedStores = self._plsinStagedStoreCount(weaveGroups, lendTiles, storeCfg)
+        if stagedStores:
+            weaveGroups, lendTiles = None, []
+        writer.states.subtileStoreStages = stagedStores
+        writer.states.subtileFusedLendVgprs = lendTiles
+        savedGroups = writer.states.subtileWeaveMfmaGroups
+        savedMaster = writer.states.subtileWeaveMfmaGroupsMaster
+        savedCaptures = writer.states.subtileWeaveCaptureInstances
+        savedCaptureCurrent = writer.states.subtileWeaveCaptureCurrent
+        savedLookahead = writer.states.subtileWeaveLookahead
+        savedPairCounter = writer.states.subtileWeavePairCounter
+        savedEmitted = writer.states.subtileWeaveEmitted
+        try:
+            # An empty group dict selects paired-store generation without placing
+            # producers. The planner fills each captured gap after generation.
+            writer.states.subtileWeaveMfmaGroupsMaster = weaveGroups
+            writer.states.subtileWeaveMfmaGroups = copy.deepcopy(weaveGroups) if weaveGroups is not None else None
+            writer.states.subtileWeaveLookahead = 0
+            writer.states.subtileWeavePairCounter = 0
+            writer.states.subtileWeaveEmitted = set()
+            writer.states.subtileWeaveCaptureInstances = [] if weaveGroups is not None else None
+            writer.states.subtileWeaveCaptureCurrent = None
+            # 4d-3a/3b: build the real beta0/NonEdge D store exactly once, then use
+            # its captured reads and gaps to perform 4d-3b latency hiding.
+            writer.states.subtileHoistedStoreInit = None
+            storeModule = writer.buildSubtileFusedStore(kernel, writer.tPA, writer.tPB)
+            if weaveGroups is not None:
+                self._planCapturedTerminalMfmas(
+                    fusedEmitted, writer.states.subtileWeaveCaptureInstances,
+                    storeModule,
+                    int(writer.states.archCaps.get("MfmaToAccReadLatency", 0)))
+                # Planner appends the gap MFMAs after Phase1 (mfma, mfma, step-1,
+                # mfma, mfma, step-2). Spread the convert VALU into those MFMA
+                # issue shadows (2 v_cvt_pk per gap), matching main-loop ds_read.
+                self._interleaveStoreConvertIntoGapMfmas(storeModule)
+        finally:
+            writer.states.subtileWeaveMfmaGroups = savedGroups
+            writer.states.subtileWeaveMfmaGroupsMaster = savedMaster
+            writer.states.subtileWeaveCaptureInstances = savedCaptures
+            writer.states.subtileWeaveCaptureCurrent = savedCaptureCurrent
+            writer.states.subtileWeaveLookahead = savedLookahead
+            writer.states.subtileWeavePairCounter = savedPairCounter
+            writer.states.subtileWeaveEmitted = savedEmitted
+        stagedInject = None
+        if stagedStores and writer.states.subtileStagedStoreSeam is not None:
+            stagedInject = self._buildStagedStoreStages(
+                storeModule, writer.states.subtileStagedStoreSeam, stagedStores)
+            if stagedInject is not None:
+                storeModule = None  # every piece now rides inside the loop
+        writer.states.subtileStagedStoreSeam = None
+        writer.states.subtileStoreStages = 0
+        fusedLoopModule = self._emitLoop(writer, kernel, f"{label}_FUSED", fusedEmitted,
+                                         injectAfterPartition=stagedInject)
+        # Step 4 store-init hoist: buildSubtileFusedStore stashed the branch/memory-free
+        # leading run of the fused store's SrdD address-math prep (when enabled and
+        # eligible). Weave it into the FUSED loop's MFMA gaps so that exposed serial SALU
+        # setup overlaps matrix compute. The remainder (branch/memory-bearing tail) was
+        # already emitted inside storeModule at its original position, before the store
+        # body's use of SrdD, so data dependencies stay intact.
+        hoistUnits = writer.states.subtileHoistedStoreInit
+        if hoistUnits:
+            fusedLoopModule = self._weaveStoreInitIntoLoop(fusedLoopModule, hoistUnits,
+                                                           f"{label}_FUSED")
+            writer.states.subtileHoistedStoreInit = None
+        module.add(fusedLoopModule)
+        if storeModule is not None:
+            module.add(storeModule)
+        # No "did-fuse" flag: the post-loop store dedups by re-evaluating the same
+        # emitFusedStoreGuard (a WG that fused here will re-pass the guard there and
+        # skip the redundant store). See kernelBodySubtile post-loop dedup.
+        # B': the FUSED arm is provably no-tail (the front guard / computePostLoopFusedStore
+        # ANDs in SizesSum % DepthU == 0), so once its store completes the wave has no tail
+        # loop and no other mainloop exit path left to run -- it only needs to reach the
+        # shared post-loop join. When the caller hands us that join label (fusedExitLabel),
+        # branch the FUSED arm STRAIGHT there in a single 32-bit long branch, merging what
+        # used to be two long-branch trampolines: this "skip PLAIN NLL" branch AND the
+        # "skip other exit paths" branch emitted by emitMainAndExitLoops. It also bypasses
+        # the tail-only PGR2 LW-parity re-align (a no-op for a no-tail wave). doneLabel is
+        # kept as the PLAIN arm's fall-through join (it just no longer has an incoming
+        # branch from the FUSED arm). Persistence is preserved: the fused arm still lands
+        # at the join -> closePersistentLoop back-edge, unchanged.
+        # Phase 3: the caller (emitMainAndExitLoops) chooses fusedExitLabel = SkipToEnd
+        # (endSummation runs, then the dedup guard skips the redundant store) OR, when
+        # _plsinCanBypassEndSummation, SkipPostLoopStore -- branching the fused owner past
+        # endSummation and the dedup guard entirely (all skipped work is comptime or dead
+        # for a fused owner; see _plsinCanBypassEndSummation).
+        # Fallback (fusedExitLabel is None): original skip-PLAIN-to-doneLabel branch, so
+        # every non-plsin / legacy caller stays byte-identical.
+        from rocisa.instruction import SLongBranchPositive
+        if fusedExitLabel is not None:
+            fusedBranchTarget = fusedExitLabel
+            fusedBranchComment = "PostLoopStoreInNll: FUSED done, skip PLAIN NLL + exit paths -> %s (long)" % fusedExitLabel.getLabelName()
+        else:
+            fusedBranchTarget = doneLabel
+            fusedBranchComment = "PostLoopStoreInNll: FUSED done, skip PLAIN NLL (long)"
+        with writer.allocTmpSgpr(3, tag="fusedNllDone_longBranch") as tmpSgprInfo:
+            module.add(SLongBranchPositive(fusedBranchTarget, tmpSgprInfo,
+                       comment=fusedBranchComment))
+        module.add(plainLabel)
+        module.add(plain)
+        module.add(doneLabel)
+        return module
+
+    @staticmethod
+    def _plsinRegisterIds(container):
+        """Return concrete (register type, index) identities for a container."""
+        if container is None or container.regName is not None:
+            return None
+        return tuple((container.regType, container.regIdx + i)
+                     for i in range(container.regNum))
+
+    def _plsinProducersWithClobberedSources(self, emitted_3d, allInsts):
+        """Pool members whose matrix inputs are rewritten later in the loop.
+
+        Moving a terminal MFMA into the store module moves it past everything the
+        loop emits after it. The planner keeps the accumulator chain ordered, but
+        an MFMA also reads A, B and the scale registers, and those are recycled:
+        each partition's LDS reads land in the same tiles the previous partition
+        used. A producer from an earlier partition, relocated past the next
+        partition's reads, then multiplies that partition's operands into its own
+        accumulator -- correct shape, wrong data, and only on the tiles whose
+        terminal MFMA happened to be captured. Such a producer has to stay put.
+
+        Scans in reverse so each instruction is asked once what it overwrites.
+        """
+        pool = {id(inst) for inst in allInsts}
+        order = []
+        for partition in emitted_3d:
+            for slot in partition or ():
+                for em in slot:
+                    order.extend(em.instructions or ())
+
+        def keysOf(inst, attrs):
+            """Register identities, or None if any operand is unreadable."""
+            out = set()
+            for container in self._plsinOperands(inst, attrs):
+                k = self._plsinRegisterKeys(container)
+                if k is None:
+                    return None
+                out.update(k)
+            return out
+
+        clobbered = set()
+        writtenAfter = set()
+        for inst in reversed(order):
+            if id(inst) in pool:
+                sources = keysOf(inst, self._PLSIN_MFMA_SOURCES)
+                if sources is None or (sources & writtenAfter):
+                    clobbered.add(id(inst))
+            for attrs in (self._PLSIN_UNIT_WRITES, self._PLSIN_MFMA_WRITES):
+                written = keysOf(inst, attrs)
+                if written is None:
+                    return pool     # an unreadable write could hit anything
+                writtenAfter |= written
+
+        return clobbered
+
+    @staticmethod
+    def _plsinTerminalMfmas(emitted_3d):
+        """Inventory terminal MFMAs without mutating the emitted loop.
+
+        Only the last subIterK slot is eligible. Under the stock [subIterK][tile]
+        order that is the whole movable set anyway: every K step accumulates into
+        the same registers, so an earlier slot's MFMA is consumed by the next
+        slot's MFMA rather than by the store.
+
+        A block-major schedule breaks that tie by finishing one tile block at a
+        time, which is why it puts every one of a block's K steps into this slot;
+        the planner tracks all of a register's writers so the resulting
+        multi-writer accumulators stay movable as an ordered chain.
+        """
+        mfmaEms = []   # (EmittedModule, [all its mfma insts])
+        allInsts = []
+        reservoir = 0  # mfmas in the slots the pool does NOT reach
+        for partition in emitted_3d:
+            if not partition:
+                continue
+            for em in partition[-1]:  # last subIterK slot's EmittedModules
+                if em.opType == 'mfma' and em.instructions:
+                    mfmaEms.append((em, list(em.instructions)))
+                    allInsts.extend(em.instructions)
+            for slot in partition[:-1]:
+                for em in slot:
+                    if em.opType == 'mfma' and em.instructions:
+                        reservoir += len(em.instructions)
+        return mfmaEms, allInsts
+
+    @staticmethod
+    def _splitCvtValu(mod):
+        """Pull v_cvt_pk_* out of a Phase1 module; leave address/comments in rest."""
+        cvts, rest = [], []
+        for it in list(mod.items()):
+            if isinstance(it, (VCvtPkF32toBF16, VCvtPkF32toFP16)):
+                cvts.append(it)
+            elif isinstance(it, Module):
+                subC, subR = LogicalScheduler._splitCvtValu(it)
+                cvts.extend(subC)
+                rest.extend(subR)
+            else:
+                rest.append(it)
+        return cvts, rest
+
+    def _interleaveStoreConvertIntoGapMfmas(self, storeModule, valuPerGap=None):
+        """Rewrite each woven pair from Phase1-blob + Gap-MFMAs + Phase2 into
+
+            mfma, cvt, cvt, mfma, cvt, cvt, <Phase1 rest>, Phase2
+
+        so two convert VALU sit in each v_mfma_scale issue shadow (the main-loop
+        ds_read analogue). Phase2 (permlane + buffer_store) stays after the
+        convert has filled vPack.
+        """
+        if valuPerGap is None:
+            valuPerGap = 2
+        if valuPerGap <= 0 or storeModule is None:
+            return 0
+        rewritten = 0
+
+        def _rewrite(mod):
+            nonlocal rewritten
+            if not isinstance(mod, Module):
+                return
+            name = getattr(mod, "name", "") or ""
+            # The un-folded woven store AND the DPP fold (convert-interleave path) both use
+            # the Phase1(converts)/PlsinGap_/Phase2 shape; the fold just carries two batches'
+            # worth of converts (8) and a coalesced Phase2.
+            if name in ("16bitSubtilePairedStoreWoven", "16bitSubtilePairedStoreRepack"):
+                if self._rewriteOneWovenPair(mod, valuPerGap):
+                    rewritten += 1
+                return
+            for child in list(mod.items()):
+                _rewrite(child)
+
+        _rewrite(storeModule)
+        return rewritten
+
+    def _rewriteOneWovenPair(self, woven, valuPerGap):
+        """Interleave this pair's v_cvt_pk into its PlsinGap MFMAs. Returns True if rewritten."""
+        phase1 = gap = phase2 = None
+        others = []
+        for child in list(woven.items()):
+            cname = getattr(child, "name", "") or ""
+            if cname in ("16bitSubtilePairedStorePhase1", "16bitSubtileRepackPhase1"):
+                phase1 = child
+            elif cname.startswith("PlsinGap_"):
+                gap = child
+            elif cname in ("16bitSubtilePairedStorePhase2", "16bitSubtileRepackPhase2"):
+                phase2 = child
+            else:
+                others.append(child)
+        if phase1 is None or gap is None or phase2 is None:
+            return False
+        cvts, p1rest = self._splitCvtValu(phase1)
+        mfmas, gaprest = [], []
+        for it in list(gap.items()):
+            if isinstance(it, (MFMAInstruction, MXMFMAInstruction)):
+                mfmas.append(it)
+            else:
+                gaprest.append(it)
+        if not cvts or not mfmas:
+            return False
+        interleaved = []
+        ci = 0
+        for mfma in mfmas:
+            interleaved.append(mfma)
+            for _ in range(valuPerGap):
+                if ci < len(cvts):
+                    interleaved.append(cvts[ci])
+                    ci += 1
+        while ci < len(cvts):
+            interleaved.append(cvts[ci])
+            ci += 1
+        interleaved.extend(gaprest)
+        interleaved.extend(p1rest)
+        gap.setItems(interleaved)
+        woven.setItems(others + [gap, phase2])
+        return True
+
+    def _planCapturedTerminalMfmas(self, emitted_3d, captures, storeModule,
+                                   requiredCycles):
+        """Move only producers with a safe generated gap in every runtime path."""
+        mfmaEms, allInsts = self._plsinTerminalMfmas(emitted_3d)
+        if not allInsts or not captures or requiredCycles <= 0:
+            return 0
+        # All of a register's writers, in pool order. A block-major schedule puts
+        # every subIterK of a tile in the pool, so an accumulator has more than one
+        # writer; that is still safe to move, because what the store needs is only
+        # that the writes land before it reads that register, in their original
+        # order. Both get assigned the same gap below and are re-inserted in this
+        # order, so the chain is preserved. Single-writer pools (the stock
+        # [subIterK][tile] schedule) keep exactly their previous behaviour.
+        producersByReg = {}
+        writesByProducer = {}
+        for inst in allInsts:
+            ids = self._plsinRegisterIds(getattr(inst, "acc", None))
+            if not ids:
+                continue
+            writesByProducer[id(inst)] = set(ids)
+            for reg in ids:
+                producersByReg.setdefault(reg, []).append(inst)
+
+        flat = list(storeModule.flatitems())
+        position = {id(item): idx for idx, item in enumerate(flat)}
+        # DPP fold convert-gap quota: siphon at most this many terminal MFMAs into a
+        # role="cvt" gap (enough to shadow the 8 converts at 2 per gap,
+        # ceil(8/2)=4 by default); leave the rest to the role="store" gap B so store-latency
+        # hiding is not starved.  gapBFloor keeps a minimum of qualifying MFMAs for gap B.
+        # When no role=="cvt" gap is present (every un-folded woven capture) cvtQuota stays 0
+        # and this function is behaviorally identical to before.
+        cvtQuotaEnv = 4
+        gapBFloor = 0
+        plans = []
+        for capture in captures:
+            consumers = {}
+            consumedRegs = {}
+            seenReadIds = set()
+            candidates = []   # (anchorPos, gap, role)
+            validCapture = True
+            for pair in capture.get("pairs", []):
+                # Legacy single-gap slot (un-folded woven store) -> role "store".
+                gap = pair.get("gap")
+                anchor = pair.get("gapAnchor")
+                anchorPos = position.get(id(anchor))
+                if gap is not None and anchorPos is not None:
+                    candidates.append((anchorPos, gap, "store"))
+                # New multi-gap list (the DPP fold registers convert-gap + gap B here).
+                for gentry in pair.get("gaps", []):
+                    g = gentry.get("gap")
+                    gAnchorPos = position.get(id(gentry.get("gapAnchor")))
+                    if g is not None and gAnchorPos is not None:
+                        candidates.append((gAnchorPos, g, gentry.get("role", "store")))
+                for readInst, source in pair.get("reads", []):
+                    ids = self._plsinRegisterIds(source)
+                    readPos = position.get(id(readInst))
+                    if (ids is None or len(ids) != 1 or readPos is None
+                            or ids[0] in seenReadIds):
+                        validCapture = False
+                        break
+                    seenReadIds.add(ids[0])
+                    for producer in producersByReg.get(ids[0], ()):
+                        consumedRegs.setdefault(id(producer), set()).add(ids[0])
+                        consumers[id(producer)] = min(
+                            consumers.get(id(producer), readPos), readPos)
+                if not validCapture:
+                    break
+            if not validCapture:
+                plans.append({})
+                continue
+
+            # Split gaps by role.  cvt-gaps take a bounded quota of the earliest-qualifying
+            # producers; every other qualifying producer keeps the original last-anchored
+            # store-gap behavior.  With no cvt-gap, cvtQuota==0 -> identical to before.
+            cvtGaps = [(a, g) for (a, g, role) in candidates if role == "cvt"]
+            storeGaps = [(a, g) for (a, g, role) in candidates if role != "cvt"]
+
+            def _lastQualifyingGap(gapList, readPos):
+                chosen = None
+                for anchorPos, gap in gapList:
+                    if anchorPos >= readPos:
+                        continue
+                    cycles = sum(1 for item in flat[anchorPos + 1:readPos]
+                                 if isinstance(item, Instruction))
+                    if cycles >= requiredCycles:
+                        chosen = gap
+                return chosen
+
+            qualifying = [p for p in allInsts
+                          if consumers.get(id(p)) is not None
+                          and consumedRegs.get(id(p)) == writesByProducer.get(id(p))]
+            # Per-gap quota: EACH convert-gap independently receives up to cvtQuotaEnv
+            # terminal MFMAs (enough to shadow its 8 converts at 2 per gap
+            # each), so every fold's converts get interleaved -- not just the first few.
+            # cvtGlobalCap = len(qualifying) - gapBFloor reserves a minimum of qualifying
+            # MFMAs for the store gaps (gap B) so store-latency hiding is not starved.
+            cvtQuotaPerGap = cvtQuotaEnv if cvtGaps else 0
+            cvtGlobalCap = max(0, len(qualifying) - gapBFloor) if cvtGaps else 0
+            cvtCountByGap = {}
+            cvtTotal = 0
+            capturePlan = {}
+            for producer in qualifying:
+                readPos = consumers[id(producer)]
+                chosen = None
+                if cvtTotal < cvtGlobalCap:
+                    # Last-anchored qualifying convert-gap that is still under its own quota.
+                    for anchorPos, gap in cvtGaps:
+                        if anchorPos >= readPos:
+                            continue
+                        if cvtCountByGap.get(id(gap), 0) >= cvtQuotaPerGap:
+                            continue
+                        cycles = sum(1 for item in flat[anchorPos + 1:readPos]
+                                     if isinstance(item, Instruction))
+                        if cycles >= requiredCycles:
+                            chosen = gap
+                    if chosen is not None:
+                        cvtCountByGap[id(chosen)] = cvtCountByGap.get(id(chosen), 0) + 1
+                        cvtTotal += 1
+                if chosen is None:
+                    chosen = _lastQualifyingGap(storeGaps, readPos)
+                if chosen is not None:
+                    capturePlan[id(producer)] = chosen
+            # Weave-stat instrumentation (from blk-sched), mapped onto the quota algorithm:
+            # rej_noconsumer = producers without a single valid consumer; rej_noslack =
+            # qualifying producers that found no gap with enough slack.
+            plans.append(capturePlan)
+
+        moved = {id(inst) for inst in allInsts}
+        moved -= self._plsinProducersWithClobberedSources(emitted_3d, allInsts)
+        for plan in plans:
+            moved.intersection_update(plan.keys())
+        if not moved:
+            return 0
+
+        # Every activation/runtime path receives its own instruction objects.
+        for plan in plans:
+            for producer in allInsts:
+                if id(producer) in moved:
+                    plan[id(producer)].add(copy.deepcopy(producer))
+        for em, insts in mfmaEms:
+            em.instructions = [inst for inst in insts if id(inst) not in moved]
+        return len(moved)
+
+    def _weaveFillersIntoMfmaGaps(self, flat, numFillers, emitFiller, woven,
+                                  perGap=None, stride=None, tailStart=None):
+        """Shared MFMA-gap weaver for the PLSIN hoist passes (B3): the single place
+        that decides WHERE hoisted fillers land relative to the loop's MFMAs. Both the
+        NGLL coord-hoist and the NLL store-init hoist route through here so a placement
+        policy change (e.g. C1 terminal-gap targeting) is made once.
+
+        Walk `flat`, copying each item into `woven`; after each MFMA, drop fillers per
+        the policy. `emitFiller(idx, woven) -> nextIdx` emits ONE filler unit (a single
+        instruction, or a multi-instruction block / SCC carry-chain) into `woven` and
+        returns the next filler index; `numFillers` is the total unit count. Exactly one
+        policy is given:
+          perGap=k    : packed   -- up to k fillers immediately after each MFMA
+          stride=s    : spread   -- one filler after every s-th MFMA
+          tailStart=t : terminal -- one filler after each MFMA past the t-th (C1): the
+                        exposed back-to-back tail MFMAs stall (~48c on ATT) while the
+                        earlier gaps already overlap the loop's ds_reads, so directing
+                        the fillers at the tail hides the real stalls instead of
+                        redundantly re-hiding already-covered early gaps.
+        Leftover fillers (fewer targeted gaps than fillers) are appended in order.
+        Returns the next filler index consumed."""
+        idx = 0
+        credit = 0
+        mfmaSeen = 0
+        for inst in flat:
+            woven.add(inst)
+            isMfma = isinstance(inst, (MFMAInstruction, MXMFMAInstruction))
+            if isMfma:
+                mfmaSeen += 1
+            if idx >= numFillers or not isMfma:
+                continue
+            if perGap is not None:
+                for _ in range(perGap):
+                    if idx >= numFillers:
+                        break
+                    idx = emitFiller(idx, woven)
+            elif tailStart is not None:
+                if mfmaSeen > tailStart:
+                    idx = emitFiller(idx, woven)
+            else:
+                credit += 1
+                if credit >= stride:
+                    credit = 0
+                    idx = emitFiller(idx, woven)
+        while idx < numFillers:  # fewer targeted gaps than fillers: append the remainder
+            idx = emitFiller(idx, woven)
+        return idx
+
+    @staticmethod
+    def _plsinStageDrainUnits(stage):
+        """Split a staged drain into one unit per D store.
+
+        A unit is the whole accvgpr_read -> cvt_pk -> buffer_store chain for one
+        subtile, kept together so scattering never separates a store from the pack
+        that feeds it. Anything ahead of the first store (the stage's N-group label
+        and its deferred SrdD row increment) leads the first unit, and any trailing
+        remainder joins the last, so the drain's program order survives the scatter.
+        """
+        from rocisa.instruction import BufferStoreB64, BufferStoreB128
+        units, cur = [], []
+        for item in stage.flatitems():
+            cur.append(item)
+            if isinstance(item, (BufferStoreB64, BufferStoreB128)):
+                units.append(cur)
+                cur = []
+        if cur:
+            if units:
+                units[-1].extend(cur)
+            else:
+                units.append(cur)
+        return units
+
+    @staticmethod
+    def _plsinRelaxDrainStoreWaits(module):
+        """Keep the woven drain's D stores out of the partition's load waits.
+
+        gfx9-class targets share one vmcnt between VMEM loads and stores, so the
+        `s_waitcnt vmcnt(0)` a partition emits to cover the global loads feeding LDS
+        also blocks on every D store the weave just issued -- even though nothing in
+        the kernel reads D back. That hands back the whole point of the weave: the
+        stores get tucked into MFMA shadows and then the next barrier bills for them.
+
+        SWaitCnt models loads and stores as separate vlcnt/vscnt fields and folds them
+        (vmcnt = vlcnt + vscnt) only when the target has a single counter, so raising
+        vscnt relaxes exactly the store half and leaves the load wait intact.
+
+        Only stores issued after the last global load are excluded. vmcnt retires in
+        issue order, so those are the trailing entries a wait can skip while still
+        guaranteeing every load ahead of them has landed; a store issued before a load
+        is covered by that load's own wait and must keep counting. Waits with no vmcnt
+        component (lgkmcnt-only) are left alone, since giving them a vscnt would invent
+        a vmcnt wait rather than relax one.
+        """
+        from rocisa.instruction import SWaitCnt, GlobalReadInstruction, \
+            BufferStoreB64, BufferStoreB128
+        pending, relaxed = 0, 0
+        for inst in module.flatitems():
+            if isinstance(inst, GlobalReadInstruction):
+                pending = 0
+            elif isinstance(inst, (BufferStoreB64, BufferStoreB128)):
+                pending += 1
+            elif isinstance(inst, SWaitCnt) and pending:
+                if inst.vlcnt == -1 and inst.vscnt == -1:
+                    continue
+                inst.vscnt = (inst.vscnt if inst.vscnt > 0 else 0) + pending
+                relaxed += 1
+        return relaxed
+
+    @staticmethod
+    def _plsinRegisterKeys(container):
+        """Comparable identities for a register container, symbolic or resolved.
+
+        _plsinRegisterIds gives up whenever a container still carries a symbolic
+        name, which at weave time is every accumulator -- they stay ValuC-relative
+        until allocation. For a hazard bar that is not merely imprecise, it is
+        silently wrong in the unsafe direction: the conflict disappears and the
+        drain weaves straight through the MFMAs it collides with. Two containers
+        naming the same symbol at the same offset are the same register whether or
+        not the index is resolved yet, so compare on (type, symbol, offset).
+
+        Returns None for a container that is neither named nor placed, which the
+        caller must treat as "cannot prove safe".
+        """
+        from rocisa.container import RegisterContainer
+        if not isinstance(container, RegisterContainer):
+            return ()          # immediates and the like hold no register identity
+        regNum = container.regNum or 0
+        name = container.regName
+        if name is not None:
+            base = name.getTotalOffsets()
+            return tuple((container.regType, name.name, base + i) for i in range(regNum))
+        base = container.regIdx
+        if base is None or base < 0:
+            return None
+        return tuple((container.regType, None, base + i) for i in range(regNum))
+
+    @staticmethod
+    def _plsinOperands(inst, attrs):
+        """Containers reachable from ``inst`` under any of ``attrs``.
+
+        Operand attributes are per-instruction, not uniform: MFMAs expose a/b/acc
+        while the drain's reads and writes are srcs/dst. Probing a name the class
+        does not have yields nothing rather than raising, so a wrong guess here is a
+        silent no-op -- hence naming every spelling that carries operands.
+
+        Operand lists are rocisa vectors, not builtin sequences, so dispatch on "is
+        it a single container" rather than on list/tuple: guessing the latter treats
+        a whole srcs vector as one unreadable operand and drops every register in it.
+        """
+        from rocisa.container import RegisterContainer
+        for attr in attrs:
+            value = getattr(inst, attr, None)
+            if value is None:
+                continue
+            if isinstance(value, RegisterContainer):
+                yield value
+            else:
+                try:
+                    yield from value
+                except TypeError:
+                    yield value
+
+    # MFMAs accumulate, so acc is both written and read; a/b are read-only.
+    _PLSIN_MFMA_WRITES = ("acc", "acc2")
+    _PLSIN_MFMA_READS  = ("a", "b", "acc", "acc2")
+    # Matrix and scale inputs only. acc is left out on purpose: the capture
+    # planner already orders the accumulator chain, and it is the inputs that
+    # nothing was checking.
+    _PLSIN_MFMA_SOURCES = ("a", "b", "mxsa", "mxsb")
+    _PLSIN_UNIT_READS  = ("srcs", "src")
+    _PLSIN_UNIT_WRITES = ("dst", "dsts")
+
+    def _plsinDrainReadyBars(self, flat, mfmaPos, units):
+        """For each drain unit, the last MFMA index it must be placed after.
+
+        Two hazards pin a unit, and only the first is about accumulators:
+          RAW  the drain's reads must follow every MFMA still accumulating into
+               the subtile they drain;
+          WAR  the drain's temps are borrowed operand VGPRs (the fused store lends
+               itself the K=0 A/B tiles), so a unit must also follow every MFMA
+               that still reads a register the unit overwrites. After the last
+               MFMA -- where this drain used to sit -- that is vacuous, which is
+               why the lend is safe today and why weaving it inward is not.
+        """
+        def keys(inst, attrs):
+            out = []
+            for container in self._plsinOperands(inst, attrs):
+                ids = self._plsinRegisterKeys(container)
+                if ids is None:
+                    return None
+                out.extend(ids)
+            return out
+
+        lastWriter, lastReader = {}, {}
+        for i in mfmaPos:
+            inst = flat[i]
+            written = keys(inst, self._PLSIN_MFMA_WRITES)
+            read = keys(inst, self._PLSIN_MFMA_READS)
+            if written is None or read is None:
+                return None
+            for reg in written:
+                lastWriter[reg] = i
+            for reg in read:
+                lastReader[reg] = i
+        readyAfter = []
+        for unit in units:
+            bar = -1
+            for item in unit:
+                read = keys(item, self._PLSIN_UNIT_READS)
+                written = keys(item, self._PLSIN_UNIT_WRITES)
+                if read is None or written is None:
+                    return None
+                for reg in read:
+                    bar = max(bar, lastWriter.get(reg, -1))
+                for reg in written:
+                    bar = max(bar, lastReader.get(reg, -1))
+            readyAfter.append(bar)
+        return readyAfter
+
+    def _weaveStagedDrainIntoPartition(self, partModule, units, label):
+        """Scatter partition p's drain through partition p+1's MFMAs.
+
+        Issuing the drain as one block after p (which is what the staged store did
+        on its own) leaves every accvgpr_read and cvt_pk exposed; spreading it one
+        store-unit per gap puts that VALU work in the MFMA issue shadows instead,
+        which is the interleave the reference kernel gets from its own block drain.
+
+        The partition boundary does NOT make this unconditionally safe. Partition p
+        owning a disjoint set of D tiles would put its accumulators out of reach of
+        p+1, but the drain handed over here is not clipped to p's tiles: on
+        MT128x128x512 (MIWaveTile 4x4) it reads a0-a63 while p+1 accumulates into
+        a32-a63, so a third of the drain reads registers p+1 is still writing. The
+        same RAW/WAR bars the last-partition weave computes therefore apply across
+        partitions too, and a unit that never clears its bar stays in order.
+        """
+        from rocisa.code import Module
+        from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
+        flat = list(partModule.flatitems())
+        mfmaPos = [i for i, inst in enumerate(flat)
+                   if isinstance(inst, (MFMAInstruction, MXMFMAInstruction))]
+        if not units or not mfmaPos:
+            return None
+        readyAfter = self._plsinDrainReadyBars(flat, mfmaPos, units)
+        if readyAfter is None:
+            return None
+
+        # Pace against the MFMAs a unit may actually occupy: everything ahead of the
+        # first unit's bar is still finalizing that unit's accumulators, so pacing
+        # against the full count spends the budget on gaps no unit can take.
+        usable = sum(1 for i in mfmaPos if i > readyAfter[0])
+        stride = max(1, usable // len(units))
+        woven = Module(f"{label}_stagedrain")
+        idx = 0
+        sinceLast = 0
+        for i, inst in enumerate(flat):
+            woven.add(inst)
+            if not isinstance(inst, (MFMAInstruction, MXMFMAInstruction)):
+                continue
+            sinceLast += 1
+            if idx < len(units) and sinceLast >= stride and readyAfter[idx] < i:
+                for item in units[idx]:
+                    woven.add(item)
+                idx += 1
+                sinceLast = 0
+        for unit in units[idx:]:
+            for item in unit:
+                woven.add(item)
+        if not idx:
+            return None
+        relaxed = self._plsinRelaxDrainStoreWaits(woven)
+        return woven
+
+    def _weaveLastPartitionDrain(self, partModule, units, label, absRowAddr):
+        """Scatter the LAST partition's drain through its own trailing MFMAs.
+
+        Partitions 0..n-2 hand their drain to the next partition. The last has no
+        successor, so its whole drain lands back-to-back after the final MFMA with
+        nothing to hide it -- on MT256x256 that is every store of the last stage
+        issuing fully exposed.
+
+        Cover does exist inside the partition: its stores are subtile ordered and so
+        are the MFMAs that finalize them, so store b's accumulators are already final
+        while blocks b+1.. are still accumulating into different registers. The MFMAs
+        that close a later block are in the very region being woven, so units are
+        pinned behind the same bars the cross-partition weave uses; units that never
+        clear their bar stay in order at the end.
+        """
+        from rocisa.code import Module
+        from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
+
+        # Reordering the drain is only safe where a store's address does not depend
+        # on how many stores ran before it. Elsewhere D is reached through the SrdD
+        # cursor, which the row advances walk forward in issue order, so moving a
+        # unit moves the rows it writes -- that was the miscompare this used to
+        # carry. Absolute row addressing removes the dependence, and it is scoped to
+        # block-scheduled tiles, so this follows the same scope.
+        # Still opt-in: absolute addressing, which this depends on, does not yet
+        # cover the bias store path -- see the note there.
+        if not self.config.blockSched:
+            return None
+        # Reordering the drain is only safe once the rows are absolute; that gate
+        # also drops out for kernels whose co-stores keep their own cursor, so
+        # asking it here keeps the two from drifting apart.
+        if not absRowAddr:
+            return None
+        flat = list(partModule.flatitems())
+        mfmaPos = [i for i, inst in enumerate(flat)
+                   if isinstance(inst, (MFMAInstruction, MXMFMAInstruction))]
+        if not units or not mfmaPos:
+            return None
+
+        readyAfter = self._plsinDrainReadyBars(flat, mfmaPos, units)
+        if readyAfter is None:
+            return None
+
+        woven = Module(f"{label}_lastdrain")
+        # Space the units over the MFMAs that can actually take one. Everything
+        # ahead of the first unit's bar is still finalizing that unit's own
+        # accumulators, so pacing against the full MFMA count spends most of the
+        # budget on gaps no unit is allowed to occupy and strands the rest of the
+        # drain past the last MFMA -- exactly the exposure this is undoing.
+        usable = sum(1 for i in mfmaPos if i > readyAfter[0])
+        stride = max(1, usable // len(units))
+        idx = 0
+        sinceLast = 0
+        for i, inst in enumerate(flat):
+            woven.add(inst)
+            if not isinstance(inst, (MFMAInstruction, MXMFMAInstruction)):
+                continue
+            sinceLast += 1
+            if idx < len(units) and sinceLast >= stride and readyAfter[idx] < i:
+                for item in units[idx]:
+                    woven.add(item)
+                idx += 1
+                sinceLast = 0
+        for unit in units[idx:]:
+            for item in unit:
+                woven.add(item)
+        if not idx:
+            return None
+        # No _plsinRelaxDrainStoreWaits here. It raises vscnt by the stores seen
+        # since the last global load, and this module has already been through it
+        # once for the previous partition's drain; a second pass adds that count on
+        # top of its own result and relaxes the partition's load waits past the
+        # loads they exist to cover. These stores therefore keep counting against
+        # the partition's vmcnt, which costs cover but cannot lose a load.
+        return woven
+
+    def _weaveStoreInitIntoLoop(self, loopModule, units, label):
+        """Step 4 store-init hoist: scatter the fused store's branch/memory-free SrdD
+        address-math prep into the FUSED NLL's MFMA gaps (mirrors the NGLL coord-hoist).
+
+        `units` (from KernelWriterAssembly._splitHoistableStoreInit) are either
+        ('alu', inst) -- a pure-ALU/RegSet instruction that is scattered one-per-slot
+        into an MFMA's issue shadow -- or ('block', [insts]) -- a self-contained
+        branch/label/compare region that is dropped CONTIGUOUSLY into a single gap so a
+        taken branch never jumps across an interleaved loop MFMA. No unit contains a
+        memory/counter op (the splitter fenced those off), so the loop's vmcnt/lgkmcnt
+        waits are unaffected, and MFMAs never touch SCC so relocating the SALU between
+        them is register-safe. SCC producer/consumer adjacency is preserved: a gap is
+        not ended immediately before an SCC-reading alu unit (addc/subb/cselect), so a
+        carry chain is never split by a later-gap loop scalar."""
+        from rocisa.code import Module
+        from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
+        woven = Module(f"{label}_storeinit_hoistwoven")
+        nU = len(units)
+        flat = list(loopModule.flatitems())
+        if nU == 0:
+            for inst in flat:
+                woven.add(inst)
+            return woven
+
+        def _readsScc(inst):
+            # SCC-consuming scalar carry / cond-select ops (s_addc/s_subb/s_cselect):
+            # a gap must not end right before one so an add/addc carry chain is never
+            # split across MFMA gaps. Type-based instead of a class-name substring so a
+            # rename fails loudly. VALU carry (VAddCOU32/VAddCCOU32) reads VCC, not SCC,
+            # and never appears in the pure-SALU store-init units, so it is excluded.
+            return isinstance(inst, (SAddCU32, SSubBU32, SCSelectB32, SCSelectB64))
+
+        def _emitUnit(uidx, woven):
+            """Emit units[uidx] (a 'block' drops contiguously; an 'alu' drops one, then
+            greedily pulls any immediately-following SCC-consumer alu units so an
+            add/addc carry chain is never split across MFMA gaps). Returns next uidx."""
+            kind, payload = units[uidx]
+            if kind == WEAVE_UNIT_BLOCK:
+                for bi in payload:
+                    woven.add(bi)
+                return uidx + 1
+            woven.add(payload)
+            uidx += 1
+            while uidx < nU and units[uidx][0] == WEAVE_UNIT_ALU and _readsScc(units[uidx][1]):
+                woven.add(units[uidx][1])
+                uidx += 1
+            return uidx
+
+        # Placement: SPREAD the hoisted address-math units evenly across ALL of the
+        # loop's MFMA gaps (default) rather than packing them into the first few.
+        # The terminal MFMAs of the fused NLL run back-to-back (their operands' local
+        # reads are already done, so there is no LDS work left to interleave) and ATT
+        # shows those exposed MFMAs stall ~48c each, while an MFMA that follows any
+        # VALU/SALU stalls ~0c. Front-loading (legacy perGap) dropped every unit into
+        # the early gaps that ALSO overlap the loop's ds_reads -- redundant hiding --
+        # leaving the terminal run fully exposed. Spreading fills the terminal gaps too.
+        # Placement itself is delegated to the shared _weaveFillersIntoMfmaGaps.
+        totalMfma = sum(1 for i in flat
+                        if isinstance(i, (MFMAInstruction, MXMFMAInstruction)))
+        # Drop one unit after roughly every `stride`-th MFMA so the units span the
+        # whole loop, including the exposed back-to-back tail.
+        stride = max(1, totalMfma // nU) if totalMfma else 1
+        self._weaveFillersIntoMfmaGaps(flat, nU, _emitUnit, woven, stride=stride)
+        return woven
+
+    def _emitFusedFrontGuard(self, writer, kernel, label, plainLabel):
+        """Loop-invariant front guard for PostLoopStoreInNll: fall through to the
+        FUSED NLL only when the NLL is terminal (no tail loop), beta==0, and the
+        tile is subtile-aligned (NonEdge); otherwise branch to `plainLabel` (the
+        PLAIN NLL).
+
+        - PostLoopHasTail (SizesSum % DepthU, computed before the main loop) is 0 iff
+          the NLL is the terminal K-step (no flat tail loop follows).
+        - beta==0 is required because the fused paired store writes D directly without
+          the read-C / alpha*acc+beta*C path.
+        - Full-tile (Option A): the fused store is emitted branch-free (no per-pair
+          OOB guards / scalar fallback / align8 exec mask), which is only correct when
+          THIS workgroup covers a complete MacroTile in both M and N. "NonEdge" is not
+          sufficient — checkIsEdgeSubtile treats an 8-aligned M remainder (and any N
+          remainder under storeAlign8) as NonEdge, but those are partial tiles that need
+          the guards. So the front guard here uses requireFullTile=True: FUSED only when
+          the last WG remainder is exactly 0 (SizeI%MT0==0 && SizeJ%MT1==0); interior WGs
+          are always full and stay FUSED-eligible. Partial edge-strip WGs fall back to the
+          PLAIN NLL + edge-capable post-loop store.
+        """
+        from rocisa.code import Module
+
+        module = Module(f"{label}_FusedFrontGuard")
+        module.addComment1("PostLoopStoreInNll front guard: FUSED iff (no tail) && beta==0 && full-tile, else PLAIN")
+        # Shared guard (single source of truth, also used by the post-loop dedup): the
+        # no-tail test is recomputed transiently from SizesSum here (no persistent
+        # PostLoopHasTail SGPR).
+        # plainLabel sits past the whole FUSED store body; with bias/SAV that body
+        # exceeds the +-simm16 short-branch range, so force 32-bit long branches.
+        module.add(writer.emitFusedStoreGuard(kernel, plainLabel, longBranch=True))
+        return module
+
+    def _inject_fused_drain(self, writer, kernel, emitted_3d):
+        """Insert the FUSED-NLL drain module (write-index/cvt materialization) right
+        after the NLL's global-read drain (wait_gr), in the FUSED copy only.
+
+        Mirrors emitMainAndExitLoops.inject_pap_after_nll_drain: find the wait_gr
+        EmittedModule, then place a new EmittedModule after it (and after any sync
+        that chains off it) by re-pointing that drain's before-consumers at the new
+        module. The module is built eagerly (like the PAP module) so it lands as
+        already-emitted instructions with source=None. Step 4c uses
+        buildSubtileFusedDrainProbe to measure VGPR headroom at the drain; Step 4d
+        swaps in the real materialization. Caller passes a deepcopy, so this mutates
+        in place. Returns emitted_3d unchanged if no drain is found."""
+        drain_module = writer.buildSubtileFusedDrainProbe(kernel)
+
+        def insert_after_drain(em_list):
+            wait_gr = next((em for em in em_list if em.opType == 'wait_gr'), None)
+            if wait_gr is None:
+                return False
+            tail_id = wait_gr.moduleId
+            sync = next((em for em in em_list
+                         if em.opType == 'sync' and em.before == tail_id), None)
+            if sync is not None:
+                tail_id = sync.moduleId
+
+            new_id = max(em.moduleId for em in em_list) + 1
+            consumers = [em for em in em_list if em.before == tail_id]
+            em_list.append(EmittedModule(moduleId=new_id,
+                                         instructions=[drain_module],
+                                         before=tail_id,
+                                         source=None))
+            for consumer in consumers:
+                consumer.before = new_id
+            return True
+
+        for partition_emitted in emitted_3d:
+            for em_list in partition_emitted:
+                if insert_after_drain(em_list):
+                    return emitted_3d
+        return emitted_3d
+
     def emitMainAndExitLoops(self, writer, kernel, tensorParametersA=None, tensorParametersB=None):
         """Emit preloop + mainloop + NGLL + NLL exit paths (no tail).
 
@@ -3545,8 +5559,14 @@ class LogicalScheduler:
         """
         from rocisa.code import Module, Label
         from rocisa.instruction import (SSubU32, SCmpEQU32, SCBranchSCC0,
-                                        SCBranchSCC1, SBranch)
+                                        SCBranchSCC1, SBranch, SLongBranchPositive)
         from rocisa.container import sgpr
+
+        # PostLoopStoreInNll bias/SAV bloats the FUSED NLL bodies so the exit-loop
+        # branches that jump across them (to SkipToEnd / ExitC{ui}) overflow the
+        # +-simm16 short-branch range. Emit those as 32-bit long branches, gated so
+        # every other kernel keeps the original short branches (byte-identical).
+        plsin = getattr(writer.states, "postLoopStoreInNll", False)
 
         assert self._emitter is not None, \
             "populate_instructions() must be called first"
@@ -3620,39 +5640,297 @@ class LogicalScheduler:
         #   PGR=0             : preloop is just initC -> mainloop
         #   K<DepthU          : skip the prefetch GR to initC, then jump to tail
         endLabel = Label("SkipToEnd", "")
-        skipGRLabel = Label("SkipPreloopGR", "")
+
+        # PostLoopStoreInNll Phase 3: pick the FUSED arm's exit target. A fused
+        # full-tile owner has already stored D and (when the bypass is safe) needs
+        # none of endSummation's runtime work, so branch it STRAIGHT to the post-loop
+        # store's SkipPostLoopStore join -- past endSummation AND the redundant dedup
+        # guard. Matched by label name (getLabelName is name-derived); KernelWriter
+        # emits the sole SkipPostLoopStore label after the post-loop store body. When
+        # the bypass is unsafe (bias-gradient write / SuppressNoLoadLoop wait / GSU
+        # AddressTD-Synchronizer loads) fall back to SkipToEnd so endSummation still
+        # runs and the dedup guard skips only the redundant store. Non-plsin callers
+        # pass None (byte-identical).
+        plsinFusedExitLabel = endLabel
+        if plsin and writer._plsinCanBypassEndSummation(kernel):
+            plsinFusedExitLabel = Label("SkipPostLoopStore", "")
+
+        # The preloop split below only runs on the MXF4 subtile path; everywhere
+        # else the original single-path layout is kept, down to the label name.
+        _mxf4 = isMxf4SubtilePath(kernel)
+
+        skipGRLabel = Label("SkipPreloop" if _mxf4 else "SkipPreloopGR", "")
+        preloopEndLabel = Label("PreloopEnd", "")
         skipGRForTail = (not kernel["NoTailLoop"]) and self.config.pgr >= 1
         if skipGRForTail:
-            module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
-                                 comment="K < DepthU? skip prefetch GR to initC"))
-            module.add(SCBranchSCC1(labelName=skipGRLabel.getLabelName(),
-                                    comment="K < DepthU: skip prefetch GR, still run initC"))
+            if _mxf4:
+                module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
+                                     comment="K < DepthU? skip prefetch GR + initC to slow-path initC"))
+                module.add(SCBranchSCC1(labelName=skipGRLabel.getLabelName(),
+                                        comment="K < DepthU: skip prefetch GR, run initC on slow path"))
+            else:
+                module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
+                                     comment="K < DepthU? skip prefetch GR to initC"))
+                module.add(SCBranchSCC1(labelName=skipGRLabel.getLabelName(),
+                                        comment="K < DepthU: skip prefetch GR, still run initC"))
 
-        # ── Preloop (initC + tail jump woven around the single init op) ──
-        # Operate on a copy so self._preloop_emitted (read by PAP and the
-        # per-unroll copies) stays untouched.
+        # ── Pre-loop scheduling (Change A): defer LDS read-address setup ──
+        # kernelBodySubtile stashed the A/B + scale LR-offset modules (lraTileAssignment,
+        # its DTL swap-vgpr init, lraTileAssignmentScaleSwizzled) on the writer instead of
+        # emitting them in the prologue. These ~750-cycle loop-invariant VALU instructions
+        # run while the prefetch buffer_loads are in flight; their only consumers are the
+        # post-barrier ds_reads and main-loop LR swaps, which come after this point.
+        # Placement: injected into the duplicated initC zone (both fast and slow paths) so
+        # the offset math is interleaved with the buffer_loads as overlapping filler.
+        # The canonical self._preloop_emitted is left untouched (so PAP / per-unroll copies
+        # that deepcopy it remain unaffected); injection happens on the preloop_emitted copy.
+        _lraDeferred = getattr(writer, "_deferredPreloopLraModules", None)
+
+        # ── PLSIN guard-hoist: fold into the preloop global-read shadow ──
+        # computePostLoopFusedStore is pure loop-invariant SALU/VALU that writes the
+        # persistent PostLoopFusedStore flag (read by the NGLL/NLL front guards and the
+        # post-loop dedup). Emitting it AFTER the MT0 global-read issue but BEFORE the
+        # wait_gr drain lets it execute while the prefetch buffer_loads are in flight,
+        # hiding its latency under the load shadow instead of exposing it on the
+        # pre-main-loop critical path (KernelWriter defers it here when PGR>=1). The
+        # preloop is emitted unscheduled (schedule=False, sequential list order), so a
+        # simple list splice just before the first wait_gr lands the fold in the shadow.
+        # Subtile fused-store path only (guarded by _plsinFusedFlagEligible); PGR==0 and
+        # every other kernel are untouched.
+        #
+        # Must run before the deepcopy below, which snapshots _preloop_emitted.
+        if (self.config.pgr >= 1
+                and not getattr(self, "_foldInjectedIntoPreloop", False)
+                and hasattr(writer, "_plsinFusedFlagEligible")
+                and writer._plsinFusedFlagEligible(kernel)
+                and self._preloop_emitted
+                and self._preloop_emitted[0] and self._preloop_emitted[0][0]):
+            fold_module = writer.computePostLoopFusedStore(kernel)
+            em_list = self._preloop_emitted[0][0]
+            drain_idx = next((i for i, em in enumerate(em_list)
+                              if em.opType == 'wait_gr'), len(em_list))
+            new_id = max((em.moduleId for em in em_list), default=-1) + 1
+            em_list.insert(drain_idx,
+                           EmittedModule(moduleId=new_id,
+                                         instructions=[fold_module],
+                                         before=None,
+                                         source=None))
+            self._foldInjectedIntoPreloop = True
+
+            # Pre-loop scheduling (Change B): computePostLoopFusedStore may have split the
+            # scale-pointer load off from the guard body (isScalarScale + hoist enabled).
+            # Splice it BEFORE the first global_read so its s_waitcnt kmcnt(0) (still in the
+            # guard fold above) is covered by the entire prefetch buffer_load window.
+            scalePtrLoad = getattr(writer, "_plsinDeferredScalePtrLoads", None)
+            if scalePtrLoad is not None:
+                gr_idx = next((i for i, em in enumerate(em_list)
+                               if em.opType == 'gr'), 0)
+                new_id = max((em.moduleId for em in em_list), default=-1) + 1
+                em_list.insert(gr_idx,
+                               EmittedModule(moduleId=new_id,
+                                             instructions=[scalePtrLoad],
+                                             before=None,
+                                             source=None))
+
+        # ── Preloop split: initC, LRA and the PLSIN guard fold on both paths ──
+        #
+        # Fast path (K >= DepthU, skipGRForTail=True):
+        #   [GRs] -> [initC] -> [lraDeferred] -> SBranch PreloopEnd
+        #                                      -> [WaitGR, Sync, LR, SkipOps]
+        #
+        # Slow path (K < DepthU):
+        #   Label SkipPreloop -> [initC] -> [lraDeferred] -> Label PreloopEnd
+        #                     -> [guard fold] -> SCmpEQ/tailJump
+        #                                     -> [WaitGR, Sync, LR, SkipOps]
+        #   The tail-only route leaves from here, so it gets its own copy of the LR
+        #   address setup, and the paths converge before the guard fold so both reach
+        #   the single copy of it.
+        #
+        # NoTailLoop path (skipGRForTail=False, no split):
+        #   [GRs] -> [initC] -> [lraDeferred] -> [WaitGR, Sync, LR, SkipOps]
+        #   lraDeferred injected before wait_gr (no slow path exists).
+        #
+        # EmittedModules with source=None (opType=="") are not dispatched by
+        # populate() — their instructions list is used directly as pre-built assembly.
+        # EmittedModules with source=InlineModuleOp are dispatched as 'inline' and
+        # built lazily by InstructionEmitter.emit_inline() via the build callback.
+        #
+        # Operate on a copy so self._preloop_emitted (read by PAP and per-unroll copies)
+        # stays untouched.
         preloop_emitted = copy.deepcopy(self._preloop_emitted)
+
+        # ── Instruction-level filler interleave (clustered preloop) ────────────
+        # Single-DU only: rewrite the fast-path preloop into clusters with
+        # dependency-aware distributed filler (LRA + initC MFMA/seed + windowed
+        # SRD). The pass consumes writer._deferredPreloopLraModules and stashes
+        # the full initC on self._canonicalInitCInstrs for the slow path, so the
+        # legacy LRA re-injection below is skipped when it runs.
+        _single_du = (max(self.config.numUnroll.values())
+                      if self.config.numUnroll else 1) == 1
+        filler_pass_ran = False
+        if (_single_du and preloop_emitted[0] and preloop_emitted[0][0]):
+            filler_pass_ran = self._interleave_preloop_filler(
+                preloop_emitted[0][0], writer)
+
         if not kernel["NoTailLoop"]:
             em_list = preloop_emitted[0][0]
             init_idx = next((i for i, em in enumerate(em_list)
                              if getattr(em.source, 'label', None) == 'initC_overlap'), None)
             assert init_idx is not None, "preloop must contain the canonical initC op"
             next_id = max(em.moduleId for em in em_list) + 1
-            # After initC, jump to the tail loop when K < DepthU.
-            em_list.insert(init_idx + 1, EmittedModule(
-                moduleId=next_id,
-                instructions=[
-                    SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
-                                comment="K < DepthU? initC done, run tail only"),
-                    SCBranchSCC1(labelName=endLabel.getLabelName(),
-                                    comment="K < DepthU: jump to tail loop"),
-                ]))
-            next_id += 1
-            if skipGRForTail:
-                # Land the skip-GR guard right before initC.
-                em_list.insert(init_idx, EmittedModule(
+
+            if plsin:
+                tailJump = writer.longBranchScc1(
+                    endLabel, posNeg=1,
+                    comment="K < DepthU: jump to tail loop (long)")
+            else:
+                tailJump = SCBranchSCC1(labelName=endLabel.getLabelName(),
+                                        comment="K < DepthU: jump to tail loop")
+
+            if not _mxf4:
+                # Original layout: tail jump straight after initC, skip-GR label
+                # immediately before it. No slow-path copy and no PreloopEnd join,
+                # since nothing is deferred into the global-read shadow here.
+                em_list.insert(init_idx + 1, EmittedModule(
+                    moduleId=next_id,
+                    instructions=[
+                        SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
+                                  comment="K < DepthU? initC done, run tail only"),
+                        tailJump,
+                    ]))
+                next_id += 1
+                if skipGRForTail:
+                    em_list.insert(init_idx, EmittedModule(
+                        moduleId=next_id,
+                        instructions=[skipGRLabel]))
+            elif skipGRForTail:
+                # When the interleave pass ran it already distributed LRA into the
+                # clustered gaps — do NOT re-inject it here (would double-emit).
+                lra_instrs = ([] if filler_pass_ran
+                              else (list(_lraDeferred) if _lraDeferred else []))
+
+                # Fast-path: initC already at init_idx; append LRA offset after initC.
+                if lra_instrs:
+                    em_list.insert(init_idx + 1, EmittedModule(
+                        moduleId=next_id,
+                        instructions=lra_instrs,
+                        before=None,
+                        source=None))
+                    next_id += 1
+
+                # ── Change 1: move PreloopEnd after MT1 GRs, not after initC+LRA ──
+                # The SBranch PreloopEnd and slow-path block are inserted just before
+                # the first wait_gr op in the emitted list, so the MT1 GRs (which sit
+                # between initC and WaitGR in build_preloop) remain in the fast-path
+                # body.  This lets the MT1 GRs be interleaved with filler by the
+                # clustered-preloop path (Change 2) and simplifies future reordering.
+                #
+                # Revised fast path:
+                #   [MT0 GRs] → [initC] → [LRA] → [MT1 GRs] → SBranch PreloopEnd
+                #                                             → [WaitGR, Sync, LR, ...]
+                # Revised slow path:
+                #   Label SkipPreloop → [initC copy] → [LRA copy] → Label PreloopEnd
+                #                       → [guard fold] → tailJump
+                #                                      → [WaitGR, Sync, LR, ...]
+                wait_idx = next((i for i, em in enumerate(em_list)
+                                 if em.opType == 'wait_gr'), len(em_list))
+
+                # The tail-only route leaves from the slow path, so the state it reads
+                # has to be built before it branches: the LR address VGPRs the tail's
+                # LDS reads go through, and the PostLoopFusedStore flag the post-loop
+                # dedup guard tests. The LR setup is copied onto the slow path below.
+                # The fold carries labels and cannot be copied, so instead the split
+                # closes ahead of it: PreloopEnd sits before the fold and the tail test
+                # after it, letting the fast path branch in and the slow path fall
+                # through. The fold stays in the global-read shadow either way, since
+                # it is still ahead of wait_gr.
+                fold_idx = next((i for i, em in enumerate(em_list)
+                                 if em.instructions
+                                 and getattr(em.instructions[0], 'name', None)
+                                     == 'computePostLoopFusedStore'), None)
+                split_idx = wait_idx if fold_idx is None else fold_idx
+
+                # Insert SBranch PreloopEnd at the split (end of the fast path).
+                em_list.insert(split_idx, EmittedModule(
+                    moduleId=next_id,
+                    instructions=[SBranch(labelName=preloopEndLabel.getLabelName(),
+                                          comment="K >= DepthU: MT1 GRs issued, skip slow-path initC")]))
+                next_id += 1
+                slow_idx = split_idx + 1
+
+                # Slow-path: SkipPreloop label + initC copy + LRA copy, then PreloopEnd.
+                em_list.insert(slow_idx, EmittedModule(
                     moduleId=next_id,
                     instructions=[skipGRLabel]))
+                next_id += 1
+                slow_idx += 1
+
+                # Copy the canonical initC for the slow path. When the interleave
+                # pass ran it emptied the fast-path initC module (its content was
+                # distributed into gaps) and stashed the full list here.
+                slow_initc = getattr(self, '_canonicalInitCInstrs', None) \
+                    if filler_pass_ran else None
+                if slow_initc is None:
+                    slow_initc = list(em_list[init_idx].instructions)
+                em_list.insert(slow_idx, EmittedModule(
+                    moduleId=next_id,
+                    instructions=list(slow_initc)))
+                next_id += 1
+                slow_idx += 1
+
+                # LRA is spliced next to the fast-path initC (or distributed into the
+                # clusters by the filler pass), so the slow path needs its own copy.
+                # Deep-copied because the fast-path modules are already placed.
+                if _lraDeferred:
+                    em_list.insert(slow_idx, EmittedModule(
+                        moduleId=next_id,
+                        instructions=copy.deepcopy(list(_lraDeferred)),
+                        before=None,
+                        source=None))
+                    next_id += 1
+                    slow_idx += 1
+
+                # Paths converge here, ahead of the fold.
+                em_list.insert(slow_idx, EmittedModule(
+                    moduleId=next_id,
+                    instructions=[preloopEndLabel]))
+                next_id += 1
+
+                # Tail-only test, after the fold and immediately before wait_gr. The
+                # fast path reaches it too and falls through (LoopCounterL > 0).
+                jump_idx = next((i for i, em in enumerate(em_list)
+                                 if em.opType == 'wait_gr'), len(em_list))
+                em_list.insert(jump_idx, EmittedModule(
+                    moduleId=next_id,
+                    instructions=[
+                        SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
+                                  comment="K < DepthU? setup done, run tail only"),
+                        tailJump,
+                    ]))
+            else:
+                # skipGRForTail=False (PGR=0): no split needed.
+                em_list.insert(init_idx + 1, EmittedModule(
+                    moduleId=next_id,
+                    instructions=[
+                        SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
+                                  comment="K < DepthU? initC done, run tail only"),
+                        tailJump,
+                    ]))
+
+        # NoTailLoop fallback: no split exists, so inject lraDeferred before wait_gr
+        # in the flat preloop (the only path). skipGRForTail=False implies NoTailLoop=True
+        # for any kernel where _lraDeferred is set (PGR=0 kernels never defer LRA).
+        if _lraDeferred and not skipGRForTail and not filler_pass_ran:
+            fl = preloop_emitted[0][0]
+            drain_idx = next((i for i, em in enumerate(fl)
+                              if em.opType == 'wait_gr'), len(fl))
+            new_id = max((em.moduleId for em in fl), default=-1) + 1
+            fl.insert(drain_idx, EmittedModule(
+                moduleId=new_id,
+                instructions=list(_lraDeferred),
+                before=None,
+                source=None))
+
         module.add(self._emitLoop(writer, kernel, "PRELOOP",
                                   preloop_emitted, schedule=False))
 
@@ -3691,9 +5969,14 @@ class LogicalScheduler:
                           comment=f"counterL == {exitValue}? (copy {ui} exit)"),
             ]
             if ui < uf - 1:
-                branch = SCBranchSCC1(
-                    labelName=exitLabels[ui].getLabelName(),
-                    comment=f"copy {ui} exit → NGLL_C{ui}")
+                if plsin:
+                    branch = writer.longBranchScc1(
+                        exitLabels[ui], posNeg=1,
+                        comment=f"copy {ui} exit → NGLL_C{ui} (long)")
+                else:
+                    branch = SCBranchSCC1(
+                        labelName=exitLabels[ui].getLabelName(),
+                        comment=f"copy {ui} exit → NGLL_C{ui}")
             else:
                 branch = SCBranchSCC0(
                     labelName=loopBegin.getLabelName(),
@@ -3716,35 +5999,124 @@ class LogicalScheduler:
 
         # Fall-through from last mainloop copy
         nll_ft = (last + pgr) % uf
-        if hasNGLL:
+        # Give the staged drain the NGLL's load-free MFMAs as cover by replacing
+        # both regions with one body that runs all four of the partition's
+        # k-subiterations (build_tail_merged). Restricted to the fall-through:
+        # when nll_ft == 0 a SkipToNLL label has to sit between the two regions
+        # for the preloop-skip path to jump at, and one body swallows its target.
+        nll_ft_3d = self._nll_per_unroll[nll_ft]
+        # Must be the same predicate allocation used. Re-reading the env here is
+        # how the two silently disagreed: registers were reserved for a merged
+        # tail that was never emitted, so the kernel paid the VGPRs and kept the
+        # split schedule.
+        spanNgll = (hasNGLL and nll_ft != 0
+                    and (self._span_ngll_merge_enabled()
+                         or self._tail_own_peaks is not None)
+                    and self._tail_merged_emitted is not None
+                    )
+        # unroll_iter for the fall-through NLL. The four-deep body covers both
+        # DepthU itself, so it has no parity copies and was populated at 0.
+        # Kept separate from nll_ft, which still has to decide where the
+        # SkipToNLL label goes -- overwriting it would emit that label twice.
+        nll_ft_ui = nll_ft
+        tailPrelude = None
+        tailPlain = None
+        if spanNgll:
+            # The four-deep body is the PLSIN arm's schedule and nothing else's.
+            # A wave that fails the fused guard runs the baseline NGLL/NLL pair,
+            # built here while nll_ft_3d still names it. Those bodies were
+            # populated before the tail reallocated the tile registers, so they
+            # still read the registers the mainloop's last iteration prefetched
+            # into; the two arms alias that space but never both run.
+            tailPlain = Module(f"NLL_C{last}_PlainSplit")
+            tailPlain.addComment0(f"NGLL_C{last} (non-PLSIN arm)")
+            tailPlain.add(self._emitLoop(writer, kernel, f"NGLL_C{last}",
+                                         self._ngll_per_unroll[(last + 1) % uf]))
+            tailPlain.addComment0(f"NLL_C{last} (non-PLSIN arm)")
+            tailPlain.add(self._emitLoop(writer, kernel, f"NLL_C{last}",
+                                         inject_pap_after_nll_drain(nll_ft_3d)))
+            nll_ft_ui = 0
+            nll_ft_3d = self._tail_merged_emitted
+        if hasNGLL and not spanNgll:
             module.addComment0(f"NGLL_C{last}")
-            module.add(self._emitLoop(writer, kernel, f"NGLL_C{last}",
+            module.add(self._emitNgllMaybeFused(writer, kernel, f"NGLL_C{last}",
                                       self._ngll_per_unroll[(last + 1) % uf]))
         if nll_ft == 0:
             module.add(Label("SkipToNLL", ""))
+        if spanNgll:
+            # The four-deep body issues no global reads, so its own schedule
+            # sees nothing in flight and places no drain. What is in flight
+            # belongs to the mainloop: offsetPartition == numPartitions puts
+            # every load two macro tiles ahead, which is the half of LDS this
+            # body reads second -- and it reaches that half in partition 0,
+            # ahead of every wait it does have. The split pair never needed
+            # this, because the NGLL stood between the loads and the NLL that
+            # read them.
+            #
+            # The count is how many of those loads may stay in flight past the
+            # barrier, and _tailEntryInflightBound derives it. The knob
+            # overrides it; see FINDINGS F22 for the sweep behind the bound.
+            from rocisa.instruction import SWaitCnt, SBarrier
+            entryVmcnt = self._tailEntryInflightBound()
+            # Collected rather than emitted: this is the four-deep body's entry
+            # sequence, so it belongs behind the fused guard with the body it
+            # serves. The plain arm keeps the baseline pair's own sync.
+            tailPrelude = Module("FourDeepTailEntry")
+            tailPrelude.add(SWaitCnt(vlcnt=entryVmcnt, dscnt=-1, vscnt=-1,
+                                comment="four-deep tail: retire the mainloop's"
+                                        " loads before reading what they wrote"))
+            tailPrelude.add(SBarrier(comment="four-deep tail entry"))
+            if self._tail_prime_emitted is not None:
+                # Under tailOwnTiles the body reallocates its tiles, so the
+                # operands its first MFMA expects are not the ones the mainloop
+                # left behind. Read them here, after the barrier that makes the
+                # mainloop's writes visible, so the body starts from LDS.
+                tailPrelude.addComment0("four-deep tail: prime LR pipeline")
+                tailPrelude.add(self._emitLoop(writer, kernel, "TAILPRIME",
+                                          [[self._tail_prime_emitted]],
+                                          schedule=False))
         module.addComment0(f"NLL_C{last}")
-        module.add(self._emitLoop(writer, kernel, f"NLL_C{last}",
-                                  inject_pap_after_nll_drain(self._nll_per_unroll[nll_ft])))
+        module.add(self._emitNllMaybeFused(writer, kernel, f"NLL_C{last}",
+                                  inject_pap_after_nll_drain(nll_ft_3d),
+                                  fusedExitLabel=(plsinFusedExitLabel if plsin else None),
+                                  unroll_iter=nll_ft_ui,
+                                  storeCfg=(self._tail_merged_scheduler.config
+                                            if self._tail_own_peaks is not None
+                                            else None),
+                                  fusedPrelude=tailPrelude,
+                                  plainOverride=tailPlain))
         module.add(self._emit_pgr2_tail_lw_align(kernel))
-        module.add(SBranch(labelName=endLabel.getLabelName(),
-                           comment="skip other exit paths"))
+        if plsin:
+            with writer.allocTmpSgpr(3, tag="nllLastExit_longBranch") as tmpSgprInfo:
+                module.add(SLongBranchPositive(endLabel, tmpSgprInfo,
+                           comment="skip other exit paths (long)"))
+        else:
+            module.add(SBranch(labelName=endLabel.getLabelName(),
+                               comment="skip other exit paths"))
 
         for ui in range(uf - 1):
             nll_idx = (ui + pgr) % uf
             module.add(exitLabels[ui])
             if hasNGLL:
                 module.addComment0(f"NGLL_C{ui}")
-                module.add(self._emitLoop(writer, kernel, f"NGLL_C{ui}",
+                module.add(self._emitNgllMaybeFused(writer, kernel, f"NGLL_C{ui}",
                                           self._ngll_per_unroll[(ui + 1) % uf]))
             if nll_idx == 0:
                 module.add(Label("SkipToNLL", ""))
             module.addComment0(f"NLL_C{ui}")
-            module.add(self._emitLoop(writer, kernel, f"NLL_C{ui}",
-                                      inject_pap_after_nll_drain(self._nll_per_unroll[nll_idx])))
+            module.add(self._emitNllMaybeFused(writer, kernel, f"NLL_C{ui}",
+                                      inject_pap_after_nll_drain(self._nll_per_unroll[nll_idx]),
+                                      fusedExitLabel=(plsinFusedExitLabel if plsin else None),
+                                      unroll_iter=nll_idx))
             module.add(self._emit_pgr2_tail_lw_align(kernel))
             if ui < uf - 2:
-                module.add(SBranch(labelName=endLabel.getLabelName(),
-                                   comment="skip other exit paths"))
+                if plsin:
+                    with writer.allocTmpSgpr(3, tag="nllExit_longBranch") as tmpSgprInfo:
+                        module.add(SLongBranchPositive(endLabel, tmpSgprInfo,
+                                   comment="skip other exit paths (long)"))
+                else:
+                    module.add(SBranch(labelName=endLabel.getLabelName(),
+                                       comment="skip other exit paths"))
 
         module.add(endLabel)
 
@@ -3815,7 +6187,16 @@ class LogicalScheduler:
         mainloop_total = _total_for(self.tile_peaks)
         _, flat_peaks = self._compute_flat_tail_tile_state()
         tail_total = _total_for(flat_peaks)
-        return max(mainloop_total, tail_total)
+        totals = [mainloop_total, tail_total]
+        if cfg.tailOwnTiles:
+            # The four-deep tail reallocates at entry like the tail loop does,
+            # so it is another body in the max rather than a term added to the
+            # mainloop's peaks.
+            if self._tail_own_peaks is None:
+                self.build_tail_merged()
+            if self._tail_own_peaks is not None:
+                totals.append(_total_for(self._tail_own_peaks))
+        return max(totals)
 
     def allocVgprTiles(self, writer, tileInfoA, tileInfoB,
                        scaleTileInfoA=None, scaleTileInfoB=None):
@@ -4042,22 +6423,36 @@ class LogicalScheduler:
         need_build = (self._preloop_emitted is None or self._ngll_emitted is None
                       or self._nll_emitted is None)
 
+        self._kernel = kernel
+
         if need_build:
             self.build()
 
-        self._kernel = kernel
+        # Compute the distributable MFMA count from dtileInfo so
+        # _build_clustered_preloop_ops can use weighted distribution.
+        from Tensile.Components.Subtile.Kernel import _zeroRegRangeMfmaCount
+        if dtileInfo and dtileInfo.vgprTiles:
+            firstReg = dtileInfo.vgprTiles[0].regList.indices[0]
+            totalRegs = sum(len(t.regList.indices) for t in dtileInfo.vgprTiles)
+            self._n_mfma_distributable = max(0,
+                _zeroRegRangeMfmaCount(totalRegs, writer) - 1)
+        else:
+            self._n_mfma_distributable = 0
 
         from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
 
-        emitter = InstructionEmitter(
-            writer, kernel, self.config,
-            tileInfoA, tileInfoB, dtileInfo,
-            self.vgprTilesA, self.vgprTilesB,
-            scaleTileInfoA, scaleTileInfoB,
-            self.vgprTilesSA, self.vgprTilesSB,
-            tensorParametersA=tensorParametersA,
-            tensorParametersB=tensorParametersB,
-        )
+        def make_emitter(config):
+            return InstructionEmitter(
+                writer, kernel, config,
+                tileInfoA, tileInfoB, dtileInfo,
+                self.vgprTilesA, self.vgprTilesB,
+                scaleTileInfoA, scaleTileInfoB,
+                self.vgprTilesSA, self.vgprTilesSB,
+                tensorParametersA=tensorParametersA,
+                tensorParametersB=tensorParametersB,
+            )
+
+        emitter = make_emitter(self.config)
 
         # Rebuild all loop variants from current _emitted (which now has
         # vgpr_tile_maps populated by assign_vgpr_tiles, unlike the stale
@@ -4084,6 +6479,32 @@ class LogicalScheduler:
             nll_copy = copy.deepcopy(self._nll_emitted)
             emitter.populate(nll_copy, unroll_iter=ui)
             self._nll_per_unroll.append(nll_copy)
+
+        # The four-deep tail is built here rather than in build() so it sees the
+        # same post-assign_vgpr_tiles state the other variants do. It has no
+        # per-unroll copies: covering both DepthU is the whole point, so there
+        # is no parity left to alternate and unroll_iter 0 is the only one.
+        self.build_tail_merged()
+        if self._tail_own_peaks is not None:
+            # The mainloop is fully emitted by now, so its tile registers are
+            # dead and the four-deep body can have them back. Same trade the
+            # tail loop makes in _realloc_tail_tiles_flat: a second layout in
+            # the same registers rather than a wider one in more of them.
+            self._realloc_tail_tiles_flat(writer, self._tail_own_peaks)
+        if self._tail_merged_emitted is not None:
+            # Emitted through its own scheduler's config, not this one's. The
+            # LDS offset a ds_read gets is k modulo numSubIterK/numUnroll, so
+            # emitting a four-deep body against the two-deep config sends its
+            # last two k-steps off the end of the buffer instead of back to the
+            # start of the other one. The physical tile lists are shared, so the
+            # registers it names are still this kernel's.
+            tailEmitter = make_emitter(self._tail_merged_scheduler.config)
+            tailEmitter.populate(self._tail_merged_emitted, unroll_iter=0)
+            if self._tail_prime_emitted is not None:
+                # Same emitter as the body it primes: the reads have to name the
+                # reallocated tiles, and resolve their LDS offsets against the
+                # four-deep config, exactly as the body's own reads do.
+                tailEmitter.populate([[self._tail_prime_emitted]], unroll_iter=0)
 
         self._emitter = emitter
 

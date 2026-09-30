@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from Tensile.Components.Subtile.Kernel import emitMfmaInstruction
 from Tensile.Components.Subtile.SubtileGREmit import (
-    emitSingleBufferLoad, globalReadPtrUpdates, globalReadLDSBufferSwap,
+    emitSingleBufferLoad,
+    globalReadPtrUpdates, globalReadLDSBufferSwap,
 )
 from Tensile.Components.Subtile.SubtileLREmit import (
     emitSingleDsRead, localReadLDSBufferSwap,
@@ -129,7 +130,7 @@ class InstructionEmitter:
         self._dispatch = {
             'mfma':         lambda em, ui: self.emit_mfma(em.source, ui),
             'lr':           lambda em, ui: self.emit_lr(em.source, ui),
-            'gr':           lambda em, ui: self.emit_gr(em.source),
+            'gr':           lambda em, ui: self.emit_gr(em.source, ui),
             'wait_gr':      lambda em, ui: self.emit_wait_gr(em.source),
             'wait_lr':      lambda em, ui: self.emit_wait_lr(),
             'sync':         lambda em, ui: self.emit_sync(),
@@ -234,10 +235,21 @@ class InstructionEmitter:
             ti = self.tileInfoMap[tensor]
             lrGran = self.config.lrSA if tensor == 'SA' else self.config.lrSB
             vgprTilesScale = self.vgprTilesSA if tensor == 'SA' else self.vgprTilesSB
+            # Same uid-local fold as A/B above, and inert for the same reason:
+            # numUnroll > 1 for a scale tensor means its LDS region holds one
+            # uid's worth of k and the base register swaps between them, so k
+            # has to come back to the start of the region rather than running
+            # past its end. Multi-DU proper leaves the scales at numUnroll == 1
+            # — there the region really does span every k — so only the
+            # four-deep tail takes this branch.
+            nUnroll = self.config.numUnroll.get(tensor, 1)
+            k_start = placement.tiles.subIterK_start
+            if nUnroll > 1:
+                k_start %= self._per_uid_k[tensor]
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 scaleGroupIdx = tileId // lrGran.mn
                 groupKey = scaleGroupIdx * lrGran.mn
-                kGroupIdx = placement.tiles.subIterK_start // ti.lrSubtileShape[1]
+                kGroupIdx = k_start // ti.lrSubtileShape[1]
                 numKGroups = ti.lrLocalSubtileGrid[1]
                 dsOffset = int(ti.lrSubtileSize) * (scaleGroupIdx * numKGroups + kGroupIdx)
                 vdst = next(iter(vgprTilesScale[tile_map[groupKey]]))
@@ -248,7 +260,7 @@ class InstructionEmitter:
                     comment=f"scale{tc}[group{scaleGroupIdx},K={placement.tiles.subIterK_start}]: load 4B from LDS"))
         return list(module.flatitems())
 
-    def emit_gr(self, placement):
+    def emit_gr(self, placement, unroll_iter=0):
         """Emit GR (buffer_load) instructions from GRPlacement."""
         module = Module()
         tensor = placement.tensor
@@ -290,6 +302,41 @@ class InstructionEmitter:
         if force_drain:
             grCnt = 0
             label = "full drain"
+        elif counts.use_gr_placement_counts:
+            # Multi-partition reorder: A/B/SA/SB hold raw GRPlacement counts.
+            # Convert to buffer_loads via ceil(count / loadRatioGR) — correct
+            # for any partition/GR-subtile alignment.
+            import math
+            sa_info = self.tileInfoMap.get('SA')
+            sb_info = self.tileInfoMap.get('SB')
+            def _to_loads(n, ratio):
+                return math.ceil(n / ratio) if (n and ratio) else 0
+            nA  = _to_loads(counts.A,  self.tileInfoA.loadRatioGR)
+            nB  = _to_loads(counts.B,  self.tileInfoB.loadRatioGR)
+            nSA = _to_loads(counts.SA, sa_info.loadRatioGR) if sa_info else 0
+            nSB = _to_loads(counts.SB, sb_info.loadRatioGR) if sb_info else 0
+            grCnt = nA + nB + nSA + nSB
+            assert grCnt > 0, (
+                f"use_gr_placement_counts=True but buffer_load sum is 0 "
+                f"(nA={nA} nB={nB} nSA={nSA} nSB={nSB}); "
+                f"check mt1_ops GRPlacement counts at build_preloop call site"
+            )
+            label = f"mt1-partition-0: A={nA} B={nB} SA={nSA} SB={nSB}"
+        elif counts.use_num_gr_total:
+            # Single-partition fast path: exact buffer_load count from tileInfo.
+            # Avoids the grMap formula which miscounts when loadRatioGR >= 1.
+            sa_info = self.tileInfoMap.get('SA')
+            sb_info = self.tileInfoMap.get('SB')
+            nA  = self.tileInfoA.numGRTotal
+            nB  = self.tileInfoB.numGRTotal
+            nSA = sa_info.numGRTotal if sa_info else 0
+            nSB = sb_info.numGRTotal if sb_info else 0
+            grCnt = nA + nB + nSA + nSB
+            assert grCnt > 0, (
+                f"use_num_gr_total=True but numGRTotal sums to 0 "
+                f"(nA={nA} nB={nB} nSA={nSA} nSB={nSB})"
+            )
+            label = f"per-subIterK: A={nA} B={nB} SA={nSA} SB={nSB}"
         else:
             grCnt = (counts.A * grMap['A'] +
                      counts.B * grMap['B'] +
@@ -327,11 +374,12 @@ class InstructionEmitter:
         """Emit globalReadPtrUpdates + globalReadLDSBufferSwap for a single tensor."""
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
+        hold = getattr(source, 'holdOnLastIter', False)
         module = Module()
         if tensor in ('SA', 'SB'):
-            module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel))
+            module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel, hold))
         else:
-            module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
+            module.add(globalReadPtrUpdates(tc, self.writer, self.kernel, hold))
         module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
@@ -394,9 +442,18 @@ class InstructionEmitter:
                 module.add(cmpCls(
                     src0=sgpr("LoopCounterL"), src1=sgpr(litSgpr),
                     comment=f"LoopCounter {source.compare} {source.value}?"))
-        module.add(SCBranchSCC1(
-            labelName=skipLabel.getLabelName(),
-            comment=source.branchComment or f"skip to {source.target}"))
+        # PostLoopStoreInNll bias/SAV bloats the NLL bodies so this preloop skip
+        # (e.g. SkipToNLL, which jumps across the whole preloop+mainloop+NGLL) can
+        # exceed the +-simm16 short-branch range. Emit a 32-bit long branch in that
+        # mode; every other kernel keeps the original short branch (byte-identical).
+        if getattr(self.writer.states, "postLoopStoreInNll", False):
+            module.add(self.writer.longBranchScc1(
+                skipLabel, posNeg=1,
+                comment=(source.branchComment or f"skip to {source.target}") + " (long)"))
+        else:
+            module.add(SCBranchSCC1(
+                labelName=skipLabel.getLabelName(),
+                comment=source.branchComment or f"skip to {source.target}"))
         return list(module.flatitems())
 
     def _mfma_K_constants(self):
