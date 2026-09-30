@@ -400,8 +400,8 @@ $(\text{qb}, h_q, \text{bt})$ decides load balance *and* L2 locality:
   each XCD streams few KV heads' K/V.
 - **`gqa_pair`, `gqa_pair_2phase`** — explicit only; see the prefill README.
 - **`auto`** (default) — for aligned causal attention `bt_hkv_minor` below
-  `chiplet_num_xcds` batches, else `qb_major`; otherwise `hkv_major` when it is
-  balance-safe **and** GQA ($g>1$), else `qb_major`.
+  `chiplet_num_xcds` batches; otherwise `hkv_major` when it is balance-safe
+  **and** GQA ($g>1$), else `qb_major`.
 
 **Default-grid block order (`nonpersist_decode`).** The grid shape and the
 block-id → work-item map:

@@ -140,7 +140,7 @@ def _dense_spec(req: OperatorRequest):
     """Build the gfx942 ``AttentionDenseSpec`` for ``req`` at its best config.
 
     The gfx942 twin of :func:`dispatch.attention.gfx950._dense_spec`. Persistent
-    ("auto") turns on the grid-stride variant at large batch, unless the
+    ("auto") turns on the grid-stride variant at D128, unless the
     non-persistent auto order is Swizzled Head-first, and non-tile-multiple
     self-attention lengths take the on-chip ragged path (no host pad) -- but a
     different tuning, which is the whole reason the two are separate functions
@@ -200,7 +200,9 @@ def _dense_spec(req: OperatorRequest):
     elif mode == "off":
         persistent = False
     elif mode == "auto":
-        persistent = int(req.batch) >= 16
+        # The persistent grid measured ahead at D128 for every batch and mask;
+        # at D64 the non-persistent grid did.
+        persistent = head_size == 128
     else:
         raise ValueError(
             f"dense_persistent must be 'auto'/'on'/'off', got {req.dense_persistent!r}"
@@ -266,7 +268,7 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
     Carries the port's P1-P5 levers: the 32x32x8 atom with K-loop doubling,
     conflict-free V (D128 fp16), exp2_fast + fused softmax rescale, per-config
     waves-per-eu and the D64 K-bank-conflict pad, and the persistent grid-stride
-    variant (``dense_persistent='auto'`` turns it on at large batch). Which config
+    variant (``dense_persistent='auto'`` turns it on at D128). Which config
     gets which lever, and why, is the table in
     ``builders/gfx942/attention/prefill/README.md``.
 

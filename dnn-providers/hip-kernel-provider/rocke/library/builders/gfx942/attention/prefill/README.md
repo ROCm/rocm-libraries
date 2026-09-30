@@ -60,7 +60,7 @@ decision), and the baseline takes `wide4`, `narrow` or `narrow_d64` as
 Every config wins at every measured length, and the margin grows with sequence length
 — the persistent grid turns on at the long end, and the causal work per tile rises
 faster than the fixed overhead. (Measured before the current block orders; dispatch
-now goes persistent from 16 batches.) Two things worth knowing about how to read the table:
+now goes persistent at D128.) Two things worth knowing about how to read the table:
 
 - **The D64 rows moved a long way, and the D64 K-bank-conflict pad is why.** An
   earlier comparison, run before the pad was adopted, measured D64 at −17 % (fp16,
@@ -148,7 +148,7 @@ magnitudes live outside the repo per `AGENTS.md`.
 | Per-config `waves_per_eu` | **bf16 D64** → 4 | forces the allocator low enough that a second workgroup co-resides (1 → 2 WG/CU) | **shipped** — large at long sequences |
 | D64 K-bank-conflict pad | **D64 both dtypes** | 2-row-group boundary pad takes the `do_qk` K reads from 32-way to 4-way | **shipped** — large, cross-part confirmed |
 | `lds_k_group_pad` default (8) confirmed | **D64 both dtypes** | gfx942 reuses the shared `AttentionDenseSpec.lds_k_group_pad` field; default 8 inherits from the gfx950 sweep (840 configs, pad ∈ {0,8,16,24,32} × bn × GQA × mode × seqlen). Whole-wave bank model and decision record: `library/builders/gfx950/attention/prefill/README.md §Tuning`. | **adopted** — default unchanged |
-| Persistent grid-stride | all | `num_persistent` CTAs grid-stride over decoded work items; `persist_decode` orders them (auto: `bt_hkv_minor` / folded `qb_major` for causal) | **shipped** — auto-on from 16 batches, except large causal MHA |
+| Persistent grid-stride | all | `num_persistent` CTAs grid-stride over decoded work items; `persist_decode` orders them (auto: `bt_hkv_minor` for causal below `chiplet_num_xcds` batches) | **shipped** — auto-on at D128, except large causal MHA |
 | Default-grid block order | causal | `nonpersist_decode`: batch, then kv head, fastest with longest-first query blocks (`bt_hkv_minor`); Swizzled Head-first (`hq_minor_swz`) for large causal MHA | **shipped** — auto |
 
 ### Evaluated and rejected

@@ -291,13 +291,12 @@ class AttentionDenseSpec:
         if self._aligned_causal:
             if self.interleave:
                 return PersistQbMajor.name  # the only decode interleave applies to
-            # Batch is the fastest digit of both and xcd = wi % num_xcds, so with
-            # fewer batches than XCDs the second digit still picks the XCD:
-            # bt_hkv_minor then gives each XCD one kv head. From there on both
-            # place items alike, and qb_major measured ahead.
+            # Batch is the fastest digit and xcd = wi % num_xcds, so with fewer
+            # batches than XCDs the second digit still picks the XCD:
+            # bt_hkv_minor then gives each XCD one kv head. From there on the
+            # rule below measured ahead.
             if self.batch < self.chiplet_num_xcds:
                 return PersistBtHkvMinor.name
-            return PersistQbMajor.name
         gqa = self.num_queries_per_kv
         nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
         per_hkv = gqa * nqb * self.batch

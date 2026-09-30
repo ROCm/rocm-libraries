@@ -1601,24 +1601,24 @@ def test_persistent_and_default_share_one_inner_body():
     assert npp.count("scf.for") == nd.count("scf.for") + 1
 
 
-def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
-    """P4 dispatch: ``dense_persistent='auto'`` resolves to persistent from 16
-    batches (num_persistent defaulted to 304), and stays off below that whatever
-    the Sq. Explicit on/off are honored; gfx950 keeps its 256 default and is
-    otherwise untouched."""
+def test_dispatch_persistent_auto_turns_on_for_d128_only():
+    """P4 dispatch: ``dense_persistent='auto'`` resolves to persistent at D128 for
+    any Sq and batch (num_persistent defaulted to 304), and stays off at D64.
+    Explicit on/off are honored; gfx950 keeps its 256 default and is otherwise
+    untouched."""
     from dispatch.attention import AttentionRequest
     from dispatch.attention.gfx942 import _dense_spec
     from dispatch.attention.gfx950 import _dense_spec as _dense_spec_gfx950
 
-    def _req(sq, arch, persist="auto", batch=1):
+    def _req(sq, arch, persist="auto", d=128):
         return AttentionRequest(
-            batch=batch,
+            batch=1,
             nhead_q=16,
             nhead_k=4,
             seqlen_q=sq,
             seqlen_k=sq,
-            hdim_q=128,
-            hdim_v=128,
+            hdim_q=d,
+            hdim_v=d,
             arch=arch,
             mask_type=1,
             dtype="fp16",
@@ -1628,9 +1628,10 @@ def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
 
     # gfx942 num_persistent defaulted to the 304-CU part's CU count.
     assert _dense_spec(_req(8192, "gfx942")).num_persistent == 304
-    # auto: on from 16 batches, off below even at large Sq.
-    assert _dense_spec(_req(2048, "gfx942", batch=16)).persistent is True
-    assert _dense_spec(_req(8192, "gfx942")).persistent is False
+    # auto: on at D128 whatever the Sq, off at D64.
+    assert _dense_spec(_req(2048, "gfx942")).persistent is True
+    assert _dense_spec(_req(8192, "gfx942")).persistent is True
+    assert _dense_spec(_req(8192, "gfx942", d=64)).persistent is False
     # explicit modes honored.
     assert _dense_spec(_req(8192, "gfx942", "off")).persistent is False
     assert _dense_spec(_req(256, "gfx942", "on")).persistent is True

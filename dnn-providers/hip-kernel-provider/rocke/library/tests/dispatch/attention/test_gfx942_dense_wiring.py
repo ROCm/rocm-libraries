@@ -8,8 +8,8 @@ Required by ``library/dispatch/AGENTS.md`` step 4. Covers:
     every other attention candidate
   - ``spec_id`` is an equivalent opt-in door
   - routing on gfx942, and rejection of every out-of-scope request
-  - ``dense_persistent``: 'auto' turns the persistent grid on once there is enough
-    work; an explicit 'on' is accepted
+  - ``dense_persistent``: 'auto' turns the persistent grid on at D128; an explicit
+    'on' is accepted
   - non-persistent gfx942 dense reads ``batch`` / ``seqlen_q`` / ``seqlen_kv`` as
     runtime kernel params, so those fields drop out of ``kernel_name()`` and the
     dispatched signature includes them. The persistent grid still bakes batch.
@@ -237,14 +237,16 @@ class TestGfx942BottomRightSafety(unittest.TestCase):
 
 
 class TestGfx942DensePersistent(unittest.TestCase):
-    def test_auto_persistent_turns_on_for_large_batch(self):
-        """'auto' turns the persistent grid-stride variant ON from 16 batches,
+    def test_auto_persistent_turns_on_for_d128(self):
+        """'auto' turns the persistent grid-stride variant ON at D128, off at D64,
         and the request is accepted."""
         with _Gfx942Arch():
-            req = _req(batch=16, dense_persistent="auto")
+            req = _req(dense_persistent="auto")
             ok, why = _candidate().admits(req)
             self.assertTrue(ok, why)
             self.assertTrue(_dense_spec(req).persistent)
+            req = _req(hdim_q=64, hdim_v=64, dense_persistent="auto")
+            self.assertFalse(_dense_spec(req).persistent)
 
     def test_large_causal_mha_stays_non_persistent_with_swizzled_head_first(self):
         with _Gfx942Arch():
