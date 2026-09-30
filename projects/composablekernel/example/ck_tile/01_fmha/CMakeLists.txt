@@ -42,12 +42,36 @@ set_directory_properties(PROPERTIES CMAKE_CONFIGURE_DEPENDS "${CODE_GEN_SCRIPTS}
 
 list(JOIN INST_TARGETS , FMHA_TARGETS_ARG)
 
+# Select the fwd --optdim head-dim list by architecture. gfx125x (QR-TDM) adds
+# 96/160/192; other archs keep the shared develop list. generate.py applies
+# --optdim uniformly across all --targets, so a mixed gfx9x + gfx125x build would
+# leak the gfx125x-only head dims into the gfx9/gfx11/gfx12 generic QR factories
+# (which also define 96/160/192 tiles). Disallow mixing so the list stays correct.
+set(FMHA_FWD_HAS_GFX125 FALSE)
+set(FMHA_FWD_HAS_NON_GFX125 FALSE)
+foreach(inst_target ${INST_TARGETS})
+  if(inst_target MATCHES "^gfx125")
+    set(FMHA_FWD_HAS_GFX125 TRUE)
+  else()
+    set(FMHA_FWD_HAS_NON_GFX125 TRUE)
+  endif()
+endforeach()
+if(FMHA_FWD_HAS_GFX125 AND FMHA_FWD_HAS_NON_GFX125)
+  message(FATAL_ERROR "CK Tile FMHA: gfx125x cannot be built together with other archs "
+                      "(the fwd --optdim head-dim list differs per arch). INST_TARGETS: ${INST_TARGETS}")
+endif()
+if(FMHA_FWD_HAS_GFX125)
+  set(FMHA_FWD_OPTDIM 32,64,96,128,160,192,256,512)
+else()
+  set(FMHA_FWD_OPTDIM 32,64,80,128,256,512)
+endif()
+
 string(REPLACE ";" "," FMHA_FWD_APIS "${FMHA_FWD_ENABLE_APIS}")
 set(FMHA_FWD_CODE_GEN_COMMON_ARGS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
   --targets ${FMHA_TARGETS_ARG}
   --api ${FMHA_FWD_APIS}
-  --optdim 32,64,80,128,256,512
+  --optdim ${FMHA_FWD_OPTDIM}
 )
 set(FMHA_BWD_CODE_GEN_COMMON_ARGS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
@@ -151,6 +175,17 @@ else()
   list(APPEND FMHA_FWD_PRIVATE_COMPILE_OPTIONS -DCK_TILE_FMHA_FWD_FAST_EXP2=0)
 endif()
 list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS -fgpu-flush-denormals-to-zero)
+
+# Per-kernel VGPR/SGPR/LDS/scratch/spill and occupancy remarks, on stderr at
+# compile time. Must hang off the instance targets: the generated blobs are
+# LANGUAGE HIP, so they take CMAKE_HIP_FLAGS and never see CMAKE_CXX_FLAGS.
+# One remark block per kernel -- narrow the instance set before enabling.
+option(FMHA_RESOURCE_USAGE
+  "emit -Rpass-analysis=kernel-resource-usage remarks for FMHA instances" OFF)
+if(FMHA_RESOURCE_USAGE)
+  list(APPEND FMHA_FWD_PRIVATE_COMPILE_OPTIONS -Rpass-analysis=kernel-resource-usage)
+  list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS -Rpass-analysis=kernel-resource-usage)
+endif()
 
 # conditionally enable call to the fwd_splitkv API in fmha_fwd example and tests
 if("fwd_splitkv" IN_LIST FMHA_FWD_ENABLE_APIS)

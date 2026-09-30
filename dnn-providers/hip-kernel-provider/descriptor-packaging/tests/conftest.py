@@ -1,5 +1,6 @@
 import os
 import shutil
+import struct
 import sys
 import types
 from pathlib import Path
@@ -22,13 +23,23 @@ if _KPACK_DIR and Path(_KPACK_DIR).is_dir() and _KPACK_DIR not in sys.path:
 # producer tests, mirroring how this conftest already wires hkp_pack and
 # rocm_kpack onto sys.path.
 #
-# Source tree, not the packs' wheel venv: this tests producer logic, and the
+# Source tree, not the packs' private wheels: this tests producer logic, and the
 # packs already cover the wheel path.
 _ROCKE_ROOT = _TESTS_DIR.parent.parent / "rocke"
 for _rocke_sub in ("platform/python", "library"):
     _p = _ROCKE_ROOT / _rocke_sub
     if _p.is_dir() and str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
+
+# Imported below the sys.path wiring above, never beside the other imports: msgpack
+# ships as a rocm_kpack dependency, so on a host without it installed system-wide it
+# becomes importable only once _KPACK_DIR is on the path. Importing at the top of the
+# file would cache that miss and fail every synthesised-object test on exactly the
+# environments HIPKERNELPROVIDER_ROCM_KPACK_DIR exists to serve.
+try:
+    import msgpack
+except ImportError:
+    msgpack = None
 
 _ROCKE_UKD_SOURCE = "kernels/gfx950/attention_dense.py"
 _ROCKE_UKD_BUILDER = "build_attention_dense"
@@ -67,6 +78,37 @@ def hipcc():
                 break
     if not exe:
         pytest.fail("hipcc not found (set HKP_HIPCC or put hipcc on PATH)")
+    return exe
+
+
+@pytest.fixture(scope="session")
+def cmake():
+    """The CMake used to drive the sub-configures and sub-builds.
+
+    Resolved from HKP_CMAKE_COMMAND (set by CMake to its own ${CMAKE_COMMAND})
+    or PATH, so the tests exercise the CMake that is running them rather than
+    whichever one happens to come first on PATH.
+    """
+    exe = os.environ.get("HKP_CMAKE_COMMAND")
+    if not exe:
+        exe = shutil.which("cmake")
+    if not exe:
+        pytest.fail("cmake not found (set HKP_CMAKE_COMMAND or put cmake on PATH)")
+    return exe
+
+
+@pytest.fixture(scope="session")
+def cmake_make_program():
+    """The build tool handed to the sub-configures' Ninja generator.
+
+    Resolved from HKP_CMAKE_MAKE_PROGRAM (set by CMake to its own
+    ${CMAKE_MAKE_PROGRAM}) or PATH.
+    """
+    exe = os.environ.get("HKP_CMAKE_MAKE_PROGRAM")
+    if not exe:
+        exe = shutil.which("ninja")
+    if not exe:
+        pytest.fail("ninja not found (set HKP_CMAKE_MAKE_PROGRAM or put ninja on PATH)")
     return exe
 
 
@@ -156,3 +198,107 @@ def rocke_ukd():
         builder=_ROCKE_UKD_BUILDER,
         spec=_ROCKE_UKD_SPEC,
     )
+
+
+# ---------------------------------------------------------------------------
+# Synthesised code objects
+# ---------------------------------------------------------------------------
+# Shared by the signature parser tests and the rocke producer tests, whose
+# stubbed compiler has to hand back something the packer can read a signature
+# out of. A real comgr object is a bare ELF carrying this note, so a stub that
+# is not one exercises a path no producer takes.
+
+
+def requires_msgpack():
+    """Fail the calling test when the note cannot be packed.
+
+    Synthesising an object needs msgpack; most tests in these modules do not, so
+    callers reaching one down a single branch call this at that branch rather
+    than marking the module.
+
+    Fails rather than skips, matching the hipcc and rocke fixtures above: msgpack
+    ships as a rocm_kpack dependency, so it cannot be legitimately absent where
+    the packer itself is importable, and a skip here would quietly retire the
+    signature-parsing coverage instead of reporting a broken environment.
+    """
+    if msgpack is None:
+        pytest.fail(
+            "msgpack is not importable, but it ships as a rocm_kpack dependency"
+        )
+
+
+def _note(owner, note_type, payload):
+    """One ELF note: namesz/descsz/type, then name and desc each padded to 4."""
+    name = owner.encode() + b"\x00"
+    pad = lambda b: b + b"\x00" * (-len(b) % 4)
+    return (
+        struct.pack("<III", len(name), len(payload), note_type)
+        + pad(name)
+        + pad(payload)
+    )
+
+
+def _elf(note_bytes):
+    """A minimal ELF64 LSB object holding `note_bytes` in one SHT_NOTE section.
+
+    Two section headers -- the mandatory null entry and the note -- and no
+    string table: the parser selects on section type, never on section name, so
+    naming the section would test nothing the real objects exercise.
+    """
+    header_size = 64
+    entry_size = 64
+    note_offset = header_size
+    sh_offset = note_offset + len(note_bytes)
+
+    header = bytearray(header_size)
+    header[0:4] = b"\x7fELF"
+    header[4] = 2  # ELFCLASS64
+    header[5] = 1  # ELFDATA2LSB
+    header[6] = 1  # EV_CURRENT
+    struct.pack_into("<Q", header, 0x28, sh_offset)
+    struct.pack_into("<HHH", header, 0x3A, entry_size, 2, 0)
+
+    null_section = struct.pack("<IIQQQQIIQQ", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    note_section = struct.pack(
+        "<IIQQQQIIQQ", 0, 7, 0, 0, note_offset, len(note_bytes), 0, 0, 4, 0
+    )
+    return bytes(header) + note_bytes + null_section + note_section
+
+
+def _metadata(kernels):
+    return msgpack.packb({"amdhsa.kernels": kernels}, use_bin_type=True)
+
+
+def _arg(kind, size, offset, name=None):
+    argument = {".value_kind": kind, ".size": size, ".offset": offset}
+    if name is not None:
+        argument[".name"] = name
+    return argument
+
+
+def _kernel(name, args):
+    return {".name": name, ".symbol": name + ".kd", ".args": args}
+
+
+def _object(kernels):
+    return _elf(_note("AMDGPU", 32, _metadata(kernels)))
+
+
+def _bundle(entries):
+    """A clang offload bundle over `entries`, each (triple, payload)."""
+    magic = b"__CLANG_OFFLOAD_BUNDLE__"
+    header = magic + struct.pack("<Q", len(entries))
+    for triple, _ in entries:
+        header += struct.pack("<QQQ", 0, 0, len(triple)) + triple.encode()
+
+    body = b""
+    offsets = []
+    for _, payload in entries:
+        offsets.append(len(header) + len(body))
+        body += payload
+
+    rebuilt = magic + struct.pack("<Q", len(entries))
+    for (triple, payload), offset in zip(entries, offsets):
+        rebuilt += struct.pack("<QQQ", offset, len(payload), len(triple))
+        rebuilt += triple.encode()
+    return rebuilt + body

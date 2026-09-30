@@ -683,7 +683,7 @@ __global__ void conv2d_depthwise_2d_toeplitz_nhwc_cdna4(const ToType<DT>* __rest
 
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
-                 const Conv2dParams& par,
+                 const ConvParams& par,
                  const void* in,
                  const void* wei,
                  void* out,
@@ -738,9 +738,12 @@ public:
     //
     // 3x3/7x7 (and 5x5) use the sparse 16x64 MFMA; 5x5 stride 1 may use the dense
     // F(4x4,5x5) MFMA. Each wave loads a uint4-aligned 8-channel slice.
-    bool is_applicable(const Conv2dParams& par) const override
+    bool is_applicable(const ConvParams& par) const override
     {
         if(!DepthwiseConvKernel::is_applicable(par))
+            return false;
+        // 16-bit only: the base admits tf32 for the CDNA5 1D path, which this has none.
+        if(par.input_type != DataType::fp16 && par.input_type != DataType::bf16)
             return false;
         if(par.direction != Direction::Fprop)
             return false;
@@ -758,13 +761,13 @@ public:
             return false;
         if(par.pad_h > par.kh - 1 || par.pad_w > par.kw - 1)
             return false;
-        Conv2dSize sz(par);
+        ConvSize sz(par);
         if(sz.input_bytes() > INT32_MAX || sz.output_bytes() > INT32_MAX)
             return false;
         return true;
     }
 
-    bool is_valid_config(const Conv2dParams& par) const override
+    bool is_valid_config(const ConvParams& par) const override
     {
         if(par.direction != cfg_.direction)
             return false;
@@ -819,7 +822,7 @@ public:
             constexpr int64_t HBM_BOUND_BYTES = int64_t(128) << 20; // 128 MiB
             if(plain_workhorse && (par.c % 64) == 0)
             {
-                const int64_t in_bytes = static_cast<int64_t>(Conv2dSize(par).input_bytes());
+                const int64_t in_bytes = static_cast<int64_t>(ConvSize(par).input_bytes());
                 // Tier 1: CH<64 splits every 128 B line across sibling WGs -> ~2x
                 // fetch. Once HBM-bound, defer to the full-line CH64 sibling.
                 if(cfg_.ch_per_wg() < 64 && in_bytes >= HBM_BOUND_BYTES)
@@ -841,7 +844,7 @@ public:
         return true;
     }
 
-    LaunchParams get_launch_params(const Conv2dParams& par) const override
+    LaunchParams get_launch_params(const ConvParams& par) const override
     {
         const int Wo              = par.q;
         const int num_tile_groups = divup(Wo, cfg_.tile_cols());

@@ -9,11 +9,12 @@
 target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/IngestorPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/KernelIngestorEngine.cpp
-    # One file per pack, the native seam; its descriptors are installed JSON. Listed
-    # explicitly rather than globbed -- CMake's own docs discourage GLOB for sources,
-    # and CONFIGURE_DEPENDS does not re-run on removal under every generator.
+    # Pointwise and Conv descriptors are test fixtures under test_descriptors/; a Pointwise
+    # bundle also sits in descriptor-packaging/examples/descriptors, where the superbuild CI
+    # lane points the production source root. Gfx950AttentionDense ships from descriptors/.
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNative.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950AttentionDenseNative.cpp
 )
 
 # Sources above are entirely inside `#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR`; the
