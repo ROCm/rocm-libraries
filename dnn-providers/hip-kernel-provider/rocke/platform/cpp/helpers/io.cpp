@@ -11,14 +11,16 @@
  *     def io_ir_type(dtype: str) -> Type:
  *         if dtype in ("f16", "fp16"): return F16
  *         if dtype == "bf16":          return BF16
+ *         if dtype == "f64":           return F64
  *         raise ValueError(
- *             f"unsupported I/O dtype {dtype!r}; expected f16/fp16/bf16")
+ *             f"unsupported I/O dtype {dtype!r}; expected f16/fp16/bf16/f64")
  *
  * Mapping invariants (must stay byte-identical to the Python so downstream IR is
  * identical):
  *   "f16"  -> rocke_f16()    (Python F16)
  *   "fp16" -> rocke_f16()    (alias; Python F16)
  *   "bf16" -> rocke_bf16()   (Python BF16)
+ *   "f64"  -> rocke_f64()    (Python F64)
  *   else   -> NULL         (Python ValueError)
  */
 
@@ -52,6 +54,11 @@ const rocke_type_t* rocke_io_ir_type(const char* dtype)
     {
         return rocke_bf16();
     }
+    /* `dtype == "f64"` -> F64 */
+    if(strcmp(dtype, "f64") == 0)
+    {
+        return rocke_f64();
+    }
     /* Python: raise ValueError. No builder here, so signal via NULL. */
     return NULL;
 }
@@ -75,7 +82,7 @@ const rocke_type_t* rocke_b_io_ir_type(rocke_ir_builder_t* b, const char* dtype)
         return (const rocke_type_t*)rocke_i_set_err(
             b,
             ROCKE_ERR_VALUE,
-            "unsupported I/O dtype %s%s%s; expected f16/fp16/bf16",
+            "unsupported I/O dtype %s%s%s; expected f16/fp16/bf16/f64",
             dtype ? "'" : "",
             dtype ? dtype : "None",
             dtype ? "'" : "");

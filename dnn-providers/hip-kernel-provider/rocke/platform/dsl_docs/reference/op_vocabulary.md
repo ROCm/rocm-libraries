@@ -6,7 +6,7 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 
 | Op name                | Builder                           | LLVM emission                          |
 |------------------------|-----------------------------------|----------------------------------------|
-| `arith.constant`       | `const_i32`, `const_i64`, `const_f32`, `fp16_zero` | constant value |
+| `arith.constant`       | `const_i32`, `const_i64`, `const_f32`, `const_f64`, `fp16_zero` | constant value |
 | `arith.constant_vec`   | `zero_vec_f32`, `zero_vec`        | `zeroinitializer` vector               |
 | `arith.add`            | `add`                             | `add` (integer)                        |
 | `arith.sub`            | `sub`                             | `sub`                                  |
@@ -50,6 +50,8 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `math.rsqrt`   | `rsqrt`      | `llvm.amdgcn.rsq.f32`           |
 | `math.tanh`    | `tanh`       | piecewise f32 expansion: OCML polynomial for `abs(x) < 0.625`, otherwise `exp2` + reciprocal; bitwise sign restoration |
 | `math.rcp`     | `rcp`        | `1.0 / v` (hardware reciprocal) |
+
+`exp2`, `sqrt`, `rsqrt` and `tanh` are f32-only and reject f64 inputs; `rcp` accepts f64.
 
 `clamp_f32(v, lo, hi)` is `fmin(hi, fmax(lo, v))` — folds to `v_med3_f32`.
 

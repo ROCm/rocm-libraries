@@ -181,6 +181,10 @@ const char* rocke_h_vec_prefix_checked(rocke_h_lowerer_t* lw,
  * arena-owned string. */
 const char* rocke_h_f32_literal(rocke_h_lowerer_t* lw, double val);
 
+/* Python _f64_literal(val): C++ double-literal text for a double, special-casing
+ * nan / +/-inf like rocke_h_f32_literal. Returns an arena-owned string. */
+const char* rocke_h_f64_literal(rocke_h_lowerer_t* lw, double val);
+
 /* Python _encode_waitcnt: arch-aware s_waitcnt immediate. Selects the gfx9/10
  * split-VMCNT layout or the gfx11 contiguous layout off lw->arch. -1 on any
  * counter means "no wait" (encoded as that field's architectural max). */

@@ -13,7 +13,8 @@ What we cover today:
 * Unary ops: ``copy``, ``neg``, ``abs``, ``relu``, ``gelu_tanh``, ``silu``, ``exp2``,
   ``tanh``
 * Binary ops: ``add``, ``sub``, ``mul``, ``max``, ``min``
-* Dtypes: ``f16`` and ``bf16`` for I/O (compute is f32 internally)
+* Dtypes: ``f16`` and ``bf16`` for I/O (compute is f32 internally), and
+  ``f64`` (computed natively; exact ops only, ``vec=2``)
 
 The kernel processes the buffer as a single contiguous run of ``numel``
 elements; multi-dimensional torch tensors must be ``contiguous()``. This
@@ -51,7 +52,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Tuple
 
-from ...core.ir import I32, IRBuilder, KernelDef, PtrType, Value
+from ...core.ir import I32, IRBuilder, KernelDef, PtrType, Type, Value
 from ...helpers.activations import _sigmoid_via_exp2, _tanh_via_exp2
 from ...helpers.distribution import (
     TileDistributionEncoding,
@@ -77,7 +78,11 @@ UnaryOp = Literal[
     "exp2",
 ]
 BinaryOp = Literal["add", "sub", "mul", "max", "min", "swiglu", "geglu"]
-DType = Literal["f16", "bf16"]
+DType = Literal["f16", "bf16", "f64"]
+
+# Ops computed exactly in the I/O type; the exp2-based activations are
+# f32-only, so f64 is limited to this set.
+_F64_OPS = ("copy", "neg", "abs", "relu", "add", "sub", "mul", "max", "min")
 
 
 @dataclass(frozen=True)
@@ -133,11 +138,16 @@ class ElementwiseSpec:
 def is_valid_spec(spec: ElementwiseSpec) -> Tuple[bool, str]:
     if not (spec.is_unary() or spec.is_binary()):
         return False, f"unknown op {spec.op!r}"
-    if spec.dtype not in ("f16", "bf16"):
+    if spec.dtype not in ("f16", "bf16", "f64"):
         return False, f"unsupported dtype {spec.dtype!r}"
+    if spec.dtype == "f64" and spec.op not in _F64_OPS:
+        return False, f"op {spec.op!r} not supported for f64"
     if spec.block_size not in (64, 128, 256, 512, 1024):
         return False, f"block_size {spec.block_size} not in {{64, 128, 256, 512, 1024}}"
-    if spec.vec not in (2, 4, 8):
+    if spec.dtype == "f64":
+        if spec.vec != 2:
+            return False, f"vec {spec.vec} not in {{2}} for f64"
+    elif spec.vec not in (2, 4, 8):
         return False, f"vec {spec.vec} not in {{2, 4, 8}}"
     return True, "ok"
 
@@ -184,7 +194,8 @@ def _apply_unary(b: IRBuilder, x: Value, op: str) -> Value:
         # ``fsub(0.0, x)`` constant load.
         return b.fmax(x, b.fneg(x))
     if op == "relu":
-        return b.fmax(x, b.const_f32(0.0))
+        zero = b.const_f64(0.0) if x.type.name == "f64" else b.const_f32(0.0)
+        return b.fmax(x, zero)
     if op == "exp2":
         return b.exp2(x)
     if op == "tanh":
@@ -233,6 +244,16 @@ def _apply_binary(b: IRBuilder, a: Value, c: Value, op: str) -> Value:
         # :func:`_gelu_tanh` so the constant pool stays unique.
         return b.fmul(_gelu_tanh(b, a), c)
     raise ValueError(f"unsupported binary op {op!r}")
+
+
+def _to_compute(b: IRBuilder, x: Value) -> Value:
+    """Promote an I/O scalar to the compute type (f64 stays native)."""
+    return x if x.type.name == "f64" else b.cast_to_f32(x)
+
+
+def _from_compute(b: IRBuilder, x: Value, io_ty: Type) -> Value:
+    """Demote a compute scalar back to the I/O type (f64 stays native)."""
+    return x if io_ty.name == "f64" else b.cast_f32_to(x, io_ty)
 
 
 # ---------------------------------------------------------------------
@@ -351,13 +372,13 @@ def build_elementwise(spec: ElementwiseSpec) -> KernelDef:
             idx = b.add(thread_base, b.const_i32(i))
             in_bounds = b.cmp_lt(idx, N)
             with b.scf_if(in_bounds):
-                a = b.cast_to_f32(a_view.load_scalar(b, [idx]))
+                a = _to_compute(b, a_view.load_scalar(b, [idx]))
                 if spec.is_binary():
-                    bv = b.cast_to_f32(b_view.load_scalar(b, [idx]))
+                    bv = _to_compute(b, b_view.load_scalar(b, [idx]))
                     r = _apply_binary(b, a, bv, spec.op)
                 else:
                     r = _apply_unary(b, a, spec.op)
-                c_view.store_scalar(b, [idx], b.cast_f32_to(r, io_ty))
+                c_view.store_scalar(b, [idx], _from_compute(b, r, io_ty))
 
     with b.scf_if(in_fast):
         emit_vec_path()

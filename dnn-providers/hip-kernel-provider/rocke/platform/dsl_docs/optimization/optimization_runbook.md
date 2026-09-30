@@ -230,7 +230,7 @@ Decide what the kernel computes before deciding how it should run.
   fields explicitly; e.g. `UnifiedAttention2DTiledSpec.dtype="bf16"`,
   `kv_storage_dtype="fp8e4m3"` for the FP8 KV cache path.
 - DSL dtype catalog: `I1`, `I8`, `I16`, `I32`, `I64`, `BF16`, `F16`,
-  `F32`, `FP8E4M3`, `BF8E5M2` (see `core/ir.py:34-97`).
+  `F32`, `F64`, `FP8E4M3`, `BF8E5M2` (see `core/ir.py:34-97`).
 - Quantization helpers in `helpers/quant.py` (`quant_max_abs`,
   `quantize_scalar_f32`, `dequantize_scalar_to_f32`, `quant_ir_type`,
   `ir_to_qdtype`). `QDType` is `Literal["i8", "fp8e4m3", "bf8e5m2"]`.
@@ -242,6 +242,9 @@ Decide what the kernel computes before deciding how it should run.
   norm `<= 5e-3` (was 2.5e-3 before noise widening, see
   `notes/PROPOSALS_IMPLEMENTATION_REPORT.md::F2`), reduce `<= 1.5e-3`,
   gemm `<= 7e-2`).
+- fp64 kernels compute natively in f64 and are checked against a float64
+  reference (`tests/instances/differential/numeric.py`: elementwise
+  `<= 1e-12`, reduce `<= 1e-10`).
 - For fp16 inputs with fp32 accumulation over O(100) terms, expect
   errors near the fp16 ULP floor for correct kernels. Errors two
   orders of magnitude higher almost always indicate structural bugs
