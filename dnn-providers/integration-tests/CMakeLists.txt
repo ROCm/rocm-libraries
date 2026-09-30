@@ -162,14 +162,12 @@ set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
 add_executable(${INTEGRATION_TESTS_EXE}
     src/main.cpp
     src/harness/ReferenceExecutorPool.cpp
-    src/harness/bundle/BundleReferenceValidationHarness.cpp
     src/harness/bundle/FrontendGraphEngineRunner.cpp
     src/harness/bundle/GraphSession.cpp
     src/harness/bundle/HarnessDependencies.cpp
     src/harness/bundle/IntegrationBundleVerificationHarness.cpp
     src/harness/bundle/OutputComparison.cpp
     src/harness/bundle/ProductionPolicy.cpp
-    src/harness/bundle/ReferenceOpCoverage.cpp
     src/harness/bundle/SupportClaimReport.cpp
     src/harness/bundle/SupportClaimWriter.cpp
     src/harness/bundle/SupportClaims.cpp
@@ -194,15 +192,18 @@ set(GOLDEN_DATA_TESTS_EXE hipdnn_golden_data_tests)
 add_executable(${GOLDEN_DATA_TESTS_EXE}
     src/golden_data_main.cpp
     src/harness/ReferenceExecutorPool.cpp
-    src/harness/bundle/BundleReferenceValidationHarness.cpp
     src/harness/bundle/GraphSession.cpp
     src/harness/bundle/OutputComparison.cpp
-    src/harness/bundle/ReferenceOpCoverage.cpp
     src/harness/bundle/SupportClaimReport.cpp
     src/harness/bundle/SupportClaims.cpp
     src/harness/bundle/SupportVerdict.cpp
     src/harness/bundle/VariantPackBuilder.cpp
     src/harness/input-init/FillInputs.cpp
+    src/harness/reference-validation/BundleReferenceValidationHarness.cpp
+    src/harness/reference-validation/GoldenDataPlan.cpp
+    src/harness/reference-validation/GoldenDataRegistration.cpp
+    src/harness/reference-validation/GoldenOutputProbe.cpp
+    src/harness/reference-validation/ReferenceOpCoverage.cpp
 )
 
 target_include_directories(${GOLDEN_DATA_TESTS_EXE} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -227,7 +228,16 @@ target_compile_options(${GOLDEN_DATA_TESTS_EXE}
 
 clang_tidy_check(${GOLDEN_DATA_TESTS_EXE})
 
-add_integration_test_target(${GOLDEN_DATA_TESTS_EXE} ${CMAKE_CURRENT_BINARY_DIR})
+# SKIP_NAME_VALIDATION: every test this binary registers is named after a bundle's
+# directory path (deriveTestName() in BundleDiscovery.hpp), so the names are
+# lower_snake_case by construction -- `quick_SdpaFwd_bhsd_bf16_hd128_causal_batch_
+# Small_CpuRef.Small`. The PascalCase convention the validator enforces is for
+# hand-written C++ test names; satisfying it here would mean renaming the checked-in
+# bundle tree, which is the data, not the test code. hipdnn_integration_tests
+# registers the same bundle-derived names and is likewise absent from the validated
+# set, because it is not a tiered ctest target (see the note below).
+add_integration_test_target(${GOLDEN_DATA_TESTS_EXE} ${CMAKE_CURRENT_BINARY_DIR}
+    SKIP_NAME_VALIDATION)
 
 add_subdirectory(src/integration-tests)
 

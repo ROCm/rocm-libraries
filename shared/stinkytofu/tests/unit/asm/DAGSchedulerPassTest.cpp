@@ -1041,6 +1041,47 @@ TEST_F(DAGSchedulerPassTest, Layer2RejectsPairWhenDescendantOrderingFormsCycle) 
     EXPECT_EQ(waits, 2);
 }
 
+// LockDsReadOrder chains every ds_load into dsReadPriority order. `high`
+// feeds an earlier WMMA than `low`, but three WMMAs that already read its
+// dest keep it unready while `low` is free. No barrier is involved. The
+// stinkytofu default is on; this test turns it off explicitly for the
+// second case, which lets `low` issue first.
+TEST_F(DAGSchedulerPassTest, AllDsLoadsIssueInDsReadPriorityOrder) {
+    auto schedule = [&](bool lockDsReadOrder) {
+        am.clear();
+        func = std::make_unique<Function>(lockDsReadOrder ? "lock_ds_order" : "free_ds_order");
+        setFunctionArch(*func, arch);
+        bb = func->createBasicBlock("loop_body");
+        bb->addSuccessor(bb);
+
+        StinkyInstruction* low =
+            createMovableDsLoad(/*destReg=*/8, /*addrReg=*/204, /*ldsToken=*/0);
+        for (int i = 0; i < 3; ++i)
+            createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/100 + i * 16, /*src0Start=*/220);
+        StinkyInstruction* high =
+            createMovableDsLoad(/*destReg=*/220, /*addrReg=*/200, /*ldsToken=*/0);
+        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/300, /*src0Start=*/220);
+        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/320, /*src0Start=*/8);
+
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.lockDsReadOrder = lockDsReadOrder;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        return std::pair{positionOf(*bb, high), positionOf(*bb, low)};
+    };
+
+    const auto [lockedHigh, lockedLow] = schedule(/*lockDsReadOrder=*/true);
+    EXPECT_LT(lockedHigh, lockedLow)
+        << "LockDsReadOrder must issue every ds_load in dsReadPriority order";
+
+    const auto [freeHigh, freeLow] = schedule(/*lockDsReadOrder=*/false);
+    EXPECT_LT(freeLow, freeHigh)
+        << "without LockDsReadOrder a ready lower-priority ds_load may issue first";
+}
+
 // DS reads + WMMAs: scheduler must not issue WMMAs back-to-back when other
 // instructions exist. With real ds_load latency, WMMAs are not latency-free
 // until ds_reads are issued and latency elapses, so we get: 4 ds_load, then 2

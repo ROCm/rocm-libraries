@@ -1269,15 +1269,25 @@ def _run_wgrad(
                     "dw_ptr": dW_dev,
                     "wg_M": wg_M_v,
                     "wg_N": wg_N_v,
-                    "split_k": instance_spec.split_k,
                     "ws_bytes": ws_nbytes,
                     "dw_bytes": dW_t.nbytes,
                     "groups": p.groups,
                 },
             )
-            kernel_name = instance_spec.kernel_name() + "+reduce"
+            kernel_name = instance_spec.kernel_name() + "+cast"
 
-            def _launch(fence: bool, _L=launcher, _v=values, _g=grid, _s2=s2_grid):
+            def _launch(
+                fence: bool,
+                _L=launcher,
+                _v=values,
+                _g=grid,
+                _s2=s2_grid,
+                _ws=ws_dev,
+                _ws_nb=ws_nbytes,
+            ):
+                # Stage 1 atomic-accumulates into the scratch: it must start
+                # from zero on every launch.
+                rt.memset(_ws, 0, _ws_nb)
                 _L(
                     _v,
                     (

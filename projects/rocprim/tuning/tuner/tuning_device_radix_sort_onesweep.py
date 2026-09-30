@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from typing import Optional, OrderedDict, Callable
+from typing import OrderedDict, Callable, Dict, Any
 import sys
 import os
 import subprocess
@@ -107,7 +107,7 @@ class Tuner(BaseTuner):
         self.param_checker = CheckParam()
         super().__init__(args)
 
-    def _get_tune_params(self, key_type: str, value_type: Optional[str] = None) -> OrderedDict:
+    def _get_tune_params(self, types: Dict[str, Any]) -> OrderedDict:
         params = OrderedDict()
         params['block_size_x'] = BLOCK_SIZES
         params['ipt'] = IPT
@@ -118,9 +118,7 @@ class Tuner(BaseTuner):
 
         return params
 
-    def _get_restrictions(
-        self, key_type: str, val_type: Optional[str] = None
-    ) -> Callable[[dict], bool]:
+    def _get_restrictions(self, types: Dict[str, Any]) -> Callable[[dict], bool]:
         def validate(params):
             bs, ipt, rb, algo = params['block_size_x'], params['ipt'], params['radix_bits'], params['algo']
             if  ipt < params['sort_ipt']:
@@ -129,7 +127,7 @@ class Tuner(BaseTuner):
             if bs != params['sort_block_size_x']:
                 return False
 
-            return self.param_checker.check_valid(key_type, val_type, bs, ipt, rb, algo)
+            return self.param_checker.check_valid(types["key_type"], types["value_type"], bs, ipt, rb, algo)
 
         return validate
 
@@ -140,7 +138,7 @@ class Tuner(BaseTuner):
 
         for key_type in COMMON_KEY_TYPES:
             for value_type in VALUE_TYPES:
-                self.tune_type(key_type, value_type)
+                self.tune_type({"key_type": key_type, "value_type": value_type})
 
 
 if __name__ == "__main__":
