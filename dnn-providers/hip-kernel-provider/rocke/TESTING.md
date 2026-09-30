@@ -133,6 +133,9 @@ the strategy's biggest holes live (see
   For source verification, run
   `python library/tests/run_sdpa_reference.py verify --bundle <qualified-bundle> --current-root .`
   from the rocKE root with NumPy, HIP, and COMGR; Torch is not required.
+  The installed GPU suite reuses separate baseline and current worker processes
+  across cases. Each case still executes both versions twice and validates its
+  outputs independently; worker failures and timeouts fail the test.
   To publish a replacement, independently qualify it first, update the source
   lock, and use `python library/tests/sdpa_reference/artifact.py pack --bundle <qualified-bundle> --lock library/tests/sdpa_reference/baseline_lock.json --archive library/tests/sdpa_reference_bundle.tar.gz`
   from the rocKE root. Then run `dvc add` and a scoped `dvc push` for the

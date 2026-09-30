@@ -24,6 +24,8 @@ from pathlib import Path, PurePosixPath
 
 import numpy as np
 
+from .session import _ACTIVE
+
 from .contract import (
     CASES,
     CASE_BY_ID,
@@ -106,26 +108,30 @@ def _worker(
         PYTHONNOUSERSITE="1",
         PYTHONDONTWRITEBYTECODE="1",
     )
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "-s",
-            "-m",
-            "sdpa_reference.worker",
-            str(work / "request.json"),
-            str(work),
-        ],
-        cwd=work,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-    if completed.returncode:
-        raise RuntimeError(
-            f"SDPA {request['mode']} worker failed:\n"
-            f"{completed.stdout[-4000:]}{completed.stderr[-12000:]}"
+    session = _ACTIVE.get()
+    if session is not None:
+        session.execute(request["mode"], work / "request.json", env)
+    else:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-s",
+                "-m",
+                "sdpa_reference.worker",
+                str(work / "request.json"),
+                str(work),
+            ],
+            cwd=work,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
         )
+        if completed.returncode:
+            raise RuntimeError(
+                f"SDPA {request['mode']} worker failed:\n"
+                f"{completed.stdout[-4000:]}{completed.stderr[-12000:]}"
+            )
     report = json.loads((work / "report.json").read_text())
     if report["launches"] != request["repetitions"]:
         raise RuntimeError("required SDPA GPU launches did not execute")

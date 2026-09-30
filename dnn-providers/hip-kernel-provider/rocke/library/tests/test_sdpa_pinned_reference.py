@@ -15,6 +15,7 @@ import pytest
 
 from sdpa_reference.cli import load_bundle, verify_case
 from sdpa_reference.contract import CASES, decode, encode
+from sdpa_reference.session import reuse_workers
 
 
 @pytest.fixture(scope="module")
@@ -43,7 +44,9 @@ def reference_bundle():
         pytest.skip(f"the SDPA reference pilot is enrolled for gfx942, found {arch}")
     if arch != "gfx942":
         pytest.fail("the required gfx942 SDPA GPU is not available")
-    return bundle, load_bundle(bundle)
+    manifest = load_bundle(bundle)
+    with reuse_workers():
+        yield bundle, manifest
 
 
 @pytest.mark.gpu

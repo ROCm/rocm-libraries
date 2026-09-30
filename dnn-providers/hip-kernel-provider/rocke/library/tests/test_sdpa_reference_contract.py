@@ -247,3 +247,83 @@ def test_worker_prefers_selected_library_over_test_packages(tmp_path, monkeypatc
     )
     np.testing.assert_array_equal(outputs[0], np.ones(1))
     assert report["launches"] == 1
+
+
+def test_reused_workers_isolate_roles_and_import_roots(tmp_path):
+    import json
+    import os
+
+    from sdpa_reference.session import WorkerSession
+
+    def environment(name):
+        root = tmp_path / name
+        package = root / "sdpa_reference"
+        package.mkdir(parents=True)
+        (package / "__init__.py").touch()
+        (package / "worker.py").write_text(
+            "import json, os\ncount = 0\n"
+            "def run(request, work):\n"
+            "    global count\n"
+            "    count += 1\n"
+            "    (work / 'result.json').write_text(json.dumps([os.getpid(), count]))\n"
+        )
+        return dict(os.environ, PYTHONPATH=str(root), PYTHONNOUSERSITE="1")
+
+    first, second = environment("first"), environment("second")
+    session = WorkerSession(timeout=10)
+    processes = []
+    try:
+        results = []
+        for i, (mode, env) in enumerate(
+            [
+                ("replay", first),
+                ("replay", first),
+                ("source", first),
+                ("replay", second),
+            ]
+        ):
+            work = tmp_path / str(i)
+            work.mkdir()
+            request = work / "request.json"
+            request.write_text("{}")
+            session.execute(mode, request, env)
+            results.append(json.loads((work / "result.json").read_text()))
+        assert results[0][0] == results[1][0]
+        assert [row[1] for row in results] == [1, 2, 1, 1]
+        assert len({results[i][0] for i in [0, 2, 3]}) == 3
+        processes = [worker.process for worker in session.workers.values()]
+    finally:
+        session.close()
+    assert all(process.poll() is not None for process in processes)
+
+
+@pytest.mark.parametrize("behavior", ["raise", "exit", "timeout"])
+def test_reused_worker_failures_are_not_silently_retried(tmp_path, behavior):
+    import os
+
+    from sdpa_reference.session import WorkerSession
+
+    package = tmp_path / "sdpa_reference"
+    package.mkdir()
+    (package / "__init__.py").touch()
+    actions = {
+        "raise": "raise ValueError('deliberate worker failure')",
+        "exit": "os._exit(17)",
+        "timeout": "time.sleep(30)",
+    }
+    (package / "worker.py").write_text(
+        "import os, time\ndef run(request, work):\n    " + actions[behavior] + "\n"
+    )
+    work = tmp_path / "request"
+    work.mkdir()
+    request = work / "request.json"
+    request.write_text("{}")
+    session = WorkerSession(timeout=0.5 if behavior == "timeout" else 10)
+    try:
+        with pytest.raises(TimeoutError if behavior == "timeout" else RuntimeError):
+            session.execute(
+                "replay", request, dict(os.environ, PYTHONPATH=str(tmp_path))
+            )
+        assert not session.workers
+    finally:
+        session.close()
