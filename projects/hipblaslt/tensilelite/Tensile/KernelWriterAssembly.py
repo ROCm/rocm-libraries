@@ -14890,6 +14890,9 @@ class KernelWriterAssembly(KernelWriter):
   def getVectorAtomicWidth(self, kernel):
     if kernel["ProblemType"]["DataType"].isHalf() and (not kernel["_GlobalAccumulation"]):
       return 2
+    if kernel["GlobalSplitUAlgorithm"] == "AtomicDest":
+      # buffer_atomic_pk_add_bf16 consumes one dword = two packed BF16 elements.
+      return 2
     return 1
 
   ##############################################################################
@@ -15352,7 +15355,12 @@ class KernelWriterAssembly(KernelWriter):
     currentInstLength = 0
     for betaIdx in reversed(range(len(betas))):
       beta = betas[betaIdx]
-      if beta and kernel["_GlobalAccumulation"] == "SingleBuffer" and (kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1):
+      # beta*C is seeded into the output by the beta-only pre-pass before the GSU
+      # slices atomically accumulate on top, so a slice must not apply beta again
+      # or beta*C lands in the result once per slice. Both pre-seeding reductions
+      # behave this way: SingleBuffer into the fp32 workspace, AtomicDest into D.
+      if beta and (kernel["_GlobalAccumulation"] == "SingleBuffer" or self.states.useAtomicPkAddBF16) \
+         and (kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1):
         continue
       betaModule = Module("Beta_%u"%betaIdx)
 
@@ -16052,7 +16060,10 @@ class KernelWriterAssembly(KernelWriter):
       if gsuLimit > 1:
         betas = betasBackup
         if gsuLimitIdx == 0:
-          self.states.bpeCexternal = self.states.bpeCinternal
+          # useAtomicPkAddBF16 atomically accumulates into the real BF16 D, so
+          # the GSU>1 store keeps the dest element size rather than the fp32 one.
+          if not self.states.useAtomicPkAddBF16:
+            self.states.bpeCexternal = self.states.bpeCinternal
           if (kernel["_GlobalAccumulation"] != 'MultipleBufferSingleKernel'):
             self.states.useBias = self.states.useBias if self.states.useBias == DataDirection.WRITE else DataDirection.NONE
           if self.states.useBias == DataDirection.WRITE and kernel["ProblemType"]["BiasSrc"] == "D":
@@ -16674,6 +16685,8 @@ class KernelWriterAssembly(KernelWriter):
             globalWriteModes = ["OptNLL_MBSK"] if noGSUBranch else ["MBSK"]
           elif kernel["GlobalSplitUAlgorithm"] == "SingleBuffer":
             globalWriteModes = ["OptNLL_SB"] if noGSUBranch else ["SB"]
+          elif kernel["GlobalSplitUAlgorithm"] == "AtomicDest":
+            globalWriteModes = ["OptNLL_AD"] if noGSUBranch else ["AD"]
         else:
           if kernel["GlobalSplitUAlgorithm"] == "MultipleBuffer":
             # StreamK and dot2 cannot be enabled with MBSK
@@ -16704,6 +16717,9 @@ class KernelWriterAssembly(KernelWriter):
             hasMultipleGlobalWriteModes = False if noGSUBranch else True
           elif kernel["GlobalSplitUAlgorithm"] == "SingleBuffer":
             globalWriteModes = ["OptNLL_SB"] if noGSUBranch else ["SB"]
+            hasMultipleGlobalWriteModes = False
+          elif kernel["GlobalSplitUAlgorithm"] == "AtomicDest":
+            globalWriteModes = ["OptNLL_AD"] if noGSUBranch else ["AD"]
             hasMultipleGlobalWriteModes = False
       else:
         globalWriteModes = ["GSU1"]
@@ -21743,9 +21759,21 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["enableTDMMetadata"]:
       tpList.append(tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"])
 
-    for tp in tpList:
-      mod.add(comp.setIncrement(self, kernel, tp))
-      mod.add(comp.calculateStartAddr(self, kernel, tp))
+    if not comp.isGSUEnabled(kernel):
+      for tp in tpList:
+        mod.add(comp.setIncrement(self, kernel, tp))
+        mod.add(comp.calculateStartAddr(self, kernel, tp))
+      return mod
+
+    # The GSU chunk starts at the same unroll iteration for every tensor, so derive
+    # it once here and let each tensor scale it by its own per-iteration increment.
+    with self.allocTmpSgpr(3, tag="gl2PrefetchCalcAddr_gsu") as tmpSgprRes:
+      gsuIterSgpr = tmpSgprRes.idx
+      offsetTmp = ContinuousRegister(idx=tmpSgprRes.idx + 1, size=2)
+      mod.add(comp.calculateGSUIterOffset(self, kernel, gsuIterSgpr, offsetTmp))
+      for tp in tpList:
+        mod.add(comp.setIncrement(self, kernel, tp))
+        mod.add(comp.calculateStartAddr(self, kernel, tp, gsuIterSgpr))
     return mod
   
   def gl2PrefetchIssueLoad(self, kernel, tPA, tPB) -> Module:
@@ -21774,6 +21802,20 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(comp.incrementAddr(self, kernel, tPB["MX"]))
     if kernel["enableTDMMetadata"]:
       mod.add(comp.incrementAddr(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]))
+    return mod
+  
+  def gl2PrefetchSkipPGR(self, kernel, tPA, tPB) -> Module:
+    mod = Module("GL2 Prefetch Skip PGR")
+    mod.addComment("GL2 Prefetch Skip PGR")
+    comp = GL2PrefetchLoad.find(self)
+    mod.add(comp.skipPGR(self, kernel, tPA))
+    mod.add(comp.skipPGR(self, kernel, tPB))
+    if kernel["ProblemType"]["MXBlockA"]:
+      mod.add(comp.skipPGR(self, kernel, tPA["MX"]))
+    if kernel["ProblemType"]["MXBlockB"]:
+      mod.add(comp.skipPGR(self, kernel, tPB["MX"]))
+    if kernel["enableTDMMetadata"]:
+      mod.add(comp.skipPGR(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]))
     return mod
 
   def getHalfPLRGroups(self, kernel, lc, u):

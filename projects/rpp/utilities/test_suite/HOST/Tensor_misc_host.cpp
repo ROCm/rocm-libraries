@@ -610,7 +610,7 @@ int main(int argc, char** argv) {
         }
         if (errorCodeCapture != RPP_SUCCESS) {
             cout << "\nThe functionality " << func << " returned an error status "
-                 << rppStatusToString[errorCodeCapture] << " on run number " << perfCount + 1
+                 << rppGetStatusString(errorCodeCapture) << " on run number " << perfCount + 1
                  << " of " << numRuns << " runs.\n";
             return errorCodeCapture;
         }
