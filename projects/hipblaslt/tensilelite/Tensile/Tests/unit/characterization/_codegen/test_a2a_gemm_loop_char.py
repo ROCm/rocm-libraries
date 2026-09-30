@@ -212,7 +212,11 @@ class TestA2AGemmBatchNumbering:
 
 
 class TestA2AGemmElection:
-    """The batch's single enqueuer: the wave-0 gate, the SMEM atomic, its target."""
+    """The batch's enqueuers: the per-wave gate, the SMEM atomic, its target, the ticket."""
+
+    # NumThreads / WavefrontSize of the config, and log2(WavefrontSize).
+    _NUM_WAVES = 4
+    _WAVE_SHIFT = 6
 
     def _src(self):
         from config_harness import emit_kernels_from_config
@@ -226,32 +230,101 @@ class TestA2AGemmElection:
         assert m, "no s_atomic_inc in the emitted kernel"
         return m
 
+    def _ticket(self, src):
+        """The SGPR the election atomic returns its pre-op value in."""
+        return self._atomic(src).group(0).split(",")[0].split()[-1]
+
     def test_election_atomic_carries_glc(self):
         assert " glc" in self._atomic(self._src()).group(0)
 
-    def test_wave0_gate_precedes_the_election_atomic(self):
+    def test_single_rank_skips_before_the_election_atomic(self):
         import re
 
         src = self._src()
-        head = src[: self._atomic(src).start()]
         assert re.search(
-            r"v_readfirstlane_b32 s\d+, v\[vgprSerial\][^\n]*\n"
-            r"s_cmp_eq_u32 s\d+, 0[^\n]*\n"
-            r"s_cbranch_scc0 label_A2ASkipEnqueue",
-            head,
-        ), "no wave-0 gate ahead of the election atomic"
+            r"s_sub_u32 s(\d+), s\[sgprA2AShardCounter\], 1[^\n]*\n"
+            r"s_cmp_eq_u32 s\1, 0[^\n]*// W == 1\?\n"
+            r"s_cbranch_scc1 label_A2ASkipEnqueue",
+            src[: self._atomic(src).start()],
+        ), "W == 1 still draws a ticket"
 
-    def test_election_target_is_the_batch_work_group_count(self):
+    def test_waves_past_m_skip_the_election_atomic(self):
+        import re
+
+        src = self._src()
+        assert re.search(
+            r"s_min_u32 s(\d+), s\1, %d[^\n]*\n"
+            r"v_readfirstlane_b32 s(\d+), v\[vgprSerial\][^\n]*\n"
+            r"s_lshr_b32 s\2, s\2, %d[^\n]*\n"
+            r"s_cmp_ge_u32 s\2, s\1[^\n]*\n"
+            r"s_cbranch_scc1 label_A2ASkipEnqueue"
+            % (self._NUM_WAVES, self._WAVE_SHIFT),
+            src[: self._atomic(src).start()],
+        ), "the election is not gated on wave index < min(numWaves, W-1)"
+
+    def test_election_target_is_the_batch_ticket_count(self):
         import re
 
         src = self._src()
         m = re.search(
-            r"s_mul_i32 s(\d+), s\[sgprA2ABlockCount\], s\[sgprNumWorkGroups0\][^\n]*\n"
-            r"s_sub_u32 s\1, s\1, 1",
+            r"s_sub_u32 s(\d+), s\[sgprA2AShardCounter\], 1[^\n]*\n"
+            r"s_min_u32 s\1, s\1, %d[^\n]*\n"
+            r"s_mul_i32 s\1, s\1, s\[sgprA2ABlockCount\][^\n]*\n"
+            r"s_mul_i32 s\1, s\1, s\[sgprNumWorkGroups0\][^\n]*\n"
+            r"s_sub_u32 s\1, s\1, 1" % self._NUM_WAVES,
             src,
         )
-        assert m, "the election DATA is not count * F - 1"
+        assert m, "the election DATA is not count * F * min(numWaves, W-1) - 1"
         assert self._atomic(src).group(0).startswith("s_atomic_inc s%s," % m.group(1))
+
+    def test_a_ticket_below_w_minus_1_wins(self):
+        import re
+
+        src = self._src()
+        assert re.search(
+            r"s_sub_u32 s(\d+), s\[sgprA2AShardCounter\], 1[^\n]*\n"
+            r"s_cmp_ge_u32 %s, s\1\b[^\n]*\n"
+            r"s_cbranch_scc1 label_A2ASkipEnqueue" % re.escape(self._ticket(src)),
+            src[self._atomic(src).end() :],
+        ), "the election does not admit exactly the tickets below W-1"
+
+    def test_the_served_rank_carries_the_ticket(self):
+        import re
+
+        src = self._src()
+        assert re.search(
+            r"s_add_u32 s(\d+), s\1, 1[^\n]*// myRank \+ 1\n"
+            r"s_add_u32 s\1, s\1, %s\b[^\n]*\n"
+            r"s_sub_u32 s(\d+), s\1, s\[sgprA2AShardCounter\][^\n]*\n"
+            r"s_cmp_ge_u32 s\1, s\[sgprA2AShardCounter\][^\n]*\n"
+            r"s_cselect_b32 s\1, s\2, s\1\b" % re.escape(self._ticket(src)),
+            src,
+        ), "the served rank is not myRank + 1 + ticket wrapped once at W"
+
+    def test_the_queue_index_is_the_ticket(self):
+        import re
+
+        src = self._src()
+        tick = re.escape(self._ticket(src))
+        assert re.search(
+            r"s_add_u32 s\d+, s\d+, %s[^\n]*// flag slot" % tick, src
+        ), "the flag slot is not indexed by the election ticket"
+        assert re.search(
+            r"s_add_u32 s\d+, %s, 1[^\n]*// gathered segment" % tick, src
+        ), "the gathered segment is not indexed by the election ticket"
+
+    def test_the_group_start_carries_the_ticket(self):
+        import re
+
+        src = self._src()
+        assert re.search(
+            r"s_sub_u32 s(\d+), s(\d+), s\1[^\n]*// queue 0's group start[^\n]*\n"
+            r"s_add_u32 s\1, s\1, %s\b[^\n]*\n"
+            r"s_sub_u32 s(\d+), s\1, s\3[^\n]*\n"
+            r"s_cmp_gt_i32 s\1, s\2[^\n]*\n"
+            r"s_cselect_b32 s\1, s\3, s\1\b" % re.escape(self._ticket(src)),
+            src,
+        ), "the group start is not queue 0's + ticket wrapped down once by W-1"
 
     def test_election_counters_start_past_the_line_aligned_flag_block(self):
         import re
@@ -309,56 +382,57 @@ class TestA2AGemmElection:
 
 
 class TestA2AGemmEnqueueLoops:
-    """The enqueuer's packing pass: one reservation and one submit per queue."""
+    """One enqueuer's packing pass: one reservation and one submit for its queue."""
 
     def _src(self):
         from config_harness import emit_kernels_from_config
 
         return emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")[0][1]
 
-    def _queue_loop_body(self, src):
+    def _packing_pass(self, src):
+        """One enqueuer's pass: the election atomic through the skip label."""
         import re
 
-        head = re.search(r"^label_a2a_queue_loop\w*:", src, re.M)
-        tail = re.search(r"^s_cbranch_scc1 label_a2a_queue_loop\w*", src, re.M)
-        assert head and tail, "no a2a queue loop in the emitted kernel"
+        head = re.search(r"^s_atomic_inc [^\n]*$", src, re.M)
+        tail = re.search(r"^label_A2ASkipEnqueue:", src, re.M)
+        assert head and tail, "no a2a packing pass in the emitted kernel"
         return src[head.end() : tail.start()]
 
     def test_each_queue_reserves_once_and_submits_once(self):
-        body = self._queue_loop_body(self._src())
+        body = self._packing_pass(self._src())
         assert body.count("s_atomic_cmpswap_x2") == 1
         assert body.count("s_store_dwordx2") == 3
 
     def test_cursors_are_raised_before_the_reserve_loop(self):
         import re
 
-        body = self._queue_loop_body(self._src())
+        body = self._packing_pass(self._src())
         rsv = re.search(r"^label_sdma_reserve_loop\w*:", body, re.M)
-        assert rsv, "no reserve loop inside the queue loop"
+        assert rsv, "no reserve loop inside the packing pass"
         assert body[: rsv.start()].count("s_atomic_umax_x2") == 2
 
     def test_room_check_cache_is_seeded_before_the_reserve_loop(self):
         import re
 
-        body = self._queue_loop_body(self._src())
+        body = self._packing_pass(self._src())
         rsv = re.search(r"^label_sdma_reserve_loop\w*:", body, re.M)
-        assert rsv, "no reserve loop inside the queue loop"
+        assert rsv, "no reserve loop inside the packing pass"
         assert "cachedHwReadIndex = hardware rptr" in body[: rsv.start()]
 
     def test_reservation_size_is_computed_per_queue(self):
         import re
 
-        body = self._queue_loop_body(self._src())
+        body = self._packing_pass(self._src())
         rsv = re.search(r"^label_sdma_reserve_loop\w*:", body, re.M)
-        assert rsv, "no reserve loop inside the queue loop"
+        assert rsv, "no reserve loop inside the packing pass"
         assert "// reservation = count" in body[: rsv.start()], (
-            "the reservation size is computed outside the queue loop"
+            "the reservation size is computed outside the packing pass"
         )
 
     def test_packet_loop_runs_once_per_block(self):
         import re
 
-        body = self._queue_loop_body(self._src())
+        body = self._packing_pass(self._src())
         m = re.search(
             r"s_mov_b32 s(\d+), s\[sgprA2ABlockCount\][^\n]*\n"
             r"v_readfirstlane_b32 s\d+, v\d+[^\n]*\n"
@@ -377,7 +451,7 @@ class TestA2AGemmEnqueueLoops:
         from Tensile.Components.SdmaPacketEmitter import (ATOMIC_PACKET_DWORDS,
                                                           COPY_PACKET_DWORDS)
 
-        body = self._queue_loop_body(self._src())
+        body = self._packing_pass(self._src())
         m = re.search(
             r"s_sub_u32 s(\d+), s\[sgprA2AShardCounter\], 1[^\n]*\n"
             r"s_min_u32 s\1, s\1, s\[sgprA2ABlockCount\][^\n]*\n"
@@ -389,14 +463,12 @@ class TestA2AGemmEnqueueLoops:
         )
         assert m, "the reservation is not count COPYs + min(W-1, count) ATOMICs"
 
-    def test_single_rank_skips_the_packing_pass(self):
-        import re
-
-        assert re.search(
-            r"s_cmp_eq_u32 s\d+, 0[^\n]*// W == 1\?\n"
-            r"s_cbranch_scc1 label_A2ASkipEnqueue",
-            self._src(),
-        ), "W == 1 does not skip the packing pass"
+    def test_the_submit_ends_the_packing_pass(self):
+        body = self._packing_pass(self._src())
+        tail = body[body.rindex("store committedWptr = pending") :].splitlines()[1:]
+        assert [l.split()[0] for l in tail if l.strip()] == ["s_waitcnt"], (
+            "the enqueuer goes on past its one queue's submit:\n%s" % "\n".join(tail)
+        )
 
 
 class TestA2AGemmRoundGroupOrder:
@@ -410,12 +482,13 @@ class TestA2AGemmRoundGroupOrder:
 
         return emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")[0][1]
 
-    def _queue_loop_body(self, src):
+    def _packing_pass(self, src):
+        """One enqueuer's pass: the election atomic through the skip label."""
         import re
 
-        head = re.search(r"^label_a2a_queue_loop\w*:", src, re.M)
-        tail = re.search(r"^s_cbranch_scc1 label_a2a_queue_loop\w*", src, re.M)
-        assert head and tail, "no a2a queue loop in the emitted kernel"
+        head = re.search(r"^s_atomic_inc [^\n]*$", src, re.M)
+        tail = re.search(r"^label_A2ASkipEnqueue:", src, re.M)
+        assert head and tail, "no a2a packing pass in the emitted kernel"
         return src[head.end() : tail.start()]
 
     def test_copy_bases_step_a_whole_group(self):
@@ -425,7 +498,7 @@ class TestA2AGemmRoundGroupOrder:
             r"s_sub_u32 s(\d+), s\[sgprA2AShardCounter\], 1[^\n]*\n"
             r"s_mul_i32 s(\d+), s\2, s\1[^\n]*\n"
             r"s_sub_u32 s\d+, s\d+, s\2[^\n]*// step back W-1 blocks",
-            self._queue_loop_body(self._src()),
+            self._packing_pass(self._src()),
         ), "the copy bases walk consecutive blocks instead of one round's group"
 
     def test_flag_address_steps_a_whole_group(self):
@@ -436,7 +509,7 @@ class TestA2AGemmRoundGroupOrder:
             r"s_mul_i32 s\1, s\1, s\1[^\n]*\n"
             r"s_lshl_b32 s\1, s\1, 2[^\n]*\n"
             r"s_sub_u32 s\d+, s\d+, s\1[^\n]*// step back W-1 blocks",
-            self._queue_loop_body(self._src()),
+            self._packing_pass(self._src()),
         ), "the flag address walks consecutive blocks instead of one round's group"
 
     def test_the_packet_loop_stops_at_the_batch_floor(self):
@@ -447,7 +520,7 @@ class TestA2AGemmRoundGroupOrder:
             r"s_add_u32 s\1, s\1, 1[^\n]*\n"
             r"s_cmp_ge_i32 s\1, s\[sgprA2ABlockLo\][^\n]*\n"
             r"s_cbranch_scc1 label_a2a_packet_loop",
-            self._queue_loop_body(self._src()),
+            self._packing_pass(self._src()),
         ), "the group does not end at the batch's first block"
 
     def test_empty_groups_are_branched_over(self):
@@ -457,17 +530,17 @@ class TestA2AGemmRoundGroupOrder:
             r"label_a2a_group_loop\w*:[^\n]*\n"
             r"s_cmp_lt_i32 s\d+, s\[sgprA2ABlockLo\][^\n]*\n"
             r"s_cbranch_scc1 label_a2a_group_next",
-            self._queue_loop_body(self._src()),
+            self._packing_pass(self._src()),
         ), "a group holding no block still places packets"
 
     def test_the_atomic_is_placed_once_per_group(self):
         import re
 
-        body = self._queue_loop_body(self._src())
+        body = self._packing_pass(self._src())
         head = re.search(r"^label_a2a_packet_loop\w*:", body, re.M)
         tail = re.search(r"^s_cbranch_scc1 label_a2a_packet_loop\w*", body, re.M)
         nxt = re.search(r"^label_a2a_group_next\w*:", body, re.M)
-        assert head and tail and nxt, "no packet loop / group-next in the queue loop"
+        assert head and tail and nxt, "no packet loop / group-next in the packing pass"
         assert body[head.end() : tail.start()].count("(packet base)") == 1, (
             "the packet loop places more than the block's COPY"
         )
@@ -476,7 +549,7 @@ class TestA2AGemmRoundGroupOrder:
         )
 
     def test_one_reservation_and_one_doorbell_cover_every_group(self):
-        body = self._queue_loop_body(self._src())
+        body = self._packing_pass(self._src())
         assert body.count("s_atomic_cmpswap_x2") == 1, "the groups reserve separately"
         assert body.count("s_store_dwordx2") == 3, "the groups ring the doorbell separately"
         assert body.index("s_atomic_cmpswap_x2") < body.index("label_a2a_group_loop"), (
@@ -512,12 +585,13 @@ class TestA2AGemmPacketBody:
         assert m, "no FusedW kernarg load in the emitted kernel"
         return int(m.group(1), 16) - fusedA2AKernArgLayout()["FusedW"]
 
-    def _queue_loop_body(self, src):
+    def _packing_pass(self, src):
+        """One enqueuer's pass: the election atomic through the skip label."""
         import re
 
-        head = re.search(r"^label_a2a_queue_loop\w*:", src, re.M)
-        tail = re.search(r"^s_cbranch_scc1 label_a2a_queue_loop\w*", src, re.M)
-        assert head and tail, "no a2a queue loop in the emitted kernel"
+        head = re.search(r"^s_atomic_inc [^\n]*$", src, re.M)
+        tail = re.search(r"^label_A2ASkipEnqueue:", src, re.M)
+        assert head and tail, "no a2a packing pass in the emitted kernel"
         return src[head.end() : tail.start()]
 
     def _packet_loop_body(self, src):
@@ -540,9 +614,9 @@ class TestA2AGemmPacketBody:
     def test_tail_block_row_count_is_clamped(self):
         import re
 
-        body = self._queue_loop_body(self._src())
+        body = self._packing_pass(self._src())
         pkt = re.search(r"^label_a2a_packet_loop\w*:", body, re.M)
-        assert pkt, "no packet loop inside the queue loop"
+        assert pkt, "no packet loop inside the packing pass"
         assert re.search(
             r"s_min_u32 s\d+, s\d+, %d\b" % self._MT_TOKEN, body[: pkt.start()]
         ), "rect_y is not clamped against the macro tile before the packet loop"
@@ -561,8 +635,8 @@ class TestA2AGemmPacketBody:
         src = self._src()
         want = self._segment_base(src) + OFF_recvPtr
         assert (
-            "offset:%d " % want in self._queue_loop_body(src)
-            or "offset:%d\n" % want in self._queue_loop_body(src)
+            "offset:%d " % want in self._packing_pass(src)
+            or "offset:%d\n" % want in self._packing_pass(src)
         ), "the peer input pointer at offset %d is never loaded" % want
 
     def test_atomic_target_is_the_local_flag_block(self):
@@ -570,7 +644,7 @@ class TestA2AGemmPacketBody:
 
         from Tensile.Components.Signature import FUSED_A2A_MODE1_FLAG_OFFSET
 
-        body = self._queue_loop_body(self._src())
+        body = self._packing_pass(self._src())
         assert re.search(
             r"s_add_u32 s\d+, s\[sgprA2ACounterPtr\], s\d+[^\n]*\n"
             r"s_addc_u32 s\d+, s\[sgprA2ACounterPtr\+1\], 0",
@@ -587,7 +661,7 @@ class TestA2AGemmPacketBody:
         # the gather destination is the tensor base, so it adds that back.
         assert re.search(
             r"s_add_u32 s\d+, s\[sgprAddressB\], %d\b" % self._PRE_PAD,
-            self._queue_loop_body(self._src()),
+            self._packing_pass(self._src()),
         ), "the destination base never re-adds the AddressB pre-pad"
 
 
