@@ -33,4 +33,5 @@ TEST_ROUTINE_WITH_CONFIG(spsort_csr,
                          arg.N,
                          arg.baseA,
                          arg.batch_count,
+                         arg.algo,
                          arg.matrix);

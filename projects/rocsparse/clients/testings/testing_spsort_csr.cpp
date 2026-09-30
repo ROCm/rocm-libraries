@@ -179,18 +179,25 @@ void testing_spsort_csr_bad_arg(const Arguments& arg)
         };
 
         // clang-format off
+        // A single source matrix with zero batch strides is sorted into every batch.
+        expect_batch_status(1, 0, 0, 2, safe_size + 1, safe_size, rocsparse_status_success);
+        expect_batch_status(1, 0, 0, 2, 0, safe_size, rocsparse_status_success);
+
         // Different batch counts.
-        expect_batch_status(1, 0, 0, 2, safe_size + 1, safe_size, rocsparse_status_invalid_value);
+        expect_batch_status(1, safe_size + 1, 0, 2, safe_size + 1, safe_size, rocsparse_status_invalid_value);
+        expect_batch_status(1, 0, safe_size, 2, safe_size + 1, safe_size, rocsparse_status_invalid_value);
         expect_batch_status(2, safe_size + 1, safe_size, 3, safe_size + 1, safe_size, rocsparse_status_invalid_value);
+        expect_batch_status(2, safe_size + 1, safe_size, 1, 0, 0, rocsparse_status_invalid_value);
 
         // Batch strides that make the batches overlap.
         expect_batch_status(2, safe_size + 1, safe_size - 1, 2, safe_size + 1, safe_size, rocsparse_status_invalid_size);
         expect_batch_status(2, safe_size + 1, safe_size, 2, safe_size + 1, safe_size - 1, rocsparse_status_invalid_size);
         expect_batch_status(2, safe_size, safe_size, 2, safe_size + 1, safe_size, rocsparse_status_invalid_size);
         expect_batch_status(2, safe_size + 1, safe_size, 2, safe_size, safe_size, rocsparse_status_invalid_size);
+        expect_batch_status(1, 0, 0, 2, safe_size + 1, 0, rocsparse_status_invalid_size);
 
-        // B can only share its row pointer between batches if A does too.
-        expect_batch_status(2, safe_size + 1, safe_size, 2, 0, safe_size, rocsparse_status_invalid_size);
+        // Either matrix may share its row pointer between batches.
+        expect_batch_status(2, safe_size + 1, safe_size, 2, 0, safe_size, rocsparse_status_success);
         expect_batch_status(2, 0, safe_size, 2, 0, safe_size, rocsparse_status_success);
         expect_batch_status(2, 0, safe_size, 2, safe_size + 1, safe_size, rocsparse_status_success);
         // clang-format on
@@ -205,7 +212,7 @@ void testing_spsort_csr(const Arguments& arg)
     J                    M    = arg.M;
     J                    N    = arg.N;
     rocsparse_index_base base = arg.baseA;
-    rocsparse_spsort_alg alg  = rocsparse_spsort_alg_default;
+    rocsparse_spsort_alg alg  = static_cast<rocsparse_spsort_alg>(arg.algo);
 
     const int64_t batch_count = std::max<int64_t>(arg.batch_count, 1);
 
@@ -361,6 +368,74 @@ void testing_spsort_csr(const Arguments& arg)
         hA_ptr.unit_check(dA_ptr);
         hA_ind.unit_check(dA_ind);
         hA_val.unit_check(dA_val);
+
+        if(batch_count > 1)
+        {
+            // Broadcast: the first batch of A, as a single matrix, is sorted into every batch of B.
+            host_dense_vector<I> hA0_ptr(offsets_size);
+            host_dense_vector<J> hA0_ind(nnz);
+            host_dense_vector<T> hA0_val(nnz);
+            std::copy(hA_ptr.data(), hA_ptr.data() + offsets_size, hA0_ptr.data());
+            std::copy(hA_ind.data(), hA_ind.data() + nnz, hA0_ind.data());
+            std::copy(hA_val.data(), hA_val.data() + nnz, hA0_val.data());
+
+            host_dense_vector<I> hB0_ptr_gold(size_ptr_B);
+            host_dense_vector<J> hB0_ind_gold(size_B);
+            host_dense_vector<T> hB0_val_gold(size_B);
+            for(int64_t batch = 0; batch < batch_count; ++batch)
+            {
+                std::copy(hB_ptr_gold.data(),
+                          hB_ptr_gold.data() + offsets_size,
+                          hB0_ptr_gold.data() + batch * offsets_batch_stride_B);
+                std::copy(hB_ind_gold.data(),
+                          hB_ind_gold.data() + nnz,
+                          hB0_ind_gold.data() + batch * columns_values_batch_stride_B);
+                std::copy(hB_val_gold.data(),
+                          hB_val_gold.data() + nnz,
+                          hB0_val_gold.data() + batch * columns_values_batch_stride_B);
+            }
+
+            device_dense_vector<I> dA0_ptr(hA0_ptr);
+            device_dense_vector<J> dA0_ind(hA0_ind);
+            device_dense_vector<T> dA0_val(hA0_val);
+            rocsparse_local_spmat  matA0(M,
+                                        N,
+                                        nnz,
+                                        dA0_ptr,
+                                        dA0_ind,
+                                        dA0_val,
+                                        get_indextype<I>(),
+                                        get_indextype<J>(),
+                                        base,
+                                        get_datatype<T>());
+
+            size_t broadcast_buffer_size = 0;
+            CHECK_ROCSPARSE_ERROR(rocsparse_spsort_buffer_size(handle,
+                                                               descr,
+                                                               matA0,
+                                                               matB,
+                                                               rocsparse_spsort_stage_compute,
+                                                               &broadcast_buffer_size,
+                                                               nullptr));
+            void* broadcast_dbuffer = nullptr;
+            CHECK_HIP_ERROR(rocsparse_hipMalloc(&broadcast_dbuffer, broadcast_buffer_size));
+            CHECK_ROCSPARSE_ERROR(rocsparse_spsort(handle,
+                                                   descr,
+                                                   matA0,
+                                                   matB,
+                                                   rocsparse_spsort_stage_compute,
+                                                   broadcast_buffer_size,
+                                                   broadcast_dbuffer,
+                                                   nullptr));
+            CHECK_HIP_ERROR(rocsparse_hipFree(broadcast_dbuffer));
+
+            hB0_ptr_gold.unit_check(dB_ptr);
+            hB0_ind_gold.unit_check(dB_ind);
+            hB0_val_gold.unit_check(dB_val);
+            hA0_ptr.unit_check(dA0_ptr);
+            hA0_ind.unit_check(dA0_ind);
+            hA0_val.unit_check(dA0_val);
+        }
 
         // In place: A is sorted into itself.
         size_t in_place_buffer_size = 0;
