@@ -436,11 +436,10 @@ validParameters = { # we need to make sure this matches develop
     # generated code keeps that first-PGR data durable and restores borrowed
     # current-tile state before current tail/NLL code resumes.
     "PrefetchAcrossPersistent": [0, 1],
-    # Persistent loop: keep the whole K extent of an operand (and its MX
-    # scales) resident in VGPRs across persistent iterations, so every tile after
-    # the first reuses them instead of re-issuing the global->LDS and LDS->VGPR
-    # traffic. Only valid when every tile a workgroup visits shares that operand,
-    # which the emitted size predicates enforce.
+    # Persistent loop: keep an operand (and its MX scales) resident in VGPRs across persistent tiles,
+    # so tiles that share it skip reloading it. The size predicates cap K at the resident k-tiles;
+    # a K remainder ((AssertSummationElementMultiple % DepthU != 0)) is tail-folded into the main loop, 
+    # so there is no tail loop in RAP kernel.
     #   0 = off (default)
     #   1 = A resident
     #   2 = B resident -- planned, not implemented yet

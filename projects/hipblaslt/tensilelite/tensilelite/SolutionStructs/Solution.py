@@ -55,7 +55,8 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
                                        pgrAutoPairRequested, \
                                        resolvePrefetchGlobalReadSpecialValues
 from ..Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
-                                       tdmGroupingName, tdmPapRejectReason
+                                       tdmGroupingName, tdmPapRejectReason, \
+                                       tdmKDimTrackable
 from ..Common.TypeValidationErrors import ConfigTypeError
 from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -3734,6 +3735,18 @@ class Solution(collections.abc.Mapping):
     state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockA"], state["AssertSummationElementMultiple"])
     state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockB"], state["AssertSummationElementMultiple"])
 
+    # Tail folding: the main loop runs a partial last k-tile, which TDM clamps at
+    # K. Only RAP folds, so only RAP solutions carry _TailFolding (readers default
+    # it to False). Set after the fp4/fp6/MX ASEM overrides above, which can leave
+    # a remainder depthUIteration never saw.
+    if state["Valid"] and state["ReuseAcrossPersistent"]:
+      state["_TailFolding"] = state["AssertSummationElementMultiple"] % state["DepthU"] != 0
+      # The clamp is one K-dim subtract per descriptor set, so every member must
+      # keep K in the same field.
+      if state["_TailFolding"] and not tdmKDimTrackable(state):
+        reject(state, printRejectionReason, "ReuseAcrossPersistent with AssertSummationElementMultiple % DepthU != 0 requires TDM descriptor sets that keep K in one field (TDMFuse = 0, K-contiguous A and B that step K alike or by bytes, no sparse, no TDM iterate mode)")
+        return
+
     # We have the real "1LDSBuffer" value now, so we have to test the rejection condition here
     # TODO-
     #  On gfx1250, i8, f8, it seem working for 1LDSBuffer=0 "BUT EPS=0", haven't checked for other archs/types, so we still reject by 1LDSBuffer only
@@ -5458,9 +5471,15 @@ class Solution(collections.abc.Mapping):
       return
 
     # NoTailLoop parameter initialization.
-    # If ASEM is multiple of DepthU TailLoop will not be used.
+    # NoTailLoop says only that no tail loop is emitted. Whether K can leave a
+    # remainder is AssertSummationElementMultiple % DepthU != 0; ask that, not
+    # this. With ASEM a multiple of DepthU there is no remainder. Under
+    # ReuseAcrossPersistent a remainder is tail-folded into the main loop instead,
+    # so it never emits a tail loop (_TailFolding is set after the fp4/fp6 and MX
+    # ASEM overrides, which run after this).
     state["NoTailLoop"] = False
-    if state["AssertSummationElementMultiple"] % state["DepthU"] == 0:
+    if state["AssertSummationElementMultiple"] % state["DepthU"] == 0 \
+        or state.get("ReuseAcrossPersistent", 0):
       state["NoTailLoop"] = True
 
     # TailloopInNll optimization check
@@ -7365,9 +7384,6 @@ class Solution(collections.abc.Mapping):
         return
       if state["InnerUnroll"] != 1:
         reject(state, printRejectionReason, "ReuseAcrossPersistent requires InnerUnroll = 1")
-        return
-      if not state["NoTailLoop"]:
-        reject(state, printRejectionReason, "ReuseAcrossPersistent requires NoTailLoop (AssertSummationElementMultiple % DepthU == 0)")
         return
       if state["DirectToVgprA"] or state.get("DirectToVgprMXSA", False):
         reject(state, printRejectionReason, "ReuseAcrossPersistent is not supported with DirectToVgpr on A")

@@ -336,11 +336,12 @@ class PersistentKernelState:
 
       The runtime gate in globalReadDo zeroes the descriptor when the loop counter
       has PrefetchGlobalRead or fewer k-tiles left. Section i (1-based) only runs
-      when K covers it, and it sees the counter at (K / DepthU) - (i - 1), so it is
-      silenced exactly when i >= K / DepthU - PrefetchGlobalRead + 1. K / DepthU
-      ranges up to the count the kernel holds, so the sections silenced for *every*
-      K it serves are the last PrefetchGlobalRead of the block, and only those: with
-      8 resident k-tiles and PGR 2, section 6 is live at K = 8 tiles and cannot go.
+      when K reaches it, and it sees the counter at ceil(K / DepthU) - (i - 1), so
+      it is silenced exactly when i >= ceil(K / DepthU) - PrefetchGlobalRead + 1.
+      ceil(K / DepthU) ranges up to the count the kernel holds, so the sections
+      silenced for *every* K it serves are the last PrefetchGlobalRead of the block,
+      and only those: with 8 resident k-tiles and PGR 2, section 6 is live at
+      K = 8 tiles and cannot go.
 
       For those last sections the descriptor writes and the transfer are dead weight
       rather than a runtime decision, so the load need not be issued at all. This is
