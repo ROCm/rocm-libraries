@@ -17,12 +17,15 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from .arch.wmma_scale import gfx1250_scaled_wmma
+from .dtypes import dtype_info
 from .ir import (
     KernelDef,
     Op,
     PtrType,
     Region,
     SmemType,
+    Type,
     Value,
     VectorType,
 )
@@ -309,6 +312,9 @@ class _Lowerer:
         self._indent -= 1
 
     def lower_op(self, op: Op) -> None:
+        if op.name.startswith("tile.") and gfx1250_scaled_wmma(op.name) is not None:
+            self._emit_wmma_gfx1250_scaled(op)
+            return
         method = getattr(self, f"_op_{op.name.replace('.', '_')}", None)
         if method is None:
             raise NotImplementedError(f"no HIP lowering for op {op.name!r}")
@@ -481,6 +487,22 @@ class _Lowerer:
         vec = int(op.attrs["vec"])
         elem_name = op.attrs.get("elem_type", "f16")
         prefix = _vec_prefix(elem_name, "global_load_vN")
+        byte_count = vec * (dtype_info(elem_name).encoded_bits // 8)
+        align = int(op.attrs.get("align", vec * 2))
+        if align <= 0 or align & (align - 1):
+            raise ValueError(
+                "global_load_vN: alignment must be a positive power of two"
+            )
+        if align < byte_count or byte_count & (byte_count - 1):
+            # Non-power-of-two vector objects include padding. Copy only the
+            # payload, using only the alignment guaranteed by the IR.
+            self._emit(
+                f"{prefix}{vec} {_name(op.result)}; "
+                f"__builtin_memcpy(&{_name(op.result)}, "
+                f"__builtin_assume_aligned({_name(ptr)} + {_name(idx)}, {align}), "
+                f"{byte_count});"
+            )
+            return
         self._emit(
             f"{prefix}{vec} {_name(op.result)} = "
             f"*reinterpret_cast<const {prefix}{vec}*>({_name(ptr)} + {_name(idx)});"
@@ -526,7 +548,7 @@ class _Lowerer:
 
         The HIP source path has no ISA backend (it emits ``__builtin_amdgcn_*``
         directly), so the ``op_id`` is mapped back to the concrete
-        ``tile.<op_id>`` op and dispatched through the existing per-op handler.
+        ``tile.<op_id>`` op and passed through the shared operation dispatcher.
         This keeps the HIP emission identical to the legacy ISA-named path while
         the IRBuilder helpers route through :meth:`IRBuilder.mma`.
         """
@@ -652,12 +674,6 @@ class _Lowerer:
     def _op_tile_wmma_gfx1250_f32_16x16x64_bf8_bf8(self, op: Op) -> None:
         self._emit_wmma_gfx1250_fp8(op, "bf8_bf8")
 
-    def _op_tile_wmma_scale_f32_16x16x128_fp8_fp8(self, op: Op) -> None:
-        self._emit_wmma_gfx1250_scaled(op, scale16=False)
-
-    def _op_tile_wmma_scale16_f32_16x16x128_fp8_fp8(self, op: Op) -> None:
-        self._emit_wmma_gfx1250_scaled(op, scale16=True)
-
     def _emit_wmma_gfx1250_fp8(self, op: Op, ab: str) -> None:
         # gfx1250 K=64 FP8/BF8 builtin: A/B are <8 x i32> (32 low-bit
         # bytes per lane), 6-operand form (A, B, fmt, C, reuseA, reuseB).
@@ -669,23 +685,24 @@ class _Lowerer:
             f"{_name(a)}, {_name(b)}, (int16_t)0, {_name(c)}, false, false);"
         )
 
-    def _emit_wmma_gfx1250_scaled(self, op: Op, *, scale16: bool) -> None:
-        op_id = (
-            "wmma_scale16_f32_16x16x128_fp8_fp8"
-            if scale16
-            else "wmma_scale_f32_16x16x128_fp8_fp8"
-        )
+    def _emit_wmma_gfx1250_scaled(self, op: Op) -> None:
+        spec = gfx1250_scaled_wmma(op.name)
+        if spec is None:
+            raise NotImplementedError(f"unsupported scaled WMMA op {op.name!r}")
+        op_id = spec.op_id
+        fmt0, fmt1 = spec.matrix_formats
         self._require_wmma_arch(op_id)
         a, b, c, a_scale, b_scale = op.operands
         builtin = (
             "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
-            if scale16
+            if spec.scale16
             else "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4"
         )
         self._emit(
             f"f32x8 {_name(op.result)} = {builtin}("
-            f"0, {_name(a)}, 0, {_name(b)}, (int16_t)0, {_name(c)}, "
-            f"0, 0, {_name(a_scale)}, 0, 0, {_name(b_scale)}, false, false);"
+            f"{fmt0}, {_name(a)}, {fmt1}, {_name(b)}, (int16_t)0, {_name(c)}, "
+            f"0, {spec.scale_formats[0]}, {_name(a_scale)}, "
+            f"0, {spec.scale_formats[1]}, {_name(b_scale)}, false, false);"
         )
 
     def _op_tile_wmma_gfx1250_f32_16x16x32_bf16(self, op: Op) -> None:
@@ -1822,6 +1839,14 @@ class _Lowerer:
         if storage is None:
             raise RuntimeError("smem load_vN before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
+        byte_count = n * (dtype_info(elem_name).encoded_bits // 8)
+        if byte_count & (byte_count - 1):
+            # Clang rounds vector object sizes up; LDS payloads have no padding.
+            self._emit(
+                f"{prefix}{n} {_name(op.result)}; "
+                f"__builtin_memcpy(&{_name(op.result)}, &{storage}[{idx_str}], {byte_count});"
+            )
+            return
         self._emit(
             f"{prefix}{n} {_name(op.result)} = "
             f"*reinterpret_cast<const {prefix}{n}*>(&{storage}[{idx_str}]);"
@@ -2441,6 +2466,41 @@ def _find_enclosing_for(region: Region, target: Op) -> Optional[Op]:
     return None
 
 
+def _extra_vector_declarations(kernel: KernelDef) -> list[str]:
+    """Declare encountered widths absent from the fixed compatibility prologue."""
+    declarations: dict[str, str] = {}
+
+    def visit_type(t: Type) -> None:
+        if isinstance(t, PtrType):
+            visit_type(t.pointee)
+        elif isinstance(t, SmemType):
+            visit_type(t.elem)
+        elif isinstance(t, VectorType):
+            name = _type_to_hip(t)
+            prefix = (
+                "boolx"
+                if t.elem.name == "i1"
+                else _vec_prefix(t.elem.name, "vector type")
+            )
+            scalar = "int8_t" if prefix == "i8x" else _HIP_TYPE[t.elem.name]
+            if f"_ROCKE_VEC({scalar}, {prefix}, {t.count})" not in HIP_PROLOGUE:
+                declarations[name] = (
+                    f"using {name} = {scalar} __attribute__((ext_vector_type({t.count})));"
+                )
+
+    def visit_region(region: Region) -> None:
+        for op in region.ops:
+            for value in (*op.operands, *op.results):
+                visit_type(value.type)
+            for child in op.regions:
+                visit_region(child)
+
+    for param in kernel.params:
+        visit_type(param.type)
+    visit_region(kernel.body)
+    return list(declarations.values())
+
+
 def lower_kernel_to_hip(
     kernel: KernelDef,
     *,
@@ -2453,9 +2513,9 @@ def lower_kernel_to_hip(
     The output is:
     1. The :data:`HIP_PROLOGUE` (typedefs + ``<hip/hip_runtime.h>``
     include + AMDGPU vector typedefs). Disable with
-    ``include_prologue=False`` when you want only the body text
-    (e.g. for embedding into a larger TU that already has these
-    typedefs).
+    ``include_prologue=False`` for embedding into a larger TU that already
+    has the shared prologue. Required per-kernel vector typedefs are still
+    emitted.
     2. The kernel's ``__global__`` signature, derived from
     :attr:`KernelDef.params`. Pointer params get ``__restrict__``;
     ``__launch_bounds__`` is taken from
@@ -2508,6 +2568,7 @@ def lower_kernel_to_hip(
     parts: List[str] = []
     if include_prologue:
         parts.append(HIP_PROLOGUE)
+    parts.extend(_extra_vector_declarations(kernel))
     parts.append(head)
     if smem_block:
         parts.append(smem_block)
