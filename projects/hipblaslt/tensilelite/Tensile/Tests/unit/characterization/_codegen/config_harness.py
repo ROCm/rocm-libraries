@@ -168,6 +168,17 @@ def solutions_from_config(config_path, arch=_DEFAULT_ARCH, limit_solutions=None)
         return _solutions_from_config_unguarded(config_path, assembler, iim, limit_solutions)
 
 
+def derive_states(config_path, arch=_DEFAULT_ARCH, limit_solutions=8):
+    """Return the derived Solution ``state`` dicts for a config (CPU-only).
+
+    Shared by the StreamK-cluster / Multicast unit suites, which all pin the
+    derived solution state (Multicast / ClusterBarrier / StreamKMulticast) rather
+    than emitted asm. Unwraps ``Solution._state`` when present.
+    """
+    sols = solutions_from_config(config_path, arch=arch, limit_solutions=limit_solutions)
+    return [s._state if hasattr(s, "_state") else s for s in sols]
+
+
 def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical=True, splitGSU=False):
     """Emit assembly for the kernels of a ``BenchmarkProblems`` config.
 
