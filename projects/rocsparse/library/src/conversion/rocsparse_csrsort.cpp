@@ -40,140 +40,95 @@ namespace rocsparse
         return (n == 0) ? 0 : 64 - __builtin_clzll(static_cast<unsigned long long>(n));
     }
 
-    template <typename I, typename J>
-    static rocsparse_status csrsort_buffer_size_template(rocsparse_handle handle,
-                                                         int64_t          m,
-                                                         int64_t          n,
-                                                         int64_t          nnz,
-                                                         const I*         csr_row_ptr,
-                                                         const J*         csr_col_ind,
-                                                         size_t*          buffer_size)
+    static bool csrsort_is_supported(rocsparse_indextype ptr_type, rocsparse_indextype ind_type)
     {
-        ROCSPARSE_ROUTINE_TRACE;
-
-        if(m == 0 || n == 0 || nnz == 0)
-        {
-            *buffer_size = 0;
-            return rocsparse_status_success;
-        }
-
-        const uint32_t startbit = 0;
-        const uint32_t endbit   = rocsparse::csrsort_endbit(n);
-
-        // We do not know if sort_pairs or sort_keys will be called, so use the largest buffer between the two
-        size_t size1;
-        size_t size2;
-        RETURN_IF_ROCSPARSE_ERROR(
-            (rocsparse::primitives::segmented_radix_sort_pairs_buffer_size<J, I, I>(
-                handle, nnz, m, startbit, endbit, &size1)));
-        RETURN_IF_ROCSPARSE_ERROR(
-            (rocsparse::primitives::segmented_radix_sort_keys_buffer_size<J, I>(
-                handle, nnz, m, startbit, endbit, &size2)));
-
-        *buffer_size = rocsparse::align_size<char>(rocsparse::max(size1, size2));
-
-        // rocPRIM does not support in-place sorting, so we need additional buffer
-        // for all temporary arrays
-
-        // columns buffer
-        *buffer_size += rocsparse::align_size<J>(nnz);
-        // perm buffer
-        *buffer_size += rocsparse::align_size<I>(nnz);
-        // segm buffer
-        *buffer_size += rocsparse::align_size<I>(m + 1);
-
-        return rocsparse_status_success;
+        return (ptr_type == rocsparse_indextype_i32 && ind_type == rocsparse_indextype_i32)
+               || (ptr_type == rocsparse_indextype_i64 && ind_type == rocsparse_indextype_i32)
+               || (ptr_type == rocsparse_indextype_i64 && ind_type == rocsparse_indextype_i64);
     }
 
-    // Sorts the column indices within each row. If perm is not null, the sort applies its
-    // reordering to perm.
     template <typename I, typename J>
-    static rocsparse_status csrsort_template(rocsparse_handle     handle,
-                                             int64_t              m,
-                                             int64_t              n,
-                                             int64_t              nnz,
-                                             rocsparse_index_base idx_base,
-                                             const I*             csr_row_ptr,
-                                             J*                   csr_col_ind,
-                                             I*                   perm,
-                                             void*                temp_buffer)
+    static rocsparse_status csrsort_rocprim_buffer_size_template(rocsparse_handle handle,
+                                                                 int64_t          m,
+                                                                 int64_t          nnz,
+                                                                 uint32_t         startbit,
+                                                                 uint32_t         endbit,
+                                                                 bool             with_perm,
+                                                                 size_t*          buffer_size)
     {
-        ROCSPARSE_ROUTINE_TRACE;
-
-        // Quick return if possible
-        if(m == 0 || n == 0 || nnz == 0)
+        if(with_perm)
         {
-            return rocsparse_status_success;
-        }
-
-        // Stream
-        hipStream_t stream = handle->stream;
-
-        const uint32_t startbit = 0;
-        const uint32_t endbit   = rocsparse::csrsort_endbit(n);
-        size_t         size;
-
-        if(perm != nullptr)
-        {
-            // Sort pairs, if permutation vector is present
             RETURN_IF_ROCSPARSE_ERROR(
                 (rocsparse::primitives::segmented_radix_sort_pairs_buffer_size<J, I, I>(
-                    handle, nnz, m, startbit, endbit, &size)));
+                    handle, nnz, m, startbit, endbit, buffer_size)));
         }
         else
         {
-            // Sort keys, if no permutation vector is present
             RETURN_IF_ROCSPARSE_ERROR(
                 (rocsparse::primitives::segmented_radix_sort_keys_buffer_size<J, I>(
-                    handle, nnz, m, startbit, endbit, &size)));
+                    handle, nnz, m, startbit, endbit, buffer_size)));
         }
+        return rocsparse_status_success;
+    }
 
-        // Temporary buffer entry points
-        char* ptr = reinterpret_cast<char*>(temp_buffer);
-
-        // columns buffer
-        J* tmp_cols = reinterpret_cast<J*>(ptr);
-        ptr += rocsparse::align_size<J>(nnz);
-
-        // perm buffer
-        I* tmp_perm = reinterpret_cast<I*>(ptr);
-        ptr += rocsparse::align_size<I>(nnz);
-
-        // segm buffer
-        I* tmp_segm = reinterpret_cast<I*>(ptr);
-        ptr += rocsparse::align_size<I>(m + 1);
-
-        // Index base one requires shift of offset positions
-        if(idx_base == rocsparse_index_base_one)
+    static rocsparse_status csrsort_rocprim_buffer_size(rocsparse_handle    handle,
+                                                        rocsparse_indextype ptr_type,
+                                                        rocsparse_indextype ind_type,
+                                                        int64_t             m,
+                                                        int64_t             nnz,
+                                                        uint32_t            startbit,
+                                                        uint32_t            endbit,
+                                                        bool                with_perm,
+                                                        size_t*             buffer_size)
+    {
+        if(ptr_type == rocsparse_indextype_i32 && ind_type == rocsparse_indextype_i32)
         {
-#define CSRSORT_DIM 512
-            dim3 csrsort_blocks((m + 1 - 1) / CSRSORT_DIM + 1);
-            dim3 csrsort_threads(CSRSORT_DIM);
-
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrsort_shift_kernel<CSRSORT_DIM>),
-                                               csrsort_blocks,
-                                               csrsort_threads,
-                                               0,
-                                               stream,
-                                               m + 1,
-                                               csr_row_ptr,
-                                               tmp_segm);
-#undef CSRSORT_DIM
+            RETURN_IF_ROCSPARSE_ERROR((csrsort_rocprim_buffer_size_template<int32_t, int32_t>(
+                handle, m, nnz, startbit, endbit, with_perm, buffer_size)));
+            return rocsparse_status_success;
         }
-
-        // rocprim buffer
-        void* tmp_rocprim = reinterpret_cast<void*>(ptr);
-
-        // Switch between offsets
-        const I* offsets = (idx_base == rocsparse_index_base_one) ? tmp_segm : csr_row_ptr;
-
-        // Sort by columns and obtain permutation vector
-
-        if(perm != nullptr)
+        if(ptr_type == rocsparse_indextype_i64 && ind_type == rocsparse_indextype_i32)
         {
-            // Sort by pairs, if permutation vector is present
-            rocsparse::primitives::double_buffer<J> keys(csr_col_ind, tmp_cols);
-            rocsparse::primitives::double_buffer<I> vals(perm, tmp_perm);
+            RETURN_IF_ROCSPARSE_ERROR((csrsort_rocprim_buffer_size_template<int64_t, int32_t>(
+                handle, m, nnz, startbit, endbit, with_perm, buffer_size)));
+            return rocsparse_status_success;
+        }
+        if(ptr_type == rocsparse_indextype_i64 && ind_type == rocsparse_indextype_i64)
+        {
+            RETURN_IF_ROCSPARSE_ERROR((csrsort_rocprim_buffer_size_template<int64_t, int64_t>(
+                handle, m, nnz, startbit, endbit, with_perm, buffer_size)));
+            return rocsparse_status_success;
+        }
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+            rocsparse_status_invalid_value,
+            "the combination of offsets and indices types is not supported");
+    }
+
+    // rocPRIM does not sort in place, so the sorted indices and permutation end up in either
+    // the input arrays or the temporary arrays, and are copied back into the input arrays.
+    template <typename I, typename J>
+    static rocsparse_status csrsort_rocprim_sort_template(rocsparse_handle handle,
+                                                          int64_t          m,
+                                                          int64_t          nnz,
+                                                          const void*      offsets,
+                                                          void*            ind,
+                                                          void*            tmp_ind,
+                                                          void*            perm,
+                                                          void*            tmp_perm,
+                                                          uint32_t         startbit,
+                                                          uint32_t         endbit,
+                                                          size_t           buffer_size,
+                                                          void*            buffer)
+    {
+        const I* offsets_ = reinterpret_cast<const I*>(offsets);
+        J*       ind_     = reinterpret_cast<J*>(ind);
+        I*       perm_    = reinterpret_cast<I*>(perm);
+
+        rocsparse::primitives::double_buffer<J> keys(ind_, reinterpret_cast<J*>(tmp_ind));
+
+        if(perm_ != nullptr)
+        {
+            rocsparse::primitives::double_buffer<I> vals(perm_, reinterpret_cast<I*>(tmp_perm));
 
             RETURN_IF_ROCSPARSE_ERROR(
                 rocsparse::primitives::segmented_radix_sort_pairs(handle,
@@ -181,41 +136,290 @@ namespace rocsparse
                                                                   vals,
                                                                   nnz,
                                                                   m,
-                                                                  offsets,
-                                                                  offsets + 1,
+                                                                  offsets_,
+                                                                  offsets_ + 1,
                                                                   startbit,
                                                                   endbit,
-                                                                  size,
-                                                                  tmp_rocprim));
+                                                                  buffer_size,
+                                                                  buffer));
 
-            if(keys.current() != csr_col_ind)
+            if(vals.current() != perm_)
             {
-                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
-                    csr_col_ind, keys.current(), sizeof(J) * nnz, hipMemcpyDeviceToDevice, stream));
-            }
-            if(vals.current() != perm)
-            {
-                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
-                    perm, vals.current(), sizeof(I) * nnz, hipMemcpyDeviceToDevice, stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(perm_,
+                                                             vals.current(),
+                                                             sizeof(I) * nnz,
+                                                             hipMemcpyDeviceToDevice,
+                                                             handle->stream));
             }
         }
         else
         {
-            // Sort by keys, if no permutation vector is present
-            rocsparse::primitives::double_buffer<J> keys(csr_col_ind, tmp_cols);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::primitives::segmented_radix_sort_keys(handle,
+                                                                                       keys,
+                                                                                       nnz,
+                                                                                       m,
+                                                                                       offsets_,
+                                                                                       offsets_ + 1,
+                                                                                       startbit,
+                                                                                       endbit,
+                                                                                       buffer_size,
+                                                                                       buffer));
+        }
 
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::primitives::segmented_radix_sort_keys(
-                handle, keys, nnz, m, offsets, offsets + 1, startbit, endbit, size, tmp_rocprim));
-
-            if(keys.current() != csr_col_ind)
-            {
-                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
-                    csr_col_ind, keys.current(), sizeof(J) * nnz, hipMemcpyDeviceToDevice, stream));
-            }
+        if(keys.current() != ind_)
+        {
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                ind_, keys.current(), sizeof(J) * nnz, hipMemcpyDeviceToDevice, handle->stream));
         }
         return rocsparse_status_success;
     }
 
+    static rocsparse_status csrsort_rocprim_sort(rocsparse_handle    handle,
+                                                 rocsparse_indextype ptr_type,
+                                                 rocsparse_indextype ind_type,
+                                                 int64_t             m,
+                                                 int64_t             nnz,
+                                                 const void*         offsets,
+                                                 void*               ind,
+                                                 void*               tmp_ind,
+                                                 void*               perm,
+                                                 void*               tmp_perm,
+                                                 uint32_t            startbit,
+                                                 uint32_t            endbit,
+                                                 size_t              buffer_size,
+                                                 void*               buffer)
+    {
+        if(ptr_type == rocsparse_indextype_i32 && ind_type == rocsparse_indextype_i32)
+        {
+            RETURN_IF_ROCSPARSE_ERROR((csrsort_rocprim_sort_template<int32_t, int32_t>(handle,
+                                                                                       m,
+                                                                                       nnz,
+                                                                                       offsets,
+                                                                                       ind,
+                                                                                       tmp_ind,
+                                                                                       perm,
+                                                                                       tmp_perm,
+                                                                                       startbit,
+                                                                                       endbit,
+                                                                                       buffer_size,
+                                                                                       buffer)));
+            return rocsparse_status_success;
+        }
+        if(ptr_type == rocsparse_indextype_i64 && ind_type == rocsparse_indextype_i32)
+        {
+            RETURN_IF_ROCSPARSE_ERROR((csrsort_rocprim_sort_template<int64_t, int32_t>(handle,
+                                                                                       m,
+                                                                                       nnz,
+                                                                                       offsets,
+                                                                                       ind,
+                                                                                       tmp_ind,
+                                                                                       perm,
+                                                                                       tmp_perm,
+                                                                                       startbit,
+                                                                                       endbit,
+                                                                                       buffer_size,
+                                                                                       buffer)));
+            return rocsparse_status_success;
+        }
+        if(ptr_type == rocsparse_indextype_i64 && ind_type == rocsparse_indextype_i64)
+        {
+            RETURN_IF_ROCSPARSE_ERROR((csrsort_rocprim_sort_template<int64_t, int64_t>(handle,
+                                                                                       m,
+                                                                                       nnz,
+                                                                                       offsets,
+                                                                                       ind,
+                                                                                       tmp_ind,
+                                                                                       perm,
+                                                                                       tmp_perm,
+                                                                                       startbit,
+                                                                                       endbit,
+                                                                                       buffer_size,
+                                                                                       buffer)));
+            return rocsparse_status_success;
+        }
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+            rocsparse_status_invalid_value,
+            "the combination of offsets and indices types is not supported");
+    }
+
+    // Shifts one based offsets to zero based offsets, which the segmented sort expects.
+    static rocsparse_status csrsort_shift_offsets(rocsparse_handle    handle,
+                                                  rocsparse_indextype ptr_type,
+                                                  int64_t             size,
+                                                  const void*         in,
+                                                  void*               out)
+    {
+#define CSRSORT_DIM 512
+        dim3 csrsort_blocks((size - 1) / CSRSORT_DIM + 1);
+        dim3 csrsort_threads(CSRSORT_DIM);
+
+        if(ptr_type == rocsparse_indextype_i32)
+        {
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrsort_shift_kernel<CSRSORT_DIM>),
+                                               csrsort_blocks,
+                                               csrsort_threads,
+                                               0,
+                                               handle->stream,
+                                               size,
+                                               reinterpret_cast<const int32_t*>(in),
+                                               reinterpret_cast<int32_t*>(out));
+            return rocsparse_status_success;
+        }
+        if(ptr_type == rocsparse_indextype_i64)
+        {
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrsort_shift_kernel<CSRSORT_DIM>),
+                                               csrsort_blocks,
+                                               csrsort_threads,
+                                               0,
+                                               handle->stream,
+                                               size,
+                                               reinterpret_cast<const int64_t*>(in),
+                                               reinterpret_cast<int64_t*>(out));
+            return rocsparse_status_success;
+        }
+#undef CSRSORT_DIM
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
+                                               "the offsets type is not supported");
+    }
+
+    static rocsparse_status csrsort_buffer_size_compute(rocsparse_handle    handle,
+                                                        int64_t             m,
+                                                        int64_t             n,
+                                                        int64_t             nnz,
+                                                        rocsparse_indextype ptr_type,
+                                                        rocsparse_indextype ind_type,
+                                                        size_t*             buffer_size_in_bytes)
+    {
+        ROCSPARSE_ROUTINE_TRACE;
+
+        if(!rocsparse::csrsort_is_supported(ptr_type, ind_type))
+        {
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                rocsparse_status_invalid_value,
+                "the combination of offsets and indices types is not supported");
+        }
+
+        if(m == 0 || n == 0 || nnz == 0)
+        {
+            *buffer_size_in_bytes = 0;
+            return rocsparse_status_success;
+        }
+
+        const uint32_t startbit = 0;
+        const uint32_t endbit   = rocsparse::csrsort_endbit(n);
+
+        // We do not know if sort_pairs or sort_keys will be called, so use the largest buffer between the two
+        size_t size1 = std::numeric_limits<size_t>::max();
+        size_t size2 = std::numeric_limits<size_t>::max();
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsort_rocprim_buffer_size(
+            handle, ptr_type, ind_type, m, nnz, startbit, endbit, true, &size1));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsort_rocprim_buffer_size(
+            handle, ptr_type, ind_type, m, nnz, startbit, endbit, false, &size2));
+
+        const size_t ptr_size = rocsparse::indextype_sizeof(ptr_type);
+        const size_t ind_size = rocsparse::indextype_sizeof(ind_type);
+
+        // rocPRIM does not support in-place sorting, so we need additional buffer
+        // for all temporary arrays
+        *buffer_size_in_bytes = rocsparse::align_size<char>(rocsparse::max(size1, size2));
+
+        // columns buffer
+        *buffer_size_in_bytes += rocsparse::align_size<char>(ind_size * nnz);
+        // perm buffer
+        *buffer_size_in_bytes += rocsparse::align_size<char>(ptr_size * nnz);
+        // segm buffer
+        *buffer_size_in_bytes += rocsparse::align_size<char>(ptr_size * (m + 1));
+
+        return rocsparse_status_success;
+    }
+
+    // Sorts the column indices within each row. If perm is not null, the sort applies its
+    // reordering to perm.
+    static rocsparse_status csrsort_compute(rocsparse_handle     handle,
+                                            int64_t              m,
+                                            int64_t              n,
+                                            int64_t              nnz,
+                                            rocsparse_index_base idx_base,
+                                            rocsparse_indextype  ptr_type,
+                                            rocsparse_indextype  ind_type,
+                                            const void*          csr_row_ptr,
+                                            void*                csr_col_ind,
+                                            void*                perm,
+                                            size_t               buffer_size_in_bytes,
+                                            void*                buffer)
+    {
+        ROCSPARSE_ROUTINE_TRACE;
+
+        size_t required_buffer_size = std::numeric_limits<size_t>::max();
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsort_buffer_size_compute(
+            handle, m, n, nnz, ptr_type, ind_type, &required_buffer_size));
+        if(buffer_size_in_bytes < required_buffer_size)
+        {
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                rocsparse_status_invalid_size,
+                "the buffer is smaller than the size required by the index sort");
+        }
+
+        // Quick return if possible
+        if(m == 0 || n == 0 || nnz == 0)
+        {
+            return rocsparse_status_success;
+        }
+
+        const uint32_t startbit = 0;
+        const uint32_t endbit   = rocsparse::csrsort_endbit(n);
+
+        size_t rocprim_size = std::numeric_limits<size_t>::max();
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsort_rocprim_buffer_size(
+            handle, ptr_type, ind_type, m, nnz, startbit, endbit, perm != nullptr, &rocprim_size));
+
+        const size_t ptr_size = rocsparse::indextype_sizeof(ptr_type);
+        const size_t ind_size = rocsparse::indextype_sizeof(ind_type);
+
+        // Temporary buffer entry points
+        char* ptr = reinterpret_cast<char*>(buffer);
+
+        // columns buffer
+        void* tmp_cols = ptr;
+        ptr += rocsparse::align_size<char>(ind_size * nnz);
+
+        // perm buffer
+        void* tmp_perm = ptr;
+        ptr += rocsparse::align_size<char>(ptr_size * nnz);
+
+        // segm buffer
+        void* tmp_segm = ptr;
+        ptr += rocsparse::align_size<char>(ptr_size * (m + 1));
+
+        // rocprim buffer
+        void* tmp_rocprim = ptr;
+
+        // Index base one requires shift of offset positions
+        const void* offsets = csr_row_ptr;
+        if(idx_base == rocsparse_index_base_one)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::csrsort_shift_offsets(handle, ptr_type, m + 1, csr_row_ptr, tmp_segm));
+            offsets = tmp_segm;
+        }
+
+        // Sort by columns and obtain permutation vector
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsort_rocprim_sort(handle,
+                                                                  ptr_type,
+                                                                  ind_type,
+                                                                  m,
+                                                                  nnz,
+                                                                  offsets,
+                                                                  csr_col_ind,
+                                                                  tmp_cols,
+                                                                  perm,
+                                                                  tmp_perm,
+                                                                  startbit,
+                                                                  endbit,
+                                                                  rocprim_size,
+                                                                  tmp_rocprim));
+        return rocsparse_status_success;
+    }
 }
 
 extern "C" rocsparse_status rocsparse_csrsort_buffer_size(rocsparse_handle     handle,
@@ -248,8 +452,13 @@ try
     ROCSPARSE_CHECKARG_POINTER(6, buffer_size);
 
     RETURN_IF_ROCSPARSE_ERROR(
-        (rocsparse::csrsort_buffer_size_template<rocsparse_int, rocsparse_int>(
-            handle, m, n, nnz, csr_row_ptr, csr_col_ind, buffer_size)));
+        rocsparse::csrsort_buffer_size_compute(handle,
+                                               m,
+                                               n,
+                                               nnz,
+                                               rocsparse::get_indextype<rocsparse_int>(),
+                                               rocsparse::get_indextype<rocsparse_int>(),
+                                               buffer_size));
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -294,8 +503,30 @@ try
     ROCSPARSE_CHECKARG_ARRAY(6, nnz, csr_col_ind);
     ROCSPARSE_CHECKARG_ARRAY(8, nnz, temp_buffer);
 
-    RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrsort_template<rocsparse_int, rocsparse_int>(
-        handle, m, n, nnz, descr->base, csr_row_ptr, csr_col_ind, perm, temp_buffer)));
+    // The legacy API does not take the size of temp_buffer, which is assumed to be the size
+    // returned by rocsparse_csrsort_buffer_size.
+    size_t buffer_size = std::numeric_limits<size_t>::max();
+    RETURN_IF_ROCSPARSE_ERROR(
+        rocsparse::csrsort_buffer_size_compute(handle,
+                                               m,
+                                               n,
+                                               nnz,
+                                               rocsparse::get_indextype<rocsparse_int>(),
+                                               rocsparse::get_indextype<rocsparse_int>(),
+                                               &buffer_size));
+
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsort_compute(handle,
+                                                         m,
+                                                         n,
+                                                         nnz,
+                                                         descr->base,
+                                                         rocsparse::get_indextype<rocsparse_int>(),
+                                                         rocsparse::get_indextype<rocsparse_int>(),
+                                                         csr_row_ptr,
+                                                         csr_col_ind,
+                                                         perm,
+                                                         buffer_size,
+                                                         temp_buffer));
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -308,116 +539,6 @@ catch(...)
 
 namespace rocsparse
 {
-    static rocsparse_status gcsrsort_buffer_size(rocsparse_handle    handle,
-                                                 int64_t             m,
-                                                 int64_t             n,
-                                                 int64_t             nnz,
-                                                 rocsparse_indextype ptr_type,
-                                                 rocsparse_indextype ind_type,
-                                                 const void*         ptr,
-                                                 const void*         ind,
-                                                 size_t*             buffer_size)
-    {
-        if(ptr_type == rocsparse_indextype_i32 && ind_type == rocsparse_indextype_i32)
-        {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::csrsort_buffer_size_template(handle,
-                                                        m,
-                                                        n,
-                                                        nnz,
-                                                        reinterpret_cast<const int32_t*>(ptr),
-                                                        reinterpret_cast<const int32_t*>(ind),
-                                                        buffer_size));
-            return rocsparse_status_success;
-        }
-        if(ptr_type == rocsparse_indextype_i64 && ind_type == rocsparse_indextype_i32)
-        {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::csrsort_buffer_size_template(handle,
-                                                        m,
-                                                        n,
-                                                        nnz,
-                                                        reinterpret_cast<const int64_t*>(ptr),
-                                                        reinterpret_cast<const int32_t*>(ind),
-                                                        buffer_size));
-            return rocsparse_status_success;
-        }
-        if(ptr_type == rocsparse_indextype_i64 && ind_type == rocsparse_indextype_i64)
-        {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::csrsort_buffer_size_template(handle,
-                                                        m,
-                                                        n,
-                                                        nnz,
-                                                        reinterpret_cast<const int64_t*>(ptr),
-                                                        reinterpret_cast<const int64_t*>(ind),
-                                                        buffer_size));
-            return rocsparse_status_success;
-        }
-        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
-            rocsparse_status_invalid_value,
-            "the combination of offsets and indices types is not supported");
-    }
-
-    static rocsparse_status gcsrsort(rocsparse_handle     handle,
-                                     int64_t              m,
-                                     int64_t              n,
-                                     int64_t              nnz,
-                                     rocsparse_index_base idx_base,
-                                     rocsparse_indextype  ptr_type,
-                                     rocsparse_indextype  ind_type,
-                                     const void*          ptr,
-                                     void*                ind,
-                                     void*                perm,
-                                     void*                buffer)
-    {
-        if(ptr_type == rocsparse_indextype_i32 && ind_type == rocsparse_indextype_i32)
-        {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::csrsort_template(handle,
-                                            m,
-                                            n,
-                                            nnz,
-                                            idx_base,
-                                            reinterpret_cast<const int32_t*>(ptr),
-                                            reinterpret_cast<int32_t*>(ind),
-                                            reinterpret_cast<int32_t*>(perm),
-                                            buffer));
-            return rocsparse_status_success;
-        }
-        if(ptr_type == rocsparse_indextype_i64 && ind_type == rocsparse_indextype_i32)
-        {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::csrsort_template(handle,
-                                            m,
-                                            n,
-                                            nnz,
-                                            idx_base,
-                                            reinterpret_cast<const int64_t*>(ptr),
-                                            reinterpret_cast<int32_t*>(ind),
-                                            reinterpret_cast<int64_t*>(perm),
-                                            buffer));
-            return rocsparse_status_success;
-        }
-        if(ptr_type == rocsparse_indextype_i64 && ind_type == rocsparse_indextype_i64)
-        {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::csrsort_template(handle,
-                                            m,
-                                            n,
-                                            nnz,
-                                            idx_base,
-                                            reinterpret_cast<const int64_t*>(ptr),
-                                            reinterpret_cast<int64_t*>(ind),
-                                            reinterpret_cast<int64_t*>(perm),
-                                            buffer));
-            return rocsparse_status_success;
-        }
-        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
-            rocsparse_status_invalid_value,
-            "the combination of offsets and indices types is not supported");
-    }
-
     // The buffer starts with the permutation array, which tracks where each entry moves
     // while the indices are sorted, followed by scratch space shared by the index sort
     // and the value permutation.
@@ -442,12 +563,10 @@ rocsparse_status rocsparse::csxsort_buffer_size(rocsparse_handle            hand
     const int64_t             nnz      = target->nnz;
     const rocsparse_indextype ptr_type = by_row ? target->row_type : target->col_type;
     const rocsparse_indextype ind_type = by_row ? target->col_type : target->row_type;
-    const void*               ptr      = by_row ? target->const_row_data : target->const_col_data;
-    const void*               ind      = by_row ? target->const_col_data : target->const_row_data;
 
-    size_t sort_buffer_size = 0;
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcsrsort_buffer_size(
-        handle, m, n, nnz, ptr_type, ind_type, ptr, ind, &sort_buffer_size));
+    size_t sort_buffer_size = std::numeric_limits<size_t>::max();
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsort_buffer_size_compute(
+        handle, m, n, nnz, ptr_type, ind_type, &sort_buffer_size));
 
     // Values sorted in place are gathered into scratch space first, since the gather cannot
     // write over its own input.
@@ -509,9 +628,10 @@ rocsparse_status rocsparse::csxsort(rocsparse_handle            handle,
     const size_t ind_stride_target = target->columns_values_batch_stride * ind_size;
     const size_t val_stride_target = target->columns_values_batch_stride * val_size;
 
-    void* perm = buffer;
-    void* sort_buffer
-        = reinterpret_cast<char*>(buffer) + rocsparse::csxsort_perm_size(nnz, ptr_type);
+    const size_t perm_size        = rocsparse::csxsort_perm_size(nnz, ptr_type);
+    const size_t sort_buffer_size = buffer_size_in_bytes - perm_size;
+    void*        perm             = buffer;
+    void*        sort_buffer      = reinterpret_cast<char*>(buffer) + perm_size;
 
     // Only uniform batches are supported, so every batch has the sparsity pattern of the first
     // one. Its indices are sorted once, and the resulting permutation is applied to the values
@@ -533,17 +653,18 @@ rocsparse_status rocsparse::csxsort(rocsparse_handle            handle,
     // The index sort applies its reordering to perm, so it must start as the identity.
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcreate_identity_permutation(handle, nnz, ptr_type, perm));
 
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcsrsort(handle,
-                                                  m,
-                                                  n,
-                                                  nnz,
-                                                  idx_base,
-                                                  ptr_type,
-                                                  ind_type,
-                                                  ptr_target,
-                                                  ind_target,
-                                                  perm,
-                                                  sort_buffer));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsort_compute(handle,
+                                                         m,
+                                                         n,
+                                                         nnz,
+                                                         idx_base,
+                                                         ptr_type,
+                                                         ind_type,
+                                                         ptr_target,
+                                                         ind_target,
+                                                         perm,
+                                                         sort_buffer_size,
+                                                         sort_buffer));
 
     // The batches run one after the other on the handle stream, so they share the buffer.
     for(int64_t batch = 0; batch < target->batch_count; ++batch)
