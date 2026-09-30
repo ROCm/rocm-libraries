@@ -71,6 +71,18 @@
 #define LARFT_SWITCHSIZE 64
 #endif
 
+/*! \brief Determine when LARFT (forward direction, column-wise) computes the product V2^H * V2
+    (k <= 64 columns, a long inner dimension) with its own kernels: with at least
+    LARFT_SPLITK_MIN rows in V2, split into chunks of LARFT_SPLITK_ROWS rows whose partial
+    products are added in a fixed order. A matrix product with a small result and a long
+    inner dimension would run on few compute units. */
+#ifndef LARFT_SPLITK_MIN
+#define LARFT_SPLITK_MIN 4096
+#endif
+#ifndef LARFT_SPLITK_ROWS
+#define LARFT_SPLITK_ROWS 1024
+#endif
+
 /***************** geqr2/geqrf and geql2/geqlf ********************************
 *******************************************************************************/
 /*! \brief Determines the size of the block column factorized at each step
