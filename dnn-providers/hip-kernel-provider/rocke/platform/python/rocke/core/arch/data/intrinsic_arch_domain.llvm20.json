@@ -110,7 +110,6 @@
     "smax.i32": "llvm.smax.i32",
     "smin.i32": "llvm.smin.i32",
     "sqrt.f32": "llvm.sqrt.f32",
-    "tanh.f32": "llvm.tanh.f32",
     "update.dpp.i32": "llvm.amdgcn.update.dpp.i32",
     "wmma.f32.16x16x16.bf16": "llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v16i16",
     "wmma.f32.16x16x16.f16": "llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v16f16",
@@ -4693,43 +4692,6 @@
         "verified_on": "llvm20"
       }
     },
-    "tanh.f32": {
-      "gfx11-generic": {
-        "evidence": "error: no libcall available for ftanh",
-        "status": "arch_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx1151": {
-        "evidence": "error: no libcall available for ftanh",
-        "status": "arch_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx1201": {
-        "evidence": "error: no libcall available for ftanh",
-        "status": "arch_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx1250": {
-        "evidence": "invalid target ID",
-        "status": "target_unsupported",
-        "verified_on": "llvm20"
-      },
-      "gfx90a": {
-        "evidence": "error: no libcall available for ftanh",
-        "status": "arch_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx942": {
-        "evidence": "error: no libcall available for ftanh",
-        "status": "arch_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx950": {
-        "evidence": "error: no libcall available for ftanh",
-        "status": "arch_absent",
-        "verified_on": "llvm20"
-      }
-    },
     "tensor.load.to.lds": {
       "gfx11-generic": {
         "evidence": "not an intrinsic in llvm20",
@@ -5495,7 +5457,7 @@
         "verified_on": "llvm20"
       }
     },
-    "wmma.scale.gfx1250.f32.16x16x128.fp8.fp8": {
+    "wmma.scale.block16.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32": {
       "gfx11-generic": {
         "evidence": "not an intrinsic in llvm20",
         "status": "name_absent",
@@ -5532,7 +5494,7 @@
         "verified_on": "llvm20"
       }
     },
-    "wmma.scale16.gfx1250.f32.16x16x128.fp8.fp8": {
+    "wmma.scale.block32.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32": {
       "gfx11-generic": {
         "evidence": "not an intrinsic in llvm20",
         "status": "name_absent",

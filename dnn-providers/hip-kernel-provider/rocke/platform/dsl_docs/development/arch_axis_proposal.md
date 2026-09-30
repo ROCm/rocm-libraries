@@ -228,8 +228,8 @@ Two further findings from the sweep, neither visible to a 15-probe sample:
 - **Probes must compile at `-O0`.** At `-O3` the IR pipeline can delete the very
   call being asked about, and a module with nothing left to select links happily.
   This produced a false `ok` for a cross-lane intrinsic on a target that does not
-  have it — the object contained no such instruction at all. Nine of the 148 keys
-  are foldable this way. A false `ok` is the dangerous direction: it silently
+  have it — the object contained no such instruction at all. Nine keys were
+  foldable this way when that was measured. A false `ok` is the dangerous direction: it silently
   admits a kernel that cannot run.
 - **Transient failures must not be recorded as facts.** Under `-j` the probes
   fork enough linkers to occasionally hit the process limit, and one abort was
@@ -300,7 +300,8 @@ keying on it means keying on install layout — the same reason
 exist on every install. `opt -S` asks the toolchain the question directly and
 costs one process per key, not per cell.
 
-Cost, measured: 148 keys × 7 arches on `llvm22`, ~15 s wall across cores. Cheap
+Cost, measured: every decl key × 7 arches on `llvm22` — the committed columns
+are the count of record, not this sentence — ~15 s wall across cores. Cheap
 enough to run in CI, not just on demand — which is why the gate is a test rather
 than a nightly.
 
@@ -377,7 +378,7 @@ tables, CI checks regeneration is a no-op.
 | emitted IR bytes | **none** — S1–S4 add checks and a data file; no emission path changes |
 | golden | **no re-bless** |
 | byte-identity | must be re-run after S4 (behaviour parity), expected GREEN |
-| `KNOWN_BAD` | stays empty; arch-unavailable keys become build errors, not allowlist entries |
+| `KNOWN_BAD` | arch-unavailable keys become build errors, not allowlist entries; the allowlist itself holds 2 entries, both the same llvm23 backend fatal on attention 3d on gfx942 |
 | B9 | fixed as a consequence: S1 flags it `name_absent` on every arch |
 
 ---
@@ -452,7 +453,8 @@ Acceptance for the change itself:
   half runs without a toolchain; the regeneration half skips where the flavor has
   no committed column)
 - `python tools/check_byte_identity.py` GREEN at each flavor (S4)
-- `python tools/check_ir_validity.py` GREEN, `KNOWN_BAD` still empty
+- `python tools/check_ir_validity.py` GREEN, with no *new* failures beyond the 2
+  documented `KNOWN_BAD` emission defects
 - golden unchanged (no re-bless in the diff)
 
 ---

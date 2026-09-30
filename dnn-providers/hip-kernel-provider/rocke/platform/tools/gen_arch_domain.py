@@ -83,6 +83,7 @@ import tempfile
 from pathlib import Path
 
 from _hostcaps import available_cpus
+from _llvm_identity import clang_identity, flavor_of_clang
 
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parent  # tools -> rocke/platform
@@ -508,9 +509,9 @@ def _probe(
     found this -- a kernel argument is wave-uniform, permlane64 of a uniform
     value folds to the identity, and LLVM 22's InstCombine folds it away. The
     object contained no permlane64 at all, the link succeeded, and the probe
-    reported ok for a target where the instruction does not exist. Nine of the
-    149 keys are foldable this way. -O0 keeps the call alive to ISel, which is
-    the only place that can answer the question.
+    reported ok for a target where the instruction does not exist. Nine keys
+    were foldable this way when that was measured. -O0 keeps the call alive to
+    ISel, which is the only place that can answer the question.
 
     Keeping the call alive also exposes probes that never terminate -- llvm20
     spins indefinitely on `raw.ptr.buffer.load.async.lds` for every arch that
@@ -576,22 +577,6 @@ def _decl_table(flavor: str) -> dict[str, str]:
     return decls
 
 
-def _clang_identity(clang: str) -> str:
-    try:
-        proc = subprocess.run(
-            [clang, "--version"], capture_output=True, text=True, check=False
-        )
-        return (proc.stdout or "").strip().splitlines()[0][:200]
-    except (OSError, IndexError):
-        return "(unknown)"
-
-
-def _flavor_of_clang(identity: str) -> str | None:
-    """Best-effort LLVM major from `clang --version`, as a flavor string."""
-    m = re.search(r"clang version (\d+)", identity)
-    return f"llvm{m.group(1)}" if m else None
-
-
 def _drift(committed: str, fresh: str) -> str | None:
     """Describe how a committed column differs from a fresh run, or None.
 
@@ -637,6 +622,52 @@ def _drift(committed: str, fresh: str) -> str | None:
     return None
 
 
+def _prune() -> int:
+    """Drop rows for decl keys that no longer exist, on every committed column.
+
+    The one repair that needs no toolchain, and the one the sweep cannot do.
+    A host can only regenerate its own flavor, so when a key is renamed or
+    deleted -- a rebase onto a develop that did it is the realistic route, and
+    is how `tanh.f32` and the two pre-rename `wmma.scale` keys went stale in
+    all three columns at once -- every other column keeps measuring something
+    the tree no longer emits, and stays red on every machine until someone
+    finds three toolchains. Nobody has three toolchains.
+
+    Deleting is safe in a way that writing never is: the answer being removed
+    was measured, is still true of the LLVM that produced it, and is simply no
+    longer a question rocke asks. Nothing is invented, so the column keeps its
+    provenance and the remaining cells keep their meaning. Adding the *new*
+    key still needs that flavor's compiler, and until someone runs it the
+    artifact test reports a named skip -- which is the honest state.
+    """
+    from rocke.core import lower_llvm as L  # noqa: F401  (loads the decl tables)
+
+    changed = 0
+    for path in sorted(DATA_DIR.glob("intrinsic_arch_domain.*.json")):
+        flavor = path.name.split(".")[1]
+        doc = json.loads(path.read_text())
+        expected = set(_decl_table(flavor))
+        stale = sorted(set(doc.get("keys", {})) - expected)
+        if not stale:
+            print(f"   {path.name}: nothing to prune")
+            continue
+        for key in stale:
+            doc["keys"].pop(key, None)
+            doc.get("canonical", {}).pop(key, None)
+        path.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n")
+        changed += 1
+        print(f"   {path.name}: dropped {len(stale)} stale row(s): {', '.join(stale)}")
+
+    if not changed:
+        print("\nOK: every column already covers exactly the current decl table.")
+        return 0
+    print(
+        f"\nwrote {changed} column(s). Rows were only ever removed; a key the "
+        "decl table gained still needs a sweep on that flavor's toolchain."
+    )
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="rocKE intrinsic arch-domain generator")
     ap.add_argument(
@@ -655,6 +686,11 @@ def main() -> int:
     ap.add_argument(
         "--keep-ir", type=Path, default=None, help="keep probe modules here"
     )
+    ap.add_argument(
+        "--prune",
+        action="store_true",
+        help="drop rows whose decl key is gone, on every column; needs no toolchain",
+    )
     ap.add_argument("--jobs", type=int, default=0)
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
@@ -664,6 +700,12 @@ def main() -> int:
     from check_ir_validity import _llvm_tool  # same resolution order, one owner
     from rocke.core import lower_llvm as L
     from rocke.core.isa.backend import wired_arches
+
+    # Before any toolchain resolution: pruning is a repair to columns this host
+    # cannot measure, so requiring a compiler for it would defeat the purpose.
+    if args.prune:
+        print("rocKE intrinsic arch-domain generator -- prune")
+        return _prune()
 
     flavor = L._resolve_llvm_flavor()
     clang = _llvm_tool("clang")
@@ -681,13 +723,41 @@ def main() -> int:
         )
         return 0
 
-    identity = _clang_identity(clang)
+    # `opt` is not optional, despite being the cheap stage. It owns the flavor
+    # axis: without it nothing separates "this LLVM has no such intrinsic" from
+    # "this target cannot lower it", and the sweep would record `name_absent`
+    # keys as `arch_absent`, `toolchain_crash` or -- worst -- `ok`, because an
+    # unresolved `llvm.*` name is just an external call that a link may happen
+    # to accept. Substituting "the name exists" for "we did not ask" is the one
+    # inversion this artifact exists to prevent, and it would be committed as
+    # fact. No name check, no column.
+    #
+    # This exits 1 where the no-clang path above exits 0, and the asymmetry is
+    # the point. No clang at all is a legitimate state: the host is not a
+    # probing host, says so, and asks for nothing. Finding clang without `opt`
+    # is not a state any complete LLVM install produces -- every ROCm release
+    # that ships one ships the other -- so it means the environment is pointed
+    # somewhere partial, most often a distro clang on PATH while `opt` is only
+    # installed under a versioned name. That is a broken invocation, not a
+    # quiet no-op, and silence would leave the caller believing a sweep it
+    # never got.
+    if opt is None:
+        print(
+            "\nFAIL: clang was found but `opt` was not, and the flavor axis is "
+            "measured with `opt`; every key would be recorded as present "
+            "without being checked. Nothing was probed. Set ROCKE_LLVM_BIN to "
+            "a complete LLVM install (the one whose clang is above), or unset "
+            "it to fall back to the ROCm that rocke itself loads."
+        )
+        return 1
+
+    identity = clang_identity(clang)
     print(f"   version: {identity}")
 
     # A probe result is only meaningful against the flavor it was measured on.
     # Recording llvm20 results in an artifact stamped llvm23 would be actively
     # misleading, so disagreement is fatal rather than a warning.
-    clang_flavor = _flavor_of_clang(identity)
+    clang_flavor = flavor_of_clang(identity)
     if clang_flavor and clang_flavor != flavor:
         print(
             f"\nERROR: clang reports {clang_flavor} but rocke resolved {flavor}. "
@@ -757,9 +827,7 @@ def main() -> int:
     canonical: dict[str, str] = {}
     absent: set[str] = set()
     for key in keys:
-        exists, note = (
-            _name_exists(opt, decls[key], Path(ir_dir)) if opt else (True, "")
-        )
+        exists, note = _name_exists(opt, decls[key], Path(ir_dir))
         if exists:
             canonical[key] = note
         else:
@@ -917,6 +985,38 @@ def main() -> int:
         for key, arch in retry:
             _k, _a, status, evidence, imm = run((key, arch))
             record(key, arch, status, evidence, imm)
+
+    # `probe_error` is the generator reporting itself broken: a diagnostic
+    # `_classify` does not recognise, or a probe module it built wrong. It is
+    # not a fact about the toolchain, so it must never be written -- and until
+    # now nothing stopped it. The artifact test forbids it in a committed
+    # column, which means the tool could produce a file its own gate rejects
+    # and the only thing between that and a commit was remembering to run the
+    # test. Refusing here moves the stop one step earlier, to the person who
+    # can still act on it.
+    #
+    # The fix is almost always to teach `_classify` a wording a new LLVM
+    # vintage introduced -- llvm23's "intrinsic not supported on subtarget" was
+    # twelve such cells -- so the evidence is printed rather than summarised.
+    stuck = [
+        (k, a, results[k][a].get("evidence", ""))
+        for k in keys
+        for a in arches
+        if results[k][a]["status"] == STATUS_PROBE_ERROR
+    ]
+    if stuck:
+        print(f"\n== {len(stuck)} unclassified probe(s) survived the serial retry ==")
+        for key, arch, evidence in stuck[:20]:
+            print(f"  {key:44s} {arch:14s} {evidence or '(no diagnostic)'}")
+        if len(stuck) > 20:
+            print(f"  ... and {len(stuck) - 20} more")
+        print(
+            f"\nFAIL: nothing written. `{STATUS_PROBE_ERROR}` means this tool "
+            "did not understand the answer, not that the target cannot lower "
+            "the intrinsic; committing it would record our defect as the "
+            "toolchain's. Teach `_classify` the wording above, then re-run."
+        )
+        return 1
 
     doc = {
         "schema": SCHEMA,

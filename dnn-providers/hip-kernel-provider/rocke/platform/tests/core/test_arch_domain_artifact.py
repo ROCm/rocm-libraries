@@ -29,6 +29,13 @@ toolchain is skipped, never failed — "we did not get an answer" must not be
 recorded as "the answer is no". Same reason the artifact distinguishes
 ``arch_absent`` (the target genuinely cannot lower it) from ``target_unsupported``,
 ``toolchain_crash`` and ``toolchain_timeout`` (no data).
+
+This file is a **source-tree** gate and is excluded from the installed test
+tree by `CMakeLists.txt`. It has to be: it imports the generator out of
+`tools/`, which is not installed, and an uninstallable import in an installed
+test is not one skipped test but a collection error that takes the whole
+pytest session down with it. The exclusion is the contract; keep the two in
+step if this file is ever renamed.
 """
 
 from __future__ import annotations
@@ -39,6 +46,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from importlib.resources import files as resource_files
 from pathlib import Path
 
 from rocke.core.isa.backend import wired_arches
@@ -47,7 +55,13 @@ from rocke.core.lower_llvm import _resolve_llvm_flavor
 _HERE = Path(__file__).resolve().parent
 _ROCKE = _HERE.parents[1]  # tests/core -> platform
 _TOOL = _ROCKE / "tools" / "gen_arch_domain.py"
-_DATA = _ROCKE / "python" / "rocke" / "core" / "arch" / "data"
+
+# Through the package, not through the checkout layout. The artifacts are
+# package data (`pyproject.toml` ships `rocke/**/*.json`, CMake installs the
+# whole `python/rocke` tree), so resolving them by walking up from this file
+# would check a directory that exists only in a source tree while the copy
+# everything else imports sits elsewhere.
+_DATA = Path(str(resource_files("rocke.core.arch") / "data"))
 
 # Import the generator for its constants and its decl-table merge rule, so the
 # gate cannot disagree with the tool about what "the decl table for a flavor"
@@ -103,7 +117,7 @@ class ArchDomainArtifactStructureTest(unittest.TestCase):
                 # produced it, and nothing downstream can tell.
                 tc = doc.get("toolchain", {})
                 self.assertEqual(tc.get("flavor"), flavor)
-                clang_flavor = G._flavor_of_clang(tc.get("clang", ""))
+                clang_flavor = G.flavor_of_clang(tc.get("clang", ""))
                 if clang_flavor is not None:
                     self.assertEqual(clang_flavor, flavor, tc.get("clang"))
 
@@ -155,6 +169,11 @@ class ArchDomainArtifactStructureTest(unittest.TestCase):
                     f"key(s): {missing} -- re-run tools/gen_arch_domain.py on "
                     f"a {flavor} toolchain and commit the result"
                 )
+                # Both of these are raised *inside* `subTest`, whose executor
+                # records the failure or skip against this column and does not
+                # re-raise. Every later column is still checked -- which is the
+                # point, since a stale key is a defect on any column and must
+                # not be masked by an earlier column's missing measurement.
                 if flavor == host:
                     self.fail(why)
                 self.skipTest(why)
@@ -457,6 +476,208 @@ class ImmargSweepTest(unittest.TestCase):
                 )
                 with self.subTest(flavor=flavor, arch=arch):
                     self.assertEqual(cell["status"], expect)
+
+
+class RefusalTest(unittest.TestCase):
+    """What the generator must refuse to write.
+
+    Both cases here produced a committed-looking artifact and exit 0 before.
+    That is the worst failure mode this tool has: the artifact carries its own
+    provenance and reads as authoritative, so a column written without the
+    measurement behind it is not caught downstream by anything. Refusing at the
+    point of generation puts the stop in front of the only person who can still
+    fix it.
+
+    Driven through `main()` with stub tools rather than a real sweep: the
+    policy being tested is "what do we do when the toolchain does not answer",
+    and a real toolchain that does answer cannot exercise it.
+    """
+
+    def _stub(self, name: str, body: str) -> str:
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        path = root / name
+        path.write_text("#!/usr/bin/env python3\n" + body)
+        path.chmod(0o755)
+        return str(path)
+
+    # Answers `--version` as an unrecognised vintage -- `flavor_of_clang`
+    # returns None, so the flavor-mismatch exit does not fire and the run
+    # reaches the stage under test.
+    _CLANG_REJECTS = """
+import sys
+if "--version" in sys.argv:
+    print("stub clang")
+    sys.exit(0)
+sys.stderr.write("error: something this tool has never seen before\\n")
+sys.exit(1)
+"""
+
+    # Echoes the declare back with an attribute group, which is how
+    # `_name_exists` recognises a resolved intrinsic.
+    _OPT_RESOLVES = """
+import sys
+src = sys.argv[-1]
+for line in open(src):
+    if line.startswith("declare "):
+        print(line.rstrip() + " #0")
+"""
+
+    def _run(self, tools: dict[str, str | None], out: Path) -> int:
+        from unittest import mock
+
+        import check_ir_validity as V
+
+        argv = [str(_TOOL), "--out", str(out), "--arch", "gfx942", "--only", "fabs"]
+        with (
+            mock.patch.object(V, "_llvm_tool", lambda n: tools.get(n)),
+            mock.patch.object(sys, "argv", argv),
+        ):
+            return G.main()
+
+    def test_a_missing_opt_writes_nothing_and_fails(self):
+        """No name check, no column.
+
+        `opt` owns the flavor axis. Without it nothing separates "this LLVM has
+        no such intrinsic" from "this target cannot lower it", and the sweep
+        used to substitute "the name exists" for "we did not ask" -- which can
+        record a `name_absent` key as `ok`, because an unresolved `llvm.*` name
+        is an ordinary external call that a link may happen to accept.
+
+        It fails rather than reporting itself unvalidated, unlike the no-clang
+        path: a host with no compiler is honestly not a probing host, but no
+        complete LLVM install ships clang without `opt`, so finding one and not
+        the other means the environment is pointed at a partial toolchain. That
+        is a broken invocation, and exiting 0 would let the caller believe a
+        sweep had happened.
+        """
+        out = Path(tempfile.mkdtemp()) / "column.json"
+        self.addCleanup(shutil.rmtree, out.parent, True)
+        clang = self._stub("clang", self._CLANG_REJECTS)
+        rc = self._run({"clang": clang, "opt": None}, out)
+        self.assertEqual(rc, 1, "a partial toolchain is a broken env, not a no-op")
+        self.assertFalse(out.exists(), "wrote a column with no name check behind it")
+
+    def test_an_unclassified_probe_writes_nothing_and_fails(self):
+        """`probe_error` is this tool reporting itself broken.
+
+        It is not a fact about the toolchain, and the artifact gate forbids it
+        in a committed column -- so a generator that emits one produces a file
+        its own test rejects, with nothing but habit between that and a commit.
+        """
+        out = Path(tempfile.mkdtemp()) / "column.json"
+        self.addCleanup(shutil.rmtree, out.parent, True)
+        tools = {
+            "clang": self._stub("clang", self._CLANG_REJECTS),
+            "opt": self._stub("opt", self._OPT_RESOLVES),
+        }
+        rc = self._run(tools, out)
+        self.assertEqual(rc, 1)
+        self.assertFalse(out.exists(), "committed our own defect as a measurement")
+
+
+class ValidityGateTest(unittest.TestCase):
+    """`tools/check_ir_validity.py` -- the sibling gate, same two rules."""
+
+    def test_both_gates_ask_the_question_at_O0(self):
+        """The one flag that decides whether either gate proves anything.
+
+        At `-O3` the IR pipeline can fold or delete the construct being asked
+        about, and the module then links because the suspect instruction is no
+        longer in it. The arch-domain generator has probed at `-O0` since the
+        false `ok` that taught us; the validity gate did not, and its link
+        oracle was chosen precisely to avoid that class of false positive.
+        Pinned together so the two cannot drift apart again.
+        """
+        import check_ir_validity as V
+
+        self.assertIn("-O0", V.COMPILE_CFLAGS)
+        self.assertIn("-O0", G.PROBE_CFLAGS)
+        argv = V._compile_argv("clang", Path("m.ll"), "gfx942", Path("m.hsaco"))
+        self.assertIn("-O0", argv)
+        self.assertNotIn("-O3", argv)
+
+    def test_a_target_this_clang_cannot_build_is_not_an_emission_failure(self):
+        """rocke wires arches ahead of the toolchains that can build for them.
+
+        gfx1250 against the LLVM 20 in ROCm 7.1 is rejected in the driver,
+        before clang reads an instruction -- so blaming the lowerer for it
+        blames it for a module nobody compiled, and since this gate now runs by
+        default it would red every host whose ROCm predates the newest wired
+        arch. Same line the generator already draws with `target_unsupported`.
+        """
+        import check_ir_validity as V
+
+        self.assertTrue(
+            V._target_unsupported("clang: error: invalid target ID 'gfx1250'")
+        )
+        # The same wording routes to `target_unsupported` in the generator.
+        self.assertEqual(
+            G._classify(1, "clang: error: invalid target ID 'gfx1250'")[0],
+            G.STATUS_TARGET_UNSUPPORTED,
+        )
+        # A real emission defect must keep its verdict.
+        for diag in (
+            "LLVM ERROR: Cannot select: intrinsic %llvm.amdgcn.foo",
+            "ld.lld: error: undefined symbol: llvm.amdgcn.made.up",
+            "error: invalid use of a non-immediate operand",
+        ):
+            with self.subTest(diag=diag):
+                self.assertFalse(V._target_unsupported(diag))
+
+    def test_an_instance_gated_on_a_newer_llvm_is_not_a_lowering_failure(self):
+        """The corpus is flavor-wide; a host is not.
+
+        Four gfx1250 `wmma_scale` cases decline to lower on anything older than
+        llvm23, and that refusal is the emitter working. It used to abort the
+        whole run with FATAL before a single module was compiled, which reds
+        the now-default `run_all.py` gate on every llvm22 host.
+
+        Matched on the gate's wording rather than the exception type, because
+        a `NotImplementedError` from anywhere else in the lowerer is still the
+        validity failure this gate exists to catch.
+        """
+        import check_ir_validity as V
+
+        self.assertTrue(
+            V._requires_newer_flavor(
+                NotImplementedError(
+                    "tile.wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32 "
+                    "requires llvm23 (ROCm 7.13+), got llvm22"
+                )
+            )
+        )
+        for exc in (
+            NotImplementedError("no handler for op 'tile.frobnicate'"),
+            NotImplementedError("unsupported dtype combination"),
+        ):
+            with self.subTest(exc=str(exc)):
+                self.assertFalse(V._requires_newer_flavor(exc))
+
+    def test_both_gates_read_a_clang_banner_the_same_way(self):
+        """The two tools act on a vintage mismatch differently on purpose --
+        the generator refuses, this gate reports UNVALIDATED -- but they must
+        not disagree about what a mismatch *is*. They share `_llvm_identity`
+        for exactly that reason; this pins the sharing.
+
+        An unrecognised banner must read as "unknown", never as "mismatch": a
+        vendor rewording that line would otherwise red every gate at once.
+        """
+        import _llvm_identity as I
+        import check_ir_validity as V
+
+        self.assertIs(V.flavor_of_clang, I.flavor_of_clang)
+        self.assertIs(G.flavor_of_clang, I.flavor_of_clang)
+        self.assertEqual(
+            I.flavor_of_clang(
+                "AMD clang version 22.0.0git "
+                "(https://github.com/RadeonOpenCompute/llvm-project roc-7.2.0 26014)"
+            ),
+            "llvm22",
+        )
+        for banner in ("(unknown)", "", "AMD clang, the good one"):
+            with self.subTest(banner=banner):
+                self.assertIsNone(I.flavor_of_clang(banner))
 
 
 class ArchDomainRegenerationTest(unittest.TestCase):
