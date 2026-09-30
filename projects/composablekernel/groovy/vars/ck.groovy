@@ -741,6 +741,7 @@ def cmake_build(Map conf=[:]){
     def setup_args = conf.get("setup_args","")
     // make sure all unit tests always run on develop branch
     def runAllUnitTests = (env.BRANCH_NAME == "develop") ? true : params.RUN_ALL_UNIT_TESTS
+    echo "runAllUnitTests = ${runAllUnitTests}, RUN_ALL_UNIT_TESTS = ${params.RUN_ALL_UNIT_TESTS}"
 
     if (prefixpath != "/usr/local"){
         setup_args = setup_args + " -DCMAKE_PREFIX_PATH=${prefixpath} "
@@ -872,7 +873,7 @@ def cmake_build(Map conf=[:]){
         if (runAllUnitTests) {
             build_cmd = conf.get(
                 "build_cmd",
-                "${build_envs} ninja -j${nt} install check"
+                "${build_envs} ninja -j${nt} ${config_targets}"
             )
         } else {
             // Smart-build enabled: skip full build and execute_cmd (client examples)
