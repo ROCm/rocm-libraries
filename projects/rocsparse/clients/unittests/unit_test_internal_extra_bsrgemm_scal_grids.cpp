@@ -23,13 +23,13 @@
  * ************************************************************************ */
 
 //
-// Forced-clamp tests for the bsrgemm scaling path, C = beta * D (AISPARSE-676).
+// Forced-clamp tests for the bsrgemm scaling path, C = beta * D (AISPARSE-676,
+// AISPARSE-679).
 //
 // FOCUS. With alpha == nullptr and beta != nullptr, bsrgemm_scal_core copies the
 // column indices of D with bsrgemm_copy and scales the block values with
-// bsrgemm_copy_scale. Both clamp grid.x with rocsparse::get_grid_size_x, and
-// bsrgemm_copy_scale takes its GRID_STRIDE instantiation only when the clamp
-// binds, so a normally sized problem never runs the looping variant.
+// bsrgemm_copy_scale. Both clamp grid.x with rocsparse::get_grid_size_x and
+// must grid-stride over whatever the clamp drops.
 //
 // WHY NOT TEST THE REAL THRESHOLD. With 1024-thread blocks the clamp binds at
 // (2^32 - 1) / 1024 = 4,194,303 blocks, i.e. about 2^32 block values. These
@@ -41,7 +41,8 @@
 // WHAT MAKES EACH CASE LOAD-BEARING. nnzb_D = 20000 blocks spans 20 column-index
 // blocks and block_dim^2 * 20000 / 1024 >= 79 value blocks, so every limit
 // clamps the scaling launch and limits 1, 3 and 7 also clamp the index copy. A
-// straight-line launch on the clamped grid leaves the tail of C unwritten.
+// launch that does not grid-stride on the clamped grid leaves the tail of C
+// unwritten, and C is poisoned first so that shows.
 //
 // EXACT ARITHMETIC. Values and beta are small integers, so C compares exactly.
 //
