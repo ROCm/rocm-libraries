@@ -1415,7 +1415,7 @@ typedef enum rocsparse_spsort_alg_
 typedef enum rocsparse_spsort_input_
 {
     rocsparse_spsort_input_alg, /**< Select algorithm \ref rocsparse_spsort_alg for input on a SpSort descriptor. */
-    rocsparse_spsort_input_direction, /**< Select sorting direction \ref rocsparse_direction for input on a SpSort descriptor. */
+    rocsparse_spsort_input_direction, /**< Select sorting direction \ref rocsparse_direction for input on a SpSort descriptor. Only used by the COO format. */
 } rocsparse_spsort_input;
 
 /*! \ingroup types_module
