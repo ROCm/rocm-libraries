@@ -274,9 +274,14 @@ void testing_spsort_coo_bad_arg(const Arguments& arg)
                     rocsparse_coo_set_strided_batch(mat_A, batch_count_A, batch_stride_A));
                 CHECK_ROCSPARSE_ERROR(
                     rocsparse_coo_set_strided_batch(mat_B, batch_count_B, batch_stride_B));
+
+                // A successful analysis records the stage, so every case uses its own descriptor.
+                rocsparse_spsort_descr batch_descr;
+                CHECK_ROCSPARSE_ERROR(rocsparse_spsort_descr_create(handle, &batch_descr, nullptr));
+                set_spsort_inputs(handle, batch_descr, alg, dir);
                 EXPECT_ROCSPARSE_STATUS(
                     rocsparse_spsort_buffer_size(handle,
-                                                 descr,
+                                                 batch_descr,
                                                  mat_A,
                                                  mat_B,
                                                  rocsparse_spsort_stage_analysis,
@@ -284,7 +289,7 @@ void testing_spsort_coo_bad_arg(const Arguments& arg)
                                                  nullptr),
                     status);
                 EXPECT_ROCSPARSE_STATUS(rocsparse_spsort(handle,
-                                                         descr,
+                                                         batch_descr,
                                                          mat_A,
                                                          mat_B,
                                                          rocsparse_spsort_stage_analysis,
@@ -292,15 +297,21 @@ void testing_spsort_coo_bad_arg(const Arguments& arg)
                                                          nullptr,
                                                          nullptr),
                                         status);
+                CHECK_ROCSPARSE_ERROR(rocsparse_spsort_descr_destroy(handle, batch_descr, nullptr));
             };
 
+            // A single source matrix with a zero batch stride is sorted into every batch.
+            expect_batch_status(1, 0, 2, safe_size, rocsparse_status_success);
+
             // Different batch counts.
-            expect_batch_status(1, 0, 2, safe_size, rocsparse_status_invalid_value);
+            expect_batch_status(1, safe_size, 2, safe_size, rocsparse_status_invalid_value);
             expect_batch_status(2, safe_size, 3, safe_size, rocsparse_status_invalid_value);
+            expect_batch_status(2, safe_size, 1, 0, rocsparse_status_invalid_value);
 
             // Batch strides that make the batches overlap.
             expect_batch_status(2, safe_size - 1, 2, safe_size, rocsparse_status_invalid_size);
             expect_batch_status(2, safe_size, 2, 0, rocsparse_status_invalid_size);
+            expect_batch_status(1, 0, 2, 0, rocsparse_status_invalid_size);
         }
 
         CHECK_ROCSPARSE_ERROR(rocsparse_spsort_descr_destroy(handle, descr, nullptr));
@@ -403,7 +414,7 @@ void testing_spsort_coo(const Arguments& arg)
     I                    N    = arg.N;
     rocsparse_index_base base = arg.baseA;
     rocsparse_direction  dir  = arg.direction;
-    rocsparse_spsort_alg alg  = rocsparse_spsort_alg_default;
+    rocsparse_spsort_alg alg  = static_cast<rocsparse_spsort_alg>(arg.algo);
 
     const int64_t batch_count = std::max<int64_t>(arg.batch_count, 1);
 
@@ -537,6 +548,66 @@ void testing_spsort_coo(const Arguments& arg)
         hA_row.unit_check(dA_row);
         hA_col.unit_check(dA_col);
         hA_val.unit_check(dA_val);
+
+        if(batch_count > 1)
+        {
+            // Broadcast: the first batch of A, as a single matrix, is sorted into every batch of B.
+            host_dense_vector<I> hA0_row(nnz);
+            host_dense_vector<I> hA0_col(nnz);
+            host_dense_vector<T> hA0_val(nnz);
+            std::copy(hA_row.data(), hA_row.data() + nnz, hA0_row.data());
+            std::copy(hA_col.data(), hA_col.data() + nnz, hA0_col.data());
+            std::copy(hA_val.data(), hA_val.data() + nnz, hA0_val.data());
+
+            host_dense_vector<I> hB0_row_gold(size_B);
+            host_dense_vector<I> hB0_col_gold(size_B);
+            host_dense_vector<T> hB0_val_gold(size_B);
+            for(int64_t batch = 0; batch < batch_count; ++batch)
+            {
+                std::copy(hB_row_gold.data(),
+                          hB_row_gold.data() + nnz,
+                          hB0_row_gold.data() + batch * batch_stride_B);
+                std::copy(hB_col_gold.data(),
+                          hB_col_gold.data() + nnz,
+                          hB0_col_gold.data() + batch * batch_stride_B);
+                std::copy(hB_val_gold.data(),
+                          hB_val_gold.data() + nnz,
+                          hB0_val_gold.data() + batch * batch_stride_B);
+            }
+
+            device_dense_vector<I> dA0_row(hA0_row);
+            device_dense_vector<I> dA0_col(hA0_col);
+            device_dense_vector<T> dA0_val(hA0_val);
+            rocsparse_local_spmat  matA0(
+                M, N, nnz, dA0_row, dA0_col, dA0_val, get_indextype<I>(), base, get_datatype<T>());
+
+            size_t broadcast_buffer_size = 0;
+            CHECK_ROCSPARSE_ERROR(rocsparse_spsort_buffer_size(handle,
+                                                               descr,
+                                                               matA0,
+                                                               matB,
+                                                               rocsparse_spsort_stage_compute,
+                                                               &broadcast_buffer_size,
+                                                               nullptr));
+            void* broadcast_dbuffer = nullptr;
+            CHECK_HIP_ERROR(rocsparse_hipMalloc(&broadcast_dbuffer, broadcast_buffer_size));
+            CHECK_ROCSPARSE_ERROR(rocsparse_spsort(handle,
+                                                   descr,
+                                                   matA0,
+                                                   matB,
+                                                   rocsparse_spsort_stage_compute,
+                                                   broadcast_buffer_size,
+                                                   broadcast_dbuffer,
+                                                   nullptr));
+            CHECK_HIP_ERROR(rocsparse_hipFree(broadcast_dbuffer));
+
+            hB0_row_gold.unit_check(dB_row);
+            hB0_col_gold.unit_check(dB_col);
+            hB0_val_gold.unit_check(dB_val);
+            hA0_row.unit_check(dA0_row);
+            hA0_col.unit_check(dA0_col);
+            hA0_val.unit_check(dA0_val);
+        }
 
         // In place: A is sorted into itself.
         size_t in_place_buffer_size = 0;

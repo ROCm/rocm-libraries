@@ -55,6 +55,7 @@ Tests:
   N: [242]
   baseA: *all_rocsparse_index_base
   direction: *all_rocsparse_direction
+  algo: [0, 1]
   matrix: [rocsparse_matrix_random]
 
 - name: spsort_coo
@@ -78,6 +79,7 @@ Tests:
   batch_count: [2]
   baseA: [rocsparse_index_base_one]
   direction: *all_rocsparse_direction
+  algo: [0, 1]
   matrix: [rocsparse_matrix_random]
 
 - name: spsort_coo_batched
