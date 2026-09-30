@@ -54,9 +54,9 @@ namespace rocsparse
         uint32_t endbit   = rocsparse::clz(m);
 
         // Determine max buffer size
-        size_t size;
         *buffer_size = 0;
 
+        size_t size = std::numeric_limits<size_t>::max();
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::radix_sort_pairs_buffer_size<J, J>(
             handle, nnz, startbit, endbit, &size)));
 
@@ -72,8 +72,8 @@ namespace rocsparse
 
         endbit = rocsparse::clz(n);
 
-        size_t size1;
-        size_t size2;
+        size_t size1 = std::numeric_limits<size_t>::max();
+        size_t size2 = std::numeric_limits<size_t>::max();
         RETURN_IF_ROCSPARSE_ERROR(
             (rocsparse::primitives::segmented_radix_sort_pairs_buffer_size<J, J, J>(
                 handle, nnz, m, startbit, endbit, &size1)));
