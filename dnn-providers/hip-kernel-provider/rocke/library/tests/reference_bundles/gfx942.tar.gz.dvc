@@ -2,4 +2,4 @@ outs:
 - md5: ef934e8763b21ddfadcbfecfa2810451
   size: 25568429
   hash: md5
-  path: sdpa_reference_bundle.tar.gz
+  path: gfx942.tar.gz

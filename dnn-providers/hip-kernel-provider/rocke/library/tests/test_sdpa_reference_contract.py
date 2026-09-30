@@ -15,9 +15,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from sdpa_reference.architectures import ARCHITECTURES, baseline_lock, get_architecture
+from sdpa_reference.architectures.gfx942 import CASES
 from sdpa_reference.cli import load_bundle, verify_case
 from sdpa_reference.contract import (
-    CASES,
     Case,
     ErrorBudget,
     array_digest,
@@ -140,6 +141,7 @@ def _bundle(tmp_path):
         "cases": {
             case.id: {
                 "case": asdict(case),
+                "device_target": "gfx942:sramecc+:xnack-",
                 "budget": asdict(ErrorBudget(case.tolerance, 0.001, case.margin)),
                 "comparison_limit": ErrorBudget(
                     case.tolerance, 0.001, case.margin
@@ -327,3 +329,20 @@ def test_reused_worker_failures_are_not_silently_retried(tmp_path, behavior):
         assert not session.workers
     finally:
         session.close()
+
+
+def test_architecture_enrollment_and_locks():
+    assert ARCHITECTURES == ("gfx942",)
+    assert get_architecture("gfx942").CASES == CASES
+    assert baseline_lock("gfx942").is_file()
+    for unsupported in ("gfx950", "gfx1151", "../gfx942"):
+        with pytest.raises(ValueError, match="not enrolled"):
+            get_architecture(unsupported)
+
+
+def test_bundle_cannot_be_used_for_a_different_architecture(tmp_path):
+    manifest = _bundle(tmp_path)
+    manifest["cases"][CASES[0].id]["device_target"] = "gfx950:sramecc+:xnack-"
+    _lock(tmp_path, manifest)
+    with pytest.raises(ValueError, match="different architecture"):
+        load_bundle(tmp_path, tmp_path / "lock.json", architecture="gfx942")

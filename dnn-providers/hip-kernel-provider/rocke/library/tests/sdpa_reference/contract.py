@@ -26,7 +26,7 @@ SCHEMA_VERSION = 1
 
 @dataclass(frozen=True)
 class Case:
-    """One parameterization of the existing gfx942 dense SDPA numeric cohort."""
+    """One dense SDPA parameterization shared by architecture-specific cohorts."""
 
     dtype: str
     head_dim: int
@@ -64,22 +64,6 @@ class Case:
     def scale(self) -> float:
         # The launch ABI stores scale as f32. Qualify that same scalar value.
         return float(np.float32(1.0 / math.sqrt(self.head_dim)))
-
-
-CASES = tuple(
-    Case(*row)
-    for row in (
-        ("fp16", 128, 16, 4, False, True),
-        ("fp16", 128, 16, 4, True, True),
-        ("bf16", 128, 16, 4, True, True),
-        ("bf16", 128, 16, 4, False, True),
-        ("fp16", 64, 16, 16, False, True),
-        ("bf16", 64, 16, 4, True, True),
-        ("fp16", 128, 16, 16, False, True),
-        ("fp16", 128, 16, 4, False, False),
-    )
-)
-CASE_BY_ID = {case.id: case for case in CASES}
 
 
 def encode(values: np.ndarray, dtype: str) -> np.ndarray:

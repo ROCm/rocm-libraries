@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .architectures import get_architecture
 from .contract import Case, array_digest, decode, file_digest, write_json
 
 
@@ -30,8 +31,11 @@ def run(request: dict, output: Path) -> None:
     root = Path(request["platform_root"]).resolve()
     if not Path(rocke.__file__).resolve().is_relative_to(root):
         raise RuntimeError("worker imported rocKE outside its selected source/runtime")
-    if get_device_arch() != "gfx942":
-        raise RuntimeError("SDPA correctness requires a HIP-visible gfx942 device")
+    target = get_architecture(request.get("architecture", "gfx942"))
+    if get_device_arch() != target.NAME:
+        raise RuntimeError(
+            f"SDPA correctness requires a HIP-visible {target.NAME} device"
+        )
     case = Case(**request["case"])
     with np.load(request["inputs"], allow_pickle=False) as archive:
         arrays = {name: archive[name] for name in ("q", "k", "v")}
@@ -60,44 +64,7 @@ def run(request: dict, output: Path) -> None:
             )
 
         if request["mode"] == "source":
-            import kernels
-            from dispatch.attention import AttentionRequest
-            from dispatch.attention.gfx942 import _dense_spec
-            from kernels.common.attention_dense_spec import attention_dense_cache_key
-            from kernels.gfx942.attention_dense import (
-                _DENSE_LAUNCHER_CACHE,
-                _as_gfx942_spec,
-                attention_dense_block,
-                attention_dense_grid,
-                run_attention_dense_torch,
-            )
-
-            if (
-                not Path(kernels.__file__)
-                .resolve()
-                .is_relative_to(Path(request["library_root"]).resolve())
-            ):
-                raise RuntimeError(
-                    "worker imported kernels outside the selected library"
-                )
-            spec = _as_gfx942_spec(
-                _dense_spec(
-                    AttentionRequest(
-                        batch=case.batch,
-                        nhead_q=case.query_heads,
-                        nhead_k=case.kv_heads,
-                        seqlen_q=case.sequence_length,
-                        seqlen_k=case.sequence_length,
-                        hdim_q=case.head_dim,
-                        hdim_v=case.head_dim,
-                        arch="gfx942",
-                        mask_type=1 if case.causal else 0,
-                        dtype=case.dtype,
-                        algorithm="attention_dense",
-                        dense_persistent="on" if case.persistent else "off",
-                    )
-                )
-            )
+            spec = target.prepare(case, request["library_root"])
         else:
             metadata = request["kernel"]
             hsaco = Path(request["hsaco"])
@@ -126,14 +93,7 @@ def run(request: dict, output: Path) -> None:
                 # launch must never inherit a plausible answer from allocation.
                 rt.memset(buffers["out"].ptr(), 0xFF, host_out.nbytes)
                 if request["mode"] == "source":
-                    run_attention_dense_torch(
-                        spec=spec,
-                        q=buffers["q"],
-                        k=buffers["k"],
-                        v=buffers["v"],
-                        out=buffers["out"],
-                        scale=case.scale,
-                    )
+                    target.launch(spec, buffers, case.scale)
                 else:
                     values = {
                         "q_ptr": buffers["q"],
@@ -194,19 +154,10 @@ def run(request: dict, output: Path) -> None:
                 "sha256": file_digest(compiler) if compiler.is_file() else None,
                 "llvm_flavor": _resolve_llvm_flavor(),
             }
-            launcher = _DENSE_LAUNCHER_CACHE[
-                attention_dense_cache_key(spec, arch="gfx942")
-            ]
+            code, kernel = target.exported_kernel(spec)
             hsaco = Path(request["export"])
-            hsaco.write_bytes(launcher._hsaco)
-            report["kernel"] = {
-                "name": launcher.kernel_name,
-                "signature": launcher.signature,
-                "grid": attention_dense_grid(spec),
-                "block": attention_dense_block(spec),
-                "runtime_shape": spec.runtime_shape,
-                "sha256": file_digest(hsaco),
-            }
+            hsaco.write_bytes(code)
+            report["kernel"] = dict(kernel, sha256=file_digest(hsaco))
         np.savez(output / "outputs.npz", **results)
         write_json(output / "report.json", report)
     finally:

@@ -120,27 +120,43 @@ the strategy's biggest holes live (see
   executions fail when hardware or qualification is missing. The first cohort
   is enrolled in installed tests when a qualified bundle is supplied at build time.
   Provider builds enable `ROCKE_INSTALL_SDPA_REFERENCE` by default. Run
-  `dvc pull dnn-providers/hip-kernel-provider/rocke/library/tests/sdpa_reference_bundle.tar.gz.dvc`
+  `dvc pull dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/gfx942.tar.gz.dvc`
   from the repository root before configuring. TheRock already performs this
   DVC download during source preparation. CMake extracts the archive, validates
   every payload hash against
-  [`baseline_lock.json`](library/tests/sdpa_reference/baseline_lock.json), and
+  [`baseline_lock.json`](library/tests/sdpa_reference/architectures/gfx942/baseline_lock.json), and
   installs it under the existing provider `tests/**` artifact capture.
   Missing or corrupt data fails configuration. For builds that intentionally
   omit this GPU lane, use `-DROCKE_INSTALL_SDPA_REFERENCE=OFF`.
   `-DROCKE_SDPA_REFERENCE_BUNDLE=<qualified-bundle>` remains an explicit local
-  override. Standalone platform builds do not enable archive staging by default.
+  override for gfx942. Target-specific overrides use
+  `-DROCKE_SDPA_REFERENCE_BUNDLE_gfx942=<qualified-bundle>`; runtime pytest overrides
+  use `ROCKE_SDPA_REFERENCE_BUNDLE_GFX942`. Standalone platform builds do not enable
+  archive staging by default.
   For source verification, run
-  `python library/tests/run_sdpa_reference.py verify --bundle <qualified-bundle> --current-root .`
+  `python library/tests/run_sdpa_reference.py verify --arch gfx942 --bundle <qualified-bundle> --current-root .`
   from the rocKE root with NumPy, HIP, and COMGR; Torch is not required.
   The installed GPU suite reuses separate baseline and current worker processes
   across cases. Each case still executes both versions twice and validates its
   outputs independently; worker failures and timeouts fail the test.
   To publish a replacement, independently qualify it first, update the source
-  lock, and use `python library/tests/sdpa_reference/artifact.py pack --bundle <qualified-bundle> --lock library/tests/sdpa_reference/baseline_lock.json --archive library/tests/sdpa_reference_bundle.tar.gz`
+  lock, and use `python library/tests/sdpa_reference/artifact.py pack --bundle <qualified-bundle> --lock library/tests/sdpa_reference/architectures/gfx942/baseline_lock.json --archive library/tests/reference_bundles/gfx942.tar.gz`
   from the rocKE root. Then run `dvc add` and a scoped `dvc push` for the
   archive from the repository root before pushing its Git pointer. Git tracks
   the lock, pointer, and ignore entry; compiled kernels and inputs stay in DVC.
+  Architecture enrollments are listed in
+  [`architectures/registry.json`](library/tests/sdpa_reference/architectures/registry.json),
+  shared by CMake and Python. Each architecture owns its case list, source-dispatch
+  adapter, and baseline lock under `sdpa_reference/architectures/<arch>/`, with a
+  separate DVC archive under `reference_bundles/<arch>.tar.gz`. Installed bundles
+  live under `tests/library/tests/reference_bundles/<arch>/`.
+  `ROCKE_SDPA_REFERENCE_ARCHITECTURES` selects the enrolled bundles to install;
+  unknown architectures fail configuration. Only gfx942 is currently enrolled.
+  Adding another architecture requires its adapter, independently qualified lock
+  and bundle, and a registry entry; adding an empty registry entry is insufficient.
+  Qualification accepts `--arch` and freezes the shared worker and architecture
+  adapters into the new bundle. Existing bundles keep their original frozen code.
+
 - **Nothing else in this document proves the math is right.** Byte-identity
   ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) and golden IR
   ([§4.2](#42-does-the-platforms-output-stay-stable)) are both blind to a

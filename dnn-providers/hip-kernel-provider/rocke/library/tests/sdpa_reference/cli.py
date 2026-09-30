@@ -25,10 +25,9 @@ from pathlib import Path, PurePosixPath
 import numpy as np
 
 from .session import _ACTIVE
+from .architectures import ARCHITECTURES, baseline_lock, get_architecture
 
 from .contract import (
-    CASES,
-    CASE_BY_ID,
     SCHEMA_VERSION,
     Case,
     ErrorBudget,
@@ -43,7 +42,7 @@ from .contract import (
 )
 
 _PACKAGE = Path(__file__).resolve().parent
-DEFAULT_LOCK = _PACKAGE / "baseline_lock.json"
+DEFAULT_LOCK = baseline_lock("gfx942")
 _SOURCE_PREFIX = PurePosixPath("dnn-providers/hip-kernel-provider/rocke")
 
 
@@ -140,8 +139,11 @@ def _worker(
     return outputs, report
 
 
-def qualify(baseline: Path, output: Path, repetitions: int) -> None:
+def qualify(
+    baseline: Path, output: Path, repetitions: int, architecture: str = "gfx942"
+) -> None:
     """Measure the old version's bounds and require deterministic old outputs."""
+    target = get_architecture(architecture)
     if repetitions < 2:
         raise ValueError("qualification requires at least two old executions")
     metadata = json.loads((baseline / "snapshot.json").read_text())
@@ -160,8 +162,13 @@ def qualify(baseline: Path, output: Path, repetitions: int) -> None:
     runner.mkdir(parents=True)
     for name in ("__init__.py", "contract.py", "worker.py"):
         shutil.copy2(_PACKAGE / name, runner / name)
+    shutil.copytree(
+        _PACKAGE / "architectures",
+        runner / "architectures",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "baseline_lock.json"),
+    )
     entries = {}
-    for case in CASES:
+    for case in target.CASES:
         case_dir = payload / "cases" / case.id
         case_dir.mkdir(parents=True)
         inputs = make_inputs(case)
@@ -171,6 +178,7 @@ def qualify(baseline: Path, output: Path, repetitions: int) -> None:
             outputs, report = _worker(
                 {
                     "mode": "source",
+                    "architecture": architecture,
                     "case": asdict(case),
                     "inputs": str(case_dir / "inputs.npz"),
                     "input_digests": input_digests,
@@ -233,9 +241,12 @@ def qualify(baseline: Path, output: Path, repetitions: int) -> None:
     print("Qualification complete; review qualification-lock.json before promotion.")
 
 
-def load_bundle(bundle: Path, lock_path: Path = DEFAULT_LOCK) -> dict:
+def load_bundle(
+    bundle: Path, lock_path: Path | None = None, *, architecture: str = "gfx942"
+) -> dict:
     """Require the independently pinned manifest, payload, and exact case cohort."""
-    lock = json.loads(lock_path.read_text())
+    target = get_architecture(architecture)
+    lock = json.loads((lock_path or baseline_lock(architecture)).read_text())
     if lock["schema"] != SCHEMA_VERSION:
         raise ValueError("unsupported SDPA lock schema")
     if file_digest(bundle / "manifest.json") != lock["manifest_sha256"]:
@@ -248,10 +259,12 @@ def load_bundle(bundle: Path, lock_path: Path = DEFAULT_LOCK) -> dict:
         raise ValueError("SDPA baseline identity mismatch")
     if payload_digests(bundle / "payload") != manifest["files"]:
         raise ValueError("SDPA bundle payload has missing, modified, or extra files")
-    if set(manifest["cases"]) != set(CASE_BY_ID):
+    if set(manifest["cases"]) != {case.id for case in target.CASES}:
         raise ValueError("SDPA bundle does not cover the complete enrolled cohort")
-    for case in CASES:
+    for case in target.CASES:
         entry = manifest["cases"][case.id]
+        if entry["device_target"].split(":", 1)[0] != architecture:
+            raise ValueError(f"SDPA bundle targets a different architecture: {case.id}")
         if entry["case"] != asdict(case):
             raise ValueError(f"SDPA case contract changed: {case.id}")
         budget = ErrorBudget(**entry["budget"])
@@ -282,14 +295,19 @@ def verify_case(
     manifest: dict,
     current_root: Path | None = None,
     repetitions: int = 2,
+    architecture: str = "gfx942",
 ) -> dict:
     """Run old/current in separate interpreters and check every current output."""
     if repetitions < 1:
         raise ValueError("verification must execute at least once")
+    target = get_architecture(architecture)
+    if case not in target.CASES:
+        raise ValueError("case is not enrolled for the selected architecture")
     entry = manifest["cases"][case.id]
     payload = bundle / "payload"
     case_dir = payload / "cases" / case.id
     base = {
+        "architecture": architecture,
         "case": asdict(case),
         "inputs": str(case_dir / "inputs.npz"),
         "input_digests": entry["input_digests"],
@@ -356,33 +374,44 @@ def main() -> None:
     export.add_argument("--repository", required=True, type=Path)
     export.add_argument("--revision", required=True)
     export.add_argument("--output", required=True, type=Path)
-    qualification = commands.add_parser("qualify", help="qualify old SDPA on gfx942")
+    qualification = commands.add_parser(
+        "qualify", help="qualify old SDPA on an enrolled architecture"
+    )
+    qualification.add_argument("--arch", choices=ARCHITECTURES, default="gfx942")
     qualification.add_argument("--baseline", required=True, type=Path)
     qualification.add_argument("--output", required=True, type=Path)
     qualification.add_argument("--repetitions", type=int, default=3)
     verification = commands.add_parser(
         "verify", help="run every required GPU comparison"
     )
+    verification.add_argument("--arch", choices=ARCHITECTURES, default="gfx942")
     verification.add_argument("--bundle", required=True, type=Path)
-    verification.add_argument("--lock", type=Path, default=DEFAULT_LOCK)
+    verification.add_argument("--lock", type=Path)
     verification.add_argument("--current-root", type=Path)
     verification.add_argument("--repetitions", type=int, default=2)
     args = parser.parse_args()
     if args.command == "snapshot":
         snapshot(args.repository.resolve(), args.revision, args.output.resolve())
     elif args.command == "qualify":
-        qualify(args.baseline.resolve(), args.output.resolve(), args.repetitions)
+        qualify(
+            args.baseline.resolve(), args.output.resolve(), args.repetitions, args.arch
+        )
     else:
         bundle = args.bundle.resolve()
-        manifest = load_bundle(bundle, args.lock)
+        manifest = load_bundle(bundle, args.lock, architecture=args.arch)
+        target = get_architecture(args.arch)
         current = args.current_root.resolve() if args.current_root else None
-        for case in CASES:
+        for case in target.CASES:
             report = verify_case(
                 case,
                 bundle=bundle,
                 manifest=manifest,
                 current_root=current,
                 repetitions=args.repetitions,
+                architecture=args.arch,
             )
             print(json.dumps(report, sort_keys=True), flush=True)
-        print(f"SDPA: {len(CASES)}/{len(CASES)} required GPU cases passed", flush=True)
+        print(
+            f"SDPA: {len(target.CASES)}/{len(target.CASES)} required GPU cases passed",
+            flush=True,
+        )

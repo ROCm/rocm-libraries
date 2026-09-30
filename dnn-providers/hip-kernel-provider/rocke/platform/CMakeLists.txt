@@ -314,30 +314,69 @@ if(ROCKE_INSTALL_TESTS)
                 PATTERN "__pycache__" EXCLUDE
                 REGEX "\\.pyc$" EXCLUDE)
       endforeach()
-      if(ROCKE_INSTALL_SDPA_REFERENCE AND NOT ROCKE_SDPA_REFERENCE_BUNDLE)
-        set(_ROCKE_SDPA_ARCHIVE "${_ROCKE_LIBRARY_DIR}/tests/sdpa_reference_bundle.tar.gz")
-        if(NOT EXISTS "${_ROCKE_SDPA_ARCHIVE}")
-          message(FATAL_ERROR
-                  "SDPA reference archive missing. Run dvc pull for "
-                  "dnn-providers/hip-kernel-provider/rocke/library/tests/sdpa_reference_bundle.tar.gz.dvc "
-                  "or configure with ROCKE_INSTALL_SDPA_REFERENCE=OFF.")
-        endif()
-        find_package(Python3 COMPONENTS Interpreter REQUIRED)
-        file(SHA256 "${_ROCKE_SDPA_ARCHIVE}" _ROCKE_SDPA_ARCHIVE_SHA256)
-        set(ROCKE_SDPA_REFERENCE_BUNDLE
-            "${CMAKE_CURRENT_BINARY_DIR}/sdpa-reference/${_ROCKE_SDPA_ARCHIVE_SHA256}")
-        execute_process(
-          COMMAND "${Python3_EXECUTABLE}" -I
-                  "${_ROCKE_LIBRARY_DIR}/tests/sdpa_reference/artifact.py" unpack
-                  --archive "${_ROCKE_SDPA_ARCHIVE}"
-                  --bundle "${ROCKE_SDPA_REFERENCE_BUNDLE}"
-                  --lock "${_ROCKE_LIBRARY_DIR}/tests/sdpa_reference/baseline_lock.json"
-          RESULT_VARIABLE _ROCKE_SDPA_UNPACK_RESULT
-          ERROR_VARIABLE _ROCKE_SDPA_UNPACK_ERROR)
-        if(NOT _ROCKE_SDPA_UNPACK_RESULT EQUAL 0)
-          message(FATAL_ERROR "SDPA reference staging failed: ${_ROCKE_SDPA_UNPACK_ERROR}")
-        endif()
+      # Use the same explicit enrollment list as the Python harness.
+      file(READ "${_ROCKE_LIBRARY_DIR}/tests/sdpa_reference/architectures/registry.json"
+           _ROCKE_SDPA_REGISTRY)
+      string(JSON _ROCKE_SDPA_COUNT LENGTH "${_ROCKE_SDPA_REGISTRY}")
+      math(EXPR _ROCKE_SDPA_LAST "${_ROCKE_SDPA_COUNT} - 1")
+      set(_ROCKE_SDPA_ARCHITECTURES "")
+      foreach(_index RANGE 0 ${_ROCKE_SDPA_LAST} 1)
+        string(JSON _arch GET "${_ROCKE_SDPA_REGISTRY}" ${_index})
+        list(APPEND _ROCKE_SDPA_ARCHITECTURES "${_arch}")
+      endforeach()
+      set(ROCKE_SDPA_REFERENCE_ARCHITECTURES "${_ROCKE_SDPA_ARCHITECTURES}" CACHE STRING
+          "Enrolled SDPA reference architectures to install")
+      if(ROCKE_INSTALL_SDPA_REFERENCE AND NOT ROCKE_SDPA_REFERENCE_ARCHITECTURES)
+        message(FATAL_ERROR "Select an enrolled SDPA architecture or disable ROCKE_INSTALL_SDPA_REFERENCE")
       endif()
+      foreach(_arch IN LISTS ROCKE_SDPA_REFERENCE_ARCHITECTURES)
+        if(NOT _arch IN_LIST _ROCKE_SDPA_ARCHITECTURES)
+          message(FATAL_ERROR "SDPA reference architecture is not enrolled: ${_arch}")
+        endif()
+        set(ROCKE_SDPA_REFERENCE_BUNDLE_${_arch} "" CACHE PATH
+            "Optional qualified SDPA bundle directory for ${_arch}")
+        set(_bundle "${ROCKE_SDPA_REFERENCE_BUNDLE_${_arch}}")
+        # Preserve the original local override for its original target.
+        if(_arch STREQUAL "gfx942" AND ROCKE_SDPA_REFERENCE_BUNDLE AND NOT _bundle)
+          set(_bundle "${ROCKE_SDPA_REFERENCE_BUNDLE}")
+        endif()
+        set(_lock "${_ROCKE_LIBRARY_DIR}/tests/sdpa_reference/architectures/${_arch}/baseline_lock.json")
+        if(ROCKE_INSTALL_SDPA_REFERENCE AND NOT _bundle)
+          set(_archive "${_ROCKE_LIBRARY_DIR}/tests/reference_bundles/${_arch}.tar.gz")
+          if(NOT EXISTS "${_archive}")
+            message(FATAL_ERROR
+                    "SDPA reference archive missing. Run dvc pull for "
+                    "dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/${_arch}.tar.gz.dvc "
+                    "or configure with ROCKE_INSTALL_SDPA_REFERENCE=OFF.")
+          endif()
+          find_package(Python3 COMPONENTS Interpreter REQUIRED)
+          file(SHA256 "${_archive}" _archive_sha256)
+          set(_bundle "${CMAKE_CURRENT_BINARY_DIR}/sdpa-reference/${_arch}/${_archive_sha256}")
+          execute_process(
+            COMMAND "${Python3_EXECUTABLE}" -I
+                    "${_ROCKE_LIBRARY_DIR}/tests/sdpa_reference/artifact.py" unpack
+                    --archive "${_archive}" --bundle "${_bundle}" --lock "${_lock}"
+            RESULT_VARIABLE _result ERROR_VARIABLE _error)
+          if(NOT _result EQUAL 0)
+            message(FATAL_ERROR "SDPA reference staging failed for ${_arch}: ${_error}")
+          endif()
+        endif()
+        if(_bundle)
+          find_package(Python3 COMPONENTS Interpreter REQUIRED)
+          execute_process(
+            COMMAND "${Python3_EXECUTABLE}" -I
+                    "${_ROCKE_LIBRARY_DIR}/tests/sdpa_reference/artifact.py" validate
+                    --bundle "${_bundle}" --lock "${_lock}"
+            RESULT_VARIABLE _result ERROR_VARIABLE _error)
+          if(NOT _result EQUAL 0)
+            message(FATAL_ERROR "SDPA reference validation failed for ${_arch}: ${_error}")
+          endif()
+          install(DIRECTORY "${_bundle}/"
+                  DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library/tests/reference_bundles/${_arch}"
+                  PATTERN "__pycache__" EXCLUDE REGEX "\\.pyc$" EXCLUDE)
+          set(_ROCKE_HAS_SDPA_REFERENCE ON)
+        endif()
+      endforeach()
 
       # Install the library test tree for the library pytest entries below.
       # cmake-lint: disable=E1122
@@ -346,25 +385,8 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "__pycache__" EXCLUDE
               REGEX "\\.pyc$" EXCLUDE
               PATTERN "*.c" EXCLUDE
-              PATTERN "sdpa_reference_bundle.tar.gz*" EXCLUDE
+              PATTERN "reference_bundles" EXCLUDE
               PATTERN "run_all.py" EXCLUDE)
-      if(ROCKE_SDPA_REFERENCE_BUNDLE)
-        find_package(Python3 COMPONENTS Interpreter REQUIRED)
-        execute_process(
-          COMMAND "${Python3_EXECUTABLE}" -I
-                  "${_ROCKE_LIBRARY_DIR}/tests/sdpa_reference/artifact.py" validate
-                  --bundle "${ROCKE_SDPA_REFERENCE_BUNDLE}"
-                  --lock "${_ROCKE_LIBRARY_DIR}/tests/sdpa_reference/baseline_lock.json"
-          RESULT_VARIABLE _ROCKE_SDPA_VALIDATE_RESULT
-          ERROR_VARIABLE _ROCKE_SDPA_VALIDATE_ERROR)
-        if(NOT _ROCKE_SDPA_VALIDATE_RESULT EQUAL 0)
-          message(FATAL_ERROR "SDPA reference validation failed: ${_ROCKE_SDPA_VALIDATE_ERROR}")
-        endif()
-        install(DIRECTORY "${ROCKE_SDPA_REFERENCE_BUNDLE}/"
-                DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library/tests/sdpa_reference_bundle"
-                PATTERN "__pycache__" EXCLUDE
-                REGEX "\\.pyc$" EXCLUDE)
-      endif()
     else()
       message(WARNING
               "rocKE: library tree not found at ${_ROCKE_LIBRARY_DIR}; the installed "
@@ -481,7 +503,7 @@ if(ROCKE_INSTALL_TESTS)
     # tests/ so the provider's existing artifact manifest captures them. Once
     # enrolled, missing gfx942 hardware or a failed qualification check is an
     # error; other GPU architectures remain explicitly outside this pilot.
-    if(ROCKE_SDPA_REFERENCE_BUNDLE)
+    if(_ROCKE_HAS_SDPA_REFERENCE)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "add_test(rocke_sdpa_gpu_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_sdpa_pinned_reference.py\" -v -rs)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
