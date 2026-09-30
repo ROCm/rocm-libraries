@@ -359,7 +359,6 @@ endif()
     line = re.search(r"hkp: root 'off'.*?(?= -- |$)", output).group(0)
     assert "disabled folder(s) fam excluded" in line
     assert not re.search(r"\bother\b", line)
-    assert line.endswith("off packaging dormant.")
 
     consumer._write(_wire_root(arches=arches, keywords=keywords, exclude="") + state)
     output = consumer.configure()

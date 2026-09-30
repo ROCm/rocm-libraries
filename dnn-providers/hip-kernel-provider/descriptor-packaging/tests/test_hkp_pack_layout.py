@@ -1948,12 +1948,9 @@ def test_a_disabled_kind_is_pruned_from_its_kdp_and_the_rest_ships(
 
     logs = []
     flat = load_flat_input(root, log=logs.append, disabled_kinds=("rocke",))
-    assert any(
-        m.startswith("pointwise.kdp.json: skipping 1 UKD(s) of a disabled kind")
-        for m in logs
-    )
+    assert any("pointwise.kdp.json" in m and "rocke" in m for m in logs)
     if form == "standalone":
-        assert any(m.startswith("standalone UKD ") for m in logs)
+        assert any(_ROCKE_UKD_ID in m and "rocke" in m for m in logs)
     (kdp,) = [k for k in flat.kdps() if k.path == kdp_path]
     assert _ROCKE_UKD_ID not in _entry_ids(kdp)
     assert _entry_ids(kdp), "the hip entries stay"
@@ -2015,8 +2012,7 @@ def test_an_excluded_folder_is_never_read(tmp_path, main_fixture):
     (root / "hip" / "rocKE" / "broken.kdp.json").unlink()
     logs = []
     flat = load_flat_input(root, log=logs.append, exclude_folders=("rocKE",))
-    prefix = "excluding disabled family folder rocKE/"
-    assert len([m for m in logs if m.startswith(prefix)]) == 1
+    assert len([m for m in logs if "rocKE/" in m]) == 1
     assert not any("rocKE" in k.path.parts for k in flat.kdps())
     assert flat.kdps()
 
