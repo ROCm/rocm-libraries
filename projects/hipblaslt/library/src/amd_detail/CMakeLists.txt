@@ -9,6 +9,7 @@ target_sources(hipblaslt
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-ext.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-ext-op.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-mode.cpp"
 )
 
 if(HIPBLASLT_ENABLE_JIT)

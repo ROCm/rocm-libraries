@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "hipblaslt-jit-code-object.hpp"
+#include "hipblaslt-jit-mode.hpp"
 #include "rocblaslt_secure_env.hpp"
 
 #include <amd_comgr/amd_comgr.h>
@@ -950,7 +951,8 @@ namespace hipblaslt_jit::code_object
 
     ComgrCache comgrCachePolicy(const char* jitMode, const char* comgrCache) noexcept
     {
-        if(!jitMode || (std::strcmp(jitMode, "1") != 0 && std::strcmp(jitMode, "2") != 0))
+        Mode mode;
+        if(!parseMode(jitMode, mode) || mode == Mode::Off)
             return ComgrCache::Default;
         return comgrCache ? ComgrCache::UserValue : ComgrCache::Disabled;
     }
