@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from typing import Optional, OrderedDict, Callable
+from typing import Any, Dict, OrderedDict, Callable
 import sys
 
 sys.path.append("../")
@@ -37,18 +37,18 @@ class TransformTuner(BaseTuner):
     def __init__(self, args: TunerArgs):
         super().__init__(args)
     
-    def _get_tune_params(self, key_type: str, value_type: Optional[str] = None) -> OrderedDict:
+    def _get_tune_params(self, types: Dict[str, Any]) -> OrderedDict:
         """Returns tuning parameters and their possible values as an OrderedDict.
         Each parameter maps to a list of valid values to explore during tuning."""
         params = OrderedDict()
-        element_size = TYPE_CONFIGS[key_type].size
+        element_size = TYPE_CONFIGS[types["value_type"]].size
         max_items = min(64 // element_size, 32)
         params["block_size_x"] = list(range(64, 1025, 64))
         params["ipt"] = list(range(1, max_items + 1, 1))
         return params
 
     def _get_restrictions(
-        self, key_type: str, value_type: Optional[str] = None
+        self, types: Dict[str, Any]
     ) -> Callable[[dict], bool]:
         """Constraints for what parameter combinations are valid during tuning"""
 
@@ -58,16 +58,10 @@ class TransformTuner(BaseTuner):
 
         return validate
 
-    def _get_key_type_name(self) -> str:
-        return "value_type"
-    
-    def _get_value_type_name(self) -> str:
-        return ""
-
     def tune_all(self) -> None:
         """Tune for all key type and value type combinations"""
         for value_type in COMMON_VALUE_TYPES:
-            self.tune_type(value_type)
+            self.tune_type({"value_type": value_type})
 
 class Tuner(TransformTuner):
     pass

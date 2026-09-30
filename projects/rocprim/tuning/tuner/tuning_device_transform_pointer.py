@@ -21,7 +21,7 @@
 # THE SOFTWARE.
 
 import sys
-from typing import Callable, Optional, OrderedDict
+from typing import Any, Callable, Dict, OrderedDict
 
 sys.path.append("../")
 
@@ -34,11 +34,11 @@ class Tuner(TransformTuner):
     def _get_default_args(cls) -> TunerArgs:
             return TunerArgs(algo_full_name="device_transform_pointer")
 
-    def _get_tune_params(self, key_type: str, value_type: Optional[str] = None) -> OrderedDict:
+    def _get_tune_params(self, types: Dict[str, Any]) -> OrderedDict:
         """Returns tuning parameters and their possible values as an OrderedDict.
         Each parameter maps to a list of valid values to explore during tuning."""
         params = OrderedDict()
-        element_size = TYPE_CONFIGS[key_type].size
+        element_size = TYPE_CONFIGS[types["value_type"]].size
         max_items = min(64 // element_size, 32)
         params["block_size_x"] = list(range(64, 1025, 64))
         params["ipt"] = list(range(1, max_items + 1, 1))
