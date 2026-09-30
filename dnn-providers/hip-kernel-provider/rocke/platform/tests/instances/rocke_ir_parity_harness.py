@@ -127,6 +127,7 @@ def build_conv(
     epilogue="default",
     groups=1,
     vector_size_c=None,
+    group_merge=1,
 ):
     def _build():
         from kernels.common.conv_implicit_gemm import (
@@ -152,6 +153,7 @@ def build_conv(
             epilogue=epilogue,
             groups=groups,
             vector_size_c=vector_size_c,
+            group_merge=group_merge,
         )
         return build_implicit_gemm_conv(spec, arch=arch)
 
@@ -1578,6 +1580,79 @@ def cases():
             tile_k=32,
             pipeline="basic",
             epilogue="cshuffle",
+        ),
+    )
+
+    # Conv forward + merged groups (group_merge).
+    #
+    # Merging folds Gm conv groups into one GEMM so the vector-width picker
+    # sees Gm channels per group instead of 1. It is admissible only on
+    # depthwise shapes (cpg == kpg == 1), so these cases need their own
+    # problem: conv1/conv2 above are dense and would be rejected by the gate.
+    #
+    # conv_dw is depthwise -- C == K == groups == 64, so cpg == kpg == 1 and
+    # M == 2*14*14 == 392. The variants below span the axes that actually
+    # change emitted IR under merge, which is what makes the golden a
+    # regression gate rather than a single smoke hash:
+    #   - dw_unmerged is the group_merge=1 control. Without it a drift in the
+    #     merged hashes could not be attributed to the merge path rather than
+    #     to the depthwise path, which carried no coverage here at all.
+    #   - gm4/gm8/gm32 vary the shift and mask width (log2 Gm) on the B-load
+    #     diagonal.
+    #   - gm64 collapses merged groups to 1, which elides k_out_group_base
+    #     entirely; gm8/gm32 keep it emitted.
+    #   - dw_gm4_direct pins vector_size_c=1 to reach _emit_direct_epilogue.
+    #     Merged kpg otherwise auto-derives vec_c > 1, which the validator
+    #     turns into a cshuffle requirement, so without the pin every merged
+    #     case here would exercise only the cshuffle epilogue.
+    # The gfx942 case checks that merging is arch-independent: it shares the
+    # emitter path with gfx950 and differs only in atom and tile shape.
+    conv_dw = (2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1, 64)
+    for tag, gm, epi, vec_c in (
+        ("dw_unmerged", 1, "default", None),
+        ("dw_gm4_direct", 4, "default", 1),
+        ("dw_gm8_cshuffle", 8, "cshuffle", None),
+        ("dw_gm32_cshuffle", 32, "cshuffle", None),
+        ("dw_gm64_cshuffle", 64, "cshuffle", None),
+    ):
+        add(
+            "conv",
+            f"conv/gfx950/n2h14c64k64r3g64/{tag}",
+            "gfx950",
+            build_conv(
+                f"irhash_conv_950_{tag}",
+                "gfx950",
+                conv_dw,
+                wave_size=64,
+                wtm=32,
+                wtn=32,
+                wtk=16,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                pipeline="mem",
+                epilogue=epi,
+                vector_size_c=vec_c,
+                group_merge=gm,
+            ),
+        )
+    add(
+        "conv",
+        "conv/gfx942/n2h14c64k64r3g64/dw_gm8_cshuffle",
+        "gfx942",
+        build_conv(
+            "irhash_conv_942_dw_gm8",
+            "gfx942",
+            conv_dw,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            epilogue="cshuffle",
+            group_merge=8,
         ),
     )
 

@@ -130,6 +130,26 @@ as described in the notes.
   `conv_implicit_gemm_auto` is a separate MFMA-specialized autotuned path
   (raw `MfmaAtom`, K=32 kpack) that has not been ported to the WMMA atom
   contract, so it stays MFMA-only.
+- **Merged groups (`group_merge`)** is available in the forward
+  (`conv_implicit_gemm`) and wgrad (`conv_implicit_gemm_wgrad`) directions for
+  **depthwise** problems only (`cpg == kpg == 1`), on `wave_size == 64` (MFMA)
+  only, and is inert at its default of `1`. The degree must divide `groups`.
+  Beyond that the two directions restrict differently: forward additionally
+  rejects `async_dma` and the pointwise fast path (`Y == X == 1`), wgrad
+  additionally rejects `split_k`. Forward *dispatch* picks a degree
+  automatically on **gfx950**; other targets fall through to the unmerged
+  candidate. **Engine coverage differs between the two directions.** Forward is
+  implemented in **both** engines — `group_merge` is a field on the C-ABI spec
+  struct (`rocke_implicit_gemm_conv_spec`), is carried across the pybind
+  boundary, and the fwd parity emitters build five merged/depthwise configs
+  (`conv_implicit_gemm_emit.{py,c}` indices 17–21) spanning the unmerged
+  depthwise control, both epilogues, and degrees that keep merged `groups > 1`
+  as well as the degree that collapses it to 1. Byte-identity is therefore a
+  real gate on merged emission, not a vacuous one. **wgrad is Python-engine
+  only:** the C++ engine has no merged wgrad configuration to express and its
+  parity emitter builds unmerged configs exclusively, so merged *wgrad* specs
+  carry no structural parity coverage and are verified by on-GPU numerics
+  alone. That gap predates the forward port and is tracked as follow-up work.
 - **GPU-numeric verification on gfx1151** (launched on the Radeon 8060S,
   output compared against a numpy reference). **Verified PASS:**
   `elementwise`, `reduce2d`, `rmsnorm2d`, `layernorm2d`, `transpose2d`,

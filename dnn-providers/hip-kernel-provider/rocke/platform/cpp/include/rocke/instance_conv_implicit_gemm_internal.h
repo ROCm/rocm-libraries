@@ -154,6 +154,17 @@ typedef struct rocke_conv_build_ctx
     const char* arch; /* `arch` (NULL-normalised)      */
     const rocke_conv_build_overrides_t* ov; /* override callbacks (may NULL) */
     const rocke_conv_problem_t* p; /* &spec->problem (alias `p`)    */
+    /* ---- group merging (Gm) ---- *
+     * `p` stays the TRUE per-group problem: it sizes the tensors, which do not
+     * merge. `p_load` is the problem the *tile* covers -- spec.merged_problem,
+     * i.e. `p` with groups divided by group_merge, so its cpg/kpg become Gm on
+     * a depthwise shape. Every load-side site reads `p_load`; the two are the
+     * same object's value at group_merge 1, which is what keeps the default
+     * path byte-identical. Mirrors the Python builder's `p` / `p_load` split. */
+    rocke_conv_problem_t merged_problem; /* spec.merged_problem (by value)    */
+    const rocke_conv_problem_t* p_load; /* &merged_problem (alias `p_load`)  */
+    int group_merge; /* spec.group_merge (>= 1)           */
+    int group_merge_log2; /* log2(group_merge); 0 when Gm == 1 */
     const rocke_archtarget_t* target; /* ArchTarget.from_gfx(arch)     */
     const rocke_mmaop_t* op; /* _resolve_conv_op(spec, arch)  */
     const rocke_mfma_atom_t* atom; /* spec.atom (NULL on WMMA path) */
@@ -229,6 +240,11 @@ typedef struct rocke_conv_build_ctx
     /* ---- global -> LDS coalesced copy plan ---- */
     int threads; /* spec.block_size           */
     int load_vec; /* _choose_load_vec(spec)    */
+    /* Python carries _def_vec_a and _def_vec_b separately; they are equal here
+     * because default_vector_sizes derives both from cpg -- except under merge,
+     * where B is forced scalar (the merged B tile is 1/Gm dense and the diagonal
+     * mask is per-element, which a vector load cannot express). */
+    int load_vec_b; /* load_vec, or 1 under merge */
 
     /* ---- coordinate-transform descriptors ---- */
     rocke_tensor_descriptor_t* A_desc; /* make_a_descriptor(p, decompose_m); NULL if pointwise */
@@ -454,6 +470,22 @@ rocke_value_t* rocke_conv_b_descriptor(rocke_ir_builder_t* b,
                                        rocke_value_t* col,
                                        rocke_value_t** out_valid,
                                        void* ctx_user);
+
+/* b_descriptor for group_merge > 1: splits k_gemm into (y, x, g_k) with g_k
+ * innermost and ANDs the diagonal predicate g_k == g_n onto the load's valid.
+ * Installed into ctx->b_descriptor_fn by the build glue, so both loader legs
+ * pick it up. Same rocke_loads_descriptor_fn contract.
+ *
+ * Mirrors Python b_descriptor_merged (conv_implicit_gemm.py). Putting the mask
+ * on the *weight* load rather than the store is what keeps the output store
+ * dense: an invalid element takes the buffer descriptor's OOB sentinel and
+ * reads back as hardware zero, so the redundant MAC is a no-op and no memory
+ * traffic is issued. */
+rocke_value_t* rocke_conv_b_descriptor_merged(rocke_ir_builder_t* b,
+                                              rocke_value_t* row,
+                                              rocke_value_t* col,
+                                              rocke_value_t** out_valid,
+                                              void* ctx_user);
 
 /* ----- load / compute closures (ctx-driven) ----- */
 

@@ -80,14 +80,48 @@ _ASYNC_PIPELINE = "mem"
 # Split-K degrees swept when --split-k 0 (auto) is passed for wgrad.
 _SPLIT_K_AUTO = (128, 64, 32, 16, 8, 4, 2, 1)
 
-# Group-merge degrees swept for depthwise wgrad. Powers of two only: the
-# merged index math uses shifts and an xor.
-_GROUP_MERGE_SWEEP = (2, 4, 8, 16)
+# Group-merge degrees swept for depthwise wgrad and fwd. Powers of two only:
+# the merged index math splits the reduction index with a mask and a shift
+# (wgrad additionally uses an xor), and both gates enumerate the same set.
+#
+# Reaches 64 because that is what the fwd gate accepts. It is not free for
+# wgrad: its merged block filters on ``Gm <= tile_m`` and ``Z*Y*X*Gm <= tile_n``,
+# which rejects 32/64 for every filter bigger than 1x1 but does admit them on
+# pointwise depthwise, so a wgrad 1x1 sweep grows. That is the intended
+# behaviour -- the degrees were capped at 16 by nothing more than the fwd path
+# not existing yet -- and ``--sample`` is the lever if the count bites.
+_GROUP_MERGE_SWEEP = (2, 4, 8, 16, 32, 64)
 
 
 # ---------------------------------------------------------------------------
 # Result record
 # ---------------------------------------------------------------------------
+
+
+class FwdCombo(NamedTuple):
+    """One point in the forward sweep.
+
+    Was a bare 8-tuple from ``itertools.product`` until ``group_merge`` was
+    added. A NamedTuple for the reason :class:`WgradCombo` records below: two
+    sites unpack this positionally, and a 9th field appended to a bare tuple
+    breaks whichever one is not updated in the same change -- quietly, because
+    the extra element only exists on the depthwise leg.
+
+    ``group_merge`` is defaulted so every non-merged construction site stays
+    correct without knowing the field is there.
+    """
+
+    tile_m: int
+    tile_n: int
+    tile_k: int
+    warp_m: int
+    warp_n: int
+    warp_tile_mn: int
+    pipeline: str
+    epilogue: str
+    # Conv groups folded into one GEMM tile. > 1 only for depthwise, where the
+    # per-group channel count is 1 and every access would otherwise be scalar.
+    group_merge: int = 1
 
 
 class WgradCombo(NamedTuple):
@@ -152,13 +186,23 @@ class Result:
 
 
 def _grid_for_spec(spec, p):
-    """Derive launch grid from spec and problem."""
-    M = p.M
-    N_gemm = p.N_gemm
+    """Derive the forward launch grid from spec and problem.
+
+    Reads ``spec.grid_*`` rather than ``p`` directly, for the same reason
+    :func:`_grid_for_wgrad_spec` does: under ``group_merge`` one workgroup owns
+    ``Gm`` conv groups, so the GEMM-N extent is ``Gm x`` larger and there are
+    ``Gm x`` fewer group slices. Taking either off the true problem is
+    host/device divergence -- and a silent one, because the true ``N_gemm`` is 1
+    on depthwise, so ``gx`` would stay 1 while the kernel writes ``Gm`` columns
+    and ``Gm x`` redundant CTAs raced on the same outputs. All three are equal
+    to the unmerged value when ``group_merge == 1``.
+    """
+    M = spec.grid_M
+    N_gemm = spec.grid_N_gemm
     gx = (N_gemm + spec.tile_n - 1) // spec.tile_n
     gy = (M + spec.tile_m - 1) // spec.tile_m
     # grid_order="NM": x=N-tile, y=M-tile (mirrors bake_off_implicit_gemm)
-    return (gx, gy, p.groups)
+    return (gx, gy, spec.grid_groups)
 
 
 def _grid_for_wgrad_spec(spec, split_k: int):
@@ -1150,6 +1194,11 @@ def main() -> int:
         "pipeline",
         "epilogue",
         "split_k",
+        # Merge degree (fwd depthwise; 1 = unmerged). It is recoverable from the
+        # ``_gm{N}`` suffix on ``kernel_name``, but only as a regex over a symbol
+        # whose format is not a contract -- and the merged/unmerged split is the
+        # axis a before/after comparison is grouped by, so it gets a real column.
+        "group_merge",
         "rocke_ms",
         "rocke_tflops",
         "rocke_gbps",
@@ -1302,6 +1351,7 @@ def main() -> int:
                             "pipeline": r.pipeline,
                             "epilogue": r.epilogue,
                             "split_k": r.split_k,
+                            "group_merge": r.group_merge,
                             "rocke_ms": r.ms,
                             "rocke_tflops": r.tflops,
                             "rocke_gbps": r.gbps,
@@ -1346,7 +1396,20 @@ def _build_fwd_one(args_tuple):
     invalid/unsupported.  Must live at module level for pickle.
     """
     combo, problem, dtype, arch, mma_family, wave_size = args_tuple
-    tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn, pipeline, epilogue = combo
+    # Re-wrap: pickling round-trips the NamedTuple fine, but the caller is free
+    # to hand us a plain tuple and the defaulted field must still resolve.
+    combo = FwdCombo(*combo)
+    (
+        tile_m,
+        tile_n,
+        tile_k,
+        warp_m,
+        warp_n,
+        warp_tile_mn,
+        pipeline,
+        epilogue,
+    ) = combo[:8]
+    group_merge = combo.group_merge
 
     from rocke.core.arch import ArchTarget
     from kernels.common.conv_implicit_gemm import (
@@ -1386,6 +1449,7 @@ def _build_fwd_one(args_tuple):
         pipeline=pipeline,
         epilogue=epilogue,
         groups=problem.groups,
+        group_merge=group_merge,
     )
     ok, _ = is_valid_spec_for_problem(spec, problem, arch)
     if not ok:
@@ -2051,7 +2115,7 @@ def _run_sweep(
     _tile_mn = _TILE_MN_GFX1250 if arch == "gfx1250" else _TILE_MN
     _warp_mn = _WARP_MN_GFX1250 if arch == "gfx1250" else _WARP_MN
     combos = [
-        c
+        FwdCombo(*c)
         for c in itertools.product(
             _tile_mn,
             _tile_mn,
@@ -2066,6 +2130,47 @@ def _run_sweep(
         # subprocesses — combos that fail this are rejected by is_valid_spec anyway.
         if c[3] * c[5] <= c[0] and c[4] * c[5] <= c[1]
     ]
+
+    # Depthwise (cpg == kpg == 1) additionally sweeps group-merged instances.
+    # This is the one shape class where the unmerged sweep has nothing to find:
+    # the GEMM-N extent is a single element, so every activation load and every
+    # store is scalar no matter which tile/pipeline/epilogue wins, and the
+    # measured ceiling sits at a couple of percent of HBM. Merging folds Gm
+    # groups onto GemmN and GemmK so both regain a Gm-wide run.
+    _depthwise = p.cpg == 1 and p.kpg == 1 and p.groups > 1
+    if _depthwise:
+        _gm_combos = [
+            FwdCombo(*c, _gm)
+            for c in itertools.product(
+                _tile_mn,
+                _tile_mn,
+                _TILE_K,
+                _warp_mn,
+                _warp_mn,
+                _WARP_TILE_MN,
+                _PIPELINES,
+                _EPILOGUES,
+            )
+            if c[3] * c[5] <= c[0] and c[4] * c[5] <= c[1]
+            for _gm in _GROUP_MERGE_SWEEP
+            # Mirrors fwd_group_merge_available so the pool is not spun up for
+            # combos the gate rejects anyway. ``Gm <= tile_n`` because the merged
+            # GEMM-N extent *is* Gm; a larger degree would put group columns
+            # outside the tile the diagonal mask is written against. The
+            # ``default`` epilogue is dropped rather than filtered late: merging
+            # takes the store vector past 1, which is_valid_spec answers with
+            # "default epilogue is not supported with vector size c".
+            if p.groups % _gm == 0 and _gm <= c[1] and c[7] != "default"
+        ]
+        combos = combos + _gm_combos
+        print(
+            f"  depthwise: +{len(_gm_combos)} group-merged combos "
+            f"(Gm in {_GROUP_MERGE_SWEEP}) swept alongside the unmerged ones. "
+            f"Merging divides the grid by Gm and multiplies GemmK by it, so "
+            f"MFMA issue is unchanged and the redundant MACs land in lanes that "
+            f"were idle.",
+            flush=True,
+        )
 
     if args.sample is not None:
         total = len(combos)
@@ -2103,6 +2208,12 @@ def _run_sweep(
     # ---------------------------------------------------------------------------
     from rocke.runtime.hip_module import HipError
 
+    # Private, deliberately: the reported load width has to be the one the
+    # emitter picked, and a second copy of the tile-geometry clamp here would
+    # drift from it silently -- the ranked table is what the Gm policy gets
+    # tuned against.
+    from kernels.common.conv_implicit_gemm import _choose_load_vec
+
     rt = Runtime()
     results: List[Result] = []
 
@@ -2137,7 +2248,18 @@ def _run_sweep(
 
     n_run = 0
     for combo, spec, artifact in pending:
-        tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn, pipeline, epilogue = combo
+        combo = FwdCombo(*combo)
+        (
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m,
+            warp_n,
+            warp_tile_mn,
+            pipeline,
+            epilogue,
+        ) = combo[:8]
+        group_merge = combo.group_merge
         warp_tile_k = spec.warp_tile_k
 
         try:
@@ -2210,7 +2332,22 @@ def _run_sweep(
         cur_gbps = (bytes_xfer / ms) * 1e-6
         n_run += 1
 
-        _va, _vb, _vc = ImplicitGemmConvSpec.default_vector_sizes(p.C, p.K, dtype)
+        # Mirrors the builder (conv_implicit_gemm.py ~:1185 and ~:2190): the
+        # access widths come from the *merged per-group* channel counts, not
+        # from C/K. On depthwise cpg == kpg == 1, so this reads (Gm, Gm) under
+        # merge and (1, 1) without -- which is the whole thing being measured.
+        # Reading p.C/p.K here printed vec=8/8/8 for every row of a G=144 sweep,
+        # making the merged and unmerged legs indistinguishable in the table.
+        _pl = spec.merged_problem
+        _va, _vb, _vc = ImplicitGemmConvSpec.default_vector_sizes(
+            _pl.cpg, _pl.kpg, dtype
+        )
+        _tile_vec = _choose_load_vec(spec)
+        _va = min(_va, _tile_vec)
+        # B is only 1/Gm dense under merge and the diagonal mask is per-element,
+        # so the builder forces it scalar; a vector load takes one predicate for
+        # the whole run and cannot express that.
+        _vb = 1 if group_merge > 1 else min(_vb, _tile_vec)
         results.append(
             Result(
                 kernel_name=artifact.kernel_name,
@@ -2231,6 +2368,7 @@ def _run_sweep(
                 vec_b=_vb,
                 vec_c=_vc,
                 passed=kernel_passed,
+                group_merge=group_merge,
             )
         )
 
@@ -2240,6 +2378,7 @@ def _run_sweep(
             f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
             f"{pipeline}/{epilogue:9s} "
             f"vec={_va}/{_vb}/{_vc} "
+            f"{f'gm{group_merge} ' if group_merge > 1 else ''}"
             f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
             flush=True,
         )

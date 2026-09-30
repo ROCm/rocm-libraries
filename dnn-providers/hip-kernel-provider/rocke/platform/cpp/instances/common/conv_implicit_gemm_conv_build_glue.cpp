@@ -108,6 +108,24 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     ctx->ov = overrides;
     ctx->p = &spec->problem; /* p = spec.problem */
 
+    /* ``p`` is the TRUE problem: it sizes the tensors, which do not merge.
+     * ``p_load`` is the problem *this workgroup's tile covers* -- under
+     * group_merge it has Gm groups folded into one, so its cpg/kpg are Gm
+     * rather than 1 and its K_gemm is Gm x larger.
+     *
+     * The split is the whole reason merging is expressible without touching the
+     * descriptor DAG: every load-side site that asks "how wide is a channel run"
+     * or "how far does the tile index reach" reads p_load, while every site that
+     * addresses the physical weight tensor keeps reading p. At group_merge == 1
+     * merged_problem is a byte-copy of problem, which is what makes the default
+     * path byte-identical rather than merely equivalent. */
+    rocke_implicit_gemm_conv_spec_merged_problem(spec, &ctx->merged_problem);
+    ctx->p_load = &ctx->merged_problem;
+    ctx->group_merge = (spec->group_merge > 1) ? spec->group_merge : 1;
+    ctx->group_merge_log2 = 0;
+    for(int _gm = ctx->group_merge; _gm > 1; _gm >>= 1)
+        ctx->group_merge_log2++;
+
     /* ---- spec.validate() ---- (line 787) */
     if(!rocke_implicit_gemm_conv_spec_validate(spec, reason, sizeof(reason)))
     {
@@ -139,7 +157,15 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         }
         else
         {
-            int _K = rocke_conv_problem_kpg(&spec->problem);
+            /* Read the *merged* problem: under group_merge the store runs over
+             * kpg*Gm consecutive output channels, so a depthwise spec that looks
+             * scalar here (kpg == 1) really stores Gm-wide. Using spec->problem
+             * would make this rule never fire on exactly the specs merging
+             * exists for, and the validator would then disagree with the emitter
+             * about which epilogue is legal. Identical at group_merge 1. */
+            rocke_conv_problem_t _merged;
+            rocke_implicit_gemm_conv_spec_merged_problem(spec, &_merged);
+            int _K = rocke_conv_problem_kpg(&_merged);
             bool _is_fp32_d = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
             if(_is_fp32_d)
                 _eff_vec_c = (_K % 4 == 0) ? 4 : (_K % 2 == 0) ? 2 : 1;
@@ -329,13 +355,13 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     /* ---- common geometry constants ---- (843-845) */
     ctx->c0 = rocke_b_const_i32(b, 0);
     ctx->c_block_k = rocke_b_const_i32(b, ctx->block_k);
-    ctx->c_K_gemm = rocke_b_const_i32(b, rocke_conv_problem_k_gemm(ctx->p));
+    ctx->c_K_gemm = rocke_b_const_i32(b, rocke_conv_problem_k_gemm(ctx->p_load));
 
     /* ---- per-CTA tile origins (chiplet-swizzle aware) ---- (858-879) */
     if(spec->chiplet_swizzle)
     {
-        int num_pid_m = (rocke_conv_problem_m(ctx->p) + ctx->block_m - 1) / ctx->block_m;
-        int num_pid_n = (rocke_conv_problem_n_gemm(ctx->p) + ctx->block_n - 1) / ctx->block_n;
+        int num_pid_m = (rocke_conv_problem_m(ctx->p_load) + ctx->block_m - 1) / ctx->block_m;
+        int num_pid_n = (rocke_conv_problem_n_gemm(ctx->p_load) + ctx->block_n - 1) / ctx->block_n;
         rocke_value_t* c_num_pid_n = rocke_b_const_i32(b, num_pid_n);
         /* wgid_flat = b.add(b.mul(b.block_id_y(), c_num_pid_n), b.block_id_x()).
          * Python evaluates the add's first arg (b.mul(b.block_id_y(), ...)) fully
@@ -376,13 +402,19 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
      *       group_idx = b.block_id_z()
      *       k_out_group_base = b.mul(group_idx, b.const_i32(p.kpg))
      *   else: group_idx = None; k_out_group_base = None
-     * Both are NULL for groups == 1 (byte-identical ungrouped path). */
-    if(ctx->p->groups > 1)
+     * Both are NULL for groups == 1 (byte-identical ungrouped path).
+     *
+     * p_load, not p: gridDim.z is the MERGED group count, so the index this
+     * reads is a merged group and the base it scales by is the merged kpg. At
+     * Gm == groups there is one merged group, p_load->groups == 1, and the whole
+     * block is elided -- which is correct, the base term is provably 0 and
+     * materialising it would cost real VALU and change the IR bytes. */
+    if(ctx->p_load->groups > 1)
     {
         /* Python: group_idx = b.block_id_z(); k_out_group_base = b.mul(group_idx, b.const_i32(kpg))
          * Bind subexpressions in Python's left-to-right order to pin SSA ids. */
         ctx->group_idx = rocke_b_block_id_z(b);
-        rocke_value_t* c_kpg = rocke_b_const_i32(b, rocke_conv_problem_kpg(ctx->p));
+        rocke_value_t* c_kpg = rocke_b_const_i32(b, rocke_conv_problem_kpg(ctx->p_load));
         ctx->k_out_group_base = rocke_b_mul(b, ctx->group_idx, c_kpg);
     }
     else
@@ -489,7 +521,12 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     {
         bool is_fp32 = (spec->dtype_a && strcmp(spec->dtype_a, "fp32") == 0);
         int max_elem = is_fp32 ? 4 : 8;
-        int c_dim = rocke_conv_problem_cpg(ctx->p);
+        /* p_load is the point of the whole exercise: on depthwise this reads Gm
+         * instead of 1, so A's load vector goes from 1 to min(Gm, 8) -- the
+         * merged A tile really does address Gm consecutive NHWC channels,
+         * because the merged group's c_in_group axis *is* the group index and
+         * NHWC stores groups contiguously. */
+        int c_dim = rocke_conv_problem_cpg(ctx->p_load);
         int max_ab = (c_dim % max_elem == 0) ? max_elem
                      : (c_dim % 4 == 0)      ? 4
                      : (c_dim % 2 == 0)      ? 2
@@ -497,6 +534,18 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         if(ctx->load_vec > max_ab)
             ctx->load_vec = max_ab;
     }
+    /* Python keeps _def_vec_a and _def_vec_b separate; this engine collapses
+     * them into one load_vec because default_vector_sizes derives BOTH from
+     * cpg, so they are equal -- except under merge, where B must not widen.
+     *
+     * The merged B tile is only 1/Gm dense: along the reduction axis consecutive
+     * k_gemm differ in the merged group g_k, and all but the diagonal one are
+     * masked off. A vector load fetches a whole run under a single predicate, so
+     * it cannot express a per-element mask -- it would either drop the one valid
+     * element or keep Gm-1 invalid ones. Weights are negligible for depthwise
+     * (K*Y*X elements against N*H*W*C of activations), so scalar B costs
+     * nothing. */
+    ctx->load_vec_b = (ctx->group_merge > 1) ? 1 : ctx->load_vec;
 
     /* ---- coordinate-transform descriptors ---- (935-936).
      * Pointwise fast path: Y=X=1, stride=1, pad=0 -> descriptors are NULL and
@@ -506,7 +555,12 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->is_pointwise = rocke_conv_problem_is_pointwise(ctx->p);
         ctx->c_wgK_pw = 0; /* forward conv: unused */
         ctx->c_wgN_pw = 0; /* forward conv: unused */
-        ctx->b_descriptor_fn = NULL; /* forward conv: use default rocke_conv_b_descriptor */
+        /* forward conv: default rocke_conv_b_descriptor, unless merging, which
+         * needs the k_gemm split and the diagonal mask. Merge rejects both
+         * async_dma and pointwise, so in practice only the sync non-pointwise
+         * leg sees the override -- but installing it here rather than at one
+         * call site means both loader legs pick it up if either gate relaxes. */
+        ctx->b_descriptor_fn = (ctx->group_merge > 1) ? rocke_conv_b_descriptor_merged : NULL;
         if(ctx->is_pointwise)
         {
             ctx->c_M_pw = rocke_conv_problem_m(ctx->p);
@@ -521,7 +575,20 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             ctx->c_C_pw = 0;
             ctx->c_K_pw = 0;
             bool decompose_m = !(overrides != NULL && overrides->a_mhw_index_fn != NULL);
-            ctx->A_desc = rocke_conv_make_a_descriptor(b, ctx->p, decompose_m);
+            /* A reads the MERGED problem. The channel decode splits k into
+             * (y, x, c_in_group) with dims [Y, X, cpg], then embeds
+             * c = group*cpg + c_in_group. With merged cpg == Gm that is exactly
+             * the arrangement this design wants -- k's innermost factor becomes
+             * the merged group and lands on consecutive NHWC channels -- with no
+             * change to the descriptor DAG at all. */
+            ctx->A_desc = rocke_conv_make_a_descriptor(b, ctx->p_load, decompose_m);
+            /* B reads the TRUE problem, deliberately. The weight tensor is
+             * physical and does not merge: for depthwise it really is
+             * W[K][Y][X][1], so a descriptor built from p_load would decode
+             * k_gemm with cpg == Gm and compute strides for a channel axis the
+             * tensor does not have. rocke_conv_b_descriptor_merged instead
+             * splits k_gemm itself, feeds the (y, x) part here and routes the
+             * merged-group part into the diagonal mask. */
             ctx->B_desc = rocke_conv_make_b_descriptor(b, ctx->p);
         }
         ctx->D_desc = NULL; /* built lazily in the epilogue phase */
@@ -579,7 +646,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
          * and only the inner c is stride-1, so a chunk wider than cpg -- or one
          * that does not divide it -- would straddle a filter position and fetch
          * the wrong elements with no diagnostic. Mirrors the Python call. */
-        const int cpg = rocke_conv_problem_cpg(&spec->problem);
+        const int cpg = rocke_conv_problem_cpg(ctx->p_load);
         rocke_status_t sa = rocke_async_tile_loader_from_tile(
             ctx->block_m, ctx->block_k, ctx->threads, spec->wave_size, 4, cpg, &ctx->a_loader);
         rocke_status_t sb = rocke_async_tile_loader_from_tile(
@@ -597,7 +664,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
          * (load-wave-relative thread index is load_tid = tid - block_size). */
         int load_threads = spec->num_load_waves * spec->wave_size;
         int load_vec_a = spec->has_vector_size_a ? spec->vector_size_a : ctx->load_vec;
-        int load_vec_b = spec->has_vector_size_b ? spec->vector_size_b : ctx->load_vec;
+        int load_vec_b = spec->has_vector_size_b ? spec->vector_size_b : ctx->load_vec_b;
         rocke_status_t sa = rocke_coalesced_tile_loader_from_tile(
             ctx->block_m, ctx->block_k, load_threads, load_vec_a, true, &ctx->a_wavelet_loader);
         rocke_status_t sb = rocke_coalesced_tile_loader_from_tile(
@@ -612,7 +679,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         /* Wavelet local state: load_tid, is_math, K_iters, epi_barriers. */
         ctx->wavelet_n_math_warps = spec->warp_m * spec->warp_n;
         ctx->wavelet_K_iters
-            = (rocke_conv_problem_k_gemm(ctx->p) + ctx->block_k - 1) / ctx->block_k;
+            = (rocke_conv_problem_k_gemm(ctx->p_load) + ctx->block_k - 1) / ctx->block_k;
         /* epi_barriers = (no_alias ? 0 : war_barriers) + 1 (RAW), war_barriers=2 for wavelet.
          * This formula is the C++ mirror of CShuffleEpilogue.compute_barrier_count; both must
          * stay in sync.  war_barriers=2: one WAR before the cshuffle store (load waves overwrote
@@ -640,7 +707,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
          *   load_vec_a = spec.vector_size_a if not None else _auto_load_vec
          *   load_vec_b = spec.vector_size_b if not None else _auto_load_vec */
         int load_vec_a = spec->has_vector_size_a ? spec->vector_size_a : ctx->load_vec;
-        int load_vec_b = spec->has_vector_size_b ? spec->vector_size_b : ctx->load_vec;
+        int load_vec_b = spec->has_vector_size_b ? spec->vector_size_b : ctx->load_vec_b;
         rocke_status_t sa = rocke_coalesced_tile_loader_from_tile(
             ctx->block_m, ctx->block_k, ctx->threads, load_vec_a, true, &ctx->a_sync_loader);
         rocke_status_t sb = rocke_coalesced_tile_loader_from_tile(

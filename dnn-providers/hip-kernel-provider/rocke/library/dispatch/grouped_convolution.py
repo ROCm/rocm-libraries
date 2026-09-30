@@ -471,6 +471,11 @@ class ConvGroupedSpec:
     split_k: int = 1  # wgrad only
     lds_k_outer: bool = False  # wgrad only
     force_deterministic: bool = False  # wgrad only
+    # fwd only. Folds Gm depthwise groups into one GEMM tile so the group index
+    # becomes the fastest-varying factor of GemmN and GemmK, restoring Gm-wide
+    # vector access on a shape whose per-group channel count is 1. Default 1 is
+    # the unmerged path, byte-for-byte.
+    group_merge: int = 1
     name: str = "rocke_conv_grouped"
 
     def kernel_name(self) -> str:
@@ -500,6 +505,12 @@ class ConvGroupedSpec:
             parts.append("kouter")
         if self.direction == "wgrad" and self.force_deterministic:
             parts.append("det")
+        #   group_merge: changes the launch grid, the B load's addressing and
+        #     mask, and every operand's vector width. Same cache-collision
+        #     argument as the two above -- untagged, two Gm degrees resolve to
+        #     one symbol and the second silently runs the first's binary.
+        if self.direction == "fwd" and self.group_merge != 1:
+            parts.append(f"gm{self.group_merge}")
         return kernel_name_join(self.name, *parts)
 
     def to_fwd_spec(self, problem: "ConvProblem") -> "ImplicitGemmConvSpec":
@@ -526,6 +537,7 @@ class ConvGroupedSpec:
             pipeline=self.pipeline,
             epilogue=self.epilogue,
             groups=problem.groups,
+            group_merge=self.group_merge,
         )
 
     def to_wgrad_spec(self, problem: "ConvProblem") -> "WgradConvSpec":
@@ -607,10 +619,18 @@ class ConvGroupedSpec:
 def _fwd_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, int]:
     assert isinstance(req, ConvGroupedRequest)
     p = _problem(req)
+    # Launch over the MERGED dims, which is what the emitted kernel indexes.
+    # Under group_merge=Gm a workgroup owns Gm conv groups at once: the GEMM-N
+    # extent grows by Gm (kpg -> kpg*Gm) and the number of group-slices shrinks
+    # by Gm. Taking either off the true problem is host/device divergence --
+    # the true N_gemm is 1 on depthwise, so gn would stay 1 while the kernel
+    # writes Gm columns, and z would launch Gm x redundant CTAs racing on the
+    # same outputs. Both expressions are the identity at Gm == 1.
+    gmerge = spec.group_merge if spec.direction == "fwd" else 1
     gm = (p.M + spec.tile_m - 1) // spec.tile_m
-    gn = (p.N_gemm + spec.tile_n - 1) // spec.tile_n
+    gn = (p.N_gemm * gmerge + spec.tile_n - 1) // spec.tile_n
     # grid_order "NM": x=n-tiles, y=m-tiles — mirrors the fwd conv manifest
-    return (gn, gm, p.groups)
+    return (gn, gm, p.groups // gmerge)
 
 
 # ws_bytes is i32 in the kernel ABI, so a two-stage workspace above this would
@@ -831,6 +851,209 @@ def _make_gfx950_fwd_candidate() -> KernelCandidate:
         spec_id=spec_id,
         abi_version=CONV_GROUPED_ABI_VERSION,
         priority=10,
+        capability=Capability(
+            arches=("gfx950",),
+            dtypes=("fp16", "bf16"),
+            layouts=("NHWC",),
+        ),
+        _supports=support,
+        select_spec=select,
+        signature=lambda _spec: (),
+        grid=_fwd_grid,
+        block=_block,
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+    )
+    return candidate
+
+
+# ---------------------------------------------------------------------------
+# gfx950 depthwise forward candidate with merged groups
+# ---------------------------------------------------------------------------
+
+# Degrees the emitter's gate accepts, descending. The policy below walks this
+# list, so the order *is* the preference.
+_FWD_MERGE_DEGREES = (64, 32, 16, 8, 4, 2)
+
+# Measured ceiling on the degree itself, set from the 35-case depthwise corpus
+# sweep. A few large-batch stride-2 shapes do peak at 64, but only narrowly, and
+# no cheap request-side signal separates them from the many shapes that peak at
+# 16 or 32 and give up a large part of their gain when pushed to 64. Scored over
+# the whole corpus, capping here realises materially more of the achievable gain
+# than allowing 64 does, and its worst case is much less bad. 64 stays available
+# in the emitter and the sweep -- this is the default policy, not the gate.
+_FWD_MERGE_MAX = 32
+
+# CTA floor the occupancy cap aims at: two per CU on a 256-CU gfx950 part.
+# Hardcoding the CU count keeps this function pure -- a device query here would
+# make dispatch non-deterministic and unusable for cross-compile. The candidate
+# is gfx950-scoped anyway, and `attention/gfx942.py:49` sets the precedent of
+# spelling 256 as "the gfx950 CU count" in dispatch policy.
+_FWD_MERGE_MIN_CTAS = 512
+
+
+def _pick_group_merge(req: ConvGroupedRequest, tile_m: int, tile_n: int) -> int:
+    """Largest merge degree worth paying for on this request, or 1.
+
+    Three caps, all binding:
+
+    * **Divisibility / tile.** ``groups % Gm == 0`` (a workgroup must not own a
+      partial group) and ``Gm <= tile_n`` (the GEMM-N extent under merge *is*
+      ``Gm``). Both are re-checked by the emitter gate; picking outside them
+      here would just make ``support()`` return False for no reason.
+    * **Occupancy.** Merging shrinks ``grid.z`` by exactly ``Gm``. Where M is
+      large that is free, but on a depthwise shape M can be a single tile
+      (``N=1``, ``7x7``), and then ``grid.z`` *is* the parallelism -- merging
+      hands the machine back to itself empty. So require the post-merge launch
+      to keep ``_FWD_MERGE_MIN_CTAS`` blocks.
+    * **Degree ceiling** ``_FWD_MERGE_MAX``.
+
+    The occupancy cap is not a refinement; it is why this function is not a
+    constant. Swept over the 35-case depthwise corpus, *no* flat degree works:
+    the degree that is best on a large-batch shape regresses the ``N=1`` shapes
+    below unmerged outright, because merging spends ``grid.z`` to buy GEMM-N
+    width and those shapes have no ``grid.z`` to spare. The rule below tracks
+    each shape's own swept optimum closely and never picks a regressing degree.
+
+    An earlier revision capped at ``dwordx4 / itemsize = 8`` on the theory that
+    the win was load width. The sweep refutes that: the A-load vector saturates
+    at 8 by ``Gm = 8`` (every higher degree still reports ``vec=8/1/8``) and yet
+    16 and 32 keep gaining. The win past saturation is MFMA N-lane utilisation
+    plus the ``grid.z`` shrink cutting redundant A re-reads -- which is also why
+    it inverts the moment CTAs become scarce.
+
+    Per-degree curves for all 35 cases, and the scoring that fixes
+    ``_FWD_MERGE_MAX``, are in
+    ``platform/python/rocke/examples/gfx950/conv_fwd/fwd_merged_groups_case_study.md``.
+    """
+    groups = int(req.G)
+    try:
+        m = int(_problem(req).M)
+    except Exception:
+        # A degenerate shape is _request_errors' business, not this function's;
+        # fall back to the caps that need no geometry.
+        m = 0
+    caps = [tile_n, _FWD_MERGE_MAX]
+    if m > 0:
+        m_tiles = -(-m // max(int(tile_m), 1))
+        caps.append(max(1, (m_tiles * groups) // _FWD_MERGE_MIN_CTAS))
+    cap = min(caps)
+    for gm in _FWD_MERGE_DEGREES:
+        if gm <= cap and groups % gm == 0:
+            return gm
+    return 1
+
+
+def _make_gfx950_fwd_dw_merged_candidate() -> KernelCandidate:
+    """Depthwise forward conv for gfx950 with ``group_merge`` folded in.
+
+    Same tile as :func:`_make_gfx950_fwd_candidate`; the only difference is the
+    merge degree. It sits at a higher priority so it wins whenever it admits,
+    and falls through to the plain fwd candidate when it does not -- which is
+    the whole gating story, since ``support()`` defers to the same
+    ``is_valid_spec`` the builder calls. A shape with no admissible degree
+    (``G = 3`` in the corpus: no power of two divides it) picks ``Gm = 1``, and
+    is rejected here rather than shipping a merged spec that is merged in name
+    only.
+    """
+    # Distinct from the plain fwd candidate: candidate names key the registry
+    # (duplicates are a hard error) and also prefix the emitted symbol.
+    name = "implicit_gemm_conv_dw_merged"
+    spec_id = "igemm_conv_fwd_dw_merged_64x64"
+    algorithm = "implicit_gemm_fwd"
+
+    def _tile(req: ConvGroupedRequest):
+        return (
+            _GFX950_TILE_M,
+            _GFX950_TILE_N,
+            _GFX950_TILE_K,
+            _GFX950_WARP_M,
+            _GFX950_WARP_N,
+            _GFX950_WARP_TILE_MN,
+            _GFX950_WARP_TILE_K,
+        )
+
+    def _build_instance_spec(req: ConvGroupedRequest) -> ImplicitGemmConvSpec:
+        tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
+        return ImplicitGemmConvSpec(
+            problem=_problem(req),
+            name=name,
+            data=_data_spec(req),
+            tile_m=tm,
+            tile_n=tn,
+            tile_k=tk,
+            warp_m=wm,
+            warp_n=wn,
+            warp_tile_m=wtmn,
+            warp_tile_n=wtmn,
+            warp_tile_k=wtk,
+            wave_size=ArchTarget.from_gfx(req.arch).wave_size,
+            pipeline=_PIPELINE,
+            # Forced, not derived. Merging makes the store vector Gm-wide, and
+            # is_valid_spec rejects the direct epilogue once that exceeds 1.
+            # _epilogue_for reads the *true* C/K, which on depthwise happens to
+            # land on cshuffle anyway -- relying on that coincidence is how the
+            # dispatcher would come to hand the builder a spec it then rejects.
+            epilogue="cshuffle",
+            groups=int(req.G),
+            group_merge=_pick_group_merge(req, tm, tn),
+        )
+
+    def support(req: OperatorRequest) -> Tuple[bool, str]:
+        errors = _request_errors(req)
+        if errors:
+            return False, "; ".join(errors)
+        assert isinstance(req, ConvGroupedRequest)
+        if not _is_gfx950(req):
+            return False, f"gfx950 candidate requires arch=gfx950 (got {req.arch!r})"
+        if req.direction != "fwd":
+            return False, f"candidate handles 'fwd', got direction={req.direction!r}"
+        tm, tn, *_rest = _tile(req)
+        gm = _pick_group_merge(req, tm, tn)
+        if gm == 1:
+            return False, f"no admissible merge degree for groups={int(req.G)}"
+        ok, why = selector_matches(req, candidate)
+        if not ok:
+            return False, why
+        # Depthwise, power-of-two degree, wave64, non-pointwise, no async_dma:
+        # all of it lives in fwd_group_merge_available, reached through here.
+        ok, why = _fwd_is_valid_spec(_build_instance_spec(req), arch=req.arch)
+        if not ok:
+            return False, why
+        return True, "ok"
+
+    def select(req: OperatorRequest) -> ConvGroupedSpec:
+        ok, why = candidate.admits(req)
+        if not ok:
+            raise ValueError(f"{name} does not support request: {why}")
+        assert isinstance(req, ConvGroupedRequest)
+        tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
+        return ConvGroupedSpec(
+            direction="fwd",
+            tile_m=tm,
+            tile_n=tn,
+            tile_k=tk,
+            warp_m=wm,
+            warp_n=wn,
+            warp_tile_mn=wtmn,
+            warp_tile_k=wtk,
+            pipeline=_PIPELINE,
+            epilogue="cshuffle",
+            dtype=req.dtype.lower(),
+            arch=req.arch,
+            name=name,
+            group_merge=_pick_group_merge(req, tm, tn),
+        )
+
+    candidate = KernelCandidate(
+        name=name,
+        family=_FAMILY_FWD,
+        algorithm=algorithm,
+        spec_id=spec_id,
+        abi_version=CONV_GROUPED_ABI_VERSION,
+        # Ahead of the plain fwd candidate's 10. Lower number wins:
+        # CandidateRegistry.candidates() sorts ascending and select() takes
+        # ranked[0], so "higher priority" here is a smaller integer.
+        priority=5,
         capability=Capability(
             arches=("gfx950",),
             dtypes=("fp16", "bf16"),
@@ -1607,6 +1830,7 @@ CONV_DGRAD_REGISTRY.register(_make_gfx950_dgrad_candidate())
 CONV_FWD_REGISTRY = CandidateRegistry(_FAMILY_FWD, dim_vocabulary=_CONV_DIM_VOCABULARY)
 CONV_FWD_REGISTRY.register(_make_gfx942_fwd_candidate())
 CONV_FWD_REGISTRY.register(_make_gfx950_fwd_candidate())
+CONV_FWD_REGISTRY.register(_make_gfx950_fwd_dw_merged_candidate())
 CONV_FWD_REGISTRY.register(_make_gfx1250_fwd_candidate())
 
 CONV_WGRAD_REGISTRY = CandidateRegistry(
