@@ -219,7 +219,7 @@ geometries, so the correctness suite runs an evenly spaced sample of
 | Gate | What it proves | Command |
 |------|----------------|---------|
 | C++ ↔ Python byte-identity | the C++ port emits identical `.ll` for 15 configs covering every atom, dtype, stride, filter size, partial tile, uneven staging pass, DB/SB, swizzle on/off, iglp, waves_per_eu, gfx942/gfx950 | `python platform/tools/check_byte_identity.py --only conv_direct_grouped` (also with `ROCKE_LLVM_FLAVOR=llvm22`) |
-| Emitters | the two sides of that gate; shared with the grouped direct-conv family, non-grouped configs are indices 25+ | `tests/parity/conv_direct_grouped_emit.{py,c}` |
+| Emitters | the two sides of that gate; shared with the grouped direct-conv family, non-grouped configs are indices 32+ | `tests/parity/conv_direct_grouped_emit.{py,c}` |
 | IR golden | Python lowering is byte-stable (5 cases, all llvm flavors) | `conv_direct_nongrouped/*` in `platform/tests/instances/rocke_ir_parity_harness.py` |
 | On-silicon numerics | output vs `torch.nn.functional.conv2d` (fp32 reference), rel. tol 5e-2 fp16 / 1e-1 bf16 | `pytest tests/test_direct_conv_correctness.py -k Nongrouped` |
 

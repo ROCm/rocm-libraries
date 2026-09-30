@@ -5,8 +5,9 @@
  * grouped convolution parity harness. Selects one of N sampled spec configs by
  * argv[1] (the config index), builds the rocke_direct_conv_16c_spec_t /
  * rocke_direct_conv_4c_spec_t / rocke_direct_conv_8c_spec_t /
- * rocke_direct_conv_32c_spec_t / rocke_direct_depthwise_spec_t (and, from
- * index 25, the non-grouped rocke_direct_conv_nongrouped_spec_t) identically to
+ * rocke_direct_conv_32c_spec_t / rocke_direct_depthwise_spec_t /
+ * rocke_direct_conv_wgrad_spec_t (and, from index 32, the non-grouped
+ * rocke_direct_conv_nongrouped_spec_t) identically to
  * the Python emitter conv_direct_grouped_emit.py, builds the kernel via the
  * matching rocke_build_direct_conv_*_new function and lowers via
  * rocke_lower_kernel_to_llvm (per-config arch, flavor AUTO) and prints the .ll
@@ -33,10 +34,11 @@ enum
     KIND_SPATIAL = 5,
     KIND_DGRAD = 6,
     KIND_DW_DGRAD = 7,
-    KIND_NONGROUPED = 8
+    KIND_WGRAD = 8,
+    KIND_NONGROUPED = 9
 };
 
-#define NONGROUPED_CFG_BASE 25
+#define NONGROUPED_CFG_BASE 32
 
 static rocke_direct_conv_problem_t mk_nongrouped_problem(
     int N, int H, int W, int C, int K, int KH, int KW, int PAD, int stride, const char* dtype)
@@ -177,6 +179,7 @@ static int make_cfg(int idx,
                     rocke_direct_depthwise_spatial_spec_t* ssp,
                     rocke_direct_conv_dgrad_spec_t* sdgrad,
                     rocke_direct_depthwise_dgrad_spec_t* sdw_dgrad,
+                    rocke_direct_conv_wgrad_spec_t* swg,
                     rocke_direct_conv_nongrouped_spec_t* snongrouped,
                     const char** arch)
 {
@@ -565,6 +568,114 @@ static int make_cfg(int idx,
         *kind = KIND_DW_DGRAD;
         *arch = "gfx950";
         return 0;
+    /* ---- wgrad (backward weights) ---- */
+    case 25:
+        /* Defaults: mfma_k=32 (VEC_CH=8, two ds_read_tr per fragment),
+         * waves_k=waves_c=waves_q=1, ho_per_block=4. */
+        p.N = 2;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 8;
+        p.cpg = 16;
+        p.kpg = 16;
+        *swg = rocke_direct_conv_wgrad_spec_default();
+        swg->problem = p;
+        *kind = KIND_WGRAD;
+        *arch = "gfx950";
+        return 0;
+    case 26:
+        /* Narrow MFMA: mfma_k=16 (VEC_CH=4, one ds_read_tr per fragment). */
+        p.N = 2;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 8;
+        p.cpg = 16;
+        p.kpg = 16;
+        *swg = rocke_direct_conv_wgrad_spec_default();
+        swg->problem = p;
+        swg->mfma_k = 16;
+        swg->ho_per_block = 2;
+        *kind = KIND_WGRAD;
+        *arch = "gfx950";
+        return 0;
+    case 27:
+        /* Multi-wave: K/C/Q all split, so n_k_tiles = n_c_tiles = 2,
+         * STRIP_GROUPS = 2 and the kernel name carries the _wq flag. */
+        p.N = 4;
+        p.H = 16;
+        p.W = 16;
+        p.groups = 4;
+        p.cpg = 64;
+        p.kpg = 64;
+        *swg = rocke_direct_conv_wgrad_spec_default();
+        swg->problem = p;
+        swg->waves_k = 2;
+        swg->waves_c = 2;
+        swg->waves_q = 2;
+        swg->ho_per_block = 3;
+        *kind = KIND_WGRAD;
+        *arch = "gfx950";
+        return 0;
+    case 28:
+        /* gfx942 has no 16x16x32 f16 atom -> both engines reject (mfma_k=32). */
+        p.N = 2;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 8;
+        p.cpg = 16;
+        p.kpg = 16;
+        *swg = rocke_direct_conv_wgrad_spec_default();
+        swg->problem = p;
+        *kind = KIND_WGRAD;
+        *arch = "gfx942";
+        return 0;
+    case 29:
+        /* gfx942 with mfma_k=16 clears the atom gate and is rejected one check
+         * later, on the missing ds_read_tr16_b64 the LDS staging needs. */
+        p.N = 2;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 8;
+        p.cpg = 16;
+        p.kpg = 16;
+        *swg = rocke_direct_conv_wgrad_spec_default();
+        swg->problem = p;
+        swg->mfma_k = 16;
+        *kind = KIND_WGRAD;
+        *arch = "gfx942";
+        return 0;
+    case 30:
+        /* wgrad bf16: bf16 I/O and the bf16 MFMA atom, same LDS transpose
+         * staging. Pins that only the atom and the element type move. */
+        p.N = 2;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 8;
+        p.cpg = 16;
+        p.kpg = 16;
+        p.dtype = "bf16";
+        *swg = rocke_direct_conv_wgrad_spec_default();
+        swg->problem = p;
+        *kind = KIND_WGRAD;
+        *arch = "gfx950";
+        return 0;
+    case 31:
+        /* wgrad bf16 at mfma_k=16: the narrow atom under bf16, one ds_read_tr
+         * per fragment. */
+        p.N = 2;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 8;
+        p.cpg = 16;
+        p.kpg = 16;
+        p.dtype = "bf16";
+        *swg = rocke_direct_conv_wgrad_spec_default();
+        swg->problem = p;
+        swg->mfma_k = 16;
+        swg->ho_per_block = 2;
+        *kind = KIND_WGRAD;
+        *arch = "gfx950";
+        return 0;
     default:
         if(idx >= NONGROUPED_CFG_BASE
            && make_nongrouped_cfg(idx - NONGROUPED_CFG_BASE, snongrouped, arch) == 0)
@@ -595,10 +706,22 @@ int main(int argc, char** argv)
     rocke_direct_depthwise_spatial_spec_t ssp;
     rocke_direct_conv_dgrad_spec_t sdgrad;
     rocke_direct_depthwise_dgrad_spec_t sdw_dgrad;
+    rocke_direct_conv_wgrad_spec_t swg;
     rocke_direct_conv_nongrouped_spec_t snongrouped;
     const char* arch = "gfx950";
-    if(make_cfg(
-           idx, &kind, &s16, &s4, &s8, &s32, &sdw, &ssp, &sdgrad, &sdw_dgrad, &snongrouped, &arch)
+    if(make_cfg(idx,
+                &kind,
+                &s16,
+                &s4,
+                &s8,
+                &s32,
+                &sdw,
+                &ssp,
+                &sdgrad,
+                &sdw_dgrad,
+                &swg,
+                &snongrouped,
+                &arch)
        != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
@@ -621,6 +744,8 @@ int main(int argc, char** argv)
         kernel = rocke_build_direct_conv_dgrad_new(&b, &sdgrad, arch);
     else if(kind == KIND_DW_DGRAD)
         kernel = rocke_build_direct_depthwise_dgrad_new(&b, &sdw_dgrad, arch);
+    else if(kind == KIND_WGRAD)
+        kernel = rocke_build_direct_conv_wgrad_new(&b, &swg, arch);
     else if(kind == KIND_NONGROUPED)
         kernel = rocke_build_direct_conv_nongrouped_new(&b, &snongrouped, arch);
     else

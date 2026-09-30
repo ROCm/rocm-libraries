@@ -706,7 +706,7 @@ the 16-wide atoms exist for widths that are not a multiple of 32.
 
 C++ engine twin: `rocke_build_direct_conv_nongrouped` in
 `cpp/instances/common/conv_direct_nongrouped.cpp`; byte-identity gated by
-`library/tests/parity/conv_direct_grouped_emit.{c,py}` (configs 25+)
+`library/tests/parity/conv_direct_grouped_emit.{c,py}` (configs 32+)
 (`tools/check_byte_identity.py --only conv_direct_grouped`), Python IR golden
 `conv_direct_nongrouped/*` in `tests/instances/rocke_ir_parity_harness.py`, binding
 `rocke_engine.conv_direct_nongrouped_*` / `rocke.core.backend.lower_conv_direct_nongrouped`.

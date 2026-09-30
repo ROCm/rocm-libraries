@@ -3268,7 +3268,8 @@ class _Lowerer:
             op.result.type.elem.name,
             2,  # type: ignore[attr-defined]
         )
-        align = vec * elem_bytes
+        # New 96-bit widths guarantee only element alignment, including FP8.
+        align = 12 // vec if vec in (3, 6, 12) else vec * elem_bytes
         # gfx1250: mark 8-wide (128-bit) LDS loads volatile to block the WMMA-aware
         # pass from substituting ds_load_tr16_b128 (transposed) in place of the plain
         # sequential ds_read_b128.  Only 8-wide loads feed the 16x16x32 WMMA fragment

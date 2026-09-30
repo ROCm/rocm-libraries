@@ -6,9 +6,9 @@
 # direct grouped convolution parity harness. Selects one of N sampled spec
 # configs by argv[1], builds the DirectConv16cSpec / DirectConv4cSpec /
 # DirectConv8cSpec / DirectConv32cSpec / DirectDepthwiseSpec /
-# DirectConvDgradSpec / DirectDepthwiseDgradSpec (and, from index 25, the
-# non-grouped DirectNongroupedConvSpec), builds the kernel via the
-# matching build_direct_conv_* function (arch=<cfg arch>) and prints
+# DirectConvDgradSpec / DirectDepthwiseDgradSpec / DirectConvWgradSpec (and,
+# from index 32, the non-grouped DirectNongroupedConvSpec), builds the kernel
+# via the matching build_direct_conv_* function (arch=<cfg arch>) and prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
 import sys
@@ -19,6 +19,7 @@ from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
     DirectConv8cSpec,
     DirectConv32cSpec,
+    DirectConvWgradSpec,
     DirectDepthwiseSpec,
     DirectDepthwiseSpatialSpec,
     DirectConvDgradSpec,
@@ -27,6 +28,7 @@ from kernels.common.conv_direct_grouped import (
     build_direct_conv_4c,
     build_direct_conv_8c,
     build_direct_conv_32c,
+    build_direct_conv_wgrad,
     build_direct_depthwise,
     build_direct_depthwise_spatial,
     build_direct_conv_dgrad,
@@ -46,14 +48,14 @@ from rocke.core.verify import verify
 
 
 # ---------------------------------------------------------------------------
-# Non-grouped (groups == 1) DirectNongroupedConvSpec configs, indices 25..39.
+# Non-grouped (groups == 1) DirectNongroupedConvSpec configs, indices 32..46.
 #
 # Each pins one branch of build_direct_conv_nongrouped: the four MFMA atoms,
 # fp16/bf16, stride 1/2, 1x1 / 3x3 / 5x5 filters, partial W/H/K tiles, staging
 # passes that do / do not divide the block evenly (the scratch-tail select),
 # single vs double buffered LDS, chiplet swizzle on/off, iglp and waves_per_eu.
 # ---------------------------------------------------------------------------
-_NONGROUPED_CFG_BASE = 25
+_NONGROUPED_CFG_BASE = 32
 
 
 def _nongrouped_p(N, H, W, C, K, *, KH=3, KW=3, PAD=1, stride=1, dtype="bf16"):
@@ -527,6 +529,88 @@ def _spec(idx: int):
             DirectDepthwiseDgradSpec(problem=p, block_w=8, block_waves=1),
             "gfx950",
         )
+    # ---- wgrad (backward weights) ----
+    if idx == 25:
+        # Defaults: mfma_k=32 (VEC_CH=8, two ds_read_tr per fragment),
+        # waves_k=waves_c=waves_q=1, ho_per_block=4.
+        p = DirectConvProblem(
+            N=2, H=8, W=8, groups=8, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=1
+        )
+        return ("wgrad", DirectConvWgradSpec(problem=p), "gfx950")
+    if idx == 26:
+        # Narrow MFMA: mfma_k=16 (VEC_CH=4, one ds_read_tr per fragment).
+        p = DirectConvProblem(
+            N=2, H=8, W=8, groups=8, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=1
+        )
+        return (
+            "wgrad",
+            DirectConvWgradSpec(problem=p, mfma_k=16, ho_per_block=2),
+            "gfx950",
+        )
+    if idx == 27:
+        # Multi-wave: K/C/Q all split, so n_k_tiles = n_c_tiles = 2,
+        # STRIP_GROUPS = 2 and the kernel name carries the _wq flag.
+        p = DirectConvProblem(
+            N=4, H=16, W=16, groups=4, cpg=64, kpg=64, KH=3, KW=3, PAD=1, stride=1
+        )
+        return (
+            "wgrad",
+            DirectConvWgradSpec(
+                problem=p, waves_k=2, waves_c=2, waves_q=2, ho_per_block=3
+            ),
+            "gfx950",
+        )
+    if idx == 28:
+        # gfx942 has no 16x16x32 f16 atom -> both engines reject (mfma_k=32).
+        p = DirectConvProblem(
+            N=2, H=8, W=8, groups=8, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=1
+        )
+        return ("wgrad", DirectConvWgradSpec(problem=p), "gfx942")
+    if idx == 29:
+        # gfx942 with mfma_k=16 clears the atom gate and is rejected one check
+        # later, on the missing ds_read_tr16_b64 the LDS staging needs.
+        p = DirectConvProblem(
+            N=2, H=8, W=8, groups=8, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=1
+        )
+        return ("wgrad", DirectConvWgradSpec(problem=p, mfma_k=16), "gfx942")
+    if idx == 30:
+        # wgrad bf16: bf16 I/O and the bf16 MFMA atom, same LDS transpose
+        # staging. Pins that only the atom and the element type move.
+        p = DirectConvProblem(
+            N=2,
+            H=8,
+            W=8,
+            groups=8,
+            cpg=16,
+            kpg=16,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype="bf16",
+        )
+        return ("wgrad", DirectConvWgradSpec(problem=p), "gfx950")
+    if idx == 31:
+        # wgrad bf16 at mfma_k=16: the narrow atom under bf16, one ds_read_tr
+        # per fragment.
+        p = DirectConvProblem(
+            N=2,
+            H=8,
+            W=8,
+            groups=8,
+            cpg=16,
+            kpg=16,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype="bf16",
+        )
+        return (
+            "wgrad",
+            DirectConvWgradSpec(problem=p, mfma_k=16, ho_per_block=2),
+            "gfx950",
+        )
     if idx >= _NONGROUPED_CFG_BASE:
         sel = _nongrouped_spec(idx - _NONGROUPED_CFG_BASE)
         if sel is not None:
@@ -549,6 +633,8 @@ def main() -> int:
         kernel = build_direct_conv_8c(spec, arch=arch)
     elif kind == "32c":
         kernel = build_direct_conv_32c(spec, arch=arch)
+    elif kind == "wgrad":
+        kernel = build_direct_conv_wgrad(spec, arch=arch)
     elif kind == "spatial":
         kernel = build_direct_depthwise_spatial(spec, arch=arch)
     elif kind == "dgrad":

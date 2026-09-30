@@ -760,7 +760,9 @@ def build_deep(kind, arch, **kw):
 # C++ engine parity: direct-conv parity is gated via tools/check_byte_identity.py
 # (see tests/instances/parity/conv_direct_grouped_emit.* and the
 # conv_direct_grouped family in tests/instances/differential/golden/llvm_gfx_all.json).
-# All five variants (16c, 4c, 8c, 32c, depthwise) are covered as configs 0-8.
+# The existing direct-conv variants occupy configs 0-24; the wgrad variant is
+# configs 25-31 (25 mfma_k=32, 26 mfma_k=16, 27 multi-wave K/C/Q, 28-29 the two
+# gfx942 rejection paths, 30-31 bf16 at mfma_k=32 / 16).
 # If you add new direct-conv variants, add matching configs to both emitters and
 # re-bless the golden.
 # ---------------------------------------------------------------------------
@@ -1098,7 +1100,7 @@ def build_direct_nongrouped(
 ):
     """Non-grouped (groups == 1) direct conv; ``spec_kw`` overrides
     DirectNongroupedConvSpec fields. Configs mirror parity/conv_direct_grouped_emit.*
-    (indices 25+), where the C++ engine is gated byte-identical by
+    (indices 32+), where the C++ engine is gated byte-identical by
     check_byte_identity.py."""
 
     def _build():
@@ -3123,7 +3125,7 @@ def cases():
     # LDS halo-reuse tile, tap-shared activation fragments, fragment-order
     # weights, hoisted staging predication. One case per structural branch; the
     # full branch matrix (and the C++ twin) lives in
-    # library/tests/parity/conv_direct_grouped_emit.* (indices 25+).
+    # library/tests/parity/conv_direct_grouped_emit.* (indices 32+).
     _nongrouped_base = dict(
         tile_h=8, tile_w=32, tile_k=64, ck=32, waves_m=2, waves_n=2, iglp=0
     )
