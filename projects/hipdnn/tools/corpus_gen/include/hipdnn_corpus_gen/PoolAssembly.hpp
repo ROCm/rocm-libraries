@@ -280,13 +280,32 @@ inline std::vector<PoolEntry> spread(const std::vector<PoolEntry>& pool)
 /// @p allocation receives what each source was asked for, which is not the same as what the
 /// manifest's mix reports: a source can be allocated more than it delivers only if a pool
 /// shrank between the two, and recording both is how that would be noticed.
+/// What a regime quota asked for and what the pools could give it.
+struct RegimeQuotaOutcome
+{
+    int64_t asked = 0;
+    int64_t taken = 0;
+};
+
+/// @brief The corpus when some regimes are owed a number of problems: those first, then the
+/// rest of @p count as @ref select would cut it.
+///
+/// A quota is how a caller that has measured where a model is weak asks for more of that
+/// population. Filled from the same spread-ordered pools and in the same source precedence as
+/// everything else, so the problems a quota takes are the ones an unquoted cut would have taken
+/// first from that regime -- a recorded model shape before a pack geometry before a sample.
+///
+/// @p count below the quotas' sum does not trim them; above it, the difference is allocated
+/// over what the quotas left, by @p shares. @p quotaOutcome reports each regime's asked and
+/// taken, since a quota the pools cannot fill is a finding about what the engine serves.
 inline std::vector<PoolEntry> select(const SourcePools& pools,
                                      int64_t count,
                                      const std::map<std::string, double>& shares,
-                                     std::map<std::string, int64_t>& allocation)
+                                     std::map<std::string, int64_t>& allocation,
+                                     const std::map<std::string, int64_t>& quotas,
+                                     std::map<std::string, RegimeQuotaOutcome>& quotaOutcome)
 {
     SourcePools ordered;
-    std::map<std::string, int64_t> capacity;
     for(const auto& source : corpusSources())
     {
         const auto found = pools.find(source);
@@ -294,20 +313,88 @@ inline std::vector<PoolEntry> select(const SourcePools& pools,
         // arrives in its own order, and taking a prefix of that keeps whatever came first.
         ordered[source] = detail::spread(
             found == pools.end() ? std::vector<PoolEntry>{} : found->second);
-        capacity[source] = static_cast<int64_t>(ordered[source].size());
     }
 
-    allocation = allocate(count, capacity, shares);
+    std::map<std::string, std::vector<bool>> chosen;
+    std::map<std::string, int64_t> fromQuotas;
+    quotaOutcome.clear();
+    for(const auto& [regime, asked] : quotas)
+    {
+        auto& outcome = quotaOutcome[regime];
+        outcome.asked = asked;
+        for(const auto& source : corpusSources())
+        {
+            const auto& pool = ordered[source];
+            auto& marks = chosen[source];
+            marks.resize(pool.size(), false);
+            for(size_t i = 0; i < pool.size() && outcome.taken < asked; ++i)
+            {
+                if(!marks[i] && pool[i].regime == regime)
+                {
+                    marks[i] = true;
+                    ++outcome.taken;
+                    ++fromQuotas[source];
+                }
+            }
+        }
+    }
+
+    int64_t quotaTotal = 0;
+    for(const auto& entry : quotaOutcome)
+    {
+        quotaTotal += entry.second.taken;
+    }
+
+    // What the quotas left, still in spread order, cut by shares for the remainder of `count`.
+    std::map<std::string, int64_t> capacity;
+    std::map<std::string, std::vector<size_t>> remaining;
+    for(const auto& source : corpusSources())
+    {
+        auto& marks = chosen[source];
+        marks.resize(ordered[source].size(), false);
+        for(size_t i = 0; i < marks.size(); ++i)
+        {
+            if(!marks[i])
+            {
+                remaining[source].push_back(i);
+            }
+        }
+        capacity[source] = static_cast<int64_t>(remaining[source].size());
+    }
+    allocation = allocate(std::max<int64_t>(0, count - quotaTotal), capacity, shares);
+    for(const auto& source : corpusSources())
+    {
+        const auto take = std::min(static_cast<size_t>(std::max<int64_t>(0, allocation[source])),
+                                   remaining[source].size());
+        for(size_t i = 0; i < take; ++i)
+        {
+            chosen[source][remaining[source][i]] = true;
+        }
+        allocation[source] += fromQuotas[source];
+    }
 
     std::vector<PoolEntry> selected;
     for(const auto& source : corpusSources())
     {
         const auto& pool = ordered[source];
-        const auto take = static_cast<size_t>(std::max<int64_t>(0, allocation[source]));
-        selected.insert(selected.end(), pool.begin(), pool.begin() + static_cast<ptrdiff_t>(
-                                                          std::min(take, pool.size())));
+        for(size_t i = 0; i < pool.size(); ++i)
+        {
+            if(chosen[source][i])
+            {
+                selected.push_back(pool[i]);
+            }
+        }
     }
     return selected;
+}
+
+inline std::vector<PoolEntry> select(const SourcePools& pools,
+                                     int64_t count,
+                                     const std::map<std::string, double>& shares,
+                                     std::map<std::string, int64_t>& allocation)
+{
+    std::map<std::string, RegimeQuotaOutcome> unused;
+    return select(pools, count, shares, allocation, {}, unused);
 }
 
 } // namespace hipdnn_corpus_gen

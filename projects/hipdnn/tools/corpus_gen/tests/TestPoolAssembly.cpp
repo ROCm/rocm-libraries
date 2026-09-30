@@ -218,3 +218,82 @@ TEST(TestPoolAssembly, ACutSweepPoolKeepsEveryCategoricalCombination)
     const std::map<std::string, int64_t> expected{{"dtype=bf16,|", 10}, {"dtype=fp32,|", 10}};
     EXPECT_EQ(perStratum, expected);
 }
+
+TEST(TestPoolAssembly, ARegimeQuotaIsFilledBeforeTheProportionalCut)
+{
+    // Ninety of one population and ten of another: a proportional cut of twenty takes two of
+    // the rare one, which is the lopsided corpus a quota exists to correct. Owed six, it gets
+    // six, and the rest of the count is cut from what is left, as before.
+    std::vector<PoolEntry> pool;
+    for(int64_t index = 0; index < 100; ++index)
+    {
+        pool.push_back(entryAt("sweep", index, index < 90 ? "common" : "rare"));
+    }
+
+    std::map<std::string, int64_t> allocation;
+    std::map<std::string, RegimeQuotaOutcome> outcome;
+    const auto selected
+        = select({{"sweep", pool}}, 20, defaultShares(), allocation, {{"rare", 6}}, outcome);
+
+    const std::map<std::string, int64_t> expected{{"common", 14}, {"rare", 6}};
+    EXPECT_EQ(regimeCounts(selected), expected);
+    EXPECT_EQ(outcome.at("rare").asked, 6);
+    EXPECT_EQ(outcome.at("rare").taken, 6);
+    EXPECT_EQ(allocation.at("sweep"), 20);
+}
+
+TEST(TestPoolAssembly, ACountBelowTheQuotasDoesNotTrimThem)
+{
+    // The quotas are what the caller measured it needs; a count set with them in mind must not
+    // quietly undo them.
+    std::vector<PoolEntry> pool;
+    for(int64_t index = 0; index < 40; ++index)
+    {
+        pool.push_back(entryAt("sweep", index, index % 2 == 0 ? "a" : "b"));
+    }
+
+    std::map<std::string, int64_t> allocation;
+    std::map<std::string, RegimeQuotaOutcome> outcome;
+    const auto selected = select(
+        {{"sweep", pool}}, 5, defaultShares(), allocation, {{"a", 8}, {"b", 7}}, outcome);
+
+    const std::map<std::string, int64_t> expected{{"a", 8}, {"b", 7}};
+    EXPECT_EQ(regimeCounts(selected), expected);
+}
+
+TEST(TestPoolAssembly, AQuotaThePoolsCannotFillSaysHowShortItIs)
+{
+    // Reported, never padded from another regime: a short quota is a finding about what the
+    // engine serves, and filling it with something else would hide it.
+    std::map<std::string, int64_t> allocation;
+    std::map<std::string, RegimeQuotaOutcome> outcome;
+    const auto selected = select({{"sweep", {entryAt("sweep", 1, "rare"), entryAt("sweep", 2, "x")}}},
+                                 0,
+                                 defaultShares(),
+                                 allocation,
+                                 {{"rare", 5}},
+                                 outcome);
+
+    EXPECT_EQ(outcome.at("rare").taken, 1);
+    ASSERT_EQ(selected.size(), 1u);
+    EXPECT_EQ(selected.front().regime, "rare");
+}
+
+TEST(TestPoolAssembly, AQuotaTakesARecordedShapeBeforeASample)
+{
+    // Same precedence as everything else: of two problems in the owed regime, the recorded
+    // model shape is the one worth measuring.
+    SourcePools pools;
+    pools["model"] = {entryAt("model", 1, "rare")};
+    pools["sweep"] = {entryAt("sweep", 2, "rare"), entryAt("sweep", 3, "rare")};
+
+    std::map<std::string, int64_t> allocation;
+    std::map<std::string, RegimeQuotaOutcome> outcome;
+    const auto selected = select(pools, 0, defaultShares(), allocation, {{"rare", 2}}, outcome);
+
+    ASSERT_EQ(selected.size(), 2u);
+    EXPECT_EQ(selected[0].source, "model");
+    EXPECT_EQ(selected[1].source, "sweep");
+    EXPECT_EQ(allocation.at("model"), 1);
+    EXPECT_EQ(allocation.at("sweep"), 1);
+}

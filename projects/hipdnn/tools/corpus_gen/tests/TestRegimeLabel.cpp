@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <hipdnn_corpus_gen/OperationMetadata.hpp>
+#include <hipdnn_corpus_gen/RegimeFocus.hpp>
 #include <hipdnn_corpus_gen/RegimeLabel.hpp>
 
 #include <gtest/gtest.h>
@@ -219,4 +220,123 @@ TEST(TestRegimeLabel, AnOperationThatNamesNoPopulationsGetsAnEmptyLabel)
 
     EXPECT_TRUE(load.metadata->regimeLabel.empty());
     EXPECT_EQ(regimeLabel(*load.metadata, ProblemPoint{{"groups", int64_t{1}}}), "");
+}
+
+namespace
+{
+
+/// A small, fast search: every regime test drives the real walk over the shipped declaration,
+/// so the budget is what keeps them quick.
+ExplorationRequest focusRequest()
+{
+    ExplorationRequest request;
+    request.budgetPerCombination = 1500;
+    request.budgetGrowthLimit = 4;
+    request.pointsPerCombination = 20;
+    request.maxCombinations = 4;
+    request.seed = 7;
+    return request;
+}
+
+const ProblemOracle SERVES_EVERYTHING = [](const ProblemPoint&) { return true; };
+
+} // namespace
+
+TEST(TestRegimeFocus, AFocusPinsAndTiesTheEqualitiesItsLabelRequires)
+{
+    // decode is `seqlen_q == 1`, mha is `heads_kv == heads`; short is an inequality and is left
+    // to the label check. Nothing else is fixed: a focus that pinned more than the label says
+    // would generate a narrower population than the one it was asked for.
+    const auto metadata = shippedSdpa();
+    std::string error;
+
+    const auto decode = compileRegimeFocus(metadata, "decode_short_mha", error);
+    ASSERT_TRUE(decode.has_value()) << error;
+    EXPECT_EQ(decode->pins, (std::map<std::string, int64_t>{{"seqlen_q", 1}}));
+    EXPECT_EQ(decode->ties, (std::map<std::string, std::string>{{"heads_kv", "heads"}}));
+
+    const auto prefill = compileRegimeFocus(metadata, "prefill_long_gqa", error);
+    ASSERT_TRUE(prefill.has_value()) << error;
+    EXPECT_TRUE(prefill->pins.empty());
+    EXPECT_EQ(prefill->ties, (std::map<std::string, std::string>{{"seqlen_q", "seqlen_k"}}));
+
+    const auto append = compileRegimeFocus(metadata, "append_short_mqa", error);
+    ASSERT_TRUE(append.has_value()) << error;
+    EXPECT_EQ(append->pins, (std::map<std::string, int64_t>{{"heads_kv", 1}}));
+    EXPECT_TRUE(append->ties.empty()) << "append is an `otherwise` label and requires no equality";
+}
+
+TEST(TestRegimeFocus, ALabelNoDeclaredFacetSpellsIsRefused)
+{
+    // Searched for, it would spend the whole budget and come back saturated -- "the engine
+    // serves none of these" -- about a population that does not exist.
+    const auto metadata = shippedSdpa();
+    std::string error;
+    EXPECT_FALSE(compileRegimeFocus(metadata, "decode_medium_mha", error).has_value());
+    EXPECT_NE(error.find("decode_medium_mha"), std::string::npos);
+    EXPECT_FALSE(compileRegimeFocus(metadata, "decode_short", error).has_value());
+}
+
+TEST(TestRegimeFocus, AFocusedSearchProposesInsideTheRegime)
+{
+    // Multi-head decode: two equalities a walk over independent extents meets almost never.
+    // With them pinned and tied, most of what the walk proposes is already in the regime, and
+    // everything it returns is.
+    const auto metadata = shippedSdpa();
+    std::string error;
+    const auto focus = compileRegimeFocus(metadata, "decode_short_mha", error);
+    ASSERT_TRUE(focus.has_value()) << error;
+
+    const auto found
+        = exploreRegime(metadata, *focus, focusRequest(), 40, SERVES_EVERYTHING, {}, {});
+
+    EXPECT_GE(found.problems.size(), 40u);
+    EXPECT_GE(found.inRegime * 2, found.proposed)
+        << found.inRegime << " of " << found.proposed << " proposals landed in the regime";
+    for(const auto& point : found.problems)
+    {
+        EXPECT_EQ(regimeLabel(metadata, point), "decode_short_mha");
+        EXPECT_TRUE(detail::satisfiesConstraints(metadata, point));
+    }
+}
+
+TEST(TestRegimeFocus, HeldPointsAreNeverReturned)
+{
+    // A point already in the pools, or in a corpus it must not repeat, is not a new problem.
+    const auto metadata = shippedSdpa();
+    std::string error;
+    const auto focus = compileRegimeFocus(metadata, "prefill_short_gqa", error);
+    ASSERT_TRUE(focus.has_value()) << error;
+    const ProblemOracle evenBatchIsHeld = [](const ProblemPoint& point) {
+        return std::get<int64_t>(point.at("batch")) % 2 == 0;
+    };
+
+    const auto found = exploreRegime(
+        metadata, *focus, focusRequest(), 20, SERVES_EVERYTHING, evenBatchIsHeld, {});
+
+    ASSERT_FALSE(found.problems.empty());
+    for(const auto& point : found.problems)
+    {
+        EXPECT_NE(std::get<int64_t>(point.at("batch")) % 2, 0);
+        EXPECT_EQ(regimeLabel(metadata, point), "prefill_short_gqa");
+    }
+}
+
+TEST(TestRegimeFocus, ARegimeTheEngineDoesNotServeIsReportedSaturated)
+{
+    // Long context is `seqlen_k > 2048`; an engine that serves nothing past 1024 has none. That
+    // is a finding for the caller, and it must read as saturation, not as a budget limit.
+    const auto metadata = shippedSdpa();
+    std::string error;
+    const auto focus = compileRegimeFocus(metadata, "decode_long_mha", error);
+    ASSERT_TRUE(focus.has_value()) << error;
+    const ProblemOracle shortOnly = [](const ProblemPoint& point) {
+        return std::get<int64_t>(point.at("seqlen_k")) <= 1024;
+    };
+
+    const auto found = exploreRegime(metadata, *focus, focusRequest(), 10, shortOnly, {}, {});
+
+    EXPECT_TRUE(found.problems.empty());
+    EXPECT_TRUE(found.saturated);
+    EXPECT_FALSE(found.searchCapped);
 }

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import logging
@@ -502,6 +503,47 @@ def _catalog_label(metric: str, usable: pd.DataFrame, defaulted: bool, role: str
     return None, "robustMeanMs", False, "robustMeanMs"
 
 
+def read_regime_manifest(manifest: Path) -> dict:
+    """benchmark -> its regime columns, from one `hipdnn_corpus_gen` manifest.csv.
+
+    The manifest carries `regime` and then one column per facet the operation declares, up to
+    `source`. They go onto rows as envelope columns (`regime`, `regime.<facet>`,
+    `regime.operation`), never features.
+    """
+    labels: dict = {}
+    with Path(manifest).open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        columns = reader.fieldnames or []
+        if "benchmark" not in columns or "regime" not in columns:
+            return labels
+        end = columns.index("source") if "source" in columns else columns.index("regime") + 1
+        facets = columns[columns.index("regime") + 1:end]
+        for record in reader:
+            labels[record["benchmark"]] = {
+                "regime": record["regime"],
+                **{f"regime.{facet}": record[facet] for facet in facets},
+                # Which declaration the label is under: a quota asks corpus_gen for a regime
+                # of one operation, and two operations may share a label.
+                **({"regime.operation": record["op"]} if record.get("op") else {})}
+    return labels
+
+
+def corpus_regimes(graph_paths) -> dict:
+    """Each graph's regime, as the corpus that generated it labelled it: benchmark -> columns.
+
+    `hipdnn_corpus_gen` writes `manifest.csv` beside `graphs/`. Its labels go onto every
+    measured row so `evaluate`'s per-regime table (RFC 0019.13 §11.2) exists for every model
+    trained from a collection, and a later sizing run can say which populations a model is
+    weak on without finding the corpus again.
+    """
+    labels: dict = {}
+    for directory in sorted({parent for path in graph_paths
+                             for parent in (Path(path).parent, Path(path).parent.parent)}):
+        if (directory / "manifest.csv").is_file():
+            labels.update(read_regime_manifest(directory / "manifest.csv"))
+    return labels
+
+
 def _measure(args: argparse.Namespace, tree: Path, stage: Path, sources: list, immediate: bool) -> dict:
     """Run the benchmark over `--graphs` into `stage`: the measuring half of generate.
 
@@ -600,6 +642,10 @@ def _measure(args: argparse.Namespace, tree: Path, stage: Path, sources: list, i
                                                      engine_descriptor_id=ued["id"])
                 rows[source].extend(collected)
                 published.update(names)
+    regimes = corpus_regimes(graphs)
+    for source in sources:
+        for row in rows[source]:
+            row.update(regimes.get(str(row["benchmark"]), {}))
     return {"collected_at": collected_at, "rows": rows, "published": published,
             "commands": commands, "graph_inputs": graph_inputs, "provenance": provenance,
             "kernel_fields": kernel_fields, "knob_encodings": addressing.as_manifest(ordinals),

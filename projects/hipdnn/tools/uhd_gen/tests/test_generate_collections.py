@@ -212,3 +212,33 @@ def test_measurement_options_are_refused_without_a_measurement(world, evaluator,
     code, _ = _train(world, "knobbed", evaluator, collections=[collection], extra=["--device", "0"])
     assert code == 1
     assert "measures nothing" in caplog.text
+
+
+def test_rows_carry_the_regime_their_corpus_labelled_them_with(world, evaluator):
+    """Beside `graphs/`, hipdnn_corpus_gen's manifest.csv names each graph's population."""
+    import csv
+
+    with (world["graphs"] / "manifest.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["benchmark", "name", "regime", "phase", "context", "source", "q.size"])
+        for index in range(GRAPHS):
+            phase = "decode" if index % 4 == 0 else "append"
+            writer.writerow([f"graph-{index}", f"g{index}", f"{phase}_short", phase, "short",
+                             "sweep", index])
+    collection = _collect(world, "labelled")
+    rows = json.loads((collection / "corpus.json").read_text(encoding="utf-8"))
+    assert {r["benchmark"]: (r["regime"], r["regime.phase"], r["regime.context"]) for r in rows} == {
+        f"graph-{i}": ("decode_short" if i % 4 == 0 else "append_short",
+                       "decode" if i % 4 == 0 else "append", "short") for i in range(GRAPHS)}
+    assert not any(name.startswith("regime") for name in json.loads(rows[0]["features"])), \
+        "a label is an envelope column, never a model input"
+    code, output = _train(world, "from_labelled", evaluator, collections=[collection])
+    assert code == 0
+    assert {r["regime"] for r in json.loads((output / "corpus.json").read_text(encoding="utf-8"))} == {
+        "decode_short", "append_short"}
+
+
+def test_graphs_without_a_corpus_manifest_carry_no_regime(world):
+    collection = _collect(world, "unlabelled")
+    rows = json.loads((collection / "corpus.json").read_text(encoding="utf-8"))
+    assert not any("regime" in row for row in rows)

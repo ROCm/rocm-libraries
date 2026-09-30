@@ -203,6 +203,11 @@ struct RegimeAxis
     /// or to keep in step.
     hipdnn_plugin_sdk::uhd::ExpressionSet clauses;
 
+    /// Each clause as declared, in the same order. The compiled set above answers "does this
+    /// point match"; generating points that DO match needs the relations themselves -- which
+    /// parameter a clause pins, and to what (RegimeFocus.hpp).
+    std::vector<nlohmann::json> whens;
+
     /// The label for a point no clause matched. Spelled out in the declaration rather than
     /// defaulted to a silent "other", because an unlabelled population is one the regret table
     /// reports as a bucket nobody can act on.
@@ -669,6 +674,7 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
                 axis.labels.push_back(clause.value("label", ""));
                 clauses.push_back(clause.value("when", nlohmann::json()));
             }
+            axis.whens = clauses;
 
             try
             {

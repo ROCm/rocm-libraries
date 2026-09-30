@@ -180,6 +180,14 @@ def main(argv: list[str] | None = None) -> int:
     generate = subparsers.add_parser("generate", help="collect, train, evaluate and promote from a graph corpus")
     add_generate_arguments(generate)
 
+    from .sizing import add_size_arguments, run_size
+    size = subparsers.add_parser(
+        "size",
+        help="how many more unique shapes an L1 model needs, and from which regimes",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    add_size_arguments(size)
+
     # export-benchmarks parses its own argv tail, so it is split off before the
     # main parser sees flags it does not declare.
     if argv is None:
@@ -207,6 +215,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     if args.command == "generate":
         return run_generate(args)
+    if args.command == "size":
+        return run_size(args)
     if args.command == "promote":
         return run_promote(args)
     if args.command == "evaluate":
