@@ -49,8 +49,9 @@ If any of these don't hold, STOP and ask the human before proceeding.
      top-level `thrust/testing/*.cu` path, reports whether a
      `test_<name>.cpp` file exists under `projects/rocthrust/test/` (a
      separate, hand-maintained GTest suite with no upstream equivalent at
-     all — distinct from `testing/`, which is a 1:1 translated port of
-     upstream's Catch2 suite) and, given `--sync-base`, whether it has
+     all — distinct from `testing/`, which ports upstream's legacy
+     `unittest/`-framework tests; see `porting-categories.md` category 7
+     for upstream's Catch2 tests) and, given `--sync-base`, whether it has
      already changed during this sync. Does not trigger on
      `thrust/testing/cuda/`, `cpp/`, `omp/`, or `unittest/` subdirectory
      touches (no `test/` counterpart pattern exists for those), nor on

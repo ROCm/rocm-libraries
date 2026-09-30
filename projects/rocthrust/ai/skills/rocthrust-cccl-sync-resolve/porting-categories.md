@@ -120,11 +120,24 @@ summary.
 ### 7. `test/` — an AMD-only mirror of `testing/`, not a copy
 `projects/rocthrust/test/` (singular) is a separate, hand-maintained GTest
 suite with no upstream CCCL equivalent at all — unlike `testing/` (plural),
-which is a 1:1 translated port of upstream's Catch2 suite. There is a
-reliable naming convention (`testing/<name>.cu` → `test/test_<name>.cpp`)
-but no git history ever links the two: a change to a `testing/<name>.cu`
-file (or a header it exercises) can leave `test/test_<name>.cpp` behind with
-nothing to notice.
+which ports upstream's `thrust/testing/*.cu` legacy `unittest/`-framework
+tests. There is a reliable naming convention (`testing/<name>.cu` →
+`test/test_<name>.cpp`) but no git history ever links the two: a change to a
+`testing/<name>.cu` file (or a header it exercises) can leave
+`test/test_<name>.cpp` behind with nothing to notice.
+
+rocThrust keeps `testing/`, `test/` and `benchmark/` at parity with
+upstream. That's policy; don't ask whether to keep mirroring.
+
+**Upstream Catch2 tests.** Upstream is migrating `thrust/testing/<name>.cu`
+to `thrust/testing/catch2_test_<name>.cu` and deleting the legacy file.
+rocThrust does not use Catch2:
+- A commit that deletes a legacy `thrust/testing/<name>.cu`: keep rocThrust's
+  `testing/<name>.cu` and `test/test_<name>.cpp`. Don't port the deletion.
+- A commit that adds or changes cases in a `catch2_test_<name>.cu`: implement
+  the same cases with Google Test in `test/test_<name>.cpp` (and in
+  `testing/<name>.cu` if that file covers the same function). Don't add the
+  `catch2_test_*.cu` file or `catch2_test_helper.h`.
 
 Discovered the same way as category 2's `reduce_into` case: diffing a
 completed AI-driven sync (zero changes anywhere under

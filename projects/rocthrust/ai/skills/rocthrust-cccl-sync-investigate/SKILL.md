@@ -231,7 +231,7 @@ if it reports `DRIFT`, **STOP and tell the human** before continuing to
 Phase C: do not silently widen `$TO_TAG` to absorb the drifted commits, and
 do not silently ignore them either. Typical resolutions: re-run Phase A with
 `--to <later patch tag>` if one already exists and covers them, or record
-the exclusion explicitly in the report's open questions (Phase D).
+the exclusion in the Summary's drift line (Phase D).
 
 Sanity-check the range size:
 
@@ -286,13 +286,13 @@ new features — CCCL's own release notes commonly bucket both together, and a
 bug fix to an existing `thrust::` API (e.g. a nullptr-deref fix in
 `device_reference`, or a `malloc<void>` correctness fix) is exactly the kind
 of change rocThrust's HIP backend needs to independently verify or port, the
-same as a genuinely new feature. Record these with a `Fix:`-style note
-distinct from feature bullets rather than filtering them out for not being
-"new."
+same as a genuinely new feature. Record these under the tag's `#### Fixes`
+heading rather than filtering them out for not being "new."
 
-For each feature record: what it is, how it is turned on (CMake option /
-feature macro / API), and its rocThrust relevance (AMD equivalent? likely
-needs libhipcxx work? disabled?). Cite the introducing PR when the commit
+Sort each tag's items into the report's `####` categories (New API, Behavior
+changes, Deprecations, Fixes, NVIDIA-only). For each item record what it is
+and what rocThrust needs to do, including how it is turned on (CMake option /
+feature macro / API) when that matters. Cite the introducing PR when the commit
 log/release notes name one, and hyperlink it —
 `[PR #<n>](https://github.com/NVIDIA/cccl/pull/<n>)` — so the report is
 clickable without a separate lookup.
@@ -317,21 +317,43 @@ AMD). Caveat: the `^\+` filter is approximate — eyeball the results.
 
 ### 3. Test / benchmark coverage gaps
 
-rocThrust ports its own `testing/` and `benchmark/` suites from upstream
-Thrust's. For each new feature from step 1, check whether rocThrust already
-has a ported test/benchmark:
+rocThrust keeps three suites at parity with upstream. This is established
+policy, so don't raise "should we keep mirroring upstream tests/benchmarks?"
+as an open question.
+
+| rocThrust | Mirrors | Framework |
+|-----------|---------|-----------|
+| `testing/<name>.cu` | upstream `thrust/testing/<name>.cu` | upstream's legacy `unittest/` framework |
+| `test/test_<name>.cpp` | rocThrust's own `testing/<name>.cu` | Google Test |
+| `benchmark/bench/<algo>/<file>.cu` | upstream `thrust/benchmarks/bench/<algo>/<file>.cu` | Google Benchmark (upstream uses nvbench) |
+
+**Catch2:** upstream is migrating its tests to Catch2 (`catch2_test_*.cu`),
+deleting legacy `testing/*.cu` files as it goes. rocThrust does not use
+Catch2. Keep the legacy files upstream deletes, and implement any new
+Catch2 test cases with Google Test in rocThrust's suites instead. This is
+routine porting work, not an open question.
+
+For each new feature and fix from step 1, check whether the matching
+rocThrust test file already exists (`testing/<name>.cu` and
+`test/test_<name>.cpp`) and whether it needs new cases.
+
+For benchmarks, match by path, not by feature symbol. rocThrust's benchmarks
+are per algorithm, like upstream's, so searching `benchmark/` for a new API
+name (e.g. `reduce_into`) finds nothing even when the algorithm's benchmark
+exists. List what upstream changed and compare paths:
 
 ```bash
-# What does upstream test/benchmark for this feature?
-git log --oneline -20 "$PREV..$TAG" -- thrust/testing/ thrust/benchmarks/ 2>/dev/null
+# Upstream benchmark changes in range (A = new, M = modified, D = deleted):
+git diff --name-status "$CURRENT_TAG..$TO_TAG" -- thrust/benchmarks/bench/
 
-# Does rocThrust already have the equivalent ported?
-git grep -l "<feature symbol>" "${SYNC_BASE}" -- projects/rocthrust/testing/ projects/rocthrust/benchmark/ 2>/dev/null
+# rocThrust's counterpart is projects/rocthrust/benchmark/bench/<same path>
+# (upstream "benchmarks" is plural, rocThrust "benchmark" is singular):
+git ls-tree -r --name-only "$SYNC_BASE" -- projects/rocthrust/benchmark/bench/
 ```
 
-Output: which features need a ported test/benchmark, whether rocThrust has
-one, and follow-up (port it / file a ticket). Mark uncertain cases for human
-confirmation rather than guessing.
+Output: for tests, which features and fixes need new or extended cases; for
+benchmarks, the upstream benchmarks added or deleted in range that rocThrust
+lacks or still has, plus a one-line note on modified ones.
 
 ### 4. Potentially problematic commits
 
@@ -370,19 +392,43 @@ a SHA found by `git log`/`git show` against the local `rocm-libraries` clone
 `libcxx.h`) is a rocm-libraries-local commit and must instead link to
 `[<sha>](https://github.com/ROCm/rocm-libraries/commit/<sha>)`. Same
 two-repo rule applies everywhere else a commit SHA is cited in the report —
-Summary/"Deriving the Current Version of rocThrust", §1 New features, §5's upstream bug
-fixes — not just this section.
+§1 New features, §3's coverage table — not just this section.
 
 ## Phase D — Write the investigation report
 
 Copy `report.md.template` (sibling of this SKILL.md) to the `rocm-libraries`
 repo root as `cccl-investigation-<TO_TAG>.md` and fill in every placeholder
-from the phases above (version delta signals, agreement verdict, the four
-sections, and the handoff block).
+from the phases above. Delete the template's `<!-- ... -->` guidance comments
+once followed.
 
-Be honest about confidence: anything inferred rather than verified (especially
-the version-delta guess and "is this disabled on AMD?") should be marked as a
-question for the human, not asserted.
+### Writing style
+
+The readers are rocThrust developers planning the port. They want to know
+what changed and what they have to do about it, not how the investigation
+was done. Keep the report short and to the point:
+
+- **Every item answers two questions**: what the change is, and what
+  rocThrust needs to do (or "nothing"). Aim for one or two sentences each.
+- **Leave out methodology and tooling commentary.** Don't say which command
+  found something, how a feature was found (e.g. "this arrived inside
+  existing headers, so it doesn't show up in an added-files diff"), or
+  mention this skill, its gaps, or its earlier test runs. The rationale and
+  earlier findings in this SKILL.md are for you, not the report.
+- **Keep the baseline discussion out of the Summary.** It was already
+  confirmed with the human in Phase A. The Summary gets one Baseline line.
+  Add a sentence only if the signals disagreed in a way that affects the
+  port. Don't list the individual signal values anywhere in the report.
+- **Use real headings for groups.** If you would group items under a bold
+  line like "**Deprecations**", make it a `####` heading instead (§1's
+  per-category headings are one example).
+- **State each fact once.** Refer back to a section (e.g. "see §4") rather
+  than repeating the explanation.
+- **Keep diff statistics** (line counts, "39/39 added lines found") out
+  unless they change what someone has to do.
+
+Be honest about confidence: anything inferred rather than verified (for
+example "is this disabled on AMD?") should go under Open questions, not be
+asserted.
 
 Hyperlink every PR reference in the report, not just the ones in §1 — this
 includes any mentioned in §4 (problematic commits) and Handoff. Use the
@@ -393,25 +439,8 @@ correct repo per PR: CCCL/Thrust PRs →
 bare `PR #<n>` in the final report.
 
 The same applies to bare commit SHAs: don't leave one un-hyperlinked anywhere
-in the report, including the Summary's "Deriving the Current Version of rocThrust"
-sub-section (e.g. the libcxx.h provenance commit, or the sync commit found
-while verifying the derived tag guess) and §1's New features prose. Apply
+in the report, including §1's New features prose. Apply
 the same CCCL-vs-rocm-libraries disambiguation described in §4 above.
-
-## Phase E — Make the report ticket-ready (forward-compatible scaffolding)
-
-There is no `rocthrust-cccl-sync-tickets` skill yet to consume this, but
-capture the decisions a ticket-filing skill would need, so the report is
-ready whenever that skill exists:
-
-1. **Per-feature disposition (decided, not open).** For every §1 feature:
-   `port/validate`, `enable` (AMD path needs real porting), or
-   `track/N-A/deferred` with a reason.
-2. **NVIDIA-only exclusion list.** Items genuinely NV-only.
-3. **Headline scope roll-up, per tag.**
-4. **Enumerated upstream bug-fix list** warranting new/extended test coverage.
-
-Where a disposition genuinely depends on the human, keep it in Open questions.
 
 ## Handoff
 
@@ -423,5 +452,3 @@ Report to the user:
 - **Next step**: once the human has reviewed the report, run
   `rocthrust-cccl-sync-todo` to create the sync branch and `todo.md` for the
   confirmed `CURRENT_TAG..TO_TAG` range.
-- Whether the report is ticket-ready per Phase E, for whenever a tickets skill
-  exists.

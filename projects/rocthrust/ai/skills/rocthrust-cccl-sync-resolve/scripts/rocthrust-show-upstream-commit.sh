@@ -113,8 +113,9 @@ fi
 echo
 echo "=== testing/ -> test/ counterpart check (AMD-only mirror) ==="
 # projects/rocthrust/test/ (singular) is a separate, hand-maintained GTest
-# suite with NO upstream counterpart at all -- unlike testing/, which is a
-# translated 1:1 port of upstream's Catch2 suite. There is a reliable naming
+# suite with NO upstream counterpart at all -- unlike testing/, which ports
+# upstream's legacy unittest/-framework tests (rocThrust implements upstream's
+# catch2_test_*.cu tests with GTest, not Catch2). There is a reliable naming
 # convention (testing/<name>.cu -> test/test_<name>.cpp) but no git history
 # ever links the two, so a change to testing/<name>.cu (or a header it
 # exercises) can silently leave test/test_<name>.cpp behind. Same
