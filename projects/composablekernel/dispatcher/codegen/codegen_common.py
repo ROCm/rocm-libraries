@@ -743,15 +743,27 @@ def gemm_vector_size_suffix(vec: Sequence[int]) -> str:
     return "_vec{}_{}_{}".format(*vec) if any(vec) else ""
 
 
-def gemm_lockstep_vector_bytes(vec: Sequence[int], dtype_a: str, dtype_b: str) -> int:
+def gemm_lockstep_vector_bytes(
+    vec: Sequence[int], dtype_a: str, dtype_b: str, layout: str = "rc", gpu_target: str = ""
+) -> int:
     """``TileGemmUniversalTraits::_VectorSize`` (bytes) for a fixed width triple.
 
     On gfx9 the LDS write width (``GetSmemPackA/B``) is derived from this single
     byte knob, not from ``VectorSizeA/B``, so it must shrink together with the
     global widths: an 8-wide LDS store fed by a 1-wide global load is a
     structural mismatch. One knob serves both tensors, hence the min.
+
+    gfx1250 reads a column-major A / row-major B (8/16-bit) from LDS with
+    ``ds_load_tr*_b128``, which needs the full 16-byte pack, so such an operand
+    does not lower the knob; 16 bytes (the default) if neither does.
     """
-    return min(vec[0] * _VEC_ELEMENT_BYTES[dtype_a], vec[1] * _VEC_ELEMENT_BYTES[dtype_b])
+    tr_load = normalize_gfx_arch(gpu_target) == GFX1250_ARCH
+    widths = [
+        v * _VEC_ELEMENT_BYTES[d]
+        for v, d, transposed in ((vec[0], dtype_a, layout[0] == "c"), (vec[1], dtype_b, layout[1] == "r"))
+        if not (tr_load and transposed and _VEC_ELEMENT_BYTES[d] <= 2)
+    ]
+    return min(widths, default=16)
 
 
 def gemm_vector_size_sweep(vec: Sequence[int], dtype_a: str, dtype_b: str, dtype_c: str) -> List[Tuple[int, int, int]]:

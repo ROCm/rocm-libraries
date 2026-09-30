@@ -228,6 +228,16 @@ class TestGeneratedKernel(unittest.TestCase):
         self.assertEqual(gemm_lockstep_vector_bytes((4, 8, 8), "fp8", "fp8"), 4)
         self.assertEqual(gemm_lockstep_vector_bytes((8, 8, 8), "bf16", "bf16"), 16)
 
+    def test_lockstep_bytes_skip_gfx1250_transpose_load(self):
+        # gfx1250 transpose-loads col-major A / row-major B from LDS with a
+        # 16-byte pack: those operands keep the knob, the others still lower it.
+        lock = gemm_lockstep_vector_bytes
+        self.assertEqual(lock((8, 1, 1), "bf16", "bf16", "rrr", "gfx1250"), 16)
+        self.assertEqual(lock((1, 8, 8), "bf16", "bf16", "crr", "gfx1250:xnack-"), 16)
+        self.assertEqual(lock((1, 8, 8), "bf16", "bf16", "rcr", "gfx1250"), 2)
+        self.assertEqual(lock((2, 1, 4), "fp32", "fp32", "crr", "gfx1250"), 4)
+        self.assertEqual(lock((8, 1, 1), "bf16", "bf16", "rrr", "gfx950"), 2)
+
 
 class TestWidthSweep(unittest.TestCase):
     def test_aligned_problem_is_native_only(self):

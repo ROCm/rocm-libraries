@@ -470,9 +470,10 @@ class KernelNaming:
 class CKTileKernelGenerator:
     """Generates CK Tile kernel instance code"""
 
-    def __init__(self, datatype: str, layout: str):
+    def __init__(self, datatype: str, layout: str, gpu_target: str = ""):
         self.datatype = datatype
         self.layout = layout
+        self.gpu_target = gpu_target
         self.tm = TypeMappings()
 
     def generate(self, config: KernelConfig) -> str:
@@ -1439,7 +1440,9 @@ using CLayout = {ns_name}::CLayout;
             return "", "", "false, 1"
         ew_tail = ", element_wise::PassThrough, element_wise::PassThrough" if ew else ""
         traits_tail = ", UseStructuredSparsity, UsePersistentKernel, NumWaveGroups, Preshuffle" if short_traits else ""
-        lds_bytes = gemm_lockstep_vector_bytes(config.trait.vector_sizes, self.datatype, self.datatype)
+        lds_bytes = gemm_lockstep_vector_bytes(
+            config.trait.vector_sizes, self.datatype, self.datatype, self.layout, self.gpu_target
+        )
         return (
             f"{ew_tail}, {problem_types}, true, {va}, {vb}",
             f"{traits_tail}, {lds_bytes}",
@@ -1741,7 +1744,7 @@ class UnifiedGemmCodegen:
                 log.warning(f"Could not create arch filter: {e}")
 
         # Initialize generators (use self.layout which is the 3-char A,B,C layout)
-        self.ck_gen = CKTileKernelGenerator(datatype, self.layout)
+        self.ck_gen = CKTileKernelGenerator(datatype, self.layout, gpu_target)
         self.disp_gen = DispatcherWrapperGenerator(datatype, self.layout)
 
     def _load_config(self, config_file: Optional[Path]) -> Dict:

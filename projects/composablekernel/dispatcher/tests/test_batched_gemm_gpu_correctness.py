@@ -93,16 +93,17 @@ def _reference_batched(A: np.ndarray, B: np.ndarray) -> np.ndarray:
 def _make_fp16_config(gfx_arch: str) -> BatchedGemmKernelConfig:
     """A single small, valid fp16/rcr batched kernel.
 
-    128x128x32 tile, 2x2x1 waves, 32x32x16 warp-tile, compv3/intrawave/cshuffle
-    — a divisibility-valid combination on both gfx942 and gfx950. Padding is on
-    so non-tile-multiple shapes still run.
+    128x128x32 tile, 2x2x1 waves, compv3/intrawave/cshuffle. The warp tile is
+    the MFMA 32x32x16 on gfx942/gfx950 and the WMMA 16x16x32 on gfx1250, which
+    has no 32x32x16 fragment. Padding is on so non-tile-multiple shapes still run.
     """
+    wt = (16, 16, 32) if _codegen_common().normalize_gfx_arch(gfx_arch) == "gfx1250" else (32, 32, 16)
     return BatchedGemmKernelConfig(
         dtype_a="fp16", dtype_b="fp16", dtype_c="fp16", dtype_acc="fp32",
         layout_a="row", layout_b="col", layout_c="row",
         tile_m=128, tile_n=128, tile_k=32,
         wave_m=2, wave_n=2, wave_k=1,
-        warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
+        warp_tile_m=wt[0], warp_tile_n=wt[1], warp_tile_k=wt[2],
         pipeline="compv3", scheduler="intrawave", epilogue="cshuffle",
         pad_m=True, pad_n=True, pad_k=True, persistent=False,
         gfx_arch=gfx_arch,
