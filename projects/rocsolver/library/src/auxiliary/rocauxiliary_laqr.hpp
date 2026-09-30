@@ -895,22 +895,18 @@ __device__ void laqr5_chunk_block(const bool wantt,
     // and the fill-in)
     const bool lead = (w == 0);
 
-    const I krlast = std::min(incol + 3 * nbmps - 3, kbot - 2);
-    for(I krcol = incol; krcol <= krlast; krcol++)
-    {
-        // Bulges number mtop to mbot are active double implicit shift bulges. There may
-        // or may not also be a small 2-by-2 bulge, if there is room. (Fortran integer
-        // division truncates toward zero, as in C++.)
-        const I mtop = std::max(I(1), ((ktop - 1) - krcol + 2) / 3 + 1);
-        const I mbot = std::min(nbmps, (kbot - krcol) / 3);
+    // 1. generate the reflection of bulge m to chase the chain right one column at step
+    //    krc (on thread-block 0, one thread per bulge; the bulges read and write disjoint
+    //    entries of H): bulges mtop to mbot are active double implicit shift bulges, and
+    //    there may also be a small 2-by-2 bulge m22 = mbot+1, if there is room
+    auto generate = [&](const I krc, const I m) {
+        const I mtop = std::max(I(1), ((ktop - 1) - krc + 2) / 3 + 1);
+        const I mbot = std::min(nbmps, (kbot - krc) / 3);
         const I m22 = mbot + 1;
-        const bool bmp22 = (mbot < nbmps) && (krcol + 3 * (m22 - 1) == kbot - 2);
-
-        // 1. generate reflections to chase the chain right one column (one thread per
-        //    bulge; the bulges read and write disjoint entries of H)
-        for(I m = mtop + tid; lead && m <= mbot; m += BS)
+        const bool bmp22 = (mbot < nbmps) && (krc + 3 * (m22 - 1) == kbot - 2);
+        if(m >= mtop && m <= mbot)
         {
-            const I k = krcol + 3 * (m - 1);
+            const I k = krc + 3 * (m - 1);
             T v3[3];
             if(k == ktop - 1)
             {
@@ -979,11 +975,9 @@ __device__ void laqr5_chunk_block(const bool wantt,
             vv(2, m) = v3[1];
             vv(3, m) = v3[2];
         }
-
-        // generate a 2-by-2 reflection, if needed
-        if(lead && bmp22 && tid == BS - 1)
+        else if(bmp22 && m == m22)
         {
-            const I k = krcol + 3 * (m22 - 1);
+            const I k = krc + 3 * (m22 - 1);
             T v2[2];
             if(k == ktop - 1)
             {
@@ -1007,7 +1001,24 @@ __device__ void laqr5_chunk_block(const bool wantt,
             vv(2, m22) = v2[1];
             vv(3, m22) = T(0);
         }
-        __syncthreads();
+    };
+
+    const I krlast = std::min(incol + 3 * nbmps - 3, kbot - 2);
+    // (the reflections of the first step; those of each next step are generated at the end
+    // of the previous one, together with the fill-in)
+    if(incol <= krlast)
+        for(I m = 1 + tid; lead && m <= nbmps; m += BS)
+            generate(incol, m);
+    __syncthreads();
+    for(I krcol = incol; krcol <= krlast; krcol++)
+    {
+        // Bulges number mtop to mbot are active double implicit shift bulges. There may
+        // or may not also be a small 2-by-2 bulge, if there is room. (Fortran integer
+        // division truncates toward zero, as in C++.)
+        const I mtop = std::max(I(1), ((ktop - 1) - krcol + 2) / 3 + 1);
+        const I mbot = std::min(nbmps, (kbot - krcol) / 3);
+        const I m22 = mbot + 1;
+        const bool bmp22 = (mbot < nbmps) && (krcol + 3 * (m22 - 1) == kbot - 2);
 
         // with accum, store the reflections of this step (U is formed later from them, Z
         // is updated with a matrix-matrix multiply, and the other thread-blocks read them)
@@ -1277,16 +1288,25 @@ __device__ void laqr5_chunk_block(const bool wantt,
         }
         __syncthreads();
 
-        // 5. fill in the last row of each bulge
+        // 5. fill in the last row of each bulge, and generate the reflections of the next
+        //    step (step 1), each bulge on one thread: generate(krcol+1, m) reads entries
+        //    that the multiplications and the fill-in of bulge m wrote in this step, and
+        //    none that the fill-in or the generation of another bulge writes; the vigilant
+        //    checks, which may set some of them to zero, are complete
         {
             const I mend = std::min(nbmps, (kbot - krcol - 1) / 3);
-            for(I m = mtop + tid; lead && m <= mend; m += BS)
+            for(I m = 1 + tid; lead && m <= nbmps; m += BS)
             {
-                const I k = krcol + 3 * (m - 1);
-                T refsum = vv(1, m) * vv(3, m) * h(k + 4, k + 3);
-                h(k + 4, k + 1) = -refsum;
-                h(k + 4, k + 2) = -refsum * conj(vv(2, m));
-                h(k + 4, k + 3) = h(k + 4, k + 3) - refsum * conj(vv(3, m));
+                if(m >= mtop && m <= mend)
+                {
+                    const I k = krcol + 3 * (m - 1);
+                    T refsum = vv(1, m) * vv(3, m) * h(k + 4, k + 3);
+                    h(k + 4, k + 1) = -refsum;
+                    h(k + 4, k + 2) = -refsum * conj(vv(2, m));
+                    h(k + 4, k + 3) = h(k + 4, k + 3) - refsum * conj(vv(3, m));
+                }
+                if(krcol < krlast)
+                    generate(krcol + 1, m);
             }
         }
         __syncthreads();
