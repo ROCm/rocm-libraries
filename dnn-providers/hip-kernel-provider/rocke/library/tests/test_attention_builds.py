@@ -3804,10 +3804,11 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
 
         base = self._spec(**self._BASE_KWARGS, persistent=True, num_persistent=64)
         self.assertEqual(base.persist_decode, "auto")
-        # Aligned causal: bt_hkv_minor below the XCD count, else qb_major.
+        # Batch below the XCD count: bt_hkv_minor. Else hkv_major iff
+        # gqa*nqb*B >= 2*NP (nqb = Sq/256 here).
         shapes = {
             "bt_hkv_minor": ((1, 512, 512), (1, 1024, 1024)),
-            "qb_major": ((8, 2048, 2048), (64, 4096, 8192)),
+            "hkv_major": ((8, 2048, 2048), (64, 4096, 8192)),
         }
 
         def artifact(spec):
@@ -3841,8 +3842,8 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         for i, part in enumerate(("cache key", "IR", "kernel name")):
             self.assertNotEqual(
                 by_order["bt_hkv_minor"][i],
-                by_order["qb_major"][i],
-                f"auto resolving to bt_hkv_minor and qb_major share one {part}; the "
+                by_order["hkv_major"][i],
+                f"auto resolving to bt_hkv_minor and hkv_major share one {part}; the "
                 "cache would serve one decode body to the other order's shapes",
             )
 
@@ -3973,22 +3974,20 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
             )
         self.assertEqual(
             {s.resolved_persist_decode for s in specs},
-            {"qb_major"},
+            {"hkv_major"},
             "test setup error: the requests no longer resolve to one decode order",
         )
         for spec in specs:
             with self.subTest(b=spec.batch, sq=spec.seqlen_q, hq=spec.num_query_heads):
                 self.assertTrue(spec.runtime_shape)
                 self.assertEqual(spec.runtime_param_fields, self._RUNTIME_FIELDS)
-                self.assertEqual(
-                    spec.fastdiv_divisors, ("batch", "num_query_heads", "gqa")
-                )
+                self.assertEqual(spec.fastdiv_divisors, ("batch", "gqa", "nqb"))
                 name = spec.kernel_name()
                 self.assertIsNone(
                     re.search(self._SHAPE_TOKEN_RE, name),
                     f"persistent gfx942 name still carries a shape token: {name}",
                 )
-                self.assertNotIn("_hkvmaj", name)
+                self.assertIn(f"_persist{spec.num_persistent}_hkvmaj", name)
         self.assertEqual(
             len({attention_dense_cache_key(s, arch="gfx942") for s in specs}),
             1,

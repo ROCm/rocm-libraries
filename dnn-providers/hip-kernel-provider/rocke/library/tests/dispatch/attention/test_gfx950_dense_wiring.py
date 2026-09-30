@@ -299,6 +299,20 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         self.assertTrue(spec.wide_lds_dma)
         self.assertNotIn("gqapair", spec.kernel_name())
 
+    def test_large_batch_selects_hkv_major_for_gqa_and_qb_major_for_mha(self):
+        gqa = _gfx950_dense_req(**{**_LLAMA_8K, "batch": 16})
+        self.assertEqual(_spec(gqa, _PERSIST).resolved_persist_decode, "hkv_major")
+        mha = _gfx950_dense_req(
+            **{
+                **_LLAMA_8K,
+                "batch": 16,
+                "nhead_k": 32,
+                "seqlen_q": 2048,
+                "seqlen_k": 2048,
+            }
+        )
+        self.assertEqual(_spec(mha, _PERSIST).resolved_persist_decode, "qb_major")
+
 
 class TestDenseBottomRightWiring(unittest.TestCase):
     @staticmethod

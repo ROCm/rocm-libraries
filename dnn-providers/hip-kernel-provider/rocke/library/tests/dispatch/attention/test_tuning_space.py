@@ -882,18 +882,26 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
         def canonical(knobs, r=req):
             return tuning_spec_with_knobs(r, "gfx942_dense", knobs)
 
+        self.assertTrue(base.persistent)  # D128: the default spec is persistent
         redundant = (
             dict(use_cfvst=True),  # the policy already turns it on here
             dict(use_exp2_fast=base.resolved_use_exp2_fast()),
             dict(persistent=base.persistent),  # base-relative no-op
-            dict(num_persistent=base.num_persistent * 2),  # grid body ignores it
-            dict(persist_decode="hkv_major"),
-            dict(interleave=True),
+            dict(nonpersist_decode="hq_minor_swz"),  # persistent body ignores it
         )
         default = attention_tuning_spec(req, "gfx942_dense")
         for knobs in redundant:
             with self.subTest(**knobs):
                 self.assertEqual(canonical(knobs), default)
+        # The grid body ignores the persistent-only knobs.
+        grid = dict(persistent=False)
+        for knobs in (
+            dict(num_persistent=base.num_persistent * 2),
+            dict(persist_decode="hkv_major"),
+            dict(interleave=True),
+        ):
+            with self.subTest(grid=knobs):
+                self.assertEqual(canonical({**grid, **knobs}), canonical(grid))
         # No cfvst path at D64: the V knobs are out of scope, so dropped, not refused.
         d64_default = attention_tuning_spec(d64_req, "gfx942_dense")
         self.assertEqual(d64_default.kernel_spec, d64)
