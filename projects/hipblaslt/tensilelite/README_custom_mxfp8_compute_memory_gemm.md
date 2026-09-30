@@ -5,7 +5,7 @@ Prebuilt Tensile Lite clients for these custom GEMM kernels on **gfx1250**
 self-contained: run the checked-in `tensile_client` against the bundled library
 code objects — no hipBLASLt library rebuild is required.
 
-**Inventory:** 10 custom kernel trees.
+**Inventory:** 12 custom kernel trees.
 
 ## How to run (any custom kernel)
 
@@ -41,12 +41,14 @@ counts and random inits). For a quick smoke / correctness check, temporarily set
 `num-elements-to-validate` to a small positive value (for example `128`) and lower
 `num-enqueues-per-sync` (for example to `1`–`10`).
 
-## Compute-bound (4)
+## Compute-bound (6)
 
 ### MXFP8 × MXFP8
 
 | Custom kernel | Size (M,N,B,K) | Problem type |
 |---------------|----------------|--------------|
+| `custom_MXFP8xMXFP8_BS1_8Kx8Kx8K_async_store_split_cluster_barrier_group_pack_spread_ds_clean_dep` | `8192,8192,1,8192` | `Cijk_Alik_Bljk_F8F8S_MXAE8B32_MXBE8B32_BH` |
+| `custom_MXFP8xMXFP8_BS1_8Kx8Kx4K_async_store_split_cluster_barrier_group_pack_spread_ds_clean_dep` | `8192,8192,1,4096` | `Cijk_Alik_Bljk_F8F8S_MXAE8B32_MXBE8B32_BH` |
 | `custom_MXFP8xMXFP8_BS1_8Kx8Kx8K_async_store_split_cluster_barrier_group_pack_spread_ds_clean_dep_Permute_interleave_HiLnMX_halfBufStore` | `8192,8192,1,8192` | `Cijk_Alik_Bljk_F8F8S_MXAE8B32_MXBE8B32_BH` |
 | `custom_MXFP8xMXFP8_BS1_8Kx8Kx4K_async_store_split_cluster_barrier_group_pack_spread_ds_clean_dep_Permute_interleave_HiLnMX_halfBufStore` | `8192,8192,1,4096` | `Cijk_Alik_Bljk_F8F8S_MXAE8B32_MXBE8B32_BH` |
 
