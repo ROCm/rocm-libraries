@@ -193,7 +193,7 @@ int rewriteToFlat(const std::unordered_set<StinkyInstruction*>& chosen,
         pf->updateHwInstDesc(flatDesc);
         // A null saddr is spelled "off" in the GLOBAL syntax and omitted in the FLAT
         // one, so the operand has to go with the opcode. The encoding is the same;
-        // only the spelling differs.
+        // only the spelling differs. An SGPR saddr is kept: FLAT takes it on gfx1250.
         std::vector<StinkyRegister> srcs;
         for (const StinkyRegister& src : pf->getSrcRegs()) {
             if (src.dataType == StinkyRegister::Type::LiteralString && src.literalValue == "off")
