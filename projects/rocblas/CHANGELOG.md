@@ -3,13 +3,12 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
-## rocBLAS 5.8.0
+## rocBLAS 5.8.0 for ROCm 10.2.0
 
 ### Removed
 
 * The `ROCBLAS_USE_HIPBLASLT_BATCHED` environment variable, deprecated in `rocBLAS 5.6.0`, is removed and is now ignored. Batched GEMM is controlled by the same environment variable as all other GEMM, so a batched-only override is no longer required. Use `ROCBLAS_USE_HIPBLASLT=0` to select the Tensile backend for all GEMM, including batched.
 
-## rocBLAS 5.6.0
 ## rocBLAS 5.7.0 for ROCm 10.1.0
 
 ### Added
