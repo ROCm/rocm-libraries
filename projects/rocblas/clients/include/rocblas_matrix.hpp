@@ -306,9 +306,9 @@ inline double init_abs_bound(rocblas_initialization init)
     {
     case rocblas_initialization::rand_int:
         // float/double: [1,10]; half/bfloat16: [-2,2]; int8: [1,3]
-        if(std::is_same_v<T, rocblas_half> || std::is_same_v<T, rocblas_bfloat16>)
+        if(std::is_same<T, rocblas_half>{} || std::is_same<T, rocblas_bfloat16>{})
             comp = 2.0;
-        else if(std::is_same_v<T, int8_t>)
+        else if(std::is_same<T, int8_t>{})
             comp = 3.0;
         else
             comp = 10.0;
