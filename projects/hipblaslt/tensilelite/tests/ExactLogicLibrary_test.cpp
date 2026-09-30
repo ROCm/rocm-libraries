@@ -115,6 +115,38 @@ namespace
         std::string m_previousValue;
     };
 
+    class ScopedMeshBasedLib
+    {
+    public:
+        explicit ScopedMeshBasedLib(std::optional<std::string> value)
+        {
+            m_previous = std::getenv("TENSILE_USE_MESHBASED");
+            if(m_previous)
+                m_previousValue = m_previous;
+
+            if(value)
+                setenv("TENSILE_USE_MESHBASED", value->c_str(), 1);
+            else
+                unsetenv("TENSILE_USE_MESHBASED");
+
+            Debug::Instance().reloadDebugBitsForTest();
+        }
+
+        ~ScopedMeshBasedLib()
+        {
+            if(m_previous)
+                setenv("TENSILE_USE_MESHBASED", m_previousValue.c_str(), 1);
+            else
+                unsetenv("TENSILE_USE_MESHBASED");
+
+            Debug::Instance().reloadDebugBitsForTest();
+        }
+
+    private:
+        const char* m_previous = nullptr;
+        std::string m_previousValue;
+    };
+
     ContractionProblemPredicate makeRowPredicate(
         std::shared_ptr<Predicates::Predicate<ContractionProblemGemm>> predicate)
     {
@@ -132,6 +164,25 @@ namespace
         lib->rows.push_back(ContractionProblemSelectionLibrary::Row(
             makeRowPredicate(std::make_shared<Predicates::Contraction::RangeMatching>()),
             std::make_shared<StubTopLibrary>(makeSolution("range", 2))));
+
+        lib->rows.push_back(ContractionProblemSelectionLibrary::Row(
+            makeRowPredicate(std::make_shared<Predicates::Contraction::PredictionMatching>()),
+            std::make_shared<StubTopLibrary>(makeSolution("prediction", 3))));
+
+        return lib;
+    }
+
+    std::shared_ptr<ContractionProblemSelectionLibrary> buildMatchingRowsWithMeshLibrary()
+    {
+        auto lib = std::make_shared<ContractionProblemSelectionLibrary>();
+
+        lib->rows.push_back(ContractionProblemSelectionLibrary::Row(
+            makeRowPredicate(std::make_shared<Predicates::Contraction::EqualityMatching>()),
+            std::make_shared<StubTopLibrary>(makeSolution("equality", 1))));
+
+        lib->rows.push_back(ContractionProblemSelectionLibrary::Row(
+            makeRowPredicate(std::make_shared<Predicates::Contraction::MeshBasedMatching>()),
+            std::make_shared<StubTopLibrary>(makeSolution("meshbased", 2))));
 
         lib->rows.push_back(ContractionProblemSelectionLibrary::Row(
             makeRowPredicate(std::make_shared<Predicates::Contraction::PredictionMatching>()),
@@ -217,4 +268,46 @@ TEST(ExactLogicLibraryTest, FindTopSolutionsForceStaticOverridesStreamKSchedulin
 
     EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3)),
               (std::vector<std::string>{"equality", "range", "prediction"}));
+}
+
+TEST(ExactLogicLibraryTest, FindTopSolutionsSkipsPredictionWhenMeshBasedEnabled)
+{
+    ScopedMeshBasedLib meshOn("1");
+
+    auto        lib     = buildMatchingRowsWithMeshLibrary();
+    auto        problem = dummyProblem();
+    const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+
+    auto names = solutionNames(lib->findTopSolutions(problem, device, 3));
+    EXPECT_EQ(names, (std::vector<std::string>{"equality", "meshbased"}));
+}
+
+TEST(ExactLogicLibraryTest, FindTopSolutionsIncludesPredictionWhenMeshBasedDisabled)
+{
+    ScopedMeshBasedLib meshOff(std::nullopt);
+
+    auto        lib     = buildMatchingRowsWithMeshLibrary();
+    auto        problem = dummyProblem();
+    const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+
+    EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3)),
+              (std::vector<std::string>{"equality", "meshbased", "prediction"}));
+}
+
+TEST(ExactLogicLibraryTest, FindBestSolutionTagsMeshBased)
+{
+    ScopedMeshBasedLib meshOn("1");
+
+    auto lib = std::make_shared<ContractionProblemSelectionLibrary>();
+    lib->rows.push_back(ContractionProblemSelectionLibrary::Row(
+        makeRowPredicate(std::make_shared<Predicates::Contraction::MeshBasedMatching>()),
+        std::make_shared<StubTopLibrary>(makeSolution("meshbased", 1))));
+
+    auto         problem  = dummyProblem();
+    const AMDGPU device   = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    auto         solution = lib->findBestSolution(problem, device);
+
+    ASSERT_NE(solution, nullptr);
+    EXPECT_EQ(solution->solutionName, "meshbased");
+    EXPECT_EQ(solution->tag, ContractionSolution::MatchingTag::MeshBased);
 }
