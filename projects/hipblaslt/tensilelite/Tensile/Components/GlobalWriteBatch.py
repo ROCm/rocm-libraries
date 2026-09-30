@@ -4742,14 +4742,16 @@ class GlobalWriteBatchWriter:
     return module
 
   def _emitPlsinStageBoundary(self, module: Module, element):
-    """Mark where this element's N group crosses into the next compute partition.
+    """Mark where this element crosses into the next compute partition.
 
     The marker is an empty Module that emits nothing; the scheduler cuts the
     finished store on it to build the per-partition stages.
     """
     tt1PerStage = getattr(self.parentWriter.states, "subtileStoreTt1PerStage", 0)
-    if not tt1PerStage:
+    tt0PerStage = getattr(self.parentWriter.states, "subtileStoreTt0PerStage", 0)
+    if not tt1PerStage or not tt0PerStage:
       return
+    numStagesM = max(1, getattr(self.parentWriter.states, "subtileStoreStagesM", 1))
     # The stage index may only advance. A cut is a relocation, so the pieces have to
     # stay in program order, and the element N groups are not globally monotone --
     # they run 0,1,..,7 and then restart, both within the batch sequence and across
@@ -4759,7 +4761,12 @@ class GlobalWriteBatchWriter:
     # accumulators, so the high-water mark lives on the writer state to survive the
     # per-batch rebuild of this object. Suppressed markers simply leave their stores
     # in the latest stage, which is always late enough to be correct.
-    stage = element[0] // tt1PerStage
+    #
+    # M fastest, matching _partition_tile_range's pi = piM + piN * numPartitionsM,
+    # because the stages are injected into the loop keyed by that pi. Under an
+    # M split the elements arrive p0,p1,p0,p1 within each N group and the second
+    # visit to p0 is the suppressed case above.
+    stage = element[1] // tt0PerStage + (element[0] // tt1PerStage) * numStagesM
     if stage <= self.parentWriter.states.subtileStoreStageHighWater:
       return
     self.parentWriter.states.subtileStoreStageHighWater = stage

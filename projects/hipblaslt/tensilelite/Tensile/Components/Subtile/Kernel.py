@@ -1406,6 +1406,22 @@ def mainLoop(writer, kernel):
   lendStore = kernel["MacroTile0"] > 256 or kernel["MacroTile1"] > 256
   tailOwnTiles = plsinTailOwnTiles() and bool(wider) and not lendStore
   tailPartitionSizeN = wider[0][1] if tailOwnTiles else 0
+  # The N split floors at 4 partitions: the MX scale read granularity forbids a
+  # partition narrower than 2 MFMA tiles, and N is 8. Splitting M as well is the
+  # only way to stage the store any finer, and it is what pulls the first store
+  # forward from 72 of the arm's 256 MFMAs to 40. It is not free -- an M split
+  # makes A and scale-A partition-varying, so their LDS reads are re-issued per
+  # partition -- so it stays opt-in until measured.
+  # TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_TAIL_PARTM=4" gives 4 M tiles per
+  # partition, i.e. a 2x4 grid on MT256x256.
+  tailPartitionSizeM = int(plsinDebugEnv("TENSILE_PLSIN_TAIL_PARTM", "0")) \
+      if tailOwnTiles else 0
+  # Only split M when it divides evenly. An uneven split -- M=6 against a size of
+  # 4 gives [4,2] -- is worse than not splitting at all: _plsinStagedStoreCount
+  # requires uniform partition sizes, so the kernel would lose the N-only staging
+  # it has today and get nothing back. Silently dropping to no M split keeps it.
+  if tailPartitionSizeM and M % tailPartitionSizeM != 0:
+      tailPartitionSizeM = 0
   if wider and not tailOwnTiles:
       candidates = wider
   for partSizeM, partSizeN in candidates:
@@ -1432,6 +1448,7 @@ def mainLoop(writer, kernel):
           blockSched=plsinStagingEligible(kernel),
           tailOwnTiles=tailOwnTiles,
           tailPartitionSizeN=tailPartitionSizeN,
+          tailPartitionSizeM=tailPartitionSizeM,
       )
 
       scheduler = LogicalScheduler(cfg)
