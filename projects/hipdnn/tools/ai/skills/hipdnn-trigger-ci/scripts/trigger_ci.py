@@ -53,7 +53,8 @@ CANONICAL_REMOTE_URL = re.compile(
     r"github\.com[:/]ROCm/rocm-libraries(\.git)?/?$", re.IGNORECASE
 )
 
-# TheRock commit the --help family and label lists were taken from.
+# TheRock commit the --help family and label lists were taken from. The Sources
+# links in SKILL.md use the same SHA; update both together.
 THEROCK_SNAPSHOT_REF = "7440cb8578f4daae0d85a428fadd6645dc5464a0"
 CI_ENV_ACTION = ".github/actions/ci-env/action.yml"
 
@@ -165,28 +166,39 @@ def checkout_therock_ref():
     if not root:
         return ""
     try:
-        text = Path(root, CI_ENV_ACTION).read_text()
-    except OSError:
+        text = Path(root, CI_ENV_ACTION).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
         return ""
     match = re.search(r'therock-ref:\n(?:.*\n)*?\s*value:\s*"([0-9a-f]+)"', text)
     return match.group(1) if match else ""
 
 
 def pr_branch(pr_number):
-    return run_cmd(
-        [
-            "gh",
-            "pr",
-            "view",
-            str(pr_number),
-            "--repo",
-            REPO,
-            "--json",
-            "headRefName",
-            "--jq",
-            ".headRefName",
-        ]
+    head = json.loads(
+        run_cmd(
+            [
+                "gh",
+                "pr",
+                "view",
+                str(pr_number),
+                "--repo",
+                REPO,
+                "--json",
+                "headRefName,isCrossRepository",
+            ]
+        )
     )
+    # A fork PR's head branch lives in the fork; on REPO the same name would
+    # select an unrelated branch.
+    if head["isCrossRepository"]:
+        print(
+            f"error: PR #{pr_number} is from a fork, so its head branch "
+            f"'{head['headRefName']}' is not on {REPO}; push it to {REPO} and "
+            "pass --branch, or use watch --run-id",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return head["headRefName"]
 
 
 def resolve_branch(args):
@@ -327,14 +339,19 @@ def cmd_dispatch(args):
 
 def cmd_status(args):
     if args.pr and not args.branch:
-        # gh pr checks exits 1 for failing checks as well as for errors, so
-        # confirm the PR resolves first; failures there exit via run_cmd.
-        pr_branch(args.pr)
         cmd = ["gh", "pr", "checks", str(args.pr), "--repo", REPO]
-        returncode = subprocess.run(cmd).returncode
-        # 0 = all passed, 1 = some failed, 8 = some pending.
-        if returncode not in (0, 1, 8):
-            sys.exit(returncode)
+        result = subprocess.run(cmd, stderr=subprocess.PIPE, text=True)
+        stderr = result.stderr.strip()
+        # 0 = all passed, 8 = some pending. 1 covers both failing checks and
+        # errors such as "no checks reported"; only errors write to stderr.
+        if result.returncode not in (0, 1, 8) or (result.returncode == 1 and stderr):
+            print(
+                f"error: {stderr or 'command failed: ' + shlex.join(cmd)}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if stderr:
+            print(stderr, file=sys.stderr)
     else:
         ref = resolve_branch(args)
         print(f"Recent runs on '{ref}':\n")
