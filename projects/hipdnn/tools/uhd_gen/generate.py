@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import tempfile
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -30,12 +31,19 @@ logger = logging.getLogger(__name__)
 
 
 def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--graphs", nargs="+", required=True,
+    inputs = parser.add_mutually_exclusive_group(required=True)
+    inputs.add_argument("--graphs", nargs="+",
                         help="Graph files -- JSON, or the binary FlatBuffers hipdnn_corpus_gen writes "
                              "as graphs/*.fb -- or corpus directories (recursive)")
+    inputs.add_argument("--collection", nargs="+", metavar="DIR",
+                        help="Train from recorded collections (written by --collect-only) instead of "
+                             "measuring; several are merged, the newest measurement of a graph on a "
+                             "device winning")
+    parser.add_argument("--collect-only", action="store_true",
+                        help="Measure --graphs, write the collection to --output-dir, and stop")
     parser.add_argument("--descriptor-tree", required=True, help="Shipping descriptor tree; authored knobs are preserved")
     parser.add_argument("--engine", help="UED name/UUID or canonical immediate engine name")
-    parser.add_argument("--engine-id", required=True, type=int, help="Public hipDNN engine ID used by hipdnn_bench")
+    parser.add_argument("--engine-id", type=int, help="Public hipDNN engine ID used by hipdnn_bench (required to measure)")
     parser.add_argument("--bench", default="hipdnn_bench", help="Public hipdnn_bench executable")
     parser.add_argument("--plugin-dir")
     parser.add_argument("--device", action="append", help="HIP_VISIBLE_DEVICES selection; repeat to collect multiple devices")
@@ -87,6 +95,123 @@ def _absent_as_null(value):
     if isinstance(value, list):
         return [_absent_as_null(item) for item in value]
     return value
+
+
+#: The recorded form of one measuring run, read back by `--collection`.
+COLLECTION_SCHEMA = "uhd_gen.collection/1"
+COLLECTION_MANIFEST = "collection_manifest.json"
+
+
+def _corpus_name(sources: list, source) -> str:
+    """One corpus per metric source, named plainly when there is only one."""
+    return "corpus" if len(sources) == 1 else f"corpus_{source}"
+
+
+def write_collection(stage: Path, *, collected_at: str, role: str, engine: str | None,
+                     engine_id: int, sources: list, rows: dict, published: set, commands: list,
+                     graph_inputs: list, provenance, knob_encodings: dict, shipping_knobs: list,
+                     collection_knobs: list, kernel_fields: set) -> dict:
+    """Write what a measuring run produced so a later `--collection` can train from it.
+
+    Everything training reads from a collection is here, and nothing training decides is:
+    no split, no feature recipe, no model. For an engine-immediate collection the binding
+    is checked now, so a collection that cannot train (mixed selector revisions within one
+    run) is refused while it is still one run's problem rather than a merge's.
+    """
+    immediate = role == ROLE
+    selector_revision = None
+    for source in sources:
+        frame = pd.DataFrame(rows[source])
+        if immediate:
+            _, binding = training_binding(normalize_corpus(frame))
+            if provenance is not None and binding["trained_against"] != provenance:
+                raise ValueError("the engine's descriptor provenance changed between metric collections")
+            provenance = binding["trained_against"]
+            selector_revision = binding["selector_revision"]
+        name = _corpus_name(sources, source)
+        frame.to_csv(stage / f"{name}.csv", index=False)
+        _write_json(stage / f"{name}.json", _absent_as_null(rows[source]))
+    every = [row for source in sources for row in rows[source]]
+    manifest = {
+        "schema": COLLECTION_SCHEMA, "collected_at": collected_at, "role": role,
+        "engine": engine, "engine_id": engine_id,
+        "engine_name": next((row.get("engine_name") for row in every if row.get("engine_name")), None),
+        "sources": sources, "trained_against": provenance, "selector_revision": selector_revision,
+        "arches": sorted({row["arch"] for row in every}),
+        "devices": sorted({str(row["device"]) for row in every}),
+        "graph_count": len({row["benchmark"] for row in every}),
+        "row_counts": {str(source): len(rows[source]) for source in sources},
+        "published": sorted(published), "kernel_fields": sorted(kernel_fields),
+        "knob_encodings": knob_encodings, "shipping_knobs": shipping_knobs,
+        "collection_knobs": collection_knobs, "graphs": graph_inputs, "commands": commands,
+    }
+    _write_json(stage / COLLECTION_MANIFEST, manifest)
+    return manifest
+
+
+def load_collections(paths: list, *, role: str, sources: list) -> dict:
+    """Merge recorded collections: the newest measurement of a graph on a device wins.
+
+    A (graph, device) group is taken whole from the newest collection that measured it --
+    for a catalog sweep that is the candidate set of one session, never candidates from
+    two sessions mixed into one ranking. Older measurements stay on disk; the merge only
+    decides which one is the label, and says how many rows it set aside.
+
+    Refused rather than merged: different roles or engines, different trained_against
+    (a model is bound to one selector revision or descriptor set), different knob
+    addressing, and a requested metric a collection did not measure.
+    """
+    loaded = []
+    for supplied in paths:
+        directory = Path(supplied).resolve()
+        manifest = json.loads((directory / COLLECTION_MANIFEST).read_text(encoding="utf-8"))
+        if manifest.get("schema") != COLLECTION_SCHEMA:
+            raise ValueError(f"{directory} is not a {COLLECTION_SCHEMA} collection")
+        loaded.append((manifest["collected_at"], str(directory), manifest))
+    if not loaded:
+        raise ValueError("--collection names no collection")
+    loaded.sort(key=lambda item: (item[0], item[1]))
+    first = loaded[0][2]
+    for _, directory, manifest in loaded:
+        if manifest["role"] != role:
+            raise ValueError(f"{directory} was collected for {manifest['role']}, not {role}")
+        for key, what in (("engine_name", "engine"), ("engine_id", "engine id"),
+                          ("trained_against", "trained_against provenance"),
+                          ("knob_encodings", "knob addressing"), ("collection_knobs", "collection knobs")):
+            if manifest.get(key) != first.get(key):
+                raise ValueError(f"collections disagree on {what}: {first.get(key)!r} vs "
+                                 f"{manifest.get(key)!r} ({directory}); a model is trained against one")
+        missing = [source for source in sources if source not in manifest["sources"]]
+        if missing:
+            raise ValueError(f"{directory} did not measure {missing}; it holds {manifest['sources']}")
+    rows, superseded, published = {source: [] for source in sources}, 0, set()
+    for source in sources:
+        chosen: dict = {}
+        for _, directory, manifest in loaded:
+            corpus = Path(directory) / f"{_corpus_name(manifest['sources'], source)}.json"
+            groups: dict = {}
+            for row in json.loads(corpus.read_text(encoding="utf-8")):
+                groups.setdefault((str(row["benchmark"]), str(row["device"])), []).append(row)
+            for key, group in groups.items():
+                if key in chosen:
+                    superseded += len(chosen[key])
+                chosen[key] = group
+        rows[source] = [row for group in chosen.values() for row in group]
+    for _, _, manifest in loaded:
+        published.update(manifest["published"])
+    return {
+        "rows": rows, "published": published, "superseded_rows": superseded,
+        "provenance": first["trained_against"], "knob_encodings": first["knob_encodings"],
+        "shipping_knobs": first["shipping_knobs"], "collection_knobs": first["collection_knobs"],
+        "kernel_fields": set(first["kernel_fields"]), "engine_id": first["engine_id"],
+        "graphs": [dict(graph, collection=directory) for _, directory, manifest in loaded
+                   for graph in manifest["graphs"]],
+        "commands": [dict(command, collection=directory) for _, directory, manifest in loaded
+                     for command in manifest["commands"]],
+        "collections": [{"path": directory, "collected_at": collected_at,
+                         "devices": manifest["devices"], "rows": manifest["row_counts"]}
+                        for collected_at, directory, manifest in loaded],
+    }
 
 
 def _descriptor(tree: Path, suffix: str, identity: str) -> tuple[Path, dict]:
@@ -340,6 +465,110 @@ def _catalog_label(metric: str, usable: pd.DataFrame, defaulted: bool, role: str
     return None, "robustMeanMs", False, "robustMeanMs"
 
 
+def _measure(args: argparse.Namespace, tree: Path, stage: Path, sources: list, immediate: bool) -> dict:
+    """Run the benchmark over `--graphs` into `stage`: the measuring half of generate.
+
+    Returns exactly what training reads, so `--collect-only` can write it down and
+    `--collection` can hand the same values back without measuring.
+    """
+    if args.engine_id is None:
+        raise ValueError("--engine-id is required to measure")
+    bench = shutil.which(args.bench)
+    if bench is None:
+        raise ValueError(f"hipdnn_bench executable {args.bench!r} was not found")
+    graphs = set()
+    for supplied in args.graphs:
+        path = Path(supplied).resolve()
+        # `hipdnn_corpus_gen` writes its problems as binary FlatBuffers under
+        # `graphs/<operation>_<n>.fb`, so a generated corpus composes with
+        # `generate` only if that form is collected alongside hand-written JSON.
+        graphs.update([*path.rglob("*.json"), *path.rglob("*.fb")] if path.is_dir() else [path])
+    if not graphs or any(not path.is_file() for path in graphs):
+        raise ValueError("--graphs must identify existing graph .json or .fb files")
+    collected_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    provenance, ued, exposed, kernel_fields, ordinals = None, {}, {}, set(), {}
+    if not immediate:
+        provenance = snapshot_provenance(tree, args.engine, args.arch)
+        ued_path, ued = _descriptor(tree, ".ued.json", provenance["ued"]["id"])
+        _, kmd = _descriptor(tree, ".kmd.json", provenance["kmd"]["id"])
+        kernel_fields = {"kernel." + field["name"] for field in kmd["fields"]}
+    environment = dict(os.environ)
+    if immediate:
+        environment["HIPDNN_DESCRIPTOR_PATH"] = str(tree)
+    else:
+        collection_tree = stage / "collection_descriptors"
+        shutil.copytree(tree, collection_tree)
+        exposed = dict(ued)
+        # RFC 0019 13.2: the collection UED exposes EVERY KMD field, so the knob tuple
+        # equals the metadata tuple and every catalog entry is individually reachable.
+        # Exposing only `int` made two kernels differing in e.g. `dtype` share a tuple
+        # and abort the run on the collision at _knob_tuple.
+        #
+        # Which of those fields ends up addressed BY AN ORDINAL is the engine's
+        # decision, not this tool's: a knob value is an int64 end to end, so the
+        # ingestor numbers each non-integer field over its own value set and reports
+        # the pin it chose on every enumerated candidate. The mapping is read back off
+        # the collection below (addressing.observe) rather than re-derived here, so
+        # there is no second numbering to disagree with the engine's.
+        exposed["knobs"] = [field["name"] for field in kmd["fields"]]
+        _write_json(collection_tree / ued_path.relative_to(tree), exposed)
+        _write_json(stage / "shipping_ued.json", ued)
+        environment["HIPDNN_DESCRIPTOR_DIR"] = str(collection_tree)
+        environment.pop("HIPDNN_DESCRIPTOR_RUNTIME_DIR", None)
+    rows = {source: [] for source in sources}
+    commands, graph_inputs = [], []
+    published = set()
+    for graph_index, graph in enumerate(sorted(graphs)):
+        payload = graph.read_bytes()
+        # `hipdnn_bench` tells the two serialized forms apart by content rather than
+        # by extension, so a renamed file still loads; the staged copy follows the
+        # same rule and keeps whichever form the source was in.
+        binary = not payload.lstrip().startswith(b"{")
+        saved_graph = stage / "graphs" / f"{graph_index:06d}{'.fb' if binary else '.json'}"
+        saved_graph.parent.mkdir(exist_ok=True)
+        if immediate and not binary:
+            graph_document = json.loads(payload.decode("utf-8"))
+            if not isinstance(graph_document, dict):
+                raise ValueError("graph input must be a JSON object")
+            if not graph_document.get("id"):
+                canonical = json.dumps(graph_document, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                graph_document["id"] = str(uuid.uuid5(uuid.NAMESPACE_URL, "hipdnn:graph:" + canonical))
+            _write_json(saved_graph, graph_document)
+        else:
+            # A serialized graph already carries its own id, and the bench preserves
+            # it across the deserialize/serialize round trip it does for L1, so there
+            # is nothing to inject: the identity the corpus records is the one the
+            # benchmark reports back as `graph_id`, keyed to this copy's sha256.
+            saved_graph.write_bytes(payload)
+        graph_inputs.append({"source": str(graph), "copy": str(saved_graph.relative_to(stage)),
+                             "sha256": hashlib.sha256(payload).hexdigest()})
+        command = [bench, "--graph", str(saved_graph), "--engine-id", str(args.engine_id)]
+        if args.plugin_dir:
+            command.extend(["--plugin-dir", str(Path(args.plugin_dir).resolve())])
+        if args.workspace_limit is not None:
+            command.extend(["--workspace-limit", str(args.workspace_limit)])
+        for knob in args.knob:
+            command.extend(["--knob", knob])
+        for device in args.device or [environment.get("HIP_VISIBLE_DEVICES")]:
+            run_env = dict(environment)
+            if device is not None:
+                run_env["HIP_VISIBLE_DEVICES"] = device
+            for source in sources:
+                if immediate:
+                    collected, names = collect_immediate_graph(command, run_env, stage / "commands",
+                                                               commands, metric=source)
+                else:
+                    collected, names = collect_graph(command, run_env, stage / "commands", commands,
+                                                     addressing_table=ordinals,
+                                                     engine_descriptor_id=ued["id"])
+                rows[source].extend(collected)
+                published.update(names)
+    return {"collected_at": collected_at, "rows": rows, "published": published,
+            "commands": commands, "graph_inputs": graph_inputs, "provenance": provenance,
+            "kernel_fields": kernel_fields, "knob_encodings": addressing.as_manifest(ordinals),
+            "shipping_knobs": ued.get("knobs", []), "collection_knobs": exposed.get("knobs", [])}
+
+
 def run_generate(args: argparse.Namespace) -> int:
     from .__main__ import main
     from .promote import PromoteError, build_plan, run_promote, add_promote_arguments
@@ -365,110 +594,55 @@ def run_generate(args: argparse.Namespace) -> int:
             raise ValueError("--output-dir must be outside the shipping descriptor tree")
         if not 0 < args.eval_fraction < 1:
             raise ValueError("generate requires a true problem holdout: 0 < --eval-fraction < 1")
-        bench = shutil.which(args.bench)
-        if bench is None:
-            raise ValueError(f"hipdnn_bench executable {args.bench!r} was not found")
-        graphs = set()
-        for supplied in args.graphs:
-            path = Path(supplied).resolve()
-            # `hipdnn_corpus_gen` writes its problems as binary FlatBuffers under
-            # `graphs/<operation>_<n>.fb`, so a generated corpus composes with
-            # `generate` only if that form is collected alongside hand-written JSON.
-            graphs.update([*path.rglob("*.json"), *path.rglob("*.fb")] if path.is_dir() else [path])
-        if not graphs or any(not path.is_file() for path in graphs):
-            raise ValueError("--graphs must identify existing graph .json or .fb files")
+        if args.collect_only and args.collection:
+            raise ValueError("--collect-only measures --graphs; it cannot also read --collection")
+        if args.collection and (args.knob or args.device or args.workspace_limit is not None):
+            raise ValueError("--knob, --device and --workspace-limit shape a measurement, and a "
+                             "--collection run measures nothing")
         if immediate:
             if args.knob or args.dim_tile:
                 raise ValueError("L1 generation cannot use kernel knobs or dimension/tile candidate features")
             if not tree.is_dir():
                 raise ValueError("--descriptor-tree must be an existing descriptor root (it may be empty)")
-            provenance, ued, exposed = None, {}, {}
-            kernel_fields = set()
-            ordinals = {}
-        else:
-            provenance = snapshot_provenance(tree, args.engine, args.arch)
-            ued_path, ued = _descriptor(tree, ".ued.json", provenance["ued"]["id"])
-            _, kmd = _descriptor(tree, ".kmd.json", provenance["kmd"]["id"])
-            kernel_fields = {"kernel." + field["name"] for field in kmd["fields"]}
-            ordinals = {}
-        output.parent.mkdir(parents=True, exist_ok=True)
-        stage = Path(tempfile.mkdtemp(prefix=".uhd-generate-", dir=output.parent))
-        environment = dict(os.environ)
-        if immediate:
-            environment["HIPDNN_DESCRIPTOR_PATH"] = str(tree)
-        else:
-            collection_tree = stage / "collection_descriptors"
-            shutil.copytree(tree, collection_tree)
-            exposed = dict(ued)
-            # RFC 0019 13.2: the collection UED exposes EVERY KMD field, so the knob tuple
-            # equals the metadata tuple and every catalog entry is individually reachable.
-            # Exposing only `int` made two kernels differing in e.g. `dtype` share a tuple
-            # and abort the run on the collision at _knob_tuple.
-            #
-            # Which of those fields ends up addressed BY AN ORDINAL is the engine's
-            # decision, not this tool's: a knob value is an int64 end to end, so the
-            # ingestor numbers each non-integer field over its own value set and reports
-            # the pin it chose on every enumerated candidate. The mapping is read back off
-            # the collection below (addressing.observe) rather than re-derived here, so
-            # there is no second numbering to disagree with the engine's.
-            exposed["knobs"] = [field["name"] for field in kmd["fields"]]
-            _write_json(collection_tree / ued_path.relative_to(tree), exposed)
-            _write_json(stage / "shipping_ued.json", ued)
-            environment["HIPDNN_DESCRIPTOR_DIR"] = str(collection_tree)
-            environment.pop("HIPDNN_DESCRIPTOR_RUNTIME_DIR", None)
         # The catalog sweep times every candidate once, whatever the metric: one timing
         # run feeds every metric's label (RFC 0019 §13.4). An immediate run measures the
         # engine's own kernel choice, which follows the requested metric, so each metric
         # is its own measurement.
         sources = metrics if immediate else [None]
-        rows = {source: [] for source in sources}
-        commands, graph_inputs = [], []
-        published = set()
-        for graph_index, graph in enumerate(sorted(graphs)):
-            payload = graph.read_bytes()
-            # `hipdnn_bench` tells the two serialized forms apart by content rather than
-            # by extension, so a renamed file still loads; the staged copy follows the
-            # same rule and keeps whichever form the source was in.
-            binary = not payload.lstrip().startswith(b"{")
-            saved_graph = stage / "graphs" / f"{graph_index:06d}{'.fb' if binary else '.json'}"
-            saved_graph.parent.mkdir(exist_ok=True)
-            if immediate and not binary:
-                graph_document = json.loads(payload.decode("utf-8"))
-                if not isinstance(graph_document, dict):
-                    raise ValueError("graph input must be a JSON object")
-                if not graph_document.get("id"):
-                    canonical = json.dumps(graph_document, sort_keys=True, separators=(",", ":"), allow_nan=False)
-                    graph_document["id"] = str(uuid.uuid5(uuid.NAMESPACE_URL, "hipdnn:graph:" + canonical))
-                _write_json(saved_graph, graph_document)
-            else:
-                # A serialized graph already carries its own id, and the bench preserves
-                # it across the deserialize/serialize round trip it does for L1, so there
-                # is nothing to inject: the identity the corpus records is the one the
-                # benchmark reports back as `graph_id`, keyed to this copy's sha256.
-                saved_graph.write_bytes(payload)
-            graph_inputs.append({"source": str(graph), "copy": str(saved_graph.relative_to(stage)),
-                                 "sha256": hashlib.sha256(payload).hexdigest()})
-            command = [bench, "--graph", str(saved_graph), "--engine-id", str(args.engine_id)]
-            if args.plugin_dir:
-                command.extend(["--plugin-dir", str(Path(args.plugin_dir).resolve())])
-            if args.workspace_limit is not None:
-                command.extend(["--workspace-limit", str(args.workspace_limit)])
-            for knob in args.knob:
-                command.extend(["--knob", knob])
-            for device in args.device or [environment.get("HIP_VISIBLE_DEVICES")]:
-                run_env = dict(environment)
-                if device is not None:
-                    run_env["HIP_VISIBLE_DEVICES"] = device
-                for source in sources:
-                    if immediate:
-                        collected, names = collect_immediate_graph(command, run_env, stage / "commands",
-                                                                   commands, metric=source)
-                    else:
-                        collected, names = collect_graph(command, run_env, stage / "commands", commands,
-                                                         addressing_table=ordinals,
-                                                         engine_descriptor_id=ued["id"])
-                    rows[source].extend(collected)
-                    published.update(names)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        stage = Path(tempfile.mkdtemp(prefix=".uhd-generate-", dir=output.parent))
+        superseded, collections = 0, None
+        if args.graphs:
+            measured = _measure(args, tree, stage, sources, immediate)
+            engine_id = args.engine_id
+            if args.collect_only:
+                manifest = write_collection(
+                    stage, collected_at=measured["collected_at"], role=args.role, engine=args.engine,
+                    engine_id=engine_id, sources=sources, rows=measured["rows"],
+                    published=measured["published"], commands=measured["commands"],
+                    graph_inputs=measured["graph_inputs"], provenance=measured["provenance"],
+                    knob_encodings=measured["knob_encodings"], shipping_knobs=measured["shipping_knobs"],
+                    collection_knobs=measured["collection_knobs"], kernel_fields=measured["kernel_fields"])
+                stage.rename(output)
+                stage = None
+                print(f"Collected {sum(manifest['row_counts'].values())} measurement(s) of "
+                      f"{manifest['graph_count']} graph(s): {output}")
+                return 0
+            graph_inputs = measured["graph_inputs"]
+        else:
+            # Measuring nothing: the rows, and everything training reads beside them, come
+            # back from the collections exactly as a measuring run would have produced them.
+            measured = load_collections(args.collection, role=args.role, sources=sources)
+            engine_id = args.engine_id if args.engine_id is not None else measured["engine_id"]
+            graph_inputs = measured["graphs"]
+            superseded, collections = measured["superseded_rows"], measured["collections"]
+            logger.info("training from %d collection(s); %d older row(s) superseded by newer "
+                        "measurements of the same graph on the same device",
+                        len(collections), superseded)
+        rows, published, commands = measured["rows"], measured["published"], measured["commands"]
+        provenance, kernel_fields = measured["provenance"], measured["kernel_fields"]
+        knob_encodings = measured["knob_encodings"]
+        shipping_knobs, collection_knobs = measured["shipping_knobs"], measured["collection_knobs"]
 
         # One corpus per source, named plainly when there is only one.
         def staged(stem: str, source) -> str:
@@ -637,6 +811,9 @@ def run_generate(args: argparse.Namespace) -> int:
                            "eval_problem_keys": sorted(evaluated_keys)})
         _write_json(stage / "generation_manifest.json", {
             "schema": "uhd_gen.generation/2", "trained_against": provenance, "graphs": graph_inputs,
+            # Where the measurements came from when this run measured nothing, and how many
+            # older rows the merge set aside for newer measurements of the same problem.
+            "collections": collections, "superseded_rows": superseded,
             "commands": commands, "features_signature": signature, "omitted_proposals": omitted,
             # One entry per UHD emitted: its metric (null for a metric-less ranker), where it
             # was trained, and the exact commands that trained and evaluated it.
@@ -648,13 +825,13 @@ def run_generate(args: argparse.Namespace) -> int:
             # report only the second without saying so.
             "catalog_density": density.as_dict() if density else None,
             "seed": args.seed, "eval_fraction": args.eval_fraction,
-            "shipping_knobs": ued.get("knobs", []), "collection_knobs": exposed.get("knobs", []),
+            "shipping_knobs": shipping_knobs, "collection_knobs": collection_knobs,
             # What each knob's pinned integer addressed, as the engine reported it on the
             # candidates this corpus enumerated. Recorded for reading, not for use: the
             # runtime derives its own numbering, and an ordinal in a stored row is
             # unreadable without knowing which value it named.
-            "knob_encodings": addressing.as_manifest(ordinals),
-            "engine_id": args.engine_id, "training_arches": arches, "promotion_role": args.role,
+            "knob_encodings": knob_encodings,
+            "engine_id": engine_id, "training_arches": arches, "promotion_role": args.role,
             "promotion_arch": args.arch or arches[0],
         })
         # Validate installation against the original tree before publishing any artifacts.
