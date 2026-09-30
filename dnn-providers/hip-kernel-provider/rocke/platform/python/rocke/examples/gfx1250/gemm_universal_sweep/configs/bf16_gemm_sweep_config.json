@@ -23,7 +23,7 @@
     "pipelines": ["mem"],
     "schedulers": ["intrawave"],
     "epilogues": ["default", "cshuffle"],
-    "waves_per_eu": [1, 2, 4],
+    "waves_per_eu": [null],
     "lds_swizzle": [false],
     "lds_k_pad": [8, 16, 24, 0],
     "direct_to_lds": [false, true],

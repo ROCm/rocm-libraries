@@ -690,11 +690,14 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
      * read -- reuses that same offset. Peak usage is therefore max(AB, C), not
      * AB + C, and this gate has to model that or it spuriously rejects specs
      * the emitter builds fine. cshuffle_no_alias opts out (the C tile is marked
-     * exclusive so the packer gives it its own byte range) and is additive. */
+     * exclusive so the packer gives it its own byte range) and is additive.
+     * persistent is additive too: the grid-stride tile loop encloses both the
+     * K-loop and the epilogue, and the packer treats every allocation used
+     * inside one scf.for as live for the whole loop, so A/B and C interfere. */
     ck_gemm_ab_lds_plan(spec, target, &ab_single, NULL, &ab_dbl);
     ab_bytes = ab_single * (ab_dbl ? 2 : 1);
     c_bytes = (strcmp(spec->trait.epilogue, "cshuffle") == 0) ? (t->tile_m * t->tile_n * 2) : 0;
-    if(c_bytes != 0 && !spec->trait.cshuffle_no_alias)
+    if(c_bytes != 0 && !(spec->trait.cshuffle_no_alias || spec->trait.persistent))
     {
         bytes_lds = ab_bytes > c_bytes ? ab_bytes : c_bytes;
     }

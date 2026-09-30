@@ -624,6 +624,15 @@ class TestGfx1250Gemm(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("LDS budget", why)
 
+        # A persistent tile loop keeps A/B and C live together, so the packer
+        # cannot alias them and the budget is additive there as well.
+        persistent = replace(
+            spec, trait=replace(spec.trait, persistent=True, persistent_ctas=256)
+        )
+        ok, why = is_valid_spec(persistent, arch="gfx1250")
+        self.assertFalse(ok)
+        self.assertIn("LDS budget", why)
+
     def test_wmma_cshuffle_stages_c_through_lds_without_extra_lds(self):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
         from rocke.instances.common.gemm_universal import build_universal_gemm

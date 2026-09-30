@@ -728,6 +728,9 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     # is 128 KiB, which double-counted on top of AB overflows every cap we
     # have). ``cshuffle_no_alias`` opts out -- it marks the C tile exclusive so
     # the packer gives it its own byte range -- and there usage is additive.
+    # ``persistent`` is additive too: the grid-stride tile loop encloses both
+    # the K-loop and the epilogue, and the packer treats every allocation used
+    # inside one ``scf.for`` as live for the whole loop, so A/B and C interfere.
     # AB is double-buffered (2x LDS) only when the emitter actually
     # ping-pongs two halves: ``dtl_prefetch`` (DTLA ping-pong) or the
     # compv4 software-pipelined double buffer, which the emitter enables
@@ -752,7 +755,7 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     ab_single, _, _ = _ab_lds_plan(spec, arch)
     ab_bytes = ab_single * _ab_lds_buffers(spec, arch)
     c_bytes = t.tile_m * t.tile_n * 2 if spec.trait.epilogue == "cshuffle" else 0
-    if c_bytes and not spec.trait.cshuffle_no_alias:
+    if c_bytes and not (spec.trait.cshuffle_no_alias or spec.trait.persistent):
         bytes_lds = max(ab_bytes, c_bytes)
     else:
         bytes_lds = ab_bytes + c_bytes
