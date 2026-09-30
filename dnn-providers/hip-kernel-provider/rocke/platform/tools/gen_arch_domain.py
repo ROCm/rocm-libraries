@@ -4,16 +4,16 @@ installed toolchain.
 
 # Why this exists
 
-rocke resolves an intrinsic `declare` on ONE axis: the LLVM flavor. The target
-arch is consumed only to pick an ISA backend (`lower_llvm.py`, `backend_for(arch
-or "gfx950")`) and never reaches the decl table -- so "is this intrinsic
-available on this GPU" is checked nowhere at build time. See
+rocke used to resolve an intrinsic `declare` on ONE axis: the LLVM flavor. The
+target arch was consumed only to pick an ISA backend (`lower_llvm.py`,
+`backend_for`) and never reached the decl table -- so "is this intrinsic
+available on this GPU" was checked nowhere at build time. See
 `dsl_docs/development/arch_axis_proposal.md`.
 
 This tool measures the missing axis instead of hand-maintaining it, and commits
-the result as a data file. Nothing consumes the artifact yet; landing the data
-first is deliberate (it cannot break anything, and it surfaces the defects that
-justify the rest).
+the result as a data file. The read side is `rocke.core.arch.domain`, which the
+lowerer's `_need` chokepoint consults on every intrinsic demand and
+`tools/check_arch_domain.py` gates the corpus against.
 
 # Two stages, because the two axes are answered by different tools
 
@@ -87,7 +87,24 @@ from _hostcaps import available_cpus
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parent  # tools -> rocke/platform
 
-SCHEMA = "rocke.intrinsic_arch_domain/v1"
+
+def _bootstrap_sys_path() -> None:
+    """Import rocke from the checkout without an external PYTHONPATH, matching
+    tests/conftest.py. Unlike check_ir_validity this needs no library/ reach --
+    the decl table lives entirely in platform."""
+    path = ROCKE / "python"
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
+
+
+# At import time, not in main(): the status vocabulary and the schema string
+# below come from the read side, so `rocke` has to be importable before the
+# module body finishes.
+_bootstrap_sys_path()
+
+from rocke.core.arch import domain as _domain
+
+SCHEMA = _domain.SCHEMA
 DATA_DIR = ROCKE / "python" / "rocke" / "core" / "arch" / "data"
 
 
@@ -103,13 +120,17 @@ def default_out(flavor: str) -> Path:
     return DATA_DIR / f"intrinsic_arch_domain.{flavor}.json"
 
 
-STATUS_OK = "ok"
-STATUS_NAME_ABSENT = "name_absent"
-STATUS_ARCH_ABSENT = "arch_absent"
-STATUS_TARGET_UNSUPPORTED = "target_unsupported"
-STATUS_TOOLCHAIN_CRASH = "toolchain_crash"
-STATUS_TOOLCHAIN_TIMEOUT = "toolchain_timeout"
-STATUS_PROBE_ERROR = "probe_error"
+# The status vocabulary is owned by the READ side -- `rocke.core.arch.domain`,
+# which is what consumers import -- and re-exported here. Two copies of a
+# seven-value enum, one in the writer and one in the readers, is exactly the
+# drift this whole artifact exists to prevent.
+STATUS_OK = _domain.STATUS_OK
+STATUS_NAME_ABSENT = _domain.STATUS_NAME_ABSENT
+STATUS_ARCH_ABSENT = _domain.STATUS_ARCH_ABSENT
+STATUS_TARGET_UNSUPPORTED = _domain.STATUS_TARGET_UNSUPPORTED
+STATUS_TOOLCHAIN_CRASH = _domain.STATUS_TOOLCHAIN_CRASH
+STATUS_TOOLCHAIN_TIMEOUT = _domain.STATUS_TOOLCHAIN_TIMEOUT
+STATUS_PROBE_ERROR = _domain.STATUS_PROBE_ERROR
 
 # Bumped when the probe *semantics* change -- not when this file is merely
 # edited -- and recorded into every column so a committed answer can be told
@@ -128,7 +149,9 @@ STATUS_PROBE_ERROR = "probe_error"
 #   2 -- probes at -O0, per-probe timeout, provenance recorded
 #   3 -- immarg values swept on a negative, winning value recorded
 #   4 -- llvm23 diagnostics understood; the sweep also runs on probe_error
-GENERATOR = 4
+#   5 -- probes built from the declare `opt` resolved, so `immarg` comes from
+#        the LLVM being measured instead of from the hand-written decl table
+GENERATOR = 5
 
 # Hoisted out of `_probe` so the artifact can record the flags that actually
 # ran rather than a hand-copied list that drifts from them. `-O0` is the one
@@ -146,15 +169,6 @@ PROBE_CFLAGS = ("-O0", "-nogpulib")
 # as an error rather than a verdict -- one unlucky key takes down the gate for
 # every host running that flavor.
 PROBE_TIMEOUT_S = 60
-
-
-def _bootstrap_sys_path() -> None:
-    """Import rocke from the checkout without an external PYTHONPATH, matching
-    tests/conftest.py. Unlike check_ir_validity this needs no library/ reach --
-    the decl table lives entirely in platform."""
-    path = ROCKE / "python"
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
 
 # --------------------------------------------------------------------------
@@ -198,6 +212,39 @@ def _param_type(param: str) -> tuple[str, bool]:
     for attr in _PARAM_ATTRS:
         ty = ty.replace(attr, "")
     return " ".join(ty.split()), is_imm
+
+
+# What a type may begin with. Return attributes precede the type (`declare
+# noundef i32 @f()`), unlike parameter attributes, which follow it -- so the
+# split has to be made on the type side.
+#
+# This is an allowlist of type openers rather than a blocklist of attributes on
+# purpose. The attribute set is open-ended and grows with every LLVM release
+# (`noundef`, `align N`, `dereferenceable(N)`, `range(...)`, `nofpclass(...)`);
+# the set of things a type can start with is closed and has been stable for
+# years. Blocklisting would silently leak the next new attribute into the
+# `store` and turn the whole row into probe_error, which is exactly the failure
+# this replaced.
+_TYPE_OPENER_RE = re.compile(
+    r"^(?:void|i\d+|half|bfloat|float|double|x86_fp80|fp128|ppc_fp128"
+    r"|ptr|metadata|token|label|[<{\[])"
+)
+
+
+def _return_type(ret: str) -> str:
+    """Drop return attributes, keeping the type.
+
+    Walks tokens left to right and stops at the first one that opens a type;
+    everything from there to the end is the type. An unrecognised leading token
+    would therefore swallow the whole string rather than a prefix of it, so the
+    caller is handed something that fails to parse loudly instead of IR that is
+    subtly wrong.
+    """
+    toks = ret.split()
+    for i, tok in enumerate(toks):
+        if _TYPE_OPENER_RE.match(tok):
+            return " ".join(toks[i:])
+    return ret.strip()
 
 
 _DECL_RE = re.compile(r"^declare\s+(.+?)\s+@([\w.]+)\((.*)\)\s*$")
@@ -273,16 +320,28 @@ def _probe_module(
     therefore arrive as kernel arguments, and non-generic pointers as an
     addrspacecast of one.
 
+    `decl` is normally the declare `opt` resolved (see `_name_exists`), not the
+    hand-written row it came from, and that is what makes the `immarg` branch
+    below trustworthy. rocke's decl table records `immarg` only where an author
+    happened to add it, while LLVM checks the real intrinsic signature; passing
+    a variable where a constant is required yields a module that is illegal
+    regardless of target, and the two vintages disagree about how loudly they
+    say so. llvm22 rejects it up front -- "immarg operand has non-immediate
+    parameter" -- but llvm20 has no such verifier check and dies at ISel with
+    "Cannot select", which is *also* what a genuinely unsupported intrinsic
+    looks like. `wmma.i32.16x16x16.iu4`/`.iu8` were recorded `arch_absent` on
+    every target at llvm20 for exactly that reason, when in fact both RDNA
+    targets lower them; the hand-written row omits `immarg` on three `i1`
+    operands and `opt` supplies it.
+
     `literal_ints`, when set, replaces every integer kernel argument with that
-    literal value. Some operands must be immediates even though the declare
-    does not mark them `immarg`: rocke's decl table is hand-written and records
-    `immarg` only where an author happened to add it, while LLVM checks the
-    real intrinsic signature. `raw.ptr.buffer.load.lds`'s size operand is the
-    example, and the two vintages report the mismatch differently -- llvm20
-    fails to legalise (on *every* arch, reading as a universal arch_absent when
-    the truth is "CDNA yes, RDNA no"), llvm22 rejects it up front with "immarg
-    operand has non-immediate parameter". This variant exists to rescue both,
-    and only those two diagnostics.
+    literal value. With the resolved declare in hand this is a backstop rather
+    than the main line: it still covers an operand LLVM does not mark `immarg`
+    but cannot legalise as a variable either (`raw.ptr.buffer.load.lds`'s size
+    operand), and it stays scoped to the diagnostics that say so -- a blanket
+    retry could constant-fold a genuinely unsupported intrinsic away and
+    manufacture an `ok`, which is the one error direction that would make the
+    artifact worse than no artifact.
 
     `imm_int`, when set, is the value given to every `immarg` operand in place
     of the default 0. A parameter that is already marked `immarg` is never
@@ -308,7 +367,7 @@ def _probe_module(
     if not m:
         return "", f"cannot parse declare: {decl!r}"
     ret, name, params = m.groups()
-    ret = ret.strip()
+    ret = _return_type(ret)
 
     kargs: list[str] = []
     prologue: list[str] = []
@@ -355,8 +414,10 @@ def _probe_module(
     return text, ""
 
 
-def _name_exists(opt: str, decl: str, scratch: Path) -> tuple[bool, str]:
+def _name_exists(opt: str, decl: str, scratch: Path) -> tuple[bool, str, str]:
     """Ask this LLVM whether it recognises the declare's name as an intrinsic.
+
+    Returns (exists, canonical_name_or_reason, resolved_declare).
 
     This is the *flavor* axis, and it is worth answering separately because it
     is arch-free: a name either exists in this LLVM or it does not, and asking
@@ -370,6 +431,15 @@ def _name_exists(opt: str, decl: str, scratch: Path) -> tuple[bool, str]:
     codegen crashes outright: an `llvm.*` name with a `metadata` operand that
     LLVM does not know is lowered as an ordinary call, and computing the
     alignment of a metadata argument segfaults the backend.
+
+    The third return value is the load-bearing one for stage B. "It attaches
+    the intrinsic's attribute set" includes the `immarg` markers, which is the
+    authoritative answer to "which operands must be constants" -- straight from
+    the LLVM we are measuring, rather than from whichever ones a rocke author
+    happened to write down. `_probe_module` builds from this rather than from
+    the hand-written row, so a probe cannot pass a variable where the intrinsic
+    demands a constant. See the `wmma.i32.16x16x16.iu8` note there for what
+    that used to cost.
     """
     src = scratch / "name.ll"
     src.write_text(decl.strip() + "\n", encoding="utf-8")
@@ -380,25 +450,29 @@ def _name_exists(opt: str, decl: str, scratch: Path) -> tuple[bool, str]:
         check=False,
     )
     if proc.returncode != 0:
-        return False, f"opt rejected the declare: {_first_error(proc.stderr)}"
+        return False, f"opt rejected the declare: {_first_error(proc.stderr)}", ""
     for line in proc.stdout.splitlines():
         if line.startswith("declare "):
             attributed = re.search(r"#\d+\s*$", line) is not None
-            m = _DECL_RE.match(re.sub(r"\s*#\d+\s*$", "", line))
+            # The trailing `#N` references an attribute group this probe module
+            # will not carry, so it is dropped rather than propagated.
+            resolved = re.sub(r"\s*#\d+\s*$", "", line)
+            m = _DECL_RE.match(resolved)
             canonical = m.group(2) if m else ""
             if attributed:
-                return True, canonical
+                return True, canonical, resolved if m else ""
             # Remangled but attribute-free: still a resolved intrinsic.
             original = _DECL_RE.match(decl.strip())
             if original and canonical and canonical != original.group(2):
-                return True, canonical
-            return False, ""
+                return True, canonical, resolved if m else ""
+            return False, "", ""
     # The declare did not survive the round-trip at all. An unrecognised
     # `llvm.*` name is an ordinary external function and is printed back
     # verbatim even when unused, so a vanished declare means AutoUpgrade
     # consumed it -- `amdgcn.global.atomic.fadd` becoming a plain `atomicrmw`
     # is the live example. That still links, so the name counts as present.
-    return True, "(auto-upgraded)"
+    # There is no resolved declare to build from; the hand-written row stands.
+    return True, "(auto-upgraded)", ""
 
 
 # --------------------------------------------------------------------------
@@ -659,7 +733,6 @@ def main() -> int:
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
-    _bootstrap_sys_path()
     sys.path.insert(0, str(HERE))
     from check_ir_validity import _llvm_tool  # same resolution order, one owner
     from rocke.core import lower_llvm as L
@@ -709,14 +782,44 @@ def main() -> int:
 
     datalayout = L._datalayout_for_flavor(flavor)
 
-    # Build every probe module first; an unparseable declare is a probe_error
-    # for every arch rather than a crash mid-sweep.
+    # Stage A -- the flavor axis, once per key. Arch-free, so it costs one
+    # `opt` run instead of one link per arch, and it is the only stage that can
+    # answer a key whose codegen crashes.
+    #
+    # It runs before the probe modules are built because it is what they are
+    # built from: `opt` hands back the declare with this LLVM's own attributes
+    # attached, `immarg` included, and that is a better signature than the
+    # hand-written row it was derived from.
+    canonical: dict[str, str] = {}
+    resolved: dict[str, str] = {}
+    absent: set[str] = set()
+    for key in keys:
+        exists, note, decl_text = (
+            _name_exists(opt, decls[key], Path(ir_dir)) if opt else (True, "", "")
+        )
+        if exists:
+            canonical[key] = note
+            if decl_text:
+                resolved[key] = decl_text
+        else:
+            absent.add(key)
+    print(
+        f"   names  : {len(keys) - len(absent)} present, {len(absent)} absent in {flavor}"
+    )
+
+    # Build every probe module; an unparseable declare is a probe_error for
+    # every arch rather than a crash mid-sweep.
+    #
+    # `opt`'s resolved declare is used where stage A produced one. Falling back
+    # to the hand-written row covers the two cases that have none: no `opt` on
+    # this host, and a declare AutoUpgrade consumed entirely.
     modules: dict[str, tuple[Path | None, str]] = {}
     literal_modules: dict[str, list[Path]] = {}
     imm_modules: dict[str, list[tuple[int, Path]]] = {}
     for key in keys:
+        decl = resolved.get(key, decls[key])
         stem = re.sub(r"[^A-Za-z0-9_.-]", "_", key)
-        text, why = _probe_module(decls[key], datalayout)
+        text, why = _probe_module(decl, datalayout)
         if why:
             modules[key] = (None, why)
             continue
@@ -730,7 +833,7 @@ def main() -> int:
         # kind of operand we happened to hit.
         variants = []
         for lit in _LITERAL_PROBE_VALUES:
-            lit_text, why_lit = _probe_module(decls[key], datalayout, literal_ints=lit)
+            lit_text, why_lit = _probe_module(decl, datalayout, literal_ints=lit)
             if not why_lit and lit_text != text:
                 lit_path = ir_dir / f"{stem}.lit{lit}.ll"
                 lit_path.write_text(lit_text)
@@ -743,30 +846,13 @@ def main() -> int:
         # signature analysis to keep in step with `_probe_module`.
         imm_variants = []
         for imm in _IMMARG_PROBE_VALUES:
-            imm_text, why_imm = _probe_module(decls[key], datalayout, imm_int=imm)
+            imm_text, why_imm = _probe_module(decl, datalayout, imm_int=imm)
             if not why_imm and imm_text != text:
                 imm_path = ir_dir / f"{stem}.imm{imm}.ll"
                 imm_path.write_text(imm_text)
                 imm_variants.append((imm, imm_path))
         if imm_variants:
             imm_modules[key] = imm_variants
-
-    # Stage A -- the flavor axis, once per key. Arch-free, so it costs one
-    # `opt` run instead of one link per arch, and it is the only stage that can
-    # answer a key whose codegen crashes.
-    canonical: dict[str, str] = {}
-    absent: set[str] = set()
-    for key in keys:
-        exists, note = (
-            _name_exists(opt, decls[key], Path(ir_dir)) if opt else (True, "")
-        )
-        if exists:
-            canonical[key] = note
-        else:
-            absent.add(key)
-    print(
-        f"   names  : {len(keys) - len(absent)} present, {len(absent)} absent in {flavor}"
-    )
 
     # Stage B -- the arch axis, only for names that exist.
     work = [(k, a) for k in keys if k not in absent for a in arches]

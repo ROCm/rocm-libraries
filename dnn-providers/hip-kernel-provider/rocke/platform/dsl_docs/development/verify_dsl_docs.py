@@ -405,7 +405,7 @@ def t_arith() -> str:
     b.cast_to_f32(h)
     b.trunc_f32_to_f16(f)
     b.sitofp_f32(a)
-    return lower_kernel_to_llvm(b.kernel)
+    return lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
 
 check("arith/math/cast methods lower", t_arith)
@@ -419,7 +419,7 @@ def t_fp_conv() -> None:
     b.cvt_f32_to_i8_sat(f)
     b.cvt_fp8_to_f32(fp8)
     b.cvt_bf8_to_f32(bf8)
-    lower_kernel_to_llvm(b.kernel)
+    lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
 
 check("fp8/bf8/i8 conversion methods lower", t_fp_conv)
@@ -438,7 +438,7 @@ def t_wave_ops() -> None:
     b.ds_bpermute(b.const_i32(0), v)
     f = b.const_f32(1.0)
     b.warp_shuffle_xor(f, 1)
-    lower_kernel_to_llvm(b.kernel)
+    lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
 
 check("wave/cross-lane methods lower", t_wave_ops)
@@ -454,7 +454,7 @@ def t_smem() -> None:
     z8 = b.zero_vec(F16, 8)
     b.smem_store_vN_f16(smem, [b.const_i32(0), b.const_i32(0)], z8, 8)
     b.smem_load_vN_f16(smem, b.const_i32(0), b.const_i32(0), n=8)
-    lower_kernel_to_llvm(b.kernel)
+    lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
 
 check("LDS scalar+vector methods lower", t_smem)
@@ -464,7 +464,7 @@ def t_ds_read_tr16() -> None:
     b = builder("t_tr16")
     smem = b.smem_alloc(F16, (16, 16))
     b.ds_read_tr16_b64(smem, b.const_i32(0), b.const_i32(0))
-    lower_kernel_to_llvm(b.kernel)
+    lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
 
 check("ds_read_tr16_b64 lowers", t_ds_read_tr16)
@@ -482,7 +482,7 @@ def t_buffer_rsrc() -> str:
     b.buffer_store_f16(rsrc, zero, zero, b.fp16_zero())
     z8 = b.zero_vec(F16, 8)
     b.buffer_store_vN_f16(rsrc, zero, zero, z8, 4)
-    return lower_kernel_to_llvm(b.kernel)
+    return lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
 
 ll = check("buffer_rsrc + loads/stores lower", t_buffer_rsrc)
@@ -504,7 +504,7 @@ def t_async_lds() -> None:
     b.async_buffer_load_lds_addr(rsrc, base, zero, zero, 4, coherency=CACHE_ALL)
     b.s_waitcnt(vmcnt=0)
     b.sync()
-    lower_kernel_to_llvm(b.kernel)
+    lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
 
 check("async_buffer_load_lds + waitcnt + sync lower", t_async_lds)
@@ -525,7 +525,7 @@ def t_mfma() -> None:
     a8bf = b.zero_vec(BF16, 8)
     b.mfma_f32_16x16x16_bf16(a4bf, a4bf, c4f)
     b.mfma_f32_16x16x32_bf16(a8bf, a8bf, c4f)
-    lower_kernel_to_llvm(b.kernel)
+    lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
 
 check("every MFMA atom in docs lowers", t_mfma)
@@ -534,7 +534,7 @@ check("every MFMA atom in docs lowers", t_mfma)
 def t_waitcnt_encoding() -> None:
     b = builder("t_wait")
     b.s_waitcnt(vmcnt=16, lgkmcnt=16)
-    ll = lower_kernel_to_llvm(b.kernel)
+    ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
     if "call void @llvm.amdgcn.s.waitcnt(i32 20336)" not in ll:
         raise AssertionError("vmcnt=16 lgkmcnt=16 encoding missing 20336")
 
@@ -555,7 +555,7 @@ def t_scf_for_iter() -> None:
         acc = iter_vars[0]
         new_acc = b.fadd(acc, b.zero_vec_f32(4))
         b.scf_yield(new_acc)
-    lower_kernel_to_llvm(b.kernel)
+    lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
 
 check("scf_for_iter lowers (with iter_args)", t_scf_for_iter)
@@ -566,7 +566,7 @@ def t_scf_if() -> None:
     v = b.const_i32(1)
     with b.scf_if(b.cmp_eq(v, b.const_i32(1))):
         b.const_i32(2)
-    lower_kernel_to_llvm(b.kernel)
+    lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
 
 check("scf_if lowers", t_scf_if)
@@ -648,7 +648,7 @@ def t_gemm_spec() -> dict:
     kernel = build_universal_gemm(spec)
     return {
         "ir": print_ir(kernel),
-        "llvm": lower_kernel_to_llvm(kernel),
+        "llvm": lower_kernel_to_llvm(kernel, arch="gfx950"),
         "hip": lower_kernel_to_hip(kernel),
         "cktile_via_spec": lower_spec_to_cktile(spec),
         "cktile_direct": lower_universal_gemm_to_cktile(spec),
@@ -678,7 +678,7 @@ def t_conv_spec() -> None:
     )
     kernel = build_implicit_gemm_conv(spec)
     print_ir(kernel)
-    lower_kernel_to_llvm(kernel)
+    lower_kernel_to_llvm(kernel, arch="gfx950")
     lower_kernel_to_hip(kernel)
     lower_spec_to_cktile(spec)
     lower_implicit_gemm_conv_to_cktile(spec)
@@ -694,12 +694,12 @@ def t_direct_conv() -> None:
         N=8, H=56, W=56, groups=16, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=1
     )
     s16 = DirectConv16cSpec(problem=p16)
-    lower_kernel_to_llvm(build_direct_conv_16c(s16))
+    lower_kernel_to_llvm(build_direct_conv_16c(s16), arch="gfx950")
     p4 = DirectConvProblem(
         N=8, H=56, W=56, groups=64, cpg=4, kpg=4, KH=3, KW=3, PAD=1, stride=1
     )
     s4 = DirectConv4cSpec(problem=p4)
-    lower_kernel_to_llvm(build_direct_conv_4c(s4))
+    lower_kernel_to_llvm(build_direct_conv_4c(s4), arch="gfx950")
 
 
 check("DirectConv16cSpec + DirectConv4cSpec: build + LLVM", t_direct_conv)
@@ -725,7 +725,7 @@ def t_smallops() -> None:
         (Transpose2DSpec(tile_m=32, tile_n=32, dtype="f16"), build_transpose2d),
     ]
     for spec, builder_fn in cases:
-        lower_kernel_to_llvm(builder_fn(spec))
+        lower_kernel_to_llvm(builder_fn(spec), arch="gfx950")
 
 
 check("small ops: build + LLVM", t_smallops)
@@ -746,7 +746,7 @@ def t_batched_grouped() -> None:
         ),
         trait=TraitSpec(pipeline="compv4", epilogue="cshuffle"),
     )
-    lower_kernel_to_llvm(build_batched_gemm(s))
+    lower_kernel_to_llvm(build_batched_gemm(s), arch="gfx950")
     g = GroupedGemmSpec(
         name="grpgemm",
         tile=TileSpec(
@@ -761,7 +761,7 @@ def t_batched_grouped() -> None:
         ),
         trait=TraitSpec(pipeline="compv4", epilogue="cshuffle"),
     )
-    lower_kernel_to_llvm(build_grouped_gemm(g))
+    lower_kernel_to_llvm(build_grouped_gemm(g), arch="gfx950")
 
 
 check("BatchedGemmSpec + GroupedGemmSpec: build + LLVM", t_batched_grouped)
@@ -801,7 +801,7 @@ def t_quant() -> None:
     scale = b.const_f32(1.0)
     q = quantize_scalar_f32(b, f, inv_scale=inv_scale, qdtype="fp8e4m3")
     dequantize_scalar_to_f32(b, q, scale=scale)
-    lower_kernel_to_llvm(b.kernel)
+    lower_kernel_to_llvm(b.kernel, arch="gfx950")
     assert ir_to_qdtype(quant_ir_type("fp8e4m3")) == "fp8e4m3"
 
 
@@ -827,7 +827,7 @@ def t_chiplet() -> None:
     b = builder("t_chiplet")
     wgid = b.block_id_x()
     chiplet_transform_chunked(b, wgid, num_wgs=512, num_xcds=8, chunk_size=64)
-    lower_kernel_to_llvm(b.kernel)
+    lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
 
 check("chiplet helpers emit IR", t_chiplet)
@@ -866,7 +866,7 @@ def t_xfm_conv() -> None:
     k = b.param("k", I32)
     off, valid = desc.offset(b, m=m, k=k)
     b.select(valid, off, b.const_i32(0))
-    lower_kernel_to_llvm(b.kernel)
+    lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
 
 check("transform DAG: pad+embed+unmerge", t_xfm_conv)
@@ -894,7 +894,7 @@ def t_xfm_indirect_dynamic_merge() -> None:
     dim = b.param("dim", I32)
     off, valid = desc.offset(b, logical_block=upper, token=tok, kv_head=head, dim=dim)
     b.select(valid, off, b.const_i32(0))
-    lower_kernel_to_llvm(b.kernel)
+    lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
     # merge flattens N upper coords into one linear lower coord; the
     # *user* still supplies the original uppers (a, b), and the merge
@@ -942,7 +942,7 @@ def t_distribution() -> None:
     view = make_naive_tensor_view_packed(X, shape=(8192,), dtype=F16)
     tile = make_tile_window(view, lengths=(8192,), origin=(b.const_i32(0),))
     load_tile(b, tile, distribution=dist, ps=[[b.thread_id_x()]], traits=traits)
-    lower_kernel_to_llvm(b.kernel)
+    lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
 
 check("TileDistribution: encoding + load_tile", t_distribution)
@@ -997,7 +997,7 @@ def t_loaders() -> None:
     slot.issue(b, tid=b.thread_id_x(), rsrc=rsrc, descriptor=desc)
     b.s_waitcnt(vmcnt=0)
     b.sync()
-    lower_kernel_to_llvm(b.kernel)
+    lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
 
 check("CoalescedTileLoader + AsyncTileLoader.bind+issue", t_loaders)
@@ -1012,7 +1012,7 @@ def t_mfma_atom() -> None:
     B = b.zero_vec(F16, 8)
     C = b.zero_vec_f32(16)
     a.emit(b, A, B, C)
-    lower_kernel_to_llvm(b.kernel)
+    lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
 
 check("mfma_atom + MfmaAtom.emit", t_mfma_atom)
@@ -1117,7 +1117,7 @@ def t_io() -> None:
     store_scalar_from_f32(b, Y, b.const_i32(0), b.const_f32(1.0), dtype="f16")
     store_scalar(b, Y, b.const_i32(0), b.fp16_zero(), dtype="f16")
     _ = v
-    lower_kernel_to_llvm(b.kernel)
+    lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
 
 check("io helpers: load/store/cast", t_io)
@@ -1129,7 +1129,7 @@ def t_pack_f32_to_list() -> None:
     scalars = [b.const_f32(float(i)) for i in range(4)]
     out = pack_f32_to(b, scalars, dtype="f16")
     assert out.type.name.startswith("vec<f16x4>") or "f16x4" in out.type.name
-    lower_kernel_to_llvm(b.kernel)
+    lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
 
 check("pack_f32_to(scalars, *, dtype) returns vec", t_pack_f32_to_list)
@@ -1143,7 +1143,7 @@ def t_block_lds_reduce() -> None:
     v = b.const_f32(1.0)
     block_lds_reduce(b, v, lds, tid, block_size=256, combine="sum")
     block_lds_reduce(b, v, lds, tid, block_size=256, combine="max")
-    lower_kernel_to_llvm(b.kernel)
+    lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
 
 check("block_lds_reduce(sum+max)", t_block_lds_reduce)
@@ -1192,7 +1192,7 @@ def t_sweep() -> None:
         elems_per_thread=4096 // 256,
         row=b.const_i32(0),
     )
-    lower_kernel_to_llvm(b.kernel)
+    lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
 
 check("sweep_row_chunks lowers", t_sweep)

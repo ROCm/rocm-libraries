@@ -1260,7 +1260,7 @@ def compile_fn(
         spec = cfg.spec
         ir_dtype = dtype_to_ir(dtype_name)
         kernel = build_universal_gemm(spec)
-        ir = lower_kernel_to_llvm(kernel)
+        ir = lower_kernel_to_llvm(kernel, arch="gfx950")
         hsaco, _ = build_hsaco_from_llvm_ir(ir)
         # Kernel param order is A, B, C, M, N, K, bias.
         # All four ptrs share the GEMM element dtype.
