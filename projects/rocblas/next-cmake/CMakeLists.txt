@@ -62,7 +62,7 @@ if(ROCBLAS_ENABLE_TENSILE)
   endif()
   set(ROCBLAS_TENSILE_SUBDIR_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../Tensile" CACHE STRING "Path to Tensile subdirectory")
   # GPU_TARGETS remains the full offload list for the rocBLAS library.
-  set(ROCBLAS_TENSILE_ARCH_SKIPLIST "gfx1201" CACHE STRING
+  set(ROCBLAS_TENSILE_ARCH_SKIPLIST "" CACHE STRING
     "GPU targets skipped during Tensile library generation; rocBLAS still compiles for GPU_TARGETS")
   include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/tensile-arch-skiplist.cmake")
   rocblas_tensile_arch_skiplist_c_literals(ROCBLAS_TENSILE_ARCH_SKIPLIST
@@ -114,17 +114,23 @@ if(ROCBLAS_ENABLE_AMD_SMI)
 endif()
 
 if(ROCBLAS_ENABLE_TENSILE)
-  if(GPU_TARGETS AND NOT GPU_TARGETS STREQUAL "all")
-    rocblas_filter_tensile_arch_skiplist(GPU_TARGETS ROCBLAS_TENSILE_ARCH_SKIPLIST
-                                         _tensile_archs _tensile_excluded_archs)
-    rocblas_tensile_use_stub_if_empty(_tensile_archs
-      "${CMAKE_CURRENT_SOURCE_DIR}/../library/src/blas3/Tensile/Logic/asm_full"
-      "${GPU_TARGETS}" "${ROCBLAS_TENSILE_ARCH_SKIPLIST}")
-    if(_tensile_excluded_archs)
-      message(STATUS "Skipping in Tensile (ROCBLAS_TENSILE_ARCH_SKIPLIST): ${_tensile_excluded_archs}")
-    endif()
-    set(Tensile_ARCHITECTURE "${_tensile_archs}" CACHE STRING "Tensile to use which architecture?" FORCE)
+  # Expand "all" here so Tensile_ARCHITECTURE is always recomputed and never
+  # left stale in the cache from an earlier explicit GPU_TARGETS configure.
+  if(NOT GPU_TARGETS OR GPU_TARGETS STREQUAL "all")
+    include("${ROCBLAS_TENSILE_SUBDIR_PATH}/next-cmake/cmake/TensileSupportedArchitectures.cmake")
+    tensile_get_base_architectures(_tensile_input_archs)
+  else()
+    set(_tensile_input_archs ${GPU_TARGETS})
   endif()
+  rocblas_filter_tensile_arch_skiplist(_tensile_input_archs ROCBLAS_TENSILE_ARCH_SKIPLIST
+                                       _tensile_archs _tensile_excluded_archs)
+  rocblas_tensile_use_stub_if_empty(_tensile_archs
+    "${CMAKE_CURRENT_SOURCE_DIR}/../library/src/blas3/Tensile/Logic/asm_full"
+    "${_tensile_input_archs}" "${ROCBLAS_TENSILE_ARCH_SKIPLIST}")
+  if(_tensile_excluded_archs)
+    message(STATUS "Skipping in Tensile (ROCBLAS_TENSILE_ARCH_SKIPLIST): ${_tensile_excluded_archs}")
+  endif()
+  set(Tensile_ARCHITECTURE "${_tensile_archs}" CACHE STRING "Tensile to use which architecture?" FORCE)
 endif()
 if(ROCBLAS_ENABLE_TENSILE)
   if(NOT ROCBLAS_ENABLE_SUPERBUILD)

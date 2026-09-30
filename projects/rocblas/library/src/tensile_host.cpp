@@ -64,6 +64,7 @@
 #include <optional>
 #include <regex>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -676,18 +677,19 @@ namespace
         }
     }
 
-    // Generated from ROCBLAS_TENSILE_ARCH_SKIPLIST. Entries match an exact gfx
-    // name or that name with a ':' target-ID suffix (for example gfx1250:xnack+).
+    // Generated from ROCBLAS_TENSILE_ARCH_SKIPLIST. Only the part before the first
+    // ':' is compared, so every target-ID feature variant of an entry is skipped
+    // (gfx90a and gfx90a:xnack+ both skip gfx90a, gfx90a:xnack-, ...).
     bool rocblas_internal_tensile_arch_skipped(const std::string& arch)
     {
         static constexpr const char* const patterns[]
             = {ROCBLAS_TENSILE_ARCH_SKIPLIST_C_LITERALS nullptr};
 
+        const std::string_view arch_base = std::string_view(arch).substr(0, arch.find(':'));
         for(const char* const* p = patterns; *p != nullptr; ++p)
         {
-            const char*  pat = *p;
-            const size_t n   = std::char_traits<char>::length(pat);
-            if(arch.compare(0, n, pat) == 0 && (arch.size() == n || arch[n] == ':'))
+            const std::string_view pat(*p);
+            if(!pat.empty() && pat.substr(0, pat.find(':')) == arch_base)
             {
                 return true;
             }
