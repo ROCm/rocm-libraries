@@ -8,6 +8,7 @@ from rocke.core.arch import ArchTarget
 from rocke.core.dtypes import dtype_info, normalize_dtype
 from rocke.core.ir import (
     F32,
+    I1,
     I32,
     TF32,
     IRBuilder,
@@ -18,6 +19,7 @@ from rocke.core.ir import (
 from rocke.core.ir_serialize import serialize, parse
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.core.verify import verify
 from rocke.examples.gfx942.tf32_numerics import rne_bits
 from rocke.instances.gfx942.tf32_mma_probe import (
     PREPARATIONS,
@@ -124,6 +126,115 @@ def test_arithmetic_rejected_after_serialization():
     native = pytest.importorskip("rocke_engine")
     with pytest.raises(Exception):
         native.lower_serialized_ir(serialize(b.kernel))
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "add",
+        "sub",
+        "mul",
+        "and",
+        "or",
+        "shl",
+        "lshr",
+        "smax",
+        "smin",
+        "max",
+        "fma",
+        "sum",
+        "reduce_max",
+        "cmp",
+        "trunc",
+        "sext",
+        "trunc_result",
+    ],
+)
+def test_vector_arithmetic_rejected_after_serialization(operation):
+    b = IRBuilder("invalid_tf32_vector_arithmetic")
+    elem = I32 if operation == "trunc_result" else TF32
+    v = b.param("v", VectorType(elem, 2))
+    if operation == "fma":
+        b.vector_fma(v, v, v)
+    elif operation in ("sum", "reduce_max"):
+        getattr(b, f"vector_{operation}")(v)
+    elif operation == "cmp":
+        b.vector_cmp("lt", v, v)
+    elif operation in ("trunc", "sext", "trunc_result"):
+        if operation == "trunc_result":
+            b.vector_trunc(v, TF32)
+        else:
+            getattr(b, f"vector_{operation}")(v, I32)
+    else:
+        getattr(b, f"vector_{operation}")(v, v)
+    b.ret()
+    ir = serialize(b.kernel)
+    kernel = parse(ir)
+    message = "TF32 arithmetic requires an explicit conversion to f32"
+    assert any(message in str(d) for d in verify(kernel))
+    with pytest.raises(ValueError, match=message):
+        _lower_kernel_to_llvm_python(kernel)
+    with pytest.raises(ValueError, match=message):
+        lower_kernel_to_hip(kernel)
+    native = pytest.importorskip("rocke_engine")
+    with pytest.raises(Exception, match=message):
+        native.lower_serialized_ir(ir)
+
+
+def test_vector_payload_operations_remain_supported():
+    b = IRBuilder("tf32_vector_payload")
+    p = b.param("p", PtrType(TF32, "global"))
+    mask = b.param("mask", I1)
+    zero = b.const_i32(0)
+    v = b.global_load(p, zero, TF32, align=4)
+    pair = b.vec_pack([v, v], TF32)
+    pair = b.vec_insert(pair, b.vec_extract(pair, 0), 1)
+    pair = b.vec_bitcast(b.vec_bitcast(pair, VectorType(I32, 2)), VectorType(TF32, 2))
+    pair = b.vector_select(mask, pair, b.vector_splat(v, 2))
+    pair = b.select(mask, pair, pair)
+    b.global_store_vN(p, zero, b.vec_concat(pair, pair), 4)
+    b.ret()
+    ir = serialize(b.kernel)
+    kernel = parse(ir)
+    assert verify(kernel) == []
+    assert "i32x4" in lower_kernel_to_hip(kernel)
+    native = pytest.importorskip("rocke_engine")
+    for flavor in ("llvm20", "llvm22", "llvm23"):
+        ll = _lower_kernel_to_llvm_python(kernel, llvm_flavor=flavor)
+        assert native.lower_serialized_ir(ir, flavor=flavor) == ll
+
+
+@pytest.mark.parametrize("n", [2, 3, 4, 8])
+@pytest.mark.parametrize("align", [None, 4])
+def test_global_vector_load(n, align):
+    b = IRBuilder("tf32_vector_load")
+    p = b.param("p", PtrType(TF32, "global"))
+    zero = b.const_i32(0)
+    values = b.global_load_vN(p, zero, TF32, n, align=align)
+    b.global_store(p, zero, b.vec_extract(values, n - 1), align=4)
+    b.ret()
+    ir = serialize(b.kernel)
+    kernel = parse(ir)
+    assert verify(kernel) == []
+    expected_align = align or (4 if n == 3 else n * 4)
+    hip = lower_kernel_to_hip(kernel)
+    if expected_align < n * 4 or n == 3:
+        assert f"{n * 4});" in hip
+        assert "__builtin_memcpy" in hip
+    native = pytest.importorskip("rocke_engine")
+    for flavor in ("llvm20", "llvm22", "llvm23"):
+        ll = _lower_kernel_to_llvm_python(kernel, llvm_flavor=flavor)
+        assert f"load <{n} x i32>" in ll
+        assert f"align {expected_align}" in ll
+        assert native.lower_serialized_ir(ir, flavor=flavor) == ll
+
+
+@pytest.mark.parametrize("n", [0, 1, 6, 16])
+def test_global_vector_load_rejects_unsupported_width(n):
+    b = IRBuilder("invalid_tf32_vector_load")
+    p = b.param("p", PtrType(TF32, "global"))
+    with pytest.raises(ValueError, match="unsupported vector width for tf32"):
+        b.global_load_vN(p, b.const_i32(0), TF32, n)
 
 
 def test_transport():

@@ -1617,7 +1617,7 @@ class IRBuilder:
     ) -> Value:
         """Vectorised global load of N consecutive values.
 
-        Supports f16/bf16/i16 (N in {2, 4, 6, 8, 16}), f32/i32
+        Supports f16/bf16/i16 (N in {2, 4, 6, 8, 16}), f32/i32/tf32
         (N in {2, 3, 4, 8}), and fp8e4m3/bf8e5m2/i8 (N in {2, 4, 8, 12, 16}).
         Loads exactly N elements. Instruction selection depends on target and
         alignment; 96-bit payloads do not require a 96-bit scalar type.
@@ -1632,7 +1632,7 @@ class IRBuilder:
             # <16 x half> operand fragment; AMDGPU coalesces it when aligned.
             if n not in (2, 4, 6, 8, 16):
                 raise ValueError(f"unsupported vector width for global_load_vN: {n}")
-        elif dtype.name in ("f32", "i32"):
+        elif dtype.name in ("f32", "i32", "tf32"):
             elem_bytes = 4
             if n not in (2, 3, 4, 8):
                 raise ValueError(
@@ -1646,7 +1646,7 @@ class IRBuilder:
                 )
         else:
             raise ValueError(
-                "global_load_vN supports f16/bf16/i16/f32/i32/fp8e4m3/bf8e5m2/i8, "
+                "global_load_vN supports f16/bf16/i16/f32/i32/tf32/fp8e4m3/bf8e5m2/i8, "
                 f"got {dtype.name}"
             )
         return self._op(

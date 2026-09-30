@@ -31,9 +31,18 @@ def tf32_op_error(op):
     )
     if error:
         return error
-    if op.name.startswith(("arith.", "math.")) and op.name not in (
+    # Vector arithmetic must not operate on the integer carrier bits either.
+    # Keep the operations that only move, reinterpret, or select payloads.
+    if op.name.startswith(("arith.", "math.", "vector.")) and op.name not in (
         "arith.bitcast",
         "arith.select",
+        "vector.bitcast",
+        "vector.extract",
+        "vector.pack",
+        "vector.concat",
+        "vector.insert",
+        "vector.splat",
+        "vector.select",
     ):
         if any(
             v.type.name == "tf32" or v.type.name.startswith("vec<tf32x")

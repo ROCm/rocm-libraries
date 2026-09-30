@@ -21,8 +21,132 @@
         }                                                           \
     } while(0)
 
+static int test_vector_arithmetic_rejected()
+{
+    for(int variant = 0; variant < 6; ++variant)
+    {
+        rocke_ir_builder_t b, parsed;
+        CHECK(rocke_ir_builder_init(&b, "invalid_tf32_vector") == ROCKE_OK);
+        CHECK(rocke_ir_builder_init(&parsed, "parsed") == ROCKE_OK);
+        auto* elem = variant == 5 ? rocke_i32() : rocke_tf32();
+        auto* v = rocke_b_param(&b, "v", rocke_vector_type(&b, elem, 2), nullptr);
+        switch(variant)
+        {
+        case 0:
+            rocke_b_vector_add(&b, v, v);
+            break;
+        case 1:
+            rocke_b_vector_mul(&b, v, v);
+            break;
+        case 2:
+            rocke_b_vector_sum(&b, v);
+            break;
+        case 3:
+            rocke_b_vector_reduce_max(&b, v);
+            break;
+        case 4:
+            rocke_b_vector_cmp(&b, "lt", v, v);
+            break;
+        case 5:
+            rocke_b_vector_trunc(&b, v, rocke_tf32());
+            break;
+        }
+        rocke_b_ret(&b);
+        char* text = nullptr;
+        CHECK(rocke_ir_serialize(b.kernel, &text) == ROCKE_OK);
+        rocke_kernel_def_t* kernel = nullptr;
+        CHECK(rocke_ir_parse(text, &parsed, &kernel) == ROCKE_OK);
+        std::free(text);
+        rocke_diag_t* diagnostics = nullptr;
+        size_t count = 0;
+        CHECK(rocke_verify(kernel, &diagnostics, &count) == ROCKE_OK);
+        bool rejected = false;
+        for(size_t i = 0; i < count; ++i)
+            rejected |= std::strstr(diagnostics[i].message, "TF32 arithmetic") != nullptr;
+        CHECK(rejected);
+        rocke_diags_free(diagnostics, count);
+        for(int f = 0; f < rocke_llvm_flavor_count(); ++f)
+        {
+            char* ll = nullptr;
+            auto flavor = rocke_llvm_flavor_from_name(rocke_llvm_flavor_at(f));
+            CHECK(rocke_lower_kernel_to_llvm(kernel, flavor, "gfx942", &ll) == ROCKE_ERR_VALUE);
+            std::free(ll);
+        }
+        rocke_strbuf_t hip;
+        CHECK(rocke_strbuf_init(&hip, 0) == 0);
+        rocke_lower_hip_opts_t opts = {};
+        opts.arch = "gfx942";
+        CHECK(rocke_lower_kernel_to_hip(&parsed, kernel, &opts, &hip) == ROCKE_ERR_VALUE);
+        rocke_strbuf_free(&hip);
+        rocke_ir_builder_free(&parsed);
+        rocke_ir_builder_free(&b);
+    }
+    return 0;
+}
+
+static int test_vector_load()
+{
+    for(int n : {0, 1, 2, 3, 4, 6, 8, 16})
+        for(int alignment : {0, 4})
+        {
+            rocke_ir_builder_t b;
+            CHECK(rocke_ir_builder_init(&b, "tf32_vector_load") == ROCKE_OK);
+            auto* p = rocke_b_param(&b, "p", rocke_ptr_type(&b, rocke_tf32(), "global"), nullptr);
+            auto* index = rocke_b_const_i32(&b, 0);
+            if(n != 2 && n != 3 && n != 4 && n != 8)
+            {
+                try
+                {
+                    rocke_b_global_load_vN(&b, p, index, rocke_tf32(), n, alignment);
+                    CHECK(false);
+                }
+                catch(const ckc::Error& error)
+                {
+                    CHECK(error.code() == ROCKE_ERR_VALUE);
+                    CHECK(std::strstr(error.what(), "unsupported vector width for tf32"));
+                }
+                rocke_ir_builder_free(&b);
+                continue;
+            }
+            auto* values = rocke_b_global_load_vN(&b, p, index, rocke_tf32(), n, alignment);
+            CHECK(values);
+            rocke_b_global_store(&b, p, index, rocke_b_vec_extract(&b, values, n - 1), 4);
+            rocke_b_ret(&b);
+            int expected_align = alignment ? alignment : (n == 3 ? 4 : n * 4);
+            for(int f = 0; f < rocke_llvm_flavor_count(); ++f)
+            {
+                char* ll = nullptr;
+                auto flavor = rocke_llvm_flavor_from_name(rocke_llvm_flavor_at(f));
+                CHECK(rocke_lower_kernel_to_llvm(b.kernel, flavor, "gfx942", &ll) == ROCKE_OK);
+                char load[64], align[32];
+                std::snprintf(load, sizeof(load), "load <%d x i32>", n);
+                std::snprintf(align, sizeof(align), "align %d", expected_align);
+                CHECK(std::strstr(ll, load));
+                CHECK(std::strstr(ll, align));
+                std::free(ll);
+            }
+            rocke_strbuf_t hip;
+            CHECK(rocke_strbuf_init(&hip, 0) == 0);
+            rocke_lower_hip_opts_t opts = {};
+            opts.arch = "gfx942";
+            CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &hip) == ROCKE_OK);
+            if(expected_align < n * 4 || n == 3)
+            {
+                char size[32];
+                std::snprintf(size, sizeof(size), "%d);", n * 4);
+                CHECK(std::strstr(hip.data, "__builtin_memcpy"));
+                CHECK(std::strstr(hip.data, size));
+            }
+            rocke_strbuf_free(&hip);
+            rocke_ir_builder_free(&b);
+        }
+    return 0;
+}
+
 int main()
 {
+    CHECK(test_vector_arithmetic_rejected() == 0);
+    CHECK(test_vector_load() == 0);
     CHECK(!rocke_type_eq(rocke_tf32(), rocke_i32()));
     CHECK(!rocke_type_eq(rocke_tf32(), rocke_f32()));
     CHECK(rocke_scalar_by_name("tf32") == rocke_tf32());

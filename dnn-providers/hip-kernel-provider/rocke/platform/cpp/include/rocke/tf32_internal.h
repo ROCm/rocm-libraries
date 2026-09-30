@@ -49,8 +49,14 @@ static inline const char* rocke_tf32_op_error(const rocke_op_t* op)
        && (op->num_results != 1
            || strcmp(op->results[0]->type->name, count == 4 ? "vec<f32x4>" : "vec<f32x16>") != 0))
         return "XF32 MMA result must match its FP32 accumulator";
-    if((strncmp(op->name, "arith.", 6) == 0 || strncmp(op->name, "math.", 5) == 0)
-       && strcmp(op->name, "arith.bitcast") != 0 && strcmp(op->name, "arith.select") != 0)
+    /* Only payload transport, reinterpretation, and selection preserve TF32. */
+    if((strncmp(op->name, "arith.", 6) == 0 || strncmp(op->name, "math.", 5) == 0
+        || strncmp(op->name, "vector.", 7) == 0)
+       && strcmp(op->name, "arith.bitcast") != 0 && strcmp(op->name, "arith.select") != 0
+       && strcmp(op->name, "vector.bitcast") != 0 && strcmp(op->name, "vector.extract") != 0
+       && strcmp(op->name, "vector.pack") != 0 && strcmp(op->name, "vector.concat") != 0
+       && strcmp(op->name, "vector.insert") != 0 && strcmp(op->name, "vector.splat") != 0
+       && strcmp(op->name, "vector.select") != 0)
     {
         for(int i = 0; i < op->num_operands + op->num_results; ++i)
         {

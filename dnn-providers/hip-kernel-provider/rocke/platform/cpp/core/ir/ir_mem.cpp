@@ -231,7 +231,8 @@ rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
             return (rocke_value_t*)rocke_i_set_err(
                 b, ROCKE_ERR_VALUE, "unsupported vector width for global_load_vN: %d", n);
     }
-    else if(rocke_i_type_is(dtype, "f32") || rocke_i_type_is(dtype, "i32"))
+    else if(rocke_i_type_is(dtype, "f32") || rocke_i_type_is(dtype, "i32")
+            || rocke_i_type_is(dtype, "tf32"))
     {
         elem_bytes = 4;
         if(n != 2 && n != 3 && n != 4 && n != 8)
@@ -251,7 +252,7 @@ rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
         return (rocke_value_t*)rocke_i_set_err(
             b,
             ROCKE_ERR_VALUE,
-            "global_load_vN supports f16/bf16/i16/f32/i32/fp8e4m3/bf8e5m2/i8, got %s",
+            "global_load_vN supports f16/bf16/i16/f32/i32/tf32/fp8e4m3/bf8e5m2/i8, got %s",
             en);
     }
     vt = rocke_vector_type(b, dtype, n);
