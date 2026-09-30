@@ -11,7 +11,9 @@
 #include <string>
 
 // clang-format off
-HIPBLASLT_EXPORT
+// No HIPBLASLT_EXPORT: these are inline, and the host-only test links the store
+// without libhipblaslt. The annotation would be dllimport on Windows, which
+// that test cannot resolve.
 constexpr hipDataType string_to_hip_datatype(const std::string& value)
 {
     if (value == "f8_fnuz_r")
@@ -53,7 +55,6 @@ constexpr hipDataType string_to_hip_datatype(const std::string& value)
         HIPBLASLT_DATATYPE_INVALID;
 }
 
-HIPBLASLT_EXPORT
 constexpr hipblasComputeType_t string_to_hipblas_computetype(const std::string& value)
 {
     return

@@ -258,9 +258,9 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     # The tuning file's row format and store, tested on their own: no device,
     # no solution library and no test hooks, so they run wherever the tests
     # build.
-    add_executable(hipblaslt-tuning-store-test
+    add_executable(hipblaslt-test-tuning-store
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/src/tuning_store_test.cpp")
-    target_link_libraries(hipblaslt-tuning-store-test
+    target_link_libraries(hipblaslt-test-tuning-store
         PRIVATE
             hipblaslt-tuning-store
             GTest::gtest

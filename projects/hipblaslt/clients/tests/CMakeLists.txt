@@ -50,7 +50,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
       "${HIPBLASLT_CTEST_INSTALL_FILE}"
     )
     apply_test_category_labels(
-      hipblaslt-tuning-store-test
+      hipblaslt-test-tuning-store
       "${CMAKE_CURRENT_SOURCE_DIR}/tuning_store_test_categories.yaml"
       "${PROJECT_BINARY_DIR}/staging"
       "${HIPBLASLT_CTEST_INSTALL_FILE}"

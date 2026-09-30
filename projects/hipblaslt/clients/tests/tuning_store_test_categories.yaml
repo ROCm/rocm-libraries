@@ -1,4 +1,4 @@
-# hipblaslt-tuning-store-test categories for TheRock's ctest presets.
+# hipblaslt-test-tuning-store categories for TheRock's ctest presets.
 #
 # The tuning file's row format and store, tested without a device. The whole
 # binary takes well under a second, so every tier runs all of it.
