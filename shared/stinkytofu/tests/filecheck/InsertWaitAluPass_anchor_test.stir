@@ -17,7 +17,7 @@
 st.func @anchor_discharges_older_prefetch() {
 ^entry:
   "st.global_prefetch_b8"(v[0:1], off) { issueCycles = 1, latencyCycles = 1 }
-  "st.flat_prefetch_b8"(v[2:3], s[64:65]) { issueCycles = 1, latencyCycles = 1 }
+  "st.flat_prefetch_b8"(v[2:3]) { issueCycles = 1, latencyCycles = 1 }
   v100 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
   v101 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
   v102 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
@@ -41,7 +41,7 @@ st.func @anchor_discharges_older_prefetch() {
 st.func @anchor_below_threshold_keeps_wait() {
 ^entry:
   "st.global_prefetch_b8"(v[0:1], off) { issueCycles = 1, latencyCycles = 1 }
-  "st.flat_prefetch_b8"(v[2:3], s[64:65]) { issueCycles = 1, latencyCycles = 1 }
+  "st.flat_prefetch_b8"(v[2:3]) { issueCycles = 1, latencyCycles = 1 }
   v100 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
   v101 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
   v102 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
@@ -65,7 +65,7 @@ st.func @anchor_below_threshold_keeps_wait() {
 st.func @anchor_survives_block_entry() {
 ^entry:
   "st.global_prefetch_b8"(v[0:1], off) { issueCycles = 1, latencyCycles = 1 }
-  "st.flat_prefetch_b8"(v[2:3], s[64:65]) { issueCycles = 1, latencyCycles = 1 }
+  "st.flat_prefetch_b8"(v[2:3]) { issueCycles = 1, latencyCycles = 1 }
   Successors: ^body
 ^body:
   v100 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }

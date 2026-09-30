@@ -486,7 +486,7 @@ st.func @async_store_lds_addr_to_valu_war() {
 
 st.func @global_prefetch_to_valu_war() {
 ^entry:
-  "st.global_prefetch_b8"(v[0:1], s[30:31]) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_prefetch_b8"(v[0:1], off) { issueCycles = 1, latencyCycles = 1 }
   v0 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
 }
 
