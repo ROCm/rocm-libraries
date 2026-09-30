@@ -1,0 +1,52 @@
+{
+  "claims": {
+    "hipkernel:Gfx950AttentionDense": [
+      {
+        "cases": [
+          "b1_hq10_kv10_sq512_skv512_d64_bfp16_bshd_causal_br",
+          "b1_hq128_kv128_sq512_skv512_d64_bfp16_bshd_causal_br",
+          "b1_hq128_kv8_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b1_hq12_kv12_sq512_skv512_d64_bfp16_bshd_causal_br",
+          "b1_hq16_kv16_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b1_hq16_kv16_sq512_skv512_d64_bfp16_bshd_causal_br",
+          "b1_hq16_kv2_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b1_hq16_kv2_sq512_skv512_d64_bfp16_bshd_causal_br",
+          "b1_hq20_kv20_sq512_skv512_d64_bfp16_bshd_causal_br",
+          "b1_hq24_kv24_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b1_hq28_kv4_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b1_hq32_kv32_sq2048_skv2048_d128_bfp16_bshd_causal_br",
+          "b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_nomask",
+          "b1_hq32_kv32_sq512_skv512_d64_bfp16_bshd_causal_br",
+          "b1_hq32_kv4_sq512_skv2048_d128_fp16_bshd_causal_flag",
+          "b1_hq32_kv4_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b1_hq32_kv4_sq512_skv512_d64_bfp16_bshd_causal_br",
+          "b1_hq32_kv8_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b1_hq32_kv8_sq512_skv512_d64_bfp16_bshd_causal_br",
+          "b1_hq40_kv10_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b1_hq40_kv40_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b1_hq40_kv8_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b1_hq48_kv8_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b1_hq4_kv4_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b1_hq64_kv64_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b1_hq64_kv8_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b1_hq64_kv8_sq512_skv512_d64_bfp16_bshd_causal_br",
+          "b1_hq8_kv1_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b1_hq8_kv1_sq512_skv512_d64_bfp16_bshd_causal_br",
+          "b1_hq8_kv2_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b1_hq8_kv8_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b1_hq8_kv8_sq512_skv512_d64_bfp16_bshd_causal_br",
+          "b1_hq96_kv8_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b1_hq9_kv9_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b2_hq64_kv8_sq1152_skv1152_d128_bfp16_bshd_nomask",
+          "b2_hq64_kv8_sq2048_skv2048_d128_bfp16_bshd_nomask"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

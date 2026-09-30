@@ -1,0 +1,669 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "b1_hq16_kv2_sq384_skv384_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              384,
+              128
+            ],
+            "strides": [
+              98304,
+              128,
+              256,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              384,
+              128
+            ],
+            "strides": [
+              786432,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              384,
+              128
+            ],
+            "strides": [
+              786432,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              2,
+              384,
+              128
+            ],
+            "strides": [
+              98304,
+              128,
+              256,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "place_bundles.py",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: consolidated from quick/SdpaFwd/bshd/bf16/hd128_causal_bm128/Small.json"
+      }
+    },
+    {
+      "id": "b1_hq64_kv4_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              4,
+              512,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              64,
+              512,
+              128
+            ],
+            "strides": [
+              4194304,
+              128,
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              512,
+              128
+            ],
+            "strides": [
+              4194304,
+              128,
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              4,
+              512,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "place_bundles.py",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: consolidated from quick/SdpaFwd/bshd/bf16/hd128_causal_gqa/Small.json"
+      }
+    },
+    {
+      "id": "b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "place_bundles.py",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: consolidated from quick/SdpaFwd/bshd/bf16/hd128_causal_mha/Small.json"
+      }
+    },
+    {
+      "id": "b2_hq64_kv8_sq1024_skv1024_d64_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              8,
+              1024,
+              64
+            ],
+            "strides": [
+              524288,
+              64,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              64,
+              1024,
+              64
+            ],
+            "strides": [
+              4194304,
+              64,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              64,
+              1024,
+              64
+            ],
+            "strides": [
+              4194304,
+              64,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              8,
+              1024,
+              64
+            ],
+            "strides": [
+              524288,
+              64,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.125,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "place_bundles.py",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: consolidated from quick/SdpaFwd/bshd/bf16/hd64_causal_gqa/Small.json"
+      }
+    },
+    {
+      "id": "b1_hq32_kv8_sq512_skv288_d64_bfp16_bshd_nomask",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              8,
+              288,
+              64
+            ],
+            "strides": [
+              147456,
+              64,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              512,
+              64
+            ],
+            "strides": [
+              1048576,
+              64,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              512,
+              64
+            ],
+            "strides": [
+              1048576,
+              64,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              8,
+              288,
+              64
+            ],
+            "strides": [
+              147456,
+              64,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.125,
+          "diagonal_alignment": "TOP_LEFT",
+          "right_bound": -1
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "place_bundles.py",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: consolidated from quick/SdpaFwd/bshd/bf16/hd64_nomask_bn32/Small.json"
+      }
+    },
+    {
+      "id": "b1_hq32_kv32_sq512_skv512_d128_fp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "place_bundles.py",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: consolidated from quick/SdpaFwd/bshd/fp16/hd128_causal_mha/Small.json"
+      }
+    },
+    {
+      "id": "b1_hq32_kv8_sq2048_skv2048_d64_fp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              8,
+              2048,
+              64
+            ],
+            "strides": [
+              1048576,
+              64,
+              512,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              2048,
+              64
+            ],
+            "strides": [
+              4194304,
+              64,
+              2048,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              2048,
+              64
+            ],
+            "strides": [
+              4194304,
+              64,
+              2048,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              8,
+              2048,
+              64
+            ],
+            "strides": [
+              1048576,
+              64,
+              512,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.125,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "place_bundles.py",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: consolidated from quick/SdpaFwd/bshd/fp16/hd64_causal_gqa/Small.json"
+      }
+    },
+    {
+      "id": "b2_hq8_kv1_sq512_skv512_d64_fp16_bshd_nomask",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              1,
+              512,
+              64
+            ],
+            "strides": [
+              32768,
+              64,
+              64,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              8,
+              512,
+              64
+            ],
+            "strides": [
+              262144,
+              64,
+              512,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              8,
+              512,
+              64
+            ],
+            "strides": [
+              262144,
+              64,
+              512,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              1,
+              512,
+              64
+            ],
+            "strides": [
+              32768,
+              64,
+              64,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.125,
+          "diagonal_alignment": "TOP_LEFT",
+          "right_bound": -1
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "place_bundles.py",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: consolidated from quick/SdpaFwd/bshd/fp16/hd64_nomask_mqa/Small.json"
+      }
+    }
+  ]
+}

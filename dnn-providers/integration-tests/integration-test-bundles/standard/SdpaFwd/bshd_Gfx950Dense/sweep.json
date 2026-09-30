@@ -1,0 +1,3029 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "b1_hq32_kv32_sq2048_skv2048_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              2048,
+              128
+            ],
+            "strides": [
+              8388608,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              2048,
+              128
+            ],
+            "strides": [
+              8388608,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              2048,
+              128
+            ],
+            "strides": [
+              8388608,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              32,
+              2048,
+              128
+            ],
+            "strides": [
+              8388608,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "place_bundles.py",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: consolidated from standard/SdpaFwd/bshd/bf16/hd128_causal_mha/Prefill.json"
+      }
+    },
+    {
+      "id": "b2_hq64_kv8_sq1152_skv1152_d128_bfp16_bshd_nomask",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              8,
+              1152,
+              128
+            ],
+            "strides": [
+              1179648,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              64,
+              1152,
+              128
+            ],
+            "strides": [
+              9437184,
+              128,
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              64,
+              1152,
+              128
+            ],
+            "strides": [
+              9437184,
+              128,
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              8,
+              1152,
+              128
+            ],
+            "strides": [
+              1179648,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "TOP_LEFT",
+          "right_bound": -1
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "place_bundles.py",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: consolidated from standard/SdpaFwd/bshd/bf16/hd128_nomask_bm128/Prefill.json"
+      }
+    },
+    {
+      "id": "b2_hq64_kv8_sq2048_skv2048_d128_bfp16_bshd_nomask",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              8,
+              2048,
+              128
+            ],
+            "strides": [
+              2097152,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              64,
+              2048,
+              128
+            ],
+            "strides": [
+              16777216,
+              128,
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              64,
+              2048,
+              128
+            ],
+            "strides": [
+              16777216,
+              128,
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              8,
+              2048,
+              128
+            ],
+            "strides": [
+              2097152,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "TOP_LEFT",
+          "right_bound": -1
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "place_bundles.py",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: consolidated from standard/SdpaFwd/bshd/bf16/hd128_nomask_gqa/Prefill.json"
+      }
+    },
+    {
+      "id": "b1_hq32_kv4_sq512_skv2048_d128_fp16_bshd_causal_flag",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              4,
+              2048,
+              128
+            ],
+            "strides": [
+              1048576,
+              128,
+              512,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              4,
+              2048,
+              128
+            ],
+            "strides": [
+              1048576,
+              128,
+              512,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": true,
+          "diagonal_alignment": "TOP_LEFT",
+          "right_bound": -1
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "place_bundles.py",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: consolidated from standard/SdpaFwd/bshd/fp16/hd128_causal_crossattn/Prefill.json"
+      }
+    },
+    {
+      "id": "b1_hq8_kv1_sq512_skv512_d64_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              512,
+              64
+            ],
+            "strides": [
+              32768,
+              64,
+              64,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              8,
+              512,
+              64
+            ],
+            "strides": [
+              262144,
+              64,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              8,
+              512,
+              64
+            ],
+            "strides": [
+              262144,
+              64,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              1,
+              512,
+              64
+            ],
+            "strides": [
+              32768,
+              64,
+              64,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.125,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq8_kv8_sq512_skv512_d64_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              8,
+              512,
+              64
+            ],
+            "strides": [
+              262144,
+              64,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              8,
+              512,
+              64
+            ],
+            "strides": [
+              262144,
+              64,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              8,
+              512,
+              64
+            ],
+            "strides": [
+              262144,
+              64,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              8,
+              512,
+              64
+            ],
+            "strides": [
+              262144,
+              64,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.125,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq10_kv10_sq512_skv512_d64_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              10,
+              512,
+              64
+            ],
+            "strides": [
+              327680,
+              64,
+              640,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              10,
+              512,
+              64
+            ],
+            "strides": [
+              327680,
+              64,
+              640,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              10,
+              512,
+              64
+            ],
+            "strides": [
+              327680,
+              64,
+              640,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              10,
+              512,
+              64
+            ],
+            "strides": [
+              327680,
+              64,
+              640,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.125,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq12_kv12_sq512_skv512_d64_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              12,
+              512,
+              64
+            ],
+            "strides": [
+              393216,
+              64,
+              768,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              12,
+              512,
+              64
+            ],
+            "strides": [
+              393216,
+              64,
+              768,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              12,
+              512,
+              64
+            ],
+            "strides": [
+              393216,
+              64,
+              768,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              12,
+              512,
+              64
+            ],
+            "strides": [
+              393216,
+              64,
+              768,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.125,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq16_kv2_sq512_skv512_d64_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              512,
+              64
+            ],
+            "strides": [
+              65536,
+              64,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              512,
+              64
+            ],
+            "strides": [
+              524288,
+              64,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              512,
+              64
+            ],
+            "strides": [
+              524288,
+              64,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              2,
+              512,
+              64
+            ],
+            "strides": [
+              65536,
+              64,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.125,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq16_kv16_sq512_skv512_d64_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              512,
+              64
+            ],
+            "strides": [
+              524288,
+              64,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              512,
+              64
+            ],
+            "strides": [
+              524288,
+              64,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              512,
+              64
+            ],
+            "strides": [
+              524288,
+              64,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              512,
+              64
+            ],
+            "strides": [
+              524288,
+              64,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.125,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq20_kv20_sq512_skv512_d64_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              20,
+              512,
+              64
+            ],
+            "strides": [
+              655360,
+              64,
+              1280,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              20,
+              512,
+              64
+            ],
+            "strides": [
+              655360,
+              64,
+              1280,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              20,
+              512,
+              64
+            ],
+            "strides": [
+              655360,
+              64,
+              1280,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              20,
+              512,
+              64
+            ],
+            "strides": [
+              655360,
+              64,
+              1280,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.125,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq32_kv4_sq512_skv512_d64_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              4,
+              512,
+              64
+            ],
+            "strides": [
+              131072,
+              64,
+              256,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              512,
+              64
+            ],
+            "strides": [
+              1048576,
+              64,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              512,
+              64
+            ],
+            "strides": [
+              1048576,
+              64,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              4,
+              512,
+              64
+            ],
+            "strides": [
+              131072,
+              64,
+              256,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.125,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq32_kv8_sq512_skv512_d64_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              8,
+              512,
+              64
+            ],
+            "strides": [
+              262144,
+              64,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              512,
+              64
+            ],
+            "strides": [
+              1048576,
+              64,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              512,
+              64
+            ],
+            "strides": [
+              1048576,
+              64,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              8,
+              512,
+              64
+            ],
+            "strides": [
+              262144,
+              64,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.125,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq32_kv32_sq512_skv512_d64_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              512,
+              64
+            ],
+            "strides": [
+              1048576,
+              64,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              512,
+              64
+            ],
+            "strides": [
+              1048576,
+              64,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              512,
+              64
+            ],
+            "strides": [
+              1048576,
+              64,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              32,
+              512,
+              64
+            ],
+            "strides": [
+              1048576,
+              64,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.125,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq64_kv8_sq512_skv512_d64_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              8,
+              512,
+              64
+            ],
+            "strides": [
+              262144,
+              64,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              64,
+              512,
+              64
+            ],
+            "strides": [
+              2097152,
+              64,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              512,
+              64
+            ],
+            "strides": [
+              2097152,
+              64,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              8,
+              512,
+              64
+            ],
+            "strides": [
+              262144,
+              64,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.125,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq128_kv128_sq512_skv512_d64_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              128,
+              512,
+              64
+            ],
+            "strides": [
+              4194304,
+              64,
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              128,
+              512,
+              64
+            ],
+            "strides": [
+              4194304,
+              64,
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              128,
+              512,
+              64
+            ],
+            "strides": [
+              4194304,
+              64,
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              128,
+              512,
+              64
+            ],
+            "strides": [
+              4194304,
+              64,
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.125,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq24_kv24_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              24,
+              512,
+              128
+            ],
+            "strides": [
+              1572864,
+              128,
+              3072,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              24,
+              512,
+              128
+            ],
+            "strides": [
+              1572864,
+              128,
+              3072,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              24,
+              512,
+              128
+            ],
+            "strides": [
+              1572864,
+              128,
+              3072,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              24,
+              512,
+              128
+            ],
+            "strides": [
+              1572864,
+              128,
+              3072,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq4_kv4_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              4,
+              512,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              4,
+              512,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              4,
+              512,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              4,
+              512,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq8_kv1_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              512,
+              128
+            ],
+            "strides": [
+              65536,
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              1,
+              512,
+              128
+            ],
+            "strides": [
+              65536,
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq8_kv2_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              512,
+              128
+            ],
+            "strides": [
+              131072,
+              128,
+              256,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              2,
+              512,
+              128
+            ],
+            "strides": [
+              131072,
+              128,
+              256,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq8_kv8_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq9_kv9_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              9,
+              512,
+              128
+            ],
+            "strides": [
+              589824,
+              128,
+              1152,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              9,
+              512,
+              128
+            ],
+            "strides": [
+              589824,
+              128,
+              1152,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              9,
+              512,
+              128
+            ],
+            "strides": [
+              589824,
+              128,
+              1152,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              9,
+              512,
+              128
+            ],
+            "strides": [
+              589824,
+              128,
+              1152,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq16_kv2_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              512,
+              128
+            ],
+            "strides": [
+              131072,
+              128,
+              256,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              512,
+              128
+            ],
+            "strides": [
+              1048576,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              512,
+              128
+            ],
+            "strides": [
+              1048576,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              2,
+              512,
+              128
+            ],
+            "strides": [
+              131072,
+              128,
+              256,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq16_kv16_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              512,
+              128
+            ],
+            "strides": [
+              1048576,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              512,
+              128
+            ],
+            "strides": [
+              1048576,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              512,
+              128
+            ],
+            "strides": [
+              1048576,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              512,
+              128
+            ],
+            "strides": [
+              1048576,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq28_kv4_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              4,
+              512,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              28,
+              512,
+              128
+            ],
+            "strides": [
+              1835008,
+              128,
+              3584,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              28,
+              512,
+              128
+            ],
+            "strides": [
+              1835008,
+              128,
+              3584,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              4,
+              512,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq32_kv4_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              4,
+              512,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              4,
+              512,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq32_kv8_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq40_kv8_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              40,
+              512,
+              128
+            ],
+            "strides": [
+              2621440,
+              128,
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              40,
+              512,
+              128
+            ],
+            "strides": [
+              2621440,
+              128,
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq40_kv10_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              10,
+              512,
+              128
+            ],
+            "strides": [
+              655360,
+              128,
+              1280,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              40,
+              512,
+              128
+            ],
+            "strides": [
+              2621440,
+              128,
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              40,
+              512,
+              128
+            ],
+            "strides": [
+              2621440,
+              128,
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              10,
+              512,
+              128
+            ],
+            "strides": [
+              655360,
+              128,
+              1280,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq40_kv40_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              40,
+              512,
+              128
+            ],
+            "strides": [
+              2621440,
+              128,
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              40,
+              512,
+              128
+            ],
+            "strides": [
+              2621440,
+              128,
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              40,
+              512,
+              128
+            ],
+            "strides": [
+              2621440,
+              128,
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              40,
+              512,
+              128
+            ],
+            "strides": [
+              2621440,
+              128,
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq48_kv8_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              48,
+              512,
+              128
+            ],
+            "strides": [
+              3145728,
+              128,
+              6144,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              48,
+              512,
+              128
+            ],
+            "strides": [
+              3145728,
+              128,
+              6144,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq64_kv8_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              64,
+              512,
+              128
+            ],
+            "strides": [
+              4194304,
+              128,
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              512,
+              128
+            ],
+            "strides": [
+              4194304,
+              128,
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq64_kv64_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              512,
+              128
+            ],
+            "strides": [
+              4194304,
+              128,
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              64,
+              512,
+              128
+            ],
+            "strides": [
+              4194304,
+              128,
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              512,
+              128
+            ],
+            "strides": [
+              4194304,
+              128,
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              64,
+              512,
+              128
+            ],
+            "strides": [
+              4194304,
+              128,
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq96_kv8_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              96,
+              512,
+              128
+            ],
+            "strides": [
+              6291456,
+              128,
+              12288,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              96,
+              512,
+              128
+            ],
+            "strides": [
+              6291456,
+              128,
+              12288,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq128_kv8_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              128,
+              512,
+              128
+            ],
+            "strides": [
+              8388608,
+              128,
+              16384,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              128,
+              512,
+              128
+            ],
+            "strides": [
+              8388608,
+              128,
+              16384,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_nomask",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attn_scale_value": 0.08838834764831843,
+          "causal_mask": false,
+          "diagonal_alignment": "TOP_LEFT",
+          "right_bound": -1
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (ALMIOPEN-2797 one-hot expansion)",
+        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
+        "notes": "ALMIOPEN-2797: one-hot off baseline b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    }
+  ]
+}

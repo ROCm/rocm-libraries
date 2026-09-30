@@ -1,0 +1,24 @@
+{
+  "claims": {
+    "hipkernel:Gfx950AttentionDense": [
+      {
+        "cases": [
+          "b1_hq16_kv2_sq384_skv384_d128_bfp16_bshd_causal_br",
+          "b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b1_hq32_kv32_sq512_skv512_d128_fp16_bshd_causal_br",
+          "b1_hq32_kv8_sq2048_skv2048_d64_fp16_bshd_causal_br",
+          "b1_hq32_kv8_sq512_skv288_d64_bfp16_bshd_nomask",
+          "b1_hq64_kv4_sq512_skv512_d128_bfp16_bshd_causal_br",
+          "b2_hq64_kv8_sq1024_skv1024_d64_bfp16_bshd_causal_br",
+          "b2_hq8_kv1_sq512_skv512_d64_fp16_bshd_nomask"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}
