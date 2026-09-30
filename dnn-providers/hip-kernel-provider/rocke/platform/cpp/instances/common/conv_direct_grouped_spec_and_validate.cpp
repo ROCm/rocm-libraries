@@ -1757,10 +1757,8 @@ bool rocke_direct_depthwise_col_is_valid_spec(const rocke_direct_depthwise_col_s
         if(reason && reason_cap > 0)
         {
             rocke_dconv_col__dtype_repr(spec->dtype, dtype_repr, sizeof(dtype_repr));
-            snprintf(reason,
-                     reason_cap,
-                     "dtype %s is not supported; expected fp16 or bf16",
-                     dtype_repr);
+            snprintf(
+                reason, reason_cap, "dtype %s is not supported; expected fp16 or bf16", dtype_repr);
         }
         return false;
     }
