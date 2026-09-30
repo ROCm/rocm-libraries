@@ -142,6 +142,7 @@ def _kernel_b8_wg11():
         "_DepthUA": 256, "_DepthUB": 256,
         "MIWaveGroup": [1, 1], "WavefrontSize": 64,
         "NonTemporalA": 0, "NonTemporalB": 0,
+        "ProblemType": {"SwizzleTensorA": False, "SwizzleTensorB": False},
     }
 
 
@@ -152,6 +153,7 @@ def _kernel_b16_wg44():
         "_DepthUA": 64, "_DepthUB": 64,
         "MIWaveGroup": [4, 4], "WavefrontSize": 64,
         "NonTemporalA": 0, "NonTemporalB": 0,
+        "ProblemType": {"SwizzleTensorA": False, "SwizzleTensorB": False},
     }
 
 
@@ -162,6 +164,7 @@ def _kernel_b16_wg22():
         "_DepthUA": 128, "_DepthUB": 128,
         "MIWaveGroup": [2, 2], "WavefrontSize": 64,
         "NonTemporalA": 0, "NonTemporalB": 0,
+        "ProblemType": {"SwizzleTensorA": False, "SwizzleTensorB": False},
     }
 
 

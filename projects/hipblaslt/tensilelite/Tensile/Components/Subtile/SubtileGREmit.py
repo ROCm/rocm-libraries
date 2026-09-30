@@ -383,7 +383,10 @@ def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel, holdOnLastIter=False):
     return module
 
   module = Module(f"GR Ptr Update ({tc})")
-  inc = int(ti.depthUBytes)
+  # Host-pre-shuffled data interleaves one K tile across all rows of an MFMA
+  # tile, so advancing one DepthU consumes 16 contiguous row fragments.
+  rowMultiplier = ti.mmaTileShape[0] if ti.isPreShuffled else 1
+  inc = int(ti.depthUBytes * rowMultiplier)
   emitSrdAdvance(module, tc, inc, writer, kernel, holdOnLastIter)
   return module
 
@@ -571,10 +574,15 @@ def _grComputeOffset_legacy(module, writer, tileInfo, colId, rowId, output):
   colBytes = tmpVgpr + 1
   loadWidth = tileInfo.loadWidthGR
   module.add(VLShiftLeftB32(dst=vgpr(colBytes), shiftHex=hex(loadWidth.bit_length()-1), src=vgpr(colId), comment="scale col_id by load_width"))
-  strideRef = "StrideA0I" if tc == 'A' else "StrideB1J"
-  module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=sgpr(strideRef), src1=vgpr(rowId), comment="%s: rowId * stride"%tc))
-  module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(bpeBits.bit_length()-1), src=vgpr(tmpVgpr), comment="%s: rowId*stride*bpe"%tc))
-  module.add(VLShiftRightB32(dst=vgpr(tmpVgpr), shiftHex=hex(3), src=vgpr(tmpVgpr), comment="to bytes"))
+  if tileInfo.isPreShuffled:
+    depthUBytes = tileInfo.depthUBytes
+    module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(depthUBytes.bit_length()-1),
+                              src=vgpr(rowId), comment="%s: rowId * depthUBytes"%tc))
+  else:
+    strideRef = "StrideA0I" if tc == 'A' else "StrideB1J"
+    module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=sgpr(strideRef), src1=vgpr(rowId), comment="%s: rowId * stride"%tc))
+    module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(bpeBits.bit_length()-1), src=vgpr(tmpVgpr), comment="%s: rowId*stride*bpe"%tc))
+    module.add(VLShiftRightB32(dst=vgpr(tmpVgpr), shiftHex=hex(3), src=vgpr(tmpVgpr), comment="to bytes"))
   module.add(VAddU32(dst=vgpr(output), src0=vgpr(colBytes), src1=vgpr(tmpVgpr), comment="%s: GR row_offset"%tc))
   writer.vgprPool.checkIn(tmpVgpr)
 
@@ -634,7 +642,7 @@ def _grComputeAllOffsets_legacy(module, writer, tileInfo, colId, rowId, rowOffse
     module.add(VAddU32(dst=vgpr(rowOffset), src0=offset, src1=vgpr(rowOffset), comment="%s: advance row for GR offset %u"%(tileInfo.tc, i)))
     rotatedcolId = writer.vgprPool.checkOut(1, tag="_grComputeAllOffsets_legacy_rotatedcolId")
     loadWidth = tileInfo.loadWidthGR
-    if tileInfo.loadRatioGR == 0.5:
+    if tileInfo.loadRatioGR == 0.5 and not tileInfo.isPreShuffled:
       if tileInfo.bpe == 1:  # FP8: intra-block K_group +2 rotation, preserving block bit
         tmpBlock = writer.vgprPool.checkOut(1, tag="_grComputeAllOffsets_legacy_tmpBlock")
         module.add(VAndB32(dst=vgpr(tmpBlock), src0=vgpr(colId), src1=hex(4), comment="%s: block_bit = colId & 4"%tileInfo.tc))
@@ -783,13 +791,26 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
   module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="Wave Id"))
   module.add(VAndB32(dst=vgpr(laneId), src0=vgpr("Serial"), src1=wavesize-1, comment=""))
   module.add(VAndB32(dst=vgpr(colIdA), src0=vgpr("Serial"), src1=(blockSize-1), comment="get col_id in wave for %uB load"%loadWidth))
+  # Without a pre-shuffled tensor the swizzle derives colIdB from colIdA, so only
+  # seed it separately when one of the two skips the swizzle.
+  if tileInfoA.isPreShuffled or tileInfoB.isPreShuffled:
+    module.add(VAndB32(dst=vgpr(colIdB), src0=vgpr("Serial"), src1=(blockSize-1), comment="colIdB base"))
   module.add(VLShiftRightB32(dst=vgpr(rowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
-  _grSwizzleColIds(module, writer, [(tileInfoA, colIdA), (tileInfoB, colIdB)],
-                   blockSize, numRowsPerLDSBanks, laneId, waveId)
+  # A pre-shuffled tensor already carries the host's layout, so it must not be
+  # swizzled again; pass only the tensors that still need it.
+  swizzlePairs = [(t, c) for t, c in ((tileInfoA, colIdA), (tileInfoB, colIdB))
+                  if not t.isPreShuffled]
+  if swizzlePairs:
+    _grSwizzleColIds(module, writer, swizzlePairs,
+                     blockSize, numRowsPerLDSBanks, laneId, waveId)
   _grComputeRowPartition_legacy(module, kernel, writer, tileInfoA, waveId, rowOffsetA)
   _grComputeRowPartition_legacy(module, kernel, writer, tileInfoB, waveId, rowOffsetB)
   _grComputeAllOffsets_legacy(module, writer, tileInfoA, colIdA, rowId, rowOffsetA)
   _grComputeAllOffsets_legacy(module, writer, tileInfoB, colIdB, rowId, rowOffsetB)
+
+  for tile, rowOff in ((tileInfoA, rowOffsetA), (tileInfoB, rowOffsetB)):
+    if tile.isPreShuffled:
+      _addPreShuffleCorrectionToGROffsets(module, writer, kernel, tile, rowOff)
 
   writer.vgprPool.checkIn(tmpVgpr)
   _grComputeSubtileOffsets_legacy(writer, module, tileInfoA)
@@ -1373,6 +1394,36 @@ def _grComputeSubtileOffsets_tlu(writer, module, tileInfo):
         module.add(VAddU32(dst=vgpr(reg), src0=vgpr(tileInfo.sharedVgprGROffset[i]),
                    src1=hex(off), comment="%s: subtile row %u offset (vgpr)" % (tc, regId)))
   return module
+def _addPreShuffleCorrectionToGROffsets(module, writer, kernel, tile, rowOffset):
+  """Fold aligned 16-row HBM padding into pre-shuffled GR offsets."""
+  tc = tile.tc
+  strideRef = "StrideA0I" if tc == 'A' else "StrideB1J"
+  depthU = kernel["_DepthU%s" % tc]
+  nTileRows = tile.mmaTileShape[0]
+  corrVgpr = writer.vgprPool.checkOut(
+      1, tag="_addPreShuffleCorrectionToGROffsets_corrVgpr")
+  tmpSgpr = writer.sgprPool.checkOut(
+      1, tag="_addPreShuffleCorrectionToGROffsets_tmpSgpr", preventOverflow=False)
+
+  module.add(VAndB32(dst=vgpr(corrVgpr),
+                     src0=hex(~(nTileRows - 1) & 0xFFFFFFFF),
+                     src1=vgpr(rowOffset), comment="aligned pre-shuffled row"))
+  module.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr(strideRef), src1=hex(depthU),
+                     comment="stride - DepthU"))
+  module.add(VMulLOU32(dst=vgpr(corrVgpr), src0=sgpr(tmpSgpr),
+                       src1=vgpr(corrVgpr), comment="row padding correction"))
+  if tile.bpe == 0.5:
+    module.add(VLShiftRightB32(dst=vgpr(corrVgpr), shiftHex=hex(1),
+                               src=vgpr(corrVgpr), comment="FP4 elements to bytes"))
+
+  for i, grOffset in enumerate(tile.sharedVgprGROffset):
+    module.add(VAddU32(dst=vgpr(grOffset), src0=vgpr(grOffset),
+                       src1=vgpr(corrVgpr),
+                       comment="pre-shuffled %s GR[%u] correction" % (tc, i)))
+  writer.vgprPool.checkIn(corrVgpr)
+  writer.sgprPool.checkIn(tmpSgpr)
+
+
 ##################################################
 # Subroutine to generate GR load code
 #
