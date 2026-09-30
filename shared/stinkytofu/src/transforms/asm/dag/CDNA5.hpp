@@ -2392,44 +2392,6 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     PASS_DEBUG(std::cerr << "[CDNA5 dsCap] dsReadPerCap=" << dsReadPerCap()
                          << " span=" << dsIssueCapSpan() << "\n");
 
-    // ModuleOptions::LockDsReadOrder. Every ds_load in this region issues in
-    // the pre-scan dsReadPriority order. Barrier membership is not consulted.
-    // Lower number first; equal priority keeps DAG id order. A later load
-    // stays unready until every earlier one has issued, so a ready
-    // lower-priority load cannot skip ahead. A priority edge that would
-    // contradict a real dependence is dropped as a cycle, one pair at a time.
-    // These edges are not part of the Layer 2 overlap contract.
-    if (getPassContext().getPassFeatureConfig().dagFeatures.lockDsReadOrder) {
-        auto dsReadPriorityOf = [&](StinkyInstruction* inst) -> unsigned {
-            auto it = deps.dag.instToId.find(inst);
-            if (it == deps.dag.instToId.end()) return std::numeric_limits<unsigned>::max();
-            return deps.dag.nodes[it->second].dsReadPriority;
-        };
-        auto dagIdOf = [&](StinkyInstruction* inst) -> unsigned {
-            auto it = deps.dag.instToId.find(inst);
-            return it == deps.dag.instToId.end() ? std::numeric_limits<unsigned>::max()
-                                                 : it->second;
-        };
-        std::vector<StinkyInstruction*> loads;
-        for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
-            auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
-            if (instPtr != nullptr && isDSRead(*instPtr)) loads.push_back(instPtr);
-        }
-        std::stable_sort(loads.begin(), loads.end(),
-                         [&](StinkyInstruction* a, StinkyInstruction* b) {
-                             const unsigned priA = dsReadPriorityOf(a);
-                             const unsigned priB = dsReadPriorityOf(b);
-                             if (priA != priB) return priA < priB;
-                             return dagIdOf(a) < dagIdOf(b);
-                         });
-        for (size_t i = 1; i < loads.size(); ++i) {
-            deps.requestedConstraints.emplace_back(loads[i - 1], loads[i]);
-            PASS_DEBUG(std::cerr << "[CDNA5 onInitRegion ds priority] predecessor=" << loads[i - 1]
-                                 << " pri=" << dsReadPriorityOf(loads[i - 1]) << " successor="
-                                 << loads[i] << " pri=" << dsReadPriorityOf(loads[i]) << "\n");
-        }
-    }
-
     barrierWmmaThresholds_.clear();
     barrierDsLoadCounts_.clear();
     std::vector<WmmaHideBudgetBarrierInfo> hideBudgetBarriers;
@@ -2814,6 +2776,67 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                                           finalThresholdFor(anchor, output.beforeThreshold),
                                           output.dsLoadCount, output.wmmaWindowsNeeded,
                                           groupOverlaps(group)});
+        }
+    }
+
+    // ModuleOptions::LockDsReadOrder. Within one memory token, ds_loads issue in
+    // dsReadPriority order. Lower number first; equal priority keeps DAG id
+    // order. A later load stays unready until every earlier one on that token
+    // has issued. Different tokens are not chained: a cross-token priority edge
+    // can cycle with a real dependence when the latch's next-iteration WMMA
+    // index wraps back to the header.
+    //
+    // The token is the PSEUDO src idx, the same test computeBarrierAfterThresholds
+    // and computeBarrierBeforeThresholds use to match a ds_load to a barrier.
+    // Those scans are not reused as the load lists. Each one only keeps loads on
+    // one side of its barrier, and only when this region has a WMMA. A load with
+    // no PSEUDO token is left unordered. A priority edge that would contradict a
+    // real dependence is dropped as a cycle, one pair at a time. These edges are
+    // not part of the Layer 2 overlap contract.
+    if (getPassContext().getPassFeatureConfig().dagFeatures.lockDsReadOrder) {
+        auto dsReadPriorityOf = [&](StinkyInstruction* inst) -> unsigned {
+            auto it = deps.dag.instToId.find(inst);
+            if (it == deps.dag.instToId.end()) return std::numeric_limits<unsigned>::max();
+            return deps.dag.nodes[it->second].dsReadPriority;
+        };
+        auto dagIdOf = [&](StinkyInstruction* inst) -> unsigned {
+            auto it = deps.dag.instToId.find(inst);
+            return it == deps.dag.instToId.end() ? std::numeric_limits<unsigned>::max()
+                                                 : it->second;
+        };
+        auto tokenKeyOf = [](const StinkyInstruction& inst) {
+            std::vector<uint32_t> tokens;
+            for (const StinkyRegister& src : inst.getSrcRegs()) {
+                if (isPseudoReg(src)) tokens.push_back(src.reg.idx);
+            }
+            std::sort(tokens.begin(), tokens.end());
+            tokens.erase(std::unique(tokens.begin(), tokens.end()), tokens.end());
+            return tokens;
+        };
+        std::map<std::vector<uint32_t>, std::vector<StinkyInstruction*>> loadsByToken;
+        for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
+            auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (instPtr == nullptr || !isDSRead(*instPtr)) continue;
+            std::vector<uint32_t> tokens = tokenKeyOf(*instPtr);
+            if (tokens.empty()) continue;
+            loadsByToken[std::move(tokens)].push_back(instPtr);
+        }
+        for (auto& entry : loadsByToken) {
+            auto& loads = entry.second;
+            std::stable_sort(loads.begin(), loads.end(),
+                             [&](StinkyInstruction* a, StinkyInstruction* b) {
+                                 const unsigned priA = dsReadPriorityOf(a);
+                                 const unsigned priB = dsReadPriorityOf(b);
+                                 if (priA != priB) return priA < priB;
+                                 return dagIdOf(a) < dagIdOf(b);
+                             });
+            for (size_t i = 1; i < loads.size(); ++i) {
+                deps.requestedConstraints.emplace_back(loads[i - 1], loads[i]);
+                PASS_DEBUG(std::cerr
+                           << "[CDNA5 onInitRegion ds priority] predecessor=" << loads[i - 1]
+                           << " pri=" << dsReadPriorityOf(loads[i - 1]) << " successor=" << loads[i]
+                           << " pri=" << dsReadPriorityOf(loads[i]) << "\n");
+            }
         }
     }
 
