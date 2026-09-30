@@ -28,34 +28,6 @@
 
 namespace rocsparse
 {
-    template <typename J>
-    rocsparse_status coosort_buffer_size_template(rocsparse_handle handle,
-                                                  J                m,
-                                                  J                n,
-                                                  J                nnz,
-                                                  const J*         coo_row_ind,
-                                                  const J*         coo_col_ind,
-                                                  size_t*          buffer_size);
-    template <typename J>
-    rocsparse_status coosort_by_row_template(rocsparse_handle handle,
-                                             J                m,
-                                             J                n,
-                                             J                nnz,
-                                             J*               coo_row_ind,
-                                             J*               coo_col_ind,
-                                             J*               perm,
-                                             void*            temp_buffer);
-
-    template <typename J>
-    rocsparse_status coosort_by_column_template(rocsparse_handle handle,
-                                                J                m,
-                                                J                n,
-                                                J                nnz,
-                                                J*               coo_row_ind,
-                                                J*               coo_col_ind,
-                                                J*               perm,
-                                                void*            temp_buffer);
-
     typedef enum rocsparse_coosort_alg_
     {
         rocsparse_coosort_alg_default = 0

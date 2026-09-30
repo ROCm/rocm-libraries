@@ -630,7 +630,6 @@ set(rocsparse_source
   src/conversion/rocsparse_gcoo_aos2coo.cpp
   src/conversion/rocsparse_gcoo_aos2csr.cpp
   src/conversion/rocsparse_gcsr2coo_aos.cpp
-  src/conversion/rocsparse_gcoosort.cpp
   src/conversion/rocsparse_gcreate_identity_permutation.cpp
   src/conversion/rocsparse_gcsr2csc.cpp
   src/conversion/rocsparse_gcsr2coo.cpp
