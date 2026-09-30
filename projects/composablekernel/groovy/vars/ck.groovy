@@ -756,7 +756,7 @@ def cmake_build(Map conf=[:]){
         cmake_envs = "CXX=/opt/rocm/llvm/bin/clang++ CXXFLAGS='-Werror' " + conf.get("cmake_ex_env","")
     }
 
-    if(conf.get("build_install","") == "true")
+    if(runAllUnitTests)
     {
         config_targets = 'install ' + config_targets
         setup_args = ' -DBUILD_DEV=On -DCMAKE_INSTALL_PREFIX=../install' + setup_args
