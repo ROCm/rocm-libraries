@@ -45,7 +45,7 @@ namespace rocsparse
         nnz,                                                                  \
         m,                                                                    \
         n,                                                                    \
-        (I)0,                                                                 \
+        static_cast<I>(0),                                                    \
         batch_count_C,                                                        \
         batch_stride_A,                                                       \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),         \
