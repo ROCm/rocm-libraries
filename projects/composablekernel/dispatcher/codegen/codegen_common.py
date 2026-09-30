@@ -695,8 +695,12 @@ def normalize_gfx_arch(arch: str) -> str:
 # widths. ``resolve_gemm_vector_sizes`` is idempotent on canonical input.
 
 # Pipelines / GEMM variants whose problem and epilogue honour fixed vector sizes.
+# Not preshuffle: its pre-shuffled B needs K and N to be warp-tile multiples,
+# which already implies native alignment, so narrower widths never help it.
 VECTOR_SIZE_PIPELINES: FrozenSet[str] = frozenset({"mem", "compv3", "compv4", "compv5"})
-VECTOR_SIZE_VARIANTS: FrozenSet[str] = frozenset({"standard", "batched"})
+VECTOR_SIZE_VARIANTS: FrozenSet[str] = frozenset(
+    {"standard", "batched", "grouped", "multi_d", "multi_abd", "stream_k"}
+)
 
 _VEC_ELEMENT_BYTES = {
     "fp16": 2, "bf16": 2, "fp32": 4, "fp64": 8, "fp8": 1, "bf8": 1, "int8": 1, "int32": 4
@@ -737,6 +741,32 @@ def _pattern_2d_y2(y: int, x: int, vec: int, block_size: int, warp_size: int) ->
 def gemm_vector_size_suffix(vec: Sequence[int]) -> str:
     """Kernel-name suffix for a canonical width triple ("" when native)."""
     return "_vec{}_{}_{}".format(*vec) if any(vec) else ""
+
+
+def gemm_lockstep_vector_bytes(vec: Sequence[int], dtype_a: str, dtype_b: str) -> int:
+    """``TileGemmUniversalTraits::_VectorSize`` (bytes) for a fixed width triple.
+
+    On gfx9 the LDS write width (``GetSmemPackA/B``) is derived from this single
+    byte knob, not from ``VectorSizeA/B``, so it must shrink together with the
+    global widths: an 8-wide LDS store fed by a 1-wide global load is a
+    structural mismatch. One knob serves both tensors, hence the min.
+    """
+    return min(vec[0] * _VEC_ELEMENT_BYTES[dtype_a], vec[1] * _VEC_ELEMENT_BYTES[dtype_b])
+
+
+def gemm_vector_size_sweep(vec: Sequence[int], dtype_a: str, dtype_b: str, dtype_c: str) -> List[Tuple[int, int, int]]:
+    """Every width triple worth building for a problem that needs ``vec``.
+
+    ``vec`` is ``gemm_problem_vector_sizes`` (largest legal width per tensor,
+    capped at 16 bytes). An aligned tensor stays native (0); a misaligned one
+    sweeps every power-of-two divisor of its largest legal width, so the tuner
+    can pick the fastest one. Only the offending tensor is narrowed.
+    """
+    full = [16 // _VEC_ELEMENT_BYTES[d] for d in (dtype_a, dtype_b, dtype_c)]
+    if all(v >= f for v, f in zip(vec, full)):
+        return [(0, 0, 0)]
+    axes = [[f] if v >= f else [1 << i for i in range(v.bit_length())] for v, f in zip(vec, full)]
+    return [(a, b, c) for a in axes[0] for b in axes[1] for c in axes[2]]
 
 
 def gemm_problem_vector_sizes(m: int, n: int, k: int, layout: str, dtype_a: str, dtype_b: str, dtype_c: str) -> Tuple[int, int, int]:
@@ -818,6 +848,9 @@ def resolve_gemm_vector_sizes(
         return eff, f"pipeline {pipeline} does not support fixed vector sizes"
     if epilogue != "cshuffle":
         return eff, f"epilogue {epilogue} cannot use fixed vector sizes"
+    # Stream-K reduces partial C tiles with buffer atomics, which need >= 4 bytes.
+    if variant == "stream_k" and eff[2] * ec < 4:
+        return eff, f"stream_k atomic C store needs >= 4 bytes, got vector_size_c={eff[2]}"
     # K-major-in-LDS operands (col-major A / row-major B) on wave64 need
     # (tile_k / Y2) >= warp_size / warp_tile_mn in the LDS descriptor.
     for name, width, (y, x), xdl, k_out in (

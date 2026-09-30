@@ -38,6 +38,7 @@ from codegen_common import (
     TDM_PIPELINES,
     gfx1250_comp_async_8bit_warp_tile_k_rejected,  # noqa: F401 (re-exported)
     gfx1250_pipeline_reject_reason,
+    gemm_lockstep_vector_bytes,
     gemm_vector_size_suffix,
     resolve_gemm_vector_sizes,
 )
@@ -905,7 +906,7 @@ using CLayout = {ns_name}::CLayout;
             TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
                                             ALayout, BLayout, CLayout, TransposeC,
                                             UseStructuredSparsity, UsePersistentKernel,
-                                            NumWaveGroups, Preshuffle>,
+                                            NumWaveGroups, Preshuffle{self._vector_size_tails(config)[1]}>,
             scheduler{self._vector_size_tails(config)[0]}>;
         
         using GemmPipeline = {self.tm.PIPELINE_TO_CK[config.trait.pipeline]}<UniversalGemmProblem>;
@@ -956,7 +957,7 @@ using CLayout = {ns_name}::CLayout;
 
         using GemmUniversalTraits = ck_tile::TileGemmUniversalTraits<
             kPadM, kPadN, kPadK, DoubleSmemBuffer,
-            ALayout, BLayout, CLayout, TransposeC>;
+            ALayout, BLayout, CLayout, TransposeC{self._vector_size_tails(config, short_traits=True)[1]}>;
 
         using UniversalGemmProblem = UniversalGemmPipelineProblem<
             ADataType, BDataType, AccDataType, TileShape,
@@ -1047,8 +1048,8 @@ using CLayout = {ns_name}::CLayout;
             TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
                                     ALayout, BLayout, CLayout, TransposeC,
                                     UseStructuredSparsity, UsePersistentKernel,
-                                    NumWaveGroups, Preshuffle>,
-            scheduler>;
+                                    NumWaveGroups, Preshuffle{self._vector_size_tails(config)[1]}>,
+            scheduler{self._vector_size_tails(config)[0]}>;
 
         using GemmPipeline = {self.tm.PIPELINE_TO_CK[config.trait.pipeline]}<UniversalGemmProblem>;
         {self._epilogue_code(config)}
@@ -1105,8 +1106,8 @@ using CLayout = {ns_name}::CLayout;
             TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
                                             ALayout, BLayout, CLayout, TransposeC,
                                             UseStructuredSparsity, UsePersistentKernel,
-                                            NumWaveGroups, Preshuffle>,
-            scheduler>;
+                                            NumWaveGroups, Preshuffle{self._vector_size_tails(config)[1]}>,
+            scheduler{self._vector_size_tails(config)[0]}>;
         
         using GemmPipeline = WeightPreshufflePipelineAGmemBGmemCRegV2<UniversalGemmProblem>;
         {self._epilogue_code(config)}
@@ -1154,8 +1155,8 @@ using CLayout = {ns_name}::CLayout;
             TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
                                             ALayout, BLayout, CLayout, TransposeC,
                                             UseStructuredSparsity, UsePersistentKernel,
-                                            NumWaveGroups, Preshuffle>,
-            scheduler>;
+                                            NumWaveGroups, Preshuffle{self._vector_size_tails(config)[1]}>,
+            scheduler{self._vector_size_tails(config)[0]}>;
         
         using GemmPipeline = {self.tm.PIPELINE_TO_CK[config.trait.pipeline]}<UniversalGemmProblem>;
         {self._epilogue_code(config)}
@@ -1218,6 +1219,9 @@ using CLayout = {ns_name}::CLayout;
         as the kernel. Multi-ABD supports only k_batch = 1, so it launches the
         kernel directly (no hot-loop tail handler, matching Old-TE).
         """
+        mabd_tails = self._vector_size_tails(
+            config, short_traits=True, problem_types="AsDataType, BsDataType", ew=False
+        )
         return f"""
     // Multi-ABD launch function - takes GemmMultiABDHostArgs with tuple A/B/D.
     static float launch(const GemmMultiABDArgs& args, const stream_config& stream) {{
@@ -1227,11 +1231,11 @@ using CLayout = {ns_name}::CLayout;
 
         // Traits use tuple layouts for multi-abd (AsLayout/BsLayout/ELayout).
         using Traits = TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
-                                               AsLayout, BsLayout, ELayout, TransposeC>;
+                                               AsLayout, BsLayout, ELayout, TransposeC{mabd_tails[1]}>;
 
         using UniversalGemmProblem = UniversalGemmPipelineProblem<
             AsDataType, BsDataType, AccDataType, TileShape, Traits, scheduler,
-            AElementWiseFn, BElementWiseFn>;
+            AElementWiseFn, BElementWiseFn{mabd_tails[0]}>;
 
         using GemmPipeline = {self.tm.PIPELINE_TO_CK[config.trait.pipeline]}<UniversalGemmProblem>;
         {self._epilogue_code(config)}
@@ -1299,9 +1303,9 @@ using CLayout = {ns_name}::CLayout;
     using SkGemmUniversalTraits = TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
                                         ALayout, BLayout, CLayout, TransposeC,
                                         UseStructuredSparsity, UsePersistentKernel,
-                                        NumWaveGroups, Preshuffle>;
+                                        NumWaveGroups, Preshuffle{self._vector_size_tails(config)[1]}>;
     using SkUniversalGemmProblem = UniversalGemmPipelineProblem<
-        ADataType, BDataType, AccDataType, TileShape, SkGemmUniversalTraits, SkScheduler>;
+        ADataType, BDataType, AccDataType, TileShape, SkGemmUniversalTraits, SkScheduler{self._vector_size_tails(config)[0]}>;
     using SkGemmPipeline = {self.tm.PIPELINE_TO_CK[config.trait.pipeline]}<SkUniversalGemmProblem>;
     {self._epilogue_code(config)}
     using SkStreamKTilePartitioner =
@@ -1410,26 +1414,35 @@ using CLayout = {ns_name}::CLayout;
         return ave_time;
     }}"""
 
-    def _vector_size_tails(self, config: KernelConfig) -> Tuple[str, str]:
-        """(pipeline-problem template tail, epilogue ``FixedVectorSize, VectorSizeC``).
+    def _vector_size_tails(
+        self,
+        config: KernelConfig,
+        short_traits: bool = False,
+        problem_types: str = "ADataType, BDataType",
+        ew: bool = True,
+    ) -> Tuple[str, str, str]:
+        """Template tails that fix the global vector widths; shared by all seven
+        ``UniversalGemmPipelineProblem`` call sites.
 
-        Native widths leave the problem at its defaults. Fixed widths are only
-        wired for the standard and batched variants; codegen_common rejects
-        them everywhere else before a config gets here.
+        Returns ``(problem, traits, epilogue)``:
+          * problem  -- after the scheduler (or after the element-wise functions
+            when ``ew`` is False): element-wise ops, compute types,
+            ``FixedVectorSize_``, ``VectorSizeA_``, ``VectorSizeB_``;
+          * traits   -- after ``Preshuffle`` (after ``TransposeC`` when
+            ``short_traits``): ``_VectorSize`` bytes, lowered in lockstep;
+          * epilogue -- CShuffle ``FixedVectorSize, VectorSizeC``.
+        Native widths keep every template at its defaults, so native kernels
+        are byte-identical to a build without this feature.
         """
         va, vb, vc = config.trait.vector_sizes
         if not vc:
-            return "", "false, 1"
-        if config.preshuffle or config.variant not in (
-            GemmVariant.STANDARD,
-            GemmVariant.BATCHED,
-        ):
-            raise ValueError(
-                f"fixed vector sizes are not supported for GEMM variant {config.variant.value}"
-            )
+            return "", "", "false, 1"
+        ew_tail = ", element_wise::PassThrough, element_wise::PassThrough" if ew else ""
+        traits_tail = ", UseStructuredSparsity, UsePersistentKernel, NumWaveGroups, Preshuffle" if short_traits else ""
+        lds_bytes = gemm_lockstep_vector_bytes(config.trait.vector_sizes, self.datatype, self.datatype)
         return (
-            ", element_wise::PassThrough, element_wise::PassThrough,"
-            f" ADataType, BDataType, true, {va}, {vb}",
+            f"{ew_tail}, {problem_types}, true, {va}, {vb}",
+            f"{traits_tail}, {lds_bytes}",
             f"true, {vc}",
         )
 
@@ -1454,7 +1467,7 @@ using CLayout = {ns_name}::CLayout;
                 ):
                     transpose_c_tail = (
                         "UniversalGemmProblem::TransposeC, 1, "
-                        f"{self._vector_size_tails(config)[1]}, 1, DoubleSmemBuffer"
+                        f"{self._vector_size_tails(config)[2]}, 1, DoubleSmemBuffer"
                     )
                 else:
                     transpose_c_tail = "UniversalGemmProblem::TransposeC"
@@ -1477,22 +1490,23 @@ using CLayout = {ns_name}::CLayout;
             # Multi-ABD epilogue: tuple A/B/D dtypes and D layouts, EDataType as
             # output, and the CDE element-wise function. Matches the TE builder's
             # CShuffleEpilogueProblem for gemm_multi_abd.
-            return """
+            vec_c = self._vector_size_tails(config)[2] if any(config.trait.vector_sizes) else ""
+            return f"""
         using EpilogueProblem = CShuffleEpilogueProblem<
             AsDataType, BsDataType, DsDataType, AccDataType, EDataType,
             DsLayout, ELayout, CDEElementWiseFn,
             TilePartitioner::MPerBlock, TilePartitioner::NPerBlock,
             WarpPerBlock_M, WarpPerBlock_N, WarpTileM, WarpTileN, WarpTileK,
-            TransposeC>;
+            TransposeC{", NumWaveGroups, " + vec_c if vec_c else ""}>;
         using GemmEpilogue = CShuffleEpilogue<EpilogueProblem>;"""
         if config.variant == GemmVariant.MULTI_D:
-            return """
+            return f"""
         using EpilogueProblem = CShuffleEpilogueProblem<
             ADataType, BDataType, DsDataType, AccDataType, CDataType,
             DsLayout, CLayout, ElementWiseFn,
             TilePartitioner::MPerBlock, TilePartitioner::NPerBlock,
             WarpPerBlock_M, WarpPerBlock_N, WarpTileM, WarpTileN, WarpTileK,
-            TransposeC, NumWaveGroups, false, 1, 1, DoubleSmemBuffer>;
+            TransposeC, NumWaveGroups, {self._vector_size_tails(config)[2]}, 1, DoubleSmemBuffer>;
         using GemmEpilogue = CShuffleEpilogue<EpilogueProblem>;"""
         elif config.trait.epilogue == "cshuffle":
             return f"""
@@ -1501,7 +1515,7 @@ using CLayout = {ns_name}::CLayout;
             tuple<>, CLayout, element_wise::PassThrough,
             TilePartitioner::MPerBlock, TilePartitioner::NPerBlock,
             WarpPerBlock_M, WarpPerBlock_N, WarpTileM, WarpTileN, WarpTileK,
-            TransposeC, NumWaveGroups, {self._vector_size_tails(config)[1]}, 1, DoubleSmemBuffer>;
+            TransposeC, NumWaveGroups, {self._vector_size_tails(config)[2]}, 1, DoubleSmemBuffer>;
         using GemmEpilogue = CShuffleEpilogue<EpilogueProblem>;"""
         else:
             return """
@@ -1981,6 +1995,9 @@ class UnifiedGemmCodegen:
                     pad_n=trait.pad_n,
                     pad_k=trait.pad_k,
                     persistent=trait.persistent,
+                    vector_size_a=trait.vector_size_a,
+                    vector_size_b=trait.vector_size_b,
+                    vector_size_c=trait.vector_size_c,
                 )
                 # Emit one preshuffle config per (tile, epilogue, persistent),
                 # de-duplicating over the swept pipeline/scheduler so a full sweep

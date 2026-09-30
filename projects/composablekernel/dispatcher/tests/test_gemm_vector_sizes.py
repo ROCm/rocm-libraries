@@ -35,6 +35,8 @@ from codegen_common import (  # noqa: E402
     gemm_native_vector_sizes,
     gemm_problem_vector_sizes,
     gemm_vector_size_suffix,
+    gemm_lockstep_vector_bytes,
+    gemm_vector_size_sweep,
     resolve_gemm_vector_sizes,
 )
 from unified_gemm_codegen import (  # noqa: E402
@@ -66,13 +68,13 @@ def _resolve(layout, requested, **kw):
     return resolve_gemm_vector_sizes(**args)
 
 
-def _bridge_config(vec=(1, 1, 8), variant="standard"):
+def _bridge_config(vec=(1, 1, 8), variant="standard", pipeline="compv3"):
     return GemmKernelConfig(
         dtype_a="bf16", dtype_b="bf16", dtype_c="bf16", dtype_acc="fp32",
         layout_a="row", layout_b="col", layout_c="row", tile_m=256, tile_n=256, tile_k=64,
         wave_m=2, wave_n=2, wave_k=1,
         warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
-        pipeline="compv3", scheduler="intrawave", epilogue="cshuffle",
+        pipeline=pipeline, scheduler="intrawave", epilogue="cshuffle",
         pad_m=True, pad_n=True, pad_k=True, gfx_arch="gfx950", variant=variant,
     ).with_vector_sizes(vec)
 
@@ -132,9 +134,10 @@ class TestResolution(unittest.TestCase):
 
     def test_rejects_unsupported_scope(self):
         for kw, word in [
-            (dict(pipeline="preshufflev2"), "pipeline"),
+            (dict(pipeline="comp_async"), "pipeline"),
             (dict(epilogue="default"), "epilogue"),
-            (dict(variant="multi_d"), "variant"),
+            (dict(variant="grouped_quant"), "variant"),
+            (dict(variant="preshuffle", pipeline="preshufflev2"), "variant"),
         ]:
             self.assertIn(word, _resolve("rcr", (1, 1, 8), **kw)[1], kw)
 
@@ -149,6 +152,12 @@ class TestResolution(unittest.TestCase):
         self.assertIn("LDS", _resolve("crr", (1, 0, 0), gfx_arch="gfx942", **tile)[1])
         self.assertIn("LDS", _resolve("rrr", (0, 1, 0), gfx_arch="gfx942", **tile)[1])
         self.assertIsNone(_resolve("crr", (1, 0, 0), gfx_arch="gfx1250", **tile)[1])
+
+    def test_rejects_stream_k_sub_dword_atomic_c(self):
+        # bf16 C width 1 = 2 bytes: below the 4-byte buffer atomic.
+        self.assertIn("atomic", _resolve("rrr", (8, 1, 1), variant="stream_k")[1])
+        self.assertIsNone(_resolve("rrr", (8, 1, 2), variant="stream_k")[1])
+        self.assertIsNone(_resolve("rrr", (8, 1, 1))[1])
 
     def test_rejects_warp_tile_k_not_multiple(self):
         _, reason = _resolve("rcr", (4, 8, 8), warp_tile=(32, 32, 2))
@@ -181,7 +190,7 @@ class TestNamingAgreement(unittest.TestCase):
         self.assertEqual(_bridge_config(vec=(1, 1, 8))[0].effective_vector_sizes, (1, 1, 8))
 
     def test_bridge_reject_names_tile(self):
-        _, reason = _bridge_config(vec=(1, 1, 8), variant="multi_d")
+        _, reason = _bridge_config(vec=(1, 1, 8), pipeline="comp_async")
         self.assertIn("256x256x64", reason)
         self.assertIn("vec1_1_8", reason)
 
@@ -202,6 +211,35 @@ class TestGeneratedKernel(unittest.TestCase):
         self.assertNotIn("_vec", src)
         self.assertNotIn("ADataType, BDataType, true", src)
         self.assertIn("NumWaveGroups, false, 1,", src)
+
+    def test_every_problem_site_gets_widths_and_lockstep(self):
+        # bf16 (1, 1, 8): VectorSizeA/B = 1 and _VectorSize = min(1*2, 1*2) = 2 bytes.
+        for variant in GemmVariant:
+            src = self._src((1, 1, 8), variant)
+            self.assertRegex(src, r"(ADataType, BDataType|AsDataType, BsDataType), true, 1, 1>", variant)
+            self.assertRegex(src, r"Preshuffle, 2>", variant)
+            self.assertIn("true, 8", src, variant)
+            native = self._src((0, 0, 0), variant)
+            self.assertNotIn("DataType, true,", native, variant)
+            self.assertNotIn("Preshuffle, ", native, variant)
+
+    def test_lockstep_bytes(self):
+        self.assertEqual(gemm_lockstep_vector_bytes((1, 8, 8), "bf16", "bf16"), 2)
+        self.assertEqual(gemm_lockstep_vector_bytes((4, 8, 8), "fp8", "fp8"), 4)
+        self.assertEqual(gemm_lockstep_vector_bytes((8, 8, 8), "bf16", "bf16"), 16)
+
+
+class TestWidthSweep(unittest.TestCase):
+    def test_aligned_problem_is_native_only(self):
+        self.assertEqual(gemm_vector_size_sweep((8, 8, 8), "bf16", "bf16", "bf16"), [(0, 0, 0)])
+
+    def test_only_offending_tensor_sweeps(self):
+        self.assertEqual(
+            gemm_vector_size_sweep((4, 8, 8), "bf16", "bf16", "bf16"),
+            [(1, 8, 8), (2, 8, 8), (4, 8, 8)],
+        )
+        self.assertEqual(gemm_vector_size_sweep((1, 1, 8), "bf16", "bf16", "bf16"), [(1, 1, 8)])
+        self.assertEqual(len(gemm_vector_size_sweep((2, 4, 8), "bf16", "bf16", "bf16")), 6)
 
 
 class TestHeaderLookup(unittest.TestCase):
