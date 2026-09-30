@@ -33,9 +33,8 @@ namespace rocsparse
         rocsparse_csrsort_alg_default = 0
     } rocsparse_csrsort_alg;
 
-    // Shared by the CSR and CSC sorts: dir == rocsparse_direction_row sorts the column indices
-    // within each row of a CSR matrix, and dir == rocsparse_direction_column sorts the row
-    // indices within each column of a CSC matrix.
+    // Shared by the CSR and CSC sorts: dir selects the format, rocsparse_direction_row for CSR
+    // and rocsparse_direction_column for CSC.
     rocsparse_status csxsort_buffer_size(rocsparse_handle            handle,
                                          rocsparse_direction         dir,
                                          rocsparse_const_spmat_descr source,

@@ -260,7 +260,7 @@ namespace rocsparse
                                                csrsort_threads,
                                                0,
                                                handle->stream,
-                                               size,
+                                               static_cast<int32_t>(size),
                                                reinterpret_cast<const int32_t*>(in),
                                                reinterpret_cast<int32_t*>(out));
             return rocsparse_status_success;
