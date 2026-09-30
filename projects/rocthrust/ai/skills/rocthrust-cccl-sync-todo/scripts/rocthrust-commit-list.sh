@@ -12,27 +12,17 @@
 # rocthrust-cccl-sync-investigate's Signal A-D version check). Every commit
 # this script prints needs to be ported.
 #
-# Scope: upstream's `thrust/` subtree has `thrust/thrust/` (headers),
-# `thrust/testing/`, and `thrust/examples/` as siblings, each with a
-# same-named local counterpart (`projects/rocthrust/{thrust,testing,examples}/`).
-# All three are scanned, so commits that touch ONLY `thrust/testing/` or
-# `thrust/examples/` (no header change at all) are included too, not just
-# commits that happen to also touch a header. Earlier versions of this
-# script scanned `thrust/thrust/` alone, which made those commits invisible
-# to todo.md entirely -- not skipped, not flagged, just never enumerated.
+# Scope: the whole upstream `thrust/` subtree, so no commit that touches
+# Thrust can be missed. Earlier versions scanned only thrust/thrust/, then
+# only thrust/{thrust,testing,examples}/; each time, commits confined to the
+# unscanned paths (tests, then benchmarks, CMake, README/.gitignore) were
+# silently never enumerated, even though rocThrust's parity list includes
+# them. Listing a commit doesn't mean it changes rocThrust: the resolve
+# stage decides that, and records "N/A" when it doesn't.
 #
-# Deliberately NOT widened to include (do not add without a real reason,
-# see rocthrust-cccl-sync-resolve/porting-categories.md category on this):
-#   - thrust/benchmarks/ -- upstream is plural, rocThrust's local directory
-#     is `projects/rocthrust/benchmark/` (singular). The generic
-#     strip-"thrust/"-and-prefix translation this script and
-#     rocthrust-show-upstream-commit.sh both rely on would silently produce
-#     a nonexistent path if this were included.
-#   - thrust/cmake/, thrust/internal/, thrust/scripts/ -- upstream CI/build
-#     tooling. rocThrust has same-named local directories, but they are
-#     independently-maintained AMD tooling, not ports of upstream's --
-#     including these would risk the same silent-wrong-translation trap as
-#     benchmarks/, just semantic instead of a naming typo.
+# Path translation (see translate_path below):
+#   thrust/benchmarks/<x>  -> projects/rocthrust/benchmark/<x>  (plural -> singular)
+#   thrust/<anything else> -> projects/rocthrust/<anything else>
 #
 # Usage: rocthrust-commit-list.sh --repo <path-to-rocm-libraries> \
 #          --from <tag> --to <tag> [--remote cccl] [--sensitive-file <path>]
@@ -51,10 +41,16 @@
 # FLAG is '⚠' if the commit touches a path matching a sensitive-files.md
 # pattern (after translating thrust/... to projects/rocthrust/thrust/...),
 # else '-'.
-# SCOPE is a comma-joined subset of {HEADER,TEST,EXAMPLE} naming which of
-# thrust/thrust/, thrust/testing/, thrust/examples/ this commit touches --
-# read it before assuming a commit needs CUDA/HIP source-level porting
-# treatment; a TEST-only or EXAMPLE-only commit usually doesn't.
+# SCOPE is a comma-joined subset of the tags below, naming which parts of
+# thrust/ the commit touches. Read it before assuming a commit needs
+# CUDA/HIP source-level porting; most non-HEADER commits don't.
+#   HEADER   thrust/thrust/
+#   TEST     thrust/testing/
+#   EXAMPLE  thrust/examples/
+#   BENCH    thrust/benchmarks/  (rocThrust uses Google Benchmark, not nvbench)
+#   CMAKE    thrust/cmake/, thrust/**/CMakeLists.txt outside the dirs above
+#            (rocThrust's CMake is its own; usually N/A)
+#   OTHER    anything else, e.g. thrust/README.md, thrust/.gitignore, docs
 
 set -euo pipefail
 
@@ -89,9 +85,8 @@ if [[ -z "$ROCTHRUST_REPO" || -z "$FROM_TAG" || -z "$TO_TAG" ]]; then
   exit 64
 fi
 
-# See the "Scope" note at the top of this file for what is and is not here,
-# and why.
-SCOPE_PATHS=("thrust/thrust/" "thrust/testing/" "thrust/examples/")
+# See the "Scope" note at the top of this file.
+SCOPE_PATHS=("thrust/")
 
 cd "$ROCTHRUST_REPO"
 
@@ -114,29 +109,42 @@ else
   echo "WARNING: sensitive-files.md not found at $SENSITIVE_FILE — flags will all be '-'" >&2
 fi
 
+translate_path() {
+  # arg: upstream path (thrust/... form) -> rocThrust path
+  case "$1" in
+    thrust/benchmarks/*) echo "projects/rocthrust/benchmark/${1#thrust/benchmarks/}" ;;
+    *) echo "projects/rocthrust/${1#thrust/}" ;;
+  esac
+}
+
 compute_scope() {
-  # args: list of touched upstream paths (thrust/thrust/... form)
-  local path has_header=0 has_test=0 has_example=0
+  # args: list of touched upstream paths (thrust/... form)
+  local path
+  local -A seen=()
   for path in "$@"; do
     case "$path" in
-      thrust/thrust/*) has_header=1 ;;
-      thrust/testing/*) has_test=1 ;;
-      thrust/examples/*) has_example=1 ;;
+      thrust/thrust/*) seen[HEADER]=1 ;;
+      thrust/testing/*) seen[TEST]=1 ;;
+      thrust/examples/*) seen[EXAMPLE]=1 ;;
+      thrust/benchmarks/*) seen[BENCH]=1 ;;
+      thrust/cmake/* | */CMakeLists.txt) seen[CMAKE]=1 ;;
+      *) seen[OTHER]=1 ;;
     esac
   done
   local -a tags=()
-  [[ "$has_header" -eq 1 ]] && tags+=("HEADER")
-  [[ "$has_test" -eq 1 ]] && tags+=("TEST")
-  [[ "$has_example" -eq 1 ]] && tags+=("EXAMPLE")
+  local tag
+  for tag in HEADER TEST EXAMPLE BENCH CMAKE OTHER; do
+    [[ -n "${seen[$tag]:-}" ]] && tags+=("$tag")
+  done
   local IFS=,
   echo "${tags[*]}"
 }
 
 is_sensitive() {
-  # args: list of touched upstream paths (thrust/thrust/... form)
+  # args: list of touched upstream paths (thrust/... form)
   local path translated pattern
   for path in "$@"; do
-    translated="projects/rocthrust/${path#thrust/}"
+    translated="$(translate_path "$path")"
     for pattern in "${PATTERNS[@]:-}"; do
       [[ -z "$pattern" ]] && continue
       # Translate a '**' glob suffix to a simple prefix match.

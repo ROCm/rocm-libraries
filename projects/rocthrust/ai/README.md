@@ -60,9 +60,14 @@ this directory.
   (`rocthrust-cccl-sync-finalize`).
 - **`todo.md` order is strict.** Only the first unticked item may be worked
   next — later commits may assume earlier ones already landed.
-- **Three upstream paths, not one.** Every skill scopes to upstream
-  `thrust/thrust/` (headers), `thrust/testing/`, and `thrust/examples/` —
-  each translates to the same-named path under `projects/rocthrust/`.
+- **All of upstream `thrust/`.** Every skill scopes to the whole upstream
+  `thrust/` subtree, so no Thrust commit is missed; commits that don't
+  apply (CMake, README) are listed and ticked N/A. `thrust/<path>`
+  translates to `projects/rocthrust/<path>`, except `thrust/benchmarks/` →
+  `projects/rocthrust/benchmark/` (singular).
+- **Test and benchmark parity.** rocThrust keeps `testing/`, `test/` and
+  `benchmark/` at parity with upstream. Upstream Catch2 tests are
+  implemented with Google Test; benchmarks use Google Benchmark.
 - **Two AMD-only counterpart trees have no upstream commit trail of their
   own**: `thrust/system/hip/` (CUDA's HIP counterpart) and
   `projects/rocthrust/test/` (a hand-maintained GTest suite mirroring

@@ -88,29 +88,24 @@ If it's still there at `$TO_TAG`, a subsequent commit in the ordered
 Porting out of order to "clean up early" breaks the strict-ordering
 guarantee `rocthrust-cccl-sync-todo`'s `todo.md` depends on.
 
-### 6. Widened commit scope: testing/ and examples/, not just headers
+### 6. Commit scope: all of `thrust/`, not just headers
 `rocthrust-commit-list.sh` (and `rocthrust-show-upstream-commit.sh`) scan
-three sibling upstream paths — `thrust/thrust/` (headers), `thrust/testing/`,
-`thrust/examples/` — not just headers. This was widened after diffing an
-AI-driven sync against the real historical port (PR #11296): scanning
-headers alone made any commit whose *entire* diff lived under
-`thrust/testing/` or `thrust/examples/` invisible to `todo.md`, not skipped
-or flagged, simply never enumerated. A commit's `SCOPE` tag
-(`HEADER`/`TEST`/`EXAMPLE`, comma-joined) tells you which of the three it
-touches; see `rocthrust-cccl-sync-resolve/SKILL.md`'s step 3 for how that
-tag changes the default classification.
+the whole upstream `thrust/` subtree. Scope was widened twice after
+comparing AI-driven syncs with the human parity list:
+- Headers only: commits confined to `thrust/testing/` or `thrust/examples/`
+  never reached `todo.md` (PR #11296 had ~22% of its diff in `testing/`).
+- Headers, tests and examples: benchmark-only, CMake-only and
+  README/.gitignore commits never reached `todo.md` (7 of the 87 commits in
+  the human-maintained v3.1 parity list).
 
-Deliberately **not** widened further, and do not add these without a real
-reason:
-- `thrust/benchmarks/` — upstream is plural, rocThrust's local directory is
-  `projects/rocthrust/benchmark/` (singular). The generic
-  strip-"thrust/"-and-prefix path translation both scripts rely on would
-  silently produce a nonexistent path.
-- `thrust/cmake/`, `thrust/internal/`, `thrust/scripts/` — upstream CI/build
-  tooling. rocThrust has same-named local directories, but they are
-  independently-maintained AMD tooling, not ports of upstream's — including
-  these would risk the same silent-wrong-translation trap as `benchmarks/`,
-  just semantic instead of a naming typo.
+A commit's `SCOPE` tag (`HEADER`/`TEST`/`EXAMPLE`/`BENCH`/`CMAKE`/`OTHER`)
+tells you which parts it touches; see `rocthrust-cccl-sync-resolve/SKILL.md`
+step 3 for how each tag changes the default classification. Two traps:
+- `thrust/benchmarks/` (plural) maps to `projects/rocthrust/benchmark/`
+  (singular). Both scripts translate it; don't strip-and-prefix by hand.
+- `thrust/cmake/`, `thrust/internal/`, `thrust/scripts/`: rocThrust has
+  same-named directories, but they hold rocThrust's own tooling, not ports
+  of upstream's. A same-named path there is not a counterpart.
 
 New test/example files this widened scope surfaces need their own
 CMake-registration check — see `rocthrust-cccl-sync-finalize/SKILL.md`'s

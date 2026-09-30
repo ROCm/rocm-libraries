@@ -145,31 +145,34 @@ $SKILL_DIR/scripts/rocthrust-commit-list.sh --repo "$ROCTHRUST_REPO" --from "$CU
 This is a thin wrapper around:
 
 ```bash
-git log --no-merges --reverse "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/ thrust/testing/ thrust/examples/
+git log --no-merges --reverse "$CURRENT_TAG..$TO_TAG" -- thrust/
 ```
 
-Three paths, not one. Upstream's `thrust/` subtree has `thrust/thrust/`
-(headers), `thrust/testing/`, and `thrust/examples/` as siblings, each with
-a same-named local counterpart. Scanning only `thrust/thrust/` — an earlier
-version of this script did exactly that — makes any commit whose *entire*
-diff is confined to `thrust/testing/` or `thrust/examples/` invisible to
-`todo.md`: not skipped, not flagged, simply never enumerated. This was
-discovered by diffing a completed AI-driven sync against the real
-historical port (PR #11296): the AI sync made zero changes anywhere under
-`projects/rocthrust/testing/` or `projects/rocthrust/examples/` for the
-whole `v3.0.3..v3.1.0` range, while the real PR's diff was ~22% concentrated
-in `testing/` alone.
+The whole `thrust/` subtree, not a subset. rocThrust's parity list includes
+every upstream commit that touches Thrust, even ones that turn out to need
+no change (CMake, benchmark-only, README/.gitignore removals). Narrower
+scans made those commits silently vanish from `todo.md`. Listing a commit
+doesn't mean it changes rocThrust: `rocthrust-cccl-sync-resolve` decides
+that, and ticks it as N/A with a reason when it doesn't.
 
-Deliberately **not** widened further to `thrust/benchmarks/`,
-`thrust/cmake/`, `thrust/internal/`, or `thrust/scripts/` — see
-`rocthrust-commit-list.sh`'s header comment for why each of those would
-silently mistranslate or misattribute if added the same way.
+Upstream paths map to `projects/rocthrust/<same path>`, except
+`thrust/benchmarks/` (plural), which maps to `projects/rocthrust/benchmark/`
+(singular).
 
-Each row the script prints also carries a `SCOPE` column — a comma-joined
-subset of `HEADER`/`TEST`/`EXAMPLE` — so a human skimming `todo.md` can tell
-at a glance which commits are test/example-only (these usually need no
-CUDA/HIP source-level porting judgment at all; see
-`rocthrust-cccl-sync-resolve/SKILL.md`).
+Each row the script prints also carries a `SCOPE` column, a comma-joined
+subset of:
+
+| Tag | Upstream path | Usual outcome in rocThrust |
+|-----|---------------|----------------------------|
+| `HEADER` | `thrust/thrust/` | port; may need CUDA→HIP adaptation |
+| `TEST` | `thrust/testing/` | port to `testing/` and `test/` |
+| `EXAMPLE` | `thrust/examples/` | port |
+| `BENCH` | `thrust/benchmarks/` | port to Google Benchmark; nvbench-only changes are N/A |
+| `CMAKE` | `thrust/cmake/`, other `CMakeLists.txt` | usually N/A: rocThrust's CMake is its own |
+| `OTHER` | anything else, e.g. `thrust/README.md`, `thrust/.gitignore` | usually N/A; never delete rocThrust's own README/.gitignore |
+
+See `rocthrust-cccl-sync-resolve/SKILL.md` step 3 for how the tag affects
+classification.
 
 There is no MERGED/NOT_MERGED classification step here — the range was
 already human-confirmed in the step above, so every commit the script

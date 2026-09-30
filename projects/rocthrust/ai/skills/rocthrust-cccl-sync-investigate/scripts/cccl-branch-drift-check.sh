@@ -30,9 +30,8 @@
 #   --to <tag>      The confirmed/candidate TO_TAG, e.g. v3.1.0 (required).
 #   --remote <name> Upstream CCCL remote name (default: cccl).
 #   --paths <list>  Space-separated pathspecs to check, relative to the
-#                   upstream repo root (default: "thrust/thrust/ thrust/testing/
-#                   thrust/examples/" — the same three paths
-#                   rocthrust-commit-list.sh scans).
+#                   upstream repo root (default: "thrust/" — the same
+#                   scope rocthrust-commit-list.sh scans).
 #
 # Output: a human-readable report on stdout, ending in an eval-able
 # BRANCH_DRIFT_STATUS='...' line for downstream steps. Always exits 0.
@@ -42,7 +41,7 @@ set -euo pipefail
 ROCTHRUST_REPO=""
 TO_TAG=""
 REMOTE="cccl"
-PATHS="thrust/thrust/ thrust/testing/ thrust/examples/"
+PATHS="thrust/"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

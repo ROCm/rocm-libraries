@@ -16,11 +16,11 @@ commits still need to be ported.
 - **Target tag** (`$TO_TAG`): <TO_TAG>
 - **Sync branch** (`$SYNC_BRANCH`, currently checked out): <SYNC_BRANCH>
 - **Investigation report**: <INVESTIGATION_REPORT_PATH_OR_NONE>
-- **Path-prefix reminder**: upstream commits touch `thrust/thrust/*`
-  (headers), `thrust/testing/*`, and/or `thrust/examples/*` — three siblings,
-  not one path with the other two nested inside it. Each translates to the
-  same-named local path under `projects/rocthrust/` (e.g. `thrust/testing/*`
-  → `projects/rocthrust/testing/*`). Translate every path before applying.
+- **Path-prefix reminder**: upstream `thrust/<path>` translates to
+  `projects/rocthrust/<path>` (e.g. `thrust/testing/*` →
+  `projects/rocthrust/testing/*`), except `thrust/benchmarks/*` →
+  `projects/rocthrust/benchmark/*` (singular). Translate every path before
+  applying.
 
 ## ⚠ Ordering rule
 
@@ -45,8 +45,8 @@ fix a bug the earlier commit itself introduced).
 
 <!-- One line per upstream commit, oldest-first, never reordered:
      - [ ] <sha> <subject> [SCOPE: HEADER,TEST,EXAMPLE] [⚠ touches <sensitive-files.md pattern>]
-     SCOPE is a comma-joined subset of HEADER/TEST/EXAMPLE from
-     rocthrust-commit-list.sh, naming which of thrust/thrust/,
-     thrust/testing/, thrust/examples/ the commit touches. A TEST-only or
-     EXAMPLE-only commit usually needs no CUDA/HIP source-level porting
-     judgment — see rocthrust-cccl-sync-resolve/SKILL.md. -->
+     SCOPE is a comma-joined subset of HEADER/TEST/EXAMPLE/BENCH/CMAKE/OTHER
+     from rocthrust-commit-list.sh, naming which parts of upstream thrust/
+     the commit touches. Only HEADER commits usually need CUDA/HIP
+     source-level porting judgment; CMAKE/OTHER-only commits are usually
+     N/A — see rocthrust-cccl-sync-resolve/SKILL.md. -->

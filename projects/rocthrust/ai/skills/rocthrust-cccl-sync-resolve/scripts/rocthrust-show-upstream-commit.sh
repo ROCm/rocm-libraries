@@ -10,12 +10,11 @@
 # there is no "ours"/"theirs"/"working" tree to snapshot (see
 # rocthrust-cccl-sync-resolve/SKILL.md's "No 3-way diff tool" section).
 #
-# Scope matches rocthrust-commit-list.sh: thrust/thrust/, thrust/testing/,
-# and thrust/examples/ (NOT thrust/benchmarks/, thrust/cmake/,
-# thrust/internal/, or thrust/scripts/ — see that script's header comment
-# for why). A commit enumerated by rocthrust-commit-list.sh may show nothing
-# here only if it's a false edge case; if that happens, the two scripts have
-# drifted out of sync and need reconciling.
+# Scope matches rocthrust-commit-list.sh: the whole upstream thrust/
+# subtree, with the same path translation (thrust/benchmarks/ ->
+# projects/rocthrust/benchmark/, everything else thrust/<x> ->
+# projects/rocthrust/<x>). Every commit that script enumerates shows a
+# non-empty diff here; if one doesn't, the two scripts have drifted apart.
 #
 # Usage: rocthrust-show-upstream-commit.sh --repo <path-to-rocm-libraries> --sha <sha> [--sync-base <ref>]
 #
@@ -54,20 +53,37 @@ fi
 
 cd "$ROCTHRUST_REPO"
 
-SCOPE_PATHS=("thrust/thrust/" "thrust/testing/" "thrust/examples/")
+SCOPE_PATHS=("thrust/")
+
+# Keep in sync with translate_path in rocthrust-commit-list.sh.
+translate_path() {
+  case "$1" in
+    thrust/benchmarks/*) echo "projects/rocthrust/benchmark/${1#thrust/benchmarks/}" ;;
+    *) echo "projects/rocthrust/${1#thrust/}" ;;
+  esac
+}
 
 echo "=== Commit message ==="
 git show --no-patch --format='%H%n%an <%ae>%n%ad%n%n%B' "$SHA"
 
 echo
 echo "=== Touched paths (upstream -> rocThrust) ==="
+# A = added, M = modified, D = deleted upstream. "[no local file]" on an M
+# or D row means rocThrust has no file at the translated path: typically
+# upstream CMake/CI tooling rocThrust doesn't use (usually N/A), or a
+# rocThrust file under a different name (find it before calling it N/A).
 mapfile -t touched < <(git diff-tree --no-commit-id --name-only -r "$SHA" -- "${SCOPE_PATHS[@]}")
 if [[ ${#touched[@]} -eq 0 ]]; then
-  echo "(no files under thrust/thrust/, thrust/testing/, or thrust/examples/ touched by this commit)"
+  echo "(no files under thrust/ touched by this commit)"
 else
-  for path in "${touched[@]}"; do
-    printf '%s\t->\tprojects/rocthrust/%s\n' "$path" "${path#thrust/}"
-  done
+  while IFS=$'\t' read -r status path; do
+    local_path="$(translate_path "$path")"
+    note=""
+    if [[ "$status" != A* ]] && ! git cat-file -e "HEAD:$local_path" 2>/dev/null; then
+      note="  [no local file]"
+    fi
+    printf '%s %s\t->\t%s%s\n' "$status" "$path" "$local_path" "$note"
+  done < <(git diff-tree --no-commit-id --name-status -r "$SHA" -- "${SCOPE_PATHS[@]}")
 fi
 
 echo

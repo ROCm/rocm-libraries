@@ -36,9 +36,9 @@ If any of these don't hold, STOP and ask the human before proceeding.
    $SKILL_DIR/scripts/rocthrust-show-upstream-commit.sh --repo "$ROCTHRUST_REPO" --sha <sha> --sync-base "$SYNC_BASE"
    ```
 
-   This prints the commit's message, its diff scoped to `thrust/thrust/`,
-   `thrust/testing/`, and `thrust/examples/`, a table mapping each touched
-   upstream path to its local `projects/rocthrust/...` equivalent, and two
+   This prints the commit's message, its diff scoped to `thrust/`, a table
+   mapping each touched upstream path to its local `projects/rocthrust/...`
+   equivalent (marking `[no local file]` where rocThrust has none), and two
    counterpart checks for AMD-only files that have no upstream commit trail
    of their own:
    - **CUDA -> HIP counterpart check**: for every touched path under
@@ -74,10 +74,24 @@ If any of these don't hold, STOP and ask the human before proceeding.
    `thrust/testing/cuda/`, which contains literal CUDA-API tests; it already
    has a same-named local counterpart (`projects/rocthrust/testing/cuda/`),
    so it is still a direct port, not an adaptation case — just to the CUDA
-   test file's own counterpart rather than a HIP-side analogue. Do not skip
-   the classification step below just because a commit is `TEST`/`EXAMPLE`
-   scoped; it still needs a disposition and a tick-note, the same as any
-   other item.
+   test file's own counterpart rather than a HIP-side analogue. The other
+   tags:
+   - `BENCH`: port to `projects/rocthrust/benchmark/` with Google Benchmark.
+     Changes to nvbench-only plumbing (`exec_tag`, `nvbench_helper`,
+     `state.add_*`) are N/A; API changes to the Thrust calls being measured
+     (e.g. `thrust::distance` → `cuda::std::distance`) and new benchmarks
+     are not.
+   - `CMAKE`: rocThrust's CMake is its own, not a port of upstream's, and
+     step 2 marks most of these paths `[no local file]`. Usually N/A. Check
+     whether the intent (e.g. a new test target, a dropped compiler
+     workaround) needs an equivalent in rocThrust's CMake before ticking it.
+   - `OTHER`: e.g. upstream deleting `thrust/README.md` or
+     `thrust/.gitignore`. rocThrust's files at those paths are its own;
+     never delete them. Usually N/A.
+
+   Do not skip the classification step below just because of the `SCOPE`
+   tag; every item still needs a disposition and a tick-note, including a
+   reason when it's N/A.
    - **Clean port** — applies to rocThrust with no CUDA-specific content.
    - **Needs CUDA→HIP adaptation** — touches CUDA intrinsics, PTX, or
      `thrust/system/cuda/` structure that has a HIP analogue under
