@@ -16,6 +16,7 @@ import ctypes
 import json
 import math
 import os
+import shutil
 import statistics
 import struct
 import subprocess
@@ -398,6 +399,85 @@ def _note_failure(result: Dict[str, Any], exc: BaseException) -> None:
         result["device_fault"] = True
 
 
+# gfx1250 lets a wave allocate up to 1024 VGPRs, but only v0..v255 fit the
+# instruction encoding; each operand past that needs an s_set_vgpr_msb switch.
+_DIRECT_VGPRS = 256
+
+
+def _count_vgpr_msb_switches(hsaco_path: str, *, arch: str) -> Optional[int]:
+    """Count ``s_set_vgpr_msb`` in a code object; ``None`` if it can't be read."""
+    objdump = shutil.which("llvm-objdump") or shutil.which(
+        "/opt/rocm/llvm/bin/llvm-objdump"
+    )
+    if not objdump:
+        return None
+    try:
+        out = subprocess.run(
+            [objdump, "-d", f"--mcpu={arch}", hsaco_path],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return out.stdout.count("s_set_vgpr_msb")
+
+
+def register_usage(record: BuildRecord, *, arch: str) -> Dict[str, Any]:
+    """VGPR count, spills, and which register regime the kernel landed in.
+
+    ``vgpr_mode`` is ``low`` (fits the directly encodable 256), ``high`` (uses
+    the extra VGPRs without spilling, paying ``s_set_vgpr_msb`` switches), or
+    ``spill``; ``None`` when the ELF notes were unavailable.
+    """
+    meta = record.elf_meta or {}
+    vgprs = meta.get("vgprs")
+    spills = meta.get("vgpr_spills")
+    if vgprs is None:
+        mode = None
+    elif spills:
+        mode = "spill"
+    elif vgprs > _DIRECT_VGPRS:
+        mode = "high"
+    else:
+        mode = "low"
+    switches: Optional[int] = None
+    if vgprs is not None and vgprs <= _DIRECT_VGPRS:
+        switches = 0
+    elif record.ok and record.hsaco_path:
+        switches = _count_vgpr_msb_switches(record.hsaco_path, arch=arch)
+    return {
+        "vgprs": vgprs,
+        "vgpr_spills": spills,
+        "vgpr_msb_switches": switches,
+        "vgpr_mode": mode,
+    }
+
+
+def best_by_vgpr_mode(results: Sequence[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Fastest result in each ``vgpr_mode``, to compare the regimes head to head."""
+    best: Dict[str, Dict[str, Any]] = {}
+    for result in rank_results(results):
+        mode = result.get("vgpr_mode")
+        if mode and mode not in best:
+            best[mode] = {
+                key: result.get(key)
+                for key in (
+                    "id",
+                    "name",
+                    "median_ms",
+                    "tflops",
+                    "verified",
+                    "vgprs",
+                    "vgpr_spills",
+                    "vgpr_msb_switches",
+                )
+            }
+    return best
+
+
 def _result_header(
     record: BuildRecord, spec: UniversalGemmSpec, *, arch: str
 ) -> Dict[str, Any]:
@@ -422,6 +502,7 @@ def _result_header(
         "hsaco": record.hsaco_path,
         "hsaco_bytes": record.hsaco_bytes,
         "elf_meta": record.elf_meta,
+        **register_usage(record, arch=arch),
         "verified": False,
     }
 
@@ -567,6 +648,10 @@ def _write_results(
         "verified",
         "max_abs_diff",
         "incorrect",
+        "vgpr_mode",
+        "vgprs",
+        "vgpr_spills",
+        "vgpr_msb_switches",
         "build_ms",
         "hsaco_bytes",
         "error",
@@ -1121,6 +1206,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "candidate_count": len(tile_specs),
             "verified_finalists": len(finalists),
             "best": rank_results(tile_results)[0],
+            "best_by_vgpr_mode": best_by_vgpr_mode(tile_results),
         }
     else:
         finalists, tile_results = _load_tile_finalists(
@@ -1154,6 +1240,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         summary["trait"] = {
             "candidate_count": len(trait_specs),
             "best_screening_result": rank_results(trait_results)[0],
+            "best_by_vgpr_mode": best_by_vgpr_mode(trait_results),
         }
     elif "final" in stages:
         trait_records, trait_results = _load_trait_results(output_dir)

@@ -37,6 +37,13 @@ class TestOccupancyEstimate(unittest.TestCase):
     def test_gfx90a_uses_eight_vgpr_allocation_granularity(self):
         self.assertEqual(occupancy._occupancy_estimate(65, "gfx90a"), 7)
 
+    def test_gfx1250_uses_its_1024_vgpr_file(self):
+        # A wave past the 256 directly encodable VGPRs still fits, alone.
+        self.assertEqual(occupancy._occupancy_estimate(694, "gfx1250"), 1)
+        self.assertEqual(occupancy._occupancy_estimate(256, "gfx1250"), 4)
+        self.assertEqual(occupancy._occupancy_estimate(65, "gfx1250"), 12)
+        self.assertEqual(occupancy._occupancy_estimate(4, "gfx1250"), 16)
+
 
 if __name__ == "__main__":
     unittest.main()

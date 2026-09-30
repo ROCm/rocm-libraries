@@ -195,6 +195,45 @@ class TestGfx1250Gemm(unittest.TestCase):
         }
         self.assertEqual(len(set(by_pad.values())), 1, by_pad)
 
+    def test_sweep_classifies_vgpr_regime(self):
+        from rocke.examples.gfx1250.gemm_universal_sweep import bf16_gemm_sweep as sweep
+        from rocke.sweep import BuildRecord
+
+        def record(**elf_meta):
+            return BuildRecord(
+                name="k", spec_dict={}, ok=True, hsaco_path="k.hsaco", elf_meta=elf_meta
+            )
+
+        with unittest.mock.patch.object(
+            sweep, "_count_vgpr_msb_switches", return_value=78
+        ) as count:
+            low = sweep.register_usage(
+                record(vgprs=250, vgpr_spills=0), arch="gfx1250"
+            )
+            count.assert_not_called()
+            high = sweep.register_usage(
+                record(vgprs=694, vgpr_spills=0), arch="gfx1250"
+            )
+            spill = sweep.register_usage(
+                record(vgprs=256, vgpr_spills=653), arch="gfx1250"
+            )
+            unknown = sweep.register_usage(record(), arch="gfx1250")
+        self.assertEqual((low["vgpr_mode"], low["vgpr_msb_switches"]), ("low", 0))
+        self.assertEqual((high["vgpr_mode"], high["vgpr_msb_switches"]), ("high", 78))
+        self.assertEqual(spill["vgpr_mode"], "spill")
+        self.assertIsNone(unknown["vgpr_mode"])
+
+        results = [
+            {"id": "a", "median_ms": 3.0, "vgpr_mode": "low"},
+            {"id": "b", "median_ms": 1.0, "vgpr_mode": "high"},
+            {"id": "c", "median_ms": 2.0, "vgpr_mode": "low"},
+            {"id": "d", "median_ms": 0.5, "vgpr_mode": "spill", "error": "fault"},
+        ]
+        best = sweep.best_by_vgpr_mode(results)
+        self.assertEqual(
+            {mode: r["id"] for mode, r in best.items()}, {"high": "b", "low": "c"}
+        )
+
     @classmethod
     def _tdm_spec(cls, *, depth: int = 1, lds_k_pad: int = 8, **trait):
         base = cls._dtl_spec()

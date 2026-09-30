@@ -37,6 +37,10 @@ _CAPS = {
     "rdna": {"vgpr_per_simd": 1536, "granularity": 24, "max_waves_per_simd": 16},
     "cdna": {"vgpr_per_simd": 512, "granularity": 16, "max_waves_per_simd": 8},
 }
+# Arches whose register file matches neither family row.
+_ARCH_CAPS = {
+    "gfx1250": {"vgpr_per_simd": 1024, "granularity": 16, "max_waves_per_simd": 16},
+}
 
 
 def _family(arch: str) -> str:
@@ -82,8 +86,9 @@ def parse_notes(hsaco_bytes: bytes) -> dict:
 
 def _occupancy_estimate(vgpr: int, arch: str) -> Optional[int]:
     """Coarse VGPR-limited waves/SIMD (relative ranking, not absolute)."""
-    caps = dict(_CAPS.get(_family(arch), {}))
-    if (arch or "").split(":", 1)[0] == "gfx90a":
+    gfx = (arch or "").split(":", 1)[0]
+    caps = dict(_ARCH_CAPS.get(gfx) or _CAPS.get(_family(arch), {}))
+    if gfx == "gfx90a":
         caps["granularity"] = 8
     if not caps or vgpr <= 0:
         return None

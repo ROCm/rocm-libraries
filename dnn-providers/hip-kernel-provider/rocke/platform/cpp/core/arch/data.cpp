@@ -1882,7 +1882,7 @@ static const rocke_arch_target_t k_target_gfx1250 = {
     6,
     {k_mma_gfx1250, K_NUM(k_mma_gfx1250)},
     {false, false, 4},
-    {1024, 256, 0, 106},
+    {1024, 1024, 0, 106},
 };
 
 static const rocke_arch_target_t k_target_gfx11_generic = {
