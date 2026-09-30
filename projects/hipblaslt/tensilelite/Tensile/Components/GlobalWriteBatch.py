@@ -625,7 +625,17 @@ class GlobalWriteBatchWriter:
     # The store path can alias LDS banks a sibling wave is still reading for its
     # bias/SAV loads. dscnt is per-wave, so globalStoreWait() cannot order that:
     # single-DU paths need the barrier just as much as multi-DU ones.
-    needsCrossWaveBarrier = needsBiasSavDrain
+    #
+    # Every LDS op a store batch issues is a load: the bias/SAV staging is written
+    # before the store loop, never inside it. Readers cannot race readers, so the
+    # batches do not need fencing from each other. What needs fencing is the end
+    # of the store against whatever rewrites LDS next -- under StreamK the same
+    # workgroup goes back to the mainloop and restages A/B into that LDS while a
+    # sibling wave may still be reading bias/SAV -- so one barrier on the last
+    # batch covers it. Multi-DU emits its stores after the barrier and keeps the
+    # per-batch placement. The assert below holds the "loads only" premise.
+    isLastBatch = (self.batchIdx == self.numBatches - 1)
+    needsCrossWaveBarrier = needsBiasSavDrain and (isMultiDU or isLastBatch)
     if not isMultiDU:
       self._emitAdd(module)
     if needsCrossWaveBarrier:
@@ -634,6 +644,10 @@ class GlobalWriteBatchWriter:
     if isMultiDU:
       self._emitAdd(module)
     self._epilog(module)
+    if needsBiasSavDrain and not needsCrossWaveBarrier:
+      assert not any(type(i).__name__.startswith(("DSStore", "DsStore"))
+                     for i in module.flatitems()), \
+        "store batch wrote LDS; batches can no longer share one end-of-store barrier"
     # A WG computes its whole tile across all batches, so the last batch is where
     # the tile is done and every PUSH store of this WG has been issued.
     if self.kernel["ProblemType"]["FusedGemmA2A"] and self.batchIdx == self.numBatches - 1:
