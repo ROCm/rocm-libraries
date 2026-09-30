@@ -580,21 +580,15 @@ class GlobalWriteBatchWriter:
     needsBiasSavDrain = self.kernel.get("UseSubtileImpl") and \
        (self.parentWriter.states.useBias != DataDirection.NONE or \
         self.kernel["ProblemType"].get("UseScaleAlphaVec", 0))
-    # SBarrier is only needed for multi-DU paths where ds_bpermute from one
-    # sub-iteration can alias LDS banks still being read by bias/SAV loads in
-    # a sibling wave. Single-DU paths (incl. the gfx950 permlane16 store) use
-    # per-element dscnt tracking in globalStoreWait() instead.
-    # Narrowing the drain to multi-DU relies on the single-DU store tracking its
-    # own dscnt, which only the MXF4 store epilogue does. Other subtile kernels
-    # keep the unconditional barrier.
-    _mxf4 = isMxf4SubtilePath(self.kernel)
-    needsCrossWaveBarrier = needsBiasSavDrain and (isMultiDU or not _mxf4)
+    # The store path can alias LDS banks a sibling wave is still reading for its
+    # bias/SAV loads. dscnt is per-wave, so globalStoreWait() cannot order that:
+    # single-DU paths need the barrier just as much as multi-DU ones.
+    needsCrossWaveBarrier = needsBiasSavDrain
     if not isMultiDU:
       self._emitAdd(module)
     if needsCrossWaveBarrier:
-      _only = " (multi-DU only)" if _mxf4 else ""
-      module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads" + _only))
-      module.add(SBarrier(comment="sync waves before subtile paired stores" + _only))
+      module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads"))
+      module.add(SBarrier(comment="sync waves before subtile paired stores"))
     if isMultiDU:
       self._emitAdd(module)
     self._epilog(module)
@@ -673,10 +667,9 @@ class GlobalWriteBatchWriter:
       subtileBarrierDrains = self.kernel.get("UseSubtileImpl") and \
         (self.parentWriter.states.useBias != DataDirection.NONE or \
          self.kernel["ProblemType"].get("UseScaleAlphaVec", 0))
-      # Mirrors emit(): only the MXF4 path drops the single-DU barrier in favour
-      # of per-element dscnt tracking, so only it may narrow this to multi-DU.
-      needsCrossWaveBarrier = subtileBarrierDrains and \
-        (isSubtileMultiDU(self.kernel) or not isMxf4SubtilePath(self.kernel))
+      # Only multi-DU drains bias/SAV before _emitAdd. Single-DU emits that drain
+      # after the consumers, so its LDS loads stay in the per-element accounting.
+      needsCrossWaveBarrier = subtileBarrierDrains and isSubtileMultiDU(self.kernel)
       if self.parentWriter.states.useBias == DataDirection.READ and not needsCrossWaveBarrier \
           and not self.parentWriter._plsinFusedSkipBias(self.kernel):
         waitLocalLoadCnt += self.biasLoadIssued[elementIdx]
