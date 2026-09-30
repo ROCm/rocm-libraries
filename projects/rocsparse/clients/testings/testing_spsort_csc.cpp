@@ -76,13 +76,10 @@ namespace
 
     void set_spsort_inputs(rocsparse_handle       handle,
                            rocsparse_spsort_descr descr,
-                           rocsparse_spsort_alg   alg,
-                           rocsparse_direction    dir)
+                           rocsparse_spsort_alg   alg)
     {
         CHECK_ROCSPARSE_ERROR(rocsparse_spsort_set_input(
             handle, descr, rocsparse_spsort_input_alg, &alg, sizeof(alg), nullptr));
-        CHECK_ROCSPARSE_ERROR(rocsparse_spsort_set_input(
-            handle, descr, rocsparse_spsort_input_direction, &dir, sizeof(dir), nullptr));
     }
 }
 
@@ -116,29 +113,36 @@ void testing_spsort_csc_bad_arg(const Arguments& arg)
                                      true);
     };
 
-    // Only the row indices within each column can be sorted.
+    // The direction is not needed, and is ignored if it is set.
     {
         rocsparse_local_spmat mat = make_mat();
 
-        rocsparse_spsort_descr descr;
-        CHECK_ROCSPARSE_ERROR(rocsparse_spsort_descr_create(handle, &descr, nullptr));
-        set_spsort_inputs(handle, descr, alg, rocsparse_direction_row);
-        EXPECT_ROCSPARSE_STATUS(
-            rocsparse_spsort_buffer_size(
-                handle, descr, mat, mat, rocsparse_spsort_stage_analysis, &buffer_size, nullptr),
-            rocsparse_status_invalid_value);
-        EXPECT_ROCSPARSE_STATUS(
-            rocsparse_spsort(
-                handle, descr, mat, mat, rocsparse_spsort_stage_analysis, 0, nullptr, nullptr),
-            rocsparse_status_invalid_value);
-        CHECK_ROCSPARSE_ERROR(rocsparse_spsort_descr_destroy(handle, descr, nullptr));
+        auto expect_success = [&](const rocsparse_direction* dir) {
+            rocsparse_spsort_descr descr;
+            CHECK_ROCSPARSE_ERROR(rocsparse_spsort_descr_create(handle, &descr, nullptr));
+            set_spsort_inputs(handle, descr, alg);
+            if(dir != nullptr)
+            {
+                CHECK_ROCSPARSE_ERROR(rocsparse_spsort_set_input(
+                    handle, descr, rocsparse_spsort_input_direction, dir, sizeof(*dir), nullptr));
+            }
+            CHECK_ROCSPARSE_ERROR(rocsparse_spsort_buffer_size(
+                handle, descr, mat, mat, rocsparse_spsort_stage_analysis, &buffer_size, nullptr));
+            CHECK_ROCSPARSE_ERROR(rocsparse_spsort_descr_destroy(handle, descr, nullptr));
+        };
+
+        const rocsparse_direction row    = rocsparse_direction_row;
+        const rocsparse_direction column = rocsparse_direction_column;
+        expect_success(nullptr);
+        expect_success(&row);
+        expect_success(&column);
     }
 
     // Batch checks.
     {
         rocsparse_spsort_descr descr;
         CHECK_ROCSPARSE_ERROR(rocsparse_spsort_descr_create(handle, &descr, nullptr));
-        set_spsort_inputs(handle, descr, alg, rocsparse_direction_column);
+        set_spsort_inputs(handle, descr, alg);
 
         auto expect_batch_status = [&](int64_t          batch_count_A,
                                        int64_t          offsets_batch_stride_A,
@@ -202,7 +206,6 @@ void testing_spsort_csc(const Arguments& arg)
     J                    M    = arg.M;
     J                    N    = arg.N;
     rocsparse_index_base base = arg.baseA;
-    rocsparse_direction  dir  = rocsparse_direction_column;
     rocsparse_spsort_alg alg  = rocsparse_spsort_alg_default;
 
     const int64_t batch_count = std::max<int64_t>(arg.batch_count, 1);
@@ -324,7 +327,7 @@ void testing_spsort_csc(const Arguments& arg)
 
     rocsparse_spsort_descr descr;
     CHECK_ROCSPARSE_ERROR(rocsparse_spsort_descr_create(handle, &descr, nullptr));
-    set_spsort_inputs(handle, descr, alg, dir);
+    set_spsort_inputs(handle, descr, alg);
 
     // Analysis
     size_t buffer_size = 0;
