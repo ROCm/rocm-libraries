@@ -1281,7 +1281,7 @@ custom.config:
   MIWaveTile: [1, 1]
   AssertSummationElementMultiple: 8
   AssertSizeEqual: { 2: 1 }
-  AssertSizeGreaterThan: { 0: 8 }
+  AssertSizeGreaterThan: { 0: 8, 1: 0 }
   AssertSizeLessThan: { 1: 5 }
   AssertStrideAEqual: { 0: 1 }
   AssertStrideBEqual: { 0: 1 }

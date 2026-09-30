@@ -1136,7 +1136,8 @@ def test_wvspltk_hf_m4_serves_every_m_up_to_four():
     assert config["AssertSizeEqual"] == {2: 1}
     assert config["AssertSizeLessThan"] == {0: 5, 3: 8193}
     assert (config["AssertSizeLessThan"][0] - 1) * (config["AssertSizeLessThan"][3] - 1) == 32768
-    assert config["AssertSizeGreaterThan"] == {1: 8}
+    # M > 0: the kernel indexes the last real row of A as M - 1.
+    assert config["AssertSizeGreaterThan"] == {0: 0, 1: 8}
     for key in _UNIT_STRIDE_KEYS:
         assert config[key] == {0: 1}, key
     assert [a["semantic"] for a in config["CustomKernel"]["args"]] == [
@@ -1158,18 +1159,18 @@ def test_wvspltk_hf_m4_serves_every_m_up_to_four():
 
 
 @pytest.mark.parametrize(
-    "name,sizeEqual,sizeLessThan",
+    "name,sizeEqual,sizeLessThan,sizeGreaterThan",
     [
-        ("wvSpltK_bf16_tn_m1", {1: 1, 2: 1}, None),
-        ("wvSpltK_bf16_tn_m2", {1: 2, 2: 1}, None),
-        ("wvSpltK_bf16_tn_m4", {2: 1}, {1: 5}),
+        ("wvSpltK_bf16_tn_m1", {1: 1, 2: 1}, None, {0: 8}),
+        ("wvSpltK_bf16_tn_m2", {1: 2, 2: 1}, None, {0: 8}),
+        ("wvSpltK_bf16_tn_m4", {2: 1}, {1: 5}, {0: 8, 1: 0}),
     ],
 )
-def test_wvspltk_bf16_tn_shipped_config(name, sizeEqual, sizeLessThan):
+def test_wvspltk_bf16_tn_shipped_config(name, sizeEqual, sizeLessThan, sizeGreaterThan):
     """TN with a skinny n, the layout torch.mm(x, w.t()) reaches hipBLASLt with.
-    m1 and m2 pin n; m4 reads it as a kernarg and serves every n <= 4. The
-    leading dimensions are kernargs, and tokens past the LDS stage are read from
-    global memory, so K has no bound."""
+    m1 and m2 pin n; m4 reads it as a kernarg and serves every 0 < n <= 4 (the
+    host does not quick-return n == 0). The leading dimensions are kernargs, and
+    tokens past the LDS stage are read from global memory, so K has no bound."""
     ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
     valid, msg = validateCustomKernelMetadata(name, ck_root)
     assert valid, msg
@@ -1184,7 +1185,7 @@ def test_wvspltk_bf16_tn_shipped_config(name, sizeEqual, sizeLessThan):
     else:
         assert config["AssertSizeLessThan"] == sizeLessThan
     # m > 8; the tail fixup underflows below one wave tile.
-    assert config["AssertSizeGreaterThan"] == {0: 8}
+    assert config["AssertSizeGreaterThan"] == sizeGreaterThan
     assert config["AssertSummationElementMultiple"] == 8
     assert config["StaggerU"] == 0
     for key in _UNIT_STRIDE_KEYS:

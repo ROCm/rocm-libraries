@@ -43,7 +43,7 @@ list), `N > 8` (below that the tail fixup underflows), `K % 8 == 0`, the K bound
 above, and unit strides on all four tensors. m1 and m2 pin their exact `M` and
 the packed layout they index without stride arguments: `lda == ldc == ldd == M`,
 which is a compile-time constant there and can be compared directly. m4 is
-predicated on `M <= 4` instead.
+predicated on `0 < M <= 4` instead.
 
 The K bound exists because the M >= 2 kernels read A only from LDS, which holds
 `M * K <= 32768` halves; for m4 the bound is sized for the full `M = 4` tile.
@@ -87,7 +87,8 @@ cannot assume a packed layout. m4 also takes `n` as a kernarg and serves every
 `n <= 4`.
 
 Predicated in `custom.config`: `batch == 1`, `m > 8`, `K % 8 == 0`, unit strides
-on all four tensors, and `n == 1` / `n == 2` for m1 / m2 or `n <= 4` for m4. K
+on all four tensors, and `n == 1` / `n == 2` for m1 / m2 or `0 < n <= 4` for m4
+(hipBLASLt does not quick-return `n == 0`, which grouped GEMM relies on). K
 needs no bound: the tokens are staged in 128 KB of LDS (gfx950 has 160 KB per
 CU), and any past that are read from global memory, which is correct in this
 layout.

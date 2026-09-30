@@ -70,7 +70,9 @@ BenchmarkProblems:
         # n <= 4: n is a kernarg and tile rows past it are never stored.
         - AssertSizeLessThan: [{1: 5}]
         # m > 8: with fewer rows than the wave tile the tail fixup underflows.
-        - AssertSizeGreaterThan: [{0: 8}]
+        # n > 0: hipBLASLt does not quick-return n == 0 (grouped GEMM needs it),
+        # and the kernel indexes the last real token as n - 1.
+        - AssertSizeGreaterThan: [{0: 8, 1: 0}]
         # Unit stride along K for A and B and along m for C and D; the leading
         # dimensions are kernargs.
         - AssertStrideAEqual: [{0: 1}]

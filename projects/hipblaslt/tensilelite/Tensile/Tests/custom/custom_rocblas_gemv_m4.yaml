@@ -65,8 +65,8 @@ BenchmarkProblems:
         # strided-batched problem would leave every batch past the first unwritten.
         - AssertSizeEqual: [{2: 1}]
         # N > 8: with fewer columns than the wave tile (3 here) the tail fixup
-        # underflows.
-        - AssertSizeGreaterThan: [{1: 8}]
+        # underflows. M > 0: the kernel indexes the last real row of A as M - 1.
+        - AssertSizeGreaterThan: [{0: 0, 1: 8}]
         # M <= 4: M is a kernarg and tile rows past it are never stored.
         # K <= 8192, i.e. M*K <= 32768 halves for every M <= 4: A is only read
         # from LDS, so the whole activation matrix has to fit the 64 KB buffer.
