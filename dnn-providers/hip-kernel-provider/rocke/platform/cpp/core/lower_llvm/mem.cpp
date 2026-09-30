@@ -339,6 +339,9 @@ static void op_memref_global_store_vN(rocke_lower_t* L, const rocke_op_t* op)
     const char* elem_name = ll_is_vec(val->type) ? val->type->elem->name : val->type->name;
     int elem_bytes = ll_elem_bytes(elem_name);
     int64_t align = ll_attr_int(op, "align", vec * elem_bytes);
+    if(align <= 0 || (align & (align - 1)))
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "global_store_vN: alignment must be a positive power of two");
     const char* ty = rocke_ll_llvm_type(L, val->type);
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, i32 %s",

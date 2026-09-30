@@ -5519,6 +5519,10 @@ class _Lowerer:
             "i64": 8,
         }.get(elem_name, 2)
         align = int(op.attrs.get("align", vec * elem_bytes))
+        if align <= 0 or align & (align - 1):
+            raise ValueError(
+                "global_store_vN: alignment must be a positive power of two"
+            )
         ty = _llvm_type(val.type)
         self._current().emit(
             f"  store {ty} {self._operand(val)}, ptr addrspace(1) {gep}, align {align}"

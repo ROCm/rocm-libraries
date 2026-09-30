@@ -411,6 +411,29 @@ def test_global_vector_store(n, align, dtype):
         assert native.lower_serialized_ir(ir, flavor=flavor) == ll
 
 
+@pytest.mark.parametrize("align", [0, -4, 3, 12])
+def test_global_vector_store_rejects_invalid_alignment(align):
+    b = IRBuilder("invalid_store_alignment")
+    p = b.param("p", PtrType(TF32, "global"))
+    zero = b.const_i32(0)
+    value = b.bitcast(zero, TF32)
+    b.global_store_vN(p, zero, b.vec_pack([value] * 4, TF32), 4, align=align)
+    # The builder treats zero as its default; serialized IR can contain it literally.
+    b.kernel.body.ops[-1].attrs["align"] = align
+    b.ret()
+    ir = serialize(b.kernel)
+    kernel = parse(ir)
+    message = "global_store_vN: alignment must be a positive power of two"
+    with pytest.raises(ValueError, match=message):
+        lower_kernel_to_hip(kernel)
+    native = pytest.importorskip("rocke_engine")
+    for flavor in ("llvm20", "llvm22", "llvm23"):
+        with pytest.raises(ValueError, match=message):
+            _lower_kernel_to_llvm_python(kernel, llvm_flavor=flavor)
+        with pytest.raises(Exception, match=message):
+            native.lower_serialized_ir(ir, flavor=flavor)
+
+
 @pytest.mark.parametrize("m", [16, 32])
 @pytest.mark.parametrize("scalar_result", [False, True])
 def test_non_xf32_mma_rejects_tf32_result(m, scalar_result):

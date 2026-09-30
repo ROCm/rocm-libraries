@@ -158,8 +158,49 @@ static int test_vector_load()
     return 0;
 }
 
+static int test_invalid_store_alignment()
+{
+    for(int align : {0, -4, 3, 12})
+    {
+        rocke_ir_builder_t b, parsed;
+        CHECK(rocke_ir_builder_init(&b, "invalid_store_alignment") == ROCKE_OK);
+        CHECK(rocke_ir_builder_init(&parsed, "parsed") == ROCKE_OK);
+        auto* p = rocke_b_param(&b, "p", rocke_ptr_type(&b, rocke_tf32(), "global"), nullptr);
+        auto* zero = rocke_b_const_i32(&b, 0);
+        auto* value = rocke_b_bitcast(&b, zero, rocke_tf32());
+        rocke_value_t* lanes[] = {value, value, value, value};
+        auto* values = rocke_b_vec_pack(&b, lanes, 4, rocke_tf32());
+        rocke_b_global_store_vN(&b, p, zero, values, 4, align);
+        auto* body = b.kernel->body;
+        rocke_attr_set_int(&b, &body->ops[body->num_ops - 1]->attrs, "align", align);
+        rocke_b_ret(&b);
+        char* text = nullptr;
+        CHECK(rocke_ir_serialize(b.kernel, &text) == ROCKE_OK);
+        rocke_kernel_def_t* kernel = nullptr;
+        CHECK(rocke_ir_parse(text, &parsed, &kernel) == ROCKE_OK);
+        std::free(text);
+        for(int f = 0; f < rocke_llvm_flavor_count(); ++f)
+        {
+            char* ll = nullptr;
+            auto flavor = rocke_llvm_flavor_from_name(rocke_llvm_flavor_at(f));
+            CHECK(rocke_lower_kernel_to_llvm(kernel, flavor, "gfx942", &ll) == ROCKE_ERR_VALUE);
+            std::free(ll);
+        }
+        rocke_strbuf_t hip;
+        CHECK(rocke_strbuf_init(&hip, 0) == 0);
+        rocke_lower_hip_opts_t opts = {};
+        opts.arch = "gfx942";
+        CHECK(rocke_lower_kernel_to_hip(&parsed, kernel, &opts, &hip) == ROCKE_ERR_VALUE);
+        rocke_strbuf_free(&hip);
+        rocke_ir_builder_free(&parsed);
+        rocke_ir_builder_free(&b);
+    }
+    return 0;
+}
+
 int main()
 {
+    CHECK(test_invalid_store_alignment() == 0);
     CHECK(test_invalid_tf32_ops_rejected() == 0);
     CHECK(test_vector_load() == 0);
     CHECK(!rocke_type_eq(rocke_tf32(), rocke_i32()));
