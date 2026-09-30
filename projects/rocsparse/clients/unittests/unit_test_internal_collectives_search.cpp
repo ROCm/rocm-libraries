@@ -118,8 +118,8 @@ namespace
     class window_array
     {
     public:
-        window_array()                               = default;
-        window_array(const window_array&)            = delete;
+        window_array()                    = default;
+        window_array(const window_array&) = delete;
         window_array& operator=(const window_array&) = delete;
 
         ~window_array()
