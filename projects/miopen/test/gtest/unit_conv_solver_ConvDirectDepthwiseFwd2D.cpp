@@ -1,10 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <miopen/config.h>
-
-#if MIOPEN_BACKEND_HIP
-
 #include "unit_conv_solver.hpp"
 
 namespace {
@@ -162,5 +158,3 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDevApplicabilityFwd_NONE,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(GetConvTestCases(miopenHalf)[0])));
-
-#endif // MIOPEN_BACKEND_HIP
