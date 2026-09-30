@@ -385,6 +385,16 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
     if (irInst->memtoken.has_value()) {
         asmInst->addModifier<MemTokenData>(MemTokenData{irInst->memtoken.value()});
     }
+    if (irInst->longBranchLabel.has_value()) {
+        // s_setpc_b64 long-branches jump to a compile-time-known label via a
+        // computed address (register operand only, no label operand). Attach the
+        // target as LabelData so CFGBuilderPass builds the CFG edge -- mirroring the
+        // rocisa->asm path (ToStinkyTofuUtils::legalizeInstruction SSetPCB64 branch).
+        // Without it the jump target (e.g. the FactorDim=1 epilogue) is unreachable
+        // in the CFG and InsertWaitAluModulePass skips it, leaving mandatory
+        // s_wait_alu hazard guards uninserted.
+        asmInst->addModifier<LabelData>(LabelData{irInst->longBranchLabel.value()});
+    }
     if (irInst->swaitcnt.has_value()) {
         // Per-counter wait values {vlcnt, vscnt, dlcnt, dscnt, kmcnt} forwarded
         // from the logical SWaitCnt. The rocisa->asm path attaches the same

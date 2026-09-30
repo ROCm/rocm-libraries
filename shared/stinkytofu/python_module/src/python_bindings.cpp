@@ -718,6 +718,14 @@ NB_MODULE(_stinkytofu, m) {
             nb::arg("tokens"),
             "Set memory token IDs for LDS dependency tracking (forwarded to MemTokenData)")
         .def(
+            "set_long_branch_label",
+            [](LogicalInstruction& inst, const std::string& label) {
+                inst.longBranchLabel = label;
+            },
+            nb::arg("label"),
+            "Set the s_setpc_b64 long-branch target label (forwarded to LabelData so "
+            "CFGBuilderPass builds the CFG edge for the computed jump)")
+        .def(
             "set_swaitcnt",
             [](LogicalInstruction& inst, int vlcnt, int vscnt, int dlcnt, int dscnt, int kmcnt) {
                 inst.swaitcnt = std::array<int, 5>{vlcnt, vscnt, dlcnt, dscnt, kmcnt};
