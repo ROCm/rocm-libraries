@@ -50,6 +50,48 @@ class ParseGtestTest(unittest.TestCase):
         self.assertEqual(cases[0]["status"], "passed")
         self.assertEqual(cases[0]["seconds"], 0.0)
 
+    def test_typeparam_failure_uses_the_baseline_id(self):
+        text = (
+            "3: [  FAILED  ] sobol_tests/1.sobol_tests, where TypeParam = "
+            "sobol_test_type<hiprandStateSobol64,unsigned long long> (10 ms)"
+        )
+        cases = ci_parity_runner.parse_gtest_output(text)
+        self.assertEqual(cases[0]["id"], "sobol_tests/1.sobol_tests")
+        self.assertEqual(cases[0]["status"], "failed")
+        self.assertEqual(cases[0]["seconds"], 0.01)
+
+    def test_duplicate_lines_count_once_and_keep_a_failure(self):
+        text = "\n".join(
+            [
+                "1: [       OK ] case/0 (10 ms)",
+                "[       OK ] case/0 (10 ms)",
+                "3: [       OK ] sobol/1 (5 ms)",
+                "[  FAILED  ] sobol/1, where TypeParam = T (5 ms)",
+            ]
+        )
+        cases = ci_parity_runner.parse_gtest_output(text)
+        self.assertEqual([case["id"] for case in cases], ["case/0", "sobol/1"])
+        self.assertEqual(cases[1]["status"], "failed")
+
+    def test_ctest_timeout_and_failure_lines(self):
+        text = "\n".join(
+            [
+                "1/5 Test #1: test_hiprand_api .................***Timeout 7200.12 sec",
+                "3/5 Test #3: test_hiprand_kernel ..............***Failed   32.39 sec",
+                "4/5 Test #4: test_hiprand_linkage .............   Passed    0.05 sec",
+            ]
+        )
+        binaries = ci_parity_runner.parse_ctest_binaries(text)
+        self.assertEqual(
+            [(item["name"], item["status"]) for item in binaries],
+            [
+                ("test_hiprand_api", "timeout"),
+                ("test_hiprand_kernel", "failed"),
+                ("test_hiprand_linkage", "passed"),
+            ],
+        )
+        self.assertEqual(binaries[0]["seconds"], 7200.12)
+
     def test_summary_line_without_time_is_ignored(self):
         cases = ci_parity_runner.parse_gtest_output(
             "[  FAILED  ] 2 tests, listed below:"

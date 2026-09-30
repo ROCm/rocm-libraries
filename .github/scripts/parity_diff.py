@@ -31,11 +31,27 @@ def classify(hw_status: str, emu_status: str) -> str:
     return "UNSUPPORTED"
 
 
+def unique_cases(cases: list[dict]) -> list[dict]:
+    """One row per gtest id. A failure replaces an earlier pass for that id."""
+    rows = []
+    index_by_id = {}
+    for case in cases:
+        case_id = case["id"]
+        previous = index_by_id.get(case_id)
+        if previous is None:
+            index_by_id[case_id] = len(rows)
+            rows.append(case)
+            continue
+        if rows[previous].get("status") != "failed" and case.get("status") == "failed":
+            rows[previous] = case
+    return rows
+
+
 def diff_results(hw: dict, emu: dict) -> dict:
     hw_cases = {case["id"]: case for case in hw.get("gtest", [])}
     rows = []
     seen = set()
-    for case in emu.get("cases", []):
+    for case in unique_cases(emu.get("cases", [])):
         case_id = case["id"]
         seen.add(case_id)
         hw_case = hw_cases.get(case_id)
@@ -71,6 +87,9 @@ def diff_results(hw: dict, emu: dict) -> dict:
     for row in rows:
         counts[row["class"]] = counts.get(row["class"], 0) + 1
     counts["NOT_RUN"] = len(not_run)
+    binaries = emu.get("binaries", [])
+    timed_out = sum(1 for binary in binaries if binary.get("status") == "timeout")
+    failed_binaries = sum(1 for binary in binaries if binary.get("status") == "failed")
     return {
         "rows": rows,
         "not_run": not_run,
@@ -80,7 +99,31 @@ def diff_results(hw: dict, emu: dict) -> dict:
         "parity_pct": parity_pct,
         "baseline_count": baseline_count,
         "coverage_pct": coverage_pct,
+        "binaries": binaries,
+        "timed_out_binaries": timed_out,
+        "failed_binaries": failed_binaries,
+        "slowdowns": largest_slowdowns(rows),
     }
+
+
+def largest_slowdowns(rows: list[dict], limit: int = 10) -> list[dict]:
+    """Cases where both sides recorded a positive hardware time, slowest first."""
+    ranked = []
+    for row in rows:
+        hw_seconds = row.get("hw_seconds")
+        emu_seconds = row.get("emu_seconds")
+        if not hw_seconds or emu_seconds is None or hw_seconds <= 0:
+            continue
+        ranked.append(
+            {
+                "id": row["id"],
+                "hw_seconds": hw_seconds,
+                "emu_seconds": emu_seconds,
+                "slowdown": emu_seconds / hw_seconds,
+            }
+        )
+    ranked.sort(key=lambda item: item["slowdown"], reverse=True)
+    return ranked[:limit]
 
 
 def render_report(hw: dict, emu: dict, result: dict) -> str:
@@ -96,22 +139,67 @@ def render_report(hw: dict, emu: dict, result: dict) -> str:
         f"- gtest filter: `{emu.get('gtest_filter', '')}`",
         "",
         (
-            f"Parity among executed baseline cases: "
+            f"Parity among completed gtest cases: "
             f"{result['matches']}/{result['denominator']} "
             f"({result['parity_pct']:.1f}% MATCH)"
         ),
         (
             f"Coverage: {result['denominator']}/{result['baseline_count']} "
-            f"baseline cases executed ({result['coverage_pct']:.1f}%)"
+            f"unique baseline cases executed ({result['coverage_pct']:.1f}%)"
         ),
         "",
-        "NOT_RUN cases stay out of the parity percentage. "
-        "ctest -L ^quick$ runs the same five hipRAND binaries as the hardware "
-        "baseline. A gtest filter narrows that set and is not a full-suite grade.",
+        "Each gtest id is counted once. NOT_RUN cases were not reached, "
+        "including cases still running when a binary hit the CTest timeout, "
+        "and they stay out of the parity percentage.",
         "",
-        "| class | count |",
-        "| --- | --- |",
     ]
+    binaries = result.get("binaries") or []
+    if binaries:
+        lines.extend(
+            [
+                "## CTest binaries",
+                "",
+                "| binary | status | seconds |",
+                "| --- | --- | --- |",
+            ]
+        )
+        for binary in binaries:
+            lines.append(
+                f"| {binary['name']} | {binary['status']} | {binary['seconds']:.2f} |"
+            )
+        lines.append("")
+        if result["timed_out_binaries"] or result["failed_binaries"]:
+            lines.append(
+                f"Timed-out binaries: {result['timed_out_binaries']}. "
+                f"Failed binaries: {result['failed_binaries']}. "
+                "The MATCH percentage above is only the cases that finished."
+            )
+            lines.append("")
+    slowdowns = result.get("slowdowns") or []
+    if slowdowns:
+        lines.extend(
+            [
+                "## Largest slowdowns",
+                "",
+                "Slowdown is emulator seconds divided by hardware seconds. "
+                "Cases whose hardware time is 0 are omitted.",
+                "",
+                "| id | hw_s | emu_s | slowdown |",
+                "| --- | --- | --- | --- |",
+            ]
+        )
+        for item in slowdowns:
+            lines.append(
+                f"| {item['id']} | {item['hw_seconds']} | "
+                f"{item['emu_seconds']} | {item['slowdown']:.0f}x |"
+            )
+        lines.append("")
+    lines.extend(
+        [
+            "| class | count |",
+            "| --- | --- |",
+        ]
+    )
     for name in (
         "MATCH",
         "EMU_FAIL_HW_PASS",
@@ -166,6 +254,9 @@ def main() -> int:
             "baseline_count": result["baseline_count"],
             "coverage_pct": result["coverage_pct"],
             "counts": result["counts"],
+            "timed_out_binaries": result["timed_out_binaries"],
+            "failed_binaries": result["failed_binaries"],
+            "slowdowns": result["slowdowns"],
         }
         Path(args.summary_json).write_text(
             json.dumps(summary, indent=2) + "\n", encoding="utf-8"

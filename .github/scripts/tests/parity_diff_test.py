@@ -76,6 +76,37 @@ class ParityDiffTest(unittest.TestCase):
         self.assertEqual(result["denominator"], 1)
         self.assertEqual(result["counts"]["NOT_RUN"], 351)
 
+    def test_duplicate_ids_are_counted_once(self):
+        hw = {
+            "gtest": [
+                {"id": "case/0", "status": "passed", "seconds": 0.1},
+                {"id": "case/1", "status": "passed", "seconds": 0.04},
+            ]
+        }
+        emu = {
+            "cases": [
+                {"id": "case/0", "status": "passed", "seconds": 11.0},
+                {"id": "case/0", "status": "passed", "seconds": 11.0},
+                {"id": "case/1", "status": "failed", "seconds": 1000.0},
+                {"id": "case/1", "status": "failed", "seconds": 1000.0},
+            ],
+            "binaries": [
+                {"name": "test_hiprand_api", "status": "timeout", "seconds": 7200.12},
+            ],
+        }
+        result = parity_diff.diff_results(hw, emu)
+        self.assertEqual(result["denominator"], 2)
+        self.assertEqual(result["matches"], 1)
+        self.assertEqual(result["counts"]["EMU_FAIL_HW_PASS"], 1)
+        self.assertEqual(result["coverage_pct"], 100.0)
+        self.assertEqual(result["timed_out_binaries"], 1)
+        self.assertEqual(result["slowdowns"][0]["id"], "case/1")
+        self.assertAlmostEqual(result["slowdowns"][0]["slowdown"], 25000.0)
+        text = parity_diff.render_report({}, emu, result)
+        self.assertIn("test_hiprand_api | timeout", text)
+        self.assertIn("Timed-out binaries: 1", text)
+        self.assertIn("slowdown", text)
+
     def test_report_roundtrip(self):
         hw = {"gtest": [{"id": "a", "status": "passed", "seconds": 1}]}
         emu = {"cases": [{"id": "a", "status": "failed", "seconds": 2}]}
