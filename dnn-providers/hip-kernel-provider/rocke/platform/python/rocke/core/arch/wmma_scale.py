@@ -7,6 +7,25 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .target import ArchTarget, MmaOp, MmaScaleDType
+from ..dtypes import dtype_info
+from ..storage import BitPacking, FragmentPacking, MatrixFragmentLayout
+
+
+def scaled_matrix_layout(dtype: str, abi_words: int) -> MatrixFragmentLayout:
+    """gfx1250 scaled operand layout, independent of atom availability.
+
+    FP6 describes the transport contract for future catalog integration.
+    """
+    info = dtype_info(dtype)
+    chunks = {"fp8e4m3": 16, "bf8e5m2": 16, "fp6e2m3": 32, "fp6e3m2": 32, "fp4e2m1": 32}
+    if info.name not in chunks:
+        raise ValueError(f"unsupported scaled matrix layout {dtype!r}")
+    return MatrixFragmentLayout(
+        FragmentPacking(BitPacking(info.encoded_bits), 64, 32, abi_words),
+        chunks[info.name],
+        2,
+        16,
+    )
 
 
 @dataclass(frozen=True)
@@ -20,6 +39,20 @@ class ScalePacking:
     count: int
     block_k: int
 
+    def __post_init__(self) -> None:
+        if self.block_k <= 0:
+            raise ValueError("scale block_k must be positive")
+        if not isinstance(self.count, int) or self.count not in (1, 2, 4, 8):
+            raise ValueError("carrier_bits must be 8, 16, 32, or 64")
+
+    @property
+    def packing(self) -> BitPacking:
+        return BitPacking(self.element_bits)
+
+    @property
+    def fragment(self) -> FragmentPacking:
+        return FragmentPacking(self.packing, self.count, self.word_bits, 1)
+
     @property
     def element_bits(self) -> int:
         return 8
@@ -27,10 +60,6 @@ class ScalePacking:
     @property
     def word_bits(self) -> int:
         return self.count * self.element_bits
-
-    @property
-    def llvm_type(self) -> str:
-        return f"i{self.word_bits}"
 
 
 @dataclass(frozen=True)
@@ -42,6 +71,22 @@ class ScaledWmmaOp:
     scale_formats: tuple[int, int]
     scales: ScalePacking
 
+    def matrix_layout(self, operand: str) -> MatrixFragmentLayout:
+        if operand == "a":
+            return scaled_matrix_layout(self.atom.a_dtype, self.atom.a_frag_len)
+        if operand == "b":
+            return scaled_matrix_layout(self.atom.b_dtype, self.atom.b_frag_len)
+        raise ValueError("matrix operand must be 'a' or 'b'")
+
+    def scale_packing(self, operand: str) -> ScalePacking:
+        if operand == "a":
+            count = self.atom.a_scale_frag_len
+        elif operand == "b":
+            count = self.atom.b_scale_frag_len
+        else:
+            raise ValueError("scale operand must be 'a' or 'b'")
+        return ScalePacking(count, self.atom.scale_block_k)
+
     @property
     def op_id(self) -> str:
         return self.atom.op_id
@@ -49,29 +94,6 @@ class ScaledWmmaOp:
     @property
     def scale16(self) -> bool:
         return self.scales.block_k == 16
-
-    @property
-    def matrix_llvm_types(self) -> tuple[str, str]:
-        return tuple(
-            f"<{n} x i32>" for n in (self.atom.a_frag_len, self.atom.b_frag_len)
-        )
-
-    @property
-    def intrinsic_suffix(self) -> str:
-        atom = self.atom
-        return (
-            f"f32.{atom.m}x{atom.n}x{atom.k}.f8f6f4.v{atom.c_frag_len}f32."
-            f"v{atom.a_frag_len}i32.v{atom.b_frag_len}i32"
-        )
-
-    @property
-    def intrinsic(self) -> str:
-        mode = "scale16" if self.scale16 else "scale"
-        return f"llvm.amdgcn.wmma.{mode}.{self.intrinsic_suffix}"
-
-    @property
-    def declaration_key(self) -> str:
-        return f"wmma.scale.block{self.scales.block_k}.gfx1250.{self.intrinsic_suffix}"
 
 
 def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:

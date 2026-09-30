@@ -4,6 +4,7 @@
 #pragma once
 
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
+#include <miopen/solver/zero_tensor.hpp>
 #include <miopen/kernel_tuning_mode.hpp>
 
 #include <limits>
@@ -1185,7 +1186,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                 {
                     if constexpr(ZeroOutputs)
                     {
-                        ZeroOutTensor(handle, data_ctx.tensors.dwDesc, data_ctx.tensors.dw);
+                        ZeroTensor(handle, data_ctx.tensors.dwDesc, data_ctx.tensors.dw);
 
                         if(handle.IsProfilingEnabled())
                         {
@@ -1257,7 +1258,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                 if constexpr(std::is_same_v<CastType, miopen::conv::DataInvokeParams> &&
                              ZeroOutputs)
                 {
-                    ZeroOutTensor(handle, data_ctx.tensors.outDesc, data_ctx.tensors.out);
+                    ZeroTensor(handle, data_ctx.tensors.outDesc, data_ctx.tensors.out);
 
                     if(handle.IsProfilingEnabled())
                     {

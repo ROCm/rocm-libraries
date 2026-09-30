@@ -145,7 +145,7 @@ bool rocke_dconv4c_prologue(rocke_dconv_4c_ctx_t* ctx)
     ctx->a_rsrc = rocke_b_buffer_rsrc(b, ctx->A, ctx->A_bytes);
     ctx->b_rsrc = rocke_b_buffer_rsrc(b, ctx->Bp, ctx->B_bytes);
     ctx->d_rsrc = rocke_b_buffer_rsrc(b, ctx->D, ctx->D_bytes);
-    ctx->fp16x4_zero = rocke_b_zero_vec_f16(b, 4);
+    ctx->io_vec4_zero = rocke_b_zero_vec_f16(b, 4);
     ctx->zero_acc = rocke_b_zero_vec_f32(b, 4);
 
     return rocke_ir_builder_ok(b);
@@ -338,8 +338,8 @@ rocke_kernel_def_t* rocke_dconv4c_stream_h_loop(rocke_dconv_4c_ctx_t* ctx)
                     b, valid, rocke_b_mul(b, a_off, ctx->c_half_bytes), ctx->oob_sentinel);
                 /* Line 985: vec = buffer_load_vN_f16(a_rsrc, safe_a, c0, 2). */
                 vec = rocke_b_buffer_load_vN_f16(b, ctx->a_rsrc, safe_a, ctx->c0, 2);
-                /* Line 986: vec = select(valid, vec, fp16x4_zero). */
-                vec = rocke_b_select(b, valid, vec, ctx->fp16x4_zero);
+                /* Line 986: vec = select(valid, vec, io_vec4_zero). */
+                vec = rocke_b_select(b, valid, vec, ctx->io_vec4_zero);
                 inputs_by_qtile[qt][s_idx] = vec;
             }
         }

@@ -14,6 +14,15 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/smoke.cpp")
 endif()
 
 if(BUILD_TESTING)
+  add_executable(rocke_storage core/test_storage.cpp)
+  target_link_libraries(rocke_storage PRIVATE rocke_core)
+  add_test(NAME rocke_storage COMMAND rocke_storage)
+  set_tests_properties(rocke_storage PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_storage)
+  set_target_properties(rocke_storage PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_storage RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_storage)
+
   add_executable(rocke_dtypes core/test_dtypes.cpp)
   target_link_libraries(rocke_dtypes PRIVATE rocke_core)
   add_test(NAME rocke_dtypes COMMAND rocke_dtypes)
@@ -90,6 +99,22 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_future_intrinsic_lowering)
+  endif()
+
+  # Direct f32 tanh lowering and narrow-type rejection in the C++ engine.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_tanh_lowering.cpp")
+    add_executable(rocke_tanh_lowering core/test_tanh_lowering.cpp)
+    target_link_libraries(rocke_tanh_lowering PRIVATE rocke_core)
+    add_test(NAME rocke_tanh_lowering COMMAND rocke_tanh_lowering)
+    set_tests_properties(rocke_tanh_lowering
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_tanh_lowering)
+    set_target_properties(rocke_tanh_lowering
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_tanh_lowering
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_tanh_lowering)
   endif()
 
   # Holds the ISA-layer and lower_llvm-layer flavor->datalayout tables together.
