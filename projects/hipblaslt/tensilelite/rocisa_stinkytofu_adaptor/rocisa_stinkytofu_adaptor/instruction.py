@@ -1157,10 +1157,16 @@ def _make_reg_jump_class(class_name: str, mnemonic: str, has_dest: bool = False)
 
         slots = ("dst", "src", "calleeFuncs")
     else:
-        def __init__(self, src: Any = None, comment: str = "", **kw):
+        def __init__(self, src: Any = None, comment: str = "",
+                     longBranchLabel: str = "", **kw):
             _ = kw
             Instruction.__init__(self, InstType.INST_NOTYPE, comment)
             self.src = src
+            # s_setpc_b64 long-branch target label. The register-indirect jump has no
+            # label operand, so CFGBuilderPass cannot recover the edge from operands.
+            # Mirrors native rocisa SSetPCB64::longBranchLabel: forwarded to the logical
+            # IR (set_long_branch_label) and lowered to LabelData in ToStinkyAsmPass.
+            self.longBranchLabel = longBranchLabel
             self.setInst(mnemonic)
 
         def getParams(self):
@@ -1180,7 +1186,11 @@ def _make_reg_jump_class(class_name: str, mnemonic: str, has_dest: bool = False)
             import stinkytofu as _st  # noqa: WPS433
 
             factory = getattr(_st, class_name)
-            return factory(_to_stinky_register(self.src), self.comment)
+            inst = factory(_to_stinky_register(self.src), self.comment)
+            lbl = getattr(self, "longBranchLabel", "")
+            if lbl:
+                inst.set_long_branch_label(lbl)
+            return inst
 
         def __deepcopy__(self, memo):
             if id(self) in memo:
@@ -1189,10 +1199,11 @@ def _make_reg_jump_class(class_name: str, mnemonic: str, has_dest: bool = False)
             memo[id(self)] = dup
             Instruction.__init__(dup, InstType.INST_NOTYPE, self.comment)
             dup.src = copy.deepcopy(self.src, memo)
+            dup.longBranchLabel = getattr(self, "longBranchLabel", "")
             dup.setInst(mnemonic)
             return dup
 
-        slots = ("src",)
+        slots = ("src", "longBranchLabel")
 
     cls = type(class_name, (Instruction,), {
         "__doc__": f"``{mnemonic}`` shim with stinkytofu left-path bridge.",
@@ -5548,14 +5559,14 @@ def _SLongBranchImpl(label, tmpSgprX2, tmpSgprX1, positiveLabelStr, comment):
                        src1=sgpr(tmpSgprX1), comment="sub target branch offset"))
     module.add(SSubBU32(dst=sgpr(tmpSgprX2 + 1), src0=sgpr(tmpSgprX2 + 1),
                         src1=0, comment="sub high and carry"))
-    module.add(SSetPCB64(src=sgpr(tmpSgprX2, 2),
+    module.add(SSetPCB64(src=sgpr(tmpSgprX2, 2), longBranchLabel=labelName,
                          comment="branch to " + labelName))
     module.add(positiveLabel)
     module.add(SAddU32(dst=sgpr(tmpSgprX2), src0=sgpr(tmpSgprX2),
                        src1=sgpr(tmpSgprX1), comment="add target branch offset"))
     module.add(SAddCU32(dst=sgpr(tmpSgprX2 + 1), src0=sgpr(tmpSgprX2 + 1),
                         src1=0, comment="add high and carry"))
-    module.add(SSetPCB64(src=sgpr(tmpSgprX2, 2),
+    module.add(SSetPCB64(src=sgpr(tmpSgprX2, 2), longBranchLabel=labelName,
                          comment="branch to " + labelName))
     return module
 
@@ -5591,7 +5602,7 @@ def SLongBranchPositive(label, tmpSgprRes_or_pcPair, offSgpr_or_comment=None,
             tmpSgprX2, tmpSgprX1 = _split_tmp_regs(tmpSgprRes)
             cr = ContinuousRegister(tmpSgprX1, 1)
             module.add(SGetPositivePCOffset(tmpSgprX2, label, cr))
-            module.add(SSetPCB64(src=sgpr(tmpSgprX2, 2),
+            module.add(SSetPCB64(src=sgpr(tmpSgprX2, 2), longBranchLabel=labelName,
                                  comment="branch to " + labelName))
         return module
     else:
@@ -5607,7 +5618,7 @@ def SLongBranchPositive(label, tmpSgprRes_or_pcPair, offSgpr_or_comment=None,
         if offSgpr.size < 1:
             raise RuntimeError("offSgpr must have at least 1 register.")
         module.add(SGetPositivePCOffset(pcPair.idx, label, offSgpr.idx))
-        module.add(SSetPCB64(src=sgpr(pcPair.idx, 2),
+        module.add(SSetPCB64(src=sgpr(pcPair.idx, 2), longBranchLabel=labelName,
                              comment="branch to " + labelName))
         return module
 
@@ -5655,7 +5666,7 @@ def _SLongBranchNegativeImpl(label, tmpSgprX2, tmpSgprX1, comment):
                        src1=sgpr(tmpSgprX1), comment="sub target branch offset"))
     module.add(SSubBU32(dst=sgpr(tmpSgprX2 + 1), src0=sgpr(tmpSgprX2 + 1),
                         src1=0, comment="sub high and carry"))
-    module.add(SSetPCB64(src=sgpr(tmpSgprX2, 2),
+    module.add(SSetPCB64(src=sgpr(tmpSgprX2, 2), longBranchLabel=labelName,
                          comment="branch to " + labelName))
     return module
 
