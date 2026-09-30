@@ -4,6 +4,8 @@
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 
 #include <algorithm>
+#include <initializer_list>
+#include <optional>
 #include <ostream>
 #include <set>
 #include <sstream>
@@ -61,9 +63,9 @@ void IntegrationBundleVerificationHarness::applyMetadataGuards() const
 // ---- support claims --------------------------------------------------------
 
 SupportObservation
-    IntegrationBundleVerificationHarness::checkSupportClaims(const GraphSession& session)
+    IntegrationBundleVerificationHarness::observeSupportClaims(const GraphSession& session)
 {
-    if(_bundle == nullptr || !shouldEnforceClaims())
+    if(_bundle == nullptr || !shouldObserveClaims())
     {
         return {};
     }
@@ -85,18 +87,36 @@ SupportObservation
                                         _deps.policy.platform);
 }
 
-void IntegrationBundleVerificationHarness::recordClaimCoverage(
-    const SupportObservation& observation)
+ClaimPhase IntegrationBundleVerificationHarness::observeClaims(const GraphSession& session)
 {
-    const CoverageUpdate update = coverageFor(observation, shouldEnforceClaims());
+    ClaimPhase phase;
+
+    phase.observation = observeSupportClaims(session);
+
+    // Everything from here down derives from the observation, so a throw above loses
+    // only facts that were not yet true. graphsReachedBody is the exception and is
+    // published from TestBody() instead, ahead of anything that can throw.
+    const CoverageUpdate update = coverageFor(phase.observation, shouldObserveClaims());
 
     _deps.reporter->recordCoverage(update);
 
-    if(update.missedQuery)
+    phase.complaint = missedQueryComplaint(update, _bundlePath.string());
+    return phase;
+}
+
+void IntegrationBundleVerificationHarness::raiseComplaints(
+    std::initializer_list<std::optional<HarnessComplaint>> complaints)
+{
+    for(const auto& complaint : complaints)
     {
-        ADD_FAILURE() << "support claims exist for " << _bundlePath
-                      << " but were never queried; enforcement would have passed "
-                         "without checking them";
+        if(!complaint.has_value())
+        {
+            continue;
+        }
+
+        // ADD_FAILURE() rather than FAIL(): FAIL() returns, and the caller still has
+        // an outcome to report and possibly a second complaint to raise.
+        ADD_FAILURE() << complaint->message;
     }
 }
 
@@ -118,9 +138,6 @@ void IntegrationBundleVerificationHarness::commitClaims(const std::vector<Suppor
     }
 }
 
-// The single place a test is marked passed, failed or skipped. Everything above
-// returns a value, which is what keeps the claim verdict and the test result read
-// off the same facts instead of off each other.
 void IntegrationBundleVerificationHarness::reportOutcome(const VerificationOutcome& outcome)
 {
     switch(outcome.status)
@@ -283,9 +300,18 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
         return unverifiable("bundle has no output tensors to compare");
     }
 
-    if(auto unavailable = prepareInputs())
+    // A graph the engine declined never reads its inputs: every mode below reaches
+    // runEngine() -- which reports the decline -- before anything touches
+    // _bundle->tensors. Filling first made a declined graph pay the full host-side
+    // allocation and RNG fill for its tensors, which on a 57M-element sweep case is
+    // seconds per skip, and left those inputs cached on the bundle for the rest of
+    // the run.
+    if(session.engines.accepted)
     {
-        return *unavailable;
+        if(auto unavailable = prepareInputs())
+        {
+            return *unavailable;
+        }
     }
 
     switch(_deps.policy.mode)
@@ -458,11 +484,27 @@ VerificationOutcome IntegrationBundleVerificationHarness::runAutoMode(GraphSessi
 
 std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepareInputs()
 {
-    if(_bundle->tensors.has_value())
+    if(!_bundle->tensors.has_value())
     {
-        return std::nullopt;
+        return fillBundleInputs();
     }
-    return fillBundleInputs();
+
+    // Tensors that are already present are unpacked, but the engine reads sub-byte
+    // operands packed, and only fillBundleInputs() builds the packed set
+    // (ALMIOPEN-2724).
+    const auto wrapper = _bundle->graphWrapper();
+    const std::set<int64_t> outputUids(_bundle->outputTensorUids.begin(),
+                                       _bundle->outputTensorUids.end());
+    for(const auto& [uid, attrs] : wrapper.getTensorMap())
+    {
+        if(!attrs->virtual_() && outputUids.count(uid) == 0
+           && hipdnn_test_sdk::detail::isSubByteDataType(attrs->data_type()))
+        {
+            return unverifiable("sub-byte input " + std::to_string(uid)
+                                + " has no packed copy for the engine (ALMIOPEN-2724)");
+        }
+    }
+    return std::nullopt;
 }
 
 std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBundleInputs()
@@ -474,6 +516,7 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
 
     InputTensorMap inputs;
     std::vector<int64_t> leafInputUids;
+    bool anySubByte = false;
     for(const auto& [uid, attrs] : tensorAttrMap)
     {
         if(attrs->virtual_() || outputUids.count(uid) != 0)
@@ -482,6 +525,7 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
         }
         inputs[uid] = hipdnn_test_sdk::detail::createTensorFromAttribute(*attrs);
         leafInputUids.push_back(uid);
+        anySubByte = anySubByte || hipdnn_test_sdk::detail::isSubByteDataType(attrs->data_type());
     }
 
     auto fillResult = hipdnn_integration_tests::fillInputs(
@@ -489,6 +533,24 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
     if(!fillResult.filled)
     {
         return unverifiable(fillResult.reason);
+    }
+
+    if(anySubByte)
+    {
+        InputTensorMap packed;
+        for(const int64_t uid : leafInputUids)
+        {
+            packed[uid] = hipdnn_test_sdk::detail::createTensorFromAttribute(
+                *tensorAttrMap.at(uid), /*packSubByteElements=*/true);
+        }
+
+        auto packedFill = hipdnn_integration_tests::fillInputs(
+            wrapper.getGraph(), packed, leafInputUids, _inputFillRecipes);
+        if(!packedFill.filled)
+        {
+            return unverifiable(packedFill.reason);
+        }
+        _packedInputs = std::move(packed);
     }
 
     _bundle->tensors = std::move(inputs);
@@ -504,12 +566,12 @@ OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs() co
 }
 
 std::unordered_map<int64_t, void*>
-    IntegrationBundleVerificationHarness::buildVariantPack(OutputTensors& outputs,
-                                                           bool useDevice) const
+    IntegrationBundleVerificationHarness::buildVariantPack(OutputTensors& outputs, bool useDevice)
 {
     const auto wrapper = _bundle->graphWrapper();
+    TensorMap& inputs = (useDevice && !_packedInputs.empty()) ? _packedInputs : *_bundle->tensors;
     return detail::buildVariantPack(
-        *_bundle->tensors, outputs, wrapper.getTensorMap(), _bundle->outputTensorUids, useDevice);
+        inputs, outputs, wrapper.getTensorMap(), _bundle->outputTensorUids, useDevice);
 }
 
 IntegrationBundleVerificationHarness::EngineRunResult

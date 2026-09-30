@@ -69,6 +69,13 @@ def get_available_algorithms() -> List[str]:
         "device_adjacent_find",
         "device_adjacent_difference",
         "device_adjacent_difference_inplace",
+        "device_binary_search",
+        "device_lower_bound",
+        "device_upper_bound",
+        "device_search_n",
+        "device_merge_sort_block_merge",
+        "device_merge_sort_block_sort",
+        "device_radix_sort_block_sort",
         "device_partition_flag",
         "device_partition_predicate",
         "device_partition_three_way",
@@ -78,13 +85,15 @@ def get_available_algorithms() -> List[str]:
         "device_select_unique_by_key",
         "device_select_flag",
         "device_select_predicate",
-        "device_select_unique"
         "device_select_unique",
+        "device_radix_sort_onesweep",
+        "device_segmented_radix_sort",
         "device_scan",
-        "device_scan_by_key"
+        "device_scan_by_key",
         "device_reduce",
         "device_segmented_reduce",
-        "device_reduce_by_key"
+        "device_reduce_by_key",
+        "device_histogram"
         # Add new algorithms here
     ])
 
@@ -220,3 +229,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    

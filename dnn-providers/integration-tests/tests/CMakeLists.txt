@@ -30,6 +30,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestTestSettings.cpp
     TestTomlGuards.cpp
     TestGpuReferenceGraphExecutor.cpp
+    TestGpuBatchnormFwdTrainPlan.cpp
+    TestGpuBatchnormFwdTrainSignatureKey.cpp
     TestGpuConvolutionFwdSignatureKey.cpp
     TestGpuConvolutionFwdPlan.cpp
     TestGpuLayernormBwdSignatureKey.cpp
@@ -66,6 +68,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestSupportClaimWriter.cpp
     TestObserveSupportOnly.cpp
     TestSupportVerdict.cpp
+    TestClaimModeResolution.cpp
     TestUnpinnedRunEnforcement.cpp
     TestBundleReferenceValidationHarness.cpp
     TestProductionPolicy.cpp
