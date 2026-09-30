@@ -1,0 +1,119 @@
+---
+CodeObjectFiles: [library/TensileLibrary_gfx1250.co]
+ConstantParams:
+  1LDSBuffer: 0
+  ActivationAlt: false
+  ActivationFuncCall: true
+  ActivationFused: true
+  AssertAIGreaterThanEqual: -1
+  AssertAILessThanEqual: -1
+  AssertFree0ElementMultiple: 1
+  AssertFree1ElementMultiple: 1
+  AssertSummationElementMultiple: 1
+  BufferLoad: true
+  BufferStore: true
+  ClusterDim: [4, 4]
+  ClusterLocalRead: 0
+  ConvertAfterDS: false
+  CustomKernelName: ''
+  DebugStreamK: 0
+  DepthU: 256
+  DirectToLds: false
+  DirectToVgprA: false
+  DirectToVgprB: false
+  DirectToVgprMXSA: false
+  DirectToVgprMXSB: false
+  DirectToVgprSparseMetadata: 0
+  ExpandPointerSwap: 0
+  ForceDisableShadowInit: 1
+  GlobalReadPerMfma: 1
+  GlobalReadVectorWidthA: -1
+  GlobalReadVectorWidthB: -1
+  GlobalSplitU: 1
+  GlobalSplitUAlgorithm: MultipleBuffer
+  GlobalSplitUCoalesced: false
+  GlobalSplitUWorkGroupMappingRoundRobin: false
+  GroupLoadStore: false
+  InnerUnroll: 1
+  InterleaveAlpha: 0
+  KernelLanguage: Assembly
+  LDSTrInst: false
+  LdsBlockSizePerPadA: -1
+  LdsBlockSizePerPadB: -1
+  LdsBlockSizePerPadMXSA: -1
+  LdsBlockSizePerPadMXSB: -1
+  LdsBlockSizePerPadMetadata: 0
+  LdsPadA: -1
+  LdsPadB: -1
+  LdsPadMXSA: -1
+  LdsPadMXSB: -1
+  LdsPadMetadata: 0
+  LocalReadVectorWidth: -1
+  LocalReadVectorWidthA: -1
+  LocalReadVectorWidthB: -1
+  LocalWritePerMfma: -1
+  MIArchVgpr: false
+  MagicDivAlg: 2
+  MatrixInstruction: [16, 16, 128, 1, 1, 8, 8, 2, 2]
+  MaxLDS: -1
+  MaxOccupancy: 40
+  MbskPrefetchMethod: 0
+  Multicast: true
+  NoReject: false
+  NonTemporal: -1
+  NonTemporalA: 0
+  NonTemporalB: 0
+  NonTemporalC: 0
+  NonTemporalD: 0
+  NonTemporalE: 0
+  NonTemporalMXSA: 0
+  NonTemporalMXSB: 0
+  NonTemporalMetadata: 0
+  NonTemporalWS: 0
+  NumElementsPerBatchStore: 0
+  NumLoadsCoalescedA: 1
+  NumLoadsCoalescedB: 1
+  OptNoLoadLoop: 1
+  PrefetchGlobalRead: 1
+  PrefetchLocalRead: 1
+  PreloadKernArgs: true
+  ScheduleGlobalRead: 1
+  ScheduleIterAlg: 0
+  ScheduleLocalWrite: 1
+  SourceSwap: 0
+  StaggerU: 0
+  StaggerUMapping: 0
+  StaggerUStride: 256
+  StorePriorityOpt: false
+  StoreRemapVectorWidth: 0
+  StoreSyncOpt: 0
+  StoreVectorWidth: -1
+  StreamK: 0
+  StreamKAtomic: 0
+  StreamKXCCMapping: 0
+  SuppressNoLoadLoop: false
+  TDMInst: 3
+  ThreadTile: [4, 4]
+  TransposeLDS: -1
+  UnrollLoopSwapGlobalReadOrder: 0
+  Use64bShadowLimit: 1
+  UseInstOffsetForGRO: 0
+  UseSgprForGRO: 0
+  VectorStore: -1
+  VectorWidthA: 1
+  VectorWidthB: 1
+  WaveSeparateGlobalReadA: 0
+  WaveSeparateGlobalReadB: 0
+  WaveSeparateGlobalReadMetadata: 0
+  WaveSplitK: false
+  WavefrontSize: 32
+  WorkGroup: [16, 16, 1]
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 1
+  WorkGroupMappingXCCGroup: -1
+  WorkGroupReduction: false
+CustomKernelWildcard: false
+CustomKernels: []
+ForkParams: {}
+ParamGroups: []
+...
