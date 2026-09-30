@@ -486,9 +486,11 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "maxnum.f32": "declare float @llvm.maxnum.f32(float, float)",
     "maxnum.f16": "declare half @llvm.maxnum.f16(half, half)",
     "maxnum.bf16": "declare bfloat @llvm.maxnum.bf16(bfloat, bfloat)",
+    "maxnum.f64": "declare double @llvm.maxnum.f64(double, double)",
     "minnum.f32": "declare float @llvm.minnum.f32(float, float)",
     "minnum.f16": "declare half @llvm.minnum.f16(half, half)",
     "minnum.bf16": "declare bfloat @llvm.minnum.bf16(bfloat, bfloat)",
+    "minnum.f64": "declare double @llvm.minnum.f64(double, double)",
     "fabs.f32": "declare float @llvm.fabs.f32(float)",
     "fabs.f16": "declare half @llvm.fabs.f16(half)",
     "fabs.bf16": "declare bfloat @llvm.fabs.bf16(bfloat)",
@@ -1134,6 +1136,8 @@ def _llvm_type(t: Type) -> str:
         return "i8"
     if t.name == "f32":
         return "float"
+    if t.name == "f64":
+        return "double"
     raise NotImplementedError(f"no LLVM mapping for type {t!r}")
 
 
@@ -1639,6 +1643,8 @@ class _Lowerer:
                 return _fp32_hex(val)
             if ity == "f16":
                 return _fp16_hex(val)
+            if ity == "f64":
+                return _fp64_hex(val)
             return str(int(val))
         return v.name
 
@@ -1926,6 +1932,7 @@ class _Lowerer:
             "tf32": 4,
             "f32": 4,
             "i64": 8,
+            "f64": 8,
         }
 
         pool_name = f"@smem_pool.{self.kernel.name}"
@@ -1944,6 +1951,8 @@ class _Lowerer:
             return seg
 
         def _align(stype: "SmemType") -> int:
+            if stype.elem.name == "f64":
+                return 8
             return 16 if stype.elem.name in ("i8", "fp8e4m3", "bf8e5m2") else 4
 
         # ---- live intervals from the kernel body ----
@@ -2312,11 +2321,17 @@ class _Lowerer:
         # Dispatch on the operand FP width: half, float, bfloat each
         # have their own maxnum intrinsic. The previous f32-only path
         # silently mis-typed half operands as float and broke comgr.
-        llvm_ty = {"f32": "float", "f16": "half", "bf16": "bfloat"}.get(ty_name)
+        llvm_ty = {
+            "f32": "float",
+            "f16": "half",
+            "bf16": "bfloat",
+            "f64": "double",
+        }.get(ty_name)
         intrin_key = {
             "f32": "maxnum.f32",
             "f16": "maxnum.f16",
             "bf16": "maxnum.bf16",
+            "f64": "maxnum.f64",
         }.get(ty_name)
         if llvm_ty is None or intrin_key is None:
             raise NotImplementedError(f"fmax: unsupported FP type {ty_name!r}")
@@ -2329,11 +2344,17 @@ class _Lowerer:
     def _op_arith_fmin(self, op: Op) -> None:
         a, b = op.operands
         ty_name = a.type.name
-        llvm_ty = {"f32": "float", "f16": "half", "bf16": "bfloat"}.get(ty_name)
+        llvm_ty = {
+            "f32": "float",
+            "f16": "half",
+            "bf16": "bfloat",
+            "f64": "double",
+        }.get(ty_name)
         intrin_key = {
             "f32": "minnum.f32",
             "f16": "minnum.f16",
             "bf16": "minnum.bf16",
+            "f64": "minnum.f64",
         }.get(ty_name)
         if llvm_ty is None or intrin_key is None:
             raise NotImplementedError(f"fmin: unsupported FP type {ty_name!r}")
@@ -3122,7 +3143,7 @@ class _Lowerer:
             f"{', '.join(gidx)}"
         )
         # Alignment is the element byte size: 1 for i8, 2 for f16/bf16,
-        # 4 for f32/i32, 8 for i64. The AMDGPU backend rejects loads /
+        # 4 for f32/i32, 8 for i64/f64. The AMDGPU backend rejects loads /
         # stores with under-aligned addresses on ``addrspace(3)``.
         align = {
             "i8": 1,
@@ -3134,6 +3155,7 @@ class _Lowerer:
             "tf32": 4,
             "f32": 4,
             "i64": 8,
+            "f64": 8,
         }.get(value.type.name, 2)
         self._current().emit(
             f"  store {_llvm_type(value.type)} {self._operand(value)}, ptr addrspace(3) {gep}, align {align}"
@@ -3199,6 +3221,7 @@ class _Lowerer:
             "tf32": 4,
             "f32": 4,
             "i64": 8,
+            "f64": 8,
         }.get(
             value.type.elem.name, 2
         )  # type: ignore[attr-defined]
@@ -3273,7 +3296,8 @@ class _Lowerer:
         )
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
         # Element byte size drives the vector alignment. 16-bit
-        # (f16 / bf16): 2 bytes; 32-bit (f32 / i32): 4 bytes.
+        # (f16 / bf16): 2 bytes; 32-bit (f32 / i32): 4 bytes; 64-bit
+        # (i64 / f64): 8 bytes.
         elem_bytes = {
             "i8": 1,
             "f16": 2,
@@ -3282,6 +3306,7 @@ class _Lowerer:
             "tf32": 4,
             "f32": 4,
             "i64": 8,
+            "f64": 8,
         }.get(
             op.result.type.elem.name,
             2,  # type: ignore[attr-defined]
@@ -5517,6 +5542,7 @@ class _Lowerer:
             "tf32": 4,
             "f32": 4,
             "i64": 8,
+            "f64": 8,
         }.get(elem_name, 2)
         align = int(op.attrs.get("align", vec * elem_bytes))
         if align <= 0 or align & (align - 1):
@@ -6409,6 +6435,14 @@ def _fp16_hex(x: float) -> str:
 
     bits = struct.unpack("<H", struct.pack("<e", float(x)))[0]
     return f"0xH{bits:04X}"
+
+
+def _fp64_hex(x: float) -> str:
+    # LLVM textual IR spells `double` hex constants as the raw IEEE-754 bits.
+    import struct
+
+    bits = struct.unpack("<Q", struct.pack("<d", float(x)))[0]
+    return f"0x{bits:016X}"
 
 
 def _lower_kernel_to_llvm_python(

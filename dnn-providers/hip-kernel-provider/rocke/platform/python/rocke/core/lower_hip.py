@@ -41,6 +41,7 @@ _HIP_TYPE = {
     "f16": "fp16",
     "bf16": "bf16",
     "f32": "float",
+    "f64": "double",
     "fp8e4m3": "fp8e4m3",
     "bf8e5m2": "bf8e5m2",
 }
@@ -68,6 +69,8 @@ def _type_to_hip(t) -> str:
             return f"bf16x{t.count}"
         if elem == "f32":
             return f"f32x{t.count}"
+        if elem == "f64":
+            return f"f64x{t.count}"
         if elem in ("i32", "tf32"):
             return f"i32x{t.count}"
         if elem == "i16":
@@ -123,6 +126,7 @@ _ROCKE_VEC(bf16, bf16x, 1); _ROCKE_VEC(bf16, bf16x, 2); _ROCKE_VEC(bf16, bf16x, 
 _ROCKE_VEC(bf16, bf16x, 8); _ROCKE_VEC(bf16, bf16x, 16);
 _ROCKE_VEC(float, f32x, 1); _ROCKE_VEC(float, f32x, 2); _ROCKE_VEC(float, f32x, 4);
 _ROCKE_VEC(float, f32x, 8); _ROCKE_VEC(float, f32x, 16);
+_ROCKE_VEC(double, f64x, 1); _ROCKE_VEC(double, f64x, 2);
 _ROCKE_VEC(int, i32x, 1); _ROCKE_VEC(int, i32x, 2); _ROCKE_VEC(int, i32x, 3);
 _ROCKE_VEC(int, i32x, 4); _ROCKE_VEC(int, i32x, 8); _ROCKE_VEC(int, i32x, 16);
 _ROCKE_VEC(int16_t, i16x, 1); _ROCKE_VEC(int16_t, i16x, 2);
@@ -182,6 +186,7 @@ _VEC_PREFIX = {
     "f16": "f16x",
     "bf16": "bf16x",
     "f32": "f32x",
+    "f64": "f64x",
     "i32": "i32x",
     "tf32": "i32x",
     "i16": "i16x",
@@ -219,6 +224,22 @@ def _f32_literal(val: float) -> str:
     if math.isinf(val):
         return "((float)-INFINITY)" if val < 0 else "((float)INFINITY)"
     return f"{val}f"
+
+
+def _f64_literal(val: float) -> str:
+    """Format a Python float for C++ double literal context.
+
+    ``repr`` is the shortest round-trip form, so finite values are exact;
+    ``inf`` / ``-inf`` / ``nan`` use the ``<math.h>`` macros as in
+    :func:`_f32_literal`.
+    """
+    import math
+
+    if math.isnan(val):
+        return "((double)NAN)"
+    if math.isinf(val):
+        return "((double)-INFINITY)" if val < 0 else "((double)INFINITY)"
+    return repr(val)
 
 
 def _encode_waitcnt_gfx9_10(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
@@ -344,6 +365,8 @@ class _Lowerer:
                 self._emit(f"{cpp_t} {_name(res)} = (fp16){literal};")
             else:
                 self._emit(f"{cpp_t} {_name(res)} = {literal};")
+        elif ity == "f64":
+            self._emit(f"{cpp_t} {_name(res)} = {_f64_literal(float(val))};")
         else:
             self._emit(f"{cpp_t} {_name(res)} = {val};")
 
@@ -1400,11 +1423,14 @@ class _Lowerer:
 
     def _op_math_rcp(self, op: Op) -> None:
         # AMDGPU has a hardware reciprocal; emit the builtin directly for
-        # f32, promote-compute-demote for f16/bf16.
+        # f32, promote-compute-demote for f16/bf16. f64 divides in double
+        # (matching the LLVM ``fdiv``) so the result keeps f64 precision.
         (v,) = op.operands
         tname = op.result.type.name
         cpp_t = _type_to_hip(op.result.type)
-        if tname == "f32":
+        if tname == "f64":
+            self._emit(f"{cpp_t} {_name(op.result)} = 1.0 / {_name(v)};")
+        elif tname == "f32":
             self._emit(
                 f"{cpp_t} {_name(op.result)} = __builtin_amdgcn_rcpf({_name(v)});"
             )

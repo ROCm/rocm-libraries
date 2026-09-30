@@ -6,11 +6,13 @@
  * Row-wise reduction kernel (M,N) -> (M,1): sum/max/min/mean/prod per row.
  * Byte-identical builder-call sequence vs the Python build_reduce2d.
  *
- * Stage 1 (thread): tree_reduce f32 fold of each vec-chunk, joined onto acc.
+ * Stage 1 (thread): tree_reduce fold of each vec-chunk in the compute type
+ *   (f32, or f64 for f64 input), joined onto acc.
  * Stage 2 (cross-thread): wave-aligned sum/max -> reduce-distribution +
  *   block_tile_reduce_sync; wave-aligned min/prod -> wave-XOR prologue;
  *   non-wave -> full LDS tree.
- * Stage 3 (lane 0): scalar store of the f32 result demoted to dtype.
+ * Stage 3 (lane 0): scalar store of the result demoted to dtype (f64 is
+ *   stored as is).
  */
 
 #include "rocke/instance_reduce.h"
@@ -33,10 +35,12 @@
  * port (helper_rocke.helpers.distribution.{h,c}), included above. */
 
 /* ===================================================================== *
- *  f32 identity constants (reduce.py module-level).
+ *  f32 / f64 identity constants (reduce.py module-level).
  * ===================================================================== */
 #define ROCKE_REDUCE_NEG_INF_F32 (-3.4028234663852886e38)
 #define ROCKE_REDUCE_POS_INF_F32 (3.4028234663852886e38)
+#define ROCKE_REDUCE_NEG_INF_F64 (-1.7976931348623157e308)
+#define ROCKE_REDUCE_POS_INF_F64 (1.7976931348623157e308)
 
 /* ===================================================================== *
  *  Spec defaults / properties.
@@ -111,8 +115,14 @@ rocke_status_t
 
 /* ===================================================================== *
  *  is_valid_spec(spec):
- *    op in (...); validate_io(IOSpecRule(dtype, block_size, vec, n_per_block))
+ *    op in (...); validate_io(IOSpecRule(dtype, block_size, vec, n_per_block,
+ *        allowed_dtypes=("f16","fp16","bf16","f64"),
+ *        allowed_vecs=(2,) if dtype == "f64" else (2, 4, 8)))
  * ===================================================================== */
+static const char* const rocke_reduce2d_dtypes[] = {"f16", "fp16", "bf16", "f64"};
+static const int rocke_reduce2d_vecs[] = {2, 4, 8};
+static const int rocke_reduce2d_vecs_f64[] = {2};
+
 static int rocke_reduce2d_op_ok(const char* op)
 {
     return op != NULL
@@ -148,6 +158,18 @@ bool rocke_reduce2d_is_valid_spec(const rocke_reduce2d_spec_t* spec,
     rocke_io_spec_rule_init(&rule, spec->dtype, spec->block_size, spec->vec);
     rule.n_per_block_set = 1;
     rule.n_per_block = spec->n_per_block;
+    rule.allowed_dtypes = rocke_reduce2d_dtypes;
+    rule.num_allowed_dtypes = 4;
+    if(spec->dtype != NULL && strcmp(spec->dtype, "f64") == 0)
+    {
+        rule.allowed_vecs = rocke_reduce2d_vecs_f64;
+        rule.num_allowed_vecs = 1;
+    }
+    else
+    {
+        rule.allowed_vecs = rocke_reduce2d_vecs;
+        rule.num_allowed_vecs = 3;
+    }
 
     rocke_arena_init(&arena, 0);
     ok = rocke_validate_io(&arena, &rule, &why);
@@ -159,8 +181,14 @@ bool rocke_reduce2d_is_valid_spec(const rocke_reduce2d_spec_t* spec,
     return ok != 0;
 }
 
+/* const_c = b.const_f64 if is_f64 else b.const_f32 */
+static rocke_value_t* rocke_reduce2d_const_c(rocke_ir_builder_t* b, bool is_f64, double value)
+{
+    return is_f64 ? rocke_b_const_f64(b, value) : rocke_b_const_f32(b, value);
+}
+
 /* ===================================================================== *
- *  _combine_scalar(b, combine, a, c): one f32 reduction step.
+ *  _combine_scalar(b, combine, a, c): one reduction step in the compute type.
  *  combine here is a rocke_reduce_combine_t (sum/max/min/prod).
  * ===================================================================== */
 static rocke_value_t* rocke_reduce2d_combine_scalar(rocke_ir_builder_t* b,
@@ -326,6 +354,8 @@ rocke_kernel_def_t*
         rocke_tensor_view_t x_view;
         rocke_tile_window_t x_tile;
         rocke_value_t* lds;
+        bool is_f64;
+        const rocke_type_t* compute_ty;
 
         rocke_reduce_combine_t combine;
         rocke_value_t* acc;
@@ -421,33 +451,40 @@ rocke_kernel_def_t*
             }
         }
 
-        /* lds = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_red").base
-         *   == smem_alloc(F32, [BS], "lds_red"); .base is the smem token. */
+        /* f16/bf16 accumulate in f32; f64 accumulates natively.
+         * is_f64 = io_ty == F64; compute_ty = F64 if is_f64 else F32 */
+        is_f64 = (io_ty == rocke_f64());
+        compute_ty = is_f64 ? rocke_f64() : rocke_f32();
+
+        /* lds = make_lds_view(b, dtype=compute_ty, shape=(BS,), name_hint="lds_red").base
+         *   == smem_alloc(compute_ty, [BS], "lds_red"); .base is the smem token. */
         {
             int lds_shape[1];
             lds_shape[0] = BS;
-            lds = rocke_b_smem_alloc(b, rocke_f32(), lds_shape, 1, "lds_red");
+            lds = rocke_b_smem_alloc(b, compute_ty, lds_shape, 1, "lds_red");
         }
 
-        /* Pick f32 identity + combiner per op. */
+        /* Pick the identity element + combiner per op (const_c = const_f64 or const_f32). */
         if(strcmp(spec->op, "sum") == 0 || strcmp(spec->op, "mean") == 0)
         {
-            acc = rocke_b_const_f32(b, 0.0);
+            acc = rocke_reduce2d_const_c(b, is_f64, 0.0);
             combine = ROCKE_REDUCE_SUM;
         }
         else if(strcmp(spec->op, "max") == 0)
         {
-            acc = rocke_b_const_f32(b, ROCKE_REDUCE_NEG_INF_F32);
+            acc = rocke_reduce2d_const_c(
+                b, is_f64, is_f64 ? ROCKE_REDUCE_NEG_INF_F64 : ROCKE_REDUCE_NEG_INF_F32);
             combine = ROCKE_REDUCE_MAX;
         }
         else if(strcmp(spec->op, "min") == 0)
         {
-            acc = rocke_b_const_f32(b, ROCKE_REDUCE_POS_INF_F32);
+            acc = rocke_reduce2d_const_c(
+                b, is_f64, is_f64 ? ROCKE_REDUCE_POS_INF_F64 : ROCKE_REDUCE_POS_INF_F32);
             combine = ROCKE_REDUCE_MIN;
         }
         else if(strcmp(spec->op, "prod") == 0)
         {
-            acc = rocke_b_const_f32(b, 1.0);
+            acc = rocke_reduce2d_const_c(b, is_f64, 1.0);
             combine = ROCKE_REDUCE_PROD;
         }
         else
@@ -478,7 +515,7 @@ rocke_kernel_def_t*
            && (combine == ROCKE_REDUCE_SUM || combine == ROCKE_REDUCE_MAX))
         {
             /* red_dist = _make_row_reduce_distribution(spec)
-             * reduced  = make_static_distributed_tensor(red_dist, dtype=F32)
+             * reduced  = make_static_distributed_tensor(red_dist, dtype=compute_ty)
              * reduced.storage[0] = acc
              * block_tile_reduce_sync(b, reduced, combine, lds_buf=lds, tid, wave_size)
              * total = reduced.storage[0] */
@@ -490,7 +527,7 @@ rocke_kernel_def_t*
             {
                 return NULL;
             }
-            reduced = rocke_make_static_distributed_tensor(b, red_dist, rocke_f32());
+            reduced = rocke_make_static_distributed_tensor(b, red_dist, compute_ty);
             if(reduced == NULL || reduced->num_storage < 1)
             {
                 (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "reduce2d: empty distributed tensor");
@@ -512,18 +549,23 @@ rocke_kernel_def_t*
             total = rocke_block_lds_reduce(b, acc, lds, tid, BS, combine);
         }
 
-        /* if spec.op == "mean": total = total * rcp(const_f32(float(N))) */
+        /* if spec.op == "mean": total = total * rcp(const_c(float(N))) */
         if(strcmp(spec->op, "mean") == 0)
         {
-            total = rocke_b_fmul(b, total, rocke_b_rcp(b, rocke_b_const_f32(b, (double)N)));
+            total = rocke_b_fmul(
+                b, total, rocke_b_rcp(b, rocke_reduce2d_const_c(b, is_f64, (double)N)));
         }
 
         /* with b.scf_if(b.cmp_eq(tid, const_i32(0))):
-         *     store_scalar_from_f32(b, Y, row, total, dtype=spec.dtype) */
+         *     if is_f64: b.global_store(Y, row, total)
+         *     else: store_scalar_from_f32(b, Y, row, total, dtype=spec.dtype) */
         {
             rocke_if_t iff = rocke_b_scf_if(b, rocke_b_cmp_eq(b, tid, rocke_b_const_i32(b, 0)));
             rocke_b_region_enter(b, iff.then_region);
-            rocke_b_store_scalar_from_f32(b, Y, row, total, spec->dtype);
+            if(is_f64)
+                rocke_b_global_store(b, Y, row, total, 0);
+            else
+                rocke_b_store_scalar_from_f32(b, Y, row, total, spec->dtype);
             rocke_b_region_leave(b);
         }
 

@@ -386,8 +386,10 @@ static const rocke_type_t*
     if(ty == NULL && reason != NULL && reason_cap > 0)
     {
         /* io_ir_type ValueError surface (unsupported A dtype). */
-        snprintf(
-            reason, reason_cap, "unsupported I/O dtype '%s'; expected f16/fp16/bf16", d->dtype_a);
+        snprintf(reason,
+                 reason_cap,
+                 "unsupported I/O dtype '%s'; expected f16/fp16/bf16/f64",
+                 d->dtype_a);
     }
     return ty;
 }

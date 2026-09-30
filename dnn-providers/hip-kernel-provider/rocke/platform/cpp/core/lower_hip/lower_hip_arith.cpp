@@ -67,6 +67,8 @@ static void h_binary(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* c_
  *             self._emit(f"{cpp_t} {_name(res)} = (fp16){literal};")
  *         else:
  *             self._emit(f"{cpp_t} {_name(res)} = {literal};")
+ *     elif ity == "f64":
+ *         self._emit(f"{cpp_t} {_name(res)} = {_f64_literal(float(val))};")
  *     else:
  *         self._emit(f"{cpp_t} {_name(res)} = {val};") */
 static rocke_status_t rocke_h_op_arith_constant(rocke_h_lowerer_t* lw, const rocke_op_t* op)
@@ -106,6 +108,13 @@ static rocke_status_t rocke_h_op_arith_constant(rocke_h_lowerer_t* lw, const roc
         { /* f32 */
             rocke_h_emitf(lw, "%s %s = %s;", cpp_t, rocke_h_name(lw, res), literal);
         }
+    }
+    else if(strcmp(ity, "f64") == 0)
+    {
+        double v = (val->kind == ROCKE_ATTR_FLOAT) ? val->u.f
+                   : (val->kind == ROCKE_ATTR_INT) ? (double)val->u.i
+                                                   : 0.0;
+        rocke_h_emitf(lw, "%s %s = %s;", cpp_t, rocke_h_name(lw, res), rocke_h_f64_literal(lw, v));
     }
     else
     {
@@ -790,9 +799,20 @@ static rocke_status_t rocke_h_op_math_log2(rocke_h_lowerer_t* lw, const rocke_op
     return lw->status;
 }
 
-/* def _op_math_rcp(self, op): -- __builtin_amdgcn_rcpf, promote/demote else. */
+/* def _op_math_rcp(self, op): -- f64 divides in double, else
+ * __builtin_amdgcn_rcpf with promote/demote. */
 static rocke_status_t rocke_h_op_math_rcp(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
+    const rocke_value_t* r = h_res(op);
+    if(r->type->name && strcmp(r->type->name, "f64") == 0)
+    {
+        rocke_h_emitf(lw,
+                      "%s %s = 1.0 / %s;",
+                      rocke_h_type_to_hip(lw, r->type),
+                      rocke_h_name(lw, r),
+                      rocke_h_name(lw, op->operands[0]));
+        return lw->status;
+    }
     h_amdgcn_unary(lw, op, "__builtin_amdgcn_rcpf");
     return lw->status;
 }

@@ -85,6 +85,9 @@ TOL: Dict[str, Tol] = {
     "fp32": Tol(rtol=1e-5, atol=1e-6),
     "fp16": Tol(rtol=1e-2, atol=1e-2),
     "bf16": Tol(rtol=1.5e-2, atol=1e-2),
+    # fp64 computes natively; the elementwise inputs are exact in f64, so only
+    # reassociation in reductions contributes error (see _ROW_TOL_FP64).
+    "fp64": Tol(rtol=1e-12, atol=1e-12),
 }
 
 
@@ -299,7 +302,17 @@ class NumericResult:
 # torch helpers
 # ---------------------------------------------------------------------
 def _torch_dtype(torch, dtype: str):
-    return {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[dtype]
+    return {
+        "fp16": torch.float16,
+        "bf16": torch.bfloat16,
+        "fp32": torch.float32,
+        "fp64": torch.float64,
+    }[dtype]
+
+
+def _ref_dtype(torch, td):
+    """Reference compute dtype: float64 for fp64 I/O, float32 otherwise."""
+    return torch.float64 if td == torch.float64 else torch.float32
 
 
 def _make_inputs(torch, m: int, n: int, k: int, dtype: str, seed: int = 0xC0FFEE):
@@ -324,15 +337,17 @@ def _make_inputs(torch, m: int, n: int, k: int, dtype: str, seed: int = 0xC0FFEE
     return A, B
 
 
-def _compare(torch, out, ref_f32, tol: Tol) -> Tuple[float, float, float]:
-    """Return (max_abs_diff, max_rel_diff, worst allclose margin)."""
-    out_f32 = out.to(torch.float32)
-    diff = (out_f32 - ref_f32).abs()
+def _compare(torch, out, ref, tol: Tol) -> Tuple[float, float, float]:
+    """Return (max_abs_diff, max_rel_diff, worst allclose margin).
+
+    ``out`` is compared in ``ref``'s dtype (float32, or float64 for fp64).
+    """
+    diff = (out.to(ref.dtype) - ref).abs()
     max_abs = float(diff.max().item())
-    denom = ref_f32.abs().clamp_min(1e-12)
+    denom = ref.abs().clamp_min(1e-12)
     max_rel = float((diff / denom).max().item())
     # allclose margin: |d| - (atol + rtol*|ref|), worst (max) over elems
-    allowed = tol.atol + tol.rtol * ref_f32.abs()
+    allowed = tol.atol + tol.rtol * ref.abs()
     margin = float((diff - allowed).max().item())
     return max_abs, max_rel, margin
 
@@ -523,7 +538,7 @@ class ElemCfg:
     name: str
     n: int  # numel (kept a multiple of block_size*vec -> fast path, no remainder)
     op: str  # binary: add|sub|mul|max|min   unary: relu|silu|...
-    dtype: str  # "f16" | "bf16"
+    dtype: str  # "f16" | "bf16" | "f64"
     block_size: int = 256
     vec: int = 8
 
@@ -538,25 +553,31 @@ ELEM_CONFIGS: List[ElemCfg] = [
     ElemCfg("add_bf16_128k", 2048 * 64, "add", "bf16"),
     ElemCfg("silu_bf16_128k", 2048 * 64, "silu", "bf16"),
     ElemCfg("tanh_bf16_128k", 2048 * 64, "tanh", "bf16"),
+    # f64: exact ops only, vec=2 (256*2 = 512 elems/block).
+    ElemCfg("add_f64_128k", 2048 * 64, "add", "f64", vec=2),
+    ElemCfg("mul_f64_128k", 2048 * 64, "mul", "f64", vec=2),
+    ElemCfg("min_f64_128k", 2048 * 64, "min", "f64", vec=2),
+    ElemCfg("relu_f64_128k", 2048 * 64, "relu", "f64", vec=2),
 ]
 
 # map spec dtype -> TOL-table key
-_ELEM_TOL_KEY = {"f16": "fp16", "bf16": "bf16"}
+_ELEM_TOL_KEY = {"f16": "fp16", "bf16": "bf16", "f64": "fp64"}
 
 
 def _torch_elementwise_ref(torch, op: str, A, B):
-    """Reference for one elementwise op, computed in fp32."""
-    a = A.to(torch.float32)
+    """Reference for one elementwise op, computed in fp32 (fp64 for fp64 I/O)."""
+    rd = _ref_dtype(torch, A.dtype)
+    a = A.to(rd)
     if op == "add":
-        return a + B.to(torch.float32)
+        return a + B.to(rd)
     if op == "sub":
-        return a - B.to(torch.float32)
+        return a - B.to(rd)
     if op == "mul":
-        return a * B.to(torch.float32)
+        return a * B.to(rd)
     if op == "max":
-        return torch.maximum(a, B.to(torch.float32))
+        return torch.maximum(a, B.to(rd))
     if op == "min":
-        return torch.minimum(a, B.to(torch.float32))
+        return torch.minimum(a, B.to(rd))
     if op == "relu":
         return torch.relu(a)
     if op == "silu":
@@ -661,7 +682,7 @@ def run_elementwise_config(cfg: ElemCfg, arch: str = "gfx950") -> NumericResult:
         ).to(td)
     C = torch.empty((cfg.n,), device="cuda", dtype=td)
 
-    ref_f32 = (
+    ref = (
         reference
         if cfg.op == "tanh"
         else _torch_elementwise_ref(torch, cfg.op, A, B if is_binary else None)
@@ -687,25 +708,25 @@ def run_elementwise_config(cfg: ElemCfg, arch: str = "gfx950") -> NumericResult:
         return res
 
     compare_actual = C
-    compare_reference = ref_f32
+    compare_reference = ref
     if cfg.op == "tanh":
         compare_actual = C.cpu()
         actual_nan = torch.isnan(compare_actual)
-        reference_nan = torch.isnan(ref_f32)
+        reference_nan = torch.isnan(ref)
         if not torch.equal(actual_nan, reference_nan):
             res.status = "DRIFT"
             res.detail = "tanh NaN classification mismatch"
             return res
-        zero_mask = ref_f32 == 0
+        zero_mask = ref == 0
         if not torch.equal(
             torch.signbit(compare_actual[zero_mask]),
-            torch.signbit(ref_f32[zero_mask]),
+            torch.signbit(ref[zero_mask]),
         ):
             res.status = "DRIFT"
             res.detail = "tanh signed-zero mismatch"
             return res
         compare_actual = compare_actual[~reference_nan]
-        compare_reference = ref_f32[~reference_nan]
+        compare_reference = ref[~reference_nan]
 
     max_abs, max_rel, margin = _compare(torch, compare_actual, compare_reference, tol)
     res.max_abs_diff = max_abs
@@ -877,7 +898,7 @@ class RowCfg:
     family: str  # "layernorm2d" | "rmsnorm2d" | "reduce2d"
     m: int
     n: int  # == n_per_block
-    dtype: str  # "f16" | "bf16"
+    dtype: str  # "f16" | "bf16" | "f64" (reduce2d only)
     op: str = ""  # reduce only: sum|max|min|mean
     block_size: int = 256
     vec: int = 8
@@ -897,6 +918,11 @@ ROW_CONFIGS: List[RowCfg] = [
     RowCfg("red_max_f16_512x4096", "reduce2d", 512, 4096, "f16", op="max"),
     RowCfg("red_mean_f16_512x4096", "reduce2d", 512, 4096, "f16", op="mean"),
     RowCfg("red_sum_bf16_512x4096", "reduce2d", 512, 4096, "bf16", op="sum"),
+    # reduce2d f64 (native f64 accumulate, vec=2); min takes the wave-XOR prologue.
+    RowCfg("red_sum_f64_512x4096", "reduce2d", 512, 4096, "f64", op="sum", vec=2),
+    RowCfg("red_max_f64_512x4096", "reduce2d", 512, 4096, "f64", op="max", vec=2),
+    RowCfg("red_mean_f64_512x4096", "reduce2d", 512, 4096, "f64", op="mean", vec=2),
+    RowCfg("red_min_f64_512x4096", "reduce2d", 512, 4096, "f64", op="min", vec=2),
 ]
 
 # Per-family tolerance overrides. layernorm/rmsnorm carry a divide by a
@@ -908,9 +934,14 @@ _ROW_TOL: Dict[str, Tol] = {
     # keep an absolute floor proportional to N and a modest rtol.
     "reduce2d": Tol(rtol=5e-2, atol=5e-2),
 }
+# fp64 reduce: only the summation order differs from the reference, so the
+# error is ~N * eps64 * max|partial| (well under 1e-10 for these shapes).
+_ROW_TOL_FP64 = Tol(rtol=1e-10, atol=1e-10)
 
 
 def _row_tol(cfg: RowCfg) -> Tol:
+    if cfg.dtype == "f64":
+        return _ROW_TOL_FP64
     return _ROW_TOL[cfg.family]
 
 
@@ -1040,7 +1071,7 @@ def run_row_config(cfg: RowCfg, arch: str = "gfx950") -> NumericResult:
     torch.manual_seed(0xC0FFEE)
     # small magnitudes so f16/bf16 round-trips and accumulation are tame
     X = (torch.randn((cfg.m, cfg.n), device="cuda", dtype=torch.float32) * 0.5).to(td)
-    x32 = X.to(torch.float32)
+    x_ref = X.to(_ref_dtype(torch, td))
     grid = grid_fn(cfg.m, spec)
     block = (spec.block_size, 1, 1)
     sig = sig_fn(spec)
@@ -1051,10 +1082,10 @@ def run_row_config(cfg: RowCfg, arch: str = "gfx950") -> NumericResult:
         ).to(td)
         Beta = (torch.randn((cfg.n,), device="cuda", dtype=torch.float32) * 0.1).to(td)
         Y = torch.zeros((cfg.m, cfg.n), device="cuda", dtype=td)
-        mean = x32.mean(dim=-1, keepdim=True)
-        var = ((x32 - mean) ** 2).mean(dim=-1, keepdim=True)
+        mean = x_ref.mean(dim=-1, keepdim=True)
+        var = ((x_ref - mean) ** 2).mean(dim=-1, keepdim=True)
         inv_std = 1.0 / torch.sqrt(var + eps)
-        ref_f32 = (x32 - mean) * inv_std * Gamma.to(torch.float32)[None, :] + Beta.to(
+        ref = (x_ref - mean) * inv_std * Gamma.to(torch.float32)[None, :] + Beta.to(
             torch.float32
         )[None, :]
         out = Y
@@ -1072,20 +1103,20 @@ def run_row_config(cfg: RowCfg, arch: str = "gfx950") -> NumericResult:
             torch.randn((cfg.n,), device="cuda", dtype=torch.float32) * 0.1 + 1.0
         ).to(td)
         Y = torch.zeros((cfg.m, cfg.n), device="cuda", dtype=td)
-        rms = torch.sqrt((x32**2).mean(dim=-1, keepdim=True) + eps)
-        ref_f32 = (x32 / rms) * Gamma.to(torch.float32)[None, :]
+        rms = torch.sqrt((x_ref**2).mean(dim=-1, keepdim=True) + eps)
+        ref = (x_ref / rms) * Gamma.to(torch.float32)[None, :]
         out = Y
         values = {"X": X, "Gamma": Gamma, "Y": Y, "M": cfg.m, "N": cfg.n, "eps": eps}
     else:  # reduce2d
         Y = torch.zeros((cfg.m,), device="cuda", dtype=td)
         if cfg.op == "sum":
-            ref_f32 = x32.sum(dim=-1)
+            ref = x_ref.sum(dim=-1)
         elif cfg.op == "max":
-            ref_f32 = x32.max(dim=-1).values
+            ref = x_ref.max(dim=-1).values
         elif cfg.op == "min":
-            ref_f32 = x32.min(dim=-1).values
+            ref = x_ref.min(dim=-1).values
         elif cfg.op == "mean":
-            ref_f32 = x32.mean(dim=-1)
+            ref = x_ref.mean(dim=-1)
         else:  # pragma: no cover
             res.status = "REJECTED"
             res.detail = f"no torch ref for reduce op {cfg.op!r}"
@@ -1104,7 +1135,7 @@ def run_row_config(cfg: RowCfg, arch: str = "gfx950") -> NumericResult:
         res.detail = f"launch raised: {e}"
         return res
 
-    max_abs, max_rel, margin = _compare(torch, out, ref_f32, tol)
+    max_abs, max_rel, margin = _compare(torch, out, ref, tol)
     res.max_abs_diff = max_abs
     res.max_rel_diff = max_rel
     res.margin = margin

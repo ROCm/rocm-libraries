@@ -49,7 +49,7 @@ static int ll_elem_bytes(const char* name)
     {
         return 4;
     }
-    if(strcmp(name, "i64") == 0)
+    if(strcmp(name, "i64") == 0 || strcmp(name, "f64") == 0)
     {
         return 8;
     }
@@ -551,7 +551,7 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
      * 2 (not 1). Replicate that exact dict here rather than the shared
      * ll_elem_bytes (which maps fp8/bf8 -> 1), or the fp8 down-GEMM LDS reads
      * emit `align 16` instead of the Python `align 32`.
-     *   {"i8":1,"f16":2,"bf16":2,"i32":4,"f32":4,"i64":8}.get(name, 2) */
+     *   {"i8":1,"f16":2,"bf16":2,"i32":4,"f32":4,"i64":8,"f64":8}.get(name, 2) */
     const char* en = op->results[0]->type->elem->name;
     int elem_bytes = 2;
     if(en)
@@ -568,7 +568,7 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
         {
             elem_bytes = 4;
         }
-        else if(strcmp(en, "i64") == 0)
+        else if(strcmp(en, "i64") == 0 || strcmp(en, "f64") == 0)
         {
             elem_bytes = 8;
         }

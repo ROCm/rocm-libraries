@@ -1031,6 +1031,22 @@ class TestElementwiseInstance(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_elementwise(ElementwiseSpec(op="bogus"))
 
+    def test_f64_path_builds(self):
+        from rocke.instances import ElementwiseSpec, build_elementwise
+
+        kernel = build_elementwise(ElementwiseSpec(op="add", dtype="f64", vec=2))
+        ll = lower_kernel_to_llvm(kernel)
+        self.assertIn("fadd double", ll)
+
+    def test_f64_rejects_transcendental_ops_and_wide_vec(self):
+        from rocke.instances.common.elementwise import ElementwiseSpec, is_valid_spec
+
+        for op in ("exp2", "tanh", "silu", "gelu_tanh"):
+            ok, _ = is_valid_spec(ElementwiseSpec(op=op, dtype="f64", vec=2))
+            self.assertFalse(ok, op)
+        ok, _ = is_valid_spec(ElementwiseSpec(op="add", dtype="f64", vec=4))
+        self.assertFalse(ok)
+
 
 class TestLayerNormInstance(unittest.TestCase):
     def test_builds_with_save_mean(self):
@@ -1068,6 +1084,20 @@ class TestReduceInstance(unittest.TestCase):
             kernel = build_reduce2d(Reduce2DSpec(n_per_block=4096, op=op))
             ll = lower_kernel_to_llvm(kernel)
             self.assertIn("define amdgpu_kernel void", ll)
+
+    def test_f64_path_builds(self):
+        from rocke.instances import Reduce2DSpec, build_reduce2d
+
+        for op in ("sum", "max", "mean"):
+            spec = Reduce2DSpec(n_per_block=4096, op=op, dtype="f64", vec=2)
+            ll = lower_kernel_to_llvm(build_reduce2d(spec))
+            self.assertIn("double", ll)
+
+    def test_f64_rejects_wide_vec(self):
+        from rocke.instances.common.reduce import Reduce2DSpec, is_valid_spec
+
+        ok, _ = is_valid_spec(Reduce2DSpec(n_per_block=4096, dtype="f64", vec=4))
+        self.assertFalse(ok)
 
 
 class TestTransposeInstance(unittest.TestCase):

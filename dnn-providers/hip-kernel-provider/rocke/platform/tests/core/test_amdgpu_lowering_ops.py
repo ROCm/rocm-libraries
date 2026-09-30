@@ -129,9 +129,9 @@ class TestSmemTypedVectorLoadHip(unittest.TestCase):
         from rocke.core.lower_hip import _vec_prefix
 
         with self.assertRaises(NotImplementedError) as cm:
-            _vec_prefix("f64", "global_load_vN")
+            _vec_prefix("i64", "global_load_vN")
         self.assertIn("global_load_vN", str(cm.exception))
-        self.assertIn("f64", str(cm.exception))
+        self.assertIn("i64", str(cm.exception))
 
 
 class TestHipArchSeamValidation(unittest.TestCase):

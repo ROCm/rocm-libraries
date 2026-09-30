@@ -46,7 +46,7 @@ from dataclasses import dataclass, field
 from itertools import product
 from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
-from ..core.ir import F32, IRBuilder, Type, Value
+from ..core.ir import F32, F64, IRBuilder, Type, Value
 from .tensor_view import TileWindow
 
 
@@ -894,6 +894,7 @@ def load_tile(
     works as well as f16/bf16: the f32 promote is a no-op for f32 and
     the Y slots simply hold the native f32 scalars. This lets the
     reduce / norm f32-accumulator tiles flow through the same path.
+    ``f64`` computes natively, so its Y slots hold unpromoted f64 scalars.
 
     **Masked / OOB-safe variant** (``mask_fn``): when ``N`` need not divide
     the block extent (img2col K-tail, pooling, topk) the in-bounds region
@@ -908,9 +909,9 @@ def load_tile(
     """
     if traits is None:
         traits = make_load_store_traits(distribution)
-    if window.dtype.name not in ("f16", "bf16", "f32"):
+    if window.dtype.name not in ("f16", "bf16", "f32", "f64"):
         raise NotImplementedError(
-            f"load_tile dtype {window.dtype.name} not wired (f16/bf16/f32 only)"
+            f"load_tile dtype {window.dtype.name} not wired (f16/bf16/f32/f64 only)"
         )
     if mask_fn is not None and window.view.addr_space != "buffer":
         raise NotImplementedError(
@@ -941,6 +942,8 @@ def load_tile(
             scalars = [
                 v if window.dtype.name == "f32" else b.cast_to_f32(v) for v in raw
             ]
+        elif window.dtype.name == "f64":
+            scalars = window.load_vec_scalars(b, *x_coords, n=traits.scalar_per_vector)
         else:
             scalars = window.load_vec_as_f32(b, *x_coords, n=traits.scalar_per_vector)
         # Splice each loaded scalar into the matching Y slot along
@@ -966,20 +969,20 @@ def store_tile(
     ``distributed``, packs them into ``traits.scalar_per_vector``-wide
     vectors, and writes them through ``window``.
 
-    Like :func:`load_tile`, ``f32`` is supported in addition to
-    f16/bf16. For f16/bf16 we route through
-    :meth:`TileWindow.store_vec_from_f32` (f32 demote + pack); for f32
-    the demote is a no-op so we pack the native scalars directly via
+    Like :func:`load_tile`, ``f32`` and ``f64`` are supported in addition
+    to f16/bf16. For f16/bf16 we route through
+    :meth:`TileWindow.store_vec_from_f32` (f32 demote + pack); for f32 /
+    f64 there is no demote so we pack the native scalars directly via
     :meth:`TileWindow.store_vec` / :meth:`TileWindow.store_scalar`.
     """
     distribution = distributed.distribution
     if traits is None:
         traits = make_load_store_traits(distribution)
     quant_dtypes = ("i8", "fp8e4m3", "bf8e5m2")
-    if window.dtype.name not in ("f16", "bf16", "f32", "i32") + quant_dtypes:
+    if window.dtype.name not in ("f16", "bf16", "f32", "f64", "i32") + quant_dtypes:
         raise NotImplementedError(
             f"store_tile dtype {window.dtype.name} not wired "
-            "(f16/bf16/f32/i32/i8/fp8e4m3/bf8e5m2)"
+            "(f16/bf16/f32/f64/i32/i8/fp8e4m3/bf8e5m2)"
         )
     for y_base in traits.iterate_accesses():
         x_coords = distribution.calculate_x(
@@ -1008,10 +1011,10 @@ def store_tile(
             else:
                 packed = b.vec_pack(scalars, window.dtype)
                 window.store_vec(b, *x_coords, value=packed, n=len(scalars))
-        elif window.dtype.name == "f32":
-            # f32 demote is a no-op; TileWindow.store_vec_from_f32
-            # rejects non-16-bit dtypes, so pack/store the native f32
-            # scalars directly here.
+        elif window.dtype.name in ("f32", "f64"):
+            # f32 demote is a no-op and f64 computes natively;
+            # TileWindow.store_vec_from_f32 rejects non-16-bit dtypes, so
+            # pack/store the native scalars directly here.
             if len(scalars) == 1:
                 window.store_scalar(b, *x_coords, value=scalars[0])
             else:
@@ -1493,7 +1496,10 @@ def block_tile_reduce_sync(
         for i in range(thread_buf_size):
             v = reduced.storage[i]
             slot = b.add(warp, b.const_i32(i * num_reduce_warps))
-            b.smem_store_vN_f32(lds_buf, [slot], v, 1)
+            if v.type.name == "f64":
+                b.smem_store_vN(lds_buf, [slot], v, 1)
+            else:
+                b.smem_store_vN_f32(lds_buf, [slot], v, 1)
     b.sync()
     # local_warp_id groups num_reduce_warps consecutive warps; each reads
     # its group's partials and tree-folds them.
@@ -1503,7 +1509,10 @@ def block_tile_reduce_sync(
         parts: List[Value] = []
         for idx in range(num_reduce_warps):
             slot = b.add(local_smem_os, b.const_i32(i * num_reduce_warps + idx))
-            vec = b.smem_load_vN_f32(lds_buf, slot, n=1)
+            if reduced.storage[i].type.name == "f64":
+                vec = b.smem_load_vN(lds_buf, slot, dtype=F64, n=1)
+            else:
+                vec = b.smem_load_vN_f32(lds_buf, slot, n=1)
             parts.append(b.vec_extract(vec, 0))
         # Pairwise power-of-two tree fold (matches the C++ stride doubling).
         while len(parts) > 1:

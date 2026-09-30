@@ -52,6 +52,7 @@ BF16 = Type("bf16")
 F16 = Type("f16")
 F32 = Type("f32")
 TF32 = Type("tf32")
+F64 = Type("f64")
 FP8E4M3 = Type("fp8e4m3")
 BF8E5M2 = Type("bf8e5m2")
 FP4E2M1 = Type("fp4e2m1")
@@ -77,6 +78,7 @@ def dtype_to_ir_type(dtype: str) -> Type:
         "bf16": BF16,
         "fp32": F32,
         "tf32": TF32,
+        "fp64": F64,
         "fp8e4m3": FP8E4M3,
         "bf8e5m2": BF8E5M2,
         "fp4e2m1": FP4E2M1,
@@ -665,6 +667,15 @@ class IRBuilder:
             "arith.constant",
             result_types=[F32],
             attrs={"value": float(value), "ity": "f32"},
+            result_name_hint="c",
+        )
+        return op.result
+
+    def const_f64(self, value: float) -> Value:
+        op = self._op(
+            "arith.constant",
+            result_types=[F64],
+            attrs={"value": float(value), "ity": "f64"},
             result_name_hint="c",
         )
         return op.result
@@ -1618,9 +1629,10 @@ class IRBuilder:
         """Vectorised global load of N consecutive values.
 
         Supports f16/bf16/i16 (N in {2, 4, 6, 8, 16}), f32/i32/tf32
-        (N in {2, 3, 4, 8}), and fp8e4m3/bf8e5m2/i8 (N in {2, 4, 8, 12, 16}).
-        Loads exactly N elements. Instruction selection depends on target and
-        alignment; 96-bit payloads do not require a 96-bit scalar type.
+        (N in {2, 3, 4, 8}), fp8e4m3/bf8e5m2/i8 (N in {2, 4, 8, 12, 16}), and
+        f64 (N = 2). Loads exactly N elements. Instruction selection depends on
+        target and alignment; 96-bit payloads do not require a 96-bit scalar
+        type.
 
         Default alignment is the payload size for power-of-two loads, and
         element alignment for 12-byte loads. An explicit alignment is a caller
@@ -1644,9 +1656,15 @@ class IRBuilder:
                 raise ValueError(
                     f"unsupported vector width for {dtype.name} global_load_vN: {n}"
                 )
+        elif dtype.name == "f64":
+            elem_bytes = 8
+            if n != 2:
+                raise ValueError(
+                    f"unsupported vector width for {dtype.name} global_load_vN: {n}"
+                )
         else:
             raise ValueError(
-                "global_load_vN supports f16/bf16/i16/f32/i32/tf32/fp8e4m3/bf8e5m2/i8, "
+                "global_load_vN supports f16/bf16/i16/f32/i32/tf32/fp8e4m3/bf8e5m2/i8/f64, "
                 f"got {dtype.name}"
             )
         return self._op(
@@ -1820,19 +1838,20 @@ class IRBuilder:
         if not isinstance(value.type, VectorType):
             raise ValueError("smem_store_vN expects vector value for n > 1")
         elem_name = value.type.elem.name
-        allowed_n = (
-            (2, 4, 8, 16) if elem_name in ("i8", "fp8e4m3", "bf8e5m2") else (2, 4, 8)
-        )
+        if elem_name in ("i8", "fp8e4m3", "bf8e5m2"):
+            allowed_n = (2, 4, 8, 16)
+            elem_bytes = 1
+        elif elem_name == "f64":
+            allowed_n = (2,)
+            elem_bytes = 8
+        else:
+            allowed_n = (2, 4, 8)
+            elem_bytes = 4 if elem_name in ("f32", "i32", "tf32") else 2
         if n not in allowed_n:
             raise ValueError(
                 f"unsupported vector width for smem_store_vN of {elem_name}: {n} "
                 f"(allowed: {allowed_n})"
             )
-        elem_bytes = (
-            1
-            if elem_name in ("i8", "fp8e4m3", "bf8e5m2")
-            else 4 if elem_name in ("f32", "i32", "tf32") else 2
-        )
         self._op(
             "tile.smem_store_vN",
             [smem, *indices, value],
@@ -1864,10 +1883,11 @@ class IRBuilder:
 
     def smem_load_vN(self, smem: Value, *indices, dtype: Type, n: int = 0) -> Value:
         """LDS load of ``<N x dtype>``. Supports 8-bit (fp8e4m3 / bf8e5m2 /
-        i8), 16-bit (f16 / bf16) and 32-bit (f32 / i32) element types;
-        loads exactly N elements. In addition to power-of-two widths, accepts
-        96-bit payloads (12 bytes, six halfwords, or three words), using element
-        alignment. The target and alignment determine instruction selection.
+        i8), 16-bit (f16 / bf16), 32-bit (f32 / i32) and 64-bit (f64, ``n in
+        {1, 2}``) element types; loads exactly N elements. In addition to
+        power-of-two widths, accepts 96-bit payloads (12 bytes, six halfwords,
+        or three words), using element alignment. The target and alignment
+        determine instruction selection.
         """
         if dtype.name not in (
             "f16",
@@ -1878,16 +1898,20 @@ class IRBuilder:
             "fp8e4m3",
             "bf8e5m2",
             "i8",
+            "f64",
         ):
             raise ValueError(
                 "smem_load_vN supports f16 / bf16 / f32 / i32 / tf32 / fp8e4m3 / "
-                f"bf8e5m2 / i8, got {dtype.name}"
+                f"bf8e5m2 / i8 / f64, got {dtype.name}"
             )
-        allowed_n = (
-            (1, 2, 4, 8, 12, 16)
-            if dtype.name in ("fp8e4m3", "bf8e5m2", "i8")
-            else (1, 2, 4, 6, 8) if dtype.name in ("f16", "bf16") else (1, 2, 3, 4, 8)
-        )
+        if dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
+            allowed_n = (1, 2, 4, 8, 12, 16)
+        elif dtype.name in ("f16", "bf16"):
+            allowed_n = (1, 2, 4, 6, 8)
+        elif dtype.name == "f64":
+            allowed_n = (1, 2)
+        else:
+            allowed_n = (1, 2, 3, 4, 8)
         if n not in allowed_n:
             raise ValueError(
                 f"unsupported vector width {n} for smem_load_vN of {dtype.name} "
@@ -3135,8 +3159,14 @@ class IRBuilder:
         permlane32_swap or ds_bpermute).
 
         Works for any 32-bit scalar `v` (f32, i32). For half/bfloat,
-        bitcast to i32 via a 2-element vector first.
+        bitcast to i32 via a 2-element vector first. An f64 `v` is split
+        into two i32 halves, each shuffled on the 32-bit path.
         """
+        if v.type.name == "f64":
+            halves = self.bitcast(v, VectorType(I32, 2))
+            lo = self.warp_shuffle_xor(self.vec_extract(halves, 0), lane_xor)
+            hi = self.warp_shuffle_xor(self.vec_extract(halves, 1), lane_xor)
+            return self.bitcast(self.vec_pack([lo, hi], I32), F64)
         if 1 <= lane_xor <= 31:
             # Emits `ds_swizzle` (XOR pattern in the immediate offset), NOT
             # `ds_bpermute`: 1 LDS op, no addr-compute. This is the path the
@@ -4239,7 +4269,8 @@ class IRBuilder:
 
         Supports the full element-type catalog the LLVM lowering already
         emits: ``f16`` / ``bf16`` / ``i16`` (2-byte), ``f32`` / ``i32`` / ``tf32``
-        (4-byte), ``i8`` / ``fp8e4m3`` / ``bf8e5m2`` (1-byte). Lowers to
+        (4-byte), ``i8`` / ``fp8e4m3`` / ``bf8e5m2`` (1-byte), ``f64``
+        (8-byte, N in {1, 2}). Lowers to
         a single ``store <N x elem>`` with the supplied address alignment.
         Payload width and address alignment are independent; target and
         alignment determine whether the transfer uses one machine instruction.
@@ -4261,9 +4292,13 @@ class IRBuilder:
                 raise ValueError(f"global_store_vN n=16 not supported for {elem_name}")
         elif elem_name in ("i8", "fp8e4m3", "bf8e5m2"):
             elem_bytes = 1
+        elif elem_name == "f64":
+            elem_bytes = 8
+            if n > 2:
+                raise ValueError(f"global_store_vN n={n} not supported for {elem_name}")
         else:
             raise ValueError(
-                "global_store_vN supports f16/bf16/i16/f32/i32/tf32/i8/fp8e4m3/bf8e5m2, "
+                "global_store_vN supports f16/bf16/i16/f32/i32/tf32/i8/fp8e4m3/bf8e5m2/f64, "
                 f"got {elem_name}"
             )
         self._op(

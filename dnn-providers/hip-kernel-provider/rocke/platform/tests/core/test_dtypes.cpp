@@ -13,6 +13,8 @@ int main()
     const char* cases[][2] = {{" HALF ", "fp16"},
                               {"bfloat16", "bf16"},
                               {" Float\t", "fp32"},
+                              {" Double ", "fp64"},
+                              {"F64", "fp64"},
                               {"FP8", "fp8e4m3"},
                               {"BF8", "bf8e5m2"},
                               {"FP6", "fp6e2m3"},

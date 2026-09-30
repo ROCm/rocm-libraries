@@ -7,7 +7,8 @@
  *
  * Emits a single AMDGPU kernel that walks one contiguous N-element tensor with
  * vectorised global loads/stores and applies a fused unary or binary operation
- * per element. Compute is f32 internally; I/O is f16 or bf16.
+ * per element. Compute is f32 internally for f16 or bf16 I/O; f64 I/O computes
+ * natively (exact ops only, vec=2).
  *
  *   Python (elementwise.py)               C99 (this header)
  *   -----------------------------------   --------------------------------------
@@ -53,7 +54,7 @@ extern "C" {
 /* --------------------------------------------------------- ElementwiseSpec */
 
 /* Mirror of Python ElementwiseSpec. `op` is one of the unary or binary op
- * spellings (see the dispatch tables below); `dtype` is "f16" or "bf16". */
+ * spellings (see the dispatch tables below); `dtype` is "f16", "bf16" or "f64". */
 typedef struct rocke_elementwise_spec
 {
     const char* op; /* required (no default in Python)                  */

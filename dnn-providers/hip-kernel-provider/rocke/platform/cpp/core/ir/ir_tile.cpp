@@ -87,7 +87,7 @@ static const char* rocke_mma_result_hint(const char* op_id)
     return "acc";
 }
 
-/* element-byte width helper (mirrors smem_store_vN's inline ternary). */
+/* element-byte width helper (mirrors smem_store_vN's elem_bytes). */
 static int rocke_elem_bytes_name(const char* elem_name)
 {
     if(!elem_name)
@@ -98,6 +98,10 @@ static int rocke_elem_bytes_name(const char* elem_name)
        || strcmp(elem_name, "bf8e5m2") == 0)
     {
         return 1;
+    }
+    if(strcmp(elem_name, "f64") == 0)
+    {
+        return 8;
     }
     if(strcmp(elem_name, "f32") == 0 || strcmp(elem_name, "i32") == 0
        || strcmp(elem_name, "tf32") == 0)
@@ -240,6 +244,7 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
     const char* elem_name;
     static const int allowed_8bit[] = {2, 4, 8, 16};
     static const int allowed_other[] = {2, 4, 8};
+    static const int allowed_64bit[] = {2};
     int elem_bytes;
     if(!rocke_i_live(b))
     {
@@ -271,10 +276,19 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
     }
     elem_name = value->type->elem->name;
     {
-        bool eight = (strcmp(elem_name, "i8") == 0 || strcmp(elem_name, "fp8e4m3") == 0
-                      || strcmp(elem_name, "bf8e5m2") == 0);
-        const int* allowed = eight ? allowed_8bit : allowed_other;
-        int acount = eight ? 4 : 3;
+        const int* allowed = allowed_other;
+        int acount = 3;
+        if(strcmp(elem_name, "i8") == 0 || strcmp(elem_name, "fp8e4m3") == 0
+           || strcmp(elem_name, "bf8e5m2") == 0)
+        {
+            allowed = allowed_8bit;
+            acount = 4;
+        }
+        else if(strcmp(elem_name, "f64") == 0)
+        {
+            allowed = allowed_64bit;
+            acount = 1;
+        }
         if(!rocke_n_in(n, allowed, acount))
         {
             rocke_i_set_err(b,
@@ -354,6 +368,7 @@ rocke_value_t* rocke_b_smem_load_vN(rocke_ir_builder_t* b,
     static const int allowed_8bit[] = {1, 2, 4, 8, 12, 16};
     static const int allowed_16bit[] = {1, 2, 4, 6, 8};
     static const int allowed_32bit[] = {1, 2, 3, 4, 8};
+    static const int allowed_64bit[] = {1, 2};
     char hint[16];
     if(!rocke_i_live(b))
     {
@@ -366,21 +381,33 @@ rocke_value_t* rocke_b_smem_load_vN(rocke_ir_builder_t* b,
     dn = dtype->name;
     if(!(strcmp(dn, "f16") == 0 || strcmp(dn, "bf16") == 0 || strcmp(dn, "f32") == 0
          || strcmp(dn, "tf32") == 0 || strcmp(dn, "i32") == 0 || strcmp(dn, "fp8e4m3") == 0
-         || strcmp(dn, "bf8e5m2") == 0 || strcmp(dn, "i8") == 0))
+         || strcmp(dn, "bf8e5m2") == 0 || strcmp(dn, "i8") == 0 || strcmp(dn, "f64") == 0))
     {
         return (rocke_value_t*)rocke_i_set_err(
             b,
             ROCKE_ERR_VALUE,
             "smem_load_vN supports f16 / bf16 / f32 / i32 / tf32 / fp8e4m3 / "
-            "bf8e5m2 / i8, got %s",
+            "bf8e5m2 / i8 / f64, got %s",
             dn);
     }
     {
-        bool eight
-            = (strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0 || strcmp(dn, "i8") == 0);
-        bool half = strcmp(dn, "f16") == 0 || strcmp(dn, "bf16") == 0;
-        const int* allowed = eight ? allowed_8bit : half ? allowed_16bit : allowed_32bit;
-        int acount = eight ? 6 : 5;
+        const int* allowed = allowed_32bit;
+        int acount = 5;
+        if(strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0 || strcmp(dn, "i8") == 0)
+        {
+            allowed = allowed_8bit;
+            acount = 6;
+        }
+        else if(strcmp(dn, "f16") == 0 || strcmp(dn, "bf16") == 0)
+        {
+            allowed = allowed_16bit;
+            acount = 5;
+        }
+        else if(strcmp(dn, "f64") == 0)
+        {
+            allowed = allowed_64bit;
+            acount = 2;
+        }
         if(!rocke_n_in(n, allowed, acount))
         {
             return (rocke_value_t*)rocke_i_set_err(

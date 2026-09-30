@@ -10,7 +10,7 @@ Named scalar types are singletons exported from `core/ir.py`:
 
 ```text
 I1, I8, I32, I64
-F16, BF16, F32
+F16, BF16, F32, F64
 FP8E4M3      # e4m3 fp8 (cvt_fp8_to_f32 / cvt_f32_to_fp8)
 BF8E5M2      # e5m2 fp8 (cvt_bf8_to_f32 / cvt_f32_to_bf8)
 ```
@@ -83,6 +83,7 @@ Kernel attributes consumed by lowering:
 const_i32(value)
 const_i64(value)
 const_f32(value)
+const_f64(value)           # printed as the exact IEEE-754 bit pattern
 fp16_zero()
 zero_vec_f32(n)            # <n x f32>, all zeros
 zero_vec_f32_4()           # <4 x f32>, all zeros
@@ -94,7 +95,7 @@ zero_vec(elem, n)          # f32 / f16 / bf16
 ```text
 add, sub, mul, div, mod                    # integer arithmetic
 fadd, fsub, fmul, fdiv, fneg               # f32 arithmetic
-fmax, fmin                                 # llvm.maxnum / llvm.minnum (f32/f16/bf16)
+fmax, fmin                                 # llvm.maxnum / llvm.minnum (f32/f16/bf16/f64)
 fcmp(pred, a, b)                           # pred in {olt,ole,ogt,oge,oeq,one,ord,uno}
 cmp_lt, cmp_le, cmp_gt, cmp_ge, cmp_eq, cmp_ne   # integer compare (-> i1)
 land, lor, lnot                            # bitwise + i1 logic
@@ -120,7 +121,7 @@ cvt_f32_to_i8_sat(v)     # round + saturate to i8
 
 ### Math intrinsics
 
-LLVM target intrinsics; lowering is f32-centric.
+LLVM target intrinsics; lowering is f32-centric. `exp2`, `sqrt`, `rsqrt` and `tanh` accept only f32 and reject f64 inputs; `rcp` is a plain `fdiv` and accepts f64.
 
 ```text
 exp2(v)        # llvm.exp2.f32
@@ -172,7 +173,7 @@ global_load_fp8e4m3(ptr, idx, align=1)
 masked_global_load(ptr, idx, mask, other, dtype, align=1)   # clamps false-lane idx to 0
 global_store(ptr, idx, value, align=1)
 global_load_vN_f16(ptr, idx, n)        # n in {2,4,8}; aligned by default
-global_load_vN(ptr, idx, dtype, n)     # f16 or bf16; n in {2,4,8}
+global_load_vN(ptr, idx, dtype, n)     # f16 or bf16; n in {2,4,8}; f64: n = 2
 global_store_vN(...)                   # vector stores
 global_atomic_add_f32(ptr, idx, value) # used by split-K paths
 ```
@@ -186,10 +187,10 @@ smem_ptr_add(lds_addr, byte_off)              # i64 LDS address arithmetic
 smem_load_f16(smem, indices)
 smem_load_vN_f16(smem, *indices, n in {1,2,4,8})
 smem_load_v4_f16(smem, row, col)
-smem_load_vN(smem, *indices, dtype, n)        # f16/bf16
+smem_load_vN(smem, *indices, dtype, n)        # f16/bf16; f64: n in {1,2}
 smem_store_f16(smem, indices, value)
 smem_store_vN_f16(smem, indices, value, n)    # ds_write_b{16,32,64,128}
-smem_store_vN(smem, indices, value, n)        # n in {1,2,4,8}
+smem_store_vN(smem, indices, value, n)        # n in {1,2,4,8}; f64: n in {1,2}
 ```
 
 ### Memory: AMDGPU buffer resources

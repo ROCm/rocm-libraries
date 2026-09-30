@@ -6,7 +6,7 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 
 | Op name                | Builder                           | LLVM emission                          |
 |------------------------|-----------------------------------|----------------------------------------|
-| `arith.constant`       | `const_i32`, `const_i64`, `const_f32`, `fp16_zero` | constant value |
+| `arith.constant`       | `const_i32`, `const_i64`, `const_f32`, `const_f64`, `fp16_zero` | constant value |
 | `arith.constant_vec`   | `zero_vec_f32`, `zero_vec`        | `zeroinitializer` vector               |
 | `arith.add`            | `add`                             | `add` (integer)                        |
 | `arith.sub`            | `sub`                             | `sub`                                  |
@@ -51,6 +51,8 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `math.tanh`    | `tanh`       | piecewise f32 expansion: OCML polynomial for `abs(x) < 0.625`, otherwise `exp2` + reciprocal; bitwise sign restoration |
 | `math.rcp`     | `rcp`        | `1.0 / v` (hardware reciprocal) |
 
+`exp2`, `sqrt`, `rsqrt` and `tanh` are f32-only and reject f64 inputs; `rcp` accepts f64.
+
 `clamp_f32(v, lo, hi)` is `fmin(hi, fmax(lo, v))` — folds to `v_med3_f32`.
 
 ## Vector
@@ -90,7 +92,7 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 |-------------------------------|-------------------------------|---------------|
 | `memref.global_load`          | `global_load_f16`             | typed `load addrspace(1)` |
 | `memref.global_load_typed`    | `global_load`, `global_load_i8`, `global_load_i16`, `global_load_i32`, `global_load_i64`, `global_load_fp8e4m3`, `global_load_bf8e5m2`, `global_load_bf16`, `global_load_f32` | typed `load addrspace(1)` |
-| `memref.global_load_vN`       | `global_load_vN`, `global_load_vN_f16` | vector `load addrspace(1)` (n in {2,4,8}) |
+| `memref.global_load_vN`       | `global_load_vN`, `global_load_vN_f16` | vector `load addrspace(1)` (n in {2,4,8}; f64: n = 2) |
 | `memref.global_store_typed`   | `global_store`                | typed `store addrspace(1)` |
 | `memref.global_store_vN`      | `global_store_vN`             | vector `store addrspace(1)` |
 | `memref.global_atomic_add_f32`| `global_atomic_add_f32`       | `atomicrmw fadd addrspace(1)` |
@@ -106,9 +108,9 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `tile.smem_ptr_add`    | `smem_ptr_add`           | `add i64` over LDS addresses                   |
 | `tile.smem_load`       | `smem_load_f16`          | scalar `load addrspace(3)`                     |
 | `tile.smem_load_v4`    | `smem_load_v4_f16`       | `<4 x half>` load                              |
-| `tile.smem_load_vN`    | `smem_load_vN_f16`, `smem_load_vN` | `<N x dtype>` load (n in {1,2,4,8})  |
+| `tile.smem_load_vN`    | `smem_load_vN_f16`, `smem_load_vN` | `<N x dtype>` load (n in {1,2,4,8}; f64: n in {1,2}) |
 | `tile.smem_store`      | `smem_store_f16`         | scalar `store addrspace(3)`                    |
-| `tile.smem_store_vN`   | `smem_store_vN_f16`, `smem_store_vN` | `<N x dtype>` store                |
+| `tile.smem_store_vN`   | `smem_store_vN_f16`, `smem_store_vN` | `<N x dtype>` store (f64: n in {1,2}) |
 | `tile.ds_read_tr16_b64`| `ds_read_tr16_b64`       | `llvm.amdgcn.ds.read.tr16.b64`                 |
 
 ### Buffer (addrspace(8))

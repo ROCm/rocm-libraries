@@ -568,6 +568,7 @@ int64_t rocke_ll_eval_constant(rocke_lower_t* L, const rocke_value_t* v);
  * Arena-owned. */
 const char* rocke_ll_fp32_hex(rocke_lower_t* L, double x);
 const char* rocke_ll_fp16_hex(rocke_lower_t* L, double x);
+const char* rocke_ll_fp64_hex(rocke_lower_t* L, double x);
 
 /* Escape a string for an LLVM asm/string literal (Python
  * _escape_llvm_asm_string): printable ASCII verbatim, else \XX hex. */

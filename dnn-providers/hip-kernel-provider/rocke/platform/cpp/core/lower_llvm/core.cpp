@@ -993,6 +993,8 @@ const char* rocke_ll_llvm_type(rocke_lower_t* L, const rocke_type_t* t)
             return "i8";
         if(strcmp(n, "f32") == 0)
             return "float";
+        if(strcmp(n, "f64") == 0)
+            return "double";
     }
     rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "no LLVM mapping for type %s", n ? n : "(null)");
 }
@@ -1091,7 +1093,7 @@ const char* rocke_ll_smem_storage_type(rocke_lower_t* L, const rocke_type_t* sme
 }
 
 /* ====================================================================== */
-/* FP hex constants (Python _fp32_hex / _fp16_hex)                        */
+/* FP hex constants (Python _fp32_hex / _fp16_hex / _fp64_hex)            */
 /* ====================================================================== */
 
 const char* rocke_ll_fp32_hex(rocke_lower_t* L, double x)
@@ -1102,6 +1104,14 @@ const char* rocke_ll_fp32_hex(rocke_lower_t* L, double x)
     double rounded = (double)f;
     uint64_t bits;
     memcpy(&bits, &rounded, sizeof bits);
+    return rocke_arena_printf(&L->arena, "0x%016llX", (unsigned long long)bits);
+}
+
+const char* rocke_ll_fp64_hex(rocke_lower_t* L, double x)
+{
+    /* LLVM textual IR spells `double` hex constants as the raw IEEE-754 bits. */
+    uint64_t bits;
+    memcpy(&bits, &x, sizeof bits);
     return rocke_arena_printf(&L->arena, "0x%016llX", (unsigned long long)bits);
 }
 
@@ -1266,6 +1276,12 @@ const char* rocke_ll_operand(rocke_lower_t* L, const rocke_value_t* v)
             double fv = 0.0;
             rocke_attr_get_float(&op->attrs, "value", &fv);
             return rocke_ll_fp16_hex(L, fv);
+        }
+        if(strcmp(ity, "f64") == 0)
+        {
+            double fv = 0.0;
+            rocke_attr_get_float(&op->attrs, "value", &fv);
+            return rocke_ll_fp64_hex(L, fv);
         }
         int64_t iv = 0;
         if(!rocke_attr_get_int(&op->attrs, "value", &iv))
@@ -1576,7 +1592,7 @@ static int ll_smem_seg_size(const rocke_type_t* stype)
         eb = 2;
     else if(strcmp(n, "i32") == 0 || strcmp(n, "tf32") == 0 || strcmp(n, "f32") == 0)
         eb = 4;
-    else if(strcmp(n, "i64") == 0)
+    else if(strcmp(n, "i64") == 0 || strcmp(n, "f64") == 0)
         eb = 8;
     else
         eb = 2; /* default */
@@ -1592,6 +1608,8 @@ static int ll_smem_align(const rocke_type_t* stype)
     if(!stype || !stype->elem || !stype->elem->name)
         return 4;
     const char* n = stype->elem->name;
+    if(strcmp(n, "f64") == 0)
+        return 8;
     if(strcmp(n, "i8") == 0 || strcmp(n, "fp8e4m3") == 0 || strcmp(n, "bf8e5m2") == 0)
         return 16;
     return 4;

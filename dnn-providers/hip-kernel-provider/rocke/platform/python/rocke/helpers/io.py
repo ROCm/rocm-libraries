@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from ..core.ir import BF16, F16, IRBuilder, Type, Value
+from ..core.ir import BF16, F16, F64, IRBuilder, Type, Value
 
 
 __all__ = [
@@ -51,15 +51,17 @@ DType = Literal["f16", "fp16", "bf16"]
 def io_ir_type(dtype: str) -> Type:
     """Map a dtype string to the canonical IR type object.
 
-    Accepts ``"f16"``, ``"fp16"`` (alias), or ``"bf16"``. Raises
-    :class:`ValueError` for any other value -- f8 and i8 paths go
+    Accepts ``"f16"``, ``"fp16"`` (alias), ``"bf16"``, or ``"f64"``.
+    Raises :class:`ValueError` for any other value -- f8 and i8 paths go
     through their own helpers because their compute dtype isn't f32.
     """
     if dtype in ("f16", "fp16"):
         return F16
     if dtype == "bf16":
         return BF16
-    raise ValueError(f"unsupported I/O dtype {dtype!r}; expected f16/fp16/bf16")
+    if dtype == "f64":
+        return F64
+    raise ValueError(f"unsupported I/O dtype {dtype!r}; expected f16/fp16/bf16/f64")
 
 
 def load_scalar(b: IRBuilder, ptr: Value, idx: Value, *, dtype: str) -> Value:

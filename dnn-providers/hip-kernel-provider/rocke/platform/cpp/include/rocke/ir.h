@@ -103,6 +103,7 @@ typedef enum rocke_scalar_kind
     ROCKE_SCALAR_BF16,
     ROCKE_SCALAR_F16,
     ROCKE_SCALAR_F32,
+    ROCKE_SCALAR_F64,
     ROCKE_SCALAR_FP8E4M3,
     ROCKE_SCALAR_BF8E5M2,
     ROCKE_SCALAR_FP4E2M1,
@@ -579,6 +580,7 @@ const rocke_type_t* rocke_bf16(void);
 const rocke_type_t* rocke_f16(void);
 const rocke_type_t* rocke_f32(void);
 const rocke_type_t* rocke_tf32(void);
+const rocke_type_t* rocke_f64(void);
 const rocke_type_t* rocke_fp8e4m3(void);
 const rocke_type_t* rocke_bf8e5m2(void);
 const rocke_type_t* rocke_fp4e2m1(void);
@@ -696,6 +698,7 @@ rocke_value_t* rocke_b_get_param(rocke_ir_builder_t* b, const char* name);
 rocke_value_t* rocke_b_const_i32(rocke_ir_builder_t* b, int64_t value);
 rocke_value_t* rocke_b_const_i64(rocke_ir_builder_t* b, int64_t value);
 rocke_value_t* rocke_b_const_f32(rocke_ir_builder_t* b, double value);
+rocke_value_t* rocke_b_const_f64(rocke_ir_builder_t* b, double value);
 rocke_value_t* rocke_b_fp16_zero(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_zero_vec_f32(rocke_ir_builder_t* b, int n);
 rocke_value_t* rocke_b_zero_vec(rocke_ir_builder_t* b, const rocke_type_t* elem, int n);

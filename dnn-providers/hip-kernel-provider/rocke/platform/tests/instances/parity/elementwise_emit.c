@@ -80,6 +80,24 @@ static int make_spec(int idx, rocke_elementwise_spec_t* spec)
         spec->block_size = 256;
         spec->vec = 8;
         break;
+    case 10: /* f64: natively computed, exact ops only (vec=2) */
+        spec->op = "add";
+        spec->dtype = "f64";
+        spec->block_size = 256;
+        spec->vec = 2;
+        break;
+    case 11:
+        spec->op = "relu";
+        spec->dtype = "f64";
+        spec->block_size = 128;
+        spec->vec = 2;
+        break;
+    case 12:
+        spec->op = "max";
+        spec->dtype = "f64";
+        spec->block_size = 512;
+        spec->vec = 2;
+        break;
     default:
         return -1;
     }
