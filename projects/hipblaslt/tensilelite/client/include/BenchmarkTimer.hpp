@@ -26,10 +26,12 @@
 
 #pragma once
 
+#include "DeviceContext.hpp"
 #include "RunListener.hpp"
 
 #include <chrono>
 #include <cstddef>
+#include <vector>
 
 #include "ProgramOptions.hpp"
 
@@ -46,9 +48,10 @@ namespace TensileLite
         public:
             using clock = std::chrono::steady_clock;
 
-            BenchmarkTimer(po::variables_map const& args,
-                           Hardware const&          hardware,
-                           float                    flushTimeUs);
+            BenchmarkTimer(po::variables_map const&                    args,
+                           Hardware const&                             hardware,
+                           float                                       flushTimeUs,
+                           std::vector<std::shared_ptr<DeviceContext>> devices);
 
             virtual bool needMoreBenchmarkRuns() const override;
             virtual void preBenchmarkRun() override;
@@ -66,11 +69,10 @@ namespace TensileLite
             virtual void   setNumWarmupRuns(size_t count) override;
             virtual void   preWarmup() override;
             virtual void   postWarmup(TimingEvents const& startEvents,
-                                      TimingEvents const& stopEvents,
-                                      hipStream_t const&  stream) override;
-            virtual void   validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                           TimingEvents const&            startEvents,
-                                           TimingEvents const&            stopEvents) override;
+                                      TimingEvents const& stopEvents) override;
+            virtual void   validateWarmups(std::vector<size_t> const& slots,
+                                           TimingEvents const&        startEvents,
+                                           TimingEvents const&        stopEvents) override;
 
             virtual size_t numSyncs() override;
             virtual void   setNumSyncs(size_t count) override;
@@ -79,13 +81,12 @@ namespace TensileLite
 
             virtual size_t numEnqueuesPerSync() override;
             virtual void   setNumEnqueuesPerSync(size_t count) override;
-            virtual void   preEnqueues(hipStream_t const& stream) override;
+            virtual void   preEnqueues() override;
             virtual void   postEnqueues(TimingEvents const& startEvents,
-                                        TimingEvents const& stopEvents,
-                                        hipStream_t const&  stream) override;
-            virtual void   validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
-                                            TimingEvents const&            startEvents,
-                                            TimingEvents const&            stopEvents) override;
+                                        TimingEvents const& stopEvents) override;
+            virtual void   validateEnqueues(std::vector<size_t> const& slots,
+                                            TimingEvents const&        startEvents,
+                                            TimingEvents const&        stopEvents) override;
 
             virtual void finalizeReport() override;
             virtual int  error() const override;
@@ -93,6 +94,9 @@ namespace TensileLite
             {
                 m_flushTimeUs = timeUs;
             }
+
+        protected:
+            virtual double takeBatchTimeMs();
 
         private:
             const int    m_numWarmups;
@@ -120,15 +124,17 @@ namespace TensileLite
             clock::time_point m_startTime;
             clock::time_point m_endTime;
 
-            hipEvent_t start = nullptr;
-            hipEvent_t stop  = nullptr;
+            std::vector<std::shared_ptr<DeviceContext>> m_devices;
+            std::vector<hipEvent_t>                     m_start;
+            std::vector<hipEvent_t>                     m_stop;
 
             using double_millis = std::chrono::duration<double, std::milli>;
             using double_micros = std::chrono::duration<double, std::micro>;
             using double_nanos  = std::chrono::duration<double, std::nano>;
             using prob_sol_map  = std::map<int, int>;
 
-            double_millis m_timeInSolution;
+            double_millis       m_timeInSolution;
+            std::vector<double> m_timeSamplesUs;
             double_millis m_totalGPUTime;
             double_millis m_currentBestWarmUpTime;
             float         m_flushTimeUs;
