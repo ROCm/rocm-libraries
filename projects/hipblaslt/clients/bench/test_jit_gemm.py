@@ -838,7 +838,8 @@ def main():
 
         proc, path, _ = run("multiple", [*options, "--requested_solution", "2"])
         require(proc.returncode == 0, f"Multiple solutions failed; see {path}")
-        rows_found = check_numerics(proc.stdout)
+        # With several solutions the benchmark repeats the fastest row after "Winner:".
+        rows_found = check_numerics(proc.stdout.split("\nWinner:")[0])
         (invocation,) = generations(path)
         require(invocation["status"] == 0, "Generator failed")
         entries = library_entries(path)
