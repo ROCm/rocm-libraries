@@ -182,6 +182,6 @@ Build with address sanitizer enabled following the [Address Sanitizer Build](../
 
 #### Expected Results
 
-- **Test Status**: All tests either pass or are explicitly skipped (architectures that do not support ASAN are skipped via `SKIP_IF_ASAN()` or a disabled ctest registration).
+- **Test Status**: All tests either pass or are explicitly skipped (architectures that do not support ASAN are skipped via `SKIP_IF_ASAN()` or a disabled ctest registration). A known upstream-library error is instead suppressed by `__asan_default_suppressions()` in `test_sdk/src/AsanDefaultSuppressions.cpp`, so the affected tests run rather than being skipped; audit that list alongside `SKIP_IF_ASAN()`.
 - **Memory Safety**: No memory leaks or violations should be detected.
 - **Platform**: On Linux the suite is expected to complete cleanly. On Windows a fully clean ASAN run is not yet available (known issues being resolved); do not treat the remaining Windows failures as a release blocker until that work lands.

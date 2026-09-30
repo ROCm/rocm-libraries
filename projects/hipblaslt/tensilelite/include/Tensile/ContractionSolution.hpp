@@ -402,6 +402,11 @@ namespace TensileLite
         // kernels (e.g. rejecting them for small K).
         bool useSubtileImpl = false;
 
+        // SourceSwap: MFMA output is mapped so that M is the fast (stride-1)
+        // store axis in D.  Enabled for all non-sparse kernels; plumbed into
+        // the Origami epilogue model to select the correct store-pattern cost.
+        bool SourceSwap = false;
+
         int NonTemporalD = 0;
         int WaveSeparateGlobalReadA = 0;
         int WaveSeparateGlobalReadB = 0;

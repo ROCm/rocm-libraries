@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .arch import target as _arch
+from .dtypes import dtype_info
 
 # ----------------------------- Types --------------------------------------
 
@@ -52,6 +53,39 @@ F16 = Type("f16")
 F32 = Type("f32")
 FP8E4M3 = Type("fp8e4m3")
 BF8E5M2 = Type("bf8e5m2")
+FP4E2M1 = Type("fp4e2m1")
+FP6E2M3 = Type("fp6e2m3")
+FP6E3M2 = Type("fp6e3m2")
+E8M0 = Type("e8m0")
+E5M3 = Type("e5m3")
+
+
+def dtype_to_ir_type(dtype: str) -> Type:
+    """Resolve a logical type without claiming scalar operation support.
+
+    Packed memory is described separately; a low-bit type is never an I8 alias.
+    """
+    info = dtype_info(dtype)
+    types = {
+        "i1": I1,
+        "i8": I8,
+        "i16": I16,
+        "i32": I32,
+        "i64": I64,
+        "fp16": F16,
+        "bf16": BF16,
+        "fp32": F32,
+        "fp8e4m3": FP8E4M3,
+        "bf8e5m2": BF8E5M2,
+        "fp4e2m1": FP4E2M1,
+        "fp6e2m3": FP6E2M3,
+        "fp6e3m2": FP6E3M2,
+        "e8m0": E8M0,
+        "e5m3": E5M3,
+    }
+    if info.name not in types:
+        raise ValueError(f"no logical IR type for dtype {info.name!r}")
+    return types[info.name]
 
 
 # AMDGPU buffer-load AUX-byte cache-coherency hints. The AUX field of
@@ -1538,34 +1572,30 @@ class IRBuilder:
     ) -> Value:
         """Vectorised global load of N consecutive values.
 
-        Supports the full element-type catalog the LLVM lowering already
-        accepts: ``f16`` / ``bf16`` (N in {2, 4, 8}), ``f32`` / ``i32``
-        (N in {2, 4, 8}), ``i16`` (N in {2, 4, 8}), ``fp8e4m3`` /
-        ``bf8e5m2`` / ``i8`` (N in {2, 4, 8, 16}).
+        Supports f16/bf16/i16 (N in {2, 4, 6, 8, 16}), f32/i32
+        (N in {2, 3, 4, 8}), and fp8e4m3/bf8e5m2/i8 (N in {2, 4, 8, 12, 16}).
+        Loads exactly N elements. Instruction selection depends on target and
+        alignment; 96-bit payloads do not require a 96-bit scalar type.
 
-        Lowers to a single ``load <N x elem>`` from ``addrspace(1)``;
-        AMDGPU's backend coalesces these into a single VMEM transaction
-        (``global_load_dwordxN``) when the address is naturally aligned.
-
-        The per-element size is folded into the default alignment so the
-        common case (8 fp8 → 8-byte load, 4 f32 → 16-byte load) does
-        not need an explicit ``align=`` kwarg.
+        Default alignment is the payload size for power-of-two loads, and
+        element alignment for 12-byte loads. An explicit alignment is a caller
+        guarantee about the address after adding idx.
         """
         if dtype.name in ("f16", "bf16", "i16"):
             elem_bytes = 2
             # n=16 (32-byte `global_load_dwordx8`) is needed for the RDNA WMMA
             # <16 x half> operand fragment; AMDGPU coalesces it when aligned.
-            if n not in (2, 4, 8, 16):
+            if n not in (2, 4, 6, 8, 16):
                 raise ValueError(f"unsupported vector width for global_load_vN: {n}")
         elif dtype.name in ("f32", "i32"):
             elem_bytes = 4
-            if n not in (2, 4, 8):
+            if n not in (2, 3, 4, 8):
                 raise ValueError(
                     f"unsupported vector width for {dtype.name} global_load_vN: {n}"
                 )
         elif dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
             elem_bytes = 1
-            if n not in (2, 4, 8, 16):
+            if n not in (2, 4, 8, 12, 16):
                 raise ValueError(
                     f"unsupported vector width for {dtype.name} global_load_vN: {n}"
                 )
@@ -1581,7 +1611,9 @@ class IRBuilder:
             attrs={
                 "elem_type": dtype.name,
                 "vec": n,
-                "align": int(align or (n * elem_bytes)),
+                "align": int(
+                    align or (elem_bytes if n * elem_bytes == 12 else n * elem_bytes)
+                ),
             },
             result_name_hint=f"gv{n}",
         ).result
@@ -1788,10 +1820,9 @@ class IRBuilder:
     def smem_load_vN(self, smem: Value, *indices, dtype: Type, n: int = 0) -> Value:
         """LDS load of ``<N x dtype>``. Supports 8-bit (fp8e4m3 / bf8e5m2 /
         i8), 16-bit (f16 / bf16) and 32-bit (f32 / i32) element types;
-        AMDGPU lowers vector LDS loads to ``ds_read_b{8, 16, 32, 64, 128}``
-        based on total payload size. The 8-bit variants must use ``n in {1,
-        2, 4, 8, 16}`` so the resulting payload still maps to a single
-        ``ds_read_b*`` instruction (n=16 → ds_read_b128).
+        loads exactly N elements. In addition to power-of-two widths, accepts
+        96-bit payloads (12 bytes, six halfwords, or three words), using element
+        alignment. The target and alignment determine instruction selection.
         """
         if dtype.name not in ("f16", "bf16", "f32", "i32", "fp8e4m3", "bf8e5m2", "i8"):
             raise ValueError(
@@ -1799,9 +1830,9 @@ class IRBuilder:
                 f"bf8e5m2 / i8, got {dtype.name}"
             )
         allowed_n = (
-            (1, 2, 4, 8, 16)
+            (1, 2, 4, 8, 12, 16)
             if dtype.name in ("fp8e4m3", "bf8e5m2", "i8")
-            else (1, 2, 4, 8)
+            else (1, 2, 4, 6, 8) if dtype.name in ("f16", "bf16") else (1, 2, 3, 4, 8)
         )
         if n not in allowed_n:
             raise ValueError(
