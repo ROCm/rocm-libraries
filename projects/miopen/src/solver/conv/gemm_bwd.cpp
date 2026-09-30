@@ -194,9 +194,11 @@ size_t GemmBwd1x1_stride2::GetWorkspaceSize(const ExecutionContext& context,
 #endif
 }
 
-bool GemmBwd1x1_stride2::IsSlow(const ExecutionContext& context,
-                                const ProblemDescription& problem) const
+SolverSpeedClass GemmBwd1x1_stride2::GetSpeedClass(const ExecutionContext& context,
+                                                   const ProblemDescription& problem) const
 {
+    // Slow, never ExceedsLaunchBudget: explicit GEMM runs in bounded per-batch chunks, so
+    // it is wasteful to benchmark here, not a watchdog risk. @see SolverSpeedClass
     const std::string& arch        = context.GetStream().GetDeviceName();
     const std::set<std::string> mi = {"gfx942", "gfx955"};
     const bool is_mi               = mi.find(arch) != mi.end();
@@ -211,7 +213,7 @@ bool GemmBwd1x1_stride2::IsSlow(const ExecutionContext& context,
 
     if(is_gfx11 || is_gfx12)
     {
-        return false;
+        return SolverSpeedClass::Normal;
     }
     else if(is_mi)
     {
@@ -219,10 +221,10 @@ bool GemmBwd1x1_stride2::IsSlow(const ExecutionContext& context,
         // SWPG < 400k: Moderate spatial-channel work
         // CPG < 192: Low channels per group (critical discriminator)
         if(spatial_work_per_group < 400000 && channels_per_group < 192)
-            return true;
+            return SolverSpeedClass::Slow;
     }
 
-    return false;
+    return SolverSpeedClass::Normal;
 }
 
 bool GemmBwd1x1_stride2::IsApplicable(const ExecutionContext& context,
@@ -430,9 +432,11 @@ size_t GemmBwd1x1_stride1::GetWorkspaceSize(const ExecutionContext&,
     return 0;
 }
 
-bool GemmBwd1x1_stride1::IsSlow(const ExecutionContext& context,
-                                const ProblemDescription& problem) const
+SolverSpeedClass GemmBwd1x1_stride1::GetSpeedClass(const ExecutionContext& context,
+                                                   const ProblemDescription& problem) const
 {
+    // Slow, never ExceedsLaunchBudget: explicit GEMM runs in bounded per-batch chunks, so
+    // it is wasteful to benchmark here, not a watchdog risk. @see SolverSpeedClass
     const std::string& arch        = context.GetStream().GetDeviceName();
     const std::set<std::string> mi = {"gfx942", "gfx955"};
     const bool is_mi               = mi.find(arch) != mi.end();
@@ -447,7 +451,7 @@ bool GemmBwd1x1_stride1::IsSlow(const ExecutionContext& context,
 
     if(is_gfx11 || is_gfx12)
     {
-        return false;
+        return SolverSpeedClass::Normal;
     }
     else if(is_mi)
     {
@@ -455,10 +459,10 @@ bool GemmBwd1x1_stride1::IsSlow(const ExecutionContext& context,
         // SWPG < 200k: Low spatial-channel work (memory-bound)
         // CPG < 640: Moderate channels (poor reuse)
         if(spatial_work_per_group < 200000 && channels_per_group < 640)
-            return true;
+            return SolverSpeedClass::Slow;
     }
 
-    return false;
+    return SolverSpeedClass::Normal;
 }
 
 bool GemmBwd1x1_stride1::IsApplicable(const ExecutionContext& context,
@@ -697,8 +701,11 @@ size_t GemmBwdRest::GetWorkspaceSize(const ExecutionContext& context,
 #endif
 }
 
-bool GemmBwdRest::IsSlow(const ExecutionContext& context, const ProblemDescription& problem) const
+SolverSpeedClass GemmBwdRest::GetSpeedClass(const ExecutionContext& context,
+                                            const ProblemDescription& problem) const
 {
+    // Slow, never ExceedsLaunchBudget: explicit GEMM runs in bounded per-batch chunks, so
+    // it is wasteful to benchmark here, not a watchdog risk. @see SolverSpeedClass
     const std::string& arch        = context.GetStream().GetDeviceName();
     const std::set<std::string> mi = {"gfx942", "gfx955"};
     const bool is_mi               = mi.find(arch) != mi.end();
@@ -722,12 +729,12 @@ bool GemmBwdRest::IsSlow(const ExecutionContext& context, const ProblemDescripti
         // SWPG < 1.6M: Low spatial-channel work
         // CPG < 360: Low channels
         if(spatial_work_per_group < 1600000 && channels_per_group < 360)
-            return true;
+            return SolverSpeedClass::Slow;
 
         // SECONDARY: Batch fragmentation detection
         // SPB < 0.8: Extreme batch fragmentation
         if(spatial_per_batch < 0.8)
-            return true;
+            return SolverSpeedClass::Slow;
     }
     else if(is_mi)
     {
@@ -735,15 +742,15 @@ bool GemmBwdRest::IsSlow(const ExecutionContext& context, const ProblemDescripti
         // SWPG < 3M: Low spatial-channel work
         // CPG < 112: Very low channels
         if(spatial_work_per_group < 3000000 && channels_per_group < 112)
-            return true;
+            return SolverSpeedClass::Slow;
 
         // SECONDARY: Batch fragmentation detection
         // SPB < 40.0: Each batch item has < 40 pixels of spatial work
         if(spatial_per_batch < 40.0)
-            return true;
+            return SolverSpeedClass::Slow;
     }
 
-    return false;
+    return SolverSpeedClass::Normal;
 }
 
 bool GemmBwdRest::IsApplicable(const ExecutionContext& context,

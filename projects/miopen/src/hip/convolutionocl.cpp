@@ -29,6 +29,7 @@
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <functional>
 #include <optional>
@@ -296,15 +297,10 @@ std::vector<Solution> EvaluateConvSolutions(const ExecutionContext& ctx,
 
         AlgorithmName algo{
             ConvolutionAlgoToDirectionalString(id.GetAlgo(), problem.GetDirection())};
-        bool ocl_non_naive_succeeded   = false;
-        std::vector<Solution> eval_sol = EvaluateInvokers(handle,
-                                                          conv_sols,
-                                                          algo,
-                                                          problem.MakeNetworkConfig(),
-                                                          invoke_ctx,
-                                                          core_result,
-                                                          false,
-                                                          ocl_non_naive_succeeded);
+        // Single-solver evaluation: the speed-class policy needs a cross-solver view it
+        // cannot have here, so it is left disabled (default empty class map).
+        std::vector<Solution> eval_sol = EvaluateInvokers(
+            handle, conv_sols, algo, problem.MakeNetworkConfig(), invoke_ctx, core_result, false);
 
         if(!eval_sol.empty())
             eval_sols.emplace_back(eval_sol.front());
@@ -1045,6 +1041,55 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
             interim.emplace_back(miopenConvSolution_t{wti2time(wti), ws, solver_id.Value(), algo});
         }
     }
+    // Last-resort (slow) solver gate, immediate-mode half. Neither fallback path above
+    // measures anything -- the AI path assigns synthetic ranks and the WTI path a static
+    // estimate -- so nothing here would notice that a solver is applicable but wildly
+    // unsuitable for this shape until the caller runs it. For the un-tiled naive kernel
+    // that means seconds of GPU occupancy and an OS watchdog reset (a TDR); for explicit
+    // GEMM it means im2col expansion and per-batch BLAS calls nobody wanted.
+    //
+    // Apply the same rule Find applies in EvaluateInvokers: ask each candidate what
+    // SolverInterface::GetSpeedClass it reports for this problem and device, and keep only
+    // those in the best (lowest) class present. The cross-solver view has to live here
+    // rather than in the solver's own GetWti, because a per-solver hook cannot see whether
+    // an alternative exists and would therefore also drop the solver when it is the *only*
+    // candidate, turning a slow convolution into a failed one. Keeping a whole class, not
+    // just one winner, preserves ranking among equally-safe candidates; keeping only the
+    // best class is what stops a watchdog risk (ExceedsLaunchBudget) from being handed out
+    // merely because the alternative was also off the pace (Slow). Placed after both paths
+    // and before the sort so it covers whichever one populated interim.
+    //
+    // MIOPEN_DEBUG_DEFER_SLOW_SOLVERS=0 skips the whole block, leaving every applicable
+    // candidate on offer exactly as before the gate existed.
+    if(!interim.empty() && IsDeferSlowSolversEnabled())
+    {
+        std::vector<solver::SolverSpeedClass> classes;
+        classes.reserve(interim.size());
+        for(const auto& s : interim)
+        {
+            const auto any = solver::Id{s.solution_id}.GetSolver();
+            classes.push_back(any.IsEmpty() ? solver::SolverSpeedClass::Normal
+                                            : any.GetSpeedClass(ctx, problem));
+        }
+
+        const auto best = *std::min_element(begin(classes), end(classes));
+        if(best != *std::max_element(begin(classes), end(classes)))
+        {
+            const auto dropped =
+                std::count_if(begin(classes), end(classes), [&](auto c) { return c != best; });
+            MIOPEN_LOG_I2("Immediate fallback: dropping "
+                          << dropped << " last-resort (slow) candidate(s); "
+                          << (interim.size() - dropped) << " better-classed candidate(s) remain");
+
+            auto kept = std::vector<miopenConvSolution_t>{};
+            kept.reserve(interim.size() - dropped);
+            for(size_t i = 0; i < interim.size(); ++i)
+                if(classes[i] == best)
+                    kept.push_back(interim[i]);
+            interim = std::move(kept);
+        }
+    }
+
     MIOPEN_LOG_I2("maxSolutionCount = " << maxSolutionCount << ", available = " << interim.size());
     for(const auto& s : interim)
         MIOPEN_LOG_I2(s);

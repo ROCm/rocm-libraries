@@ -52,16 +52,31 @@ std::string ConvDirectNaiveConvCompileOption(const ExecutionContext& ctx,
 bool ConvDirectNaiveConvIsApplicableByKernelType(const ExecutionContext&,
                                                  const miopen::conv::ProblemDescription&);
 
-/// Returns true when the problem's total MAC work exceeds the naive-conv work
-/// limit. Naive stays applicable at any size (it is the universal fallback); this
-/// is consumed at the selection layer (EvaluateInvokers) to keep the un-tiled
-/// naive kernel from being benchmarked when it would run long enough to trip the
-/// OS GPU watchdog / TDR and a non-naive alternative also applies.
-/// Overridable via MIOPEN_DEBUG_CONV_DIRECT_NAIVE_MAX_WORK; see the .cpp for detail.
-/// Exported (MIOPEN_INTERNALS_EXPORT) so the gtest unit test can link against it
-/// directly and exercise the metric on the CPU without launching a kernel.
+/// Total multiply-accumulate count for the problem: the naive kernel is un-tiled,
+/// so its wall-time is proportional to this.
+MIOPEN_INTERNALS_EXPORT size_t ConvDirectNaiveConvWork(const miopen::conv::ProblemDescription&);
+
+/// Work budget (in MACs) a single naive launch may spend on a device with the given
+/// capabilities, derived from a wall-time budget so the limit scales with the part
+/// actually running the kernel. Takes plain integers rather than a Handle so the
+/// model can be unit tested on the CPU against synthetic devices.
+/// Tunable via MIOPEN_DEBUG_CONV_DIRECT_NAIVE_MAX_TIME_MS (budget) and
+/// MIOPEN_DEBUG_CONV_DIRECT_NAIVE_MAX_WORK (absolute override); see the .cpp.
+MIOPEN_INTERNALS_EXPORT size_t ConvDirectNaiveConvWorkLimit(size_t hw_cus,
+                                                            size_t wavefront_width,
+                                                            size_t clock_khz);
+
+/// Returns true when the problem's total MAC work exceeds what the context's device
+/// can retire inside the wall-time budget. Naive stays applicable at any size (it is
+/// the universal fallback); this is consumed at the selection layers
+/// (EvaluateInvokers for Find, GetSolutionsFallback for immediate mode) to drop the
+/// un-tiled naive kernel when it would run long enough to trip the OS GPU watchdog /
+/// TDR and a non-naive alternative also applies.
+/// Exported (MIOPEN_INTERNALS_EXPORT) so the gtest unit tests can link against these
+/// directly and exercise the model on the CPU without launching a kernel.
 MIOPEN_INTERNALS_EXPORT bool
-ConvDirectNaiveConvExceedsWorkLimit(const miopen::conv::ProblemDescription&);
+ConvDirectNaiveConvExceedsWorkLimit(const ExecutionContext&,
+                                    const miopen::conv::ProblemDescription&);
 
 bool IsInputFp32(const miopen::conv::ProblemDescription&);
 bool IsInputFp16(const miopen::conv::ProblemDescription&);

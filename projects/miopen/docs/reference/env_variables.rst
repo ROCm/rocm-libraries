@@ -104,39 +104,39 @@ and :doc:`Performance database <../conceptual/perfdb>`.
       - | 1: Enable
         | 0 or unset: Disable
 
-    * - | ``MIOPEN_NAIVE_TIMEOUT``
-        | When enabled and a non-naive solver has already succeeded,
-        | naive solver evaluation is launched on a separate HIP stream
-        | with a wall-clock budget of ``MIOPEN_NAIVE_TIMEOUT_FACTOR``
-        | percent of the best non-naive time. If the naive kernel does
-        | not complete within the budget, it is skipped and the stream
-        | is returned to an async pool for later reclamation. Naive
-        | solvers are still used as a fallback when no non-naive solver
-        | succeeds.
-        |
-        | Limitation: a skipped kernel keeps reading the caller's input
-        | tensors until it finishes. Its results are discarded, so stale
-        | or reused data is harmless, but unmapping those pages while it
-        | reads them faults the process. Freeing with ``hipFree`` is safe
-        | because it synchronizes the device first. ``hipFreeAsync`` is
-        | ordered only against the stream it is given and does not wait
-        | for a skipped kernel; the pool normally keeps the address range
-        | reserved, but it releases pages back to the operating system
-        | once ``hipMemPoolAttrReleaseThreshold`` is exceeded, which its
-        | default value of 0 always is. Disable this option if the
-        | application frees convolution inputs through the
-        | stream-ordered allocator.
-      - | 1 or unset: Enable (default)
-        | 0: Disable
+    * - | ``MIOPEN_DEBUG_CONV_DIRECT_NAIVE_MAX_TIME_MS``
+        | Wall-clock budget, in milliseconds, for a single launch of the
+        | un-tiled naive convolution kernel. The naive solvers convert
+        | this budget into a MAC limit using the device's compute units,
+        | wavefront width, and clock, then report the speed class
+        | ``ExceedsLaunchBudget`` for any problem exceeding it, which
+        | keeps find and immediate mode from selecting them while any
+        | better-classed solver applies. Raise it to let
+        | naive compete on larger problems, at the risk of a GPU driver
+        | watchdog reset (TDR); lower it on a device with a short
+        | watchdog. Values above 60000 are clamped.
+      - | Milliseconds (default: 1000)
 
-    * - | ``MIOPEN_NAIVE_TIMEOUT_FACTOR``
-        | Sets the wall-clock budget for naive solver evaluation as a
-        | percentage of the best non-naive solver time. Only takes
-        | effect when ``MIOPEN_NAIVE_TIMEOUT`` is enabled and a
-        | non-naive solver has already succeeded. For example, the
-        | default value of 300 gives naive a budget of 3× the best
-        | non-naive time.
-      - | Integer percentage (default: 300)
+    * - | ``MIOPEN_DEBUG_CONV_DIRECT_NAIVE_MAX_WORK``
+        | Pins the naive convolution MAC limit to a fixed value instead
+        | of deriving it from the device and the time budget above. Takes
+        | precedence over ``MIOPEN_DEBUG_CONV_DIRECT_NAIVE_MAX_TIME_MS``.
+        | Intended for testing and for bisecting the derived limit.
+      - | MAC count (unset: derive from device)
+
+    * - | ``MIOPEN_DEBUG_DEFER_SLOW_SOLVERS``
+        | Master switch for speed-class based solver deferral. When on,
+        | each solver reports a speed class for the problem at hand and
+        | find and immediate mode consider only the best class that has
+        | an applicable member, so a solver that is merely applicable is
+        | not benchmarked or offered while a better-classed one exists.
+        | Set to 0 to consider every applicable solver regardless of its
+        | speed class, as releases before this mechanism did. That is a
+        | workaround for a solver being deferred on a shape where it was
+        | in fact the right choice; it also re-exposes the naive-kernel
+        | GPU driver watchdog reset (TDR) the mechanism prevents.
+      - | 1 or unset: Defer slow solvers
+        | 0: Consider all applicable solvers
 
     * - | ``MIOPEN_DEBUG_DISABLE_FIND_DB``
         | Disables FindDb functionality.

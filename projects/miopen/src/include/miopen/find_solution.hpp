@@ -416,10 +416,13 @@ struct SolverContainer
                 {
                     MIOPEN_LOG_I2(solver.SolverDbId() << ": Not applicable");
                 }
-                else if(env::enabled(MIOPEN_SEARCH_CUTOFF) && solver.IsSlow(ctx, problem))
-                {
-                    MIOPEN_LOG_I2(solver.SolverDbId() << ": Skipped (slow, search cutoff active)");
-                }
+                // No GetSpeedClass() check here on purpose. A solver reporting a non-Normal
+                // speed class is still applicable and must stay in the candidate list,
+                // because it may be the *only* candidate -- dropping it here would turn a
+                // slow convolution into a failed one. The last-resort policy needs the
+                // cross-solver view that only the consumers have, so it lives in
+                // FindCore/EvaluateInvokers (Find) and GetSolutionsFallback (immediate
+                // mode). @see ShouldSkipSlowBenchmark
                 else
                 {
                     const Solution s =
@@ -475,10 +478,8 @@ struct SolverContainer
                 {
                     MIOPEN_LOG_I2(solver.SolverDbId() << ": Not applicable");
                 }
-                else if(env::enabled(MIOPEN_SEARCH_CUTOFF) && solver.IsSlow(ctx, problem))
-                {
-                    MIOPEN_LOG_I2(solver.SolverDbId() << ": Skipped (slow, search cutoff active)");
-                }
+                // No GetSpeedClass() check here on purpose -- see the note in the sibling
+                // loop above.
                 else
                 {
                     auto db = [&]() -> PerformanceDb& {
