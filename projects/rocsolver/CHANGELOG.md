@@ -17,6 +17,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Removed
 ### Optimized
 ### Resolved issues
+
+* Fixed memory access faults for matrices with more than 2^31 elements (for example in GEQLF and ORGQL/UNGQL), caused by 32-bit internal matrix offsets.
+
 ### Known issues
 ### Upcoming changes
 

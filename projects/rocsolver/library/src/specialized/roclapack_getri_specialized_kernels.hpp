@@ -46,11 +46,11 @@ ROCSOLVER_BEGIN_NAMESPACE
 template <rocblas_int DIM, typename T, typename U>
 ROCSOLVER_KERNEL void __launch_bounds__(TRTRI_MAX_COLS)
     getri_kernel_small(U AA,
-                       const rocblas_int shiftA,
+                       const rocblas_stride shiftA,
                        const rocblas_int lda,
                        const rocblas_stride strideA,
                        rocblas_int* ipivA,
-                       const rocblas_int shiftP,
+                       const rocblas_stride shiftP,
                        const rocblas_stride strideP,
                        rocblas_int* info,
                        const bool complete,
@@ -177,11 +177,11 @@ template <typename T, typename U>
 rocblas_status getri_run_small(rocblas_handle handle,
                                const rocblas_int n,
                                U A,
-                               const rocblas_int shiftA,
+                               const rocblas_stride shiftA,
                                const rocblas_int lda,
                                const rocblas_stride strideA,
                                rocblas_int* ipiv,
-                               const rocblas_int shiftP,
+                               const rocblas_stride shiftP,
                                const rocblas_stride strideP,
                                rocblas_int* info,
                                const rocblas_int batch_count,
@@ -276,11 +276,11 @@ rocblas_status getri_run_small(rocblas_handle handle,
     Instantiation macros
 *************************************************************/
 
-#define INSTANTIATE_GETRI_SMALL(T, U)                                              \
-    template rocblas_status getri_run_small<T, U>(                                 \
-        rocblas_handle handle, const rocblas_int n, U A, const rocblas_int shiftA, \
-        const rocblas_int lda, const rocblas_stride strideA, rocblas_int* ipiv,    \
-        const rocblas_int shiftP, const rocblas_stride strideP, rocblas_int* info, \
+#define INSTANTIATE_GETRI_SMALL(T, U)                                                 \
+    template rocblas_status getri_run_small<T, U>(                                    \
+        rocblas_handle handle, const rocblas_int n, U A, const rocblas_stride shiftA, \
+        const rocblas_int lda, const rocblas_stride strideA, rocblas_int* ipiv,       \
+        const rocblas_stride shiftP, const rocblas_stride strideP, rocblas_int* info, \
         const rocblas_int batch_count, const bool complete, const bool pivot)
 
 ROCSOLVER_END_NAMESPACE
