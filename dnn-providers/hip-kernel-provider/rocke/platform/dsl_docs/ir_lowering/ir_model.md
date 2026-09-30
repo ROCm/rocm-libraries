@@ -10,7 +10,7 @@ Named scalar types are singletons exported from `core/ir.py`:
 
 ```text
 I1, I8, I32, I64
-F16, BF16, F32
+F16, BF16, F32, F64
 FP8E4M3      # e4m3 fp8 (cvt_fp8_to_f32 / cvt_f32_to_fp8)
 BF8E5M2      # e5m2 fp8 (cvt_bf8_to_f32 / cvt_f32_to_bf8)
 ```
@@ -88,6 +88,7 @@ Kernel attributes consumed by lowering:
 const_i32(value)
 const_i64(value)
 const_f32(value)
+const_f64(value)           # printed as the exact IEEE-754 bit pattern
 fp16_zero()
 zero_vec_f32(n)            # <n x f32>, all zeros
 zero_vec_f32_4()           # <4 x f32>, all zeros
@@ -99,7 +100,7 @@ zero_vec(elem, n)          # f32 / f16 / bf16
 ```text
 add, sub, mul, div, mod                    # integer arithmetic
 fadd, fsub, fmul, fdiv, fneg               # f32 arithmetic
-fmax, fmin                                 # llvm.maxnum / llvm.minnum (f32/f16/bf16)
+fmax, fmin                                 # llvm.maxnum / llvm.minnum (f32/f16/bf16/f64)
 fcmp(pred, a, b)                           # pred in {olt,ole,ogt,oge,oeq,one,ord,uno}
 cmp_lt, cmp_le, cmp_gt, cmp_ge, cmp_eq, cmp_ne   # integer compare (-> i1)
 land, lor, lnot                            # bitwise + i1 logic
@@ -125,7 +126,7 @@ cvt_f32_to_i8_sat(v)     # round + saturate to i8
 
 ### Math intrinsics
 
-LLVM target intrinsics; lowering is f32-centric.
+LLVM target intrinsics; lowering is f32-centric. `exp2`, `sqrt`, `rsqrt` and `tanh` accept only f32 and reject f64 inputs; `rcp` is a plain `fdiv` and accepts f64.
 
 ```text
 exp2(v)        # llvm.exp2.f32

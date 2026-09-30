@@ -139,6 +139,15 @@ static bool rocke_ew_reason(char* reason, size_t cap, const char* msg)
     return false;
 }
 
+/* _F64_OPS: ops computed exactly in the I/O type; the exp2-based activations
+ * are f32-only, so f64 is limited to this set. */
+static bool rocke_ew_is_f64_op(const char* op)
+{
+    return rocke_ew_streq(op, "copy") || rocke_ew_streq(op, "neg") || rocke_ew_streq(op, "abs")
+           || rocke_ew_streq(op, "relu") || rocke_ew_streq(op, "add") || rocke_ew_streq(op, "sub")
+           || rocke_ew_streq(op, "mul") || rocke_ew_streq(op, "max") || rocke_ew_streq(op, "min");
+}
+
 bool rocke_elementwise_is_valid_spec(const rocke_elementwise_spec_t* spec,
                                      char* reason,
                                      size_t reason_cap)
@@ -153,9 +162,15 @@ bool rocke_elementwise_is_valid_spec(const rocke_elementwise_spec_t* spec,
         snprintf(buf, sizeof(buf), "unknown op %s", spec->op ? spec->op : "(null)");
         return rocke_ew_reason(reason, reason_cap, buf);
     }
-    if(!(rocke_ew_streq(spec->dtype, "f16") || rocke_ew_streq(spec->dtype, "bf16")))
+    if(!(rocke_ew_streq(spec->dtype, "f16") || rocke_ew_streq(spec->dtype, "bf16")
+         || rocke_ew_streq(spec->dtype, "f64")))
     {
         snprintf(buf, sizeof(buf), "unsupported dtype %s", spec->dtype ? spec->dtype : "(null)");
+        return rocke_ew_reason(reason, reason_cap, buf);
+    }
+    if(rocke_ew_streq(spec->dtype, "f64") && !rocke_ew_is_f64_op(spec->op))
+    {
+        snprintf(buf, sizeof(buf), "op '%s' not supported for f64", spec->op);
         return rocke_ew_reason(reason, reason_cap, buf);
     }
     if(!(spec->block_size == 64 || spec->block_size == 128 || spec->block_size == 256
@@ -165,7 +180,15 @@ bool rocke_elementwise_is_valid_spec(const rocke_elementwise_spec_t* spec,
             buf, sizeof(buf), "block_size %d not in {64, 128, 256, 512, 1024}", spec->block_size);
         return rocke_ew_reason(reason, reason_cap, buf);
     }
-    if(!(spec->vec == 2 || spec->vec == 4 || spec->vec == 8))
+    if(rocke_ew_streq(spec->dtype, "f64"))
+    {
+        if(spec->vec != 2)
+        {
+            snprintf(buf, sizeof(buf), "vec %d not in {2} for f64", spec->vec);
+            return rocke_ew_reason(reason, reason_cap, buf);
+        }
+    }
+    else if(!(spec->vec == 2 || spec->vec == 4 || spec->vec == 8))
     {
         snprintf(buf, sizeof(buf), "vec %d not in {2, 4, 8}", spec->vec);
         return rocke_ew_reason(reason, reason_cap, buf);
@@ -222,7 +245,9 @@ static rocke_value_t* rocke_ew_apply_unary(rocke_ir_builder_t* b, rocke_value_t*
     }
     if(rocke_ew_streq(op, "relu"))
     {
-        return rocke_b_fmax(b, x, rocke_b_const_f32(b, 0.0));
+        rocke_value_t* zero = strcmp(x->type->name, "f64") == 0 ? rocke_b_const_f64(b, 0.0)
+                                                                : rocke_b_const_f32(b, 0.0);
+        return rocke_b_fmax(b, x, zero);
     }
     if(rocke_ew_streq(op, "exp2"))
     {
@@ -296,19 +321,34 @@ static rocke_value_t*
     return NULL;
 }
 
+/* _to_compute: promote an I/O scalar to the compute type (f64 stays native). */
+static rocke_value_t* rocke_ew_to_compute(rocke_ir_builder_t* b, rocke_value_t* x)
+{
+    return strcmp(x->type->name, "f64") == 0 ? x : rocke_b_cast_to_f32(b, x);
+}
+
+/* _from_compute: demote a compute scalar back to the I/O type (f64 stays native). */
+static rocke_value_t*
+    rocke_ew_from_compute(rocke_ir_builder_t* b, rocke_value_t* x, const rocke_type_t* io_ty)
+{
+    return strcmp(io_ty->name, "f64") == 0 ? x : rocke_b_cast_f32_to(b, x, io_ty);
+}
+
 /* ===================================================================== *
  *  Distribution-driven load / store specialised for the elementwise tile.
  *
  *  Reproduces the Python load_tile / store_tile builder-call order for the
  *  fixed single-Y, single-P, single-X distribution this instance uses. The
- *  per-thread register tile holds exactly `vec` f32 scalars (storage[0..vec)).
+ *  per-thread register tile holds exactly `vec` compute scalars (f32, or
+ *  native f64 for f64 I/O) in storage[0..vec).
  * ===================================================================== */
 
 /* load_tile(window, distribution, ps=[[tid]]) for the elementwise distribution.
  *
  *   traits.iterate_accesses() yields one base y_base = (0,)
  *   x_coords = distribution.calculate_x(ys=[const_i32(0)], ps=[[tid]])
- *   scalars  = window.load_vec_as_f32(*x_coords, n=vec)
+ *   scalars  = window.load_vec_scalars(*x_coords, n=vec)   if f64
+ *              window.load_vec_as_f32(*x_coords, n=vec)    otherwise
  *   dt[k] = scalars[k]
  *
  * `out_storage` must have capacity >= vec. Returns 1 on success, 0 on failure
@@ -340,6 +380,12 @@ static int rocke_ew_load_tile(rocke_ir_builder_t* b,
         return 0;
     }
 
+    if(strcmp(rocke_tile_window_dtype(window)->name, "f64") == 0)
+    {
+        rocke_tile_window_load_vec_scalars(b, window, x_coords, 1, vec, out_storage);
+        return rocke_ir_builder_ok(b) ? 1 : 0;
+    }
+
     /* window.load_vec_as_f32(*x_coords, n=vec):
      *   v = load_vec(x_coords, n=vec)
      *   scalars[k] = cast_to_f32(vec_extract(v, k))
@@ -356,7 +402,8 @@ static int rocke_ew_load_tile(rocke_ir_builder_t* b,
  *
  *   x_coords = calculate_x(ys=[const_i32(0)], ps=[[tid]])
  *   scalars  = storage[0..vec)
- *   window.store_vec_from_f32(*x_coords, values=scalars):
+ *   f64: packed = vec_pack(scalars, dtype); store_vec(x_coords, packed, n=vec)
+ *   otherwise window.store_vec_from_f32(*x_coords, values=scalars):
  *       casts[k] = cast_f32_to(scalars[k], dtype)
  *       packed   = vec_pack(casts, dtype)
  *       store_vec(x_coords, packed, n=vec)
@@ -391,7 +438,8 @@ static void rocke_ew_store_tile(rocke_ir_builder_t* b,
     dtype = rocke_tile_window_dtype(window);
     for(k = 0; k < vec; ++k)
     {
-        casts[k] = rocke_b_cast_f32_to(b, storage[k], dtype);
+        casts[k] = strcmp(dtype->name, "f64") == 0 ? storage[k]
+                                                   : rocke_b_cast_f32_to(b, storage[k], dtype);
     }
     packed = rocke_b_vec_pack(b, casts, vec, dtype);
     rocke_tile_window_store_vec(b, window, x_coords, 1, packed, vec);
@@ -658,12 +706,12 @@ rocke_kernel_def_t* rocke_build_elementwise(rocke_ir_builder_t* b,
                     rocke_value_t* a_s;
                     rocke_value_t* r;
                     indices[0] = idx;
-                    /* a = cast_to_f32(a_view.load_scalar([idx])) */
-                    a_s = rocke_b_cast_to_f32(
+                    /* a = _to_compute(a_view.load_scalar([idx])) */
+                    a_s = rocke_ew_to_compute(
                         b, rocke_tensor_view_load_scalar(b, &a_view, indices, 1));
                     if(is_binary)
                     {
-                        rocke_value_t* bv = rocke_b_cast_to_f32(
+                        rocke_value_t* bv = rocke_ew_to_compute(
                             b, rocke_tensor_view_load_scalar(b, &b_view, indices, 1));
                         r = rocke_ew_apply_binary(b, a_s, bv, spec->op);
                     }
@@ -671,9 +719,9 @@ rocke_kernel_def_t* rocke_build_elementwise(rocke_ir_builder_t* b,
                     {
                         r = rocke_ew_apply_unary(b, a_s, spec->op);
                     }
-                    /* c_view.store_scalar([idx], cast_f32_to(r, io_ty)) */
+                    /* c_view.store_scalar([idx], _from_compute(r, io_ty)) */
                     rocke_tensor_view_store_scalar(
-                        b, &c_view, indices, 1, rocke_b_cast_f32_to(b, r, io_ty), 0);
+                        b, &c_view, indices, 1, rocke_ew_from_compute(b, r, io_ty), 0);
                 }
                 rocke_b_region_leave(b);
             }

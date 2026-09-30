@@ -298,12 +298,19 @@ rocke_value_t* rocke_b_global_load_vN_ex(rocke_ir_builder_t* b,
             return (rocke_value_t*)rocke_i_set_err(
                 b, ROCKE_ERR_VALUE, "unsupported vector width for %s global_load_vN: %d", en, n);
     }
+    else if(rocke_i_type_is(dtype, "f64"))
+    {
+        elem_bytes = 8;
+        if(n != 2)
+            return (rocke_value_t*)rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "unsupported vector width for %s global_load_vN: %d", en, n);
+    }
     else
     {
         return (rocke_value_t*)rocke_i_set_err(
             b,
             ROCKE_ERR_VALUE,
-            "global_load_vN supports f16/bf16/i16/f32/i32/tf32/fp8e4m3/bf8e5m2/i8, got %s",
+            "global_load_vN supports f16/bf16/i16/f32/i32/tf32/fp8e4m3/bf8e5m2/i8/f64, got %s",
             en);
     }
     streaming = mem_opts_streaming(b, opts, "global_load_vN");
@@ -424,12 +431,22 @@ void rocke_b_global_store_vN_ex(rocke_ir_builder_t* b,
     {
         elem_bytes = 1;
     }
+    else if(rocke_i_type_is(et, "f64"))
+    {
+        elem_bytes = 8;
+        if(n > 2)
+        {
+            (void)rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "global_store_vN n=%d not supported for %s", n, en);
+            return;
+        }
+    }
     else
     {
         (void)rocke_i_set_err(
             b,
             ROCKE_ERR_VALUE,
-            "global_store_vN supports f16/bf16/i16/f32/i32/tf32/i8/fp8e4m3/bf8e5m2, got %s",
+            "global_store_vN supports f16/bf16/i16/f32/i32/tf32/i8/fp8e4m3/bf8e5m2/f64, got %s",
             en);
         return;
     }

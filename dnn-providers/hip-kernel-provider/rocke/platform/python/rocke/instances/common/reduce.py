@@ -10,8 +10,8 @@ of an ``(M, N)`` tensor produces one scalar per row by applying:
     max :  Y[m] = max_n(X[m,n])
     mean:  Y[m] = sum_n(X[m,n]) / N
 
-Compute is in f32 internally; the output dtype matches the input dtype
-(f16 in / f16 out, etc.).
+Compute is in f32 internally (f64 input computes natively in f64); the
+output dtype matches the input dtype (f16 in / f16 out, etc.).
 
 CK Tile parity shape (``BlockReduce2d{Sync, CrossWarpSync}`` in
 :file:`include/ck_tile/ops/reduce/block/block_reduce2d.hpp`):
@@ -40,7 +40,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Tuple
 
-from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
+from ...core.ir import F32, F64, I32, IRBuilder, KernelDef, PtrType, Value
 from ...helpers.distribution import (
     TileDistributionEncoding,
     block_tile_reduce_sync,
@@ -69,7 +69,7 @@ from ...helpers.tensor_view import (
 )
 
 
-DType = Literal["f16", "bf16"]
+DType = Literal["f16", "bf16", "f64"]
 ReduceOp = Literal["sum", "max", "min", "mean", "prod"]
 
 
@@ -115,12 +115,16 @@ def is_valid_spec(spec: Reduce2DSpec) -> Tuple[bool, str]:
             block_size=spec.block_size,
             vec=spec.vec,
             n_per_block=spec.n_per_block,
+            allowed_dtypes=("f16", "fp16", "bf16", "f64"),
+            allowed_vecs=(2,) if spec.dtype == "f64" else (2, 4, 8),
         )
     )
 
 
 _NEG_INF_F32 = -3.4028234663852886e38
 _POS_INF_F32 = 3.4028234663852886e38
+_NEG_INF_F64 = float("-inf")
+_POS_INF_F64 = float("inf")
 
 
 def _combine_scalar(
@@ -129,7 +133,7 @@ def _combine_scalar(
     a: Value,
     c: Value,
 ) -> Value:
-    """One step of the per-element reduction combiner in f32.
+    """One step of the per-element reduction combiner in the compute type.
 
     Centralised so the per-chunk tree fold, the warp XOR butterfly,
     and the cross-warp LDS tree share the exact same op selection.
@@ -209,20 +213,25 @@ def build_reduce2d(spec: Reduce2DSpec) -> KernelDef:
     x_view = make_naive_tensor_view_packed(X, shape=(1, N), dtype=io_ty)
     x_tile = make_tile_window(x_view, lengths=(1, N), origin=(row, b.const_i32(0)))
 
-    lds = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_red").base
+    # f16/bf16 accumulate in f32; f64 accumulates natively.
+    is_f64 = io_ty == F64
+    compute_ty = F64 if is_f64 else F32
+    const_c = b.const_f64 if is_f64 else b.const_f32
 
-    # Pick the f32 identity element + the combiner for each op.
+    lds = make_lds_view(b, dtype=compute_ty, shape=(BS,), name_hint="lds_red").base
+
+    # Pick the identity element + the combiner for each op.
     if spec.op in ("sum", "mean"):
-        acc = b.const_f32(0.0)
+        acc = const_c(0.0)
         combine: Literal["sum", "max", "min", "prod"] = "sum"
     elif spec.op == "max":
-        acc = b.const_f32(_NEG_INF_F32)
+        acc = const_c(_NEG_INF_F64 if is_f64 else _NEG_INF_F32)
         combine = "max"
     elif spec.op == "min":
-        acc = b.const_f32(_POS_INF_F32)
+        acc = const_c(_POS_INF_F64 if is_f64 else _POS_INF_F32)
         combine = "min"
     elif spec.op == "prod":
-        acc = b.const_f32(1.0)
+        acc = const_c(1.0)
         combine = "prod"
     else:  # validated earlier; defensive
         raise ValueError(f"unsupported reduce op {spec.op!r}")
@@ -270,7 +279,7 @@ def build_reduce2d(spec: Reduce2DSpec) -> KernelDef:
     # that isn't a clean multiple of ``wave_size``).
     if spec.block_size % spec.wave_size == 0 and combine in ("sum", "max"):
         red_dist = _make_row_reduce_distribution(spec)
-        reduced = make_static_distributed_tensor(red_dist, dtype=F32)
+        reduced = make_static_distributed_tensor(red_dist, dtype=compute_ty)
         reduced.storage[0] = acc
         block_tile_reduce_sync(
             b,
@@ -297,10 +306,13 @@ def build_reduce2d(spec: Reduce2DSpec) -> KernelDef:
         total = block_lds_reduce(b, acc, lds, tid, block_size=BS, combine=combine)
 
     if spec.op == "mean":
-        total = b.fmul(total, b.rcp(b.const_f32(float(N))))
+        total = b.fmul(total, b.rcp(const_c(float(N))))
 
     with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
-        store_scalar_from_f32(b, Y, row, total, dtype=spec.dtype)
+        if is_f64:
+            b.global_store(Y, row, total)
+        else:
+            store_scalar_from_f32(b, Y, row, total, dtype=spec.dtype)
 
     return b.kernel
 
