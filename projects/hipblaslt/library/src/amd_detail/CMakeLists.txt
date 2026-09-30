@@ -42,7 +42,8 @@ if(HIPBLASLT_ENABLE_JIT)
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-mock-backend.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-gemm.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-backend.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-process.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-process.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-report.cpp")
 endif()
 
 if(HIPBLASLT_BUILD_TESTING)
