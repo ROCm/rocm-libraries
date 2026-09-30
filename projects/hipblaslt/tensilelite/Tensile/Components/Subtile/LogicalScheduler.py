@@ -281,6 +281,11 @@ class SchedulerConfig:
     # that test needs the tile geometry.
     tailOwnTiles: bool = False
     tailPartitionSizeN: int = 0
+    # M-side tail split (0 = keep the full M dimension in one partition). An M
+    # split is what takes the tail grid past the N axis alone: 8 N tiles floor at
+    # 4 partitions once the MX scale granularity forbids a partition narrower
+    # than 2 tiles, so further staging has to come from M.
+    tailPartitionSizeM: int = 0
 
     # Resolve a partition spec into per-partition sizes along one dimension.
     # spec is either:
@@ -3187,7 +3192,8 @@ class LogicalScheduler:
         self._ngll_emitted = ngll
         return ngll
 
-    def build_nll(self, dropRedundantSync: bool = False) -> EmittedSchedule:
+    def build_nll(self, dropRedundantSync: bool = False,
+                  keepLastSync: bool = True) -> EmittedSchedule:
         """NLL (No Load Loop): mainloop without GR, LR(n+1), GR_INC, LR_INC,
         WaitGR(n+1)+Sync. Keeps LR(n), MFMAs, WaitGR(n). WaitGR counts are
         zeroed only when no LR(n) remains in the last subIterK slot.
@@ -3205,6 +3211,10 @@ class LogicalScheduler:
         thing standing between this body's final LDS read and the next macro
         tile's global reads, which overwrite that buffer. The preloop cannot
         cover that: its barrier sits after its GRs, not before them.
+
+        ``keepLastSync=False`` drops that one too, for the caller who can show
+        another barrier already sits between the body and the re-entry. It is
+        the caller's obligation to show it, not this function's.
 
         Off by default. The split NLL reaches its barriers with the NGLL's
         loads still in flight behind it, so the same argument needs checking
@@ -3280,7 +3290,7 @@ class LogicalScheduler:
                 for em in new_emitted
                 if em.opType == 'sync' and em.moduleId not in removed
             ]
-            for idx, em in survivors[:-1]:
+            for idx, em in (survivors if not keepLastSync else survivors[:-1]):
                 pending[idx][2].add(em.moduleId)
 
         nll: EmittedSchedule = []
@@ -3291,6 +3301,29 @@ class LogicalScheduler:
 
         self._nll_emitted = nll
         return nll
+
+    def _tailLastSyncIsCovered(self) -> bool:
+        """Is the four-deep body's last barrier already covered by a later one?
+
+        build_nll keeps that barrier to separate the body's final LDS read from
+        the next macro tile's global reads. When the body is followed by the
+        fused store, GlobalWriteBatch.emit puts its own barrier at the end of
+        the arm -- the "sync waves before subtile paired stores" drain -- and
+        every path out of the arm crosses it, so it separates the same two
+        things a whole store later. Keeping both costs a barrier the profile
+        shows at 118 cycles per wave, 0.53% of the kernel's stall.
+
+        The conditions below are the ones GlobalWriteBatch.emit tests, minus
+        the bias disjunct: it keys on states.useBias, which is not derivable
+        here, whereas UseScaleAlphaVec is read from ProblemType by both. A
+        bias-only kernel therefore keeps its barrier rather than guessing.
+        """
+        k = self._kernel
+        if not k or not k.get("UseSubtileImpl") or not k.get("PostLoopStoreInNll"):
+            return False
+        if not k["ProblemType"].get("UseScaleAlphaVec", 0):
+            return False
+        return plsinDebugEnv("TENSILE_PLSIN_TAIL_DROP_LAST_SYNC", "0") != "0"
 
     def build_tail_merged(self) -> Optional[EmittedSchedule]:
         """Schedule the last two DepthU as one body, four k-subiterations deep.
@@ -3334,7 +3367,7 @@ class LogicalScheduler:
             # split lives here, where it is what keeps B narrow enough for the
             # four-deep body's doubled A to fit.
             cfg.spanTailOverride = True
-            cfg.partitionSizeM = self.config.numMFMATilesM
+            cfg.partitionSizeM = self.config.tailPartitionSizeM or self.config.numMFMATilesM
             cfg.partitionSizeN = self.config.tailPartitionSizeN
             # The partition sizes above are inputs to the derived per-partition
             # lists, and deepcopy carries the parent's derivation rather than
@@ -3350,7 +3383,8 @@ class LogicalScheduler:
         # the FourDeepTailEntry sequence does it explicitly with its own waitcnt
         # and barrier. The body itself issues no global read, so nothing inside
         # can recreate the hazard.
-        sub.build_nll(dropRedundantSync=True)
+        sub.build_nll(dropRedundantSync=True,
+                      keepLastSync=not self._tailLastSyncIsCovered())
 
         _dumpDir = plsinDebugEnv("TENSILE_PLSIN_DUMP_TAIL", "")
         if _dumpDir:
@@ -4311,7 +4345,12 @@ class LogicalScheduler:
         # of the loop for no extra cover.
         pendingDrain = None
         for pi, partition_emitted in enumerate(emitted_3d):
-            partModule = Module(f"{label}_part{pi}") if pendingDrain else module
+            # Partition 0 has no inbound drain, so it used to write straight into
+            # the loop module and could not be woven into. Its own stage is the one
+            # that fixes where the first store lands, so give every partition a
+            # module of its own whenever a staged drain is in play.
+            _ownModule = pendingDrain is not None or injectAfterPartition is not None
+            partModule = Module(f"{label}_part{pi}") if _ownModule else module
             for k, em_list in enumerate(partition_emitted):
                 partModule.addComment0(f"partition={pi} subIterK={k}")
                 has_mfma = any(em.opType == 'mfma' for em in em_list)
@@ -4351,13 +4390,29 @@ class LogicalScheduler:
                         for item in unit:
                             module.add(item)
                 pendingDrain = None
+            elif _ownModule:
+                # No inbound drain, but this partition still owns its module so its
+                # own stage can be woven into it below.
+                selfCover = partModule
             if injectAfterPartition is not None:
                 staged = injectAfterPartition.get(pi)
                 if staged is not None:
                     self._plsinStageAccCheck(pi, staged, emitted_3d)
                     units = self._plsinStageDrainUnits(staged)
+                    # First chance: this partition's own MFMAs, where the bars that
+                    # pin each unit actually live, so a unit can go in as soon as
+                    # its accumulators are final rather than a whole partition later.
+                    # Whatever cannot be covered here falls through to the old route.
+                    if units and selfCover is not None:
+                        earlyWoven, units = self._weaveStageDrainIntoOwnPartition(
+                            selfCover, units, f"{label}_p{pi}",
+                            writer.states.subtileAbsRowAddr)
+                        if earlyWoven is not None:
+                            selfCover = earlyWoven
                     if units and pi + 1 < len(emitted_3d):
                         pendingDrain = units  # defer to the next partition's MFMAs
+                    elif not units:
+                        pass  # fully placed in this partition
                     else:
                         # No next partition to defer to, so the partition's own
                         # trailing MFMAs are the last cover available: they finalize
@@ -4629,10 +4684,15 @@ class LogicalScheduler:
     def _plsinStagedStoreCount(self, weaveGroups, lendTiles, storeCfg=None):
         """Number of per-partition store stages for the fused arm (0 = monolithic).
 
-        Staging only lines up with the store when the partitions split along N. The
-        store enumerates its elements N-group-outermost, so an N split makes each
-        partition's D tiles a contiguous run that can be cut on, while an M split
-        interleaves the partitions throughout the element list.
+        The store enumerates its elements N-group-outermost, so an N split makes
+        each partition's D tiles one contiguous run. An M split interleaves the
+        partitions instead -- the elements run p0,p1,p0,p1 in tt0 blocks -- and
+        the cut still works, because a boundary marker only ever opens a *later*
+        stage (_emitPlsinStageBoundary's high-water rule). The revisited p0
+        elements stay in p1's stage, which is later than they need and therefore
+        safe; the cost is that those stores drain one partition late rather than
+        being spread evenly. Both splits require uniform partition sizes, since a
+        stage is cut at a fixed element stride.
 
         Tiles that lend operand registers to the store are excluded: a stage runs
         while the next partition is still reading those registers. That is exactly
@@ -4657,11 +4717,11 @@ class LogicalScheduler:
         # one that body was scheduled with. They coincide except under
         # TENSILE_PLSIN_TAIL_OWN_TILES, where only the four-deep tail is split.
         cfg = storeCfg if storeCfg is not None else self.config
-        if cfg.numPartitionsM != 1 or cfg.numPartitionsN < 2:
+        if cfg.numPartitions < 2:
             return 0
-        if len(set(cfg._partitionSizesN)) != 1:
+        if len(set(cfg._partitionSizesN)) != 1 or len(set(cfg._partitionSizesM)) != 1:
             return 0
-        return cfg.numPartitionsN
+        return cfg.numPartitions
 
     @staticmethod
     def _hasStageMarker(mod):
@@ -4786,6 +4846,12 @@ class LogicalScheduler:
         if stagedStores:
             weaveGroups, lendTiles = None, []
         writer.states.subtileStoreStages = stagedStores
+        # The stage index is 2-D whenever the tail splits M as well. It has to
+        # match _partition_tile_range's pi ordering (M fastest), because the
+        # stages are injected into the loop keyed by that same pi.
+        writer.states.subtileStoreStagesM = \
+            (storeCfg if storeCfg is not None else self.config).numPartitionsM \
+            if stagedStores else 1
         writer.states.subtileFusedLendVgprs = lendTiles
         savedGroups = writer.states.subtileWeaveMfmaGroups
         savedMaster = writer.states.subtileWeaveMfmaGroupsMaster
@@ -4833,6 +4899,7 @@ class LogicalScheduler:
                 storeModule = None  # every piece now rides inside the loop
         writer.states.subtileStagedStoreSeam = None
         writer.states.subtileStoreStages = 0
+        writer.states.subtileStoreStagesM = 1
         fusedLoopModule = self._emitLoop(writer, kernel, f"{label}_FUSED", fusedEmitted,
                                          injectAfterPartition=stagedInject)
         # Step 4 store-init hoist: buildSubtileFusedStore stashed the branch/memory-free
@@ -5451,6 +5518,76 @@ class LogicalScheduler:
                     bar = max(bar, lastReader.get(reg, -1))
             readyAfter.append(bar)
         return readyAfter
+
+    def _weaveStageDrainIntoOwnPartition(self, partModule, units, label, absRowAddr):
+        """Place stage p's units inside partition p, each at its own ready bar.
+
+        The deferred path hands stage p to partition p+1, where none of p's MFMAs
+        remain, so every bar there is vacuous and the units get spread by stride
+        alone. Measured on MT256x256 that leaves every store issuing about 21 MFMAs
+        after its accumulators went final, and strands the last stage's units past
+        the final MFMA with no cover at all.
+
+        Here the bars are real -- the MFMAs that finalize a unit are in this very
+        module -- so a unit can be dropped in as soon as its own accumulators are
+        done, which is the earliest any placement could legally put it.
+
+        Only units that still have MFMAs behind them are placed. A unit whose bar
+        falls at the end of the partition would be issuing exposed, which is worse
+        than what the deferred path gives it, so it is handed back as leftover and
+        takes the old route into partition p+1.
+
+        Returns (module, leftoverUnits); (None, units) when nothing could be placed.
+        """
+        from rocisa.code import Module
+        from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
+        # Same gate as the last-partition weave: reordering the drain is only safe
+        # once rows are addressed absolutely, otherwise moving a unit moves the rows
+        # it writes because D is reached through the SrdD cursor.
+        if not self.config.blockSched or not absRowAddr:
+            return None, units
+        if plsinDebugEnv("TENSILE_PLSIN_DRAIN_EARLY", "0") == "0":
+            return None, units
+        flat = list(partModule.flatitems())
+        mfmaPos = [i for i, inst in enumerate(flat)
+                   if isinstance(inst, (MFMAInstruction, MXMFMAInstruction))]
+        if not units or not mfmaPos:
+            return None, units
+        readyAfter = self._plsinDrainReadyBars(flat, mfmaPos, units)
+        if readyAfter is None:
+            return None, units
+        # Keep this many MFMAs behind a unit for it to be worth placing here, and
+        # this many between two units so they do not re-bunch into one exposed run.
+        reserve = max(1, int(plsinDebugEnv("TENSILE_PLSIN_DRAIN_EARLY_RESERVE", "2")))
+        # The bars already space the units: a unit's accumulators are finalized by
+        # a different MFMA than its neighbour's, so placing each one straight at its
+        # bar spreads them without any pacing term. Adding a stride on top only
+        # holds units back past the point they became legal, which is the delay this
+        # is removing -- so the default is no extra spacing.
+        spacing = max(1, int(plsinDebugEnv("TENSILE_PLSIN_DRAIN_EARLY_SPACING", "1")))
+        woven = Module(f"{label}_earlydrain")
+        placed, idx, sinceLast = [], 0, 0
+        for i, inst in enumerate(flat):
+            woven.add(inst)
+            if not isinstance(inst, (MFMAInstruction, MXMFMAInstruction)):
+                continue
+            sinceLast += 1
+            behind = sum(1 for p in mfmaPos if p > i)
+            while (idx < len(units) and readyAfter[idx] < i
+                   and sinceLast >= spacing and behind >= reserve):
+                for item in units[idx]:
+                    woven.add(item)
+                placed.append(idx)
+                idx += 1
+                sinceLast = 0
+                break
+        if not placed:
+            return None, units
+        relaxed = self._plsinRelaxDrainStoreWaits(woven)
+        self._plsinWeaveStat("earlydrain", units=len(units), mfma=len(mfmaPos),
+                             placed=len(placed), spacing=spacing, relaxed=relaxed,
+                             leftover=len(units) - idx)
+        return woven, units[idx:]
 
     def _weaveStagedDrainIntoPartition(self, partModule, units, label):
         """Scatter partition p's drain through partition p+1's MFMAs.

@@ -14962,6 +14962,7 @@ class KernelWriterAssembly(KernelWriter):
     # compute partition's D tiles; leaving the stride at 0 falls back to one monolithic
     # store, so an awkward tile simply keeps today's behaviour.
     self.states.subtileStoreTt1PerStage = 0
+    self.states.subtileStoreTt0PerStage = 0
     self.states.subtileStoreStageHighWater = 0
     self.states.subtileScalarPackSlot = 0
     self.states.subtilePairPackSlot = 0
@@ -14982,10 +14983,70 @@ class KernelWriterAssembly(KernelWriter):
     self.states.subtileAbsRowAddr = plsinBlockSchedTile(kernel) and \
                                     plsinDebugEnv("TENSILE_PLSIN_ABS_STORE_ADDR", "1") != "0"
     _nStages = self.states.subtileStoreStages
-    if _nStages > 1:
+    _nStagesM = max(1, self.states.subtileStoreStagesM)
+    if _nStages > 1 and _nStages % _nStagesM == 0:
+      _nStagesN = _nStages // _nStagesM
       _tt1Vals = sorted({e[0] for e in elements[0]})
-      if len(_tt1Vals) % _nStages == 0 and _tt1Vals == list(range(len(_tt1Vals))):
-        self.states.subtileStoreTt1PerStage = len(_tt1Vals) // _nStages
+      _tt0Vals = sorted({e[1] for e in elements[0]})
+      # An M-split tail keys the stage on tt0 as well, so that axis now has to be
+      # dense and evenly divisible too. Left unchecked for an N-only split so a
+      # tile whose tt0 groups are sparse keeps staging exactly as before.
+      _okM = _nStagesM == 1 or (
+          len(_tt0Vals) % _nStagesM == 0 and _tt0Vals == list(range(len(_tt0Vals))))
+      if len(_tt1Vals) % _nStagesN == 0 and _tt1Vals == list(range(len(_tt1Vals))) and _okM:
+        self.states.subtileStoreTt1PerStage = len(_tt1Vals) // _nStagesN
+        # For an N-only split this spans every tt0, so the M term of the stage
+        # index is identically zero and the formula reduces to today's.
+        self.states.subtileStoreTt0PerStage = \
+            (len(_tt0Vals) // _nStagesM) if _nStagesM > 1 else (max(_tt0Vals) + 1)
+        if _nStagesM > 1:
+          # Put the elements in partition order so each stage is one contiguous
+          # run. Without this an M split hands the store p0,p1,p0,p1 within every
+          # pair of N groups, and since a stage boundary may only open a later
+          # stage, the revisited p0 elements fall into p1's stage: the stages come
+          # out alternating 4 and 12 elements and the *last* one -- the one with no
+          # following partition to drain under -- is a long one. Sorting makes them
+          # equal, which is what shortens the run of stores left after the final
+          # MFMA.
+          #
+          # The key is the stage index itself (N group outer, M group inner, matching
+          # _partition_tile_range's pi = piM + piN * numPartitionsM), and the sort is
+          # stable, so element order within a stage is untouched and the paired-store
+          # pairing of adjacent tt0 still sees (0,1),(2,3) side by side.
+          #
+          # Scoped to the list this one fused store consumes. notLocalFullTileElements
+          # and every other store path keep the stock tt1-outer order.
+          # An element's D address comes from its tuple, but the accumulator it
+          # drains comes from its *position*: globalWriteBatch pops the acc reads
+          # off self.codes.accVgprRead in element order. Permuting the elements
+          # alone would therefore re-pair every accumulator with the wrong address.
+          # The queue is a flat list in architectural order, gwvw*regsPerScalar
+          # items per element, and buildSubtileFusedStore already owns a private
+          # copy of it (rebuilt above, restored on the way out), so it can be
+          # permuted in lockstep here without disturbing any other store path.
+          _t1, _t0 = self.states.subtileStoreTt1PerStage, self.states.subtileStoreTt0PerStage
+          _perm = [i for i, _ in sorted(
+              enumerate(elements[0]), key=lambda ie: (ie[1][0] // _t1, ie[1][1] // _t0))]
+          _accRead = self.codes.accVgprRead
+          _blk = fullVws[0] * (self.states.bpeCinternal // self.states.bpr)
+          _items = _accRead.items() if _accRead is not None else []
+          # Only permute when the queue divides into one block per element exactly
+          # as the consumer assumes; otherwise leave everything in stock order and
+          # let the high-water rule give the unbalanced-but-correct staging.
+          if len(_items) == len(_perm) * _blk:
+            _accRead.setItems([it for i in _perm
+                               for it in _items[i * _blk:(i + 1) * _blk]])
+            _same_1 = elements_1[0] is elements[0]
+            elements = list(elements)
+            elements[0] = [elements[0][i] for i in _perm]
+            # notLocalFullTileElements hands back the *same* list for both when
+            # GlobalSplitU==0, which is the only case that reaches this store. Match
+            # on identity rather than length: a GSU>0 elements_1 is a different
+            # store-vector-width enumeration with its own acc queue, and permuting
+            # it to this one's order would silently mispair it.
+            if _same_1:
+              elements_1 = list(elements_1)
+              elements_1[0] = list(elements[0])
     # 4d-3b weave: route accvgpr reads PER PAIR (into each pair's Phase1) instead of
     # the up-front batch block, so terminal MFMAs can later be interleaved between
     # Phase1/Phase2 to hide the ds_bpermute latency (see GlobalWriteBatch weave path).
@@ -15011,6 +15072,7 @@ class KernelWriterAssembly(KernelWriter):
     # everything after is one-time epilogue.
     self.states.subtileStagedStoreSeam = module.itemsSize() if self.states.subtileStoreTt1PerStage else None
     self.states.subtileStoreTt1PerStage = 0
+    self.states.subtileStoreTt0PerStage = 0
     module.add(storeModule)
     self.cleanupGlobalWrite(kernel)
     self.states.bpeCexternal = savedBpeCext
