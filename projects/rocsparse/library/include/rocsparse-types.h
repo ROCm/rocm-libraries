@@ -1403,7 +1403,8 @@ typedef enum rocsparse_spgeam_alg_
  */
 typedef enum rocsparse_spsort_alg_
 {
-    rocsparse_spsort_alg_default = 0, /**< Default SpSort algorithm for the given format. */
+    rocsparse_spsort_alg_default    = 0, /**< Default SpSort algorithm (radix sort). */
+    rocsparse_spsort_alg_radix_sort = 1, /**< Radix sort based SpSort algorithm. */
 } rocsparse_spsort_alg;
 
 /*! \ingroup types_module
