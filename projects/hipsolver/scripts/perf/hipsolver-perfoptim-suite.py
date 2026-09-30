@@ -85,10 +85,10 @@ def execute_benchmarks(output_file, suite, precision, case, bench_executable, lo
     """
     init = False
     benchmark_generator = SUITES[suite]
-    sizenormal, sizebatch = get_size_configurations(case)
+#    sizenormal, sizebatch = get_size_configurations(case)
 
-    for roww, n, bench_args in benchmark_generator(suite=suite, precision=precision,
-                                                    sizenormal=sizenormal, sizebatch=sizebatch):
+    for roww, n, bench_args in benchmark_generator(suite=suite, precision=precision, case=case):
+#                                                    sizenormal=sizenormal, sizebatch=sizebatch):
         if emulated:
             bench_args += ' --math_mode fp32_fp64'
         

@@ -74,15 +74,22 @@ def get_nrhs(s_nrhs, s):
     return nrhs
 
 
-def get_n(s_shape, s, mode):
+def get_mn(s_shape, s, mode):
     """
-    Gets the number of columns depending of the shape (default is square-normal)
+    Gets the number of columns and rows depending on the shape (default is square-normal)
     """
-    if s_shape == 'skinny':
-        if mode == 'batched': n = 26
-        else: n = 160
-    else: n = s
-    return n
+    if mode == 'batched': mn = 26
+    else: mn = 160
+    if s_shape == 'skinny' or s_shape == 'overdet':
+        m = s
+        n = mn
+    elif s_shape == 'underdet':
+        n = s
+        m = mn
+    else:
+        m = s
+        n = s
+    return m,n
 
 
 def get_size_configurations(case):
@@ -406,11 +413,11 @@ def geqrf_suite(*, suite, precision, sizenormal, sizebatch):
     size = sizenormal
     for s_shape in ['square', 'skinny']:
         for s in size:
-            n = get_n(s_shape, s, 'normal')
+            m,n = get_mn(s_shape, s, 'normal')
             ld = get_ld(s)
-            if s >= n:
+            if m >= n:
                 row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'shape': s_shape, 'n': s}
-                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -n {n} -m {s} --lda {ld}')
+                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -n {n} -m {m} --lda {ld}')
 
 
 def geqrfBatch_suite(*, suite, precision, sizenormal, sizebatch):
@@ -425,11 +432,11 @@ def geqrfBatch_suite(*, suite, precision, sizenormal, sizebatch):
     size = sizebatch
     for s_shape in ['square', 'skinny']:
         for s, bc in size:
-            n = get_n(s_shape, s, 'batched')
+            m,n = get_mn(s_shape, s, 'batched')
             ld = get_ld(s)
-            if s >= n:
+            if m >= n:
                 row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'shape': s_shape, 'n': s}
-                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -n {n} -m {s} --lda {ld}')
+                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -n {n} -m {m} --lda {ld}')
 
 
 def cholqr_suite(*, suite, precision, sizenormal, sizebatch):
@@ -444,11 +451,11 @@ def cholqr_suite(*, suite, precision, sizenormal, sizebatch):
     for s_shape in ['square', 'skinny']:
         for alg in [1, 2]:
             for s in size:
-                n = get_n(s_shape, s, 'normal')
+                m,n = get_mn(s_shape, s, 'normal')
                 ld = get_ld(s)
-                if s >= n:
+                if m >= n:
                     row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'shape': s_shape, 'algo': alg, 'n': s}
-                    yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --cholshift {cshift} --cholnum {alg} -n {n} -m {s} --lda {ld}')
+                    yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --cholshift {cshift} --cholnum {alg} -n {n} -m {m} --lda {ld}')
 
 
 def cholqrBatch_suite(*, suite, precision, sizenormal, sizebatch):
@@ -463,71 +470,65 @@ def cholqrBatch_suite(*, suite, precision, sizenormal, sizebatch):
     for s_shape in ['square', 'skinny']:
         for alg in [1, 2]:
             for s, bc in size:
-                n = get_n(s_shape, s, 'batched')
+                m,n = get_mn(s_shape, s, 'batched')
                 ld = get_ld(s)
-                if s >= n:
+                if m >= n:
                     row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'shape': s_shape, 'algo': alg, 'n': s}
-                    yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --cholshift {cshift} --cholnum {alg} -n {n} -m {s} --lda {ld}')
+                    yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --cholshift {cshift} --cholnum {alg} -n {n} -m {m} --lda {ld}')
 
 
 def gels_suite(*, suite, precision, sizenormal, sizebatch):
     """
-    GELS tests are run, for the given precision and number of rows, with 160 columns and with 1, 
-    n/2 and n right-hand-vectors. Only with m < n to actually test gelqf and ormlq/unmlq. 
-    Tests run ops = {none, transposed} cases.
+    GELS tests are run, for the given precision and number of rows (columns), with 160 columns (rows) and with 1,
+    n/2 and n right-hand-vectors. We want the overdetermined case m >= n, but also the underdetermined m < n
+    to actually test gelqf and ormlq/unmlq.
     gelqf uses:
     larft_forward_row
     larfb_forward_row_right_none
-    ormlq uses:           
-    larft_forward_row           
-    larfb_forward_row_left_<ops>
+    ormlq uses:
+    larft_forward_row
+    larfb_forward_row_left_none
     """
     fn = 'gels'
-    tr = 'T' if precision == 's' or precision == 'd' else 'C'
     size = sizenormal
-    for ops in ['none', 'trans']:
-        if ops == 'none': op = 'N'
-        else: op = tr
+    for s_shape in ['overdet', 'underdet']: 
         for s_nrhs in ['one', 'half_n', 'n']:
-            nrhs = 1
             for s in size:
-                if s < 4000: ld = s + 1
-                else: ld = s + 64
-                if s_nrhs == 'half_n': nrhs = s//2
-                elif s_nrhs == 'n': nrhs = s
-                if s >= 160:
-                    row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'trans': ops, 'nrhs': s_nrhs, 'n': s}
-                    yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -m 160 --trans {op} --nrhs {nrhs} -n {s} --lda 161 --ldb {ld}')
+                nrhs = get_nrhs(s_nrhs, s)
+                m,n = get_mn(s_shape, s, 'normal')
+                ld_b = get_ld(s)
+                ld_a = get_ld(m)
+                ld_x = get_ld(n)
+                if (s_shape == 'overdet' and m >= n) or (s_shape == 'underdet' and m < n):
+                    row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'shape': s_shape, 'nrhs': s_nrhs, 'n': s}
+                    yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -m {m} -n {n} --nrhs {nrhs} --lda {ld_a} --ldb {ld_b} --ldx {ld_x}')
 
 
 def gelsBatch_suite(*, suite, precision, sizenormal, sizebatch):
     """
-    GELSBATCH tests are run, for the given precision and number of rows, with 26 columns and with 1, 
-    n/2 and n right-hand-vectors. Only with m < n to actually test gelqf and ormlq/unmlq.
-    Tests run ops = {none, transposed} cases.
+    GELSBATCH tests are run, for the given precision and number of rows (columns), with 160 columns (rows) and with 1,
+    n/2 and n right-hand-vectors. We want the overdetermined case m >= n, but also the underdetermined m < n
+    to actually test gelqf and ormlq/unmlq.
     gelqf uses:
     larft_forward_row
     larfb_forward_row_right_none
-    ormlq uses:           
-    larft_forward_row           
-    larfb_forward_row_left_<ops>
+    ormlq uses:
+    larft_forward_row
+    larfb_forward_row_left_none
     """
     fn = 'gels_batched'
-    tr = 'T' if precision == 's' or precision == 'd' else 'C'
     size = sizebatch
-    for ops in ['none', 'trans']:
-        if ops == 'none': op = 'N'
-        else: op = tr
+    for s_shape in ['overdet', 'underdet']:
         for s_nrhs in ['one', 'half_n', 'n']:
-            nrhs = 1
-            for s, bc in size:
-                if s < 4000: ld = s + 1
-                else: ld = s + 64
-                if s_nrhs == 'half_n': nrhs = s//2
-                elif s_nrhs == 'n': nrhs = s
-                if s >= 26:
-                    row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'trans': ops, 'nrhs': s_nrhs, 'n': s}
-                    yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -m 26 --trans {op} --nrhs {nrhs} -n {s} --lda 27 --ldb {ld}')
+            for s in size:
+                nrhs = get_nrhs(s_nrhs, s)
+                m,n = get_mn(s_shape, s, 'batched')
+                ld_b = get_ld(s)
+                ld_a = get_ld(m)
+                ld_x = get_ld(n)
+                if (s_shape == 'overdet' and m >= n) or (s_shape == 'underdet' and m < n):
+                    row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'shape': s_shape, 'nrhs': s_nrhs, 'n': s}
+                    yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -m {m} -n {n} --nrhs {nrhs} --lda {ld_a} --ldb {ld_b} --ldx {ld_x}')
 
 
 def xxgqr_suite(*, suite, precision, sizenormal, sizebatch):
