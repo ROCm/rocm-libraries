@@ -23,7 +23,7 @@ Infer options from the user request:
 - **GPU families**: `--gfx` (Linux) and `--windows-gfx`, comma-separated. When omitted the workflow defaults apply:
   - `multi-arch`: Linux `gfx94X,gfx950,gfx125X`, Windows `gfx110X` (`.github/workflows/therock-multi-arch-ci.yml`, `setup` job inputs). Pass `none` to skip a platform, for example `--windows-gfx none` for a Linux-only run.
   - `therock-ci`: Linux `gfx94X, gfx950, gfx125X`, Windows `gfx1151` (`.github/workflows/therock-ci.yml`, "Fetch Linux/Windows targets for build and test" steps).
-- **Projects** (`therock-ci` only): `--projects`, space-separated subtree paths that are keys of `subtree_to_project_map` in `.github/scripts/therock_matrix.py` (for example `dnn-providers/integration-tests`, `projects/hipdnn`), or `all`.
+- **Projects** (`therock-ci` only, required there): `--projects`, space-separated subtree paths that are keys of `subtree_to_project_map` in `.github/scripts/therock_matrix.py` (for example `dnn-providers/integration-tests`, `projects/hipdnn`), or `all`. The workflow has no default: without it a run builds and tests nothing yet completes, so `dispatch` refuses `-w therock-ci` without `--projects`.
 - **Test labels** (`multi-arch` only): `--test-labels` (Linux) and `--windows-test-labels`, comma-separated. See the test reference below.
 
 `dispatch` rejects an option the chosen workflow does not take (for example `--test-labels` with `-w therock-ci`, or any option with `-w hipdnn-superbuild`) instead of dropping it.
@@ -79,6 +79,8 @@ hipDNN components (all run on Linux and Windows, one shard, 30-minute timeout):
 Other components use their own names (for example `test:rocblas`, `test:hipblaslt`); read the component matrix for the full list. Do not invent labels: an unknown label matches no component, so only sanity runs.
 
 ### Test tier
+
+This applies to `multi-arch`. A `therock-ci` dispatch always runs `standard` (`.github/scripts/therock_configure_ci.py`, which reads labels only on push and pull request events).
 
 One tier (`test_type`) is chosen for the whole run:
 

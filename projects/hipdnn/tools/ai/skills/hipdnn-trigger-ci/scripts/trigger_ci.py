@@ -319,6 +319,14 @@ def cmd_dispatch(args):
                 file=sys.stderr,
             )
             sys.exit(1)
+    # therock-ci has no default for projects; an empty value selects no subtrees,
+    # so the run skips every build job and still completes.
+    if args.workflow == "therock-ci" and not args.projects:
+        print(
+            "error: -w therock-ci needs --projects (subtree paths or 'all')",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     ref = resolve_branch(args)
     inputs = {}
     for field in wf["fields"]:
@@ -466,7 +474,7 @@ hipDNN test labels (multi-arch; from TheRock fetch_test_configurations.py test_m
         "--projects",
         default="",
         help="Space-separated subtree paths from .github/scripts/therock_matrix.py, "
-        "or 'all' (therock-ci only)",
+        "or 'all' (therock-ci only, required there)",
     )
     dispatch.add_argument(
         "--test-labels",
