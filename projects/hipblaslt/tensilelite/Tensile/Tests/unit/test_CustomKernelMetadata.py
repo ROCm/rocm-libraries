@@ -1155,3 +1155,86 @@ def test_wvspltk_hf_m4_serves_every_m_up_to_four():
         "StrideC0",
         "StrideD0",
     ]
+
+
+@pytest.mark.parametrize(
+    "name,sizeEqual,sizeLessThan",
+    [
+        ("wvSpltK_bf16_tn_m1", {1: 1, 2: 1}, None),
+        ("wvSpltK_bf16_tn_m2", {1: 2, 2: 1}, None),
+        ("wvSpltK_bf16_tn_m4", {2: 1}, {1: 5}),
+    ],
+)
+def test_wvspltk_bf16_tn_shipped_config(name, sizeEqual, sizeLessThan):
+    """TN with a skinny n, the layout torch.mm(x, w.t()) reaches hipBLASLt with.
+    m1 and m2 pin n; m4 reads it as a kernarg and serves every n <= 4. The
+    leading dimensions are kernargs, and tokens past the LDS stage are read from
+    global memory, so K has no bound."""
+    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
+    valid, msg = validateCustomKernelMetadata(name, ck_root)
+    assert valid, msg
+
+    config = getCustomKernelConfig(name, {}, ck_root)
+    pt = config["ProblemType"]
+    assert (pt["DataType"], pt["DestDataType"], pt["ComputeDataType"]) == ("b", "b", "s")
+    assert (pt["TransposeA"], pt["TransposeB"]) == (True, False)
+    assert config["AssertSizeEqual"] == sizeEqual
+    if sizeLessThan is None:
+        assert "AssertSizeLessThan" not in config
+    else:
+        assert config["AssertSizeLessThan"] == sizeLessThan
+    # m > 8; the tail fixup underflows below one wave tile.
+    assert config["AssertSizeGreaterThan"] == {0: 8}
+    assert config["AssertSummationElementMultiple"] == 8
+    assert config["StaggerU"] == 0
+    for key in _UNIT_STRIDE_KEYS:
+        assert config[key] == {0: 1}, key
+    ck = config["CustomKernel"]
+    assert ck["grid"] == ["ComputeUnits", "One", "One"]
+    assert ck["threads"] == [64, 16, 1]
+    assert [a["semantic"] for a in ck["args"]] == [
+        "SizeSum",
+        "SizeFree0",
+        "AddressA",
+        "AddressB",
+        "ComputeUnits",
+        "SizeFree1",
+        "StrideA0",
+        "StrideB0",
+        "AddressC",
+        "AddressD",
+        "Alpha",
+        "Beta",
+        "StrideC0",
+        "StrideD0",
+    ]
+
+
+def test_wvspltk_hf_m1_shipped_config():
+    """The rocBLAS M=1 GEMV kernel must stay loadable with the CU-count interface."""
+    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
+    valid, msg = validateCustomKernelMetadata("wvSpltK_hf_m1", ck_root)
+    assert valid, msg
+
+    config = getCustomKernelConfig("wvSpltK_hf_m1", {}, ck_root)
+    ck = config["CustomKernel"]
+    assert ck["grid"] == ["ComputeUnits", "One", "One"]
+    assert ck["threads"] == [64, 16, 1]
+    # M == 1 and batch == 1; the kernel takes no batch strides.
+    assert config["AssertSizeEqual"] == {0: 1, 2: 1}
+    # N > 8; the tail fixup underflows below one wave tile.
+    assert config["AssertSizeGreaterThan"] == {1: 8}
+    assert config["AssertSummationElementMultiple"] == 8
+    assert config["StaggerU"] == 0
+    # C is read (beta term) and D is written, so out-of-place calls are correct.
+    assert [a["semantic"] for a in ck["args"]] == [
+        "SizeSum",
+        "SizeFree1",
+        "AddressB",
+        "AddressA",
+        "AddressC",
+        "AddressD",
+        "Alpha",
+        "Beta",
+        "ComputeUnits",
+    ]

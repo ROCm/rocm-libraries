@@ -11,6 +11,9 @@ Wave-split-K skinny GEMM kernels from rocBLAS-internal `skinnyGemm`
 `CuCount` is a kernarg, not a compile-time constant, so the persistent
 stride matches the launch grid on MI300 (gfx942) and MI350 (gfx950).
 
+Names follow rocBLAS: `M` is the skinny side (tokens) and `N` the long side.
+In hipBLASLt terms that is `m` and `n` for NN, and `n` and `m` for TN.
+
 ## `wvSpltK_hf_m1`, `wvSpltK_hf_m2`, `wvSpltK_hf_m4`
 
 FP16 I/O, FP32 alpha/beta, NN only. Block `(64, 16)`, grid = device CU count.
@@ -58,20 +61,52 @@ These are the `TRANSA=true` rocBLAS instantiations, i.e. column-major A
 
 Tensile retargets `.amdgcn_target` for gfx950; keep the directives.
 
+## `wvSpltK_bf16_tn_m1`, `wvSpltK_bf16_tn_m2`, `wvSpltK_bf16_tn_m4`
+
+BF16 I/O, FP32 accumulate and alpha/beta, hipBLASLt TN with a skinny `n`. This
+is the layout `torch.mm(x, w.t())` and `F.linear` reach hipBLASLt with (`m` =
+output features, `n` = tokens), and the one rocBLAS served with the
+`TRANSA=false` instantiation. Same block, grid and persistent loop as the FP16
+kernels; all three build from `wvSpltK_bf16_tn.cpp`.
+
+| Kernel | n | YTILE | UNRL |
+| ------ | - | ----- | ---- |
+| `wvSpltK_bf16_tn_m1` | 1 | 2 | 2 |
+| `wvSpltK_bf16_tn_m2` | 2 | 2 | 2 |
+| `wvSpltK_bf16_tn_m4` | 1 to 4 | 1 | 4 |
+
+gfx950 only: the dot product is `v_dot2c_f32_bf16`, and gfx942 has no BF16 dot
+instruction. The m4 tile is tuned for gfx950's 256 CUs: on the GLM-5.2 decode
+shapes a wider tile leaves too few waves to hide memory latency, and with
+weights streamed from HBM `YTILE=1, UNRL=4` is 1.2x faster than `YTILE=3,
+UNRL=2` there, and no slower on larger decode shapes.
+
+Every leading dimension is a kernarg. `torch.mm` on a sliced activation, for
+example `q = qkv[:, :q_size]`, reaches hipBLASLt with `ldb > K`, so the kernels
+cannot assume a packed layout. m4 also takes `n` as a kernarg and serves every
+`n <= 4`.
+
+Predicated in `custom.config`: `batch == 1`, `m > 8`, `K % 8 == 0`, unit strides
+on all four tensors, and `n == 1` / `n == 2` for m1 / m2 or `n <= 4` for m4. K
+needs no bound: the tokens are staged in 128 KB of LDS (gfx950 has 160 KB per
+CU), and any past that are read from global memory, which is correct in this
+layout.
+
 ## Kernarg preload
 
-`wvSpltK_hf_m4` takes 72 bytes of kernargs, which spill into a second 64-byte
-line. It orders everything the staging and the K loop read first and preloads
-those 14 dwords into SGPRs, so only the epilogue's arguments are fetched with
-`s_load`. Tensile strips the preload directives on toolchains that cannot use
-them, and the compatibility prologue the compiler emits then loads the same
-SGPRs.
+`wvSpltK_hf_m4` and the TN kernels take 72 bytes of kernargs, which spill into
+a second 64-byte line. They order everything the staging and the K loop read
+first and preload those 14 dwords into SGPRs, so only the epilogue's arguments
+are fetched with `s_load`. Tensile strips the preload directives on toolchains
+that cannot use them, and the compatibility prologue the compiler emits then
+loads the same SGPRs.
 
 ## Regenerating
 
 Regenerate assembly (keep `.amdgcn_target` / `.amdhsa_code_object_version`),
-then embed the Tensile metadata. M=1 reads its config from
-`custom_rocblas_gemv.yaml`; M=2 and M=4 use the `_m2` / `_m4` files.
+then embed the Tensile metadata. FP16 M=1 reads its config from
+`custom_rocblas_gemv.yaml`; M=2 and M=4 use the `_m2` / `_m4` files, and the
+TN kernels use `custom_rocblas_gemv_bf16_tn_m{1,2,4}.yaml`.
 
 ```bash
 hipcc -S --cuda-device-only --offload-arch=gfx942 -O3 \
@@ -80,6 +115,10 @@ hipcc -S --cuda-device-only --offload-arch=gfx942 -O3 \
 hipcc -S --cuda-device-only --offload-arch=gfx942 -O3 \
   -mllvm -amdgpu-kernarg-preload-count=14 \
   -o wvSpltK_hf_m4.s wvSpltK_hf_m4.cpp
+
+hipcc -S --cuda-device-only --offload-arch=gfx950 -O3 -DWVSPLTK_M=4 \
+  -mllvm -amdgpu-kernarg-preload-count=14 \
+  -o wvSpltK_bf16_tn_m4.s wvSpltK_bf16_tn.cpp
 
 python -m Tensile.AddCustomConfig \
   Tensile/CustomKernels/rocblas/wvSpltK_hf_m2.s \
