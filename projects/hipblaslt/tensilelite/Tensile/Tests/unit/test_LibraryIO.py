@@ -376,6 +376,55 @@ def test_prepare_library_logic_dict_gridbased() -> None:
     assert data["Library"]["table"] == [[[128, 128, 1, 128], [0, 0.0]]]
 
 
+def test_prepare_library_logic_dict_meshbased() -> None:
+    """``prepareLibraryLogicDict`` promotes MeshBased to Matching library metadata."""
+    data: dict[str, Any] = {
+        "LibraryType": "MeshBased",
+        "IndexOrder": [2, 3, 0, 1],
+        "ExactLogic": [[[128, 128, 1, 128], [0, 0.0]]],
+        "Solutions": [{"SolutionIndex": 0}],
+    }
+    LibraryIO.prepareLibraryLogicDict(data)
+    assert data["LibraryType"] == "Matching"
+    assert data["Library"]["distance"] == "MeshBased"
+    assert data["Library"]["indexOrder"] == [2, 3, 0, 1]
+    assert data["Library"]["table"] == [[[128, 128, 1, 128], [0, 0.0]]]
+
+
+def test_load_mesh_table_from_csv_gz(tmp_path: Any) -> None:
+    """``_loadMeshTableFromCsvGz`` reads a gzip CSV into the expected table format."""
+    import csv as _csv
+    import gzip
+
+    csv_path = tmp_path / "test.yaml.csv.gz"
+    with gzip.open(csv_path, "wt", newline="") as f:
+        writer = _csv.writer(f)
+        writer.writerow(["M", "N", "batch", "K", "solutionIdx"])
+        writer.writerow([128, 256, 1, 512, 7])
+        writer.writerow([64, 64, 2, 1024, 3])
+
+    table = LibraryIO._loadMeshTableFromCsvGz(str(csv_path))
+    assert len(table) == 2
+    assert table[0] == [[128, 256, 1, 512], [7, 0.0]]
+    assert table[1] == [[64, 64, 2, 1024], [3, 0.0]]
+
+
+def test_companion_csv_gz_path_found(tmp_path: Any) -> None:
+    """``_companionCsvGzPath`` returns the path when the companion file exists."""
+    yaml_path = tmp_path / "lib.yaml"
+    csv_path = tmp_path / "lib.yaml.csv.gz"
+    yaml_path.write_text("")
+    csv_path.write_text("")
+    assert LibraryIO._companionCsvGzPath(str(yaml_path)) == str(csv_path)
+
+
+def test_companion_csv_gz_path_not_found(tmp_path: Any) -> None:
+    """``_companionCsvGzPath`` returns None when no companion file exists."""
+    yaml_path = tmp_path / "lib.yaml"
+    yaml_path.write_text("")
+    assert LibraryIO._companionCsvGzPath(str(yaml_path)) is None
+
+
 def test_reorder_solution_dict_for_dict_merge_sorts_internal_support_params() -> None:
     """``reorderSolutionDictForDictMerge`` sorts nested ``InternalSupportParams``."""
     state = {
