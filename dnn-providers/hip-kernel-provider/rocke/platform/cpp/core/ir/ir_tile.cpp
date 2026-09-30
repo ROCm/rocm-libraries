@@ -49,8 +49,6 @@ static const rocke_mma_hint_row_t ROCKE_MMA_RESULT_HINT[] = {
     {"mfma_f32_16x16x96_fp6", "acc6"},
     {"mfma_f32_16x16x128_fp8", "acc128"},
     {"mfma_scale_f32_16x16x128_f8f6f4", "mxacc"},
-    {"wmma_scale_f32_16x16x128_fp8_fp8", "mxacc"},
-    {"wmma_scale16_f32_16x16x128_fp8_fp8", "mxacc"},
 };
 
 /* Accumulator fragment length for op_id, from the arch SSOT
@@ -71,6 +69,9 @@ static bool rocke_mma_is_int_acc(const char* op_id)
 
 static const char* rocke_mma_result_hint(const char* op_id)
 {
+    const char* family = rocke_arch_mma_op_id_family(op_id);
+    if(family && strcmp(family, "wmma_scaled") == 0)
+        return "mxacc";
     size_t i;
     if(op_id)
     {
@@ -348,8 +349,9 @@ rocke_value_t* rocke_b_smem_load_vN(rocke_ir_builder_t* b,
     const rocke_type_t* vt;
     rocke_attr_map_t attrs;
     const char* dn;
-    static const int allowed_8bit[] = {1, 2, 4, 8, 16};
-    static const int allowed_other[] = {1, 2, 4, 8};
+    static const int allowed_8bit[] = {1, 2, 4, 8, 12, 16};
+    static const int allowed_16bit[] = {1, 2, 4, 6, 8};
+    static const int allowed_32bit[] = {1, 2, 3, 4, 8};
     char hint[16];
     if(!rocke_i_live(b))
     {
@@ -374,8 +376,9 @@ rocke_value_t* rocke_b_smem_load_vN(rocke_ir_builder_t* b,
     {
         bool eight
             = (strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0 || strcmp(dn, "i8") == 0);
-        const int* allowed = eight ? allowed_8bit : allowed_other;
-        int acount = eight ? 5 : 4;
+        bool half = strcmp(dn, "f16") == 0 || strcmp(dn, "bf16") == 0;
+        const int* allowed = eight ? allowed_8bit : half ? allowed_16bit : allowed_32bit;
+        int acount = eight ? 6 : 5;
         if(!rocke_n_in(n, allowed, acount))
         {
             return (rocke_value_t*)rocke_i_set_err(
@@ -651,32 +654,6 @@ rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4(rocke_ir_builder_t* b,
     extra[0] = a_scale;
     extra[1] = b_scale;
     return rocke_b_mma(b, "mfma_scale_f32_16x16x128_f8f6f4", a, bb, c, extra, 2);
-}
-
-rocke_value_t* rocke_b_wmma_scale_f32_16x16x128_fp8_fp8(rocke_ir_builder_t* b,
-                                                        rocke_value_t* a,
-                                                        rocke_value_t* bb,
-                                                        rocke_value_t* c,
-                                                        rocke_value_t* a_scale,
-                                                        rocke_value_t* b_scale)
-{
-    rocke_value_t* extra[2];
-    extra[0] = a_scale;
-    extra[1] = b_scale;
-    return rocke_b_mma(b, "wmma_scale_f32_16x16x128_fp8_fp8", a, bb, c, extra, 2);
-}
-
-rocke_value_t* rocke_b_wmma_scale16_f32_16x16x128_fp8_fp8(rocke_ir_builder_t* b,
-                                                          rocke_value_t* a,
-                                                          rocke_value_t* bb,
-                                                          rocke_value_t* c,
-                                                          rocke_value_t* a_scale,
-                                                          rocke_value_t* b_scale)
-{
-    rocke_value_t* extra[2];
-    extra[0] = a_scale;
-    extra[1] = b_scale;
-    return rocke_b_mma(b, "wmma_scale16_f32_16x16x128_fp8_fp8", a, bb, c, extra, 2);
 }
 
 /* ===================================================================== */

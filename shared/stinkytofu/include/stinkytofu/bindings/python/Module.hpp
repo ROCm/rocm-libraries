@@ -53,6 +53,9 @@
  * auto-allocated in Tensile
  *        `_initKernel`. -1 = not reserved / pass no-ops (also -1 for Stream-K /
  * non-gfx1250).
+ * @note TimePasses: print a per-pass wall-time report to stderr after the
+ * pipeline runs (Tensile `StinkyTofuTimePasses`, stinkytofu-opt
+ * `--time-passes`).
  */
 #define MODULE_OPTIONS_LIST(X)                    \
     X(DebugLevel, int)                            \
@@ -80,6 +83,7 @@
     X(DebugPass, std::string)                     \
     X(PassOrderSnapshotJson, std::string)         \
     X(VerifyEach, bool)                           \
+    X(TimePasses, bool)                           \
     X(EnableRemarks, bool)                        \
     X(EnableWaitCntInsertion, bool)               \
     X(EnableLoopCarriedTokenDeps, bool)           \
@@ -100,8 +104,6 @@
     X(CloneList, std::vector<CloneSpec>)          \
     X(DsReadQueueDepth, int)                      \
     X(DsReadDrainLatency, int)                    \
-    X(DsReadThrottleLatency, int)                 \
-    X(DsReadPerWmma, int)                         \
     X(TensorLoadWmmaSpace, int)                   \
     X(GlobalReadQueueDepth, int)                  \
     X(GlobalReadDrainLatency, int)                \
@@ -110,10 +112,20 @@
 
 // Keep transition disabled by default to preserve legacy full-throttle pacing:
 // entries=0 skips the transition range, and factor=1.0 is the full interval.
-#define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)       \
-    X(DsReadThrottleTransitionFactor, double, 1.0) \
-    X(DsReadThrottleTransitionEntries, int, 0)     \
-    X(ClusterBarrierRule3SignalLeadCycles, int, 100)
+//
+// Scheduling knobs below default to -1 (= unset), except LockDsReadOrder,
+// which defaults on. Gfx1250Backend resolves unset knobs via
+// SchedulingKnobHeuristics before DAG scheduling / cluster-barrier
+// insertion (user value wins; degenerate main-loop IR falls back to today's
+// static HW/CDNA5/Rule3 defaults). See SchedulingKnobHeuristics.hpp.
+#define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                          \
+    X(LockDsReadOrder, bool, true)                                    \
+    X(DsReadThrottleTransitionFactor, double, 1.0)                    \
+    X(DsReadThrottleTransitionEntries, int, 0)                        \
+    X(DsReadThrottleLatency, int, -1)                                 \
+    X(DsReadPerCap, int, -1)                                          \
+    X(DsReadPerWmma, int, -1) /* deprecated alias for DsReadPerCap */ \
+    X(ClusterBarrierRule3SignalLeadCycles, int, -1)
 
 namespace stinkytofu {
 /**

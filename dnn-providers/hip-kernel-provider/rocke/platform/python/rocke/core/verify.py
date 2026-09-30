@@ -311,6 +311,12 @@ class _Verifier:
                     f"operand type {op.operands[0].type.name}",
                     op,
                 )
+            if name == "math.tanh" and op.operands[0].type.name != "f32":
+                self.err(
+                    f"math.tanh requires f32 operand, got "
+                    f"{op.operands[0].type.name}",
+                    op,
+                )
         elif name in _CMP_OPS:
             if len(op.operands) != 2 or len(op.results) != 1:
                 self.err(f"{name}: expected 2 operands / 1 result", op)
