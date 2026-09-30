@@ -30,8 +30,8 @@
 // CuCount is a kernarg (not a compile-time 80) so the persistent stride matches
 // the launch grid on MI300 / MI350.
 //
-// Regenerate assembly:
-//   hipcc -S --cuda-device-only --offload-arch=gfx942 -O3 \
+// Regenerate assembly (code object v4 is the version hipBLASLt links at):
+//   hipcc -S --cuda-device-only --offload-arch=gfx942 -O3 -mcode-object-version=4 \
 //     -o wvSpltK_hf_m1.s wvSpltK_hf_m1.cpp
 // Keep .amdgcn_target / .amdhsa_code_object_version (Tensile retargets).
 

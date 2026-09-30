@@ -104,21 +104,23 @@ loads the same SGPRs.
 
 ## Regenerating
 
-Regenerate assembly (keep `.amdgcn_target` / `.amdhsa_code_object_version`),
-then embed the Tensile metadata. FP16 M=1 reads its config from
-`custom_rocblas_gemv.yaml`; M=2 and M=4 use the `_m2` / `_m4` files, and the
-TN kernels use `custom_rocblas_gemv_bf16_tn_m{1,2,4}.yaml`.
+Regenerate assembly at code object version 4 (see `../README.md`; keep
+`.amdgcn_target` / `.amdhsa_code_object_version`), then embed the Tensile
+metadata. FP16 M=1 reads its config from `custom_rocblas_gemv.yaml`; M=2 and
+M=4 use the `_m2` / `_m4` files, and the TN kernels use
+`custom_rocblas_gemv_bf16_tn_m{1,2,4}.yaml`. To refresh a `custom.config`,
+delete the existing block first: `AddCustomConfig` will not overwrite it.
 
 ```bash
-hipcc -S --cuda-device-only --offload-arch=gfx942 -O3 \
+hipcc -S --cuda-device-only --offload-arch=gfx942 -O3 -mcode-object-version=4 \
   -o wvSpltK_hf_m2.s wvSpltK_hf_m2.cpp
 
-hipcc -S --cuda-device-only --offload-arch=gfx942 -O3 \
+hipcc -S --cuda-device-only --offload-arch=gfx942 -O3 -mcode-object-version=4 \
   -mllvm -amdgpu-kernarg-preload-count=14 \
   -o wvSpltK_hf_m4.s wvSpltK_hf_m4.cpp
 
-hipcc -S --cuda-device-only --offload-arch=gfx950 -O3 -DWVSPLTK_M=4 \
-  -mllvm -amdgpu-kernarg-preload-count=14 \
+hipcc -S --cuda-device-only --offload-arch=gfx950 -O3 -mcode-object-version=4 \
+  -DWVSPLTK_M=4 -mllvm -amdgpu-kernarg-preload-count=14 \
   -o wvSpltK_bf16_tn_m4.s wvSpltK_bf16_tn.cpp
 
 python -m Tensile.AddCustomConfig \

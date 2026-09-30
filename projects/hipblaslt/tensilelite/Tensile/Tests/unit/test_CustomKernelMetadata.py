@@ -23,11 +23,13 @@
 ################################################################################
 
 import os
+import re
 from textwrap import dedent, indent
 
 import pytest
 
 import Tensile
+from Tensile.resources import custom_kernel_text
 import Tensile.TensileLogic.HandleCustomKernel as hck_mod
 from Tensile.AddCustomConfig import (
     _fmt_yaml_args,
@@ -1114,6 +1116,26 @@ def test_wvspltk_shipped_family_predicates(name, rows, maxK):
     for key in ("AssertStrideAEqual", "AssertStrideCEqual", "AssertStrideDEqual"):
         assert config[key] == {0: 1, 1: rows}, key
     assert config["AssertStrideBEqual"] == {0: 1}
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "wvSpltK_hf_m1",
+        "wvSpltK_hf_m2",
+        "wvSpltK_hf_m4",
+        "wvSpltK_bf16_tn_m1",
+        "wvSpltK_bf16_tn_m2",
+        "wvSpltK_bf16_tn_m4",
+    ],
+)
+def test_wvspltk_code_object_version_matches_library_build(name):
+    """Library logic references these kernels, so TensileCreateLibrary links each
+    into one code object with Tensile's kernels, which hipBLASLt assembles at its
+    default code object v4. ld.lld rejects mixed ABI versions, and the directive
+    in the .s overrides the assembler's -mcode-object-version."""
+    text = custom_kernel_text(name)
+    assert re.search(r"^\s*\.amdhsa_code_object_version\s+4\s*$", text, re.M)
 
 
 _UNIT_STRIDE_KEYS = (

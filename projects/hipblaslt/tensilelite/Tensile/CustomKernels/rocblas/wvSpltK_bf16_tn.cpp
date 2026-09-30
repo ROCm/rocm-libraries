@@ -34,9 +34,10 @@
 //     YTILE=2 / UNRL=2; no other tile in the same sweep beat it across them.
 //
 // One source builds the three kernels; keep .amdgcn_target and
-// .amdhsa_code_object_version in the output:
-//   hipcc -S --cuda-device-only --offload-arch=gfx950 -O3 -DWVSPLTK_M=1 \
-//     -mllvm -amdgpu-kernarg-preload-count=14 \
+// .amdhsa_code_object_version in the output. Code object v4 is the version
+// hipBLASLt links its libraries at:
+//   hipcc -S --cuda-device-only --offload-arch=gfx950 -O3 -mcode-object-version=4 \
+//     -DWVSPLTK_M=1 -mllvm -amdgpu-kernarg-preload-count=14 \
 //     -o wvSpltK_bf16_tn_m1.s wvSpltK_bf16_tn.cpp
 // and likewise -DWVSPLTK_M=2 and -DWVSPLTK_M=4.
 

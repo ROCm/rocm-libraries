@@ -1,5 +1,5 @@
 	.amdgcn_target "amdgcn-amd-amdhsa--gfx942"
-	.amdhsa_code_object_version 6
+	.amdhsa_code_object_version 4
 	.text
 	.protected	wvSpltK_hf_m1           ; -- Begin function wvSpltK_hf_m1
 	.globl	wvSpltK_hf_m1
@@ -464,7 +464,6 @@ wvSpltK_hf_m1:                          ; @wvSpltK_hf_m1
 		.amdhsa_user_sgpr_kernarg_preload_length 0
 		.amdhsa_user_sgpr_kernarg_preload_offset 0
 		.amdhsa_user_sgpr_private_segment_size 0
-		.amdhsa_uses_dynamic_stack 0
 		.amdhsa_enable_private_segment 0
 		.amdhsa_system_sgpr_workgroup_id_x 1
 		.amdhsa_system_sgpr_workgroup_id_y 0
@@ -475,6 +474,7 @@ wvSpltK_hf_m1:                          ; @wvSpltK_hf_m1
 		.amdhsa_next_free_sgpr 96
 		.amdhsa_accum_offset 44
 		.amdhsa_reserve_vcc 1
+		.amdhsa_reserve_xnack_mask 1
 		.amdhsa_float_round_mode_32 0
 		.amdhsa_float_round_mode_16_64 0
 		.amdhsa_float_denorm_mode_32 3
@@ -541,17 +541,17 @@ wvSpltK_hf_m1:                          ; @wvSpltK_hf_m1
 	.set amdgpu.max_num_agpr, 0
 	.set amdgpu.max_num_sgpr, 0
 	.text
-	.type	__hip_cuid_e9797186894e033f,@object ; @__hip_cuid_e9797186894e033f
+	.type	__hip_cuid_44f60985c5bb6bd4,@object ; @__hip_cuid_44f60985c5bb6bd4
 	.section	.bss,"aw",@nobits
-	.globl	__hip_cuid_e9797186894e033f
-__hip_cuid_e9797186894e033f:
+	.globl	__hip_cuid_44f60985c5bb6bd4
+__hip_cuid_44f60985c5bb6bd4:
 	.byte	0                               ; 0x0
-	.size	__hip_cuid_e9797186894e033f, 1
+	.size	__hip_cuid_44f60985c5bb6bd4, 1
 
 	.ident	"AMD clang version 22.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.2.4 26084 f58b06dce1f9c15707c5f808fd002e18c2accf7e)"
 	.section	".note.GNU-stack","",@progbits
 	.addrsig
-	.addrsig_sym __hip_cuid_e9797186894e033f
+	.addrsig_sym __hip_cuid_44f60985c5bb6bd4
 	.amdgpu_metadata
 ---
 custom.config:
@@ -653,15 +653,13 @@ amdhsa.kernels:
     .sgpr_count:     46
     .sgpr_spill_count: 0
     .symbol:         wvSpltK_hf_m1.kd
-    .uniform_work_group_size: 1
-    .uses_dynamic_stack: false
     .vgpr_count:     44
     .vgpr_spill_count: 0
     .wavefront_size: 64
 amdhsa.target:   amdgcn-amd-amdhsa--gfx942
 amdhsa.version:
   - 1
-  - 2
+  - 1
 ...
 
 	.end_amdgpu_metadata

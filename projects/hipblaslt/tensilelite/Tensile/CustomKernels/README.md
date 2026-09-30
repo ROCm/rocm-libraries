@@ -55,6 +55,10 @@ Triton-specific concerns for the compile step / YAML argument map:
   assembler rewrites `.amdgcn_target` and `amdhsa.target` when a kernel is built
   for another architecture (`Assembler._retargetAssemblySource`), and the
   StaggerU census disassembles each kernel at the target it declares.
+- A kernel that library logic references is linked into the same code object as
+  Tensile's kernels, and `ld.lld` rejects mixed ABI versions. Emit it at code
+  object version 4 (`-mcode-object-version=4`), the version hipBLASLt builds
+  its libraries at; the directive in the `.s` overrides the assembler's flag.
 
 ## What `custom.config` looks like
 

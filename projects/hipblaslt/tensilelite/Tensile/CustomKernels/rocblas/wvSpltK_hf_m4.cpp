@@ -53,8 +53,8 @@
 //     custom.config (K <= 8192 for every M <= 4), so the fallback is unreachable
 //     here too and is dropped rather than left as a trap.
 //
-// Regenerate assembly:
-//   hipcc -S --cuda-device-only --offload-arch=gfx942 -O3 \
+// Regenerate assembly (code object v4 is the version hipBLASLt links at):
+//   hipcc -S --cuda-device-only --offload-arch=gfx942 -O3 -mcode-object-version=4 \
 //     -mllvm -amdgpu-kernarg-preload-count=14 \
 //     -o wvSpltK_hf_m4.s wvSpltK_hf_m4.cpp
 // Keep .amdgcn_target / .amdhsa_code_object_version (Tensile retargets).
