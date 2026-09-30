@@ -98,6 +98,9 @@ class LogicalInstruction : public IRBase {
         swaitcnt;  ///< s_waitcnt values {vlcnt,vscnt,dlcnt,dscnt,kmcnt} for gfx12+ split
     std::optional<SDelayAluData>
         sdelayalu;  ///< s_delay_alu data (instid0/instskip/instid1) carried from the adaptor
+    std::optional<std::string>
+        longBranchLabel;  ///< s_setpc_b64 long-branch target label (forwarded to LabelData so
+                          ///< CFGBuilderPass can build the CFG edge for the computed jump)
 
     /// LLVM-style casting support
     static bool classof(const IRBase* ir) {
