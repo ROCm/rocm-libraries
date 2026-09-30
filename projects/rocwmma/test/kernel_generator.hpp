@@ -27,7 +27,9 @@
 #ifndef ROCWMMA_KERNEL_GENERATOR_HPP
 #define ROCWMMA_KERNEL_GENERATOR_HPP
 
+#include <functional>
 #include <tuple>
+#include <type_traits>
 #include <vector>
 
 #include "hip_device.hpp"
@@ -81,13 +83,33 @@ namespace rocwmma
     /// Concat( A, tuple<B> ) = tuple<A, B>
     /// Concat( tuple<A>, tuple<B> ) = tuple<A, B>
     /// Concat( A, B, C, ...) = tuple<A, B, C, ...>
+    namespace detail
+    {
+        // C++17 equivalent of make_tuple's decay/reference_wrapper unwrapping,
+        // without instantiating tuple constructors just to compute a type.
+        template <typename T>
+        struct KernelParamDecay
+        {
+            using type = T;
+        };
+
+        template <typename T>
+        struct KernelParamDecay<std::reference_wrapper<T>>
+        {
+            using type = T&;
+        };
+
+        template <typename T>
+        using KernelParamDecayT = typename KernelParamDecay<std::decay_t<T>>::type;
+    } // namespace detail
+
     template <typename... Args>
     struct Concat;
 
     template <typename Arg>
     struct Concat<Arg>
     {
-        using Result = decltype(std::make_tuple(Arg()));
+        using Result = std::tuple<detail::KernelParamDecayT<Arg>>;
     };
 
     template <typename... Args>
@@ -105,25 +127,25 @@ namespace rocwmma
     template <typename Lhs, typename Rhs>
     struct Concat<Lhs, Rhs>
     {
-        using Result = decltype(std::make_tuple(Lhs(), Rhs()));
+        using Result = std::tuple<detail::KernelParamDecayT<Lhs>, detail::KernelParamDecayT<Rhs>>;
     };
 
     template <typename Lhs, typename... Rhs>
     struct Concat<Lhs, std::tuple<Rhs...>>
     {
-        using Result = decltype(std::tuple_cat(std::make_tuple(Lhs()), std::tuple<Rhs...>()));
+        using Result = std::tuple<detail::KernelParamDecayT<Lhs>, Rhs...>;
     };
 
     template <typename... Lhs, typename... Rhs>
     struct Concat<std::tuple<Lhs...>, std::tuple<Rhs...>>
     {
-        using Result = decltype(std::tuple_cat(std::tuple<Lhs...>(), std::tuple<Rhs...>()));
+        using Result = std::tuple<Lhs..., Rhs...>;
     };
 
     template <typename... Lhs, typename Rhs>
     struct Concat<std::tuple<Lhs...>, Rhs>
     {
-        using Result = decltype(std::tuple_cat(std::tuple<Lhs...>(), std::make_tuple(Rhs())));
+        using Result = std::tuple<Lhs..., detail::KernelParamDecayT<Rhs>>;
     };
 
     /// CombineOne: Creates combinatorial pairs of LHS
@@ -144,21 +166,14 @@ namespace rocwmma
     template <typename Lhs, typename Rhs>
     struct CombineOne
     {
-        using Result = decltype(std::make_tuple(typename Concat<Lhs, Rhs>::Result()));
-    };
-
-    template <typename Lhs, typename Rhs>
-    struct CombineOne<Lhs, std::tuple<Rhs>>
-    {
-        using Result = decltype(std::make_tuple(typename Concat<Lhs, Rhs>::Result()));
+        using Result = std::tuple<typename Concat<Lhs, Rhs>::Result>;
     };
 
     template <typename Lhs, typename Rhs0, typename... Rhs>
     struct CombineOne<Lhs, std::tuple<Rhs0, Rhs...>>
     {
-        using Mine   = typename Concat<Lhs, Rhs0>::Result;
-        using Next   = CombineOne<Lhs, std::tuple<Rhs...>>;
-        using Result = decltype(std::tuple_cat(std::make_tuple(Mine()), typename Next::Result()));
+        using Result
+            = std::tuple<typename Concat<Lhs, Rhs0>::Result, typename Concat<Lhs, Rhs>::Result...>;
     };
 
     /// CombineMany: Creates combinatorial pairs two lists:
@@ -193,7 +208,7 @@ namespace rocwmma
     {
         using Mine   = typename CombineOne<Lhs0, Rhs>::Result;
         using Next   = CombineMany<std::tuple<Lhs...>, Rhs>;
-        using Result = decltype(std::tuple_cat(Mine(), typename Next::Result()));
+        using Result = typename Concat<Mine, typename Next::Result>::Result;
     };
 
     /// CombineLists: Creates combinatorial sets from multiple lists.
@@ -247,8 +262,8 @@ namespace rocwmma
         }
     };
 
-    template <typename KernelParams, typename... Next, class GeneratorImpl>
-    struct KernelGenerator<std::tuple<KernelParams, Next...>, GeneratorImpl>
+    template <typename First, typename... Params, class GeneratorImpl>
+    struct KernelGenerator<std::tuple<First, Params...>, GeneratorImpl>
     {
         using ResultT = std::vector<typename GeneratorImpl::ResultT>;
         ROCWMMA_HOST static ResultT generate()
@@ -260,22 +275,25 @@ namespace rocwmma
 
         ROCWMMA_HOST static void generate(ResultT& kernels)
         {
-            // Generates the kernel for the current set of KernelParams
+            // Initializer-list evaluation preserves order without instantiating
+            // every suffix of the list or exceeding the compiler's fold depth.
+            using Expand = int[];
+            (void)Expand{0, (generateOne<First>(kernels), 0), (generateOne<Params>(kernels), 0)...};
+        }
+
+    private:
+        template <typename KernelParams>
+        ROCWMMA_HOST static void generateOne(ResultT& kernels)
+        {
             auto gen_kernel
                 = [](ResultT& k) { k.push_back(GeneratorImpl::generate(KernelParams())); };
 
-            // Advances to the next set of KernelParams
-            auto next_kernel = [](ResultT& k) {
-                KernelGenerator<std::tuple<Next...>, GeneratorImpl>::generate(k);
-            };
-
-            if constexpr(contains_type_v<float8_t,
-                                         KernelParams> || contains_type_v<bfloat8_t, KernelParams>)
+            if constexpr(contains_type_v<float8_t, KernelParams>
+                         || contains_type_v<bfloat8_t, KernelParams>)
             {
                 if constexpr(!(bool)ROCWMMA_FP8)
                 {
                     // Current KernelParams have f8: skip kernel on unsupported arch.
-                    next_kernel(kernels);
                     return;
                 }
 
@@ -293,23 +311,19 @@ namespace rocwmma
                        && arch != DeviceInfo::hipGcnArch_t::GFX1250)
                     {
                         // Current KernelParams have f8: skip kernel on host.
-                        next_kernel(kernels);
                         return;
                     }
                 }
 
                 // Generate kernel
                 gen_kernel(kernels);
-                next_kernel(kernels);
             }
-            else if constexpr(contains_type_v<
-                                  float8_fnuz_t,
-                                  KernelParams> || contains_type_v<bfloat8_fnuz_t, KernelParams>)
+            else if constexpr(contains_type_v<float8_fnuz_t, KernelParams>
+                              || contains_type_v<bfloat8_fnuz_t, KernelParams>)
             {
                 if constexpr(!(bool)ROCWMMA_FP8_FNUZ)
                 {
                     // Current KernelParams have f8_fnuz: skip kernel on unsupported arch.
-                    next_kernel(kernels);
                     return;
                 }
 
@@ -324,20 +338,17 @@ namespace rocwmma
                     if(arch != DeviceInfo::hipGcnArch_t::GFX942)
                     {
                         // Current KernelParams have f8_fnuz: skip kernel on host.
-                        next_kernel(kernels);
                         return;
                     }
                 }
 
                 // Generate kernel
                 gen_kernel(kernels);
-                next_kernel(kernels);
             }
             else
             {
                 // Generate kernel
                 gen_kernel(kernels);
-                next_kernel(kernels);
             }
         }
     };

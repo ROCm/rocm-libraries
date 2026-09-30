@@ -24,9 +24,11 @@
  *
  *******************************************************************************/
 
-#include "gemm_kernel_base.hpp"
+#include "../gemm_kernel_base_instantiations.hpp"
 
+#if(ROCWMMA_FP8_FNUZ)
 namespace rocwmma
 {
-    bool KernelI::sHeaderPrinted = false;
+    ROCWMMA_INSTANTIATE_GEMM_KERNEL_BASE(bfloat8_fnuz_t, float32_t, float32_t);
 } // namespace rocwmma
+#endif

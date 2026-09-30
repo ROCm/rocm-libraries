@@ -47,6 +47,8 @@ endif()
 
    # Add dependency to custom target
    add_dependencies(rocwmma_dlrm_tests_validate ${TEST_TARGET})
+   rocwmma_share_test_sources(${TEST_TARGET} common ${ROCWMMA_COMMON_TEST_SOURCES})
+   rocwmma_share_test_sources(${TEST_TARGET} dlrm ${DlrmCommonSources})
  endfunction()
 
  # Include rocBLAS performance benchmark
@@ -61,6 +63,8 @@ endif()
 
    # Add dependency to custom target
    add_dependencies(rocwmma_dlrm_tests_bench ${TEST_TARGET})
+   rocwmma_share_test_sources(${TEST_TARGET} common ${ROCWMMA_COMMON_TEST_SOURCES})
+   rocwmma_share_test_sources(${TEST_TARGET} dlrm ${DlrmCommonSources})
  endfunction()
 
  set(DlrmCommonSources ${ROCWMMA_COMMON_TEST_SOURCES}
