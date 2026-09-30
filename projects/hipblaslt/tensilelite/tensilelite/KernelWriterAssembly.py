@@ -8365,14 +8365,22 @@ class KernelWriterAssembly(KernelWriter):
 
   def a2aBatchSpan(self, kernel, tPB):
     module = Module("a2aBatchSpan")
-    from .Components.Signature import fusedA2AKernArgLayout
+    from .Components.Signature import (FUSED_A2A_LINE_BYTES, FUSED_A2A_MAX_RANKS,
+                                       PEER_GROUP_BYTES, fusedA2AKernArgLayout)
     layout = fusedA2AKernArgLayout()
     numCu  = self.sgprPool.checkOut(1, tag="a2aBatchSpan_numCu", preventOverflow=False)
     module.add(self.argLoader.loadKernArg(numCu, "KernArgAddress",
         sgprOffset=hex(self.states.fusedA2AKernArgBase + layout["FusedNumCu"]), dword=1))
     module.add(self.argLoader.loadKernArg("A2ACounterPtr", "KernArgAddress",
         sgprOffset=hex(self.states.fusedA2AKernArgBase + layout["counter_ptr"]), dword=2))
-    module.add(SWaitCnt(kmcnt=0, comment="wait FusedNumCu and counter_ptr"))
+    # One discarded load per line of the peer groups.
+    base  = self.states.fusedA2AKernArgBase
+    touch = self.sgprPool.checkOut(1, tag="a2aBatchSpan_touch", preventOverflow=False)
+    for line in range(base & -FUSED_A2A_LINE_BYTES, base + FUSED_A2A_MAX_RANKS * PEER_GROUP_BYTES,
+                      FUSED_A2A_LINE_BYTES):
+      module.add(self.argLoader.loadKernArg(touch, "KernArgAddress", sgprOffset=hex(line), dword=1))
+    module.add(SWaitCnt(kmcnt=0, comment="wait FusedNumCu, counter_ptr and the peer-group lines"))
+    self.sgprPool.checkIn(touch)
     tmpVgpr = self.vgprPool.checkOutAligned(4, 2, tag="a2aBatchSpan_divide")
     vgprRes = ContinuousRegister(idx=tmpVgpr, size=4)
     ww      = kernel["WavefrontSize"]
