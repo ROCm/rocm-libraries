@@ -163,6 +163,7 @@ jobs:
           "ref": "${{ github.sha }}",
           "base_sha": "${{ github.event.pull_request.base.sha || github.event.before }}",
           "head_sha": "${{ github.sha }}",
+          "pr_number": ${{ github.event.pull_request.number || 'null' }},
           "event_name": "${{ github.event_name }}",
           "skip_ci_config": ".github/skip-ci-config.toml",
           "projects_config": ".github/repos-config.json",
