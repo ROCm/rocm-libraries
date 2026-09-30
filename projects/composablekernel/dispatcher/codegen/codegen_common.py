@@ -24,6 +24,7 @@ import argparse
 import itertools
 import json
 import logging
+import math
 import concurrent.futures
 from dataclasses import dataclass
 from pathlib import Path
@@ -675,6 +676,167 @@ def normalize_gfx_arch(arch: str) -> str:
     ``dispatcher/tests/test_codegen_common.py::TestNormalizeGfxArch``.
     """
     return arch.split(":", 1)[0]
+
+
+# ============================================================================
+# Global-memory vector widths (A / B / C)
+# ============================================================================
+#
+# By default every GEMM kernel picks the widest global vector the tile allows
+# (16 bytes for A/B), so ``IsSupportedArgument`` rejects any problem whose
+# contiguous extent is not a multiple of that width. A kernel may instead be
+# generated with fixed, narrower widths (``FixedVectorSize`` in the pipeline
+# problem and the CShuffle epilogue). These helpers are the single source of
+# truth for which widths a kernel gets, how it is named, and which widths a
+# problem needs.
+#
+# Canonical form: a trait triple ``(a, b, c)`` is either all 0 (native widths,
+# no name suffix, FixedVectorSize=false) or all three explicit effective
+# widths. ``resolve_gemm_vector_sizes`` is idempotent on canonical input.
+
+# Pipelines / GEMM variants whose problem and epilogue honour fixed vector sizes.
+VECTOR_SIZE_PIPELINES: FrozenSet[str] = frozenset({"mem", "compv3", "compv4", "compv5"})
+VECTOR_SIZE_VARIANTS: FrozenSet[str] = frozenset({"standard", "batched"})
+
+_VEC_ELEMENT_BYTES = {
+    "fp16": 2, "bf16": 2, "fp32": 4, "fp64": 8, "fp8": 1, "bf8": 1, "int8": 1, "int32": 4
+}
+
+
+def _native_ab_vector_size(elem: int, mn_per_block: int, x_per_tile: int, tile_k: int, block_size: int) -> int:
+    """Mirror of ``GetGlobalVectorLoadSize`` in the universal GEMM policy.
+
+    Like CK, the 4- and 2-byte steps are only tried for elements at least that
+    wide, so e.g. fp16 falls from 4 straight to 1.
+    """
+    elems_per_thread = mn_per_block * tile_k // block_size
+    for nbytes in (16, 8, 4, 2):
+        width = nbytes // elem
+        if nbytes >= 8 or elem >= nbytes:
+            if width >= 1 and x_per_tile % width == 0 and elems_per_thread % width == 0:
+                return width
+    return 1
+
+
+def _pattern_2d_y2(y: int, x: int, vec: int, block_size: int, warp_size: int) -> int:
+    """Y2 of the thread-raked ``tile_distribution_encoding_pattern_2d``, 0 if
+    its static_asserts would fail."""
+    if x % vec:
+        return 0
+    x1 = min(vec, x * y // block_size)
+    if x1 <= 0:
+        return 0
+    x0 = min(warp_size, x // x1)
+    if x0 <= 0 or warp_size % x0:
+        return 0
+    y1, y0 = warp_size // x0, block_size // warp_size
+    x2, y2 = x // (x0 * x1), y // (y1 * y0)
+    return y2 if y0 * y1 * y2 == y and x0 * x1 * x2 == x else 0
+
+
+def gemm_vector_size_suffix(vec: Sequence[int]) -> str:
+    """Kernel-name suffix for a canonical width triple ("" when native)."""
+    return "_vec{}_{}_{}".format(*vec) if any(vec) else ""
+
+
+def gemm_problem_vector_sizes(m: int, n: int, k: int, layout: str, dtype_a: str, dtype_b: str, dtype_c: str) -> Tuple[int, int, int]:
+    """Widest width per operand that divides the problem's contiguous extent.
+
+    ``layout`` is the A/B/C layout string (e.g. ``"rcr"``). A kernel whose
+    widths divide these values accepts the problem.
+    """
+    extents = ((k if layout[0] == "r" else m), (n if layout[1] == "r" else k), (n if layout[2] == "r" else m))
+    dtypes = (dtype_a, dtype_b, dtype_c)
+    return tuple(math.gcd(e, 16 // _VEC_ELEMENT_BYTES[d]) for e, d in zip(extents, dtypes))
+
+
+def _vector_geometry(dtype_a, dtype_b, dtype_c, layout, tile, waves, warp_tile, gfx_arch):
+    """Shared derivation for the vector-size helpers below.
+
+    Returns ``(native, a_yx, b_yx, c_row, block_size, warp_size, elem_bytes)``;
+    ``(Y, X)`` is the DRAM tile of A/B with X the contiguous dim.
+    """
+    tile_m, tile_n, tile_k = tile
+    warp_m, warp_n, warp_k = waves
+    warp_size = 64 if normalize_gfx_arch(gfx_arch).startswith("gfx9") else 32
+    block_size = warp_m * warp_n * warp_k * warp_size
+    ea, eb, ec = (_VEC_ELEMENT_BYTES[d] for d in (dtype_a, dtype_b, dtype_c))
+    a_row, b_row, c_row = (ch == "r" for ch in layout[:3])
+    a_yx = (tile_m, tile_k) if a_row else (tile_k, tile_m)
+    b_yx = (tile_k, tile_n) if b_row else (tile_n, tile_k)
+    native = (
+        _native_ab_vector_size(ea, tile_m, a_yx[1], tile_k, block_size),
+        _native_ab_vector_size(eb, tile_n, b_yx[1], tile_k, block_size),
+        min((warp_tile[1] * warp_n) if c_row else (warp_tile[0] * warp_m), 16 // ec),
+    )
+    return native, a_yx, b_yx, c_row, block_size, warp_size, (ea, eb, ec)
+
+
+def gemm_native_vector_sizes(*, dtype_a, dtype_b, dtype_c, layout, tile, waves, warp_tile, gfx_arch) -> Tuple[int, int, int]:
+    """A/B/C global vector widths a kernel uses when no widths are fixed."""
+    return _vector_geometry(dtype_a, dtype_b, dtype_c, layout, tile, waves, warp_tile, gfx_arch)[0]
+
+
+def resolve_gemm_vector_sizes(
+    *,
+    dtype_a: str,
+    dtype_b: str,
+    dtype_c: str,
+    layout: str,
+    tile: Sequence[int],
+    waves: Sequence[int],
+    warp_tile: Sequence[int],
+    gfx_arch: str,
+    requested: Sequence[int] = (0, 0, 0),
+    pipeline: str = "compv3",
+    epilogue: str = "cshuffle",
+    variant: str = "standard",
+) -> Tuple[Tuple[int, int, int], Optional[str]]:
+    """Resolve requested A/B/C global vector widths to the canonical triple.
+
+    ``requested`` entries of 0 mean "native". The effective width of each
+    operand is ``min(requested, native)``. Returns ``(triple, reject_reason)``
+    where ``triple`` is ``(0, 0, 0)`` when every effective width equals the
+    native one, and ``reject_reason`` is None when the widths are legal for
+    this tile (otherwise a short human-readable string).
+    """
+    native, a_yx, b_yx, c_row, block_size, warp_size, (ea, eb, ec) = _vector_geometry(
+        dtype_a, dtype_b, dtype_c, layout, tile, waves, warp_tile, gfx_arch
+    )
+    tile_m, tile_n, _ = tile
+    warp_tile_m, warp_tile_n, warp_tile_k = warp_tile
+    eff = tuple(min(r, nv) if r else nv for r, nv in zip(requested, native))
+    if eff == native:
+        return (0, 0, 0), None
+
+    for name, width, elem in zip("ABC", eff, (ea, eb, ec)):
+        if width < 1 or width & (width - 1) or width * elem > 16:
+            return eff, f"vector_size_{name.lower()}={width} is not a power of two <= 16 bytes"
+    if variant not in VECTOR_SIZE_VARIANTS:
+        return eff, f"variant {variant} does not support fixed vector sizes"
+    if pipeline not in VECTOR_SIZE_PIPELINES:
+        return eff, f"pipeline {pipeline} does not support fixed vector sizes"
+    if epilogue != "cshuffle":
+        return eff, f"epilogue {epilogue} cannot use fixed vector sizes"
+    # K-major-in-LDS operands (col-major A / row-major B) on wave64 need
+    # (tile_k / Y2) >= warp_size / warp_tile_mn in the LDS descriptor.
+    for name, width, (y, x), xdl, k_out in (
+        ("A", eff[0], a_yx, warp_tile_m, layout[0] == "c"),
+        ("B", eff[1], b_yx, warp_tile_n, layout[1] == "r"),
+    ):
+        if warp_tile_k % width:
+            return eff, f"warp_tile_k={warp_tile_k} not divisible by vector_size_{name.lower()}={width}"
+        y2 = _pattern_2d_y2(y, x, width, block_size, warp_size)
+        if not y2:
+            return eff, f"{name} tile {y}x{x} cannot be distributed with vector_size_{name.lower()}={width}"
+        if k_out and warp_size == 64 and (y // y2) < warp_size // xdl:
+            return eff, f"{name} LDS layout needs more warps for vector_size_{name.lower()}={width}"
+    per_thread = warp_tile_m * warp_tile_n // warp_size
+    if per_thread > eff[2]:
+        shuffles = per_thread // eff[2]
+        if per_thread % eff[2] or (tile_m if c_row else tile_n) % shuffles:
+            return eff, f"CShuffle cannot split {per_thread} elements/thread by vector_size_c={eff[2]}"
+    return eff, None
 
 
 # ============================================================================

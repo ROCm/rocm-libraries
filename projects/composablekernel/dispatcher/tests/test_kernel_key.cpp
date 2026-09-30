@@ -133,6 +133,21 @@ TEST(KernelKeyTest, EncodeIdentifierWithSplitK)
     EXPECT_NE(id.find("_splitk4"), std::string::npos);
 }
 
+TEST(KernelKeyTest, EncodeIdentifierWithVectorSizes)
+{
+    KernelKey native            = make_test_key(256, 256, 32, "gfx950");
+    KernelKey key               = native;
+    key.algorithm.vector_size_a = 1;
+    key.algorithm.vector_size_b = 1;
+    key.algorithm.vector_size_c = 8;
+
+    // Native widths leave the identifier untouched; fixed widths add a suffix
+    // (same spelling as the codegen kernel name) and a distinct key.
+    EXPECT_EQ(native.encode_identifier().find("_vec"), std::string::npos);
+    EXPECT_NE(key.encode_identifier().find("32x32x16_vec1_1_8"), std::string::npos);
+    EXPECT_NE(key, native);
+}
+
 TEST(KernelKeyTest, EncodeIdentifierWithSparsity)
 {
     KernelKey key;

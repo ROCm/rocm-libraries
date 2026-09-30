@@ -43,16 +43,23 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 
 _THIS_DIR = Path(__file__).resolve().parent
 _COMMON_DIR = _THIS_DIR.parent / "common"
 _DISPATCHER_ROOT = _THIS_DIR.parents[2] / "dispatcher"
 sys.path.insert(0, str(_DISPATCHER_ROOT / "python"))
+sys.path.insert(0, str(_DISPATCHER_ROOT / "codegen"))
 sys.path.insert(0, str(_COMMON_DIR))
 sys.path.insert(0, str(_THIS_DIR))
 
 from gemm_utils import setup_multiple_gemm_dispatchers, expand_sweep  # noqa: E402
+from codegen_common import (  # noqa: E402
+    CommonTypeMappings,
+    VECTOR_SIZE_VARIANTS,
+    gemm_problem_vector_sizes,
+)
 from smi_utils import detect_gpu_ids  # noqa: E402
 
 # Config layout. The bridged regular-GEMM path (gemm_universal) keeps its sweep
@@ -372,6 +379,13 @@ def main():
         default=2e-2,
         help="Relative tolerance for --verify (default 2e-2, suits fp16)",
     )
+    parser.add_argument(
+        "--no-vector-fallback",
+        action="store_true",
+        help="Build only native-vector-width kernels. By default, problems whose "
+        "contiguous A/B/C extents are not a multiple of the native width also get "
+        "kernels with narrower fixed widths (gcd of extent and native width)",
+    )
     args = parser.parse_args()
 
     config_paths = resolve_configs(args)
@@ -438,6 +452,28 @@ def main():
         if args.multi_abd_cde_op is not None:
             mabd_kwargs["cde_elementwise_op"] = args.multi_abd_cde_op
 
+    problems = load_problems(args.problems, args.variant)
+    # Per-problem widest legal A/B/C vector widths; a kernel may run a problem
+    # iff each of its effective widths divides the problem's.
+    out_dtype = CommonTypeMappings.get_output_dtype(args.dtype)
+    prob_vecs = [
+        gemm_problem_vector_sizes(
+            int(p["M"]), int(p["N"]), int(p["K"]), args.layout,
+            args.dtype, args.dtype, out_dtype,
+        )
+        for p in problems
+    ]
+    vector_fallback = (
+        not args.no_vector_fallback and codegen_variant in VECTOR_SIZE_VARIANTS
+    )
+    vec_kwargs = {}
+    vec_rejects = {}
+    if vector_fallback:
+        vec_kwargs = dict(
+            vector_sizes=sorted({(0, 0, 0), *prob_vecs}), rejects=vec_rejects
+        )
+        print(f"  Vector-width fallback triples: {vec_kwargs['vector_sizes']}")
+
     all_configs = []
     for cfg_path in config_paths:
         all_configs.extend(
@@ -448,12 +484,20 @@ def main():
                 layout=sweep_layout,
                 variant=codegen_variant,
                 mabd_cli_overrides=(mabd_kwargs or None),
+                **vec_kwargs,
                 **mabd_kwargs,
             )
         )
+    for reason, n in sorted(vec_rejects.items()):
+        print(f"  Vector-width reject ({n}x): {reason}")
 
     if args.max_kernels > 0:
-        all_configs = all_configs[: args.max_kernels]
+        # Count base tiles, not their vector-width variants.
+        def base(c):
+            return replace(c, pad_m=False, pad_n=False, pad_k=False).with_vector_sizes((0, 0, 0))[0].name
+
+        keep = set(list(dict.fromkeys(map(base, all_configs)))[: args.max_kernels])
+        all_configs = [c for c in all_configs if base(c) in keep]
 
     print(f"  Expanded configs: {len(all_configs)}")
     print(f"  Build workers: {args.workers}")
@@ -468,6 +512,9 @@ def main():
     built_kernels = [
         (cfg, lib) for cfg, lib in zip(all_configs, lib_paths) if lib is not None
     ]
+    for cfg, lib in zip(all_configs, lib_paths):
+        if lib is None and any(cfg.vector_sizes):
+            print(f"  Build FAILED for fixed vector widths: {cfg.name}")
 
     # Dedupe by .so path (distinct configs can map to the same physical kernel).
     seen_libs = set()
@@ -498,12 +545,33 @@ def main():
     print("Phase 2: Load test problems")
     print(f"{'=' * 80}")
 
-    problems = load_problems(args.problems, args.variant)
+    # Pair each problem only with kernels whose vector widths it can satisfy
+    # (without the fallback, keep the old all-pairs behaviour).
+    if vector_fallback:
+        kernel_vecs = [cfg.effective_vector_sizes for cfg, _ in built_kernels]
+        pairs = [
+            [
+                i
+                for i, kv in enumerate(kernel_vecs)
+                if all(p % k == 0 for p, k in zip(pv, kv))
+            ]
+            for pv in prob_vecs
+        ]
+    else:
+        pairs = [list(range(len(built_kernels)))] * len(problems)
+    n_meas = sum(map(len, pairs))
     print(f"  Problems: {len(problems)}")
     print(
-        f"  Total measurements: {len(built_kernels)} x {len(problems)} = "
-        f"{len(built_kernels) * len(problems)}"
+        f"  Total measurements: {n_meas} "
+        f"({len(built_kernels) * len(problems) - n_meas} vector-width-incompatible "
+        f"pairs skipped)"
     )
+    for prob, pv, idx in zip(problems, prob_vecs, pairs):
+        if not idx:
+            print(
+                f"  WARNING: no built kernel supports problem "
+                f"{prob['M']}x{prob['N']}x{prob['K']} (widths {pv})"
+            )
 
     # ========================================================================
     # Phase 3: Benchmark across all visible GPUs (subprocess isolation, batched)
@@ -542,14 +610,10 @@ def main():
     # Build a single work queue of (prob_idx, prob_dict, kernel-batch) units and
     # fan them out across device-pinned worker threads.
     work_q = queue.Queue()
-    for prob_idx, prob in enumerate(problems):
+    for prob_idx, (prob, idx) in enumerate(zip(problems, pairs)):
         prob_dict = {"M": int(prob["M"]), "N": int(prob["N"]), "K": int(prob["K"])}
-        for start in range(0, len(built_kernels), args.batch_size):
-            end = min(start + args.batch_size, len(built_kernels))
-            batch = [
-                (start + j, cfg, lib)
-                for j, (cfg, lib) in enumerate(built_kernels[start:end])
-            ]
+        for start in range(0, len(idx), args.batch_size):
+            batch = [(i, *built_kernels[i]) for i in idx[start : start + args.batch_size]]
             work_q.put((prob_idx, prob_dict, batch))
 
     io_lock = threading.Lock()

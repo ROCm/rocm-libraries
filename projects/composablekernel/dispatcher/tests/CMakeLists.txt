@@ -151,6 +151,20 @@ set_tests_properties(dispatcher_test_codegen_common PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# Fixed global vector widths: per-problem gcd widths, canonical resolution, and
+# agreement between the bridge name, codegen naming and the generated kernel.
+add_test(
+    NAME dispatcher_test_gemm_vector_sizes
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_gemm_vector_sizes.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gemm_vector_sizes PROPERTIES
+    LABELS "dispatcher;python;codegen;validation"
+    TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # Arch-string handling in tile_engine's gemm_validation_utils, which seven GEMM
 # instance builders and the dispatcher's own warp gate all share. Registered on the
 # dispatcher side because the bridge/Old-TE instance-set parity that depends on it

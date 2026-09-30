@@ -28,6 +28,7 @@ Usage:
 
 from dispatcher_common import unified_framework_flags
 import ctypes
+import re
 import subprocess
 import numpy as np
 from pathlib import Path
@@ -496,7 +497,7 @@ def find_matching_kernel_header(config: "KernelConfig") -> Optional[Path]:
 
     # Strategy 1: Exact match with ALL parameters including warp tile
     pattern = f"gemm_{dtype}_{layout}_{pipeline}_*_{scheduler}_*_{tile_str}_{wave_str}_{warp_str}.hpp"
-    matches = list(kernel_dir.glob(pattern))
+    matches = _glob_native(kernel_dir, pattern)
     if matches:
         return matches[0]
 
@@ -504,25 +505,25 @@ def find_matching_kernel_header(config: "KernelConfig") -> Optional[Path]:
     pattern = (
         f"gemm_{dtype}_{layout}_{pipeline}_*_{scheduler}_*_{tile_str}_{wave_str}_*.hpp"
     )
-    matches = list(kernel_dir.glob(pattern))
+    matches = _glob_native(kernel_dir, pattern)
     if matches:
         return matches[0]
 
     # Strategy 3: Match with just tile (ignore wave/warp)
     pattern = f"gemm_{dtype}_{layout}_{pipeline}_*_{scheduler}_*_{tile_str}_*.hpp"
-    matches = list(kernel_dir.glob(pattern))
+    matches = _glob_native(kernel_dir, pattern)
     if matches:
         return matches[0]
 
     # Strategy 4: Match with intrawave (known to work)
     pattern = f"gemm_{dtype}_{layout}_*_intrawave_*_{tile_str}_*.hpp"
-    matches = list(kernel_dir.glob(pattern))
+    matches = _glob_native(kernel_dir, pattern)
     if matches:
         return matches[0]
 
     # Strategy 5: Any kernel with matching dtype/layout/tile
     pattern = f"gemm_{dtype}_{layout}_*_{tile_str}_*.hpp"
-    matches = list(kernel_dir.glob(pattern))
+    matches = _glob_native(kernel_dir, pattern)
     if matches:
         return matches[0]
 
@@ -1149,6 +1150,19 @@ def _parse_triplet(text: str) -> Optional[Tuple[int, int, int]]:
         return None
 
 
+def _is_fixed_vector_header(header: Path) -> bool:
+    """True for reduced-width fallback kernels (``..._vec{a}_{b}_{c}``).
+
+    They support a superset of problems at lower bandwidth, so name-based
+    fallback lookups must never pick one in place of a native kernel.
+    """
+    return re.search(r"_vec\d+_\d+_\d+(_|$)", header.stem) is not None
+
+
+def _glob_native(kernel_dir: Path, pattern: str) -> List[Path]:
+    return [h for h in kernel_dir.glob(pattern) if not _is_fixed_vector_header(h)]
+
+
 def _parse_gemm_header_metadata(header: Path) -> Optional[Dict[str, Any]]:
     """
     Parse GEMM header name into configuration metadata.
@@ -1159,7 +1173,7 @@ def _parse_gemm_header_metadata(header: Path) -> Optional[Dict[str, Any]]:
            _{tile_m}x{tile_n}x{tile_k}_{wave_m}x{wave_n}x{wave_k}_{warp_m}x{warp_n}x{warp_k}
     """
     parts = header.stem.split("_")
-    if len(parts) < 13 or parts[0] != "gemm":
+    if len(parts) < 13 or parts[0] != "gemm" or _is_fixed_vector_header(header):
         return None
 
     tile = _parse_triplet(parts[10])

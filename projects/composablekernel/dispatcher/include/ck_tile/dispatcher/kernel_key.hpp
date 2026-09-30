@@ -173,6 +173,10 @@ struct KernelKey
         bool preshuffle;              // Preshuffle (for weight preshuffle variants)
         bool transpose_c;             // TransposeC
         std::uint8_t num_wave_groups; // NumWaveGroups
+        // Fixed global vector widths (elements) for A/B/C; all 0 = native widths
+        std::uint8_t vector_size_a = 0;
+        std::uint8_t vector_size_b = 0;
+        std::uint8_t vector_size_c = 0;
 
         // Padding support flags (kPadM, kPadN, kPadK in generated kernels)
         bool pad_m = true; // Support arbitrary M dimensions via padding
@@ -234,7 +238,10 @@ struct KernelKey
                         algorithm.pad_k,
                         algorithm.streamk,
                         algorithm.reduction_strategy,
-                        algorithm.workspace);
+                        algorithm.workspace,
+                        algorithm.vector_size_a,
+                        algorithm.vector_size_b,
+                        algorithm.vector_size_c);
     }
 
     /// Equality comparison
@@ -484,6 +491,11 @@ inline std::string KernelKey::encode_identifier() const
         << "_" << unsigned(algorithm.wave_shape.m) << "x" << unsigned(algorithm.wave_shape.n) << "x"
         << unsigned(algorithm.wave_shape.k) << "_" << unsigned(algorithm.warp_tile_shape.m) << "x"
         << unsigned(algorithm.warp_tile_shape.n) << "x" << unsigned(algorithm.warp_tile_shape.k);
+
+    // Must match gemm_vector_size_suffix() in codegen_common.py
+    if(algorithm.vector_size_a || algorithm.vector_size_b || algorithm.vector_size_c)
+        oss << "_vec" << unsigned(algorithm.vector_size_a) << "_"
+            << unsigned(algorithm.vector_size_b) << "_" << unsigned(algorithm.vector_size_c);
 
     if(signature.split_k > 1)
         oss << "_splitk" << unsigned(signature.split_k);
