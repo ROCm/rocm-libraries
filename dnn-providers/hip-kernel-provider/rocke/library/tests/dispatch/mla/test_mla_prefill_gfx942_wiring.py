@@ -23,9 +23,11 @@ from dispatch.mla import (
     MLA_REGISTRY,
     MLARequest,
     dispatch_mla,
+    dispatch_mla_all,
     mla_candidates,
     mla_sweep_space,
     num_q_blocks_for,
+    registered_mla_combos,
 )
 
 _NAME = "mla_prefill_fwd_gfx942"
@@ -311,6 +313,31 @@ class TestDispatchResult(unittest.TestCase):
 
     def test_sweep_space_is_empty_for_a_malformed_request(self):
         self.assertEqual(mla_sweep_space(_req(num_heads=0)), ())
+
+    def test_combos_are_the_selected_candidate_and_spec(self):
+        result = dispatch_mla(_req())
+        self.assertEqual(
+            registered_mla_combos(_req()), ((result.candidate, result.spec),)
+        )
+
+    def test_combos_are_empty_for_a_malformed_request(self):
+        self.assertEqual(registered_mla_combos(_req(num_heads=0)), ())
+
+    def test_dispatch_all_agrees_with_dispatch(self):
+        (swept,) = dispatch_mla_all(_req())
+        auto = dispatch_mla(_req())
+        # A sweep result carries the request with this candidate pinned, so its
+        # selection key is the pinned request's; the compiled kernel is shared.
+        pinned = dispatch_mla(
+            _req(algorithm=auto.candidate.algorithm, spec_id=auto.candidate.spec_id)
+        )
+        self.assertEqual(swept.kernel_id, pinned.kernel_id)
+        self.assertEqual(swept.kernel_id.compile_key, auto.kernel_id.compile_key)
+        self.assertEqual(swept.grid, auto.grid)
+        self.assertEqual(swept.signature, auto.signature)
+
+    def test_dispatch_all_is_empty_for_a_malformed_request(self):
+        self.assertEqual(dispatch_mla_all(_req(num_heads=0)), ())
 
 
 class TestSupportImpliesBuildable(unittest.TestCase):
