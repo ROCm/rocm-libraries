@@ -59,7 +59,8 @@ namespace rocsparse
     // CSR matrix target, which must have the same sizes, types, index base and batch layout as
     // source, and whose row pointer receives a copy of the row pointer of source. Each array of
     // target may either alias the matching array of source, in which case it is sorted in
-    // place, or not overlap it at all. Each batch is sorted independently.
+    // place, or not overlap it at all. The batches must be uniform: they all share the sparsity
+    // pattern of the first batch, and only their values differ.
     rocsparse_status csrsort(rocsparse_handle            handle,
                              rocsparse_csrsort_alg       alg,
                              rocsparse_const_spmat_descr source,
