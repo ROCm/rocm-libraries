@@ -3183,12 +3183,17 @@ CK_TILE_DEVICE void amd_buffer_atomic_add(const thread_buffer<T, N>& src_thread_
     if constexpr(std::is_same<T, bf16_t>::value)
     {
         // Global atomics have no buffer range check, so drop what the buffer path would drop.
-        if(dst_thread_element_valid && dst_thread_element_offset >= 0 &&
-           dst_thread_element_offset <= dst_element_space_size - N)
-        {
-            amd_global_atomic_add_impl<T, N>(src_thread_data,
-                                             p_dst_wave + dst_thread_element_offset);
-        }
+        // It checks each packed pair on its own.
+        static_for<0, N / 2, 1>{}([&](auto i) {
+            const index_t pair_offset = 2 * i;
+            if(dst_thread_element_valid && dst_thread_element_offset >= -pair_offset &&
+               dst_thread_element_offset <= dst_element_space_size - 2 - pair_offset)
+            {
+                amd_global_atomic_add_impl<T, 2>(
+                    bit_cast<thread_buffer<T, 2>>(src_thread_data.template get_as<bf16x2_t>()[i]),
+                    p_dst_wave + dst_thread_element_offset + pair_offset);
+            }
+        });
     }
     else
     {
