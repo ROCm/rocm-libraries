@@ -246,12 +246,10 @@ void testing_gemm_ex_get_solutions(const Arguments& arg)
         if(arg.outofplace)
             CHECK_HIP_ERROR(dDref.transfer_from(hD));
 
-        // A solution reported by the query must also run successfully; record a failure
-        // if it does not, then skip only the numeric compare for that solution.
-        rocblas_status status = rocblas_gemm_exM(GEMM_EX_ARGS, sol, rocblas_gemm_flags_none);
-        EXPECT_ROCBLAS_STATUS(status, rocblas_status_success);
-        if(status != rocblas_status_success)
-            return;
+        // A solution reported by the query must also run successfully. Wrap the launch
+        // in CHECK_ROCBLAS_ERROR so a faulting solution is caught and recorded rather
+        // than taking down the test binary.
+        CHECK_ROCBLAS_ERROR(rocblas_gemm_exM(GEMM_EX_ARGS, sol, rocblas_gemm_flags_none));
 
         CHECK_HIP_ERROR(hD.transfer_from(dDref));
 
