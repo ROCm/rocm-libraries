@@ -28,6 +28,17 @@ from rocke.instances.gfx942.tf32_mma_probe import (
 )
 
 
+def test_public_tf32_exports():
+    import rocke
+    import rocke.core
+    from rocke import TF32 as public_tf32
+    from rocke.core import TF32 as core_tf32
+
+    assert public_tf32 is core_tf32 is TF32
+    assert "TF32" in rocke.__all__
+    assert "TF32" in rocke.core.__all__
+
+
 def test_dtype_identity():
     assert TF32 != F32 and TF32 != I32
     for alias in ("tf32", "xf32", " XF32 "):
