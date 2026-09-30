@@ -72,6 +72,7 @@ from dataclasses import dataclass
 from typing import List, Tuple
 
 from rocke.core.ir import (
+    BF16,
     F16,
     F32,
     I32,
@@ -83,14 +84,87 @@ from rocke.core.ir import (
 from rocke.helpers.transforms import TensorDescriptor, embed, unmerge_magic
 
 
+def _io_type(dtype: str):
+    """Return the IR type for a given ``dtype`` string (``"fp16"`` or ``"bf16"``)."""
+    if dtype == "bf16":
+        return BF16
+    if dtype == "fp16":
+        return F16
+    raise ValueError(
+        f"unsupported direct_conv dtype: {dtype!r}; expected 'fp16' or 'bf16'"
+    )
+
+
+def _buf_load_vN(
+    b: IRBuilder, dtype: str, rsrc: Value, voff: Value, soff: Value, dwords: int
+) -> Value:
+    """Dtype-dispatch for vectorised buffer load.
+
+    ``dwords`` matches the ``dwords`` parameter of ``buffer_load_vN_f16`` /
+    ``buffer_load_vN_bf16``: each dword holds two 16-bit elements (dwords=1 ->
+    2 elements, dwords=2 -> 4 elements, dwords=4 -> 8 elements).
+    Uses the type-specific op names to stay byte-identical with the C++ engine.
+    """
+    if dtype == "bf16":
+        return b.buffer_load_vN_bf16(rsrc, voff, soff, dwords)
+    return b.buffer_load_vN_f16(rsrc, voff, soff, dwords)
+
+
+def _buf_store_vN(
+    b: IRBuilder,
+    dtype: str,
+    rsrc: Value,
+    voff: Value,
+    soff: Value,
+    val: Value,
+    dwords: int,
+) -> None:
+    """Dtype-dispatch for vectorised buffer store.
+
+    ``dwords`` matches the ``dwords`` parameter of ``buffer_store_vN_f16`` /
+    ``buffer_store_vN_bf16``: each dword holds two 16-bit elements.
+    """
+    if dtype == "bf16":
+        b.buffer_store_vN_bf16(rsrc, voff, soff, val, dwords)
+    else:
+        b.buffer_store_vN_f16(rsrc, voff, soff, val, dwords)
+
+
+def _trunc_f32(b: IRBuilder, dtype: str, val: Value) -> Value:
+    """Truncate a vector of f32 accumulators to the output dtype."""
+    if dtype == "bf16":
+        return b.vec_trunc_f32_to_bf16(val)
+    return b.vec_trunc_f32_to_f16(val)
+
+
+def _mfma(
+    b: IRBuilder,
+    dtype: str,
+    shape: str,
+    a: Value,
+    b_val: Value,
+    acc: Value,
+) -> Value:
+    """Dtype-dispatch for a single MFMA call.
+
+    ``shape`` is the size suffix without the dtype, e.g. ``"16x16x16"``,
+    ``"16x16x32"``, or ``"32x32x8"``.
+    """
+    if dtype == "bf16":
+        fn = getattr(b, f"mfma_f32_{shape}_bf16")
+    else:
+        fn = getattr(b, f"mfma_f32_{shape}_f16")
+    return fn(a, b_val, acc)
+
+
 @dataclass(frozen=True)
 class DirectConvProblem:
     """The grouped direct-conv shape parameters.
 
     Layouts:
-      A: NHWC fp16, `[N, H, W, groups*cpg]`
-      B: KRSC fp16, `[groups*kpg, KH, KW, cpg]`
-      D: NHWK fp16, `[N, H, W, groups*kpg]`
+      A: NHWC, `[N, H, W, groups*cpg]`
+      B: KRSC, `[groups*kpg, KH, KW, cpg]`
+      D: NHWK, `[N, H, W, groups*kpg]`
     """
 
     N: int
@@ -103,6 +177,7 @@ class DirectConvProblem:
     KW: int = 3
     PAD: int = 1
     stride: int = 1
+    dtype: str = "fp16"  # "fp16" or "bf16"
 
     @property
     def total_c(self) -> int:
@@ -190,11 +265,13 @@ class DirectConv16cSpec:
             f"bq{self.block_q}",
             f"bg{self.block_groups}",
             "db" if self.double_buffer else "sb",
-            flags={"k32": self.fold_k32},
+            flags={"k32": self.fold_k32, "bf16": p.dtype == "bf16"},
         )
 
     def validate(self) -> None:
         p = self.problem
+        if p.dtype not in ("fp16", "bf16"):
+            raise ValueError(f"DirectConv16cSpec: unsupported dtype {p.dtype!r}")
         if p.cpg != 16 or p.kpg != 16:
             raise ValueError(
                 f"DirectConv16cSpec expects cpg=kpg=16 (got {p.cpg}, {p.kpg})"
@@ -230,6 +307,8 @@ def is_valid_spec_16c(
     except KeyError as e:
         return False, str(e)
     p = spec.problem
+    if p.dtype not in ("fp16", "bf16"):
+        return False, f"unsupported dtype {p.dtype!r}; expected 'fp16' or 'bf16'"
     if p.stride != 1:
         return False, f"stride > 1 is not supported (got {p.stride})"
     if p.cpg != 16 or p.kpg != 16:
@@ -238,15 +317,16 @@ def is_valid_spec_16c(
         return False, (
             f"groups {p.groups} not divisible by block_groups {spec.block_groups}"
         )
+    ab_dtype = "bf16" if p.dtype == "bf16" else "f16"
     if not target.mma.has_shape(
-        a_dtype="f16", b_dtype="f16", c_dtype="fp32", m=16, n=16, k=16
+        a_dtype=ab_dtype, b_dtype=ab_dtype, c_dtype="fp32", m=16, n=16, k=16
     ):
-        return False, f"missing 16x16x16 f16 MFMA atom on {arch}"
+        return False, f"missing 16x16x16 {ab_dtype} MFMA atom on {arch}"
     if spec.fold_k32 and not target.mma.has_shape(
-        a_dtype="f16", b_dtype="f16", c_dtype="fp32", m=16, n=16, k=32
+        a_dtype=ab_dtype, b_dtype=ab_dtype, c_dtype="fp32", m=16, n=16, k=32
     ):
         return False, (
-            f"fold_k32=True needs the 16x16x32 f16 MFMA atom, absent on "
+            f"fold_k32=True needs the 16x16x32 {ab_dtype} MFMA atom, absent on "
             f"{arch}; use fold_k32=False for a {arch}-capable kernel"
         )
     return True, "ok"
@@ -273,6 +353,7 @@ def build_direct_conv_16c(
     if not ok:
         raise ValueError(f"invalid direct_conv_16c spec for {arch}: {why}")
     p = spec.problem
+    io_type = _io_type(p.dtype)
     BLOCK_Q = spec.block_q
     BLOCK_GROUPS = spec.block_groups
     WAVE = spec.wave_size
@@ -292,9 +373,9 @@ def build_direct_conv_16c(
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    D = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
     A_bytes = b.param("A_bytes", I32)
     B_bytes = b.param("B_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
@@ -355,9 +436,9 @@ def build_direct_conv_16c(
     # halves so the OOB-zeroed writes land in the slack region of the
     # allocation and never alias a valid chunk.
     lds_total_fp16 = PASSES * THREADS * LOAD_VEC
-    A_smem = b.smem_alloc(F16, [1, lds_total_fp16], name_hint="lds_a")
+    A_smem = b.smem_alloc(io_type, [1, lds_total_fp16], name_hint="lds_a")
     B_smem = (
-        b.smem_alloc(F16, [1, lds_total_fp16], name_hint="lds_b")
+        b.smem_alloc(io_type, [1, lds_total_fp16], name_hint="lds_b")
         if spec.double_buffer
         else A_smem
     )
@@ -369,7 +450,7 @@ def build_direct_conv_16c(
 
     c_half_bytes = b.const_i32(2)
     oob_sentinel = b.const_i32((1 << 31) - 1)
-    fp16x4_zero = b.zero_vec_f16(4)
+    fp16x4_zero = b.zero_vec(io_type, 4)
     zero_acc = b.zero_vec_f32(4)
 
     # ---- weight loads (constant across H-loop) ----
@@ -396,7 +477,7 @@ def build_direct_conv_16c(
     # c4 in {2, 3}) are zero-padded, so its accumulator chain stays the
     # same width as the S=0/1 atom (see the MFMA comment below).
     lane_in_lo_half = b.cmp_lt(c4, b.const_i32(2))
-    fp16x8_zero = b.zero_vec_f16(8)
+    fp16x8_zero = b.zero_vec(io_type, 8)
     if spec.fold_k32:
         for r_const in range(p.KH):
             r_i = b.const_i32(r_const)
@@ -410,7 +491,7 @@ def build_direct_conv_16c(
                 c=ch_lane_k32,
             )
             weights_k32.append(
-                b.buffer_load_vN_f16(b_rsrc, b.mul(w_off_k32, c_half_bytes), c0, 4)
+                _buf_load_vN(b, p.dtype, b_rsrc, b.mul(w_off_k32, c_half_bytes), c0, 4)
             )
             # Residual S=2 promoted to a zero-padded K=32 atom. The low
             # half (c4 in {0,1}) carries B[k_out, r, 2, 0:8] / [8:16]; the
@@ -422,7 +503,9 @@ def build_direct_conv_16c(
                 s=b.const_i32(2),
                 c=ch_lane_k32,
             )
-            w_s2 = b.buffer_load_vN_f16(b_rsrc, b.mul(w_off_s2, c_half_bytes), c0, 4)
+            w_s2 = _buf_load_vN(
+                b, p.dtype, b_rsrc, b.mul(w_off_s2, c_half_bytes), c0, 4
+            )
             weights_s2_k32.append(b.select(lane_in_lo_half, w_s2, fp16x8_zero))
     else:
         for r_const in range(p.KH):
@@ -437,7 +520,7 @@ def build_direct_conv_16c(
                     c=ch_lane_k16,
                 )
                 weights.append(
-                    b.buffer_load_vN_f16(b_rsrc, b.mul(w_off, c_half_bytes), c0, 2)
+                    _buf_load_vN(b, p.dtype, b_rsrc, b.mul(w_off, c_half_bytes), c0, 2)
                 )
 
     # ---- LDS load helper ----
@@ -579,7 +662,7 @@ def build_direct_conv_16c(
             valid = b.land(addr_valid, cm["in_bounds"])
             a_off_bytes = b.mul(a_off_elems, c_half_bytes)
             safe_off = b.select(valid, a_off_bytes, oob_sentinel)
-            a_vec = b.buffer_load_vN_f16(a_rsrc, safe_off, c0, 2)
+            a_vec = _buf_load_vN(b, p.dtype, a_rsrc, safe_off, c0, 2)
             a_vec = b.select(valid, a_vec, fp16x4_zero)
             # LDS index in halves: chunk_idx * 4. Allocation is 2D
             # `[1, ROW]` so we pass (row=0, col=lds_idx).
@@ -589,7 +672,7 @@ def build_direct_conv_16c(
 
     def store_to_lds(loads, lds: Value) -> None:
         for a_vec, lds_idx in loads:
-            b.smem_store_vN_f16(lds, [c0, lds_idx], a_vec, 4)
+            b.smem_store_vN(lds, [c0, lds_idx], a_vec, 4)
 
     q_subtiles = BLOCK_Q // 16
 
@@ -613,7 +696,7 @@ def build_direct_conv_16c(
             ),
             b.mul(c4, b.const_i32(4)),
         )
-        return b.smem_load_vN_f16(lds, c0, lds_idx, n=4)
+        return b.smem_load_vN(lds, c0, lds_idx, dtype=io_type, n=4)
 
     def lds_read_input_k32(q_subtile: int, lds: Value) -> Value:
         """Per-lane <8 x half> read for the folded K=32 MFMA.
@@ -633,7 +716,7 @@ def build_direct_conv_16c(
             ),
             ch_lane_k32,
         )
-        return b.smem_load_vN_f16(lds, c0, lds_idx, n=8)
+        return b.smem_load_vN(lds, c0, lds_idx, dtype=io_type, n=8)
 
     def lds_read_input_s2_k32(q_subtile: int, lds: Value) -> Value:
         """Per-lane <8 x half> input read for the S=2 residual, promoted to
@@ -657,7 +740,7 @@ def build_direct_conv_16c(
             ),
             ch_lane_k32,
         )
-        vec = b.smem_load_vN_f16(lds, c0, lds_idx, n=8)
+        vec = b.smem_load_vN(lds, c0, lds_idx, dtype=io_type, n=8)
         return b.select(lane_in_lo_half, vec, fp16x8_zero)
 
     # ---- prologue: prefetch row 0 (= -PAD..-PAD+1 = -1) into A_smem ----
@@ -752,18 +835,28 @@ def build_direct_conv_16c(
                     # Migrating the C-accumulator readout + A/B K-pack to
                     # c_layout().coord would delete this whole hazard class at
                     # the source; tracked as a follow-up.
-                    acc_in = b.mfma_f32_16x16x32_f16(
-                        weights_k32[r_const], input_k32, acc_in
+                    acc_in = _mfma(
+                        b, p.dtype, "16x16x32", weights_k32[r_const], input_k32, acc_in
                     )
-                    acc_in = b.mfma_f32_16x16x32_f16(
-                        weights_s2_k32[r_const], input_s2, acc_in
+                    acc_in = _mfma(
+                        b,
+                        p.dtype,
+                        "16x16x32",
+                        weights_s2_k32[r_const],
+                        input_s2,
+                        acc_in,
                     )
                 else:
                     inputs = inputs_by_q[qt]
                     for s_const in range(p.KW):
                         w_idx = r_const * p.KW + s_const
-                        acc_in = b.mfma_f32_16x16x16_f16(
-                            weights[w_idx], inputs[s_const], acc_in
+                        acc_in = _mfma(
+                            b,
+                            p.dtype,
+                            "16x16x16",
+                            weights[w_idx],
+                            inputs[s_const],
+                            acc_in,
                         )
                 accs[p_idx] = acc_in
 
@@ -828,9 +921,9 @@ def build_direct_conv_16c(
                 # k_out = g*kpg + c4*4 + [0..3].  Store them as one
                 # 64-bit vector instead of four scalar buffer_store_short
                 # ops.
-                acc_h = b.vec_trunc_f32_to_f16(acc_to_flush)
-                b.buffer_store_vN_f16(d_rsrc, safe_d_off, c0, acc_h, 2)
-        # Unconditional slot reset — kills early-iter leaks before they
+                acc_h = _trunc_f32(b, p.dtype, acc_to_flush)
+                _buf_store_vN(b, p.dtype, d_rsrc, safe_d_off, c0, acc_h, 2)
+        # Unconditional slot reset - kills early-iter leaks before they
         # pollute a later output row.
         for qt in range(q_subtiles):
             acc_tiles[qt][P_FLUSH] = zero_acc
@@ -867,6 +960,11 @@ class DirectConv4cSpec:
 
     def validate(self) -> None:
         p = self.problem
+        if p.dtype != "fp16":
+            raise ValueError(
+                f"DirectConv4cSpec: bf16 is not supported - the mfma_f32_4x4x4 atom "
+                f"is fp16-only on CDNA; use fp16 dtype or a different cpg variant"
+            )
         if p.cpg != 4 or p.kpg != 4:
             raise ValueError(
                 f"DirectConv4cSpec expects cpg=kpg=4 (got {p.cpg}, {p.kpg})"
@@ -892,6 +990,7 @@ def is_valid_spec_4c(spec: DirectConv4cSpec, arch: str = "gfx950") -> Tuple[bool
     is deliberately not gated through the MMA catalog ``has_shape`` check
     because the catalog lists only the warp-tile (16x16 / 32x32) shapes,
     while comgr selects the 4x4x4 intrinsic directly on both targets.
+    bf16 is not supported — no 4x4x4 bf16 MFMA atom exists on CDNA.
     """
     from rocke.core.arch import ArchTarget
 
@@ -900,6 +999,10 @@ def is_valid_spec_4c(spec: DirectConv4cSpec, arch: str = "gfx950") -> Tuple[bool
     except KeyError as e:
         return False, str(e)
     p = spec.problem
+    if p.dtype != "fp16":
+        return False, (
+            f"DirectConv4cSpec: bf16 not supported - no mfma_f32_4x4x4_bf16 atom on CDNA"
+        )
     if p.stride != 1:
         return False, f"stride > 1 is not supported (got {p.stride})"
     if p.cpg != 4 or p.kpg != 4:
@@ -1106,8 +1209,8 @@ def build_direct_conv_4c(spec: DirectConv4cSpec, *, arch: str = "gfx950") -> Ker
                 safe_d = b.select(out_q_ok, b.mul(d_base, c_half_bytes), oob_sentinel)
                 # MFMA 4x4x4 wave64 per-lane output layout:
                 #   acc[i] -> D[n, ho_row, out_q, g*kpg + i]  for i in 0..3
-                acc_h = b.vec_trunc_f32_to_f16(acc)
-                b.buffer_store_vN_f16(d_rsrc, safe_d, c0, acc_h, 2)
+                acc_h = _trunc_f32(b, p.dtype, acc)
+                _buf_store_vN(b, p.dtype, d_rsrc, safe_d, c0, acc_h, 2)
         for qt in range(q_tiles_per_wave):
             acc_tiles[qt][P_FLUSH] = zero_acc
 
@@ -1172,10 +1275,13 @@ class DirectConv8cSpec:
             f"bq{self.block_q}",
             f"bg{self.block_groups}",
             "db" if self.double_buffer else "sb",
+            flags={"bf16": p.dtype == "bf16"},
         )
 
     def validate(self) -> None:
         p = self.problem
+        if p.dtype not in ("fp16", "bf16"):
+            raise ValueError(f"DirectConv8cSpec: unsupported dtype {p.dtype!r}")
         if p.cpg != 8 or p.kpg != 8:
             raise ValueError(
                 f"DirectConv8cSpec expects cpg=kpg=8 (got {p.cpg}, {p.kpg})"
@@ -1192,15 +1298,18 @@ def is_valid_spec_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Tuple[bool
     """Return ``(ok, reason)`` for an 8c spec on ``arch``.
 
     The 8c kernel folds two S-positions into the K=16 dimension of
-    ``mfma_f32_16x16x16_f16``, which is present on both gfx942 and gfx950.
+    ``mfma_f32_16x16x16_f16`` (or the bf16 counterpart), which is present on
+    both gfx942 and gfx950.
     """
     from rocke.core.arch import ArchTarget
 
     try:
-        ArchTarget.from_gfx(arch)
+        target = ArchTarget.from_gfx(arch)
     except KeyError as e:
         return False, str(e)
     p = spec.problem
+    if p.dtype not in ("fp16", "bf16"):
+        return False, f"unsupported dtype {p.dtype!r}; expected 'fp16' or 'bf16'"
     if p.stride != 1:
         return False, f"stride > 1 is not supported (got {p.stride})"
     if p.cpg != 8 or p.kpg != 8:
@@ -1212,6 +1321,11 @@ def is_valid_spec_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Tuple[bool
         )
     if spec.block_q % 16 != 0:
         return False, "DirectConv8cSpec block_q must be a multiple of 16"
+    ab_dtype = "bf16" if p.dtype == "bf16" else "f16"
+    if not target.mma.has_shape(
+        a_dtype=ab_dtype, b_dtype=ab_dtype, c_dtype="fp32", m=16, n=16, k=16
+    ):
+        return False, f"missing 16x16x16 {ab_dtype} MFMA atom on {arch}"
     return True, "ok"
 
 
@@ -1244,6 +1358,7 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
     if not ok:
         raise ValueError(f"invalid direct_conv_8c spec for {arch}: {why}")
     p = spec.problem
+    io_type = _io_type(p.dtype)
 
     BLOCK_Q = spec.block_q
     BLOCK_GROUPS = spec.block_groups
@@ -1261,9 +1376,9 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    D = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
     A_bytes = b.param("A_bytes", I32)
     B_bytes = b.param("B_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
@@ -1308,9 +1423,9 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
 
     # LDS allocation (same over-allocation scheme as 16c to absorb OOB writes).
     lds_total_fp16 = PASSES * THREADS * LOAD_VEC
-    A_smem = b.smem_alloc(F16, [1, lds_total_fp16], name_hint="lds_a")
+    A_smem = b.smem_alloc(io_type, [1, lds_total_fp16], name_hint="lds_a")
     B_smem = (
-        b.smem_alloc(F16, [1, lds_total_fp16], name_hint="lds_b")
+        b.smem_alloc(io_type, [1, lds_total_fp16], name_hint="lds_b")
         if spec.double_buffer
         else A_smem
     )
@@ -1319,7 +1434,7 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
     b_rsrc = b.buffer_rsrc(Bp, B_bytes)
     d_rsrc = b.buffer_rsrc(D, D_bytes)
 
-    fp16x4_zero = b.zero_vec_f16(4)
+    fp16x4_zero = b.zero_vec(io_type, 4)
     zero_acc = b.zero_vec_f32(4)
 
     # Weight loads (constant across the H-loop).
@@ -1348,13 +1463,13 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
         # Main atom: s_lane selects s=0 (c4 ∈ {0,1}) or s=1 (c4 ∈ {2,3}).
         w_off_main, _ = b_desc.offset(b, k_out=k_out_val, r=r_i, s=s_lane, c=ch_lane)
         weights_main.append(
-            b.buffer_load_vN_f16(b_rsrc, b.mul(w_off_main, c_half_bytes), c0, 2)
+            _buf_load_vN(b, p.dtype, b_rsrc, b.mul(w_off_main, c_half_bytes), c0, 2)
         )
         # Residual s=2: valid only for c4 ∈ {0,1} (lower half of K).
         w_off_s2, _ = b_desc.offset(
             b, k_out=k_out_val, r=r_i, s=b.const_i32(2), c=ch_lane
         )
-        w_s2 = b.buffer_load_vN_f16(b_rsrc, b.mul(w_off_s2, c_half_bytes), c0, 2)
+        w_s2 = _buf_load_vN(b, p.dtype, b_rsrc, b.mul(w_off_s2, c_half_bytes), c0, 2)
         weights_s2.append(b.select(lane_in_lo_half, w_s2, fp16x4_zero))
 
     # LDS loader (same chunk-decomposition algebra as 16c but with cpg=8).
@@ -1434,7 +1549,7 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
             valid = b.land(addr_valid, cm["in_bounds"])
             a_off_bytes = b.mul(a_off_elems, c_half_bytes)
             safe_off = b.select(valid, a_off_bytes, oob_sentinel)
-            a_vec = b.buffer_load_vN_f16(a_rsrc, safe_off, c0, 2)
+            a_vec = _buf_load_vN(b, p.dtype, a_rsrc, safe_off, c0, 2)
             a_vec = b.select(valid, a_vec, fp16x4_zero)
             lds_idx = b.mul(cm["chunk_idx"], b.const_i32(4))
             out.append((a_vec, lds_idx))
@@ -1442,7 +1557,7 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
 
     def store_to_lds(loads, lds):
         for a_vec, lds_idx in loads:
-            b.smem_store_vN_f16(lds, [c0, lds_idx], a_vec, 4)
+            b.smem_store_vN(lds, [c0, lds_idx], a_vec, 4)
 
     q_subtiles = BLOCK_Q // 16
 
@@ -1467,7 +1582,7 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
             ),
             b.mul(ch_block_idx, b.const_i32(4)),
         )
-        return b.smem_load_vN_f16(lds, c0, lds_idx, n=4)
+        return b.smem_load_vN(lds, c0, lds_idx, dtype=io_type, n=4)
 
     def lds_read_input_s2(q_subtile: int, lds) -> Value:
         """Per-lane <4 x half> read from LDS for the s=2 residual.
@@ -1489,7 +1604,7 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
             ),
             b.mul(ch_block_idx, b.const_i32(4)),
         )
-        vec = b.smem_load_vN_f16(lds, c0, lds_idx, n=4)
+        vec = b.smem_load_vN(lds, c0, lds_idx, dtype=io_type, n=4)
         return b.select(lane_in_lo_half, vec, fp16x4_zero)
 
     # Prologue: prefetch row 0 into A_smem.
@@ -1526,11 +1641,13 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
                 p_idx = (y - r_const) % p.KH
                 acc_in = accs[p_idx]
                 # Main atom: s=0 and s=1 folded into K=16.
-                acc_in = b.mfma_f32_16x16x16_f16(
-                    weights_main[r_const], inp_main, acc_in
+                acc_in = _mfma(
+                    b, p.dtype, "16x16x16", weights_main[r_const], inp_main, acc_in
                 )
                 # Residual atom: s=2, zero-padded to K=16 (upper lanes carry zeros).
-                acc_in = b.mfma_f32_16x16x16_f16(weights_s2[r_const], inp_s2, acc_in)
+                acc_in = _mfma(
+                    b, p.dtype, "16x16x16", weights_s2[r_const], inp_s2, acc_in
+                )
                 accs[p_idx] = acc_in
 
         if loads_next is not None:
@@ -1563,8 +1680,8 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
                 d_base_bytes = b.mul(d_base, c_half_bytes)
                 store_valid = b.land(out_q_valid, c4_valid)
                 safe_d_off = b.select(store_valid, d_base_bytes, oob_sentinel)
-                acc_h = b.vec_trunc_f32_to_f16(acc_to_flush)
-                b.buffer_store_vN_f16(d_rsrc, safe_d_off, c0, acc_h, 2)
+                acc_h = _trunc_f32(b, p.dtype, acc_to_flush)
+                _buf_store_vN(b, p.dtype, d_rsrc, safe_d_off, c0, acc_h, 2)
         for qt in range(q_subtiles):
             acc_tiles[qt][P_FLUSH] = zero_acc
 
@@ -1627,10 +1744,13 @@ class DirectConv32cSpec:
             f"bq{self.block_q}",
             f"bg{self.block_groups}",
             "db" if self.double_buffer else "sb",
+            flags={"bf16": p.dtype == "bf16"},
         )
 
     def validate(self) -> None:
         p = self.problem
+        if p.dtype not in ("fp16", "bf16"):
+            raise ValueError(f"DirectConv32cSpec: unsupported dtype {p.dtype!r}")
         if p.cpg != 32 or p.kpg != 32:
             raise ValueError(
                 f"DirectConv32cSpec expects cpg=kpg=32 (got {p.cpg}, {p.kpg})"
@@ -1648,8 +1768,8 @@ def is_valid_spec_32c(
 ) -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for a 32c spec on ``arch``.
 
-    The 32c kernel uses ``mfma_f32_32x32x8_f16``, which is present in the
-    rocke MMA catalog for both gfx942 and gfx950.
+    The 32c kernel uses ``mfma_f32_32x32x8_f16`` or ``mfma_f32_32x32x8_bf16``,
+    which are present in the rocke MMA catalog for both gfx942 and gfx950.
     """
     from rocke.core.arch import ArchTarget
 
@@ -1658,6 +1778,8 @@ def is_valid_spec_32c(
     except KeyError as e:
         return False, str(e)
     p = spec.problem
+    if p.dtype not in ("fp16", "bf16"):
+        return False, f"unsupported dtype {p.dtype!r}; expected 'fp16' or 'bf16'"
     if p.stride != 1:
         return False, f"stride > 1 is not supported (got {p.stride})"
     if p.cpg != 32 or p.kpg != 32:
@@ -1669,6 +1791,11 @@ def is_valid_spec_32c(
         )
     if spec.block_q % 32 != 0:
         return False, "DirectConv32cSpec block_q must be a multiple of 32"
+    ab_dtype = "bf16" if p.dtype == "bf16" else "f16"
+    if not target.mma.has_shape(
+        a_dtype=ab_dtype, b_dtype=ab_dtype, c_dtype="fp32", m=32, n=32, k=8
+    ):
+        return False, f"missing 32x32x8 {ab_dtype} MFMA atom on {arch}"
     return True, "ok"
 
 
@@ -1696,6 +1823,7 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
     if not ok:
         raise ValueError(f"invalid direct_conv_32c spec for {arch}: {why}")
     p = spec.problem
+    io_type = _io_type(p.dtype)
 
     BLOCK_Q = spec.block_q
     BLOCK_GROUPS = spec.block_groups
@@ -1713,9 +1841,9 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    D = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
     A_bytes = b.param("A_bytes", I32)
     B_bytes = b.param("B_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
@@ -1734,7 +1862,7 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
     tid = b.thread_id_x()
     wave_id = b.div(tid, c_wave)
     lane = b.mod(tid, c_wave)
-    # Lane decomposition for mfma_f32_32x32x8_f16 (wave64):
+    # Lane decomposition for mfma_f32_32x32x8_{f16,bf16} (wave64):
     #   q_in_lane = lane % 32 → M row (k_out within group) and N col (output W)
     #   k_blk     = lane // 32 → K-block (0 → ch=0..3, 1 → ch=4..7 within each atom)
     q_in_lane = b.mod(lane, b.const_i32(32))
@@ -1748,9 +1876,9 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
     q_tile_start = b.mul(bx, c_BQ)
 
     lds_total_fp16 = PASSES * THREADS * LOAD_VEC
-    A_smem = b.smem_alloc(F16, [1, lds_total_fp16], name_hint="lds_a")
+    A_smem = b.smem_alloc(io_type, [1, lds_total_fp16], name_hint="lds_a")
     B_smem = (
-        b.smem_alloc(F16, [1, lds_total_fp16], name_hint="lds_b")
+        b.smem_alloc(io_type, [1, lds_total_fp16], name_hint="lds_b")
         if spec.double_buffer
         else A_smem
     )
@@ -1759,10 +1887,10 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
     b_rsrc = b.buffer_rsrc(Bp, B_bytes)
     d_rsrc = b.buffer_rsrc(D, D_bytes)
 
-    fp16x4_zero = b.zero_vec_f16(4)
+    fp16x4_zero = b.zero_vec(io_type, 4)
     zero_acc = b.zero_vec_f32(16)
 
-    # Weight loads: per (r, s, atom_idx), each lane loads 4 f16 at
+    # Weight loads: per (r, s, atom_idx), each lane loads 4 elements at
     #   weight[k_out_val, r, s, ch_start + k_blk*4 .. ch_start + k_blk*4 + 3]
     # where ch_start = atom_idx * 8, k_out_val = g*kpg + q_in_lane.
     b_desc = TensorDescriptor.naive(
@@ -1789,7 +1917,7 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
                     c=ch_off,
                 )
                 weights_rs.append(
-                    b.buffer_load_vN_f16(b_rsrc, b.mul(w_off, c_half_bytes), c0, 2)
+                    _buf_load_vN(b, p.dtype, b_rsrc, b.mul(w_off, c_half_bytes), c0, 2)
                 )
             weights_r.append(weights_rs)
         weights.append(weights_r)
@@ -1869,7 +1997,7 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
             valid = b.land(addr_valid, cm["in_bounds"])
             a_off_bytes = b.mul(a_off_elems, c_half_bytes)
             safe_off = b.select(valid, a_off_bytes, oob_sentinel)
-            a_vec = b.buffer_load_vN_f16(a_rsrc, safe_off, c0, 2)
+            a_vec = _buf_load_vN(b, p.dtype, a_rsrc, safe_off, c0, 2)
             a_vec = b.select(valid, a_vec, fp16x4_zero)
             lds_idx = b.mul(cm["chunk_idx"], b.const_i32(4))
             out.append((a_vec, lds_idx))
@@ -1877,10 +2005,10 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
 
     def store_to_lds(loads, lds):
         for a_vec, lds_idx in loads:
-            b.smem_store_vN_f16(lds, [c0, lds_idx], a_vec, 4)
+            b.smem_store_vN(lds, [c0, lds_idx], a_vec, 4)
 
     def lds_read_input(q_subtile: int, s_const: int, atom_idx: int, lds) -> Value:
-        """Per-lane <4 x half> read from LDS for one K-atom of the 32c kernel.
+        """Per-lane <4 x half/bfloat> read from LDS for one K-atom of the 32c kernel.
 
         Lane ``q_in_lane`` owns output column ``q_subtile*32 + q_in_lane``.
         LDS offset: ``(q_in_lane + q_subtile*32) * stride + s_const``.
@@ -1901,7 +2029,7 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
             ),
             ch_off,
         )
-        return b.smem_load_vN_f16(lds, c0, lds_idx, n=4)
+        return b.smem_load_vN(lds, c0, lds_idx, dtype=io_type, n=4)
 
     q_subtiles = BLOCK_Q // 32
 
@@ -1942,7 +2070,10 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
                 acc_in = accs[p_idx]
                 for s_const in range(p.KW):
                     for atom_idx in range(4):
-                        acc_in = b.mfma_f32_32x32x8_f16(
+                        acc_in = _mfma(
+                            b,
+                            p.dtype,
+                            "32x32x8",
                             weights[r_const][s_const][atom_idx],
                             inputs_by_q[qt][s_const][atom_idx],
                             acc_in,
@@ -1986,8 +2117,8 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
                         e0 = b.vec_extract(acc_to_flush, slot0)
                         e1 = b.vec_extract(acc_to_flush, slot1)
                         pair_acc = b.vec_pack([e0, e1], F32)
-                        pair_h = b.vec_trunc_f32_to_f16(pair_acc)
-                        b.buffer_store_vN_f16(d_rsrc, safe_d_off, c0, pair_h, 1)
+                        pair_h = _trunc_f32(b, p.dtype, pair_acc)
+                        _buf_store_vN(b, p.dtype, d_rsrc, safe_d_off, c0, pair_h, 1)
         for qt in range(q_subtiles):
             acc_tiles[qt][P_FLUSH] = zero_acc
 
@@ -2055,6 +2186,7 @@ class DirectConvSpec:
         wk_flag = f"wk{self.waves_k}" if self.waves_k > 1 else ""
         rk_flag = "rk" if self.runtime_k_loop else ""
         k32_flag = "k32" if self.fold_k32 else ""
+        bf16_flag = "bf16" if p.dtype == "bf16" else ""
         return kernel_name_join(
             self.name,
             p.short(),
@@ -2066,10 +2198,13 @@ class DirectConvSpec:
             wk_flag,
             rk_flag,
             k32_flag,
+            bf16_flag,
         )
 
     def validate(self) -> None:
         p = self.problem
+        if p.dtype not in ("fp16", "bf16"):
+            raise ValueError(f"DirectConvSpec: unsupported dtype {p.dtype!r}")
         if p.cpg % 4 != 0 or p.cpg < 4:
             raise ValueError(
                 f"DirectConvSpec requires cpg to be a positive multiple of 4 "
@@ -2125,6 +2260,8 @@ def is_valid_spec(spec: "DirectConvSpec", arch: str = "gfx950") -> Tuple[bool, s
         return False, str(e)
 
     p = spec.problem
+    if p.dtype not in ("fp16", "bf16"):
+        return False, f"unsupported dtype {p.dtype!r}; expected 'fp16' or 'bf16'"
     if p.stride != 1:
         return False, f"stride > 1 is not supported (got {p.stride})"
     if p.cpg % 4 != 0 or p.cpg < 4:
@@ -2138,10 +2275,15 @@ def is_valid_spec(spec: "DirectConvSpec", arch: str = "gfx950") -> Tuple[bool, s
         )
     if spec.block_q % 16 != 0:
         return False, "block_q must be a multiple of 16"
+    ab_dtype = "bf16" if p.dtype == "bf16" else "f16"
     if not target.mma.has_shape(
-        a_dtype="f16", b_dtype="f16", c_dtype="fp32", m=16, n=16, k=16
+        a_dtype=ab_dtype, b_dtype=ab_dtype, c_dtype="fp32", m=16, n=16, k=16
     ):
-        return False, f"missing mfma_f32_16x16x16_f16 on {arch}"
+        return False, f"missing mfma_f32_16x16x16_{ab_dtype} on {arch}"
+    if spec.fold_k32 and not target.mma.has_shape(
+        a_dtype=ab_dtype, b_dtype=ab_dtype, c_dtype="fp32", m=16, n=16, k=32
+    ):
+        return False, f"fold_k32 requires mfma_f32_16x16x32_{ab_dtype} on {arch}"
     return True, "ok"
 
 
@@ -2174,6 +2316,7 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
         raise ValueError(f"invalid DirectConvSpec for {arch}: {why}")
 
     p = spec.problem
+    io_type = _io_type(p.dtype)
 
     BLOCK_Q = spec.block_q
     BLOCK_GROUPS = spec.block_groups
@@ -2217,9 +2360,9 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    D = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
     A_bytes = b.param("A_bytes", I32)
     B_bytes = b.param("B_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
@@ -2239,8 +2382,8 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
     c_half_bytes = b.const_i32(2)
     oob_sentinel = b.const_i32((1 << 31) - 1)
 
-    fp16x4_zero = b.zero_vec_f16(4)
-    zero_acc = b.zero_vec_f32(4)  # mfma_f32_16x16x16_f16: 4 f32 per lane
+    fp16x4_zero = b.zero_vec(io_type, 4)
+    zero_acc = b.zero_vec_f32(4)  # mfma_f32_16x16x16_{f16,bf16}: 4 f32 per lane
 
     tid = b.thread_id_x()
     # Wave decomposition: wave_id encodes (group, waves_q, waves_k) as:
@@ -2326,9 +2469,9 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
     # LDS loader uses the full block Q range (all waves cooperate on same LDS row).
     q_tile_start_lds = block_q_start
 
-    A_smem = b.smem_alloc(F16, [1, lds_total_fp16], name_hint="lds_a")
+    A_smem = b.smem_alloc(io_type, [1, lds_total_fp16], name_hint="lds_a")
     B_smem = (
-        b.smem_alloc(F16, [1, lds_total_fp16], name_hint="lds_b")
+        b.smem_alloc(io_type, [1, lds_total_fp16], name_hint="lds_b")
         if spec.double_buffer
         else A_smem
     )
@@ -2442,10 +2585,10 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
             )
             valid = b.land(addr_valid, cm["in_bounds"])
             safe_off = b.select(valid, b.mul(a_off, c_half_bytes), oob_sentinel)
-            # LOAD_VEC=4 → dwordx2 (4 halves); LOAD_VEC=8 → dwordx4 (8 halves).
-            _n_dwords = LOAD_VEC // 2  # dwords = halves / 2
-            a_vec = b.buffer_load_vN_f16(a_rsrc, safe_off, c0, _n_dwords)
-            _zero_vec = b.zero_vec_f16(LOAD_VEC)
+            # LOAD_VEC=4 → dwordx2 (4 elements); LOAD_VEC=8 → dwordx4 (8 elements).
+            _n_dwords = LOAD_VEC // 2  # dwords = elements / 2
+            a_vec = _buf_load_vN(b, p.dtype, a_rsrc, safe_off, c0, _n_dwords)
+            _zero_vec = b.zero_vec(io_type, LOAD_VEC)
             a_vec = b.select(valid, a_vec, _zero_vec)
             lds_idx = b.mul(cm["chunk_idx"], b.const_i32(LOAD_VEC))
             out.append((a_vec, lds_idx))
@@ -2453,7 +2596,7 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
 
     def store_to_lds(loads, lds) -> None:
         for a_vec, lds_idx in loads:
-            b.smem_store_vN_f16(lds, [c0, lds_idx], a_vec, LOAD_VEC)
+            b.smem_store_vN(lds, [c0, lds_idx], a_vec, LOAD_VEC)
 
     # ---- Persistent cell loop (when persistent_grid=True) ----
     # Each of 256 blocks iterates over its assigned cells: (n, h_tile, q_tile).
@@ -2570,8 +2713,13 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                             b.mul(block_idx, c_block_sz),
                             b.mul(lane_id_pw, b.const_i32(LOAD_VEC)),
                         )
-                        w_frag_pw = b.buffer_load_vN_f16(
-                            b_rsrc, b.mul(elem_off, c_half_bytes), c0, _pw_n_dwords
+                        w_frag_pw = _buf_load_vN(
+                            b,
+                            p.dtype,
+                            b_rsrc,
+                            b.mul(elem_off, c_half_bytes),
+                            c0,
+                            _pw_n_dwords,
                         )
                         preloaded_w[(r_const, s_const, local_atom, m)] = w_frag_pw
 
@@ -2645,12 +2793,12 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                                 ch_off,
                             )
                             # For fold_k32: load 8 halves from LDS (K=32 atom).
-                            x_frag_pw = b.smem_load_vN_f16(
-                                cur, c0, lds_idx_pw, n=LOAD_VEC
+                            x_frag_pw = b.smem_load_vN(
+                                cur, c0, lds_idx_pw, dtype=io_type, n=LOAD_VEC
                             )
                             if p.cpg % K_ATOM_SIZE != 0:
                                 c4_oob_pw = b.cmp_ge(ch_off, b.const_i32(p.cpg))
-                                _zero_pw = b.zero_vec_f16(LOAD_VEC)
+                                _zero_pw = b.zero_vec(io_type, LOAD_VEC)
                                 x_frag_pw = b.select(c4_oob_pw, _zero_pw, x_frag_pw)
 
                             for m in range(N_M_TILES):
@@ -2659,14 +2807,15 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                                 w_frag_pw = preloaded_w[
                                     (r_const, s_const, local_atom, m)
                                 ]
-                                if FOLD_K32:
-                                    acc_tiles[qt][m][p_idx] = b.mfma_f32_16x16x32_f16(
-                                        w_frag_pw, x_frag_pw, acc_tiles[qt][m][p_idx]
-                                    )
-                                else:
-                                    acc_tiles[qt][m][p_idx] = b.mfma_f32_16x16x16_f16(
-                                        w_frag_pw, x_frag_pw, acc_tiles[qt][m][p_idx]
-                                    )
+                                mfma_shape = "16x16x32" if FOLD_K32 else "16x16x16"
+                                acc_tiles[qt][m][p_idx] = _mfma(
+                                    b,
+                                    p.dtype,
+                                    mfma_shape,
+                                    w_frag_pw,
+                                    x_frag_pw,
+                                    acc_tiles[qt][m][p_idx],
+                                )
                     continue  # skip the runtime s_loop/atom_loop below
 
                 # ---- Runtime K-atom loop path (runtime_k_loop=True) ----
@@ -2722,12 +2871,12 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                                 ),
                                 ch_off_rk,
                             )
-                            x_frag_rk = b.smem_load_vN_f16(
-                                cur, c0, lds_idx_rk, n=LOAD_VEC
+                            x_frag_rk = b.smem_load_vN(
+                                cur, c0, lds_idx_rk, dtype=io_type, n=LOAD_VEC
                             )
                             if p.cpg % K_ATOM_SIZE != 0:
                                 c4_oob_rk = b.cmp_ge(ch_off_rk, b.const_i32(p.cpg))
-                                _zero_rk = b.zero_vec_f16(LOAD_VEC)
+                                _zero_rk = b.zero_vec(io_type, LOAD_VEC)
                                 x_frag_rk = b.select(c4_oob_rk, _zero_rk, x_frag_rk)
                             for m in range(N_M_TILES):
                                 if m * 16 >= p.kpg:
@@ -2759,20 +2908,23 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                                         b.const_i32(LOAD_VEC),
                                     ),
                                 )
-                                w_frag_rk = b.buffer_load_vN_f16(
+                                w_frag_rk = _buf_load_vN(
+                                    b,
+                                    p.dtype,
                                     b_rsrc,
                                     b.mul(elem_off_rk, c_half_bytes),
                                     c0,
                                     LOAD_VEC // 2,
                                 )
-                                if FOLD_K32:
-                                    new_k_accs_rk[m] = b.mfma_f32_16x16x32_f16(
-                                        w_frag_rk, x_frag_rk, new_k_accs_rk[m]
-                                    )
-                                else:
-                                    new_k_accs_rk[m] = b.mfma_f32_16x16x16_f16(
-                                        w_frag_rk, x_frag_rk, new_k_accs_rk[m]
-                                    )
+                                mfma_shape = "16x16x32" if FOLD_K32 else "16x16x16"
+                                new_k_accs_rk[m] = _mfma(
+                                    b,
+                                    p.dtype,
+                                    mfma_shape,
+                                    w_frag_rk,
+                                    x_frag_rk,
+                                    new_k_accs_rk[m],
+                                )
                         b.scf_yield(*new_k_accs_rk)
                     for m in range(N_M_TILES):
                         acc_tiles[qt][m][p_idx] = k_loop_rk.results[m]
@@ -2846,11 +2998,13 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                             ),
                             ch_off,
                         )
-                        x_frag = b.smem_load_vN_f16(cur, c0, lds_idx, n=LOAD_VEC)
+                        x_frag = b.smem_load_vN(
+                            cur, c0, lds_idx, dtype=io_type, n=LOAD_VEC
+                        )
 
                         if p.cpg % K_ATOM_SIZE != 0:
                             c4_oob = b.cmp_ge(ch_off, b.const_i32(p.cpg))
-                            _zero_std = b.zero_vec_f16(LOAD_VEC)
+                            _zero_std = b.zero_vec(io_type, LOAD_VEC)
                             x_frag = b.select(c4_oob, _zero_std, x_frag)
 
                         new_atom_accs = []
@@ -2866,20 +3020,21 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                                 s=s_iv,
                                 c=ch_off,
                             )
-                            w_frag = b.buffer_load_vN_f16(
-                                b_rsrc, b.mul(w_off, c_half_bytes), c0, LOAD_VEC // 2
+                            w_frag = _buf_load_vN(
+                                b,
+                                p.dtype,
+                                b_rsrc,
+                                b.mul(w_off, c_half_bytes),
+                                c0,
+                                LOAD_VEC // 2,
                             )
                             if p.cpg % K_ATOM_SIZE != 0:
                                 w_frag = b.select(c4_oob, _zero_std, w_frag)
 
-                            if FOLD_K32:
-                                new_acc = b.mfma_f32_16x16x32_f16(
-                                    w_frag, x_frag, atom_accs[m]
-                                )
-                            else:
-                                new_acc = b.mfma_f32_16x16x16_f16(
-                                    w_frag, x_frag, atom_accs[m]
-                                )
+                            mfma_shape = "16x16x32" if FOLD_K32 else "16x16x16"
+                            new_acc = _mfma(
+                                b, p.dtype, mfma_shape, w_frag, x_frag, atom_accs[m]
+                            )
                             new_atom_accs.append(new_acc)
 
                         b.scf_yield(*new_atom_accs)
@@ -2994,18 +3149,18 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                                     s = b.fadd(s, b.vec_extract(rows_f32[wk], slot))
                                 sum_slots.append(s)
                             partial = b.vec_pack(sum_slots, F32)
-                            acc_h = b.vec_trunc_f32_to_f16(partial)
                             safe_d = b.select(
                                 store_ok, b.mul(d_base, c_half_bytes), oob_sentinel
                             )
-                            b.buffer_store_vN_f16(d_rsrc, safe_d, c0, acc_h, 2)
+                            acc_h = _trunc_f32(b, p.dtype, partial)
+                            _buf_store_vN(b, p.dtype, d_rsrc, safe_d, c0, acc_h, 2)
                         b.sync()  # allow red_lds reuse by next flush
                     else:
-                        acc_h = b.vec_trunc_f32_to_f16(acc_to_flush)
                         safe_d = b.select(
                             store_ok, b.mul(d_base, c_half_bytes), oob_sentinel
                         )
-                        b.buffer_store_vN_f16(d_rsrc, safe_d, c0, acc_h, 2)
+                        acc_h = _trunc_f32(b, p.dtype, acc_to_flush)
+                        _buf_store_vN(b, p.dtype, d_rsrc, safe_d, c0, acc_h, 2)
 
         for qt in range(q_subtiles):
             for m in range(N_M_TILES):
@@ -3016,6 +3171,829 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
         # Yield cell_idx (changes each round) to prevent loop elimination.
         b.scf_yield(cell_idx)
         cell_loop.__exit__(None, None, None)
+
+    return b.kernel
+
+
+# ---------------------------------------------------------------------------
+# Direct grouped convolution — backward weights (wgrad)
+#
+# Algorithm for direct wgrad convolution:
+#   - All KH*KW filter taps computed IN ONE BLOCK → dY loaded once, reused 9×
+#   - Grid encodes (group, k_tile, ho_block) in bx; c_tile in by; batch n in bz
+#   - Inner loops iterate (ho_in_block, wo_chunk) directly — zero div/mod in hot loop
+#   - 9 separate MFMA accumulators (one per filter tap) per wave
+#   - LDS staging: one dy_lds + KH*KW x_lds buffers; single sync per (ho, wo_chunk)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DirectConvWgradSpec:
+    """Direct grouped wgrad kernel: computes the weight gradient dW.
+
+    Computes::
+
+        dW[k, r, s, c] = sum_{n, ho, wo} dY[n, ho, wo, k] * X[n, hi, wi, c]
+
+    where hi = ho * stride + r - PAD  and  wi = wo * stride + s - PAD.
+
+    Algorithm:
+      One block owns ALL KH*KW filter taps, and the row loop walks INPUT rows
+      ``hi`` (at stride 1 input row ``hi`` feeds output row ``hi + PAD - r``).
+      Two reuse structures carry it:
+
+        - dY register ring: KH slots, one dY row each. A row is loaded once and
+          serves KH consecutive iterations, so dY costs one load per hi instead
+          of KH.
+        - S-row strip: one LDS tile of ``WO_BLOCK + KW - 1`` columns per hi. All
+          KW s-taps read it at a one-column shift, so X costs one strip per hi
+          instead of KW tiles.
+
+      The block owns a single ``wo`` tile, so there is no inner wo loop -- the
+      MFMA's K-inner dimension (``mfma_k``, 32 by default) covers the whole
+      tile.
+
+      Grid (see the launch-grid section of README_conv_direct_grouped.md):
+        bx = (group * n_k_tiles + k_tile) * n_c_tiles + c_tile
+        by = hi_block          (input-row block; spec.n_ho_blocks() of them)
+        bz = n * n_q_blocks + q_block
+
+      Per hi iteration:
+        1. Commit the dY row + S strip issued last iteration into LDS.
+        2. Issue the next row's DRAM reads (software-pipelined by one row).
+        3. ``sync_lds_only``.
+        4. Transpose-read the ring slot and the KW S fragments out of LDS.
+        5. KH*KW ``mfma_f32_16x16x{mfma_k}_{f16,bf16}``, one per (r, s) tap.
+        6. Barrier before the next iteration overwrites the LDS tiles.
+
+      Epilogue: atomic_add the KH*KW accumulator tiles into dW[k, r, s, c],
+      with the k/c tails and the over-provisioned wo tiles masked off.
+
+    Benefits vs the per-tap grid this replaced:
+      - dY loaded once per (hi, wo tile) and reused KH× from registers.
+      - One X strip per hi instead of KW separate LDS tiles.
+      - No div/mod in the hot loop (hi and wo are iterated directly).
+      - KH*KW = 9 parallel MFMA accumulators per wave → high compute density.
+
+    dW output is fp32. The caller must zero-initialise dW before launch.
+    """
+
+    problem: DirectConvProblem
+    name: str = "direct_conv_wgrad"
+    wave_tile_k: int = 16  # K output channels per wave (MFMA M-dim)
+    wave_tile_c: int = 16  # C input channels per wave (MFMA N-dim)
+    waves_k: int = 1  # waves along K
+    waves_c: int = 1  # waves along C
+    waves_q: int = 1  # waves along Q (spatial/wo); each handles one wo_tile
+    wave_size: int = 64
+    ho_per_block: int = 4  # output rows per block; tunes grid occupancy
+    mfma_k: int = 32  # MFMA K-inner: 32 (gfx950, default) or 16
+
+    @property
+    def block_k(self) -> int:
+        return self.waves_k * self.wave_tile_k
+
+    @property
+    def block_c(self) -> int:
+        return self.waves_c * self.wave_tile_c
+
+    @property
+    def threads_per_block(self) -> int:
+        return self.waves_k * self.waves_c * self.waves_q * self.wave_size
+
+    @property
+    def wo_block(self) -> int:
+        """Output columns per MFMA chunk (= MFMA K-inner dimension)."""
+        return self.mfma_k
+
+    def n_ho_blocks(self) -> int:
+        """Grid ``y`` extent: ``ceil(H / ho_per_block)``.
+
+        The kernel decodes ``by`` as an INPUT-row block (``hi_block_start =
+        by * ho_per_block``) and the row loop walks ``hi``, so the extent is
+        driven by ``H``, not ``Ho``. The two coincide only when
+        ``2 * PAD == KH - 1``; at e.g. ``PAD=0, KH=3`` we have ``Ho == H - 2``,
+        and sizing on ``Ho`` would leave the last input rows unvisited.
+        """
+        return (self.problem.H + self.ho_per_block - 1) // self.ho_per_block
+
+    def n_wo_tiles(self) -> int:
+        p = self.problem
+        Wo = (p.W + 2 * p.PAD - p.KW) // p.stride + 1
+        return (Wo + self.wo_block - 1) // self.wo_block
+
+    def n_q_blocks(self) -> int:
+        """Grid blocks in the wo dimension (ceil(n_wo_tiles / waves_q))."""
+        return (self.n_wo_tiles() + self.waves_q - 1) // self.waves_q
+
+    def kernel_name(self) -> str:
+        from rocke.helpers.spec import kernel_name_join
+
+        p = self.problem
+        # ``p.short()`` does not carry the dtype, so the bf16 flag is what keeps
+        # an fp16 and a bf16 kernel of the same shape from colliding on name --
+        # which the artifact maps, the parity golden and the module loader all
+        # key on.
+        flags = {"wq": self.waves_q} if self.waves_q > 1 else {}
+        if p.dtype == "bf16":
+            flags["bf16"] = True
+        return kernel_name_join(
+            self.name,
+            p.short(),
+            f"bk{self.block_k}",
+            f"bc{self.block_c}",
+            f"hpb{self.ho_per_block}",
+            f"mk{self.mfma_k}",
+            flags=flags,
+        )
+
+    def validate(self) -> None:
+        p = self.problem
+        if p.dtype not in ("fp16", "bf16"):
+            raise ValueError(f"DirectConvWgradSpec: unsupported dtype {p.dtype!r}")
+        if p.kpg < self.wave_tile_k:
+            raise ValueError(f"kpg {p.kpg} must be >= wave_tile_k {self.wave_tile_k}")
+        if p.cpg < self.wave_tile_c:
+            raise ValueError(f"cpg {p.cpg} must be >= wave_tile_c {self.wave_tile_c}")
+        if self.wave_tile_k != 16:
+            raise ValueError("wave_tile_k must be 16")
+        if self.wave_tile_c != 16:
+            raise ValueError("wave_tile_c must be 16")
+        if p.KH < 1 or p.KH > _WGRAD_MAX_KH:
+            raise ValueError(f"KH must be in 1..{_WGRAD_MAX_KH} (got {p.KH})")
+        if p.KW < 1 or p.KW > _WGRAD_MAX_KW:
+            raise ValueError(f"KW must be in 1..{_WGRAD_MAX_KW} (got {p.KW})")
+        # Checked before the product: waves_k=0 would sail through
+        # ``waves_k * waves_c <= 16`` and then divide by a zero block_k.
+        if self.waves_k < 1:
+            raise ValueError("waves_k must be >= 1")
+        if self.waves_c < 1:
+            raise ValueError("waves_c must be >= 1")
+        if self.waves_k * self.waves_c > 16:
+            raise ValueError("waves_k * waves_c must be <= 16")
+        if self.waves_q < 1:
+            raise ValueError("waves_q must be >= 1")
+        if self.wave_size != 64:
+            raise ValueError(_WGRAD_WAVE64_WHY.format(wave_size=self.wave_size))
+        if self.ho_per_block <= 0:
+            raise ValueError("ho_per_block must be > 0")
+        if self.mfma_k not in (16, 32):
+            raise ValueError(f"mfma_k must be 16 or 32 (got {self.mfma_k})")
+        if self.problem.stride != 1:
+            raise ValueError(_WGRAD_STRIDE_WHY.format(stride=self.problem.stride))
+
+
+# The row loop walks INPUT rows and pairs row hi with output row hi + PAD - r,
+# and one LDS strip row serves all KW s-taps by being read at a one-column
+# shift. Both identities hold only at stride 1; at stride 2 the taps would have
+# to step the strip by `stride` columns and the row pairing would skip rows.
+_WGRAD_STRIDE_WHY = (
+    "direct wgrad is a stride-1 algorithm (input-row iteration + shifted S-row "
+    "strip); got stride={stride}"
+)
+
+# The lane->fragment mapping is the wave64 MFMA one (``c4 = lane // 16`` picks
+# the accumulator row group, ``lane % 16`` the column), and ds_read_tr16_b64
+# hands back a 64-lane fragment. There is no wave32 variant of either.
+_WGRAD_WAVE64_WHY = (
+    "direct wgrad needs wave_size 64 (wave64 MFMA fragment + ds_read_tr16_b64 "
+    "lane mapping); got wave_size={wave_size}"
+)
+
+# The C++ engine stores the per-tap accumulators and the delta ring in
+# fixed-size arrays sized by ``ROCKE_DCONV_WGRAD_MAX_K{H,W}``
+# (``platform/cpp/include/rocke/instance_conv_direct_grouped.h``), so the cap is
+# part of the spec contract rather than a C-side implementation detail: both
+# engines reject above it, or a KH=9 spec would build here and fail there.
+_WGRAD_MAX_KH = 8
+_WGRAD_MAX_KW = 8
+
+
+def is_valid_wgrad_spec(
+    spec: DirectConvWgradSpec, arch: str = "gfx950"
+) -> Tuple[bool, str]:
+    """Return ``(ok, reason)`` for a wgrad spec on ``arch``."""
+    from rocke.core.arch import ArchTarget
+
+    try:
+        target = ArchTarget.from_gfx(arch)
+    except KeyError as e:
+        return False, str(e)
+    p = spec.problem
+    if p.dtype not in ("fp16", "bf16"):
+        return False, f"unsupported dtype {p.dtype!r}; expected 'fp16' or 'bf16'"
+    if p.kpg < spec.wave_tile_k:
+        return False, f"kpg {p.kpg} must be >= wave_tile_k {spec.wave_tile_k}"
+    if p.cpg < spec.wave_tile_c:
+        return False, f"cpg {p.cpg} must be >= wave_tile_c {spec.wave_tile_c}"
+    if spec.wave_tile_k != 16 or spec.wave_tile_c != 16:
+        return False, "wave_tile_k and wave_tile_c must be 16"
+    if p.KH < 1 or p.KH > _WGRAD_MAX_KH:
+        return False, f"KH must be in 1..{_WGRAD_MAX_KH} (got {p.KH})"
+    if p.KW < 1 or p.KW > _WGRAD_MAX_KW:
+        return False, f"KW must be in 1..{_WGRAD_MAX_KW} (got {p.KW})"
+    if spec.waves_k < 1:
+        return False, "waves_k must be >= 1"
+    if spec.waves_c < 1:
+        return False, "waves_c must be >= 1"
+    if spec.waves_k * spec.waves_c > 16:
+        return False, "waves_k * waves_c must be <= 16"
+    if spec.waves_q < 1:
+        return False, "waves_q must be >= 1"
+    if spec.wave_size != target.wave_size:
+        return False, (
+            f"wave_size {spec.wave_size} does not match the {arch} wave size "
+            f"{target.wave_size}"
+        )
+    if spec.wave_size != 64:
+        return False, _WGRAD_WAVE64_WHY.format(wave_size=spec.wave_size)
+    if spec.threads_per_block > target.max_threads_per_block:
+        return False, (
+            f"threads_per_block {spec.threads_per_block} > "
+            f"{target.max_threads_per_block} (hardware cap) on {arch}"
+        )
+    if spec.ho_per_block <= 0:
+        return False, "ho_per_block must be > 0"
+    if spec.mfma_k not in (16, 32):
+        return False, f"mfma_k must be 16 or 32 (got {spec.mfma_k})"
+    if p.stride != 1:
+        return False, _WGRAD_STRIDE_WHY.format(stride=p.stride)
+    ab_dtype = "bf16" if p.dtype == "bf16" else "f16"
+    if not target.mma.has_shape(
+        a_dtype=ab_dtype, b_dtype=ab_dtype, c_dtype="fp32", m=16, n=16, k=16
+    ):
+        return False, f"missing mfma_f32_16x16x16_{ab_dtype} on {arch}"
+    if spec.mfma_k == 32 and not target.mma.has_shape(
+        a_dtype=ab_dtype, b_dtype=ab_dtype, c_dtype="fp32", m=16, n=16, k=32
+    ):
+        return False, (
+            f"mfma_k=32 needs mfma_f32_16x16x32_{ab_dtype}, absent on {arch}"
+        )
+    if not target.memory.has_ds_read_tr:
+        return False, (
+            f"wgrad LDS staging requires ds_read_tr16_b64 (gfx950+), absent on {arch}"
+        )
+    return True, "ok"
+
+
+def build_direct_conv_wgrad(
+    spec: DirectConvWgradSpec, arch: str = "gfx950"
+) -> KernelDef:
+    """Build the IR for the direct grouped convolution wgrad kernel.
+
+    Computes dW[k, r, s, c] = sum_{n,ho,wo} dY[n,ho,wo,k] * X[n,hi,wi,c]
+    where hi = ho*stride + r - PAD and wi = wo*stride + s - PAD.
+
+    All KH*KW filter taps are handled in ONE block. The row loop walks INPUT
+    rows: each dY row is loaded once into a KH-slot register ring and reused KH
+    times, and one S-row strip per input row serves all KW s-taps at a
+    one-column shift.
+
+    LDS (2 tiles, spatial-major so the NHWC load lands contiguously):
+      dy_lds[sp = WO_BLOCK][k_ch = 16]       — partitioned per (wave_k, wave_q)
+      s_strip_lds[col = STRIP_COLS][c_ch = 16] — partitioned per (wave_c, wave_q)
+    Both are read back through ``ds_read_tr16_b64``, which delivers the
+    transposed per-lane MFMA fragment directly.
+
+    Grid:
+      bx = (group * n_k_tiles + k_tile) * n_c_tiles + c_tile
+      by = hi_block          (input-row block; spec.n_ho_blocks() of them)
+      bz = n * n_q_blocks + q_block
+
+    The caller must zero-initialise dW before launch.
+    """
+    spec.validate()
+    ok, why = is_valid_wgrad_spec(spec, arch=arch)
+    if not ok:
+        raise ValueError(f"invalid DirectConvWgradSpec for {arch}: {why}")
+
+    p = spec.problem
+    Ho = p.Ho
+    Wo = p.Wo
+    KH, KW = p.KH, p.KW
+
+    # dY and X are p.dtype (fp16 or bf16); dW is always fp32, because the
+    # split-K reduction lands through fp32 global atomics and a 16-bit
+    # accumulator would lose the small per-block contributions outright.
+    io_dtype = p.dtype
+    io_type = _io_type(io_dtype)
+
+    WAVE_K = spec.wave_tile_k  # 16
+    WAVE_C = spec.wave_tile_c  # 16
+    WAVES_K = spec.waves_k
+    WAVES_C = spec.waves_c
+    WAVE = spec.wave_size
+    THREADS = spec.threads_per_block
+    HPB = spec.ho_per_block  # output rows per block
+
+    # MFMA variants controlled by spec.mfma_k (atom dtype follows p.dtype):
+    #   mfma_k=16: mfma_f32_16x16x16_*, WO_BLOCK=16, vec4 loads (4 elems/thread)
+    #   mfma_k=32: mfma_f32_16x16x32_*, WO_BLOCK=32, vec8 loads (8 elems/thread)
+    #     → 2× spatial positions per MFMA atom → 2× fewer loop iterations
+    #     → vec8 DRAM loads → 2× better cache-line utilisation
+    # ---- Algorithm: delta register ring + S-row strip ----
+    #
+    # direct_wgrad main_loop:
+    #   - Iterate over output rows ho (= input rows hi for stride=1)
+    #   - Keep KH delta (dY) rows in REGISTER RING: each loaded once, reused KH×
+    #   - Load one S-row strip per (hi, r) → covers KW=3 s-taps with one load
+    #   - Zero inner wo_chunk loop: block owns one wo_tile, MFMA K=32 covers all
+    #
+    # Memory ops per ho_in_blk iteration (vs old approach):
+    #   delta loads: 1 async DRAM→LDS → 1 ds_read_tr16_b64 (+ reuse KH× in ring)
+    #   S-strip loads: KH=3 × 1 async load (covers KW=3 taps)
+    #   MFMAs: KH×KW = 9 (same)
+    # vs old: 1 dY + 9 X = 10 per (ho, wo_chunk) × n_wo_chunks = 50 loads per ho
+    # new:    1 dY + 3 S-strips = 4 per ho (1× wo tile per block, no wo loop!)
+    # → ~12× fewer loads per block
+
+    # ---- INPUT-row iteration + delta register ring ----
+    #
+    # Outer loop: INPUT rows hi = 0..H-1 (not output rows ho).
+    # For each hi:
+    #   dY: load one row dY(ho=hi+PAD) into ring[hi%KH] via async DRAM→LDS → ds_read_tr16_b64
+    #       Each dY row is reused KH=3 times across consecutive hi iterations → 3× saving.
+    #   S-strip: one strip X[n, hi, wo_tile_start..+STRIP_COLS-1, c] in LDS,
+    #            covers all KW s-offsets (s=0,1,2) at this input row. ONE load per hi.
+    #   MFMAs: for (r,s): acc[r][s] += ring[(hi+KH-r)%KH] × S_strip[s]
+    #
+    # Loads per hi: 1 dY async + 2 S-strip async passes = ~3 total (vs old 4-10 per ho).
+    # KH=3 dY reuse → effective 1 load per 3 hi for dY component.
+
+    WAVES_Q = spec.waves_q
+    WO_BLOCK = spec.mfma_k  # 32 for mk=32, 16 for mk=16
+    VEC_CH = spec.mfma_k // 4  # 8 for mk=32, 4 for mk=16
+    n_wo_tiles = spec.n_wo_tiles()
+    STRIP_COLS = WO_BLOCK + KW - 1  # 34 for mk=32; 18 for mk=16
+
+    # ---- LDS staging: spatial-major tiles + transpose reads ----
+    #
+    # Both LDS tiles are stored EXACTLY as NHWC delivers them — channel is the
+    # fast axis, spatial the slow one:
+    #
+    #   dy_lds[sp = WO_BLOCK rows][k_ch = 16 cols]
+    #   s_strip_lds[col = STRIP_COLS rows][c_ch = 16 cols]
+    #
+    # so the VEC_CH channels a lane pulls out of DRAM land in ONE contiguous
+    # LDS run and go back with a single ds_write_b{64,128}. The transposed
+    # per-lane operand the MFMA wants is recovered on the read side by
+    # ``ds_read_b64_tr_b16``, which is free: it is the same LDS traffic the
+    # untransposed read would do.
+    #
+    # The alternative — storing channel-major so a plain ds_read serves the
+    # MFMA — costs VEC_CH scalar ds_write_b16 per lane per tile, and that
+    # scatter is what makes this kernel LDS-instruction bound: at 16x16 wave
+    # tiles the write side alone is 24 LDS instructions per row against 9
+    # MFMAs, and LDS is one unit per CU while MFMA is one per SIMD.
+    #
+    # Transpose-read lane formulas for a [K][N=16] tile (CK's
+    # TransposeLDSLayout; see rocke.helpers.layouts.TransposeLdsReader):
+    #   row(lane, read) = (lane / 16) * K_L + read * 4 + (lane / 4) % 4
+    #   col(lane)       = (lane % 4) * 4        with K_L = K / 4
+    # After N_READS of these, lane ``l`` holds tile[(l / 16) * VEC_CH + 0 ..
+    # VEC_CH - 1][l % 16] — the mfma_f32_16x16x{16,32}_f16 operand fragment.
+    TR_N = WAVE_K  # LDS row width, = WAVE_C = 16 (both validated)
+    TR_K_L = WO_BLOCK // 4  # tile rows one lane's k-chunk spans
+    N_TR_READS = VEC_CH // 4  # ds_read_b64_tr_b16 per operand fragment
+
+    # dy_lds: WAVES_K × WAVES_Q partitions, each WO_BLOCK × 16 f16.
+    # Partition index = wave_k_id * WAVES_Q + wave_q_id.
+    LDS_SIZE_DY = WO_BLOCK * TR_N  # 512 f16/wave for mk=32, 256 for mk=16
+
+    # s_strip_lds: STRIP_COLS × 16 f16 per partition — the KW s-taps are row
+    # shifts into the same strip. One wave-pass covers WO_BLOCK rows, so the
+    # strip takes STRIP_PASSES of them and the WAVES_K waves sharing a partition
+    # split those: wave_k ``w`` runs the passes congruent to ``w`` mod
+    # STRIP_GROUPS, which is branch-free and covers every pass for any WAVES_K.
+    #
+    # The partition is then padded to the full grid of (pass-per-wave × group)
+    # slots each wave can address, so no pass needs an ``scf_if``: a dead lane
+    # loads zero through the OOB sentinel and writes it into the pad, and no
+    # wave can step past its own partition. Gating instead is what lets LLVM
+    # sink the tail load into the conditional region, which strands it in the
+    # same iteration as its ``s_waitcnt`` and costs a full exposed DRAM latency
+    # per row.
+    STRIP_PASSES = (STRIP_COLS + WO_BLOCK - 1) // WO_BLOCK
+    STRIP_GROUPS = min(WAVES_K, STRIP_PASSES)
+    STRIP_PASSES_PER_WAVE = (STRIP_PASSES + STRIP_GROUPS - 1) // STRIP_GROUPS
+    STRIP_COLS_PAD = STRIP_PASSES_PER_WAVE * STRIP_GROUPS * WO_BLOCK
+
+    b = IRBuilder(spec.kernel_name())
+    b.kernel.attrs["max_workgroup_size"] = THREADS
+
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(F32, "global"), noalias=True, align=4)
+    A_bytes = b.param("A_bytes", I32)
+    B_bytes = b.param("B_bytes", I32)
+    # dW is reached by plain global_atomic_add, not a buffer resource, so the
+    # size is unused here — but the parameter still has to be declared to match
+    # the launch signature every conv kernel shares.
+    b.param("D_bytes", I32)
+
+    c0 = b.const_i32(0)
+    c_wave = b.const_i32(WAVE)
+    c_cpg = b.const_i32(p.cpg)
+    c_kpg = b.const_i32(p.kpg)
+    c_half_bytes = b.const_i32(2)
+    oob_sentinel = b.const_i32((1 << 31) - 1)
+    c_H = b.const_i32(p.H)  # INPUT height
+    c_Ho = b.const_i32(Ho)  # output height (for dY bounds)
+    c_Wo = b.const_i32(Wo)
+
+    zero_acc = b.zero_vec_f32(4)
+
+    tid = b.thread_id_x()
+    wave_id = b.div(tid, c_wave)
+    lane = b.mod(tid, c_wave)
+    c4 = b.div(lane, b.const_i32(16))
+    q_in_lane = b.mod(lane, b.const_i32(16))
+
+    # ---- Grid decode ----
+    # bx = (group * n_k_tiles + k_tile) * n_c_tiles + c_tile
+    # by = hi_block  (input row block, 0..n_hi_blocks-1 where n_hi_blocks=ceil(H/HPB))
+    # bz = n * n_q_blocks + q_block
+    #
+    # waves_q spatial decomposition:
+    #   wave_kc_id = wave_id // WAVES_Q  (K/C wave group index)
+    #   wave_q_id  = wave_id  % WAVES_Q  (which wo_tile within block: 0..WAVES_Q-1)
+    #   wave_k_id  = wave_kc_id % WAVES_K
+    #   wave_c_id  = wave_kc_id // WAVES_K
+    #   wo_tile    = q_block * WAVES_Q + wave_q_id
+    # If wo_tile >= n_wo_tiles: wave is out-of-range, suppress epilogue atomic.
+    n_k_tiles = (p.kpg + spec.block_k - 1) // spec.block_k
+    n_c_tiles = (p.cpg + spec.block_c - 1) // spec.block_c
+    n_q_blocks = spec.n_q_blocks()  # ceil(n_wo_tiles / WAVES_Q)
+
+    bx = b.block_id_x()
+    by = b.block_id_y()  # hi_block
+    bz = b.block_id_z()  # n * n_q_blocks + q_block
+
+    c_n_k_tiles = b.const_i32(n_k_tiles)
+    c_n_c_tiles = b.const_i32(n_c_tiles)
+    c_n_q_blocks = b.const_i32(n_q_blocks)
+
+    c_tile_idx = b.mod(bx, c_n_c_tiles)
+    gk_flat = b.div(bx, c_n_c_tiles)
+    k_tile_in_group = b.mod(gk_flat, c_n_k_tiles)
+    group = b.div(gk_flat, c_n_k_tiles)
+
+    n_i = b.div(bz, c_n_q_blocks)
+    q_block = b.mod(bz, c_n_q_blocks)
+
+    hi_block = by
+    hi_block_start = b.mul(hi_block, b.const_i32(HPB))
+
+    # Wave decomposition: KCQ layout (q is fastest-varying)
+    # wave_id = wave_kc_id * WAVES_Q + wave_q_id
+    wave_q_id = b.mod(wave_id, b.const_i32(WAVES_Q))
+    wave_kc_id = b.div(wave_id, b.const_i32(WAVES_Q))
+    wave_k_id = b.mod(wave_kc_id, b.const_i32(WAVES_K))
+    wave_c_id = b.div(wave_kc_id, b.const_i32(WAVES_K))
+
+    wave_k_origin = b.mul(wave_k_id, b.const_i32(WAVE_K))
+    wave_c_origin = b.mul(wave_c_id, b.const_i32(WAVE_C))
+
+    # wo_tile and wo_tile_start for THIS wave's spatial item
+    wo_tile = b.add(b.mul(q_block, b.const_i32(WAVES_Q)), wave_q_id)
+    wo_tile_start = b.mul(wo_tile, b.const_i32(WO_BLOCK))
+    # Guard: last block may have fewer than WAVES_Q valid tiles
+    wo_tile_valid = b.cmp_lt(wo_tile, b.const_i32(n_wo_tiles))
+
+    k_tile_origin = b.mul(k_tile_in_group, b.const_i32(spec.block_k))
+    c_tile_origin = b.mul(c_tile_idx, b.const_i32(spec.block_c))
+
+    k_wave_base = b.add(b.add(b.mul(group, c_kpg), k_tile_origin), wave_k_origin)
+
+    a_rsrc = b.buffer_rsrc(A, A_bytes)
+    b_rsrc = b.buffer_rsrc(Bp, B_bytes)
+
+    # ---- Descriptors ----
+    # dY: A[N, Ho, Wo, total_k] — loaded at output row ho = hi + PAD - r
+    dy_desc = TensorDescriptor.naive(
+        "A",
+        lengths=[p.N, Ho, Wo, p.total_k],
+        coord_names=("n", "h", "w", "k"),
+    )
+    # X for S-strip: B[N, H, W, total_c] — loaded at INPUT row hi directly
+    # w embed: wo_tile_start + col - PAD (col is runtime strip column index)
+    x_strip_desc = TensorDescriptor.naive(
+        "B",
+        lengths=[p.N, p.H, p.W, p.total_c],
+        coord_names=("n", "h", "w", "c"),
+    ).transform(
+        embed(
+            upper=("wo", "s_off"),
+            into="w",
+            strides=(p.stride, 1),
+            offset=-p.PAD,
+            lo=0,
+            hi=p.W,
+        ),
+    )
+    dw_desc = TensorDescriptor.naive(
+        "D",
+        lengths=[p.total_k, p.KH, p.KW, p.cpg],
+        coord_names=("k", "r", "s", "c"),
+    )
+
+    # ---- LDS allocation ----
+    #
+    # Partitioning rule: a tile is keyed on exactly the wave axes its contents
+    # depend on, and every wave writes precisely the bytes it later reads. That
+    # is what lets the row loop run on ONE barrier per iteration — a wave never
+    # consumes another wave's write, so the only ordering it needs is "nobody is
+    # still reading last row's tile before I overwrite it".
+    #
+    #   dy_lds[sp][k_ch]        depends on (wave_k, wave_q)  -> keyed on both
+    #   s_strip_lds[col][c_ch]  depends on (wave_c, wave_q)  -> keyed on both
+    #
+    # The waves that share a tile write it redundantly; that costs a duplicate
+    # DRAM read (L1/L2 resident) and a duplicate ds_write, and buys away the
+    # second barrier plus the cross-wave dependency it would impose.
+    dy_lds = b.smem_alloc(
+        io_type, [1, WAVES_K * WAVES_Q * LDS_SIZE_DY], name_hint="dy_lds"
+    )
+
+    # Column-major [col=STRIP_COLS rows, c_ch=TR_N cols]; s-tap = row shift.
+    STRIP_PER_Q = STRIP_COLS_PAD * TR_N
+    s_strip_lds = b.smem_alloc(
+        io_type, [1, WAVES_C * WAVES_Q * STRIP_PER_Q], name_hint="s_strip"
+    )
+
+    # ---- Per-thread loader decomposition ----
+    # VEC_CH f16 (one contiguous channel run) per lane via buffer_load_vN.
+    #   c_ld_sp = lane // (TR_N // VEC_CH), c_ld_ch = (lane % ...) * VEC_CH.
+    #   For mk=32: VEC_CH=8, c_lanes_per_sp=2, c_ld_sp∈0..31, c_ld_ch∈{0,8}.
+    #   For mk=16: VEC_CH=4, c_lanes_per_sp=4, c_ld_sp∈0..15, c_ld_ch∈{0,4,8,12}.
+    # Either way the 64 lanes tile WO_BLOCK spatial positions × TR_N channels
+    # exactly, and lane l's LDS run starts at byte 2 * VEC_CH * l — a perfectly
+    # linear, conflict-free ds_write_b{64,128}.
+    c_lanes_per_sp = b.const_i32(TR_N // VEC_CH)
+    c_ld_sp = b.div(lane, c_lanes_per_sp)
+    c_ld_ch = b.mul(b.mod(lane, c_lanes_per_sp), b.const_i32(VEC_CH))
+
+    # dy partition index = wave_k_id * WAVES_Q + wave_q_id
+    dy_part_idx = b.add(b.mul(wave_k_id, b.const_i32(WAVES_Q)), wave_q_id)
+    dy_wave_off_f16 = b.mul(dy_part_idx, b.const_i32(LDS_SIZE_DY))
+    # s_strip partition index = wave_c_id * WAVES_Q + wave_q_id
+    s_strip_part_idx = b.add(b.mul(wave_c_id, b.const_i32(WAVES_Q)), wave_q_id)
+    s_strip_off_f16 = b.mul(s_strip_part_idx, b.const_i32(STRIP_PER_Q))
+    c_TR_N = b.const_i32(TR_N)
+    c_WO_BLOCK = b.const_i32(WO_BLOCK)
+    c_STRIP_COLS = b.const_i32(STRIP_COLS)
+
+    # Transpose-read lane address, shared by both operands (same tile width).
+    tr_row = b.add(
+        b.mul(c4, b.const_i32(TR_K_L)),
+        b.mod(b.div(lane, b.const_i32(4)), b.const_i32(4)),
+    )
+    tr_flat = b.add(
+        b.mul(tr_row, c_TR_N), b.mul(b.mod(lane, b.const_i32(4)), b.const_i32(4))
+    )
+
+    # ---- Readers ----
+    # Both operands live in LDS spatial-major and come back transposed, so one
+    # address formula serves them: ``mfma(dy_vec, x_vec, acc)`` puts dY in the
+    # A position (M = k channels) and X in the B position (N = c channels), and
+    # for a 16x16 atom the A and B per-lane fragments have the same shape —
+    # element (lane % 16, (lane / 16) * VEC_CH + j) of the [channel][spatial]
+    # operand. That is exactly what ds_read_b64_tr_b16 delivers out of a
+    # [spatial][channel] tile.
+    def _tr_read(smem: "Value", part_off: "Value", row_shift: int) -> "Value":
+        base = b.add(part_off, b.add(tr_flat, b.const_i32(row_shift * TR_N)))
+        frag = b.ds_read_tr16_b64(smem, c0, base, dtype=io_type)
+        for rd in range(1, N_TR_READS):
+            frag = b.vec_concat(
+                frag,
+                b.ds_read_tr16_b64(
+                    smem,
+                    c0,
+                    b.add(base, b.const_i32(4 * rd * TR_N)),
+                    dtype=io_type,
+                ),
+            )
+        return frag
+
+    def _read_dy() -> "Value":
+        """dY fragment: transpose-read of dy_lds[sp][k_ch]."""
+        return _tr_read(dy_lds, dy_wave_off_f16, 0)
+
+    def _read_strip(s_const: int) -> "Value":
+        """X fragment for filter column ``s``: the strip shifted ``s`` rows."""
+        return _tr_read(s_strip_lds, s_strip_off_f16, s_const)
+
+    # ---- Loaders ----
+    #
+    # Split into ISSUE (DRAM -> VGPR) and COMMIT (VGPR -> LDS) so the row loop
+    # can run the issue a whole iteration ahead of the commit that consumes it.
+    # Fused, the ``s_waitcnt vmcnt(0)`` in front of the LDS write exposes the
+    # full DRAM latency on every row; split, that wait sits one compute phase
+    # downstream of its load and the latency lands under the MFMAs.
+    #
+    # No OOB masking of the loaded value is needed: an out-of-range lane gets
+    # ``oob_sentinel`` as its buffer offset, and a buffer load past num_records
+    # returns zero. The extra ``select`` per vector cost VEC_CH/2 v_cndmask per
+    # load for nothing.
+    #
+    # The CHANNEL tail needs no masking either, and that is a property of wgrad
+    # specifically. Each lane pulls a contiguous VEC_CH run starting at
+    # ``c_ld_ch``, so at a ragged ``kpg``/``cpg`` (17, say) the last tile does
+    # read the next group's channels -- or past the tensor, where the buffer
+    # returns zero. Neither contaminates a live result: k and c are the MFMA's
+    # M and N axes here (the reduction runs over the SPATIAL axis n/ho/wo), so
+    # channel j of a staged tile feeds accumulator row/column j and nothing
+    # else. The epilogue drops exactly those rows/columns -- ``k_valid`` and
+    # ``c_valid_guard`` below -- so the garbage dies with them. Contrast the
+    # forward variants, where c is the reduction axis and a tail lane WOULD
+    # need masking because its junk lands in a live sum.
+    def _lds_run(part_off: "Value", row: "Value") -> "Value":
+        """Flat f16 index of this lane's VEC_CH-wide run in ``row`` of a tile."""
+        return b.add(part_off, b.add(b.mul(row, c_TR_N), c_ld_ch))
+
+    def _issue_delta(ho_val: "Value", ho_ok: "Value") -> "Value":
+        """Start the DRAM read of one dY row; returns the in-flight fragment."""
+        wo_sp = b.add(wo_tile_start, c_ld_sp)
+        both_ok = b.land(ho_ok, b.cmp_lt(wo_sp, c_Wo))
+        k_ld = b.add(k_wave_base, c_ld_ch)
+        off, _ = dy_desc.offset(b, n=n_i, h=ho_val, w=wo_sp, k=k_ld)
+        safe_off = b.select(both_ok, b.mul(off, c_half_bytes), oob_sentinel)
+        return _buf_load_vN(b, io_dtype, a_rsrc, safe_off, c0, VEC_CH // 2)
+
+    def _commit_delta(vec: "Value") -> None:
+        """Land a dY fragment in dy_lds[sp][k_ch] — one ds_write per lane."""
+        b.smem_store_vN(dy_lds, [c0, _lds_run(dy_wave_off_f16, c_ld_sp)], vec, n=VEC_CH)
+
+    # The strip columns this wave loads: pass ``base + j * STRIP_GROUPS`` of the
+    # partition it shares with the other k-waves (see the LDS staging note).
+    #
+    # This is the one place a wave reads LDS another wave wrote. It is safe
+    # because ``sync_lds_only`` below is a real barrier, not just a waitcnt.
+    _strip_pass_base = b.mod(wave_k_id, b.const_i32(STRIP_GROUPS))
+    _strip_cols = [
+        b.add(
+            c_ld_sp,
+            b.mul(b.add(_strip_pass_base, b.const_i32(j * STRIP_GROUPS)), c_WO_BLOCK),
+        )
+        for j in range(STRIP_PASSES_PER_WAVE)
+    ]
+    _strip_col_ok = [b.cmp_lt(col, c_STRIP_COLS) for col in _strip_cols]
+
+    def _issue_s_strip(hi_val: "Value", hi_ok: "Value") -> List["Value"]:
+        """Start the DRAM reads of one X strip; returns the in-flight fragments."""
+        c_ld_base = b.add(
+            b.add(b.mul(group, c_cpg), c_tile_origin),
+            b.add(wave_c_origin, c_ld_ch),
+        )
+        out: List["Value"] = []
+        for pass_idx, col in enumerate(_strip_cols):
+            off, x_ok = x_strip_desc.offset(
+                b,
+                n=n_i,
+                h=hi_val,
+                wo=wo_tile_start,
+                s_off=col,
+                c=c_ld_base,
+            )
+            both_ok = b.land(b.land(hi_ok, _strip_col_ok[pass_idx]), x_ok)
+            safe = b.select(both_ok, b.mul(off, c_half_bytes), oob_sentinel)
+            out.append(_buf_load_vN(b, io_dtype, b_rsrc, safe, c0, VEC_CH // 2))
+        return out
+
+    def _commit_s_strip(vecs: List["Value"]) -> None:
+        """Land the X strip fragments in s_strip_lds[col][c_ch].
+
+        Unconditional in both passes: the tail pass's dead lanes carry zeros
+        and land them in the partition's pad rows, which nothing reads.
+        """
+        for pass_idx, col in enumerate(_strip_cols):
+            b.smem_store_vN(
+                s_strip_lds,
+                [c0, _lds_run(s_strip_off_f16, col)],
+                vecs[pass_idx],
+                n=VEC_CH,
+            )
+
+    # ---- Accumulators and delta register ring ----
+    acc: List[List["Value"]] = [[zero_acc] * KW for _ in range(KH)]
+    # KH-slot register ring: ring[i] = <VEC_CH x io_type> for dY row i
+    delta_ring: List["Value"] = [b.zero_vec(io_type, VEC_CH)] * KH
+
+    # ---- Prologue: pre-load KH-1 past delta rows into the ring ----
+    # For hi_block B (hi_block_start = B*HPB), the ring needs delta rows from
+    # "virtual" input rows hi = hi_block_start - 1 and hi_block_start - 2.
+    # The corresponding output rows are: ho = hi_virtual + PAD - r_0 = hi_virtual + PAD.
+    # (We prefetch for r=0, i.e., ho = hi + PAD.)
+    #
+    # k=1: virtual_hi = hi_block_start - 1,  ho_past = (hi_block_start - 1) + PAD
+    #      slot = (KH-1)%KH = KH-1 = 2
+    # k=2: virtual_hi = hi_block_start - 2,  ho_past = (hi_block_start - 2) + PAD
+    #      slot = (KH-2)%KH = 1
+    #
+    # For hi_block=0: ho_past = PAD-1=0 (valid) and PAD-2=-1 (OOB→zero). ✓
+    # For hi_block=B>0: ho_past = B*HPB-k+PAD (valid for small PAD and reasonable B). ✓
+    for k in range(KH - 1, 0, -1):
+        slot_pre = (KH - k) % KH  # ring slot for virtual hi = hi_block_start - k
+        # ho to load: virtual_hi + PAD = (hi_block_start - k) + PAD (runtime value)
+        ho_past = b.add(hi_block_start, b.const_i32(p.PAD - k))  # runtime!
+        ho_past_ok = b.land(b.cmp_ge(ho_past, c0), b.cmp_lt(ho_past, c_Ho))
+        _commit_delta(_issue_delta(ho_past, ho_past_ok))
+        b.sync_lds_only()
+        delta_ring[slot_pre] = _read_dy()
+        # Full sync_lds_only, NOT the bare barrier the row loop ends on. The
+        # difference is consumption: there, ``delta_ring[slot_fill]`` feeds the
+        # MFMAs before the barrier, so the register dependence already forces
+        # lgkmcnt(0) and the bare form costs nothing. Here the fragment is not
+        # read until row-loop iteration 0, so nothing makes the ds_read drain --
+        # and ``dy_wave_off_f16`` keys only on (wave_k, wave_q), so a waves_c
+        # sibling's next ``_commit_delta`` writes a different dY row over these
+        # very bytes. gfx950's back-off barrier means SIInsertWaitcnts will not
+        # insert the wait for us (see the transpose2d note in lower_llvm.py), so
+        # the read has to be drained here. One instruction, KH-1 times per
+        # workgroup, outside the row loop.
+        b.sync_lds_only()
+
+    # ---- Python-unrolled loop over hi_in_block (HPB input rows) ----
+    #
+    # Software-pipelined by one row: iteration i commits the fragments issued at
+    # i - 1 and issues row i + 1's, so every ``s_waitcnt vmcnt`` for a DRAM read
+    # is separated from its load by a whole compute phase.
+    def _row_coords(hi_in_blk: int):
+        """(hi, hi_ok, ho, ho_ok) for one input row of this block."""
+        hi_val = b.add(hi_block_start, b.const_i32(hi_in_blk))
+        hi_ok = b.cmp_lt(hi_val, c_H)
+        # dY row this input row feeds through r = 0.
+        ho_val = b.add(hi_val, b.const_i32(p.PAD))
+        return hi_val, hi_ok, ho_val, b.land(hi_ok, b.cmp_lt(ho_val, c_Ho))
+
+    _hi0, _hi0_ok, _ho0, _ho0_ok = _row_coords(0)
+    pending_dy = _issue_delta(_ho0, _ho0_ok)
+    pending_x = _issue_s_strip(_hi0, _hi0_ok)
+
+    for hi_in_blk in range(HPB):
+        slot_fill = hi_in_blk % KH  # compile-time ring slot
+
+        # 1. Land the fragments issued last iteration.
+        b.s_setprio(0)
+        _commit_delta(pending_dy)
+        _commit_s_strip(pending_x)
+
+        # 2. Issue the next row's DRAM reads before waiting on this one's LDS
+        #    writes, so their latency runs under the compute phase below.
+        if hi_in_blk + 1 < HPB:
+            nxt_hi, nxt_hi_ok, nxt_ho, nxt_ho_ok = _row_coords(hi_in_blk + 1)
+            pending_dy = _issue_delta(nxt_ho, nxt_ho_ok)
+            pending_x = _issue_s_strip(nxt_hi, nxt_hi_ok)
+
+        # 3. Wait for LDS loads to complete.
+        b.sync_lds_only()  # wait for smem_store (lgkmcnt=0) for both dY and X
+
+        # 4. Update delta ring → VGPR, and read the KW S fragments once each.
+        #    Hoisted out of the r loop: the same KW fragments feed all KH rows,
+        #    so re-reading them per r would triple the LDS read traffic.
+        delta_ring[slot_fill] = _read_dy()
+        x_vecs = [_read_strip(s) for s in range(KW)]
+
+        # 5. Compute phase: s_setprio(1) + KH*KW MFMAs.
+        b.s_setprio(1)
+        for r in range(KH):
+            ring_slot = (hi_in_blk + KH - r) % KH  # compile-time!
+            dy_vec = delta_ring[ring_slot]
+            shape = "16x16x32" if spec.mfma_k == 32 else "16x16x16"
+            for s in range(KW):
+                acc[r][s] = _mfma(b, io_dtype, shape, dy_vec, x_vecs[s], acc[r][s])
+
+        b.s_setprio(0)
+        b.s_barrier_bare()
+
+    # ---- Epilogue: atomic-add to dW ----
+    # Guard with wo_tile_valid: last q_block may have fewer than WAVES_Q valid tiles.
+    #
+    # dW is [total_k, KH, KW, cpg]: the k axis is global but the c axis is
+    # per-group, so the channel index here is the IN-GROUP one. Feeding the
+    # global channel (which is what X is addressed by) walks off the end of the
+    # filter's c extent and lands in the next (r, s) slot for every group > 0.
+    c_in_group_lane = b.add(b.add(c_tile_origin, wave_c_origin), q_in_lane)
+    c_valid_guard = b.cmp_lt(c_in_group_lane, c_cpg)
+    k_in_group_base = b.sub(k_wave_base, b.mul(group, c_kpg))
+
+    for r in range(KH):
+        for s in range(KW):
+            for slot in range(4):
+                k_abs = b.add(
+                    k_wave_base, b.add(b.mul(c4, b.const_i32(4)), b.const_i32(slot))
+                )
+                k_in_group = b.add(
+                    k_in_group_base, b.add(b.mul(c4, b.const_i32(4)), b.const_i32(slot))
+                )
+                k_valid = b.cmp_lt(k_in_group, c_kpg)
+                both_valid = b.land(b.land(k_valid, c_valid_guard), wo_tile_valid)
+                acc_val = b.vec_extract(acc[r][s], slot)
+                dw_off, _ = dw_desc.offset(
+                    b, k=k_abs, r=b.const_i32(r), s=b.const_i32(s), c=c_in_group_lane
+                )
+                with b.scf_if(both_valid):
+                    b.global_atomic_add(D, dw_off, acc_val)
 
     return b.kernel
 
@@ -3071,13 +4049,14 @@ def build_direct_transpose_weights_dgrad(
     Block: (64, 1, 1)
     """
     p = spec.problem
+    io_type = _io_type(p.dtype)
     BLOCK = 64
 
     b = IRBuilder(f"direct_transpose_weights_dgrad_{p.short()}")
     b.kernel.attrs["max_workgroup_size"] = BLOCK
 
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    D = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
     A_bytes = b.param("A_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
 
@@ -3127,7 +4106,10 @@ def build_direct_transpose_weights_dgrad(
     src_safe = b.select(valid, b.mul(src_off, c_half_bytes), oob_sentinel)
     a_rsrc = b.buffer_rsrc(A, A_bytes)
     d_rsrc = b.buffer_rsrc(D, D_bytes)
-    val = b.buffer_load_f16(a_rsrc, src_safe, c0)
+    if p.dtype == "bf16":
+        val = b.buffer_load_bf16(a_rsrc, src_safe, c0)
+    else:
+        val = b.buffer_load_f16(a_rsrc, src_safe, c0)
 
     # Destination: W_T[c_abs, r', s', k_in_g]
     dst_desc = TensorDescriptor.naive(
@@ -3135,7 +4117,10 @@ def build_direct_transpose_weights_dgrad(
     )
     dst_off, _ = dst_desc.offset(b, c=c_abs, r=r_prime, s=s_prime, k=k_in_g)
     dst_safe = b.select(valid, b.mul(dst_off, c_half_bytes), oob_sentinel)
-    b.buffer_store_f16(d_rsrc, dst_safe, c0, val)
+    if p.dtype == "bf16":
+        b.buffer_store_bf16(d_rsrc, dst_safe, c0, val)
+    else:
+        b.buffer_store_f16(d_rsrc, dst_safe, c0, val)
 
     return b.kernel
 
@@ -3214,8 +4199,9 @@ def build_direct_reorganize_weights(
     b = IRBuilder(f"direct_reorg_wt{'32' if fold_k32 else ''}_{p.short()}")
     b.kernel.attrs["max_workgroup_size"] = WAVE
 
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    D = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    io_type = _io_type(p.dtype)
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
     A_bytes = b.param("A_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
 
@@ -3280,8 +4266,8 @@ def build_direct_reorganize_weights(
         b, k_new=k_new_val, r=r_prime, s=s_prime, c_new=c_new_base
     )
     safe_src = b.select(src_ok, b.mul(src_off, c_half_bytes), oob_sentinel)
-    # Load ELEMS_PER_LANE consecutive halves: n_dwords = ELEMS_PER_LANE // 2
-    val = b.buffer_load_vN_f16(a_rsrc, safe_src, c0, ELEMS_PER_LANE // 2)
+    # Load ELEMS_PER_LANE consecutive elements: n_dwords = ELEMS_PER_LANE // 2
+    val = _buf_load_vN(b, p.dtype, a_rsrc, safe_src, c0, ELEMS_PER_LANE // 2)
 
     # Destination: stride ELEMS_PER_LANE between consecutive lanes → coalesced.
     dst_off = b.add(
@@ -3289,7 +4275,7 @@ def build_direct_reorganize_weights(
         b.mul(tid, b.const_i32(ELEMS_PER_LANE)),
     )
     safe_dst = b.select(src_ok, b.mul(dst_off, c_half_bytes), oob_sentinel)
-    b.buffer_store_vN_f16(d_rsrc, safe_dst, c0, val, ELEMS_PER_LANE // 2)
+    _buf_store_vN(b, p.dtype, d_rsrc, safe_dst, c0, val, ELEMS_PER_LANE // 2)
 
     return b.kernel
 
@@ -3320,9 +4306,10 @@ def build_direct_coalesced_weights_dgrad(
     b = IRBuilder(f"direct_coa_wt_dgrad_{p.short()}")
     b.kernel.attrs["max_workgroup_size"] = WAVE
 
+    io_type = _io_type(p.dtype)
     # A = W source, D = W_coalesced destination
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    D = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
     A_bytes = b.param("A_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
 
@@ -3388,7 +4375,7 @@ def build_direct_coalesced_weights_dgrad(
     )
     src_off, _ = src_desc.offset(b, k=k_src, r=r_flip, s=s_flip, c=c_src)
     safe_src = b.select(k_ok, b.mul(src_off, c_half_bytes), oob_sentinel)
-    val = b.buffer_load_vN_f16(a_rsrc, safe_src, c0, 2)
+    val = _buf_load_vN(b, p.dtype, a_rsrc, safe_src, c0, 2)
 
     # Destination: W_coa[bx * WAVE * 4 + tid * 4]  (coalesced: tid*4 stride)
     dst_off = b.add(
@@ -3396,7 +4383,7 @@ def build_direct_coalesced_weights_dgrad(
         b.mul(tid, b.const_i32(4)),
     )
     safe_dst = b.select(k_ok, b.mul(dst_off, c_half_bytes), oob_sentinel)
-    b.buffer_store_vN_f16(d_rsrc, safe_dst, c0, val, 2)
+    _buf_store_vN(b, p.dtype, d_rsrc, safe_dst, c0, val, 2)
 
     return b.kernel
 
@@ -3440,6 +4427,7 @@ def build_direct_mfma_dgrad(
         KW=orig_p.KW,
         PAD=orig_p.KH - 1 - orig_p.PAD,  # undo the PAD swap
         stride=1,
+        dtype=orig_p.dtype,
     )
     transpose_kernel = build_direct_transpose_weights_dgrad(
         DirectTransposeWeightsDgradSpec(problem=orig_problem), arch=arch
@@ -3492,6 +4480,7 @@ def make_dgrad_fprop_spec(
         KW=p.KW,
         PAD=pad_new,
         stride=1,
+        dtype=p.dtype,
     )
     return DirectConvSpec(
         problem=transposed_problem,
@@ -3557,10 +4546,13 @@ class DirectConvDgradSpec:
             p.short(),
             f"bq{self.block_q}",
             f"bg{self.block_groups}",
+            flags={"bf16": p.dtype == "bf16"},
         )
 
     def validate(self) -> None:
         p = self.problem
+        if p.dtype not in ("fp16", "bf16"):
+            raise ValueError(f"DirectConvDgradSpec: unsupported dtype {p.dtype!r}")
         if p.cpg < 1:
             raise ValueError(f"DirectConvDgradSpec requires cpg >= 1 (got {p.cpg})")
         if p.kpg < 1:
@@ -3630,6 +4622,7 @@ def build_direct_conv_dgrad(
         raise ValueError(f"invalid DirectConvDgradSpec for {arch}: {why}")
 
     p = spec.problem
+    io_type = _io_type(p.dtype)
     BLOCK_W = spec.block_q  # reuse block_q field as input-W tile
     BLOCK_WAVES = spec.block_groups  # reuse block_groups as wave count per block
     WAVE = spec.wave_size
@@ -3643,9 +4636,9 @@ def build_direct_conv_dgrad(
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    D = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
     A_bytes = b.param("A_bytes", I32)
     B_bytes = b.param("B_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
@@ -3794,13 +4787,19 @@ def build_direct_conv_dgrad(
                         k_byte_off = b.mul(k_iv, k_stride_bytes)
                         w_byte = b.add(w_off0_bytes, k_byte_off)
                         safe_w = b.select(tap_valid, w_byte, oob_sentinel)
-                        w_h = b.buffer_load_f16(b_rsrc, safe_w, c0)
+                        if p.dtype == "bf16":
+                            w_h = b.buffer_load_bf16(b_rsrc, safe_w, c0)
+                        else:
+                            w_h = b.buffer_load_f16(b_rsrc, safe_w, c0)
                         w_f32 = b.select(tap_valid, b.cast_to_f32(w_h), zero_f32)
 
                         # dY[n, ho, wo, k_base + k_iv]: k is contiguous in NHWK.
                         dy_byte = b.add(dy_off0_bytes, b.mul(k_iv, c_half_bytes))
                         safe_dy = b.select(tap_valid, dy_byte, oob_sentinel)
-                        dy_h = b.buffer_load_f16(a_rsrc, safe_dy, c0)
+                        if p.dtype == "bf16":
+                            dy_h = b.buffer_load_bf16(a_rsrc, safe_dy, c0)
+                        else:
+                            dy_h = b.buffer_load_f16(a_rsrc, safe_dy, c0)
                         dy_f32 = b.select(tap_valid, b.cast_to_f32(dy_h), zero_f32)
 
                         new_acc = b.fma(w_f32, dy_f32, acc_k)
@@ -3813,7 +4812,10 @@ def build_direct_conv_dgrad(
             safe_d = b.select(
                 b.land(c_in_ok, wi_ok), b.mul(d_off, c_half_bytes), oob_sentinel
             )
-            b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc))
+            if p.dtype == "bf16":
+                b.buffer_store_bf16(d_rsrc, safe_d, c0, b.trunc_f32_to_bf16(acc))
+            else:
+                b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc))
 
         b.scf_yield(dummy_in)
 
@@ -3871,10 +4873,15 @@ class DirectDepthwiseDgradSpec:
             p.short(),
             f"bw{self.block_w}",
             f"bw{self.block_waves}wv",
+            flags={"bf16": p.dtype == "bf16"},
         )
 
     def validate(self) -> None:
         p = self.problem
+        if p.dtype not in ("fp16", "bf16"):
+            raise ValueError(
+                f"DirectDepthwiseDgradSpec: unsupported dtype {p.dtype!r}; expected fp16 or bf16"
+            )
         if p.cpg != 1 or p.kpg != 1:
             raise ValueError(
                 f"DirectDepthwiseDgradSpec requires cpg=kpg=1 (got {p.cpg}, {p.kpg})"
@@ -3892,6 +4899,11 @@ def is_valid_depthwise_dgrad_spec(
     except KeyError as e:
         return False, str(e)
     p = spec.problem
+    if p.dtype not in ("fp16", "bf16"):
+        return (
+            False,
+            f"DirectDepthwiseDgradSpec: unsupported dtype {p.dtype!r}; expected fp16 or bf16",
+        )
     if p.cpg != 1 or p.kpg != 1:
         return False, f"requires cpg=kpg=1 (got {p.cpg}, {p.kpg})"
     return True, "ok"
@@ -3936,9 +4948,10 @@ def build_direct_depthwise_dgrad(
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    D = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    io_type = _io_type(p.dtype)
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
     A_bytes = b.param("A_bytes", I32)
     B_bytes = b.param("B_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
@@ -3988,7 +5001,11 @@ def build_direct_depthwise_dgrad(
                 b, k=ch, r=b.const_i32(r_const), s=b.const_i32(s_const), c=c0
             )
             safe_w = b.select(ch_in_range, b.mul(w_off, c_half_bytes), oob_sentinel)
-            w_h = b.buffer_load_f16(b_rsrc, safe_w, c0)
+            w_h = (
+                b.buffer_load_bf16(b_rsrc, safe_w, c0)
+                if p.dtype == "bf16"
+                else b.buffer_load_f16(b_rsrc, safe_w, c0)
+            )
             row.append(b.select(ch_in_range, b.cast_to_f32(w_h), zero_f32))
         weights_f32.append(row)
 
@@ -4051,7 +5068,11 @@ def build_direct_depthwise_dgrad(
 
                     dy_off, _ = dy_desc.offset(b, n=n, ho=ho, wo=wo, ch=ch)
                     safe_dy = b.select(valid, b.mul(dy_off, c_half_bytes), oob_sentinel)
-                    dy_h = b.buffer_load_f16(a_rsrc, safe_dy, c0)
+                    dy_h = (
+                        b.buffer_load_bf16(a_rsrc, safe_dy, c0)
+                        if p.dtype == "bf16"
+                        else b.buffer_load_f16(a_rsrc, safe_dy, c0)
+                    )
                     dy_f32 = b.select(valid, b.cast_to_f32(dy_h), zero_f32)
                     acc = b.fma(weights_f32[r_const][s_const], dy_f32, acc)
 
@@ -4060,7 +5081,10 @@ def build_direct_depthwise_dgrad(
             safe_d = b.select(
                 b.land(ch_in_range, wi_ok), b.mul(d_off, c_half_bytes), oob_sentinel
             )
-            b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc))
+            if p.dtype == "bf16":
+                b.buffer_store_bf16(d_rsrc, safe_d, c0, b.trunc_f32_to_bf16(acc))
+            else:
+                b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc))
 
         b.scf_yield(dummy_in)
 
@@ -4122,10 +5146,15 @@ class DirectDepthwiseDgradStreamSpec:
             p.short(),
             f"bw{self.block_w}",
             f"bw{self.block_waves}wv",
+            flags={"bf16": p.dtype == "bf16"},
         )
 
     def validate(self) -> None:
         p = self.problem
+        if p.dtype not in ("fp16", "bf16"):
+            raise ValueError(
+                f"DirectDepthwiseDgradStreamSpec: unsupported dtype {p.dtype!r}; expected fp16 or bf16"
+            )
         if p.cpg != 1 or p.kpg != 1:
             raise ValueError(
                 f"DirectDepthwiseDgradStreamSpec requires cpg=kpg=1 (got {p.cpg}, {p.kpg})"
@@ -4143,6 +5172,11 @@ def is_valid_depthwise_dgrad_stream_spec(
     except KeyError as e:
         return False, str(e)
     p = spec.problem
+    if p.dtype not in ("fp16", "bf16"):
+        return (
+            False,
+            f"DirectDepthwiseDgradStreamSpec: unsupported dtype {p.dtype!r}; expected fp16 or bf16",
+        )
     if p.cpg != 1 or p.kpg != 1:
         return False, f"requires cpg=kpg=1 (got {p.cpg}, {p.kpg})"
     return True, "ok"
@@ -4186,9 +5220,10 @@ def build_direct_depthwise_dgrad_streaming(
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    D = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    io_type = _io_type(p.dtype)
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
     A_bytes = b.param("A_bytes", I32)
     B_bytes = b.param("B_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
@@ -4240,7 +5275,11 @@ def build_direct_depthwise_dgrad_streaming(
                 b, k=ch, r=b.const_i32(r_const), s=b.const_i32(s_const), c=c0
             )
             safe_w = b.select(ch_ok, b.mul(w_off, c_half_bytes), oob_sentinel)
-            w_h = b.buffer_load_f16(b_rsrc, safe_w, c0)
+            w_h = (
+                b.buffer_load_bf16(b_rsrc, safe_w, c0)
+                if p.dtype == "bf16"
+                else b.buffer_load_f16(b_rsrc, safe_w, c0)
+            )
             row.append(b.select(ch_ok, b.cast_to_f32(w_h), zero_f32))
         weights_f32.append(row)
 
@@ -4305,7 +5344,11 @@ def build_direct_depthwise_dgrad_streaming(
                     safe_dy = b.select(
                         tap_valid, b.mul(dy_off, c_half_bytes), oob_sentinel
                     )
-                    dy_h = b.buffer_load_f16(a_rsrc, safe_dy, c0)
+                    dy_h = (
+                        b.buffer_load_bf16(a_rsrc, safe_dy, c0)
+                        if p.dtype == "bf16"
+                        else b.buffer_load_f16(a_rsrc, safe_dy, c0)
+                    )
                     dy_f32 = b.select(tap_valid, b.cast_to_f32(dy_h), zero_f32)
 
                     acc_slots[slot][j] = b.fma(
@@ -4332,9 +5375,14 @@ def build_direct_depthwise_dgrad_streaming(
                 safe_d = b.select(
                     b.land(ch_ok, wi_ok), b.mul(d_off, c_half_bytes), oob_sentinel
                 )
-                b.buffer_store_f16(
-                    d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc_slots[slot][j])
-                )
+                if p.dtype == "bf16":
+                    b.buffer_store_bf16(
+                        d_rsrc, safe_d, c0, b.trunc_f32_to_bf16(acc_slots[slot][j])
+                    )
+                else:
+                    b.buffer_store_f16(
+                        d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc_slots[slot][j])
+                    )
                 # Reset slot for future use.
                 acc_slots[slot][j] = zero_f32
 
@@ -4393,15 +5441,19 @@ class DirectDepthwiseSpec:
             p.short(),
             f"bw{self.block_w}",
             f"bw{self.block_waves}wv",
+            flags={"bf16": p.dtype == "bf16"},
         )
 
     def validate(self) -> None:
         p = self.problem
+        if p.dtype not in ("fp16", "bf16"):
+            raise ValueError(
+                f"DirectDepthwiseSpec: unsupported dtype {p.dtype!r}; expected fp16 or bf16"
+            )
         if p.cpg != 1 or p.kpg != 1:
             raise ValueError(
                 f"DirectDepthwiseSpec requires cpg=kpg=1 (got cpg={p.cpg}, kpg={p.kpg})"
             )
-        pass
 
 
 def is_valid_depthwise_spec(
@@ -4420,6 +5472,11 @@ def is_valid_depthwise_spec(
         return False, str(e)
 
     p = spec.problem
+    if p.dtype not in ("fp16", "bf16"):
+        return (
+            False,
+            f"DirectDepthwiseSpec: unsupported dtype {p.dtype!r}; expected fp16 or bf16",
+        )
     if p.cpg != 1 or p.kpg != 1:
         return False, f"cpg and kpg must both be 1 (got cpg={p.cpg}, kpg={p.kpg})"
     return True, "ok"
@@ -4470,9 +5527,10 @@ def build_direct_depthwise(
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    D = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    io_type = _io_type(p.dtype)
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
     A_bytes = b.param("A_bytes", I32)
     B_bytes = b.param("B_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
@@ -4559,7 +5617,11 @@ def build_direct_depthwise(
                 c=c0,
             )
             safe_w_off = b.select(ch_in_range, b.mul(w_off, c_half_bytes), oob_sentinel)
-            w_h = b.buffer_load_f16(b_rsrc, safe_w_off, c0)
+            w_h = (
+                b.buffer_load_bf16(b_rsrc, safe_w_off, c0)
+                if p.dtype == "bf16"
+                else b.buffer_load_f16(b_rsrc, safe_w_off, c0)
+            )
             w_f32 = b.select(ch_in_range, b.cast_to_f32(w_h), zero_f32)
             row.append(w_f32)
         weights_f32.append(row)
@@ -4594,7 +5656,11 @@ def build_direct_depthwise(
                     safe_off = b.select(
                         load_ok, b.mul(a_off, c_half_bytes), oob_sentinel
                     )
-                    a_h = b.buffer_load_f16(a_rsrc, safe_off, c0)
+                    a_h = (
+                        b.buffer_load_bf16(a_rsrc, safe_off, c0)
+                        if p.dtype == "bf16"
+                        else b.buffer_load_f16(a_rsrc, safe_off, c0)
+                    )
                     a_f32 = b.select(load_ok, b.cast_to_f32(a_h), zero_f32)
                     for r_const in range(p.KH):
                         p_idx = (y - r_const + p.KH) % p.KH
@@ -4617,9 +5683,14 @@ def build_direct_depthwise(
                     safe_d = b.select(
                         out_q_ok, b.mul(d_off, c_half_bytes), oob_sentinel
                     )
-                    b.buffer_store_f16(
-                        d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc[w_out][P_FLUSH])
-                    )
+                    if p.dtype == "bf16":
+                        b.buffer_store_bf16(
+                            d_rsrc, safe_d, c0, b.trunc_f32_to_bf16(acc[w_out][P_FLUSH])
+                        )
+                    else:
+                        b.buffer_store_f16(
+                            d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc[w_out][P_FLUSH])
+                        )
             for w_out in range(BLOCK_W):
                 acc[w_out][P_FLUSH] = zero_f32
 
@@ -4664,7 +5735,11 @@ def build_direct_depthwise(
                         safe_off = b.select(
                             ok, b.mul(a_off, c_half_bytes), oob_sentinel
                         )
-                        a_h = b.buffer_load_f16(a_rsrc, safe_off, c0)
+                        a_h = (
+                            b.buffer_load_bf16(a_rsrc, safe_off, c0)
+                            if p.dtype == "bf16"
+                            else b.buffer_load_f16(a_rsrc, safe_off, c0)
+                        )
                         a_f32 = b.select(ok, b.cast_to_f32(a_h), zero_f32)
                         for r_const in range(p.KH):
                             p_idx = (j - r_const + p.KH) % p.KH  # STATIC slot
@@ -4698,7 +5773,14 @@ def build_direct_depthwise(
                     safe_d = b.select(
                         store_ok, b.mul(d_off, c_half_bytes), oob_sentinel
                     )
-                    b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc_val))
+                    if p.dtype == "bf16":
+                        b.buffer_store_bf16(
+                            d_rsrc, safe_d, c0, b.trunc_f32_to_bf16(acc_val)
+                        )
+                    else:
+                        b.buffer_store_f16(
+                            d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc_val)
+                        )
 
                 for w_out in range(BLOCK_W):
                     new_accs[P_FLUSH_j * BLOCK_W + w_out] = zero_f32
@@ -4755,10 +5837,19 @@ class DirectDepthwiseSpatialSpec:
         from rocke.helpers.spec import kernel_name_join
 
         p = self.problem
-        return kernel_name_join(self.name, p.short(), f"bwv{self.block_waves}")
+        return kernel_name_join(
+            self.name,
+            p.short(),
+            f"bwv{self.block_waves}",
+            flags={"bf16": p.dtype == "bf16"},
+        )
 
     def validate(self) -> None:
         p = self.problem
+        if p.dtype not in ("fp16", "bf16"):
+            raise ValueError(
+                f"DirectDepthwiseSpatialSpec: unsupported dtype {p.dtype!r}; expected fp16 or bf16"
+            )
         if p.cpg != 1 or p.kpg != 1:
             raise ValueError(
                 f"DirectDepthwiseSpatialSpec requires cpg=kpg=1 "
@@ -4787,6 +5878,11 @@ def is_valid_depthwise_spatial_spec(
         return False, str(e)
 
     p = spec.problem
+    if p.dtype not in ("fp16", "bf16"):
+        return (
+            False,
+            f"DirectDepthwiseSpatialSpec: unsupported dtype {p.dtype!r}; expected fp16 or bf16",
+        )
     if p.cpg != 1 or p.kpg != 1:
         return False, f"cpg and kpg must both be 1 (got cpg={p.cpg}, kpg={p.kpg})"
     if p.groups > spec.wave_size:
@@ -4812,7 +5908,6 @@ def build_direct_depthwise_spatial(
 
     p = spec.problem
     WAVE = spec.wave_size
-    BLOCK_WAVES = spec.block_waves
     THREADS = spec.threads_per_block
     n_w = spec.n_w_per_wave
     BLOCK_W = spec.block_w
@@ -4826,9 +5921,10 @@ def build_direct_depthwise_spatial(
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    D = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    io_type = _io_type(p.dtype)
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
     A_bytes = b.param("A_bytes", I32)
     B_bytes = b.param("B_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
@@ -4894,7 +5990,11 @@ def build_direct_depthwise_spatial(
                 b, k=ch, r=b.const_i32(r_const), s=b.const_i32(s_const), c=c0
             )
             safe_w = b.select(w_valid, b.mul(w_off, c_half_bytes), oob_sentinel)
-            w_h = b.buffer_load_f16(b_rsrc, safe_w, c0)
+            w_h = (
+                b.buffer_load_bf16(b_rsrc, safe_w, c0)
+                if p.dtype == "bf16"
+                else b.buffer_load_f16(b_rsrc, safe_w, c0)
+            )
             row.append(b.select(w_valid, b.cast_to_f32(w_h), zero_f32))
         weights_f32.append(row)
 
@@ -4909,7 +6009,11 @@ def build_direct_depthwise_spatial(
                 )
                 ok = b.land(valid, q_ok)
                 safe_off = b.select(ok, b.mul(a_off, c_half_bytes), oob_sentinel)
-                a_h = b.buffer_load_f16(a_rsrc, safe_off, c0)
+                a_h = (
+                    b.buffer_load_bf16(a_rsrc, safe_off, c0)
+                    if p.dtype == "bf16"
+                    else b.buffer_load_f16(a_rsrc, safe_off, c0)
+                )
                 a_f32 = b.select(ok, b.cast_to_f32(a_h), zero_f32)
                 for r_const in range(p.KH):
                     p_idx = (y - r_const + p.KH) % p.KH
@@ -4924,9 +6028,14 @@ def build_direct_depthwise_spatial(
                         b, n=n, h=b.const_i32(ho_row), w=q_out, k=ch
                     )
                     safe_d = b.select(q_ok, b.mul(d_off, c_half_bytes), oob_sentinel)
-                    b.buffer_store_f16(
-                        d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc[P_FLUSH])
-                    )
+                    if p.dtype == "bf16":
+                        b.buffer_store_bf16(
+                            d_rsrc, safe_d, c0, b.trunc_f32_to_bf16(acc[P_FLUSH])
+                        )
+                    else:
+                        b.buffer_store_f16(
+                            d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc[P_FLUSH])
+                        )
             acc[P_FLUSH] = zero_f32
 
     else:
@@ -4957,7 +6066,11 @@ def build_direct_depthwise_spatial(
                     )
                     ok = b.land(b.land(valid, j_valid), q_ok)
                     safe_off = b.select(ok, b.mul(a_off, c_half_bytes), oob_sentinel)
-                    a_h = b.buffer_load_f16(a_rsrc, safe_off, c0)
+                    a_h = (
+                        b.buffer_load_bf16(a_rsrc, safe_off, c0)
+                        if p.dtype == "bf16"
+                        else b.buffer_load_f16(a_rsrc, safe_off, c0)
+                    )
                     a_f32 = b.select(ok, b.cast_to_f32(a_h), zero_f32)
                     for r_const in range(p.KH):
                         p_idx = (j - r_const + p.KH) % p.KH  # STATIC
@@ -4985,7 +6098,12 @@ def build_direct_depthwise_spatial(
                 acc_val = new_accs[P_FLUSH_j]  # STATIC index
                 d_off, _ = d_desc.offset(b, n=n, h=ho_row_j, w=q_out, k=ch)
                 safe_d = b.select(store_ok, b.mul(d_off, c_half_bytes), oob_sentinel)
-                b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc_val))
+                if p.dtype == "bf16":
+                    b.buffer_store_bf16(
+                        d_rsrc, safe_d, c0, b.trunc_f32_to_bf16(acc_val)
+                    )
+                else:
+                    b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc_val))
 
                 new_accs[P_FLUSH_j] = zero_f32  # unconditional static reset
 

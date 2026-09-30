@@ -339,8 +339,7 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
             return;
         }
     }
-    else if(rocke_i_type_is(et, "f32") || rocke_i_type_is(et, "i32")
-            || rocke_i_type_is(et, "tf32"))
+    else if(rocke_i_type_is(et, "f32") || rocke_i_type_is(et, "i32") || rocke_i_type_is(et, "tf32"))
     {
         elem_bytes = 4;
         if(n == 16)

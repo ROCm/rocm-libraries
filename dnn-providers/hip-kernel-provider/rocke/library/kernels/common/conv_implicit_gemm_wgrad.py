@@ -199,8 +199,8 @@ def wgrad_atomic_epilogue_available(
             f"<2 x dtype> atomic pairs are dword-aligned only on an even row, and "
             f"sv=1 leaves no partner); got wg_N={wgN}, store_vec={sv} "
             f"(Z={p.Z if p.is_3d else 1}, Y={p.Y}, X={p.X}, cpg={p.cpg}). Use "
-            f"two_stage=True (or force_deterministic=True) to reach split-K via "
-            f"the f32 workspace path, which emits no atomics."
+            f"two_stage=True to reach split-K via the f32 scratch path, whose "
+            f"scalar atomicrmw fadd f32 has no such alignment constraint."
         )
     return True, "ok"
 
@@ -328,6 +328,10 @@ def make_dw_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescriptor:
 # Spec
 # ---------------------------------------------------------------------
 
+# Default scratch replica count for the two-stage path. See the ``ws_replicas``
+# field docs on :class:`WgradConvSpec` for why more than one slab is needed.
+_DEFAULT_WS_REPLICAS = 8
+
 
 @dataclass(frozen=True)
 class WgradConvSpec:
@@ -442,22 +446,37 @@ class WgradConvSpec:
     #      Caller must zero-init dW before launch.
     # ABI for 0 and >1: dW is not writeonly; K_wg is padded as needed.
     split_k: int = 1
-    # Two-stage deterministic mode (requires split_k > 1).
-    # When True, Stage 1 writes f32 partial sums to a workspace buffer
-    # (ws_ptr) instead of atomic-adding into dW.  The caller must launch a
-    # separate Stage 2 reduce kernel (conv_wgrad_workspace_reduce) afterwards
-    # on the same stream to accumulate workspace slices into dW.
-    # Workspace size: groups * split_k * wg_M * wg_N * 4 bytes (always f32).
-    # Automatically set to True by the builder when force_deterministic=True
-    # and split_k > 1; callers should prefer force_deterministic over setting
-    # this directly.
+    # Two-stage mode (requires split_k > 1).
+    # When True, Stage 1 f32-atomic-adds its partial sums into a scratch
+    # buffer (ws_ptr) instead of 16-bit-atomic-adding into dW.  The caller
+    # must zero the scratch first and launch a Stage 2 cast kernel
+    # (conv_wgrad_workspace_reduce) afterwards on the same stream.
+    # Scratch size: groups * ws_replicas * wg_M * wg_N * 4 bytes (always f32) --
+    # ``ws_replicas`` copies of the per-group dW slab, with no split_k factor
+    # since the slices accumulate on top of each other within those copies.
+    # Derive it from ``wgrad_two_stage_workspace_nbytes`` rather than by hand.
+    # This is how split-K reaches a 16-bit dW whose row length wg_N is odd,
+    # which the packed <2 x dtype> atomic cannot address.
     two_stage: bool = False
-    # Semantic determinism intent flag.  When True and split_k > 1 (or
-    # split_k=-1 auto), the builder forces two_stage=True so the kernel uses
-    # the workspace-store epilogue instead of atomic adds.  For split_k == 1
-    # the output is already deterministic (plain store) and this flag is a
-    # no-op.
-    force_deterministic: bool = False
+    # Number of scratch slabs a group's K-slices spread their atomics over.
+    #
+    # The scratch is dW-sized, which for a wgrad is a filter-sized handful of
+    # elements -- a few dozen cache lines. Pointing every CTA's atomics at it
+    # serialises them in L2 per line, and Stage 1 then gets *slower* as split_k
+    # grows instead of faster. Spreading over R slabs cuts the per-line traffic
+    # R-fold; Stage 2 sums the R slabs, which is a fixed unrolled fold, not a
+    # loop over the reduction degree.
+    #
+    # R = 1 is the pure atomic form; R = split_k would be per-slice slabs with
+    # no atomics at all. The useful settings are in between: enough replicas to
+    # take the contention off L2, few enough that Stage 2 stays trivial.
+    # Scratch size scales with R: groups * R * wg_M * wg_N * 4 bytes.
+    #
+    # The default was picked on gfx950 as the point past which extra replicas
+    # stop taking contention off Stage 1 while the scratch is still small. It
+    # is a knob, not a constant: another arch or a different filter shape can
+    # want a different contention-versus-footprint tradeoff.
+    ws_replicas: int = _DEFAULT_WS_REPLICAS
 
     @property
     def block_size(self) -> int:
@@ -580,6 +599,14 @@ class WgradConvSpec:
                 # default keeps its historical name and golden.
                 f"gm{self.group_merge}": self.group_merge > 1,
                 "twostage": self.two_stage,
+                # Same reasoning as gm/pad: changes the scratch addressing and
+                # so the emitted code. Gated on two_stage as well as on the
+                # default, because there is no scratch at all on the atomic
+                # path -- tagging it there renamed every single-stage wgrad
+                # kernel (and churned its golden) over a knob its body never
+                # reads. Tracks the `twostage` flag above so the two move
+                # together.
+                f"wsr{self.ws_replicas}": self.two_stage and self.ws_replicas > 1,
             },
         )
 
@@ -610,28 +637,23 @@ class WgradConvSpec:
                 "two_stage=True requires split_k > 1 (or split_k=-1 for auto); "
                 "with split_k=1 there is nothing to reduce and two_stage is a no-op"
             )
+        if self.ws_replicas < 1:
+            raise ValueError(
+                f"ws_replicas must be >= 1 (got {self.ws_replicas}); it is the "
+                f"number of scratch slabs a group's K-slices spread over"
+            )
         # Delegate rather than re-derive -- is_valid_wgrad_spec calls the same
         # predicate, so the two cannot drift apart.
         _gm_ok, _gm_why = wgrad_group_merge_available(self)
         if not _gm_ok:
             raise ValueError(_gm_why)
-        # force_deterministic is folded in here rather than relied on being
-        # already promoted: build_implicit_gemm_conv_wgrad promotes it to
-        # two_stage before calling validate(), but validate() is a public method
-        # on a public dataclass and callers reach it directly on un-promoted
-        # specs. Without this term such a spec is reported valid by
-        # is_valid_wgrad_spec and then raises here -- the two predicates must
-        # agree. Mirrors effective_two_stage_v in the C++ is_valid_wgrad_spec.
-        #
         # The `split_k > 1` term is load-bearing, not defensive: the builder
         # computes `_is_two_stage = split_k > 1 and two_stage`, so at
         # split_k == 0 (runtime degree) a two_stage spec still lands on the
         # *atomic* epilogue. Dropping the term here would exempt exactly that
         # spec from the atomic gates below and re-open the admits/build hole
         # one axis over.
-        _effective_two_stage = (
-            self.two_stage or self.force_deterministic
-        ) and self.split_k > 1
+        _effective_two_stage = self.two_stage and self.split_k > 1
         _needs_atomic = (
             self.split_k == 0 or self.split_k > 1
         ) and not _effective_two_stage
@@ -654,7 +676,7 @@ class WgradConvSpec:
             if not _ok:
                 raise ValueError(_why)
         # The cshuffle requirement is an atomic-epilogue constraint only. Neither
-        # split_k == 1 (direct store) nor two_stage (f32 workspace store) emits
+        # split_k == 1 (direct store) nor two_stage (f32 scratch atomic) emits
         # packed atomics, so the default epilogue is fine for both. Gating on
         # _needs_atomic rather than on dtype alone keeps the non-atomic 16-bit
         # output path reachable -- it is the only one WMMA wgrad can use, since
@@ -669,11 +691,11 @@ class WgradConvSpec:
                 f"epilogue='cshuffle' (default emits zero-fill packed atomics with "
                 f"scattered MFMA layout; cshuffle produces contiguous pairs)"
             )
-        # two_stage uses an f32 workspace store, not LDS cshuffle; cshuffle is
+        # two_stage uses an f32 scratch atomic, not LDS cshuffle; cshuffle is
         # both redundant and misleading in the kernel name.
         if _effective_two_stage and self.epilogue == "cshuffle":
             raise ValueError(
-                "two_stage wgrad uses an f32 workspace store epilogue; "
+                "two_stage wgrad uses an f32 scratch-atomic epilogue; "
                 "epilogue='cshuffle' is invalid (use epilogue='default')"
             )
         if self.async_dma and not self.lds_k_outer:
@@ -697,9 +719,7 @@ class WgradConvSpec:
                 "global->LDS load needs a stride-1 reduction axis, which wgrad "
                 "only has once the tile is stored K-outer"
             )
-        if self.split_k == 0 and (
-            self.async_dma or self.unroll_k or self.pipeline == "basic"
-        ):
+        if self.split_k == 0 and (self.async_dma or self.unroll_k):
             # split_k == 0 means the split degree is a launch-time kernel
             # argument, so the K-slice length is not known at build time. The
             # async and unrolled k-loops both need a compile-time trip count to
@@ -709,8 +729,7 @@ class WgradConvSpec:
             # sweep drivers swallow into a silent skip.
             raise ValueError(
                 "wgrad split_k=0 (runtime degree) is incompatible with "
-                "async_dma/unroll_k/pipeline='basic': those pipelines need a "
-                "compile-time "
+                "async_dma/unroll_k: those pipelines need a compile-time "
                 "iteration count. Use a fixed split_k >= 1."
             )
         if self.lds_k_outer:
@@ -1010,10 +1029,8 @@ def wgrad_group_merge_available(
     # merged tile cannot use is the packed-atomic split-K epilogue: it has no
     # way to drop an off-diagonal group pair, so it would accumulate garbage
     # into a live dW element instead of skipping the store. Route split_k > 1
-    # through two-stage, whose workspace store carries the mask.
-    _effective_two_stage = (
-        spec.two_stage or spec.force_deterministic
-    ) and spec.split_k > 1
+    # through two-stage, whose scratch atomic carries the mask.
+    _effective_two_stage = spec.two_stage and spec.split_k > 1
     if (spec.split_k == 0 or spec.split_k > 1) and not _effective_two_stage:
         return False, (
             f"group_merge with split_k={spec.split_k} needs the two-stage path "
@@ -1090,18 +1107,20 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             "two_stage=True requires split_k > 1 (or split_k=-1 for auto); "
             "with split_k=1 there is nothing to reduce and two_stage is a no-op"
         )
+    if spec.ws_replicas < 1:
+        return False, (
+            f"ws_replicas must be >= 1 (got {spec.ws_replicas}); it is the "
+            f"number of scratch slabs a group's K-slices spread over"
+        )
     # -1 = auto: resolved at build time; always valid at the spec-check stage.
     # 0 = runtime atomic; validate constraints identically to >1 without a degree.
     _is_atomic = sk == 0 or sk > 1
-    # force_deterministic is promoted to two_stage by the builder, but this
-    # predicate is public and is reached on un-promoted specs, so fold it in.
-    # Mirrors effective_two_stage_v in the C++ is_valid_wgrad_spec.
     # The `sk > 1` term mirrors the builder's
     # `_is_two_stage = split_k > 1 and two_stage`: at sk == 0 a two_stage spec
     # still lands on the atomic epilogue, so it must stay subject to the atomic
     # gates below. See the matching comment in WgradConvSpec.validate().
-    _effective_two_stage = (spec.two_stage or spec.force_deterministic) and sk > 1
-    # The two-stage workspace-store epilogue is MFMA-only. The packed *atomic*
+    _effective_two_stage = spec.two_stage and sk > 1
+    # The two-stage scratch-atomic epilogue is MFMA-only. The packed *atomic*
     # epilogue does have a WMMA variant (_emit_wgrad_split_k_epilogue_wmma), so
     # split-K itself is fine on wave32 -- but _emit_wgrad_workspace_store_epilogue
     # calls c_warp_params(atom), and `atom` is None on the WMMA path. The
@@ -1111,8 +1130,8 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     # pre-filter (dispatch support(), the sweep drivers, benchmarks) can see it.
     if _effective_two_stage and family == "wmma":
         return False, (
-            f"two-stage deterministic wgrad is CDNA-only (got family 'wmma' on "
-            f"{arch}); the workspace-store epilogue has no WMMA variant"
+            f"two-stage wgrad is CDNA-only (got family 'wmma' on "
+            f"{arch}); the scratch-atomic epilogue has no WMMA variant"
         )
     _needs_atomic = _is_atomic and not _effective_two_stage
     if _needs_atomic and spec.data.dtype_d not in ("fp32", "bf16", "fp16"):
@@ -1122,7 +1141,7 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         )
     # Mirror of the wg_N-parity gate in WgradConvSpec.validate(); see the
     # rationale there. The invariant is an even dW *row length*, not an even
-    # cpg, and it does not apply when the epilogue is the f32 workspace store.
+    # cpg, and it does not apply when the epilogue is the f32 scratch atomic.
     if _needs_atomic:
         _ok, _why = wgrad_atomic_epilogue_available(
             spec.problem, spec.data.dtype_d, spec.vector_size_c
@@ -1132,7 +1151,7 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     # Atomic-epilogue constraint only: the packed atomic store emits zero-fill
     # pairs at the scattered MFMA layout, so it needs cshuffle's contiguous
     # pairs. Two cases are not on it. At split_k == 1 the epilogue is a direct
-    # store, and under two_stage it is an f32 workspace store; neither emits
+    # store, and under two_stage it is an f32 scratch atomic; neither emits
     # packed atomics, so 'default' is fine. split_k == 1 + 'default' is also the
     # only combination WMMA wgrad can use, since WMMA rejects cshuffle outright.
     # (_effective_two_stage is computed above, with the split-K validity gates.)
@@ -1149,17 +1168,14 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         )
     if _effective_two_stage and spec.epilogue == "cshuffle":
         return False, (
-            "two_stage wgrad uses an f32 workspace store epilogue; "
+            "two_stage wgrad uses an f32 scratch-atomic epilogue; "
             "epilogue='cshuffle' is invalid (use epilogue='default')"
         )
 
-    if spec.split_k == 0 and (
-        spec.async_dma or spec.unroll_k or spec.pipeline == "basic"
-    ):
+    if spec.split_k == 0 and (spec.async_dma or spec.unroll_k):
         return False, (
             "wgrad split_k=0 (runtime degree) is incompatible with "
-            "async_dma/unroll_k/pipeline='basic': those pipelines need a "
-            "compile-time iteration "
+            "async_dma/unroll_k: those pipelines need a compile-time iteration "
             "count. Use a fixed split_k >= 1."
         )
     if spec.lds_k_outer and spec.lds_k_pad is not None:
@@ -1234,21 +1250,13 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     if spec.pipeline == "basic" and spec.async_dma:
         return False, "pipeline='basic' is incompatible with async_dma=True"
 
-    if spec.pipeline == "basic" or spec.async_dma:
-        # Both loops are unrolled in Python, one full load+mfma body per K
-        # iteration, so a deep reduction explodes compile time and code size.
-        # The cap is a build-practicality bound, not a hardware one.
-        #
-        # This used to guard 'basic' only, which left async uncapped. A deep
-        # reduction at a low split-K degree then unrolled five figures of
-        # bodies into one kernel; a sweep that reached those specs exhausted
-        # host memory during the IR build rather than failing validation.
-        _label = "pipeline='basic'" if spec.pipeline == "basic" else "async_dma"
+    if spec.async_dma:
+        # async_dma is Python-unrolled; a deep reduction explodes compile time.
         _slice_k = spec.wg_K_padded() // max(spec.split_k, 1)
         _k_iters = (_slice_k + spec.tile_k - 1) // spec.tile_k
         if _k_iters > _MAX_UNROLLED_K_ITERS:
             return False, (
-                f"{_label} would unroll to {_k_iters} K iterations "
+                f"async_dma would unroll to {_k_iters} K iterations "
                 f"(slice_k={_slice_k}, tile_k={spec.tile_k}), over the "
                 f"{_MAX_UNROLLED_K_ITERS} limit; raise split_k or tile_k"
             )
@@ -1425,13 +1433,6 @@ def build_implicit_gemm_conv_wgrad(
         )
         spec = _dc_replace(spec, split_k=decision.split_k)
 
-    # Promote to two-stage when the caller requested deterministic output and
-    # split_k > 1 (split_k == 1 is already deterministic; no workspace needed).
-    if spec.force_deterministic and spec.split_k > 1 and not spec.two_stage:
-        from dataclasses import replace as _dc_replace  # noqa: F811
-
-        spec = _dc_replace(spec, two_stage=True)
-
     spec.validate()
     ok, why = is_valid_wgrad_spec(spec, arch=arch)
     if not ok:
@@ -1492,12 +1493,14 @@ def build_implicit_gemm_conv_wgrad(
     dY_bytes = b.param("dY_bytes", I32)
     X_bytes = b.param("X_bytes", I32)
     dW_bytes = b.param("dW_bytes", I32)
-    # Two-stage only: workspace buffer that receives f32 partial sums.
-    # Size = split_k * wg_M * wg_N * 4.  Not present in the atomic-add ABI.
+    # Two-stage only: f32 scratch accumulator every K-slice atomic-adds into.
+    # Size = groups * wg_M * wg_N * 4 -- one slab per conv group, NOT per
+    # K-slice: the slices accumulate on top of each other rather than each
+    # landing in its own region.  Not present in the 16-bit atomic ABI.
+    #
+    # Not ``writeonly``: an atomicrmw reads its target.
     if _is_two_stage:
-        ws_ptr = b.param(
-            "ws_ptr", PtrType(F32, "global"), noalias=True, writeonly=True, align=16
-        )
+        ws_ptr = b.param("ws_ptr", PtrType(F32, "global"), noalias=True, align=16)
         _ws_bytes = b.param(
             "ws_bytes", I32
         )  # noqa: F841  (side-effect: adds param to kernel signature)
@@ -1960,44 +1963,6 @@ def build_implicit_gemm_conv_wgrad(
             return _dy_kouter, _x_kouter
         return dy_descriptor, x_descriptor
 
-    def emit_global_read(k_off: Value) -> tuple:
-        """Issue only the global reads (buffer_load_vN) for one K tile.
-
-        Returns ``(k_off, a_staged, b_staged)`` -- the tile offset plus the two
-        lists of ``(row, col, v)`` triples from
-        :meth:`CoalescedTileLoader.load_global`. The caller commits them later
-        with :func:`emit_lds_write`. Sync path only; this is what lets the
-        CK pipeline_basic loop overlap VMEM latency with MFMA compute.
-
-        ``k_off`` is carried in the tuple because wgrad's offsets are
-        ``add(k_lo, const)`` -- a real emitted op, unlike the forward conv's
-        cached ``const_i32`` -- so re-deriving it in :func:`emit_lds_write`
-        would strand an extra add after the barrier.
-        """
-        k_off_capture[0] = k_off
-        a_desc_fn, b_desc_fn = _split_desc_fns()
-        a_staged = a_sync_loader.load_global(
-            b, tid=tid, descriptor=a_desc_fn, rsrc=dy_rsrc
-        )
-        b_staged = b_sync_loader.load_global(
-            b, tid=tid, descriptor=b_desc_fn, rsrc=x_rsrc
-        )
-        return k_off, a_staged, b_staged
-
-    def emit_lds_write(staged_tuple: tuple, A_dst: Value, B_dst: Value) -> None:
-        """Commit previously staged VGPR values to LDS.
-
-        Restores ``k_off_capture`` so any descriptor consulted here sees the
-        offset the values were read at, even though the read and the write sit
-        in different loop positions. ``store_lds`` funnels through the same
-        ``_store_tile`` as the fused loader, so ``vector_axis="row"`` replays
-        the transpose-on-store scatter unchanged.
-        """
-        k_off, a_staged, b_staged = staged_tuple
-        k_off_capture[0] = k_off
-        a_sync_loader.store_lds(b, smem_dst=A_dst, staged=a_staged)
-        b_sync_loader.store_lds(b, smem_dst=B_dst, staged=b_staged)
-
     def emit_wmma_phase(
         A_src: Value, B_src: Value, iter_vars: Sequence[Value]
     ) -> List[Value]:
@@ -2208,51 +2173,6 @@ def build_implicit_gemm_conv_wgrad(
             b.sync()
 
         final_accs = current_accs
-    elif spec.pipeline == "basic":
-        # CK pipeline_basic: single LDS buffer, global-read/compute overlap.
-        #
-        # The buffer_load_vN for tile it+1 is issued BEFORE the sync+mfma for
-        # tile it, so the VMEM latency hides behind the MFMA stream. The LDS
-        # write is deferred past the second sync -- once every ds_read for tile
-        # it has drained -- which is what makes one buffer sufficient: the tile
-        # it+1 data waits in VGPRs, not in a second LDS tile. unroll_k needs
-        # A_smem2/B_smem2 precisely because it moves the *store* inside the
-        # read window; this does not.
-        #
-        # Per iteration:
-        #   emit_global_read(k_lo + (it+1)*block_k)   buffer_load, in flight
-        #   sync()      drain the previous ds_write   -> tile it RAW-safe
-        #   k_off_capture = k_lo + it*block_k         descriptors address tile it
-        #   emit_mfma_phase                           ds_read + mfma
-        #   sync()      drain the ds_reads            -> buffer WAR-safe
-        #   emit_lds_write(staged it+1)               ds_write
-        #
-        # Each k offset is materialised once and carried in the staged tuple:
-        # wgrad's offsets are add(k_lo, const), so re-deriving one in
-        # emit_lds_write would emit a stray add after the barrier.
-        slice_k = wg_K if k_hi is None else (spec.wg_K_padded() // spec.split_k)
-        K_iters = (slice_k + block_k - 1) // block_k
-        current_accs = [v for _, v in accs]
-
-        # Prologue: read tile 0 and commit it immediately -- no prior ds_read
-        # exists to drain, so the write needs no barrier in front of it.
-        emit_lds_write(emit_global_read(k_lo), A_smem, B_smem)
-
-        pending_staged = None
-        for it in range(K_iters):
-            if it + 1 < K_iters:
-                pending_staged = emit_global_read(
-                    b.add(k_lo, b.const_i32((it + 1) * block_k))
-                )
-            b.sync()
-            k_off_capture[0] = b.add(k_lo, b.const_i32(it * block_k))
-            current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
-            b.sync()
-            if pending_staged is not None:
-                emit_lds_write(pending_staged, A_smem, B_smem)
-                pending_staged = None
-
-        final_accs = current_accs
     elif not spec.async_dma:
         for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, accs, iv_name="k0")
         with for_op as (k0, iter_vars):
@@ -2297,7 +2217,7 @@ def build_implicit_gemm_conv_wgrad(
     final_accs = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs)
 
     if _is_two_stage:
-        # Two-stage deterministic: plain f32 store to per-k workspace slice.
+        # Two-stage: f32 atomic-add into the scratch accumulator.
         # ws_ptr is defined above only when _is_two_stage=True.
         _emit_wgrad_workspace_store_epilogue(
             b,
@@ -2312,7 +2232,6 @@ def build_implicit_gemm_conv_wgrad(
             ws_ptr,
             c_per_lane,
             gm_group=group_v,
-            gm_slice=slice_v,
         )
     elif _is_split_k and op.family == "wmma":
         # WMMA split-K: atomic-add via the WMMA C-fragment layout (fp32/bf16/fp16).
@@ -2952,26 +2871,36 @@ def _emit_wgrad_workspace_store_epilogue(
     ws_ptr: Value,
     c_per_lane: int,
     gm_group: Optional[Value] = None,
-    gm_slice: Optional[Value] = None,
 ) -> None:
-    """Two-stage Stage 1 epilogue: plain f32 store to workspace slice.
+    """Two-stage Stage 1 epilogue: f32 atomic-add into the scratch accumulator.
 
-    Identical coordinate computation to :func:`_emit_wgrad_split_k_epilogue`
-    but replaces every ``global_atomic_add`` with a ``global_store`` (f32).
-    The workspace slice for this CTA is at:
+    Identical coordinate computation to :func:`_emit_wgrad_split_k_epilogue`,
+    but the add lands in an f32 scratch buffer instead of in ``dW``:
 
-        ws_ptr + k_id * wg_M * wg_N + c_m * wg_N + c_n
+        ws_ptr + group * wg_M * wg_N + c_m * wg_N + c_n
 
-    where ``k_id = blockIdx.z``.  The output is always f32 regardless of
-    ``dtype_d``; the dtype conversion happens in Stage 2 (workspace reduce).
-    Out-of-bounds elements are guarded by ``scf_if`` — a plain ``global_store``
-    to a sentinel offset would compute a real address and fault on AMD GPUs.
+    The scratch has **one slab per conv group**, not one per K-slice: every
+    slice atomic-adds on top of the same slab, so the reduction over ``split_k``
+    is done by the hardware and Stage 2 is a pure dtype cast.
+
+    This exists because the 16-bit packed atomic that writes ``dW`` directly
+    needs an even ``wg_N`` (its ``<2 x dtype>`` pair straddles two dW columns),
+    while ``atomicrmw fadd f32`` has no such constraint -- a scalar f32 is
+    dword-aligned by construction.  So an odd ``wg_N`` reaches split-K through
+    f32 atomics plus a cast rather than through 16-bit atomics.  It is also the
+    more accurate of the two: partials accumulate in f32 and round once, where
+    the 16-bit atomic rounds every partial.
+
+    **The caller must zero the scratch before every launch.** These are adds,
+    not stores, so stale content is added to the result.
+
+    Out-of-bounds elements are guarded by ``scf_if`` -- an atomic to a sentinel
+    offset would compute a real address and fault on AMD GPUs.
 
     Under group merging the tile covers a ``Gm x Gm`` block of group pairs and
-    only the diagonal is real work, so the store predicate gains an equality
-    test. The workspace does NOT merge -- it keeps its true
-    ``[groups * split_k, wg_M, wg_N]`` shape, so Stage 2 needs no changes --
-    which means the address is rebuilt from true coordinates while the
+    only the diagonal is real work, so the predicate gains an equality test.
+    The scratch does NOT merge -- it keeps its true ``[groups * R, wg_M, wg_N]``
+    shape -- which means the address is rebuilt from true coordinates while the
     accumulator *bounds* come from the merged dims. Getting that backwards
     writes ``(1 - 1/Gm) * K`` silently-zero dW rows, which is what the
     row-coverage guard in the correctness suite exists to catch.
@@ -2984,30 +2913,48 @@ def _emit_wgrad_workspace_store_epilogue(
     wg_M_v = b.const_i32(wg_M)
     wg_N_v = b.const_i32(wg_N)
 
-    # workspace slice index = blockIdx.z (always).
-    # Ungrouped:       z = k_id              → slices 0..split_k-1
-    # Grouped+split_k: z = group*split_k+k_id → slices 0..groups*split_k-1
-    # Each (group, k_id) pair gets a unique z and thus a unique workspace region.
-    # Workspace total size = groups * split_k * wg_M * wg_N (f32 elements).
-    k_id = b.to_sgpr_u32(b.block_id_z())
-    slice_off = b.mul(k_id, b.const_i32(wg_M * wg_N))
-
-    # Merged-path setup. Only materialised when gm > 1: IRBuilder.const_i32
-    # does no folding or CSE, so an unconditional constant would renumber every
+    # Scratch slab index = group * R + (blockIdx.z % R): every K-slice of a
+    # group accumulates into one of that group's R replica slabs, chosen by a
+    # cheap hash of z. Any function of z works -- correctness only needs Stage 2
+    # to fold all R of a group's slabs -- and z % R spreads slices evenly
+    # whether or not the launch is grouped.
+    #
+    # Ungrouped with R == 1 has exactly one slab at offset 0, so the term is
+    # elided rather than multiplied by a constant zero -- IRBuilder.const_i32
+    # does no folding, so an unconditional constant would renumber every
     # downstream SSA value and break byte-identity on the default path.
+    # Scratch total size = groups * R * wg_M * wg_N (f32 elements).
+    reps = spec.ws_replicas
+    slab_elems = wg_M * wg_N
+    _slab_idx = None
+    if gm_group is not None and reps > 1:
+        _slab_idx = b.add(
+            b.mul(gm_group, b.const_i32(reps)),
+            b.mod(b.block_id_z(), b.const_i32(reps)),
+        )
+    elif gm_group is not None:
+        _slab_idx = gm_group
+    elif reps > 1:
+        _slab_idx = b.mod(b.block_id_z(), b.const_i32(reps))
+    slab_off = (
+        b.mul(_slab_idx, b.const_i32(slab_elems)) if _slab_idx is not None else None
+    )
+
+    # Merged-path setup. Only materialised when gm > 1, for the same
+    # SSA-renumbering reason.
     gm = spec.group_merge
     bound_m_v, bound_n_v = wg_M_v, wg_N_v
     if gm > 1:
-        if gm_group is None or gm_slice is None:
+        if gm_group is None:
             raise ValueError(
-                "group_merge > 1 needs the merged group and K-slice indices; "
-                "the caller must pass gm_group/gm_slice"
+                "group_merge > 1 needs the merged group index; "
+                "the caller must pass gm_group"
             )
         _gm_split, c_zero_v = _gm_coord_splitter(b, p, gm)
         c_gm_v = b.const_i32(gm)
         c_cpg_v = b.const_i32(p.cpg)
-        c_split_k_v = b.const_i32(spec.split_k)
-        c_slab_v = b.const_i32(wg_M * wg_N)
+        c_slab_v = b.const_i32(slab_elems)
+        c_reps_v = b.const_i32(reps) if reps > 1 else None
         bound_m_v = b.const_i32(spec.grid_M)
         bound_n_v = b.const_i32(spec.grid_N)
 
@@ -3047,13 +2994,15 @@ def _emit_wgrad_workspace_store_epilogue(
                 c_m = b.add(atom_m_base, rows[i])
                 c_n = b.add(atom_n_base, cols[i])
                 val_f32 = b.vec_extract(acc, i)
-                # OOB guard via conditional — global_store to a sentinel offset
+                # OOB guard via conditional — an atomic to a sentinel offset
                 # would compute a real address and fault; use scf_if instead.
                 if gm == 1:
                     in_bounds = b.land(b.cmp_lt(c_m, wg_M_v), b.cmp_lt(c_n, wg_N_v))
                     with b.scf_if(in_bounds):
-                        ws_off = b.add(slice_off, b.add(b.mul(c_m, wg_N_v), c_n))
-                        b.global_store(ws_ptr, ws_off, val_f32, align=4)
+                        ws_off = b.add(b.mul(c_m, wg_N_v), c_n)
+                        if slab_off is not None:
+                            ws_off = b.add(slab_off, ws_off)
+                        b.global_atomic_add(ws_ptr, ws_off, val_f32)
                 else:
                     gm_m, km, gm_n, yx, cc = _gm_split(b, c_m, c_n)
                     in_bounds = b.land(
@@ -3063,12 +3012,16 @@ def _emit_wgrad_workspace_store_epilogue(
                     with b.scf_if(in_bounds):
                         # True conv group, then its (kpg, Z*Y*X*cpg) slab.
                         group_true = b.add(b.mul(gm_group, c_gm_v), gm_m)
-                        slice_true = b.add(b.mul(group_true, c_split_k_v), gm_slice)
+                        if reps > 1:
+                            group_true = b.add(
+                                b.mul(group_true, c_reps_v),
+                                b.mod(b.block_id_z(), c_reps_v),
+                            )
                         n_true = b.mul(yx, c_cpg_v) if p.cpg > 1 else yx
                         if p.cpg > 1:
                             n_true = b.add(n_true, cc)
                         ws_off = b.add(
-                            b.mul(slice_true, c_slab_v),
+                            b.mul(group_true, c_slab_v),
                             b.add(b.mul(km, wg_N_v), n_true),
                         )
-                        b.global_store(ws_ptr, ws_off, val_f32, align=4)
+                        b.global_atomic_add(ws_ptr, ws_off, val_f32)

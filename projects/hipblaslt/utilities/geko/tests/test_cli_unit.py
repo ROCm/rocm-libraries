@@ -168,8 +168,109 @@ def test_parse_cli_args_inline_normalizes_transpose_and_retry_flag() -> None:
         "0",
         "--no_retry",
     ])
-    assert args.inline == (64, 64, 1, 64, "B", "B", "S", "T", "N")
+    assert args.inline == (64, 64, 1, 64, "B", "B", "S", "T", "N", False)
     assert args.retry is False
+
+
+def test_parse_cli_args_inline_mx_flag_accepted() -> None:
+    args = cli.parse_cli_args([
+        "--bench",
+        "--inline",
+        "1024", "1024", "1", "1024",
+        "F8", "S", "S", "N", "T", "MX",
+        "--arch", "gfx950",
+        "--devices", "0",
+    ])
+    assert args.inline == (1024, 1024, 1, 1024, "F8", "S", "S", "N", "T", True)
+
+
+def test_parse_cli_args_inline_mx_flag_requires_arch() -> None:
+    with pytest.raises(SystemExit):
+        cli.parse_cli_args([
+            "--bench",
+            "--inline",
+            "1024", "1024", "1", "1024",
+            "F8", "S", "S", "N", "T", "MX",
+            "--devices", "0",
+        ])
+
+
+def test_rows_from_gemm_config_yaml_uses_yaml_arch_for_mx_scale(tmp_path: Path) -> None:
+    """mx_scale must come from the ARCH resolved by load_prepared_config_from_yaml
+    (which may be set only inside the --list YAML), not the raw --arch CLI value."""
+    cfg = tmp_path / "cfg.yaml"
+    yaml.safe_dump(
+        {
+            "ARCH": "gfx950",
+            "TRANSA": "N",
+            "TRANSB": "N",
+            "DataType": "F4",
+            "DestDataType": "S",
+            "ComputeDataType": "S",
+            "SIZE_OPTION": 0,
+            "Sizes": [[32, 32, 1, 32]],
+        },
+        cfg.open("w"),
+        sort_keys=False,
+    )
+
+    rows = cli._rows_from_gemm_config_yaml(cfg, arch=None)
+    assert rows[0]["scaleA"] == 1001
+    assert rows[0]["scaleB"] == 1001
+
+
+def test_dispatch_inline_mx_rejects_unsupported_arch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(cli, "resolve_hipblaslt_path", lambda **_kwargs: tmp_path)
+
+    args = cli.CliArgs(
+        tune=False,
+        bench=True,
+        search=False,
+        workload=None,
+        gemm_config=None,
+        inline=(1024, 1024, 1, 1024, "F8", "S", "S", "N", "T", True),
+        arch="gfx942",
+        hipblaslt=str(tmp_path),
+        verbose=0,
+        devices=[0],
+        n_slots=1,
+        keep_thr=0.0,
+        backend="ductile",
+        search_space=None,
+        workdir=str(tmp_path / "run"),
+        up_thr=1.03,
+        duration=0.04,
+        benchmark_duration=0.5,
+        custom_lib_src=None,
+        custom_lib_dir=None,
+        retry=True,
+        bench_freq=False,
+    )
+
+    rc = cli.dispatch(args, anchor=str(tmp_path))
+    assert rc == 1
+
+
+def test_parse_cli_args_inline_invalid_tenth_arg_rejected() -> None:
+    with pytest.raises(SystemExit):
+        cli.parse_cli_args([
+            "--bench",
+            "--inline",
+            "1024", "1024", "1", "1024",
+            "F8", "S", "S", "N", "T", "NOTMX",
+            "--devices", "0",
+        ])
+
+
+def test_parse_cli_args_inline_wrong_arg_count_rejected() -> None:
+    with pytest.raises(SystemExit):
+        cli.parse_cli_args([
+            "--bench",
+            "--inline",
+            "1024", "1024", "1", "1024",
+            "F8", "S", "S", "N",
+            "--devices", "0",
+        ])
 
 
 def test_parse_cli_args_surfaces_device_parse_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -481,7 +582,7 @@ def test_dispatch_inline_value_error_returns_one(monkeypatch: pytest.MonkeyPatch
         search=False,
         workload=None,
         gemm_config=None,
-        inline=(64, 64, 1, 64, "B", "B", "S", "N", "N"),
+        inline=(64, 64, 1, 64, "B", "B", "S", "N", "N", False),
         arch=None,
         hipblaslt=str(tmp_path),
         verbose=0,
