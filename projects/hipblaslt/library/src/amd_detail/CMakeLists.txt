@@ -72,6 +72,16 @@ if(HIPBLASLT_BUILD_TESTING)
     endif()
 endif()
 
+# Public API only, so it also runs against builds without JIT.
+if(HIPBLASLT_BUILD_TESTING)
+    add_executable(hipblaslt-jit-heuristic-test
+        "${PROJECT_SOURCE_DIR}/clients/tests/jit/heuristic_test.cpp")
+    target_link_libraries(hipblaslt-jit-heuristic-test PRIVATE roc::hipblaslt hip::device)
+    target_compile_features(hipblaslt-jit-heuristic-test PRIVATE cxx_std_17)
+    set_target_properties(hipblaslt-jit-heuristic-test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging")
+endif()
+
 # Exercise generator subprocess handling independently of GPU execution.
 if(HIPBLASLT_BUILD_TESTING)
     find_package(Threads REQUIRED)
