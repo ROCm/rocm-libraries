@@ -1,0 +1,158 @@
+# gfx1250 MXF4 subtile correctness sweep: shapes that the common-test yaml misses.
+# Same kernels as Tensile/Tests/common/gemm/gfx12/subtile_mxf4_gfx1250.yaml, plus beta=1
+# with random C, batch > 1, edge tiles, K tails, and StreamK splitting K across WGs.
+# Expected failures are tracked in ../KNOWN_ISSUES.md. The crashing size is last so the
+# rest of the second problem still runs.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-stinkytofu]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeD: 3
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  CpuThreads: -1
+  RotatingBufferSize: 0
+  Architecture: gfx1250
+  ISA: [[12, 5, 0]]
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: e8
+      DataTypeMXSB: e8
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [true]
+        - MatrixInstruction:
+          - [32, 16, 128, 1,  1, 2, 2,  2, 2]  # MT 128x64  WG 2x2  WT 2x2
+        - DepthU: [256]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - UseSubtileImpl: [true]
+        - StreamK: [3]
+        - LDSSegmentInterleave: [2]
+        - TDMInst: [3]
+        - SourceSwap: [false]
+        - StaggerU: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMXSA: [-1]
+        - LdsPadMXSB: [-1]
+        - 1LDSBuffer: [0]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - GlobalSplitU: [1]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - PreloadKernArgs: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 64, 1, 256]    # one full MT, K = 1*DU
+          - Exact: [128, 64, 1, 512]    # one full MT, K = 2*DU
+          - Exact: [256, 128, 1, 256]   # 2x2 MTs
+          - Exact: [96,  48, 1, 256]    # M/N edge (not a full MT)
+          - Exact: [128, 64, 1, 384]    # tail: K multiple of MI_K, not DU
+          - Exact: [1000, 500, 2, 768]
+          - Exact: [128, 64, 3, 4096]
+          - Exact: [200, 100, 1, 1152]
+
+  # LDS bank-conflict bench: MT 256x256x256, one large compute-bound problem.
+  # KeepBuildTmp dumps the ISA for ds_read conflict inspection.
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: e8
+      DataTypeMXSB: e8
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [true]
+        - MatrixInstruction:
+          - [32, 16, 128, 1,  1, 4, 8,  2, 2]  # MT 256x256  WG 2x2  WT 4x8
+        - DepthU: [256]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - UseSubtileImpl: [true]
+        - StreamK: [3]
+        - LDSSegmentInterleave: [2]
+        - TDMInst: [3]
+        - SourceSwap: [false]
+        - StaggerU: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMXSA: [-1]
+        - LdsPadMXSB: [-1]
+        - 1LDSBuffer: [0]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - GlobalSplitU: [1]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - PreloadKernArgs: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096, 4096, 1, 8192]
+          - Exact: [256, 256, 1, 256]
+          - Exact: [512, 512, 1, 2048]
+          - Exact: [1000, 700, 1, 1280]
+          - Exact: [300, 200, 2, 1152]
+          - Exact: [2048, 1024, 1, 384]
+          - Exact: [256, 256, 1, 8192]    # illegal memory access

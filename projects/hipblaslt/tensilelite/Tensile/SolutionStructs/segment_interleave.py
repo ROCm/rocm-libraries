@@ -251,9 +251,15 @@ def _evaluate_subtile(state, mode):
     # ([2,2]: A half = wave bit 0 = read port, B half = wave bit 1). KernelWriter places
     # [A0][B0] and [A1][B1] on consecutive 64 KiB segments; offsets here are not consumed.
     # Always the aligned layout (LDS grows), so only an explicit request enables it.
-    if mode != 1:                                              return _no("subtile: aligned layout needs LDSSegmentInterleave=1")
+    # Mode 2 instead puts all of A in one segment and all of B in the next, and the main loop
+    # has the two read ports read A and B in opposite orders.
+    if mode not in (1, 2):                                     return _no("subtile: aligned layout needs LDSSegmentInterleave=1 or 2")
     if list(state["MIWaveGroup"]) != [2, 2]:                   return _no("subtile: MIWaveGroup must be [2,2]")
     if state.get("TDMSplit"):                                  return _no("subtile: TDMSplit")
+    if mode == 2:
+        return {"applicable": True, "aligned": False, "offsets": {"subtile": True},
+                "blockSpan": 0, "reason": "subtile-ab-split",
+                "segmentMap": "SUBTILE-AB-SPLIT seg0={A0,A1} seg1={B0,B1}"}
     return {"applicable": True, "aligned": False, "offsets": {"subtile": True},
             "blockSpan": 0, "reason": "subtile-aligned",
             "segmentMap": "SUBTILE-ALIGNED seg0={A0,B0} seg1={A1,B1}"}
@@ -290,6 +296,7 @@ def evaluate(state):
         return _no("bf16/fp16/fp8/fp4 only")
     if state.get("UseSubtileImpl"):
         return _evaluate_subtile(state, mode)
+    if mode == 2:                                              return _no("LDSSegmentInterleave=2 is subtile-only")
 
     # [4,1]/[1,4]: exactly one MIWaveGroup dim is 1 -> one active + one shared tensor.
     wgM, wgN = state["MIWaveGroup"][0], state["MIWaveGroup"][1]

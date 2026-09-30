@@ -118,6 +118,49 @@ def _emitBodySetupBranch(module, loopBody, setupInsts, branch, hoist):
     module.add(branch)
 
 
+# LDSSegmentInterleave=2 read order per LDS read port: (tensor, reversed). Segment 0 holds A and
+# SA, segment 1 holds B and SB, and the two ports walk the segments in opposite order. The B-first
+# port takes B and SB reversed so its first reads target the registers the preceding MFMAs
+# finished with longest ago.
+LR_ORDER_A_FIRST = (('A', False), ('SA', False), ('B', False), ('SB', False))
+LR_ORDER_B_FIRST = (('B', True), ('SB', True), ('A', False), ('SA', False))
+
+
+def _reorderLocalReads(scheduled, tensorOf, order):
+    """Refill the ds_read slots of a scheduled group in the given tensor order.
+
+    Slot positions are unchanged; only which read fills each slot changes, and
+    reads are never moved across a non-MFMA instruction (waits, barriers, offset
+    swaps), so no wait count or address dependency changes.
+
+    tensorOf maps id(ds_read) -> tensor; order is a sequence of (tensor, reversed).
+    Returns a rebuilt flat Module.
+    """
+    from rocisa.code import TextBlock
+    from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
+
+    items = scheduled.flatitems()
+    runs = [[]]
+    for idx, it in enumerate(items):
+        if id(it) in tensorOf:
+            runs[-1].append(idx)
+        elif not isinstance(it, (TextBlock, MFMAInstruction, MXMFMAInstruction)):
+            runs.append([])
+    for run in runs:
+        refill = []
+        for tensor, rev in order:
+            reads = [items[i] for i in run if tensorOf[id(items[i])] == tensor]
+            refill += reads[::-1] if rev else reads
+        assert len(refill) == len(run), "read order must cover every reordered tensor"
+        for i, it in zip(run, refill):
+            items[i] = it
+
+    rebuilt = Module(scheduled.name)
+    for it in items:
+        rebuilt.add(it)
+    return rebuilt
+
+
 class Pass(IntEnum):
     """Scheduler passes in dependency order.
 
@@ -3408,13 +3451,15 @@ class LogicalScheduler:
         self._preloop_emitted = [[emitted]]
         return self._preloop_emitted
 
-    def _emitLoop(self, writer, kernel, label, emitted_3d, schedule=True):
+    def _emitLoop(self, writer, kernel, label, emitted_3d, schedule=True, lrOrder=None):
         """Emit a loop section from a 3D emitted structure.
 
         emitted_3d: [partition][subIterK][EmittedModule]
 
         When schedule=True and a group has MFMAs, calls instructionSchedule
         for interleaving. When schedule=False, emits instructions sequentially.
+        lrOrder refills each scheduled group's ds_read slots in that tensor
+        order (see _reorderLocalReads).
         """
         from Tensile.Components.Subtile.InstructionScheduler import (
             instructionSchedule,
@@ -3454,6 +3499,16 @@ class LogicalScheduler:
                         em_list,
                         multiDU=self._is_multi_du(),
                         minGapDsReadToWait=minGapDsReadToWait)
+                    if lrOrder:
+                        from rocisa.instruction import LocalReadInstruction
+                        orderTensors = {t for t, _ in lrOrder}
+                        tensorOf = {id(inst): em.source.tensor
+                                    for em in em_list
+                                    if em.opType == 'lr' and em.source.tensor in orderTensors
+                                    for item in em.instructions
+                                    for inst in (item.flatitems() if isinstance(item, Module) else [item])
+                                    if isinstance(inst, LocalReadInstruction)}
+                        scheduled = _reorderLocalReads(scheduled, tensorOf, lrOrder)
                     module.add(scheduled)
                 else:
                     for em in em_list:
@@ -3663,7 +3718,23 @@ class LogicalScheduler:
         exitValue = self.config.pgr
 
         exitLabels = [Label(f"ExitC{ui}", "") for ui in range(uf - 1)]
-        module.add(loopBegin)
+        # LDSSegmentInterleave=2: A+SA and B+SB sit in different LDS segments and wave bit 0 picks
+        # the LDS read port. Even waves read A+SA then B+SB, odd waves run a mainloop copy that
+        # reads B+SB then A+SA, so the two ports read different segments. Exit paths (NGLL/NLL)
+        # stay shared.
+        portSplit = kernel.get("LDSSegmentInterleave") == 2
+        loopBeginB = Label("LoopBeginL_PortB", "", alignment=16) if portSplit else None
+        loopEnd = Label("MainloopPortsJoin", "") if portSplit else None
+        if portSplit:
+            from rocisa.instruction import VReadfirstlaneB32, SBitcmp1B32
+            from rocisa.container import vgpr
+            with writer.allocTmpSgpr(1) as tmpSgprRes:
+                waveSgpr = sgpr(tmpSgprRes.idx)
+                module.add(VReadfirstlaneB32(waveSgpr, vgpr("Serial"), "first tId"))
+                module.add(SBitcmp1B32(waveSgpr, int(math.log2(kernel["WavefrontSize"])),
+                                       "wave bit 0: LDS read port"))
+                module.add(SCBranchSCC1(labelName=loopBeginB.getLabelName(),
+                                        comment="odd waves: B-first mainloop"))
         # Debug: emit `s_mov_b32 m0, LoopCounterL; s_ttracedata` at the start of
         # every mainloop iteration so SQTT / trace decoders can identify iterations
         # (adds 2 instructions per iter). Gated by the EmitMainloopTraceMarker global.
@@ -3672,33 +3743,44 @@ class LogicalScheduler:
             from rocisa.container import mgpr
             from rocisa.instruction import SMovB32 as _SMovB32
             from rocisa.instruction import STtraceData as _STtraceData
-        for ui in range(uf):
-            if emitTraceMarker:
-                # Mainloop iteration marker for SQTT / trace decoder: write
-                # LoopCounterL into M0 then emit it via s_ttracedata. Decoder
-                # only uses low 8 bits, so M0 wrap past 256 is fine.
-                module.add(_SMovB32(dst=mgpr(0), src=sgpr("LoopCounterL"),
-                                    comment="trace: M0 = LoopCounterL"))
-                module.add(_STtraceData(comment="trace: emit M0 to SQTT"))
-            loopBody = self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
-                                      self._emitted_per_unroll[ui])
-            # dec + compare that produce the SCC the loop-control branch reads.
-            setupInsts = [
-                SSubU32(dst=sgpr("LoopCounterL"),
-                        src0=sgpr("LoopCounterL"), src1=1,
-                        comment=f"dec counterL (copy {ui})"),
-                SCmpEQU32(src0=sgpr("LoopCounterL"), src1=exitValue,
-                          comment=f"counterL == {exitValue}? (copy {ui} exit)"),
-            ]
-            if ui < uf - 1:
-                branch = SCBranchSCC1(
-                    labelName=exitLabels[ui].getLabelName(),
-                    comment=f"copy {ui} exit → NGLL_C{ui}")
-            else:
-                branch = SCBranchSCC0(
-                    labelName=loopBegin.getLabelName(),
-                    comment="restart mainloop")
-            _emitBodySetupBranch(module, loopBody, setupInsts, branch, hoist=isGfx1250)
+
+        def emitMainloopCopies(begin, lrOrder, suffix, ownCopy):
+            module.add(begin)
+            for ui in range(uf):
+                if emitTraceMarker:
+                    # Mainloop iteration marker for SQTT / trace decoder: write
+                    # LoopCounterL into M0 then emit it via s_ttracedata. Decoder
+                    # only uses low 8 bits, so M0 wrap past 256 is fine.
+                    module.add(_SMovB32(dst=mgpr(0), src=sgpr("LoopCounterL"),
+                                        comment="trace: M0 = LoopCounterL"))
+                    module.add(_STtraceData(comment="trace: emit M0 to SQTT"))
+                # The scheduler adjusts wait counts in place, so a second copy needs its own objects.
+                emitted = copy.deepcopy(self._emitted_per_unroll[ui]) if ownCopy else self._emitted_per_unroll[ui]
+                loopBody = self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}" + suffix,
+                                          emitted, lrOrder=lrOrder)
+                # dec + compare that produce the SCC the loop-control branch reads.
+                setupInsts = [
+                    SSubU32(dst=sgpr("LoopCounterL"),
+                            src0=sgpr("LoopCounterL"), src1=1,
+                            comment=f"dec counterL (copy {ui})"),
+                    SCmpEQU32(src0=sgpr("LoopCounterL"), src1=exitValue,
+                              comment=f"counterL == {exitValue}? (copy {ui} exit)"),
+                ]
+                if ui < uf - 1:
+                    branch = SCBranchSCC1(
+                        labelName=exitLabels[ui].getLabelName(),
+                        comment=f"copy {ui} exit → NGLL_C{ui}")
+                else:
+                    branch = SCBranchSCC0(
+                        labelName=begin.getLabelName(),
+                        comment="restart mainloop")
+                _emitBodySetupBranch(module, loopBody, setupInsts, branch, hoist=isGfx1250)
+
+        emitMainloopCopies(loopBegin, LR_ORDER_A_FIRST if portSplit else None, "", False)
+        if portSplit:
+            module.add(SBranch(labelName=loopEnd.getLabelName(), comment="even waves: skip B-first copy"))
+            emitMainloopCopies(loopBeginB, LR_ORDER_B_FIRST, "_PortB", True)
+            module.add(loopEnd)
 
         # ── NGLL + NLL exit paths ──
         hasNGLL = self.config.pgr >= 2

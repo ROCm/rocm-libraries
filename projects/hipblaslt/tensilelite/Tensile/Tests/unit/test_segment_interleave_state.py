@@ -24,16 +24,18 @@ def _resolve_lsi(state):
     _lsiOneLdsBufAtEval = state.get("1LDSBuffer", 0)
     res = evaluate(state)
     _lsiBufWillResolve = _lsiOneLdsBufAtEval == -1 and res["reason"] == "needs 1LDSBuffer==0"
+    applied = 2 if _lsiRequested == 2 else 1  # 2 (subtile A/B split) keeps its value
+    forced = _lsiRequested in (1, 2)
     if not _lsiBufWillResolve:
         # 1 = applied (split or bcontig alike), 0 = not.
-        return (1 if res["applicable"] else 0, _lsiRequested == 1 and not res["applicable"])
+        return (applied if res["applicable"] else 0, forced and not res["applicable"])
     # Deferred: 1LDSBuffer resolves to 0 (the case that suppressed the reject); LDSSegmentInterleave
     # is kept at _lsiRequested (not forced to 0) so the re-eval oracle does not short-circuit on mode==0.
     s2 = dict(state); s2["1LDSBuffer"] = 0
     res2 = evaluate(s2)
     if res2["applicable"] and not res2["aligned"]:
-        return 1, False                       # tight/bcontig are pure reorders -> size-safe to apply post-hoc
-    return 0, (_lsiRequested == 1)            # aligned (LDS unreserved) or genuinely inapplicable -> reject if forced
+        return applied, False                 # tight/bcontig are pure reorders -> size-safe to apply post-hoc
+    return 0, forced                          # aligned (LDS unreserved) or genuinely inapplicable -> reject if forced
 
 
 def test_deferred_1ldsbuffer_auto_applies_tight():
@@ -89,6 +91,14 @@ def test_subtile_resolves_only_when_forced():
                                    LDSSegmentInterleave=1)) == (0, True)
     assert _resolve_lsi(_vw8_state(UseSubtileImpl=1, TDMSplit=1,
                                    LDSSegmentInterleave=1)) == (0, True)
+
+
+def test_ab_split_mode_is_subtile_only_and_kept():
+    from Tensile.Tests.unit.test_segment_interleave import _vw8_state
+    assert _resolve_lsi(_vw8_state(UseSubtileImpl=1, LDSSegmentInterleave=2)) == (2, False)
+    assert _resolve_lsi(_vw8_state(**{"UseSubtileImpl": 1, "1LDSBuffer": -1,
+                                      "LDSSegmentInterleave": 2})) == (2, False)
+    assert _resolve_lsi(_vw8_state(LDSSegmentInterleave=2)) == (0, True)
 
 def test_bcontig_resolves_to_1():
     # bcontig (unsplittable B) applies and resolves to 1, like split.

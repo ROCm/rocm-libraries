@@ -418,8 +418,10 @@ validParameters = { # we need to make sure this matches develop
     #    0 = off (default): baseline layout.
     #    1 = on: enable wherever valid, including cases that reserve more LDS to reach a segment
     #            boundary (needs PrefetchGlobalRead=2).
+    #    2 = subtile only: A in one segment, B in the next; odd waves (the other LDS read port)
+    #        run a main-loop copy that reads B before A, so the two ports never share a segment.
     # Recommended: set [0, 1] when tuning to compare baseline vs interleaved.
-    "LDSSegmentInterleave": [-1, 0, 1],
+    "LDSSegmentInterleave": [-1, 0, 1, 2],
     # StreamK persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
     # generated code keeps that first-PGR data durable and restores borrowed

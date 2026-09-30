@@ -7659,6 +7659,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.ldsStartOffsetMXSB = sizeA + sizeB + sizeMXSA
 
       self.ldsTotalSize = sizeA + sizeB + sizeMXSA + sizeMXSB
+      if kernel.get("LDSSegmentInterleave") == 2:
+        # [A][MXSA] fill one 64 KiB segment and [B][MXSB] the next, so a wave reading A-side data
+        # and a wave reading B-side data never share a segment. The main loop has the two LDS read
+        # ports walk the segments in opposite order.
+        assert sizeA + sizeMXSA <= LDS_SEGMENT_BYTES and sizeB + sizeMXSB <= LDS_SEGMENT_BYTES, \
+          "LDSSegmentInterleave=2 needs A+MXSA and B+MXSB to each fit one LDS segment"
+        self.ldsStartOffsetB = LDS_SEGMENT_BYTES
+        if sizeMXSA or sizeMXSB:
+          self.ldsStartOffsetMXSA = sizeA
+          self.ldsStartOffsetMXSB = LDS_SEGMENT_BYTES + sizeB
+        self.ldsTotalSize = 2 * LDS_SEGMENT_BYTES
       if self.ldsSegCompStride:
         # Keep the second LDS buffer's components segment-aligned too.
         self.ldsTotalSize = -(-self.ldsTotalSize // LDS_SEGMENT_BYTES) * LDS_SEGMENT_BYTES
