@@ -19,12 +19,14 @@ Infer options from the user request:
   - `multi-arch` → `.github/workflows/therock-multi-arch-ci.yml`. Builds ROCm with TheRock and runs component tests on the chosen GPU families. This is the one to use for hipDNN/provider test labels.
   - `therock-ci` → `.github/workflows/therock-ci.yml`. Single-arch TheRock CI for a set of rocm-libraries subtrees.
   - `hipdnn-superbuild` → `.github/workflows/hipdnn-superbuild-ci.yml`. Takes no inputs.
-- **Branch**: `--branch <branch>` (a global option, placed before the subcommand). If omitted, `--pr <pr-number>` resolves the PR head branch; otherwise the current git branch is used. The branch must already be pushed to `ROCm/rocm-libraries` for a dispatch to find it.
+- **Branch**: `--branch <branch>` (a global option, placed before the subcommand). If omitted, `--pr <pr-number>` resolves the PR head branch; otherwise the current git branch is used, under its upstream name when it tracks one. The branch must already be pushed to `ROCm/rocm-libraries` for a dispatch to find it.
 - **GPU families**: `--gfx` (Linux) and `--windows-gfx`, comma-separated. When omitted the workflow defaults apply:
   - `multi-arch`: Linux `gfx94X,gfx950,gfx125X`, Windows `gfx110X` (`.github/workflows/therock-multi-arch-ci.yml`, `setup` job inputs). Pass `none` to skip a platform, for example `--windows-gfx none` for a Linux-only run.
   - `therock-ci`: Linux `gfx94X, gfx950, gfx125X`, Windows `gfx1151` (`.github/workflows/therock-ci.yml`, "Fetch Linux/Windows targets for build and test" steps).
 - **Projects** (`therock-ci` only): `--projects`, space-separated subtree paths that are keys of `subtree_to_project_map` in `.github/scripts/therock_matrix.py` (for example `dnn-providers/integration-tests`, `projects/hipdnn`), or `all`.
 - **Test labels** (`multi-arch` only): `--test-labels` (Linux) and `--windows-test-labels`, comma-separated. See the test reference below.
+
+`dispatch` rejects an option the chosen workflow does not take (for example `--test-labels` with `-w therock-ci`, or any option with `-w hipdnn-superbuild`) instead of dropping it.
 
 The accepted GPU family names come from TheRock's `build_tools/github_actions/amdgpu_family_matrix.py` at the TheRock ref pinned in `.github/actions/ci-env/action.yml` (`therock-ref`). `trigger_ci.py --help` prints the current list. Names are case-insensitive. A family that has no entry for the target platform is dropped for that platform (for example `gfx94X` and `gfx950` are Linux-only). `multi-arch` rejects an unknown name with an error listing the known families; `therock-ci` skips unknown names silently, so check the spelling. `multi-arch` also accepts `gfx1250-strict` (dispatch-only) and `all`.
 

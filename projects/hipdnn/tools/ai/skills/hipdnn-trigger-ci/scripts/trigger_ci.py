@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """Trigger CI workflows on a rocm-libraries branch.
 
-Defaults to the current git branch. Override with --branch.
+Defaults to the current git branch (its upstream name when it tracks one).
+Override with --branch.
 
 Examples:
     # Dispatch TheRock CI for integration-tests on gfx94X (current branch)
@@ -34,6 +37,7 @@ Examples:
 
 import json
 import argparse
+import shlex
 import subprocess
 import sys
 import time
@@ -63,6 +67,25 @@ INPUT_MAP = {
     "windows_test_labels": "windows_test_labels",
 }
 
+OPTION_NAMES = {
+    "gfx": "--gfx",
+    "windows_gfx": "--windows-gfx",
+    "projects": "--projects",
+    "test_labels": "--test-labels",
+    "windows_test_labels": "--windows-test-labels",
+}
+
+INSTALL_HINTS = {
+    "gh": "install the GitHub CLI (https://cli.github.com)",
+    "git": "install git",
+}
+
+
+def exit_not_found(cmd):
+    hint = INSTALL_HINTS.get(cmd[0], "install it")
+    print(f"error: '{cmd[0]}' not found on PATH; {hint}", file=sys.stderr)
+    sys.exit(1)
+
 
 def run_cmd(cmd, check=True, capture=True):
     try:
@@ -72,22 +95,24 @@ def run_cmd(cmd, check=True, capture=True):
             text=True,
             check=check,
         )
+    except FileNotFoundError:
+        exit_not_found(cmd)
     except subprocess.CalledProcessError as e:
         stderr = (e.stderr or "").strip()
         if stderr:
             print(f"error: {stderr}", file=sys.stderr)
         else:
-            print(f"error: command failed: {' '.join(cmd)}", file=sys.stderr)
+            print(f"error: command failed: {shlex.join(cmd)}", file=sys.stderr)
         sys.exit(1)
     return result.stdout.strip() if capture else ""
 
 
 def check_gh_auth():
-    result = subprocess.run(
-        ["gh", "auth", "status"],
-        capture_output=True,
-        text=True,
-    )
+    cmd = ["gh", "auth", "status"]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError:
+        exit_not_found(cmd)
     if result.returncode != 0:
         print(
             "error: gh is not authenticated. Run 'gh auth login' first.",
@@ -101,6 +126,13 @@ def current_git_branch():
     if branch == "HEAD":
         print("error: detached HEAD — use --branch to specify a ref", file=sys.stderr)
         sys.exit(1)
+    # Dispatch needs the name on the remote, which differs from the local name
+    # when the branch tracks an upstream under another name.
+    merge_ref = run_cmd(
+        ["git", "config", "--get", f"branch.{branch}.merge"], check=False
+    )
+    if merge_ref.startswith("refs/heads/"):
+        return merge_ref[len("refs/heads/") :]
     return branch
 
 
@@ -176,7 +208,7 @@ def dispatch_workflow(workflow_file, ref, inputs, dry_run=False):
         if value:
             cmd.extend(["-f", f"{key}={value}"])
 
-    print(f"  {' '.join(cmd)}")
+    print(f"  {shlex.join(cmd)}")
 
     if dry_run:
         print("  (dry-run — not dispatched)")
@@ -227,8 +259,16 @@ def find_active_run(ref):
 
 
 def cmd_dispatch(args):
-    ref = resolve_branch(args)
     wf = WORKFLOWS[args.workflow]
+    for field, option in OPTION_NAMES.items():
+        if getattr(args, field, "") and field not in wf["fields"]:
+            valid_for = [name for name, w in WORKFLOWS.items() if field in w["fields"]]
+            print(
+                f"error: {option} is only valid for -w {' or -w '.join(valid_for)}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    ref = resolve_branch(args)
     inputs = {}
     for field in wf["fields"]:
         value = getattr(args, field, "") or ""
