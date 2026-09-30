@@ -79,7 +79,7 @@ set(CMAKE_INSTALL_INCLUDEDIR "include/hipccl" CACHE PATH
 # rocm-cmake's rocm_install_symlink_subdir(). Intended to be removed once
 # downstream consumers have migrated - not a permanent feature.
 option(HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS
-    "Install compatibility symlinks at the old, pre-hipccl flat include paths (temporary migration aid)" OFF)
+    "Install compatibility symlinks at the old, pre-hipccl flat include paths (temporary migration aid)" ON)
 
 # --- Documentation ---
 # NOTE(hipccl2): ../docs is shared with hipccl3 (it documents the hipCCL
