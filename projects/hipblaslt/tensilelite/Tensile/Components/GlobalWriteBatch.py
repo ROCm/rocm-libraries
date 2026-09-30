@@ -622,16 +622,15 @@ class GlobalWriteBatchWriter:
     needsBiasSavDrain = self.kernel.get("UseSubtileImpl") and \
        (self.parentWriter.states.useBias != DataDirection.NONE or \
         self.kernel["ProblemType"].get("UseScaleAlphaVec", 0))
-    # SBarrier is only needed for multi-DU paths where ds_bpermute from one
-    # sub-iteration can alias LDS banks still being read by bias/SAV loads in
-    # a sibling wave. Single-DU paths (incl. the gfx950 permlane16 store) use
-    # per-element dscnt tracking in globalStoreWait() instead.
-    needsCrossWaveBarrier = needsBiasSavDrain and isMultiDU
+    # The store path can alias LDS banks a sibling wave is still reading for its
+    # bias/SAV loads. dscnt is per-wave, so globalStoreWait() cannot order that:
+    # single-DU paths need the barrier just as much as multi-DU ones.
+    needsCrossWaveBarrier = needsBiasSavDrain
     if not isMultiDU:
       self._emitAdd(module)
     if needsCrossWaveBarrier:
-      module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads (multi-DU only)"))
-      module.add(SBarrier(comment="sync waves before subtile paired stores (multi-DU only)"))
+      module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads"))
+      module.add(SBarrier(comment="sync waves before subtile paired stores"))
     if isMultiDU:
       self._emitAdd(module)
     self._epilog(module)
