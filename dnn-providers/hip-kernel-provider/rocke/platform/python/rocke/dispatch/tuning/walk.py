@@ -16,10 +16,6 @@ from .axes import KnobAxis
 
 SWEEP_LEVELS: Tuple[str, ...] = ("production", "full")
 
-# ``waves_per_eu`` values each level tries; ``None`` is the kernel's policy.
-FULL_WAVES: Tuple[Optional[int], ...] = (None, 1, 2, 3, 4)
-PRODUCTION_WAVES: Tuple[Optional[int], ...] = (None, 2, 4)
-
 _SWEEP_LEVEL: contextvars.ContextVar[str] = contextvars.ContextVar(
     "rocke_sweep_level", default="production"
 )
@@ -45,7 +41,9 @@ def sample_count(level: str, tuning_sample: int) -> int:
     """The per-candidate sample count a sweep at ``level`` uses."""
     if level not in SWEEP_LEVELS:
         raise ValueError(f"sweep level must be one of {SWEEP_LEVELS}, got {level!r}")
-    return 0 if level == "production" else max(0, int(tuning_sample))
+    if int(tuning_sample) < 0:
+        raise ValueError(f"tuning_sample must be >= 0, got {tuning_sample!r}")
+    return 0 if level == "production" else int(tuning_sample)
 
 
 @contextmanager
@@ -77,21 +75,6 @@ def iter_at_level(level: str, make: Callable[[], Iterable]) -> Iterator:
             except StopIteration:
                 return
         yield item
-
-
-def waves_per_eu_sweep_values(
-    default: int, level: Optional[str] = None
-) -> Tuple[int, ...]:
-    """Concrete WPE values for ``level`` (the active level by default) when the
-    base spec already resolved its policy to ``default``; that comes first."""
-    level = _SWEEP_LEVEL.get() if level is None else level
-    axis = PRODUCTION_WAVES if level == "production" else FULL_WAVES
-    resolved: list[int] = []
-    for value in axis:
-        wpe = int(default if value is None else value)
-        if wpe not in resolved:
-            resolved.append(wpe)
-    return tuple(resolved)
 
 
 def _enabler_count(axes: Tuple[KnobAxis, ...]) -> int:

@@ -128,11 +128,12 @@ def list_combos(args) -> int:
         print(f"\n{label} Sq=1 Sk={s} Hq={hq} Hkv={hkv} D={d}  n={len(combos)}")
         for candidate, spec in combos:
             extra = ""
-            if isinstance(spec, AttentionDenseSpec):
+            kernel_spec = getattr(spec, "kernel_spec", spec)
+            if isinstance(kernel_spec, AttentionDenseSpec):
                 extra = (
-                    f"  bm={getattr(spec, 'block_m', None)} "
-                    f"persist={getattr(spec, 'persistent', None)} "
-                    f"wdma={getattr(spec, 'wide_lds_dma', None)}"
+                    f"  bm={kernel_spec.block_m} "
+                    f"persist={kernel_spec.persistent} "
+                    f"wdma={getattr(kernel_spec, 'wide_lds_dma', None)}"
                 )
             print(
                 f"  {candidate.name:<48} {candidate.algorithm:<18} "

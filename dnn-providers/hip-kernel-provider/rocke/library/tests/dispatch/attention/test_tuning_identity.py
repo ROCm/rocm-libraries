@@ -147,6 +147,27 @@ class TestCanonicalKnobs(unittest.TestCase):
             with self.subTest(knobs=knobs), self.assertRaisesRegex(ValueError, reason):
                 tuning_spec_with_knobs(req, spec_id, knobs)
 
+    def test_equal_knob_values_of_another_type_are_one_config(self):
+        """``True == 1`` and ``2 == 2.0`` hash alike, so a request cache keyed
+        on them must not see two configurations."""
+        req = _req()
+        for spec_id, typed, other in (
+            (_DENSE, {"o_store_width": 1}, {"o_store_width": True}),
+            (_DENSE, {"lazy_rescale_threshold": 2.0}, {"lazy_rescale_threshold": 2}),
+            (_UNIFIED, {"use_register_pv": True}, {"use_register_pv": 1}),
+            (_UNIFIED, {"waves_per_eu": 2}, {"waves_per_eu": 2.0}),
+        ):
+            with self.subTest(spec_id=spec_id, knobs=other):
+                expected = tuning_spec_with_knobs(req, spec_id, typed)
+                self.assertEqual(tuning_spec_with_knobs(req, spec_id, other), expected)
+                self.assertEqual(dict(expected.knobs), typed)
+        for spec_id, knobs in (
+            (_DENSE, {"o_store_width": "1"}),
+            (_UNIFIED, {"use_register_pv": 2}),
+        ):
+            with self.subTest(knobs=knobs), self.assertRaisesRegex(ValueError, "takes"):
+                tuning_spec_with_knobs(req, spec_id, knobs)
+
     def test_known_wrong_knobs_are_refused_on_every_entry_point(self):
         req = _req(arch="gfx942", dtype="fp16")
         tuning = next(

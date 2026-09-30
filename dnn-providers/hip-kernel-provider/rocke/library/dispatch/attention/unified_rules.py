@@ -15,8 +15,6 @@ from dataclasses import MISSING, dataclass, fields as _dataclass_fields
 from functools import lru_cache
 from typing import Any, Iterable, Mapping, NamedTuple, Optional, Tuple
 
-from rocke.dispatch.tuning import FULL_WAVES, PRODUCTION_WAVES, KnobSpace
-
 from .axes import (
     DEAD_END_KNOBS,
     KNOWN_WRONG_KNOBS,
@@ -43,6 +41,7 @@ from .tuning_specs import (
     make_explicit_attention_2d_spec,
     make_explicit_attention_3d_specs,
 )
+from .waves import FULL_WAVES, PRODUCTION_WAVES, WavesPerEuSpace
 
 TUNING_ALGORITHM = "unified_tuning"
 
@@ -189,13 +188,116 @@ def _sets_dead_end(spec: AttentionTuningSpec) -> bool:
     return any(getattr(spec.kernel_spec, knob, False) for knob in banned)
 
 
+# gfx950 2D LDS rules. The tiled 2D validator does not model LDS, so an
+# over-budget spec only fails at codegen, and the KQ pad has cases the kernel
+# silently disables or computes wrongly. These mirror attention_tiled_2d.py.
+_KQ_PAD_KNOBS = ("use_kq_lds_pad", "kq_lds_pad_halves")
+
+
+def _k_schedule_bufs(spec) -> int:
+    if spec.use_k_single_buffer:
+        return 1
+    depth = int(spec.kv_ring_depth)
+    return depth if depth > 2 else 2
+
+
+def _fp8_mfma_qk(spec) -> bool:
+    return spec.kv_storage_dtype == "fp8e4m3" and bool(spec.use_fp8_mfma_qk)
+
+
+def _kq_pad_slab_rows(spec) -> int:
+    head = int(spec.head_size)
+    return 512 // head if head and 512 % head == 0 else 0
+
+
+def _kq_pad_off_reason(spec) -> Optional[str]:
+    """Why the kernel emits a set KQ pad as no pad at all, or None."""
+    if _fp8_mfma_qk(spec):
+        return "the KQ LDS pad is off under native-FP8 K LDS"
+    slab_rows = _kq_pad_slab_rows(spec)
+    if (
+        not slab_rows
+        or int(spec.tile_size_eff) % slab_rows
+        or int(spec.kq_lds_pad_halves) % 8
+    ):
+        return "the KQ LDS pad needs an aligned slab layout"
+    if _k_schedule_bufs(spec) != 1:
+        return "the KQ LDS pad is only laid out for a single-K schedule"
+    return None
+
+
+def _q_aliases_k(spec) -> bool:
+    """Whether Q is staged in K_lds rather than its own slab."""
+    if spec.use_q_reread or spec.use_q_direct_reg or _fp8_mfma_qk(spec):
+        return False
+    tile, head = int(spec.tile_size_eff), int(spec.head_size)
+    return int(spec.block_m) * head * 2 <= 2 * tile * head * 2
+
+
+def _kq_pad_active(spec) -> bool:
+    return bool(spec.use_kq_lds_pad) and _kq_pad_off_reason(spec) is None
+
+
+def _gfx950_2d_lds_bytes(spec) -> int:
+    """The LDS pool the LLVM lowering packs for one gfx950 tiled 2D spec."""
+    tile = int(spec.tile_size_eff)
+    head = int(spec.head_size)
+    block_m = int(spec.block_m)
+    kv_fp8 = spec.kv_storage_dtype == "fp8e4m3"
+    fp8_qk = _fp8_mfma_qk(spec)
+    fp8_pv = kv_fp8 and bool(spec.use_fp8_mfma_pv)
+    k_elem_bytes = 1 if fp8_qk else 2
+    v_elem_bytes = 1 if fp8_pv else 2
+    k_bufs = _k_schedule_bufs(spec)
+    v_bufs = 2 if spec.use_v_double_buffer else 1
+
+    if _kq_pad_active(spec):
+        slab_rows = _kq_pad_slab_rows(spec)
+        slab_cols = slab_rows * head + int(spec.kq_lds_pad_halves)
+        k_bytes = k_bufs * (tile // slab_rows) * slab_cols * k_elem_bytes
+    else:
+        k_bytes = k_bufs * tile * head * k_elem_bytes
+    v_bytes = v_bufs * tile * head * v_elem_bytes
+
+    transposed = bool(spec.use_mfma_32x32 and spec.use_transposed_qk_32x32)
+    p_bytes = (
+        0
+        if spec.use_register_pv or transposed
+        else block_m * (tile + (16 if fp8_pv else 8)) * v_elem_bytes
+    )
+    q_bytes = 0 if spec.use_q_direct_reg or _q_aliases_k(spec) else block_m * head * 2
+    acc_bytes = block_m * (32 if head <= 64 else head) * 2
+    fp8_staging_bytes = 3 * tile * head if fp8_qk else 0
+    loop_bytes = k_bytes + v_bytes + p_bytes + q_bytes + fp8_staging_bytes
+    # The transposed body touches the epilogue slab only after the KV loop, so
+    # the lowering's liveness packing overlays it on the loop buffers.
+    if transposed:
+        return max(loop_bytes, acc_bytes)
+    return loop_bytes + acc_bytes
+
+
+def _gfx950_2d_legality(spec) -> Tuple[bool, str]:
+    if _kq_pad_active(spec) and _q_aliases_k(spec):
+        return False, "padded K LDS does not support aliased Q (wrong output)"
+    from rocke.core.arch import ArchTarget
+
+    capacity = ArchTarget.from_gfx("gfx950").lds_capacity_bytes
+    used = _gfx950_2d_lds_bytes(spec)
+    if used > capacity:
+        return False, (
+            f"estimated LDS {used} B exceeds the gfx950 {capacity} B LDS budget; "
+            "codegen would fail"
+        )
+    return True, "ok"
+
+
 class UnifiedKernels(NamedTuple):
     kernel_spec: Any
     reduce_spec: Any = None
 
 
 @dataclass(frozen=True)
-class UnifiedSpace(KnobSpace):
+class UnifiedSpace(WavesPerEuSpace):
     """One geometry variant's space. ``base`` is the request's
     ``UnifiedAttentionProblem``."""
 
@@ -221,14 +323,12 @@ class UnifiedSpace(KnobSpace):
         inert = _other_codepath_knobs(self.arch, {**self.fixed(base), **knobs})
         return {k: v for k, v in knobs.items() if k not in inert}
 
-    def build(self, base, knobs, waves_per_eu):
+    def build(self, base, knobs):
+        knobs = dict(knobs)
+        wpe = knobs.pop("waves_per_eu", None)
         if self.path == "3d":
-            return UnifiedKernels(
-                *_explicit_3d_specs(base, self.variant, knobs, waves_per_eu)
-            )
-        return UnifiedKernels(
-            _explicit_2d_spec(base, self.variant, knobs, waves_per_eu)
-        )
+            return UnifiedKernels(*_explicit_3d_specs(base, self.variant, knobs, wpe))
+        return UnifiedKernels(_explicit_2d_spec(base, self.variant, knobs, wpe))
 
     def field_value(self, kernel, name):
         return getattr(kernel.kernel_spec, name, MISSING)
@@ -246,7 +346,22 @@ class UnifiedSpace(KnobSpace):
     def base_value(self, base, kernel, name):
         return _field_defaults(type(kernel.kernel_spec)).get(name, MISSING)
 
-    def waves(self, base, level):
+    def _gfx950_2d(self) -> bool:
+        return self.arch == "gfx950" and self.path == "2d"
+
+    def inert(self, base, kernel):
+        spec = kernel.kernel_spec
+        if not self._gfx950_2d() or not spec.use_kq_lds_pad:
+            return {}
+        why = _kq_pad_off_reason(spec)
+        return {} if why is None else dict.fromkeys(_KQ_PAD_KNOBS, why)
+
+    def validate(self, base, kernel):
+        if not self._gfx950_2d():
+            return True, "ok"
+        return _gfx950_2d_legality(kernel.kernel_spec)
+
+    def outer_values(self, base, level):
         if level == "production" and self.path == "2d":
             return PRODUCTION_WAVES
         return FULL_WAVES
@@ -258,10 +373,10 @@ class UnifiedSpace(KnobSpace):
         if _policy_conflict(self.arch, knobs):
             return False
         try:
-            self.build(base, knobs, None)
+            kernel = self.build(base, knobs)
         except (ValueError, NotImplementedError):
             return False
-        return True
+        return self.validate(base, kernel)[0]
 
     def accept_default(self, spec):
         return not _sets_dead_end(spec)

@@ -17,25 +17,11 @@ from __future__ import annotations
 
 import random
 from dataclasses import MISSING, dataclass
-from typing import Any, Iterable, Iterator, Mapping, Optional, Tuple
+from typing import Any, ClassVar, Iterable, Iterator, Mapping, Optional, Tuple
 
-from .axes import KnobAxis, Knobs, axis_knob_names, knob_requirements
-from .identity import (
-    config_key,
-    defaults_fingerprint,
-    key_of,
-    knob_items,
-    names_variant,
-    tuning_id,
-)
-from .walk import (
-    FULL_WAVES,
-    PRODUCTION_WAVES,
-    SWEEP_LEVELS,
-    iter_knob_sets,
-    one_knob_at_a_time,
-    random_knob_set,
-)
+from .axes import KnobAxis, Knobs, axis_knob_names, knob_requirements, knob_types
+from .identity import config_key, defaults_fingerprint, key_of, knob_items, tuning_id
+from .walk import SWEEP_LEVELS, iter_knob_sets, one_knob_at_a_time, random_knob_set
 
 Verdict = Tuple[Optional[Any], str]
 
@@ -61,15 +47,20 @@ class KnobSpace:
     variant_id: str
     candidate_name: str
 
+    # A field swept outside the pruned walk, or None. The walk checks a knob
+    # set once and only rebuilds it per :meth:`outer_values` value, so the
+    # drop rules (:meth:`base_value`, :meth:`inert`) must not read it.
+    outer_knob: ClassVar[Optional[str]] = None
+
     # ------------------------------------------------------------ must define
     def axes(self, base) -> Tuple[KnobAxis, ...]:
         """The axes in scope for ``base``, prerequisites first."""
         raise NotImplementedError
 
-    def build(self, base, knobs: Mapping[str, object], waves_per_eu: Optional[int]):
-        """The kernel spec for ``knobs`` (fixed knobs included) at
-        ``waves_per_eu`` (``None``: the base's). Raise one of
-        :data:`BUILD_ERRORS` to refuse."""
+    def build(self, base, knobs: Mapping[str, object]):
+        """The kernel spec for ``knobs`` (fixed knobs included, and the
+        :attr:`outer_knob` when it is set). Raise one of :data:`BUILD_ERRORS`
+        to refuse."""
         raise NotImplementedError
 
     def wrap(self, base, kernel, knobs: Knobs, key: str, tid: str):
@@ -107,17 +98,31 @@ class KnobSpace:
     def inert(self, base, kernel) -> Mapping[str, str]:
         """``{knob: why}`` for fields of ``kernel`` the body does not read, or
         whose explicit value restates a policy. Like :meth:`base_value`, it
-        must not depend on ``waves_per_eu``: streams check a knob set once and
-        then only rebuild it per WPE value."""
+        must not depend on the :attr:`outer_knob`."""
         return {}
 
     def validate(self, base, kernel) -> Tuple[bool, str]:
         """The kernel's own legality check."""
         return True, "ok"
 
-    def default_waves(self, base) -> Optional[int]:
-        """The default spec's ``waves_per_eu``; a pinned equal value is dropped."""
+    def outer_values(self, base, level: str) -> Tuple[object, ...]:
+        """The :attr:`outer_knob` values a stream at ``level`` builds each knob
+        set at; ``None`` leaves the base's value."""
+        return (None,)
+
+    def outer_default(self, base):
+        """The base's :attr:`outer_knob` value; a pinned equal value is dropped."""
         return None
+
+    def stem(self, kernel) -> str:
+        """The display part of ``tuning_id``. It must start with
+        :meth:`stem_prefix`; pins never match on it."""
+        return self.variant_id
+
+    def stem_prefix(self) -> str:
+        """What every id of this variant starts with; a bare id without it is
+        not searched for."""
+        return f"{self.variant_id}@"
 
     def defaults(self, base, kernel) -> Mapping[str, object]:
         """The problem-independent defaults the knobs are a delta against:
@@ -133,14 +138,6 @@ class KnobSpace:
         value, so the same knobs name the same configuration on every problem;
         dropping them when they equal this problem's default would not."""
         return frozenset()
-
-    def waves_per_eu_of(self, kernel) -> Optional[int]:
-        """The value shown in the id stem."""
-        value = self.field_value(kernel, "waves_per_eu")
-        return None if value is MISSING else value
-
-    def waves(self, base, level: str) -> Tuple[Optional[int], ...]:
-        return PRODUCTION_WAVES if level == "production" else FULL_WAVES
 
     def root(self, base) -> Mapping[str, object]:
         """Where the walks start."""
@@ -168,7 +165,7 @@ class KnobSpace:
         if len(self.prefilter(base, knobs)) != len(knobs):
             return False
         try:
-            kernel = self.build(base, {**fixed, **knobs}, None)
+            kernel = self.build(base, {**fixed, **knobs})
         except BUILD_ERRORS:
             return False
         if self._droppable(base, kernel, knobs, knob_requirements(axes)):
@@ -197,7 +194,25 @@ class KnobSpace:
     default_from_full = False
 
     # -------------------------------------------------------------- the rules
-    def _checked(self, base, knobs: Mapping[str, object], waves_per_eu):
+    def _with_outer(self, knobs: Mapping[str, object], outer) -> dict:
+        if outer is None or self.outer_knob is None:
+            return dict(knobs)
+        return {**knobs, self.outer_knob: outer}
+
+    def _typed_outer(self, base, value) -> Tuple[object, str]:
+        types = {type(v) for v in self.outer_values(base, "full") if v is not None}
+        if len(types) != 1 or type(value) in types:
+            return value, ""
+        (want,) = types
+        converted = _convert(value, want)
+        if converted is MISSING:
+            return value, (
+                f"{self.outer_knob}={value!r} is a {type(value).__name__}; "
+                f"it takes {want.__name__}"
+            )
+        return converted, ""
+
+    def _checked(self, base, knobs: Mapping[str, object], outer):
         """``(kernel, canonical_knobs, why)``; ``kernel`` is None if refused."""
         knobs = dict(knobs)
         why = self.refuse(base, knobs)
@@ -214,12 +229,15 @@ class KnobSpace:
         if stray:
             return None, knobs, f"{stray} are not tunable on {self.candidate_name}"
         # A known knob this problem does not read is inert here, not illegal.
-        knobs = self.prefilter(base, {k: v for k, v in knobs.items() if k in in_scope})
+        knobs, why = _typed({k: v for k, v in knobs.items() if k in in_scope}, axes)
+        if why:
+            return None, knobs, why
+        knobs = self.prefilter(base, knobs)
         requires = knob_requirements(axes)
         kernel = None
         for _ in range(len(knobs) + 1):
             try:
-                kernel = self.build(base, {**fixed, **knobs}, waves_per_eu)
+                kernel = self.build(base, self._with_outer({**fixed, **knobs}, outer))
             except BUILD_ERRORS as e:
                 return None, knobs, str(e) or type(e).__name__
             drop = self._droppable(base, kernel, knobs, requires)
@@ -231,15 +249,19 @@ class KnobSpace:
             return None, knobs, why
         return kernel, knobs, "ok"
 
-    def _finish(self, base, kernel, knobs: Mapping[str, object], waves_per_eu):
+    def _finish(self, base, kernel, knobs: Mapping[str, object], outer):
         canonical = dict(knobs)
         recorded = self.recorded(base)
-        for name in recorded - {"waves_per_eu"}:
+        for name in recorded:
             canonical[name] = self.field_value(kernel, name)
-        if "waves_per_eu" in recorded:
-            canonical["waves_per_eu"] = self.waves_per_eu_of(kernel)
-        elif waves_per_eu is not None and waves_per_eu != self.default_waves(base):
-            canonical["waves_per_eu"] = int(waves_per_eu)
+        name = self.outer_knob
+        if (
+            name is not None
+            and name not in recorded
+            and outer is not None
+            and outer != self.outer_default(base)
+        ):
+            canonical[name] = outer
         items = knob_items(canonical)
         key = config_key(
             abi=self.abi,
@@ -249,19 +271,25 @@ class KnobSpace:
             knobs=items,
             defaults=defaults_fingerprint(self.defaults(base, kernel)),
         )
-        tid = tuning_id(self.variant_id, self.waves_per_eu_of(kernel), key)
+        tid = tuning_id(self.stem(kernel), key)
         return self.wrap(base, kernel, items, key, tid)
 
     # ------------------------------------------------------------ public API
     def canonicalize(self, base, knobs: Mapping[str, object]) -> Verdict:
-        """``base`` with ``knobs`` (``waves_per_eu`` included) applied, in
-        canonical form, or ``(None, why)``."""
+        """``base`` with ``knobs`` (the :attr:`outer_knob` included) applied,
+        in canonical form, or ``(None, why)``."""
         knobs = dict(knobs)
-        waves_per_eu = knobs.pop("waves_per_eu", None)
-        kernel, canonical, why = self._checked(base, knobs, waves_per_eu)
+        outer = None
+        if self.outer_knob is not None:
+            outer = knobs.pop(self.outer_knob, None)
+            if outer is not None:
+                outer, why = self._typed_outer(base, outer)
+                if why:
+                    return None, why
+        kernel, canonical, why = self._checked(base, knobs, outer)
         if kernel is None:
             return None, why
-        return self._finish(base, kernel, canonical, waves_per_eu), "ok"
+        return self._finish(base, kernel, canonical, outer), "ok"
 
     def stream(self, base, level: str) -> Iterator:
         """Specs at ``level``, production's first spec being the default.
@@ -295,25 +323,27 @@ class KnobSpace:
             kernel, canonical, _why = self._checked(base, knobs, None)
             if kernel is None:
                 continue
-            for waves_per_eu in self.waves(base, level):
-                spec = self._at_waves(base, kernel, fixed, canonical, waves_per_eu)
+            for outer in self.outer_values(base, level):
+                spec = self._at_outer(base, kernel, fixed, canonical, outer)
                 if spec is None or spec.tuning_id in seen:
                     continue
                 seen.add(spec.tuning_id)
                 yield spec
 
-    def _at_waves(self, base, kernel, fixed, canonical, waves_per_eu):
-        """The checked knob set at one WPE: rebuild and revalidate only, since
-        the drop rules never read ``waves_per_eu``."""
-        if waves_per_eu is not None:
+    def _at_outer(self, base, kernel, fixed, canonical, outer):
+        """The checked knob set at one outer value: rebuild and revalidate
+        only, since the drop rules never read the outer knob."""
+        if outer is not None:
             try:
-                kernel = self.build(base, {**fixed, **canonical}, waves_per_eu)
+                kernel = self.build(
+                    base, self._with_outer({**fixed, **canonical}, outer)
+                )
             except BUILD_ERRORS:
                 return None
             ok, _why = self.validate(base, kernel)
             if not ok:
                 return None
-        return self._finish(base, kernel, canonical, waves_per_eu)
+        return self._finish(base, kernel, canonical, outer)
 
     def sample(self, base, n: int, seed: int) -> Iterator:
         """Up to ``n`` distinct random legal specs from the full space, deduped
@@ -325,7 +355,7 @@ class KnobSpace:
             return self.is_valid(base, knobs)
 
         rng = random.Random(f"{int(seed)}:{self.candidate_name}")
-        waves = self.waves(base, "full")
+        outer_values = self.outer_values(base, "full")
         seen: set[str] = set()
         for _ in range(20 * int(n)):
             if len(seen) >= n:
@@ -333,7 +363,8 @@ class KnobSpace:
             knobs = random_knob_set(axes, self.root(base), is_valid, rng)
             if knobs is None:
                 continue
-            spec, _why = self.canonicalize(base, _with_waves(knobs, rng.choice(waves)))
+            outer = rng.choice(outer_values)
+            spec, _why = self.canonicalize(base, self._with_outer(knobs, outer))
             if spec is not None and spec.tuning_id not in seen:
                 seen.add(spec.tuning_id)
                 yield spec
@@ -361,7 +392,7 @@ class KnobSpace:
         searched for: dispatch must stay bounded. A full-space id replays from
         the knobs recorded next to it, which every sweep row and pinned result
         carries."""
-        if not names_variant(wanted, self.variant_id):
+        if not wanted.startswith(self.stem_prefix()):
             return None
         key = key_of(wanted)
         return next(
@@ -369,7 +400,40 @@ class KnobSpace:
         )
 
 
-def _with_waves(knobs: Mapping[str, object], waves_per_eu) -> dict:
-    if waves_per_eu is None:
-        return dict(knobs)
-    return {**knobs, "waves_per_eu": waves_per_eu}
+def _typed(knobs: Mapping[str, object], axes) -> Tuple[dict, str]:
+    """``knobs`` with each value in the type its axis declares, or the reason
+    one has no lossless conversion. Equal values of different types (``True``
+    and ``1``, ``2`` and ``2.0``) hash alike, so they must canonicalize alike."""
+    types = knob_types(axes)
+    typed = {}
+    for name, value in knobs.items():
+        want = types.get(name)
+        if want is None or value is None or type(value) is want:
+            typed[name] = value
+            continue
+        converted = _convert(value, want)
+        if converted is MISSING:
+            return dict(knobs), (
+                f"knob {name}={value!r} is a {type(value).__name__}; "
+                f"its axis takes {want.__name__}"
+            )
+        typed[name] = converted
+    return typed, ""
+
+
+def _convert(value, want: type):
+    if want is bool:
+        return (
+            bool(value)
+            if isinstance(value, (int, float)) and value in (0, 1)
+            else MISSING
+        )
+    if want is int:
+        if isinstance(value, (bool, int)) or (
+            isinstance(value, float) and value.is_integer()
+        ):
+            return int(value)
+        return MISSING
+    if want is float:
+        return float(value) if isinstance(value, (bool, int, float)) else MISSING
+    return MISSING

@@ -15,10 +15,9 @@ from dataclasses import dataclass, fields as _dataclass_fields, replace
 from functools import lru_cache
 from typing import Callable, Mapping, Optional, Tuple
 
-from rocke.dispatch.tuning import KnobSpace, waves_per_eu_sweep_values
-
 from .axes import DENSE_PROBLEM_FIELDS, KnobAxis, axis_knob_names, tuning_axes
 from .common import AttentionTuningSpec
+from .waves import WavesPerEuSpace, waves_per_eu_sweep_values
 
 DenseSupports = Callable[..., Tuple[bool, str]]
 
@@ -244,7 +243,7 @@ def _dense_defaults(base, recorded: frozenset) -> Tuple[Tuple[str, object], ...]
 
 
 @dataclass(frozen=True)
-class DenseSpace(KnobSpace):
+class DenseSpace(WavesPerEuSpace):
     """One dense variant's space. ``base`` is its default kernel spec for the
     request; ``supports`` is the kernel's own validator."""
 
@@ -263,9 +262,8 @@ class DenseSpace(KnobSpace):
     def defaults(self, base, kernel):
         return dict(_dense_defaults(base, self.recorded_fields))
 
-    def build(self, base, knobs, waves_per_eu):
-        extra = {} if waves_per_eu is None else {"waves_per_eu": int(waves_per_eu)}
-        return replace(base, **knobs, **extra)
+    def build(self, base, knobs):
+        return replace(base, **knobs)
 
     def inert(self, base, kernel):
         inert = dict(_dense_redundant_knobs(kernel, self.arch))
@@ -277,10 +275,10 @@ class DenseSpace(KnobSpace):
     def validate(self, base, kernel):
         return self.supports(kernel, arch=self.arch)
 
-    def default_waves(self, base):
+    def outer_default(self, base):
         return int(base.waves_per_eu)
 
-    def waves(self, base, level):
+    def outer_values(self, base, level):
         return waves_per_eu_sweep_values(int(base.waves_per_eu), level)
 
     def wrap(self, base, kernel, knobs, key, tid):

@@ -340,8 +340,9 @@ indirection must be preserved by any code that touches the gfx950 override.
 The probe that walks opt-in candidates and expands `sweep_space` now lives on
 `CandidateRegistry` (`combos` / `sweep_space` / `dispatch_all`). Every operator
 family wraps those methods (`registered_*_combos`, `*_sweep_space`,
-`dispatch_*_all`). Attention keeps a thin wrapper so gfx950 dense still returns
-its standalone dense spec rather than the unified path label.
+`dispatch_*_all`). Attention keeps a thin wrapper that yields executable
+`AttentionTuningSpec`s (dense and unified alike) rather than the routing-only
+unified path labels.
 
 `attention_sweep_space(req)` is the unified 2D/3D slice of that primitive: the
 deduped spec of every candidate that supports `req` and carries a `path`. The
@@ -365,9 +366,10 @@ roughly 16M legal knob settings, so `full` is consumed by sampling:
 random walk uniform at each knob decision, not uniform over the whole legal
 set. `production` ignores `tuning_sample`.
 
-Dense candidates share the level context but own a small WPE axis: production
-walks the shipped policy plus WPE 2 and 4; full walks WPE 1 through 4. WPE is
-part of the `tuning_id`, so an id replays one value.
+Dense candidates share the level context and have a full knob space
+(`dense_rules.py`): production walks the shipped spec plus each declared knob
+on its own, full walks the pruned product of every knob. WPE is swept on top
+of either level and is part of the `tuning_id`, so an id replays one value.
 
 Every consumer takes `sweep_level` plus `candidate_prefix` / `tuning_id_prefix`:
 `run_sweep` (exposed as `--sweep-level` / `--sweep-tuning-sample` /

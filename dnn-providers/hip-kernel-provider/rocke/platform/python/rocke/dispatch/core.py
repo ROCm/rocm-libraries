@@ -98,15 +98,12 @@ def pin_to_spec(
     request reselects what ran and ``request_hash`` tells configurations apart.
     """
     pinned = opt_in_probe(request, candidate)
+    if not (hasattr(pinned, "tuning_id") and hasattr(pinned, "tuning_knobs")):
+        return pinned
     tuned = str(getattr(spec, "tuning_id", "") or "")
-    if tuned and hasattr(pinned, "tuning_id") and hasattr(pinned, "tuning_knobs"):
-        try:
-            return replace(
-                pinned, tuning_id=tuned, tuning_knobs=getattr(spec, "knobs", ())
-            )
-        except TypeError:
-            return pinned
-    return pinned
+    if not tuned:
+        return replace(pinned, tuning_id="auto", tuning_knobs=())
+    return replace(pinned, tuning_id=tuned, tuning_knobs=getattr(spec, "knobs", ()))
 
 
 class PinRefused(ValueError):

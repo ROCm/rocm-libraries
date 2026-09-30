@@ -289,13 +289,19 @@ config_key = hash(TUNING_ID_VERSION, ABI, arch, path, variant_id, knobs,
                   fingerprint(the variant's defaults))
 ```
 
-`config_key` hashes that explicit list, never the spec's dataclass fields, so
-it is the same on every problem the variant admits and does not move when a
-kernel spec gains a field (a change to the payload or the canonicalization
-rules bumps `TUNING_ID_VERSION` in `rocke.dispatch.tuning.identity`). gfx942
-dense resolves `persistent` and `waves_per_eu` per problem, so those two are
-always recorded with their effective value. The `wpe{N}` stem is
-display only and is never parsed back. The compiled binary has a separate
+`config_key` hashes that explicit list rather than the spec's dataclass
+fields, so it is the same on every problem the variant admits. The defaults
+fingerprint covers every declared default of the kernel spec, so adding a
+defaulted field or changing a default changes every id of that variant: a
+stored pin is then refused instead of silently building a different kernel,
+and has to be re-swept. A change to the payload or the canonicalization rules
+bumps `TUNING_ID_VERSION` in `rocke.dispatch.tuning.identity`. gfx942 dense
+resolves `persistent` and `waves_per_eu` per problem, so those two are always
+recorded with their effective value. Pins match on `config_key`; the
+`{variant_id}_wpe{N}` stem (`waves.py`: `waves_per_eu` is the attention
+spaces' outer knob) is only read to skip variants a bare id cannot name
+(`KnobSpace.stem_prefix`). Knob values take the type their axis declares, so
+`True` and `1` name the same configuration. The compiled binary has a separate
 identity: `AttentionTuningSpec.identity()` (the kernel cache key), which
 `KernelId.spec_hash` hashes.
 
@@ -366,9 +372,14 @@ between fields or candidate-specific policy:
 - shape cohorts and 2D/3D path compatibility;
 - whether a geometry candidate produces any valid concrete tuning spec.
 
-Per tuning spec, the kernel's own validators are the only legality gate.
-Points they reject are omitted before they enter `sweep_space`; kernel
-builders are not responsible for repairing dispatcher tuning points.
+Per tuning spec, legality is the kernel's own validators plus, on the gfx950
+2D path, `UnifiedSpace.validate`: the tiled 2D validator does not model LDS,
+so a static LDS budget rejects specs codegen would refuse, and a padded K
+LDS is refused when Q aliases K (it computes wrong output). A pad the kernel
+lays out as no pad (double-buffered K, native-FP8 K, misaligned slabs) is
+inert and dropped, so it does not mint a second id. Points they reject are
+omitted before they enter `sweep_space`; kernel builders are not responsible
+for repairing dispatcher tuning points.
 
 ## Concrete tuning specs
 

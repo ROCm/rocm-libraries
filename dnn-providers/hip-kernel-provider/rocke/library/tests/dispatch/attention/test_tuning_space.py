@@ -29,8 +29,16 @@ from dispatch.attention.axes import (
     KNOWN_WRONG_KNOBS,
     tuning_axes,
 )
+from dispatch.attention.common import _problem
 from dispatch.attention.dense_rules import resolve_dense_num_persistent
+from dispatch.attention.gfx950_unified import GFX950_TUNING_VARIANTS
 from dispatch.attention.tuning_specs import _SEMANTIC_FIELDS
+from dispatch.attention.unified_rules import (
+    _gfx950_2d_lds_bytes,
+    canonicalize_tuning_spec,
+    unified_space,
+)
+from rocke.core.arch import ArchTarget
 from kernels.common.attention_unified import _tiled_2d_impl, _tiled_3d_impl
 from kernels.gfx942.attention_dense import (
     Gfx942AttentionDenseSpec,
@@ -372,12 +380,118 @@ class TestTuningSpace(unittest.TestCase):
                     for dead in DEAD_END_KNOBS[arch]:
                         self.assertFalse(getattr(spec.kernel_spec, dead, False), knob)
 
-    def test_dispatch_offers_what_the_kernel_accepts(self):
-        """No dispatcher gate is stricter than the kernel validators: the
-        wide32 8x baseline, which a dispatcher LDS estimate used to reject, is
-        offered because the tiled spec and supports_tiled_2d accept it."""
-        _c, _req, specs = _specs_for("attention_gfx950_u2d_wide32_nw4_mw32_t8xb_llvm")
-        self.assertTrue(specs)
+    def test_an_over_budget_geometry_still_resolves(self):
+        """The wide32 8x baseline passes the kernel validators but its LDS pool
+        (165888 B) does not fit; auto takes the single-K spec that does."""
+        spec = attention_tuning_spec(_request(), "gfx950_u2d_wide32_nw4_mw32_t8xb_llvm")
+        self.assertTrue(spec.kernel_spec.use_k_single_buffer)
+
+
+def _gfx950_variant(spec_id):
+    return next(v for v in GFX950_TUNING_VARIANTS if v.spec_id == spec_id)
+
+
+_KQ_PAD = {"use_k_single_buffer": True, "use_kq_lds_pad": True, "kq_lds_pad_halves": 16}
+
+
+class TestGfx950UnifiedLegality(unittest.TestCase):
+    """What the tiled 2D validator does not model: the LDS footprint, and the
+    padded-K layout the kernel disables or cannot share with Q."""
+
+    def test_lds_model_is_the_lowered_pool(self):
+        import re
+
+        import kernels.common.attention_unified as au
+        from dispatch.attention.tuning_specs import build_explicit_attention_2d
+        from rocke import lower_kernel_to_llvm
+
+        decode = dict(
+            nhead_q=16, nhead_k=2, seqlen_q=1, seqlen_k=8192, kv_block_size=64
+        )
+        cases = (
+            ("gfx950_u2d_narrow_nw1_mw16_t4xb_llvm", decode, {}),
+            (
+                "gfx950_u2d_narrow_nw1_mw16_t4xb_llvm",
+                decode,
+                {"use_k_single_buffer": True},
+            ),
+            ("gfx950_u2d_wide32_nw4_mw32_t8xb_llvm", {}, {}),
+            ("gfx950_u2d_transposed32_nw4_mw32_t1xb_llvm", decode, {}),
+            (
+                "gfx950_u2d_transposed32_nw2_mw32_t4xb_llvm",
+                dict(mask_type=1, kv_block_size=64),
+                {**_KQ_PAD, "use_q_reread": True},
+            ),
+        )
+        au._RESOLVED_ATTENTION_ARCH = "gfx950"  # conftest restores it
+        for spec_id, shape, knobs in cases:
+            with self.subTest(spec_id=spec_id, knobs=knobs):
+                problem = _problem(_request(**shape))
+                space = unified_space(_gfx950_variant(spec_id))
+                spec = space.build(problem, {**space.fixed(problem), **knobs})
+                ir = lower_kernel_to_llvm(
+                    build_explicit_attention_2d(spec.kernel_spec, arch="gfx950"),
+                    arch="gfx950",
+                )
+                pool = sum(
+                    int(n)
+                    for n in re.findall(r"addrspace\(3\) global \[(\d+) x i8\]", ir)
+                )
+                self.assertEqual(_gfx950_2d_lds_bytes(spec.kernel_spec), pool)
+
+    def test_over_budget_baseline_is_refused_and_auto_fits(self):
+        req = _request(
+            nhead_q=16, nhead_k=2, seqlen_q=1, seqlen_k=8192, kv_block_size=64
+        )
+        variant = _gfx950_variant("gfx950_u2d_narrow_nw1_mw16_t4xb_llvm")
+        spec, why = canonicalize_tuning_spec(_problem(req), variant, {})
+        self.assertIsNone(spec)
+        self.assertIn("LDS budget", why)
+        auto = attention_tuning_spec(req, variant.spec_id)
+        self.assertEqual(dict(auto.knobs), {"use_k_single_buffer": True})
+        cap = ArchTarget.from_gfx("gfx950").lds_capacity_bytes
+        double_k = replace(auto.kernel_spec, use_k_single_buffer=False)
+        # llc: "local memory (209152) exceeds limit (163840)" for the baseline.
+        self.assertEqual(_gfx950_2d_lds_bytes(double_k), 209152)
+        self.assertLessEqual(_gfx950_2d_lds_bytes(auto.kernel_spec), cap)
+
+    def test_padded_k_with_aliased_q_is_refused(self):
+        req = _request(mask_type=1, kv_block_size=64)
+        spec_id = "gfx950_u2d_transposed32_nw2_mw32_t2xb_llvm"
+        with self.assertRaisesRegex(ValueError, "aliased Q"):
+            tuning_spec_with_knobs(req, spec_id, _KQ_PAD)
+        reread = tuning_spec_with_knobs(req, spec_id, {**_KQ_PAD, "use_q_reread": True})
+        self.assertTrue(reread.kernel_spec.use_kq_lds_pad)
+
+    def test_a_pad_the_kernel_lays_out_as_none_names_the_unpadded_spec(self):
+        req = _request(mask_type=1, kv_block_size=64)
+        variant = _gfx950_variant("gfx950_u2d_transposed32_nw2_mw32_t2xb_hipcc")
+        unpadded, _why = canonicalize_tuning_spec(_problem(req), variant, {})
+        for halves in (8, 16, 24, 32):
+            with self.subTest(halves=halves):
+                padded, why = canonicalize_tuning_spec(
+                    _problem(req),
+                    variant,
+                    {"use_kq_lds_pad": True, "kq_lds_pad_halves": halves},
+                )
+                self.assertIsNotNone(padded, why)
+                self.assertEqual(padded.tuning_id, unpadded.tuning_id)
+                self.assertEqual(padded.knobs, ())
+
+    def test_offered_pads_are_laid_out_and_never_alias_q(self):
+        shape = dict(mask_type=1, kv_block_size=64)
+        for prefix in (
+            "attention_gfx950_u2d_transposed32_nw2_mw32_t2xb_llvm",
+            "attention_gfx950_u2d_wide32_nw2_mw32_t2xb_llvm",
+        ):
+            specs = _sampled(prefix, 64, **shape) + _specs_for(prefix, 300, **shape)[2]
+            self.assertTrue(specs, prefix)
+            for spec in specs:
+                ks = spec.kernel_spec
+                if ks.use_kq_lds_pad:
+                    with self.subTest(spec=spec.tuning_id):
+                        self.assertTrue(ks.use_k_single_buffer)
+                        self.assertTrue(ks.use_q_reread or ks.use_q_direct_reg)
 
 
 def _dense_request(**kw):

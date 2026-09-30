@@ -117,7 +117,7 @@ def make_tuned_candidate(
         if errors:
             return False, "; ".join(errors)
         if not explicitly_pinned(req, algorithm, spec_id):
-            return False, f"opt-in: pin spec_id={spec_id!r}"
+            return False, f"opt-in: pin algorithm={algorithm!r} and spec_id={spec_id!r}"
         if precheck is not None:
             ok, why = precheck(req)
             if not ok:
