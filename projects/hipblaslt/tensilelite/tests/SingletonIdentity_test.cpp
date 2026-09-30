@@ -7,11 +7,6 @@
 
 #include "DebugInstanceProbe.hpp"
 
-// ROCM-31245 regression guard. This test binary is a separate link unit from
-// tensilelite-host, so it stands in for libhipblaslt: if Debug can be
-// duplicated across a shared-library boundary, it is duplicated here too.
-// With a static tensilelite-host there is only one link unit and the checks
-// below cannot fail, so they only run against a shared build.
 namespace
 {
     class ExcludedLibGuard

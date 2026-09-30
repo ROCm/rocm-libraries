@@ -314,8 +314,6 @@ namespace TensileLite
         }
     }
 
-    // Test-only probe, declared for tests in tests/include/DebugInstanceProbe.hpp
-    // rather than a public header. Keep the two declarations in sync.
     TENSILELITEHOST_EXPORT const void* debugInstanceAddress();
 
     const void* debugInstanceAddress()

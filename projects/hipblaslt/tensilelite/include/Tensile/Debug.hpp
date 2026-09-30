@@ -45,10 +45,6 @@ namespace TensileLite
     class TENSILELITEHOST_EXPORT Debug
     {
     public:
-        // Must stay defined out of line in Debug.cpp. An inline accessor gets
-        // hidden visibility under VISIBILITY_INLINES_HIDDEN, so libhipblaslt and
-        // a shared libtensilelite-host would each own a separate Debug instance
-        // and state such as excludedLibFromGetAll() would not cross between them.
         static Debug& Instance();
 
         bool printPropertyEvaluation() const;

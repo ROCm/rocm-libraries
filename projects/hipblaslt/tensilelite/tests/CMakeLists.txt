@@ -90,16 +90,11 @@ endif()
 
 target_link_libraries(tensilelite-tests PUBLIC GTest::gtest)
 
-# SingletonIdentity_test is only meaningful across a shared-library boundary.
 target_compile_definitions(tensilelite-tests
     PRIVATE
         $<$<STREQUAL:$<TARGET_PROPERTY:tensilelite-host,TYPE>,SHARED_LIBRARY>:TENSILELITE_HOST_IS_SHARED>
 )
 
-# In YAML builds the serialization templates are instantiated in these test
-# translation units, not only inside tensilelite-host. tensilelite-host links
-# LLVMObjectYAML PRIVATE and, when shared, is linked with --exclude-libs,ALL,
-# so it does not re-export those symbols.
 if(HIPBLASLT_ENABLE_YAML)
     target_link_libraries(tensilelite-tests PRIVATE LLVMObjectYAML)
     target_include_directories(tensilelite-tests PRIVATE ${LLVM_INCLUDE_DIRS})
