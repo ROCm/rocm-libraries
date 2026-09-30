@@ -147,7 +147,7 @@ and cases are not authored by hand. The route is a round trip through C++:
 An engine's output is only checked if an oracle exists
 ([Verification modes](running-tests.md#verification-modes)). Which ops each
 reference executor must handle is listed in
-`src/harness/bundle/ReferenceOpCoverage.hpp`. If yours is not there, the bundle
+`src/harness/reference-validation/ReferenceOpCoverage.hpp`. If yours is not there, the bundle
 lands in `UNVERIFIABLE BUNDLES` and nothing checks it. Either:
 
 - **add golden data** produced by an independent implementation (see

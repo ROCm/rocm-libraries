@@ -177,11 +177,16 @@ build/bin/hipdnn_golden_data_tests --gtest_filter='quick_*'
 | `--validator` | `auto` (host) | Where the comparison runs. `gpu` needs a device, even for the CPU suite. |
 | `--test-config`, `--tc` | none | Accepted, but this harness applies neither the TOML's skips nor its tolerances. |
 
-It has no skip path for a bundle it can run: a test is registered only when the
-bundle has golden data **and** every node in its graph is in that reference's
-required-op set (`src/harness/bundle/ReferenceOpCoverage.hpp`); the counts are
-printed at registration. A tree whose `.bin` files were never pulled registers
-nothing and says so. It is registered once, not per provider.
+A registered test has no skip path in its body: a test is registered only when
+the bundle has golden data **and** every node in its graph is in that
+reference's required-op set
+(`src/harness/reference-validation/ReferenceOpCoverage.hpp`), so a reference that
+cannot run a registered graph is a failure. Bundles outside a lane's set are
+absent from that lane, and the counts — plus the ops responsible — are printed
+at registration. With both lanes selected (the default), a bundle with golden
+data that neither lane registered a test for fails as `<bundle>_Unvalidated`. A
+tree whose `.bin` files were never pulled registers nothing and says so. It is
+registered once, not per provider.
 
 ## Test tiers
 
