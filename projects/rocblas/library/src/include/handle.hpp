@@ -327,7 +327,26 @@ public:
      ******************************************************************************/
     bool tryHipBLASLt(bool batched)
     {
-        return isHipBLASLtEnabled() && !(batched && is_stream_in_capture_mode());
+        bool status = false;
+
+#ifdef BUILD_WITH_HIPBLASLT
+        if(hipblasltEnvVar < 0)
+        {
+            if(isDefaultHipBLASLtArch())
+            {
+                status = true;
+            }
+        }
+        else
+            status = hipblasltEnvVar == 1;
+#endif
+
+        if(status && batched)
+        {
+            status = !is_stream_in_capture_mode();
+        }
+
+        return status;
     }
 
     bool isHipBLASLtEnabled()
