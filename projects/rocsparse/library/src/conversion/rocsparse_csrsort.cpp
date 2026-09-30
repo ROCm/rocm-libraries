@@ -491,73 +491,84 @@ rocsparse_status rocsparse::csxsort(rocsparse_handle            handle,
     const rocsparse_indextype  ind_type  = by_row ? target->col_type : target->row_type;
     const rocsparse_datatype   data_type = target->data_type;
 
-    const void* ptr_source = by_row ? source->const_row_data : source->const_col_data;
-    const void* ind_source = by_row ? source->const_col_data : source->const_row_data;
-    void*       ptr_target = by_row ? target->row_data : target->col_data;
-    void*       ind_target = by_row ? target->col_data : target->row_data;
+    const char* ptr_source
+        = reinterpret_cast<const char*>(by_row ? source->const_row_data : source->const_col_data);
+    const char* ind_source
+        = reinterpret_cast<const char*>(by_row ? source->const_col_data : source->const_row_data);
+    const char* val_source = reinterpret_cast<const char*>(source->const_val_data);
+    char*       ptr_target = reinterpret_cast<char*>(by_row ? target->row_data : target->col_data);
+    char*       ind_target = reinterpret_cast<char*>(by_row ? target->col_data : target->row_data);
+    char*       val_target = reinterpret_cast<char*>(target->val_data);
 
     const size_t ptr_size = rocsparse::indextype_sizeof(ptr_type);
     const size_t ind_size = rocsparse::indextype_sizeof(ind_type);
     const size_t val_size = rocsparse::datatype_sizeof(data_type);
 
+    const size_t val_stride_source = source->columns_values_batch_stride * val_size;
+    const size_t ptr_stride_target = target->offsets_batch_stride * ptr_size;
+    const size_t ind_stride_target = target->columns_values_batch_stride * ind_size;
+    const size_t val_stride_target = target->columns_values_batch_stride * val_size;
+
     void* perm = buffer;
     void* sort_buffer
         = reinterpret_cast<char*>(buffer) + rocsparse::csxsort_perm_size(nnz, ptr_type);
 
+    // Only uniform batches are supported, so every batch has the sparsity pattern of the first
+    // one. Its indices are sorted once, and the resulting permutation is applied to the values
+    // of every batch.
+
+    // The index sort works in place, so the offsets and indices of source are first copied into
+    // target. A matrix without rows may have a null offsets array.
+    if(m > 0 && ptr_target != ptr_source)
+    {
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+            ptr_target, ptr_source, ptr_size * (m + 1), hipMemcpyDeviceToDevice, handle->stream));
+    }
+    if(ind_target != ind_source)
+    {
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+            ind_target, ind_source, ind_size * nnz, hipMemcpyDeviceToDevice, handle->stream));
+    }
+
+    // The index sort applies its reordering to perm, so it must start as the identity.
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcreate_identity_permutation(handle, nnz, ptr_type, perm));
+
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcsrsort(handle,
+                                                  m,
+                                                  n,
+                                                  nnz,
+                                                  idx_base,
+                                                  ptr_type,
+                                                  ind_type,
+                                                  ptr_target,
+                                                  ind_target,
+                                                  perm,
+                                                  sort_buffer));
+
     // The batches run one after the other on the handle stream, so they share the buffer.
     for(int64_t batch = 0; batch < target->batch_count; ++batch)
     {
-        const int64_t offsets_offset_source = batch * source->offsets_batch_stride;
-        const int64_t offsets_offset_target = batch * target->offsets_batch_stride;
-        const int64_t cv_offset_source      = batch * source->columns_values_batch_stride;
-        const int64_t cv_offset_target      = batch * target->columns_values_batch_stride;
-
-        const void* batch_ptr_source
-            = reinterpret_cast<const char*>(ptr_source) + offsets_offset_source * ptr_size;
-        const void* batch_ind_source
-            = reinterpret_cast<const char*>(ind_source) + cv_offset_source * ind_size;
-        const void* batch_val_source
-            = reinterpret_cast<const char*>(source->const_val_data) + cv_offset_source * val_size;
-        void* batch_ptr_target
-            = reinterpret_cast<char*>(ptr_target) + offsets_offset_target * ptr_size;
-        void* batch_ind_target = reinterpret_cast<char*>(ind_target) + cv_offset_target * ind_size;
-        void* batch_val_target
-            = reinterpret_cast<char*>(target->val_data) + cv_offset_target * val_size;
-
-        // The index sort works in place, so the offsets and indices of source are first copied
-        // into target. A matrix without rows may have a null offsets array.
-        if(m > 0 && batch_ptr_target != batch_ptr_source)
+        if(batch > 0)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(batch_ptr_target,
-                                                         batch_ptr_source,
-                                                         ptr_size * (m + 1),
-                                                         hipMemcpyDeviceToDevice,
-                                                         handle->stream));
-        }
-        if(batch_ind_target != batch_ind_source)
-        {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(batch_ind_target,
-                                                         batch_ind_source,
+            // The offsets of the target are shared by all its batches when their stride is zero.
+            char* batch_ptr_target = ptr_target + batch * ptr_stride_target;
+            if(m > 0 && batch_ptr_target != ptr_target)
+            {
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(batch_ptr_target,
+                                                             ptr_target,
+                                                             ptr_size * (m + 1),
+                                                             hipMemcpyDeviceToDevice,
+                                                             handle->stream));
+            }
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(ind_target + batch * ind_stride_target,
+                                                         ind_target,
                                                          ind_size * nnz,
                                                          hipMemcpyDeviceToDevice,
                                                          handle->stream));
         }
 
-        // The index sort applies its reordering to perm, so it must start as the identity.
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::gcreate_identity_permutation(handle, nnz, ptr_type, perm));
-
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcsrsort(handle,
-                                                      m,
-                                                      n,
-                                                      nnz,
-                                                      idx_base,
-                                                      ptr_type,
-                                                      ind_type,
-                                                      batch_ptr_target,
-                                                      batch_ind_target,
-                                                      perm,
-                                                      sort_buffer));
+        const char* batch_val_source = val_source + batch * val_stride_source;
+        char*       batch_val_target = val_target + batch * val_stride_target;
 
         // The gather cannot write over its own input, so in place values go through scratch.
         const bool in_place_val = (batch_val_target == batch_val_source);
