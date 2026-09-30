@@ -53,6 +53,7 @@ Tests:
   M: [300]
   N: [242]
   baseA: *all_rocsparse_index_base
+  algo: [0, 1]
   matrix: [rocsparse_matrix_random]
 
 - name: spsort_csc
@@ -74,6 +75,7 @@ Tests:
   N: [33]
   batch_count: [2]
   baseA: [rocsparse_index_base_one]
+  algo: [0, 1]
   matrix: [rocsparse_matrix_random]
 
 - name: spsort_csc_file
