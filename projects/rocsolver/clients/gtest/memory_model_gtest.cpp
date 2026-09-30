@@ -96,9 +96,9 @@ TEST_F(checkin_misc_memory_model, MemorySizeQuery_GETRF_Deterministic)
     EXPECT_EQ(size1, size2);
     EXPECT_GT(size1, 0);
 
-    hipFree(dA);
-    hipFree(dP);
-    hipFree(dinfo);
+    ASSERT_EQ(hipFree(dA), hipSuccess);
+    ASSERT_EQ(hipFree(dP), hipSuccess);
+    ASSERT_EQ(hipFree(dinfo), hipSuccess);
 }
 
 TEST_F(checkin_misc_memory_model, MemorySizeQuery_GETRF_SizeScaling)
@@ -130,9 +130,9 @@ TEST_F(checkin_misc_memory_model, MemorySizeQuery_GETRF_SizeScaling)
     EXPECT_LE(size_bc10 * 9, size_bc100);
     EXPECT_GE(size_bc10 * 11, size_bc100);
 
-    hipFree(dA);
-    hipFree(dP);
-    hipFree(dinfo);
+    ASSERT_EQ(hipFree(dA), hipSuccess);
+    ASSERT_EQ(hipFree(dP), hipSuccess);
+    ASSERT_EQ(hipFree(dinfo), hipSuccess);
 }
 
 TEST_F(checkin_misc_memory_model, MemorySizeQuery_ComplexVsReal)
@@ -169,12 +169,12 @@ TEST_F(checkin_misc_memory_model, MemorySizeQuery_ComplexVsReal)
     EXPECT_LE(size_real * 1.9, size_complex);
     EXPECT_GE(size_real * 2.1, size_complex);
 
-    hipFree(dA_real);
-    hipFree(dP_real);
-    hipFree(dinfo_real);
-    hipFree(dA_complex);
-    hipFree(dP_complex);
-    hipFree(dinfo_complex);
+    ASSERT_EQ(hipFree(dA_real), hipSuccess);
+    ASSERT_EQ(hipFree(dP_real), hipSuccess);
+    ASSERT_EQ(hipFree(dinfo_real), hipSuccess);
+    ASSERT_EQ(hipFree(dA_complex), hipSuccess);
+    ASSERT_EQ(hipFree(dP_complex), hipSuccess);
+    ASSERT_EQ(hipFree(dinfo_complex), hipSuccess);
 }
 
 TEST_F(checkin_misc_memory_model, MemorySizeQuery_EdgeCase_ZeroSize)
@@ -232,12 +232,12 @@ TEST_F(checkin_misc_memory_model, MemorySizeQuery_GETRF_SmallVsLarge)
     // Large problem should require more workspace
     EXPECT_GT(size_large, size_small);
 
-    hipFree(dA_large);
-    hipFree(dP_large);
-    hipFree(dinfo_large);
-    hipFree(dA_small);
-    hipFree(dP_small);
-    hipFree(dinfo_small);
+    ASSERT_EQ(hipFree(dA_large), hipSuccess);
+    ASSERT_EQ(hipFree(dP_large), hipSuccess);
+    ASSERT_EQ(hipFree(dinfo_large), hipSuccess);
+    ASSERT_EQ(hipFree(dA_small), hipSuccess);
+    ASSERT_EQ(hipFree(dP_small), hipSuccess);
+    ASSERT_EQ(hipFree(dinfo_small), hipSuccess);
 }
 
 /*************************************/
@@ -300,9 +300,9 @@ TEST_F(checkin_misc_memory_model, NumericalCorrectness_MultipleInvocations_GETRF
         }
     }
 
-    hipFree(dA);
-    hipFree(dP);
-    hipFree(dinfo);
+    ASSERT_EQ(hipFree(dA), hipSuccess);
+    ASSERT_EQ(hipFree(dP), hipSuccess);
+    ASSERT_EQ(hipFree(dinfo), hipSuccess);
 }
 
 TEST_F(checkin_misc_memory_model, NumericalCorrectness_AlternatingSizes)
@@ -357,9 +357,9 @@ TEST_F(checkin_misc_memory_model, NumericalCorrectness_AlternatingSizes)
         EXPECT_EQ(hinfo, 0);
     }
 
-    hipFree(dA);
-    hipFree(dP);
-    hipFree(dinfo);
+    ASSERT_EQ(hipFree(dA), hipSuccess);
+    ASSERT_EQ(hipFree(dP), hipSuccess);
+    ASSERT_EQ(hipFree(dinfo), hipSuccess);
 }
 
 /*************************************/
@@ -393,10 +393,10 @@ TEST_F(checkin_misc_memory_model, NestedWorkspace_GEBLTTRS_reuses_GETRS)
         size = query_workspace_size(rocsolver_dgeblttrs_npvt, nb, nblocks, nrhs, dA, lda, dB, ldb,
                                     dC, ldc, dX, ldx);
 
-        hipFree(dA);
-        hipFree(dB);
-        hipFree(dC);
-        hipFree(dX);
+        ASSERT_EQ(hipFree(dA), hipSuccess);
+        ASSERT_EQ(hipFree(dB), hipSuccess);
+        ASSERT_EQ(hipFree(dC), hipSuccess);
+        ASSERT_EQ(hipFree(dX), hipSuccess);
     };
 
     // Standalone GETRS over a single nb-by-nrhs block, matching the inner solve.
@@ -409,9 +409,9 @@ TEST_F(checkin_misc_memory_model, NestedWorkspace_GEBLTTRS_reuses_GETRS)
     size_t getrs_size = query_workspace_size(rocsolver_dgetrs, rocblas_operation_none, nb, nrhs,
                                              dGA, lda, dGP, dGB, ldb);
 
-    hipFree(dGA);
-    hipFree(dGB);
-    hipFree(dGP);
+    ASSERT_EQ(hipFree(dGA), hipSuccess);
+    ASSERT_EQ(hipFree(dGB), hipSuccess);
+    ASSERT_EQ(hipFree(dGP), hipSuccess);
 
     size_t geblttrs_size_1 = 0, geblttrs_size_8 = 0;
     query_geblttrs(1, geblttrs_size_1);
@@ -511,10 +511,10 @@ TEST_F(checkin_misc_memory_model, NestedWorkspace_GESV_NumericalCorrectness)
 
     EXPECT_LT(max_residual, 1e-6) << "Solution residual too large";
 
-    hipFree(dA);
-    hipFree(dB);
-    hipFree(dP);
-    hipFree(dinfo);
+    ASSERT_EQ(hipFree(dA), hipSuccess);
+    ASSERT_EQ(hipFree(dB), hipSuccess);
+    ASSERT_EQ(hipFree(dP), hipSuccess);
+    ASSERT_EQ(hipFree(dinfo), hipSuccess);
 }
 
 /*************************************/
@@ -563,10 +563,10 @@ TEST_F(checkin_misc_memory_model, UserManagedMemory_ExactAllocation)
     ASSERT_EQ(hipMemcpy(&hinfo, dinfo, sizeof(rocblas_int), hipMemcpyDeviceToHost), hipSuccess);
     EXPECT_EQ(hinfo, 0);
 
-    hipFree(workspace);
-    hipFree(dA);
-    hipFree(dP);
-    hipFree(dinfo);
+    ASSERT_EQ(hipFree(workspace), hipSuccess);
+    ASSERT_EQ(hipFree(dA), hipSuccess);
+    ASSERT_EQ(hipFree(dP), hipSuccess);
+    ASSERT_EQ(hipFree(dinfo), hipSuccess);
 }
 
 TEST_F(checkin_misc_memory_model, UserManagedMemory_InsufficientAllocation)
@@ -603,10 +603,10 @@ TEST_F(checkin_misc_memory_model, UserManagedMemory_InsufficientAllocation)
     rocblas_status status = rocsolver_dgetrf(handle, n, n, dA, lda, dP, dinfo);
     EXPECT_EQ(status, rocblas_status_memory_error);
 
-    hipFree(workspace);
-    hipFree(dA);
-    hipFree(dP);
-    hipFree(dinfo);
+    ASSERT_EQ(hipFree(workspace), hipSuccess);
+    ASSERT_EQ(hipFree(dA), hipSuccess);
+    ASSERT_EQ(hipFree(dP), hipSuccess);
+    ASSERT_EQ(hipFree(dinfo), hipSuccess);
 }
 
 /*************************************/
@@ -666,11 +666,11 @@ TEST_F(checkin_misc_memory_model, BatchedFunction_GETRF_Correctness)
     // Cleanup
     for(int b = 0; b < batch_count; b++)
     {
-        hipFree(hA_array[b]);
+        ASSERT_EQ(hipFree(hA_array[b]), hipSuccess);
     }
-    hipFree(dA_array);
-    hipFree(dP);
-    hipFree(dinfo);
+    ASSERT_EQ(hipFree(dA_array), hipSuccess);
+    ASSERT_EQ(hipFree(dP), hipSuccess);
+    ASSERT_EQ(hipFree(dinfo), hipSuccess);
 }
 
 /*************************************/
@@ -707,9 +707,9 @@ TEST_F(checkin_misc_memory_model, StressTest_RapidAllocationDeallocation)
         EXPECT_EQ(hinfo, 0) << "Non-zero info at iteration " << iter;
     }
 
-    hipFree(dA);
-    hipFree(dP);
-    hipFree(dinfo);
+    ASSERT_EQ(hipFree(dA), hipSuccess);
+    ASSERT_EQ(hipFree(dP), hipSuccess);
+    ASSERT_EQ(hipFree(dinfo), hipSuccess);
 }
 
 TEST_F(checkin_misc_memory_model, StressTest_RandomSizes)
@@ -749,7 +749,7 @@ TEST_F(checkin_misc_memory_model, StressTest_RandomSizes)
         EXPECT_EQ(hinfo, 0) << "Non-zero info at iteration " << iter << " with size " << n;
     }
 
-    hipFree(dA);
-    hipFree(dP);
-    hipFree(dinfo);
+    ASSERT_EQ(hipFree(dA), hipSuccess);
+    ASSERT_EQ(hipFree(dP), hipSuccess);
+    ASSERT_EQ(hipFree(dinfo), hipSuccess);
 }
