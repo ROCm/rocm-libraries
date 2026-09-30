@@ -8,9 +8,6 @@
 
 #include <cstdint>
 #include <string>
-#ifdef HIPBLASLT_ENABLE_JIT
-#include "hipblaslt-jit-tensilelite.hpp"
-#endif
 
 // Process-wide CLI knobs that hipblaslt-bench forwards into the matmul
 // descriptor without going through the YAML-backed Arguments struct.
@@ -26,11 +23,6 @@
 // as {0=off, 1=on} and follows the same convention.
 namespace hipblaslt_bench_options
 {
-    bool&        jit_gemm();
-    std::string& jit_output_dir();
-#ifdef HIPBLASLT_ENABLE_JIT
-    hipblaslt_ext::experimental::jit::tensilelite::Options jit_generate_options();
-#endif
     int32_t&     sm_count_target();
     int32_t&     streamk_tile_scheduling_mode();
     std::string& streamk_tile_scheduling_mode_str();

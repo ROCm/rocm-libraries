@@ -4,23 +4,6 @@
 add_executable(hipblaslt-bench)
 add_library(hipblaslt-clients-common STATIC)
 
-if(HIPBLASLT_ENABLE_JIT)
-    # testing_matmul.hpp is shared by the benchmark and client tests.
-    target_compile_definitions(hipblaslt-clients-common PUBLIC HIPBLASLT_ENABLE_JIT)
-    if(NOT TARGET _rocisa)
-        message(FATAL_ERROR "hipblaslt-bench JIT requires the local _rocisa target")
-    endif()
-    add_dependencies(hipblaslt-clients-common _rocisa)
-    # --jit-gemm uses the internal, uninstalled JIT headers until HIPBLASLT_JIT replaces it.
-    target_include_directories(hipblaslt-clients-common PUBLIC
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail>)
-    target_compile_definitions(hipblaslt-clients-common PRIVATE
-        HIPBLASLT_JIT_PYTHON="${Python_EXECUTABLE}"
-        HIPBLASLT_JIT_TENSILE_SOURCE="${PROJECT_SOURCE_DIR}/tensilelite"
-        HIPBLASLT_JIT_PYTHONPATH="$<TARGET_FILE_DIR:_rocisa>/.."
-        HIPBLASLT_JIT_CXX="${CMAKE_CXX_COMPILER}")
-endif()
-
 target_include_directories(hipblaslt-clients-common
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/include>
@@ -250,7 +233,6 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
 
     add_subdirectory(tests)
 endif()
-
 if(HIPBLASLT_ENABLE_SAMPLES)
     add_subdirectory(samples)
 endif()

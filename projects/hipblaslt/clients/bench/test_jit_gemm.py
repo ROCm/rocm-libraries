@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import time
 
 
@@ -76,26 +77,20 @@ def check_numerics(stdout):
     return result
 
 
-def check_provenance(stderr, stdout, case, artifact_root, architecture):
+def generator_outputs(invocation):
+    """The copies of one generator invocation's outputs: (root, output name)."""
+    require(invocation["artifacts"], "Generator outputs were not copied")
+    return Path(invocation["artifacts"]), Path(invocation["output"]).name
+
+
+def check_provenance(invocation, stdout, case, architecture):
     import yaml  # Use the existing configured venv (already needed by Tensile).
 
-    def reported(label):
-        matches = re.findall(r"^" + re.escape(label) + r": (.+)$", stderr, re.MULTILINE)
-        require(len(matches) == 1, f"Expected one {label}, got {len(matches)}")
-        path = Path(matches[0]).resolve(strict=True)
-        require(
-            path.is_relative_to(artifact_root), f"Artifact escaped test output: {path}"
-        )
-        return path
-
-    config = reported("JIT recipe")
-    manifest_path = reported("JIT manifest")
-    require(
-        "JIT recipe:" not in stdout and "JIT manifest:" not in stdout,
-        "JIT diagnostics polluted benchmark stdout",
-    )
-    manifests = list(artifact_root.rglob("manifest.json"))
-    require(manifests == [manifest_path], f"Expected one generated bundle: {manifests}")
+    root, name = generator_outputs(invocation)
+    config = root / (name + ".yaml")
+    manifests = list((root / name).glob("bundle-*/manifest.json"))
+    require(len(manifests) == 1, f"Expected one generated bundle: {manifests}")
+    manifest_path = manifests[0]
     manifest = json.loads(manifest_path.read_text())
     require(manifest["counts"]["solutions"] == 1, "Generated more than one solution")
     require(
@@ -247,13 +242,13 @@ def make_case(
     expected = dict(
         DataTypeA=type_id,
         DataTypeB=type_id,
-        DestDataType=0 if name == "half-c-default" else type_id,
+        DestDataType=type_id,
         ComputeDataType={"i8": 6, "c": 2}.get(dtype, 0),
         OutputAmaxD=amax,
     )
     expected.update(problem_type or {})
     args = ["--api_method", api, "-m", str(m), "-n", str(n), "-k", str(k)]
-    # Omitting precision verifies the JIT-specific FP16 input / FP32 output defaults.
+    # Omitting precision verifies the benchmark's FP16 default reaches generation.
     if name != "half-c-default":
         precision = {
             "h": "f16_r",
@@ -562,6 +557,59 @@ CASES = [
     ),
 ]
 
+# Records each generator invocation, copies its outputs before hipBLASLt removes
+# them, and can inject a timing sentinel.
+GENERATOR_WRAPPER = """import json, os, shutil, subprocess, sys, time
+from pathlib import Path
+trace = Path(os.environ['HIPBLASLT_JIT_TRACE'])
+start = time.monotonic_ns()
+time.sleep(float(os.environ.get('HIPBLASLT_JIT_TEST_DELAY', '0')))
+status = subprocess.call([os.environ['HIPBLASLT_JIT_REAL_PYTHON'], *sys.argv[1:]])
+record = dict(args=sys.argv[1:], start_ns=start, end_ns=time.monotonic_ns(),
+              status=status, output=None, artifacts=None)
+if sys.argv[1:3] == ['-m', 'Tensile.JitGemm']:
+    output = Path(sys.argv[4])
+    copy = trace.parent / f'generator-{len(list(trace.parent.glob("generator-*")))}'
+    copy.mkdir()
+    for path in output.parent.iterdir():
+        if path.name.startswith(output.name + '.') and path.is_file():
+            shutil.copy2(path, copy / path.name)
+    if output.is_dir():
+        shutil.copytree(output, copy / output.name, symlinks=True)
+    record.update(output=str(output), artifacts=str(copy))
+with open(trace, 'a') as stream:
+    stream.write(json.dumps(record) + '\\n')
+sys.exit(status)
+"""
+
+NO_RESULT = "NO solution found"
+
+
+def generations(path):
+    trace = path / "generator.jsonl"
+    if not trace.exists():
+        return []
+    return [json.loads(line) for line in trace.read_text().splitlines()]
+
+
+def jit_reports(stderr, severity="error"):
+    return re.findall(r"^hipblaslt " + severity + r": JIT .*$", stderr, re.MULTILINE)
+
+
+def library_entries(path):
+    return list((path / "jit-library").rglob("TensileLibrary_JIT_*.dat"))
+
+
+def check_no_result(proc, path, diagnostic):
+    errors = jit_reports(proc.stderr)
+    require(
+        len(errors) == 1 and diagnostic in errors[0],
+        f"Expected one JIT error naming {diagnostic!r}: {errors}",
+    )
+    require(NO_RESULT in proc.stderr, "Benchmark did not report the empty heuristic")
+    require("norm_error" not in proc.stdout, "Empty heuristic entered timed execution")
+    require(not library_entries(path), "Failed request published a solution")
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -576,7 +624,11 @@ def main():
     parser.add_argument(
         "--case", action="append", choices=[case["name"] for case in CASES]
     )
-    parser.add_argument("--feature-off", action="store_true")
+    parser.add_argument(
+        "--feature-off",
+        action="store_true",
+        help="Check a build without HIPBLASLT_ENABLE_JIT ignores HIPBLASLT_JIT",
+    )
     parser.add_argument("--negative-only", action="store_true")
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument(
@@ -596,7 +648,7 @@ def main():
     empty_library.mkdir()
     env = dict(os.environ)
     for name in list(env):
-        if name.startswith("HIPBLASLT_JIT_"):
+        if name.startswith("HIPBLASLT_JIT"):
             del env[name]
     for name in ("HIPBLASLT_TUNING_FILE", "HIPBLASLT_TUNING_USER_MAX_WORKSPACE"):
         env.pop(name, None)
@@ -622,31 +674,24 @@ def main():
         )
 
     wrapper = output / "trace-python"
-    # The wrapper records every generator invocation and can inject a timing sentinel.
-    wrapper.write_text(
-        "#!"
-        + str(args.python.absolute())
-        + "\n"
-        + """import json, os, subprocess, sys, time
-path = os.environ['HIPBLASLT_JIT_TRACE']
-start = time.monotonic_ns()
-time.sleep(float(os.environ.get('HIPBLASLT_JIT_TEST_DELAY', '0')))
-status = subprocess.call([os.environ['HIPBLASLT_JIT_REAL_PYTHON'], *sys.argv[1:]])
-with open(path, 'a') as stream:
-    stream.write(json.dumps(dict(args=sys.argv[1:], start_ns=start,
-                                 end_ns=time.monotonic_ns(), status=status)) + '\\n')
-sys.exit(status)
-"""
-    )
+    wrapper.write_text("#!" + str(args.python.absolute()) + "\n" + GENERATOR_WRAPPER)
     wrapper.chmod(0o700)
     env["HIPBLASLT_JIT_PYTHON"] = str(wrapper)
     env["HIPBLASLT_JIT_REAL_PYTHON"] = str(args.python.absolute())
     report = []
+    failures = []
 
     def run(name, options, extra_env=None):
         case_dir = output / name
         case_dir.mkdir()
-        case_env = dict(env, HIPBLASLT_JIT_TRACE=str(case_dir / "generator.jsonl"))
+        (case_dir / "tmp").mkdir()
+        case_env = dict(
+            env,
+            HIPBLASLT_JIT="2",
+            HIPBLASLT_JIT_LIBRARY_PATH=str(case_dir / "jit-library"),
+            HIPBLASLT_JIT_TRACE=str(case_dir / "generator.jsonl"),
+            TMPDIR=str(case_dir / "tmp"),
+        )
         case_env.update(extra_env or {})
         command = [str(bench), *options]
         (case_dir / "command.json").write_text(json.dumps(command, indent=2))
@@ -659,91 +704,42 @@ sys.exit(status)
         return proc, case_dir, time.monotonic() - started
 
     if args.feature_off:
-        proc, path, _ = run("feature-off", ["--jit-gemm"])
-        require(
-            proc.returncode != 0 and "HIPBLASLT_ENABLE_JIT=ON" in proc.stderr,
-            "Feature-off build did not reject JIT explicitly",
+        proc, path, _ = run("feature-off", ["-m", "128", "-n", "128", "-k", "128"])
+        warning = (
+            "hipblaslt warning: HIPBLASLT_JIT=2 is ignored: "
+            "hipBLASLt was built without HIPBLASLT_ENABLE_JIT"
         )
         require(
-            not (path / "generator.jsonl").exists(), "Feature-off invoked generation"
+            proc.stderr.count(warning) == 1,
+            "Feature-off build did not warn once about HIPBLASLT_JIT",
         )
-        print("PASS feature-off rejection")
+        require(not generations(path), "Feature-off build invoked generation")
+        require(
+            not (path / "jit-library").exists(), "Feature-off build created a JIT library"
+        )
+        print("PASS feature-off: HIPBLASLT_JIT ignored with one warning")
         return
 
-    for name, options, diagnostic in [
-        ("all", ["--algo_method", "all"], "one generated solution"),
-        ("index", ["--algo_method", "index"], "one generated solution"),
-        ("solution-index", ["--solution_index", "0"], "one generated solution"),
-        ("multiple", ["--requested_solution", "2"], "one generated solution"),
-        ("splitk", ["--api_method", "mix", "--splitk", "2"], "tuning"),
-        ("wgm", ["--api_method", "mix", "--wgm", "2"], "tuning"),
-        ("grouped", ["--grouped_gemm"], "non-grouped strided"),
-        ("pointer-array", ["--batch_mode", "1"], "non-grouped strided"),
-    ]:
-        proc, path, _ = run("negative-" + name, ["--jit-gemm", *options])
-        require(
-            proc.returncode != 0 and diagnostic in proc.stderr,
-            f"Conflict not rejected: {name}",
-        )
-        require(
-            not (path / "generator.jsonl").exists(),
-            f"Conflict generated kernels: {name}",
-        )
-        report.append({"case": name, "pass": True})
-
-    tuning = output / "must-not-create-tuning.txt"
     proc, path, _ = run(
-        "negative-tuning", ["--jit-gemm"], {"HIPBLASLT_TUNING_FILE": str(tuning)}
+        "negative-grouped", ["--grouped_gemm", "-m", "128", "-n", "128", "-k", "128"]
     )
-    require(
-        proc.returncode != 0 and "HIPBLASLT_TUNING_FILE" in proc.stderr,
-        "Tuning conflict ignored",
-    )
-    require(not tuning.exists(), "Rejected JIT invocation wrote the tuning file")
-    require(
-        not (path / "generator.jsonl").exists(), "Tuning conflict invoked generation"
-    )
-    report.append({"case": "tuning-no-file-write", "pass": True})
-
-    proc, path, _ = run(
-        "negative-output-without-jit", ["--jit-output-dir", str(output / "unused")]
-    )
-    require(
-        proc.returncode != 0 and "requires --jit-gemm" in proc.stderr,
-        "Output option was silently ignored without JIT",
-    )
-    require(
-        not (output / "unused").exists(), "Invalid invocation created JIT artifacts"
-    )
-    report.append({"case": "output-without-jit", "pass": True})
+    check_no_result(proc, path, "does not support grouped GEMM")
+    require(not generations(path), "Grouped GEMM invoked generation")
+    report.append({"case": "grouped", "pass": True})
+    print("PASS negative-grouped: one JIT error, no generation", flush=True)
 
     if args.architecture == "gfx950" and not args.negative_only:
         natural = next(case for case in CASES if case["name"] == "mxfp4-float-output")
-        natural_root = output / "natural-mx-artifacts"
-        proc, path, _ = run(
-            "negative-natural-mx-layout",
-            ["--jit-gemm", "--jit-output-dir", str(natural_root), *natural["args"]],
-        )
+        proc, path, _ = run("negative-natural-mx-layout", natural["args"])
+        check_no_result(proc, path, "generate failed")
+        (invocation,) = generations(path)
+        require(invocation["status"] != 0, "Expected provider validation failure")
+        root, name = generator_outputs(invocation)
         require(
-            proc.returncode != 0
-            and "all supplied recipes were rejected" in proc.stderr
-            and "gfx950 MX requires UseSubtileImpl" in proc.stderr,
-            "Natural gfx950 MX request did not report the missing modeled subtile parameters",
-        )
-        trace = [
-            json.loads(line)
-            for line in (path / "generator.jsonl").read_text().splitlines()
-        ]
-        require(
-            len(trace) == 1 and trace[0]["status"] != 0,
-            "Expected provider validation failure",
-        )
-        require(
-            not list(natural_root.glob("**/manifest.json")),
+            not list((root / name).glob("bundle-*/manifest.json")),
             "Unsupported MX layout built a bundle",
         )
-        (request_file,) = natural_root.rglob("*.request.json")
-        request = json.loads(request_file.read_text())
+        request = json.loads((root / (name + ".request.json")).read_text())
         require(
             all(
                 request["problem"][f"scale_mode_{tensor}"] == "Block_32_UE8M0"
@@ -751,7 +747,14 @@ sys.exit(status)
             ),
             "Natural scale descriptors changed before validation",
         )
+        generator_log = (root / (name + ".log")).read_text()
+        require(
+            "all supplied recipes were rejected" in generator_log
+            and "gfx950 MX requires UseSubtileImpl" in generator_log,
+            "Natural gfx950 MX request did not report the missing modeled subtile parameters",
+        )
         report.append({"case": "natural-mx-no-supported-recipe", "pass": True})
+        print("PASS negative-natural-mx-layout: one JIT error, no bundle", flush=True)
 
     if not args.negative_only:
         for case in CASES:
@@ -776,12 +779,8 @@ sys.exit(status)
                     case["problem_type"][key] = {15: 11, 16: 12}.get(
                         case["problem_type"][key], case["problem_type"][key]
                     )
-            artifact_root = output / (case["name"] + "-artifacts")
             sentinel = case["name"] == "half-c-default"
             options = [
-                "--jit-gemm",
-                "--jit-output-dir",
-                str(artifact_root),
                 *case["args"],
                 "--alpha",
                 (
@@ -805,148 +804,144 @@ sys.exit(status)
                 options,
                 {"HIPBLASLT_JIT_TEST_DELAY": "2" if sentinel else "0"},
             )
-            no_ranking = case["name"] in {
-                "complex-nn",
-                "complex-conjugate",
-                "float-zero-k",
-                "float-alpha-zero",
-                "mixed-float8-float-output",
-            }
-            all_invalid = args.architecture == "gfx950" and case["name"] in {
-                "mxfp4-float-output",
-                "mxfp8-float-output",
-            }
-            if no_ranking or all_invalid:
-                require(
-                    proc.returncode != 0,
-                    f'{case["name"]} silently substituted a recipe',
-                )
-                diagnostic = (
-                    "No Origami ranking: no finite positive-latency candidates"
-                    if no_ranking
-                    else "all supplied recipes were rejected"
-                )
-                require(
-                    diagnostic in proc.stderr,
-                    f'{case["name"]}: wrong failure; see {path}',
-                )
-                require(
-                    not list(artifact_root.rglob("manifest.json")),
-                    "Rejected request built a bundle",
-                )
-                require(
-                    not list(artifact_root.rglob("solution.yaml")),
-                    "Rejected request selected a recipe",
-                )
-                require(
-                    "norm_error" not in proc.stdout,
-                    "Rejected request entered timed execution",
-                )
-                if no_ranking:
-                    require(
-                        not (path / "generator.jsonl").exists(),
-                        "Unranked request invoked generation",
-                    )
-                    require(
-                        not list(artifact_root.rglob("*.request.json")),
-                        "Unranked request emitted candidates",
-                    )
-                else:
-                    trace = [
-                        json.loads(line)
-                        for line in (path / "generator.jsonl").read_text().splitlines()
-                    ]
-                    require(
-                        len(trace) == 1 and trace[0]["status"] != 0,
-                        "Expected one failed validation",
-                    )
-                    (request_file,) = artifact_root.rglob("*.request.json")
-                    request = json.loads(request_file.read_text())
-                    require(
-                        request["model"] == "origami.gemm.estimation"
-                        and request["candidates"],
-                        "Failure lost the genuine Origami ranking",
-                    )
-                    generator_log = request_file.with_name("solution.log").read_text()
-                    require(
-                        all(
-                            f"{candidate['id']}:" in generator_log
-                            for candidate in request["candidates"]
-                        ),
-                        "Failure did not report every supplied candidate rejection",
-                    )
-                report.append(
-                    dict(
-                        case=case["name"],
-                        pass_=True,
-                        diagnostic=diagnostic,
-                        elapsed_seconds=elapsed,
-                    )
-                )
-                print(f'PASS {case["name"]}: {diagnostic}', flush=True)
+            try:
+                summary = check_case(case, proc, path, args.architecture, sentinel)
+            except AssertionError as error:
+                failures.append(case["name"])
+                report.append(dict(case=case["name"], pass_=False, error=str(error)))
+                print(f'FAIL {case["name"]}: {error}; see {path}', flush=True)
                 continue
-            require(proc.returncode == 0, f'{case["name"]} failed; see {path}')
-            if not case["problem"]["m"] or not case["problem"]["n"]:
-                require(
-                    "empty output; no kernel generation or launch" in proc.stderr,
-                    f"Missing empty-output result: {path}",
-                )
-                require(
-                    not (path / "generator.jsonl").exists(),
-                    "Empty output invoked generation",
-                )
-                require(
-                    not artifact_root.exists(),
-                    "Empty output created generation artifacts",
-                )
-                report.append(
-                    dict(case=case["name"], pass_=True, elapsed_seconds=elapsed)
-                )
-                print(f'PASS {case["name"]}: no generation or launch', flush=True)
-                continue
-            numeric = check_numerics(proc.stdout)
-            provenance = check_provenance(
-                proc.stderr, proc.stdout, case, artifact_root, args.architecture
-            )
-            trace = [
-                json.loads(line)
-                for line in (path / "generator.jsonl").read_text().splitlines()
-            ]
-            require(
-                len(trace) == 1,
-                f"Expected one generation across warmup/timing: {trace}",
-            )
-            require(
-                trace[0]["args"][:2] == ["-m", "Tensile.JitGemm"],
-                "Wrong generator entry point",
-            )
-            require(trace[0]["status"] == 0, "Generator failed")
-            if sentinel:
-                require(
-                    (trace[0]["end_ns"] - trace[0]["start_ns"]) >= 2e9,
-                    "Timing sentinel missing",
-                )
-                # A 2s compile delay must not appear in the three measured CPU-timed calls.
-                require(
-                    max(float(row["us"]) for row in numeric) * 3 < 500_000,
-                    "Generation delay leaked into normal benchmark timing",
-                )
-            report.append(
-                dict(
-                    case=case["name"],
-                    pass_=True,
-                    elapsed_seconds=elapsed,
-                    rows=numeric,
-                    **provenance,
-                )
-            )
-            print(
-                f'PASS {case["name"]}: generation=1, finite verified result, local ranked artifact',
-                flush=True,
-            )
+            report.append(dict(case=case["name"], pass_=True, elapsed_seconds=elapsed, **summary))
+            print(f'PASS {case["name"]}: {summary["result"]}', flush=True)
+
+    if not args.negative_only and not args.case:
+        reused = next(case for case in CASES if case["name"] == "half-explicit-precision")
+        options = [*reused["args"], "--alpha", "1.25", "--beta", "0.5", "--verify",
+                   "--iters", "3", "--cold_iters", "1", "--print_kernel_info"]
+        first = output / reused["name"]
+        proc, path, _ = run(
+            "library-reuse",
+            options,
+            {"HIPBLASLT_JIT_LIBRARY_PATH": str(first / "jit-library")},
+        )
+        require(proc.returncode == 0, f"Library reuse failed; see {path}")
+        check_numerics(proc.stdout)
+        require(not generations(path), "A published solution was generated again")
+        require(not jit_reports(proc.stderr, "(?:error|warning)"), "Library reuse reported")
+        (manifest,) = (first / "generator-0").rglob("bundle-*/manifest.json")
+        require(
+            json.loads(manifest.read_text())["main_kernel"]["name"] in proc.stdout,
+            "Library reuse ran a different kernel",
+        )
+        report.append({"case": "library-reuse", "pass": True})
+        print("PASS library-reuse: published solution ran without generation", flush=True)
+
+        proc, path, _ = run("multiple", [*options, "--requested_solution", "2"])
+        require(proc.returncode == 0, f"Multiple solutions failed; see {path}")
+        rows_found = check_numerics(proc.stdout)
+        (invocation,) = generations(path)
+        require(invocation["status"] == 0, "Generator failed")
+        entries = library_entries(path)
+        require(
+            1 <= len(entries) <= 2 and len(rows_found) == len(entries),
+            f"Expected one verified result per published solution: {len(rows_found)} rows, "
+            f"{len(entries)} entries",
+        )
+        report.append({"case": "multiple", "pass": True, "solutions": len(entries)})
+        print(f"PASS multiple: {len(entries)} generated solutions verified", flush=True)
+
     (output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
+    if failures:
+        print(f"FAIL {len(failures)} of {len(report)} checks: {', '.join(failures)}")
+        return 1
     print(f"PASS {len(report)} checks; evidence in {output}")
+    return 0
+
+
+def check_case(case, proc, path, architecture, sentinel):
+    trace = generations(path)
+    no_ranking = case["name"] in {
+        "complex-nn",
+        "complex-conjugate",
+        "float-zero-k",
+        "float-alpha-zero",
+        "mixed-float8-float-output",
+    }
+    all_invalid = architecture == "gfx950" and case["name"] in {
+        "mxfp4-float-output",
+        "mxfp8-float-output",
+    }
+    if no_ranking:
+        diagnostic = "No Origami ranking: no finite positive-latency candidates"
+        check_no_result(proc, path, diagnostic)
+        require(not trace, "Unranked request invoked generation")
+        return dict(result=diagnostic)
+    if all_invalid:
+        check_no_result(proc, path, "generate failed")
+        require(
+            len(trace) == 1 and trace[0]["status"] != 0,
+            "Expected one failed validation",
+        )
+        root, name = generator_outputs(trace[0])
+        require(
+            not list((root / name).glob("bundle-*/manifest.json")),
+            "Rejected request built a bundle",
+        )
+        request = json.loads((root / (name + ".request.json")).read_text())
+        require(
+            request["model"] == "origami.gemm.estimation" and request["candidates"],
+            "Failure lost the genuine Origami ranking",
+        )
+        generator_log = (root / (name + ".log")).read_text()
+        require(
+            "all supplied recipes were rejected" in generator_log,
+            "Generator did not report the rejected recipes",
+        )
+        require(
+            all(
+                f"{candidate['id']}:" in generator_log
+                for candidate in request["candidates"]
+            ),
+            "Failure did not report every supplied candidate rejection",
+        )
+        return dict(result="all supplied recipes were rejected")
+    if not case["problem"]["m"] or not case["problem"]["n"]:
+        require(NO_RESULT in proc.stderr, f"Missing empty-output result: {path}")
+        require(not jit_reports(proc.stderr), "Empty output reported a JIT failure")
+        require(not trace, "Empty output invoked generation")
+        require(
+            not (path / "jit-library").exists(),
+            "Empty output created a JIT library",
+        )
+        return dict(result="no generation or launch")
+    require(proc.returncode == 0, f'{case["name"]} failed; see {path}')
+    require(not jit_reports(proc.stderr), "Successful generation reported an error")
+    numeric = check_numerics(proc.stdout)
+    require(len(trace) == 1, f"Expected one generation across warmup/timing: {trace}")
+    require(trace[0]["args"][:2] == ["-m", "Tensile.JitGemm"], "Wrong generator entry point")
+    require(trace[0]["status"] == 0, "Generator failed")
+    provenance = check_provenance(trace[0], proc.stdout, case, architecture)
+    require(len(library_entries(path)) == 1, "Expected one published solution")
+    require(
+        not list((path / "tmp").glob("hipblaslt-jit-*")),
+        "Successful generation left its scratch directory",
+    )
+    if sentinel:
+        require(
+            (trace[0]["end_ns"] - trace[0]["start_ns"]) >= 2e9,
+            "Timing sentinel missing",
+        )
+        # A 2s compile delay must not appear in the three measured CPU-timed calls.
+        require(
+            max(float(row["us"]) for row in numeric) * 3 < 500_000,
+            "Generation delay leaked into normal benchmark timing",
+        )
+    return dict(
+        result="generation=1, published, finite verified result, local ranked artifact",
+        rows=numeric,
+        **provenance,
+    )
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

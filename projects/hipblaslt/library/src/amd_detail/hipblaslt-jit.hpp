@@ -14,7 +14,7 @@ namespace hipblaslt_jit
 }
 
 // Not installed. The entry points stay exported because the JIT test binaries
-// and hipblaslt-bench --jit-gemm link against the shared library.
+// link against the shared library.
 namespace hipblaslt_ext::experimental::jit
 {
     namespace detail
