@@ -44,7 +44,7 @@ from rocisa.instruction import Instruction, SAddCU32, SSubBU32, SCSelectB32, SCS
     MFMAInstruction, MXMFMAInstruction, VCvtPkF32toBF16, VCvtPkF32toFP16
 
 from ...Common.GlobalParameters import globalParameters
-from ...Common import isMxf4SubtilePath
+from ...Common import isMxf4SubtilePath, plsinBlockSchedTile, plsinStagingEligible
 
 
 def plsinTailOwnTiles() -> bool:
@@ -3287,7 +3287,11 @@ class LogicalScheduler:
             return False
         if not k["ProblemType"].get("UseScaleAlphaVec", 0):
             return False
-        return plsinDebugEnv("TENSILE_PLSIN_TAIL_DROP_LAST_SYNC", "0") != "0"
+        # Held to the same tiles as the rest of the block-scheduled store, so a
+        # geometry whose arm has not been traced keeps both barriers.
+        if not plsinStagingEligible(k):
+            return False
+        return plsinDebugEnv("TENSILE_PLSIN_TAIL_DROP_LAST_SYNC", "1") != "0"
 
     def build_tail_merged(self) -> Optional[EmittedSchedule]:
         """Schedule the last two DepthU as one body, four k-subiterations deep.
@@ -5375,7 +5379,10 @@ class LogicalScheduler:
         # it writes because D is reached through the SrdD cursor.
         if not self.config.blockSched or not absRowAddr:
             return None, units
-        if plsinDebugEnv("TENSILE_PLSIN_DRAIN_EARLY", "0") == "0":
+        # On by default: the blockSched gate above already holds this to the
+        # tiles the placement was measured on. TENSILE_PLSIN_DRAIN_EARLY=0
+        # restores the deferred route, which hands stage p to partition p+1.
+        if plsinDebugEnv("TENSILE_PLSIN_DRAIN_EARLY", "1") == "0":
             return None, units
         flat = list(partModule.flatitems())
         mfmaPos = [i for i, inst in enumerate(flat)

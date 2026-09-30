@@ -1411,10 +1411,15 @@ def mainLoop(writer, kernel):
   # only way to stage the store any finer, and it is what pulls the first store
   # forward from 72 of the arm's 256 MFMAs to 40. It is not free -- an M split
   # makes A and scale-A partition-varying, so their LDS reads are re-issued per
-  # partition -- so it stays opt-in until measured.
-  # TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_TAIL_PARTM=4" gives 4 M tiles per
-  # partition, i.e. a 2x4 grid on MT256x256.
-  tailPartitionSizeM = int(plsinDebugEnv("TENSILE_PLSIN_TAIL_PARTM", "0")) \
+  # partition.
+  #
+  # On at 4 M tiles per partition -- a 2x4 grid on MT256x256 -- for the tiles
+  # block scheduling is scoped to, and off everywhere else, so a geometry it has
+  # not been measured on keeps its shipped schedule. TENSILE_PLSIN_TAIL_PARTM
+  # overrides it; 0 restores the N-only split. 2 (a 4x4 grid) does not assemble:
+  # vgpr tile assignment stops converging.
+  _defaultPartM = "4" if plsinStagingEligible(kernel) else "0"
+  tailPartitionSizeM = int(plsinDebugEnv("TENSILE_PLSIN_TAIL_PARTM", _defaultPartM)) \
       if tailOwnTiles else 0
   # Only split M when it divides evenly. An uneven split -- M=6 against a size of
   # 4 gives [4,2] -- is worse than not splitting at all: _plsinStagedStoreCount
