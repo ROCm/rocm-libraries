@@ -49,6 +49,9 @@ void runGpuVsCpuPointwiseUnary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMo
     fillWithRandomValues(
         inputTensor, static_cast<DataType>(-fillRange), static_cast<DataType>(fillRange), seed);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
+
     CpuReferencePointwiseImpl<DataType, DataType>::pointwiseCompute(
         operation, outputCpu, inputTensor);
 
@@ -73,6 +76,10 @@ void runGpuVsCpuPointwiseBinary(hipdnn_flatbuffers_sdk::data_objects::PointwiseM
         input0Tensor, static_cast<DataType>(-fillRange), static_cast<DataType>(fillRange), seed);
     fillWithRandomValues(
         input1Tensor, static_cast<DataType>(-fillRange), static_cast<DataType>(fillRange), seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
 
     CpuReferencePointwiseImpl<DataType, DataType, DataType>::pointwiseCompute(
         operation, outputCpu, input0Tensor, input1Tensor);

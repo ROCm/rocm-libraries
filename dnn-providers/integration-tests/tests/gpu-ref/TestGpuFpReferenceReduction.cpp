@@ -159,6 +159,9 @@ TEST(TestGpuReductionRefMixedType, FloatInputFloatOutput)
     const unsigned int seed = getGlobalTestSeed();
     fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+
     CpuFpReferenceReduction::reduce<float, float, double>(xTensor, yCpu, ReductionMode::ADD);
     GpuFpReferenceReduction::reduce<float, float, double>(xTensor, yGpu, ReductionMode::ADD);
 
@@ -176,6 +179,9 @@ TEST(TestGpuReductionRefMixedType, HalfInputFloatOutput)
     const unsigned int seed = getGlobalTestSeed();
     fillWithRandomValues(xTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+
     CpuFpReferenceReduction::reduce<HalfType, float, double>(xTensor, yCpu, ReductionMode::ADD);
     GpuFpReferenceReduction::reduce<HalfType, float, double>(xTensor, yGpu, ReductionMode::ADD);
 
@@ -192,6 +198,9 @@ TEST(TestGpuReductionRefMixedType, HalfInputHalfOutput)
 
     const unsigned int seed = getGlobalTestSeed();
     fillWithRandomValues(xTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
 
     CpuFpReferenceReduction::reduce<HalfType, HalfType, double>(xTensor, yCpu, ReductionMode::ADD);
     GpuFpReferenceReduction::reduce<HalfType, HalfType, double>(xTensor, yGpu, ReductionMode::ADD);
@@ -211,6 +220,9 @@ TEST(TestGpuReductionRefMixedType, BfloatInputFloatOutput)
     fillWithRandomValues(
         xTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+
     CpuFpReferenceReduction::reduce<BFloat16Type, float, double>(xTensor, yCpu, ReductionMode::ADD);
     GpuFpReferenceReduction::reduce<BFloat16Type, float, double>(xTensor, yGpu, ReductionMode::ADD);
 
@@ -228,6 +240,9 @@ TEST(TestGpuReductionRefMixedType, BfloatInputBfloatOutput)
     const unsigned int seed = getGlobalTestSeed();
     fillWithRandomValues(
         xTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
 
     CpuFpReferenceReduction::reduce<BFloat16Type, BFloat16Type, double>(
         xTensor, yCpu, ReductionMode::ADD);
@@ -250,6 +265,9 @@ TEST(TestGpuReductionRefChannelLast, MatchesCpuRefReducingSpatialAxes)
     const unsigned int seed = getGlobalTestSeed();
     fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+
     CpuFpReferenceReduction::reduce<float, float, double>(xTensor, yCpu, ReductionMode::ADD);
     GpuFpReferenceReduction::reduce<float, float, double>(xTensor, yGpu, ReductionMode::ADD);
 
@@ -267,6 +285,9 @@ TEST(TestGpuReductionRefChannelLast, MatchesCpuRefReducingChannelAxis)
     const unsigned int seed = getGlobalTestSeed();
     fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+
     CpuFpReferenceReduction::reduce<float, float, double>(xTensor, yCpu, ReductionMode::ADD);
     GpuFpReferenceReduction::reduce<float, float, double>(xTensor, yGpu, ReductionMode::ADD);
 
@@ -283,6 +304,9 @@ TEST(TestGpuReductionRefChannelLast, MatchesCpuRefDifferentIOLayouts)
 
     const unsigned int seed = getGlobalTestSeed();
     fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
 
     CpuFpReferenceReduction::reduce<float, float, double>(xTensor, yCpu, ReductionMode::ADD);
     GpuFpReferenceReduction::reduce<float, float, double>(xTensor, yGpu, ReductionMode::ADD);

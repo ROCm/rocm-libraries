@@ -91,7 +91,7 @@ TEST(TestGpuShallowTensor, HostFillOperationsThrow)
     ShallowGpuTensor<float> tensor(workspace.get(), {1, 1, 2, 2}, {4, 4, 2, 1});
 
     EXPECT_THROW(tensor.fillWithValue(1.0f), std::runtime_error);
-    EXPECT_THROW(fillWithRandomValues(tensor, -1.0f, 1.0f, 42), std::runtime_error);
+    EXPECT_THROW(tensor.fillWithRandomValues(-1.0f, 1.0f, 42), std::runtime_error);
 
     std::array<float, 4> hostData = {1.0f, 2.0f, 3.0f, 4.0f};
     EXPECT_THROW(tensor.fillWithData(hostData.data(), sizeof(hostData)), std::runtime_error);

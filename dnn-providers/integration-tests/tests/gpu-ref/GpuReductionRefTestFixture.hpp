@@ -42,6 +42,9 @@ void runGpuVsCpuReduction(const std::vector<int64_t>& inputDims,
                          static_cast<InputDataType>(fillRange),
                          seed);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
+
     CpuFpReferenceReduction::reduce<InputDataType, OutputDataType, ComputeDataType>(
         inputTensor, outputTensorCpu, mode);
     GpuFpReferenceReduction::reduce<InputDataType, OutputDataType, ComputeDataType>(

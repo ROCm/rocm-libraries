@@ -49,6 +49,9 @@ TYPED_TEST(TestGpuFpValidation, ExactMatchPasses)
 
     fillWithRandomValues(ref, static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    ref.memory().hostData();
+
     // Copy ref data into impl so they are identical
     const auto* refHost = ref.memory().hostData();
     auto* implHost = impl.memory().hostData();
@@ -69,6 +72,9 @@ TYPED_TEST(TestGpuFpValidation, WithinTolerancePasses)
     Tensor<TypeParam> impl({4, 4});
 
     fillWithRandomValues(ref, static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    ref.memory().hostData();
 
     const auto* refHost = ref.memory().hostData();
     auto* implHost = impl.memory().hostData();
@@ -527,6 +533,9 @@ TYPED_TEST(TestGpuVsCpuValidation, AgreeOnPass)
 
     fillWithRandomValues(ref, static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    ref.memory().hostData();
+
     const auto* refHost = ref.memory().hostData();
     auto* implHost = impl.memory().hostData();
     for(size_t i = 0; i < ref.elementCount(); ++i)
@@ -588,6 +597,9 @@ TEST(TestGpuFpValidationLargeTensor, LargeTensorExactMatch)
     Tensor<float> impl({64, 32, 32});
 
     fillWithRandomValues(ref, -1.0f, 1.0f, 42);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    ref.memory().hostData();
 
     const auto* refHost = ref.memory().hostData();
     auto* implHost = impl.memory().hostData();

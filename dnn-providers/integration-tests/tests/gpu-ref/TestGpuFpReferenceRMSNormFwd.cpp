@@ -314,6 +314,10 @@ TEST(TestGpuRMSNormFwdRefMixedType, FloatInputHalfScale)
     fillWithRandomValues(
         scaleTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed + 1);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+
     CpuFpReferenceRMSNorm::forward<float, HalfType, float, double>(
         xTensor, scaleTensor, yCpu, 1e-5);
 
@@ -334,6 +338,10 @@ TEST(TestGpuRMSNormFwdRefMixedType, HalfInputFloatScale)
     const unsigned int seed = getGlobalTestSeed();
     fillWithRandomValues(xTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed);
     fillWithRandomValues(scaleTensor, -1.0f, 1.0f, seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
 
     CpuFpReferenceRMSNorm::forward<HalfType, float, HalfType, double>(
         xTensor, scaleTensor, yCpu, 1e-5);
@@ -358,6 +366,10 @@ TEST(TestGpuRMSNormFwdRefMixedType, HalfInputHalfScale)
     fillWithRandomValues(
         scaleTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed + 1);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+
     CpuFpReferenceRMSNorm::forward<HalfType, HalfType, HalfType>(xTensor, scaleTensor, yCpu, 1e-5);
     GpuFpReferenceRMSNorm::fprop<HalfType, HalfType, HalfType>(xTensor, scaleTensor, yGpu, 1e-5);
 
@@ -378,6 +390,10 @@ TEST(TestGpuRMSNormFwdRefMixedType, BfloatInputFloatOutput)
         xTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed);
     fillWithRandomValues(
         scaleTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
 
     CpuFpReferenceRMSNorm::forward<BFloat16Type, BFloat16Type, float, double>(
         xTensor, scaleTensor, yCpu, 1e-5);
@@ -403,6 +419,10 @@ TEST(TestGpuRMSNormFwdRefMixedType, BfloatInputHalfScale)
     fillWithRandomValues(
         scaleTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed + 1);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+
     CpuFpReferenceRMSNorm::forward<BFloat16Type, HalfType, BFloat16Type, double>(
         xTensor, scaleTensor, yCpu, 1e-5);
     GpuFpReferenceRMSNorm::fprop<BFloat16Type, HalfType, BFloat16Type, double>(
@@ -427,6 +447,11 @@ TEST(TestGpuRMSNormFwdRefOptionalArgs, WithBias)
     fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
     fillWithRandomValues(scaleTensor, -1.0f, 1.0f, seed + 1);
     fillWithRandomValues(biasTensor, -1.0f, 1.0f, seed + 2);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+    biasTensor.memory().hostData();
 
     CpuFpReferenceRMSNorm::forward<float, float, float>(
         xTensor,
@@ -461,6 +486,10 @@ TEST(TestGpuRMSNormFwdRefOptionalArgs, WithInvRms)
     fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
     fillWithRandomValues(scaleTensor, -1.0f, 1.0f, seed + 1);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+
     CpuFpReferenceRMSNorm::forward<float, float, float>(
         xTensor, scaleTensor, yCpu, 1e-5, &invRmsCpu, nullptr);
     GpuFpReferenceRMSNorm::fprop<float, float, float>(
@@ -484,6 +513,10 @@ TEST(TestGpuRMSNormFwdRefChannelLast, MatchesCpuRef)
     fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
     fillWithRandomValues(scaleTensor, -1.0f, 1.0f, seed + 1);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+
     CpuFpReferenceRMSNorm::forward<float, float, float>(xTensor, scaleTensor, yCpu, 1e-5);
     GpuFpReferenceRMSNorm::fprop<float, float, float>(xTensor, scaleTensor, yGpu, 1e-5);
 
@@ -505,6 +538,11 @@ TEST(TestGpuRMSNormFwdRefChannelLast, MatchesCpuRefWithBiasAndInvRms)
     fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
     fillWithRandomValues(scaleTensor, -1.0f, 1.0f, seed + 1);
     fillWithRandomValues(biasTensor, -1.0f, 1.0f, seed + 2);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+    biasTensor.memory().hostData();
 
     CpuFpReferenceRMSNorm::forward<float, float, float>(
         xTensor, scaleTensor, yCpu, 1e-5, &invRmsCpu, &biasTensor);
@@ -741,6 +779,10 @@ TEST(TestGpuRMSNormFwdRefEdgeCaseValidation, DISABLED_BeyondInt32InnerSizeIfMemo
     const unsigned int seed = getGlobalTestSeed();
     fillWithRandomValues(x, -1.0f, 1.0f, seed);
     fillWithRandomValues(scale, -1.0f, 1.0f, seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
 
     CpuFpReferenceRMSNorm::forward<float, float, float, double>(x, scale, yCpu, 1e-5);
     GpuFpReferenceRMSNorm::fprop<float, float, float, double>(x, scale, yGpu, 1e-5);

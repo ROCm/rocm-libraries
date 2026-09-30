@@ -84,6 +84,11 @@ void compareGpuVsCpuSdpaFwd(Tensor<QDataType>& q,
     fillWithRandomValues(k, static_cast<KDataType>(-1.0f), static_cast<KDataType>(1.0f), SEED_K);
     fillWithRandomValues(v, static_cast<VDataType>(-1.0f), static_cast<VDataType>(1.0f), SEED_V);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    q.memory().hostData();
+    k.memory().hostData();
+    v.memory().hostData();
+
     CpuFpReferenceSdpa::forward<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
         q,
         k,
@@ -215,6 +220,11 @@ void compareGpuVsCpuSdpaFwdWithLse(Tensor<QDataType>& q,
     fillWithRandomValues(q, static_cast<QDataType>(-1.0f), static_cast<QDataType>(1.0f), SEED_Q);
     fillWithRandomValues(k, static_cast<KDataType>(-1.0f), static_cast<KDataType>(1.0f), SEED_K);
     fillWithRandomValues(v, static_cast<VDataType>(-1.0f), static_cast<VDataType>(1.0f), SEED_V);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    q.memory().hostData();
+    k.memory().hostData();
+    v.memory().hostData();
 
     CpuFpReferenceSdpa::forward<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
         q,
@@ -567,6 +577,9 @@ TYPED_TEST(TestGpuSdpaFwdPlain, AdditiveMaskRank4)
 
     fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
+
     compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
                                        k,
                                        v,
@@ -596,6 +609,9 @@ TYPED_TEST(TestGpuSdpaFwdPlain, AdditiveMaskBroadcastRank2)
 
     fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
+
     compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
                                        k,
                                        v,
@@ -623,6 +639,9 @@ TYPED_TEST(TestGpuSdpaFwdPlain, AdditiveMaskBroadcastRank3)
     Tensor<float> mask({2, 8, 8}); // [H, Sq, Skv]
 
     fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
                                        k,
@@ -891,6 +910,9 @@ TYPED_TEST(TestGpuSdpaFwdPlain, AdditiveMaskWithSlidingWindow)
 
     fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
+
     compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
                                        k,
                                        v,
@@ -925,6 +947,9 @@ TYPED_TEST(TestGpuSdpaFwdPlain, AdditiveMaskBroadcastBatchHead)
 
     fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
+
     compareGpuVsCpuSdpaFwd<T, T, T, T>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<T>(), std::nullopt, /*attnMask=*/&mask);
 }
@@ -948,6 +973,9 @@ TYPED_TEST(TestGpuSdpaFwdPlain, AdditiveMaskBroadcastHeadOnly)
     Tensor<float> mask({2, 1, 8, 8}); // broadcast over head only
 
     fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<T>(), std::nullopt, /*attnMask=*/&mask);
@@ -1069,6 +1097,11 @@ TYPED_TEST(TestGpuSdpaFwdPlain, LseFullyMaskedRowIsNegInf)
     fillWithRandomValues(q, static_cast<T>(-1.0f), static_cast<T>(1.0f), SEED_Q);
     fillWithRandomValues(k, static_cast<T>(-1.0f), static_cast<T>(1.0f), SEED_K);
     fillWithRandomValues(v, static_cast<T>(-1.0f), static_cast<T>(1.0f), SEED_V);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    q.memory().hostData();
+    k.memory().hostData();
+    v.memory().hostData();
 
     CpuFpReferenceSdpa::forward<T, T, T, T, float>(q,
                                                    k,
@@ -1193,6 +1226,9 @@ TYPED_TEST(TestGpuSdpaFwdPlain, GqaAdditiveMaskRank4)
 
     fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
+
     compareGpuVsCpuSdpaFwd<T, T, T, T>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<T>(), std::nullopt, /*attnMask=*/&mask);
 }
@@ -1261,6 +1297,9 @@ TYPED_TEST(TestGpuSdpaFwdPlain, NonPackedBshdAdditiveMask)
 
     fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
+
     compareGpuVsCpuSdpaFwd<T, T, T, T>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<T>(), std::nullopt, /*attnMask=*/&mask);
 }
@@ -1318,6 +1357,9 @@ TYPED_TEST(TestGpuSdpaFwdPlain, ExplicitScaleAdditiveMask)
     Tensor<float> mask({1, 2, 8, 8});
 
     fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<T>(), /*attnScaleValue=*/0.25f, /*attnMask=*/&mask);
@@ -1417,6 +1459,9 @@ TYPED_TEST(TestGpuSdpaFwdPlain, CrossAttentionAdditiveMask)
 
     fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
+
     compareGpuVsCpuSdpaFwd<T, T, T, T>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<T>(), std::nullopt, /*attnMask=*/&mask);
 }
@@ -1458,6 +1503,9 @@ TEST(TestGpuSdpaFwdMixedPrecision, Bfloat16InputsFloatOutputAdditiveMask)
     Tensor<float> mask({1, 2, 8, 8});
 
     fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
 
     compareGpuVsCpuSdpaFwd<BFloat16Type, BFloat16Type, BFloat16Type, float>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<float>(), std::nullopt, /*attnMask=*/&mask);

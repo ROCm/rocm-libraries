@@ -75,6 +75,14 @@ void runGpuVsCpuRMSNormFwd(const std::vector<int64_t>& ioDims,
                              seed + 2);
     }
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+    if(includeBias)
+    {
+        biasTensor.memory().hostData();
+    }
+
     CpuFpReferenceRMSNorm::forward<InputDataType, ScaleDataType, OutputDataType, ComputeDataType>(
         inputTensor,
         scaleTensor,

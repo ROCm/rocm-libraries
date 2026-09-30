@@ -94,6 +94,16 @@ void runGpuVsCpuBatchnormFwdTrain(const std::vector<int64_t>& ioDims,
                              seed + 4); // Ensure variance stays positive!
     }
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+    biasTensor.memory().hostData();
+    if(includeRunningStats)
+    {
+        prevRunningMeanTensor.memory().hostData();
+        prevRunningVarTensor.memory().hostData();
+    }
+
     CpuFpReferenceBatchnorm::fwdTraining<InputDataType,
                                          ScaleBiasDataType,
                                          MeanVarDataType,

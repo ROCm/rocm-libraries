@@ -219,6 +219,10 @@ TEST(TestGpuMatmulRefValidation, HalfAFloatBFloatC)
     fillWithRandomValues(aTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed);
     fillWithRandomValues(bTensor, -1.0f, 1.0f, seed + 1);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    aTensor.memory().hostData();
+    bTensor.memory().hostData();
+
     GpuFpReferenceMatmul::matmul<HalfType, float, float>(aTensor, bTensor, cGpu);
 
     CpuFpReferenceMatmul::matmul<HalfType, float, float>(aTensor, bTensor, cCpu);
@@ -238,6 +242,10 @@ TEST(TestGpuMatmulRefValidation, HalfAFloatBHalfC)
     const unsigned int seed = getGlobalTestSeed();
     fillWithRandomValues(aTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed);
     fillWithRandomValues(bTensor, -1.0f, 1.0f, seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    aTensor.memory().hostData();
+    bTensor.memory().hostData();
 
     GpuFpReferenceMatmul::matmul<HalfType, float, HalfType>(aTensor, bTensor, cGpu);
 
@@ -260,6 +268,10 @@ TEST(TestGpuMatmulRefValidation, HalfAHalfBFloatC)
     fillWithRandomValues(
         bTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed + 1);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    aTensor.memory().hostData();
+    bTensor.memory().hostData();
+
     GpuFpReferenceMatmul::matmul<HalfType, HalfType, float>(aTensor, bTensor, cGpu);
 
     CpuFpReferenceMatmul::matmul<HalfType, HalfType, float>(aTensor, bTensor, cCpu);
@@ -279,6 +291,10 @@ TEST(TestGpuMatmulRefValidation, FloatAFloatBHalfC)
     const unsigned int seed = getGlobalTestSeed();
     fillWithRandomValues(aTensor, -1.0f, 1.0f, seed);
     fillWithRandomValues(bTensor, -1.0f, 1.0f, seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    aTensor.memory().hostData();
+    bTensor.memory().hostData();
 
     GpuFpReferenceMatmul::matmul<float, float, HalfType>(aTensor, bTensor, cGpu);
 
@@ -300,6 +316,10 @@ TEST(TestGpuMatmulRefValidation, HalfAHalfBHalfC)
     fillWithRandomValues(aTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed);
     fillWithRandomValues(
         bTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    aTensor.memory().hostData();
+    bTensor.memory().hostData();
 
     GpuFpReferenceMatmul::matmul<HalfType, HalfType, HalfType>(aTensor, bTensor, cGpu);
 
@@ -323,6 +343,10 @@ TEST(TestGpuMatmulRefValidation, BfloatABfloatBFloatC)
     fillWithRandomValues(
         bTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed + 1);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    aTensor.memory().hostData();
+    bTensor.memory().hostData();
+
     GpuFpReferenceMatmul::matmul<BFloat16Type, BFloat16Type, float>(aTensor, bTensor, cGpu);
 
     CpuFpReferenceMatmul::matmul<BFloat16Type, BFloat16Type, float>(aTensor, bTensor, cCpu);
@@ -344,6 +368,10 @@ TEST(TestGpuMatmulRefValidation, BFloat16AHalfBBfloatC)
         aTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed);
     fillWithRandomValues(
         bTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    aTensor.memory().hostData();
+    bTensor.memory().hostData();
 
     GpuFpReferenceMatmul::matmul<BFloat16Type, HalfType, BFloat16Type>(aTensor, bTensor, cGpu);
 
@@ -704,6 +732,10 @@ TEST(TestGpuMatmulRefEdgeCaseValidation, DISABLED_BeyondInt32MatrixIfMemoryAllow
     const unsigned int seed = getGlobalTestSeed();
     fillWithRandomValues(a, -1.0f, 1.0f, seed);
     fillWithRandomValues(b, -1.0f, 1.0f, seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    a.memory().hostData();
+    b.memory().hostData();
 
     CpuFpReferenceMatmul::matmul(a, b, cCpu);
     GpuFpReferenceMatmul::matmul(a, b, cGpu);

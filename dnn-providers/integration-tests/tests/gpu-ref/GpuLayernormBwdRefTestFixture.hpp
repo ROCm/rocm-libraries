@@ -75,6 +75,16 @@ void runGpuVsCpuLayernormBwd(const std::vector<int64_t>& ioDims,
                              seed + 4);
     }
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    dyTensor.memory().hostData();
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+    if(optionalTensors)
+    {
+        meanTensor.memory().hostData();
+        rstdTensor.memory().hostData();
+    }
+
     GpuFpReferenceLayernorm::
         bprop<XDataType, ScaleBiasDataType, YDataType, MeanRstdDataType, ComputeDataType>(
             dyTensor,

@@ -57,6 +57,10 @@ void compareGpuVsCpuConvWrw(Tensor<XDataType>& xTensor,
                          static_cast<DyDataType>(fillRange),
                          seed + 1);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+    dyTensor.memory().hostData();
+
     CpuFpReferenceConvolution::wgrad<XDataType, DwDataType, DyDataType, ComputeDataType>(
         xTensor, dwCpu, dyTensor, strides, dilations, prePadding, postPadding);
 

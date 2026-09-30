@@ -76,6 +76,12 @@ void runGpuVsCpuRMSNormBwd(const std::vector<int64_t>& ioDims,
                          static_cast<ComputeDataType>(std::fabs(fillRange)),
                          seed + 3); // Ensure invRms is always positive!
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    dyTensor.memory().hostData();
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+    invRmsTensor.memory().hostData();
+
     auto dbiasCpu
         = includeBias ? Tensor<ScaleDataType>(scaleDims, layout) : Tensor<ScaleDataType>({});
     auto dbiasGpu

@@ -103,6 +103,10 @@ void runGpuVsCpuBatchnormFwdInf(const std::vector<int64_t>& ioDims, const Tensor
     estimatedMeanTensor.fillWithValue(static_cast<MeanVarDataType>(MEAN));
     invVarTensor.fillWithValue(static_cast<MeanVarDataType>(INV_VARIANCE));
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    scaleTensor.memory().hostData();
+    biasTensor.memory().hostData();
+
     CpuFpReferenceBatchnorm::fwdInference<InputDataType,
                                           ScaleBiasDataType,
                                           MeanVarDataType,
@@ -164,6 +168,11 @@ void runGpuVsCpuBatchnormFwdInfWithVariance(const std::vector<int64_t>& ioDims,
                          seed++);
     estimatedMeanTensor.fillWithValue(static_cast<MeanVarDataType>(MEAN));
     varianceTensor.fillWithValue(static_cast<MeanVarDataType>(VARIANCE));
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    scaleTensor.memory().hostData();
+    biasTensor.memory().hostData();
+
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance<InputDataType,
                                                       ScaleBiasDataType,
                                                       MeanVarDataType,

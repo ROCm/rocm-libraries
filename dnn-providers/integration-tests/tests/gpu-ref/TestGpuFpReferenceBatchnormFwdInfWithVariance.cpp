@@ -277,6 +277,13 @@ TEST(TestGpuBatchnormFwdInfVar3DShapes, Broadcast2D)
     fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
     fillWithRandomValues(variance, 0.1f, 1.f, seed++);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    variance.memory().hostData();
+
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
     GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
 
@@ -302,6 +309,13 @@ TEST(TestGpuBatchnormFwdInfVar3DShapes, MaterialEpsilon)
     fillWithRandomValues(bias, -fillRange, fillRange, seed++);
     fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
     fillWithRandomValues(variance, 0.1f, 1.f, seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    variance.memory().hostData();
 
     const double epsilon = 0.1;
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
@@ -332,6 +346,13 @@ TEST(TestGpuBatchnormFwdInfVar4DShapes, Broadcast2D)
     fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
     fillWithRandomValues(variance, 0.1f, 1.0f, seed++);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    variance.memory().hostData();
+
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
     GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
 
@@ -358,6 +379,13 @@ TEST(TestGpuBatchnormFwdInfVar4DShapes, Broadcast3D)
     fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
     fillWithRandomValues(variance, 0.1f, 1.0f, seed++);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    variance.memory().hostData();
+
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
     GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
 
@@ -383,6 +411,13 @@ TEST(TestGpuBatchnormFwdInfVar4DShapes, MaterialEpsilon)
     fillWithRandomValues(bias, -fillRange, fillRange, seed++);
     fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
     fillWithRandomValues(variance, 0.1f, 1.0f, seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    variance.memory().hostData();
 
     const double epsilon = 0.1;
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
@@ -413,6 +448,13 @@ TEST(TestGpuBatchnormFwdInfVar5DShapes, Broadcast2D)
     fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
     fillWithRandomValues(variance, 0.1f, 1.0f, seed++);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    variance.memory().hostData();
+
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
     GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
 
@@ -438,6 +480,13 @@ TEST(TestGpuBatchnormFwdInfVar5DShapes, Broadcast3D)
     fillWithRandomValues(bias, -fillRange, fillRange, seed++);
     fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
     fillWithRandomValues(variance, 0.1f, 1.0f, seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    variance.memory().hostData();
 
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
     GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
@@ -465,6 +514,13 @@ TEST(TestGpuBatchnormFwdInfVar5DShapes, Broadcast4D)
     fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
     fillWithRandomValues(variance, 0.1f, 1.0f, seed++);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    variance.memory().hostData();
+
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
     GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
 
@@ -490,6 +546,13 @@ TEST(TestGpuBatchnormFwdInfVar5DShapes, MaterialEpsilon)
     fillWithRandomValues(bias, -fillRange, fillRange, seed++);
     fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
     fillWithRandomValues(variance, 0.1f, 1.0f, seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    variance.memory().hostData();
 
     const double epsilon = 0.1;
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
@@ -522,6 +585,13 @@ TEST(TestGpuBatchnormFwdInfVar5DShapes, DISABLED_ExceedsUInt32MaxElements)
     fillWithRandomValues(bias, -fillRange, fillRange, seed++);
     fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
     fillWithRandomValues(variance, HalfType(0.1f), HalfType(1.0f), seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    variance.memory().hostData();
 
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
     GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
@@ -565,6 +635,13 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, UpcastX)
         estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
     fillWithRandomValues(
         variance, static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    variance.memory().hostData();
 
     CpuFpReferenceBatchnorm::
         fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
@@ -611,6 +688,13 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastX)
     fillWithRandomValues(
         variance, static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    variance.memory().hostData();
+
     CpuFpReferenceBatchnorm::
         fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
             x, scale, bias, estMean, variance, yCpu);
@@ -655,6 +739,13 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, UpcastY)
         estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
     fillWithRandomValues(
         variance, static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    variance.memory().hostData();
 
     CpuFpReferenceBatchnorm::
         fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
@@ -701,6 +792,13 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastY)
     fillWithRandomValues(
         variance, static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    variance.memory().hostData();
+
     CpuFpReferenceBatchnorm::
         fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
             x, scale, bias, estMean, variance, yCpu);
@@ -745,6 +843,13 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, UpcastAffine)
         estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
     fillWithRandomValues(
         variance, static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    variance.memory().hostData();
 
     CpuFpReferenceBatchnorm::
         fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
@@ -791,6 +896,13 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastAffine)
     fillWithRandomValues(
         variance, static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    variance.memory().hostData();
+
     CpuFpReferenceBatchnorm::
         fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
             x, scale, bias, estMean, variance, yCpu);
@@ -835,6 +947,13 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastComputeHalf)
         estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
     fillWithRandomValues(
         variance, static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    variance.memory().hostData();
 
     CpuFpReferenceBatchnorm::
         fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
@@ -884,6 +1003,13 @@ TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastComputeBfloat)
         estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
     fillWithRandomValues(
         variance, static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    variance.memory().hostData();
 
     CpuFpReferenceBatchnorm::
         fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(

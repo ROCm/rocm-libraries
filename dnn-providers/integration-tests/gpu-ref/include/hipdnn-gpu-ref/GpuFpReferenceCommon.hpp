@@ -246,9 +246,6 @@ static void gpuFillWithRandomValues(hipdnn_data_sdk::utilities::TensorBase<T>& t
 
         throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
     }
-
-    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access, which can cause issues down the line
-    tensor.memory().hostData();
 }
 #endif // USE_ROCRAND
 

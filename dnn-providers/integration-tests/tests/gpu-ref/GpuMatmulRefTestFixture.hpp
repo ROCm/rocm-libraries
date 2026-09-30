@@ -48,6 +48,10 @@ void runGpuVsCpuMatmul(const std::vector<int64_t>& aDims,
     auto cGpu = Tensor<CDataType>(cDims, cStrides);
     auto cCpu = Tensor<CDataType>(cDims, cStrides);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    aTensor.memory().hostData();
+    bTensor.memory().hostData();
+
     GpuFpReferenceMatmul::matmul<ADataType, BDataType, CDataType, ComputeDataType>(
         aTensor, bTensor, cGpu);
     cGpu.markDeviceModified();
