@@ -391,6 +391,17 @@ inline std::map<std::string, int>
                           assemblerPath,
                           "buffer_atomic_add_f32 v0, v1, s[0:3], null offen offset:0",
                           isDebug);
+    // Packed 2xBF16 atomic add (gfx950 / gfx1250+). gfx950 takes the literal 0
+    // soffset form, gfx1250 requires null, so probe both as HasAtomicAdd does.
+    rv["HasAtomicPkAddBF16"]
+        = tryAssembler(isaVersion,
+                       assemblerPath,
+                       "buffer_atomic_pk_add_bf16 v0, v1, s[0:3], 0 offen offset:0",
+                       isDebug)
+          || tryAssembler(isaVersion,
+                          assemblerPath,
+                          "buffer_atomic_pk_add_bf16 v0, v1, s[0:3], null offen offset:0",
+                          isDebug);
     rv["HasGLCModifier"]
         = tryAssembler(isaVersion,
                        assemblerPath,
@@ -608,6 +619,11 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     // sequence must emit `global_inv scope:SCOPE_DEV; s_wait_loadcnt 0` after
     // the flag load.
     rv["HasInvWbDevFences"]            = checkInList(isaVersion, {{12, 5, 0}});
+
+    // gfx950 splits L2 across 8 XCDs. StreamK partial-tile fixup needs
+    // VMEM flags with glc+slc and waitcnt fences for cross-XCD coherence;
+    // gfx1250 uses HasInvWbDevFences (global_wb / global_inv) instead.
+    rv["HasXCDSplitL2"]                = checkInList(isaVersion, {{9, 5, 0}});
 
     // XNACK-replay drain. When set, in-flight VMEM ops can be replayed and
     // therefore reorder w.r.t. a subsequent volatile/atomic VMEM. An

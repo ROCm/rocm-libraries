@@ -66,6 +66,14 @@ typedef halfhpp Rpp16f;
 /*! \brief RPP maximum channels in audio tensor \ingroup group_rppdefs \page subpage_rppt */
 #define RPPT_MAX_AUDIO_CHANNELS (16)
 
+/*! \brief If a nested RPP call fails, return its \ref RppStatus from the enclosing function. Use
+ * when forwarding the result of a *_host_tensor or hip_exec_* helper. \ingroup group_rppdefs */
+#define RPP_RETURN_IF_ERROR(expr)                           \
+    do {                                                    \
+        RppStatus _rpp_status = (expr);                     \
+        if (_rpp_status != RPP_SUCCESS) return _rpp_status; \
+    } while (0)
+
 #if RPP_BACKEND_HIP
 #include <hip/hip_runtime.h>
 #define RPP_HOST_DEVICE __host__ __device__
@@ -224,6 +232,84 @@ typedef enum {
     /*! \brief Internal HIP/GPU runtime error \ingroup group_rppdefs */
     RPP_ERROR_HIP_RUNTIME = -29,
 } RppStatus;
+
+/*! \brief Get the string representation of a RPP status code.
+ * \details Function to convert a <tt> \ref RppStatus</tt> value returned by any RPP tensor API
+ * function into its enumerator name, for logging and error reporting.
+ * \param [in] status A <tt> \ref RppStatus</tt> enumeration.
+ * \ingroup group_rppdefs
+ * \return A null-terminated string with static storage duration holding the enumerator name (for
+ * example "RPP_ERROR_INVALID_SRC_LAYOUT"), or "RPP_STATUS_UNKNOWN" if the value does not name an
+ * enumerator. The caller must not free the returned pointer.
+ */
+inline const char* rppGetStatusString(RppStatus status) noexcept {
+    // A switch over string literals keeps this allocation-free and non-throwing, so it stays safe
+    // to call from logging and error handling paths.
+    switch (status) {
+        case RPP_SUCCESS:
+            return "RPP_SUCCESS";
+        case RPP_ERROR:
+            return "RPP_ERROR";
+        case RPP_ERROR_INVALID_ARGUMENTS:
+            return "RPP_ERROR_INVALID_ARGUMENTS";
+        case RPP_ERROR_LOW_OFFSET:
+            return "RPP_ERROR_LOW_OFFSET";
+        case RPP_ERROR_ZERO_DIVISION:
+            return "RPP_ERROR_ZERO_DIVISION";
+        case RPP_ERROR_HIGH_SRC_DIMENSION:
+            return "RPP_ERROR_HIGH_SRC_DIMENSION";
+        case RPP_ERROR_NOT_IMPLEMENTED:
+            return "RPP_ERROR_NOT_IMPLEMENTED";
+        case RPP_ERROR_INVALID_SRC_CHANNELS:
+            return "RPP_ERROR_INVALID_SRC_CHANNELS";
+        case RPP_ERROR_INVALID_DST_CHANNELS:
+            return "RPP_ERROR_INVALID_DST_CHANNELS";
+        case RPP_ERROR_INVALID_SRC_LAYOUT:
+            return "RPP_ERROR_INVALID_SRC_LAYOUT";
+        case RPP_ERROR_INVALID_DST_LAYOUT:
+            return "RPP_ERROR_INVALID_DST_LAYOUT";
+        case RPP_ERROR_INVALID_SRC_DATATYPE:
+            return "RPP_ERROR_INVALID_SRC_DATATYPE";
+        case RPP_ERROR_INVALID_DST_DATATYPE:
+            return "RPP_ERROR_INVALID_DST_DATATYPE";
+        case RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE:
+            return "RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE";
+        case RPP_ERROR_INSUFFICIENT_DST_BUFFER_LENGTH:
+            return "RPP_ERROR_INSUFFICIENT_DST_BUFFER_LENGTH";
+        case RPP_ERROR_INVALID_PARAMETER_DATATYPE:
+            return "RPP_ERROR_INVALID_PARAMETER_DATATYPE";
+        case RPP_ERROR_NOT_ENOUGH_MEMORY:
+            return "RPP_ERROR_NOT_ENOUGH_MEMORY";
+        case RPP_ERROR_OUT_OF_BOUND_SRC_ROI:
+            return "RPP_ERROR_OUT_OF_BOUND_SRC_ROI";
+        case RPP_ERROR_LAYOUT_MISMATCH:
+            return "RPP_ERROR_LAYOUT_MISMATCH";
+        case RPP_ERROR_INVALID_CHANNELS:
+            return "RPP_ERROR_INVALID_CHANNELS";
+        case RPP_ERROR_INVALID_OUTPUT_TILE_LENGTH:
+            return "RPP_ERROR_INVALID_OUTPUT_TILE_LENGTH";
+        case RPP_ERROR_OUT_OF_BOUND_SHARED_MEMORY_SIZE:
+            return "RPP_ERROR_OUT_OF_BOUND_SHARED_MEMORY_SIZE";
+        case RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE:
+            return "RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE";
+        case RPP_ERROR_INVALID_SRC_DIMS:
+            return "RPP_ERROR_INVALID_SRC_DIMS";
+        case RPP_ERROR_INVALID_DST_DIMS:
+            return "RPP_ERROR_INVALID_DST_DIMS";
+        case RPP_ERROR_INVALID_DIM_LENGTHS:
+            return "RPP_ERROR_INVALID_DIM_LENGTHS";
+        case RPP_ERROR_INVALID_AXIS:
+            return "RPP_ERROR_INVALID_AXIS";
+        case RPP_ERROR_INCOMPATIBLE_BACKEND:
+            return "RPP_ERROR_INCOMPATIBLE_BACKEND";
+        case RPP_ERROR_HIP_LAUNCH:
+            return "RPP_ERROR_HIP_LAUNCH";
+        case RPP_ERROR_HIP_RUNTIME:
+            return "RPP_ERROR_HIP_RUNTIME";
+    }
+
+    return "RPP_STATUS_UNKNOWN";
+}
 
 /*! \brief RPP RppBackend type enums
  * \ingroup group_rppdefs

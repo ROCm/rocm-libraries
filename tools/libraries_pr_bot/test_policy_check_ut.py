@@ -406,6 +406,39 @@ class DraftAndBumpTests(unittest.TestCase):
         self.assertFalse(pc.is_bump_pr(policy, ""))
 
 
+# ----------------------------- required checks ---------------------------------
+
+
+class RequiredCheckTests(unittest.TestCase):
+    def test_pending_required_checks_include_missing_and_running(self) -> None:
+        policy = make_policy(required_checks=["pre-commit", "codeql"])
+        runs = [
+            {"name": "pre-commit", "conclusion": None},
+            {"name": "labeler", "conclusion": "success"},
+        ]
+        self.assertEqual(
+            pc.pending_required_checks(policy, runs), ["pre-commit", "codeql"]
+        )
+
+    def test_pending_only_comment_uses_waiting_heading(self) -> None:
+        marker = "<!-- test -->"
+        body = pc.build_policy_table_comment(
+            [
+                pc.CheckResult(
+                    "pre-commit",
+                    "🔎",
+                    passed=False,
+                    details=["⏳ Still running…"],
+                    pending=True,
+                )
+            ],
+            marker,
+        )
+        self.assertIn("### ⏳ Waiting on Required Checks", body)
+        self.assertIn("still running or have not started yet", body)
+        self.assertNotIn("Action Required", body)
+
+
 # ----------------------------- skip tag --------------------------------------
 
 
