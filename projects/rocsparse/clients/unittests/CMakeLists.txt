@@ -203,6 +203,9 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # (compiled in via rocsparse_assign_async.cpp below) and the ceil_div helper
   # in rocsparse_common.hpp.
   unit_test_internal_assign_async.cpp
+  # grid.y column-panel grid-stride loops of csrmm row_split and coomm, driven
+  # through rocsparse_spmm with maxGridSize[1] shrunk [AISPARSE-668/696].
+  unit_test_internal_level3_mm_grid_y.cpp
 )
 
 # Host building-block library translation units under test by the
