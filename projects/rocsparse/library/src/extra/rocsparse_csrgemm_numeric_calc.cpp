@@ -175,36 +175,36 @@ namespace rocsparse
               typename J,
               typename T>
     static inline rocsparse_status
-        csrgemm_numeric_launcher(rocsparse_handle                   handle,
-                                 const csrgemm_bitmap_region<I, J>& region,
-                                 J                                  group_size,
-                                 const J*                           group_offset,
-                                 const J*                           perm,
-                                 J                                  m,
-                                 J                                  n,
-                                 J                                  k,
-                                 const T*                           alpha_device_host,
-                                 const I*                           csr_row_ptr_A,
-                                 const J*                           csr_col_ind_A,
-                                 const T*                           csr_val_A,
-                                 const rocsparse_mat_descr          descr_B,
-                                 const I*                           csr_row_ptr_B,
-                                 const J*                           csr_col_ind_B,
-                                 const T*                           csr_val_B,
-                                 const T*                           beta_device_host,
-                                 const rocsparse_mat_descr          descr_D,
-                                 const I*                           csr_row_ptr_D,
-                                 const J*                           csr_col_ind_D,
-                                 const T*                           csr_val_D,
-                                 const I*                           csr_row_ptr_C,
-                                 const J*                           csr_col_ind_C,
-                                 T*                                 csr_val_C,
-                                 rocsparse_index_base               base_A,
-                                 rocsparse_index_base               base_B,
-                                 rocsparse_index_base               base_C,
-                                 rocsparse_index_base               base_D,
-                                 bool                               mul,
-                                 bool                               add)
+        csrgemm_numeric_launcher(rocsparse_handle                handle,
+                                 csrgemm_bitmap_workspace<I, J>& workspace,
+                                 J                               group_size,
+                                 const J*                        group_offset,
+                                 const J*                        perm,
+                                 J                               m,
+                                 J                               n,
+                                 J                               k,
+                                 const T*                        alpha_device_host,
+                                 const I*                        csr_row_ptr_A,
+                                 const J*                        csr_col_ind_A,
+                                 const T*                        csr_val_A,
+                                 const rocsparse_mat_descr       descr_B,
+                                 const I*                        csr_row_ptr_B,
+                                 const J*                        csr_col_ind_B,
+                                 const T*                        csr_val_B,
+                                 const T*                        beta_device_host,
+                                 const rocsparse_mat_descr       descr_D,
+                                 const I*                        csr_row_ptr_D,
+                                 const J*                        csr_col_ind_D,
+                                 const T*                        csr_val_D,
+                                 const I*                        csr_row_ptr_C,
+                                 const J*                        csr_col_ind_C,
+                                 T*                              csr_val_C,
+                                 rocsparse_index_base            base_A,
+                                 rocsparse_index_base            base_B,
+                                 rocsparse_index_base            base_C,
+                                 rocsparse_index_base            base_D,
+                                 bool                            mul,
+                                 bool                            add)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -278,7 +278,7 @@ namespace rocsparse
             // The hash table of this group does not fit in LDS for a value type this wide
             RETURN_IF_ROCSPARSE_ERROR(
                 (rocsparse::csrgemm_numeric_reuse_bitmap<I, J, T>(handle,
-                                                                  region,
+                                                                  workspace,
                                                                   m,
                                                                   n,
                                                                   group_size,
@@ -372,12 +372,8 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
         d_perm = nullptr;
     }
 
-    rocsparse::csrgemm_bitmap_region<I, J> bitmap_region;
-    if(d_perm != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrgemm_bitmap_region_at_tail<I, J>(
-            handle, temp_buffer, info_C->csrgemm_info->buffer_size, m, n, bitmap_region)));
-    }
+    // Shared by the groups that outgrow LDS, so they allocate once between them
+    rocsparse::csrgemm_bitmap_workspace<I, J> bitmap_workspace(handle);
 
     // Stream
     hipStream_t stream = handle->stream;
@@ -431,7 +427,7 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
     RETURN_IF_ROCSPARSE_ERROR(                                                      \
         (rocsparse::csrgemm_numeric_launcher<CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE>(   \
             handle,                                                                 \
-            bitmap_region,                                                          \
+            bitmap_workspace,                                                       \
             h_group_size[GROUP_SIZE_ID],                                            \
             &d_group_offset[GROUP_SIZE_ID],                                         \
             d_perm,                                                                 \
@@ -692,7 +688,7 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
 
         RETURN_IF_ROCSPARSE_ERROR(
             (rocsparse::csrgemm_numeric_reuse_bitmap<I, J, T>(handle,
-                                                              bitmap_region,
+                                                              bitmap_workspace,
                                                               m,
                                                               n,
                                                               h_group_size[10],

@@ -668,13 +668,11 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
             return rocsparse_status_requires_sorted_storage;
         }
 
-        rocsparse::csrgemm_bitmap_region<I, J> region;
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrgemm_bitmap_region_at_tail<I, J>(
-            handle, temp_buffer, info_C->csrgemm_info->buffer_size, m, n, region)));
+        rocsparse::csrgemm_bitmap_workspace<I, J> workspace(handle);
 
         RETURN_IF_ROCSPARSE_ERROR(
             (rocsparse::csrgemm_numeric_bitmap<I, J, T>(handle,
-                                                        region,
+                                                        workspace,
                                                         m,
                                                         n,
                                                         h_group_size[10],
