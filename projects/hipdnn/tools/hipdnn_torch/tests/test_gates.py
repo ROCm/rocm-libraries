@@ -288,3 +288,19 @@ def test_output_layout_unit_batch_ties_keep_logical_order():
     alloc_dims, inverse = _output_layout(q_shape, _contig_strides(q_shape), 64)
     assert alloc_dims == [1, 1, 128, 64]
     assert inverse == [0, 1, 2, 3]
+
+
+def test_output_layout_packed_qkv_slice_gives_dense_bshd_output():
+    # Q sliced out of a [B,S,3,H,D] buffer: gaps between rows, same BSHD order.
+    q_shape, q_stride = (2, 8, 128, 64), (196608, 64, 1536, 1)
+    alloc_dims, inverse = _output_layout(q_shape, q_stride, 64)
+    assert alloc_dims == [2, 128, 8, 64]
+    assert _layout_strides(alloc_dims, inverse) == (65536, 64, 512, 1)
+
+
+def test_output_layout_overlapping_query_falls_back_to_contiguous():
+    # Heads broadcast with expand(): stride 0 on a non-unit dim, no order to copy.
+    q_shape, q_stride = (2, 8, 128, 64), (8192, 0, 64, 1)
+    alloc_dims, inverse = _output_layout(q_shape, q_stride, 64)
+    assert alloc_dims == [2, 8, 128, 64]
+    assert inverse == [0, 1, 2, 3]

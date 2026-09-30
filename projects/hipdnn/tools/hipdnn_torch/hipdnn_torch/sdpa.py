@@ -50,13 +50,25 @@ def _output_layout(q_shape, q_stride, dv):
     allocation into a ``[*q_shape[:-1], dv]`` output ordered like Q in memory.
 
     Dims are sorted outermost-first by Q's stride; ties keep index order, so a
-    contiguous Q maps to a contiguous output. Pure shape/stride math, so the gates
-    tests can check it without torch.
+    contiguous Q maps to a contiguous output. Only the order is taken from Q: the
+    output is always a fresh dense buffer, so gaps in Q (a slice of a packed QKV
+    buffer) are fine. A Q whose elements overlap (a zero stride on a non-unit dim,
+    as from ``expand``) has no memory order to copy, so the output is contiguous.
+    Pure shape/stride math, so the gates tests can check it without torch.
     """
     shape = (*q_shape[:-1], dv)
-    order = sorted(range(len(shape)), key=lambda i: (-q_stride[i], i))
+    rank = len(shape)
+    order = sorted(range(rank), key=lambda i: (-q_stride[i], i))
+    span = 1  # elements covered by the dims inner to the current one
+    for i in reversed(order):
+        if q_shape[i] == 1:
+            continue
+        if q_stride[i] < span:
+            order = list(range(rank))  # overlapping: no order to follow
+            break
+        span = q_stride[i] * q_shape[i]
     alloc_dims = [shape[i] for i in order]
-    inverse = [order.index(i) for i in range(len(order))]
+    inverse = [order.index(i) for i in range(rank)]
     return alloc_dims, inverse
 
 
