@@ -13,7 +13,7 @@
 # CHECK: v0 = "st.v_mov_b32"
 st.func @paired_flat_survives_join() {
 ^entry:
-  "st.flat_prefetch_b8"(v[0:1], s[64:65]) { issueCycles = 1, latencyCycles = 1 }
+  "st.flat_prefetch_b8"(v[0:1]) { issueCycles = 1, latencyCycles = 1 }
   "st.s_cbranch_scc1"("label_join", SCC0)
   Successors: ^bb_side, ^label_join
 ^bb_side:
@@ -43,7 +43,7 @@ st.func @paired_flat_survives_join() {
 # CHECK-NEXT: v0 = "st.v_mov_b32"
 st.func @paired_flat_lost_when_paths_disagree() {
 ^entry:
-  "st.flat_prefetch_b8"(v[0:1], s[64:65]) { issueCycles = 1, latencyCycles = 1 }
+  "st.flat_prefetch_b8"(v[0:1]) { issueCycles = 1, latencyCycles = 1 }
   "st.s_cbranch_scc1"("label_join2", SCC0)
   Successors: ^bb_side2, ^label_join2
 ^bb_side2:
