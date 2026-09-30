@@ -222,8 +222,7 @@ def emitScaleGRPtrUpdate(ti, writer, kernel):
     # over-advance this SRD — keep mxScaleFormat==0 refused under USO until
     # that multiplier is format-gated.
     inc = int(ti.scaleDepthU * ti.bpe)
-  module.addComment0("Scale SRD update: %s += %u (%s)" % (
-      tc, inc, kernel.get("MXScaleFormat", "NoSwizzle")))
+  module.addComment0("Scale SRD update: %s += %u" % (tc, inc))
   module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc))
   module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0))
   return module

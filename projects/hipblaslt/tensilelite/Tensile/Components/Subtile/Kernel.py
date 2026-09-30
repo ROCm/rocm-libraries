@@ -694,7 +694,11 @@ class TileInfo:
     # should be managed by scale-specific alloc in SubtileScaleEmit.py
     if isinstance(self.geometry, MXScaleTilePair):
       self._sharedVgprGROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprGROffset")]
-      self._sharedVgprGROffsetSwap = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprGROffsetSwap")]
+      # Option B (NoSwizzle) only: double-buffer swap mask for GR ds_store.
+      # HostPreSwizzle / InMemorySwizzle use SGPR LocalWriteBaseAddr swap and
+      # must not take this VGPR or later numbering drifts from pre-Option-B asm.
+      if kernel.get("MXScaleFormat", "NoSwizzle") == "NoSwizzle":
+        self._sharedVgprGROffsetSwap = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprGROffsetSwap")]
       self._sharedVgprLROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffset")]
       self._sharedVgprLROffsetSwap = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffsetSwap")]
 

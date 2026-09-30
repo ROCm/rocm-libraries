@@ -5339,7 +5339,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if (kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]
         and kernel["UseSubtileImpl"]
         and mxScaleFormat in ("HostPreSwizzle", "InMemorySwizzle")):
-      module.addComment("Scale StridesMXSA/B by MXBlock for swizzled scale layout")
+      module.addComment("Scale StridesMXSA by 32")
       module.add(SLShiftLeftB32(sgpr("StridesMXSA"), 5, sgpr("StridesMXSA")))
       module.add(SLShiftLeftB32(sgpr("StridesMXSB"), 5, sgpr("StridesMXSB")))
 
