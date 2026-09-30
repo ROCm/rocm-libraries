@@ -43,7 +43,9 @@ constexpr int BENCHMARK_ITERATIONS = 7;
 /// A finite negative elapsed time is a known artifact of HIP event timing near the
 /// clock's resolution floor, not proof a candidate is broken: sampleCandidate() discards
 /// it and re-measures the same slot, using at most this many extra attempts for the
-/// whole candidate. NaN, Inf, and a backend timing error are never retried this way.
+/// whole candidate. Exhausting the budget restarts a stalled comparison unstalled and
+/// scores the candidate unusable in an unstalled one. NaN, Inf, and a backend timing
+/// error are never retried this way.
 constexpr int MAX_NEGATIVE_SAMPLE_RETRIES = 2;
 
 // A zero iteration count would leave sampleCandidate()'s reduction at its DBL_MAX seed
@@ -197,10 +199,11 @@ private:
         /// The candidate's representative time; unset when it could not be timed or the
         /// sample was malformed. Either way scores the candidate unusable.
         std::optional<double> timeMs;
-        /// True when the timed span cannot be trusted as a stalled measurement: either a
-        /// watchdog timeout, or a valid sample the timer reports as unstalled while a
-        /// stalled pass requested one. Neither is about the candidate itself, so the
-        /// whole comparison must stop sampling immediately and restart unstalled.
+        /// True when the timed span cannot be trusted as a stalled measurement: a
+        /// watchdog timeout, a valid sample the timer reports as unstalled while a
+        /// stalled pass requested one, or stalled samples that stay negative after the
+        /// retry budget. None is about the candidate itself, so the whole comparison
+        /// must stop sampling immediately and restart unstalled.
         bool restartUnstalled = false;
     };
 
@@ -355,14 +358,14 @@ private:
         ranked.reserve(_candidates.size());
 
         // A candidate that could not actually be measured stalled -- whether a stall
-        // watchdog timed out, or the gate simply never held the stream (unsupported
-        // device, a transient arm failure) -- cannot be mixed with the rest of this
-        // pass's genuinely stalled measurements: that would rank two incomparable
-        // populations. So sampling stops the instant either happens -- candidates not
-        // yet reached this pass are never sampled stalled at all -- and every candidate
-        // is re-measured unstalled from scratch. This policy is local to this one
-        // comparison: it never reads or writes any state shared with another
-        // comparison, another gate, or a standalone timed execution elsewhere.
+        // watchdog timed out, the gate never held the stream (unsupported device, a
+        // transient arm failure), or stalled readings stayed negative -- cannot be mixed
+        // with the rest of this pass's genuinely stalled measurements: that would rank two
+        // incomparable populations. So sampling stops the instant any of these happens --
+        // candidates not yet reached this pass are never sampled stalled at all -- and every
+        // candidate is re-measured unstalled from scratch. This policy is local to this one
+        // comparison: it never reads or writes any state shared with another comparison,
+        // another gate, or a standalone timed execution elsewhere.
         for(;;)
         {
             ranked.clear();
@@ -398,7 +401,8 @@ private:
             }
 
             HIPDNN_PLUGIN_LOG_WARN(
-                "ingestor: stalled timing was unavailable or timed out during benchmarking. "
+                "ingestor: stalled timing was unavailable, timed out, or kept reading "
+                "negative during benchmarking. "
                 "Discarding the pass and re-measuring every candidate unstalled.");
             // The retry runs with stalled=false, so no sample from it can trigger
             // another restart: this can happen at most once.
@@ -454,11 +458,14 @@ private:
     /// the sign check below, so a negative sample can never hide a restart the comparison
     /// actually needs. A backend error (no elapsed time at all) or a non-finite sample
     /// (NaN/Inf) scores the candidate unusable immediately, with no retry. A finite
-    /// negative sample is instead treated as a transient HIP-event-timing artifact: it is
-    /// discarded and the same slot re-measured, using at most MAX_NEGATIVE_SAMPLE_RETRIES
-    /// extra attempts for the whole candidate; exhausting that budget scores the
-    /// candidate unusable without the malformed value ever reaching the reduction,
-    /// ranking, or cache.
+    /// negative sample is instead treated as a HIP-event-timing artifact: it is discarded
+    /// and the same slot re-measured, using at most MAX_NEGATIVE_SAMPLE_RETRIES extra
+    /// attempts for the whole candidate. Exhausting that budget in a stalled pass
+    /// restarts the comparison unstalled, because stalled timing can read negative for
+    /// short work on some runtimes (seen on Windows) and dropping the candidate would
+    /// silently exclude the fastest kernels. In an unstalled pass it scores the candidate
+    /// unusable. Either way the negative value never reaches the reduction, ranking, or
+    /// cache.
     ///
     /// Samples are reduced with robustMean() rather than by taking the fastest: a kernel
     /// that is usually slower but occasionally lucky would win on its best sample and then
@@ -557,9 +564,8 @@ private:
                     // near the clock's resolution floor, not proof the candidate is
                     // broken: discard it and re-measure the same slot rather than
                     // condemning the whole candidate on one bad reading. A persistently
-                    // negative candidate still exhausts the retry budget and falls
-                    // through to the unusable return below, never entering the
-                    // reduction, ranking, or cache.
+                    // negative candidate exhausts the retry budget below and never enters
+                    // the reduction, ranking, or cache.
                     if(negativeSampleRetriesLeft > 0)
                     {
                         --negativeSampleRetriesLeft;
@@ -568,6 +574,17 @@ private:
                                                << "' reported a negative elapsed time; "
                                                   "discarding it and re-measuring");
                         continue;
+                    }
+                    if(stalled)
+                    {
+                        HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
+                                               << toString(candidate.kernelId)
+                                               << "' reported a negative stalled elapsed time "
+                                                  "after exhausting "
+                                               << MAX_NEGATIVE_SAMPLE_RETRIES
+                                               << " retries; the whole comparison will "
+                                                  "restart unstalled");
+                        return {std::nullopt, true};
                     }
                     HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
                                            << toString(candidate.kernelId)
