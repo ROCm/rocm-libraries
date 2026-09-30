@@ -24,7 +24,9 @@ from Tensile.Common.GlobalParameters import defaultInternalSupportParams, defaul
 from Tensile.Common.ValidParameters import validParameters, validParametersForArch
 
 _CHAR_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+# common/config_helpers.findConfigs collects every other .yaml under Tensile/Tests
+# as a Tensile config, and a dict-format logic file would fail there.
+_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logic_yaml")
 _CODEGEN_DATA = os.path.join(_CHAR_DIR, "_codegen", "data")
 
 #: Dict-format gfx950 logic whose DefaultSolution holds MaxOccupancy 40 and
