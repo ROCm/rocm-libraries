@@ -1612,3 +1612,92 @@ st.func @test_barrier_anchor_missing_tokens() {
 
     EXPECT_EQ(countWaitCnt(entryBB), 1);
 }
+
+// The prologue can fully complete both initial groups while a one-copy loop
+// continues to rotate physical LDS banks. Its static token1 consumer must keep
+// the steady-state partial completion contract even though sweep 0 sees only
+// the newest token0 producer(s). Counts 1 and 2 cover data and data+MX groups.
+TEST_F(WaitCntInsertionTest, BarrierTensorContractSurvivesDrainedLoopEntry) {
+    for (int count : {1, 2}) {
+        SCOPED_TRACE(count);
+        gemmConfig.NumWaves = 4;
+        std::string irString = R"(
+st.func @drained_entry_rotating_loop() {
+^entry:
+  LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  LDS1 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [1] } }
+  "st.s_wait_tensorcnt"(0) { mod.swaittensorcnt = { tlcnt = 0 } }
+  Successors: ^loop
+^loop:
+)";
+        for (int i = 0; i < count; ++i)
+            irString += R"(  LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+)";
+        irString += R"(  LDS1 = "st.s_barrier_signal"(-1, LDS1) { mod.memtoken = { tokens = [1] }, mod.swaittensorcnt = { tlcnt = )";
+        irString += std::to_string(count);
+        irString += R"( } }
+  LDS1 = "st.s_barrier_wait"(-1, LDS1) { mod.memtoken = { tokens = [1] } }
+  v[0:3] = "st.ds_load_b128"(v10, LDS1) { mod.memtoken = { tokens = [1] } }
+  Successors: ^loop, ^exit
+^exit:
+}
+)";
+        StinkyIRConverter converter(getArch());
+        auto* parsed = parseIR(irString, converter);
+        ASSERT_NE(parsed, nullptr);
+        // Round-trip the annotation through native IR serialization as well.
+        const std::string serialized = toString(*parsed);
+        StinkyIRConverter roundTrip(getArch());
+        auto* func = parseIR(serialized, roundTrip);
+        ASSERT_NE(func, nullptr);
+        BasicBlock& loop = *std::next(func->begin());
+        auto* signal = findNthInst(loop, GFX::s_barrier_signal);
+        ASSERT_NE(signal, nullptr);
+        ASSERT_NE(signal->getModifier<SWaitTensorCntData>(), nullptr);
+        EXPECT_EQ(signal->getModifier<SWaitTensorCntData>()->tlcnt, count);
+        runInsertionPass(*func);
+        auto* wait = findNthInst(loop, GFX::s_wait_tensorcnt);
+        ASSERT_NE(wait, nullptr) << "Entry completion must not erase later-trip readiness";
+        EXPECT_EQ(wait->getModifier<SWaitTensorCntData>()->tlcnt, count);
+        EXPECT_LT(getInstructionPosition(loop, wait), getInstructionPosition(loop, signal));
+        ASSERT_NE(wait->getModifier<MemTokenData>(), nullptr);
+        EXPECT_EQ(wait->getModifier<MemTokenData>()->tokens, std::vector<int>({1}));
+    }
+}
+
+TEST_F(WaitCntInsertionTest, BarrierTensorContractDoesNotWeakenInferredWait) {
+    std::string irString = R"(
+st.func @stronger_inferred_completion() {
+^entry:
+  LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  LDS1 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [1] } }
+  LDS1 = "st.s_barrier_signal"(-1, LDS1) { mod.memtoken = { tokens = [1] }, mod.swaittensorcnt = { tlcnt = 2 } }
+  LDS1 = "st.s_barrier_wait"(-1, LDS1) { mod.memtoken = { tokens = [1] } }
+}
+)";
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+    runInsertionPass(*func);
+    auto* wait = findNthInst(*func->begin(), GFX::s_wait_tensorcnt);
+    ASSERT_NE(wait, nullptr);
+    EXPECT_EQ(wait->getModifier<SWaitTensorCntData>()->tlcnt, 0);
+    ASSERT_NE(wait->getModifier<MemTokenData>(), nullptr);
+    EXPECT_EQ(wait->getModifier<MemTokenData>()->tokens, std::vector<int>({0, 1}));
+}
+
+TEST_F(WaitCntInsertionTest, UnsetBarrierTensorContractKeepsInference) {
+    std::string irString = R"(
+st.func @unset_barrier_contract() {
+^entry:
+  LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  LDS1 = "st.s_barrier_signal"(-1, LDS1) { mod.memtoken = { tokens = [1] }, mod.swaittensorcnt = { tlcnt = -1 } }
+  LDS1 = "st.s_barrier_wait"(-1, LDS1) { mod.memtoken = { tokens = [1] } }
+}
+)";
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+    runInsertionPass(*func);
+    EXPECT_EQ(findNthInst(*func->begin(), GFX::s_wait_tensorcnt), nullptr);
+}

@@ -286,6 +286,10 @@ class _SetupNewTilePapTdmWriter:
     def isPrefetchAcrossPersistentEnabled(self, kernel):
         return KernelWriter.isPrefetchAcrossPersistentEnabled(self, kernel)
 
+    def papPgr2PipelineEnabled(self, kernel, tpa, tpb):
+        # This fixture exercises StreamK PGR1 setup and WaveIdx lifetime.
+        return False
+
     def _nextLdsToken(self, idx):
         return KernelWriter._nextLdsToken(self, idx)
 

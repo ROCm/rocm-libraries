@@ -2829,3 +2829,47 @@ TEST_F(InsertClusterBarrierPassTest, SplitWaveLoopPostsSignalOnlyOnWave0Copy) {
     EXPECT_TRUE(renamedBranch) << blockListing(*bb);
     EXPECT_GT(findLabel("label_Inside"), -1) << "the original label stays in wave 0";
 }
+
+// The physical cluster ID is authoritative even when a front end supplies
+// memory tokens to express a partial LDS readiness phase.
+TEST_F(InsertClusterBarrierPassTest, TypedClusterWaitIsAnExistingHandshake) {
+    appendGsu1Preheader();
+    openLoop();
+    createBarrierSignal(kClusterBarrierId)->addModifier<MemTokenData>(MemTokenData{{0}});
+    createBarrierWait(kClusterBarrierId)->addModifier<MemTokenData>(MemTokenData{{0}});
+    appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    closeLoop();
+    runPass();
+    const auto first = clusterBarrierCounts();
+    EXPECT_EQ(first.first, 2);
+    EXPECT_EQ(first.second, 2);
+    runPass();
+    EXPECT_EQ(clusterBarrierCounts(), first);
+}
+
+TEST_F(InsertClusterBarrierPassTest, Rule3HardStopCannotFindItsOwnTriggerAsEarlierPair) {
+    appendGsu1Preheader();
+    openLoop();
+    createBarrierSignal(kClusterBarrierId);
+    createBarrierWait(kClusterBarrierId);
+    createWMMA(24, 0, 8);
+    StinkyInstruction* leadingDrain = createWaitTensorCnt(0);
+    StinkyInstruction* trigger = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    closeLoop();
+    auto* loopHead = findLabelNamed("label_TestLoop");
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    const auto cycleMap = computeEstimatedCyclesPerInstruction(*func, ctx);
+    for (int hops : {0, 1}) {
+        for (auto* reference : {leadingDrain, trigger}) {
+            const auto found = cluster_barrier::test::findRule3SignalAnchorByCycleLeadForUnitTest(
+                reference, segBeginAfter(loopHead), reference, cycleMap,
+                500, 900, {}, hops, loopHead);
+            EXPECT_EQ(found.anchor, reference);
+            EXPECT_EQ(found.hops, 0);
+            EXPECT_FALSE(found.crossedLoopHead);
+            EXPECT_EQ(found.outOfSegmentNomination, nullptr);
+        }
+    }
+    runPass(/*rule3SignalLeadCycles=*/500);
+}

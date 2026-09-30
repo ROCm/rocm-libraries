@@ -105,13 +105,20 @@ class PersistentKernelState:
         from rocisa.instruction import DSLoadInstruction, SSchedulingFence, VAddU32
         module = Module("PAP next tile first local reads")
         reads = getattr(self.states, "papFirstPlrReads", None)
-        if reads is None:
+        # A multicast producer must publish group0 to its peers even when the
+        # VGPR budget leaves its first local reads at the ordinary entry site.
+        cluster = persistentSpatialCluster(kernel)
+        if reads is None and not (cluster and self.papPgr2PipelineEnabled(kernel, tPA, tPB)):
             return module
         skip = Label(self.labels.getNameInc("PapSkipNextLocalRead"), "")
         module.add(SSchedulingFence(comment="PAP current final WMMA releases first PLR operands"))
         module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=3,
                               comment="PAP both next groups issued?"))
         module.add(SCBranchSCC0(labelName=skip.getLabelName()))
+        if reads is None:
+            module.add(self.papPgr2GroupReady(kernel, tPA, tPB, 0))
+            module.add(skip)
+            return module
         # Rebuild lane-relative base pointers using scratch allocated while C and
         # all operands are unavailable. A copy of setup's code could clobber C.
         snapshot = self.rapSnapshotEmitterState(kernel, tPA, tPB)
@@ -133,10 +140,8 @@ class PersistentKernelState:
                     addr = vgpr("LocalReadAddr%s+%d" % (tc, i))
                     module.add(VAddU32(dst=addr, src0=addr, src1=sgpr(bank.idx),
                                        comment="PAP select group0 bank for " + tc))
-        module.add(self._wait(kernel, tPA, tPB, self.papPgr2TensorCount(kernel), -1, -1,
-                              "PAP PLR waits group0; younger group1 may remain in flight"))
+        module.add(self.papPgr2GroupReady(kernel, tPA, tPB, 0))
         token = self.states.memTokenLdsBuffer0
-        module.add(self._syncThreads(kernel, "PAP group0 ready for next PLR", memoryToken=[token]))
         retainedReads = deepcopy(reads)
         for item in retainedReads.flatitems():
             if isinstance(item, DSLoadInstruction):
@@ -169,14 +174,31 @@ class PersistentKernelState:
                 and not pt.get("UseBias", 0)
                 and not pt.get("UseScaleAlphaVec", 0)
                 and pt.get("UseScaleAB", "") != "Vector"
-                and not pt.get("OutputAmaxD", False)
-                and not persistentSpatialCluster(kernel))
+                and not pt.get("OutputAmaxD", False))
 
     @staticmethod
     def papPgr2TensorCount(kernel):
         # The aliased wave-separated descriptors issue once per wave for data,
         # and once more for paired MX; descriptor group operands are not loads.
         return 2 if kernel["ProblemType"]["MXBlockA"] else 1
+
+    def papPgr2MainLoopReadiness(self, kernel, tPA, tPB):
+        """Complete the older producer at every rotating main-loop read boundary.
+
+        One emitted loop copy swaps physical LDS banks on each trip. Its static
+        tokens cannot describe that backedge, and a full PAP entry drain must
+        not erase the repeated dependency. One younger TDM group (data plus
+        paired MX, when present) may remain outstanding at this rendezvous.
+        """
+        if (self.states.unrollLoopCopies != 1
+                or not self.papPgr2PipelineEnabled(kernel, tPA, tPB)):
+            return None
+        module = Module("Persistent PAP rotating loop readiness")
+        barrier = SBarrier(tensorcnt=self.papPgr2TensorCount(kernel),
+                           comment="PAP complete older TDM group on every main-loop trip")
+        barrier.setMemToken(MemTokenData([self.states.ldsReadTokenIdx]))
+        module.add(barrier)
+        return module
 
     def papPgr2AdvanceDescriptor(self, kernel):
         """One positive DepthU step, independent of the current tile counters.
@@ -213,6 +235,53 @@ class PersistentKernelState:
             self.states.ldsTensorTokenIdx = previous
         return module
 
+    def papPgr2ClusterPhase(self, kernel, group, phase):
+        """Finish one elected arrive/wait phase on every multicast peer.
+
+        Release callers provide the token-scoped local join; readiness owns
+        its join here. Padded phantom peers release and publish together too.
+        """
+        module = Module("PAP PGR2 cluster %s group%d" % (phase, group))
+        if not persistentSpatialCluster(kernel):
+            return module
+        assignment = Component.WorkAssignment.find(self)
+        assignment._clusterElectArriveSignal(
+            self, module, labelBase="PapPgr2%sGroup%d" % (phase.title(), group),
+            electTag="PAP PGR2 cluster election", wait=True)
+        token = self.states.memTokenLdsBuffer0
+        if group:
+            token = self._nextLdsToken(token)
+        for item in module.flatitems():
+            if isinstance(item, SBarrier):
+                item.setMemToken(MemTokenData([token]))
+        if phase == "ready":
+            # Keep the local join in the same owner as the cluster handshake.
+            # Python's token pass preserves that complete publication unit;
+            # a nested syncThreads module could be removed and rebuilt too late.
+            barrier = SBarrier(comment="PAP group%d producer waves ready" % group)
+            # Group1 readiness deliberately completes every producer at entry.
+            # Name both roles so the native join covers cold and carried paths.
+            tokens = [self.states.memTokenLdsBuffer0, token] if group else [token]
+            barrier.setMemToken(MemTokenData(tokens))
+            module.add(barrier, 0)
+        return module
+
+    def papPgr2GroupReady(self, kernel, tPA, tPB, group):
+        """Complete this producer group before peers consume its LDS bank."""
+        module = Module("PAP PGR2 group%d readiness" % group)
+        count = self.papPgr2TensorCount(kernel) if group == 0 else 0
+        comment = ("PAP PLR waits group0; younger group1 may remain in flight"
+                   if group == 0 else "PAP group1 producer ready at next entry")
+        module.add(self._wait(kernel, tPA, tPB, count, -1, -1, comment))
+        token = self.states.memTokenLdsBuffer0
+        if group:
+            token = self._nextLdsToken(token)
+        if not persistentSpatialCluster(kernel):
+            comment = "PAP group0 ready for next PLR" if group == 0 else "PAP group1 producer waves ready"
+            module.add(self._syncThreads(kernel, comment, memoryToken=[token]))
+        module.add(self.papPgr2ClusterPhase(kernel, group, "ready"))
+        return module
+
     def papPgr2EntryWait(self, kernel, tPA, tPB):
         module = Module("PAP PGR2 first group readiness")
         ordinary = Label(self.labels.getNameInc("PapPgr2ColdEntryWait"), "")
@@ -220,6 +289,10 @@ class PersistentKernelState:
         module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=3,
                               comment="PAP second group already issued?"))
         module.add(SCBranchSCC0(labelName=ordinary.getLabelName()))
+        if persistentSpatialCluster(kernel):
+            # Group0 was published before the previous tile's epilogue. Delay
+            # group1's readiness phase through that epilogue and this setup.
+            module.add(self.papPgr2GroupReady(kernel, tPA, tPB, 1))
         module.add(self._wait(kernel, tPA, tPB, self.papPgr2TensorCount(kernel), -1, -1,
                               "PAP group0 ready; retain younger group1"))
         module.add(SBranch(labelName=done.getLabelName()))
@@ -989,6 +1062,10 @@ class PersistentLoop(Component):
 
         if group == 1:
             module.add(releaseBank())
+        # The next tile and K guards above are cluster-uniform, including its
+        # padded phantom peers. Neither skipped issues nor the loop-close path
+        # may arrive for one of these explicit bank-release phases.
+        module.add(writer.papPgr2ClusterPhase(kernel, group, "release"))
         module.add(writer.papPgr2IssueGroup(kernel, tPA, tPB, group))
         module.add(SSchedulingFence(comment="PAP PGR2 publish only after group%d issue" % group))
         module.add(SOrB32(dst=sgpr("PersistentPrefetchState"), src0=sgpr("PersistentPrefetchState"),

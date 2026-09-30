@@ -1192,6 +1192,18 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         iterCode.addItems(macItems)
       else:
         if(kernel["PrefetchGlobalRead"] >= 2):
+          papReadiness = [item for item in syncCode.flatitems()
+                          if isinstance(item, SBarrier) and getattr(item, "tensorcnt", -1) >= 0]
+          if papReadiness and not isNLLorNGLL:
+            # The partial readiness count leaves this youngest TDM group live.
+            # Its descriptor swap/increment belongs to the previous subiteration;
+            # order the actual issue before the pinned rendezvous, then let the
+            # token pass insert the prior bank's read-to-write release before it.
+            assert pointerLWCode.itemsSize() == 0
+            tensorIssues = sum(isinstance(item, TensorLoadToLds) for item in globalReadCode.flatitems())
+            assert len(papReadiness) == 1 and tensorIssues == papReadiness[0].tensorcnt
+            iterCode.add(globalReadCode)
+            globalReadCode = Module()
           iterCode.add(waitLWCode)
           iterCode.add(syncCode)
           iterCode.add(localReadCode)
@@ -5106,7 +5118,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
              (kernel["enableTDMA"] and kernel["enableTDMB"]):
             # DTVA/B, DTLA/B, or TDM case: global read wait is handled above, skip force waitcnt0
             skipForceWaitcnt0 = True
-          syncCode.add(self._syncThreads(kernel, "PGR, and wait until LW done to sync", skipForceWaitcnt0=skipForceWaitcnt0))
+          papLoopSync = self.papPgr2MainLoopReadiness(kernel, tensorParametersA, tensorParametersB)
+          if papLoopSync is not None:
+            syncCode.add(papLoopSync)
+          else:
+            syncCode.add(self._syncThreads(kernel, "PGR, and wait until LW done to sync", skipForceWaitcnt0=skipForceWaitcnt0))
           if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["PrefetchGlobalRead"] == 1:
             syncCode.add(self._syncThreads(kernel, "PGR1 and TDM, another wait to sync", skipForceWaitcnt0=skipForceWaitcnt0))
 
@@ -11309,7 +11325,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if isinstance(item, Module):
           modulesToScan.append(item)
           keptItems.append(item)
-        elif isinstance(item, SBarrier) and not (clusterHandoff or explicitPapHandoff):
+        elif isinstance(item, SBarrier) and not (
+            clusterHandoff or explicitPapHandoff or getattr(item, "tensorcnt", -1) >= 0):
           # Only ordinary workgroup barriers are rebuilt from LDS tokens.
           # Preserve explicitly grouped cluster signal/wait handoffs intact.
           removedCount += 1
@@ -11596,6 +11613,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       access = _classifyTokenAccess(item)
       tokens = _getTokenList(item)
+      if isinstance(item, SBarrier) and getattr(item, "tensorcnt", -1) >= 0:
+        # A contracted rendezvous already completes the named producer bank.
+        # Do not rebuild a duplicate join before its following local reads.
+        for token in tokens:
+          tokenState[token] = "standby"
+          loopEntryOverride.pop(token, None)
+          loopPendingTokens.discard(token)
+        continue
       if access is None and tokens:
         print2(f"[postMainLoopBarrierCheckAndReset] WARNING: instruction {type(item).__name__} has tokens {tokens} but no classified access — barrier may be missing")
       if access is None or not tokens:

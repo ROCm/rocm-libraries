@@ -1,65 +1,185 @@
-# PAP implementation checkpoint (WIP)
+# PAP implementation checkpoint
 
-Implementation paused on 2026-09-30 for a local checkpoint. This is unfinished
-work, not a validated performance change. The new two-group path is selected
-by existing PAP settings for its supported non-multicast geometry; its final
-native completion proof is outstanding. GPU correctness and performance of
-this draft have not been validated.
+Updated 2026-09-30. Two next-tile global-prefetch groups and retained first-PLR
+operands are implemented for the eligible classic gfx1250 DataParallel/StaticGrid
+PAP path, including persistent multicast. Final production kernels pass all 30
+supported functional comparisons, four smoke cases, and the two original
+long-K regression cases. All 24 paired performance runs passed; measured mean
+kernel-time reductions range from 1.70% to 7.68% for the four configurations below.
+This checkpoint records the integrated fixes developed after `85fae93fd19`.
+Work is paused for a local WIP commit; the HalfPLR extension described below
+has not been implemented.
 
-## Saved implementation
+## Implemented behavior
 
-- Includes the existing PAP multicast correctness work: cluster bank handoff,
-  phantom-tile identity preservation, persistent grid behavior, and regressions.
-- Includes prepared next-tile addresses, descriptor lifetime fixes, positive
-  group1 DepthU increments, two next-tile global-prefetch groups, and retained
-  first-PLR operands through epilogue and next-tile setup.
-- Group0 uses token0; group1 and surviving current F-bank reads use token1.
-  The saved checkpoint adds a typed token0 completion barrier at the common
-  next-entry consumer boundary. Multicast remains disabled for this new
-  two-group/PLR path; existing legacy multicast behavior is separate.
-- Rejects PAP configurations whose bias/vector-scale/local-split-U epilogue
-  overwrites prefetched LDS banks. Existing StoreRemap rejection remains.
+- Prepare next-tile addresses while preserving current tile identity. Issue
+  group0 into its released LDS bank, advance the descriptor by a positive DepthU
+  step, then issue group1 into the other released bank.
+- Group0 uses token0; group1 and surviving current final-bank reads use token1.
+  Group0 readiness allows the younger group1 transfer to remain outstanding.
+  Retained first-PLR operands remain allocated through the epilogue and next-tile
+  setup, with typed completion before both first-WMMA consumer routes.
+- Multicast has guarded release and publication phases for each group. Producers
+  complete and all local waves join before the elected wave signals the cluster;
+  all waves then wait for publication. The late group1 local join names both
+  producer tokens because it completes all tensor producers. Its cluster phase
+  still names token1.
+- Phantom peers participate in the same phases while preserving store eligibility.
+  Preparation, next-tile, K, and loop-close guards prevent duplicate issues or
+  unmatched cluster phases. Resource denial retains the corresponding ordinary
+  address or local-read path.
 
-The saved incremental source/test patch is checkpoint04, SHA256
-`0299a736e2fdf8cd8ccf7150dcfd790a6a7362913e1730e86fd5a61d87a1260a`.
-It is newer than the latest independently emitted checkpoint03. Local detailed
-artifacts remain under `triage/pap_optimization/resume/` and are not committed.
+The native cluster pass recognizes token-tagged cluster waits by physical
+barrier ID. Its Rule3 forward scan is bounded by the current wait and control-flow
+segment, fixing the reproduced out-of-segment anchor assertion. Local producer
+joins remain in the explicit cluster-handshake module so Python barrier
+reconstruction preserves publication order.
 
-## Existing evidence and unresolved issues
+## Long-K correctness repair
 
-- Before the last completion edit, 93 focused two-group/PLR cases passed; the
-  final PLR helper suite passed 15 cases. The adjacent run already in progress
-  at pause finished with 414 passed, 9 skipped, and 3 failures. All failures
-  are `test_setup_new_tile_releases_waveidx_*` tests whose
-  `_SetupNewTilePapTdmWriter` fixture lacks `papPgr2PipelineEnabled`. They are
-  recorded without a follow-up fix or rerun.
-- Checkpoint03 representative MX native emission/assembly passed at 104 SGPRs
-  and 686 VGPRs (previous integrated draft: 104/678). All 102 between-group
-  F-bank DS reads carry token1; all 204 retained operand VGPRs survive setup
-  and epilogue. Emitted positive descriptor increments passed q2/3/4/6 and
-  carry-boundary interpreter checks. This does not prove device correctness.
-- Checkpoint03 carried PLR completion is unsafe: its 51-read producer order
-  needs first-WMMA `dscnt <= 28`, but both main and q2 routes use `dscnt 41`
-  without prior completion. Checkpoint04's typed late completion barrier is
-  saved but has not been independently emitted or verified.
-- A native `s_wait_tensorcnt 0` still executes before the active group1 bank
-  release and drains group0. The intended overlap is therefore unproven.
-  Early and legacy fallback group0 sites both use token0. A short-K CFG merge
-  is only a hypothesis; the native cause has not been established.
-- The in-progress no-MX emission completed at 74 SGPRs/655 VGPRs, but its token,
-  lifetime, and wait details were not inspected. Final fallback, bank-parity,
-  small-K, native completion, and multicast phase checks remain unfinished.
-- No new tests, native builds, or GPU operations were started for this commit.
-  Only source preservation, parse, whitespace, and secret checks were run.
+GPU validation exposed a missing repeated main-loop tensor wait. The original
+PAP1 kernel passed K=0/256/512/768 but failed K=1024/1536 and the ragged batched
+case. Matching PAP0 controls passed; PAP1 also failed with only one persistent
+assignment, so a next-tile overwrite was not required to trigger the error.
+A diagnostic restoring only `s_wait_tensorcnt 1` at the shared LDS1 consumer
+boundary passed all seven original shapes.
 
-## Unmerged native investigation
+Physical LDS banks rotate on every trip of the one-copy loop, while its static
+token names repeat. Native tensor analysis freezes after its first sweep. PAP's
+valid entry drain removed the initial producer state that previously caused a
+partial wait to be emitted, although later trips still needed that wait.
 
-`triage/pap_checkpoint/rule3-bound-wip.patch` and `rule3_bound_repro.cpp`
-preserve a small proposed bound on cluster-barrier Rule3 anchor scans and its
-CPU reproducer. The patch is not applied to shared native source and is not
-part of the enabled implementation. The patch has zero context; applying it
-requires `git apply --unidiff-zero` from the monorepo root. Both original and
-patched reproducer
-builds failed to link on `stinkytofu::resolveSymbolicOperands`; neither ran.
-The multicast extension still needs guarded bank-release and readiness phases,
-native phase-balance validation, and resolution of the partial-wait behavior.
+The source fix adds the typed `SBarrier(tensorcnt=...)` contract. Native wait
+reconstruction preserves the required count, strengthens it when inferred
+dependencies demand a deeper drain, and carries its token provenance forward.
+The annotation survives legacy barrier lowering and prevents unsafe scheduling
+motion or barrier merging. Default `tensorcnt=-1` retains inference alone.
+The eligible PAP loop uses count 1 for data or count 2 for paired data plus MX.
+
+The final Python schedule explicitly issues the younger TDM group before this
+contracted boundary, after the descriptor update and prior bank's read release.
+This ordering is necessary: the initial integration pinned the barrier before
+the younger issue, making its partial count insufficient. The final correction
+checks the younger issue count and preserves both LDS release and pointer order.
+
+## Validation
+
+- Final focused Python suite: **572 passed, 9 skipped** on the rebuilt production
+  runtime, including the tensor-contract and producer-order regressions.
+- Native wait-count, barrier, and barrier-merge suites: **46 passed** against
+  rebuilt production objects. New coverage includes a fully drained loop entry,
+  counts 1/2, stronger inferred count 0, unset behavior, serialization, legalization,
+  scheduling motion, and both merge directions. Five new regressions fail against
+  the original native implementation. The earlier cluster suite passed 22 tests.
+- Installed API, deepcopy, argument validation, and actual native count-1/count-2
+  lowering checks pass. The isolated parent and two loky workers load the same
+  rebuilt native library; both frozen library names were refreshed.
+- Final GPU functional matrix: **30/30 supported comparisons passed** across
+  non-MX MC0, non-MX 2x1 multicast, paired-MX MC0, and paired-MX 2x4 multicast.
+  Regular problems use `(M,N,B)=(512,32768,1)` and K=0/256/512/768/1024/1280/1536,
+  plus `(520,32760,2,1536)` for ragged batched coverage. Only the two MX/K=0
+  comparisons are excluded, as described below. The original K=1024/1536
+  regression pair and four persistent smoke cases also pass.
+- Independent final assembly and physical-bank audits confirm the younger tensor
+  issue precedes the partial wait and that later loop trips read completed data.
+  Runtime, code-object, input, launch, and source provenance accompany the results.
+
+The two MX/K=0 inputs are **host-side exclusions, not GPU passes**. The existing
+MX data generator rejects nonpositive dimensions or strides before launching a
+kernel (`shared/mxdatagenerator/lib/include/mxDataGenerator/DataGenerator.hpp`,
+lines 638-643). The non-MX K=0 cases pass. No generator behavior was changed.
+
+## Measured performance
+
+All timings use `(M,N,B,K)=(512,32768,1,1536)`, persistent grid 256, and three
+samples per PAP setting. Each row compares matching PAP0 and PAP1 configurations;
+24 runs cover four representatives, two settings, and three repetitions.
+The runs use five warmups, 1,000 enqueues, one sync and benchmark, the host
+timer, and a 384 MiB rotating-buffer request. PAP order alternates across the
+three repetitions: (0,1), (1,0), (0,1). Full parameters and sample values are in
+the report. MC0 means multicast disabled. Times are the means of the three
+samples. Reduction is
+`100 * (PAP0 mean - PAP1 mean) / PAP0 mean`.
+
+| Configuration | PAP0 mean (us) | PAP1 mean (us) | Time reduction |
+|---|---:|---:|---:|
+| Non-MX, MC0 | 19.1121 | 18.5422 | 2.98% |
+| Non-MX, multicast 2x1 | 17.4121 | 17.1153 | 1.70% |
+| Paired MX, MC0 | 20.8585 | 19.6864 | 5.62% |
+| Paired MX, multicast 2x4 | 19.1518 | 17.6800 | 7.68% |
+
+These measurements establish improvements for these configurations and this
+shape. They do not establish gains for other K values, problem sizes, devices,
+or unsupported PAP geometries.
+
+## Evidence and limits
+
+- [Final GPU report](triage/pap_optimization/finish/gpu/ordered_20260930T165416Z/final_gpu_report.md)
+- [Final GPU summary](triage/pap_optimization/finish/gpu/ordered_20260930T165416Z/final_gpu_summary.json)
+- [Final Python test log](triage/pap_optimization/finish/gpu/ordered_20260930T165416Z/python_tests.log)
+- [Installed native test results](triage/pap_optimization/finish/native/tensor_contract_candidate/installed_tests.json)
+- [Native diagnosis and fixes](triage/pap_optimization/finish/native/diagnosis.md)
+- [Installed API and lowering checks](triage/pap_optimization/finish/native/tensor_contract_candidate/api_result.json)
+- [Native runtime provenance](triage/pap_optimization/finish/native/tensor_contract_candidate/import_provenance.json)
+- [Performance run ledger](triage/pap_optimization/finish/gpu/ordered_20260930T165416Z/continuation_20260930T170410Z/performance/ledger.json)
+
+The optimization remains restricted to the eligible full-K, two-bank, PGR2/PLR1,
+NoTailLoop path and its existing address, type, epilogue, and resource guards.
+It does not enable unsupported LocalSplitU, StoreRemap, LDS-writing epilogues,
+or other rejected geometries. A conservative full tensor drain remains at next
+entry after NLL, store, and setup overlap; group1 could potentially wait until a
+later consumer. The current implementation does not claim the latest possible
+wait placement or universal performance gains.
+
+Historical snapshots, failed trials, and diagnostic assembly copies are retained
+under `triage/pap_optimization/` for traceability. Final results above use newly
+generated production kernels with the integrated source fixes.
+
+
+## Paused HalfPLR follow-up
+
+The requested extension is still pending. The resumed HalfPLR task performed
+source/phase analysis and preserved the pre-change source snapshot, but made
+no production or test edits and ran no builds, tests, or GPU work before the
+user paused implementation. Existing HalfPLR PAP still carries one next-tile
+PGR group and uses the shared incremental-descriptor and late-handoff work;
+it does not use the classic two-group or retained-first-PLR path.
+
+The intended first scope is full-K gfx1250 DataParallel/StaticGrid, HalfPLR1
+(A only), PGR2, ScheduleIterAlg4, with paired MX or non-MX and multicast off/on.
+Preserve the original FlyDSL case35 MT256x256, four-wave, DepthU256 geometry
+and three-half A allocation. ASE256 truthfully specializes K1536; other
+HalfPLR modes and tail contracts must retain their existing fallback.
+
+Preliminary source analysis, not emitted or validated: the existing final-trip
+lookahead appears to read next group0 into A halves
+`[(loopCopy + 1) % 3, (loopCopy + 2) % 3]` for LoopIters2, plus B_X0 and MX_X0.
+After final u0 reads release the current last bank, its descriptor swap and
+increment appear to provide a site for next group1; the existing last-trip
+issue is currently descriptor-disabled. A future implementation must prove
+that release/publication order, preserve or normalize the A phase for next
+entry, protect retained ranges through store/setup, and skip matching entry
+reads. This is a design lead, not a completed or correctness-checked path.
+
+Prior case35 measurements use `(M,N,B,K)=(512,65536,1,1536)` and grid256.
+Each completed matrix passed four correctness runs and 12 interleaved timings:
+
+| Tuning | Multicast | PAP0 mean (us) | PAP1 mean (us) | PAP latency change |
+|---|---|---:|---:|---:|
+| Original HalfPLR1, MT256x256 | Off | 27.1690 | 27.5571 | +1.43% |
+| Original HalfPLR1, MT256x256 | 2x4 | 23.9315 | 24.3569 | +1.78% |
+| Retuned HalfPLR0, MT128x256 | Off | 38.2308 | 35.8348 | -6.27% |
+| Retuned HalfPLR0, MT128x256 | 2x4 | 35.6249 | 32.3901 | -9.08% |
+
+The HalfPLR0 rows change tile/tuning parameters and are not an isolated HalfPLR
+comparison. Literal MT256x256 four-wave HalfPLR0 variants exceeded the VGPR
+limit. An eight-wave same-tile attempt compiled, but its first PAP0 dispatch
+failed with HSA invalid dispatch / hip701; it provides no valid comparison
+and establishes no specific hardware cause.
+
+Local evidence remains under `triage/pap_optimization/finish/gpu/` in
+`flydsl35_20260930T171647Z/` and
+`flydsl35_halfplr0_20260930T173030Z/known_four_wave/`.
+The pre-change snapshot and manifest are under
+`triage/pap_optimization/halfplr/implementation/prechange/`.
+These generated artifacts remain local and are not part of this source commit.
