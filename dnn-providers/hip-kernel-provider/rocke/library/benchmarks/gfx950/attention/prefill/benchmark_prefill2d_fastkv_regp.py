@@ -37,6 +37,7 @@ import math
 import sys
 import time
 import traceback
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -154,8 +155,6 @@ class RockeFastKvRegPBench:
         return sliding_window == 0 and shape.softcap <= 0 and not shape.has_alibi
 
     def _combo_spec(self, base, shape, sliding_window: int, *, early_v: bool = False):
-        from dataclasses import replace
-
         return replace(
             base,
             use_transposed_scalar_state=True,
@@ -307,8 +306,6 @@ class RockeFastKvRegPBench:
         raise ValueError(f"unknown variant: {variant}")
 
     def _launcher(self, shape, problem, variant: str, sliding_window: int):
-        from dataclasses import replace
-
         from rocke import compile_kernel
         from kernels.common.attention_unified import (
             _attn_signature,

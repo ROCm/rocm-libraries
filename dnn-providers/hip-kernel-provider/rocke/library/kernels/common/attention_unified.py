@@ -2598,7 +2598,7 @@ def _kv_cache_exceeds_i32(problem: UnifiedAttentionProblem, num_kv_blocks: int) 
 def _check_kv_addr_width(
     problem: UnifiedAttentionProblem,
     k,
-    use_i64_kv_addr: Optional[bool] = None,
+    use_i64_kv_addr: bool | None = None,
 ) -> None:
     """Reject a launch whose K cache needs i64 addressing the kernel does not use.
 
@@ -3361,7 +3361,7 @@ def _attn_values(
     k_scale: float = 1.0,
     v_scale: float = 1.0,
     out_scale: float = 1.0,
-    use_i64_kv_addr: Optional[bool] = None,
+    use_i64_kv_addr: bool | None = None,
 ):
     # Every Python 2D and scalar kernarg pack goes through here (production and
     # the direct-launch harnesses), so check the kernel's KV addressing width

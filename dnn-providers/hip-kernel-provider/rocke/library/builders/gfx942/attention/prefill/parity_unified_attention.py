@@ -878,7 +878,7 @@ def _run_rocke(s: Shape, data, launcher, spec, *, warmup: int, attempts: int):
         include_qq_bias_stride=True,
         # The spec is hand-built from the Shape, not from this problem, so check
         # the cache against the flag the kernel was actually compiled with.
-        use_i64_kv_addr=getattr(spec, "use_i64_kv_addr", False),
+        use_i64_kv_addr=spec.use_i64_kv_addr,
     )
     block_q = spec.block_q
     total_num_q_blocks = q.shape[0] // block_q + s.batch
