@@ -27,6 +27,7 @@ import re
 from textwrap import dedent, indent
 
 import pytest
+import yaml
 
 import Tensile
 from Tensile.resources import custom_kernel_text
@@ -1231,6 +1232,92 @@ def test_wvspltk_bf16_tn_shipped_config(name, sizeEqual, sizeLessThan, sizeGreat
         "StrideC0",
         "StrideD0",
     ]
+
+
+_LOGIC_ROOT = os.path.normpath(
+    os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        *([".."] * 4),
+        "library",
+        "src",
+        "amd_detail",
+        "rocblaslt",
+        "src",
+        "Tensile",
+        "Logic",
+        "asm_full",
+    )
+)
+
+_WVSPLTK_NN_RANGES = {
+    "wvSpltK_hf_m1": [1, 1, 9, -1, 1, 1, 8, -1],
+    "wvSpltK_hf_m2": [2, 2, 9, -1, 1, 1, 8, 16384],
+    "wvSpltK_hf_m4": [3, 4, 9, -1, 1, 1, 8, 8192],
+}
+
+
+@pytest.mark.parametrize(
+    "rel,plainRel,ranges",
+    [
+        (
+            "aquavanjaram/gfx942/Range/aquavanjaram_Cijk_Ailk_Bljk_HHS_BH_UserArgs.yaml",
+            "aquavanjaram/gfx942/Equality/aquavanjaram_Cijk_Ailk_Bljk_HHS_BH_UserArgs.yaml",
+            _WVSPLTK_NN_RANGES,
+        ),
+        ("gfx950/gfx950/Range/gfx950_Cijk_Ailk_Bljk_HHS_BH_UserArgs.yaml", None, _WVSPLTK_NN_RANGES),
+        (
+            "gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml",
+            "gfx950/gfx950/Equality/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml",
+            {
+                "wvSpltK_bf16_tn_m1": [9, -1, 1, 1, 1, 1, 8, -1],
+                "wvSpltK_bf16_tn_m2": [9, -1, 2, 2, 1, 1, 8, -1],
+                "wvSpltK_bf16_tn_m4": [9, -1, 3, 4, 1, 1, 8, -1],
+            },
+        ),
+    ],
+)
+def test_wvspltk_range_logic(rel, plainRel, ranges):
+    """hipBLASLt reaches the wvSpltK kernels through these Range files. A custom
+    kernel takes the logic file's problem type, and these kernels support no bias,
+    activation or scale vector, so the type must be plain GEMM. Where plain-GEMM
+    logic ships, the file must match its header and type to share its placeholder.
+    Keys are [m_min, m_max, n_min, n_max, batch_min, batch_max, K_min, K_max], -1
+    unbounded, and each must sit inside its kernel's predicates."""
+    with open(os.path.join(_LOGIC_ROOT, rel)) as f:
+        doc = yaml.safe_load(f)
+    assert doc["LibraryType"] == "Range"
+    pt = doc["ProblemType"]
+    assert pt.get("ActivationType", "none") == "none"
+    assert pt.get("UseScaleAB", "") == ""
+    for key in ("UseBias", "UseE", "UseScaleAlphaVec", "UseScaleCD", "GroupedGemm", "Gradient"):
+        assert not pt.get(key), key
+
+    if plainRel is not None:
+        with open(os.path.join(_LOGIC_ROOT, plainRel)) as f:
+            plain = yaml.safe_load(f)
+        if isinstance(plain, list):  # legacy positional schema
+            plainHeader, plainPt = dict(zip(("ScheduleName", "ArchitectureName", "DeviceNames"), plain[1:4])), plain[4]
+        else:
+            plainHeader = {k: plain[k] for k in ("ScheduleName", "ArchitectureName", "CUCount", "DeviceNames")}
+            plainPt = plain["ProblemType"]
+        assert {k: doc[k] for k in plainHeader} == plainHeader
+        assert pt == plainPt
+
+    names = {s["SolutionIndex"]: s["CustomKernel"]["name"] for s in doc["Solutions"]}
+    assert {names[index]: key for key, (index, _) in doc["ExactLogic"]} == ranges
+
+    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
+    for name, key in ranges.items():
+        config = getCustomKernelConfig(name, {}, ck_root)
+        for dim in range(4):
+            lo, hi = key[2 * dim], key[2 * dim + 1]
+            if dim in config.get("AssertSizeEqual", {}):
+                assert lo == hi == config["AssertSizeEqual"][dim], (name, dim)
+            if dim in config.get("AssertSizeGreaterThan", {}):
+                assert lo > config["AssertSizeGreaterThan"][dim], (name, dim)
+            if dim in config.get("AssertSizeLessThan", {}):
+                assert -1 < hi < config["AssertSizeLessThan"][dim], (name, dim)
+        assert key[6] >= config["AssertSummationElementMultiple"], name
 
 
 def test_wvspltk_hf_m1_shipped_config():

@@ -102,6 +102,33 @@ are fetched with `s_load`. Tensile strips the preload directives on toolchains
 that cannot use them, and the compatibility prologue the compiler emits then
 loads the same SGPRs.
 
+## Library logic
+
+hipBLASLt picks these kernels through `Range` logic files, one per problem type.
+Every range has `batch == 1`:
+
+| Logic file | Ranges (skinny side; long side; K) |
+| ---------- | ---------------------------------- |
+| `aquavanjaram/gfx942/Range/aquavanjaram_Cijk_Ailk_Bljk_HHS_BH_UserArgs.yaml` | m = 1, 2, 3-4; n >= 9; K >= 8, capped as above |
+| `gfx950/gfx950/Range/gfx950_Cijk_Ailk_Bljk_HHS_BH_UserArgs.yaml` | same as gfx942 |
+| `gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml` | n = 1, 2, 3-4; m >= 9; K >= 8 |
+
+Each file carries the plain-GEMM problem type (no bias, activation or scale
+vector), because a custom kernel takes the logic file's problem type and these
+kernels support none of those.
+
+Within one device's logic, hipBLASLt searches the plain-GEMM placeholder library
+before the Bias/SAV ones, and `Equality` before `Range` inside a placeholder.
+Where plain-GEMM logic already ships for the same hardware, the Range file
+reuses its header so both share a placeholder, and its tuned sizes keep their
+kernels. A matched range whose kernel fails its own predicates (strides, K
+bound) returns nothing, so the problem falls through to the next library.
+
+The gfx950 files use the MI350 (`0x75a0`) header. MI355X searches its own tuned
+logic (`gfx950_id75a3`) first, so its tuned sizes keep their kernels. On MI350
+and on gfx942, the ranges come before skinny sizes tuned in the same device's
+Bias libraries.
+
 ## Regenerating
 
 Regenerate assembly at code object version 4 (see `../README.md`; keep
