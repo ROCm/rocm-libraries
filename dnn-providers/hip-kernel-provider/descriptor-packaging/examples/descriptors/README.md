@@ -5,8 +5,8 @@ exercised end to end: the hip half compiles a `.cpp` with `hipcc`, the rocKE hal
 lowers a real rocKE builder through comgr. Placeholder shapes, real code paths.
 
 This tree drives the production packaging path with fixtures. Without a source root
-pointed here, the pack step packs the provider's shipped root instead, which today holds
-only the gfx950 dense attention bundle and is dormant on builds without gfx950.
+pointed here, the pack step uses the provider's shipped descriptor root instead, and
+skips when nothing there declares an architecture the build packs for.
 
 ## Disposition
 
@@ -18,8 +18,8 @@ only the gfx950 dense attention bundle and is dormant on builds without gfx950.
 Neither set reaches a product build: `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` defaults to
 the provider's shipped descriptor root, so nothing points at this tree unless a build
 overrides it, and no install rule copies it. Two things do use it.
-`hipdnn-superbuild-ci.yml` points the production source root here in the Linux lane, which is
-the only CI lane that runs the production packaging path end to end. `test_hkp_pack_layout.py` packs
+`hipdnn-superbuild-ci.yml` points the production source root here in the Linux lane, which
+runs the production packaging path end to end on these fixtures. `test_hkp_pack_layout.py` packs
 the tree directly, which is what makes its layout assertion strict: changing anything here
 changes what those tests pin.
 

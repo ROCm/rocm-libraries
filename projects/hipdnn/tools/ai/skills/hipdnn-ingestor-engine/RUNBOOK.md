@@ -28,7 +28,7 @@ ENGINE=<your-bundle-engine-id>
 
 Replace `<your-bundle-engine-id>` with your bundle's engine ID; it is consumed verbatim
 as `--expect-engine` below. A gfx942 dense attention bundle would spell it
-`hipkernel:Gfx942AttentionDense`; this tree ships no such engine.
+`hipkernel:Gfx942AttentionDense`; the name is an illustration, not an engine to look for.
 
 Follow the **Setup** section of `$GEN/README.md`. Authoring and mining imports need the
 profile's rocKE library environment; production packaging uses its own selected
@@ -324,11 +324,11 @@ a KDP is what arch pruning consumes. Outcomes:
 | KDP present, pruned on every arch, built-in default root | Dormant, so configuring for an undeclared arch is not a build error |
 | Root set but not a directory | Fatal at configure |
 
-That default root is `$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/`. It
-holds one bundle, `rocKE/gfx950_attention_dense/`, whose KDP declares gfx950 only, so a
-default configure packs it when the GPU targets include gfx950 and leaves production
-packaging dormant otherwise. Add your own bundle under it, or repoint the cache variable,
-before expecting output for it, and substitute your bundle's name wherever a bundle path
+That default root is `$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/`, which
+holds the bundles the provider ships. Packaging from it skips when nothing under it
+declares an architecture this build packs for, so what a build ships depends on its
+configuration. Add your own bundle under it, or repoint the cache variable, before
+expecting output for it, and substitute your bundle's name wherever a bundle path
 appears below.
 `descriptors/README.md` carries the authoring rules that root enforces, including the
 native pack whose symbols a bundle's UKDs must name before it serves. The packaging
@@ -529,15 +529,11 @@ provider's default installed CTest root is **`$INSTALL/bin/hip_kernel_provider`*
 `hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests`, which is the ASM SDPA engine
 reached by a different path and never ingestor evidence.
 
-The production descriptor root ships one bundle, `rocKE/gfx950_attention_dense`. When a
-configuration ships it for gfx950 (ingestor, rocKE and `HIPDNN_ENABLE_SDPA` all ON),
-its target is `hip_kernel_provider_gfx950_attention_dense_gpu_ref_integration_tests`
-for engine `hipkernel:Gfx950AttentionDense`, installed into the gfx950 shard. Use it as
-a worked example only; it is not evidence for your bundle. Replace
-`<your-bundle-ctest-target>` with the name your own registration creates. A gfx942 dense
-bundle would be shaped like
-`hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests`, which does not
-exist in this tree:
+Other bundles in the production root may register their own targets; they are not
+evidence for yours. Replace `<your-bundle-ctest-target>` with the name your own
+registration creates. A gfx942 dense bundle would be shaped like
+`hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests`; treat it as an
+illustration, not a name to copy:
 
 ```bash
 CTEST_ROOT="$INSTALL/bin/hip_kernel_provider"

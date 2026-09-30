@@ -386,10 +386,9 @@ class TestCliEndToEnd:
 # Real-bundle regressions: everything above runs against a purpose-built fixture,
 # these against every git-tracked bundle the repository carries -- no pack, no
 # hipcc, no GPU. Two roots are wired and both read: `examples/descriptors` is the
-# documented sample tree, and the engine root is what a consumer loads. The engine
-# root ships `rocKE/gfx950_attention_dense/` today; a producer subtree it does not carry
-# (such as `hip/`) skips with a named reason. New bundles need no change here, since the
-# roots are globbed.
+# documented sample tree, and the engine root is what a consumer loads. A producer
+# subtree a root does not carry skips with a named reason. New bundles need no change
+# here, since the roots are globbed.
 _PACKAGING = Path(__file__).resolve().parent.parent
 _EXAMPLES = [
     _PACKAGING / "examples" / "descriptors",
