@@ -67,7 +67,7 @@ BF16 I/O, FP32 accumulate and alpha/beta, hipBLASLt TN with a skinny `n`. This
 is the layout `torch.mm(x, w.t())` and `F.linear` reach hipBLASLt with (`m` =
 output features, `n` = tokens), and the one rocBLAS served with the
 `TRANSA=false` instantiation. Same block, grid and persistent loop as the FP16
-kernels; all three build from `wvSpltK_bf16_tn.cpp`.
+kernels.
 
 | Kernel | n | YTILE | UNRL |
 | ------ | - | ----- | ---- |
@@ -129,27 +129,17 @@ logic (`gfx950_id75a3`) first, so its tuned sizes keep their kernels. On MI350
 and on gfx942, the ranges come before skinny sizes tuned in the same device's
 Bias libraries.
 
-## Regenerating
+## Tensile metadata
 
-Regenerate assembly at code object version 4 (see `../README.md`; keep
-`.amdgcn_target` / `.amdhsa_code_object_version`), then embed the Tensile
-metadata. FP16 M=1 reads its config from `custom_rocblas_gemv.yaml`; M=2 and
-M=4 use the `_m2` / `_m4` files, and the TN kernels use
-`custom_rocblas_gemv_bf16_tn_m{1,2,4}.yaml`. To refresh a `custom.config`,
-delete the existing block first: `AddCustomConfig` will not overwrite it.
+Each `.s` embeds its Tensile `custom.config`, generated from a Tensile YAML:
+`custom_rocblas_gemv.yaml` for FP16 M=1, the `_m2` / `_m4` files for M=2 and
+M=4, and `custom_rocblas_gemv_bf16_tn_m{1,2,4}.yaml` for the TN kernels. To
+refresh one, delete the existing block first: `AddCustomConfig` will not
+overwrite it. Replacement assembly must stay at code object version 4 (see
+`../README.md`) and keep its `.amdgcn_target` / `.amdhsa_code_object_version`
+directives.
 
 ```bash
-hipcc -S --cuda-device-only --offload-arch=gfx942 -O3 -mcode-object-version=4 \
-  -o wvSpltK_hf_m2.s wvSpltK_hf_m2.cpp
-
-hipcc -S --cuda-device-only --offload-arch=gfx942 -O3 -mcode-object-version=4 \
-  -mllvm -amdgpu-kernarg-preload-count=14 \
-  -o wvSpltK_hf_m4.s wvSpltK_hf_m4.cpp
-
-hipcc -S --cuda-device-only --offload-arch=gfx950 -O3 -mcode-object-version=4 \
-  -DWVSPLTK_M=4 -mllvm -amdgpu-kernarg-preload-count=14 \
-  -o wvSpltK_bf16_tn_m4.s wvSpltK_bf16_tn.cpp
-
 python -m Tensile.AddCustomConfig \
   Tensile/CustomKernels/rocblas/wvSpltK_hf_m2.s \
   --yaml Tensile/Tests/custom/custom_rocblas_gemv_m2.yaml \
