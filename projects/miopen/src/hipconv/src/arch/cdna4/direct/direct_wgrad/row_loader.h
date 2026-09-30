@@ -5,6 +5,7 @@
 // One class serves both operands: S rows (W x C, NHWC) and delta rows (Q x K, NPQK). The tile
 // shape is the only difference between them, and Layout carries it.
 
+#include <type_traits>
 #include "bunnies.hpp"
 #include "bunnies_cdna4.hpp"
 #include "lds_layout.h"
@@ -54,7 +55,16 @@ struct RowTensorPars
 //
 // LaneBytes is the per-lane width of one load, 4 or 16.
 // It sets the round size, and so how much of a row buffer is padding.
-template <typename Layout, typename datatype_t, int NumWaves, int Items = 1, int LaneBytes = 16>
+// Tiled folds the tile's first row into the 64-bit base so the 32-bit soffset spans one tile
+// rather than one image, which is what lets an image past 2 GiB be addressed at all. It is a
+// template parameter rather than a runtime origin of zero so the untiled path keeps the
+// addressing it already had, byte for byte. See RowSchedule's row-tile section.
+template <typename Layout,
+          typename datatype_t,
+          int NumWaves,
+          int Items     = 1,
+          int LaneBytes = 16,
+          bool Tiled    = false>
 class RowLoader
 {
     static constexpr int rsrc_data_format = 1 << 15;
@@ -119,7 +129,9 @@ public:
                          bool valid,
                          int image,
                          int col0,
-                         int chan0)
+                         int chan0,
+                         int row_origin  = 0,
+                         int window_rows = 0)
         : pars_(pars)
         // An idle partition aims its columns at the end of the image.
         //
@@ -130,6 +142,29 @@ public:
         , chan0_(chan0)
         , item_base_(item * item_rounds)
     {
+        if constexpr(Tiled)
+        {
+            row_stride_bytes_ = pars.cols * pars.chans * elem_bytes;
+            // Both origins fold into the 64-bit base, the window covering the tile's rows plus
+            // the lookahead its last iterations issue, so a load past the tile still resolves
+            // here and the boundary needs no handling.
+            //
+            // img_stride_bytes_ stays 0: a tiled config runs at unfold_n 1, so src.image is
+            // always zero and the int that term would overflow leaves the address.
+            const size_t row_elems   = static_cast<size_t>(pars.cols) * pars.chans;
+            const size_t img_elems64 = static_cast<size_t>(pars.rows) * row_elems;
+            const datatype_t* image_base =
+                tensor + static_cast<size_t>(valid ? image : 0) * img_elems64;
+            tile_                  = {row_origin, image_base, valid};
+            const datatype_t* base = image_base + static_cast<size_t>(row_origin) * row_elems;
+            const int window_bytes = valid ? tile_window_bytes(pars, row_origin, window_rows) : 0;
+            rsrc_                  = __builtin_amdgcn_make_buffer_rsrc(
+                const_cast<datatype_t*>(base), 0, window_bytes, rsrc_data_format);
+            oob_bytes_        = window_bytes;
+            img_stride_bytes_ = 0;
+            return;
+        }
+
         const int img_elems = pars.rows * pars.cols * pars.chans;
 
         // Fold the first image's origin into the 64-bit base, and stop the window at the last.
@@ -162,6 +197,48 @@ public:
         row_stride_bytes_ = pars.cols * pars.chans * elem_bytes;
     }
 
+    // The same loader with its origin moved to `row_origin`, for the next row tile.
+    //
+    // Only the base and the window move; the column, channel and item state is the tile's own
+    // and carries over. Tiled only -- an untiled loader spans the whole image already.
+    __device__ RowLoader rebased(int row_origin, int window_rows) const
+    {
+        static_assert(Tiled, "an untiled loader spans the whole image and has no tile to rebase");
+        RowLoader next         = *this;
+        next.tile_.row_origin  = row_origin;
+        const size_t row_elems = static_cast<size_t>(pars_.cols) * pars_.chans;
+        const datatype_t* base = tile_.image_base + static_cast<size_t>(row_origin) * row_elems;
+        const int window_bytes =
+            tile_.valid ? tile_window_bytes(pars_, row_origin, window_rows) : 0;
+        next.rsrc_ = __builtin_amdgcn_make_buffer_rsrc(
+            const_cast<datatype_t*>(base), 0, window_bytes, rsrc_data_format);
+        next.oob_bytes_ = window_bytes;
+        return next;
+    }
+
+    // Bytes a tile's window spans, stopping at the end of the image.
+    //
+    // The clamp is not tidiness. The window is the only thing bounding the over-read a wave
+    // makes past a row when its channel origin runs past the tensor's channel count, which a
+    // padded block does on every layer. Untiled, the window is the image and catches it; a
+    // tile window reaching past the last row would let that read touch unmapped memory, which
+    // faults rather than returning zero.
+    __device__ int tile_window_bytes(const RowTensorPars& pars, int row_origin, int rows) const
+    {
+        const int left = pars.rows - row_origin;
+        return (rows < left ? rows : left) * row_stride_bytes_;
+    }
+
+    // The row index this loader's base measures from: the tensor row when untiled, its offset
+    // into the tile when not.
+    __device__ int rebase_row(int row) const
+    {
+        if constexpr(Tiled)
+            return row - tile_.row_origin;
+        else
+            return row;
+    }
+
     // Load tensor row `row` of this loader's item into the LDS row buffer at `dest`.
     //
     // `row` is a global row index and may fall outside the image, in which case the whole
@@ -175,7 +252,7 @@ public:
         // soffset bypasses the buffer range check, so an out-of-image row zeroes it and leans
         // on the out-of-bounds voffset.
         const int soffset =
-            row_in_image ? __builtin_amdgcn_readfirstlane(row * row_stride_bytes_) : 0;
+            row_in_image ? __builtin_amdgcn_readfirstlane(rebase_row(row) * row_stride_bytes_) : 0;
 
         const auto vsoffset = [&](const SourceElem& src) -> std::array<int, 2> {
             const int col = col0_ + src.col;
@@ -269,6 +346,21 @@ private:
     int oob_bytes_;
     int img_stride_bytes_;
     int row_stride_bytes_;
+    // The tile origin this loader's base sits on, subtracted from every row it loads, plus what
+    // rebased() needs to build the next tile's descriptor.
+    //
+    // Empty and zero-sized when untiled: carrying it there grew the object enough to move the
+    // register allocation of 4x4's C(128) x K(32) tile, which already spills.
+    struct TileState
+    {
+        int row_origin               = 0;
+        const datatype_t* image_base = nullptr;
+        bool valid                   = false;
+    };
+    struct NoTileState
+    {
+    };
+    [[no_unique_address]] std::conditional_t<Tiled, TileState, NoTileState> tile_;
 };
 
 } // namespace hipconv::cdna4::direct_wgrad

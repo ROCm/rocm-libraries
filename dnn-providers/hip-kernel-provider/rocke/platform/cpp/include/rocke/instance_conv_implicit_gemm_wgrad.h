@@ -53,8 +53,10 @@
  * wide store. Mirrors _KOUTER_PAD in conv_implicit_gemm_wgrad.py. */
 #define ROCKE_WGRAD_KOUTER_PAD 8
 
-/* The K-outer LDS tile is fed by ds_read_tr16_b64, a CDNA4 transpose read.
- * Emitting it for an older target produces IR the assembler will reject.
+/* The wave64 regime's arch. The K-outer tile is fed by an LDS transpose read
+ * that exists in two regimes: ds_read_tr16_b64 on gfx950 (wave64) and
+ * ds_load_tr16_b128 on gfx1250 (wave32); the validator accepts both and pins
+ * each arch to its wave size. Retained for the wave64 half.
  * Mirrors _LDS_K_OUTER_ARCH in conv_implicit_gemm_wgrad.py. */
 #define ROCKE_WGRAD_LDS_K_OUTER_ARCH "gfx950"
 #include <stddef.h>
@@ -156,20 +158,20 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
     /* split_k: -1 = auto, 1 = off, >1 = fixed degree. */
     int split_k; /* default 1 */
 
-    /* two_stage: when true and split_k > 1, Stage 1 writes f32 partial sums
-     * to a workspace buffer (ws_ptr / ws_bytes kernel params) instead of
-     * atomic-adding into dW.  Stage 2 (conv_wgrad_workspace_reduce) then
-     * reduces the workspace slices into dW in a fixed sequential order.
-     * This guarantees bit-exact, deterministic output.
-     * Set automatically by the builder when force_deterministic=true and
-     * split_k > 1; prefer force_deterministic over setting this directly. */
+    /* two_stage: when true and split_k > 1, Stage 1 f32-atomic-adds its
+     * partial sums into a scratch buffer (ws_ptr / ws_bytes kernel params)
+     * instead of 16-bit-atomic-adding into dW.  Stage 2
+     * (conv_wgrad_workspace_reduce) folds the replica slabs and casts to
+     * dtype_d.  This is how split-K reaches a 16-bit dW whose row length
+     * wg_N is odd, which the packed <2 x dtype> atomic cannot address. */
     bool two_stage; /* default false */
 
-    /* force_deterministic: semantic intent flag.  When true and split_k > 1
-     * (or split_k=-1 auto), the builder sets two_stage=true so the kernel
-     * uses the workspace-store epilogue instead of atomic adds.
-     * For split_k == 1 this flag is a no-op (output is always deterministic). */
-    bool force_deterministic; /* default false */
+    /* ws_replicas: number of scratch slabs a group's K-slices spread their
+     * atomics over.  A dW-sized scratch is a few dozen cache lines, so
+     * pointing every CTA at one slab serialises the atomics in L2; R slabs
+     * cut that R-fold and Stage 2 folds them back with a fixed unrolled add.
+     * Scratch size is groups * R * wg_M * wg_N * 4 bytes. */
+    int ws_replicas; /* default 8 */
 } rocke_implicit_gemm_conv_wgrad_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */
@@ -195,14 +197,24 @@ int rocke_wgrad_conv_spec_wg_M(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
 /* spec.wg_N: filter spatial x input channels per group (Z * Y * X * C/groups). */
 int rocke_wgrad_conv_spec_wg_N(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
 
-/* Returns true when the kernel output is guaranteed bit-exact deterministic:
- * either split_k <= 1 (plain store, no atomics) or two_stage=true
- * (workspace-reduce path).  false means the kernel uses atomic adds and
- * output order is non-deterministic across runs. */
+/* Is THIS spec's output guaranteed bit-exact across runs?  This is a per-spec
+ * predicate, not a property of the kernel family:
+ *
+ *   split_k <= 1  -> true.  Plain store, no atomics, one CTA per output tile.
+ *   split_k >  1  -> false.  The epilogue adds atomically, so the summation
+ *                    order is scheduler-dependent and f32/f16 addition is not
+ *                    associative.  two_stage=true is NOT an exception: its
+ *                    Stage 1 f32-atomic-adds into shared replica slabs, and
+ *                    Stage 2's ordered fold over those slabs cannot un-reorder
+ *                    sums that were already reordered inside one.
+ *
+ * So a deterministic wgrad is still available -- ask for split_k <= 1 -- but a
+ * split-K wgrad, two-stage or not, is not one.  Hosts that need bit-exactness
+ * should gate on this predicate rather than on two_stage. */
 bool rocke_wgrad_conv_spec_is_deterministic(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
 
 /* Returns the workspace buffer size in bytes required for the two-stage
- * deterministic wgrad path.  Formula: groups * split_k * wg_M * wg_N * 4.
+ * wgrad path.  Formula: groups * ws_replicas * wg_M * wg_N * 4 (always f32).
  * Returns 0 when two_stage=false or split_k <= 1 (no workspace needed).
  * Analogous to rocke_streamk_gemm_workspace_bytes / rocke_moe_fused_workspace_bytes. */
 size_t rocke_wgrad_conv_workspace_bytes(const rocke_implicit_gemm_conv_wgrad_spec_t* s);

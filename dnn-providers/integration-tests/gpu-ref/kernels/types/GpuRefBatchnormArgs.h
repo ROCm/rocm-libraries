@@ -33,3 +33,22 @@ struct BatchnormFwdInfWithVarArgs
     double epsilon;
     BatchnormFwdInfCommonArgs common;
 };
+
+struct BatchnormFwdTrainArgs
+{
+    const void* input;
+    const void* scale;
+    const void* bias;
+    void* output;
+    double epsilon;
+    double momentum;
+    void* mean;
+    void* invVariance;
+    const void* prevResultRunningMean;
+    const void* prevResultRunningVariance;
+    void* nextResultRunningMean;
+    void* nextResultRunningVariance;
+    long long n;
+    long long c;
+    long long hw;
+};

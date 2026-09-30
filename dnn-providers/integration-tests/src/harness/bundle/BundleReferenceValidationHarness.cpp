@@ -127,22 +127,28 @@ void BundleReferenceValidationHarness::TestBody()
     };
 
     // defaultTolerance(), never resolveTolerance(): a TOML override belongs to an
-    // engine and must not loosen the gate on our own data.
-    const auto toleranceFor = [&wrapper](hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
+    // engine and must not loosen the gate on our own data. For the same reason this
+    // path never selects a non-default validator — allclose always.
+    const auto toleranceFor = [&wrapper](const std::string& /*label*/,
+                                         hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
         const float value = tolerance::defaultTolerance(wrapper, dataType);
-        return ComparisonTolerance{value, value};
+        return ComparisonTolerance::allClose(value, value);
     };
 
     const std::string contextLine = "Golden data validation ("
                                     + std::string(referenceLabel(_referenceType))
                                     + "): " + _bundlePath.string();
 
-    for(const auto& mismatch : bundle::compareOutputs(wrapper,
-                                                      _bundle->outputTensorUids,
-                                                      referenceOutputs,
-                                                      goldenFor,
-                                                      toleranceFor,
-                                                      contextLine))
+    // Golden data is loaded on the host, so by default the comparison runs there
+    // whichever reference produced the output being judged; --validator can move it.
+    for(const auto& mismatch :
+        bundle::compareOutputs(wrapper,
+                               _bundle->outputTensorUids,
+                               referenceOutputs,
+                               goldenFor,
+                               toleranceFor,
+                               resolveValidationSite(_validator, ValidationSite::HOST),
+                               contextLine))
     {
         ADD_FAILURE() << mismatch.report;
     }

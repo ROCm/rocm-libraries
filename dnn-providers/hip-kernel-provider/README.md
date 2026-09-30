@@ -42,6 +42,8 @@ The SDK packages can come from either:
 
 Either approach works as long as the installed SDK version is compatible with the plugin version being built.
 
+The [hipDNN developer image](../../projects/hipdnn/dockerfiles/README.md) supplies the third-party libraries. The steps below need no dependency download, install, or fetch flag in that image; ROCm and the compatible hipDNN SDKs must still be available.
+
 > **Avoiding header conflicts:** If you have hipDNN installed system-wide (e.g., from ROCm or TheRock) and also build hipDNN from source in the repository, the two sets of headers may conflict. To avoid this, use `CMAKE_PREFIX_PATH` to point at exactly the installation you intend to use:
 >
 > ```bash
@@ -56,13 +58,25 @@ Either approach works as long as the installed SDK version is compatible with th
     - If you would like to enable/disable a specific engine, add the argument `-DENABLE_<engine>=0` (example: `-DENABLE_ASM_SDPA_ENGINE=0`)
 4. Finally, run `ninja` to build the plugin.
 
+Outside the image, this provider resolves third-party libraries like every other hipDNN component; see [Third-Party Libraries](../../projects/hipdnn/docs/Building.md#third-party-libraries) for the installed-package and fetch options. Configure from this provider's build directory:
+
+```bash
+cmake -GNinja -DCMAKE_CXX_COMPILER=/path/to/amdclang/clang++ \
+    -DCMAKE_PREFIX_PATH="/path/to/hipdnn-install;/path/to/rocm;/path/to/dependencies" ..
+```
+
+Beyond the shared third-party set, the prefixes must provide HIP/HIPRTC, `hipdnn_data_sdk`, `hipdnn_flatbuffers_sdk`, `hipdnn_plugin_sdk`, and their transitive dependencies. The fetch opt-in supplies none of those.
+
 ### Build Requirements
 
-- hipDNN SDK packages installed (`hipdnn_data_sdk`, `hipdnn_plugin_sdk`)
+- hipDNN SDK packages installed (`hipdnn_data_sdk`, `hipdnn_flatbuffers_sdk`, `hipdnn_plugin_sdk`)
 - ROCm with HIP and HIPRTC
 - CMake 3.25+
 - Ninja build system
 - C++17 compatible compiler (amdclang++ recommended)
+- GoogleTest including GoogleMock for tests (see [Third-Party Libraries](../../projects/hipdnn/docs/Building.md#third-party-libraries))
+
+Descriptor packaging (`HIPDNN_ENABLE_KERNEL_INGESTOR=ON`) additionally requires a supplied `Python3_EXECUTABLE` with pip, `msgpack`, and `zstandard`, a kpack source tree, and local rocKE wheels. The `hkp_rocke_wheel_python_interp` target installs those wheels only into build-owned storage with no index access or dependency resolution, then uses the supplied interpreter with a subprocess-scoped private import path. It does not install rocKE into the parent Python environment. See [Kernel packing](../../projects/hipdnn/docs/Building.md#kernel-packing-rocm_kpack) for wheel supply modes and prerequisites.
 
 ### Testing
 
@@ -95,6 +109,15 @@ When adding new operations:
 7. Add integration tests for end-to-end verification
 
 Follow the existing patterns from the codebase.
+
+## Project policies
+
+This plugin is part of the hipDNN project. Shared project documentation and
+policies are maintained in hipDNN:
+
+- [hipDNN Overview](../../projects/hipdnn/README.md)
+- [Contributing Guidelines](../../projects/hipdnn/CONTRIBUTING.md)
+- [Security Policy](../../projects/hipdnn/SECURITY.md)
 
 ## License
 
