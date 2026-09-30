@@ -160,15 +160,29 @@ namespace rocsparse
         }
     }
 
-    // Copy and scale an array
-    template <uint32_t BLOCKSIZE, typename I, typename T>
+    // Copy and scale an array. GRID_STRIDE must be true when the grid was
+    // clamped below (size - 1) / BLOCKSIZE + 1 blocks. Without the clamp the
+    // grid holds at most 2^32 - 1 work-items, so size and idx fit in 32 bits.
+    template <uint32_t BLOCKSIZE, bool GRID_STRIDE, typename I, typename T>
     ROCSPARSE_DEVICE_ILF void bsrgemm_copy_scale_device(I size, T beta, const T* in, T* out)
     {
-        for(int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
-            idx < size;
-            idx += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
+        if constexpr(GRID_STRIDE)
         {
-            out[idx] = beta * in[idx];
+            for(int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+                idx < size;
+                idx += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
+            {
+                out[idx] = beta * in[idx];
+            }
+        }
+        else
+        {
+            const uint32_t idx = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+
+            if(idx < static_cast<uint32_t>(size))
+            {
+                out[idx] = beta * in[idx];
+            }
         }
     }
 
