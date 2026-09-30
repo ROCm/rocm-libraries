@@ -142,19 +142,6 @@ rocsparse_status rocsparse::spsort_check_arguments(rocsparse_spsort_descr      d
                         && rocsparse::enum_utils::is_invalid(descr->get_direction())),
                        rocsparse_status_invalid_value);
 
-    // A CSR matrix can only have the column indices within each row sorted, and a CSC matrix
-    // can only have the row indices within each column sorted.
-    ROCSPARSE_CHECKARG(1,
-                       descr,
-                       (source->format == rocsparse_format_csr
-                        && descr->get_direction() != rocsparse_direction_row),
-                       rocsparse_status_invalid_value);
-    ROCSPARSE_CHECKARG(1,
-                       descr,
-                       (source->format == rocsparse_format_csc
-                        && descr->get_direction() != rocsparse_direction_column),
-                       rocsparse_status_invalid_value);
-
     return rocsparse_status_success;
 }
 

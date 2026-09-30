@@ -115,15 +115,6 @@ int main()
                                                sizeof(spsort_alg),
                                                p_error));
 
-    // Sort the column indices within each row
-    const rocsparse_direction spsort_direction = rocsparse_direction_row;
-    ROCSPARSE_CHECK(rocsparse_spsort_set_input(handle,
-                                               spsort_descr,
-                                               rocsparse_spsort_input_direction,
-                                               &spsort_direction,
-                                               sizeof(spsort_direction),
-                                               p_error));
-
     // Passing matA as both the input and the output sorts it in place
     // Call spsort to get buffer size
     size_t buffer_size;
