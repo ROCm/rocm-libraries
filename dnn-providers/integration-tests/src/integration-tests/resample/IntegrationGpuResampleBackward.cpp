@@ -259,6 +259,9 @@ protected:
             Tensor<int32_t> indexScratch(dyDims, dyStrides);
             fillWithRandomValues(xScratch, -1.0f, 1.0f, getGlobalTestSeed());
 
+            // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+            xScratch.memory().hostData();
+
             CpuFpReferenceResampleFwd::forward<float, float, float, int32_t>(
                 xScratch,
                 yScratch,

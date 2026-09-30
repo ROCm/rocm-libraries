@@ -410,6 +410,9 @@ void runReductionExecutorVsCpu(const std::vector<int64_t>& inDims,
     hipdnn_data_sdk::utilities::Tensor<IOType> outputTensor(outDims, outStrides);
     fillWithRandomValues(inputTensor, static_cast<IOType>(-1.0f), static_cast<IOType>(1.0f), 42);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
+
     // Run GPU Graph executor
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[IN_UID] = inputTensor.rawDeviceData();
@@ -794,6 +797,11 @@ TEST(TestGpuReferenceGraphExecutorFp32, LayernormFwdExecutes)
     fillWithRandomValues(biasTensor, -1.0f, 1.0f);
     epsilonTensor.fillWithValue(static_cast<float>(LAYERNORM_DEFAULT_EPSILON));
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+    biasTensor.memory().hostData();
+
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[10] = xTensor.rawDeviceData();
     variantPack[11] = yTensor.rawDeviceData();
@@ -966,6 +974,13 @@ TEST(TestGpuReferenceGraphExecutorFp32, LayernormBwdExecutes)
     fillWithRandomValues(meanTensor, -1.0f, 1.0f);
     fillWithRandomValues(rstdTensor, -1.0f, 1.0f);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    dyTensor.memory().hostData();
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+    meanTensor.memory().hostData();
+    rstdTensor.memory().hostData();
+
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[10] = dyTensor.rawDeviceData();
     variantPack[11] = xTensor.rawDeviceData();
@@ -1092,6 +1107,10 @@ TEST(TestGpuReferenceGraphExecutorFp32, MatmulExecutes)
     fillWithRandomValues(aTensor, -1.0f, 1.0f);
     fillWithRandomValues(bTensor, -1.0f, 1.0f);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    aTensor.memory().hostData();
+    bTensor.memory().hostData();
+
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[10] = aTensor.rawDeviceData();
     variantPack[11] = bTensor.rawDeviceData();
@@ -1177,6 +1196,9 @@ TEST(TestGpuReferenceGraphExecutorFp32, PointwiseUnaryExecutes)
     hipdnn_data_sdk::utilities::Tensor<float> outputTensor(dims, strides);
     fillWithRandomValues(inputTensor, -1.0f, 1.0f);
     outputTensor.fillWithValue(0);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[IN_UID] = inputTensor.rawDeviceData();
@@ -1269,6 +1291,10 @@ TEST(TestGpuReferenceGraphExecutorFp32, PointwiseBinaryExecutes)
     fillWithRandomValues(input1Tensor, -1.0f, 1.0f);
     outputTensor.fillWithValue(0);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[IN_0_UID] = input0Tensor.rawDeviceData();
     variantPack[IN_1_UID] = input1Tensor.rawDeviceData();
@@ -1318,6 +1344,10 @@ TEST(TestGpuReferenceGraphExecutorFp32, RMSNormFwdExecutes)
     fillWithRandomValues(xTensor, -1.0f, 1.0f);
     fillWithRandomValues(scaleTensor, 0.5f, 1.5f);
     yTensor.fillWithValue(0);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[1] = xTensor.rawDeviceData();
@@ -1387,6 +1417,12 @@ TEST(TestGpuReferenceGraphExecutorFp32, RMSNormBwdExecutes)
     dxTensor.fillWithValue(0);
     dscaleTensor.fillWithValue(0);
     dbiasTensor.fillWithValue(0);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    dyTensor.memory().hostData();
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+    invRmsTensor.memory().hostData();
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[1] = dyTensor.rawDeviceData();
@@ -1523,6 +1559,13 @@ TEST(TestGpuReferenceGraphExecutorFp32, BatchnormFwdInfExecutes)
     fillWithRandomValues(invVarianceTensor, 0.1f, 1.0f);
     yTensor.fillWithValue(0);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+    biasTensor.memory().hostData();
+    meanTensor.memory().hostData();
+    invVarianceTensor.memory().hostData();
+
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[1] = xTensor.rawDeviceData();
     variantPack[2] = yTensor.rawDeviceData();
@@ -1596,6 +1639,13 @@ TEST(TestGpuReferenceGraphExecutorFp32, BatchnormFwdInfVarianceExecutes)
     fillWithRandomValues(meanTensor, -0.5f, 0.5f);
     fillWithRandomValues(varianceTensor, 0.1f, 1.0f);
     yTensor.fillWithValue(0);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+    biasTensor.memory().hostData();
+    meanTensor.memory().hostData();
+    varianceTensor.memory().hostData();
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[1] = xTensor.rawDeviceData();

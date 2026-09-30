@@ -685,7 +685,7 @@ TEST(TestGpuPointwiseRefRELuBackward, WithVals)
 
 // --- Test suite instantiations ---
 
-using TestGpuPointwiseUnaryRef4DFp16 = PointwiseTestSuite<BFloat16Type>;
+using TestGpuPointwiseUnaryRef4DFp16 = PointwiseTestSuite<HalfType>;
 using TestGpuPointwiseUnaryRef5DFp16 = PointwiseTestSuite<HalfType>;
 using TestGpuPointwiseBinaryRef4DFp16 = PointwiseTestSuite<HalfType>;
 using TestGpuPointwiseBinaryRef5DFp16 = PointwiseTestSuite<HalfType>;
