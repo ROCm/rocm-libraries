@@ -582,6 +582,18 @@ void forEachServedKernel(Visit&& visit)
     }
 }
 
+/// The catalog's `dtype` spelling for a graph dtype; the catalog carries only these two.
+std::string catalogDtypeName(DataType dataType)
+{
+    return dataType == DataType::HALF ? "FP16" : "BF16";
+}
+
+/// The catalog's `causal` value for a mask: every spelling but NO_MASK is causal.
+int64_t catalogCausal(Mask mask)
+{
+    return mask == Mask::NO_MASK ? 0 : 1;
+}
+
 /// The id of the one kernel this engine's gfx950 packs carry for @p shape's semantic fields
 /// and @p tile, as the selection line spells it. Records a failure naming the key and the
 /// number of kernels carrying it, and returns nullopt, when that is not exactly one.
@@ -595,11 +607,11 @@ std::optional<std::string> expectedKernelId(const GraphShape& shape, const Tile&
     }
 
     const MetadataKey key{
-        {"dtype", std::string(shape.dataType == DataType::HALF ? "FP16" : "BF16")},
+        {"dtype", catalogDtypeName(shape.dataType)},
         {"head_size", shape.headSize},
         {"num_query_heads", shape.queryHeads},
         {"num_kv_heads", shape.kvHeads},
-        {"causal", int64_t{shape.mask == Mask::NO_MASK ? 0 : 1}},
+        {"causal", catalogCausal(shape.mask)},
         {"ragged", int64_t{0}},
         {"sliding_window", int64_t{0}},
         {"block_m", tile.blockM},
@@ -819,6 +831,73 @@ TEST_F(IntegrationGpuGfx950AttentionDenseKnobCoverage, CoversEveryCatalogHeadCon
     EXPECT_EQ(tableConfigs, catalogConfigs)
         << "in the catalog but not knobCases():" << onlyIn(catalogConfigs, tableConfigs)
         << "\nin knobCases() but not the catalog:" << onlyIn(tableConfigs, catalogConfigs)
+        << "\nunder HIPDNN_DESCRIPTOR_RUNTIME_DIR='"
+        << hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR") << "'";
+}
+
+/// Every row runs one compiled kernel, and what the compiler specializes on is the head size,
+/// dtype, causal flag and tile. The table must run every such class the catalog carries, so a
+/// row edited or removed cannot silently leave a code path unexecuted.
+TEST_F(IntegrationGpuGfx950AttentionDenseKnobCoverage, CoversEveryCatalogKernelClass)
+{
+    ASSERT_FALSE(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
+        << "HIPDNN_DESCRIPTOR_RUNTIME_DIR is not set, so there are no production descriptors to "
+           "read the catalog's kernel classes from";
+
+    using KernelClass = std::tuple<int64_t, std::string, int64_t, int64_t, int64_t>;
+
+    std::set<KernelClass> tableClasses;
+    for(const auto& knobCase : knobCases())
+    {
+        tableClasses.emplace(knobCase.shape.headSize,
+                             catalogDtypeName(knobCase.shape.dataType),
+                             catalogCausal(knobCase.shape.mask),
+                             knobCase.tile.blockM,
+                             knobCase.tile.blockN);
+    }
+
+    std::set<KernelClass> catalogClasses;
+    forEachServedKernel([&catalogClasses](
+                            const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel) {
+        const auto intField = [&kernel](const char* field) -> const int64_t* {
+            const auto value = kernel.metadata.find(field);
+            return value == kernel.metadata.end() ? nullptr : std::get_if<int64_t>(&value->second);
+        };
+        const auto dtype = kernel.metadata.find("dtype");
+        const auto* dtypeName
+            = dtype == kernel.metadata.end() ? nullptr : std::get_if<std::string>(&dtype->second);
+        const auto* headSize = intField("head_size");
+        const auto* causal = intField("causal");
+        const auto* blockM = intField("block_m");
+        const auto* blockN = intField("block_n");
+        if(dtypeName == nullptr || headSize == nullptr || causal == nullptr || blockM == nullptr
+           || blockN == nullptr)
+        {
+            ADD_FAILURE() << "kernel " << hipdnn_plugin_sdk::ingestor::toString(kernel.id)
+                          << " carries no string dtype and integer head_size, causal, block_m "
+                             "and block_n";
+            return;
+        }
+        catalogClasses.emplace(*headSize, *dtypeName, *causal, *blockM, *blockN);
+    });
+
+    const auto onlyIn = [](const std::set<KernelClass>& from, const std::set<KernelClass>& other) {
+        std::string text;
+        for(const auto& kernelClass : from)
+        {
+            if(other.count(kernelClass) == 0)
+            {
+                const auto& [headSize, dtype, causal, blockM, blockN] = kernelClass;
+                text += " (D" + std::to_string(headSize) + ", " + dtype + ", causal "
+                        + std::to_string(causal) + ", " + std::to_string(blockM) + "/"
+                        + std::to_string(blockN) + ")";
+            }
+        }
+        return text.empty() ? std::string(" none") : text;
+    };
+    EXPECT_EQ(tableClasses, catalogClasses)
+        << "in the catalog but not knobCases():" << onlyIn(catalogClasses, tableClasses)
+        << "\nin knobCases() but not the catalog:" << onlyIn(tableClasses, catalogClasses)
         << "\nunder HIPDNN_DESCRIPTOR_RUNTIME_DIR='"
         << hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR") << "'";
 }

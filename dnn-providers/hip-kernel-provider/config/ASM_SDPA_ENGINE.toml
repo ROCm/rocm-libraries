@@ -22,13 +22,15 @@ version = 1
 #   atol: absolute tolerance
 #   rtol: relative tolerance
 #
-# The bf16 D128 cases of the gfx950 dense SdpaFwd BSHD sweeps
-# (integration-test-bundles/{quick,standard}/SdpaFwd/bshd_Gfx950Dense/) are the only
-# shared bundles ASM ranks, and in an installed artifact it cannot load their kernels:
-# AITER_ASM_DIR is the configure-time absolute install prefix, and this entry sets no
-# HIPDNN_AITER_ASM_DIR. Arch-independent, so 'archs' is omitted.
+# ASM ranks the bf16 D128 cases of the shared SdpaFwd sweeps
+# (integration-test-bundles/{quick,standard}/SdpaFwd/Default/), and in an installed
+# artifact it cannot load their kernels: AITER_ASM_DIR is the configure-time absolute
+# install prefix, and this entry sets no HIPDNN_AITER_ASM_DIR. The filter names the
+# sweep, not a shape in the case id: import_graph.py names cases in its own format, so
+# an id pattern would miss the cases it adds. The cases ASM does not rank would skip
+# anyway. Arch-independent, so 'archs' is omitted.
 [[test_skips]]
-filters = ["*_SdpaFwd_bshd_Gfx950Dense.*_d128_bfp16_bshd_*"]
+filters = ["*_SdpaFwd_Default.*"]
 reason  = "ALMIOPEN-2766 — ASM SDPA fwd .co load fails (hipError 301) from a relocated install"
 
 # The common suite's ToleranceResolver maps both SdpaAttributes and

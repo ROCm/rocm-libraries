@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "id": "b1_hq16_kv2_sq384_skv384_d128_bfp16_bshd_causal_br",
+      "id": "1_2_384_128_bfp16_nhwc_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -72,103 +72,23 @@
           }
         ],
         "attributes": {
-          "attn_scale_value": 0.08838834764831843,
-          "diagonal_alignment": "BOTTOM_RIGHT",
-          "right_bound": 0
+          "attributes__attn_scale_value": 0.0883883461356163,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
         }
       },
       "metadata": {
         "format_version": 1,
-        "generator": "place_bundles.py",
-        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
-        "notes": "ALMIOPEN-2797: consolidated from quick/SdpaFwd/bshd/bf16/hd128_causal_bm128/Small.json"
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuSdpaFwdBshdBfp16.Correctness/b1_hq16_kv2_sq384_skv384_d128_bfp16_bshd_causal_br",
+        "operation": "Smoke/IntegrationGpuSdpaFwdBshdBfp16",
+        "seed": 42,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaFwdBshdBfp16.Correctness_b1_hq16_kv2_sq384_skv384_d128_bfp16_bshd_causal_br"
       }
     },
     {
-      "id": "b1_hq64_kv4_sq512_skv512_d128_bfp16_bshd_causal_br",
-      "values": {
-        "io_data_type": "bfloat16",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              4,
-              512,
-              128
-            ],
-            "strides": [
-              262144,
-              128,
-              512,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              1,
-              64,
-              512,
-              128
-            ],
-            "strides": [
-              4194304,
-              128,
-              8192,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              64,
-              512,
-              128
-            ],
-            "strides": [
-              4194304,
-              128,
-              8192,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              1,
-              4,
-              512,
-              128
-            ],
-            "strides": [
-              262144,
-              128,
-              512,
-              1
-            ],
-            "data_type": "bfloat16"
-          }
-        ],
-        "attributes": {
-          "attn_scale_value": 0.08838834764831843,
-          "diagonal_alignment": "BOTTOM_RIGHT",
-          "right_bound": 0
-        }
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "place_bundles.py",
-        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
-        "notes": "ALMIOPEN-2797: consolidated from quick/SdpaFwd/bshd/bf16/hd128_causal_gqa/Small.json"
-      }
-    },
-    {
-      "id": "b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br",
+      "id": "1_32_512_128_bfp16_nhwc_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -238,103 +158,23 @@
           }
         ],
         "attributes": {
-          "attn_scale_value": 0.08838834764831843,
-          "diagonal_alignment": "BOTTOM_RIGHT",
-          "right_bound": 0
+          "attributes__attn_scale_value": 0.0883883461356163,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
         }
       },
       "metadata": {
         "format_version": 1,
-        "generator": "place_bundles.py",
-        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
-        "notes": "ALMIOPEN-2797: consolidated from quick/SdpaFwd/bshd/bf16/hd128_causal_mha/Small.json"
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuSdpaFwdBshdBfp16.Correctness/b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br",
+        "operation": "Smoke/IntegrationGpuSdpaFwdBshdBfp16",
+        "seed": 42,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaFwdBshdBfp16.Correctness_b1_hq32_kv32_sq512_skv512_d128_bfp16_bshd_causal_br"
       }
     },
     {
-      "id": "b2_hq64_kv8_sq1024_skv1024_d64_bfp16_bshd_causal_br",
-      "values": {
-        "io_data_type": "bfloat16",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              8,
-              1024,
-              64
-            ],
-            "strides": [
-              524288,
-              64,
-              512,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              64,
-              1024,
-              64
-            ],
-            "strides": [
-              4194304,
-              64,
-              4096,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              64,
-              1024,
-              64
-            ],
-            "strides": [
-              4194304,
-              64,
-              4096,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              2,
-              8,
-              1024,
-              64
-            ],
-            "strides": [
-              524288,
-              64,
-              512,
-              1
-            ],
-            "data_type": "bfloat16"
-          }
-        ],
-        "attributes": {
-          "attn_scale_value": 0.125,
-          "diagonal_alignment": "BOTTOM_RIGHT",
-          "right_bound": 0
-        }
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "place_bundles.py",
-        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
-        "notes": "ALMIOPEN-2797: consolidated from quick/SdpaFwd/bshd/bf16/hd64_causal_gqa/Small.json"
-      }
-    },
-    {
-      "id": "b1_hq32_kv8_sq512_skv288_d64_bfp16_bshd_nomask",
+      "id": "1_8_288_64_bfp16_nhwc_attn_scale_value0p125_diagonal_alignmenttop_left_noright_bound",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -404,20 +244,195 @@
           }
         ],
         "attributes": {
-          "attn_scale_value": 0.125,
-          "diagonal_alignment": "TOP_LEFT",
-          "right_bound": -1
+          "attributes__attn_scale_value": 0.125,
+          "attributes__diagonal_alignment": "TOP_LEFT",
+          "attributes__right_bound": null
         }
       },
       "metadata": {
         "format_version": 1,
-        "generator": "place_bundles.py",
-        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
-        "notes": "ALMIOPEN-2797: consolidated from quick/SdpaFwd/bshd/bf16/hd64_nomask_bn32/Small.json"
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuSdpaFwdBshdBfp16.Correctness/b1_hq32_kv8_sq512_skv288_d64_bfp16_bshd_nomask",
+        "operation": "Smoke/IntegrationGpuSdpaFwdBshdBfp16",
+        "seed": 42,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaFwdBshdBfp16.Correctness_b1_hq32_kv8_sq512_skv288_d64_bfp16_bshd_nomask"
       }
     },
     {
-      "id": "b1_hq32_kv32_sq512_skv512_d128_fp16_bshd_causal_br",
+      "id": "1_4_512_128_bfp16_nhwc_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              4,
+              512,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              64,
+              512,
+              128
+            ],
+            "strides": [
+              4194304,
+              128,
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              512,
+              128
+            ],
+            "strides": [
+              4194304,
+              128,
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              4,
+              512,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.0883883461356163,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuSdpaFwdBshdBfp16.Correctness/b1_hq64_kv4_sq512_skv512_d128_bfp16_bshd_causal_br",
+        "operation": "Smoke/IntegrationGpuSdpaFwdBshdBfp16",
+        "seed": 42,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaFwdBshdBfp16.Correctness_b1_hq64_kv4_sq512_skv512_d128_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "2_8_1024_64_bfp16_nhwc_attn_scale_value0p125_diagonal_alignmentbottom_right_right_bound0",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              8,
+              1024,
+              64
+            ],
+            "strides": [
+              524288,
+              64,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              64,
+              1024,
+              64
+            ],
+            "strides": [
+              4194304,
+              64,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              64,
+              1024,
+              64
+            ],
+            "strides": [
+              4194304,
+              64,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              8,
+              1024,
+              64
+            ],
+            "strides": [
+              524288,
+              64,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.125,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuSdpaFwdBshdBfp16.Correctness/b2_hq64_kv8_sq1024_skv1024_d64_bfp16_bshd_causal_br",
+        "operation": "Smoke/IntegrationGpuSdpaFwdBshdBfp16",
+        "seed": 42,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaFwdBshdBfp16.Correctness_b2_hq64_kv8_sq1024_skv1024_d64_bfp16_bshd_causal_br"
+      }
+    },
+    {
+      "id": "1_32_512_128_fp16_nhwc_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -487,20 +502,23 @@
           }
         ],
         "attributes": {
-          "attn_scale_value": 0.08838834764831843,
-          "diagonal_alignment": "BOTTOM_RIGHT",
-          "right_bound": 0
+          "attributes__attn_scale_value": 0.0883883461356163,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
         }
       },
       "metadata": {
         "format_version": 1,
-        "generator": "place_bundles.py",
-        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
-        "notes": "ALMIOPEN-2797: consolidated from quick/SdpaFwd/bshd/fp16/hd128_causal_mha/Small.json"
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuSdpaFwdBshdFp16.Correctness/b1_hq32_kv32_sq512_skv512_d128_fp16_bshd_causal_br",
+        "operation": "Smoke/IntegrationGpuSdpaFwdBshdFp16",
+        "seed": 42,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaFwdBshdFp16.Correctness_b1_hq32_kv32_sq512_skv512_d128_fp16_bshd_causal_br"
       }
     },
     {
-      "id": "b1_hq32_kv8_sq2048_skv2048_d64_fp16_bshd_causal_br",
+      "id": "1_8_2048_64_fp16_nhwc_attn_scale_value0p125_diagonal_alignmentbottom_right_right_bound0",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -570,20 +588,23 @@
           }
         ],
         "attributes": {
-          "attn_scale_value": 0.125,
-          "diagonal_alignment": "BOTTOM_RIGHT",
-          "right_bound": 0
+          "attributes__attn_scale_value": 0.125,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
         }
       },
       "metadata": {
         "format_version": 1,
-        "generator": "place_bundles.py",
-        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
-        "notes": "ALMIOPEN-2797: consolidated from quick/SdpaFwd/bshd/fp16/hd64_causal_gqa/Small.json"
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuSdpaFwdBshdFp16.Correctness/b1_hq32_kv8_sq2048_skv2048_d64_fp16_bshd_causal_br",
+        "operation": "Smoke/IntegrationGpuSdpaFwdBshdFp16",
+        "seed": 42,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaFwdBshdFp16.Correctness_b1_hq32_kv8_sq2048_skv2048_d64_fp16_bshd_causal_br"
       }
     },
     {
-      "id": "b2_hq8_kv1_sq512_skv512_d64_fp16_bshd_nomask",
+      "id": "2_8_512_64_fp16_nhwc_attn_scale_value0p125_diagonal_alignmenttop_left_noright_bound",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -653,16 +674,19 @@
           }
         ],
         "attributes": {
-          "attn_scale_value": 0.125,
-          "diagonal_alignment": "TOP_LEFT",
-          "right_bound": -1
+          "attributes__attn_scale_value": 0.125,
+          "attributes__diagonal_alignment": "TOP_LEFT",
+          "attributes__right_bound": null
         }
       },
       "metadata": {
         "format_version": 1,
-        "generator": "place_bundles.py",
-        "reference_source": "graph-only: no golden data; graded at run time against the harness reference executor",
-        "notes": "ALMIOPEN-2797: consolidated from quick/SdpaFwd/bshd/fp16/hd64_nomask_mqa/Small.json"
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuSdpaFwdBshdFp16.Correctness/b2_hq8_kv1_sq512_skv512_d64_fp16_bshd_nomask",
+        "operation": "Smoke/IntegrationGpuSdpaFwdBshdFp16",
+        "seed": 42,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaFwdBshdFp16.Correctness_b2_hq8_kv1_sq512_skv512_d64_fp16_bshd_nomask"
       }
     }
   ]

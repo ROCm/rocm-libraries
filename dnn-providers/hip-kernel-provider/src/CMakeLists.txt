@@ -377,7 +377,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             INSTALL_SUBDIR hip_kernel_provider
             ${_gfx950_shard_args}
             TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950AttentionDense.toml
-            GTEST_FILTER   "quick_SdpaFwd_bshd_*:standard_SdpaFwd_bshd_*"
+            GTEST_FILTER   "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*"
             ENVIRONMENT    ${TEST_ENVIRONMENT}
             ${_gfx950_attention_dense_category_args}
         )

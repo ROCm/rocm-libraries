@@ -131,9 +131,10 @@ Use a **straight single-graph bundle** (no sweep) when:
   you want to pin byte-for-byte.
 - The topology itself changes per case (different node counts/wiring), so cases
   cannot share one template. A sweep can only vary knob values, not structure;
-  distinct structures are distinct bundles. (SDPA-forward is an example: each
-  head-dim/mask/stats variant is generated as its own bundle rather than
-  templatized.)
+  distinct structures are distinct bundles. (In SDPA-forward, head size, mask and
+  shape are knob values, but a stats output, FP8 descale inputs or varlen
+  sequence-length tensors change the wiring, so those variants cannot share the
+  base template.)
 - Golden data comes from a bespoke per-case generator whose output does not map
   cleanly onto a single parameterized skeleton.
 

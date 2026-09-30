@@ -1,13 +1,15 @@
-"""The gfx950 dense attention bundle sweeps and the shipped catalog name the same head
+"""The gfx950 dense attention bundle cases and the shipped catalog name the same head
 configurations.
 
-The sweeps vary one axis at a time off a baseline cell, and their head-configuration axis
-is meant to reach every (head size, Hq, Hkv) the catalog compiles. Nothing at run time
-enforces that: a configuration added to the catalog simply has no end-to-end bundle, and
-the knob suite's own catalog check runs only on gfx950 hardware. A bundle whose
-configuration the catalog lacks is the opposite drift, and surfaces only as a broken
-support claim on a gfx950 runner. This compares the two host-side, from the shipped
-descriptor and the sweep JSON, so every runner that builds the packaging tests sees both.
+The shared SdpaFwd sweeps vary one axis at a time off a baseline cell, and the cases
+claimed for the engine are meant to reach every (head size, Hq, Hkv) the catalog
+compiles. Nothing at run time enforces that: a configuration added to the catalog simply
+has no end-to-end bundle, and the knob suite's own catalog check runs only on gfx950
+hardware. A claimed case whose configuration the catalog lacks is the opposite drift,
+and surfaces only as a broken support claim on a gfx950 runner. This compares the two
+host-side, from the shipped descriptor and the sweep JSON, so every runner that builds
+the packaging tests sees both. Only cases support.json claims for the engine on gfx950
+count: the sweeps are shared, and another engine's cases are not this catalog's to cover.
 """
 
 import json
@@ -23,11 +25,12 @@ CATALOG = (
     / "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors"
     / "rocKE/gfx950_attention_dense/gfx950_attention_dense.kdp.json"
 )
+ENGINE = "hipkernel:Gfx950AttentionDense"
 SWEEPS = [
     REPO
     / "dnn-providers/integration-tests/integration-test-bundles"
     / tier
-    / "SdpaFwd/bshd_Gfx950Dense"
+    / "SdpaFwd/Default"
     for tier in ("quick", "standard")
 ]
 
@@ -42,15 +45,28 @@ def catalog_head_configs(kdp_path):
     return configs
 
 
+def claimed_case_ids(sweep_dir):
+    """Ids of the cases support.json claims for ENGINE on gfx950."""
+    support = json.loads((sweep_dir / "support.json").read_text(encoding="utf-8"))
+    claimed = set()
+    for claim in support["claims"].get(ENGINE, []):
+        if "gfx950" in claim["support"]:
+            claimed.update(claim["cases"])
+    return claimed
+
+
 def sweep_head_configs(sweep_dir):
-    """(head_size, Hq, Hkv) of every case, read from its Q and K dims ([B, H, S, D])."""
+    """(head_size, Hq, Hkv) of every claimed case, from its Q and K dims ([B, H, S, D])."""
     template = json.loads(
         (sweep_dir / "graph.template.json").read_text(encoding="utf-8")
     )
     uid = {tensor["name"]: tensor["uid"] for tensor in template["tensors"]}
     sweep = json.loads((sweep_dir / "sweep.json").read_text(encoding="utf-8"))
+    claimed = claimed_case_ids(sweep_dir)
     configs = set()
     for case in sweep["cases"]:
+        if case["id"] not in claimed:
+            continue
         dims = {tensor["uid"]: tensor["dims"] for tensor in case["values"]["tensors"]}
         q, k = dims[uid["Q"]], dims[uid["K"]]
         configs.add((q[3], q[1], k[1]))

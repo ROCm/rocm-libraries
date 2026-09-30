@@ -1,0 +1,53 @@
+{
+  "claims": {
+    "hipkernel:Gfx950AttentionDense": [
+      {
+        "cases": [
+          "1_10_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",
+          "1_10_512_64_bfp16_nhwc_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right",
+          "1_128_512_64_bfp16_nhwc_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right",
+          "1_12_512_64_bfp16_nhwc_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right",
+          "1_16_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",
+          "1_16_512_64_bfp16_nhwc_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right",
+          "1_20_512_64_bfp16_nhwc_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right",
+          "1_24_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",
+          "1_2_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right_5900a6",
+          "1_2_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right_a9612b",
+          "1_2_512_64_bfp16_nhwc_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right",
+          "1_32_2048_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",
+          "1_32_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmenttop_left",
+          "1_32_512_64_bfp16_nhwc_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right",
+          "1_40_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",
+          "1_4_2048_128_fp16_nhwc_attn_scale_value0p08839_causal_mask_diagonal_alignmenttop_left",
+          "1_4_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right_002d1f",
+          "1_4_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right_19860f",
+          "1_4_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right_c28289",
+          "1_4_512_64_bfp16_nhwc_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right",
+          "1_64_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",
+          "1_8_512_128_bfp16_nhwc_attn_scale_value0p08839_causal_mask_diagonal_alignmenttop_left",
+          "1_8_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right_118f0e",
+          "1_8_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right_282a00",
+          "1_8_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right_6e2c95",
+          "1_8_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right_81d8e7",
+          "1_8_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right_8cf7ac",
+          "1_8_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right_9e029e",
+          "1_8_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right_9f4024",
+          "1_8_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right_fd6673",
+          "1_8_512_64_bfp16_nhwc_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right_4f7cf1",
+          "1_8_512_64_bfp16_nhwc_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right_71cb04",
+          "1_8_512_64_bfp16_nhwc_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right_86163e",
+          "1_8_512_64_bfp16_nhwc_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right_f33558",
+          "1_9_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",
+          "2_8_1152_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmenttop_left",
+          "2_8_2048_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmenttop_left"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}
