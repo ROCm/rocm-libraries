@@ -96,7 +96,7 @@ to replay, publish or rebuild it.
 | `heuristic-concurrent` | In modes 1 and 2, four processes of four threads each start the same query through a file barrier: every query returns the same two distinct solutions with checked numerics and no JIT report, and the library holds exactly those two entries with the allocator just past them |
 | `heuristic-null-algo` | `hipblasLtMatmul` without an algorithm runs a JIT solution with checked numerics in modes 1 and 2, and does not use JIT in mode 0 |
 | `heuristic-report` | In modes 1 and 2, a missing Python and a failing generator each print exactly one `hipblaslt error: JIT` line across two handles, two queries and both APIs; the queries return no results with the status the mode defines, and the generator log named in the report is kept |
-| `heuristic-partial-fill` | With the build's device library, a request for one more than the pre-tuned count in mode 1 returns the same pre-tuned solutions followed by one JIT solution whose kernel is not among them; prints SKIP when the build has no device library for the problem |
+| `heuristic-partial-fill` | With the build's device library, a request for one more than the pre-tuned count in mode 1 returns the same pre-tuned solutions followed by one JIT solution whose kernel is not among them. It first queries 4096 solutions without JIT, and prints SKIP when that query fails or returns none (the build has no device library for the problem) or when it returns all 4096 (the device library leaves no shortfall for JIT to fill) |
 | `bench` | `HIPBLASLT_JIT=2` through the benchmark's ordinary heuristic query: genuine Origami ranking and first-valid selection, unchanged numerical checks, compilation outside timing, publication and reuse, and one error report when ranking or validation cannot produce a recipe |
 | `disabled-api` | The JIT headers are absent from the public include tree, `hipblaslt-ext.hpp` compiles without them, and the extension API links against the disabled library; the disabled benchmark and heuristic test print one warning that `HIPBLASLT_JIT` is ignored, and the heuristic results match a run without it |
 
@@ -213,6 +213,27 @@ runs the `jit-gemm-gfx1250` route. The driver passes
 `jit_gemm_request_gfx1250.json` from `tensilelite/Tensile/Tests/unit/test_data`:
 the request hipBLASLt writes for its default FP16 problem, with the Origami
 ranking of the six best gfx950 candidates retargeted to gfx1250.
+
+## Algorithm error-status tests
+
+`hipblaslt-test` includes the `AlgoErrors.smoke_*` tests in
+`clients/tests/src/algo_errors_gtest.cpp`. They check the error statuses for a
+solution index that names no solution, which a reserved JIT index that no JIT
+library holds also gets, with a 128×128×128 FP16 GEMM and index 2^30 − 1, the
+last index below the reserved range:
+
+- `Gemm::initialize` and `GroupedGemm::initialize` with an index that names no
+  solution return `HIPBLAS_STATUS_INVALID_VALUE`.
+- `hipblasLtMatmul` with that index does not succeed; it returns
+  `HIPBLAS_STATUS_INTERNAL_ERROR`.
+- `hipblasLtMatmulAlgoGetHeuristic` with `requestedAlgoCount` 0 returns
+  `HIPBLAS_STATUS_INVALID_VALUE` and sets `*returnAlgoCount` to 0.
+
+Build the `hipblaslt-test` target and run it with
+`--gtest_filter='AlgoErrors.*'` and `HIPBLASLT_JIT` unset; the shared driver
+does not run these tests. The index checks are reached only when the build's
+device library loads. Without one the calls fail earlier, and the tests still
+pass.
 
 ## Shared automation and remaining coverage
 

@@ -74,7 +74,8 @@ TensileLite backend's `tensilelite::Options`; heuristic queries use the
 owns its buffers and workspace. The
 request owns descriptor values and host scalars; it does not take ownership of
 device pointers. Compilation and support checks finish before graphics
-processing unit (GPU) work is submitted. The Jit interfaces are for
+processing unit (GPU) work is submitted; call the entry points before stream
+capture. The Jit interfaces are for
 compiled-in implementations and do not establish a stable external plugin
 application binary interface (ABI). GEMM is the implemented operation; an
 attention request adapter and backend remain future work.
@@ -352,7 +353,13 @@ reused while the root exists. Publication fails once the range is exhausted.
 own solution adapter whose code-object directory is the key directory, and all
 other indices to the prebuilt library. An index that no JIT library holds
 resolves to an empty library, so callers report their usual missing-solution
-error.
+error. For an index that names no solution in either range,
+`hipblaslt_ext::Gemm::initialize` and `GroupedGemm::initialize` return
+`HIPBLAS_STATUS_INVALID_VALUE`, and `hipblasLtMatmul` returns
+`HIPBLAS_STATUS_INTERNAL_ERROR`; problems that take rocRoller's early route do
+not reach this check. The `AlgoErrors` tests in `hipblaslt-test` check these
+statuses with index 2^30 − 1, the last index below the reserved range; see
+[validation](#validation).
 
 **Publication and refresh.** A publisher holds `lock` (waiting up to 120
 seconds) while it allocates indices and writes, in this order: `allocator.dat`,
@@ -405,7 +412,11 @@ same support and workspace checks as a `getAllSolutions` result and is appended
 after the results already found. Its solution index is in the reserved JIT
 range.
 
-**Return count.** The query sets `*returnAlgoCount` to 0 on entry. Returning
+**Return count.** `hipblasLtMatmulAlgoGetHeuristic` sets `*returnAlgoCount` to 0
+before it validates the request, so a rejected request also reports no results:
+a `requestedAlgoCount` below 1 returns `HIPBLAS_STATUS_INVALID_VALUE` with a
+count of 0. Only a null argument, and in builds with fused all-to-all a
+rejected all-to-all epilogue, return before the count is set. Returning
 fewer results than requested, including none, is success, as it already was for
 the pre-tuned lookup. In fallback mode, a query whose pre-tuned lookup failed,
 for example because no pre-tuned library could be loaded, succeeds when JIT adds
@@ -442,6 +453,12 @@ An empty output (M=0 or N=0) gets no JIT result. A problem that Origami cannot
 rank, such as K=0, reports a predict failure. Grouped GEMM is not supported and
 reports an error.
 
+Behavior when a heuristic query, or `hipblasLtMatmul` without an algorithm,
+would generate during HIP stream capture is not specified. Generate before
+capture: run the query first and pass the returned algorithm to
+`hipblasLtMatmul` inside the capture, or warm the JIT solution library by
+running the same queries beforehand, in this process or an earlier one.
+
 #### Tool paths and scratch files
 
 A JIT build compiles the generator's tool paths into the library as defaults:
@@ -473,6 +490,9 @@ processes at once, a problem the backend cannot rank, and failure reports.
 The `code-object-gfx1250` and `jit-gemm-gfx1250` routes run compile-only for
 gfx1250 on any host; the second generates heuristic solutions with
 `Tensile.JitGemm` and builds them with comgr. The
+[`AlgoErrors` tests](clients/tests/jit/README.md#algorithm-error-status-tests)
+in `hipblaslt-test` check the statuses for an index that names no solution and
+for a rejected heuristic query; the driver does not run them. The
 [benchmark guide](clients/bench/README.jit.md) describes the prediction and
 benchmark checks.
 
