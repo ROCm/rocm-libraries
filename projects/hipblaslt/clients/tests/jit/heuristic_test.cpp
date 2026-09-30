@@ -3,23 +3,34 @@
 
 // Queries hipblasLtMatmulAlgoGetHeuristic and GemmInstance::algoGetHeuristic for
 // one FP16 GEMM, prints each query as a JSON line, and runs and checks every
-// returned algorithm. Uses only the public API, so it builds with and without
-// HIPBLASLT_ENABLE_JIT; test_heuristic.py checks what HIPBLASLT_JIT should return.
+// returned algorithm. --from-index resolves algorithm indices instead, and
+// --threads with --barrier issues the same queries from several threads that
+// start together, also across processes. Uses only the public API, so it builds
+// with and without HIPBLASLT_ENABLE_JIT; test_heuristic.py checks what
+// HIPBLASLT_JIT should return.
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <iostream>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace
 {
+    // Serializes the JSON lines and PASS lines of concurrent threads.
+    std::mutex outputMutex;
+
     void check(hipError_t status, const char* what)
     {
         if(status != hipSuccess)
@@ -37,9 +48,12 @@ namespace
         int         requested = 1;
         int64_t     m = 256, n = 128, k = 512;
         int         handles = 1, queries = 1;
-        size_t      workspace = 32 << 20;
-        bool        nullAlgo  = false;
-        bool        run       = true;
+        size_t           workspace = 32 << 20;
+        bool             nullAlgo  = false;
+        bool             run       = true;
+        std::vector<int> fromIndex;
+        int              threads = 1;
+        std::string      barrier;
     };
 
     // A and B are multiples of 1/8 and C of 1/4, so the FP32 sums are exact and
@@ -47,6 +61,7 @@ namespace
     struct Problem
     {
         const Settings&         s;
+        int                     thread;
         hipblasLtHandle_t       handle = nullptr;
         hipblasLtMatmulDesc_t   desc   = nullptr;
         hipblasLtMatrixLayout_t aLayout = nullptr, bLayout = nullptr, cLayout = nullptr,
@@ -59,8 +74,9 @@ namespace
         std::vector<__half>         hostA, hostB, hostC, hostD;
         std::vector<float>          expected;
 
-        explicit Problem(const Settings& settings)
+        Problem(const Settings& settings, int thread)
             : s(settings)
+            , thread(thread)
         {
             const auto m = s.m, n = s.n, k = s.k;
             check(hipblasLtCreate(&handle), "Create handle");
@@ -145,6 +161,7 @@ namespace
                                              + ", expected " + std::to_string(expected[i])
                                              + ", actual " + std::to_string(actual));
             }
+            std::lock_guard<std::mutex> lock(outputMutex);
             std::cerr << label << " PASS\n";
         }
         hipblasStatus_t matmul(const hipblasLtMatmulAlgo_t* algo)
@@ -168,22 +185,28 @@ namespace
         }
     };
 
-    void print(const char*                                    api,
+    void print(Problem&                                       p,
+               const char*                                    api,
                int                                            handle,
                int                                            query,
                hipblasStatus_t                                status,
                std::vector<hipblasLtMatmulHeuristicResult_t>& results)
     {
-        std::ostringstream indices, workspaces;
+        std::ostringstream indices, workspaces, kernels;
         for(size_t i = 0; i < results.size(); ++i)
         {
             indices << (i ? "," : "") << hipblaslt_ext::getIndexFromAlgo(results[i].algo);
             workspaces << (i ? "," : "") << results[i].workspaceSize;
+            kernels << (i ? ",\"" : "\"")
+                    << hipblaslt_ext::getKernelNameFromAlgo(p.handle, results[i].algo) << '"';
         }
-        std::cout << "{\"api\":\"" << api << "\",\"handle\":" << handle << ",\"query\":" << query
+        std::lock_guard<std::mutex> lock(outputMutex);
+        std::cout << "{\"api\":\"" << api << "\",\"thread\":" << p.thread
+                  << ",\"handle\":" << handle << ",\"query\":" << query
                   << ",\"status\":" << status << ",\"count\":" << results.size()
                   << ",\"indices\":[" << indices.str() << "],\"workspace\":["
-                  << workspaces.str() << "]}" << std::endl;
+                  << workspaces.str() << "],\"kernels\":[" << kernels.str() << "]}"
+                  << std::endl;
     }
 
     void queryC(Problem& p, int handle, int query)
@@ -204,7 +227,7 @@ namespace
         if(count < 0 || count > p.s.requested)
             throw std::runtime_error("C heuristic returned count " + std::to_string(count));
         results.resize(count);
-        print("c", handle, query, status, results);
+        print(p, "c", handle, query, status, results);
         for(int i = 0; p.s.run && i < count; ++i)
         {
             p.reset();
@@ -232,7 +255,7 @@ namespace
         pref.setMaxWorkspaceBytes(p.s.workspace);
         std::vector<hipblasLtMatmulHeuristicResult_t> results;
         const auto status = gemm.algoGetHeuristic(p.s.requested, pref, results);
-        print("cpp", handle, query, status, results);
+        print(p, "cpp", handle, query, status, results);
         for(size_t i = 0; p.s.run && i < results.size(); ++i)
         {
             p.reset();
@@ -241,6 +264,49 @@ namespace
             check(gemm.run(p.stream), label + " run");
             p.verify(label);
         }
+    }
+
+    void queryIndices(Problem& p, int handle)
+    {
+        auto                                          indices = p.s.fromIndex;
+        std::vector<hipblasLtMatmulHeuristicResult_t> results;
+        const auto status = hipblaslt_ext::getAlgosFromIndex(p.handle, indices, results);
+        print(p, "from-index", handle, 0, status, results);
+        for(size_t i = 0; p.s.run && i < results.size(); ++i)
+        {
+            p.reset();
+            const auto label = "Index result " + std::to_string(i);
+            check(p.matmul(&results[i].algo), label + " hipblasLtMatmul");
+            p.verify(label);
+        }
+    }
+
+    // Claims a ready-N file in dir, then waits for dir/go, so the threads of
+    // several processes issue their first query together.
+    void waitAtBarrier(const std::filesystem::path& dir)
+    {
+        for(int slot = 0;; ++slot)
+        {
+            if(!std::filesystem::is_directory(dir) || slot == 4096)
+                throw std::runtime_error("Cannot join the barrier in " + dir.string());
+            const auto ready = dir / ("ready-" + std::to_string(slot));
+            if(auto* file = std::fopen(ready.string().c_str(), "wx"))
+            {
+                std::fclose(file);
+                break;
+            }
+        }
+        while(!std::filesystem::exists(dir / "go"))
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    std::vector<int> parseIndices(const std::string& list)
+    {
+        std::vector<int>  indices;
+        std::stringstream stream(list);
+        for(std::string item; std::getline(stream, item, ',');)
+            indices.push_back(std::stoi(item));
+        return indices;
     }
 
     Settings parse(int argc, char** argv)
@@ -274,42 +340,82 @@ namespace
                 s.nullAlgo = true;
             else if(arg == "--no-run")
                 s.run = false;
+            else if(arg == "--from-index")
+                s.fromIndex = parseIndices(value());
+            else if(arg == "--threads")
+                s.threads = std::stoi(value());
+            else if(arg == "--barrier")
+                s.barrier = value();
             else
                 throw std::invalid_argument("Unknown argument " + arg);
         }
         if((s.api != "c" && s.api != "cpp" && s.api != "both" && s.api != "none")
-           || s.requested < 1 || s.m < 1 || s.n < 1 || s.k < 1 || s.handles < 1
-           || s.queries < 1)
+           || s.requested < 1 || s.m < 1 || s.n < 1 || s.k < 0 || s.handles < 1
+           || s.queries < 1 || s.threads < 1)
             throw std::invalid_argument("Invalid arguments");
         return s;
+    }
+
+    void runThread(const Settings& s, int thread)
+    {
+        for(int handle = 0; handle < s.handles; ++handle)
+        {
+            Problem problem(s, thread);
+            if(handle == 0 && !s.barrier.empty())
+                waitAtBarrier(s.barrier);
+            for(int query = 0; query < s.queries; ++query)
+            {
+                if(s.api == "c" || s.api == "both")
+                    queryC(problem, handle, query);
+                if(s.api == "cpp" || s.api == "both")
+                    queryCpp(problem, handle, query);
+            }
+            if(!s.fromIndex.empty())
+                queryIndices(problem, handle);
+            if(s.nullAlgo)
+            {
+                problem.reset();
+                const auto status = problem.matmul(nullptr);
+                {
+                    std::lock_guard<std::mutex> lock(outputMutex);
+                    std::cout << "{\"api\":\"null-algo\",\"thread\":" << thread
+                              << ",\"handle\":" << handle << ",\"status\":" << status << "}"
+                              << std::endl;
+                }
+                if(status == HIPBLAS_STATUS_SUCCESS)
+                    problem.verify("hipblasLtMatmul without an algorithm");
+            }
+        }
     }
 }
 
 int main(int argc, char** argv)
 try
 {
-    const auto settings = parse(argc, argv);
-    for(int handle = 0; handle < settings.handles; ++handle)
-    {
-        Problem problem(settings);
-        for(int query = 0; query < settings.queries; ++query)
+    const auto               settings = parse(argc, argv);
+    std::vector<std::string> failures(settings.threads);
+    std::vector<std::thread> threads;
+    for(int thread = 0; thread < settings.threads; ++thread)
+        threads.emplace_back([&, thread] {
+            try
+            {
+                runThread(settings, thread);
+            }
+            catch(const std::exception& e)
+            {
+                failures[thread] = e.what();
+            }
+        });
+    for(auto& thread : threads)
+        thread.join();
+    int exitCode = 0;
+    for(const auto& failure : failures)
+        if(!failure.empty())
         {
-            if(settings.api == "c" || settings.api == "both")
-                queryC(problem, handle, query);
-            if(settings.api == "cpp" || settings.api == "both")
-                queryCpp(problem, handle, query);
+            std::cerr << "FAIL: " << failure << '\n';
+            exitCode = 1;
         }
-        if(settings.nullAlgo)
-        {
-            problem.reset();
-            const auto status = problem.matmul(nullptr);
-            std::cout << "{\"api\":\"null-algo\",\"handle\":" << handle
-                      << ",\"status\":" << status << "}" << std::endl;
-            if(status == HIPBLAS_STATUS_SUCCESS)
-                problem.verify("hipblasLtMatmul without an algorithm");
-        }
-    }
-    return 0;
+    return exitCode;
 }
 catch(const std::exception& e)
 {

@@ -8,6 +8,7 @@ HIPBLASLT_TENSILE_LIBPATH unless the route needs the build's device library.
 """
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import functools
 import json
 import os
@@ -15,6 +16,9 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
+
+import msgpack
 
 JIT_INDEX = 1 << 30
 INVALID_VALUE = 3
@@ -73,6 +77,12 @@ def reports(stderr, severity="(?:error|warning)"):
 
 def entries(library):
     return list(library.rglob("TensileLibrary_JIT_*.dat"))
+
+
+def allocated(library):
+    """The next index the library's allocator hands out."""
+    data = (library / "v1" / "allocator.dat").read_bytes()
+    return msgpack.unpackb(data)["next"]
 
 
 def queries(records, api):
@@ -171,7 +181,152 @@ def cache_hit(run, output):
     require(queries(second, "null-algo")[0]["status"] == 0, "Null algorithm failed")
     require(not trap.exists(), f"The second process generated: {trap}")
     require(not reports(stderr), "The second process reported a JIT problem")
-    print("PASS heuristic-cache-hit: a second process reuses the library without generating")
+    stderr, third = run(
+        "resolve",
+        ["--api", "none", "--from-index", ",".join(map(str, published))],
+        HIPBLASLT_JIT="0",
+        HIPBLASLT_JIT_PYTHON=str(python),
+        HIPBLASLT_JIT_TEST_TRAP=str(trap),
+    )
+    (resolved,) = queries(third, "from-index")
+    require(
+        resolved["status"] == 0 and resolved["indices"] == published,
+        f"HIPBLASLT_JIT=0 did not resolve {published}: {resolved}",
+    )
+    require("Index result 0 PASS" in stderr, "The resolved solution was not checked")
+    require(not trap.exists(), f"The third process generated: {trap}")
+    require(not reports(stderr), "The third process reported a JIT problem")
+    print(
+        "PASS heuristic-cache-hit: a second process reuses the library without generating;"
+        " HIPBLASLT_JIT=0 resolves the published index"
+    )
+
+
+def distinct(run, output):
+    stderr, first = run(
+        "publish", ["--api", "c", "--requested", "1", "--no-run"], HIPBLASLT_JIT="2"
+    )
+    (published,) = queries(first, "c")
+    require(published["count"] == 1, f"The first query returned {published}")
+    requested = 3
+    stderr, records = run(
+        "fill", ["--api", "both", "--requested", str(requested)], HIPBLASLT_JIT="2"
+    )
+    check_jit_results(stderr, records, ("c", "cpp"), requested)
+    for api in ("c", "cpp"):
+        (record,) = queries(records, api)
+        require(
+            record["count"] == requested,
+            f"{api} returned {record['count']} of {requested}",
+        )
+        require(
+            record["indices"][0] == published["indices"][0],
+            f"{api} did not return the cached solution first: {record['indices']}",
+        )
+        require(
+            len(set(record["indices"])) == len(set(record["kernels"])) == requested,
+            f"{api} returned a solution twice: {record['kernels']}",
+        )
+    require(not reports(stderr), "A JIT problem was reported")
+    require(
+        len(entries(output / "lib")) == requested,
+        f"The library does not hold {requested} solutions",
+    )
+    print(
+        "PASS heuristic-distinct: a request for 3 with 1 cached returns 3 distinct kernels"
+    )
+
+
+def unsupported(run, output):
+    # Origami has no ranking for K = 0, so the backend rejects the problem.
+    args = ["--api", "both", "--k", "0", "--handles", "2", "--queries", "2", "--no-run"]
+    for mode, status in (("1", INVALID_VALUE), ("2", 0)):
+        name = f"mode-{mode}"
+        library = output / f"lib-{name}"
+        stderr, records = run(
+            name, args, HIPBLASLT_JIT=mode, HIPBLASLT_JIT_LIBRARY_PATH=str(library)
+        )
+        lines = reports(stderr)
+        require(
+            len(lines) == 1
+            and lines[0].startswith("hipblaslt error: JIT predict failed")
+            and "No Origami ranking" in lines[0],
+            f"{name}: expected one 'predict failed' error naming the reason, got {lines}",
+        )
+        require(
+            len(records) == 8
+            and all(
+                record["status"] == status and record["count"] == 0
+                for record in records
+            ),
+            f"{name}: expected 8 empty queries with status {status}: {records}",
+        )
+        require(not entries(library), f"{name} published a solution")
+    print("PASS heuristic-unsupported: one visible error naming the reason, no results")
+
+
+def concurrent(run, output):
+    processes, threads, requested = 4, 4, 2
+    for mode in ("1", "2"):
+        library = output / f"lib-mode-{mode}"
+        barrier = output / f"barrier-mode-{mode}"
+        barrier.mkdir()
+        args = ["--api", "both", "--requested", str(requested)]
+        args += ["--threads", str(threads), "--barrier", str(barrier)]
+        with ThreadPoolExecutor(processes) as pool:
+            started = [
+                pool.submit(
+                    run,
+                    f"mode-{mode}-process-{process}",
+                    args,
+                    HIPBLASLT_JIT=mode,
+                    HIPBLASLT_JIT_LIBRARY_PATH=str(library),
+                )
+                for process in range(processes)
+            ]
+            deadline = time.monotonic() + 300
+            while (
+                len(list(barrier.glob("ready-*"))) < processes * threads
+                and not any(future.done() for future in started)
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.01)
+            ready = len(list(barrier.glob("ready-*")))
+            (barrier / "go").touch()
+            outputs = [future.result() for future in started]
+        require(
+            ready == processes * threads,
+            f"Mode {mode}: only {ready} threads reached the barrier",
+        )
+        results = set()
+        for stderr, records in outputs:
+            check_jit_results(stderr, records, ("c", "cpp"), requested)
+            require(not reports(stderr), f"Mode {mode}: a JIT problem was reported")
+            require(
+                len(records) == 2 * threads,
+                f"Mode {mode}: expected {2 * threads} queries per process",
+            )
+            for record in records:
+                results.add((tuple(record["indices"]), tuple(record["kernels"])))
+        require(
+            len(results) == 1,
+            f"Mode {mode}: queries returned different results: {sorted(results)}",
+        )
+        ((indices, kernels),) = results
+        require(
+            len(set(indices)) == len(set(kernels)) == requested,
+            f"Mode {mode}: a solution was returned twice: {kernels}",
+        )
+        require(
+            len(entries(library)) == requested
+            and allocated(library) == JIT_INDEX + requested
+            and set(indices) == set(range(JIT_INDEX, JIT_INDEX + requested)),
+            f"Mode {mode}: the library holds duplicate or stray entries",
+        )
+    print(
+        f"PASS heuristic-concurrent: {processes} processes x {threads} threads agree"
+        " and publish each solution once"
+    )
 
 
 def null_algo(run, output):
@@ -266,8 +421,9 @@ def partial_fill(run, output):
         )
         (filled,) = queries(records, api)
         require(filled["status"] == 0, f"{api} fill failed: {filled}")
+        # The pre-tuned library can order tied solutions differently in each process.
         require(
-            filled["indices"][:count] == record["indices"],
+            sorted(filled["indices"][:count]) == sorted(record["indices"]),
             f"{api} fill changed the pre-tuned results",
         )
         require(
@@ -275,10 +431,14 @@ def partial_fill(run, output):
             f"{api} fill added a pre-tuned solution",
         )
         require(
-            filled["count"] == count + 1 or reports(stderr, "warning"),
-            f"{api} shortfall was not reported",
+            filled["count"] == count + 1,
+            f"{api} fill returned {filled['count']} of {count + 1}",
         )
-    print("PASS heuristic-partial-fill: JIT solutions follow the pre-tuned results")
+        require(
+            filled["kernels"][count] not in filled["kernels"][:count],
+            f"{api} fill repeated a pre-tuned kernel: {filled['kernels'][count]}",
+        )
+    print("PASS heuristic-partial-fill: a new JIT kernel follows the pre-tuned results")
 
 
 def jit_off(run, output):
@@ -300,6 +460,9 @@ ROUTES = {
     "fallback-cpp": functools.partial(fallback, api="cpp"),
     "forced": forced,
     "cache-hit": cache_hit,
+    "distinct": distinct,
+    "unsupported": unsupported,
+    "concurrent": concurrent,
     "null-algo": null_algo,
     "report": report,
     "partial-fill": partial_fill,

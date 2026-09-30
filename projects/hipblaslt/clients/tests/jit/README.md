@@ -89,10 +89,13 @@ to replay, publish or rebuild it.
 | `bundle-failures` | Damaged source bundles are rejected through the public API: a foreign target, an escaping symbolic link, missing sources or main assembly, an undefined main kernel, invalid assembly or helper source (the message names the comgr log), corrupt or truncated library entries, missing helper source or symbols, and unsupported problems |
 | `heuristic-fallback-c`, `heuristic-fallback-cpp` | `HIPBLASLT_JIT=1` with an empty device library: the C or C++ heuristic query returns only JIT indices for one and three requested solutions, each checked through `hipblasLtMatmul` or `Gemm`, publishes them, and reports any shortfall as a warning |
 | `heuristic-forced` | `HIPBLASLT_JIT=2` with an empty and with the build's device library: both queries return only JIT indices with checked numerics, and comgr's on-disk cache stays unused |
-| `heuristic-cache-hit` | A second process whose generator fails if it runs gets the first process's published index from both queries and from `hipblasLtMatmul` without an algorithm, with no JIT report |
+| `heuristic-cache-hit` | A second process whose generator fails if it runs gets the first process's published index from both queries and from `hipblasLtMatmul` without an algorithm, with no JIT report; a third process with `HIPBLASLT_JIT=0` resolves that index through `getAlgosFromIndex` and runs it with checked numerics |
+| `heuristic-distinct` | With one solution already published, a request for three in mode 2 returns that solution first and two new ones, three distinct kernels in all, with no JIT report |
+| `heuristic-unsupported` | A problem the backend cannot rank (K=0) in modes 1 and 2: exactly one `hipblaslt error: JIT predict failed` line naming the reason across two handles, two queries and both APIs; the queries return no results with the status the mode defines, and nothing is published |
+| `heuristic-concurrent` | In modes 1 and 2, four processes of four threads each start the same query through a file barrier: every query returns the same two distinct solutions with checked numerics and no JIT report, and the library holds exactly those two entries with the allocator just past them |
 | `heuristic-null-algo` | `hipblasLtMatmul` without an algorithm runs a JIT solution with checked numerics in modes 1 and 2, and does not use JIT in mode 0 |
 | `heuristic-report` | In modes 1 and 2, a missing Python and a failing generator each print exactly one `hipblaslt error: JIT` line across two handles, two queries and both APIs; the queries return no results with the status the mode defines, and the generator log named in the report is kept |
-| `heuristic-partial-fill` | With the build's device library, JIT indices follow the unchanged pre-tuned results in mode 1; prints SKIP when the build has no device library for the problem |
+| `heuristic-partial-fill` | With the build's device library, a request for one more than the pre-tuned count in mode 1 returns the same pre-tuned solutions followed by one JIT solution whose kernel is not among them; prints SKIP when the build has no device library for the problem |
 | `bench` | `HIPBLASLT_JIT=2` through the benchmark's ordinary heuristic query: genuine Origami ranking and first-valid selection, unchanged numerical checks, compilation outside timing, publication and reuse, and one error report when ranking or validation cannot produce a recipe |
 | `disabled-api` | The JIT headers are absent from the public include tree, `hipblaslt-ext.hpp` compiles without them, and the extension API links against the disabled library; the disabled benchmark and heuristic test print one warning that `HIPBLASLT_JIT` is ignored, and the heuristic results match a run without it |
 
@@ -173,11 +176,17 @@ while one reader process looks them up.
 and without JIT. It queries `hipblasLtMatmulAlgoGetHeuristic` and
 `GemmInstance::algoGetHeuristic` for an FP16 GEMM with FP32 accumulation
 (M=256, N=128, K=512 by default), prints one JSON line per query with the
-status, the returned solution indices and their workspace sizes, and then runs
-every returned algorithm and compares the output with a CPU reference.
-`--api c|cpp|both|none`, `--requested`, `--m`, `--n`, `--k`, `--handles`,
-`--queries` and `--workspace` shape the queries, `--null-algo` also checks
-`hipblasLtMatmul` without an algorithm, and `--no-run` skips execution.
+status, the returned solution indices, their workspace sizes and kernel names,
+and then runs every returned algorithm and compares the output with a CPU
+reference. `--api c|cpp|both|none`, `--requested`, `--m`, `--n`, `--k`,
+`--handles`, `--queries` and `--workspace` shape the queries, `--null-algo`
+also checks `hipblasLtMatmul` without an algorithm, `--from-index i,j,...`
+resolves indices through `hipblaslt_ext::getAlgosFromIndex` and runs them, and
+`--no-run` skips execution. `--threads N` runs the whole sequence in N threads,
+each with its own handles; with `--barrier DIR` each thread claims a
+`ready-<n>` file in `DIR` after creating its first handle and waits for
+`DIR/go` before its first query, so that threads in several processes start
+together.
 
 `test_heuristic.py <binary> <route> <fresh-output>` runs the binary for one
 driver route in fresh processes, each with its own JIT solution library,
