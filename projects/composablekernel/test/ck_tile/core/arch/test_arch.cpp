@@ -241,27 +241,29 @@ __global__ void test_buffer_resource_3rd_dword_kernel(uint32_t* out)
 // default of 0x00020000).
 int64_t expected_buffer_resource_3rd_dword(amdgcn_target_id id)
 {
-    switch(id)
-    {
-    case amdgcn_target_id::GFX1250: return 0;
-    case amdgcn_target_id::GFX1100:
-    case amdgcn_target_id::GFX1101:
-    case amdgcn_target_id::GFX1102:
-    case amdgcn_target_id::GFX1103:
-    case amdgcn_target_id::GFX1150:
-    case amdgcn_target_id::GFX1151:
-    case amdgcn_target_id::GFX1152:
-    case amdgcn_target_id::GFX1153:
-    case amdgcn_target_id::GFX1200:
-    case amdgcn_target_id::GFX1201: return 0x31004000;
-    case amdgcn_target_id::GFX1030:
-    case amdgcn_target_id::GFX1031:
-    case amdgcn_target_id::GFX1032:
-    case amdgcn_target_id::GFX1034:
-    case amdgcn_target_id::GFX1035:
-    case amdgcn_target_id::GFX1036: return 0x31014000;
-    default: return -1;
-    }
+    if(id == amdgcn_target_id::GFX1250)
+        return 0;
+    for(auto t : {amdgcn_target_id::GFX1100,
+                  amdgcn_target_id::GFX1101,
+                  amdgcn_target_id::GFX1102,
+                  amdgcn_target_id::GFX1103,
+                  amdgcn_target_id::GFX1150,
+                  amdgcn_target_id::GFX1151,
+                  amdgcn_target_id::GFX1152,
+                  amdgcn_target_id::GFX1153,
+                  amdgcn_target_id::GFX1200,
+                  amdgcn_target_id::GFX1201})
+        if(id == t)
+            return 0x31004000;
+    for(auto t : {amdgcn_target_id::GFX1030,
+                  amdgcn_target_id::GFX1031,
+                  amdgcn_target_id::GFX1032,
+                  amdgcn_target_id::GFX1034,
+                  amdgcn_target_id::GFX1035,
+                  amdgcn_target_id::GFX1036})
+        if(id == t)
+            return 0x31014000;
+    return -1;
 }
 
 // Regression test: the SPIR-V runtime-dispatch branch must resolve
