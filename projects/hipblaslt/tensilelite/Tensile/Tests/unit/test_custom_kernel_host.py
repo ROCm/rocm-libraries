@@ -114,6 +114,53 @@ def test_assign_custom_kernel_params_default_depthu_is_not_a_tile():
         Solution._assignCustomKernelParameters(state)
 
 
+@pytest.mark.parametrize("grid", [
+    ["TilesX", "TilesYGSU", "Batch"],
+    ["TilesXYBatchGSU", "One", "One"],
+])
+def test_assign_custom_kernel_params_split_k_grid_is_accepted(grid):
+    state = _ck_state(
+        GlobalSplitU=16,
+        GlobalSplitUAlgorithm="MultipleBufferSingleKernel",
+        InternalSupportParams={"SupportUserGSU": True},
+    )
+    state["CustomKernel"]["grid"] = grid
+    Solution._assignCustomKernelParameters(state)
+    assert state["_GlobalAccumulation"] == "MultipleBufferSingleKernel"
+    assert state["InternalSupportParams"]["SupportUserGSU"] is True
+
+
+@pytest.mark.parametrize("gsu", [16, -1])
+def test_assign_custom_kernel_params_split_k_without_gsu_grid_raises(gsu):
+    # A split-K kernel reduces into D only once every GSU slice has arrived, so a
+    # grid without a GSU term would launch one slice and leave D unwritten.
+    # GlobalSplitU -1 lets the runtime pick a split above 1.
+    state = _ck_state(GlobalSplitU=gsu, GlobalSplitUAlgorithm="MultipleBufferSingleKernel")
+    state["CustomKernel"]["grid"] = ["TilesX", "TilesY", "Batch"]
+    with pytest.raises(RuntimeError, match="launches one GSU slice per tile"):
+        Solution._assignCustomKernelParameters(state)
+
+
+@pytest.mark.parametrize("gsu", [1, 0])  # 0: GSU disabled
+def test_assign_custom_kernel_params_grid_without_gsu_term_rejects_user_gsu(gsu):
+    # Such a grid launches one GSU slice per tile, so a runtime GSU override has to
+    # be turned away during solution selection rather than fail at launch.
+    state = _ck_state(GlobalSplitU=gsu, InternalSupportParams={"SupportUserGSU": True})
+    state["CustomKernel"]["grid"] = ["TilesX", "TilesY", "Batch"]
+    Solution._assignCustomKernelParameters(state)
+    assert state["InternalSupportParams"]["SupportUserGSU"] is False
+
+
+def test_assign_custom_kernel_params_streamk_keeps_user_gsu():
+    # Stream-K splits K through its own grid, so neither the GSU check nor the
+    # override flag applies to it.
+    state = _ck_state(
+        GlobalSplitU=16, StreamK=2, InternalSupportParams={"SupportUserGSU": True})
+    state["CustomKernel"]["grid"] = ["TilesX", "TilesY", "Batch"]
+    Solution._assignCustomKernelParameters(state)
+    assert state["InternalSupportParams"]["SupportUserGSU"] is True
+
+
 def test_assign_custom_kernel_params_enable_mi_sets_wave_params():
     state = _ck_state()
     Solution._assignCustomKernelParameters(state)

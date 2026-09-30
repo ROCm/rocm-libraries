@@ -1873,7 +1873,9 @@ class Solution(collections.abc.Mapping):
 
     Raises:
       RuntimeError: If a macrotile component is supplied by neither the
-        CustomKernel block nor the consuming logic file.
+        CustomKernel block nor the consuming logic file, or if the solution
+        can split K (GlobalSplitU other than 0 or 1) but its grid launches one
+        GSU slice per tile.
     """
     ck = state["CustomKernel"]
 
@@ -1900,6 +1902,23 @@ class Solution(collections.abc.Mapping):
     # ContractionSolution reads customKernel.macrotile directly for custom-kernel
     # tile and workspace sizing.
     ck["macrotile"] = macrotile
+
+    # A split-K kernel reduces into D only once every GSU slice of a tile has
+    # arrived, so a grid without a GSU term would return success with D unwritten.
+    # GlobalSplitU -1 lets the runtime pick a split above 1.
+    gsu = state.get("GlobalSplitU", 1)
+    grid = ck.get("grid", [])
+    gridSplitsK = state.get("StreamK", 0) \
+      or any(g in ("TilesYGSU", "TilesXYBatchGSU") for g in grid)
+    if gsu not in (0, 1) and not gridSplitsK:
+      raise RuntimeError(
+        f"Custom kernel '{ck.get('name', '?')}' runs with GlobalSplitU {gsu}, but its "
+        f"CustomKernel grid {grid} launches one GSU slice per tile; use TilesYGSU "
+        f"or TilesXYBatchGSU.")
+    # The same grid cannot honor a runtime GSU override either; clearing the flag
+    # rejects one during solution selection instead of failing at launch.
+    if not gridSplitsK:
+      state.setdefault("InternalSupportParams", {})["SupportUserGSU"] = False
 
     # Derive _GlobalAccumulation from GlobalSplitUAlgorithm so the C++
     # runtime sees a non-zero sizeMapping.globalAccumulation for GSU>1

@@ -156,6 +156,7 @@ namespace TensileLite
         case CustomGridSize::StreamKWithBatch: return "StreamKWithBatch";
         case CustomGridSize::StreamKNoBatch:   return "StreamKNoBatch";
         case CustomGridSize::TilesXYBatchGSU:  return "TilesXYBatchGSU";
+        case CustomGridSize::TilesYGSU:        return "TilesYGSU";
         case CustomGridSize::CustomGridSize_Count:
             break;
         }
@@ -175,6 +176,7 @@ namespace TensileLite
             {"StreamKWithBatch", CustomGridSize::StreamKWithBatch},
             {"StreamKNoBatch",   CustomGridSize::StreamKNoBatch},
             {"TilesXYBatchGSU",  CustomGridSize::TilesXYBatchGSU},
+            {"TilesYGSU",        CustomGridSize::TilesYGSU},
         };
 
         auto it = lookup.find(str);
@@ -2898,6 +2900,9 @@ namespace TensileLite
                 case CustomGridSize::TilesXYBatchGSU:
                     dim = tiles.x * tiles.y * tiles.z * (gsu > 0 ? gsu : 1);
                     break;
+                case CustomGridSize::TilesYGSU:
+                    dim = tiles.y * (gsu > 0 ? gsu : 1);
+                    break;
                 case CustomGridSize::StreamKWithBatch:
                     // generateCustomCall is only used for handwritten/external
                     // custom kernels; Tensile-generated kernels are routed to
@@ -2918,6 +2923,28 @@ namespace TensileLite
         assignGridSize(rv.numWorkGroups.x, customKernel.grid.x);
         assignGridSize(rv.numWorkGroups.y, customKernel.grid.y);
         assignGridSize(rv.numWorkGroups.z, customKernel.grid.z);
+
+        // A split-K kernel reduces into D only once every GSU slice of a tile has
+        // arrived, so a grid that launches one slice per tile would return success
+        // with D unwritten.
+        auto splitsK = [](CustomGridSize size) {
+            return size == CustomGridSize::TilesYGSU || size == CustomGridSize::TilesXYBatchGSU
+                   || size == CustomGridSize::StreamKWithBatch
+                   || size == CustomGridSize::StreamKNoBatch;
+        };
+        if(gsu > 1 && !splitsK(customKernel.grid.x) && !splitsK(customKernel.grid.y)
+           && !splitsK(customKernel.grid.z))
+            throw std::runtime_error(concatenate("Solution ",
+                                                 kernelName,
+                                                 " runs with GSU ",
+                                                 gsu,
+                                                 " but its custom-kernel grid [",
+                                                 customKernel.grid.x,
+                                                 ", ",
+                                                 customKernel.grid.y,
+                                                 ", ",
+                                                 customKernel.grid.z,
+                                                 "] launches one GSU slice per tile"));
 
         bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
         bool hasNumWorkGroupsArg = std::any_of(

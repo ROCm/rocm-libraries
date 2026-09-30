@@ -187,6 +187,7 @@ namespace TensileLite
         StreamKWithBatch,
         StreamKNoBatch,
         TilesXYBatchGSU,
+        TilesYGSU,
         CustomGridSize_Count,
     };
 
