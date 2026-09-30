@@ -56,6 +56,9 @@
  * @note TimePasses: print a per-pass wall-time report to stderr after the
  * pipeline runs (Tensile `StinkyTofuTimePasses`, stinkytofu-opt
  * `--time-passes`).
+ * @note WaitRepairSlotsAfterAnchor: how many non-WMMA instructions
+ * WaitAwareScheduleRepairPass may move past each wait-anchored WMMA.
+ * Defaults to 1 (pass on). 0 or less does not add the pass.
  */
 #define MODULE_OPTIONS_LIST(X)                    \
     X(DebugLevel, int)                            \
@@ -125,7 +128,8 @@
     X(DsReadThrottleLatency, int, -1)                                 \
     X(DsReadPerCap, int, -1)                                          \
     X(DsReadPerWmma, int, -1) /* deprecated alias for DsReadPerCap */ \
-    X(ClusterBarrierRule3SignalLeadCycles, int, -1)
+    X(ClusterBarrierRule3SignalLeadCycles, int, -1)                   \
+    X(WaitRepairSlotsAfterAnchor, int, 1) /* 0 disables the pass */
 
 namespace stinkytofu {
 /**
