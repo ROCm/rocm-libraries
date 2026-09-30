@@ -22,10 +22,12 @@ reject reason is captured from stdout via ``capsys``.
 
 import collections
 import copy
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
 
+from tensilelite.Components.TDMFuse import tdmKDimField, tdmKDimTrackable
 from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 from tensilelite.Components.PersistentLoop import PersistentKernelState
 
@@ -369,10 +371,10 @@ def test_rap_leaves_both_free_dims_alone(
     """K is the only dim RAP constrains. M and N carry nothing.
 
     The entry guard carries what the M == MacroTile0 predicate used to: which A a
-    tile needs is (M-tile, batch), and it compares both. A partial M-tile leaves
-    another M-tile's rows in the resident registers, which cannot reach a C
-    element that matters -- row m of C depends only on row m of A, and the edge
-    store masks the rows past M. An N edge reaches only the store.
+    tile needs is (M-tile, batch), and it compares both. Whatever a partial
+    M-tile's rows past M hold in the resident registers cannot reach a C element
+    that matters -- row m of C depends only on row m of A, and the edge store
+    masks the rows past M. An N edge reaches only the store.
 
     Asserting the absence rather than a tag, because re-adding a constraint on
     either dim is how the support would silently narrow again. Absence is not
@@ -395,56 +397,178 @@ def test_rap_leaves_both_free_dims_alone(
     assert any(p.index == kIdx for p in preds), "K must still be constrained"
 
 
-def test_rap_k_predicates_admit_a_range_of_whole_ktiles(
+def test_rap_k_predicates_admit_every_k_up_to_the_resident_block(
     _gp_gfx1250, gfx1250_iim, assembler, capsys, monkeypatch
 ):
-    """K spans a range, and both ends are one-off sensitive.
+    """K spans 1 .. kTiles * DepthU, and both ends are one-off sensitive.
 
-    The kernel holds k k-tiles but the loop leaves as soon as the counter runs
-    out, so any whole number of k-tiles from one up to k works. Both bounds are
-    silent when wrong, and wrong in opposite directions: too high a ceiling admits
-    a K whose top k-tile was never filled and multiplies whatever the previous
-    tile left in those registers, while a floor of zero admits a K that skips the
-    loop, and with it the clone that zeroes C. Neither shows up as a build
-    failure.
-
-    The floor is one k-tile and not PrefetchGlobalRead + 1: the pre-loop prefetch
-    already skips its second stage at a counter of 1, so a single k-tile needs no
-    drain section to land in.
+    The loop runs ceil(K / DepthU) resident k-tiles and the TDM clamp stops a
+    partial last one at K, so K needs no DepthU multiple -- ASEM's own
+    BoundSizeMultiple sets the granularity. Both bounds are silent when wrong, and
+    wrong in opposite directions: too high a ceiling admits a K whose top k-tile
+    was never filled and multiplies whatever the previous tile left in those
+    registers, while admitting K = 0 skips the loop, and with it the clone that
+    zeroes C. Neither shows up as a build failure.
 
     SizeGreaterThan and SizeLessThan are strict in the C++ evaluator
-    (ContractionProblemPredicates.hpp), which is why the bounds are emitted as
-    floor-1 and ceiling+1 rather than the bounds themselves.
+    (ContractionProblemPredicates.hpp), hence 0 and the ceiling + 1.
     """
     import tensilelite.Contractions as C
 
     _pin_store_budget(monkeypatch, 4)
-    sol, out = _derive(gfx1250_iim, assembler, capsys)
+    sol, out = _derive(gfx1250_iim, assembler, capsys, AssertSummationElementMultiple=32)
     assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
 
     depthU = sol["DepthU"]
     kTiles = sol["_RAPNumResidentKTiles"]
-    floorTiles = 1
     kIdx = sol["ProblemType"]["NumIndicesC"]
-    assert kTiles > floorTiles, "need a real range for the bounds to differ"
 
     problemType = C.ProblemType.FromOriginalState(sol["ProblemType"])
     preds = C.ProblemPredicate.CompoundPredicates(sol, problemType)
     kPreds = {(p.tag, p.value) for p in preds if p.index == kIdx}
 
-    assert kPreds == {
-        ("SizeMultiple", depthU),
-        ("SizeGreaterThan", floorTiles * depthU - 1),
-        ("SizeLessThan", kTiles * depthU + 1),
-    }
+    assert kPreds == {("SizeGreaterThan", 0), ("SizeLessThan", kTiles * depthU + 1)}
 
-    # Spelled out as the accepted set, so a bound that drifts by one k-tile fails
-    # here even if someone rewrites the triple above to match.
-    accepted = {k for k in range(depthU, (kTiles + 2) * depthU + 1)
-                if k % depthU == 0
-                and k > floorTiles * depthU - 1
-                and k < kTiles * depthU + 1}
-    assert accepted == {t * depthU for t in range(floorTiles, kTiles + 1)}
+    # Spelled out as the accepted set, so a bound that drifts by one fails here
+    # even if someone rewrites the pair above to match.
+    accepted = {k for k in range(0, (kTiles + 2) * depthU + 1)
+                if k > 0 and k < kTiles * depthU + 1}
+    assert accepted == set(range(1, kTiles * depthU + 1))
+
+
+@pytest.mark.parametrize(
+    "rap, asem, folds, noTailLoop",
+    [
+        pytest.param(1, 32, True, True, id="rap_with_a_remainder"),
+        pytest.param(1, 256, False, True, id="rap_without_a_remainder"),
+        pytest.param(0, 32, False, False, id="no_rap_with_a_remainder"),
+        pytest.param(0, 256, False, True, id="no_rap_without_a_remainder"),
+    ],
+)
+def test_tail_folding_is_rap_meeting_a_k_remainder(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, rap, asem, folds, noTailLoop
+):
+    """Tail folding is how RAP takes a K remainder, and nothing else folds.
+
+    NoTailLoop and _TailFolding are derived apart -- NoTailLoop inside
+    depthUIteration, _TailFolding after the ASEM overrides that follow it -- so
+    this pins that they agree: a RAP kernel never has a tail loop, and folds
+    exactly when its ASEM leaves a remainder. NoTailLoop then means only that no
+    tail is emitted: the partial last k-tile takes a resident slot of its own.
+    """
+    sol, out = _derive(gfx1250_iim, assembler, capsys,
+                       ReuseAcrossPersistent=rap, AssertSummationElementMultiple=asem)
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    assert sol.get("_TailFolding", False) is folds
+    assert sol["NoTailLoop"] is noTailLoop
+    # Only RAP folds, so only RAP solutions carry the key: every other solution
+    # keeps the shape the Solution characterization snapshots pin.
+    assert ("_TailFolding" in sol) is bool(rap)
+
+
+def test_a_rap_kernel_never_reaches_the_tail_loop_emitter(
+    _gp_gfx1250, gfx1250_iim, assembler
+):
+    """Derivation never sends RAP to the tail loop; codegen refuses if it ever does.
+
+    A tail loop under RAP needs registers RAP does not budget -- the resident A
+    blocks leave it no ValuA to load into -- so a derivation change that let one
+    through would otherwise surface as a pool overflow, or as a kernel computing
+    from the wrong registers.
+    """
+    import shutil
+    import rocisa
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+
+    sol = Solution(_make_params(gfx1250_iim, AssertSummationElementMultiple=32),
+                   False, False, False, assembler, gfx1250_iim)
+    assert sol.get("Valid") is True
+    with preserve_rocisa_kernel_state():
+        (kernel,) = generateKernelObjectsFromSolutions([sol])
+        ri = rocisa.rocIsa.getInstance()
+        ri.init(tuple(kernel["ISA"]), shutil.which("amdclang++") or "/usr/bin/amdclang++")
+        ri.setKernel(tuple(kernel["ISA"]), kernel["WavefrontSize"])
+        kernel.duplicate = False
+        kernel["BaseName"] = getKernelFileBase(False, kernel)
+        kernel["NoTailLoop"] = False
+        kwa = KernelWriterAssembly(assembler, DebugConfig())
+        kwa.setRocIsa(ri.getData(), ri.getOutputOptions())
+        with pytest.raises(AssertionError, match="tail-folds the K remainder"):
+            kwa.getSourceFileString(kernel)
+
+
+_MX_PROBLEM_TYPE = {
+    "MacDataTypeA": "F8", "MacDataTypeB": "F8",
+    "MXBlockA": 32, "MXBlockB": 32, "DataTypeMXSA": "E8", "DataTypeMXSB": "E8",
+}
+_K_FIELD_REJECT = ("ReuseAcrossPersistent with AssertSummationElementMultiple % DepthU != 0 "
+                   "requires TDM descriptor sets that keep K in one field")
+
+
+def test_tail_folding_sees_the_asem_the_fp4_override_leaves(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys
+):
+    """Asked for 256, an F8xF4 kernel ends up at 32 and has to fold.
+
+    The FP4 override runs after depthUIteration, where NoTailLoop is derived, so
+    _TailFolding is derived after the override instead. Read off the config's
+    256 it would come out False, and the partial last k-tile the predicate
+    admits would load past K with no K dim shrink to clamp it. F8xF4 can fold at
+    all because A and B, though they step K by different amounts, both count it
+    in bytes: each wave steps by its own address increment.
+    """
+    sol, out = _derive(gfx1250_iim, assembler, capsys, AssertSummationElementMultiple=256,
+                       ProblemType=dict(_MX_PROBLEM_TYPE, MacDataTypeB="F4"))
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    assert sol["AssertSummationElementMultiple"] == 32
+    assert sol["_TailFolding"] is True
+    assert sol["NoTailLoop"] is True
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        # TDM moves a tile-major B only with the transposing LDS read.
+        pytest.param({"ProblemType": {"TransposeB": True}, "LDSTrInst": True},
+                     id="tile_major_b"),
+        # PAP rejects every TDMFuse other than 0 on its own, so ask without it.
+        pytest.param({"ProblemType": dict(_MX_PROBLEM_TYPE), "TDMFuse": 1,
+                      "PrefetchAcrossPersistent": 0}, id="tdmfuse_1"),
+    ],
+)
+def test_rap_rejects_a_k_remainder_its_descriptors_cannot_clamp(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, overrides
+):
+    """One subtract per descriptor set shrinks K only if every member keeps it alike.
+
+    Each case is accepted without a remainder, so what rejects it is the remainder.
+    """
+    sol, out = _derive(gfx1250_iim, assembler, capsys, **copy.deepcopy(overrides))
+    assert sol.get("Valid") is True, f"control rejected with: {out!r}"
+    sol, out = _derive(gfx1250_iim, assembler, capsys,
+                       AssertSummationElementMultiple=32, **copy.deepcopy(overrides))
+    assert sol.get("Valid") is False, f"expected reject for {overrides}"
+    assert _K_FIELD_REJECT in out, f"rejected for another reason: {out!r}"
+
+
+def test_rap_checks_the_k_remainder_against_the_final_asem(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys
+):
+    """FP4 overrides ASEM after RAP's other checks have run.
+
+    Asked for 256, an FP4 kernel still ends up at 32, so it carries a remainder
+    whatever the config said. Checked against the config's value, this grouping
+    would pass derivation and fail in codegen instead.
+    """
+    sol, out = _derive(gfx1250_iim, assembler, capsys, AssertSummationElementMultiple=256,
+                       TDMFuse=1, PrefetchAcrossPersistent=0,
+                       ProblemType=dict(_MX_PROBLEM_TYPE, MacDataTypeB="F4"))
+    assert sol["AssertSummationElementMultiple"] == 32
+    assert sol.get("Valid") is False, "the remainder check saw the config's ASEM"
+    assert _K_FIELD_REJECT in out, f"rejected for another reason: {out!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -461,11 +585,6 @@ def test_rap_k_predicates_admit_a_range_of_whole_ktiles(
             {"TileProcessingStrategy": "StreamK"},
             "ReuseAcrossPersistent requires DataParallel/StaticGrid",
             id="without_dp_only",
-        ),
-        pytest.param(
-            {"AssertSummationElementMultiple": 32},
-            "ReuseAcrossPersistent requires NoTailLoop",
-            id="with_tail_loop",
         ),
         pytest.param(
             # PGR>=2 forces ExpandPointerSwap off before the guard runs, so this
@@ -777,3 +896,107 @@ def test_store_guard_examines_only_the_beta_non_edge_path(beta, edge):
     # more under RAP than without it; see rapCheckStoreNeutrality for the figures
     # and for what this guard would do if it were let near that path.
     assert _runStoreGuard(400, beta=beta, edge=edge).overflowedResources == 0
+
+
+# ---------------------------------------------------------------------------
+# K dim tracking. A partial last k-tile runs through the resident loop, and the
+# TDM descriptor clamps it at K only if each set's K dim, measured from the
+# moving base, shrinks as the address advances.
+# ---------------------------------------------------------------------------
+def _kDimKernel(fuse=0, a="F8", b="F8", mx=True, depthU=256, **overrides):
+    from tensilelite.Common.DataType import DataType
+
+    kernel = {
+        "TDMFuse": fuse, "NumWaves": 4, "TDMInst": 3, "TDMSplit": False,
+        "enableTDMA": True, "enableTDMB": True, "UseSubtileImpl": False,
+        "DepthU": depthU, "MatrixInstK": 128,
+        "ReuseAcrossPersistent": 1, "AssertSummationElementMultiple": 32,
+        "ProblemType": {
+            "DataTypeA": DataType(a), "DataTypeB": DataType(b),
+            "TLUA": False, "TLUB": False, "Sparse": 0,
+            "MXBlockA": 32 if mx else 0, "MXBlockB": 32 if mx else 0,
+        },
+    }
+    kernel.update(overrides)
+    return kernel
+
+
+@pytest.mark.parametrize("kernelArgs, trackable, fields", [
+    pytest.param({}, True, {"A": (1, 256), "MXSB": (2, 2)}, id="mx_f8_default_grouping"),
+    # FP4 packs two elements per byte and the dim counts bytes. 256 bytes and 128
+    # bytes: each is its own address increment.
+    pytest.param({"b": "F4"}, True, {"B": (1, 128)}, id="f8_by_f4_both_in_bytes"),
+    pytest.param({"fuse": 1}, False, {}, id="tdm_fuse_1"),
+    pytest.param({"fuse": 2}, False, {}, id="tdm_fuse_2"),
+    pytest.param({"fuse": 3}, False, {}, id="tdm_fuse_3"),
+    pytest.param({"mx": False}, True, {}, id="f8_no_mx"),
+    pytest.param({"a": "F4", "b": "F4"}, True, {}, id="f4_by_f4"),
+    # 256 elements either way, so one step fits both.
+    pytest.param({"b": "H", "mx": False}, True, {}, id="f8_by_half_same_elements"),
+    # 128 bytes against 256 half elements: no single register holds both.
+    pytest.param({"a": "F4", "b": "H", "mx": False}, False, {}, id="f4_by_half"),
+    pytest.param({"tileMajorB": True}, False, {}, id="tile_major_b"),
+])
+def test_tdm_k_dim_fields_and_tracking(kernelArgs, trackable, fields):
+    """Where each tensor keeps K in its descriptor, and whether a set can track it.
+
+    One subtract per descriptor set clamps the partial last k-tile, so every
+    member has to keep K in one field and step it alike: by the same element
+    count, or in bytes by its own address increment. Only the default grouping
+    (TDMFuse 0) keeps one K field per set.
+    """
+    args = dict(kernelArgs)
+    tileMajorB = args.pop("tileMajorB", False)
+    kernel = _kDimKernel(**args)
+    if tileMajorB:
+        kernel["ProblemType"]["TLUB"] = True
+    for tensor, field in fields.items():
+        assert tdmKDimField(kernel, tensor) == field
+    assert tdmKDimTrackable(kernel) is trackable
+
+
+class _ShrinkWriter:
+    """Just enough writer to render tailFoldingShrinkTdmKDim."""
+
+    isTdmWaveSeparated = KernelWriterAssembly.isTdmWaveSeparated
+    _tdmPairedParityOrder = KernelWriterAssembly._tdmPairedParityOrder
+    tailFoldingMxsKSplitOffsetExceedsOneGroup = KernelWriterAssembly.tailFoldingMxsKSplitOffsetExceedsOneGroup
+
+    def rapResidentKTiles(self, kernel):
+        return 8
+
+    @contextmanager
+    def allocTmpSgpr(self, num, alignment=None, tag=None):
+        yield SimpleNamespace(idx=90, size=num)
+
+
+def _shrink(kernel, tcA, tcB):
+    return str(KernelWriterAssembly.tailFoldingShrinkTdmKDim(
+        _ShrinkWriter(), kernel, {"tensorChar": tcA}, {"tensorChar": tcB}))
+
+
+@pytest.mark.parametrize("kernelArgs, tensors, emitted, absent", [
+    pytest.param({}, ("A", "B"),
+                 ["s_sub_u32 s[sgprtdmAGroup1+1], s[sgprtdmAGroup1+1], 0x1000000"], ["s_and_b32"],
+                 id="data_set_shrinks_dim0_by_one_k_tile"),
+    pytest.param({"b": "F4"}, ("A", "B"),
+                 ["s[sgprtdmABIncs]", "s_sub_u32 s[sgprtdmAGroup1+1], s[sgprtdmAGroup1+1], s90"], [],
+                 id="data_set_in_bytes_shrinks_by_the_wave_address_increment"),
+    # DepthU 256 is two K groups, one per scale wave: the second wave starts a
+    # group in and can never outrun the last k-tile's one-or-two groups.
+    pytest.param({}, ("MXSA", "MXSB"),
+                 ["s_sub_u32 s[sgprtdmMXSAGroup1+2], s[sgprtdmMXSAGroup1+2], 0x20000"], ["s_and_b32"],
+                 id="scale_set_shrinks_dim1_by_its_k_groups"),
+    # DepthU 512 gives each of the two scale waves two groups, so the second
+    # starts two groups in and runs out when the last k-tile has only one.
+    pytest.param({"depthU": 512}, ("MXSA", "MXSB"),
+                 ["s_sub_u32 s[sgprtdmMXSAGroup1+2], s[sgprtdmMXSAGroup1+2], 0x40000",
+                  "s_and_b32 s[sgprtdmMXSAGroup1+2], s[sgprtdmMXSAGroup1+2], s90"], [],
+                 id="scale_wave_offset_past_one_group_clamps_instead_of_wrapping"),
+])
+def test_tail_folding_shrinks_each_sets_k_dim(kernelArgs, tensors, emitted, absent):
+    rendered = _shrink(_kDimKernel(**kernelArgs), *tensors)
+    for text in emitted:
+        assert text in rendered
+    for text in absent:
+        assert text not in rendered
