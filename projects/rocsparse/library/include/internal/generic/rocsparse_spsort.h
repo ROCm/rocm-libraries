@@ -91,9 +91,12 @@ rocsparse_status rocsparse_spsort_buffer_size(rocsparse_handle            handle
 *    column pointer of the source matrix.
 *
 *  Batched matrices are supported. They are set up with \ref rocsparse_coo_set_strided_batch,
-*  \ref rocsparse_csr_set_strided_batch or \ref rocsparse_csc_set_strided_batch. Each batch is
-*  sorted independently. The source and target matrices must have the same batch count, and their
-*  strides may differ. Batches must not overlap:
+*  \ref rocsparse_csr_set_strided_batch or \ref rocsparse_csc_set_strided_batch. Only uniform
+*  batches are supported: every batch of the source matrix must have the same sparsity pattern,
+*  with the same offsets and indices in the same order, and only the values may differ between
+*  batches. The indices are sorted once, and the resulting permutation is applied to the values of
+*  every batch. The source and target matrices must have the same batch count, and their strides
+*  may differ. Batches must not overlap:
 *  - The COO batch stride, and the CSR/CSC columns/values batch stride, must be at least the
 *    number of non-zeros.
 *  - The CSR/CSC offsets batch stride must be zero, meaning all batches share one pointer
