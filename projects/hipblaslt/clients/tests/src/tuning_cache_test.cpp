@@ -395,6 +395,32 @@ namespace
         std::string types = "f16_r,f16_r,f16_r,f32_r";
     };
 
+    /** A row's header and value lines in hipblaslt-bench's layout, without line ends. */
+    std::pair<std::string, std::string> rowLines(const Row& row)
+    {
+        std::string header
+            = "transA,transB,batch_count,m,n,k,a_type,b_type,c_type,compute_type,solution_index";
+        std::ostringstream value;
+        value << "N,N,1," << kM << "," << kN << "," << kK << "," << row.types << "," << row.index;
+        if(row.kernelName)
+        {
+            header += ",kernel_name";
+            value << "," << *row.kernelName;
+        }
+        return {header, value.str()};
+    }
+
+    /** A version line, then `body` exactly as given. An empty stamp writes no version line. */
+    void writeRawTuningFile(const std::string& path,
+                            const std::string& stamp,
+                            const std::string& body)
+    {
+        std::ofstream out(path, std::ios::trunc);
+        if(!stamp.empty())
+            out << "Git Version: " << stamp << "\n";
+        out << body;
+    }
+
     /**
      * A tuning file in hipblaslt-bench's layout: a version line, then a header
      * and a value row per entry, all for the problem these cases run. An empty
@@ -404,23 +430,13 @@ namespace
                          const std::string&      stamp,
                          const std::vector<Row>& rows)
     {
-        std::ofstream out(path, std::ios::trunc);
-        if(!stamp.empty())
-            out << "Git Version: " << stamp << "\n";
-
+        std::string body;
         for(const auto& row : rows)
         {
-            out << "transA,transB,batch_count,m,n,k,a_type,b_type,c_type,compute_type,solution_"
-                   "index";
-            if(row.kernelName)
-                out << ",kernel_name";
-            out << "\n";
-
-            out << "N,N,1," << kM << "," << kN << "," << kK << "," << row.types << "," << row.index;
-            if(row.kernelName)
-                out << "," << *row.kernelName;
-            out << "\n";
+            const auto [header, value] = rowLines(row);
+            body += header + "\n" + value + "\n";
         }
+        writeRawTuningFile(path, stamp, body);
     }
 
     class TuningCache_pre_checkin : public ::testing::Test
@@ -589,6 +605,31 @@ namespace
         int selected = -1;
         ASSERT_TRUE(runGemm(&selected));
         EXPECT_EQ(selected, m_identities[0].index);
+    }
+
+    // A row cut short, as an interrupted append can leave the file's last one,
+    // is dropped rather than read as a row that records no name, whose index
+    // would be trusted on the version line alone. The cut can fall on either
+    // side of the comma before the name.
+    TEST_F(TuningCache_pre_checkin, TruncatedNamedEntryIsIgnored)
+    {
+        if(!haveSolutions(2))
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+        if(m_stamp.empty())
+            GTEST_SKIP() << "this build reports no revision to write";
+
+        const auto& recorded = m_identities[1];
+        const auto  header   = rowLines({recorded.index, recorded.kernelName}).first;
+        const auto  unnamed  = rowLines({recorded.index, std::nullopt}).second;
+        for(const auto& cut : {unnamed, unnamed + ","})
+        {
+            writeRawTuningFile(m_path, m_stamp, header + "\n" + cut);
+            useTuningFile();
+
+            int selected = -1;
+            ASSERT_TRUE(runGemm(&selected));
+            EXPECT_EQ(selected, m_identities[0].index) << "row: " << cut;
+        }
     }
 
     // The C++ extension API applies the same per-row rule as the C API.

@@ -246,7 +246,18 @@ namespace TensileLite
                 continue;
             }
 
-            auto parsed = problemFromRow(zipRow(splitCsv(header), splitCsv(value)));
+            // An interrupted append can also cut a row short, or leave the next
+            // append on the same line. Such a row no longer lines up with its
+            // header, and one cut before its kernel_name would otherwise read as
+            // a row that records no name, trusted on the version line alone.
+            // splitCsv yields no cell after a final comma, so a row cut just
+            // after one is short as well.
+            const auto names  = splitCsv(header);
+            const auto values = splitCsv(value);
+            if(values.size() != names.size())
+                continue;
+
+            auto parsed = problemFromRow(zipRow(names, values));
             if(!parsed)
                 continue;
 
