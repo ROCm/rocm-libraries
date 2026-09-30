@@ -661,6 +661,14 @@ I hseqr_aed_window_cap(const I nh, const bool hybrid)
     window always uses ZLAHQR, and in a different order of operations, so that the
     results are equally valid but not bitwise identical): the window is copied to the
     host and back in each iteration. **/
+/** HSEQR_RESET_BARRIER_KERNEL sets the arrivals counter of laqr5_grid_barrier to 0 before a
+    launch of the chunk kernel (with an atomic store, through the L2 cache: a memset may be done
+    by another engine and leave a stale copy of the counter in the cache). **/
+ROCSOLVER_KERNEL void hseqr_reset_barrier_kernel(unsigned* bar)
+{
+    __hip_atomic_store(bar, 0u, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+}
+
 template <typename T, typename I>
 rocblas_status hseqr_multishift(rocblas_handle handle,
                                 const bool wantt,
@@ -1059,7 +1067,8 @@ rocblas_status hseqr_multishift(rocblas_handle handle,
                 T* Hc = Wwin - (r0 - 1) - size_t(r0 - 1) * ldw;
                 // (the counter of the grid barriers starts at 0 in each launch)
                 if(ngroups > 1)
-                    HIP_CHECK(hipMemsetAsync(dbar, 0, sizeof(unsigned), stream));
+                    ROCSOLVER_LAUNCH_KERNEL(hseqr_reset_barrier_kernel, dim3(1), dim3(1), 0,
+                                            stream, dbar);
                 ROCSOLVER_LAUNCH_KERNEL((laqr5_chunk_kernel<HSEQR_CHASE_BLOCKSIZE, T>),
                                         dim3(ngroups > 1 ? ngroups : 1), dim3(HSEQR_CHASE_BLOCKSIZE),
                                         0, stream, wantt, wantz, accum, n, ktop, kbot, nbmps, incol,
