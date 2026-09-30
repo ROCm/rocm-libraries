@@ -34,9 +34,8 @@ add_embed_library(non_ascii_test
     RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-add_executable(test_non_ascii_embed non_ascii_test.cpp)
-target_link_libraries(test_non_ascii_embed PRIVATE non_ascii_test)
-target_compile_definitions(test_non_ascii_embed PRIVATE
+rocm_add_test_executable(codegen_test_non_ascii_embed non_ascii_test.cpp)
+target_link_libraries(codegen_test_non_ascii_embed non_ascii_test)
+target_compile_definitions(codegen_test_non_ascii_embed PRIVATE
     SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-add_test(NAME codegen_test_non_ascii_embed COMMAND $<TARGET_FILE:test_non_ascii_embed>)
 
