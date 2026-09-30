@@ -3399,6 +3399,11 @@ class Solution(collections.abc.Mapping):
     # each DepthU attempt should start from the original auto-derived VW.
     _savedVWA = state["VectorWidthA"]
     _savedVWB = state["VectorWidthB"]
+
+    halfPLR: int = state["HalfPLR"]
+    state["HalfPLRA"] = bool(halfPLR & 0x01)
+    state["HalfPLRB"] = bool(halfPLR & 0x02)
+
     while True:
       for backup in backupValues:
         state[backup[0]] = backup[1]
@@ -6907,9 +6912,6 @@ class Solution(collections.abc.Mapping):
     # HalfPLR forces ClusterLocalRead=0. That has to land before the wider
     # local-read check below, which treats ClusterLocalRead as a legal way to
     # support LocalReadVectorWidth > MIInputPerThread.
-    halfPLR: int = state["HalfPLR"]
-    state["HalfPLRA"] = bool(halfPLR & 0x01)
-    state["HalfPLRB"] = bool(halfPLR & 0x02)
     if state["HalfPLR"]:
       state["ClusterLocalRead"] = 0
       state["SuppressNoLoadLoop"] = True
