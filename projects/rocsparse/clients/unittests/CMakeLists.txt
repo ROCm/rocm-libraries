@@ -184,6 +184,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_conversion_extras.cpp
   unit_test_internal_conversion_csr2csc_buffer.cpp
   unit_test_internal_extra_geam.cpp
+  # --- bsrgemm scaling-copy grid.x clamp [AISPARSE-676] ---------------------
+  # Distinct anchor (after the geam internal tests) so this leaf does not
+  # conflict with the sibling grid-clamp branches. Drives the public
+  # rocsparse_Xbsrgemm entry point with handle->properties.maxGridSize[0]
+  # shrunk; no compile-in TUs.
+  unit_test_internal_extra_bsrgemm_scal_grids.cpp
   #10154: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_extra_geam.cpp
   unit_test_internal_level3_sddmm.cpp
