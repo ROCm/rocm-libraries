@@ -34,7 +34,7 @@ extern "C" __global__ void BatchnormBwdRef(BatchnormBwdArgs args)
 
     COMPUTE_TYPE channelMean;
     COMPUTE_TYPE channelInvVariance;
-    if(savedMean == nullptr)
+    if(savedMean == nullptr || savedInvVariance == nullptr)
     {
         // Compute the channel mean
         COMPUTE_TYPE sum = static_cast<COMPUTE_TYPE>(0);
@@ -60,6 +60,7 @@ extern "C" __global__ void BatchnormBwdRef(BatchnormBwdArgs args)
         }
 
         channelMean = reduceA[0] * invNhw;
+        __syncthreads();
 
         // Compute variance from deviations from the mean to avoid cancellation
         COMPUTE_TYPE varianceSum = static_cast<COMPUTE_TYPE>(0);
@@ -73,19 +74,18 @@ extern "C" __global__ void BatchnormBwdRef(BatchnormBwdArgs args)
             varianceSum = varianceSum + deviation * deviation;
         }
 
-        __syncthreads();
-        reduceA[lid] = varianceSum;
+        reduceB[lid] = varianceSum;
         __syncthreads();
         for(long long offset = localSize >> 1; offset > 0; offset >>= 1)
         {
             if(lid < offset)
             {
-                reduceA[lid] = reduceA[lid] + reduceA[lid + offset];
+                reduceB[lid] = reduceB[lid] + reduceB[lid + offset];
             }
             __syncthreads();
         }
 
-        const COMPUTE_TYPE variance = reduceA[0] * invNhw;
+        const COMPUTE_TYPE variance = reduceB[0] * invNhw;
         channelInvVariance = rsqrt(variance + toAccum(args.epsilon));
     }
     else
@@ -93,6 +93,7 @@ extern "C" __global__ void BatchnormBwdRef(BatchnormBwdArgs args)
         channelMean = toAccum(savedMean[channel]);
         channelInvVariance = toAccum(savedInvVariance[channel]);
     }
+    __syncthreads();
 
     // Accumulate the per-channel scale and bias gradients
     COMPUTE_TYPE dotProduct = static_cast<COMPUTE_TYPE>(0);
@@ -110,8 +111,6 @@ extern "C" __global__ void BatchnormBwdRef(BatchnormBwdArgs args)
         sumDy = sumDy + dyValue;
     }
 
-    // Every thread must finish reading the channel statistics before the buffers are reused
-    __syncthreads();
     reduceA[lid] = dotProduct;
     reduceB[lid] = sumDy;
     __syncthreads();

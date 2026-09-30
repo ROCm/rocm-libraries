@@ -47,20 +47,25 @@ void runGpuVsCpuBatchnormBackward(const std::vector<int64_t>& dims,
     Tensor<ScaleBiasDataType> dscaleGpu(affineDims, layout);
     Tensor<ScaleBiasDataType> dbiasCpu(affineDims, layout);
     Tensor<ScaleBiasDataType> dbiasGpu(affineDims, layout);
-    Tensor<MeanVarianceDataType> mean(affineDims, layout);
-    Tensor<MeanVarianceDataType> invVariance(affineDims, layout);
+    auto mean = useSavedStats ? Tensor<MeanVarianceDataType>(affineDims, layout)
+                              : Tensor<MeanVarianceDataType>({});
+    auto invVariance = useSavedStats ? Tensor<MeanVarianceDataType>(affineDims, layout)
+                                     : Tensor<MeanVarianceDataType>({});
 
     const auto seed = getGlobalTestSeed();
     dy.fillWithRandomValues(static_cast<DyDataType>(-1.0f), static_cast<DyDataType>(1.0f), seed);
     x.fillWithRandomValues(static_cast<XDataType>(-1.0f), static_cast<XDataType>(1.0f), seed + 1);
     scale.fillWithRandomValues(
         static_cast<ScaleBiasDataType>(-1.0f), static_cast<ScaleBiasDataType>(1.0f), seed + 2);
-    mean.fillWithRandomValues(static_cast<MeanVarianceDataType>(-1.0f),
-                              static_cast<MeanVarianceDataType>(1.0f),
-                              seed + 3);
-    invVariance.fillWithRandomValues(static_cast<MeanVarianceDataType>(0.25f),
-                                     static_cast<MeanVarianceDataType>(2.0f),
-                                     seed + 4);
+    if(useSavedStats)
+    {
+        mean.fillWithRandomValues(static_cast<MeanVarianceDataType>(-1.0f),
+                                  static_cast<MeanVarianceDataType>(1.0f),
+                                  seed + 3);
+        invVariance.fillWithRandomValues(static_cast<MeanVarianceDataType>(0.25f),
+                                         static_cast<MeanVarianceDataType>(2.0f),
+                                         seed + 4);
+    }
 
     CpuFpReferenceBatchnorm::backward<DyDataType,
                                       XDataType,
