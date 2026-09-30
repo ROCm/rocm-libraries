@@ -199,6 +199,10 @@ def select_dense_variant(req: AttentionRequest) -> Gfx950DenseVariant:
     """Variant ``dense_spec_for_request`` and the gfx950 dense ranker share."""
     preferred = _auto_variant(req)
     matching = [v for v in GFX950_DENSE_VARIANTS if _pins_match(v, req)]
+    if bool(getattr(req, "use_fp8", False)):
+        # fp8 KV is grid-only (the spec rejects persistent); keep the persistent
+        # auto-policy from selecting a variant fp8 can't build.
+        matching = [v for v in matching if not v.persistent] or matching
     if not matching:
         raise ValueError("no gfx950 dense variant matches the request pins")
     if preferred in matching:
@@ -261,6 +265,26 @@ def _dense_opted_in(
     return True, "ok"
 
 
+def _fp8_dense_tuned_overrides(req: AttentionRequest) -> dict:
+    """Step-0-swept tuned config for the fp8 D64 causal dense cohort (gfx950).
+
+    fp8 dense prefill is VALU-bound and occupancy-starved (static ISA: valu:vmem
+    ~87:1, MFMA idle), so 4 waves/EU hides the softmax latency -- a clean win over
+    the wpe2 default that grows with sequence length. Sliding-window additionally
+    wants a smaller tile: the window masks most of a big block's KV work, so
+    bm128/bn32 fills the CU better than the default bm256/bn64 (wpe4 on the default
+    bn64 tile is actively worse for SWA). Returns {} outside the cohort. Explicit
+    ``dense_waves_per_eu`` / ``dense_tile`` pins still win over the tuned defaults.
+    """
+    if not bool(req.use_fp8) or req.arch != "gfx950" or int(req.hdim_q) != 64:
+        return {}
+    if _parse_attention_mask_type(req.mask_type) == AttentionMaskType.NO_MASK:
+        return {}  # causal only (flash / SWA)
+    if int(req.sliding_window) > 0:
+        return {"waves_per_eu": 4, "block_m": 128, "block_n": 32}
+    return {"waves_per_eu": 4}
+
+
 def _dense_spec(req: OperatorRequest, variant: Gfx950DenseVariant | None = None):
     """Build the launch-ready ``Gfx950AttentionDenseSpec`` for ``variant``.
 
@@ -298,6 +322,16 @@ def _dense_spec(req: OperatorRequest, variant: Gfx950DenseVariant | None = None)
     )
     # Cross-length ragged attention is valid only when bottom-right supplies the
     # shifted diagonal. Equal-length bottom-right is ordinary causal attention.
+    # fp8 D64 cohort tune (Step-0 sweep): more waves + a mask-fit tile. Explicit
+    # dense_waves_per_eu / dense_tile pins still take precedence.
+    wpe = _resolve_dense_waves_per_eu(req, 2)
+    tune = _fp8_dense_tuned_overrides(req)
+    if tune:
+        if int(req.dense_waves_per_eu) == 0:
+            wpe = int(tune.get("waves_per_eu", wpe))
+        if req.dense_tile.strip().lower() == "auto":
+            bm = int(tune.get("block_m", bm))
+            bn = int(tune.get("block_n", bn))
     ragged = _ragged_self_attention(
         sq, sk, bm, bn, moving_bottom_right=moving_bottom_right
     )
@@ -312,7 +346,7 @@ def _dense_spec(req: OperatorRequest, variant: Gfx950DenseVariant | None = None)
         dtype=req.dtype.lower(),
         block_m=bm,
         block_n=bn,
-        waves_per_eu=_resolve_dense_waves_per_eu(req, 2),
+        waves_per_eu=wpe,
         lds_v_row_pad=int(layout["lds_v_row_pad"]),
         persistent=variant.persistent,
         num_persistent=int(req.dense_num_persistent),
