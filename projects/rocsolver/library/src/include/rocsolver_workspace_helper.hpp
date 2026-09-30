@@ -32,6 +32,10 @@
 #include "lib_host_helpers.hpp"
 #include "rocsolver/rocsolver.h"
 
+#include <algorithm>
+#include <cstdint>
+#include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -49,7 +53,7 @@ private:
     std::unordered_map<std::string, size_t> indices, n_indices;
     std::vector<uint8_t*> pointers;
     std::vector<size_t> sizes;
-    std::vector<rocsolver_workspace_helper*> nested;
+    std::vector<std::unique_ptr<rocsolver_workspace_helper>> nested;
 
     void assign_buffer(uint8_t* scalars_r, uint8_t* scalars_c, uint8_t* curr_ptr)
     {
@@ -108,13 +112,6 @@ public:
 
     /* Disallow assigning. */
     rocsolver_workspace_helper& operator=(const rocsolver_workspace_helper&) = delete;
-
-    /* Destructor */
-    ~rocsolver_workspace_helper()
-    {
-        for(size_t i = 0; i < nested.size(); i++)
-            delete nested[i];
-    }
 
     /* Assigns the given workspace sizes to the workspace helper. Workspace sizes are passed in two separate lists:
        sizes_excl for workspaces that must not be overwritten by nested functions, and sizes_shared for workspaces that
@@ -196,9 +193,13 @@ public:
         return sizes[i];
     }
     /* Gets the size of the named workspace array, rounded up to a multiple of MIN_CHUNK_SIZE. */
-    size_t get_size(std::string name)
+    size_t get_size(const std::string& name)
     {
-        return sizes[indices[name]];
+        auto it = indices.find(name);
+        if(it == indices.end())
+            return -1;
+        else
+            return sizes[it->second];
     }
 
     /* Sets the capacity of the internal vector that holds workspace helpers for nested functions. Optional,
@@ -211,29 +212,31 @@ public:
        after assign_sizes. */
     rocsolver_workspace_helper* add_nested()
     {
-        rocsolver_workspace_helper* result = new rocsolver_workspace_helper();
-        nested.push_back(result);
-        return result;
+        nested.push_back(std::make_unique<rocsolver_workspace_helper>());
+        return nested.back().get();
     }
     /* Adds a nested workspace helper to manage workspaces for a nested function. May be called before or
        after assign_sizes. */
-    rocsolver_workspace_helper* add_nested(std::string name)
+    rocsolver_workspace_helper* add_nested(const std::string& name)
     {
         this->n_indices[name] = nested.size();
-        rocsolver_workspace_helper* result = new rocsolver_workspace_helper();
-        nested.push_back(result);
-        return result;
+        nested.push_back(std::make_unique<rocsolver_workspace_helper>());
+        return nested.back().get();
     }
     /* Gets a pointer to the nested workspace helper at position i, which was created by the ith call to
        add_nested. */
     rocsolver_workspace_helper* get_nested(size_t i)
     {
-        return nested[i];
+        return nested[i].get();
     }
     /* Gets a pointer to the named nested workspace helper. */
-    rocsolver_workspace_helper* get_nested(std::string name)
+    rocsolver_workspace_helper* get_nested(const std::string& name)
     {
-        return nested[n_indices[name]];
+        auto it = n_indices.find(name);
+        if(it == n_indices.end())
+            return nullptr;
+        else
+            return nested[it->second].get();
     }
 
     /* Assigns device memory to the workspace helper, to be partitioned into individual workspace arrays
@@ -291,9 +294,13 @@ public:
         return pointers[i + has_scalars_r + has_scalars_c];
     }
     /* Gets a pointer to the named workspace array. Only called after assign_buffer. */
-    void* operator[](std::string name)
+    void* operator[](const std::string& name)
     {
-        return pointers[indices[name] + has_scalars_r + has_scalars_c];
+        auto it = indices.find(name);
+        if(it == indices.end())
+            return nullptr;
+        else
+            return pointers[it->second + has_scalars_r + has_scalars_c];
     }
 
     /* Sets a value indicating that the function requires the device-side scalar array. Only called before
