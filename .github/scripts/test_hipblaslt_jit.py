@@ -51,6 +51,7 @@ def main():
             "jit-component",
             "code-object",
             "code-object-gfx1250",
+            "jit-gemm-gfx1250",
             "comgr-cache",
             "streamk-api",
             "amax-api",
@@ -166,6 +167,23 @@ def main():
             ],
             {},
             300,
+        ),
+        # Compile-only: the heuristic generator and comgr build for gfx1250.
+        (
+            "jit-gemm-gfx1250",
+            [
+                sys.executable,
+                str(
+                    source
+                    / "projects/hipblaslt/clients/tests/jit/test_gfx1250_jit_gemm.py"
+                ),
+                str(staging / "hipblaslt-jit-code-object-test"),
+                str(fixtures / "jit_gemm_request_gfx1250.json"),
+                compiler,
+                str(output / "jit-gemm-gfx1250"),
+            ],
+            {},
+            600,
         ),
         (
             "comgr-cache",

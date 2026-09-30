@@ -75,6 +75,7 @@ to replay, publish or rebuild it.
 | `jit-component` | Jit over fake stages, without a GPU: count limiting, excluded kernels, prediction only for backends that consume it, the stage of each failure, publish and load ordering, scratch lifetime, concurrent generation, and the TensileLite default seeds |
 | `code-object` | comgr builds, loaded and run on the GPU: assembly and HIP relocatables, multi-source and mixed links, code-object versions, linker flags, target rewriting, a missing ROCm path, concurrent builds, malformed inputs and the comgr cache policy, plus the `splitk-api` bundle's main kernel and 26 helpers assembled, compiled, linked into one code object, loaded and resolved |
 | `code-object-gfx1250` | The hardware-free part of `code-object` for gfx1250, on any host |
+| `jit-gemm-gfx1250` | Compile-only on any host: `Tensile.JitGemm` generates two ranked gfx1250 solutions from a heuristic request with the arguments hipBLASLt passes, skipping a ranked candidate that repeats an accepted kernel, and comgr assembles, compiles and links each one into a wave32 code object that uses the gfx1250 WMMA instruction |
 | `comgr-cache` | In fresh processes with private cache directories: `HIPBLASLT_JIT=1` leaves no comgr cache, `AMD_COMGR_CACHE=1` creates one, which shows the check can detect it, and a user-set `AMD_COMGR_CACHE` is kept under `HIPBLASLT_JIT=1` |
 | `mock-backend` | The in-process mock backend replaying the `splitk-api` source bundle through Jit and the comgr builder: C/C++ numerics, owned scalar values, copied algorithms outliving their owners, name lookups, 65 streams, insufficient workspace, forged tokens and indices, the wrong device, NOT_SUPPORTED for a non-GEMM request or another ProblemType, generation and build faults, and bundle lifetime |
 | `mock-backend-library` | `getLibraryAlgos` publishes the mock solution into a fresh JIT solution library and returns a reserved index, which `getAlgosFromIndex` and `hipblasLtMatmul` run with checked numerics. A second process then runs that index before any lookup, and `getLibraryAlgos` finds it there with a backend that aborts the process if it generates |
@@ -205,6 +206,12 @@ bundle kept with `--keep-build-tmp`, whose code objects are then compared with
 the comgr-built ones. `--expect-comgr-cache present|absent` adds the comgr cache
 check that the `comgr-cache` route runs; that check expects `XDG_CACHE_HOME`
 and `HOME` to name existing scratch directories. `--only` selects tests by name.
+
+`test_gfx1250_jit_gemm.py <code-object-test> <request> <compiler> <fresh-output>`
+runs the `jit-gemm-gfx1250` route. The driver passes
+`jit_gemm_request_gfx1250.json` from `tensilelite/Tensile/Tests/unit/test_data`:
+the request hipBLASLt writes for its default FP16 problem, with the Origami
+ranking of the six best gfx950 candidates retargeted to gfx1250.
 
 ## Shared automation and remaining coverage
 
