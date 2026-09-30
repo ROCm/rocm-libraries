@@ -219,9 +219,9 @@ class SdpaOverride(OpOverride):
             alloc_dims, inverse = _output_layout(
                 tuple(query.shape), tuple(query.stride()), dv
             )
-            o = torch.empty(
-                alloc_dims, dtype=query.dtype, device=query.device
-            ).permute(inverse)
+            o = torch.empty(alloc_dims, dtype=query.dtype, device=query.device).permute(
+                inverse
+            )
 
             entry = self._cached_graph(
                 (
