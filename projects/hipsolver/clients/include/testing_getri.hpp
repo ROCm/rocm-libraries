@@ -166,9 +166,7 @@ void getri_initData(const hipsolverHandle_t handle,
                 {
                     for(rocblas_int j = 0; j < n; j++)
                     {
-                        tmp                        = hA[b][i + j * lda];
-                        hA[b][i + j * lda]         = hA[b][n - 1 - i + j * lda];
-                        hA[b][n - 1 - i + j * lda] = tmp;
+                        std::swap(hA[b][i + j * lda], hA[b][n - 1 - i + j * lda]);
                     }
                 }
             }

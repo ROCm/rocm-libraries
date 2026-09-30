@@ -32,7 +32,7 @@ using namespace std;
 typedef std::tuple<int, int> getri_tuple;
 
 // each tuple is {n, lda}
-// case when n = -1 will also execute the bad arguments test
+// case when n = -1 and lda == 1 will also execute the bad arguments test
 // (null handle, null pointers and invalid values)
 
 // for checkin_lapack tests
@@ -47,11 +47,13 @@ const vector<int> n_size_range = {
 };
 
 const vector<int> lda_size_range = {
-    // invalid (lda < n)
+    // valid for n <= 1
     1,
-    // normal (valid) samples
+    // valid for n <= 20
     20,
+    // valid for n <= 64
     64,
+    // normal (valid) samples
     100,
     150,
 };
@@ -86,7 +88,7 @@ protected:
     {
         Arguments arg = getri_setup_arguments(GetParam());
 
-        if(arg.peek<rocblas_int>("n") == -1)
+        if(arg.peek<rocblas_int>("n") == -1 && arg.peek<rocblas_int>("lda") == 1)
             testing_getri_bad_arg<API, BATCHED, STRIDED, T, I, SIZE>();
 
         arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
