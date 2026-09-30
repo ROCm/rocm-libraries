@@ -1679,6 +1679,12 @@ rocblas_status getAllSolutions(const RocblasContractionProblem<Ti, To, Tc>& prob
         {
             if(list_array == nullptr)
                 *list_size = 0;
+            else
+            {
+                for(rocblas_int i = 0; i < *list_size; ++i)
+                    list_array[i] = c_rocblas_default_solution;
+                status = rocblas_status_success;
+            }
             status = rocblas_status_success;
         }
         else
