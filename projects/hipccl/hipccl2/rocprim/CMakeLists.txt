@@ -253,6 +253,34 @@ print_configuration_summary()
 # rocPRIM library
 add_subdirectory(rocprim)
 
+# --- Legacy header symlink (temporary migration aid, standalone builds only) ---
+# NOTE(hipccl2): when built through hipccl2's root CMakeLists.txt, that root
+# installs this compatibility symlink itself (after all components are added),
+# so this block is skipped there - otherwise the same install(CODE ...) rule
+# would be declared twice. It exists for the standalone path
+# (cd hipccl2/rocprim && cmake .. && make install), which still relocates
+# headers to <prefix>/include/hipccl/rocprim via the CMAKE_INSTALL_INCLUDEDIR
+# override near the top of this file, and would otherwise leave nothing at the
+# old, flat <prefix>/include/rocprim path.
+#
+# The plain CMAKE_CURRENT_SOURCE_DIR/CMAKE_SOURCE_DIR comparison is used here
+# rather than ROCPRIM_PROJECT_IS_TOP_LEVEL: that flag is settable from a parent
+# (if(NOT DEFINED ...)), so forcing it ON while nested would declare the symlink
+# twice. This check asks the narrower question that actually matters - "is there
+# a hipccl root above me that will do this instead?".
+#
+# Must come after add_subdirectory(rocprim) above: install() rules run in
+# declaration order, and the symlink's target has to be installed first.
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/modules")
+  include(install_legacy_header_symlink)
+  option(HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS
+      "Install compatibility symlinks at the old, pre-hipccl flat include paths (temporary migration aid)" OFF)
+  if(HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS)
+    hipccl_install_legacy_header_symlink(rocprim)
+  endif()
+endif()
+
 if(ROCPRIM_PROJECT_IS_TOP_LEVEL AND (BUILD_TEST OR BUILD_BENCHMARK))
   rocm_package_setup_component(clients)
 endif()

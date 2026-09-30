@@ -284,6 +284,28 @@ else()
   add_subdirectory(hipcub)
 endif()
 
+# --- Legacy header symlink (temporary migration aid, standalone builds only) ---
+# NOTE(hipccl3): when built through hipccl3's root CMakeLists.txt, that root
+# installs this compatibility symlink itself (after all components are added),
+# so this block is skipped there - otherwise the same install(CODE ...) rule
+# would be declared twice. It exists for the standalone path
+# (cd hipccl3/hipcub && cmake .. && make install), which still relocates
+# headers to <prefix>/include/hipccl/hipcub via the CMAKE_INSTALL_INCLUDEDIR
+# override near the top of this file, and would otherwise leave nothing at the
+# old, flat <prefix>/include/hipcub path.
+#
+# Must come after the add_subdirectory() above: install() rules run in
+# declaration order, and the symlink's target has to be installed first.
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/modules")
+  include(install_legacy_header_symlink)
+  option(HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS
+      "Install compatibility symlinks at the old, pre-hipccl flat include paths (temporary migration aid)" ON)
+  if(HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS)
+    hipccl_install_legacy_header_symlink(hipcub)
+  endif()
+endif()
+
 if(BUILD_TEST OR (BUILD_BENCHMARK AND NOT ONLY_INSTALL))
   rocm_package_setup_component(clients)
 endif()

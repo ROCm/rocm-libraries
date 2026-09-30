@@ -40,6 +40,10 @@
 # (e.g. `cd hipccl3 && cmake ..`, or `cd hipccl2 && cmake ..`) - it is purely
 # an optional, additional entry point.
 cmake_minimum_required(VERSION 3.25.2)
+
+# Install prefix
+set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
+
 project(hipccl-selector LANGUAGES NONE)
 
 option(HIPCCL_BUILD_LEGACY

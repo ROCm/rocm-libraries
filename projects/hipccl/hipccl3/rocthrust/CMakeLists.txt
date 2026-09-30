@@ -279,6 +279,32 @@ else()
   add_subdirectory(thrust)
 endif()
 
+# --- Legacy header symlink (temporary migration aid, standalone builds only) ---
+# NOTE(hipccl3): when built through hipccl3's root CMakeLists.txt, that root
+# installs this compatibility symlink itself (after all components are added),
+# so this block is skipped there - otherwise the same install(CODE ...) rule
+# would be declared twice. It exists for the standalone path
+# (cd hipccl3/rocthrust && cmake .. && make install), which still relocates
+# headers to <prefix>/include/hipccl/thrust via the CMAKE_INSTALL_INCLUDEDIR
+# override near the top of this file, and would otherwise leave nothing at the
+# old, flat <prefix>/include/thrust path.
+#
+# Also skipped under GRAFT_THRUST_ONTO_BINARIES: that path uses CCCL's headers
+# instead of building/installing rocThrust's own, so there would be no
+# include/hipccl/thrust for the link to point at - it would just dangle.
+#
+# Must come after the add_subdirectory() above: install() rules run in
+# declaration order, and the symlink's target has to be installed first.
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR AND NOT GRAFT_THRUST_ONTO_BINARIES)
+  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/modules")
+  include(install_legacy_header_symlink)
+  option(HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS
+      "Install compatibility symlinks at the old, pre-hipccl flat include paths (temporary migration aid)" ON)
+  if(HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS)
+    hipccl_install_legacy_header_symlink(thrust)
+  endif()
+endif()
+
 if(BUILD_TEST OR BUILD_BENCHMARK OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_component(clients)
 endif()
