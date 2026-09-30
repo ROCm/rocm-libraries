@@ -1,0 +1,25 @@
+# serializer version: 1
+# name: test_mxf4_bf16_subtile_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_UserArgD4AmvBRtTGq2bebKjq7dlw4HMww3VXj3FM4BRKPoy68=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_UserArgamKQizvE-pEPr8zUom_ar8C5eeg5rJhUe_DFMjtwAFk=',
+      'err': 0,
+    }),
+  ])
+# ---
+# name: test_mxf4_fp32_control_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArg2G7LmzZ4CtVAVrPVQyPVhhyop9d-eHR18o75bFulkcw=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgqST6iHyl2UBEN6OCbW-6Ga2P2IBItQfn-1LWubB1YTE=',
+      'err': 0,
+    }),
+  ])
+# ---
