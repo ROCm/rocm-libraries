@@ -271,7 +271,7 @@ from this plan.
 | 7 | FP32-selection-unchanged regression test | `tests/` | after 3 | ✅ [step 7](xf32_bf16x3_steps/step-07-selection-regression.md) |
 | 8 | COMGR compile gate for gfx950 | `tests/` | after 6 | ✅ [step 8](xf32_bf16x3_steps/step-08-comgr-compile-gate.md) |
 | 9 | Numeric regression: vs FP32 reference **and** vs CK packed-path reference | `tests/core/` + `examples/gfx950/xf32/` | after 8 | ✅ [step 9](xf32_bf16x3_steps/step-09-numeric-regression.md) — host half green; **gfx950 device run not performed** (no gfx950 visible here) |
-| 10 | Re-bless byte-identity goldens; run both LLVM flavors | `tools/check_byte_identity.py` | last |
+| 10 | Re-bless byte-identity goldens; run both LLVM flavors | `tools/check_byte_identity.py` | last | ✅ [step 10](xf32_bf16x3_steps/step-10-byte-identity.md) — 69 GREEN / 1 pre-existing DRIFT at both flavors, matching the merge base; no golden needed re-blessing |
 
 ---
 
