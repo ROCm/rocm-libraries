@@ -4,8 +4,8 @@
 
 Measuring and training used to be one run, so every model re-measured its corpus and the
 measurements lived only inside that model's output. These pin the split: a recorded
-collection trains exactly what the one-shot run would have, collections merge with the
-newest measurement of a graph on a device winning, and what cannot be one model is refused
+collection trains exactly what the one-shot run would have, training takes one measurement
+of each configuration on each shape (the newest), and what cannot be one model is refused
 at the merge rather than trained.
 """
 import json
@@ -46,8 +46,12 @@ def world(tmp_path, monkeypatch):
         metric = command[command.index("--ranking-metric") + 1]
         graph = json.loads(Path(command[command.index("--graph") + 1]).read_text(encoding="utf-8"))
         average = (1.0 + graph["size"] / 10) * engine["scale"]
+        # `--device N` runs on board-N, as HIP_VISIBLE_DEVICES picks a GPU.
+        visible = environment.get("HIP_VISIBLE_DEVICES")
+        device = f"board-{visible}" if visible else engine["device"]
+        engine["scale"] *= engine.get("drift", 1.0)
         return {"engine_id": 7, "engine_name": engine["engine_name"], "graph_id": graph["id"],
-                "device_id": engine["device"], "arch": "gfx942", "metric": metric,
+                "device_id": device, "arch": "gfx942", "metric": metric,
                 "binding": {"engine": engine["engine_name"], "role": "predict_engine", "arch": "gfx942",
                             "selector_revision": engine["revision"], "trained_against": provenance},
                 "features": {"graph.flops": 2e9 * (graph["size"] + 1), "device.cu_count": 120},
@@ -135,20 +139,57 @@ def test_the_newest_measurement_of_a_graph_on_a_device_is_the_label(world, evalu
     assert [c["path"] for c in manifest["collections"]] == [str(older), str(newer)]
 
 
-def test_collections_from_different_devices_are_all_trained_on(world, evaluator):
-    """Another GPU is another problem: nothing is superseded, every row is a label."""
-    first = _collect(world, "a", device="board-a")
-    second = _collect(world, "b", device="board-b")
-    code, output = _train(world, "both", evaluator, collections=[first, second])
+def test_a_shape_measured_on_two_gpus_of_the_arch_is_trained_on_once(world, evaluator):
+    """Another GPU of the same arch measures the same problem: one label, the newest."""
+    older = _collect(world, "a", collected_at="2026-09-28T10:00:00+00:00", device="board-a", scale=1.0)
+    newer = _collect(world, "b", collected_at="2026-09-29T10:00:00+00:00", device="board-b", scale=2.0)
+    code, output = _train(world, "both", evaluator, collections=[older, newer])
     assert code == 0
     rows = json.loads((output / "corpus.json").read_text(encoding="utf-8"))
-    assert len(rows) == 2 * GRAPHS and {r["device"] for r in rows} == {"board-a", "board-b"}
+    assert len(rows) == GRAPHS and {r["device"] for r in rows} == {"board-b"}
+    assert _labels(output) == _labels(newer)
     manifest = json.loads((output / "generation_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["superseded_rows"] == 0
+    assert manifest["superseded_rows"] == GRAPHS
+
+
+def test_one_run_on_several_gpus_trains_on_each_shape_once(world, evaluator):
+    """`--device` repeated measures every shape on each GPU; the last GPU's is the label."""
+    world["engine"]["drift"] = 1.01  # every measurement differs, so the label is traceable
+    code, output = _train(world, "two_gpus", evaluator, graphs=world["graphs"],
+                          extra=["--device", "0", "--device", "1"])
+    assert code == 0 and world["engine"]["calls"] == 2 * GRAPHS
+    rows = json.loads((output / "corpus.json").read_text(encoding="utf-8"))
+    assert len(rows) == GRAPHS and {r["device"] for r in rows} == {"board-1"}
+    manifest = json.loads((output / "generation_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["superseded_rows"] == GRAPHS
+
+
+def test_distinct_configurations_on_one_shape_are_distinct_rows():
+    """A catalog sweep times many configurations of a shape; only a repeat is a duplicate."""
+    from uhd_gen.generate import one_measurement_per_shape
+
+    def row(graph, kernel, knobs, arch="gfx942"):
+        return {"benchmark": graph, "arch": arch, "kernel": kernel, "knob_settings": knobs}
+
+    measured = [
+        ("a", row("g", "k1", '{"tile": 64}')), ("a", row("g", "k1", '{"tile": 128}')),
+        ("a", row("g", "k2", '{"tile": 64}')), ("a", row("g", "k1", '{"tile": 64}', "gfx950")),
+        ("b", row("g", "k1", '{"tile": 64}')),  # a repeat, on another GPU: supersedes a's
+        ("b", row("h", "k1", '{"tile": 64}')),
+    ]
+    kept, dropped = one_measurement_per_shape(measured)
+    assert dropped == 1
+    assert kept == [m[1] for m in measured[1:]]
+    # An L1 row names no configuration (the engine chose): its shape is its identity.
+    l1 = [("a", {"benchmark": "g", "arch": "gfx942"}), ("b", {"benchmark": "g", "arch": "gfx942"})]
+    assert one_measurement_per_shape(l1) == ([l1[1][1]], 1)
+    # A repeat under another binding is a revision change, never a silent supersede.
+    with pytest.raises(ValueError, match="two engine bindings"):
+        one_measurement_per_shape([("a", dict(l1[0][1], binding="r1")), ("b", dict(l1[1][1], binding="r2"))])
 
 
 @pytest.mark.parametrize("change, message", [
-    ({"revision": "provider-2"}, "selector or descriptor provenance changed"),
+    ({"revision": "provider-2"}, "collections disagree on selector revision"),
     ({"engine_name": "provider:engine8"}, "collections disagree on engine"),
 ])
 def test_what_cannot_be_one_model_is_refused(world, evaluator, caplog, change, message):

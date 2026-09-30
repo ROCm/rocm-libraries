@@ -37,8 +37,8 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
                              "as graphs/*.fb -- or corpus directories (recursive)")
     inputs.add_argument("--collection", nargs="+", metavar="DIR",
                         help="Train from recorded collections (written by --collect-only) instead of "
-                             "measuring; several are merged, the newest measurement of a graph on a "
-                             "device winning")
+                             "measuring; several are merged into one measurement of each configuration "
+                             "on each shape, the newest winning")
     parser.add_argument("--collect-only", action="store_true",
                         help="Measure --graphs, write the collection to --output-dir, and stop")
     parser.add_argument("--descriptor-tree", required=True, help="Shipping descriptor tree; authored knobs are preserved")
@@ -149,13 +149,53 @@ def write_collection(stage: Path, *, collected_at: str, role: str, engine: str |
     return manifest
 
 
-def load_collections(paths: list, *, role: str, sources: list) -> dict:
-    """Merge recorded collections: the newest measurement of a graph on a device wins.
+def _measurement_key(row: dict) -> tuple:
+    """What a measurement is of: a configuration on a shape, on an architecture.
 
-    A (graph, device) group is taken whole from the newest collection that measured it --
-    for a catalog sweep that is the candidate set of one session, never candidates from
-    two sessions mixed into one ranking. Older measurements stay on disk; the merge only
-    decides which one is the label, and says how many rows it set aside.
+    A shape is a graph -- the graph id is content-derived, so the same geometry has the
+    same id wherever it was generated -- and the same shape on another arch is another
+    problem. A catalog sweep times many kernel configurations on one shape, and each is a
+    row of its own; an L1 row carries no configuration (the engine chose it), so its key
+    is the shape alone.
+    """
+    return (str(row["benchmark"]), str(row["arch"]),
+            str(row.get("kernel")), str(row.get("knob_settings")))
+
+
+def one_measurement_per_shape(measured: list) -> tuple[list, int]:
+    """Keep one measurement of each configuration on each shape: the newest session's.
+
+    `measured` is `(session, row)` in the order measured, a session being one run on one
+    device. Returns (rows, dropped). A configuration measured twice on a shape -- on two
+    GPUs of the arch, or in two collections -- is one training problem, not two: kept
+    twice it is weighted twice, and split across the held-out boundary it scores the
+    model on a problem it was trained on (the split keys on (graph, device), and another
+    GPU of the same arch is another device). Distinct configurations on the same shape
+    are distinct rows and are all kept. Older measurements stay in their collections;
+    this only picks the label.
+
+    A repeat taken under another binding (selector revision, descriptor set) is refused,
+    not superseded: dropping it would hide the mix the corpus check exists to refuse.
+    """
+    newest: dict = {}
+    binding: dict = {}
+    for session, row in measured:
+        key = _measurement_key(row)
+        if binding.setdefault(key, row.get("binding")) != row.get("binding"):
+            raise ValueError(f"{key[0]} on {key[1]} was measured under two engine bindings; "
+                             "the selector or descriptor provenance changed between measurements")
+        newest[key] = session
+    kept = [row for session, row in measured if newest[_measurement_key(row)] == session]
+    return kept, len(measured) - len(kept)
+
+
+def load_collections(paths: list, *, role: str, sources: list) -> dict:
+    """Merge recorded collections into one measurement per shape, the newest winning.
+
+    Collections are taken oldest to newest by `collected_at` (not the order named), and
+    `one_measurement_per_shape` keeps the newest measurement of each configuration on
+    each shape. The count of rows set aside is returned, so the model can say how much of
+    the store it did not use.
 
     Refused rather than merged: different roles or engines, different trained_against
     (a model is bound to one selector revision or descriptor set), different knob
@@ -176,6 +216,7 @@ def load_collections(paths: list, *, role: str, sources: list) -> dict:
         if manifest["role"] != role:
             raise ValueError(f"{directory} was collected for {manifest['role']}, not {role}")
         for key, what in (("engine_name", "engine"), ("engine_id", "engine id"),
+                          ("selector_revision", "selector revision"),
                           ("trained_against", "trained_against provenance"),
                           ("knob_encodings", "knob addressing"), ("collection_knobs", "collection knobs")):
             if manifest.get(key) != first.get(key):
@@ -186,17 +227,13 @@ def load_collections(paths: list, *, role: str, sources: list) -> dict:
             raise ValueError(f"{directory} did not measure {missing}; it holds {manifest['sources']}")
     rows, superseded, published = {source: [] for source in sources}, 0, set()
     for source in sources:
-        chosen: dict = {}
-        for _, directory, manifest in loaded:
+        measured = []
+        for order, (_, directory, manifest) in enumerate(loaded):
             corpus = Path(directory) / f"{_corpus_name(manifest['sources'], source)}.json"
-            groups: dict = {}
-            for row in json.loads(corpus.read_text(encoding="utf-8")):
-                groups.setdefault((str(row["benchmark"]), str(row["device"])), []).append(row)
-            for key, group in groups.items():
-                if key in chosen:
-                    superseded += len(chosen[key])
-                chosen[key] = group
-        rows[source] = [row for group in chosen.values() for row in group]
+            measured.extend(((order, str(row["device"])), row)
+                            for row in json.loads(corpus.read_text(encoding="utf-8")))
+        rows[source], dropped = one_measurement_per_shape(measured)
+        superseded += dropped
     for _, _, manifest in loaded:
         published.update(manifest["published"])
     return {
@@ -629,6 +666,10 @@ def run_generate(args: argparse.Namespace) -> int:
                       f"{manifest['graph_count']} graph(s): {output}")
                 return 0
             graph_inputs = measured["graph_inputs"]
+            for source in sources:
+                measured["rows"][source], dropped = one_measurement_per_shape(
+                    [(str(row["device"]), row) for row in measured["rows"][source]])
+                superseded += dropped
         else:
             # Measuring nothing: the rows, and everything training reads beside them, come
             # back from the collections exactly as a measuring run would have produced them.
@@ -636,9 +677,8 @@ def run_generate(args: argparse.Namespace) -> int:
             engine_id = args.engine_id if args.engine_id is not None else measured["engine_id"]
             graph_inputs = measured["graphs"]
             superseded, collections = measured["superseded_rows"], measured["collections"]
-            logger.info("training from %d collection(s); %d older row(s) superseded by newer "
-                        "measurements of the same graph on the same device",
-                        len(collections), superseded)
+            logger.info("training from %d collection(s); %d row(s) superseded by a newer "
+                        "measurement of the same configuration on the same shape", len(collections), superseded)
         rows, published, commands = measured["rows"], measured["published"], measured["commands"]
         provenance, kernel_fields = measured["provenance"], measured["kernel_fields"]
         knob_encodings = measured["knob_encodings"]
@@ -812,7 +852,7 @@ def run_generate(args: argparse.Namespace) -> int:
         _write_json(stage / "generation_manifest.json", {
             "schema": "uhd_gen.generation/2", "trained_against": provenance, "graphs": graph_inputs,
             # Where the measurements came from when this run measured nothing, and how many
-            # older rows the merge set aside for newer measurements of the same problem.
+            # rows were set aside so each configuration on a shape is trained on once.
             "collections": collections, "superseded_rows": superseded,
             "commands": commands, "features_signature": signature, "omitted_proposals": omitted,
             # One entry per UHD emitted: its metric (null for a metric-less ranker), where it
