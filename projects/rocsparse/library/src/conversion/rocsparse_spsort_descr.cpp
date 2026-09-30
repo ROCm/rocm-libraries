@@ -33,6 +33,7 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spsort_alg value_)
     switch(value_)
     {
     case rocsparse_spsort_alg_default:
+    case rocsparse_spsort_alg_radix_sort:
     {
         return false;
     }
