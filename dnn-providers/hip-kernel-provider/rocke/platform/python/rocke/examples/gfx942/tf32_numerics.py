@@ -5,8 +5,8 @@
 import argparse
 import ctypes
 import json
-from pathlib import Path
 import struct
+from pathlib import Path
 
 import numpy as np
 
@@ -162,19 +162,21 @@ def run(output_dir, backend="both", shapes=(16, 32)):
                 ir = serialize(kernel)
                 if engine == "cpp":
                     ir_native = native.tf32_mma_probe_serialize_ir(m, mode)
-                    assert ir == ir_native, (m, mode, "builder parity")
+                    if ir != ir_native:
+                        raise RuntimeError(
+                            f"m={m} mode={mode}: builder parity mismatch"
+                        )
                     ll = native.lower_serialized_ir(
                         ir_native,
                         arch="gfx942",
                         flavor=flavor,
                     )
-                    assert ll == _lower_kernel_to_llvm_python(
+                    if ll != _lower_kernel_to_llvm_python(
                         kernel, arch="gfx942", llvm_flavor=flavor
-                    ), (
-                        m,
-                        mode,
-                        "lowerer parity",
-                    )
+                    ):
+                        raise RuntimeError(
+                            f"m={m} mode={mode}: lowerer parity mismatch"
+                        )
                 else:
                     ll = _lower_kernel_to_llvm_python(
                         kernel, arch="gfx942", llvm_flavor=flavor
@@ -204,18 +206,11 @@ def run(output_dir, backend="both", shapes=(16, 32)):
                     if variant in ("rne", "prepacked")
                     else bb.view(np.uint32)
                 )
-                assert np.array_equal(pa, expected_a), (
-                    engine,
-                    m,
-                    variant,
-                    "A preparation",
-                )
-                assert np.array_equal(pb, expected_b), (
-                    engine,
-                    m,
-                    variant,
-                    "B preparation",
-                )
+                context = f"{engine} m={m} variant={variant}"
+                if not np.array_equal(pa, expected_a):
+                    raise RuntimeError(f"{context}: A preparation mismatch")
+                if not np.array_equal(pb, expected_b):
+                    raise RuntimeError(f"{context}: B preparation mismatch")
                 np.savez(stem.with_suffix(".npz"), d=d, pa=pa, pb=pb)
                 results[variant] = d
                 # Dense reference uses float64 scalar products and a conservative
@@ -229,9 +224,12 @@ def run(output_dir, backend="both", shapes=(16, 32)):
                 ref = np.einsum("bik,bjk->bij", da, db) + c[single:].astype(np.float64)
                 scale = np.einsum("bik,bjk->bij", abs(da), abs(db)) + abs(c[single:])
                 error = abs(d[single:].astype(np.float64) - ref)
-                assert np.all(
+                if not np.all(
                     error <= 4 * (128 // m) * np.finfo(np.float32).eps * scale + 1e-7
-                ), (engine, m, variant, "dense reference", float(error.max()))
+                ):
+                    raise RuntimeError(
+                        f"{context}: dense reference mismatch (max error {float(error.max())})"
+                    )
                 # Exact single-product normal results avoid reduction-order noise.
                 input_bits = np.concatenate((bits, bits))
                 expected = (
@@ -247,14 +245,15 @@ def run(output_dir, backend="both", shapes=(16, 32)):
                 expected = np.where(
                     (expected & 0x7FFFFFFF) == 0, np.uint32(0), expected
                 ).astype(np.uint32)
-                assert np.all(
+                if not np.all(
                     same_values(
                         d[:single],
                         np.broadcast_to(
                             expected.view(np.float32)[:, None, None], d[:single].shape
                         ),
                     )
-                ), (engine, m, variant, "single product")
+                ):
+                    raise RuntimeError(f"{context}: single product mismatch")
                 summary["results"].append(
                     {
                         "engine": engine,
@@ -271,12 +270,10 @@ def run(output_dir, backend="both", shapes=(16, 32)):
                 ("raw", "masked"),
                 ("rne", "prepacked"),
             ):
-                assert np.all(same_values(results[left], results[right])), (
-                    engine,
-                    m,
-                    left,
-                    right,
-                )
+                if not np.all(same_values(results[left], results[right])):
+                    raise RuntimeError(
+                        f"{engine} m={m}: variant parity mismatch ({left}, {right})"
+                    )
             # Preserve all boundary observations, including denormal and NaN behavior.
             observations = [
                 {
@@ -318,11 +315,14 @@ def run(output_dir, backend="both", shapes=(16, 32)):
             all_results[engine] = results
         if backend == "both":
             for variant in all_results["python"]:
-                assert np.all(
+                if not np.all(
                     same_values(
                         all_results["python"][variant], all_results["cpp"][variant]
                     )
-                )
+                ):
+                    raise RuntimeError(
+                        f"m={m} variant={variant}: backend parity mismatch (python, cpp)"
+                    )
     summary["comgr"] = resolved_lib_path()
     summary["status"] = "pass"
     (output_dir / "results.json").write_text(json.dumps(summary, indent=2) + "\n")
