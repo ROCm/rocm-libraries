@@ -1,0 +1,87 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --WaitAwareScheduleRepairPass --print-output
+#
+# A DS load keeps at least the distance it had from the matrix instruction ahead
+# of it.
+#
+# Both windows here put three scalars between the WMMA and the first load. The
+# memory-first preference on its own would pull both loads up against the WMMA
+# and push all three scalars behind them, closing the gap to zero. The release
+# distance recorded for each load holds it back until the schedule has moved as
+# far past the WMMA as it had in the input, so the scalars fill the gap first.
+#
+# One slot still moves past each anchor, so the repair itself is unaffected.
+#
+# The second window also covers carry: it receives the scalar deferred out of the
+# first, and that scalar leads the window and counts toward the gap rather than
+# being pushed behind the loads.
+#
+# The third window guards the interval-distance rule. Its loads sit at different
+# input distances from the anchor, with scalars between them. Giving each load
+# its own distance would reproduce that and drive the scalars between the loads;
+# the interval distance gates both on the first load, so they stay adjacent.
+#
+# CHECK-LABEL: @wait_aware_schedule_repair_matrix_gap
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: ds_load_b128
+# CHECK-SAME: offset = 0
+# CHECK-NEXT: ds_load_b128
+# CHECK-SAME: offset = 16
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# Second window: the scalar carried across the first anchor counts toward the
+# gap, so it fills a slot instead of displacing the loads.
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: ds_load_b128
+# CHECK-SAME: offset = 32
+# CHECK-NEXT: ds_load_b128
+# CHECK-SAME: offset = 48
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# Third window: its loads were 0 and 3 apart from the anchor in the input, with
+# two scalars between them. They must come out adjacent, gated on the first.
+# CHECK-NEXT: ds_load_b128
+# CHECK-SAME: offset = 64
+# CHECK-NEXT: ds_load_b128
+# CHECK-SAME: offset = 80
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: s_mov_b32
+
+st.func @wait_aware_schedule_repair_matrix_gap() {
+^entry:
+  v[0:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[400:407], v[0:15]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  s60 = "st.s_mov_b32"(60) { issueCycles = 1, latencyCycles = 2 }
+  s61 = "st.s_mov_b32"(61) { issueCycles = 1, latencyCycles = 2 }
+  s62 = "st.s_mov_b32"(62) { issueCycles = 1, latencyCycles = 2 }
+  v[100:103] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[104:107] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  s63 = "st.s_mov_b32"(63) { issueCycles = 1, latencyCycles = 2 }
+  "st.s_wait_dscnt"(4) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 4, dscnt = -1, kmcnt = -1 } }
+  v[16:31] = "st.v_wmma_f32_16x16x32_bf16"(v[208:215], v[400:407], v[16:31]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+
+  s64 = "st.s_mov_b32"(64) { issueCycles = 1, latencyCycles = 2 }
+  s65 = "st.s_mov_b32"(65) { issueCycles = 1, latencyCycles = 2 }
+  s66 = "st.s_mov_b32"(66) { issueCycles = 1, latencyCycles = 2 }
+  v[108:111] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[112:115] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 48, gds = false }, mod.memtoken = { tokens = [0] } }
+  s67 = "st.s_mov_b32"(67) { issueCycles = 1, latencyCycles = 2 }
+  "st.s_wait_dscnt"(2) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 2, dscnt = -1, kmcnt = -1 } }
+  v[32:47] = "st.v_wmma_f32_16x16x32_bf16"(v[216:223], v[400:407], v[32:47]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+
+  v[116:119] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 64, gds = false }, mod.memtoken = { tokens = [0] } }
+  s68 = "st.s_mov_b32"(68) { issueCycles = 1, latencyCycles = 2 }
+  s69 = "st.s_mov_b32"(69) { issueCycles = 1, latencyCycles = 2 }
+  v[120:123] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 80, gds = false }, mod.memtoken = { tokens = [0] } }
+  s70 = "st.s_mov_b32"(70) { issueCycles = 1, latencyCycles = 2 }
+  "st.s_wait_dscnt"(0) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 0, dscnt = -1, kmcnt = -1 } }
+  v[48:63] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[400:407], v[48:63]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+}
