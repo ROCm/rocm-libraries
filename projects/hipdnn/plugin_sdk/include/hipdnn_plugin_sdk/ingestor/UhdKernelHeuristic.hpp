@@ -16,12 +16,14 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/AdapterFactory.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/ScoreTransform.hpp>
@@ -68,20 +70,6 @@ inline std::optional<uhd::VariableContext::ValueType> toValueType(const Metadata
     return std::nullopt;
 }
 
-inline uhd::FeatureExtractionContext::ValueMap
-    deviceVarsFrom(const DeviceProperties& deviceProperties)
-{
-    // Through deviceFeatureValues, never a second list: the benchmark recorder writes
-    // the same names as `device.*` columns, and a vocabulary maintained twice drifts
-    // into a model trained on a column the runtime cannot bind.
-    uhd::FeatureExtractionContext::ValueMap vars;
-    for(const auto& entry : deviceFeatureValues(deviceProperties))
-    {
-        // entry.first, not a captured structured binding: those are C++20.
-        std::visit([&vars, &entry](auto held) { vars.emplace(entry.first, held); }, entry.second);
-    }
-    return vars;
-}
 inline void appendFeatureValue(uhd::FeatureExtractionContext::ValueMap& vars,
                                const std::string& name,
                                const MetadataValue& value)
@@ -107,6 +95,58 @@ inline uhd::FeatureExtractionContext::ValueMap queryVarsFrom(const BoundTokens& 
         appendFeatureValue(vars, name, value);
     }
     return vars;
+}
+
+/// True for a name in a namespace the engine publishes itself: `graph.*` and `device.*`
+/// (problemFeatures), `constraint.*` (engineFeatures) and `kernel.*` (kernel metadata).
+inline bool isReservedFeatureName(const std::string& name)
+{
+    const std::string_view bare
+        = !name.empty() && name.front() == '$' ? std::string_view(name).substr(1) : name;
+    for(const std::string_view reserved : {"graph.", "device.", "constraint.", "kernel."})
+    {
+        if(bare.substr(0, reserved.size()) == reserved)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// Binds what graph matching resolved, under the names the matchers published.
+///
+/// Matchers may add names but never overwrite a reserved one: a token spelled `graph.flops`
+/// would otherwise replace the canonical value, and a model trained on the work model would
+/// read whatever one pack's matcher happened to bind.
+inline void bindGraphMatchBindings(uhd::FeatureExtractionContext& features,
+                                   const BoundTokens& bound)
+{
+    for(const auto& entry : queryVarsFrom(bound))
+    {
+        if(!isReservedFeatureName(entry.first))
+        {
+            features.bind(entry.first, entry.second);
+        }
+    }
+}
+
+/// The problem half of every `sort_kernel_catalog` feature row: the canonical `graph.*` and
+/// `device.*` features (heuristics::problemFeatures) plus the graph-match bindings.
+///
+/// The one binding both sides use -- the live ranker, and the enumeration pages and sweep
+/// rows a ranker is trained on -- so a model reads at runtime exactly the name->value set it
+/// was fitted on. Kernel metadata is bound per candidate on top of it. No `constraint.*`: a
+/// ranked catalog is cached per CatalogKey (graph, device, engine version, metric), so its
+/// order must not depend on the configuration of whichever request first ranked it.
+///
+/// Computed once per graph per selection, page or sweep, never per candidate: the tensor
+/// and node features cost string building proportional to the graph.
+inline uhd::FeatureExtractionContext catalogProblemFeatures(const MatchContext& context,
+                                                            const BoundTokens& bound)
+{
+    auto features = heuristics::problemFeatures(context.graph, context.deviceProperties);
+    bindGraphMatchBindings(features, bound);
+    return features;
 }
 
 inline uhd::FeatureExtractionContext::ValueMap kernelVarsFrom(const KernelDefinition& kernel)
@@ -471,9 +511,7 @@ public:
         {
             return 0.0;
         }
-        uhd::FeatureExtractionContext ctx;
-        ctx.bindDeviceVars(detail::deviceVarsFrom(context.deviceProperties));
-        ctx.bindQueryVars(detail::queryVarsFrom(bound));
+        auto ctx = detail::catalogProblemFeatures(context, bound);
         ctx.bindKernelVars(detail::kernelVarsFrom(kernel));
         // The reported form: this entry point answers "what is this kernel worth", and
         // ranking does not go through it -- rankScored is overridden and uses both forms.
@@ -844,10 +882,6 @@ private:
         }
         try
         {
-            uhd::FeatureExtractionContext ctx;
-            ctx.bindDeviceVars(detail::deviceVarsFrom(context.deviceProperties));
-            ctx.bindQueryVars(detail::queryVarsFrom(catalog.bound));
-
             if(!_adapter->isTrainedForArch(context.deviceProperties.gcnArchName))
             {
                 // A warning, not a refusal: RFC 0019 §9.3 treats an unseen architecture as
@@ -858,11 +892,13 @@ private:
             }
 
             // RFC 0019 §6 step 2: the problem and device slots are the same for every
-            // candidate, so they are evaluated once and the kernel slots overwritten.
-            // §9.4 asks for the two halves to be timed apart, because the prefix is paid
-            // once per graph while the tail is the O(N) term the RFC calls "the main lever
-            // on selection cost" -- one aggregate number cannot tell them apart.
+            // candidate, so they are bound and evaluated once and the kernel slots
+            // overwritten. §9.4 asks for the two halves to be timed apart, because the
+            // prefix is paid once per graph while the tail is the O(N) term the RFC calls
+            // "the main lever on selection cost" -- one aggregate number cannot tell them
+            // apart. Binding the graph features is part of the prefix, so it is timed in it.
             const auto prefixStart = Clock::now();
+            auto ctx = detail::catalogProblemFeatures(context, catalog.bound);
             auto features = _extractor->prepare(ctx);
             _timing.prefixNs.fetch_add(elapsedNs(prefixStart), std::memory_order_relaxed);
             _timing.selections.fetch_add(1, std::memory_order_relaxed);

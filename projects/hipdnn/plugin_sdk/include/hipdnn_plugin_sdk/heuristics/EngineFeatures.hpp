@@ -713,7 +713,13 @@ inline bool bindNodeFeatures(uhd::FeatureExtractionContext& features,
 }
 } // namespace detail
 
-/// @brief Publishes canonical graph, device and constraint features without kernel enumeration.
+/// @brief Publishes the canonical device and graph features of one problem: every feature
+///        whose value is fixed by (graph, device) alone, without kernel enumeration.
+///
+/// The half of engineFeatures() that does not read an engine configuration, and the one a
+/// `sort_kernel_catalog` ranker binds (with the graph-match tokens and kernel metadata): a
+/// ranked catalog is cached per (graph, device, engine version, ranking metric), so nothing
+/// it is ranked on may depend on the configuration a later request carries.
 ///
 /// Work features, each absent -- never 0 -- when unknown:
 ///   graph.nodes[i].flops         the node's logical work (detail::logicalFlops).
@@ -730,9 +736,8 @@ inline bool bindNodeFeatures(uhd::FeatureExtractionContext& features,
 /// shapes: its declared shapes need not be the ones executed.
 template <typename TProperties>
 inline uhd::FeatureExtractionContext
-    engineFeatures(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
-                   const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config,
-                   const TProperties& device)
+    problemFeatures(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                    const TProperties& device)
 {
     uhd::FeatureExtractionContext features;
     for(const auto& entry : deviceFeatureValues(device))
@@ -740,41 +745,6 @@ inline uhd::FeatureExtractionContext
         std::visit(
             [&features, &entry](auto value) { features.bind("device." + entry.first, value); },
             entry.second);
-    }
-    if(const auto limit = workspaceLimit(config))
-    {
-        features.bind("constraint.workspace_limit", *limit);
-    }
-    if(config.isValid())
-    {
-        using namespace hipdnn_flatbuffers_sdk::data_objects;
-        for(const auto& setting : config.knobSettingWrappers())
-        {
-            const auto name = setting->knobId();
-            if(name == BENCHMARKING_KNOB_NAME || name == WORKSPACE_SIZE_LIMIT_KNOB_NAME)
-            {
-                continue;
-            }
-            const auto feature = "constraint.knobs." + name;
-            switch(setting->valueType())
-            {
-            case KnobValue::IntValue:
-                features.bind(feature, setting->template valueAs<IntValue>().value());
-                break;
-            case KnobValue::FloatValue:
-                features.bind(feature, setting->template valueAs<FloatValue>().value());
-                break;
-            case KnobValue::StringValue:
-                if(const auto* text = setting->template valueAs<StringValue>().value())
-                {
-                    features.bind(feature, text->str());
-                }
-                break;
-            default:
-                throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-                                            "Prediction constraint has no typed value");
-            }
-        }
     }
     const auto& raw = graph.getGraph();
     const auto* nodes = raw.nodes();
@@ -873,6 +843,58 @@ inline uhd::FeatureExtractionContext
         if(flopsKnown && *bytes > 0.0)
         {
             features.bind("graph.arithmetic_intensity", flops / *bytes);
+        }
+    }
+    return features;
+}
+
+/// @brief Publishes problemFeatures() plus the `constraint.*` features of @p config: the
+///        engine-level (L1) feature set.
+///
+/// Constraints are what the request pins: its workspace bound (`constraint.workspace_limit`)
+/// and every other knob it sets (`constraint.knobs.<name>`), except the benchmarking knob,
+/// which chooses how to select rather than what may be selected.
+template <typename TProperties>
+inline uhd::FeatureExtractionContext
+    engineFeatures(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                   const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config,
+                   const TProperties& device)
+{
+    auto features = problemFeatures(graph, device);
+    if(const auto limit = workspaceLimit(config))
+    {
+        features.bind("constraint.workspace_limit", *limit);
+    }
+    if(!config.isValid())
+    {
+        return features;
+    }
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    for(const auto& setting : config.knobSettingWrappers())
+    {
+        const auto name = setting->knobId();
+        if(name == BENCHMARKING_KNOB_NAME || name == WORKSPACE_SIZE_LIMIT_KNOB_NAME)
+        {
+            continue;
+        }
+        const auto feature = "constraint.knobs." + name;
+        switch(setting->valueType())
+        {
+        case KnobValue::IntValue:
+            features.bind(feature, setting->template valueAs<IntValue>().value());
+            break;
+        case KnobValue::FloatValue:
+            features.bind(feature, setting->template valueAs<FloatValue>().value());
+            break;
+        case KnobValue::StringValue:
+            if(const auto* text = setting->template valueAs<StringValue>().value())
+            {
+                features.bind(feature, text->str());
+            }
+            break;
+        default:
+            throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                                        "Prediction constraint has no typed value");
         }
     }
     return features;

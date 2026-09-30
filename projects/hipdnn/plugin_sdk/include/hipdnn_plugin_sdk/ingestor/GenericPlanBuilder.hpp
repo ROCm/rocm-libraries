@@ -381,6 +381,7 @@ public:
         std::vector<std::string> benchmarkFailures;
         std::vector<typename BenchmarkPlan<THandle>::Candidate> candidates;
         candidates.reserve(filtered.size());
+        const auto problem = problemFeaturesJson(context, catalog.bound);
         for(const auto& kernel : filtered)
         {
             try
@@ -391,7 +392,7 @@ public:
                          _stateManager.getDispatchDetails(kernel), context, catalog.bound),
                      kernel.packId,
                      kernel.dispatchId,
-                     candidateFeatures(catalog.bound, kernel, context.deviceProperties)});
+                     candidateFeatures(problem, kernel)});
                 continue;
             }
             catch(const HipdnnPluginException& error)
@@ -596,19 +597,23 @@ public:
         page.device_arch = context.deviceProperties.gcnArchName;
         page.total_count = filtered.size();
         page.offset = offset;
-        nlohmann::json problem = nlohmann::json::object();
-        for(const auto& [token, value] : catalog.bound)
+        // The live ranker's own problem half, split at the namespace so device facts keep
+        // their field: a model trained on this page reads at runtime what it was fitted on.
+        auto problem = problemFeaturesJson(context, catalog.bound);
+        nlohmann::json device = nlohmann::json::object();
+        for(auto it = problem.begin(); it != problem.end();)
         {
-            detail::addMetadataFeature(
-                problem, !token.empty() && token.front() == '$' ? token.substr(1) : token, value);
+            if(it.key().rfind("device.", 0) == 0)
+            {
+                device[it.key()] = std::move(it.value());
+                it = problem.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
         }
         page.problem_features = problem.dump();
-        nlohmann::json device = nlohmann::json::object();
-        for(const auto& entry : deviceFeatureValues(context.deviceProperties))
-        {
-            std::visit([&device, &entry](auto held) { device["device." + entry.first] = held; },
-                       entry.second);
-        }
         page.device_features = device.dump();
         const auto end = offset + std::min<uint64_t>(limit, filtered.size() - offset);
         page.candidates.reserve(static_cast<size_t>(end - offset));
@@ -650,17 +655,7 @@ public:
         {
             if(const auto bound = _stateManager.graphBindings(context))
             {
-                // Matchers may add published names but never overwrite common facts.
-                for(const auto& entry : detail::queryVarsFrom(*bound))
-                {
-                    const auto& name = entry.first;
-                    const auto bare = !name.empty() && name.front() == '$' ? name.substr(1) : name;
-                    if(bare.rfind("graph.", 0) != 0 && bare.rfind("device.", 0) != 0
-                       && bare.rfind("constraint.", 0) != 0 && bare.rfind("kernel.", 0) != 0)
-                    {
-                        features.bind(name, entry.second);
-                    }
-                }
+                detail::bindGraphMatchBindings(features, *bound);
             }
         }
         catch(const std::exception& error)
@@ -863,43 +858,48 @@ private:
         return tuple;
     }
 
+    /// The problem half of every collected `sort_kernel_catalog` row, as JSON: exactly the
+    /// scalar name->value set the live ranker binds (detail::catalogProblemFeatures), plus
+    /// each int-list token whole beside its indexed elements.
+    ///
+    /// The `device.*` facts are what a board IS, where the row envelope's `device` says only
+    /// which one it was: a sweep merged from several boards of one arch needs both, since the
+    /// UHD is arch-keyed. Keys are the published names without '$'.
+    static nlohmann::json problemFeaturesJson(const MatchContext& context, const BoundTokens& bound)
+    {
+        auto features = detail::catalogProblemFeatures(context, bound).toJson();
+        for(const auto& [token, value] : bound)
+        {
+            // A list has no scalar binding, so a model reads it only through the indexed
+            // names already present; the whole list rides along for readers of the row.
+            const auto* values = std::get_if<std::vector<int64_t>>(&value);
+            if(values != nullptr && !detail::isReservedFeatureName(token))
+            {
+                features[!token.empty() && token.front() == '$' ? token.substr(1) : token]
+                    = *values;
+            }
+        }
+        return features;
+    }
+
     /// Every feature value that describes one benchmarked (problem, kernel) pair: the
-    /// tokens graph matching bound for the problem, and the kernel's own KMD metadata.
+    /// problem half (problemFeaturesJson, computed once per sweep) and the kernel's own KMD
+    /// metadata under `kernel.`, the names an enumeration page gives the same kernel.
     ///
     /// This is where the knowledge lives -- BenchmarkPlan holds the MatchContext and the
     /// KernelDefinition for nothing, and teaching it to reach into a graph would cost it
     /// the opacity its benchmarkId comment exists to protect.
     ///
-    /// Keys are the exact published binding names without '$'; array elements are
-    /// also emitted as indexed references for direct-column feature projection.
-    ///
     /// Built for every sweep, whatever the engine ships. Gating this on a UHD being
     /// present would make the corpus collectable only by a build that already has the
     /// model the corpus exists to train.
-    static nlohmann::json candidateFeatures(const BoundTokens& bound,
-                                            const KernelDefinition& kernel,
-                                            const DeviceProperties& device)
+    static nlohmann::json candidateFeatures(const nlohmann::json& problem,
+                                            const KernelDefinition& kernel)
     {
-        nlohmann::json features = nlohmann::json::object();
-        for(const auto& [token, value] : bound)
-        {
-            detail::addMetadataFeature(
-                features, !token.empty() && token.front() == '$' ? token.substr(1) : token, value);
-        }
+        auto features = problem;
         for(const auto& [field, value] : kernel.metadata)
         {
             detail::addMetadataFeature(features, "kernel." + field, value);
-        }
-        // The device half. A sweep merged from several boards of one arch is the point:
-        // the UHD is arch-keyed, so `device` alone says which card a row came from while
-        // these say what that card IS, which is what a model can actually learn from.
-        // Through deviceFeatureValues, the same list the extractor binds, so a logged
-        // column and a `features_signature` entry cannot drift apart.
-        for(const auto& entry : deviceFeatureValues(device))
-        {
-            // entry.first, not a captured structured binding: those are C++20.
-            std::visit([&features, &entry](auto held) { features["device." + entry.first] = held; },
-                       entry.second);
         }
         return features;
     }

@@ -6,9 +6,12 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -26,6 +29,7 @@
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/NativeScorerRegistry.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlanBuilder.hpp>
@@ -2714,6 +2718,209 @@ TEST(TestIngestorCandidateEnumeration, EmptyScopedCatalogIsNotUnsupportedOrAnInv
     const auto invalid = makeIntKnobEngineConfig(invalidBuffer, "unknown_knob", 1);
     EXPECT_THROW(builder.enumerateCandidates(0, graph, invalid, 0, 1),
                  hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// ---------------------------------------------------------------------------
+// One problem feature set for collection and for the live ranker
+// ---------------------------------------------------------------------------
+
+/// Every value shape a matcher can publish, plus two names in namespaces the engine owns
+/// that no matcher may claim: the corpus and the ranker must both carry the canonical value.
+std::optional<BoundTokens> bindEveryTokenShape(const MatchContext& context)
+{
+    auto bound = acceptGraph(context);
+    (*bound)["$attention.dims"] = std::vector<int64_t>{32, 128};
+    (*bound)["$attention.causal"] = true;
+    (*bound)["$attention.scale"] = 0.125;
+    (*bound)["$attention.layout"] = std::string("bshd");
+    (*bound)["$graph.flops"] = 1.0;
+    (*bound)["device.cu_count"] = int64_t{1};
+    return bound;
+}
+
+/// The rows the live ranker hands its scorer, in catalog order.
+std::vector<std::vector<double>>& capturedRankerRows()
+{
+    static std::vector<std::vector<double>> rows;
+    return rows;
+}
+
+double captureRankerRow(const double* features, size_t count)
+{
+    capturedRankerRows().emplace_back(features, features + count);
+    return 1.0;
+}
+
+/// The sweep record's envelope: identity and measurement, never a feature.
+bool isSweepEnvelope(const std::string& key)
+{
+    static const std::set<std::string> ENVELOPE = {"event",
+                                                   "benchmark",
+                                                   "device",
+                                                   "kernel",
+                                                   "pack",
+                                                   "dispatch",
+                                                   "status",
+                                                   "reason",
+                                                   "min_ms",
+                                                   "avg_ms",
+                                                   "stddev_ms",
+                                                   "robust_mean_ms",
+                                                   "iters"};
+    return ENVELOPE.count(key) != 0;
+}
+
+TEST(TestIngestorCatalogFeatureParity, TheLiveRankerReadsWhatEnumerationAndTheSweepPublish)
+{
+    // The property a trained `sort_kernel_catalog` model depends on: for one (graph, device,
+    // match bindings, kernel), every name an enumeration page or a sweep row publishes is
+    // bound by the live ranker, to the same value. A model is fitted on the first two and
+    // scored through the third.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const ScopedSymbols symbols(
+        "test.graph", bindEveryTokenShape, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(
+        engine, *manager, resolver, makeThreeKernelDescendingTimer());
+    const MatmulTestGraph matmul(16, 32, 8);
+    const auto& graph = matmul.graph();
+    const TestHandle handle;
+
+    // Collection, first half: the enumeration page.
+    flatbuffers::FlatBufferBuilder emptyBuffer;
+    const auto page
+        = builder.enumerateCandidates(handle, graph, makeEmptyEngineConfig(emptyBuffer), 0, 100);
+    ASSERT_EQ(page.candidates.size(), 3U);
+    const auto problem = nlohmann::json::parse(page.problem_features);
+    const auto device = nlohmann::json::parse(page.device_features);
+    EXPECT_DOUBLE_EQ(problem.at("graph.flops").get<double>(), 2.0 * 16 * 32 * 8)
+        << "a matmul page must carry the work model's graph.flops, not a matcher's";
+    EXPECT_EQ(device.at("device.cu_count"), testDeviceProperties().multiProcessorCount)
+        << "a matcher's device.cu_count replaced the device fact";
+    EXPECT_EQ(problem.at("attention.dims"), nlohmann::json::array({32, 128}));
+    for(const auto& entry : problem.items())
+    {
+        EXPECT_NE(entry.key().rfind("device.", 0), 0U) << entry.key() << " is not a problem fact";
+    }
+    for(const auto& entry : device.items())
+    {
+        EXPECT_EQ(entry.key().rfind("device.", 0), 0U) << entry.key() << " is not a device fact";
+    }
+    std::map<std::string, nlohmann::json> published; // candidate id -> its full feature row
+    for(const auto& candidate : page.candidates)
+    {
+        auto row = problem;
+        row.update(device);
+        row.update(nlohmann::json::parse(candidate->kernel_features));
+        published[candidate->id] = std::move(row);
+    }
+
+    // Collection, second half: the sweep rows.
+    flatbuffers::FlatBufferBuilder benchmarkBuffer;
+    const auto benchmarking
+        = makeIntKnobEngineConfig(benchmarkBuffer, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, benchmarking, settings);
+    BenchmarkContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, benchmarking, context);
+    std::vector<std::byte> workspace(context.plan().getWorkspaceSize(handle));
+    context.plan().execute(handle, nullptr, 0U, workspace.data());
+    size_t sweepRows = 0;
+    for(const auto& recorded : recorder.getRecordedLogs())
+    {
+        const auto start = recorded.message.find('{');
+        const auto row
+            = start == std::string::npos
+                  ? nlohmann::json()
+                  : nlohmann::json::parse(recorded.message.substr(start), nullptr, false);
+        if(!row.is_object() || row.value("event", "") != "ingestor.benchmark.candidate")
+        {
+            continue;
+        }
+        ++sweepRows;
+        const auto& expected = published.at(row.at("kernel").get<std::string>());
+        for(const auto& entry : expected.items())
+        {
+            EXPECT_EQ(row.value(entry.key(), nlohmann::json()), entry.value())
+                << "sweep row disagrees with the page on " << entry.key();
+        }
+        for(const auto& entry : row.items())
+        {
+            EXPECT_TRUE(expected.contains(entry.key()) || isSweepEnvelope(entry.key()))
+                << "sweep row publishes " << entry.key() << ", which the page does not";
+        }
+    }
+    EXPECT_EQ(sweepRows, 3U);
+
+    // Runtime: a model whose signature reads every scalar the corpus carries, ranking the
+    // same catalog through the live UhdKernelHeuristic. A whole list has no scalar binding;
+    // its indexed elements are published beside it and read instead.
+    std::vector<nlohmann::json> signature;
+    std::vector<std::string> names;
+    hipdnn_plugin_sdk::uhd::CategoricalEncoding encoding;
+    for(const auto& entry : published.begin()->second.items())
+    {
+        if(entry.value().is_array())
+        {
+            continue;
+        }
+        names.push_back(entry.key());
+        signature.emplace_back("$" + entry.key());
+        for(const auto& row : published)
+        {
+            if(const auto& value = row.second.at(entry.key()); value.is_string())
+            {
+                encoding["$" + entry.key()].emplace(value.get<std::string>(),
+                                                    encoding["$" + entry.key()].size());
+            }
+        }
+    }
+    constexpr const char* CAPTURE_SYMBOL = "hipdnn.kernel_ingestor.test.capture_ranker_row";
+    const hipdnn_plugin_sdk::uhd::ScopedNativeScorer capture(CAPTURE_SYMBOL, &captureRankerRow);
+    HeuristicDescriptor model;
+    model.id = testId(0xAB);
+    model.name = "feature parity probe";
+    model.adapter = UhdAdapter::NATIVE;
+    model.nativeSymbol = CAPTURE_SYMBOL;
+    model.featuresSignature = signature;
+    model.categoricalEncoding = encoding;
+    model.featuresHash = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(signature, encoding);
+    const auto ranker = UhdKernelHeuristic::tryCreate(
+        model, "parity probe", {BLOCK_SIZE, DTYPE}, {BLOCK_SIZE, DTYPE});
+    ASSERT_NE(ranker, nullptr);
+
+    const auto properties = testDeviceProperties();
+    const MatchContext match{graph, 0, properties};
+    const auto catalog = manager->unsortedCatalog(match);
+    capturedRankerRows().clear();
+    (void)ranker->rankScored(catalog, match);
+    ASSERT_EQ(capturedRankerRows().size(), catalog.entries.size())
+        << "the ranker could not bind every published name, so its model never scored";
+    for(size_t index = 0; index < catalog.entries.size(); ++index)
+    {
+        const auto& expected = published.at(toString(catalog.entries[index].kernelId));
+        const auto& row = capturedRankerRows()[index];
+        ASSERT_EQ(row.size(), names.size());
+        for(size_t slot = 0; slot < names.size(); ++slot)
+        {
+            const auto& value = expected.at(names[slot]);
+            const double want
+                = value.is_string()
+                      ? static_cast<double>(
+                            encoding.at("$" + names[slot]).at(value.get<std::string>()))
+                  : value.is_boolean() ? (value.get<bool>() ? 1.0 : 0.0)
+                                       : value.get<double>();
+            EXPECT_DOUBLE_EQ(row[slot], want)
+                << "the ranker reads " << names[slot] << " differently";
+        }
+    }
 }
 
 } // namespace

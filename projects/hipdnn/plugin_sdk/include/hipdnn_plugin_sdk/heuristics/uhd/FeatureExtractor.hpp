@@ -29,10 +29,6 @@ class FeatureExtractionContext
 public:
     using ValueMap = std::unordered_map<std::string, VariableContext::ValueType>;
 
-    void bindDeviceVars(const ValueMap& props)
-    {
-        _ctx.bindNamespace("device", props);
-    }
     void bindKernelVars(const ValueMap& props)
     {
         _ctx.bindNamespace("kernel", props);

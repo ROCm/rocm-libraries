@@ -1584,6 +1584,20 @@ than recomputing it ([Open Question 4](#schema-and-training), resolved). A golde
 and parity with the three counts that predate this section, are held by test beside the
 feature-semantics revision they were computed under ([Section 6.9](#69-feature-semantics-revision)).
 
+**Catalog rankers read the same problem at collection and at runtime.** A `sort_kernel_catalog`
+ranker binds the problem half of its row through one function (`catalogProblemFeatures`,
+`UhdKernelHeuristic.hpp`): every `$graph.*` and `$device.*` feature of this section and
+[Section 6.7](#67-per-node-operand-features), the work model included, plus the graph-match
+bindings, onto which each candidate's `$kernel.*` metadata is bound. Enumeration pages
+(`problem_features`, `device_features`) and benchmark sweep rows publish from that same function, so a
+model trained on them reads at selection exactly the names and values it was fitted on, and `uhd_gen`
+derives a catalog `tflops` label from the page's `$graph.flops`. A matcher may add names but never
+rebind `graph.*`, `device.*`, `constraint.*`, or `kernel.*`. `$constraint.*` is not available to a
+catalog ranker: a ranked catalog is cached per graph, device, engine version, and ranking metric
+([Section 9.2](#92-loading-and-caching)), so its order cannot depend on the knobs or workspace bound of
+whichever request ranked it first. Constraints reach selection as filters on that order, and as
+features only of the engine-level estimate.
+
 ### 6.9 Feature Semantics Revision
 
 `features_hash` fingerprints what a model reads — the signature and its encoding

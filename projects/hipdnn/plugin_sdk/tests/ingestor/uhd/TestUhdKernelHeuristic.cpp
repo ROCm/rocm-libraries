@@ -484,6 +484,79 @@ TEST(TestIngestorUhdKernelHeuristic, TheProblemChangesTheRanking)
     EXPECT_EQ(shortSeq.front().kernelId, testId(0x01)); // short sequence: small tile
 }
 
+/// A kernel axis and the graph's canonical logical work, the pair a ranker trained on an
+/// enumeration corpus reads: slot 1 is published by the work model, not by any matcher.
+/// Paired with preferLargeTilesOnLongSequences(), whose root splits slot 1 at 1024: at or
+/// below that much work the small tile scores 9, above it the large tile does.
+const std::vector<nlohmann::json> WORK_SIGNATURE = {"$kernel.tile_m", "$graph.flops"};
+
+TEST(TestIngestorUhdKernelHeuristic, TheGraphsLogicalWorkChangesTheRankingThroughTheLiveSelector)
+{
+    // R2: the ranker a model trained on enumeration pages runs under must bind the graph
+    // features those pages publish. Two graphs differing only in size, one catalog: the
+    // winner follows `graph.flops`, which no matcher binds.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_graph_work");
+    const auto fixture = writeFixture(dir.path(),
+                                      preferLargeTilesOnLongSequences(),
+                                      "max",
+                                      {},
+                                      /*calibrated=*/true,
+                                      "identity",
+                                      WORK_SIGNATURE);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::MatmulTestGraph small(4, 4, 4); // 128 flops
+    const testing::MatmulTestGraph large(64, 64, 64); // 524288 flops
+    const auto properties = gfx942();
+    const auto catalog = catalogAgainstPriority(2048);
+
+    const auto onSmall = heuristic->rankScored(catalog, MatchContext{small.graph(), 0, properties});
+    const auto onLarge = heuristic->rankScored(catalog, MatchContext{large.graph(), 0, properties});
+
+    ASSERT_EQ(onSmall.size(), 2U);
+    ASSERT_EQ(onLarge.size(), 2U);
+    EXPECT_EQ(onSmall.front().kernelId, testId(0x01)) << "small problem: small tile";
+    EXPECT_EQ(onLarge.front().kernelId, testId(0x02)) << "large problem: large tile";
+    // The winning leaf, not the 0 of a declared-order fallback, which also puts the small
+    // tile first: an unbound `$graph.flops` would pass the small case by degrading.
+    EXPECT_DOUBLE_EQ(onSmall.front().score, 9.0);
+    EXPECT_DOUBLE_EQ(onLarge.front().score, 9.0);
+}
+
+TEST(TestIngestorUhdKernelHeuristic, AGraphMatchTokenCannotStandInForTheCanonicalWork)
+{
+    // A matcher may publish new names, never a reserved one: a pack binding its own
+    // `graph.flops` would otherwise feed the model a number the corpus never carried.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_reserved_token");
+    const auto fixture = writeFixture(dir.path(),
+                                      preferLargeTilesOnLongSequences(),
+                                      "max",
+                                      {},
+                                      /*calibrated=*/true,
+                                      "identity",
+                                      WORK_SIGNATURE);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::MatmulTestGraph large(64, 64, 64);
+    const auto properties = gfx942();
+    const MatchContext context{large.graph(), 0, properties};
+    for(const auto* token : {"graph.flops", "$graph.flops"})
+    {
+        auto catalog = catalogAgainstPriority(2048);
+        catalog.bound[token] = 1.0; // a "small problem" if it were believed
+        const auto ranked = heuristic->rankScored(catalog, context);
+        ASSERT_EQ(ranked.size(), 2U);
+        EXPECT_EQ(ranked.front().kernelId, testId(0x02)) << token << " overrode graph.flops";
+        EXPECT_DOUBLE_EQ(ranked.front().score, 9.0);
+        EXPECT_DOUBLE_EQ(heuristic->score(context, catalog.bound, catalog.entries[1]), 9.0)
+            << "the single-kernel path binds a different problem half from the ranking";
+    }
+}
+
 TEST(TestIngestorUhdKernelHeuristic, AMinimisingObjectiveReversesTheOrder)
 {
     // Same model, same catalog; only `objective` differs. A UHD trained on a cost rather
