@@ -31,7 +31,9 @@
 #include <miopen/reducetensor.hpp>
 #include <miopen/solver/legacy_ck_common.hpp>
 
+#include <algorithm>
 #include <cassert>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -200,18 +202,6 @@ struct ReductionKernelConfigurator
     };
 };
 
-inline int GetIndicesTypeSize(miopenIndicesType_t t)
-{
-    switch(t)
-    {
-    case MIOPEN_32BIT_INDICES: return (4);
-    case MIOPEN_64BIT_INDICES: return (8);
-    case MIOPEN_16BIT_INDICES: return (2);
-    case MIOPEN_8BIT_INDICES: return (1);
-    }
-    MIOPEN_THROW("Unknown data type");
-}
-
 inline int GetDataTypeSize(miopenDataType_t t)
 {
     switch(t)
@@ -228,7 +218,8 @@ inline int GetDataTypeSize(miopenDataType_t t)
     case miopenInt64: break;
     };
 
-    MIOPEN_THROW("Only float, half, double, bfloat16, int8 data types are supported.");
+    MIOPEN_THROW(miopenStatusBadParm,
+                 "Only float, half, double, bfloat16, int8 data types are supported.");
 };
 
 }; // end of namespace detail
@@ -253,7 +244,7 @@ static ck::DataTypeEnum_t mapDataTypeId(miopenDataType_t t)
     case miopenInt64: break;
     };
 
-    MIOPEN_THROW("Only float, half, double data type is supported.");
+    MIOPEN_THROW(miopenStatusBadParm, "Only float, half, double data type is supported.");
 };
 
 static ck::ReduceTensorOp_t mapReduceOpId(miopenReduceTensorOp_t t)
@@ -272,7 +263,7 @@ static ck::ReduceTensorOp_t mapReduceOpId(miopenReduceTensorOp_t t)
     case MIOPEN_REDUCE_TENSOR_NORM2: return ReduceTensorOp_t::NORM2;
     };
 
-    MIOPEN_THROW("Operation is not supported");
+    MIOPEN_THROW(miopenStatusBadParm, "Operation is not supported");
 };
 
 static std::string get_network_config_string_from_type_enums(miopenDataType_t TSrc,
@@ -387,8 +378,10 @@ static std::pair<bool, bool> get_padding_need(ReductionMethod_t reduceImpl,
         case Reduce_DirectWarpWise:
             copySliceLen = warpSize * tunable->GredAccessesPerThreadInWarp;
             src_need_padding =
-                (invariantLen < GridSize * BlockSize / warpSize || toReduceLen % copySliceLen > 0);
-            dst_need_padding = (invariantLen < GridSize * BlockSize / warpSize);
+                (invariantLen < static_cast<size_t>(GridSize) * BlockSize / warpSize ||
+                 toReduceLen % copySliceLen > 0);
+            dst_need_padding =
+                (invariantLen < static_cast<size_t>(GridSize) * BlockSize / warpSize);
             return std::make_pair(src_need_padding, dst_need_padding);
 
         case Reduce_BlockWise:
@@ -447,8 +440,81 @@ ReduceTensorDescriptor::ReduceTensorDescriptor(miopenReduceTensorOp_t reduceTens
 {
     if(reduceTensorIndices == MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES &&
        reduceTensorIndicesType != MIOPEN_32BIT_INDICES)
-        MIOPEN_THROW("Only int32 type is supported for ReduceTensor indices.");
+        MIOPEN_THROW(miopenStatusBadParm, "Only int32 type is supported for ReduceTensor indices.");
 };
+
+namespace {
+
+void ValidateReduceDescriptors(const TensorDescriptor& inDesc, const TensorDescriptor& outDesc)
+{
+    // the legacy reduction kernels take at most 6 dimensions
+    constexpr std::size_t maxReduceRank = 6;
+
+    const auto& inDescLengths  = inDesc.GetLengths();
+    const auto& outDescLengths = outDesc.GetLengths();
+
+    if(inDescLengths.size() != outDescLengths.size())
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "The number of dimensions of the input and output tensor should match.");
+
+    if(inDescLengths.size() > maxReduceRank)
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "Invalid TensorDescriptor, at most number of dimensions of 6 is supported.");
+
+    for(std::size_t i = 0; i < inDescLengths.size(); i++)
+    {
+        if(outDescLengths[i] != 1 && outDescLengths[i] != inDescLengths[i])
+        {
+            MIOPEN_THROW(miopenStatusBadParm,
+                         "The length of the output tensor dimension should either be 1 or be equal "
+                         "to the length of the corresponding dimension of the input tensor.");
+        }
+    }
+}
+
+// The kernels receive lengths and strides as int and address global memory through 32-bit byte
+// offsets (legacy CK buffer addressing), so both have to fit into int. The stride of a length-1
+// dimension never contributes to an offset, so it is not restricted.
+void ValidateReduceTensorFitsIntoInt(const TensorDescriptor& desc, const char* name)
+{
+    const auto& lengths = desc.GetLengths();
+    const auto& strides = desc.GetStrides();
+
+    // offset of the last element; the terms are capped, so the sum cannot wrap (a capped term
+    // already makes the span exceed INT32_MAX bytes)
+    std::size_t lastOffset = 0;
+    for(std::size_t i = 0; i < lengths.size(); i++)
+    {
+        if(lengths[i] == 1)
+            continue;
+
+        if(lengths[i] > std::numeric_limits<int>::max() ||
+           strides[i] > std::numeric_limits<int>::max())
+            MIOPEN_THROW(miopenStatusBadParm,
+                         std::string{"Reduction "} + name +
+                             " tensor has a length or stride exceeding INT32_MAX, which is not "
+                             "supported.");
+
+        lastOffset +=
+            std::min<std::size_t>((lengths[i] - 1) * strides[i], std::numeric_limits<int>::max());
+    }
+
+    if((lastOffset + 1) * detail::GetDataTypeSize(desc.GetType()) > std::numeric_limits<int>::max())
+        MIOPEN_THROW(miopenStatusBadParm,
+                     std::string{"Reduction "} + name +
+                         " tensor spans more than INT32_MAX bytes, which is not supported.");
+}
+
+int ToIntOrThrow(std::size_t value, const char* what)
+{
+    if(value > std::numeric_limits<int>::max())
+        MIOPEN_THROW(miopenStatusBadParm,
+                     std::string{"Reduction "} + what + " " + std::to_string(value) +
+                         " exceeds INT32_MAX, which is not supported.");
+    return static_cast<int>(value);
+}
+
+} // namespace
 
 // This is WS requirement of the dynamic reduction.
 // We must enforce it especially when reduction is used internally.
@@ -460,20 +526,7 @@ std::size_t ReduceTensorDescriptor::GetWorkspaceSize(const Handle& handle,
                                                      const TensorDescriptor& inDesc,
                                                      const TensorDescriptor& outDesc) const
 {
-    const auto& inDescLengths  = inDesc.GetLengths();
-    const auto& outDescLengths = outDesc.GetLengths();
-
-    if(inDescLengths.size() != outDescLengths.size())
-        MIOPEN_THROW("The number of dimensions of the input and output tensor should match.");
-
-    for(int i = 0; i < inDescLengths.size(); i++)
-    {
-        if(outDescLengths[i] != 1 && outDescLengths[i] != inDescLengths[i])
-        {
-            MIOPEN_THROW("The length of the output tensor dimension should either be 1 or be equal "
-                         "to the length of the corresponding dimension of the input tensor.");
-        }
-    };
+    ValidateReduceDescriptors(inDesc, outDesc);
 
     auto invariantLength = outDesc.GetElementSize();
     auto toReduceLength  = inDesc.GetElementSize() / invariantLength;
@@ -508,20 +561,7 @@ std::size_t ReduceTensorDescriptor::GetWorkspaceSize(const Handle& handle,
 std::size_t ReduceTensorDescriptor::GetIndicesSize(const TensorDescriptor& inDesc,
                                                    const TensorDescriptor& outDesc) const
 {
-    const auto& inDescLengths  = inDesc.GetLengths();
-    const auto& outDescLengths = outDesc.GetLengths();
-
-    if(inDescLengths.size() != outDescLengths.size())
-        MIOPEN_THROW("The number of dimensions of the input and output tensor should match.");
-
-    for(int i = 0; i < inDescLengths.size(); i++)
-    {
-        if(outDescLengths[i] != 1 && outDescLengths[i] != inDescLengths[i])
-        {
-            MIOPEN_THROW("The length of the output tensor dimension should either be 1 or be equal "
-                         "to the length of the corresponding dimension of the input tensor.");
-        }
-    };
+    ValidateReduceDescriptors(inDesc, outDesc);
 
     auto reduceIndicesOpt = this->reduceTensorIndices_;
     auto reduceOp         = this->reduceTensorOp_;
@@ -571,32 +611,24 @@ void ReduceTensorDescriptor::ReduceTensor(const Handle& handle,
         (reduceOp == MIOPEN_REDUCE_TENSOR_MIN || reduceOp == MIOPEN_REDUCE_TENSOR_MAX ||
          reduceOp == MIOPEN_REDUCE_TENSOR_AMAX);
 
-    if(inDescLengths.size() > 6)
-        MIOPEN_THROW("Invalid TensorDescriptor, at most number of dimensions of 6 is supported.");
+    ValidateReduceDescriptors(aDesc, cDesc);
 
     if(need_indices && (reduceIndicesType != MIOPEN_32BIT_INDICES))
-        MIOPEN_THROW("Only int32 type can be used for ReduceTensor indices.");
+        MIOPEN_THROW(miopenStatusBadParm, "Only int32 type can be used for ReduceTensor indices.");
 
-    if(inDescLengths.size() != outDescLengths.size())
-        MIOPEN_THROW("The number of dimensions of the input and output tensor should match.");
-
-    for(int i = 0; i < inDescLengths.size(); i++)
-    {
-        if(outDescLengths[i] != 1 && outDescLengths[i] != inDescLengths[i])
-        {
-            MIOPEN_THROW("The length of the output tensor dimension should either be 1 or be equal "
-                         "to the length of the corresponding dimension of the input tensor.");
-        }
-    };
+    // GetWorkspaceSize() deliberately does not check this: it is also used just to size buffers
+    // for reductions that are never run (e.g. RNN inference)
+    ValidateReduceTensorFitsIntoInt(aDesc, "input");
+    ValidateReduceTensorFitsIntoInt(cDesc, "output");
 
     std::size_t ws_sizeInBytes      = this->GetWorkspaceSize(handle, aDesc, cDesc);
     std::size_t indices_sizeInBytes = this->GetIndicesSize(aDesc, cDesc);
 
     if(ws_sizeInBytes > workspaceSizeInBytes)
-        MIOPEN_THROW("The workspace size allocated is not enough!");
+        MIOPEN_THROW(miopenStatusBadParm, "The workspace size allocated is not enough!");
 
     if(indices_sizeInBytes > indicesSizeInBytes)
-        MIOPEN_THROW("The indices size allocated is not enough!");
+        MIOPEN_THROW(miopenStatusBadParm, "The indices size allocated is not enough!");
 
     // invariantLength and toReduceLength are used to determine the kernel configuration
     const auto invariantLength = cDesc.GetElementSize();
@@ -614,7 +646,11 @@ void ReduceTensorDescriptor::ReduceTensor(const Handle& handle,
 
     const ReductionMethod_t reduceImpl =
         configurator.getReductionMethod(invariantLength, toReduceLength);
-    const int gridSize = configurator.getGridSize(invariantLength, toReduceLength);
+    // element counts are only bounded by the byte span checks above for non-overlapping tensors
+    ToIntOrThrow(invariantLength, "output element count");
+    const int origReduceLen = ToIntOrThrow(toReduceLength, "reduced element count");
+    const int gridSize =
+        ToIntOrThrow(configurator.getGridSize(invariantLength, toReduceLength), "grid size");
     const int blkGroupSize =
         (reduceImpl == Reduce_MultiBlock) ? static_cast<int>(gridSize / invariantLength) : 0;
 
@@ -633,7 +669,8 @@ void ReduceTensorDescriptor::ReduceTensor(const Handle& handle,
 
     if(toReduceDims.empty())
     {
-        MIOPEN_THROW("Invalid TensorDescriptor, at least one dimension of the input tensor should "
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "Invalid TensorDescriptor, at least one dimension of the input tensor should "
                      "be reduced.");
     }
 
@@ -647,13 +684,12 @@ void ReduceTensorDescriptor::ReduceTensor(const Handle& handle,
                          : *reinterpret_cast<const float*>(beta);
 
     { // use dynamic reduction
-        const int origReduceLen = toReduceLength;
-
         int p_inLengths[6]  = {0};
         int p_inStrides[6]  = {0};
         int p_outLengths[6] = {0};
         int p_outStrides[6] = {0};
 
+        // the casts below are safe, see ValidateReduceTensorFitsIntoInt()
         int pos = 0;
         for(int i = 0; i < outDescLengths.size(); i++)
         {
@@ -674,7 +710,8 @@ void ReduceTensorDescriptor::ReduceTensor(const Handle& handle,
             if(outDescLengths[i] == 1)
             {
                 p_inLengths[pos] = static_cast<int>(inDescLengths[i]);
-                p_inStrides[pos] = static_cast<int>(inDescStrides[i]);
+                // a length-1 stride is unused and may not fit into int
+                p_inStrides[pos] = inDescLengths[i] == 1 ? 1 : static_cast<int>(inDescStrides[i]);
                 pos++;
             };
         };
@@ -831,8 +868,8 @@ void ReduceTensorDescriptor::ReduceTensor(const Handle& handle,
         if(useTwoCalls)
         {
             const auto toReduceLength_2 = blkGroupSize;
-            const int gridSize_2 =
-                static_cast<int>(configurator.getGridSize_2(invariantLength, toReduceLength_2));
+            const int gridSize_2        = ToIntOrThrow(
+                configurator.getGridSize_2(invariantLength, toReduceLength_2), "grid size");
             const std::vector<size_t> vgd2_2 = {
                 static_cast<size_t>(gridSize_2) * tunable->BlockSize, size_t{1}, size_t{1}};
             const auto reduceImpl2  = configurator.GetReductionMethod_2(toReduceLength_2);
