@@ -1,76 +1,28 @@
 ---
 include: rocblas_common.yaml
 
-# Regression for the missing negative-increment chunk compensation in
-# rocblas_internal_rot_launcher_64. copy, swap, rotm and dot's multi-block path
-# all pass
+# Covers rocblas_internal_rot_launcher_64 on the chunked X path with a negative
+# increment. Each row sets only the increment signs; the test fixes n at 2^31 and
+# the magnitude at 1, sizes the guard regions, and carries the full rationale (see
+# rot_ilp64_chunk_gtest.cpp, and rocblas_rot_kernels_64.cpp for the offset math).
 #
-#   offset + (inc < 0 ? -inc * (n_64 - n - n_base) : n_base * inc)
+# Footprint: 16 GiB for the all-positive control (no guard), 24 GiB for one
+# negative increment, 32 GiB for two. Rows skip rather than fail where the device
+# cannot supply the memory.
 #
-# to the 32-bit launcher, which walks a negative increment from the end of each
-# chunk. rot passed only n_base * inc, so for a negative increment chunk k
-# addressed [-kC, -kC + C - 1]: chunk 0 touched the wrong elements and every
-# later chunk lay entirely below the buffer. rot writes both operands, so this
-# was an out-of-bounds write.
-#
-# Only the increment signs are data. The magnitude is fixed at 1 in the C++ so
-# each operand costs n elements rather than n * |inc|, and n is fixed at 2^31 --
-# the smallest value above c_ILP64_i32_max, which is the threshold below which
-# the launcher returns through a single 32-bit call and never chunks. 2^31 is
-# also exactly 8 * c_i64_grid_X_chunk, so the overrun stops at 7 chunks; 2^31 + 1
-# would add a ninth chunk and deepen it by another 2^28 elements.
-#
-# The fix corrects two lines, offset_x and offset_y, so all four sign
-# combinations are covered: neither negative (a control), each alone, and both.
-# Testing only one would leave half the fix unverified and a later edit could
-# break the uncovered line silently.
-#
-# Memory. Each operand with a negative increment carries 7 * c_i64_grid_X_chunk
-# guarded elements below it -- exactly the union of the out-of-bounds chunk
-# ranges -- and one chunk above, which bounds the most plausible wrong fix. The
-# overrun is then reported as a guard trip instead of faulting, and a fault would
-# abort the process and take every later test in the binary with it. That is
-# 24 GiB for one negative increment and 32 GiB for two; the all-positive control
-# needs no guard and is 16 GiB. The test skips rather than fails where the device
-# cannot supply it.
-#
-# Category. nightly, as a deliberate exception to the convention that a row at
-# this scale is stress -- rot_ILP64 in rot_gtest.yaml, asum_ILP64 and axpy_ILP64
-# all are. stress is currently wired to no lane: no <run> in rtest.xml selects
-# *stress*, ctest comprehensive and ctest full are both
+# Category is nightly by exception to the convention that a row at this scale is
+# stress (rot_ILP64, asum_ILP64, axpy_ILP64 all are). stress is wired to no lane:
+# no <run> in rtest.xml selects *stress*, ctest comprehensive and full are both
 # *quick*:*pre_checkin*:*nightly*, osdb and cqe are nightly, code coverage
-# excludes *stress* by name, and the full entry in test_categories.yaml has its
-# *stress* pattern commented out above a note that CI does not match the stress
-# use case. A stress row therefore runs in no automated lane at all, and this is
-# the only coverage of the defect: no other row pairs a chunked n with a small
-# negative increment, since rot_ILP64's large-n row is all-positive and its
-# negative rows are N: 2 with |inc| above 32 bits, which take the other branch.
-#
-# Runtime is not the obstacle -- a case is about ten seconds on gfx90a-mi250, as
-# measured for the fix. The constraint is VRAM, and where the device cannot
-# supply it these rows skip rather than fail, so the cost on a smaller machine is
-# a skip and not a broken lane.
-#
-# -DROCBLAS_DEV_TEST_ILP64. These rows are not valid in that build, and the
-# category does not fence them off: rocblas_gtest_main.cpp drops a category only
-# when no --yaml is given and the filter is empty, so any explicit filter selects
-# them whatever the category is. In that mode c_i64_grid_X_chunk becomes 512 and
-# c_ILP64_i32_max becomes 0, while n here is a compile-time 2^31 chosen for the
-# production gate and does not follow: the launcher would make 2^22 chunk calls
-# for the same 16 to 32 GiB, and the guard below would no longer cover the
-# pre-fix overrun, which reaches 2^31 - 512 elements down rather than 7 * 2^28.
-# Do not run these rows in that mode.
+# excludes *stress* by name, and test_categories.yaml has its *stress* pattern
+# commented out. These rows are the only coverage of this path, so they go in a
+# lane that runs: no other row pairs a chunked n with a small negative increment.
 
 Tests:
-# Control. With both increments positive the offsets reduce to n_base * inc,
-# which the pre-fix code already computed correctly, so this row passes before
-# the fix as well as after it. Its job is to catch a fix that changes the
-# positive-increment path while correcting the negative one -- the expression is
-# a single conditional covering both, so that is a live possibility.
-#
-# It is also the cheapest row, since neither operand needs a guard region, so it
-# is the last to be skipped for want of memory and the most likely to run on a
-# small device.
+# Control: both increments positive, so the offsets reduce to n_base * inc. Guards
+# a change to the positive-increment path, which shares one conditional with the
+# negative one. Cheapest row (no guard region), so the last to skip on a small
+# device.
 - name: rot_ilp64_chunk_control_positive
   category: nightly
   arguments:

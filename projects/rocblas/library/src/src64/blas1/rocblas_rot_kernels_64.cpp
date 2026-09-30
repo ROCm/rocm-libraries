@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -128,26 +128,12 @@ rocblas_status rocblas_internal_rot_launcher_64(rocblas_handle handle,
             {
                 int32_t n = int32_t(std::min(n_64 - n_base, c_i64_grid_X_chunk));
 
-                // Same compensation as the branch above, for the same reason: the
-                // launcher shifts to the end of the chunk, so a negative increment
-                // needs the offset of the chunk's last element.
-                //
-                // The previous form, -inc * n_base, walked the chunks in reverse:
-                // it addressed the elements of logical chunk k at coefficients
-                // [n_base, n_base + n), where the traversal wants
-                // [n_64 - n - n_base, n_64 - n_base). Both stay in bounds and
-                // their union is the whole vector, so for two same-sign
-                // increments it is only a permutation of which chunk does which
-                // range. With mixed signs the operands are then paired the wrong
-                // way round and the result is wrong.
-                //
-                // Reaching this branch needs |incx| > c_ILP64_i32_max or
-                // |incy| >= c_ILP64_i32_max -- the test above is asymmetric --
-                // and reaching a second chunk additionally needs
-                // n_64 > c_i64_grid_X_chunk, i.e. a span above 2^59 elements, so
-                // it is not reachable with allocatable sizes today. It is kept in
-                // the canonical form anyway, as copy and swap are on both of their
-                // increment-width paths, so the two branches cannot drift.
+                // Same compensation as the branch above: the launcher shifts to
+                // the end of the chunk, so a negative increment needs the offset
+                // of the chunk's last element. This branch (an increment wider
+                // than 32 bits) needs a span above 2^59 elements to reach a second
+                // chunk, so it is not exercisable at allocatable sizes; it matches
+                // copy and swap so the two increment-width paths cannot drift.
                 int64_t shiftx
                     = offset_x + (incx_64 < 0 ? -incx_64 * (n_64 - n - n_base) : n_base * incx_64);
                 int64_t shifty

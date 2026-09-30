@@ -35,79 +35,35 @@
 
 namespace
 {
-    // Regression for the missing negative-increment chunk compensation in
-    // rocblas_internal_rot_launcher_64.
+    // Covers rocblas_internal_rot_launcher_64 on the chunked X path: n above
+    // c_ILP64_i32_max with a negative increment, where each chunk's base offset
+    // must account for the 32-bit launcher traversing a negative increment from
+    // the end of the chunk (see rocblas_rot_kernels_64.cpp for the offset math).
+    // Below that n the launcher takes a single 32-bit call and never chunks, so
+    // n is at least 2^31 here, roughly 8.6 GB per operand at single precision.
     //
-    // The src64 launcher splits n into chunks of c_i64_grid_X_chunk (2^28) and
-    // calls the 32-bit launcher per chunk. That launcher walks a negative
-    // increment from the end of the data using the chunk's n, so the caller has to
-    // hand it the offset of the chunk's last element. copy, swap, rotm and dot's
-    // multi-block path all pass
+    // The four rows exercise both offset lines independently: increments positive
+    // (control), incx negative, incy negative, and both. Detection is twofold. The
+    // value check compares every element against BLAS traversal order; two sites
+    // per chunk carry distinct values so the expected result depends on the actual
+    // x/y pairing, while the full scan confirms the chunk ranges partition the
+    // vector. The guard check catches an out-of-bounds write as a guard trip
+    // rather than a device fault, which would abort the whole binary.
     //
-    //   offset + (inc < 0 ? -inc * (n_64 - n - n_base) : n_base * inc)
+    // n is exactly 2^31 = 8 * c_i64_grid_X_chunk: the smallest n that chunks, and
+    // an even multiple. c_below is the 7-chunk span a lost negative-increment
+    // offset reaches below the pointer; c_above is one chunk, bounding an
+    // off-by-one that writes (n_64 - 1 - n_base) instead of (n_64 - n - n_base).
     //
-    // while rot passed only the positive-stride form, n_base * inc. For inc < 0
-    // that contributes -|inc| * n_base, so chunk k addresses [-kC, -kC + C - 1]:
-    // chunk 0 is in bounds but covers the wrong range, and every later chunk lies
-    // entirely below the buffer. rot writes both operands, so this is an
-    // out-of-bounds write.
-    //
-    // Reaching it requires n above c_ILP64_i32_max, since at or below that the
-    // launcher returns through a single 32-bit call before the chunk loop. n is
-    // therefore at least 2^31 elements and roughly 8.6 GB per operand at single
-    // precision; that floor is set by the defect and cannot be lowered.
-    //
-    // The fix corrects two lines, offset_x and offset_y, so the increment signs
-    // are taken from the test data and all four combinations are exercised:
-    // neither negative (a control, correct before and after the fix), incx alone,
-    // incy alone, and both. Covering only one would leave half the fix unverified,
-    // and a later edit could break the uncovered line without any test noticing.
-    //
-    // DETECTION. Two independent mechanisms, because either one alone is weaker
-    // than it looks:
-    //
-    //   * Values. Every element of both operands is checked against a value
-    //     derived from BLAS traversal order. A uniform fill alone would not be
-    //     enough: a rotation of a constant vector by a uniform (c, s) is again
-    //     constant, so any permutation of which chunk covers which range would be
-    //     invisible and detection would rest entirely on the guard. Two sites per
-    //     chunk -- its first and last element -- therefore carry distinct values,
-    //     which makes the expected result depend on the actual pairing, and that
-    //     is what the fix is about. Checking every element on top of that is what
-    //     shows the chunk ranges partition the vector rather than merely getting
-    //     the probed points right.
-    //   * Guards. Each operand with a negative increment is allocated with a
-    //     guarded region below and above the pointer handed to rocBLAS, so an
-    //     out-of-bounds write is reported as a guard trip rather than a device
-    //     fault. That matters because a fault aborts the process and takes every
-    //     later test in the binary with it.
-    //
-    // SIZING. n is exactly 2^31, which is 8 * c_i64_grid_X_chunk. It is both the
-    // smallest n that reaches the path and a value that divides evenly, so the
-    // pre-fix overrun stops at 7 chunks below the pointer; 2^31 + 1 would add a
-    // ninth chunk and deepen it by a further 2^28 elements.
-    //
-    // The guard below is exactly 7 * c_i64_grid_X_chunk, the union of those seven
-    // ranges. The guard above is one chunk, which is not needed by the defect as
-    // it stands but bounds the most plausible wrong fix: writing
-    // (n_64 - 1 - n_base) instead of (n_64 - n - n_base) overruns the top by up to
-    // one chunk, and without a guard there that would be a fault rather than a
-    // reported failure.
-    //
-    // These are the production values of the library constants, and the test is
-    // only valid against them. A -DROCBLAS_DEV_TEST_ILP64 build sets
-    // c_i64_grid_X_chunk to 512 and c_ILP64_i32_max to 0, while c_n below stays a
-    // compile-time 2^31 chosen for the production gate: the launcher would then
-    // make 2^22 chunk calls for the same 16 to 32 GiB, and c_below would no longer
-    // cover the pre-fix overrun, which in that mode reaches 2^31 - 512 elements
-    // below the pointer rather than 7 * 2^28. Nothing fences these rows off from
-    // that build -- the category cannot, since the harness drops a category only
-    // when the filter is empty -- so a developer working in that mode should not
-    // run them.
+    // Valid only against the production constants. A -DROCBLAS_DEV_TEST_ILP64 build
+    // sets c_i64_grid_X_chunk to 512 and c_ILP64_i32_max to 0 while c_n stays 2^31,
+    // so the guard sizes no longer match the chunk layout; do not run these rows in
+    // that mode. The category does not fence them off, since the harness drops a
+    // category only when the filter is empty.
     constexpr int64_t c_grid_x_chunk = int64_t(1) << 28; // c_i64_grid_X_chunk
     constexpr int64_t c_n            = int64_t(1) << 31; // 8 * c_grid_x_chunk
-    constexpr int64_t c_below        = 7 * c_grid_x_chunk; // union of OOB chunks
-    constexpr int64_t c_above        = c_grid_x_chunk; // bounds an off-by-one fix
+    constexpr int64_t c_below        = 7 * c_grid_x_chunk; // 7-chunk guard span below
+    constexpr int64_t c_above        = c_grid_x_chunk; // one-chunk guard span above
 
     constexpr unsigned char c_guard_byte = 0xA5;
 
@@ -222,10 +178,9 @@ namespace
         const int64_t incx = arg.incx < 0 ? -1 : 1;
         const int64_t incy = arg.incy < 0 ? -1 : 1;
 
-        // Guarded room is needed exactly where an increment is negative, because
-        // that is the line whose compensation was missing. The all-positive row is
-        // a control and needs no guard at all, which also makes it the cheapest
-        // row and the last to be skipped for want of memory.
+        // Guarded room is needed exactly where an increment is negative. The
+        // all-positive row is a control and needs no guard at all, which also makes
+        // it the cheapest row and the last to be skipped for want of memory.
         const size_t below_x = incx < 0 ? size_t(c_below) : 0;
         const size_t below_y = incy < 0 ? size_t(c_below) : 0;
         const size_t above_x = incx < 0 ? size_t(c_above) : 0;
@@ -302,7 +257,7 @@ namespace
 
         const rocblas_status status
             = rocblas_rot_64<T, T, T>(handle, c_n, dx, incx, dy, incy, &c_val, &s_val);
-        EXPECT_EQ(status, rocblas_status_success);
+        ASSERT_EQ(status, rocblas_status_success);
         const hipError_t sync = hipDeviceSynchronize();
         ASSERT_EQ(sync, hipSuccess)
             << "device fault after rot, which indicates an out-of-bounds access beyond the "
@@ -359,9 +314,7 @@ namespace
         //
         // A negative increment walks its operand from the far end, so physical
         // element p of x carries logical element i = n-1-p, and the y it is paired
-        // with is whichever physical element carries the same logical index. That
-        // reversal is correct behaviour, not a symptom; what the defect changes is
-        // which physical elements a chunk touches at all.
+        // with is whichever physical element carries the same logical index.
         auto expected = [&](int64_t p, bool want_x) {
             if(want_x)
             {
@@ -380,8 +333,8 @@ namespace
         //
         // The sample sites exist to make the *pairing* observable, and sixteen of
         // them are enough for that, but they are not enough to show that the chunk
-        // ranges partition the vector: a wrong fix could get all sixteen right and
-        // still skip or double-cover elements between them. Away from the sample
+        // ranges partition the vector: getting all sixteen right is consistent with
+        // skipping or double-covering elements between them. Away from the sample
         // sites both operands are constant, so the expected value is uniform --
         // 0.5*1 + 2*2 = 4.5 for x and 0.5*2 - 2*1 = -1 for y, both exact -- which
         // makes the full check no harder to write than the sampled one. This holds
