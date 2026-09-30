@@ -810,6 +810,11 @@ class LogicalScheduler:
         self._tail_own_peaks: Optional[dict] = None
         self._tail_prime_emitted: Optional[list] = None
         self._tail_merged_scheduler: Optional['LogicalScheduler'] = None
+        # Second wait/barrier for the four-deep tail's in-flight unroll half,
+        # and the slot it goes in front of. Both stay None unless the split
+        # entry is on; see _tailUidSyncSlot.
+        self._tail_uid_sync_slot: Optional[tuple] = None
+        self._tail_uid_sync: Optional[dict] = None
         # Tail-loop tile bookkeeping. Tail loop only use a subset of tiles, so we track which tileIds are
         # unused or freed for reuse within the tail loop.
         self._tail_unused_tile_ids: Dict[str, set] = {'A': set(), 'B': set(),
@@ -1102,6 +1107,19 @@ class LogicalScheduler:
                         side_key = 'A' if tensor in ('A', 'SA') else 'B'
                         ts, te = tile_range[side_key]
 
+                        # A scale read spans k_gran sub-k-iterations, so the
+                        # chunk that feeds k=2 is placed at slot 0 -- two ahead
+                        # of its consumer, and ahead of the only barrier that
+                        # makes the other half's LDS writes visible. That is
+                        # what pins the tail's entry wait at vmcnt(0). Hold it
+                        # to one sub-k-iteration of lookahead so a second
+                        # wait/barrier pair has somewhere to go. Only the tail
+                        # sub-scheduler asks; the mainloop keeps its placement.
+                        lr_slot = slot_k
+                        if (tensor in ('SA', 'SB') and multi_part and not is_wrap
+                                and cfg.spanTailOverride):
+                            lr_slot = min(numK - 1, max(lr_slot, lr_k_start - 1))
+
                         # Wrapping: use load dict. Non-wrapping: use placed set.
                         if is_wrap and multi_part:
                             if not load[side_key]:
@@ -1117,10 +1135,10 @@ class LogicalScheduler:
                             tensor=tensor,
                             mtIteration=lr_mt,
                             tiles=MFMATileRange(lr_k_start, lr_k_end, ts, te),
-                            subIterK_slot=slot_k,
+                            subIterK_slot=lr_slot,
                         )
-                        slots[slot_k].lrs.append(lr)
-                        slot_mt[slot_k] = lr_mt
+                        slots[lr_slot].lrs.append(lr)
+                        slot_mt[lr_slot] = lr_mt
 
         return slots
 
@@ -3529,6 +3547,60 @@ class LogicalScheduler:
 
         return sum(_loads(gr) for gr in grs[max(scaleIdx) + 1:])
 
+    def _tailEntryResidentBound(self) -> int:
+        """Entry bound once a second barrier covers the in-flight half.
+
+        With the second wait and barrier sitting in front of the first read of
+        the in-flight half, the entry wait only has to make the *resident* half
+        visible. One DepthU's worth of loads may still be outstanding, so the
+        bound is that batch size -- 18 for MT256x256 fp4.
+
+        Returns 0, which waits for everything, when the batch size is not
+        derivable; the caller then keeps the shipped behaviour.
+        """
+        emitter = self._emitter
+        if emitter is None:
+            return 0
+        total = sum(info.numGRTotal
+                    for info in emitter.tileInfoMap.values() if info)
+        return int(total) if total > 0 else 0
+
+    def _tailUidSyncSlot(self, emitted_3d) -> Optional[tuple]:
+        """Where the in-flight unroll half is first read, or None.
+
+        The four-deep body reads two unroll halves. The first is resident by
+        the time the entry barrier retires; the second may still be on the
+        wire, so the earliest read of it is the only place a second wait and
+        barrier can go and still be worth anything.
+
+        An LR does not carry its half directly -- it is the read's k range over
+        the per-half k span, which is how the tail dump prints it. Returns the
+        (partition, subIterK) of the earliest such read, or None when the body
+        does not split into halves at all.
+        """
+        sub = self._tail_merged_scheduler
+        if sub is None or emitted_3d is None:
+            return None
+        perUid = {}
+        for tensor, numUnroll in (sub.config.numUnroll or {}).items():
+            if not numUnroll:
+                return None
+            perUid[tensor] = sub.config.numSubIterK // numUnroll
+        if not perUid:
+            return None
+        for pi, partition in enumerate(emitted_3d):
+            for k, em_list in enumerate(partition):
+                for em in em_list:
+                    if em.opType != 'lr':
+                        continue
+                    src = em.source
+                    span = perUid.get(src.tensor)
+                    if not span:
+                        continue
+                    if src.tiles.subIterK_start // span >= 1:
+                        return (pi, k)
+        return None
+
     def build_tailloop_pgr0(self) -> List[List[List[EmittedModule]]]:
         """Template for Tailloop based on PGR0 schedule.
 
@@ -4301,7 +4373,7 @@ class LogicalScheduler:
         return self._preloop_emitted
 
     def _emitLoop(self, writer, kernel, label, emitted_3d, schedule=True,
-                  injectAfterPartition=None):
+                  injectAfterPartition=None, injectBeforeSlot=None):
         """Emit a loop section from a 3D emitted structure.
 
         emitted_3d: [partition][subIterK][EmittedModule]
@@ -4309,6 +4381,11 @@ class LogicalScheduler:
         injectAfterPartition: {partition index: Module} spliced in once that
         partition's K reduction is complete. The staged fused store uses this to
         drain partition p's D tiles while partition p+1 is still accumulating.
+
+        injectBeforeSlot: {(partition, subIterK): Module} emitted ahead of that
+        slot, before its reads are scheduled. The four-deep tail uses it to put
+        the second wait/barrier in front of the first read of the in-flight
+        unroll half.
 
         When schedule=True and a group has MFMAs, calls instructionSchedule
         for interleaving. When schedule=False, emits instructions sequentially.
@@ -4357,6 +4434,10 @@ class LogicalScheduler:
             partModule = Module(f"{label}_part{pi}") if _ownModule else module
             for k, em_list in enumerate(partition_emitted):
                 partModule.addComment0(f"partition={pi} subIterK={k}")
+                if injectBeforeSlot is not None:
+                    _pre = injectBeforeSlot.get((pi, k))
+                    if _pre is not None:
+                        partModule.add(_pre)
                 has_mfma = any(em.opType == 'mfma' for em in em_list)
 
                 if schedule and em_list and has_mfma:
@@ -4905,7 +4986,8 @@ class LogicalScheduler:
         writer.states.subtileStoreStages = 0
         writer.states.subtileStoreStagesM = 1
         fusedLoopModule = self._emitLoop(writer, kernel, f"{label}_FUSED", fusedEmitted,
-                                         injectAfterPartition=stagedInject)
+                                         injectAfterPartition=stagedInject,
+                                         injectBeforeSlot=self._tail_uid_sync)
         # Step 4 store-init hoist: buildSubtileFusedStore stashed the branch/memory-free
         # leading run of the fused store's SrdD address-math prep (when enabled and
         # eligible). Weave it into the FUSED loop's MFMA gaps so that exposed serial SALU
@@ -6372,8 +6454,23 @@ class LogicalScheduler:
             # barrier, and _tailEntryInflightBound derives it. The knob
             # overrides it; see FINDINGS F22 for the sweep behind the bound.
             from rocisa.instruction import SWaitCnt, SBarrier
+            self._tail_uid_sync_slot = self._tailUidSyncSlot(nll_ft_3d)
+            # Split entry: give the in-flight half its own wait and barrier at
+            # the first read that touches it, so the entry wait only has to
+            # cover the resident half. That turns the entry vmcnt(0) the
+            # profile charges 354 cycles per wave into a vmcnt(18) charged 28,
+            # and the second wait it pays for costs 73 -- tail vmcnt stall
+            # falls from 91.7k cycles to 42.4k. Throughput is unchanged
+            # (1.001x geomean over 11 shapes): the arm is MFMA-bound, so the
+            # recovered cycles land back on the critical path. Kept on because
+            # a bounded wait is the correct shape for a half the barrier
+            # already covers. 0 restores the single vmcnt(0).
+            splitWait = (plsinDebugEnv("TENSILE_PLSIN_TAIL_SPLIT_WAIT", "1") != "0"
+                         and self._tail_uid_sync_slot is not None)
+            _defaultVmcnt = (self._tailEntryResidentBound() if splitWait
+                             else self._tailEntryInflightBound())
             entryVmcnt = int(plsinDebugEnv("TENSILE_PLSIN_TAIL_ENTRY_VMCNT",
-                                           str(self._tailEntryInflightBound())))
+                                           str(_defaultVmcnt)))
             # Collected rather than emitted: this is the four-deep body's entry
             # sequence, so it belongs behind the fused guard with the body it
             # serves. The plain arm keeps the baseline pair's own sync.
@@ -6391,6 +6488,12 @@ class LogicalScheduler:
                 tailPrelude.add(self._emitLoop(writer, kernel, "TAILPRIME",
                                           [[self._tail_prime_emitted]],
                                           schedule=False))
+            if splitWait:
+                _sync = Module("FourDeepTailUidSync")
+                _sync.add(SWaitCnt(vlcnt=0, dscnt=-1, vscnt=-1,
+                          comment="four-deep tail: retire the in-flight half"))
+                _sync.add(SBarrier(comment="four-deep tail: in-flight half visible"))
+                self._tail_uid_sync = {self._tail_uid_sync_slot: _sync}
         module.addComment0(f"NLL_C{last}")
         module.add(self._emitNllMaybeFused(writer, kernel, f"NLL_C{last}",
                                   inject_pap_after_nll_drain(nll_ft_3d),
