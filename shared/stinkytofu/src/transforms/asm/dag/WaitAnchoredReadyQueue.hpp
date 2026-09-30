@@ -24,6 +24,8 @@
 
 #include <cassert>
 #include <iostream>
+#include <limits>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -139,6 +141,17 @@ using OrderedReadyNodeSet = std::set<DAGNode*, CompareDAGNodeByOriginalOrder>;
 /// Set to false to fill the budget in strict original order.
 constexpr bool kPreferMemProducerFirst = true;
 
+/// Build-time toggle for preserving the distance a DS load sits behind the
+/// matrix instruction preceding it.
+///
+/// The scheduler that runs before the repair leaves a deliberate gap between a
+/// matrix instruction and the DS loads that follow it. Selecting a load as early
+/// as the window allows would close that gap, so each load is held back until the
+/// schedule has moved at least as far past the matrix instruction as it had in
+/// the input. This is a lower bound: a load may end up further away, never
+/// nearer. Set to false to let loads issue as early as the window allows.
+constexpr bool kPreserveMatrixToDsGap = true;
+
 /// Selection policy for shortening the window that ends at a matrix anchor.
 ///
 /// A window is repaired when its anchor carries a final wait, and also when an
@@ -158,7 +171,9 @@ class WaitAnchoredPickPolicy {
                            unsigned slotsToMovePastAnchor)
         : waitAnchors_(waitAnchors),
           regionDAG_(regionDAG),
-          slotsToMovePastAnchor_(slotsToMovePastAnchor) {}
+          slotsToMovePastAnchor_(slotsToMovePastAnchor) {
+        buildDsReleaseDistances();
+    }
 
     /// Return a policy-selected node, or nullptr to request stable baseline order.
     DAGNode* select(const OrderedReadyNodeSet& wmmaQueue,
@@ -185,11 +200,20 @@ class WaitAnchoredPickPolicy {
     }
 
     /// Update policy state after the queue commits a selected node.
+    ///
+    /// sinceLastMatrix_ is maintained here rather than in the per-window
+    /// handlers because it spans windows: it must keep advancing while no window
+    /// is active, so that a load in the next window still measures its distance
+    /// from the matrix instruction that actually precedes it.
     void onPicked(DAGNode& node, bool isWmma) {
-        if (isWmma)
+        if (isWmma) {
+            sinceLastMatrix_ = 0;
             onWmmaPicked(node);
-        else
+        } else {
+            reportShortGapIfAny(node);
+            ++sinceLastMatrix_;
             onOtherPicked();
+        }
     }
 
    private:
@@ -216,12 +240,66 @@ class WaitAnchoredPickPolicy {
         }
     };
 
+    /// Marks a node the gap rule says nothing about.
+    static constexpr unsigned kNoGapConstraint = std::numeric_limits<unsigned>::max();
+
     const WaitAnchorMap& waitAnchors_;
     RegionDAG& regionDAG_;
     const unsigned slotsToMovePastAnchor_;
     WindowState window_;
     /// Non-WMMA work deferred past the previous anchor and not yet picked.
     unsigned pendingCarry_ = 0;
+    /// Per DS load, how far past the preceding matrix instruction the schedule
+    /// must be before it may be selected. kNoGapConstraint for everything else.
+    std::vector<unsigned> dsReleaseDistance_;
+    /// Instructions emitted since the last matrix instruction was selected.
+    unsigned sinceLastMatrix_ = 0;
+
+    /// Give every DS load in one matrix interval the input distance of the
+    /// *first* load in that interval, so the whole run is gated on one release
+    /// point. Distances are a difference of DAG IDs, which are dense and follow
+    /// input order.
+    ///
+    /// Per-load distances would be wrong: they reconstruct the input's internal
+    /// spacing between loads and so drive ordinary work between loads the
+    /// scheduler had placed back to back.
+    void buildDsReleaseDistances() {
+        dsReleaseDistance_.assign(regionDAG_.nodes.size(), kNoGapConstraint);
+
+        std::optional<unsigned> lastMatrixId;
+        std::optional<unsigned> intervalDistance;
+        for (unsigned id = 0; id < regionDAG_.nodes.size(); ++id) {
+            const DAGNode& node = regionDAG_.nodes[id];
+            if (isMatrixInstruction(*node.inst)) {
+                lastMatrixId = id;
+                intervalDistance.reset();
+                continue;
+            }
+            if (!lastMatrixId.has_value()) continue;
+            if (waitcnt::classifyMemOp(*node.inst) != waitcnt::CK_DS) continue;
+            if (!intervalDistance.has_value()) intervalDistance = id - *lastMatrixId - 1;
+            dsReleaseDistance_[id] = *intervalDistance;
+        }
+    }
+
+    /// Report a DS load committed closer to its matrix instruction than the
+    /// input had it. Legal, so this is a diagnostic rather than an assert: only
+    /// the spacing is lost. Reporting at the commit point also covers the
+    /// mandatory-producer step, which takes a load whatever its release distance.
+    void reportShortGapIfAny(const DAGNode& node) const {
+        if (matrixGapSatisfied(node)) return;
+        PASS_DEBUG(std::cerr << "[WaitAnchoredReadyQueue onPicked] gap shortened for dagId="
+                             << node.id << " required=" << dsReleaseDistance_[node.id]
+                             << " actual=" << sinceLastMatrix_ << '\n');
+    }
+
+    /// Test whether the schedule has moved far enough past the last matrix
+    /// instruction for this node to be selected.
+    bool matrixGapSatisfied(const DAGNode& node) const {
+        if constexpr (!kPreserveMatrixToDsGap) return true;
+        const unsigned required = dsReleaseDistance_[node.id];
+        return required == kNoGapConstraint || sinceLastMatrix_ >= required;
+    }
 
     /// Account for a non-WMMA pick within the active window.
     void onOtherPicked() {
@@ -248,7 +326,8 @@ class WaitAnchoredPickPolicy {
         }
 
         PASS_DEBUG(std::cerr << "[WaitAnchoredReadyQueue onWmmaPicked] picked WMMA dagId="
-                             << node.id << " pendingCarry=" << pendingCarry_ << '\n');
+                             << node.id << " pendingCarry=" << pendingCarry_
+                             << " sinceLastMatrix reset\n");
 
         DAGNode* nextWmma = findNextWmmaInOriginalOrder(node.id);
         if (nextWmma == nullptr) return;
@@ -327,12 +406,26 @@ class WaitAnchoredPickPolicy {
         return false;
     }
 
-    /// Find the earliest ready memory producer that belongs before the anchor.
-    DAGNode* findReadyMemProducerBeforeAnchor(const OrderedReadyNodeSet& otherQueue) const {
+    /// Find the earliest ready node that belongs before the anchor and matches.
+    template <typename Predicate>
+    DAGNode* findReadyBeforeAnchor(const OrderedReadyNodeSet& otherQueue, Predicate match) const {
         for (DAGNode* node : otherQueue) {
-            if (node->id < window_.anchor->id && isMemProducer(*node)) return node;
+            if (node->id < window_.anchor->id && match(*node)) return node;
         }
         return nullptr;
+    }
+
+    /// Find the earliest ready memory producer that belongs before the anchor.
+    DAGNode* findReadyMemProducerBeforeAnchor(const OrderedReadyNodeSet& otherQueue) const {
+        return findReadyBeforeAnchor(otherQueue,
+                                     [](const DAGNode& node) { return isMemProducer(node); });
+    }
+
+    /// Same, restricted to producers the gap rule has already released.
+    DAGNode* findReadyReleasedMemProducer(const OrderedReadyNodeSet& otherQueue) const {
+        return findReadyBeforeAnchor(otherQueue, [this](const DAGNode& node) {
+            return isMemProducer(node) && matrixGapSatisfied(node);
+        });
     }
 
     /// Find ready dependency work needed to make the anchor ready.
@@ -347,13 +440,25 @@ class WaitAnchoredPickPolicy {
     DAGNode* findReadyOtherBeforeAnchor(const OrderedReadyNodeSet& otherQueue) const {
         if (!window_.active()) return nullptr;
         if constexpr (kPreferMemProducerFirst) {
-            if (DAGNode* node = findReadyMemProducerBeforeAnchor(otherQueue)) return node;
+            if (DAGNode* node = findReadyReleasedMemProducer(otherQueue)) return node;
         }
+
+        DAGNode* gapBlocked = nullptr;
         for (DAGNode* node : otherQueue) {
             // This includes carried-over work from the previous WMMA window.
-            if (node->id < window_.anchor->id) return node;
+            if (node->id >= window_.anchor->id) continue;
+            if (!matrixGapSatisfied(*node)) {
+                if (gapBlocked == nullptr) gapBlocked = node;
+                continue;
+            }
+            return node;
         }
-        return nullptr;
+
+        // Taking a load before its gap is filled, rather than stalling. Believed
+        // unreachable: the work that forms a gap sits between the load and the
+        // matrix instruction, so it has lower IDs and is selected first. Kept
+        // because the queue must always make progress if it is ever wrong.
+        return gapBlocked;
     }
 
     /// Find the next WMMA in original DAG order.
