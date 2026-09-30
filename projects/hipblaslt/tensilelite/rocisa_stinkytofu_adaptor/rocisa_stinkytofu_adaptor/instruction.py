@@ -4441,6 +4441,8 @@ BufferStoreB128 = _make_buffer_store_class("BufferStoreB128", "buffer_store_b128
 BufferAtomicAddF32 = _make_buffer_load_class("BufferAtomicAddF32", "buffer_atomic_add_f32", latency=1)
 BufferAtomicCmpswapB32 = _make_buffer_store_class("BufferAtomicCmpswapB32", "buffer_atomic_cmpswap_b32", latency=1)
 BufferAtomicCmpswapB64 = _make_buffer_store_class("BufferAtomicCmpswapB64", "buffer_atomic_cmpswap_b64", latency=1)
+# logicalIR: BufferAtomicPkAddBF16
+BufferAtomicPkAddBF16 = _make_buffer_store_class("BufferAtomicPkAddBF16", "buffer_atomic_pk_add_bf16", latency=1)
 
 # --- Flat Store: rocisa(src, vaddr, flat, comment) ---
 FlatStoreB8 = _make_flat_store_class("FlatStoreB8", "flat_store_b8", latency=1)

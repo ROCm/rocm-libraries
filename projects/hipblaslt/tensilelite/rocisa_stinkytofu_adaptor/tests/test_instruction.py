@@ -253,6 +253,7 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     BufferAtomicAddF32,
     BufferAtomicCmpswapB32,
     BufferAtomicCmpswapB64,
+    BufferAtomicPkAddBF16,
     FlatLoadD16HIU8,
     FlatLoadD16U8,
     FlatLoadD16HIB16,
@@ -2337,6 +2338,7 @@ _BUFFER_STORE = [
     (BufferStoreB128, "buffer_store_b128"),
     (BufferAtomicCmpswapB32, "buffer_atomic_cmpswap_b32"),
     (BufferAtomicCmpswapB64, "buffer_atomic_cmpswap_b64"),
+    (BufferAtomicPkAddBF16, "buffer_atomic_pk_add_bf16"),
 ]
 
 _FLAT_LOAD = [
