@@ -787,6 +787,23 @@ static void op_tile_global_ptr_add(rocke_lower_t* L, const rocke_op_t* op)
                    off64);
 }
 
+static void op_tile_global_ptr_to_i64(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* ptr;
+    if(!rocke_ll_live(L))
+        return;
+    if(op->num_operands != 1 || op->num_results != 1)
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "global_ptr_to_i64 expects one operand and one result");
+    ptr = op->operands[0];
+    if(strcmp(rocke_ll_value_ptr_type(L, ptr), "ptr addrspace(1)") != 0)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "global_ptr_to_i64 ptr must be a global pointer");
+    rocke_ll_emitf(L,
+                   "  %s = ptrtoint ptr addrspace(1) %s to i64",
+                   ll_res(op),
+                   rocke_ll_operand(L, ptr));
+}
+
 /* ====================================================================== */
 /* tile.* buffer resource descriptor + buffer load/store                  */
 /* ====================================================================== */
@@ -1543,6 +1560,158 @@ static void op_tile_global_load_tr16_b128(rocke_lower_t* L, const rocke_op_t* op
                    rocke_ll_operand(L, src));
 }
 
+static int ll_is_i32_value(const rocke_value_t* v)
+{
+    return v && v->type && v->type->kind == ROCKE_TYPE_SCALAR
+           && v->type->scalar == ROCKE_SCALAR_I32;
+}
+
+static void op_tile_cluster_load(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* ptr;
+    const rocke_value_t* mask;
+    const rocke_type_t* rty;
+    const char* ptr_ty;
+    const char* bits;
+    const char* suffix;
+    const char* expected;
+    const char* key;
+    int64_t width;
+    int64_t cachepolicy;
+    int lanes;
+    if(!rocke_ll_live(L))
+        return;
+    ll_require_gfx1250_llvm23(L, "cluster_load");
+    if(op->num_operands != 2 || op->num_results != 1)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "cluster_load expects two operands and one result");
+    ptr    = op->operands[0];
+    mask   = op->operands[1];
+    ptr_ty = rocke_ll_value_ptr_type(L, ptr);
+    if(strcmp(ptr_ty, "ptr addrspace(1)") != 0)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "cluster_load ptr must be a global pointer");
+    if(!ll_is_i32_value(mask))
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "cluster_load mask must be i32");
+    width = ll_attr_int(op, "width_bytes", 0);
+    if(width == 4)
+    {
+        bits     = "b32";
+        suffix   = "i32";
+        expected = "i32";
+        lanes    = 1;
+    }
+    else if(width == 8)
+    {
+        bits     = "b64";
+        suffix   = "v2i32";
+        expected = "vec<i32x2>";
+        lanes    = 2;
+    }
+    else if(width == 16)
+    {
+        bits     = "b128";
+        suffix   = "v4i32";
+        expected = "vec<i32x4>";
+        lanes    = 4;
+    }
+    else
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "cluster_load width_bytes must be 4, 8, or 16, got %lld",
+                      (long long)width);
+    rty = op->results[0]->type;
+    if(lanes == 1 ? !ll_is_i32_value(op->results[0])
+                  : (!rty || rty->kind != ROCKE_TYPE_VECTOR || rty->count != lanes || !rty->elem
+                     || rty->elem->kind != ROCKE_TYPE_SCALAR
+                     || rty->elem->scalar != ROCKE_SCALAR_I32))
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "cluster_load result must be %s, got %s",
+                      expected,
+                      rty && rty->name ? rty->name : "?");
+    cachepolicy = ll_attr_int(op, "cachepolicy", 0);
+    if(cachepolicy < 0 || cachepolicy > 0x1F)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "cluster_load cachepolicy must be in 0..31, got %lld",
+                      (long long)cachepolicy);
+    key = rocke_arena_printf(&L->arena, "cluster.load.%s.%s", bits, suffix);
+    rocke_ll_need(L, key);
+    rocke_ll_emitf(L,
+                   "  %s = call %s @llvm.amdgcn.cluster.load.%s.%s("
+                   "ptr addrspace(1) %s, i32 %lld, i32 %s)",
+                   ll_res(op),
+                   rocke_ll_llvm_type(L, rty),
+                   bits,
+                   suffix,
+                   rocke_ll_operand(L, ptr),
+                   (long long)cachepolicy,
+                   rocke_ll_operand(L, mask));
+}
+
+static void op_tile_cluster_load_async_to_lds(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* src;
+    const rocke_value_t* lds;
+    const rocke_value_t* mask;
+    const char* local;
+    const char* suffix;
+    const char* key;
+    int64_t width;
+    int64_t offset;
+    int64_t cachepolicy;
+    if(!rocke_ll_live(L))
+        return;
+    ll_require_gfx1250_llvm23(L, "cluster_load_async_to_lds");
+    if(op->num_operands != 3)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "cluster_load_async_to_lds expects three operands");
+    src  = op->operands[0];
+    lds  = op->operands[1];
+    mask = op->operands[2];
+    if(strcmp(rocke_ll_value_ptr_type(L, src), "ptr addrspace(1)") != 0)
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "cluster_load_async_to_lds src_ptr must be a global pointer");
+    if(!ll_is_i32_value(mask))
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "cluster_load_async_to_lds mask must be i32");
+    width = ll_attr_int(op, "width_bytes", 0);
+    if(width == 1)
+        suffix = "b8";
+    else if(width == 4)
+        suffix = "b32";
+    else if(width == 8)
+        suffix = "b64";
+    else if(width == 16)
+        suffix = "b128";
+    else
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "cluster_load_async_to_lds width_bytes must be 1, 4, 8, or 16, got %lld",
+                      (long long)width);
+    offset = ll_attr_int(op, "offset_bytes", 0);
+    if(offset < INT32_MIN || offset > INT32_MAX)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "cluster_load_async_to_lds offset_bytes must fit signed i32, got %lld",
+                      (long long)offset);
+    cachepolicy = ll_attr_int(op, "cachepolicy", 0);
+    if(cachepolicy < 0 || cachepolicy > 0x1F)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "cluster_load_async_to_lds cachepolicy must be in 0..31, got %lld",
+                      (long long)cachepolicy);
+    local = ll_lds_ptr_operand(L, "cluster_load_async_to_lds", lds);
+    key   = rocke_arena_printf(&L->arena, "cluster.load.async.to.lds.%s", suffix);
+    rocke_ll_need(L, key);
+    rocke_ll_emitf(L,
+                   "  call void @llvm.amdgcn.cluster.load.async.to.lds.%s("
+                   "ptr addrspace(1) %s, ptr addrspace(3) %s, i32 %lld, i32 %lld, i32 %s)",
+                   suffix,
+                   rocke_ll_operand(L, src),
+                   local,
+                   (long long)offset,
+                   (long long)cachepolicy,
+                   rocke_ll_operand(L, mask));
+}
+
 static void op_tile_tensor_lds_transfer(rocke_lower_t* L,
                                         const rocke_op_t* op,
                                         const char* short_name,
@@ -1650,6 +1819,7 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_SMEM_ADDR_OF, op_tile_smem_addr_of);
     rocke_ll_set_handler(ROCKE_OP_TILE_SMEM_PTR_ADD, op_tile_smem_ptr_add);
     rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_PTR_ADD, op_tile_global_ptr_add);
+    rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_PTR_TO_I64, op_tile_global_ptr_to_i64);
 
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_RSRC, op_tile_buffer_rsrc);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_VN_F16, op_tile_buffer_load_vN_f16);
@@ -1672,6 +1842,9 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_STORE_ASYNC_FROM_LDS,
                          op_tile_global_store_async_from_lds);
     rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_LOAD_TR16_B128, op_tile_global_load_tr16_b128);
+    rocke_ll_set_handler(ROCKE_OP_TILE_CLUSTER_LOAD, op_tile_cluster_load);
+    rocke_ll_set_handler(ROCKE_OP_TILE_CLUSTER_LOAD_ASYNC_TO_LDS,
+                         op_tile_cluster_load_async_to_lds);
     rocke_ll_set_handler(ROCKE_OP_TILE_TENSOR_LOAD_TO_LDS, op_tile_tensor_load_to_lds);
     rocke_ll_set_handler(ROCKE_OP_TILE_TENSOR_STORE_FROM_LDS, op_tile_tensor_store_from_lds);
     rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_LOAD_LDS, op_tile_global_load_lds);

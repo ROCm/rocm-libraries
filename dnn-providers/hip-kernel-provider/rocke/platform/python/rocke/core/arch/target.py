@@ -904,6 +904,12 @@ class MemoryCapabilities:
     has_ds_read_tr: bool
     has_tdm: bool
     buffer_load_max_dwords: int
+    # gfx1250 feature flags. Each stays False until its feature passes a
+    # functional run on a device; the ops themselves are gated separately.
+    has_scalar_data_prefetch: bool = False
+    has_global_prefetch: bool = False
+    has_cluster_launch: bool = False
+    has_multicast_load: bool = False
 
 
 @dataclass(frozen=True)
@@ -1246,6 +1252,10 @@ def _build_target(gfx: str) -> ArchTarget:
             has_ds_read_tr=mem["has_ds_read_tr"],
             has_tdm=mem.get("has_tdm", False),
             buffer_load_max_dwords=mem["buffer_load_max_dwords"],
+            has_scalar_data_prefetch=mem.get("has_scalar_data_prefetch", False),
+            has_global_prefetch=mem.get("has_global_prefetch", False),
+            has_cluster_launch=mem.get("has_cluster_launch", False),
+            has_multicast_load=mem.get("has_multicast_load", False),
         ),
         limits=ResourceLimits(
             max_threads_per_block=lim["max_threads_per_block"],

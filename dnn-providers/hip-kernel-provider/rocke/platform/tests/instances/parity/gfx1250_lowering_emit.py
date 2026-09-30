@@ -348,6 +348,93 @@ def build_cluster(b: IRBuilder) -> None:
 CONFIGS.append((build_cluster, "gfx1250"))
 
 
+def build_cluster_dims(b: IRBuilder) -> None:
+    """A 2x2x1 cluster shape: the only effect is the "amdgpu-cluster-dims"
+    function attribute, so the body just reads the cluster-local flat id."""
+    out = b.param("out", PtrType(I32, "global"))
+    b.set_cluster_dims(2, 2, 1)
+    tid = b.thread_id_x()
+    flat = b.cluster_workgroup_flat_id()
+    b.global_store(out, tid, flat)
+    b.ret()
+
+
+CONFIGS.append((build_cluster_dims, "gfx1250"))
+
+
+def build_multicast(b: IRBuilder) -> None:
+    """Every cluster multicast width once, with non-default immediates so a
+    dropped attr shows up; the sync results are stored so they stay live."""
+    src = b.param("src", PtrType(I32, "global"), readonly=True, align=16)
+    out = b.param("out", PtrType(I32, "global"))
+    mask = b.param("mask", I32)
+    local = b.smem_addr_of(b.smem_alloc(I32, [64], name_hint="stage"))
+    tid = b.thread_id_x()
+    v1 = b.cluster_load(src, mask)
+    b.global_store(out, tid, v1)
+    v2 = b.cluster_load(src, mask, width_bytes=8, cachepolicy=1)
+    b.global_store(out, tid, b.vec_extract(v2, 1))
+    v4 = b.cluster_load(src, mask, width_bytes=16, cachepolicy=8)
+    b.global_store(out, tid, b.vec_extract(v4, 3))
+    b.cluster_load_async_to_lds(src, local, mask, width_bytes=1)
+    b.cluster_load_async_to_lds(src, local, mask, width_bytes=4, offset_bytes=16)
+    b.cluster_load_async_to_lds(src, local, mask, width_bytes=8, cachepolicy=3)
+    b.cluster_load_async_to_lds(
+        src, local, mask, width_bytes=16, offset_bytes=-32, cachepolicy=31
+    )
+    b.ret()
+
+
+CONFIGS.append((build_multicast, "gfx1250"))
+
+
+def build_tdm(b: IRBuilder) -> None:
+    """Two packed TDM descriptors: the load takes the smem (i64) LDS address
+    with padding and a workgroup mask set; the store takes an i32 LDS address
+    with the defaults, so both address paths and every flag field show up."""
+    src = b.param("src", PtrType(I16, "global"), readonly=True, align=16)
+    dst = b.param("dst", PtrType(I16, "global"), align=16)
+    dim0 = b.param("dim0", I32)
+    dim1 = b.param("dim1", I32)
+    stride = b.param("stride", I32)
+    lds32 = b.param("lds32", I32)
+    lds = b.smem_addr_of(b.smem_alloc(I16, [64 * 16], name_hint="tile"))
+    b.tensor_load_to_lds(
+        *b.tdm_descriptor_2d(
+            src,
+            lds,
+            elem_bytes=2,
+            tensor_dim0=dim0,
+            tensor_dim1=dim1,
+            row_stride=stride,
+            tile_dim0=64,
+            tile_dim1=16,
+            workgroup_mask=3,
+            pad_interval=2,
+            pad_amount=5,
+        )
+    )
+    b.s_wait_tensorcnt(0)
+    b.tensor_store_from_lds(
+        *b.tdm_descriptor_2d(
+            dst,
+            lds32,
+            elem_bytes=2,
+            tensor_dim0=dim0,
+            tensor_dim1=dim1,
+            row_stride=stride,
+            tile_dim0=0xFFFF,
+            tile_dim1=16,
+        ),
+        cachepolicy=5,
+    )
+    b.s_wait_tensorcnt(0)
+    b.ret()
+
+
+CONFIGS.append((build_tdm, "gfx1250"))
+
+
 def _spec(idx: int):
     """Config selector: the (builder, arch) pair the shared driver expects."""
     if not 0 <= idx < len(CONFIGS):

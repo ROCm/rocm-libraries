@@ -103,14 +103,62 @@ word3 placeholder; it is a hint, so a wrong word3 loses the prefetch rather
 than the result, but `isa_features/data_prefetch_verify.py` is the check that
 confirms the functional run on a device.
 
-**Workgroup-cluster ops are compile-verified only.** The five `gpu.cluster_*`
+**Workgroup clusters are compile-verified only.** The five `gpu.cluster_*`
 reads and `tile.cluster_barrier` lower identically in both engines and
-`isa_features/cluster_ids_verify.py` pins their ISA, but ROCKE cannot yet launch
-with a cluster shape, so no device run confirms the values or the barrier.
-A normal launch is defined as a 1x1x1 cluster (ids 0, max ids 0,
-`cluster_size` 1); that too is unconfirmed until the launch path lands. Only the
-combined `s.cluster.barrier` is exposed; split cluster arrive/wait on barrier
-id -3 is deferred, because only one wave per workgroup may signal it.
+`isa_features/cluster_ids_verify.py` pins their ISA. The `cluster_dims` kernel
+attr lowers to `"amdgpu-cluster-dims"` in both engines and reaches the
+code-object `.cluster_dims` metadata, and the launch paths exist
+(`Runtime.launch(..., cluster=)`, `LaunchConfig.cluster`, the portable-IR
+plan's `cluster`, and the provider's `Kernel::setClusterDims`). None of it has
+run on a device yet: no run confirms the id values, the barrier, the
+`clusterLaunch` device property, or that a plain launch behaves as a 1x1x1
+cluster (ids 0, max ids 0, `cluster_size` 1). `cluster_ids_verify.py` carries
+both functional checks. Other limits:
+
+- `hip_module.Runtime.launch` checks the cluster shape and grid divisibility,
+  but not that the shape matches the kernel's `.cluster_dims`; only
+  `KernelLauncher` and the portable-IR plan compare the two.
+- No launch path checks uniform work-group size, LDS, or occupancy against the
+  cluster; a cluster that cannot be co-scheduled is left to the driver.
+- `lower_hip.py` ignores `cluster_dims`, so the HIP-source path cannot express a
+  clustered kernel.
+- The C JSON importer and recipe VM skip a malformed int-list kernel attr, where
+  Python raises; a malformed `cluster_dims` then lowers as an unclustered kernel.
+- The provider reads `cluster_dims` from the kernel metadata, so the engine's
+  KMD schema must declare it as an INT_LIST (default empty) before an ingested
+  kernel can use it.
+- Only the combined `s.cluster.barrier` is exposed; split cluster arrive/wait on
+  barrier id -3 is deferred, because only one wave per workgroup may signal it.
+
+**Cluster multicast loads are compile-verified only.** `tile.cluster_load`
+(b32/b64/b128) and `tile.cluster_load_async_to_lds` (b8/b32/b64/b128) lower
+identically in both engines, and `isa_features/multicast_verify.py` pins their
+ISA. No device run has confirmed the mask semantics or the async-to-LDS
+delivery yet. `has_multicast_load` stays false until the probe's three
+functional runs pass. The ops check the mask type but not that it is
+wave-uniform or that it selects only workgroups inside the launched cluster;
+both are left to the caller.
+
+**TDM has a descriptor builder but no production user.**
+`IRBuilder.tdm_descriptor_2d` (C: `rocke_b_tdm_descriptor_2d`) packs rank-2
+D# groups, and `isa_features/tdm_verify.py` now runs a real global -> LDS ->
+global round trip. That run has not happened on a device yet, and no gfx1250
+instance uses TDM, so `has_tdm` stays false. Other limits:
+
+- Only rank 2 is covered. D# groups 2 to 4 are zero, so there is no higher
+  rank, gather, or iteration.
+- The multicast `workgroup_mask` is packed but never launched.
+- LDS padding is exposed only through the raw `pad_interval` and
+  `pad_amount` fields.
+
+**The block-scaled GEMM prefetch flag is compile-verified only.**
+`BlockScaledGemmSpec(prefetch=True)` is the named user of the data-prefetch
+ops. Its LLVM and flag-on/flag-off ISA are pinned by
+`tests/core/test_gfx1250_prefetch_users.py` and
+`isa_features/prefetch_users_verify.py`. No device run has confirmed that
+results are unchanged, and none has measured the effect on performance. The
+flag stays opt-in and does not flip `has_scalar_data_prefetch` or
+`has_global_prefetch`.
 
 ---
 

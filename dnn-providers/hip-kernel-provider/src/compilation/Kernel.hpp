@@ -4,7 +4,9 @@
 #pragma once
 
 #include "IRunnableKernel.hpp"
+#include <array>
 #include <hip/hip_runtime_api.h>
+#include <optional>
 #include <string>
 
 namespace hip_kernel_provider::compilation
@@ -38,12 +40,21 @@ public:
     void setGridSize(unsigned int x, unsigned int y = 1, unsigned int z = 1) override;
     void setSharedMemBytes(unsigned int bytes) override;
 
+    /// Each dimension must be in 1..15 and the product at most 16 workgroups. The grid
+    /// must be a whole number of clusters in every dimension; that is checked at launch,
+    /// since the grid may be set afterwards.
+    void setClusterDims(unsigned int x, unsigned int y, unsigned int z) override;
+
     ~Kernel() override = default;
 
 protected:
     void launchImpl(hipStream_t stream, void** kernelParams) const override;
 
 private:
+    /// launchImpl's tail when cluster dimensions are set: the device is bound and the
+    /// grid already checked against the cluster.
+    void launchClustered(hipStream_t stream, void** kernelParams) const;
+
     std::string _kernelName;
     hipFunction_t _kernel;
     int _deviceOrdinal = NO_DEVICE;
@@ -54,6 +65,7 @@ private:
     unsigned int _gridY = 1;
     unsigned int _gridZ = 1;
     unsigned int _sharedMemBytes = 0;
+    std::optional<std::array<unsigned int, 3>> _clusterDims;
 };
 
 } // namespace hip_kernel_provider::compilation

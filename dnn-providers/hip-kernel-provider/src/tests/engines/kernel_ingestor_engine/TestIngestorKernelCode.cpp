@@ -3,11 +3,13 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -119,6 +121,14 @@ public:
     {
         return buildIngestorKernelCode(
             _compiler, _loader, _fixture.context(), kernel, _options, expected);
+    }
+
+    /// The EMBEDDED_SOURCE path, which reaches the compiler rather than the loader.
+    IngestorKernelCode buildWith(const compilation::IKernelCompiler& compiler,
+                                 const KernelDefinition& kernel)
+    {
+        return buildIngestorKernelCode(
+            compiler, _loader, _fixture.context(), kernel, _options, threeBuffers());
     }
 
 private:
@@ -540,6 +550,15 @@ public:
         sharedMemBytes = bytes;
     }
 
+    void setClusterDims(unsigned int x, unsigned int y, unsigned int z) override
+    {
+        if(!clusterCapable)
+        {
+            IRunnableKernel::setClusterDims(x, y, z);
+        }
+        cluster = std::array<unsigned int, 3>{x, y, z};
+    }
+
     int ordinal() const
     {
         return _ordinal;
@@ -552,6 +571,9 @@ public:
     unsigned int gridY = 0;
     unsigned int gridZ = 0;
     unsigned int sharedMemBytes = 0;
+    std::optional<std::array<unsigned int, 3>> cluster;
+    /// False to answer as a kernel with no cluster support does: the interface default.
+    bool clusterCapable = true;
 
 private:
     // Never reached: no case here launches. Present because the interface demands it.
@@ -738,6 +760,158 @@ TEST(TestIngestorKernelCodeDevice, ReportsADeviceItCannotQuery)
         EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
     }
     EXPECT_TRUE(code.resolves.empty());
+}
+
+// ---------------------------------------------------------------------------
+// Cluster launch
+// ---------------------------------------------------------------------------
+//
+// A kernel compiled for workgroup clusters reads cluster ids and waits on cluster
+// barriers, so launching it unclustered is wrong rather than slow. These cases pin that
+// the dimensions a descriptor records reach every kernel the plan launches. The limits
+// themselves are Kernel's and are tested with it.
+
+using ClusterDims = std::array<unsigned int, 3>;
+
+/// Compiles nothing; hands back the counting program so the kernel can be inspected.
+class CountingCompiler : public compilation::IKernelCompiler
+{
+public:
+    std::unique_ptr<compilation::ICompiledProgram>
+        compile(const std::string& /*kernelFileName*/,
+                const std::vector<std::string>& /*options*/) const override
+    {
+        return std::make_unique<CountingProgram>(7);
+    }
+};
+
+KernelDefinition makeClusterKernel(std::optional<MetadataValue> clusterDims)
+{
+    KernelDefinition kernel;
+    kernel.kernelId.fill(0x31);
+    kernel.packId.fill(0x32);
+    kernel.dispatchId.fill(0x33);
+    kernel.name = "clustered_kernel";
+    kernel.source.kind = KernelSourceKind::EMBEDDED_SOURCE;
+    kernel.source.sourceFile = "clustered_kernel.hip";
+    kernel.source.entryPoint = "clustered_kernel";
+    if(clusterDims)
+    {
+        kernel.metadata.emplace(CLUSTER_DIMS_METADATA, *clusterDims);
+    }
+    return kernel;
+}
+
+IngestorKernelCode makeCountingCode()
+{
+    return IngestorKernelCode(std::make_unique<CountingProgram>(0),
+                              std::make_unique<CountingKernel>(0));
+}
+
+const CountingKernel& countingKernelOf(const IngestorKernelCode& code)
+{
+    return dynamic_cast<const CountingKernel&>(code.kernelFor(0));
+}
+
+TEST(TestIngestorKernelCodeCluster, ReachesADeviceResolvedAfterItWasSet)
+{
+    FakeDeviceCode code({{0, "gfx1250"}, {1, "gfx1250"}}, 0);
+    code.setGridSize(8, 1, 1);
+    code.setClusterDims(4, 1, 1);
+
+    const auto& first = dynamic_cast<const CountingKernel&>(code.kernelFor(0));
+    const auto& second = dynamic_cast<const CountingKernel&>(code.kernelFor(1));
+
+    EXPECT_EQ(first.cluster, (ClusterDims{4, 1, 1}));
+    // Recorded, not just applied: the second device's kernel did not exist when the
+    // dimensions were set, and launching it unclustered would hang on its first barrier.
+    EXPECT_EQ(second.cluster, (ClusterDims{4, 1, 1}));
+}
+
+TEST(TestIngestorKernelCodeCluster, IsNotRecordedWhenTheKernelRefusesIt)
+{
+    auto kernel = std::make_unique<CountingKernel>(0);
+    kernel->clusterCapable = false;
+    IngestorKernelCode code(std::make_unique<CountingProgram>(0), std::move(kernel));
+
+    try
+    {
+        code.setClusterDims(2, 1, 1);
+        FAIL() << "expected a kernel without cluster support to refuse";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_NE(std::string(error.what()).find("does not support cluster launch"),
+                  std::string::npos)
+            << error.what();
+    }
+
+    // Re-applying the geometry would reach setClusterDims again had the refused
+    // dimensions been kept, and throw from a setter that has nothing to do with them.
+    EXPECT_NO_THROW(code.setBlockSize(64, 1, 1));
+    EXPECT_FALSE(countingKernelOf(code).cluster.has_value());
+}
+
+TEST(TestIngestorKernelCodeCluster, AbsentOrEmptyMetadataLeavesTheLaunchUnclustered)
+{
+    for(const auto& value : {std::optional<MetadataValue>{},
+                             std::optional<MetadataValue>{MetadataValue{std::vector<int64_t>{}}}})
+    {
+        auto code = makeCountingCode();
+        applyClusterDimsMetadata(code, makeClusterKernel(value));
+        EXPECT_FALSE(countingKernelOf(code).cluster.has_value());
+    }
+}
+
+TEST(TestIngestorKernelCodeCluster, MetadataIsAppliedToTheKernel)
+{
+    auto code = makeCountingCode();
+    applyClusterDimsMetadata(code, makeClusterKernel(MetadataValue{std::vector<int64_t>{2, 2, 1}}));
+
+    EXPECT_EQ(countingKernelOf(code).cluster, (ClusterDims{2, 2, 1}));
+}
+
+TEST(TestIngestorKernelCodeCluster, MalformedMetadataIsRefusedRatherThanDropped)
+{
+    const std::vector<MetadataValue> malformed = {
+        MetadataValue{std::vector<int64_t>{2, 1}},
+        MetadataValue{std::vector<int64_t>{2, 1, 1, 1}},
+        MetadataValue{std::vector<int64_t>{0, 1, 1}},
+        MetadataValue{std::vector<int64_t>{-2, 1, 1}},
+        MetadataValue{std::vector<int64_t>{int64_t{1} << 40, 1, 1}},
+        MetadataValue{int64_t{2}},
+        MetadataValue{std::string("2,1,1")},
+    };
+
+    for(const auto& value : malformed)
+    {
+        auto code = makeCountingCode();
+        try
+        {
+            applyClusterDimsMetadata(code, makeClusterKernel(value));
+            ADD_FAILURE() << "expected malformed cluster_dims to be refused";
+        }
+        catch(const HipdnnPluginException& error)
+        {
+            EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+            const std::string message = error.what();
+            EXPECT_NE(message.find("cluster_dims"), std::string::npos) << message;
+            EXPECT_NE(message.find("clustered_kernel"), std::string::npos) << message;
+        }
+        EXPECT_FALSE(countingKernelOf(code).cluster.has_value());
+    }
+}
+
+TEST(TestIngestorKernelCodeCluster, BuildAppliesTheDescriptorsClusterDims)
+{
+    GuardHarness harness;
+    const CountingCompiler compiler;
+
+    const auto code = harness.buildWith(
+        compiler, makeClusterKernel(MetadataValue{std::vector<int64_t>{4, 1, 1}}));
+
+    EXPECT_EQ(countingKernelOf(code).cluster, (ClusterDims{4, 1, 1}));
 }
 
 } // namespace

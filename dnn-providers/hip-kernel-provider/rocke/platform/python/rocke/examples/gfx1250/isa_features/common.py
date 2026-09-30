@@ -101,37 +101,39 @@ def require_llvm23() -> None:
     os.environ["ROCKE_LLVM_FLAVOR"] = _LLVM_FLAVOR
 
 
-def _objdump_path() -> str:
-    explicit = os.environ.get("LLVM_OBJDUMP")
+def _llvm_tool_path(tool: str, env_var: str, purpose: str) -> str:
+    explicit = os.environ.get(env_var)
     if explicit:
         return explicit
     rocm_root = os.environ.get("ROCM_PATH") or os.environ.get("ROCM_HOME")
     if rocm_root:
-        candidate = Path(rocm_root) / "llvm" / "bin" / "llvm-objdump"
+        candidate = Path(rocm_root) / "llvm" / "bin" / tool
         if candidate.is_file():
             return str(candidate)
-    candidate = shutil.which("llvm-objdump")
+    candidate = shutil.which(tool)
     if candidate:
         return candidate
     raise FileNotFoundError(
-        "llvm-objdump is required for ISA validation; set LLVM_OBJDUMP or ROCM_PATH"
+        f"{tool} is required for {purpose}; set {env_var} or ROCM_PATH"
     )
 
 
-def disassemble_hsaco(hsaco: bytes, arch: str) -> str:
-    """Disassemble one in-memory code object with the selected ROCm objdump."""
+def _objdump_path() -> str:
+    return _llvm_tool_path("llvm-objdump", "LLVM_OBJDUMP", "ISA validation")
+
+
+def _readelf_path() -> str:
+    return _llvm_tool_path("llvm-readelf", "LLVM_READELF", "code-object metadata validation")
+
+
+def _run_on_hsaco(hsaco: bytes, command: list[str], tool: str) -> str:
+    """Run ``command`` with the code object's path appended; return stdout."""
     with tempfile.NamedTemporaryFile(suffix=".hsaco", delete=False) as handle:
         handle.write(hsaco)
         hsaco_path = Path(handle.name)
     try:
         proc = subprocess.run(
-            [
-                _objdump_path(),
-                "--disassemble",
-                f"--mcpu={arch}",
-                "--triple=amdgcn-amd-amdhsa",
-                str(hsaco_path),
-            ],
+            [*command, str(hsaco_path)],
             check=False,
             capture_output=True,
             text=True,
@@ -139,12 +141,31 @@ def disassemble_hsaco(hsaco: bytes, arch: str) -> str:
         )
         if proc.returncode != 0:
             message = (proc.stderr or proc.stdout).strip()
-            raise ValidationError(f"llvm-objdump failed: {message}")
+            raise ValidationError(f"{tool} failed: {message}")
         if not proc.stdout.strip():
-            raise ValidationError("llvm-objdump produced no ISA text")
+            raise ValidationError(f"{tool} produced no output")
         return proc.stdout
     finally:
         hsaco_path.unlink(missing_ok=True)
+
+
+def disassemble_hsaco(hsaco: bytes, arch: str) -> str:
+    """Disassemble one in-memory code object with the selected ROCm objdump."""
+    return _run_on_hsaco(
+        hsaco,
+        [
+            _objdump_path(),
+            "--disassemble",
+            f"--mcpu={arch}",
+            "--triple=amdgcn-amd-amdhsa",
+        ],
+        "llvm-objdump",
+    )
+
+
+def read_hsaco_notes(hsaco: bytes) -> str:
+    """Return the code object's notes, including the AMDGPU kernel metadata."""
+    return _run_on_hsaco(hsaco, [_readelf_path(), "--notes"], "llvm-readelf")
 
 
 def _assert_llvm(llvm_text: str, required: tuple[str, ...]) -> None:
@@ -153,14 +174,18 @@ def _assert_llvm(llvm_text: str, required: tuple[str, ...]) -> None:
         raise ValidationError(f"LLVM text missing: {', '.join(missing)}")
 
 
-def _assert_isa(isa_text: str, required: tuple[str, ...]) -> None:
+def _assert_patterns(text: str, required: tuple[str, ...], what: str) -> None:
     missing = [
         pattern
         for pattern in required
-        if re.search(pattern, isa_text, flags=re.IGNORECASE | re.MULTILINE) is None
+        if re.search(pattern, text, flags=re.IGNORECASE | re.MULTILINE) is None
     ]
     if missing:
-        raise ValidationError(f"ISA text missing patterns: {', '.join(missing)}")
+        raise ValidationError(f"{what} missing patterns: {', '.join(missing)}")
+
+
+def _assert_isa(isa_text: str, required: tuple[str, ...]) -> None:
+    _assert_patterns(isa_text, required, "ISA text")
 
 
 def compile_and_validate(
@@ -169,13 +194,20 @@ def compile_and_validate(
     arch: str,
     llvm_required: tuple[str, ...],
     isa_required: tuple[str, ...],
+    notes_required: tuple[str, ...] = (),
 ) -> ValidatedArtifact:
-    """Compile a kernel and require features in both LLVM text and final ISA."""
+    """Compile a kernel and require features in both LLVM text and final ISA.
+
+    ``notes_required`` are regexes matched against ``llvm-readelf --notes``,
+    for properties that live in the kernel metadata rather than the ISA.
+    """
     require_llvm23()
     artifact = compile_kernel(kernel, arch=arch, backend="python")
     _assert_llvm(artifact.llvm_text, llvm_required)
     isa_text = disassemble_hsaco(artifact.hsaco, arch)
     _assert_isa(isa_text, isa_required)
+    if notes_required:
+        _assert_patterns(read_hsaco_notes(artifact.hsaco), notes_required, "code-object notes")
     return ValidatedArtifact(artifact=artifact, isa_text=isa_text)
 
 
@@ -187,6 +219,7 @@ def record_compile_check(
     arch: str,
     llvm_required: tuple[str, ...],
     isa_required: tuple[str, ...],
+    notes_required: tuple[str, ...] = (),
 ) -> ValidatedArtifact | None:
     """Compile, validate, and turn exceptions into one stable check result."""
     try:
@@ -195,11 +228,13 @@ def record_compile_check(
             arch=arch,
             llvm_required=llvm_required,
             isa_required=isa_required,
+            notes_required=notes_required,
         )
     except Exception as exc:  # noqa: BLE001 - verifier must report toolchain failures
         reporter.failed(name, f"{type(exc).__name__}: {exc}")
         return None
-    reporter.passed(name, "LLVM and ISA matched")
+    detail = "LLVM, ISA, and metadata matched" if notes_required else "LLVM and ISA matched"
+    reporter.passed(name, detail)
     return validated
 
 
@@ -258,13 +293,18 @@ def launch(
     block: tuple[int, int, int],
     pack_format: str,
     pack_values: tuple[int, ...],
+    cluster: tuple[int, int, int] | None = None,
 ) -> None:
-    """Load, launch with packed bytes, synchronize, and unload one kernel."""
+    """Load, launch with packed bytes, synchronize, and unload one kernel.
+
+    ``cluster`` launches workgroup clusters of that shape; it must match the
+    kernel's compiled ``cluster_dims``.
+    """
     module = runtime.load_module(validated.artifact.hsaco)
     try:
         function = module.get_function(validated.artifact.kernel_name)
         packed = struct.pack(pack_format, *pack_values)
-        runtime.launch(function, grid, block, packed, stream=0)
+        runtime.launch(function, grid, block, packed, stream=0, cluster=cluster)
         runtime.wait_stream(0)
     finally:
         module.unload()

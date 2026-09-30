@@ -26,6 +26,25 @@ target_include_directories(hip_kernel_provider_impl PUBLIC
 dnn_provider_generate_version_header(hip_kernel_provider hip_kernel_provider_impl ${CMAKE_CURRENT_LIST_DIR}/..)
 target_link_libraries(hip_kernel_provider_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
 
+# Workgroup cluster launch needs hipDrvLaunchKernelEx and hipLaunchAttributeClusterDimension,
+# which older HIP headers lack. Without them Kernel refuses a cluster launch at run time
+# rather than failing the build. PUBLIC so the unit tests see the same answer.
+include(CheckCXXSourceCompiles)
+set(CMAKE_REQUIRED_LIBRARIES hip::host)
+check_cxx_source_compiles("#include <hip/hip_runtime_api.h>
+    int main() {
+        hipLaunchAttribute attr;
+        attr.id = hipLaunchAttributeClusterDimension;
+        HIP_LAUNCH_CONFIG config{};
+        config.attrs = &attr;
+        return hipDrvLaunchKernelEx(&config, nullptr, nullptr, nullptr) == hipSuccess ? 0 : 1;
+    }"
+    HIP_KERNEL_PROVIDER_HAS_CLUSTER_LAUNCH)
+unset(CMAKE_REQUIRED_LIBRARIES)
+if(HIP_KERNEL_PROVIDER_HAS_CLUSTER_LAUNCH)
+    target_compile_definitions(hip_kernel_provider_impl PUBLIC HIP_KERNEL_PROVIDER_HAS_CLUSTER_LAUNCH=1)
+endif()
+
 target_compile_options(hip_kernel_provider_impl PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(hip_kernel_provider_impl PROPERTIES
     CXX_VISIBILITY_PRESET hidden

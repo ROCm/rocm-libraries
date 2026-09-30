@@ -6,6 +6,8 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <array>
+#include <cstdint>
 #include <filesystem>
 #include <limits>
 #include <memory>
@@ -14,6 +16,7 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
@@ -166,6 +169,24 @@ public:
     {
         _geometry.sharedMemBytes = bytes;
         applyGeometryToResolved();
+    }
+
+    /// Launch as workgroup clusters. Recorded like the rest of the geometry, so a kernel
+    /// resolved later for another device clusters too. Nothing is recorded if a resolved
+    /// kernel refuses the dimensions.
+    void setClusterDims(unsigned int x, unsigned int y, unsigned int z)
+    {
+        const auto previous = _geometry.cluster;
+        _geometry.cluster = std::array<unsigned int, 3>{x, y, z};
+        try
+        {
+            applyGeometryToResolved();
+        }
+        catch(...)
+        {
+            _geometry.cluster = previous;
+            throw;
+        }
     }
 
     /// The kernel a dispatch on @p stream must launch. The entry point a pack calls.
@@ -329,6 +350,8 @@ private:
         unsigned int gridY = 1;
         unsigned int gridZ = 1;
         unsigned int sharedMemBytes = 0;
+        /// Unset for an unclustered launch, which is not the same as a 1x1x1 cluster.
+        std::optional<std::array<unsigned int, 3>> cluster;
     };
 
     struct Memo
@@ -342,6 +365,11 @@ private:
         kernel.setBlockSize(_geometry.blockX, _geometry.blockY, _geometry.blockZ);
         kernel.setGridSize(_geometry.gridX, _geometry.gridY, _geometry.gridZ);
         kernel.setSharedMemBytes(_geometry.sharedMemBytes);
+        if(_geometry.cluster)
+        {
+            const auto& cluster = *_geometry.cluster;
+            kernel.setClusterDims(cluster[0], cluster[1], cluster[2]);
+        }
     }
 
     /// Under the lock: a second device can be resolving while this runs.
@@ -474,6 +502,46 @@ inline void
     }
 }
 
+/// The metadata field a clustered kernel records its compiled cluster dimensions in.
+/// An engine whose kernels may cluster declares it in its KMD schema as an INT_LIST
+/// defaulting to empty; the loader rejects a field the schema does not declare.
+inline constexpr const char* CLUSTER_DIMS_METADATA = "cluster_dims";
+
+/// Carries a kernel's `cluster_dims` metadata onto its launch. Absent or empty means an
+/// ordinary launch. Only the shape is checked here; the cluster limits belong to the
+/// kernel, which checks them in setClusterDims.
+///
+/// A clustered kernel launched without its cluster reads cluster ids that do not exist
+/// and waits on a cluster barrier nothing else arrives at, so a malformed field is refused
+/// rather than dropped.
+inline void applyClusterDimsMetadata(IngestorKernelCode& code,
+                                     const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
+{
+    const auto value = kernel.tryGetMetadata(CLUSTER_DIMS_METADATA);
+    if(!value)
+    {
+        return;
+    }
+    const auto* dims = std::get_if<std::vector<int64_t>>(&*value);
+    if(dims != nullptr && dims->empty())
+    {
+        return;
+    }
+    const auto inRange
+        = [](int64_t dim) { return dim >= 1 && dim <= std::numeric_limits<unsigned int>::max(); };
+    if(dims == nullptr || dims->size() != 3 || !std::all_of(dims->begin(), dims->end(), inRange))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            hipdnn_plugin_sdk::ingestor::describeDescriptor("kernel", kernel.name, kernel.kernelId)
+                + ": metadata field '" + CLUSTER_DIMS_METADATA
+                + "' must be an empty list or three positive integers (x, y, z)");
+    }
+    code.setClusterDims(static_cast<unsigned int>((*dims)[0]),
+                        static_cast<unsigned int>((*dims)[1]),
+                        static_cast<unsigned int>((*dims)[2]));
+}
+
 /// The single place a KernelSource's `kind` decides where the code object comes from.
 ///
 /// @param compiler   Used only on the EMBEDDED_SOURCE path.
@@ -501,7 +569,9 @@ inline IngestorKernelCode buildIngestorKernelCode(
     {
         auto program = compiler.compile(kernel.source.sourceFile, options);
         auto runnableKernel = program->getKernel(kernel.source.entryPoint);
-        return IngestorKernelCode{std::move(program), std::move(runnableKernel)};
+        IngestorKernelCode code{std::move(program), std::move(runnableKernel)};
+        applyClusterDimsMetadata(code, kernel);
+        return code;
     }
     case KernelSourceKind::KPACK:
     {
@@ -607,17 +677,19 @@ inline IngestorKernelCode buildIngestorKernelCode(
                                         kernel.source.sha256,
                                         label);
         auto runnableKernel = program->getKernel(kernel.source.symbol);
-        return IngestorKernelCode{kpackLoader,
-                                  KpackSource{resolved,
-                                              kernel.source.tocKey,
-                                              kernel.source.symbol,
-                                              kernel.source.sha256,
-                                              label,
-                                              std::string(hipdnn_plugin_sdk::stripArchFeatures(
-                                                  context.deviceProperties.gcnArchName))},
-                                  context.deviceId,
-                                  std::move(program),
-                                  std::move(runnableKernel)};
+        IngestorKernelCode code{kpackLoader,
+                                KpackSource{resolved,
+                                            kernel.source.tocKey,
+                                            kernel.source.symbol,
+                                            kernel.source.sha256,
+                                            label,
+                                            std::string(hipdnn_plugin_sdk::stripArchFeatures(
+                                                context.deviceProperties.gcnArchName))},
+                                context.deviceId,
+                                std::move(program),
+                                std::move(runnableKernel)};
+        applyClusterDimsMetadata(code, kernel);
+        return code;
     }
     case KernelSourceKind::HSACO_FILE:
     case KernelSourceKind::ROCKE_BUILDER:

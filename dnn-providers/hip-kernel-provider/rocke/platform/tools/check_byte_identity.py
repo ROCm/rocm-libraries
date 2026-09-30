@@ -6,6 +6,9 @@
 # prove its LLVM-IR emission is byte-identical to the Python engine across every
 # kernel family. A green run means the dual-backend contract still holds.
 #
+# Unless ROCKE_LLVM_FLAVOR is already llvm23, a second gating lane re-runs the
+# gfx1250 family at llvm23, since its gated ops lower only at that flavor.
+#
 # Cross-platform (Windows + Linux) replacement for the legacy check_byte_identity.sh.
 # All paths are derived relative to this file so the rocke/platform/ tree stays copy-able.
 #
@@ -26,6 +29,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parents[0] if HERE.name != "tools" else HERE.parent  # tools -> rocKE
 RUN_DIFF = ROCKE / "tests" / "instances" / "differential" / "run_diff.py"
+# The parity family that carries the llvm23-gated gfx1250 ops.
+GFX1250_FAMILY = "gfx1250_lowering"
 
 
 def _cxx() -> str | None:
@@ -127,7 +132,14 @@ def main() -> int:
     if args.ref_shim:
         ref_args += ["--shim", args.ref_shim]
 
-    def run_gate(label: str, dashboard: str, extra: list[str]) -> int:
+    def run_gate(
+        label: str,
+        dashboard: str,
+        extra: list[str],
+        *,
+        only: list[str] | None = None,
+        env: dict[str, str] | None = None,
+    ) -> int:
         print(f"\n== differential gate: {label} ==")
         proc = subprocess.run(
             [
@@ -137,12 +149,13 @@ def main() -> int:
                 str(archive),
                 "--json",
                 dashboard,
-                *only_args,
+                *(only_args if only is None else only),
                 *ref_args,
                 *extra,
             ],
             capture_output=True,
             text=True,
+            env=env,
         )
         print(proc.stdout)
         if proc.stderr:
@@ -159,6 +172,23 @@ def main() -> int:
         str(build_root / "dashboard_ll.json"),
         ["--mode", "ll"],
     )
+    # The gfx1250-only ops (prefetch, clusters, async stores, tensor moves, ...)
+    # lower only under llvm23. Under any other flavor both engines reject those
+    # configs, which reads as BOTH_REJECTED and passes without comparing a
+    # byte. Re-run the gfx1250 families at llvm23 so every invocation of this
+    # gate covers them, whatever flavor the host resolves to.
+    llvm23_only = [s for s in args.only.split(",") if s and s in GFX1250_FAMILY]
+    if os.environ.get("ROCKE_LLVM_FLAVOR") != "llvm23" and (
+        not args.only or llvm23_only
+    ):
+        env = dict(os.environ, ROCKE_LLVM_FLAVOR="llvm23")
+        status |= run_gate(
+            "LLVM-IR, gfx1250 families at llvm23",
+            str(build_root / "dashboard_ll_llvm23.json"),
+            ["--mode", "ll"],
+            only=["--only", ",".join(llvm23_only) or GFX1250_FAMILY],
+            env=env,
+        )
     if args.ir:
         # Diagnostic, not gating: its exit code is deliberately discarded, so a
         # GATE FAILURES block under this label does not turn the result RED.

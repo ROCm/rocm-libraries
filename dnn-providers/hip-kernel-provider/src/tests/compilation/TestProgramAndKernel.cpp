@@ -10,6 +10,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include <array>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -284,6 +285,132 @@ TEST_F(TestKernelDeviceBinding, RefusesALaunchItCannotBindTheDeviceFor)
     ASSERT_EQ(hipSuccess, deviceStatus);
     EXPECT_EQ(_moduleDevice, afterLaunch);
     expectOutput(0.0f);
+}
+
+#ifdef HIP_KERNEL_PROVIDER_HAS_CLUSTER_LAUNCH
+TEST_F(TestKernelDeviceBinding, RefusesAClusterLaunchOnADeviceWithoutClusters)
+{
+    hipDeviceProp_t properties{};
+    ASSERT_EQ(hipSuccess, hipGetDeviceProperties(&properties, _moduleDevice));
+    if(properties.clusterLaunch != 0)
+    {
+        GTEST_SKIP() << "the device supports cluster launch";
+    }
+    Kernel kernel(_program->getKernel("vector_add"), "vector_add", _moduleDevice);
+    kernel.setBlockSize(N);
+    kernel.setGridSize(2);
+    kernel.setClusterDims(2, 1, 1);
+
+    // Refused rather than launched unclustered: a clustered kernel run that way reads
+    // cluster ids that do not exist.
+    try
+    {
+        kernel.launch(nullptr, _a.get(), _b.get(), _c.get(), N);
+        FAIL() << "expected the cluster launch to be refused";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_NE(std::string(error.what()).find("does not support cluster launch"),
+                  std::string::npos)
+            << error.what();
+    }
+    expectOutput(0.0f);
+}
+#endif
+
+// ---------------------------------------------------------------------------
+// Cluster dimensions. Everything below throws before the first HIP call, so none of it
+// needs a device.
+// ---------------------------------------------------------------------------
+
+std::string clusterRefusal(Kernel& kernel, unsigned int x, unsigned int y, unsigned int z)
+{
+    try
+    {
+        kernel.setClusterDims(x, y, z);
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        return error.what();
+    }
+    return {};
+}
+
+TEST(TestKernelCluster, RefusesADimensionOutsideTheHardwareRange)
+{
+    Kernel kernel(nullptr, "clustered", Kernel::NO_DEVICE);
+
+    for(const auto& dims : std::vector<std::array<unsigned int, 3>>{
+            {0, 1, 1}, {1, 0, 1}, {1, 1, 0}, {16, 1, 1}, {1, 16, 1}, {1, 1, 16}})
+    {
+        const std::string message = clusterRefusal(kernel, dims[0], dims[1], dims[2]);
+        EXPECT_NE(message.find("each dimension must be in 1..15"), std::string::npos)
+            << "(" << dims[0] << ", " << dims[1] << ", " << dims[2] << "): " << message;
+        EXPECT_NE(message.find("kernel 'clustered'"), std::string::npos) << message;
+    }
+}
+
+TEST(TestKernelCluster, RefusesMoreThanSixteenWorkgroups)
+{
+    Kernel kernel(nullptr, "clustered", Kernel::NO_DEVICE);
+
+    const std::string message = clusterRefusal(kernel, 4, 4, 2);
+    EXPECT_NE(message.find("cluster_dims (4, 4, 2): 32 workgroups exceeds the cluster limit of 16"),
+              std::string::npos)
+        << message;
+}
+
+TEST(TestKernelCluster, AcceptsTheLimits)
+{
+    Kernel kernel(nullptr, "clustered", Kernel::NO_DEVICE);
+
+    EXPECT_NO_THROW(kernel.setClusterDims(15, 1, 1));
+    EXPECT_NO_THROW(kernel.setClusterDims(4, 4, 1));
+    EXPECT_NO_THROW(kernel.setClusterDims(2, 2, 4));
+    EXPECT_NO_THROW(kernel.setClusterDims(1, 1, 1));
+}
+
+TEST(TestKernelCluster, RefusesAGridThatIsNotAWholeNumberOfClusters)
+{
+    // A null function and no device: reaching HIP would fail differently, so the message
+    // below also proves the check runs first.
+    Kernel kernel(nullptr, "clustered", Kernel::NO_DEVICE);
+    kernel.setGridSize(4, 3, 1);
+    kernel.setClusterDims(2, 2, 1);
+
+    try
+    {
+        kernel.launch(nullptr);
+        FAIL() << "expected a partial cluster to be refused";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_NE(std::string(error.what())
+                      .find("grid (4, 3, 1) is not a multiple of cluster (2, 2, 1) in y"),
+                  std::string::npos)
+            << error.what();
+    }
+}
+
+TEST(TestKernelCluster, IsRefusedByAKernelWithoutClusterSupport)
+{
+    // The interface default: a kernel that cannot cluster must not launch unclustered.
+    class PlainKernel : public IRunnableKernel
+    {
+    public:
+        void setBlockSize(unsigned int, unsigned int, unsigned int) override {}
+        void setGridSize(unsigned int, unsigned int, unsigned int) override {}
+        void setSharedMemBytes(unsigned int) override {}
+
+    protected:
+        void launchImpl(hipStream_t, void**) const override {}
+    };
+
+    PlainKernel kernel;
+    EXPECT_THROW(kernel.setClusterDims(2, 1, 1), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 } // namespace

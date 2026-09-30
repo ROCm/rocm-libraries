@@ -438,6 +438,25 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"cluster.workgroup.flat.id", "declare i32 @llvm.amdgcn.cluster.workgroup.flat.id()"},
     {"cluster.workgroup.max.flat.id", "declare i32 @llvm.amdgcn.cluster.workgroup.max.flat.id()"},
     {"s.cluster.barrier", "declare void @llvm.amdgcn.s.cluster.barrier()"},
+    /* gfx1250 cluster multicast loads (llvm23): (ptr, cachepolicy, M0 mask). */
+    {"cluster.load.b32.i32",
+     "declare i32 @llvm.amdgcn.cluster.load.b32.i32(ptr addrspace(1), i32 immarg, i32)"},
+    {"cluster.load.b64.v2i32",
+     "declare <2 x i32> @llvm.amdgcn.cluster.load.b64.v2i32(ptr addrspace(1), i32 immarg, i32)"},
+    {"cluster.load.b128.v4i32",
+     "declare <4 x i32> @llvm.amdgcn.cluster.load.b128.v4i32(ptr addrspace(1), i32 immarg, i32)"},
+    {"cluster.load.async.to.lds.b8",
+     "declare void @llvm.amdgcn.cluster.load.async.to.lds.b8(ptr addrspace(1), ptr addrspace(3), "
+     "i32 immarg, i32 immarg, i32)"},
+    {"cluster.load.async.to.lds.b32",
+     "declare void @llvm.amdgcn.cluster.load.async.to.lds.b32(ptr addrspace(1), ptr addrspace(3), "
+     "i32 immarg, i32 immarg, i32)"},
+    {"cluster.load.async.to.lds.b64",
+     "declare void @llvm.amdgcn.cluster.load.async.to.lds.b64(ptr addrspace(1), ptr addrspace(3), "
+     "i32 immarg, i32 immarg, i32)"},
+    {"cluster.load.async.to.lds.b128",
+     "declare void @llvm.amdgcn.cluster.load.async.to.lds.b128(ptr addrspace(1), ptr "
+     "addrspace(3), i32 immarg, i32 immarg, i32)"},
 };
 
 const int ROCKE_LL_INTRINSIC_DECLS_COUNT

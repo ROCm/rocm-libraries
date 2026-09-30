@@ -247,6 +247,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--compile-route", default="comgr", choices=("comgr", "hip"))
     p.add_argument(
+        "--prefetch",
+        action="store_true",
+        help="add the data-prefetch hints (llvm23); results must not change",
+    )
+    p.add_argument(
         "--case",
         default="mixed",
         help="mixed, neutral, a-only, b-only, group-N, or all (including every K group)",
@@ -267,6 +272,7 @@ def main(argv: list[str] | None = None) -> int:
         scale_dtype="e8m0" if native else "fp32",
         block_k=block_k,
         matrix_path=args.matrix_path,
+        prefetch=args.prefetch,
     )
     ok, reason = is_valid_spec(spec, arch=args.arch)
     if not ok:

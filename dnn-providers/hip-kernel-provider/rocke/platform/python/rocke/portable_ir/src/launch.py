@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from rocke.core.ir import check_cluster_dims
 from rocke.portable_ir.utils.recipe_expand import (
     ExpandError,
     eval_intexpr,
@@ -116,6 +117,49 @@ def eval_launch(
         raise ExpandError(f"recipe launch.lds_bytes evaluates to {v}, must be >= 0")
     out["lds_bytes"] = v
     return out
+
+
+def _int_list_attr(tv: Any) -> Optional[Tuple[Any, ...]]:
+    """Values of a list-of-bare-ints attr as ir_export writes it --
+    ``{"t": "l", "v": [{"_": {"t": "i", "v": 4}}, ...]}`` -- or None if ``tv``
+    has any other shape."""
+    if not isinstance(tv, dict) or tv.get("t") != "l" or not isinstance(tv.get("v"), list):
+        return None
+    vals = []
+    for item in tv["v"]:
+        inner = item.get("_") if isinstance(item, dict) else None
+        if not isinstance(inner, dict) or inner.get("t") != "i":
+            return None
+        vals.append(inner.get("v"))
+    return tuple(vals)
+
+
+def eval_cluster(
+    recipe: Dict[str, Any], geometry: Optional[Dict[str, Any]] = None
+) -> Optional[Tuple[int, int, int]]:
+    """The kernel's cluster shape, or None if it has no ``cluster_dims`` attr.
+
+    Read from the recipe's kernel attrs, not from the launch block, so the shape
+    cannot disagree with the compiled "amdgpu-cluster-dims". When ``geometry``
+    is given its grid must be a whole number of clusters on every axis.
+
+    Mirrors rv_plan_cluster in recipe_vm.cpp, including the messages."""
+    tv = (recipe.get("attrs") or {}).get("cluster_dims")
+    if tv is None:
+        return None
+    vals = _int_list_attr(tv)
+    try:
+        cluster = check_cluster_dims(vals)
+    except ValueError as e:
+        raise ExpandError(str(e)) from None
+    if geometry is not None:
+        grid = tuple(geometry["grid"])
+        for axis, g, k in zip("xyz", grid, cluster):
+            if g % k:
+                raise ExpandError(
+                    f"grid {grid} is not a multiple of cluster {cluster} in {axis}"
+                )
+    return cluster
 
 
 def format_kernel_name(
@@ -238,15 +282,20 @@ def plan(
     spec_int: Dict[str, int],
     spec_str: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
-    """Everything needed to launch: name, args, geometry. The Python mirror of
-    rocke_launch_plan_t, and the oracle the C plan is tested against."""
+    """Everything needed to launch: name, args, geometry, cluster. The Python
+    mirror of rocke_launch_plan_t, and the oracle the C plan is tested against.
+
+    ``cluster`` is None for a kernel without ``cluster_dims``; otherwise launch
+    with hipDrvLaunchKernelEx and a cluster-dimension attribute of that shape."""
     spec_str = spec_str or {}
     args = signature(recipe, spec_int, spec_str)
+    geometry = eval_launch(recipe, spec_int, spec_str)
     return {
         "kernel_name": format_kernel_name(
             recipe.get("kernel_name_fmt", ""), spec_int, spec_str
         ),
         "args": args,
         "kernarg_size": kernarg_size(args),
-        "geometry": eval_launch(recipe, spec_int, spec_str),
+        "geometry": geometry,
+        "cluster": eval_cluster(recipe, geometry),
     }

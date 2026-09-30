@@ -94,6 +94,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterator, Mapping, Optional, Sequence, Tuple
 
+from ..core.ir import check_cluster_dims
 from .hip_module import Runtime
 from .packing import compile_packer
 from .torch_interop import resolve_stream
@@ -218,6 +219,14 @@ class LaunchConfig:
     :meth:`Runtime.wait_stream`). The :func:`no_fence` context
     manager forces this off for any nested launcher call regardless
     of the per-call value.
+    """
+
+    cluster: Optional[Tuple[int, int, int]] = None
+    """Workgroup-cluster shape ``(x, y, z)`` for this launch.
+
+    ``None`` uses the launcher's compiled ``cluster_dims`` (a plain launch
+    when it has none). A value must equal the compiled shape when there is
+    one; ``grid`` must be a multiple of it in every dimension.
     """
 
 
@@ -403,6 +412,9 @@ class KernelLauncher:
     a downstream `torch.cuda.Event.synchronize()`) is responsible
     for observing the output. This matches Triton's launch semantics
     and lets a benchmarking harness do its own event-based timing.
+
+    ``cluster_dims`` is the kernel's compiled cluster shape (the IR kernel
+    attr, also recorded in the manifest). When set, every launch uses it.
     """
 
     def __init__(
@@ -412,11 +424,15 @@ class KernelLauncher:
         kernel_name: str,
         signature: Sequence[Mapping[str, Any]],
         cache_key: Optional[Tuple] = None,
+        cluster_dims: Optional[Sequence[int]] = None,
     ) -> None:
         self._hsaco = hsaco
         self._kernel_name = kernel_name
         self._signature = list(signature)
         self._cache_key = cache_key
+        self._cluster_dims = (
+            None if cluster_dims is None else check_cluster_dims(cluster_dims)
+        )
         rt = _runtime()
         self._module = rt.load_module(hsaco)
         self._fn = self._module.get_function(kernel_name)
@@ -437,6 +453,23 @@ class KernelLauncher:
     def signature(self) -> Sequence[Mapping[str, Any]]:
         return tuple(self._signature)
 
+    @property
+    def cluster_dims(self) -> Optional[Tuple[int, int, int]]:
+        return self._cluster_dims
+
+    def _resolve_cluster(
+        self, config: LaunchConfig
+    ) -> Optional[Tuple[int, int, int]]:
+        if config.cluster is None:
+            return self._cluster_dims
+        cluster = check_cluster_dims(config.cluster)
+        if self._cluster_dims is not None and cluster != self._cluster_dims:
+            raise ValueError(
+                f"{self._kernel_name}: launch cluster {cluster} does not match "
+                f"the kernel's cluster_dims {self._cluster_dims}"
+            )
+        return cluster
+
     def __call__(
         self,
         values: Mapping[str, Any],
@@ -444,6 +477,7 @@ class KernelLauncher:
         config: LaunchConfig,
     ) -> LaunchSummary:
         rt = _runtime()
+        cluster = self._resolve_cluster(config)
         args = self._packer(values)
         stream = resolve_stream(config.stream)
         fence = _resolved_fence(config.fence)
@@ -465,6 +499,7 @@ class KernelLauncher:
                 args,
                 shared_bytes=config.shared_bytes,
                 stream=stream,
+                cluster=cluster,
             )
             return LaunchSummary(launches=1)
 
@@ -486,6 +521,7 @@ class KernelLauncher:
             shared_bytes=config.shared_bytes,
             stream=stream,
             record_event=False,
+            cluster=cluster,
         )
         rt.retain_for_stream(stream, *values.values())
         return LaunchSummary(launches=1)

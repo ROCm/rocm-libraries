@@ -47,6 +47,19 @@ class TestGfx1250Arch(unittest.TestCase):
         self.assertFalse(target.memory.has_async_lds)
         self.assertFalse(target.memory.has_ds_read_tr)
 
+    def test_new_feature_flags_start_false(self):
+        # Prefetch, cluster launch, and multicast flags flip only after a
+        # functional run on a device; every arch must report them False now.
+        from rocke.core.arch import ArchTarget, known_arches
+
+        for gfx in known_arches():
+            memory = ArchTarget.from_gfx(gfx).memory
+            with self.subTest(gfx=gfx):
+                self.assertFalse(memory.has_scalar_data_prefetch)
+                self.assertFalse(memory.has_global_prefetch)
+                self.assertFalse(memory.has_cluster_launch)
+                self.assertFalse(memory.has_multicast_load)
+
     def test_wmma_atom_is_k32(self):
         from rocke.core.arch import ArchTarget
 

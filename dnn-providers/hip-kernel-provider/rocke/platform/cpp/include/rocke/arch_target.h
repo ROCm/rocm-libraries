@@ -178,6 +178,12 @@ typedef struct rocke_memory_caps
     bool has_async_lds;
     bool has_ds_read_tr;
     int buffer_load_max_dwords;
+    /* gfx1250 feature flags; each stays false until its feature passes a
+     * functional run on a device. */
+    bool has_scalar_data_prefetch;
+    bool has_global_prefetch;
+    bool has_cluster_launch;
+    bool has_multicast_load;
 } rocke_memory_caps_t;
 
 typedef struct rocke_resource_limits

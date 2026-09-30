@@ -410,6 +410,9 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_GLOBAL_PREFETCH,
     ROCKE_OP_TILE_FLAT_PREFETCH,
     ROCKE_OP_TILE_CLUSTER_BARRIER,
+    ROCKE_OP_TILE_CLUSTER_LOAD,
+    ROCKE_OP_TILE_CLUSTER_LOAD_ASYNC_TO_LDS,
+    ROCKE_OP_TILE_GLOBAL_PTR_TO_I64,
     ROCKE_OP_TILE_S_SETPRIO,
     ROCKE_OP_TILE_IGLP_OPT,
     ROCKE_OP_TILE_SCHED_BARRIER,
@@ -1275,6 +1278,8 @@ void rocke_b_global_load_lds(rocke_ir_builder_t* b,
 /* ----- global pointer arithmetic + buffer resource descriptors ----- */
 rocke_value_t*
     rocke_b_global_ptr_add(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* byte_off);
+/* 64-bit address of a global pointer (``ptrtoint``). */
+rocke_value_t* rocke_b_global_ptr_to_i64(rocke_ir_builder_t* b, rocke_value_t* ptr);
 rocke_value_t*
     rocke_b_buffer_rsrc(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* num_bytes);
 rocke_value_t* rocke_b_buffer_load_vN_f16(rocke_ir_builder_t* b,
@@ -1413,6 +1418,38 @@ void rocke_b_flat_prefetch(rocke_ir_builder_t* b, rocke_value_t* ptr, int cachep
 /* gfx1250 cluster barrier: cluster-scope release fence, s.cluster.barrier,
  * cluster-scope acquire fence. */
 void rocke_b_cluster_barrier(rocke_ir_builder_t* b);
+/* gfx1250 cluster multicast loads. mask (i32, wave-uniform) selects the
+ * receiving workgroups by cluster flat id (M0[15:0]). cluster_load returns i32
+ * (4 bytes), vec<i32x2> (8) or vec<i32x4> (16). */
+rocke_value_t* rocke_b_cluster_load(rocke_ir_builder_t* b,
+                                    rocke_value_t* ptr,
+                                    rocke_value_t* mask,
+                                    int width_bytes,
+                                    int cachepolicy);
+void rocke_b_cluster_load_async_to_lds(rocke_ir_builder_t* b,
+                                       rocke_value_t* src_ptr,
+                                       rocke_value_t* lds_ptr,
+                                       rocke_value_t* mask,
+                                       int width_bytes,
+                                       int offset_bytes,
+                                       int cachepolicy);
+/* Build the five D# groups for a rank-2 TDM tile transfer (mirrors
+ * IRBuilder.tdm_descriptor_2d). ``pad_interval`` < 0 disables LDS padding.
+ * Writes out[0..4] (out[2] == out[3], both the zero v4i32) and returns 1, or
+ * sets the builder error and returns 0. */
+int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
+                              rocke_value_t* global_ptr,
+                              rocke_value_t* lds_addr,
+                              int elem_bytes,
+                              rocke_value_t* tensor_dim0,
+                              rocke_value_t* tensor_dim1,
+                              rocke_value_t* row_stride,
+                              int tile_dim0,
+                              int tile_dim1,
+                              int workgroup_mask,
+                              int pad_interval,
+                              int pad_amount,
+                              rocke_value_t* out[5]);
 void rocke_b_s_setprio(rocke_ir_builder_t* b, int level);
 void rocke_b_iglp_opt(rocke_ir_builder_t* b, int level);
 void rocke_b_sched_barrier(rocke_ir_builder_t* b, int mask);

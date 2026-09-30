@@ -55,6 +55,7 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    check_cluster_dims,
     split_loc,
 )
 
@@ -1078,6 +1079,35 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare i32 @llvm.amdgcn.cluster.workgroup.max.flat.id()"
     ),
     "s.cluster.barrier": "declare void @llvm.amdgcn.s.cluster.barrier()",
+    # gfx1250 cluster multicast loads (llvm23): (ptr, cachepolicy, M0 mask).
+    "cluster.load.b32.i32": (
+        "declare i32 @llvm.amdgcn.cluster.load.b32.i32("
+        "ptr addrspace(1), i32 immarg, i32)"
+    ),
+    "cluster.load.b64.v2i32": (
+        "declare <2 x i32> @llvm.amdgcn.cluster.load.b64.v2i32("
+        "ptr addrspace(1), i32 immarg, i32)"
+    ),
+    "cluster.load.b128.v4i32": (
+        "declare <4 x i32> @llvm.amdgcn.cluster.load.b128.v4i32("
+        "ptr addrspace(1), i32 immarg, i32)"
+    ),
+    "cluster.load.async.to.lds.b8": (
+        "declare void @llvm.amdgcn.cluster.load.async.to.lds.b8("
+        "ptr addrspace(1), ptr addrspace(3), i32 immarg, i32 immarg, i32)"
+    ),
+    "cluster.load.async.to.lds.b32": (
+        "declare void @llvm.amdgcn.cluster.load.async.to.lds.b32("
+        "ptr addrspace(1), ptr addrspace(3), i32 immarg, i32 immarg, i32)"
+    ),
+    "cluster.load.async.to.lds.b64": (
+        "declare void @llvm.amdgcn.cluster.load.async.to.lds.b64("
+        "ptr addrspace(1), ptr addrspace(3), i32 immarg, i32 immarg, i32)"
+    ),
+    "cluster.load.async.to.lds.b128": (
+        "declare void @llvm.amdgcn.cluster.load.async.to.lds.b128("
+        "ptr addrspace(1), ptr addrspace(3), i32 immarg, i32 immarg, i32)"
+    ),
 }
 
 # Address spaces each ``llvm_anyptr_ty`` intrinsic accepts, mapped to their LLVM
@@ -4664,6 +4694,16 @@ class _Lowerer:
             f"{self._operand(ptr)}, i64 {off64}"
         )
 
+    def _op_tile_global_ptr_to_i64(self, op: Op) -> None:
+        if len(op.operands) != 1 or len(op.results) != 1:
+            raise ValueError("global_ptr_to_i64 expects one operand and one result")
+        (ptr,) = op.operands
+        if self._ptr_llvm_type(ptr) != "ptr addrspace(1)":
+            raise TypeError("global_ptr_to_i64 ptr must be a global pointer")
+        self._current().emit(
+            f"  {op.result.name} = ptrtoint ptr addrspace(1) {self._operand(ptr)} to i64"
+        )
+
     def _op_tile_async_buffer_load_lds_addr(self, op: Op) -> None:
         rsrc, lds_addr, voff, soff = op.operands
         dwords = int(op.attrs["dwords"])
@@ -4865,6 +4905,78 @@ class _Lowerer:
             f"  {op.result.name} = call {llvm_ty} "
             f"@llvm.amdgcn.global.load.tr.b128.{suffix}("
             f"ptr addrspace(1) {self._operand(src_ptr)})"
+        )
+
+    def _cluster_load_policy(self, op: Op, short_name: str) -> int:
+        cachepolicy = int(op.attrs.get("cachepolicy", 0))
+        if not 0 <= cachepolicy <= 0x1F:
+            raise ValueError(
+                f"{short_name} cachepolicy must be in 0..31, got {cachepolicy}"
+            )
+        return cachepolicy
+
+    def _op_tile_cluster_load(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("cluster_load")
+        if len(op.operands) != 2 or len(op.results) != 1:
+            raise ValueError("cluster_load expects two operands and one result")
+        ptr, mask = op.operands
+        if self._ptr_llvm_type(ptr) != "ptr addrspace(1)":
+            raise TypeError("cluster_load ptr must be a global pointer")
+        if mask.type != I32:
+            raise TypeError("cluster_load mask must be i32")
+        width = int(op.attrs.get("width_bytes", 0))
+        shapes = {
+            4: ("b32", "i32", I32),
+            8: ("b64", "v2i32", VectorType(I32, 2)),
+            16: ("b128", "v4i32", VectorType(I32, 4)),
+        }
+        if width not in shapes:
+            raise ValueError(
+                f"cluster_load width_bytes must be 4, 8, or 16, got {width}"
+            )
+        bits, suffix, expected = shapes[width]
+        if op.result.type != expected:
+            raise TypeError(
+                f"cluster_load result must be {expected.name}, "
+                f"got {getattr(op.result.type, 'name', op.result.type)}"
+            )
+        cachepolicy = self._cluster_load_policy(op, "cluster_load")
+        key = f"cluster.load.{bits}.{suffix}"
+        self._need(key)
+        self._current().emit(
+            f"  {op.result.name} = call {_llvm_type(expected)} "
+            f"@llvm.amdgcn.cluster.load.{bits}.{suffix}("
+            f"ptr addrspace(1) {self._operand(ptr)}, i32 {cachepolicy}, "
+            f"i32 {self._operand(mask)})"
+        )
+
+    def _op_tile_cluster_load_async_to_lds(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("cluster_load_async_to_lds")
+        if len(op.operands) != 3:
+            raise ValueError("cluster_load_async_to_lds expects three operands")
+        src_ptr, lds_ptr, mask = op.operands
+        if self._ptr_llvm_type(src_ptr) != "ptr addrspace(1)":
+            raise TypeError("cluster_load_async_to_lds src_ptr must be a global pointer")
+        if mask.type != I32:
+            raise TypeError("cluster_load_async_to_lds mask must be i32")
+        width = int(op.attrs.get("width_bytes", 0))
+        if width not in (1, 4, 8, 16):
+            raise ValueError(
+                f"cluster_load_async_to_lds width_bytes must be 1, 4, 8, or 16, got {width}"
+            )
+        offset = int(op.attrs.get("offset_bytes", 0))
+        if not -(1 << 31) <= offset < (1 << 31):
+            raise ValueError(
+                f"cluster_load_async_to_lds offset_bytes must fit signed i32, got {offset}"
+            )
+        cachepolicy = self._cluster_load_policy(op, "cluster_load_async_to_lds")
+        suffix = {1: "b8", 4: "b32", 8: "b64", 16: "b128"}[width]
+        local = self._lds_ptr_operand("cluster_load_async_to_lds", lds_ptr)
+        self._need(f"cluster.load.async.to.lds.{suffix}")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.cluster.load.async.to.lds.{suffix}("
+            f"ptr addrspace(1) {self._operand(src_ptr)}, ptr addrspace(3) {local}, "
+            f"i32 {offset}, i32 {cachepolicy}, i32 {self._operand(mask)})"
         )
 
     def _op_tile_tensor_load_to_lds(self, op: Op) -> None:
@@ -6381,6 +6493,14 @@ class _Lowerer:
         agpr_alloc = self.kernel.attrs.get("agpr_alloc")
         if agpr_alloc is not None:
             attr_parts.append(f'"amdgpu-agpr-alloc"="{_format_agpr_alloc(agpr_alloc)}"')
+        # gfx1250 workgroup-cluster shape. The backend copies it to the
+        # code-object ``.cluster_dims`` metadata without range checks, so it
+        # is validated here; the launch must pass the same shape.
+        cluster_dims = self.kernel.attrs.get("cluster_dims")
+        if cluster_dims is not None:
+            self._require_gfx1250_llvm23("cluster_dims")
+            cx, cy, cz = check_cluster_dims(cluster_dims)
+            attr_parts.append(f'"amdgpu-cluster-dims"="{cx},{cy},{cz}"')
         out.append(
             "attributes #0 = { " + " ".join(attr_parts) + " norecurse nounwind }"
         )

@@ -51,6 +51,10 @@ _WMMA_SCALE_K = 128
 _WAVE = 32
 _HALF_K = 32  # K-elements per lane-half for the K=64 atom
 _ACC = 8  # accumulator slots per lane (<8 x f32>)
+# ``prefetch=True`` sizes its scalar prefetch in lines of this many bytes. It
+# is the largest line size assumed, so the hint never reaches past the
+# workgroup's own scale rows.
+_PREFETCH_LINE_BYTES = 128
 
 
 def _wmma_op_id(dtype_a: str, dtype_b: str) -> str:
@@ -94,6 +98,10 @@ class BlockScaledGemmSpec:
     tile_m: int = 16
     tile_n: int = 16
     tile_k: int = 128
+    # Data-prefetch hints (gfx1250, llvm23 only): one scalar prefetch of the
+    # workgroup's A-scale rows and a per-lane ``global_prefetch`` of the next
+    # K step's A/B rows. Results do not change; off keeps the default IR.
+    prefetch: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "dtype_a", normalize_dtype(self.dtype_a))
@@ -111,7 +119,7 @@ class BlockScaledGemmSpec:
             f"M{self.M}N{self.N}K{self.K}",
             f"bk{self.block_k}",
             f"t{self.tile_m}x{self.tile_n}x{self.tile_k}",
-            flags={self.resolved_matrix_path(): True},
+            flags={self.resolved_matrix_path(): True, "pf": self.prefetch},
         )
 
     def resolved_matrix_path(self) -> str:
@@ -295,6 +303,12 @@ def build_block_scaled_gemm(
     halves. Both paths use the gfx12 column-distributed ``<8 x f32>``
     accumulator layout.
     Scale arrays remain A_scale[M, K/block_k] and B_scale[K/block_k, N].
+
+    ``spec.prefetch`` adds data-prefetch hints, which need gfx1250 and the
+    llvm23 flavor: the wave enables scalar prefetch and prefetches its
+    contiguous A_scale rows once, then each K step prefetches the next step's
+    A and B rows per lane. The last step prefetches nothing, so no hint
+    reaches past the operands.
     """
     ok, reason = is_valid_spec(spec, arch=arch)
     if not ok:
@@ -351,6 +365,24 @@ def build_block_scaled_gemm(
     b_row = ir.add(n0, frag)  # this lane's B row (= output col n)
     a_base = ir.mul(a_row, cK)
     b_base = ir.mul(b_row, cK)
+
+    if spec.prefetch:
+        # A_scale rows m0 .. m0+15 are contiguous and m0 is wave-uniform, as
+        # s_prefetch_data requires.
+        scale_bytes = {I8: 1, F16: 2, F32: 4}[scale_ty]
+        tile_bytes = _BLOCK_M * groups * scale_bytes
+        ir.enable_scalar_prefetch()
+        ir.s_prefetch_data(
+            ir.global_ptr_add(AScale, ir.mul(m0, ir.const_i32(groups * scale_bytes))),
+            ir.const_i32(max(1, tile_bytes // _PREFETCH_LINE_BYTES)),
+        )
+
+    def _prefetch_step(k_next):
+        # A and B are one byte per element, so element offsets are byte offsets.
+        if not spec.prefetch or k_next >= spec.K:
+            return
+        for ptr, base in ((A, a_base), (B, b_base)):
+            ir.global_prefetch(ir.global_ptr_add(ptr, ir.add(base, ir.const_i32(k_next))))
 
     def _load_frag(ptr, base, storage_ty, k0):
         if not native_scale:
@@ -415,6 +447,7 @@ def build_block_scaled_gemm(
         acc = ir.zero_vec_f32(_ACC)
         for step in range(spec.K // _WMMA_SCALE_K):
             k0 = step * _WMMA_SCALE_K
+            _prefetch_step(k0 + _WMMA_SCALE_K)
             a_frag = _load_frag(A, a_base, a_ty, k0)
             b_frag = _load_frag(B, b_base, b_ty, k0)
             a_scale = _pack_strided_scales(AScale, step, for_b=False)
@@ -438,6 +471,7 @@ def build_block_scaled_gemm(
         acc = ir.zero_vec_f32(_ACC)
         for step in range(steps_per_group):
             k0 = kg * spec.block_k + step * _WMMA_K
+            _prefetch_step(k0 + _WMMA_K)
             a_frag = _load_frag(A, a_base, a_ty, k0)
             b_frag = _load_frag(B, b_base, b_ty, k0)
             acc = ir.mma(op_id, a_frag, b_frag, acc)

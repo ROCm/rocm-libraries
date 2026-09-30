@@ -161,6 +161,10 @@
         "has_async_global_lds": true,
         "has_ds_read_tr": false,
         "has_tdm": false,
+        "has_scalar_data_prefetch": false,
+        "has_global_prefetch": false,
+        "has_cluster_launch": false,
+        "has_multicast_load": false,
         "buffer_load_max_dwords": 4
       },
       "limits": {

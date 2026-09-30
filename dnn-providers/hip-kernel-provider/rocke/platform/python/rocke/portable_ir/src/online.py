@@ -276,6 +276,8 @@ def _bind(lib: ctypes.CDLL) -> None:
         POINTER(c_uint),
     ]
     lib.rocke_launch_plan_geometry.restype = c_bool
+    lib.rocke_launch_plan_cluster.argtypes = [ctypes.c_void_p, POINTER(_LaunchDims)]
+    lib.rocke_launch_plan_cluster.restype = c_bool
     lib.rocke_launch_plan_num_args.argtypes = [ctypes.c_void_p]
     lib.rocke_launch_plan_num_args.restype = c_int
     lib.rocke_launch_plan_arg.argtypes = [ctypes.c_void_p, c_int]
@@ -556,6 +558,8 @@ def _read_plan(lib, handle) -> Dict:
         has_geom = lib.rocke_launch_plan_geometry(
             handle, byref(grid), byref(block), byref(lds)
         )
+        cluster = _LaunchDims()
+        has_cluster = lib.rocke_launch_plan_cluster(handle, byref(cluster))
         args = []
         for i in range(lib.rocke_launch_plan_num_args(handle)):
             a = lib.rocke_launch_plan_arg(handle, i).contents
@@ -581,6 +585,9 @@ def _read_plan(lib, handle) -> Dict:
                 if has_geom
                 else None
             ),
+            "cluster": (
+                (cluster.x, cluster.y, cluster.z) if has_cluster else None
+            ),
         }
     finally:
         lib.rocke_launch_plan_free(handle)
@@ -594,13 +601,14 @@ def plan_launch(
     ints: Optional[Dict[str, int]] = None,
     strs: Optional[Dict[str, str]] = None,
 ) -> Dict:
-    """How to launch what this recipe builds: name, args, grid/block/LDS.
+    """How to launch what this recipe builds: name, args, grid/block/LDS, cluster.
 
     `key` selects out of a bundle; omit it for a standalone recipe. Returns the
     same shape as src/launch.py::plan, which is what lets a test pin the two
     engines against each other. `geometry` is None when the recipe carries no
     launch block -- see rocke_launch_plan_geometry on why that is reported
-    rather than defaulted."""
+    rather than defaulted. `cluster` is None unless the kernel has a
+    cluster_dims attr (see rocke_launch_plan_cluster)."""
     lib = load()
     buf = (c_ubyte * len(cbor)).from_buffer_copy(cbor)
     ia, ni, sa, ns = _mk_specs(ints, strs)

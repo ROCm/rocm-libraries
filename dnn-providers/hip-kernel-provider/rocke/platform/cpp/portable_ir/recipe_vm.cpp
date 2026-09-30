@@ -850,6 +850,29 @@ static void rv_attrs(rvm_t* vm, const jd_val_t* attrs, rocke_attr_map_t* m)
     }
 }
 
+/* A kernel list attr of bare ints (e.g. cluster_dims), encoded by ir_export as
+ * {"t":"l","v":[{"_":{"t":"i","v":N}}, ...]}. Other list shapes are skipped,
+ * as before. */
+static void rv_kernel_int_list(rocke_ir_builder_t* b,
+                               rocke_attr_map_t* m,
+                               const char* key,
+                               const jd_val_t* v)
+{
+    int64_t ints[16];
+    if(v->kind != JD_ARR || v->arr_len <= 0 || v->arr_len > (int)(sizeof ints / sizeof ints[0]))
+        return;
+    for(int i = 0; i < v->arr_len; i++)
+    {
+        const jd_val_t* item = rocke_jget(v->arr[i], "_");
+        const char* t = rocke_jstr(rocke_jget(item, "t"));
+        double d;
+        if(!t || strcmp(t, "i") != 0 || !rocke_jnum(rocke_jget(item, "v"), &d))
+            return;
+        ints[i] = (int64_t)d;
+    }
+    rocke_attr_set_int_list(b, m, key, ints, v->arr_len);
+}
+
 /* ---------------------------------------------------------------- execute */
 
 static void rv_exec_list(rvm_t* vm, const jd_val_t* program);
@@ -1350,6 +1373,8 @@ static rocke_status_t rv_run_root(jd_val_t* root,
             double d;
             if(t && v && strcmp(t, "i") == 0 && rocke_jnum(v, &d))
                 rocke_attr_set_int(out_builder, &k->attrs, key, (int64_t)d);
+            else if(t && v && strcmp(t, "l") == 0)
+                rv_kernel_int_list(out_builder, &k->attrs, key, v);
         }
     }
 
@@ -1578,6 +1603,8 @@ struct rocke_launch_plan
     rocke_launch_dims_t grid;
     rocke_launch_dims_t block;
     unsigned lds_bytes;
+    bool has_cluster;
+    rocke_launch_dims_t cluster;
     rocke_arg_desc_t* args;
     int n_args;
     unsigned kernarg_size;
@@ -1704,6 +1731,84 @@ static bool rv_plan_geometry(
     return true;
 }
 
+/* The kernel's cluster_dims attr, read off the built kernel so the launch
+ * shape cannot disagree with the compiled "amdgpu-cluster-dims". The grid (when
+ * the recipe carries one) must be a whole number of clusters on every axis;
+ * hipDrvLaunchKernelEx would reject it, but far from the cause. */
+static bool rv_plan_cluster(const rocke_kernel_def_t* kernel,
+                            rocke_launch_plan_t* plan,
+                            char* err,
+                            size_t cap)
+{
+    const rocke_attr_value_t* v = kernel ? rocke_attr_get(&kernel->attrs, "cluster_dims") : NULL;
+    if(!v)
+        return true;
+    if(v->kind != ROCKE_ATTR_INT_LIST || v->u.ilist.count != 3)
+    {
+        if(err && cap)
+            ROCKE_ERR_SNPRINTF(err, cap, "cluster_dims must be three integers (x, y, z)");
+        return false;
+    }
+    const int64_t* c = v->u.ilist.ints;
+    for(int i = 0; i < 3; i++)
+    {
+        if(c[i] < 1 || c[i] > 15)
+        {
+            if(err && cap)
+                ROCKE_ERR_SNPRINTF(err,
+                                   cap,
+                                   "cluster_dims (%lld, %lld, %lld): each dimension must be in "
+                                   "1..15",
+                                   (long long)c[0],
+                                   (long long)c[1],
+                                   (long long)c[2]);
+            return false;
+        }
+    }
+    if(c[0] * c[1] * c[2] > 16)
+    {
+        if(err && cap)
+            ROCKE_ERR_SNPRINTF(err,
+                               cap,
+                               "cluster_dims (%lld, %lld, %lld): %lld workgroups exceeds the "
+                               "cluster limit of 16",
+                               (long long)c[0],
+                               (long long)c[1],
+                               (long long)c[2],
+                               (long long)(c[0] * c[1] * c[2]));
+        return false;
+    }
+    plan->cluster.x = (unsigned)c[0];
+    plan->cluster.y = (unsigned)c[1];
+    plan->cluster.z = (unsigned)c[2];
+    plan->has_cluster = true;
+    if(plan->has_geometry)
+    {
+        const unsigned g[3] = {plan->grid.x, plan->grid.y, plan->grid.z};
+        const unsigned k[3] = {plan->cluster.x, plan->cluster.y, plan->cluster.z};
+        for(int i = 0; i < 3; i++)
+        {
+            if(g[i] % k[i] != 0)
+            {
+                if(err && cap)
+                    ROCKE_ERR_SNPRINTF(err,
+                                       cap,
+                                       "grid (%u, %u, %u) is not a multiple of cluster "
+                                       "(%u, %u, %u) in %c",
+                                       g[0],
+                                       g[1],
+                                       g[2],
+                                       k[0],
+                                       k[1],
+                                       k[2],
+                                       "xyz"[i]);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 static rocke_status_t rv_plan_on(jd_val_t* root,
                                  const rocke_recipe_spec_int_t* ints,
                                  int n_ints,
@@ -1794,7 +1899,8 @@ static rocke_status_t rv_plan_on(jd_val_t* root,
     vm.n_ints = n_ints;
     vm.strs = strs;
     vm.n_strs = n_strs;
-    if(!rv_plan_geometry(&vm, root, plan, err, err_cap))
+    if(!rv_plan_geometry(&vm, root, plan, err, err_cap)
+       || !rv_plan_cluster(kernel, plan, err, err_cap))
     {
         rocke_ir_builder_free(&b);
         rocke_launch_plan_free(plan);
@@ -1923,6 +2029,15 @@ bool rocke_launch_plan_geometry(const rocke_launch_plan_t* plan,
         *out_block = plan->block;
     if(out_lds_bytes)
         *out_lds_bytes = plan->lds_bytes;
+    return true;
+}
+
+bool rocke_launch_plan_cluster(const rocke_launch_plan_t* plan, rocke_launch_dims_t* out_cluster)
+{
+    if(!plan || !plan->has_cluster)
+        return false;
+    if(out_cluster)
+        *out_cluster = plan->cluster;
     return true;
 }
 

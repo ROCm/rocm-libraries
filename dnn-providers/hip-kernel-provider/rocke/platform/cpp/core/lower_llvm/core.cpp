@@ -2082,6 +2082,61 @@ const char* rocke_ll_format_agpr_alloc(rocke_lower_t* L, const rocke_attr_value_
     return rocke_arena_printf(&L->arena, "%ld,%ld", lo, hi);
 }
 
+/* gfx1250 workgroup-cluster shape; mirrors Python ir.check_cluster_dims (same
+ * limits and messages) behind the gfx1250 + llvm23 gate. The backend copies
+ * the attribute to the code-object .cluster_dims metadata unchecked. */
+#define ROCKE_LL_MAX_CLUSTER_DIM 15
+#define ROCKE_LL_MAX_CLUSTER_WORKGROUPS 16
+
+static const char* rocke_ll_format_cluster_dims(rocke_lower_t* L, const rocke_attr_value_t* v)
+{
+    if(!L->backend || !L->backend->gfx || strcmp(L->backend->gfx, "gfx1250") != 0)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "cluster_dims requires gfx1250, got %s",
+                      (L->backend && L->backend->gfx) ? L->backend->gfx : "(unknown)");
+    }
+    if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "cluster_dims requires LLVM flavor llvm23, got %s",
+                      rocke_llvm_flavor_name(L->flavor));
+    }
+    if(!v || v->kind != ROCKE_ATTR_INT_LIST || v->u.ilist.count != 3)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "cluster_dims must be three integers (x, y, z)");
+    }
+    const long long x = (long long)v->u.ilist.ints[0];
+    const long long y = (long long)v->u.ilist.ints[1];
+    const long long z = (long long)v->u.ilist.ints[2];
+    if(x < 1 || y < 1 || z < 1 || x > ROCKE_LL_MAX_CLUSTER_DIM || y > ROCKE_LL_MAX_CLUSTER_DIM
+       || z > ROCKE_LL_MAX_CLUSTER_DIM)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "cluster_dims (%lld, %lld, %lld): each dimension must be in 1..%d",
+                      x,
+                      y,
+                      z,
+                      ROCKE_LL_MAX_CLUSTER_DIM);
+    }
+    if(x * y * z > ROCKE_LL_MAX_CLUSTER_WORKGROUPS)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "cluster_dims (%lld, %lld, %lld): %lld workgroups exceeds the "
+                      "cluster limit of %d",
+                      x,
+                      y,
+                      z,
+                      x * y * z,
+                      ROCKE_LL_MAX_CLUSTER_WORKGROUPS);
+    }
+    return rocke_arena_printf(&L->arena, "%lld,%lld,%lld", x, y, z);
+}
+
 static const char* rocke_ll_scheduler_strategy(rocke_lower_t* L, const rocke_attr_value_t* v)
 {
     if(!v || v->kind != ROCKE_ATTR_STR || !v->u.s)
@@ -2273,6 +2328,12 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
         {
             const char* fa = rocke_ll_format_agpr_alloc(L, agpr);
             rocke_strbuf_appendf(out, " \"amdgpu-agpr-alloc\"=\"%s\"", fa);
+        }
+        const rocke_attr_value_t* cluster = rocke_attr_get(&L->kernel->attrs, "cluster_dims");
+        if(cluster)
+        {
+            rocke_strbuf_appendf(
+                out, " \"amdgpu-cluster-dims\"=\"%s\"", rocke_ll_format_cluster_dims(L, cluster));
         }
     }
     rocke_strbuf_append(out, " norecurse nounwind }\n");

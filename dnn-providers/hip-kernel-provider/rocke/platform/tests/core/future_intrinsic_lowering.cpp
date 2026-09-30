@@ -19,6 +19,7 @@
 #include <cstring>
 #include <exception>
 #include <string>
+#include <vector>
 
 #include "rocke/arch_target.h"
 #include "rocke/ir.h"
@@ -1274,6 +1275,872 @@ void case_gfx1250_cluster_purity()
         fail("tile.cluster_barrier must not be pure", __LINE__);
 }
 
+/* ---- gfx1250 cluster multicast loads ---- */
+
+rocke_value_t* i32_param(rocke_ir_builder_t* b, const char* name)
+{
+    return rocke_b_param(b, name, rocke_i32(), nullptr);
+}
+
+rocke_value_t* lds_stage(rocke_ir_builder_t* b)
+{
+    const int shape[] = {64};
+    return rocke_b_smem_addr_of(b, rocke_b_smem_alloc(b, rocke_i32(), shape, 1, "stage"));
+}
+
+/* Mirrors _build_all in test_gfx1250_multicast.py. */
+void build_gfx1250_multicast(rocke_ir_builder_t* b)
+{
+    rocke_value_t* src   = global_ptr_param(b, "src", rocke_i32());
+    rocke_value_t* dst   = global_ptr_param(b, "dst", rocke_i32());
+    rocke_value_t* mask  = i32_param(b, "mask");
+    rocke_value_t* local = lds_stage(b);
+    rocke_value_t* v1    = rocke_b_cluster_load(b, src, mask, 4, 0);
+    rocke_value_t* v2    = rocke_b_cluster_load(b, src, mask, 8, 1);
+    rocke_value_t* v4    = rocke_b_cluster_load(b, src, mask, 16, 8);
+    rocke_value_t* zero  = rocke_b_const_i32(b, 0);
+    rocke_b_global_store(b, dst, zero, v1, 4);
+    rocke_b_global_store(b, dst, zero, rocke_b_vec_extract(b, v2, 1), 4);
+    rocke_b_global_store(b, dst, zero, rocke_b_vec_extract(b, v4, 3), 4);
+    rocke_b_cluster_load_async_to_lds(b, src, local, mask, 1, 0, 0);
+    rocke_b_cluster_load_async_to_lds(b, src, local, mask, 4, 16, 0);
+    rocke_b_cluster_load_async_to_lds(b, src, local, mask, 8, 0, 3);
+    rocke_b_cluster_load_async_to_lds(b, src, local, mask, 16, -32, 31);
+}
+
+void case_gfx1250_multicast()
+{
+    const std::string ir = lower_one(
+        "gfx1250_multicast", build_gfx1250_multicast, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23);
+    EXPECT_IR(ir,
+              " = call i32 @llvm.amdgcn.cluster.load.b32.i32("
+              "ptr addrspace(1) %src, i32 0, i32 %mask)");
+    EXPECT_IR(ir,
+              " = call <2 x i32> @llvm.amdgcn.cluster.load.b64.v2i32("
+              "ptr addrspace(1) %src, i32 1, i32 %mask)");
+    EXPECT_IR(ir,
+              " = call <4 x i32> @llvm.amdgcn.cluster.load.b128.v4i32("
+              "ptr addrspace(1) %src, i32 8, i32 %mask)");
+    EXPECT_IR_COUNT(
+        ir,
+        "declare i32 @llvm.amdgcn.cluster.load.b32.i32(ptr addrspace(1), i32 immarg, i32)",
+        1);
+    EXPECT_IR_COUNT(
+        ir,
+        "declare <2 x i32> @llvm.amdgcn.cluster.load.b64.v2i32(ptr addrspace(1), i32 immarg, i32)",
+        1);
+    EXPECT_IR_COUNT(ir,
+                    "declare <4 x i32> @llvm.amdgcn.cluster.load.b128.v4i32("
+                    "ptr addrspace(1), i32 immarg, i32)",
+                    1);
+    static const struct
+    {
+        const char* suffix;
+        const char* imms;
+    } asyncs[] = {
+        {"b8", "i32 0, i32 0, i32 %mask)"},
+        {"b32", "i32 16, i32 0, i32 %mask)"},
+        {"b64", "i32 0, i32 3, i32 %mask)"},
+        {"b128", "i32 -32, i32 31, i32 %mask)"},
+    };
+    for(const auto& a : asyncs)
+    {
+        char call[160];
+        char decl[192];
+        snprintf(call,
+                 sizeof(call),
+                 "call void @llvm.amdgcn.cluster.load.async.to.lds.%s(ptr addrspace(1) %%src, "
+                 "ptr addrspace(3) ",
+                 a.suffix);
+        snprintf(decl,
+                 sizeof(decl),
+                 "declare void @llvm.amdgcn.cluster.load.async.to.lds.%s(ptr addrspace(1), "
+                 "ptr addrspace(3), i32 immarg, i32 immarg, i32)",
+                 a.suffix);
+        expect_count(ir, call, 1, __LINE__);
+        expect_count(ir, decl, 1, __LINE__);
+        /* The immediates trail the call on the same line. */
+        const size_t at = ir.find(call);
+        if(at != std::string::npos)
+        {
+            const std::string line = ir.substr(at, ir.find('\n', at) - at);
+            if(line.find(a.imms) == std::string::npos)
+                fail(line.c_str(), __LINE__);
+        }
+    }
+}
+
+void case_gfx1250_multicast_declares_only_used()
+{
+    const std::string ir = lower_one(
+        "only_b32",
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* src = global_ptr_param(b, "src", rocke_i32());
+            rocke_value_t* dst = global_ptr_param(b, "dst", rocke_i32());
+            rocke_b_global_store(b,
+                                 dst,
+                                 rocke_b_const_i32(b, 0),
+                                 rocke_b_cluster_load(b, src, rocke_b_const_i32(b, 3), 4, 0),
+                                 4);
+        },
+        "gfx1250",
+        ROCKE_LLVM_FLAVOR_LLVM23);
+    EXPECT_IR(ir, "@llvm.amdgcn.cluster.load.b32.i32(");
+    EXPECT_NO_IR(ir, "@llvm.amdgcn.cluster.load.b64");
+    EXPECT_NO_IR(ir, "@llvm.amdgcn.cluster.load.b128");
+    EXPECT_NO_IR(ir, "@llvm.amdgcn.cluster.load.async");
+}
+
+void case_gfx1250_multicast_gated()
+{
+    struct Gate
+    {
+        const char* name;
+        void (*build)(rocke_ir_builder_t*);
+    };
+    static const Gate gates[] = {
+        {"cluster_load",
+         [](rocke_ir_builder_t* b) {
+             rocke_value_t* src = global_ptr_param(b, "src", rocke_i32());
+             rocke_b_global_store(b,
+                                  src,
+                                  rocke_b_const_i32(b, 0),
+                                  rocke_b_cluster_load(b, src, rocke_b_const_i32(b, 1), 4, 0),
+                                  4);
+         }},
+        {"cluster_load_async_to_lds",
+         [](rocke_ir_builder_t* b) {
+             rocke_b_cluster_load_async_to_lds(b,
+                                               global_ptr_param(b, "src", rocke_i32()),
+                                               lds_stage(b),
+                                               rocke_b_const_i32(b, 1),
+                                               4,
+                                               0,
+                                               0);
+         }},
+    };
+    const struct
+    {
+        const char* arch;
+        rocke_llvm_flavor_t flavor;
+        const char* suffix;
+    } bad[] = {
+        {"gfx950", ROCKE_LLVM_FLAVOR_LLVM22, " requires gfx1250"},
+        {"gfx1201", ROCKE_LLVM_FLAVOR_LLVM23, " requires gfx1250"},
+        {"gfx1250", ROCKE_LLVM_FLAVOR_LLVM22, " requires LLVM flavor llvm23"},
+    };
+    for(const Gate& g : gates)
+    {
+        for(const auto& t : bad)
+        {
+            std::string err;
+            const rocke_status_t st = lower_expect_error("gate", g.build, t.arch, t.flavor, &err);
+            const std::string want = std::string(g.name) + t.suffix;
+            if(st != ROCKE_ERR_VALUE || err.find(want) == std::string::npos)
+            {
+                char msg[ROCKE_ERR_MSG_CAP + 128];
+                snprintf(msg,
+                         sizeof(msg),
+                         "%s on %s: status %d, err \"%s\"",
+                         g.name,
+                         t.arch,
+                         (int)st,
+                         err.c_str());
+                fail(msg, __LINE__);
+            }
+        }
+    }
+}
+
+void case_gfx1250_multicast_builder_rejects()
+{
+    struct Reject
+    {
+        const char* want;
+        void (*emit)(rocke_ir_builder_t*, rocke_value_t*, rocke_value_t*, rocke_value_t*);
+    };
+    using B = rocke_ir_builder_t*;
+    using V = rocke_value_t*;
+    static const Reject rejects[] = {
+        {"cluster_load width_bytes must be 4, 8, or 16 (got 1)",
+         [](B b, V s, V, V) { rocke_b_cluster_load(b, s, rocke_b_const_i32(b, 1), 1, 0); }},
+        {"cluster_load width_bytes must be 4, 8, or 16 (got 32)",
+         [](B b, V s, V, V) { rocke_b_cluster_load(b, s, rocke_b_const_i32(b, 1), 32, 0); }},
+        {"cluster_load cachepolicy",
+         [](B b, V s, V, V) { rocke_b_cluster_load(b, s, rocke_b_const_i32(b, 1), 4, 32); }},
+        {"cluster_load ptr must be a global pointer",
+         [](B b, V, V f, V) { rocke_b_cluster_load(b, f, rocke_b_const_i32(b, 1), 4, 0); }},
+        {"cluster_load mask must be i32",
+         [](B b, V s, V, V) { rocke_b_cluster_load(b, s, rocke_b_const_i64(b, 1), 4, 0); }},
+        {"cluster_load_async_to_lds width_bytes must be 1, 4, 8, or 16 (got 2)",
+         [](B b, V s, V, V l) {
+             rocke_b_cluster_load_async_to_lds(b, s, l, rocke_b_const_i32(b, 1), 2, 0, 0);
+         }},
+        {"cluster_load_async_to_lds cachepolicy",
+         [](B b, V s, V, V l) {
+             rocke_b_cluster_load_async_to_lds(b, s, l, rocke_b_const_i32(b, 1), 4, 0, -1);
+         }},
+        {"cluster_load_async_to_lds src_ptr must be a global pointer",
+         [](B b, V, V f, V l) {
+             rocke_b_cluster_load_async_to_lds(b, f, l, rocke_b_const_i32(b, 1), 4, 0, 0);
+         }},
+        {"cluster_load_async_to_lds local pointer must be",
+         [](B b, V s, V, V) {
+             rocke_b_cluster_load_async_to_lds(b, s, s, rocke_b_const_i32(b, 1), 4, 0, 0);
+         }},
+        {"cluster_load_async_to_lds mask must be i32",
+         [](B b, V s, V, V l) {
+             rocke_b_cluster_load_async_to_lds(b, s, l, rocke_b_const_i64(b, 1), 4, 0, 0);
+         }},
+    };
+    for(const Reject& r : rejects)
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "bad");
+        bool rejected = false;
+        std::string err;
+        try
+        {
+            rocke_value_t* src  = global_ptr_param(&b, "src", rocke_i32());
+            rocke_value_t* flat = private_ptr_param(&b, "flat", rocke_i32());
+            r.emit(&b, src, flat, lds_stage(&b));
+            rejected           = rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE;
+            const char* msg    = rocke_ir_builder_error(&b);
+            err                = msg ? msg : "";
+        }
+        catch(const std::exception& e)
+        {
+            rejected = true;
+            err      = e.what();
+        }
+        if(!rejected || err.find(r.want) == std::string::npos)
+        {
+            char msg[ROCKE_ERR_MSG_CAP + 128];
+            snprintf(msg, sizeof(msg), "want \"%s\", err \"%s\"", r.want, err.c_str());
+            fail(msg, __LINE__);
+        }
+        rocke_ir_builder_free(&b);
+    }
+}
+
+/* Raw ops carry attrs the builder would reject; the lowerer must catch them. */
+void emit_raw_cluster_load(rocke_ir_builder_t* b, int64_t width, int64_t cachepolicy, int lanes)
+{
+    rocke_attr_map_t attrs;
+    rocke_attr_map_init(&attrs);
+    rocke_attr_set_int(b, &attrs, "width_bytes", width);
+    rocke_attr_set_int(b, &attrs, "cachepolicy", cachepolicy);
+    rocke_value_t* src        = global_ptr_param(b, "src", rocke_i32());
+    rocke_value_t* operands[] = {src, rocke_b_const_i32(b, 1)};
+    const rocke_type_t* rty
+        = lanes == 1 ? rocke_i32() : rocke_vector_type(b, rocke_i32(), lanes);
+    rocke_op_t* op = rocke_b_op(
+        b, ROCKE_OP_TILE_CLUSTER_LOAD, operands, 2, &rty, 1, &attrs, nullptr, 0, "cld", nullptr);
+    rocke_value_t* v = rocke_op_result(b, op);
+    rocke_b_global_store(
+        b, src, rocke_b_const_i32(b, 0), lanes == 1 ? v : rocke_b_vec_extract(b, v, 0), 4);
+}
+
+void emit_raw_cluster_load_async(rocke_ir_builder_t* b,
+                                 int64_t width,
+                                 int64_t offset,
+                                 int64_t cachepolicy)
+{
+    rocke_attr_map_t attrs;
+    rocke_attr_map_init(&attrs);
+    rocke_attr_set_int(b, &attrs, "width_bytes", width);
+    rocke_attr_set_int(b, &attrs, "offset_bytes", offset);
+    rocke_attr_set_int(b, &attrs, "cachepolicy", cachepolicy);
+    rocke_value_t* operands[]
+        = {global_ptr_param(b, "src", rocke_i32()), lds_stage(b), rocke_b_const_i32(b, 1)};
+    rocke_b_op(b,
+               ROCKE_OP_TILE_CLUSTER_LOAD_ASYNC_TO_LDS,
+               operands,
+               3,
+               nullptr,
+               0,
+               &attrs,
+               nullptr,
+               0,
+               nullptr,
+               nullptr);
+}
+
+void case_gfx1250_multicast_lowerer_rechecks()
+{
+    struct Recheck
+    {
+        const char* want;
+        void (*build)(rocke_ir_builder_t*);
+    };
+    static const Recheck rechecks[] = {
+        {"cluster_load cachepolicy must be in 0..31, got 40",
+         [](rocke_ir_builder_t* b) { emit_raw_cluster_load(b, 4, 40, 1); }},
+        {"cluster_load width_bytes must be 4, 8, or 16, got 2",
+         [](rocke_ir_builder_t* b) { emit_raw_cluster_load(b, 2, 0, 1); }},
+        {"cluster_load result must be vec<i32x2>, got i32",
+         [](rocke_ir_builder_t* b) { emit_raw_cluster_load(b, 8, 0, 1); }},
+        {"cluster_load result must be i32, got vec<i32x4>",
+         [](rocke_ir_builder_t* b) { emit_raw_cluster_load(b, 4, 0, 4); }},
+        {"cluster_load_async_to_lds width_bytes must be 1, 4, 8, or 16, got 2",
+         [](rocke_ir_builder_t* b) { emit_raw_cluster_load_async(b, 2, 0, 0); }},
+        {"cluster_load_async_to_lds offset_bytes must fit signed i32, got 2147483648",
+         [](rocke_ir_builder_t* b) { emit_raw_cluster_load_async(b, 4, INT64_C(1) << 31, 0); }},
+        {"cluster_load_async_to_lds cachepolicy must be in 0..31, got 32",
+         [](rocke_ir_builder_t* b) { emit_raw_cluster_load_async(b, 4, 0, 32); }},
+    };
+    for(const Recheck& r : rechecks)
+    {
+        std::string err;
+        const rocke_status_t st
+            = lower_expect_error("recheck", r.build, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23, &err);
+        if(st != ROCKE_ERR_VALUE || err.find(r.want) == std::string::npos)
+        {
+            char msg[ROCKE_ERR_MSG_CAP + 128];
+            snprintf(msg,
+                     sizeof(msg),
+                     "want \"%s\", status %d, err \"%s\"",
+                     r.want,
+                     (int)st,
+                     err.c_str());
+            fail(msg, __LINE__);
+        }
+    }
+}
+
+/* Multicast writes other workgroups' registers/LDS; DCE must keep both. */
+void case_gfx1250_multicast_purity()
+{
+    if(rocke_opcode_is_pure(ROCKE_OP_TILE_CLUSTER_LOAD))
+        fail("tile.cluster_load must not be pure", __LINE__);
+    if(rocke_opcode_is_pure(ROCKE_OP_TILE_CLUSTER_LOAD_ASYNC_TO_LDS))
+        fail("tile.cluster_load_async_to_lds must not be pure", __LINE__);
+}
+
+/* ---- gfx1250 TDM descriptor (tdm_descriptor_2d + tensor transfers) ---- */
+
+struct TdmShape
+{
+    int elem_bytes     = 4;
+    int tile_dim0      = 64;
+    int tile_dim1      = 16;
+    int workgroup_mask = 0;
+    int pad_interval   = -1;
+    int pad_amount     = 0;
+};
+
+/* Mirrors _build_round_trip in test_gfx1250_tdm.py: global -> LDS -> global
+ * through one 64x16 i32 tile. */
+void build_gfx1250_tdm(rocke_ir_builder_t* b, const TdmShape& s)
+{
+    const int shape[]     = {64 * 16};
+    rocke_value_t* src    = global_ptr_param(b, "src", rocke_i32());
+    rocke_value_t* dst    = global_ptr_param(b, "dst", rocke_i32());
+    rocke_value_t* dim0   = i32_param(b, "dim0");
+    rocke_value_t* dim1   = i32_param(b, "dim1");
+    rocke_value_t* stride = i32_param(b, "stride");
+    rocke_value_t* lds
+        = rocke_b_smem_addr_of(b, rocke_b_smem_alloc(b, rocke_i32(), shape, 1, "tile"));
+    rocke_value_t* g[5];
+    rocke_b_tdm_descriptor_2d(b,
+                              src,
+                              lds,
+                              s.elem_bytes,
+                              dim0,
+                              dim1,
+                              stride,
+                              s.tile_dim0,
+                              s.tile_dim1,
+                              s.workgroup_mask,
+                              s.pad_interval,
+                              s.pad_amount,
+                              g);
+    rocke_b_tensor_load_to_lds(b, g[0], g[1], g[2], g[3], g[4], 0);
+    rocke_b_s_wait_tensorcnt(b, 0);
+    rocke_b_tdm_descriptor_2d(b,
+                              dst,
+                              lds,
+                              s.elem_bytes,
+                              dim0,
+                              dim1,
+                              stride,
+                              s.tile_dim0,
+                              s.tile_dim1,
+                              s.workgroup_mask,
+                              s.pad_interval,
+                              s.pad_amount,
+                              g);
+    rocke_b_tensor_store_from_lds(b, g[0], g[1], g[2], g[3], g[4], 0);
+    rocke_b_s_wait_tensorcnt(b, 0);
+}
+
+void build_gfx1250_tdm_default(rocke_ir_builder_t* b)
+{
+    build_gfx1250_tdm(b, TdmShape{});
+}
+
+/* The operand of every readfirstlane call, in emission order. The trailing
+ * space in the needle skips the declaration, whose operand list is "(i32)". */
+std::vector<std::string> tdm_readfirstlane_args(const std::string& ir)
+{
+    static const char needle[] = "@llvm.amdgcn.readfirstlane.i32(i32 ";
+    std::vector<std::string> args;
+    for(size_t at = ir.find(needle); at != std::string::npos; at = ir.find(needle, at + 1))
+    {
+        const size_t start = at + sizeof(needle) - 1;
+        const size_t end   = ir.find(')', start);
+        if(end == std::string::npos)
+            break;
+        args.push_back(ir.substr(start, end - start));
+    }
+    return args;
+}
+
+void expect_arg(const std::vector<std::string>& args, size_t i, const char* want, int line)
+{
+    if(i >= args.size() || args[i] != want)
+    {
+        char msg[256];
+        snprintf(msg,
+                 sizeof(msg),
+                 "readfirstlane arg %zu: want \"%s\", saw \"%s\"",
+                 i,
+                 want,
+                 i < args.size() ? args[i].c_str() : "<missing>");
+        fail(msg, line);
+    }
+}
+
+void case_gfx1250_tdm_round_trip()
+{
+    const std::string ir
+        = lower_one("gfx1250_tdm", build_gfx1250_tdm_default, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23);
+    /* Group 0: global address split, hi[24:0] with type field (bits 31:30) = 2. */
+    EXPECT_IR(ir, " = ptrtoint ptr addrspace(1) %src to i64");
+    EXPECT_IR(ir, " = ptrtoint ptr addrspace(1) %dst to i64");
+    EXPECT_IR_COUNT(ir, ", 32\n", 2);
+    EXPECT_IR_COUNT(ir, ", 33554431\n", 2);
+    EXPECT_IR_COUNT(ir, ", -2147483648\n", 2);
+    /* The smem i64 address is truncated to the 32-bit LDS byte address. */
+    EXPECT_IR(ir, " = trunc i64 %lds_addr");
+    /* Group 1: tensor dims split 16/16; tile_dim0=64 lands in dword 3 high half. */
+    EXPECT_IR(ir, " = shl i32 %dim0, 16\n");
+    EXPECT_IR(ir, " = lshr i32 %dim0, 16\n");
+    EXPECT_IR(ir, " = shl i32 %dim1, 16\n");
+    EXPECT_IR(ir, " = lshr i32 %dim1, 16\n");
+    EXPECT_IR_COUNT(ir, ", 4194304\n", 2);
+
+    const std::vector<std::string> args = tdm_readfirstlane_args(ir);
+    if(args.size() != 24)
+    {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "want 24 readfirstlane args, saw %zu", args.size());
+        fail(msg, __LINE__);
+        return;
+    }
+    /* Group 0 dword 0 = 1; group 1 = flags (elem 4 B -> data_size 2), ...,
+     * tile_dim1, row_stride, dim-1 stride 1<<16, 0. Both descriptors match. */
+    static const struct
+    {
+        size_t index;
+        const char* want;
+    } constant_words[] = {
+        {0, "1"}, {4, "131072"}, {8, "16"}, {9, "%stride"}, {10, "65536"}, {11, "0"}};
+    for(size_t base : {size_t(0), size_t(12)})
+        for(const auto& w : constant_words)
+            expect_arg(args, base + w.index, w.want, __LINE__);
+
+    EXPECT_IR_COUNT(ir, "call void @llvm.amdgcn.tensor.load.to.lds(<4 x i32> %vp", 1);
+    EXPECT_IR_COUNT(ir, "call void @llvm.amdgcn.tensor.store.from.lds(<4 x i32> %vp", 1);
+    EXPECT_IR_COUNT(ir, "call void @llvm.amdgcn.s.wait.tensorcnt(i16 0)", 2);
+    /* Groups 2 and 3 share one zero v4i32; each call ends with the cpol 0. */
+    for(const char* call : {"call void @llvm.amdgcn.tensor.load.to.lds(",
+                            "call void @llvm.amdgcn.tensor.store.from.lds("})
+    {
+        const size_t at = ir.find(call);
+        if(at == std::string::npos)
+            continue;
+        const std::string line = ir.substr(at, ir.find('\n', at) - at);
+        const size_t g2        = line.find("<4 x i32> %cz");
+        const size_t g3        = g2 == std::string::npos ? g2 : line.find("<4 x i32> %cz", g2 + 1);
+        if(g2 == std::string::npos || g3 == std::string::npos
+           || line.substr(g2, line.find(',', g2) - g2) != line.substr(g3, line.find(',', g3) - g3)
+           || line.find("<8 x i32> %cz") == std::string::npos
+           || line.compare(line.size() - 8, 8, ", i32 0)") != 0)
+            fail(line.c_str(), __LINE__);
+    }
+}
+
+void case_gfx1250_tdm_flag_words()
+{
+    static const struct
+    {
+        TdmShape shape;
+        const char* flags;
+    } cases[] = {
+        /* elem 2 B, wg mask 3, pad on (interval 2, amount 5). */
+        {{2, 64, 16, 3, 2, 5}, "177274883"},
+        /* elem 8 B, pad interval 7 / amount 127 sets bit 31: printed signed. */
+        {{8, 64, 16, 0, 7, 127}, "-2949120"},
+        /* elem 1 B, pad enabled with interval 0 still sets bit 20. */
+        {{1, 64, 16, 0, 0, 0}, "1048576"},
+    };
+    for(const auto& c : cases)
+    {
+        const TdmShape s     = c.shape;
+        const std::string ir = lower_one(
+            "tdm_flags",
+            [&s](rocke_ir_builder_t* b) { build_gfx1250_tdm(b, s); },
+            "gfx1250",
+            ROCKE_LLVM_FLAVOR_LLVM23);
+        expect_arg(tdm_readfirstlane_args(ir), 4, c.flags, __LINE__);
+    }
+    /* tile_dim0 = 0xFFFF shifts into bit 31 of dword 3: printed signed. */
+    TdmShape wide;
+    wide.tile_dim0       = 0xFFFF;
+    const std::string ir = lower_one(
+        "tdm_wide",
+        [&wide](rocke_ir_builder_t* b) { build_gfx1250_tdm(b, wide); },
+        "gfx1250",
+        ROCKE_LLVM_FLAVOR_LLVM23);
+    EXPECT_IR_COUNT(ir, ", -65536\n", 2);
+}
+
+void case_gfx1250_tdm_i32_lds_address()
+{
+    const std::string ir = lower_one(
+        "i32_lds",
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* src = global_ptr_param(b, "src", rocke_i32());
+            rocke_value_t* lds = i32_param(b, "lds");
+            rocke_value_t* n   = rocke_b_const_i32(b, 64);
+            rocke_value_t* g[5];
+            rocke_b_tdm_descriptor_2d(b, src, lds, 4, n, n, n, 64, 1, 0, -1, 0, g);
+            rocke_b_tensor_load_to_lds(b, g[0], g[1], g[2], g[3], g[4], 0);
+        },
+        "gfx1250",
+        ROCKE_LLVM_FLAVOR_LLVM23);
+    EXPECT_NO_IR(ir, "trunc i64 %lds");
+    expect_arg(tdm_readfirstlane_args(ir), 1, "%lds", __LINE__);
+}
+
+void case_gfx1250_tdm_group_types()
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "types");
+    rocke_value_t* src = global_ptr_param(&b, "src", rocke_i32());
+    rocke_value_t* n   = rocke_b_const_i32(&b, 8);
+    rocke_value_t* g[5];
+    if(!rocke_b_tdm_descriptor_2d(&b, src, rocke_b_const_i32(&b, 0), 4, n, n, n, 8, 8, 0, -1, 0, g))
+        fail("tdm_descriptor_2d failed", __LINE__);
+    else
+    {
+        static const int lanes[] = {4, 8, 4, 4, 8};
+        for(int i = 0; i < 5; ++i)
+        {
+            const rocke_type_t* t = g[i]->type;
+            if(t->kind != ROCKE_TYPE_VECTOR || t->count != lanes[i]
+               || !rocke_type_eq(t->elem, rocke_i32()))
+                fail("tdm group type", __LINE__);
+        }
+        if(g[2] != g[3])
+            fail("groups 2 and 3 must share one zero vector", __LINE__);
+    }
+    rocke_ir_builder_free(&b);
+}
+
+void case_global_ptr_to_i64()
+{
+    /* Plain address cast: available on every arch and flavor. */
+    const std::string ir = lower_one(
+        "p2i",
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* src = global_ptr_param(b, "src", rocke_i32());
+            rocke_value_t* dst = global_ptr_param(b, "dst", rocke_i64());
+            rocke_b_global_store(
+                b, dst, rocke_b_const_i32(b, 0), rocke_b_global_ptr_to_i64(b, src), 8);
+        },
+        "gfx950",
+        ROCKE_LLVM_FLAVOR_LLVM22);
+    EXPECT_IR(ir, " = ptrtoint ptr addrspace(1) %src to i64\n");
+
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "p2i_bad");
+    bool rejected = false;
+    std::string err;
+    try
+    {
+        rocke_b_global_ptr_to_i64(&b, private_ptr_param(&b, "flat", rocke_f32()));
+        rejected        = rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE;
+        const char* msg = rocke_ir_builder_error(&b);
+        err             = msg ? msg : "";
+    }
+    catch(const std::exception& e)
+    {
+        rejected = true;
+        err      = e.what();
+    }
+    if(!rejected || err.find("global_ptr_to_i64 ptr must be a global pointer") == std::string::npos)
+        fail("global_ptr_to_i64 must reject a non-global pointer", __LINE__);
+    rocke_ir_builder_free(&b);
+}
+
+void case_gfx1250_tdm_gated()
+{
+    const struct
+    {
+        const char* arch;
+        rocke_llvm_flavor_t flavor;
+        const char* want;
+    } bad[] = {
+        {"gfx950", ROCKE_LLVM_FLAVOR_LLVM22, "tensor_load_to_lds requires gfx1250"},
+        {"gfx1201", ROCKE_LLVM_FLAVOR_LLVM23, "tensor_load_to_lds requires gfx1250"},
+        {"gfx1250", ROCKE_LLVM_FLAVOR_LLVM22, "tensor_load_to_lds requires LLVM flavor llvm23"},
+    };
+    for(const auto& t : bad)
+    {
+        std::string err;
+        const rocke_status_t st
+            = lower_expect_error("gate", build_gfx1250_tdm_default, t.arch, t.flavor, &err);
+        if(st != ROCKE_ERR_VALUE || err.find(t.want) == std::string::npos)
+        {
+            char msg[ROCKE_ERR_MSG_CAP + 128];
+            snprintf(
+                msg, sizeof(msg), "%s: status %d, err \"%s\"", t.arch, (int)st, err.c_str());
+            fail(msg, __LINE__);
+        }
+    }
+}
+
+void case_gfx1250_tdm_builder_rejects()
+{
+    using B = rocke_ir_builder_t*;
+    using V = rocke_value_t*;
+    struct Reject
+    {
+        const char* want;
+        /* (builder, global src, private ptr, i32 n) */
+        void (*emit)(B, V, V, V);
+    };
+    static const Reject rejects[] = {
+        {"tdm_descriptor_2d global_ptr must be a global pointer",
+         [](B b, V, V f, V n) {
+             V g[5];
+             rocke_b_tdm_descriptor_2d(b, f, n, 4, n, n, n, 8, 8, 0, -1, 0, g);
+         }},
+        {"tdm_descriptor_2d lds_addr must be i64 or i32",
+         [](B b, V s, V, V n) {
+             V g[5];
+             rocke_b_tdm_descriptor_2d(
+                 b, s, rocke_b_const_f32(b, 0.0), 4, n, n, n, 8, 8, 0, -1, 0, g);
+         }},
+        {"tdm_descriptor_2d tensor_dim0 must be i32",
+         [](B b, V s, V, V n) {
+             V g[5];
+             rocke_b_tdm_descriptor_2d(
+                 b, s, n, 4, rocke_b_const_i64(b, 8), n, n, 8, 8, 0, -1, 0, g);
+         }},
+        {"tdm_descriptor_2d tensor_dim1 must be i32",
+         [](B b, V s, V, V n) {
+             V g[5];
+             rocke_b_tdm_descriptor_2d(
+                 b, s, n, 4, n, rocke_b_const_i64(b, 8), n, 8, 8, 0, -1, 0, g);
+         }},
+        {"tdm_descriptor_2d row_stride must be i32",
+         [](B b, V s, V, V n) {
+             V g[5];
+             rocke_b_tdm_descriptor_2d(
+                 b, s, n, 4, n, n, rocke_b_const_i64(b, 8), 8, 8, 0, -1, 0, g);
+         }},
+        {"tdm_descriptor_2d elem_bytes must be 1, 2, 4, or 8",
+         [](B b, V s, V, V n) {
+             V g[5];
+             rocke_b_tdm_descriptor_2d(b, s, n, 3, n, n, n, 8, 8, 0, -1, 0, g);
+         }},
+        {"tdm_descriptor_2d tile_dim0 must be in 1..65535",
+         [](B b, V s, V, V n) {
+             V g[5];
+             rocke_b_tdm_descriptor_2d(b, s, n, 4, n, n, n, 0, 8, 0, -1, 0, g);
+         }},
+        {"tdm_descriptor_2d tile_dim0 must be in 1..65535",
+         [](B b, V s, V, V n) {
+             V g[5];
+             rocke_b_tdm_descriptor_2d(b, s, n, 4, n, n, n, 1 << 16, 8, 0, -1, 0, g);
+         }},
+        {"tdm_descriptor_2d tile_dim1 must be in 1..65535",
+         [](B b, V s, V, V n) {
+             V g[5];
+             rocke_b_tdm_descriptor_2d(b, s, n, 4, n, n, n, 8, 0, 0, -1, 0, g);
+         }},
+        {"tdm_descriptor_2d workgroup_mask must be in 0..65535",
+         [](B b, V s, V, V n) {
+             V g[5];
+             rocke_b_tdm_descriptor_2d(b, s, n, 4, n, n, n, 8, 8, 1 << 16, -1, 0, g);
+         }},
+        {"tdm_descriptor_2d workgroup_mask must be in 0..65535",
+         [](B b, V s, V, V n) {
+             V g[5];
+             rocke_b_tdm_descriptor_2d(b, s, n, 4, n, n, n, 8, 8, -1, -1, 0, g);
+         }},
+        {"tdm_descriptor_2d pad_interval must be in 0..7",
+         [](B b, V s, V, V n) {
+             V g[5];
+             rocke_b_tdm_descriptor_2d(b, s, n, 4, n, n, n, 8, 8, 0, 8, 0, g);
+         }},
+        {"tdm_descriptor_2d pad_amount must be in 0..127",
+         [](B b, V s, V, V n) {
+             V g[5];
+             rocke_b_tdm_descriptor_2d(b, s, n, 4, n, n, n, 8, 8, 0, 0, 128, g);
+         }},
+        {"needs pad_interval",
+         [](B b, V s, V, V n) {
+             V g[5];
+             rocke_b_tdm_descriptor_2d(b, s, n, 4, n, n, n, 8, 8, 0, -1, 1, g);
+         }},
+    };
+    for(const Reject& r : rejects)
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "bad");
+        bool rejected = false;
+        std::string err;
+        try
+        {
+            rocke_value_t* src  = global_ptr_param(&b, "src", rocke_i32());
+            rocke_value_t* flat = private_ptr_param(&b, "flat", rocke_f32());
+            r.emit(&b, src, flat, rocke_b_const_i32(&b, 8));
+            rejected        = rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE;
+            const char* msg = rocke_ir_builder_error(&b);
+            err             = msg ? msg : "";
+        }
+        catch(const std::exception& e)
+        {
+            /* Builder errors surface as ckc::ValueError inside the library. */
+            rejected = true;
+            err      = e.what();
+        }
+        if(!rejected || err.find(r.want) == std::string::npos)
+        {
+            char msg[ROCKE_ERR_MSG_CAP + 128];
+            snprintf(msg, sizeof(msg), "want \"%s\", err \"%s\"", r.want, err.c_str());
+            fail(msg, __LINE__);
+        }
+        rocke_ir_builder_free(&b);
+    }
+}
+
+/* The address cast is side-effect free; the transfers are not. */
+void case_gfx1250_tdm_purity()
+{
+    if(!rocke_opcode_is_pure(ROCKE_OP_TILE_GLOBAL_PTR_TO_I64))
+        fail("tile.global_ptr_to_i64 must be pure", __LINE__);
+    if(rocke_opcode_is_pure(ROCKE_OP_TILE_TENSOR_LOAD_TO_LDS))
+        fail("tile.tensor_load_to_lds must not be pure", __LINE__);
+    if(rocke_opcode_is_pure(ROCKE_OP_TILE_TENSOR_STORE_FROM_LDS))
+        fail("tile.tensor_store_from_lds must not be pure", __LINE__);
+}
+
+/* ---- gfx1250 cluster launch shape (cluster_dims kernel attr) ---- */
+
+void set_cluster_dims(rocke_ir_builder_t* b, const int64_t* dims, int count)
+{
+    rocke_attr_set_int_list(b, &rocke_ir_builder_kernel(b)->attrs, "cluster_dims", dims, count);
+}
+
+/* Mirrors TestGfx1250ClusterDims.test_attr_emitted_last_on_the_kernel: the
+ * shape becomes the last string attribute of the kernel's attribute group. */
+void case_gfx1250_cluster_dims()
+{
+    static const struct
+    {
+        int64_t dims[3];
+        const char* want;
+    } shapes[] = {
+        {{2, 2, 1}, " \"amdgpu-cluster-dims\"=\"2,2,1\" norecurse nounwind }"},
+        {{15, 1, 1}, " \"amdgpu-cluster-dims\"=\"15,1,1\" norecurse nounwind }"},
+        {{4, 4, 1}, " \"amdgpu-cluster-dims\"=\"4,4,1\" norecurse nounwind }"},
+        {{2, 2, 4}, " \"amdgpu-cluster-dims\"=\"2,2,4\" norecurse nounwind }"},
+    };
+    for(const auto& t : shapes)
+    {
+        const std::string ir = lower_one(
+            "cluster_dims",
+            [&t](rocke_ir_builder_t* b) { set_cluster_dims(b, t.dims, 3); },
+            "gfx1250",
+            ROCKE_LLVM_FLAVOR_LLVM23);
+        EXPECT_IR(ir, t.want);
+        EXPECT_IR_COUNT(ir, "amdgpu-cluster-dims", 1);
+    }
+    /* A kernel without the attr is untouched. */
+    const std::string plain
+        = lower_one("plain", [](rocke_ir_builder_t*) {}, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23);
+    EXPECT_NO_IR(plain, "amdgpu-cluster-dims");
+}
+
+/* Shape and target validation; the text matches ir.check_cluster_dims and the
+ * Python lowerer's gate. */
+void case_gfx1250_cluster_dims_rejects()
+{
+    static const struct
+    {
+        int64_t dims[4];
+        int count;
+        const char* arch;
+        rocke_llvm_flavor_t flavor;
+        const char* want;
+    } rejects[] = {
+        {{2, 2}, 2, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23, "cluster_dims must be three integers (x, y, z)"},
+        {{2, 2, 1, 1}, 4, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23, "cluster_dims must be three integers (x, y, z)"},
+        {{0, 1, 1}, 3, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23, "cluster_dims (0, 1, 1): each dimension must be in 1..15"},
+        {{1, -2, 1}, 3, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23, "cluster_dims (1, -2, 1): each dimension must be in 1..15"},
+        {{16, 1, 1}, 3, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23, "cluster_dims (16, 1, 1): each dimension must be in 1..15"},
+        {{1, 1, 16}, 3, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23, "cluster_dims (1, 1, 16): each dimension must be in 1..15"},
+        {{4, 4, 2}, 3, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23, "cluster_dims (4, 4, 2): 32 workgroups exceeds the cluster limit of 16"},
+        {{3, 3, 2}, 3, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23, "cluster_dims (3, 3, 2): 18 workgroups exceeds the cluster limit of 16"},
+        {{2, 1, 1}, 3, "gfx950", ROCKE_LLVM_FLAVOR_LLVM22, "cluster_dims requires gfx1250, got gfx950"},
+        {{2, 1, 1}, 3, "gfx1201", ROCKE_LLVM_FLAVOR_LLVM23, "cluster_dims requires gfx1250, got gfx1201"},
+        {{2, 1, 1}, 3, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM22, "cluster_dims requires LLVM flavor llvm23, got llvm22"},
+    };
+    for(const auto& r : rejects)
+    {
+        std::string err;
+        const rocke_status_t st = lower_expect_error(
+            "cluster_dims_bad",
+            [&r](rocke_ir_builder_t* b) { set_cluster_dims(b, r.dims, r.count); },
+            r.arch,
+            r.flavor,
+            &err);
+        if(st != ROCKE_ERR_VALUE || err.find(r.want) == std::string::npos)
+        {
+            char msg[ROCKE_ERR_MSG_CAP + 256];
+            snprintf(msg, sizeof(msg), "want \"%s\", status %d, err \"%s\"", r.want, (int)st, err.c_str());
+            fail(msg, __LINE__);
+        }
+    }
+}
+
+/* ---- gfx1250 feature flags ---- */
+
+/* Mirrors test_new_feature_flags_start_false: each flag flips only after its
+ * feature passes a functional run on a device, so every arch reports False. */
+void case_new_feature_flags_start_false()
+{
+    static const char* const arches[]
+        = {"gfx11-generic", "gfx1151", "gfx1201", "gfx1250", "gfx90a", "gfx942", "gfx950"};
+    for(const char* gfx : arches)
+    {
+        const rocke_arch_target_t* t = rocke_arch_target_from_gfx(gfx);
+        if(t == nullptr)
+        {
+            fail(gfx, __LINE__);
+            continue;
+        }
+        if(t->memory.has_scalar_data_prefetch || t->memory.has_global_prefetch
+           || t->memory.has_cluster_launch || t->memory.has_multicast_load)
+            fail(gfx, __LINE__);
+    }
+}
+
 /* ---- async buffer / global -> LDS ---- */
 void case_buffer_load_lds_async()
 {
@@ -1457,6 +2324,9 @@ void case_opcode_names_are_aligned()
         {ROCKE_OP_TILE_GLOBAL_PREFETCH, "tile.global_prefetch"},
         {ROCKE_OP_TILE_FLAT_PREFETCH, "tile.flat_prefetch"},
         {ROCKE_OP_TILE_CLUSTER_BARRIER, "tile.cluster_barrier"},
+        {ROCKE_OP_TILE_CLUSTER_LOAD, "tile.cluster_load"},
+        {ROCKE_OP_TILE_CLUSTER_LOAD_ASYNC_TO_LDS, "tile.cluster_load_async_to_lds"},
+        {ROCKE_OP_TILE_GLOBAL_PTR_TO_I64, "tile.global_ptr_to_i64"},
         {ROCKE_OP_GPU_CLUSTER_ID, "gpu.cluster_id"},
         {ROCKE_OP_GPU_CLUSTER_WORKGROUP_ID, "gpu.cluster_workgroup_id"},
         {ROCKE_OP_GPU_CLUSTER_WORKGROUP_MAX_ID, "gpu.cluster_workgroup_max_id"},
@@ -1590,6 +2460,23 @@ const TestCase k_cases[] = {
     {"gfx1250_cluster_builder_rejects", case_gfx1250_cluster_builder_rejects},
     {"gfx1250_cluster_lowerer_rechecks", case_gfx1250_cluster_lowerer_rechecks},
     {"gfx1250_cluster_purity", case_gfx1250_cluster_purity},
+    {"gfx1250_multicast", case_gfx1250_multicast},
+    {"gfx1250_multicast_declares_only_used", case_gfx1250_multicast_declares_only_used},
+    {"gfx1250_multicast_gated", case_gfx1250_multicast_gated},
+    {"gfx1250_multicast_builder_rejects", case_gfx1250_multicast_builder_rejects},
+    {"gfx1250_multicast_lowerer_rechecks", case_gfx1250_multicast_lowerer_rechecks},
+    {"gfx1250_multicast_purity", case_gfx1250_multicast_purity},
+    {"gfx1250_tdm_round_trip", case_gfx1250_tdm_round_trip},
+    {"gfx1250_tdm_flag_words", case_gfx1250_tdm_flag_words},
+    {"gfx1250_tdm_i32_lds_address", case_gfx1250_tdm_i32_lds_address},
+    {"gfx1250_tdm_group_types", case_gfx1250_tdm_group_types},
+    {"global_ptr_to_i64", case_global_ptr_to_i64},
+    {"gfx1250_tdm_gated", case_gfx1250_tdm_gated},
+    {"gfx1250_tdm_builder_rejects", case_gfx1250_tdm_builder_rejects},
+    {"gfx1250_tdm_purity", case_gfx1250_tdm_purity},
+    {"gfx1250_cluster_dims", case_gfx1250_cluster_dims},
+    {"gfx1250_cluster_dims_rejects", case_gfx1250_cluster_dims_rejects},
+    {"new_feature_flags_start_false", case_new_feature_flags_start_false},
     {"buffer_load_lds_async", case_buffer_load_lds_async},
     {"global_load_async_to_lds_b8", case_global_load_async_to_lds_b8},
     {"hip_zext_uses_unsigned_source_cast", case_hip_zext_uses_unsigned_source_cast},

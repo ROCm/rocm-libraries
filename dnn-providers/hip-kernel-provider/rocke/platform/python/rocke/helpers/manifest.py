@@ -24,6 +24,7 @@ Schema (version `ck.dsl.example.manifest/v1`):
       "cpg": <int>, "kpg": <int>,            // conv only
       "grid_explicit": [gx, gy, gz],         // optional, overrides grid_order
       "grid_order": "MN" | "NM",             // optional
+      "cluster_dims": [cx, cy, cz],          // optional, gfx1250 cluster launch
       "args_signature": [
         {"name": ..., "type": "ptr<f16,global>" | "ptr<bf16,global>" | "i32", "size_bytes": ...},
         ...
@@ -115,6 +116,15 @@ def engine_version() -> str:
 def _provenance_fields() -> Dict[str, str]:
     bid, ver = _engine_provenance()
     return {"engine_build_id": bid, "engine_version": ver}
+
+
+def _cluster_fields(artifact: KernelArtifact) -> Dict[str, List[int]]:
+    """``{"cluster_dims": [x, y, z]}`` for a kernel compiled with a gfx1250
+    workgroup-cluster shape, else ``{}`` so other manifests are unchanged.
+    Launchers must pass this shape to the cluster launch path."""
+    kernel = getattr(artifact, "kernel", None)
+    dims = kernel.cluster_dims if kernel is not None else None
+    return {} if dims is None else {"cluster_dims": list(dims)}
 
 
 # ---------------------------------------------------------------------
@@ -277,6 +287,7 @@ def make_simple_op_manifest(
         "ir_authored": True,
         "is_binary": bool(is_binary),
         **_provenance_fields(),
+        **_cluster_fields(artifact),
     }
     if elems_per_block is not None:
         manifest["elems_per_block"] = int(elems_per_block)
@@ -345,6 +356,7 @@ def make_gemm_manifest(
         "ck_dependency": False,
         "ir_authored": True,
         **_provenance_fields(),
+        **_cluster_fields(artifact),
     }
     if extra:
         manifest.update(dict(extra))
@@ -418,6 +430,7 @@ def make_conv_manifest(
         "ck_dependency": False,
         "ir_authored": True,
         **_provenance_fields(),
+        **_cluster_fields(artifact),
     }
     if grid_explicit is not None:
         manifest["grid_explicit"] = [int(x) for x in grid_explicit]
@@ -459,6 +472,7 @@ def make_attention_manifest(
         "ck_dependency": False,
         "ir_authored": True,
         **_provenance_fields(),
+        **_cluster_fields(artifact),
     }
     if extra:
         manifest.update(dict(extra))
