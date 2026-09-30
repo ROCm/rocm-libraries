@@ -217,6 +217,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
         ${_gfx950_shard_args}
         REFERENCE_EXECUTOR gpu
         GTEST_FILTER "quick_SdpaFwd_bshd_*:standard_SdpaFwd_bshd_*"
+        ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
     )
 endif()
 
@@ -239,6 +240,8 @@ if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
             Smoke/IntegrationGpuSdpaFwdBfp16.Correctness/*
         ENVIRONMENT
             ${HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV}
+        ENVIRONMENT_MODIFICATION
+            ${TEST_ENVIRONMENT_MODIFICATION}
         INSTALL_ENVIRONMENT
             "HIPDNN_AITER_ASM_DIR=${_install_asm_dir}"
     )
