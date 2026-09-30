@@ -39,6 +39,7 @@ extern "C" {
 #include "rocke/instance_batched_gemm.h"
 #include "rocke/instance_block_scale_gemm.h"
 #include "rocke/instance_conv_direct_grouped.h"
+#include "rocke/instance_conv_direct_nhwc.h"
 #include "rocke/instance_conv_implicit_gemm.h"
 #include "rocke/instance_conv_implicit_gemm_wgrad.h"
 #include "rocke/instance_conv_wgrad_workspace_reduce.h"
@@ -1711,6 +1712,80 @@ std::vector<std::string> conv_direct_grouped_verify(const py::dict& d, const std
     std::vector<std::string> out = verify_kernel(k);
     rocke_ir_builder_free(&b);
     return out;
+}
+
+/* ======================== conv_direct_nhwc ========================== */
+
+/* Non-grouped (groups == 1) direct conv. The dict mirrors DirectNhwcConvSpec
+ * with the problem nested; `iglp` / `waves_per_eu` may be None (absent knob). */
+rocke_direct_conv_nhwc_spec_t dnhwc_build_spec(const py::dict& d, std::deque<std::string>& store)
+{
+    auto keep = [&](const std::string& s) -> const char* {
+        store.push_back(s);
+        return store.back().c_str();
+    };
+    rocke_direct_conv_nhwc_spec_t s = rocke_direct_conv_nhwc_spec_default();
+    if(d.contains("problem") && py::isinstance<py::dict>(d["problem"]))
+    {
+        py::dict pd = d["problem"].cast<py::dict>();
+        std::string v;
+        fill_direct_conv_problem(&s.problem, pd);
+        if(dict_str(pd, "dtype", v))
+            s.problem.dtype = keep(v);
+    }
+    {
+        std::string v;
+        if(dict_str(d, "name", v))
+            s.name = keep(v);
+        if(dict_str(d, "atom", v))
+            s.atom = keep(v);
+    }
+    s.tile_h = dict_int(d, "tile_h", s.tile_h);
+    s.tile_w = dict_int(d, "tile_w", s.tile_w);
+    s.tile_k = dict_int(d, "tile_k", s.tile_k);
+    s.ck = dict_int(d, "ck", s.ck);
+    s.waves_m = dict_int(d, "waves_m", s.waves_m);
+    s.waves_n = dict_int(d, "waves_n", s.waves_n);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.lds_pad = dict_int(d, "lds_pad", s.lds_pad);
+    s.chiplet_swizzle = dict_bool(d, "chiplet_swizzle", s.chiplet_swizzle);
+    s.swizzle_wgm = dict_int(d, "swizzle_wgm", s.swizzle_wgm);
+    s.chiplet_chunk = dict_int(d, "chiplet_chunk", s.chiplet_chunk);
+    s.num_xcds = dict_int(d, "num_xcds", s.num_xcds);
+    s.double_buffer = dict_bool(d, "double_buffer", s.double_buffer);
+    if(d.contains("iglp") && !d["iglp"].is_none())
+        s.iglp = d["iglp"].cast<int>();
+    if(d.contains("waves_per_eu") && !d["waves_per_eu"].is_none())
+        s.waves_per_eu = d["waves_per_eu"].cast<int>();
+    return s;
+}
+
+std::string conv_direct_nhwc_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    std::deque<std::string> store;
+    rocke_direct_conv_nhwc_spec_t s = dnhwc_build_spec(d, store);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_direct_conv_nhwc_lower_to_llvm(
+        &s, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+    return take_lowered(st, ll, err, "rocke_engine.conv_direct_nhwc_lower_llvm");
+}
+
+std::string conv_direct_nhwc_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_engine.conv_direct_nhwc_serialize_ir",
+                                rocke_direct_conv_nhwc_spec_t,
+                                dnhwc_build_spec,
+                                rocke_build_direct_conv_nhwc_new(&b, &s, arch_or_default(arch)));
+}
+
+std::vector<std::string> conv_direct_nhwc_verify(const py::dict& d, const std::string& arch)
+{
+    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.conv_direct_nhwc_verify",
+                             rocke_direct_conv_nhwc_spec_t,
+                             dnhwc_build_spec,
+                             rocke_build_direct_conv_nhwc_new(&b, &s, arch_or_default(arch)));
 }
 
 /* ======================= deep_fused_conv_pool ======================= */
@@ -3634,6 +3709,10 @@ PYBIND11_MODULE(rocke_engine, m)
          &conv_direct_grouped_lower_llvm,
          &conv_direct_grouped_serialize_ir,
          &conv_direct_grouped_verify);
+    reg3("conv_direct_nhwc",
+         &conv_direct_nhwc_lower_llvm,
+         &conv_direct_nhwc_serialize_ir,
+         &conv_direct_nhwc_verify);
     register_img2col(m); /* separate TU; see note at top of file */
     reg3("deep_fused_conv_pool",
          &deep_fused_conv_pool_lower_llvm,

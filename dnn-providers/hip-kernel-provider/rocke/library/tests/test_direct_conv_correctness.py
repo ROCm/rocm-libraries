@@ -995,11 +995,21 @@ class _NgCase:
     waves_m: int = 2
     waves_n: int = 2
     atom: str = "32x32x16"
+    # Schedule / pipeline knobs (DirectNhwcConvSpec defaults).
+    double_buffer: bool = False
+    iglp: "int | None" = None
+    waves_per_eu: "int | None" = None
+    chiplet_swizzle: bool = True
+    swizzle_wgm: int = 8
 
 
 # Each case pins down one branch of the addressing: exact vs partial output
 # tiles, K not covering tile_k, the 16-wide atom used for widths that are not a
-# multiple of 32, stride 2, a 1x1 filter, and the fp16 operand path.
+# multiple of 32, stride 2, a 1x1 filter, and the fp16 operand path. The
+# second group pins the pipeline/schedule knobs: ping-pong LDS, iglp, the
+# occupancy hint, the grid decode with and without the chiplet swizzle, and a
+# grid large enough (> num_xcds * chiplet_chunk = 512 WGs) that the chiplet
+# remap is not the identity, with a partial tail block past the last full one.
 _NG_CASES: List[_NgCase] = [
     _NgCase("ng_exact", N=1, H=16, W=32, C=64, K=64),
     _NgCase("ng_partial_w", N=2, H=16, W=40, C=64, K=64),
@@ -1034,24 +1044,41 @@ _NG_CASES: List[_NgCase] = [
         waves_m=1,
         atom="16x16x16",
     ),
+    _NgCase("ng_32x32x8", N=1, H=16, W=32, C=64, K=64, ck=16, atom="32x32x8"),
+    _NgCase("ng_5x5", N=1, H=16, W=32, C=64, K=96, KH=5, KW=5, PAD=2),
+    _NgCase("ng_double_buffer", N=2, H=16, W=40, C=128, K=64, double_buffer=True),
+    _NgCase(
+        "ng_double_buffer_s2_fp16",
+        N=1,
+        H=32,
+        W=64,
+        C=64,
+        K=64,
+        stride=2,
+        ck=16,
+        dtype="fp16",
+        double_buffer=True,
+        iglp=1,
+    ),
+    _NgCase("ng_iglp0_we3", N=1, H=16, W=32, C=128, K=64, iglp=0, waves_per_eu=3),
+    _NgCase("ng_no_swizzle", N=2, H=16, W=64, C=64, K=128, chiplet_swizzle=False),
+    _NgCase("ng_wgm1", N=2, H=16, W=64, C=64, K=192, swizzle_wgm=1),
+    _NgCase(
+        "ng_chiplet_remap",
+        N=9,
+        H=64,
+        W=64,
+        C=32,
+        K=256,
+        iglp=0,
+    ),
 ]
 
 
 def _run_nongrouped_one(arch: str, case: _NgCase) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one non-grouped direct-conv kernel."""
-    import torch
-
-    from rocke import compile_kernel
-    from rocke.helpers.manifest import conv_args_signature
     from kernels.common.conv_direct_grouped import DirectConvProblem
-    from kernels.common.conv_direct_nhwc import (
-        DirectNhwcConvSpec,
-        build_direct_conv_nhwc,
-        is_valid_nhwc_spec,
-    )
-    from rocke.runtime import synchronize_and_release
-    from rocke.runtime.hip_module import HipError, Runtime
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+    from kernels.common.conv_direct_nhwc import DirectNhwcConvSpec
 
     p = DirectConvProblem(
         N=case.N,
@@ -1075,7 +1102,30 @@ def _run_nongrouped_one(arch: str, case: _NgCase) -> Tuple[bool, str]:
         waves_m=case.waves_m,
         waves_n=case.waves_n,
         atom=case.atom,
+        double_buffer=case.double_buffer,
+        iglp=case.iglp,
+        waves_per_eu=case.waves_per_eu,
+        chiplet_swizzle=case.chiplet_swizzle,
+        swizzle_wgm=case.swizzle_wgm,
     )
+    return _run_nongrouped_spec(arch, spec, case.id)
+
+
+def _run_nongrouped_spec(arch: str, spec, case_id: str) -> Tuple[bool, str]:
+    """Compile, launch and verify one ``DirectNhwcConvSpec`` against conv2d."""
+    import torch
+
+    from rocke import compile_kernel
+    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_direct_nhwc import (
+        build_direct_conv_nhwc,
+        is_valid_nhwc_spec,
+    )
+    from rocke.runtime import synchronize_and_release
+    from rocke.runtime.hip_module import HipError, Runtime
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    p = spec.problem
     ok, why = is_valid_nhwc_spec(spec, arch=arch)
     if not ok:
         return False, f"skip {why}"
@@ -1085,7 +1135,7 @@ def _run_nongrouped_one(arch: str, case: _NgCase) -> Tuple[bool, str]:
     except Exception as e:  # noqa: BLE001
         return False, f"build/compile failed: {e}"
 
-    td = torch.bfloat16 if case.dtype == "bf16" else torch.float16
+    td = torch.bfloat16 if p.dtype == "bf16" else torch.float16
     torch.manual_seed(0)
     A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=td).uniform_(-1.0, 1.0)
     B_t = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=td).uniform_(-1.0, 1.0)
@@ -1104,7 +1154,7 @@ def _run_nongrouped_one(arch: str, case: _NgCase) -> Tuple[bool, str]:
         launcher = KernelLauncher(
             hsaco=artifact.hsaco,
             kernel_name=artifact.kernel_name,
-            signature=conv_args_signature(case.dtype),
+            signature=conv_args_signature(p.dtype),
         )
     except HipError as e:
         rt.free(A_dev)
@@ -1135,10 +1185,10 @@ def _run_nongrouped_one(arch: str, case: _NgCase) -> Tuple[bool, str]:
 
     diff = (D_cpu.float() - ref.float().cpu()).abs()
     rel_err = float(diff.max() / ref.abs().max().clamp(min=1.0))
-    tol = _TOL_BF16 if case.dtype == "bf16" else _TOL
+    tol = _TOL_BF16 if p.dtype == "bf16" else _TOL
     if rel_err >= tol:
         return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
-    print(f"  PASS  {case.id}  {arch}  rel_err={rel_err:.2e}", flush=True)
+    print(f"  PASS  {case_id}  {arch}  rel_err={rel_err:.2e}", flush=True)
     return True, ""
 
 
@@ -1153,6 +1203,24 @@ class TestDirectConvNhwcCorrectness(unittest.TestCase):
                 if reason.startswith("skip"):
                     self.skipTest(reason)
                 self.assertTrue(passed, f"FAIL {case.id} on {GPU_ARCH}: {reason}")
+
+    def test_sweep_candidates(self):
+        """An evenly spaced sample of what ``nongrouped_specs`` hands the
+        benchmark. The winner of a sweep is whichever config is fastest, so
+        every candidate the sweep can pick has to be correct -- not just the
+        hand-picked geometries above. Wo=48 exercises both the exact-width
+        16-wide atom and the padded 32-wide one."""
+        from kernels.common.conv_direct_grouped import DirectConvProblem
+        from kernels.common.conv_direct_nhwc import nongrouped_specs
+
+        p = DirectConvProblem(N=2, H=16, W=48, groups=1, cpg=64, kpg=128, dtype="bf16")
+        specs = nongrouped_specs(p, arch=GPU_ARCH)
+        self.assertGreater(len(specs), 0)
+        for spec in specs[:: max(1, len(specs) // 8)]:
+            name = spec.kernel_name()
+            with self.subTest(spec=name):
+                passed, reason = _run_nongrouped_spec(GPU_ARCH, spec, name)
+                self.assertTrue(passed, f"FAIL {name} on {GPU_ARCH}: {reason}")
 
 
 class TestDirectConvNhwcValidation(unittest.TestCase):

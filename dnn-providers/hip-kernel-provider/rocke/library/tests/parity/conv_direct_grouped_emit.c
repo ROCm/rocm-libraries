@@ -5,7 +5,8 @@
  * grouped convolution parity harness. Selects one of N sampled spec configs by
  * argv[1] (the config index), builds the rocke_direct_conv_16c_spec_t /
  * rocke_direct_conv_4c_spec_t / rocke_direct_conv_8c_spec_t /
- * rocke_direct_conv_32c_spec_t / rocke_direct_depthwise_spec_t identically to
+ * rocke_direct_conv_32c_spec_t / rocke_direct_depthwise_spec_t (and, from
+ * index 25, the non-grouped rocke_direct_conv_nhwc_spec_t) identically to
  * the Python emitter conv_direct_grouped_emit.py, builds the kernel via the
  * matching rocke_build_direct_conv_*_new function and lowers via
  * rocke_lower_kernel_to_llvm (per-config arch, flavor AUTO) and prints the .ll
@@ -16,6 +17,7 @@
 #include <string.h>
 
 #include "rocke/instance_conv_direct_grouped.h"
+#include "rocke/instance_conv_direct_nhwc.h"
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
@@ -30,8 +32,138 @@ enum
     KIND_DW = 4,
     KIND_SPATIAL = 5,
     KIND_DGRAD = 6,
-    KIND_DW_DGRAD = 7
+    KIND_DW_DGRAD = 7,
+    KIND_NHWC = 8
 };
+
+#define NHWC_CFG_BASE 25
+
+static rocke_direct_conv_problem_t mk_nhwc_problem(
+    int N, int H, int W, int C, int K, int KH, int KW, int PAD, int stride, const char* dtype)
+{
+    rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();
+    p.N = N;
+    p.H = H;
+    p.W = W;
+    p.groups = 1;
+    p.cpg = C;
+    p.kpg = K;
+    p.KH = KH;
+    p.KW = KW;
+    p.PAD = PAD;
+    p.stride = stride;
+    p.dtype = dtype;
+    return p;
+}
+
+/* Python _BASE: t8x32x64, ck32, 2x2 waves, iglp 0 (everything else default). */
+static rocke_direct_conv_nhwc_spec_t mk_nhwc_spec(rocke_direct_conv_problem_t p)
+{
+    rocke_direct_conv_nhwc_spec_t s = rocke_direct_conv_nhwc_spec_default();
+    s.problem = p;
+    s.tile_h = 8;
+    s.tile_w = 32;
+    s.tile_k = 64;
+    s.ck = 32;
+    s.waves_m = 2;
+    s.waves_n = 2;
+    s.iglp = 0;
+    return s;
+}
+
+/* Non-grouped (groups == 1) DirectNhwcConvSpec configs, emitted as indices
+ * NHWC_CFG_BASE + idx. Returns 0 on success, -1 if unknown. */
+static int make_nhwc_cfg(int idx, rocke_direct_conv_nhwc_spec_t* s, const char** arch)
+{
+    *arch = "gfx950";
+    switch(idx)
+    {
+    case 0:
+        *s = mk_nhwc_spec(mk_nhwc_problem(2, 16, 32, 64, 128, 3, 3, 1, 1, "bf16"));
+        return 0;
+    case 1:
+        *s = mk_nhwc_spec(mk_nhwc_problem(2, 16, 32, 64, 128, 3, 3, 1, 1, "fp16"));
+        return 0;
+    case 2:
+        *s = mk_nhwc_spec(mk_nhwc_problem(2, 16, 32, 64, 128, 3, 3, 1, 1, "bf16"));
+        s->double_buffer = true;
+        return 0;
+    case 3:
+        *s = mk_nhwc_spec(mk_nhwc_problem(2, 16, 32, 64, 128, 3, 3, 1, 1, "bf16"));
+        s->chiplet_swizzle = false;
+        return 0;
+    case 4:
+        *s = mk_nhwc_spec(mk_nhwc_problem(2, 16, 32, 64, 128, 3, 3, 1, 1, "bf16"));
+        s->iglp = ROCKE_DCONV_NHWC_IGLP_NONE;
+        s->waves_per_eu = 3;
+        return 0;
+    case 5:
+        *s = mk_nhwc_spec(mk_nhwc_problem(1, 32, 64, 64, 64, 3, 3, 1, 2, "bf16"));
+        return 0;
+    case 6:
+        *s = mk_nhwc_spec(mk_nhwc_problem(1, 16, 32, 64, 64, 1, 1, 0, 1, "bf16"));
+        return 0;
+    case 7:
+        *s = mk_nhwc_spec(mk_nhwc_problem(2, 20, 40, 64, 64, 3, 3, 1, 1, "bf16"));
+        s->tile_w = 48;
+        s->tile_k = 32;
+        s->waves_m = 1;
+        s->atom = "16x16x32";
+        return 0;
+    case 8:
+        *s = mk_nhwc_spec(mk_nhwc_problem(1, 16, 32, 64, 64, 3, 3, 1, 1, "fp16"));
+        s->tile_w = 16;
+        s->tile_k = 32;
+        s->ck = 16;
+        s->waves_m = 1;
+        s->atom = "16x16x16";
+        return 0;
+    case 9:
+        *s = mk_nhwc_spec(mk_nhwc_problem(1, 16, 32, 64, 64, 3, 3, 1, 1, "fp16"));
+        s->atom = "32x32x8";
+        s->ck = 16;
+        *arch = "gfx942";
+        return 0;
+    case 10:
+        *s = mk_nhwc_spec(mk_nhwc_problem(1, 16, 48, 32, 64, 3, 3, 1, 1, "bf16"));
+        s->tile_w = 48;
+        s->tile_k = 32;
+        s->ck = 16;
+        s->waves_m = 1;
+        s->waves_n = 4;
+        s->atom = "16x16x16";
+        *arch = "gfx942";
+        return 0;
+    case 11:
+        *s = mk_nhwc_spec(mk_nhwc_problem(1, 16, 32, 64, 96, 5, 5, 2, 1, "bf16"));
+        s->swizzle_wgm = 1;
+        return 0;
+    case 12:
+        *s = mk_nhwc_spec(mk_nhwc_problem(1, 20, 64, 64, 64, 3, 3, 1, 1, "bf16"));
+        s->tile_h = 16;
+        s->tile_w = 64;
+        s->waves_n = 4;
+        return 0;
+    case 13:
+        *s = mk_nhwc_spec(mk_nhwc_problem(4, 64, 64, 640, 640, 3, 3, 1, 1, "bf16"));
+        s->tile_h = 16;
+        s->tile_w = 64;
+        s->tile_k = 128;
+        s->ck = 16;
+        s->waves_m = 2;
+        s->waves_n = 4;
+        return 0;
+    case 14:
+        *s = mk_nhwc_spec(mk_nhwc_problem(1, 32, 64, 64, 64, 3, 3, 1, 2, "fp16"));
+        s->ck = 16;
+        s->double_buffer = true;
+        s->iglp = 1;
+        s->chiplet_swizzle = false;
+        return 0;
+    default:
+        return -1;
+    }
+}
 
 /* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
  * On success sets *kind, the matching spec struct, and *arch. */
@@ -45,6 +177,7 @@ static int make_cfg(int idx,
                     rocke_direct_depthwise_spatial_spec_t* ssp,
                     rocke_direct_conv_dgrad_spec_t* sdgrad,
                     rocke_direct_depthwise_dgrad_spec_t* sdw_dgrad,
+                    rocke_direct_conv_nhwc_spec_t* snhwc,
                     const char** arch)
 {
     rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();
@@ -433,6 +566,11 @@ static int make_cfg(int idx,
         *arch = "gfx950";
         return 0;
     default:
+        if(idx >= NHWC_CFG_BASE && make_nhwc_cfg(idx - NHWC_CFG_BASE, snhwc, arch) == 0)
+        {
+            *kind = KIND_NHWC;
+            return 0;
+        }
         return -1;
     }
 }
@@ -456,8 +594,10 @@ int main(int argc, char** argv)
     rocke_direct_depthwise_spatial_spec_t ssp;
     rocke_direct_conv_dgrad_spec_t sdgrad;
     rocke_direct_depthwise_dgrad_spec_t sdw_dgrad;
+    rocke_direct_conv_nhwc_spec_t snhwc;
     const char* arch = "gfx950";
-    if(make_cfg(idx, &kind, &s16, &s4, &s8, &s32, &sdw, &ssp, &sdgrad, &sdw_dgrad, &arch) != 0)
+    if(make_cfg(idx, &kind, &s16, &s4, &s8, &s32, &sdw, &ssp, &sdgrad, &sdw_dgrad, &snhwc, &arch)
+       != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
@@ -479,6 +619,8 @@ int main(int argc, char** argv)
         kernel = rocke_build_direct_conv_dgrad_new(&b, &sdgrad, arch);
     else if(kind == KIND_DW_DGRAD)
         kernel = rocke_build_direct_depthwise_dgrad_new(&b, &sdw_dgrad, arch);
+    else if(kind == KIND_NHWC)
+        kernel = rocke_build_direct_conv_nhwc_new(&b, &snhwc, arch);
     else
         kernel = rocke_build_direct_depthwise_new(&b, &sdw, arch);
     if(kernel == NULL)

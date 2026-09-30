@@ -50,6 +50,9 @@ dispatcher) from `cpg = C / groups`:
 All grouped variants require `kpg = cpg`.  If `cpg` is not in the table above,
 use the implicit-GEMM kernel ([`conv_implicit_gemm.py`](conv_implicit_gemm.py)).
 
+For `groups == 1` these variants degenerate to one wave per output row; use the
+non-grouped direct conv instead ([`README_conv_direct_nhwc.md`](README_conv_direct_nhwc.md)).
+
 ### cpg = 1 — Depthwise (`DirectDepthwiseSpec`)
 
 Each output channel is computed independently using scalar FMA.  The kernel
@@ -231,6 +234,7 @@ implicit-GEMM kernel with `pipeline="wavelet"` on that target.
 | Grouped with arbitrary `groups` | Implicit-GEMM |
 | gfx1250 target | Implicit-GEMM (`pipeline="wavelet"`) |
 | Depthwise (`cpg = 1`, `stride = 1`) | Direct-conv depthwise |
+| Non-grouped (`groups = 1`), `stride ≤ 2` | Sweep `conv_direct_nhwc` and implicit-GEMM, keep the faster ([`README_conv_direct_nhwc.md`](README_conv_direct_nhwc.md)) |
 
 ---
 

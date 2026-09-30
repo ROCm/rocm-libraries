@@ -1081,6 +1081,52 @@ def build_direct_depthwise_dgrad(
     return _build
 
 
+def build_direct_nhwc(
+    name,
+    arch,
+    N,
+    H,
+    W,
+    C,
+    K,
+    KH=3,
+    KW=3,
+    PAD=1,
+    stride=1,
+    dtype="bf16",
+    **spec_kw,
+):
+    """Non-grouped (groups == 1) direct conv; ``spec_kw`` overrides
+    DirectNhwcConvSpec fields. Configs mirror parity/conv_direct_grouped_emit.*
+    (indices 25+), where the C++ engine is gated byte-identical by
+    check_byte_identity.py."""
+
+    def _build():
+        from kernels.common.conv_direct_grouped import DirectConvProblem
+        from kernels.common.conv_direct_nhwc import (
+            DirectNhwcConvSpec,
+            build_direct_conv_nhwc,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=1,
+            cpg=C,
+            kpg=K,
+            KH=KH,
+            KW=KW,
+            PAD=PAD,
+            stride=stride,
+            dtype=dtype,
+        )
+        spec = DirectNhwcConvSpec(problem=p, name=name, **spec_kw)
+        return build_direct_conv_nhwc(spec, arch=arch)
+
+    return _build
+
+
 def build_grouped_gemm_case(name, arch, m, n, k, e):
     def _build():
         from rocke.instances.gfx950.grouped_gemm import (
@@ -3072,6 +3118,53 @@ def cases():
             block_waves=1,
         ),
     )
+
+    # --- conv_direct_nhwc: non-grouped (groups == 1) direct conv ---
+    # LDS halo-reuse tile, tap-shared activation fragments, fragment-order
+    # weights, hoisted staging predication. One case per structural branch; the
+    # full branch matrix (and the C++ twin) lives in
+    # library/tests/parity/conv_direct_grouped_emit.* (indices 25+).
+    _nhwc_base = dict(
+        tile_h=8, tile_w=32, tile_k=64, ck=32, waves_m=2, waves_n=2, iglp=0
+    )
+    for _case_id, _arch, _shape, _over in (
+        ("bf16_t8x32x64_iglp0", "gfx950", dict(N=2, H=16, W=32, C=64, K=128), {}),
+        (
+            "fp16_db_s2",
+            "gfx950",
+            dict(N=1, H=32, W=64, C=64, K=64, stride=2, dtype="fp16"),
+            dict(ck=16, double_buffer=True),
+        ),
+        (
+            "bf16_a16x16x32_partial_w",
+            "gfx950",
+            dict(N=2, H=20, W=40, C=64, K=64),
+            dict(tile_w=48, tile_k=32, waves_m=1, atom="16x16x32"),
+        ),
+        (
+            "bf16_noswizzle_we3",
+            "gfx950",
+            dict(N=2, H=16, W=32, C=64, K=128),
+            dict(chiplet_swizzle=False, iglp=None, waves_per_eu=3),
+        ),
+        (
+            "fp16_a32x32x8",
+            "gfx942",
+            dict(N=1, H=16, W=32, C=64, K=64, dtype="fp16"),
+            dict(atom="32x32x8", ck=16),
+        ),
+    ):
+        add(
+            "conv_direct_nhwc",
+            f"conv_direct_nhwc/{_arch}/{_case_id}",
+            _arch,
+            build_direct_nhwc(
+                f"irhash_direct_nhwc_{_case_id}",
+                _arch,
+                **_shape,
+                **{**_nhwc_base, **_over},
+            ),
+        )
 
     # gfx942 GQA head-fold (D128 sliding-window bf16). Registered SEPARATELY from
     # the D256 case above because that one early-returns into the lean D256 kernel

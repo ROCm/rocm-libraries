@@ -233,6 +233,7 @@ GroupedGemmLauncher, grouped_gemm_problems
 ConvProblem, ImplicitGemmConvSpec, build_implicit_gemm_conv
 DirectConvProblem, DirectConv16cSpec, build_direct_conv_16c
 DirectConv4cSpec, build_direct_conv_4c
+DirectNhwcConvSpec, build_direct_conv_nhwc, is_valid_nhwc_spec, nongrouped_specs
 Img2ColSpec, build_img2col
 PoolingProblem, Pooling2DSpec, PoolOp, build_pooling2d
 

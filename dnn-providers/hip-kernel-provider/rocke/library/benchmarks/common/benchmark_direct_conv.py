@@ -5,14 +5,14 @@
 Three kernel families are covered:
   cpg == 1  (groups == C == K) — depthwise:   ``DirectDepthwiseSpec``, scalar fma.
   groups == 1                  — non-grouped: ``DirectNhwcConvSpec``, LDS halo
-                                 reuse + mfma_f32_32x32x16.
+                                 reuse + mfma_f32_32x32x16 / 16x16x32.
   cpg >= 4, cpg % 4 == 0       — grouped:     ``DirectConvSpec``, mfma_f32_16x16x16.
 
 The variant is selected automatically from C / groups.
 
 Run examples:
   python benchmark_direct_conv.py --N 8 --Hi 56 --Wi 56 --C 64 --K 64 --groups 64   # depthwise
-  python benchmark_direct_conv.py --N 8 --Hi 56 --Wi 56 --C 64 --K 64 --groups 1    # grouped cpg=64
+  python benchmark_direct_conv.py --N 8 --Hi 56 --Wi 56 --C 64 --K 64 --groups 1    # non-grouped
   python benchmark_direct_conv.py --N 8 --Hi 56 --Wi 56 --C 1024 --K 1024 --groups 64 --verify
 """
 
