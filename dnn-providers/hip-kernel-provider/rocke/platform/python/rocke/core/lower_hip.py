@@ -1837,6 +1837,19 @@ class _Lowerer:
         n = int(op.attrs["vec"])
         elem_name = op.attrs.get("elem_type", "f16")
         prefix = _vec_prefix(elem_name, "global_store_vN")
+        byte_count = n * (dtype_info(elem_name).encoded_bits // 8)
+        align = int(op.attrs.get("align", byte_count))
+        if align <= 0 or align & (align - 1):
+            raise ValueError(
+                "global_store_vN: alignment must be a positive power of two"
+            )
+        if align < byte_count or byte_count & (byte_count - 1):
+            self._emit(
+                f"__builtin_memcpy("
+                f"__builtin_assume_aligned({_name(ptr)} + {_name(idx)}, {align}), "
+                f"&{_name(val)}, {byte_count});"
+            )
+            return
         self._emit(
             f"*reinterpret_cast<{prefix}{n}*>({_name(ptr)} + {_name(idx)}) = "
             f"{_name(val)};"

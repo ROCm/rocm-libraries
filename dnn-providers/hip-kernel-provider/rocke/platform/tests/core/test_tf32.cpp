@@ -21,9 +21,9 @@
         }                                                           \
     } while(0)
 
-static int test_vector_arithmetic_rejected()
+static int test_invalid_tf32_ops_rejected()
 {
-    for(int variant = 0; variant < 6; ++variant)
+    for(int variant = 0; variant < 8; ++variant)
     {
         rocke_ir_builder_t b, parsed;
         CHECK(rocke_ir_builder_init(&b, "invalid_tf32_vector") == ROCKE_OK);
@@ -51,7 +51,22 @@ static int test_vector_arithmetic_rejected()
             rocke_b_vector_trunc(&b, v, rocke_tf32());
             break;
         }
-        rocke_b_ret(&b);
+        if(variant >= 6)
+        {
+            rocke_ir_builder_free(&b);
+            auto* probe = rocke_build_tf32_mma_probe(&b, variant == 6 ? 16 : 32, "fp32");
+            CHECK(probe);
+            for(int i = 0; i < probe->body->num_ops; ++i)
+            {
+                auto* op = probe->body->ops[i];
+                if(std::strcmp(op->name, "tile.mma") == 0)
+                    op->results[0]->type
+                        = rocke_vector_type(&b, rocke_tf32(), variant == 6 ? 4 : 16);
+            }
+        }
+        else
+            rocke_b_ret(&b);
+        const char* message = variant >= 6 ? "MMA results must not use TF32" : "TF32 arithmetic";
         char* text = nullptr;
         CHECK(rocke_ir_serialize(b.kernel, &text) == ROCKE_OK);
         rocke_kernel_def_t* kernel = nullptr;
@@ -62,7 +77,7 @@ static int test_vector_arithmetic_rejected()
         CHECK(rocke_verify(kernel, &diagnostics, &count) == ROCKE_OK);
         bool rejected = false;
         for(size_t i = 0; i < count; ++i)
-            rejected |= std::strstr(diagnostics[i].message, "TF32 arithmetic") != nullptr;
+            rejected |= std::strstr(diagnostics[i].message, message) != nullptr;
         CHECK(rejected);
         rocke_diags_free(diagnostics, count);
         for(int f = 0; f < rocke_llvm_flavor_count(); ++f)
@@ -145,7 +160,7 @@ static int test_vector_load()
 
 int main()
 {
-    CHECK(test_vector_arithmetic_rejected() == 0);
+    CHECK(test_invalid_tf32_ops_rejected() == 0);
     CHECK(test_vector_load() == 0);
     CHECK(!rocke_type_eq(rocke_tf32(), rocke_i32()));
     CHECK(!rocke_type_eq(rocke_tf32(), rocke_f32()));
@@ -182,49 +197,67 @@ int main()
     }
     // Mirror test_global_vector_store: native authoring must accept the same widths.
     for(int n : {1, 2, 4, 8, 16})
-    {
-        rocke_ir_builder_t b;
-        CHECK(rocke_ir_builder_init(&b, "tf32_vector_store") == ROCKE_OK);
-        auto* p = rocke_b_param(&b, "p", rocke_ptr_type(&b, rocke_tf32(), "global"), nullptr);
-        auto* index = rocke_b_const_i32(&b, 0);
-        auto* value = rocke_b_bitcast(&b, index, rocke_tf32());
-        rocke_value_t* components[16];
-        for(int i = 0; i < n; ++i)
-            components[i] = value;
-        auto* values = rocke_b_vec_pack(&b, components, n, rocke_tf32());
-        if(n == 16)
+        for(int alignment : {0, 4, 64})
         {
-            try
+            rocke_ir_builder_t b;
+            CHECK(rocke_ir_builder_init(&b, "tf32_vector_store") == ROCKE_OK);
+            auto* p = rocke_b_param(&b, "p", rocke_ptr_type(&b, rocke_tf32(), "global"), nullptr);
+            auto* index = rocke_b_const_i32(&b, 0);
+            auto* value = rocke_b_bitcast(&b, index, rocke_tf32());
+            rocke_value_t* components[16];
+            for(int i = 0; i < n; ++i)
+                components[i] = value;
+            auto* values = rocke_b_vec_pack(&b, components, n, rocke_tf32());
+            if(n == 16)
             {
-                rocke_b_global_store_vN(&b, p, index, values, n, 0);
-                CHECK(false);
+                try
+                {
+                    rocke_b_global_store_vN(&b, p, index, values, n, alignment);
+                    CHECK(false);
+                }
+                catch(const ckc::Error& error)
+                {
+                    CHECK(error.code() == ROCKE_ERR_VALUE);
+                    CHECK(std::strstr(error.what(), "n=16 not supported for tf32"));
+                }
             }
-            catch(const ckc::Error& error)
+            else
             {
-                CHECK(error.code() == ROCKE_ERR_VALUE);
-                CHECK(std::strstr(error.what(), "n=16 not supported for tf32"));
+                rocke_b_global_store_vN(&b, p, index, values, n, alignment);
+                rocke_b_ret(&b);
+                for(int f = 0; f < rocke_llvm_flavor_count(); ++f)
+                {
+                    char* ll = nullptr;
+                    auto flavor = rocke_llvm_flavor_from_name(rocke_llvm_flavor_at(f));
+                    CHECK(rocke_lower_kernel_to_llvm(
+                              rocke_ir_builder_kernel(&b), flavor, "gfx950", &ll)
+                          == ROCKE_OK);
+                    char store[64], align[32];
+                    std::snprintf(store, sizeof(store), "store <%d x i32>", n);
+                    std::snprintf(align, sizeof(align), "align %d", alignment ? alignment : n * 4);
+                    CHECK(std::strstr(ll, store));
+                    CHECK(std::strstr(ll, align));
+                    std::free(ll);
+                }
+                rocke_strbuf_t hip;
+                CHECK(rocke_strbuf_init(&hip, 0) == 0);
+                rocke_lower_hip_opts_t opts = {};
+                opts.arch = "gfx942";
+                CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &hip) == ROCKE_OK);
+                if(alignment && alignment < n * 4)
+                {
+                    char size[32];
+                    std::snprintf(size, sizeof(size), ", %d);", n * 4);
+                    CHECK(std::strstr(hip.data, "__builtin_memcpy(__builtin_assume_aligned("));
+                    CHECK(std::strstr(hip.data, size));
+                    CHECK(!std::strstr(hip.data, "*reinterpret_cast<"));
+                }
+                else
+                    CHECK(std::strstr(hip.data, "*reinterpret_cast<"));
+                rocke_strbuf_free(&hip);
             }
+            rocke_ir_builder_free(&b);
         }
-        else
-        {
-            rocke_b_global_store_vN(&b, p, index, values, n, 0);
-            rocke_b_ret(&b);
-            for(int f = 0; f < rocke_llvm_flavor_count(); ++f)
-            {
-                char* ll = nullptr;
-                auto flavor = rocke_llvm_flavor_from_name(rocke_llvm_flavor_at(f));
-                CHECK(rocke_lower_kernel_to_llvm(rocke_ir_builder_kernel(&b), flavor, "gfx950", &ll)
-                      == ROCKE_OK);
-                char store[64], align[32];
-                std::snprintf(store, sizeof(store), "store <%d x i32>", n);
-                std::snprintf(align, sizeof(align), "align %d", n * 4);
-                CHECK(std::strstr(ll, store));
-                CHECK(std::strstr(ll, align));
-                std::free(ll);
-            }
-        }
-        rocke_ir_builder_free(&b);
-    }
     rocke_ir_builder_t b;
     CHECK(rocke_ir_builder_init(&b, "invalid") == ROCKE_OK);
     auto* integer = rocke_b_const_i32(&b, 1);

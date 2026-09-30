@@ -38,13 +38,17 @@ static inline const char* rocke_tf32_op_error(const rocke_op_t* op)
     const char* id = rocke_attr_get_str(&op->attrs, "op_id");
     if(!id && strncmp(op->name, "tile.", 5) == 0)
         id = op->name + 5;
-    const char* error = (strcmp(op->name, "tile.mma") == 0 || strncmp(op->name, "tile.mfma", 9) == 0
-                         || strncmp(op->name, "tile.wmma", 9) == 0)
-                            ? rocke_tf32_mma_error(id, op->operands, op->num_operands)
-                            : NULL;
+    const int is_mma = strcmp(op->name, "tile.mma") == 0 || strncmp(op->name, "tile.mfma", 9) == 0
+                       || strncmp(op->name, "tile.wmma", 9) == 0;
+    const char* error = is_mma ? rocke_tf32_mma_error(id, op->operands, op->num_operands) : NULL;
     if(error)
         return error;
     int count = rocke_tf32_mma_count(id);
+    if(is_mma && !count)
+        for(int i = 0; i < op->num_results; ++i)
+            if(strcmp(op->results[i]->type->name, "tf32") == 0
+               || strncmp(op->results[i]->type->name, "vec<tf32x", 9) == 0)
+                return "MMA results must not use TF32";
     if(count
        && (op->num_results != 1
            || strcmp(op->results[0]->type->name, count == 4 ? "vec<f32x4>" : "vec<f32x16>") != 0))

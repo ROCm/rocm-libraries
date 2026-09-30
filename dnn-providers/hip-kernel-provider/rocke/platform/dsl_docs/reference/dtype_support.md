@@ -85,7 +85,10 @@ the intrinsic's float-vector ABI, while C/D remain FP32.
 ties-to-even; bitcasting back to F32 reinterprets the prepared bits. Generic
 TF32 scalar and vector arithmetic is rejected. Bitcasts, vector transport,
 selection, and the native atoms are supported. Direct global vector loads
-accept 2, 3, 4, or 8 TF32 elements, with the same alignment rules as I32.
+accept 2, 3, 4, or 8 TF32 elements; global vector stores accept 1, 2, 4, or 8.
+Both use the same alignment rules as I32. Payload width and address alignment
+are independent: underaligned HIP stores copy exactly the payload bytes, and
+target/alignment determine the machine transfer instructions.
 The fragment loader uses `storage_ir_type("tf32") == I32` and returns carriers
 that the caller wraps as logical TF32.
 

@@ -5518,7 +5518,7 @@ class _Lowerer:
             "f32": 4,
             "i64": 8,
         }.get(elem_name, 2)
-        align = vec * elem_bytes
+        align = int(op.attrs.get("align", vec * elem_bytes))
         ty = _llvm_type(val.type)
         self._current().emit(
             f"  store {ty} {self._operand(val)}, ptr addrspace(1) {gep}, align {align}"

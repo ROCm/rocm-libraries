@@ -13,6 +13,11 @@ def tf32_mma_error(op_id, operands, results=None):
             for v in operands
         ):
             return "TF32 operands require an XF32 MMA"
+        if results is not None and any(
+            v.type.name == "tf32" or v.type.name.startswith("vec<tf32x")
+            for v in results
+        ):
+            return "MMA results must not use TF32"
         return None
     expected = ["vec<tf32x2>", "vec<tf32x2>", f"vec<f32x{count}>"]
     if [v.type.name for v in operands] != expected:

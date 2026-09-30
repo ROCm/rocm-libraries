@@ -367,26 +367,84 @@ def test_recipe_replay_preserves_ir(m, mode, monkeypatch):
 
 
 @pytest.mark.parametrize("n", [1, 2, 4, 8, 16])
-def test_global_vector_store(n):
-    b = IRBuilder("tf32_vector_store")
-    p = b.param("p", PtrType(TF32, "global"))
+@pytest.mark.parametrize("align", [None, 4, 64, "legacy"])
+@pytest.mark.parametrize("dtype", [TF32, I32, F32])
+def test_global_vector_store(n, align, dtype):
+    b = IRBuilder("vector_store_alignment")
+    p = b.param("p", PtrType(dtype, "global"))
     i = b.const_i32(0)
-    v = b.global_load(p, i, TF32, align=4)
-    values = b.vec_pack([v] * n, TF32)
+    v = b.global_load(p, i, dtype, align=4)
+    values = b.vec_pack([v] * n, dtype)
     if n == 16:
-        with pytest.raises(ValueError, match="n=16 not supported for tf32"):
-            b.global_store_vN(p, i, values, n)
+        with pytest.raises(ValueError, match="n=16 not supported"):
+            b.global_store_vN(p, i, values, n, align=align)
         return
-    b.global_store_vN(p, i, values, n)
+    # Legacy serialized stores without an align attribute retain their default.
+    legacy = align == "legacy"
+    align = None if legacy else align
+    # The guarantee applies to the accessed address, including the index.
+    index = b.const_i32(1 if align == 4 else 0)
+    b.global_store_vN(p, index, values, n, align=align)
+    if legacy:
+        b.kernel.body.ops[-1].attrs.pop("align")
     b.ret()
     ir = serialize(b.kernel)
-    assert serialize(parse(ir)) == ir
+    kernel = parse(ir)
+    assert serialize(kernel) == ir
+    assert verify(kernel) == []
+    expected_align = align or n * 4
+    hip = lower_kernel_to_hip(kernel)
+    if expected_align < n * 4:
+        assert (
+            f"__builtin_assume_aligned(p + {index.name.lstrip('%')}, {expected_align})"
+            in hip
+        )
+        assert f"&{values.name.lstrip('%')}, {n * 4});" in hip
+    else:
+        assert "*reinterpret_cast<" in hip
     native = pytest.importorskip("rocke_engine")
     for flavor in ("llvm20", "llvm22", "llvm23"):
-        ll = _lower_kernel_to_llvm_python(b.kernel, llvm_flavor=flavor)
-        assert f"store <{n} x i32>" in ll
-        assert f"align {n * 4}" in ll
+        ll = _lower_kernel_to_llvm_python(kernel, llvm_flavor=flavor)
+        store = next(line for line in ll.splitlines() if "store <" in line)
+        assert f"store <{n} x {'float' if dtype == F32 else 'i32'}>" in store
+        assert store.endswith(f"align {expected_align}")
         assert native.lower_serialized_ir(ir, flavor=flavor) == ll
+
+
+@pytest.mark.parametrize("m", [16, 32])
+@pytest.mark.parametrize("scalar_result", [False, True])
+def test_non_xf32_mma_rejects_tf32_result(m, scalar_result):
+    b = IRBuilder("non_xf32_tf32_result")
+    out = b.param("out", PtrType(TF32, "global"))
+    a = b.param("a", F32)
+    c = b.param("c", VectorType(F32, 4 if m == 16 else 16))
+    atom = ArchTarget.from_gfx("gfx942").mma.op_for_shape(
+        family="mma",
+        a_dtype="fp32",
+        b_dtype="fp32",
+        c_dtype="fp32",
+        m=m,
+        n=m,
+        k=64 // m,
+    )
+    result = b.mma(atom, a, a, c)
+    # Model malformed serialized IR while keeping all downstream types consistent.
+    result.type = TF32 if scalar_result else VectorType(TF32, 4 if m == 16 else 16)
+    value = result if scalar_result else b.vec_extract(result, 0)
+    b.global_store(out, b.const_i32(0), value, align=4)
+    b.ret()
+    ir = serialize(b.kernel)
+    kernel = parse(ir)
+    message = "MMA results must not use TF32"
+    assert any(message in str(d) for d in verify(kernel))
+    with pytest.raises(ValueError, match=message):
+        lower_kernel_to_hip(kernel, arch="gfx942")
+    native = pytest.importorskip("rocke_engine")
+    for flavor in ("llvm20", "llvm22", "llvm23"):
+        with pytest.raises(ValueError, match=message):
+            _lower_kernel_to_llvm_python(kernel, arch="gfx942", llvm_flavor=flavor)
+        with pytest.raises(Exception, match=message):
+            native.lower_serialized_ir(ir, arch="gfx942", flavor=flavor)
 
 
 @pytest.mark.parametrize("m", [16, 32])
