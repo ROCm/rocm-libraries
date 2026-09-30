@@ -2099,10 +2099,11 @@ def test_auto_persist_decode_keys_on_the_resolved_order():
     the raw ``"auto"`` would let two shapes that resolve differently share one slot
     and serve one decode's binary for the other.
 
-    gqa=4, NQB=16, NP=228, causal: batch below the XCD count resolves to
-    bt_hkv_minor, and from there on to qb_major. Same-order shapes share key, name
-    and body; cross-order shapes differ in all three; and an ``"auto"`` that
-    resolves to an order is the SAME kernel as that order spelled explicitly.
+    gqa=4, NQB=16, NP=228: batch below the XCD count resolves to bt_hkv_minor, and
+    at B=8 the per-kv-head work 64*B is past 2*NP, so hkv_major. Same-order shapes
+    share key, name and body; cross-order shapes differ in all three; and an
+    ``"auto"`` that resolves to an order is the SAME kernel as that order spelled
+    explicitly.
     """
     by_batch = {
         b: _persistent_spec(batch=b, persist_decode="auto") for b in (1, 2, 8, 16)
@@ -2111,8 +2112,8 @@ def test_auto_persist_decode_keys_on_the_resolved_order():
     assert order == {
         1: "bt_hkv_minor",
         2: "bt_hkv_minor",
-        8: "qb_major",
-        16: "qb_major",
+        8: "hkv_major",
+        16: "hkv_major",
     }
 
     def ident(spec):
@@ -2127,13 +2128,13 @@ def test_auto_persist_decode_keys_on_the_resolved_order():
     assert ids[8] == ids[16]
     lo, hi = ids[1], ids[8]
     assert all(a != b for a, b in zip(lo, hi)), "key, name and body must all split"
-    assert "bthkvmin" in lo[1] and "bthkvmin" not in hi[1]
-    for b, resolved in ((1, "bt_hkv_minor"), (8, "qb_major")):
+    assert "hkvmaj" in hi[1] and "hkvmaj" not in lo[1]
+    for b, resolved in ((1, "bt_hkv_minor"), (8, "hkv_major")):
         explicit = dataclasses.replace(by_batch[b], persist_decode=resolved)
         assert ident(explicit) == ids[b]
     # The fast-division ABI follows the resolved order as well.
     assert by_batch[1].fastdiv_divisors == _EXPECTED_FASTDIV_DIVISORS["bt_hkv_minor"]
-    assert by_batch[8].fastdiv_divisors == _EXPECTED_FASTDIV_DIVISORS["qb_major"]
+    assert by_batch[8].fastdiv_divisors == _EXPECTED_FASTDIV_DIVISORS["hkv_major"]
 
 
 def test_persistent_runtime_args_reject_work_past_the_fastdiv_bound():
@@ -2157,11 +2158,11 @@ def test_persistent_runtime_args_reject_work_past_the_fastdiv_bound():
     assert attention_dense_runtime_args(default)["batch"] == at_limit
 
 
-def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
-    """P4 dispatch: the default spec turns persistent on once the work
-    (nqb*Hq*B) fills the gfx942 persistent grid (num_persistent defaulted to 304), and
-    stays off for small Sq. The ``persistent`` knob is honored; gfx950 keeps its 256 default
-    and is otherwise untouched."""
+def test_dispatch_persistent_auto_turns_on_for_d128_only():
+    """P4 dispatch: the default spec turns persistent on at D128 for any Sq and
+    batch (num_persistent defaulted to 304), and stays off at D64. The
+    ``persistent`` knob is honored; gfx950 keeps its 256 default and is otherwise
+    untouched."""
     from dispatch.attention import AttentionRequest
     from dispatch.attention import attention_tuning_spec, tuning_spec_with_knobs
 
@@ -2173,15 +2174,15 @@ def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
     def _dense_spec_gfx950(req):
         return attention_tuning_spec(req, "gfx950_dense_grid").kernel_spec
 
-    def _req(sq, arch):
+    def _req(sq, arch, d=128):
         return AttentionRequest(
             batch=1,
             nhead_q=16,
             nhead_k=4,
             seqlen_q=sq,
             seqlen_k=sq,
-            hdim_q=128,
-            hdim_v=128,
+            hdim_q=d,
+            hdim_v=d,
             arch=arch,
             mask_type=1,
             dtype="fp16",
@@ -2189,10 +2190,11 @@ def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
 
     # gfx942 num_persistent defaulted to the 304-CU part's CU count.
     assert _dense_spec(_req(8192, "gfx942")).num_persistent == 304
-    # auto: on for large Sq (nqb*Hq = 32*16 = 512 >= 304), off for small.
+    # default: on at D128 whatever the Sq, off at D64.
+    assert _dense_spec(_req(2048, "gfx942")).persistent is True
     assert _dense_spec(_req(8192, "gfx942")).persistent is True
-    assert _dense_spec(_req(2048, "gfx942")).persistent is False  # 8*16 = 128 < 304
-    # explicit modes honored.
+    assert _dense_spec(_req(8192, "gfx942", d=64)).persistent is False
+    # the persistent knob is honored.
     assert _dense_spec(_req(8192, "gfx942"), persistent=False).persistent is False
     assert _dense_spec(_req(256, "gfx942"), persistent=True).persistent is True
     # gfx950 untouched: keeps the 256 default (not the gfx942 304 override).

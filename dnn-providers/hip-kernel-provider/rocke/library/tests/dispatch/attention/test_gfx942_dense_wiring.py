@@ -9,8 +9,8 @@ Required by ``library/dispatch/AGENTS.md`` step 4. Covers:
   - selection returns an ``AttentionTuningSpec`` (``path="dense"``) whose
     ``tuning_id`` replays; ``auto`` is the default spec
   - routing on gfx942, and rejection of every out-of-scope request
-  - the default spec turns the persistent grid on once there is enough work;
-    ``persistent`` and ``waves_per_eu`` are knobs of the candidate
+  - the default spec turns the persistent grid on at D128; ``persistent`` and
+    ``waves_per_eu`` are knobs of the candidate
   - both gfx942 dense grids read ``batch`` / ``seqlen_q`` / ``seqlen_kv`` and both
     head counts as runtime kernel params, so those fields drop out of
     ``kernel_name()`` and the cache key and the dispatched signature includes them.
@@ -266,12 +266,13 @@ class TestGfx942BottomRightSafety(unittest.TestCase):
 
 
 class TestGfx942DensePersistent(unittest.TestCase):
-    def test_default_spec_turns_persistent_on_for_large_sq(self):
-        """The default spec turns the persistent grid-stride variant on once
-        there is enough work to fill the grid -- the large-Sq prefill regime."""
+    def test_default_spec_turns_persistent_on_for_d128(self):
+        """The default spec turns the persistent grid-stride variant on at D128,
+        whatever the Sq and batch, and leaves it off at D64."""
         with _Gfx942Arch():
+            self.assertTrue(_spec(_req()).persistent)
             self.assertTrue(_spec(_req(seqlen_q=8192, seqlen_k=8192)).persistent)
-            self.assertFalse(_spec(_req(nhead_q=8, nhead_k=8)).persistent)
+            self.assertFalse(_spec(_req(hdim_q=64, hdim_v=64)).persistent)
 
     def test_persistent_is_a_knob_of_the_candidate(self):
         """Persistence is reached through the knob space (and its tuning ids),
@@ -552,13 +553,19 @@ class TestGfx942DensePersistentRuntimeShape(unittest.TestCase):
             "bt_hkv_minor": [
                 dict(batch=1, nhead_q=128, nhead_k=8),
                 dict(batch=1, nhead_q=40, nhead_k=8),
-                dict(batch=4, nhead_q=32, nhead_k=32),
+                dict(batch=4, nhead_q=32, nhead_k=8),
             ],
-            # From the XCD count on
-            "qb_major": [
+            # gqa > 1, batch >= the XCD count and gqa*nqb*B >= 2*NP (608)
+            "hkv_major": [
                 dict(batch=8, nhead_q=128, nhead_k=8),
                 dict(batch=8, nhead_q=40, nhead_k=8),
+                dict(batch=8, nhead_q=32, nhead_k=8),
+            ],
+            # MHA, batch >= the XCD count
+            "qb_major": [
                 dict(batch=8, nhead_q=32, nhead_k=32),
+                dict(batch=8, nhead_q=64, nhead_k=64),
+                dict(batch=16, nhead_q=32, nhead_k=32),
             ],
         }
         keys, names = {}, {}
@@ -587,7 +594,7 @@ class TestGfx942DensePersistentRuntimeShape(unittest.TestCase):
                     self.assertEqual(explicit.kernel_name(), names[decode])
             self.assertEqual(len(set(keys.values())), len(groups))
             self.assertEqual(len(set(names.values())), len(groups))
-            for decode, tag in (("bt_hkv_minor", "bthkvmin"),):
+            for decode, tag in (("bt_hkv_minor", "bthkvmin"), ("hkv_major", "hkvmaj")):
                 self.assertEqual(
                     [n for n in names.values() if tag in n], [names[decode]]
                 )
