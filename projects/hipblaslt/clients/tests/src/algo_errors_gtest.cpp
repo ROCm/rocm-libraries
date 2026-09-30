@@ -12,7 +12,7 @@
 
 namespace
 {
-    // Square, so A, B, C and D have the same size.
+    // Square, so one buffer size and one layout serve A, B, C and D.
     constexpr int64_t     kSize = 128;
     constexpr hipDataType kType = HIP_R_16F;
 
@@ -31,17 +31,25 @@ namespace
     class AlgoErrors : public ::testing::Test
     {
     protected:
-        hipblasLtHandle_t handle = nullptr;
-        void*             a      = nullptr;
-        void*             b      = nullptr;
-        void*             c      = nullptr;
-        void*             d      = nullptr;
-        float             alpha  = 1.0f;
-        float             beta   = 0.0f;
+        hipblasLtHandle_t           handle = nullptr;
+        hipblasLtMatmulDesc_t       desc   = nullptr;
+        hipblasLtMatrixLayout_t     layout = nullptr;
+        hipblasLtMatmulPreference_t pref   = nullptr;
+        void*                       a      = nullptr;
+        void*                       b      = nullptr;
+        void*                       c      = nullptr;
+        void*                       d      = nullptr;
+        float                       alpha  = 1.0f;
+        float                       beta   = 0.0f;
 
         void SetUp() override
         {
             ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatrixLayoutCreate(&layout, kType, kSize, kSize, kSize),
+                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
             for(void** buffer : {&a, &b, &c, &d})
                 ASSERT_EQ(hipMalloc(buffer, kSize * kSize * sizeof(uint16_t)), hipSuccess);
         }
@@ -50,6 +58,12 @@ namespace
         {
             for(void* buffer : {a, b, c, d})
                 static_cast<void>(hipFree(buffer));
+            if(pref)
+                hipblasLtMatmulPreferenceDestroy(pref);
+            if(layout)
+                hipblasLtMatrixLayoutDestroy(layout);
+            if(desc)
+                hipblasLtMatmulDescDestroy(desc);
             if(handle)
                 hipblasLtDestroy(handle);
         }
@@ -88,5 +102,15 @@ namespace
         ASSERT_EQ(gemm.setProblem(size, size, size, batch, epilogue, in), HIPBLAS_STATUS_SUCCESS);
 
         EXPECT_EQ(gemm.initialize(algoWithUnknownIndex(), nullptr), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(AlgoErrors, smoke_HeuristicReportsZeroAlgosWhenRequestIsRejected)
+    {
+        hipblasLtMatmulHeuristicResult_t result{};
+        int                              returned = -1;
+        EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                      handle, desc, layout, layout, layout, layout, pref, 0, &result, &returned),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(returned, 0);
     }
 } // namespace
