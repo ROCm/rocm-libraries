@@ -4836,8 +4836,11 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, f"Tensor A swizzling supports TN or TT only")
 
       if state["ProblemType"]["SwizzleTensorB"]:
-        if not state["DirectToVgprB"]:
-          reject(state, printRejectionReason, f"Tensor B swizzling requires DirectToVgprB")
+        # The subtile global-read emitter walks the swizzled B layout itself, so it
+        # does not need B staged through DirectToVgpr the way the classic path does.
+        if not state["UseSubtileImpl"]:
+          if not state["DirectToVgprB"]:
+            reject(state, printRejectionReason, f"Tensor B swizzling requires DirectToVgprB")
         if state["ProblemType"]["TransposeB"]:
           reject(state, printRejectionReason, f"Tensor B swizzling supports TN or NN only")
 
