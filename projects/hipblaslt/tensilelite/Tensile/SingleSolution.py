@@ -376,7 +376,9 @@ def _build(
                 derived = _deriveSingleSolution(
                     candidateConfig, label, architecture, toolchain, debug, isaInfoMap,
                     strictErrors=True)
-                derived["KernelNameMin"] = getKernelNameMin(derived, debug.splitGSU)
+                # Must match the name the published library gives the kernel
+                # (MasterSolutionLibrary.applyNaming names the kernel view).
+                derived["KernelNameMin"] = getKernelNameMin(derived.getKernels()[0], debug.splitGSU)
                 return derived
             choice = _selection[1](derive)
             if choice is None:

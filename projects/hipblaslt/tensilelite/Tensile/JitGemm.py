@@ -410,9 +410,14 @@ def _select(request, configPath, derive, ranking=None):
         if reason:
             rejections.append({"candidate_id": candidate["id"], "reason": reason})
             continue
-        if solution.get("KernelNameMin") in excluded:
+        kernel = solution.get("KernelNameMin")
+        if kernel in excluded:
             rejections.append({"candidate_id": candidate["id"],
-                               "reason": f"Excluded kernel {solution['KernelNameMin']}"})
+                               "reason": f"Excluded kernel {kernel}"})
+            continue
+        if kernel in ranking.kernels:
+            rejections.append({"candidate_id": candidate["id"],
+                               "reason": f"Same kernel as candidate {ranking.kernels[kernel]}"})
             continue
         with configPath.open("x", encoding="utf-8") as stream:
             stream.write("# Copyright Advanced Micro Devices, Inc., or its affiliates.\n"
@@ -457,6 +462,7 @@ def _select(request, configPath, derive, ranking=None):
         if request.get("modeled_contract"):
             metadata["modeled_contract"] = request["modeled_contract"]
             metadata["modeled"] = copy.deepcopy(candidate["modeled"])
+        ranking.kernels[kernel] = candidate["id"]
         ranking.accepted += 1
         return configPath, solution, metadata
     if ranking.accepted:
@@ -471,6 +477,7 @@ class _Ranking:
     def __init__(self):
         self.position = 0
         self.accepted = 0
+        self.kernels = {}  # accepted kernel name -> candidate id
         self.rejections = []
 
 

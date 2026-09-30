@@ -353,12 +353,16 @@ def test_reject_invalid_ranked_output_fields(prediction_request, tmp_path, field
         JG._readRequest(path)
 
 
-def ranked_build(monkeypatch):
-    """Replace code emission; selection and publication stay real."""
+def ranked_build(monkeypatch, names=None):
+    """Replace code emission; selection and publication stay real.
+
+    ``names`` maps a candidate id to its kernel name, default ``kernel-<id>``.
+    """
     def build(configPath, staging, *args):
         def derive(config, label):
             derived = solution()
-            derived["KernelNameMin"] = f"kernel-{label.rsplit(' ', 1)[1]}"
+            identifier = label.rsplit(' ', 1)[1]
+            derived["KernelNameMin"] = (names or {}).get(int(identifier), f"kernel-{identifier}")
             return derived
 
         choice = args[-1][1](derive)
@@ -400,6 +404,54 @@ def test_ranked_bundles_skip_excluded_kernels_and_publish_together(
         {"candidate_id": 7, "reason": "Excluded kernel kernel-7"}]
     assert json.loads(Path(f"{output}.prediction.json").read_text())["candidate_id"] == 2
     assert Path(f"{output}.yaml").is_file() and Path(f"{output}.1.yaml").is_file()
+
+
+def test_ranked_bundles_have_distinct_kernels(prediction_request, tmp_path, monkeypatch):
+    ranked_build(monkeypatch, {7: "kernel-a", 2: "kernel-b", 5: "kernel-a", 4: "kernel-c", 9: "kernel-d"})
+    for identifier in (5, 4, 9):
+        candidate = copy.deepcopy(prediction_request["candidates"][1])
+        candidate["id"] = identifier
+        prediction_request["candidates"].append(candidate)
+    prediction_request.update(requested_solutions=3, exclude_kernel_names=["kernel-b"])
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(prediction_request))
+    output = tmp_path / "ranked"
+    JG.generateAndBuildJitGemm(source, output, architecture="gfx950", sourceOnly=True)
+    manifests = [json.loads((output / f"bundle-{rank}/manifest.json").read_text()) for rank in range(3)]
+    assert [m["main_kernel"]["name"] for m in manifests] == ["kernel-a", "kernel-c", "kernel-d"]
+    assert [m["jit_prediction"]["candidate_id"] for m in manifests] == [7, 4, 9]
+    assert manifests[1]["jit_prediction"]["rejections"] == [
+        {"candidate_id": 2, "reason": "Excluded kernel kernel-b"},
+        {"candidate_id": 5, "reason": "Same kernel as candidate 7"}]
+
+
+def test_exclusion_and_duplicates_compare_published_kernel_names(modeled_request, tmp_path):
+    def compile(name, request):
+        (tmp_path / name).mkdir()
+        compile_request(request, tmp_path / name, "--source-only")
+        return [json.loads(path.read_text())
+                for path in sorted((tmp_path / name).glob("compiled/bundle-*/manifest.json"))]
+
+    (top,) = compile("top", modeled_request)
+    excluded = copy.deepcopy(modeled_request)
+    excluded["exclude_kernel_names"] = [top["main_kernel"]["name"]]
+    (second,) = compile("excluded", excluded)
+    assert second["jit_prediction"]["candidate_id"] == 2
+    assert second["jit_prediction"]["rejections"] == [
+        {"candidate_id": 7, "reason": f"Excluded kernel {top['main_kernel']['name']}"}]
+
+    # Only the instruction's K differs, and the kernel name does not record it.
+    same = copy.deepcopy(modeled_request["candidates"][1])
+    same["id"] = 5
+    same["parameters"]["MatrixInstruction"][2] = 16
+    first, other = modeled_request["candidates"]
+    modeled_request.update(candidates=[other, same, first], requested_solutions=2)
+    ranked = compile("distinct", modeled_request)
+    assert [m["jit_prediction"]["candidate_id"] for m in ranked] == [2, 7]
+    assert [m["main_kernel"]["name"] for m in ranked] == [
+        second["main_kernel"]["name"], top["main_kernel"]["name"]]
+    assert ranked[1]["jit_prediction"]["rejections"] == [
+        {"candidate_id": 5, "reason": "Same kernel as candidate 2"}]
 
 
 def test_ranked_bundles_stop_when_candidates_run_out(prediction_request, tmp_path, monkeypatch):
