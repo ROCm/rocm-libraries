@@ -218,10 +218,11 @@ IRList* irlist = converter.convertToIRList(irText);
 if(irlist) {
     PassContext* ctx = converter.getPassContext();
     if(ctx) {
-        // Create pass manager and add passes
+        // Create pass manager and add passes. The public API exposes passes
+        // through factory functions (the concrete pass types are not installed).
         PassManager pm;
-        pm.addPass(std::make_unique<StinkyDAGSchedulerPass>());
-        pm.addPass(std::make_unique<StinkyConfigurableWaitCntPass>());
+        pm.addPass(createStinkyDAGSchedulerPass());
+        pm.addPass(createStinkyWaitCntInsertionPass());
 
         // Run the passes
         pm.run(*ctx);

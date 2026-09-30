@@ -11,6 +11,8 @@ subtrees:
       title: Build from source
   - caption: Reference
     entries:
+    - file: api-reference/data-type-support
+      title: Precision support
     - file: doxygen/html/index
       title: API library
   - caption: About

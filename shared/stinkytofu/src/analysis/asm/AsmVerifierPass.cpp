@@ -69,6 +69,9 @@ static RegType fieldTypeToRegType(FieldType ft) {
 static bool isScalarRegType(RegType type) {
     switch (type) {
         case RegType::S:
+        // FieldType::sreg_m0 means "an sreg or m0", and fieldTypeToRegType folds it
+        // to RegType::S, so the actual m0 register has to be accepted here too.
+        case RegType::M:
         case RegType::SCC:
         case RegType::VCC:
         case RegType::VCC_LO:
@@ -101,6 +104,8 @@ static bool isExpectedTypeMatch(FieldType fieldType, RegType expectedType, RegTy
 // can use less operands.
 static bool canUseLessOperand(const StinkyInstruction* inst) {
     if (inst->getUnifiedOpcode() == GFX::tensor_load_to_lds) return true;
+    if (inst->getUnifiedOpcode() == GFX::s_delay_alu) return true;
+    if (inst->getUnifiedOpcode() == GFX::s_wait_alu) return true;
     return false;
 }
 

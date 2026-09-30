@@ -81,27 +81,23 @@ struct RMSNormTestCase
     }
 };
 
-inline std::vector<RMSNormTestCase> getRMSNormTestCases()
+// Crosses each (xDims, scaleDims) shape with isTraining x withBias.
+inline std::vector<RMSNormTestCase>
+    expandCases(const std::vector<std::tuple<std::vector<int64_t>, std::vector<int64_t>>>& shapes,
+                float eps,
+                unsigned seed,
+                bool bwd = false)
 {
-    const float eps = 1e-5f;
-    const unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
-
-    const std::vector<std::tuple<std::vector<int64_t>, std::vector<int64_t>>> shapes = {
-        {{2, 16, 8, 8}, {1, 16, 8, 8}}, // Normalized shape [C, H, W]
-        {{2, 16, 8, 8}, {1, 1, 8, 8}}, // Normalized shape [H, W]
-        {{2, 16, 8, 8}, {1, 1, 1, 8}}, // Normalized shape [W]
-        {{2, 1, 1, 1}, {1, 1, 1, 1}}, // degenerate all-1
-        {{4096, 128, 1, 1},
-         {1, 128, 1, 1}}, // [batch * sequence_length, hidden_dim, 1, 1], normalize over hidden_dim
-        {{32, 3, 1, 14}, {1, 3, 1, 14}}, // degenerate H
-        {{32, 3, 14, 1}, {1, 3, 14, 1}}, // degenerate W
-    };
-
     std::vector<RMSNormTestCase> cases;
-    cases.reserve(shapes.size() * 4);
+    cases.reserve(bwd ? shapes.size() : shapes.size() * 4);
+    std::vector<bool> isTrainingOptions = {false};
+    if(!bwd)
+    {
+        isTrainingOptions.push_back(true);
+    }
     for(const auto& [xDims, scaleDims] : shapes)
     {
-        for(const bool isTraining : {false, true})
+        for(const bool isTraining : isTrainingOptions)
         {
             for(const bool withBias : {false, true})
             {
@@ -117,6 +113,113 @@ inline std::vector<RMSNormTestCase> getRMSNormTestCases()
         }
     }
     return cases;
+}
+
+inline std::vector<RMSNormTestCase> getRMSNormQuickTestCases(bool bwd = false)
+{
+    const float eps = 1e-5f;
+    const unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    const std::vector<std::tuple<std::vector<int64_t>, std::vector<int64_t>>> shapes = {
+        {{2, 1, 1, 1}, {1, 1, 1, 1}}, // degenerate all-1
+        {{2, 3, 4, 4}, {1, 3, 4, 4}}, // normalize C,H,W, small
+        {{2, 3, 4, 4}, {1, 1, 4, 4}}, // normalize H,W, small
+        {{2, 3, 4, 4}, {1, 1, 1, 4}}, // normalize W, small
+    };
+
+    return expandCases(shapes, eps, seed, bwd);
+}
+
+inline std::vector<RMSNormTestCase> getRMSNormStandardTestCases(bool bwd = false)
+{
+    const float eps = 1e-5f;
+    const unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    const std::vector<std::tuple<std::vector<int64_t>, std::vector<int64_t>>> shapes = {
+        {{2, 16, 8, 8}, {1, 16, 8, 8}}, // Normalized shape [C, H, W]
+        {{2, 16, 8, 8}, {1, 1, 8, 8}}, // Normalized shape [H, W]
+        {{2, 16, 8, 8}, {1, 1, 1, 8}}, // Normalized shape [W]
+        {{32, 3, 1, 14}, {1, 3, 1, 14}}, // degenerate H
+        {{32, 3, 14, 1}, {1, 3, 14, 1}}, // degenerate W
+    };
+
+    return expandCases(shapes, eps, seed, bwd);
+}
+
+inline std::vector<RMSNormTestCase> getRMSNormComprehensiveTestCases(bool bwd = false)
+{
+    const float eps = 1e-5f;
+    const unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    const std::vector<std::tuple<std::vector<int64_t>, std::vector<int64_t>>> shapes = {
+        {{4096, 128, 1, 1},
+         {1, 128, 1, 1}}, // [batch * sequence_length, hidden_dim, 1, 1], normalize over hidden_dim
+        {{5, 256, 14, 14}, {1, 256, 14, 14}}, // larger production-like channel count
+    };
+
+    return expandCases(shapes, eps, seed, bwd);
+}
+
+inline std::vector<RMSNormTestCase> getRMSNormFullTestCases(bool bwd = false)
+{
+    const float eps = 1e-5f;
+    const unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    const std::vector<std::tuple<std::vector<int64_t>, std::vector<int64_t>>> shapes = {
+        {{1, 3, 14, 14}, {1, 3, 14, 14}}, // normalize C,H,W, batch=1
+        {{1, 3, 14, 14}, {1, 1, 14, 14}}, // normalize H,W, batch=1
+        {{1, 3, 14, 14}, {1, 1, 1, 14}}, // normalize W, batch=1
+        {{1, 256, 1, 1}, {1, 256, 1, 1}}, // all-spatial-1 with a real channel count
+        {{2, 3, 1, 1}, {1, 3, 1, 1}}, // normalize C only, spatial=1
+        {{32, 1, 14, 14}, {1, 1, 14, 14}}, // degenerate C (single channel)
+        {{32, 3, 1, 14}, {1, 3, 1, 14}}, // degenerate H
+        {{32, 3, 14, 1}, {1, 3, 14, 1}}, // degenerate W
+        {{32, 3, 14, 1}, {1, 1, 14, 1}}, // degenerate W with channel-collapsed scale
+    };
+
+    return expandCases(shapes, eps, seed, bwd);
+}
+
+inline std::vector<RMSNormTestCase> getRMSNorm3dQuickTestCases(bool bwd = false)
+{
+    const float eps = 1e-5f;
+    const unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    const std::vector<std::tuple<std::vector<int64_t>, std::vector<int64_t>>> shapes = {
+        {{2, 3, 4, 2, 2}, {1, 3, 4, 2, 2}}, // Normalized shape [C, D, H, W], small
+        {{2, 3, 4, 2, 2}, {1, 1, 4, 2, 2}}, // Normalized shape [D, H, W], small
+        {{2, 3, 4, 2, 2}, {1, 1, 1, 2, 2}}, // Normalized shape [H, W], small
+        {{2, 3, 4, 2, 2}, {1, 1, 1, 1, 2}}, // Normalized shape [W], small
+    };
+
+    return expandCases(shapes, eps, seed, bwd);
+}
+
+inline std::vector<RMSNormTestCase> getRMSNorm3dStandardTestCases(bool bwd = false)
+{
+    const float eps = 1e-5f;
+    const unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    const std::vector<std::tuple<std::vector<int64_t>, std::vector<int64_t>>> shapes = {
+        {{2, 3, 4, 8, 8}, {1, 3, 4, 8, 8}}, // Normalized shape [C, D, H, W]
+        {{2, 3, 4, 8, 8}, {1, 1, 4, 8, 8}}, // Normalized shape [D, H, W]
+        {{2, 3, 4, 8, 8}, {1, 1, 1, 8, 8}}, // Normalized shape [H, W]
+        {{2, 3, 4, 8, 8}, {1, 1, 1, 1, 8}}, // Normalized shape [W]
+    };
+
+    return expandCases(shapes, eps, seed, bwd);
+}
+
+inline std::vector<RMSNormTestCase> getRMSNorm3dComprehensiveTestCases(bool bwd = false)
+{
+    const float eps = 1e-5f;
+    const unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    const std::vector<std::tuple<std::vector<int64_t>, std::vector<int64_t>>> shapes = {
+        {{16, 3, 8, 14, 14}, {1, 3, 8, 14, 14}}, // larger production-like shape
+    };
+
+    return expandCases(shapes, eps, seed, bwd);
 }
 
 } // namespace test_rmsnorm_common

@@ -24,7 +24,7 @@
 
 INST_GEMM_EX_C_API(rocblas_int)
 
-#ifdef BUILD_WITH_TENSILE
+#if defined(BUILD_WITH_TENSILE) || defined(BUILD_WITH_HIPBLASLT)
 #include "rocblas_gemm_ex_get_solutions.hpp"
 #endif
 
@@ -57,7 +57,7 @@ rocblas_status rocblas_gemm_ex_get_solutions(rocblas_handle    handle,
 {
     try
     {
-#ifdef BUILD_WITH_TENSILE
+#if defined(BUILD_WITH_TENSILE) || defined(BUILD_WITH_HIPBLASLT)
         if(!handle)
             return rocblas_status_invalid_handle;
 
@@ -198,7 +198,7 @@ rocblas_status rocblas_gemm_ex_get_solutions_by_type(rocblas_handle   handle,
                                                      rocblas_int*     list_array,
                                                      rocblas_int*     list_size)
 {
-#ifdef BUILD_WITH_TENSILE
+#if defined(BUILD_WITH_TENSILE) || defined(BUILD_WITH_HIPBLASLT)
     if(!handle)
         return rocblas_status_invalid_handle;
 

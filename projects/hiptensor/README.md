@@ -9,11 +9,11 @@ Welcome! hiptensor is AMD's C++ library for accelerating tensor primitives using
 
 hipTensor currently supports the following AMDGPU architectures:
 
-* CDNA class GPU featuring matrix core support: gfx908, gfx90a, gfx942, gfx950 as 'gfx9'.
-* RDNA class GPU featuring matrix core support: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200 and gfx1201.
+* CDNA class GPU featuring matrix core support: gfx908, gfx90a, gfx942, gfx950 as 'gfx9'
+* RDNA class GPU featuring matrix core support: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201 and gfx1250.
 
 > [!NOTE]
-> Double precision FP64 datatype support requires gfx90a, gfx942 or gfx950.
+> Double precision FP64 datatype support requires gfx90a, gfx942, gfx950 or gfx1250.
 
 Dependencies:
 

@@ -25,6 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#include "exceptions.hpp"
 #include "roclapack_getrf.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -46,6 +47,7 @@ rocblas_status rocsolver_getrf_info32_impl(rocblas_handle handle,
                                            int64_t* ipiv,
                                            rocblas_int* info,
                                            const bool pivot)
+try
 {
     const char* name = (pivot ? "getrf" : "getrf_npvt");
     ROCSOLVER_ENTER_TOP(name, "-m", m, "-n", n, "--lda", lda);
@@ -92,6 +94,10 @@ rocblas_status rocsolver_getrf_info32_impl(rocblas_handle handle,
     return rocsolver_getrf_template<false, false, T>(handle, m, n, A, shiftA, inca, lda, strideA,
                                                      ipiv, shiftP, strideP, info, batch_count,
                                                      &work_helper, pivot);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

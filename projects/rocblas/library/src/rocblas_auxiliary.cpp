@@ -127,6 +127,86 @@ catch(...)
 }
 
 /*******************************************************************************
+ * ! \brief get alpha stride
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_get_batch_alpha_stride(rocblas_handle  handle,
+                                                         rocblas_stride* alpha_stride)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    *alpha_stride = handle->get_stride_alpha();
+    rocblas_internal_logger logger;
+    if(handle->layer_mode & rocblas_layer_mode_log_trace)
+        logger.log_trace(handle, "rocblas_get_batch_alpha_stride", *alpha_stride);
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
+ * ! \brief set alpha stride
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_set_batch_alpha_stride(rocblas_handle handle,
+                                                         rocblas_stride alpha_stride)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    rocblas_internal_logger logger;
+    if(handle->layer_mode & rocblas_layer_mode_log_trace)
+        logger.log_trace(handle, "rocblas_set_batch_alpha_stride", alpha_stride);
+    handle->set_stride_alpha(alpha_stride);
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
+ * ! \brief get beta stride
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_get_batch_beta_stride(rocblas_handle  handle,
+                                                        rocblas_stride* beta_stride)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    *beta_stride = handle->get_stride_beta();
+    rocblas_internal_logger logger;
+    if(handle->layer_mode & rocblas_layer_mode_log_trace)
+        logger.log_trace(handle, "rocblas_get_batch_beta_stride", *beta_stride);
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
+ * ! \brief set beta stride
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_set_batch_beta_stride(rocblas_handle handle,
+                                                        rocblas_stride beta_stride)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    rocblas_internal_logger logger;
+    if(handle->layer_mode & rocblas_layer_mode_log_trace)
+        logger.log_trace(handle, "rocblas_set_batch_beta_stride", beta_stride);
+    handle->set_stride_beta(beta_stride);
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
  * ! \brief get math mode
  ******************************************************************************/
 extern "C" rocblas_status rocblas_get_math_mode(rocblas_handle handle, rocblas_math_mode* mode)
@@ -916,6 +996,34 @@ std::string rocblas_internal_get_xnack_mode()
     hipDeviceProp_t deviceProperties;
     PRINT_IF_HIP_ERROR(hipGetDeviceProperties(&deviceProperties, deviceId));
     return XnackMode<hipDeviceProp_t>{}(deviceProperties);
+}
+
+// Internal use. True when the device's revision requires the strict device
+// library. Kept revision-numeric and codename-neutral on purpose.
+bool rocblas_internal_is_strict_target(int deviceId)
+{
+    // Test/CI override: force strict-catalog selection on a strict-capable device.
+    static const bool force_strict = [] {
+        const char* e = std::getenv("ROCBLAS_TENSILE_STRICT");
+        return e && strtol(e, nullptr, 0) != 0;
+    }();
+
+    hipDeviceProp_t deviceProperties;
+    if(hipGetDeviceProperties(&deviceProperties, deviceId) != hipSuccess)
+        return false;
+
+    // The strict identity currently only applies to gfx1250 silicon.
+    if(std::string(deviceProperties.gcnArchName).find("gfx1250") == std::string::npos)
+        return false;
+
+    if(force_strict)
+        return true;
+
+    // Revision-gated: the strict device library targets the earliest silicon
+    // revision, which reports asicRevision 0 (confirmed against ROCr agent
+    // enumeration); later revisions use the regular library.
+    static constexpr int c_strict_asic_revision = 0;
+    return deviceProperties.asicRevision == c_strict_asic_revision;
 }
 
 /*******************************************************************************

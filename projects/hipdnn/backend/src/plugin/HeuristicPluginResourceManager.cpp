@@ -35,6 +35,29 @@ struct HeuristicPluginShutdownRegistrar
 
 HeuristicPluginShutdownRegistrar gHeuristicShutdownRegistrar;
 
+// Best-effort handle destruction used by both the constructor (rollback) and
+// the destructor. Plugin code is untrusted and may throw arbitrary types; we
+// must swallow everything because we are either mid-construction-failure or
+// mid-destruction.
+void safeDestroyHandle(const HeuristicPlugin* plugin, hipdnnHeuristicHandle_t handle) noexcept
+{
+    try
+    {
+        plugin->destroyHandle(handle);
+    }
+    catch(const std::exception& e)
+    {
+        HIPDNN_BACKEND_LOG_WARN(
+            "Failed to destroy handle for heuristic plugin '{}': {}", plugin->name(), e.what());
+    }
+    catch(...)
+    {
+        HIPDNN_BACKEND_LOG_WARN(
+            "Failed to destroy handle for heuristic plugin '{}' (unknown exception)",
+            plugin->name());
+    }
+}
+
 } // anonymous namespace
 
 // Static accessor implementations for CRTP base class
@@ -80,86 +103,101 @@ HeuristicPluginResourceManager::HeuristicPluginResourceManager(
         return; // No plugins to initialize
     }
 
-    // Create plugin handles for all loaded heuristic plugins
+    // Create plugin handles for all loaded heuristic plugins. Each plugin has a single
+    // handle, but a plugin may expose multiple policies; every policy ID maps to the
+    // same handle (N:1).
+    //
+    // Per-plugin setup is wrapped in try/catch so that a single failing plugin does
+    // not leave the resource manager partially constructed. If any step after
+    // createHandle() throws, the constructor would otherwise exit with an active
+    // plugin handle recorded only in _handleToPlugin — and since the destructor
+    // does NOT run for an object whose constructor threw, that handle would leak.
+    // The rollback path below mirrors what the destructor would do for the
+    // half-initialized plugin.
     const auto& plugins = _pm->getPlugins();
     for(const auto& plugin : plugins)
     {
-        // Set logging callback before creating handle
+        // Set logging callback before creating handle. This is a status-returning
+        // call (not throwing) so it stays outside the try block.
         auto logStatus
             = plugin->setLoggingCallback(hipdnn_backend::logging::backendLoggingCallback);
         if(logStatus != HIPDNN_PLUGIN_STATUS_SUCCESS)
         {
-            HIPDNN_BACKEND_LOG_WARN(
-                "Failed to set logging callback on heuristic plugin with policy ID {}",
-                plugin->policyId());
+            HIPDNN_BACKEND_LOG_WARN("Failed to set logging callback on heuristic plugin '{}'",
+                                    plugin->name());
             continue;
         }
 
-        // Set log level (optional)
-        hipdnnSeverity_t level = HIPDNN_SEV_INFO;
-        hipdnn_backend::logging::getGlobalLogLevel(level);
-        plugin->setLogLevel(level);
-
-        // Create plugin handle
         hipdnnHeuristicHandle_t handle = nullptr;
+        std::vector<int64_t> registeredPolicyIds;
+
         try
         {
+            // Set log level (optional). May throw from untrusted plugin code.
+            hipdnnSeverity_t level = HIPDNN_SEV_INFO;
+            hipdnn_backend::logging::getGlobalLogLevel(level);
+            plugin->setLogLevel(level);
+
+            // Create plugin handle (one per plugin, shared across all its policies)
             handle = plugin->createHandle();
             if(handle == nullptr)
             {
-                HIPDNN_BACKEND_LOG_ERROR("Plugin with policy ID {} ({}) returned null handle "
-                                         "despite reporting success. Plugin will be unavailable.",
-                                         plugin->policyId(),
+                HIPDNN_BACKEND_LOG_ERROR("Heuristic plugin '{}' returned null handle despite "
+                                         "reporting success. Plugin will be unavailable.",
                                          plugin->name());
                 continue;
             }
+
+            _handleToPlugin[handle] = plugin.get();
+
+            const auto policyIds = plugin->getAllPolicyIds();
+            for(const int64_t policyId : policyIds)
+            {
+                _policyIdToHandle[policyId] = handle;
+                registeredPolicyIds.push_back(policyId);
+                HIPDNN_BACKEND_LOG_INFO("Registered heuristic policy ID {} ({}) from plugin '{}'",
+                                        policyId,
+                                        std::string(plugin->getPolicyName(policyId)),
+                                        plugin->name());
+            }
+
+            continue; // success — skip the rollback block below
         }
-        catch(const HipdnnException& e)
+        catch(const std::exception& e)
         {
-            HIPDNN_BACKEND_LOG_ERROR("Failed to create handle for heuristic plugin with policy ID "
-                                     "{} ({}): {}. Plugin will be unavailable.",
-                                     plugin->policyId(),
+            HIPDNN_BACKEND_LOG_ERROR("Failed to initialize heuristic plugin '{}': {}. "
+                                     "Plugin will be unavailable.",
                                      plugin->name(),
                                      e.what());
-            continue;
+        }
+        catch(...)
+        {
+            HIPDNN_BACKEND_LOG_ERROR(
+                "Failed to initialize heuristic plugin '{}' (unknown exception). "
+                "Plugin will be unavailable.",
+                plugin->name());
         }
 
-        _handleToPlugin[handle] = plugin.get();
-        _policyIdToHandle[plugin->policyId()] = handle;
-
-        HIPDNN_BACKEND_LOG_INFO("Created heuristic plugin handle for policy ID {} ({})",
-                                plugin->policyId(),
-                                plugin->name());
+        // Reached only via catch: undo any partial state for this plugin so the
+        // resource manager remains consistent (and free the handle if we got
+        // far enough to create it).
+        for(const int64_t policyId : registeredPolicyIds)
+        {
+            _policyIdToHandle.erase(policyId);
+        }
+        if(handle != nullptr)
+        {
+            _handleToPlugin.erase(handle);
+            safeDestroyHandle(plugin.get(), handle);
+        }
     }
 }
 
 HeuristicPluginResourceManager::~HeuristicPluginResourceManager()
 {
-    // Lambda to safely destroy a handle, catching all errors
-    auto safeDestroyHandle = [](const HeuristicPlugin* plugin, hipdnnHeuristicHandle_t handle) {
-        try
-        {
-            plugin->destroyHandle(handle);
-        }
-        catch(const std::exception& e)
-        {
-            HIPDNN_BACKEND_LOG_WARN("Failed to destroy handle for heuristic plugin '{}' (policy ID "
-                                    "{}) during cleanup: {}",
-                                    plugin->name(),
-                                    plugin->policyId(),
-                                    e.what());
-        }
-        catch(...)
-        {
-            HIPDNN_BACKEND_LOG_WARN(
-                "Failed to destroy handle for heuristic plugin '{}' (policy ID {}) during cleanup: "
-                "unknown error",
-                plugin->name(),
-                plugin->policyId());
-        }
-    };
-
-    // Destroy all plugin handles
+    // Destroy all plugin handles. safeDestroyHandle (anon namespace above)
+    // swallows exceptions; the constructor uses the same helper for its
+    // partial-failure rollback.
     for(const auto& [handle, plugin] : _handleToPlugin)
     {
         safeDestroyHandle(plugin, handle);
@@ -184,6 +222,14 @@ HeuristicPluginResourceManager&
 {
     if(this != &other)
     {
+        // Destroy any handles we currently own before overwriting the map —
+        // move-assigning into _handleToPlugin would otherwise silently drop
+        // them and leak. Mirrors the destructor's loop.
+        for(const auto& [handle, plugin] : _handleToPlugin)
+        {
+            safeDestroyHandle(plugin, handle);
+        }
+
         _handleToPlugin = std::move(other._handleToPlugin);
         _policyIdToHandle = std::move(other._policyIdToHandle);
         _cachedPolicyInfos = std::move(other._cachedPolicyInfos);
@@ -236,10 +282,9 @@ void HeuristicPluginResourceManager::setDevicePropertiesOnAllHandles(
         }
         catch(const HipdnnException& e)
         {
-            HIPDNN_BACKEND_LOG_WARN(
-                "Failed to set device properties on heuristic plugin with policy ID {}: {}",
-                plugin->policyId(),
-                e.what());
+            HIPDNN_BACKEND_LOG_WARN("Failed to set device properties on heuristic plugin '{}': {}",
+                                    plugin->name(),
+                                    e.what());
             // Continue with other plugins
         }
     }
@@ -253,16 +298,21 @@ std::vector<HeuristicPolicyInfo> HeuristicPluginResourceManager::getHeuristicPol
     }
 
     std::vector<HeuristicPolicyInfo> infos;
-    infos.reserve(_handleToPlugin.size());
+    infos.reserve(_policyIdToHandle.size());
 
     for(const auto& [handle, plugin] : _handleToPlugin)
     {
-        HeuristicPolicyInfo info;
-        info.policyId = plugin->policyId();
-        info.policyName = std::string(plugin->name());
-        info.pluginVersion = std::string(plugin->version());
-        info.apiVersion = std::string(plugin->apiVersion());
-        infos.push_back(info);
+        const auto policyIds = plugin->getAllPolicyIds();
+        for(const int64_t policyId : policyIds)
+        {
+            HeuristicPolicyInfo info;
+            info.policyId = policyId;
+            info.policyName = std::string(plugin->getPolicyName(policyId));
+            info.pluginName = std::string(plugin->name());
+            info.pluginVersion = std::string(plugin->version());
+            info.apiVersion = std::string(plugin->apiVersion());
+            infos.push_back(info);
+        }
     }
 
     _cachedPolicyInfos = infos;
@@ -301,6 +351,7 @@ std::string HeuristicPluginResourceManager::toString() const
         {
             oss << " (" << info.policyName << ")";
         }
+        oss << ", Plugin: " << info.pluginName;
         oss << ", Plugin Version: " << info.pluginVersion;
         oss << ", API Version: " << info.apiVersion << "\n";
     }

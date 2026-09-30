@@ -3,13 +3,13 @@ TestParameters:
   marks: [skip-gfx1250, skip-gfx950, skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
 
 GlobalParameters:
+  SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   MinimumRequiredVersion: 5.0.0
   PrintLevel: 1
   # PrintSolutionRejectionReason: True
   Device: 0
   CMakeBuildType: Debug
-#  MergeFiles: False
   KernelTime: True
   MaxWorkspaceSize: 13421772800
   DataInitTypeA: 3
@@ -22,9 +22,6 @@ GlobalParameters:
   NumElementsToValidate: -1
   BoundsCheck: 0
   KeepBuildTmp: True
-  MaxFileName: 128
-  DeviceLDS: 163840
-  MaxLDS: 163840
   MXScaleFormat: 1
 
 BenchmarkProblems:
@@ -40,8 +37,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
       Activation: True
@@ -80,7 +77,7 @@ BenchmarkProblems:
         # - PrefetchLocalRead: [0,1]
         - PrefetchLocalRead: [1]
         # - PreloadKernArgs: [0,1]
-        - PreloadKernArgs: [1]
+        - PreloadKernArgs: [true]
         # - ClusterLocalRead: [0,1]
         - ClusterLocalRead: [1]
         - VectorWidthA: [1]
@@ -93,10 +90,10 @@ BenchmarkProblems:
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
         - 1LDSBuffer: [0]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StreamK: [3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

@@ -1036,3 +1036,121 @@ TEST(PreSwizzleScalesGFX950Test, InputSizeMismatch)
     std::vector<uint8_t> input(100);
     EXPECT_THROW(preSwizzleScalesGFX950(input, {64, 16}), std::runtime_error);
 }
+
+// ============================================================================
+// Tests for preSwizzleScalesGFX1250() (dimk-based swizzle for gfx1250 / non-
+// rocroller WMMA path).
+//
+// The swizzle is "pad fast dim to multiple of dimk = 128 / mxBlock; view as
+// {slow, fast/dimk, dimk}; permute (1,0,2)". This block tests:
+//   * the natural-layout to swizzled-layout index mapping
+//   * round-trip preservation of the original payload (after stripping the
+//     padded zero scales)
+//   * padding behaviour when fastDim % dimk != 0
+//   * padded-size helper
+//   * input validation
+// ============================================================================
+
+TEST(PreSwizzleScalesGFX1250Test, PaddedSizeNoPad)
+{
+    EXPECT_EQ(preSwizzleScalesGFX1250PaddedSize(/*slowDim=*/8, /*fastDim=*/4, /*mxBlock=*/32), 32);
+    EXPECT_EQ(preSwizzleScalesGFX1250PaddedSize(/*slowDim=*/16, /*fastDim=*/8, /*mxBlock=*/16),
+              128);
+}
+
+TEST(PreSwizzleScalesGFX1250Test, PaddedSizeWithPad)
+{
+    EXPECT_EQ(preSwizzleScalesGFX1250PaddedSize(8, 5, 32), 8 * 8);
+    EXPECT_EQ(preSwizzleScalesGFX1250PaddedSize(8, 7, 16), 8 * 8);
+}
+
+TEST(PreSwizzleScalesGFX1250Test, ThrowsOnZeroBlock)
+{
+    std::vector<uint8_t> in(4);
+    EXPECT_THROW(preSwizzleScalesGFX1250(in, 1, 4, 0), std::runtime_error);
+    EXPECT_THROW(preSwizzleScalesGFX1250PaddedSize(1, 4, 0), std::runtime_error);
+}
+
+TEST(PreSwizzleScalesGFX1250Test, ThrowsOnSizeMismatch)
+{
+    std::vector<uint8_t> in(7); // slow*fast = 8 expected
+    EXPECT_THROW(preSwizzleScalesGFX1250(in, 2, 4, 32), std::runtime_error);
+}
+
+TEST(PreSwizzleScalesGFX1250Test, MapsAlignedFastDim)
+{
+    // mxBlock=32 -> dimk=4. slow=2, fast=8 (=2 tiles). Use values v[s*fast+f] = s*10+f.
+    constexpr size_t          slow = 2, fast = 8, mxBlock = 32;
+    constexpr size_t          dimk = 128 / mxBlock; // = 4
+    std::vector<unsigned int> in(slow * fast);
+    for(size_t s = 0; s < slow; ++s)
+        for(size_t f = 0; f < fast; ++f)
+            in[s * fast + f] = static_cast<unsigned int>(s * 10 + f);
+
+    auto out = preSwizzleScalesGFX1250(in, slow, fast, mxBlock);
+    ASSERT_EQ(out.size(), slow * fast); // no padding
+
+    // Output layout: {numTiles, slow, dimk}
+    // out[tile, s, j] should equal in[s, tile*dimk + j]
+    size_t const numTiles = fast / dimk;
+    for(size_t tile = 0; tile < numTiles; ++tile)
+        for(size_t s = 0; s < slow; ++s)
+            for(size_t j = 0; j < dimk; ++j)
+            {
+                size_t const outIdx = tile * (slow * dimk) + s * dimk + j;
+                size_t const inIdx  = s * fast + (tile * dimk + j);
+                EXPECT_EQ(out[outIdx], in[inIdx])
+                    << "tile=" << tile << " s=" << s << " j=" << j;
+            }
+}
+
+TEST(PreSwizzleScalesGFX1250Test, PadsFastDimWithZeros)
+{
+    // mxBlock=16 -> dimk=8. slow=3, fast=10 -> paddedFast=16, two tiles, second
+    // tile has 6 padded zero scales.
+    constexpr size_t      slow = 3, fast = 10, mxBlock = 16;
+    constexpr size_t      dimk = 128 / mxBlock; // = 8
+    std::vector<uint8_t>  in(slow * fast);
+    for(size_t i = 0; i < in.size(); ++i)
+        in[i] = static_cast<uint8_t>(i + 1); // non-zero so we can spot pads
+
+    auto out = preSwizzleScalesGFX1250(in, slow, fast, mxBlock);
+    ASSERT_EQ(out.size(), slow * 16);
+
+    size_t const numTiles = 16 / dimk;
+    size_t       seenZeros = 0;
+    for(size_t tile = 0; tile < numTiles; ++tile)
+        for(size_t s = 0; s < slow; ++s)
+            for(size_t j = 0; j < dimk; ++j)
+            {
+                size_t const outIdx  = tile * (slow * dimk) + s * dimk + j;
+                size_t const srcFast = tile * dimk + j;
+                if(srcFast < fast)
+                    EXPECT_EQ(out[outIdx], in[s * fast + srcFast]);
+                else
+                {
+                    EXPECT_EQ(out[outIdx], 0);
+                    ++seenZeros;
+                }
+            }
+    EXPECT_EQ(seenZeros, slow * (16 - fast));
+}
+
+TEST(PreSwizzleScalesGFX1250Test, MultiplesPreservePayload)
+{
+    // For perfectly-aligned fastDim, the swizzle is a pure permutation: every
+    // input byte appears exactly once in the output (unsorted equality).
+    constexpr size_t     slow = 4, fast = 16, mxBlock = 32;
+    std::vector<uint8_t> in(slow * fast);
+    for(size_t i = 0; i < in.size(); ++i)
+        in[i] = static_cast<uint8_t>(i * 3 + 7);
+
+    auto out = preSwizzleScalesGFX1250(in, slow, fast, mxBlock);
+    ASSERT_EQ(out.size(), in.size());
+
+    auto sortedIn  = in;
+    auto sortedOut = out;
+    std::sort(sortedIn.begin(), sortedIn.end());
+    std::sort(sortedOut.begin(), sortedOut.end());
+    EXPECT_EQ(sortedIn, sortedOut);
+}

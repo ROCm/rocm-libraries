@@ -269,8 +269,8 @@ void testing_gemm_ex_bad_arg(const Arguments& arg)
                 computeType,
                 algo, flags));
 
-            // If K == 0, alpha, A, and B can be nullptr
-            DAPI_CHECK(hipblasGemmExFn, (handle, transA, transB, M, N, 0, nullptr,
+            // If K == 0, A, and B can be nullptr
+            DAPI_CHECK(hipblasGemmExFn, (handle, transA, transB, M, N, 0, alpha,
                                               nullptr, aType, lda,
                                               nullptr, bType, ldb, beta,
                                               dC, cType, ldc,

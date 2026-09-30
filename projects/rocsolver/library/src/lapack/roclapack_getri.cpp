@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_getri.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -37,6 +38,7 @@ rocblas_status rocsolver_getri_impl(rocblas_handle handle,
                                     rocblas_int* ipiv,
                                     rocblas_int* info,
                                     const bool pivot)
+try
 {
     const char* name = (pivot ? "getri" : "getri_npvt");
     ROCSOLVER_ENTER_TOP(name, "-n", n, "--lda", lda);
@@ -66,7 +68,7 @@ rocblas_status rocsolver_getri_impl(rocblas_handle handle,
     size_t size_tmpcopy;
     // size of arrays of pointers (for batched cases)
     size_t size_workArr;
-    rocsolver_getri_getMemorySize<false, false, T>(n, batch_count, &size_work1, &size_work2,
+    rocsolver_getri_getMemorySize<false, false, T>(handle, n, batch_count, &size_work1, &size_work2,
                                                    &size_work3, &size_work4, &size_tmpcopy,
                                                    &size_workArr, &optim_mem);
 
@@ -93,6 +95,10 @@ rocblas_status rocsolver_getri_impl(rocblas_handle handle,
     return rocsolver_getri_template<false, false, T>(
         handle, n, A, shiftA, lda, strideA, ipiv, shiftP, strideP, info, batch_count, work1, work2,
         work3, work4, (T*)tmpcopy, (T**)workArr, optim_mem, pivot);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

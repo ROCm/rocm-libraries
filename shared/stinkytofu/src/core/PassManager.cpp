@@ -19,9 +19,11 @@
  * ************************************************************************ */
 #include "stinkytofu/core/PassManager.hpp"
 
+#include <cstdint>
 #include <iostream>
 
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace stinkytofu {
@@ -35,6 +37,14 @@ void PassContext::setGemmTileConfig(const GemmTileConfig& config) {
     } else {
         STINKY_UNREACHABLE("Invalid architecture, unable to compute wavefront size");
     }
+    // Same derivation point as wavefrontSize: both are functions of the arch alone.
+    hwModel_ = &hwModelForArch(gemmConfig.arch);
+}
+
+const HWModel& PassContext::getHWModel() const {
+    // A PassContext that never had setGemmTileConfig() called still has to answer
+    // this; hwModelForArch() maps the unset {0,0,0} arch to the default model.
+    return hwModel_ ? *hwModel_ : hwModelForArch(gemmConfig.arch);
 }
 
 //----------------------------------------------------------------------
@@ -44,7 +54,7 @@ static bool DebugFlag = false;
 static std::unordered_set<std::string> DebugTypes;
 
 bool isDebugOnlyEnabled(const char* TYPE) {
-    return DebugFlag && DebugTypes.count(TYPE);
+    return DebugFlag && DebugTypes.contains(TYPE);
 }
 
 void PassManagerDebugConfig::addDebugOnly(const std::string& passName) {
@@ -93,11 +103,11 @@ void PassManagerDebugConfig::setDumpStreamAfter(std::shared_ptr<std::ostream> st
 }
 
 bool PassManagerDebugConfig::shouldPrintBefore(const std::string& passName) const {
-    return printBeforeAll || onlyPrintBefore.count(passName);
+    return printBeforeAll || onlyPrintBefore.contains(passName);
 }
 
 bool PassManagerDebugConfig::shouldPrintAfter(const std::string& passName) const {
-    return printAfterAll || onlyPrintAfter.count(passName);
+    return printAfterAll || onlyPrintAfter.contains(passName);
 }
 
 std::ostream& PassManagerDebugConfig::getOutputStreamInBefore() const {

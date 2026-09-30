@@ -23,7 +23,10 @@ PerformanceConfigLayernorm LayernormBase::GetDefaultPerformanceConfig(
 {
     PerformanceConfigLayernorm config;
     config.HeuristicInit(problem);
-    config.local_size = PerformanceConfigLayernorm::default_local_size(problem);
+    config.local_size           = PerformanceConfigLayernorm::default_local_size(problem);
+    config.vectorized           = PerformanceConfigLayernorm::default_vectorized(problem);
+    config.separate_stride      = PerformanceConfigLayernorm::default_separate_stride(problem);
+    config.stride_in_local_size = PerformanceConfigLayernorm::default_stride_in_local_size(problem);
     MIOPEN_LOG_I(config.ToString());
     return config;
 }
@@ -68,14 +71,19 @@ void PerformanceConfigLayernorm::HeuristicInit(const miopen::layernorm::ProblemD
     {
     case miopenHalf:
     case miopenFloat:
-    case miopenBFloat16: local_size = 1; break;
+    case miopenBFloat16:
+        local_size           = start_local_size;
+        vectorized           = start_vectorized;
+        separate_stride      = start_separate_stride;
+        stride_in_local_size = start_stride_in_local_size;
+        break;
+
     case miopenDouble:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
     case miopenInt8:
     case miopenInt32:
-    case miopenInt64:
-    default: MIOPEN_THROW("Unsupported datatype");
+    case miopenInt64: MIOPEN_THROW("Unsupported datatype");
     }
 #endif
     initialized = true;
@@ -91,22 +99,40 @@ bool PerformanceConfigLayernorm::SetNextValue(const miopen::layernorm::ProblemDe
     {
         HeuristicInit(problem);
     }
-    if(local_size <= 0)
+    if(local_size < start_local_size)
     {
-        MIOPEN_THROW(miopenStatusInvalidValue, "Local size zero or negative");
+        MIOPEN_THROW(miopenStatusInvalidValue, "Local size below valid value");
     }
-    if(local_size * 2 <= max_local_size)
+    local_size *= 2;
+    if(vectorized == start_vectorized && local_size > max_local_size)
     {
-        local_size *= 2;
-        return true;
+        local_size = start_local_size;
+        vectorized = !start_vectorized;
     }
-    return false;
+    if(separate_stride == start_separate_stride && vectorized != start_vectorized &&
+       local_size > max_local_size)
+    {
+        local_size      = start_local_size;
+        vectorized      = start_vectorized;
+        separate_stride = !start_separate_stride;
+    }
+    if(stride_in_local_size == start_stride_in_local_size &&
+       separate_stride != start_separate_stride && vectorized != start_vectorized &&
+       local_size > max_local_size)
+    {
+        local_size           = start_local_size;
+        vectorized           = start_vectorized;
+        separate_stride      = start_separate_stride;
+        stride_in_local_size = !start_stride_in_local_size;
+    }
+    return local_size <= max_local_size;
 #endif
 }
 
 bool PerformanceConfigLayernorm::IsValidValue() const
 {
-    return local_size > 0 && local_size <= max_local_size;
+    return local_size >= start_local_size && local_size <= max_local_size &&
+           !(!separate_stride && stride_in_local_size);
 }
 
 bool PerformanceConfigLayernorm::CheckParallelKernelBounds(
@@ -133,14 +159,18 @@ bool PerformanceConfigLayernorm::IsValid(const ExecutionContext& context,
     {
     case miopenHalf:
     case miopenFloat:
-    case miopenBFloat16: return CheckParallelKernelBounds(context, problem);
+    case miopenBFloat16:
+        return CheckParallelKernelBounds(context, problem) &&
+               !(stride_in_local_size && problem.stride > local_size) &&
+               !((separate_stride || stride_in_local_size) && problem.stride == 1) &&
+               IsValidValue();
+
     case miopenDouble:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
     case miopenInt8:
     case miopenInt32:
-    case miopenInt64:
-    default: MIOPEN_THROW("Unsupported datatype");
+    case miopenInt64: MIOPEN_THROW("Unsupported datatype");
     }
     return false;
 #endif
@@ -148,7 +178,9 @@ bool PerformanceConfigLayernorm::IsValid(const ExecutionContext& context,
 
 bool PerformanceConfigLayernorm::operator==(const PerformanceConfigLayernorm& other) const
 {
-    return local_size == other.local_size;
+    return local_size == other.local_size && vectorized == other.vectorized &&
+           separate_stride == other.separate_stride &&
+           stride_in_local_size == other.stride_in_local_size;
 }
 
 } // namespace layernorm

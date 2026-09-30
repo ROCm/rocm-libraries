@@ -35,6 +35,11 @@ if(BUILD_MEMSTAT)
   add_compile_options(-DROCSPARSE_WITH_MEMSTAT)
 endif()
 
+# ROCSPARSE_DEBUGGING ?
+if(BUILD_ROCSPARSE_DEBUGGING)
+  add_compile_options(-DROCSPARSE_DEBUGGING)
+endif()
+
 if(BUILD_ROCSPARSE_ILP64)
   add_compile_options(-Drocsparse_ILP64)
 endif()
@@ -173,14 +178,18 @@ set(ROCSPARSE_TEST_SOURCES
   test_v2_spmv_csc.cpp
   test_v2_spmv_ell.cpp
   test_v2_spmv_sell.cpp
-  test_spsv_csr.cpp
   test_sptrsv_csr.cpp
+  test_sptrsv_csc.cpp
   test_spitsv_csr.cpp
+  test_spsv_csr.cpp
+  test_spsv_csc.cpp
   test_spsv_coo.cpp
   test_sptrsv_coo.cpp
   test_spsm_csr.cpp
+  test_spsm_csc.cpp
   test_spsm_coo.cpp
   test_sptrsm_csr.cpp
+  test_sptrsm_csc.cpp
   test_sptrsm_coo.cpp
   test_spmm_bsr.cpp
   test_spmm_csr.cpp
@@ -195,6 +204,7 @@ set(ROCSPARSE_TEST_SOURCES
   test_sparse_to_dense_coo.cpp
   test_sparse_to_dense_csr.cpp
   test_sparse_to_dense_csc.cpp
+  test_dense_to_sparse_bell.cpp
   test_dense_to_sparse_coo.cpp
   test_dense_to_sparse_csr.cpp
   test_dense_to_sparse_csc.cpp
@@ -221,7 +231,33 @@ set(ROCSPARSE_TEST_SOURCES
   test_check_matrix_hyb.cpp
   test_check_spmat.cpp
   test_bsrpad_value.cpp
+  test_spildlt0.cpp
 )
+
+if(BUILD_ROCSPARSE_DEBUGGING)
+  list(APPEND ROCSPARSE_TEST_SOURCES
+    test_hip_debug.cpp
+    )
+endif()
+
+if(BUILD_WITH_ELL_TRSV)
+  list(APPEND ROCSPARSE_TEST_SOURCES
+    test_spsv_ell.cpp
+    test_sptrsv_ell.cpp)
+endif()
+
+if(ROCSPARSE_ENABLE_SPMAT_SCALE)
+  list(APPEND ROCSPARSE_TEST_SOURCES test_spmat_scale.cpp)
+endif()
+
+if(ROCSPARSE_ENABLE_SDDMM_BATCHED)
+  list(APPEND ROCSPARSE_TEST_SOURCES
+    test_sddmm_batched_ell.cpp
+    test_sddmm_batched_coo.cpp
+    test_sddmm_batched_coo_aos.cpp
+    test_sddmm_batched_csr.cpp
+    test_sddmm_batched_csc.cpp)
+endif()
 
 set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_axpby.cpp
@@ -323,14 +359,18 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_v2_spmv_csc.cpp
 ../testings/testing_v2_spmv_ell.cpp
 ../testings/testing_v2_spmv_sell.cpp
-../testings/testing_spsv_csr.cpp
 ../testings/testing_sptrsv_csr.cpp
+../testings/testing_sptrsv_csc.cpp
 ../testings/testing_spitsv_csr.cpp
+../testings/testing_spsv_csr.cpp
+../testings/testing_spsv_csc.cpp
 ../testings/testing_spsv_coo.cpp
 ../testings/testing_sptrsv_coo.cpp
 ../testings/testing_spsm_csr.cpp
+../testings/testing_spsm_csc.cpp
 ../testings/testing_spsm_coo.cpp
 ../testings/testing_sptrsm_csr.cpp
+../testings/testing_sptrsm_csc.cpp
 ../testings/testing_sptrsm_coo.cpp
 ../testings/testing_spmm_bsr.cpp
 ../testings/testing_spmm_csr.cpp
@@ -345,6 +385,7 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_sparse_to_dense_coo.cpp
 ../testings/testing_sparse_to_dense_csr.cpp
 ../testings/testing_sparse_to_dense_csc.cpp
+../testings/testing_dense_to_sparse_bell.cpp
 ../testings/testing_dense_to_sparse_coo.cpp
 ../testings/testing_dense_to_sparse_csr.cpp
 ../testings/testing_dense_to_sparse_csc.cpp
@@ -371,8 +412,37 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_check_matrix_hyb.cpp
 ../testings/testing_check_spmat.cpp
 ../testings/testing_bsrpad_value.cpp
+../testings/testing_spildlt0.cpp
 rocsparse_test_listeners.cpp
   )
+
+if(BUILD_WITH_ELL_TRSV)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS
+    ../testings/testing_spsv_ell.cpp
+    ../testings/testing_sptrsv_ell.cpp)
+endif()
+
+if(ROCSPARSE_ENABLE_SPMAT_SCALE)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spmat_scale.cpp)
+endif()
+
+if(ROCSPARSE_ENABLE_SDDMM_BATCHED)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS
+    ../testings/testing_sddmm_batched_ell.cpp
+    ../testings/testing_sddmm_batched_coo.cpp
+    ../testings/testing_sddmm_batched_coo_aos.cpp
+    ../testings/testing_sddmm_batched_csr.cpp
+    ../testings/testing_sddmm_batched_csc.cpp)
+endif()
+
+
+
+if(BUILD_ROCSPARSE_DEBUGGING)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS
+../testings/testing_hip_debug.cpp
+    )
+endif()
+
 
 
 set(ROCSPARSE_CLIENTS_COMMON
@@ -414,8 +484,16 @@ set(ROCSPARSE_CLIENTS_COMMON
   ../common/rocsparse_clients_matrices_dir.cpp
   ../common/rocsparse_clients_spmat_descr.cpp
   ../common/rocsparse_clients_dnvec_descr.cpp
- ../common/rocsparseio.cpp
+  ../common/rocsparseio.cpp
   )
+
+
+if(BUILD_ROCSPARSE_DEBUGGING)
+  list(APPEND ROCSPARSE_CLIENTS_COMMON
+    ../common/rocsparse_clients_test_hip_debug.cpp
+    ../common/rocsparse_clients_test_hip_debug_api.cpp
+    )
+endif()
 
 if (BUILD_CLIENTS_ONLY)
   add_executable(rocsparse-test rocsparse_test_main.cpp ${ROCSPARSE_TEST_SOURCES} ${ROCSPARSE_CLIENTS_COMMON} ${ROCSPARSE_CLIENTS_TESTINGS})
@@ -427,7 +505,10 @@ endif()
 target_compile_definitions(rocsparse-test PRIVATE GOOGLE_TEST)
 
 # Target compile options
-target_compile_options(rocsparse-test PRIVATE -ffp-contract=on -mfma -Wno-deprecated -Wno-unused-command-line-argument -Wall)
+target_compile_options(rocsparse-test PRIVATE -ffp-contract=on -Wno-deprecated -Wno-unused-command-line-argument -Wall)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+  target_compile_options(rocsparse-test PRIVATE -mfma)
+endif()
 
 # Internal common header
 target_include_directories(rocsparse-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)

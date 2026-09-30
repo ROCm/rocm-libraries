@@ -14,18 +14,7 @@
 #include <miopen/config.h>
 #include <miopen/export.h>
 
-#if MIOPEN_BACKEND_OPENCL
-#define CL_TARGET_OPENCL_VERSION 120
-#if defined(__APPLE__) || defined(__MACOSX)
-#include <OpenCL/cl.h>
-#else
-#define CL_USE_DEPRECATED_OPENCL_1_2_APIS
-#include <CL/cl.h>
-#endif
-
-#elif MIOPEN_BACKEND_HIP
 #include <hip/hip_runtime_api.h>
-#endif
 
 /*
  * @defgroup convolutions
@@ -64,11 +53,7 @@
 extern "C" {
 #endif
 
-#if MIOPEN_BACKEND_OPENCL
-typedef cl_command_queue miopenAcceleratorQueue_t;
-#elif MIOPEN_BACKEND_HIP
 typedef hipStream_t miopenAcceleratorQueue_t;
-#endif
 
 /*! @ingroup handle
  * @brief Creates the miopenHandle_t type
@@ -162,6 +147,10 @@ MIOPEN_EXPORT miopenStatus_t miopenGetVersion(size_t* major, size_t* minor, size
  *
  * This function creates a MIOpen handle. This is called at the very start to initialize the MIOpen
  * environment.
+ *
+ * @note When MIOpen is built with Composable Kernel support, the first handle created for a given
+ * GPU architecture in a process loads the CK dynamic library.
+ *
  * @param handle     A pointer to a MIOpen handle type (output)
  *
  * @return           miopenStatus_t
@@ -170,10 +159,13 @@ MIOPEN_EXPORT miopenStatus_t miopenCreate(miopenHandle_t* handle);
 
 /*! @brief Create a MIOpen handle with an accelerator stream.
  *
- * The HIP side uses a hipStream_t type for the stream, while OpenCL will use a
- * cl_command_queue.
+ * Create a handle with a previously created accelerator stream.
  *
- * Create a handle with a previously created accelerator command queue.
+ * The HIP backend uses a hipStream_t type for the stream.
+ *
+ * @note When MIOpen is built with Composable Kernel support, the first handle created for a given
+ * GPU architecture in a process loads the CK dynamic library.
+ *
  * @param handle     A pointer to a MIOpen handle type (output)
  * @param stream      An accelerator queue type (input)
  *
@@ -2170,7 +2162,6 @@ miopenConvolutionBackwardWeights(miopenHandle_t handle,
 /*! @brief Calculates the gradient with respect to the bias.
  *
  * @deprecated This function is deprecated and will be removed in a future release.
- *             The underlying OpenCL kernel (MIOpenConvBwdBias.cl) has been removed.
  *             This function now returns miopenStatusNotImplemented.
  *
  * Compute the convolution backwards gradient with respect to the bias tensor.

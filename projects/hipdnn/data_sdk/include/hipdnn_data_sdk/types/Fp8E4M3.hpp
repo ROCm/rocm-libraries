@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -57,8 +58,8 @@ constexpr int FP8_E4M3_MANT_BITS = 3;
 /// Number of exponent bits
 constexpr int FP8_E4M3_EXP_BITS = 4;
 
-/// Maximum exponent value (before bias)
-constexpr int FP8_E4M3_MAX_EXP = 15;
+/// Maximum biased exponent representable in EXP_BITS bits
+constexpr int FP8_E4M3_MAX_BIASED_EXP = (1 << FP8_E4M3_EXP_BITS) - 1;
 
 // ============================================================================
 // FP8 E4M3 Special Values (bit patterns)
@@ -90,69 +91,93 @@ constexpr uint32_t FP8_E4M3_ROUND_THRESHOLD = 0x80000;
 
 // Convert float to FP8 E4M3 bits (OCP format: 1 sign, 4 exponent, 3 mantissa)
 // Range: +/- 448, no infinity, NaN = 0x7F or 0xFF
+// NOTE: The `saturate=false` paths return NaN on overflow per the OCP spec and
+// are reserved for future non-saturating-mode support.
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline uint8_t float_to_fp8_e4m3_bits(float f, bool saturate = true) noexcept
 {
-    // Handle special values first using std library functions
+    // Handle NaN: preserve sign bit in the OCP NaN encoding (0x7F / 0xFF)
     if(std::isnan(f))
     {
-        return std::signbit(f) ? 0xFF : 0x7F; // NaN with preserved sign
+        return std::signbit(f) ? static_cast<uint8_t>(FP8_E4M3_NAN | FP8_E4M3_SIGN_MASK)
+                               : FP8_E4M3_NAN;
     }
 
+    // Handle infinity: E4M3 OCP has no infinity; saturate to MAX or return NaN
     if(std::isinf(f))
     {
-        // E4M3 has no infinity - saturate to max or return NaN
         if(saturate)
         {
-            return std::signbit(f) ? 0xFE : 0x7E; // Max finite value
+            return std::signbit(f) ? FP8_E4M3_LOWEST : FP8_E4M3_MAX;
         }
-        return std::signbit(f) ? 0xFF : 0x7F; // NaN
+        return std::signbit(f) ? static_cast<uint8_t>(FP8_E4M3_NAN | FP8_E4M3_SIGN_MASK)
+                               : FP8_E4M3_NAN;
     }
 
     uint32_t bits;
     std::memcpy(&bits, &f, sizeof(float));
 
-    const uint32_t sign = (bits >> 24) & 0x80; // Extract sign to bit 7
+    const uint32_t sign = (bits >> 24) & FP8_E4M3_SIGN_MASK; // Extract sign to bit 7
     const uint32_t fp32Exp = (bits >> 23) & 0xFF;
-    int32_t exp = static_cast<int32_t>(fp32Exp) - 127 + 7; // Rebias from float (127) to E4M3 (7)
+    // Rebias from float (127) to OCP E4M3 (7)
+    int32_t exp = static_cast<int32_t>(fp32Exp) - 127 + FP8_E4M3_EXP_BIAS;
     uint32_t mant = bits & 0x007FFFFF;
 
-    // Handle overflow
-    if(exp >= 15)
+    // Handle +0.0 / -0.0 and fp32 subnormal inputs:
+    // fp32 subnormals (fp32Exp==0, mant!=0) are far smaller than any representable
+    // OCP E4M3 value; flush to signed zero explicitly.
+    if(fp32Exp == 0)
+    {
+        return static_cast<uint8_t>(sign);
+    }
+
+    // Handle overflow: saturate to MAX or return NaN (E4M3 OCP has no infinity).
+    // Note the asymmetry vs E5M2: in OCP E4M3, biased_exp == MAX_BIASED_EXP (15) is a
+    // valid normal exponent (used by MAX = 448 at exp=15, mant=6), so only exp > 15
+    // overflows. In OCP E5M2, biased_exp == MAX_BIASED_EXP (31) is reserved for Inf/NaN,
+    // so the equivalent check there uses >=.
+    if(exp > FP8_E4M3_MAX_BIASED_EXP)
     {
         if(saturate)
         {
-            // Saturate to max finite value (0x7E for positive, 0xFE for negative)
-            return static_cast<uint8_t>(sign | 0x7E);
+            return static_cast<uint8_t>(sign | FP8_E4M3_MAX);
         }
-        return static_cast<uint8_t>(sign | 0x7F); // NaN (no infinity in E4M3)
+        return static_cast<uint8_t>(sign | FP8_E4M3_NAN);
     }
 
-    // Handle zero
-    if(fp32Exp == 0 && mant == 0)
-    {
-        return static_cast<uint8_t>(sign); // Signed zero
-    }
-
-    // Handle denormalized or underflow
+    // Handle inputs in the subnormal/underflow range (may round up to normal)
     if(exp <= 0)
     {
-        // Denormalized: shift formula is (1 - exp + 20) where exp can range from
-        // -17 (deeply subnormal float) to 0, giving shift values from 21 to 38.
-        // The guard condition (shift >= 24) ensures we don't shift beyond the
-        // 24-bit mantissa, returning zero for values too small to represent.
         mant |= 0x00800000; // Add implicit 1
         auto shift = static_cast<uint32_t>(1 - exp + 20); // 23 - 3 = 20 bits to shift
-        if(shift >= 24)
+        if(shift > 24)
         {
             return static_cast<uint8_t>(sign); // Too small, return zero
         }
+
+        const uint32_t halfPoint = 1u << (shift - 1);
+        const uint32_t remainder = mant & ((1u << shift) - 1u);
         mant >>= shift;
-        return static_cast<uint8_t>(sign | (mant & 0x07));
+
+        // Round to nearest even
+        if(remainder > halfPoint || (remainder == halfPoint && ((mant & 1) != 0)))
+        {
+            mant++;
+            if(mant > FP8_E4M3_MANT_MASK)
+            {
+                // Rounded up into the smallest normal (exp=1, mant=0)
+                return static_cast<uint8_t>(sign | FP8_E4M3_MIN_NORMAL);
+            }
+        }
+        if(mant == 0u)
+        {
+            return static_cast<uint8_t>(sign); // Rounded down to zero
+        }
+        return static_cast<uint8_t>(sign | (mant & FP8_E4M3_MANT_MASK));
     }
 
-    // Normal case: shift mantissa from 23 bits to 3 bits with rounding
-    uint32_t fp8Mant = (mant >> 20) & 0x07;
+    // Normal case: shift mantissa from 23 bits to 3 bits with round-to-nearest-even
+    uint32_t fp8Mant = (mant >> 20) & FP8_E4M3_MANT_MASK;
     const uint32_t remainder = mant & 0x000FFFFF;
 
     // Round to nearest even
@@ -160,69 +185,76 @@ inline uint8_t float_to_fp8_e4m3_bits(float f, bool saturate = true) noexcept
        || (remainder == FP8_E4M3_ROUND_THRESHOLD && ((fp8Mant & 1) != 0)))
     {
         fp8Mant++;
-        if(fp8Mant > 7)
+        if(fp8Mant > FP8_E4M3_MANT_MASK)
         {
             fp8Mant = 0;
             exp++;
-            if(exp >= 15)
+            if(exp > FP8_E4M3_MAX_BIASED_EXP)
             {
                 if(saturate)
                 {
-                    return static_cast<uint8_t>(sign | 0x7E);
+                    return static_cast<uint8_t>(sign | FP8_E4M3_MAX);
                 }
-                return static_cast<uint8_t>(sign | 0x7F); // NaN
+                return static_cast<uint8_t>(sign | FP8_E4M3_NAN);
             }
         }
+    }
+
+    // OCP E4M3 special case: exp=15 && mant=7 produces bit pattern 0x7F (or 0xFF),
+    // which is the NaN encoding. Any finite float value that maps exactly to this
+    // bit pattern must instead saturate to MAX (0x7E/0xFE), since 0x7F/0xFF
+    // is reserved for NaN in OCP E4M3.
+    if(exp == FP8_E4M3_MAX_BIASED_EXP && fp8Mant == FP8_E4M3_MANT_MASK)
+    {
+        if(saturate)
+        {
+            return static_cast<uint8_t>(sign | FP8_E4M3_MAX);
+        }
+        return static_cast<uint8_t>(sign | FP8_E4M3_NAN);
     }
 
     return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | fp8Mant);
 }
 
-// Convert FP8 E4M3 bits to float
+// Convert FP8 E4M3 bits to float using a half-size lookup table.
+// Only positive values (0x00..0x7E) are stored; 0x7F is NaN.
+// For bits in 0x80..0xFE the function negates the positive entry at (bits & 0x7F).
+// For 0xFF it returns a negative NaN. This halves the table size from 1024 to 512 bytes.
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline float fp8_e4m3_bits_to_float(uint8_t bits) noexcept
 {
-    uint32_t sign = (static_cast<uint32_t>(bits) & 0x80) << 24;
-    uint32_t exp = (bits >> 3) & 0x0F;
-    uint32_t mant = bits & 0x07;
-
-    // Handle NaN (0x7F or 0xFF)
-    if((bits & 0x7F) == 0x7F)
+    // clang-format off
+    static constexpr std::array<float, 128> TABLE = {
+        0.0f,           0.001953125f,   0.00390625f,    0.005859375f,   0.0078125f,     0.009765625f,   0.01171875f,    0.013671875f,   // exp=0 (subnormal)
+        0.015625f,      0.017578125f,   0.01953125f,    0.021484375f,   0.0234375f,     0.025390625f,   0.02734375f,    0.029296875f,   // exp=1
+        0.03125f,       0.03515625f,    0.0390625f,     0.04296875f,    0.046875f,      0.05078125f,    0.0546875f,     0.05859375f,    // exp=2
+        0.0625f,        0.0703125f,     0.078125f,      0.0859375f,     0.09375f,       0.1015625f,     0.109375f,      0.1171875f,     // exp=3
+        0.125f,         0.140625f,      0.15625f,       0.171875f,      0.1875f,        0.203125f,      0.21875f,       0.234375f,      // exp=4
+        0.25f,          0.28125f,       0.3125f,        0.34375f,       0.375f,         0.40625f,       0.4375f,        0.46875f,       // exp=5
+        0.5f,           0.5625f,        0.625f,         0.6875f,        0.75f,          0.8125f,        0.875f,         0.9375f,        // exp=6
+        1.0f,           1.125f,         1.25f,          1.375f,         1.5f,           1.625f,         1.75f,          1.875f,         // exp=7
+        2.0f,           2.25f,          2.5f,           2.75f,          3.0f,           3.25f,          3.5f,           3.75f,          // exp=8
+        4.0f,           4.5f,           5.0f,           5.5f,           6.0f,           6.5f,           7.0f,           7.5f,           // exp=9
+        8.0f,           9.0f,           10.0f,          11.0f,          12.0f,          13.0f,          14.0f,          15.0f,          // exp=10
+        16.0f,          18.0f,          20.0f,          22.0f,          24.0f,          26.0f,          28.0f,          30.0f,          // exp=11
+        32.0f,          36.0f,          40.0f,          44.0f,          48.0f,          52.0f,          56.0f,          60.0f,          // exp=12
+        64.0f,          72.0f,          80.0f,          88.0f,          96.0f,          104.0f,         112.0f,         120.0f,         // exp=13
+        128.0f,         144.0f,         160.0f,         176.0f,         192.0f,         208.0f,         224.0f,         240.0f,         // exp=14
+        256.0f,         288.0f,         320.0f,         352.0f,         384.0f,         416.0f,         448.0f,         std::numeric_limits<float>::quiet_NaN(), // exp=15: mant=0..6 normal, mant=7 (0x7F) = NaN; the early NaN check below guards this slot, so the value here is for self-documentation only
+    };
+    // clang-format on
+    const uint8_t absBits = bits & FP8_E4M3_ABS_MASK;
+    // Handle both NaN patterns: 0x7F (positive) and 0xFF (negative)
+    if(absBits == FP8_E4M3_NAN)
     {
-        uint32_t nanBits = sign | 0x7FC00000; // Quiet NaN
-        float f;
-        std::memcpy(&f, &nanBits, sizeof(float));
-        return f;
+        constexpr float QUIET_NAN = std::numeric_limits<float>::quiet_NaN();
+        return ((bits & FP8_E4M3_SIGN_MASK) != 0) ? std::copysign(QUIET_NAN, -1.0f) : QUIET_NAN;
     }
-
-    // Handle zero
-    if(exp == 0 && mant == 0)
+    if(bits < FP8_E4M3_NAN)
     {
-        float f;
-        std::memcpy(&f, &sign, sizeof(float));
-        return f;
+        return TABLE[bits];
     }
-
-    // Handle denormalized
-    if(exp == 0)
-    {
-        // Denormalized: value = (-1)^sign * 2^(-6) * (0.mantissa)
-        float value = static_cast<float>(mant) / 8.0f * (1.0f / 64.0f);
-        if(sign != 0)
-        {
-            value = -value;
-        }
-        return value;
-    }
-
-    // Normal case: rebias from E4M3 (7) to float (127)
-    exp = exp - 7 + 127;
-    mant <<= 20; // Shift 3-bit mantissa to 23-bit position
-
-    uint32_t floatBits = sign | (exp << 23) | mant;
-    float f;
-    std::memcpy(&f, &floatBits, sizeof(float));
-    return f;
+    return -TABLE[absBits];
 }
 
 } // namespace detail
@@ -268,14 +300,14 @@ struct fp8_e4m3
 
     // EXPLICIT constructor from double (via float)
     explicit fp8_e4m3(double d) noexcept
-        : data(detail::float_to_fp8_e4m3_bits(static_cast<float>(d)))
+        : fp8_e4m3(static_cast<float>(d))
     {
     }
 
     // EXPLICIT constructor from integral types
     template <typename T, typename = std::enable_if_t<std::is_integral_v<T>>>
     explicit fp8_e4m3(T value) noexcept
-        : data(detail::float_to_fp8_e4m3_bits(static_cast<float>(value)))
+        : fp8_e4m3(static_cast<float>(value))
     {
     }
 
@@ -330,6 +362,9 @@ struct fp8_e4m3
 static_assert(sizeof(fp8_e4m3) == sizeof(uint8_t), "fp8_e4m3 must be 1 byte");
 static_assert(std::is_trivially_copyable_v<fp8_e4m3>, "fp8_e4m3 must be trivially copyable");
 static_assert(std::is_standard_layout_v<fp8_e4m3>, "fp8_e4m3 must be standard layout");
+static_assert(std::is_default_constructible_v<fp8_e4m3>, "fp8_e4m3 must be default constructible");
+static_assert(std::is_copy_constructible_v<fp8_e4m3>, "fp8_e4m3 must be copy constructible");
+static_assert(std::is_move_constructible_v<fp8_e4m3>, "fp8_e4m3 must be move constructible");
 
 // User-defined literal
 // NOLINTNEXTLINE(readability-identifier-naming)

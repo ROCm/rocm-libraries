@@ -25,4 +25,4 @@
 #include "testing_scatter.hpp"
 
 TEST_ROUTINE_WITH_CONFIG(
-    scatter, generic, hipsparse_test_config_it, arg.N, arg.nnz, arg.baseA, arg.graph_test);
+    scatter, generic, hipsparse_test_config_scatter, arg.N, arg.nnz, arg.baseA, arg.graph_test);

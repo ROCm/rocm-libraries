@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_sytrf.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -37,6 +38,7 @@ rocblas_status rocsolver_sytrf_impl(rocblas_handle handle,
                                     const rocblas_int lda,
                                     rocblas_int* ipiv,
                                     rocblas_int* info)
+try
 {
     ROCSOLVER_ENTER_TOP("sytrf", "--uplo", uplo, "-n", n, "--lda", lda);
 
@@ -76,6 +78,10 @@ rocblas_status rocsolver_sytrf_impl(rocblas_handle handle,
     // execution
     return rocsolver_sytrf_template<T>(handle, uplo, n, A, shiftA, lda, strideA, ipiv, strideP,
                                        info, batch_count, (T*)work);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

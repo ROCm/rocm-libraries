@@ -30,13 +30,23 @@
 namespace stinkytofu {
 class Pass;
 
+struct WaitCntInsertionOptions {
+    /// Disabled by default: CK_Tensor dataflow freezes after the first solver
+    /// sweep, preventing tensor state from propagating through back-edges.
+    /// Enable to restore conservative tensor fixed-point iteration.
+    bool enableLoopCarriedTokenDeps = false;
+};
+
 /**
  * @brief Creates a minimal wait-count insertion pass.
  *
  * Inserts architecture-specific wait instructions so asynchronous memory operations
- * complete before their results are used. Tensor waits are reinserted at barriers
- * via a token-matching heuristic.
+ * complete before their results are used. Each tracked hardware counter gets its own
+ * wait opcode: DS ops -> s_wait_dscnt, vector global/buffer ops -> s_wait_loadcnt,
+ * SMRD scalar loads (s_load_*) -> s_wait_kmcnt, and tensor loads -> s_wait_tensorcnt.
+ * Tensor waits are reinserted at barriers via a token-matching heuristic.
  */
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyWaitCntInsertionPass();
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyWaitCntInsertionPass(
+    WaitCntInsertionOptions options = {});
 
 }  // namespace stinkytofu

@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,6 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#include "exceptions.hpp"
 #include "roclapack_sygvj_hegvj.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -49,6 +50,7 @@ rocblas_status rocsolver_sygvj_hegvj_strided_batched_impl(rocblas_handle handle,
                                                           const rocblas_stride strideW,
                                                           rocblas_int* info,
                                                           const rocblas_int batch_count)
+try
 {
     const char* name = (!rocblas_is_complex<T> ? "sygvj_strided_batched" : "hegvj_strided_batched");
     ROCSOLVER_ENTER_TOP(name, "--itype", itype, "--evect", evect, "--uplo", uplo, "-n", n, "--lda",
@@ -111,6 +113,10 @@ rocblas_status rocsolver_sygvj_hegvj_strided_batched_impl(rocblas_handle handle,
         handle, itype, evect, uplo, n, A, shiftA, lda, strideA, B, shiftB, ldb, strideB, abstol,
         residual, max_sweeps, n_sweeps, W, strideW, info, batch_count, (T*)scalars, work1, work2,
         work3, work4, work5, work6, (rocblas_int*)iinfo, optim_mem);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

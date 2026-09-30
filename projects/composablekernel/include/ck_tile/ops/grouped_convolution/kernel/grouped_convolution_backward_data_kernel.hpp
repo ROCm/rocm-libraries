@@ -460,7 +460,7 @@ struct GroupedConvBwdDataKernelArgs
     long_index_t group_stride_c;
 
     // Split-N support fields - initialize to safe defaults
-    index_t n_splits            = 1; // Number of batch splits (e.g., 2 for 128→64×2)
+    index_t n_splits            = 1; // Number of batch splits (e.g., 2 for 128->64x2)
     index_t n_per_split         = 1; // Batches per split (N_ from transformer)
     index_t original_n          = 1; // Original batch size before splitting
     index_t input_batch_stride  = 0; // Stride to next batch in input tensor
@@ -529,7 +529,9 @@ struct GroupedConvolutionBackwardDataKernel
     using GemmDsLayout                  = remove_cvref_t<typename EpiloguePipeline::DsLayout>;
     static constexpr index_t NumDTensor = GroupedConvTraitsType_::NumDTensor;
 
-    static constexpr index_t kBlockSize = GemmPipeline::BlockSize;
+    // Wavelet pipelines launch extra load waves (LaunchBlockSize > BlockSize); others use
+    // BlockSize. See GroupedConvLaunchBlockSize in grouped_convolution_utils.hpp.
+    static constexpr index_t kBlockSize = GroupedConvLaunchBlockSize<GemmPipeline>;
 
     using OutDataType = remove_cvref_t<typename GemmPipeline::ADataType>;
     using WeiDataType = remove_cvref_t<typename GemmPipeline::BDataType>;
@@ -541,6 +543,8 @@ struct GroupedConvolutionBackwardDataKernel
         GroupedConvBwdDataKernelArgs<GroupedConvTraitsType_, TilePartitioner>;
     static constexpr index_t MaxGroupedGemmGroupsNum =
         GroupedConvBwdDataKernelArgsSpecialized::MaxGroupedGemmGroupsNum;
+
+    static constexpr bool LargeTensors = GemmPipeline::LargeTensors;
 
     static constexpr auto I0 = number<0>();
     static constexpr auto I1 = number<1>();
@@ -624,15 +628,20 @@ struct GroupedConvolutionBackwardDataKernel
                      const index_t i_m,
                      const index_t i_k)
     {
+        constexpr bool pad_not_contiguous_dim = LargeTensors;
+
         // Step 1: Create tensor view for A (Out tensor)
         const auto& a_tensor_view =
-            make_tensor_view<address_space_enum::global>(a_ptr, kargs.a_grid_descs_m_k[group_id]);
+            make_tensor_view<address_space_enum::global,
+                             memory_operation_enum::set,
+                             amd_buffer_coherence_enum::coherence_default,
+                             LargeTensors>(a_ptr, kargs.a_grid_descs_m_k[group_id]);
 
         // Step 2: Create padded view
         const auto& a_pad_view = pad_tensor_view(
             a_tensor_view,
             make_tuple(number<TilePartitioner::MPerBlock>{}, number<TilePartitioner::KPerBlock>{}),
-            sequence<false, true>{});
+            sequence<pad_not_contiguous_dim, true>{});
 
         // Step 3: Create tile window
         auto a_block_window = make_tile_window(
@@ -650,15 +659,20 @@ struct GroupedConvolutionBackwardDataKernel
                      const index_t i_n,
                      const index_t i_k)
     {
+        constexpr bool pad_not_contiguous_dim = LargeTensors;
+
         // Step 1: Create tensor view for B (Weight tensor)
         const auto& b_tensor_view =
-            make_tensor_view<address_space_enum::global>(b_ptr, kargs.b_grid_descs_n_k[group_id]);
+            make_tensor_view<address_space_enum::global,
+                             memory_operation_enum::set,
+                             amd_buffer_coherence_enum::coherence_default,
+                             LargeTensors>(b_ptr, kargs.b_grid_descs_n_k[group_id]);
 
         // Step 2: Create padded view
         const auto& b_pad_view = pad_tensor_view(
             b_tensor_view,
             make_tuple(number<TilePartitioner::KPerBlock>{}, number<TilePartitioner::NPerBlock>{}),
-            sequence<false, true>{});
+            sequence<pad_not_contiguous_dim, true>{});
 
         // Step 3: Create tile window
         auto b_block_window = make_tile_window(
@@ -676,19 +690,25 @@ struct GroupedConvolutionBackwardDataKernel
                       const index_t i_m,
                       const index_t i_n)
     {
+        constexpr bool pad_not_contiguous_dim = LargeTensors;
+
         // Create D tensor block windows
         const auto ds_block_window = generate_tuple(
             [&](auto i) {
                 // Step 1: Create tensor view for D
-                const auto& d_tensor_view = make_tensor_view<address_space_enum::global>(
-                    static_cast<const InDataType*>(ds_ptr[i]), kargs.c_grid_descs_m_n[group_id]);
+                const auto& d_tensor_view =
+                    make_tensor_view<address_space_enum::global,
+                                     memory_operation_enum::set,
+                                     amd_buffer_coherence_enum::coherence_default,
+                                     LargeTensors>(static_cast<const InDataType*>(ds_ptr[i]),
+                                                   kargs.c_grid_descs_m_n[group_id]);
 
                 // Step 2: Create padded view
                 const auto& d_pad_view =
                     pad_tensor_view(d_tensor_view,
                                     make_tuple(number<TilePartitioner::MPerBlock>{},
                                                number<TilePartitioner::NPerBlock>{}),
-                                    sequence<false, true>{});
+                                    sequence<pad_not_contiguous_dim, true>{});
 
                 // Step 3: Create tile window
                 return make_tile_window(d_pad_view,
@@ -710,17 +730,22 @@ struct GroupedConvolutionBackwardDataKernel
                      const index_t i_n)
     {
         // Step 1: Create tensor view for C (Input tensor)
-        const auto& c_tensor_view = make_tensor_view<address_space_enum::global, DstInMemOp>(
-            c_ptr, kargs.c_grid_descs_m_n[group_id]);
+        const auto& c_tensor_view =
+            make_tensor_view<address_space_enum::global,
+                             DstInMemOp,
+                             amd_buffer_coherence_enum::coherence_default,
+                             LargeTensors>(c_ptr, kargs.c_grid_descs_m_n[group_id]);
 
         // For bf16_t and atomic_add global_atomic_add is used instead of buffer_atomic_add
-        // Add padding for not contiguous dim due to the lack of OOB check
-        // Not needed from gfx950.
+        // Add padding for not contiguous dim due to the lack of OOB check.
+        // On gfx950 this padding is only needed for LargeTensors; on other targets it is also
+        // needed for bf16_t with atomic_add.
 #if defined(__gfx950__)
-        constexpr bool pad_not_contiguous_dim = false;
+        constexpr bool pad_not_contiguous_dim = LargeTensors;
 #else
         constexpr bool pad_not_contiguous_dim =
-            std::is_same_v<InDataType, bf16_t> && DstInMemOp == memory_operation_enum::atomic_add;
+            LargeTensors ||
+            (std::is_same_v<InDataType, bf16_t> && DstInMemOp == memory_operation_enum::atomic_add);
 #endif
         // Step 2: Create padded view
         const auto& c_pad_view = pad_tensor_view(
@@ -825,13 +850,19 @@ struct GroupedConvolutionBackwardDataKernel
             // Check access per C
             if(ConvC % GroupedConvTraitsType_::VectorSizeB != 0)
             {
-                CK_TILE_ERROR("Conv C is not a multiple of vector load size for input image!");
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("Conv C is not a multiple of vector load size for input image!");
+                }
                 return false;
             }
         }
         else
         {
-            CK_TILE_ERROR("Not supported input layout!");
+            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+            {
+                CK_TILE_ERROR("Not supported input layout!");
+            }
             return false;
         }
 
@@ -842,13 +873,19 @@ struct GroupedConvolutionBackwardDataKernel
         {
             if(ConvC % GroupedConvTraitsType_::VectorSizeC != 0)
             {
-                CK_TILE_ERROR("Conv C is not a multiple of vector load size for weight!");
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("Conv C is not a multiple of vector load size for weight!");
+                }
                 return false;
             }
         }
         else
         {
-            CK_TILE_ERROR("Not supported weight layout!");
+            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+            {
+                CK_TILE_ERROR("Not supported weight layout!");
+            }
             return false;
         }
 
@@ -858,13 +895,20 @@ struct GroupedConvolutionBackwardDataKernel
         {
             if(ConvK % GroupedConvTraitsType_::VectorSizeA != 0)
             {
-                CK_TILE_ERROR("Conv K is not a multiple of vector store size for output image!");
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR(
+                        "Conv K is not a multiple of vector store size for output image!");
+                }
                 return false;
             }
         }
         else
         {
-            CK_TILE_ERROR("Not supported output layout!");
+            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+            {
+                CK_TILE_ERROR("Not supported output layout!");
+            }
             return false;
         }
 
@@ -911,29 +955,31 @@ struct GroupedConvolutionBackwardDataKernel
 
         const index_t k_batch = amd_wave_read_first_lane(kargs.k_batch);
 
-        // Run Epilogue Pipeline with k_batch dispatch
-        if(k_batch == 1)
-        {
-            auto c_block_window = MakeCBlockWindow<memory_operation_enum::set>(
-                c_ptr, kargs, group_id, block_idx_m, block_idx_n);
-
-            EpiloguePipeline{}
-                .template operator()<decltype(c_block_window), decltype(c_block_tile)>(
-                    c_block_window, c_block_tile, d_block_window, smem_ptr_0);
-        }
-        else
-        {
-            if constexpr(!(GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
-                           is_any_of<InDataType, fp16_t, bf16_t>::value))
+        // Run the epilogue with split-K dispatch, wrapped for wavelet load/math waves.
+        RunWaveletAwareEpilogue<GemmPipeline, EpiloguePipeline>([&]() {
+            if(k_batch == 1)
             {
-                auto c_block_window = MakeCBlockWindow<memory_operation_enum::atomic_add>(
+                auto c_block_window = MakeCBlockWindow<memory_operation_enum::set>(
                     c_ptr, kargs, group_id, block_idx_m, block_idx_n);
 
                 EpiloguePipeline{}
                     .template operator()<decltype(c_block_window), decltype(c_block_tile)>(
                         c_block_window, c_block_tile, d_block_window, smem_ptr_0);
             }
-        }
+            else
+            {
+                if constexpr(!(GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
+                               is_any_of<InDataType, fp16_t, bf16_t>::value))
+                {
+                    auto c_block_window = MakeCBlockWindow<memory_operation_enum::atomic_add>(
+                        c_ptr, kargs, group_id, block_idx_m, block_idx_n);
+
+                    EpiloguePipeline{}
+                        .template operator()<decltype(c_block_window), decltype(c_block_tile)>(
+                            c_block_window, c_block_tile, d_block_window, smem_ptr_0);
+                }
+            }
+        });
     }
 
     CK_TILE_DEVICE index_t FindGroupId(const GroupedConvBwdDataKernelArgsSpecialized& kargs,

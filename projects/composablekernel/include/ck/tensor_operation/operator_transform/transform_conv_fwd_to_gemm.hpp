@@ -23,12 +23,16 @@ template <index_t NDimSpatial,
 struct TransformConvFwdToGemm
 {
     private:
-    static constexpr auto I0 = Number<0>{};
-    static constexpr auto I1 = Number<1>{};
-    static constexpr auto I2 = Number<2>{};
-    static constexpr auto I3 = Number<3>{};
-    static constexpr auto I4 = Number<4>{};
-    static constexpr auto I5 = Number<5>{};
+    template <index_t N>
+    using NumberType =
+        std::conditional_t<std::is_same_v<IndexType, index_t>, Number<N>, LongNumber<N>>;
+
+    static constexpr auto I0 = NumberType<0>{};
+    static constexpr auto I1 = NumberType<1>{};
+    static constexpr auto I2 = NumberType<2>{};
+    static constexpr auto I3 = NumberType<3>{};
+    static constexpr auto I4 = NumberType<4>{};
+    static constexpr auto I5 = NumberType<5>{};
 
     template <typename ConvDimsType>
     static long_index_t calculate_element_space_size_impl(const ConvDimsType& lengths,
@@ -382,8 +386,10 @@ struct TransformConvFwdToGemm
             I1 + (N_ - I1) * NStrideTensorC_ + (Do_ - I1) * DoStride_ + (Ho_ - I1) * HoStride_ +
             (Wo_ - I1) * WoStride_ + (K_ - I1) * KStrideTensorC_;
 
-        bool is_a_descriptor_smaller_than_2GB = (in_desc_space_size * sizeof(ADataType)) <= TwoGB;
-        bool is_c_descriptor_smaller_than_2GB = (out_desc_space_size * sizeof(CDataType)) <= TwoGB;
+        bool is_a_descriptor_smaller_than_2GB =
+            (in_desc_space_size * sizeof(ADataType)) <= TwoGB && in_desc_space_size < TwoGB;
+        bool is_c_descriptor_smaller_than_2GB =
+            (out_desc_space_size * sizeof(CDataType)) <= TwoGB && out_desc_space_size < TwoGB;
 
         return is_a_descriptor_smaller_than_2GB && is_c_descriptor_smaller_than_2GB;
     }
@@ -553,7 +559,7 @@ struct TransformConvFwdToGemm
                 const auto in_n_x_wo_c_desc = transform_tensor_descriptor(
                     in_n_wip_c_desc,
                     make_tuple(make_pass_through_transform(N_),
-                               make_embed_transform(make_tuple(Number<3>{}, Wo_),
+                               make_embed_transform(make_tuple(NumberType<3>{}, Wo_),
                                                     make_tuple(ConvDilationW_, ConvStrideW_))),
                     make_tuple(Sequence<0>{}, Sequence<1>{}),
                     make_tuple(Sequence<0>{}, Sequence<1, 2>{}));
@@ -561,7 +567,7 @@ struct TransformConvFwdToGemm
                 return transform_tensor_descriptor(
                     in_n_x_wo_c_desc,
                     make_tuple(make_merge_transform(make_tuple(N_, Wo_)),
-                               make_pass_through_transform(Number<3>{})),
+                               make_pass_through_transform(NumberType<3>{})),
                     make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
                     make_tuple(Sequence<0>{}, Sequence<1>{}));
             }
@@ -582,7 +588,7 @@ struct TransformConvFwdToGemm
                 const auto in_n_x_wo_c_desc = transform_tensor_descriptor(
                     in_n_wip_c_desc,
                     make_tuple(make_pass_through_transform(N_),
-                               make_embed_transform(make_tuple(Number<3>{}, Wo_),
+                               make_embed_transform(make_tuple(NumberType<3>{}, Wo_),
                                                     make_tuple(ConvDilationW_, ConvStrideW_)),
                                make_pass_through_transform(NumGroupsToMerge)),
                     make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}),
@@ -591,7 +597,7 @@ struct TransformConvFwdToGemm
                 return transform_tensor_descriptor(
                     in_n_x_wo_c_desc,
                     make_tuple(make_merge_transform(make_tuple(N_, Wo_, NumGroupsToMerge)),
-                               make_pass_through_transform(Number<3>{})),
+                               make_pass_through_transform(NumberType<3>{})),
                     make_tuple(Sequence<0, 2, 3>{}, Sequence<1>{}),
                     make_tuple(Sequence<0>{}, Sequence<1>{}));
             }
@@ -769,9 +775,9 @@ struct TransformConvFwdToGemm
                 const auto in_n_y_ho_x_wo_c_desc = transform_tensor_descriptor(
                     in_n_hip_wip_c_desc,
                     make_tuple(make_pass_through_transform(N_),
-                               make_embed_transform(make_tuple(Number<3>{}, Ho_),
+                               make_embed_transform(make_tuple(NumberType<3>{}, Ho_),
                                                     make_tuple(ConvDilationH_, ConvStrideH_)),
-                               make_embed_transform(make_tuple(Number<3>{}, Wo_),
+                               make_embed_transform(make_tuple(NumberType<3>{}, Wo_),
                                                     make_tuple(ConvDilationW_, ConvStrideW_))),
                     make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}),
                     make_tuple(Sequence<0>{}, Sequence<1, 2>{}, Sequence<3, 4>{}));
@@ -779,7 +785,7 @@ struct TransformConvFwdToGemm
                 return transform_tensor_descriptor(
                     in_n_y_ho_x_wo_c_desc,
                     make_tuple(make_merge_transform(make_tuple(N_, Ho_, Wo_)),
-                               make_merge_transform(make_tuple(Number<3>{}, Number<3>{}))),
+                               make_merge_transform(make_tuple(NumberType<3>{}, NumberType<3>{}))),
                     make_tuple(Sequence<0, 2, 4>{}, Sequence<1, 3>{}),
                     make_tuple(Sequence<0>{}, Sequence<1>{}));
             }
@@ -801,9 +807,9 @@ struct TransformConvFwdToGemm
                 const auto in_n_y_ho_x_wo_groups_c_desc = transform_tensor_descriptor(
                     in_n_hip_wip_groups_c_desc,
                     make_tuple(make_pass_through_transform(N_),
-                               make_embed_transform(make_tuple(Number<3>{}, Ho_),
+                               make_embed_transform(make_tuple(NumberType<3>{}, Ho_),
                                                     make_tuple(ConvDilationH_, ConvStrideH_)),
-                               make_embed_transform(make_tuple(Number<3>{}, Wo_),
+                               make_embed_transform(make_tuple(NumberType<3>{}, Wo_),
                                                     make_tuple(ConvDilationW_, ConvStrideW_)),
                                make_pass_through_transform(NumGroupsToMerge)),
                     make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
@@ -812,7 +818,7 @@ struct TransformConvFwdToGemm
                 return transform_tensor_descriptor(
                     in_n_y_ho_x_wo_groups_c_desc,
                     make_tuple(make_merge_transform(make_tuple(N_, Ho_, Wo_, NumGroupsToMerge)),
-                               make_merge_transform(make_tuple(Number<3>{}, Number<3>{}))),
+                               make_merge_transform(make_tuple(NumberType<3>{}, NumberType<3>{}))),
                     make_tuple(Sequence<0, 2, 4, 5>{}, Sequence<1, 3>{}),
                     make_tuple(Sequence<0>{}, Sequence<1>{}));
             }
@@ -1017,11 +1023,11 @@ struct TransformConvFwdToGemm
                 const auto in_n_z_do_y_ho_x_wo_c_desc = transform_tensor_descriptor(
                     in_n_hip_wip_c_desc,
                     make_tuple(make_pass_through_transform(N_),
-                               make_embed_transform(make_tuple(Number<3>{}, Do_),
+                               make_embed_transform(make_tuple(NumberType<3>{}, Do_),
                                                     make_tuple(ConvDilationD_, ConvStrideD_)),
-                               make_embed_transform(make_tuple(Number<3>{}, Ho_),
+                               make_embed_transform(make_tuple(NumberType<3>{}, Ho_),
                                                     make_tuple(ConvDilationH_, ConvStrideH_)),
-                               make_embed_transform(make_tuple(Number<3>{}, Wo_),
+                               make_embed_transform(make_tuple(NumberType<3>{}, Wo_),
                                                     make_tuple(ConvDilationW_, ConvStrideW_))),
                     make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
                     make_tuple(
@@ -1029,9 +1035,9 @@ struct TransformConvFwdToGemm
 
                 return transform_tensor_descriptor(
                     in_n_z_do_y_ho_x_wo_c_desc,
-                    make_tuple(
-                        make_merge_transform(make_tuple(N_, Do_, Ho_, Wo_)),
-                        make_merge_transform(make_tuple(Number<3>{}, Number<3>{}, Number<3>{}))),
+                    make_tuple(make_merge_transform(make_tuple(N_, Do_, Ho_, Wo_)),
+                               make_merge_transform(
+                                   make_tuple(NumberType<3>{}, NumberType<3>{}, NumberType<3>{}))),
                     make_tuple(Sequence<0, 2, 4, 6>{}, Sequence<1, 3, 5>{}),
                     make_tuple(Sequence<0>{}, Sequence<1>{}));
             }
@@ -1056,11 +1062,11 @@ struct TransformConvFwdToGemm
                 const auto in_n_z_do_y_ho_x_wo_c_desc = transform_tensor_descriptor(
                     in_n_hip_wip_c_desc,
                     make_tuple(make_pass_through_transform(N_),
-                               make_embed_transform(make_tuple(Number<3>{}, Do_),
+                               make_embed_transform(make_tuple(NumberType<3>{}, Do_),
                                                     make_tuple(ConvDilationD_, ConvStrideD_)),
-                               make_embed_transform(make_tuple(Number<3>{}, Ho_),
+                               make_embed_transform(make_tuple(NumberType<3>{}, Ho_),
                                                     make_tuple(ConvDilationH_, ConvStrideH_)),
-                               make_embed_transform(make_tuple(Number<3>{}, Wo_),
+                               make_embed_transform(make_tuple(NumberType<3>{}, Wo_),
                                                     make_tuple(ConvDilationW_, ConvStrideW_)),
                                make_pass_through_transform(NumGroupsToMerge)),
                     make_tuple(
@@ -1075,7 +1081,8 @@ struct TransformConvFwdToGemm
                     in_n_z_do_y_ho_x_wo_c_desc,
                     make_tuple(
                         make_merge_transform(make_tuple(N_, Do_, Ho_, Wo_, NumGroupsToMerge)),
-                        make_merge_transform(make_tuple(Number<3>{}, Number<3>{}, Number<3>{}))),
+                        make_merge_transform(
+                            make_tuple(NumberType<3>{}, NumberType<3>{}, NumberType<3>{}))),
                     make_tuple(Sequence<0, 2, 4, 6, 7>{}, Sequence<1, 3, 5>{}),
                     make_tuple(Sequence<0>{}, Sequence<1>{}));
             }
@@ -1348,10 +1355,10 @@ struct TransformConvFwdToGemm
         if constexpr(ConvForwardSpecialization ==
                      device::ConvolutionForwardSpecialization::Filter3x3)
         {
-            using FilterSizeNumType =
-                ck::conditional_t<NDimSpatial == 1,
-                                  Number<3>,
-                                  ck::conditional_t<NDimSpatial == 2, Number<9>, Number<27>>>;
+            using FilterSizeNumType = ck::conditional_t<
+                NDimSpatial == 1,
+                NumberType<3>,
+                ck::conditional_t<NDimSpatial == 2, NumberType<9>, NumberType<27>>>;
 
             if constexpr(NumGroupsToMerge == 1)
             {

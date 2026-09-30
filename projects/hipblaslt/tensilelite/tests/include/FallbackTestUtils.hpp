@@ -175,8 +175,16 @@ namespace testing
 
     inline ContractionProblemGemm dummyProblem()
     {
-        return ContractionProblemGemm::GEMM(
+        auto problem = ContractionProblemGemm::GEMM(
             false, false, 1024, 1024, 1024, 1024, 1024, 1024, 1.0, false, 1);
+        // The plain GEMM factory sets a/b/c/d to Float but leaves the separate
+        // m_computeInputType{A,B} members unset. getSKReduction/getSKGrid feed
+        // computeInputTypeA() to origami via datatypeToAnalyticalDatatype(),
+        // which throws on the indeterminate value. In production these are
+        // always set by ClientProblemFactory; mirror the factory's Float here.
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        return problem;
     }
 
     // -----------------------------------------------------------------------

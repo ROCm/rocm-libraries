@@ -30,9 +30,7 @@
 #include <cmath>
 #include <iostream>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 #define TENSILE_USE_BF16
 
@@ -94,6 +92,11 @@ namespace TensileLite
         explicit operator int8_t() const
         {
             return static_cast<int8_t>(float(*this));
+        }
+
+        explicit operator uint8_t() const
+        {
+            return static_cast<uint8_t>(float(*this));
         }
 
         uint16_t data;
@@ -327,4 +330,3 @@ namespace std
     }
 } // namespace std
 
-TENSILE_HIDDEN_END

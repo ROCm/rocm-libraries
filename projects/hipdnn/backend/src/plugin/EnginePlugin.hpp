@@ -4,6 +4,8 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
+#include <string>
 #include <vector>
 
 #include <hip/hip_runtime.h>
@@ -26,6 +28,28 @@ protected:
 public:
     // Functions that don't require a handle (called first)
     virtual std::vector<int64_t> getAllEngineIds() const;
+
+    /**
+     * @brief Reports whether this plugin exports the optional engine-name
+     *        symbol (`hipdnnEnginePluginGetEngineName`).
+     *
+     * Symbol presence is the sole predicate for consulting a plugin about names:
+     * the version a plugin reports is self-declared, and most leave it at the
+     * 1.0.0 baseline.
+     */
+    virtual bool hasEngineName() const;
+
+    /**
+     * @brief Queries the plugin for the canonical name of an engine.
+     *
+     * Returns `std::nullopt` when the symbol is absent, when the plugin answers
+     * `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`, or when the returned string is null
+     * or empty. Throws `HipdnnException` on any other status: declining is
+     * spelled `NOT_APPLICABLE`, so a failure status is a defect.
+     *
+     * @param engineId Engine ID as reported by `getAllEngineIds()`.
+     */
+    [[nodiscard]] virtual std::optional<std::string> getEngineName(int64_t engineId) const;
 
     // Handle lifecycle functions
     virtual hipdnnEnginePluginHandle_t createHandle() const;
@@ -64,6 +88,43 @@ public:
                                 void* workspace,
                                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                 uint32_t numDeviceBuffers) const;
+
+    /**
+     * @brief Reports whether this plugin exports the optional override-execute
+     *        symbol (`hipdnnEnginePluginExecuteOpGraphWithOverrides`).
+     *
+     * Plugins that report an older API version are filtered out for graphs
+     * that opt in to overridable tensor shapes. Per RFC 0008 §4.6, callers
+     * must still check this predicate before override dispatch so a plugin
+     * that reports a recent-enough API version but omits the optional symbol
+     * yields a clean `HIPDNN_STATUS_NOT_SUPPORTED` rather than a
+     * missing-symbol crash.
+     */
+    virtual bool hasOverrideExecute() const;
+
+    /**
+     * @brief Override-aware execute dispatch (RFC 0008 §4.5).
+     *
+     * Wraps the optional `hipdnnEnginePluginExecuteOpGraphWithOverrides`
+     * symbol. Callers must guard with `hasOverrideExecute()`; invoking this
+     * method on a plugin that did not export the symbol throws
+     * `HIPDNN_STATUS_NOT_SUPPORTED`.
+     *
+     * Pointer-lifetime contract: all override pointers (and the inner
+     * per-tensor shape/stride buffers reachable through them) must remain
+     * valid for the duration of the call. The plugin is forbidden from
+     * retaining any of them. See RFC 0008 §4.6.
+     */
+    virtual void executeOpGraphWithOverrides(hipdnnEnginePluginHandle_t handle,
+                                             hipdnnEnginePluginExecutionContext_t executionContext,
+                                             void* workspace,
+                                             const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                             uint32_t numDeviceBuffers,
+                                             uint32_t numOverrides,
+                                             const int64_t* overrideUniqueIds,
+                                             const uint32_t* overrideLengths,
+                                             const int64_t* const* overrideShapes,
+                                             const int64_t* const* overrideStrides) const;
 
     // Cleanup functions (called in reverse order)
     virtual void
@@ -125,6 +186,24 @@ private:
                                                 void*,
                                                 const hipdnnPluginDeviceBuffer_t*,
                                                 uint32_t);
+
+    // Optional override-execute symbol (RFC 0008 §4.5). Resolved via
+    // tryAssignSymbol; nullptr when the plugin does not export it.
+    hipdnnPluginStatus_t (*_funcExecuteOpGraphWithOverrides)(hipdnnEnginePluginHandle_t,
+                                                             hipdnnEnginePluginExecutionContext_t,
+                                                             void*,
+                                                             const hipdnnPluginDeviceBuffer_t*,
+                                                             uint32_t,
+                                                             uint32_t,
+                                                             const int64_t*,
+                                                             const uint32_t*,
+                                                             const int64_t* const*,
+                                                             const int64_t* const*)
+        = nullptr; ///< Default nullptr is load-bearing: tryAssignSymbol leaves this untouched when the symbol is absent.
+
+    // Optional engine-name symbol, engine plugin API 1.4.0 and newer.
+    hipdnnPluginStatus_t (*_funcGetEngineName)(int64_t, const char**)
+        = nullptr; ///< Default nullptr is load-bearing: tryAssignSymbol leaves this untouched when the symbol is absent.
 
     friend class PluginManagerBase<EnginePlugin>;
 };

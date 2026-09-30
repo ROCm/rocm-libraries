@@ -1,33 +1,31 @@
 .. meta::
-  :description: Using multiple GPUs for testing
-  :keywords: rocThrust, ROCm, testing, ctest, multiple GPUs, resource-spec
+  :description: Run rocThrust unit tests on multiple GPUs
+  :keywords: ROCm libraries, rocThrust, ROCm, CTest, benchmarks, testing
 
-***************************************************
-How to run tests on multiple GPUs
-***************************************************
+************************************************
+Running rocThrust unit tests over multiple GPUs
+************************************************
 
-To run tests on multiple GPUs, CTest provides the resource allocation feature. The feature requires two inputs:
+The `CTest resource allocation feature <https://cmake.org/cmake/help/latest/manual/ctest.1.html#resource-allocation>`__ can be used to distribute tests across multiple GPUs, accelerating testing when multiple GPUs of the same family are in a system. It can also be used to test multiple product families without having to set ``HIP_VISIBLE_DEVICES``.
 
-  * the resource specification file which describes the resources available on the system, and
-  * the ``RESOURCE_GROUPS`` property of tests, which describes the resources required by each individual test.
+.. note::
 
-When you build rocThrust with the ``-DBUILD_TESTS=ON`` option, an executable named ``generate_resource_spec`` will be built and running it will generate the resource specification file. For example, in your build folder
+   CMake 3.18 or later is required.
+
+When rocThrust is built with :doc:`cmake -DBUILD_TEST=ON <../install/source-build>`, the ``generate_resource_spec`` binary file is created. 
+
+
+Use ``generate_resource_spec`` to create a resource specification file. The resource specification file is a JSON file that describes the GPU resources available on your system. For example:
 
 .. code:: shell
 
     ./generate_resource_spec resources.json
 
-will generate a resource specification file named ``resources.json``. This file describes the GPUs available on your system. In addition, CMake also defines the ``RESOURCE_GROUPS`` property for each test that refers to the default GPU resource ``gpus`` in ``resources.json``. Then when your run ``ctest`` with specified number of jobs:
+To run tests in parallel, pass the resource specification file and the maximum number of tests to run in parallel to ``ctest``:
 
 .. code:: shell
 
-    ctest --resource-spec-file ./resources.json --parallel <number-of-jobs>
-
-tests will be distributed across the available GPUs and run concurently up to the specified number of jobs. Note that the specified number of jobs can be independent to the number of GPUs on the system. CTest will schedule tests in a way that running them simultaneously does not oversubscribe the GPUs.
-
-Alternatively, you can configure your tests using the ``AMDGPU_TEST_TARGETS`` CMake option. This option lets you specify the families of GPUs on which you want to run your tests. For example, if you have two GPUs from the ``gfx900`` family in your system, you can specify ``-DAMDGPU_TEST_TARGETS=gfx900`` to indicate that you only want that family of GPUs to be tested. This option will define the ``RESOURCE_GROUPS`` property to use the ``gfx900`` resources in ``resources.json``. If you don't set ``AMDGPU_TEST_TARGETS``, the tests will be run on the default GPU resource ``gpus`` as described above.
+    ctest --resource-spec-file PATH_TO_RESOURCE_SPECIFICATION_FILE --parallel MAXIMUM_NUMBER_OF_PARALLEL_TESTS
 
 
-.. note::
-
-    CTest resource allocation requires CMake 3.16 or later.
+To restrict tests to a single family of GPUs, use the ``AMDGPU_TEST_TARGETS`` option when :doc:`building rocThrust <../install/source-build>`.

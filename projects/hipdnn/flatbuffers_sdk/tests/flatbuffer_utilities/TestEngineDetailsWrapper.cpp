@@ -21,6 +21,17 @@ flatbuffers::FlatBufferBuilder buildValidEngineDetailsBuffer(int64_t engineId)
 }
 
 flatbuffers::FlatBufferBuilder
+    buildEngineDetailsWithBehaviorNotes(int64_t engineId, const std::vector<int32_t>& notes)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    auto notesVector = builder.CreateVector(notes);
+    auto details = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+        builder, engineId, 0, notesVector);
+    builder.Finish(details);
+    return builder;
+}
+
+flatbuffers::FlatBufferBuilder
     buildEngineDetailsWithKnobs(int64_t engineId, const std::vector<std::string>& knobNames)
 {
     flatbuffers::FlatBufferBuilder builder;
@@ -49,6 +60,16 @@ flatbuffers::FlatBufferBuilder
     auto knobsVector = builder.CreateVector(knobs);
     auto details
         = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, engineId, knobsVector);
+    builder.Finish(details);
+    return builder;
+}
+
+flatbuffers::FlatBufferBuilder buildEngineDetailsWithName(int64_t engineId, const std::string& name)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    auto nameOffset = builder.CreateString(name);
+    auto details = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+        builder, engineId, 0, 0, nameOffset);
     builder.Finish(details);
     return builder;
 }
@@ -143,4 +164,53 @@ TEST(TestEngineDetailsWrapper, KnobMethodsOnInvalidWrapperThrow)
     EXPECT_THROW(wrapper.knobCount(), std::invalid_argument);
     EXPECT_THROW(wrapper.knobWrappers(), std::invalid_argument);
     EXPECT_THROW(wrapper.getKnobByName("test"), std::invalid_argument);
+}
+
+TEST(TestEngineDetailsWrapper, BehaviorNotesMissingFieldIsEmpty)
+{
+    auto builder = buildValidEngineDetailsBuffer(42);
+    const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_TRUE(wrapper.behaviorNotes().empty());
+}
+
+TEST(TestEngineDetailsWrapper, BehaviorNotesPopulated)
+{
+    auto builder = buildEngineDetailsWithBehaviorNotes(42, {0, 3, 4});
+    const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
+
+    const auto notes = wrapper.behaviorNotes();
+    ASSERT_EQ(notes.size(), 3u);
+    EXPECT_EQ(notes[0], 0);
+    EXPECT_EQ(notes[1], 3);
+    EXPECT_EQ(notes[2], 4);
+}
+
+TEST(TestEngineDetailsWrapper, NamePopulated)
+{
+    auto builder = buildEngineDetailsWithName(42, "EXAMPLE_PROVIDER_RELU_ENGINE");
+    const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_TRUE(wrapper.isValid());
+    EXPECT_EQ(wrapper.name(), "EXAMPLE_PROVIDER_RELU_ENGINE");
+}
+
+TEST(TestEngineDetailsWrapper, NameMissingFieldIsEmpty)
+{
+    auto builder = buildValidEngineDetailsBuffer(42);
+    const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_TRUE(wrapper.isValid());
+    EXPECT_TRUE(wrapper.name().empty());
+}
+
+TEST(TestEngineDetailsWrapper, NameEmptyStringIsEmpty)
+{
+    auto builder = buildEngineDetailsWithName(42, "");
+    const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_TRUE(wrapper.isValid());
+    EXPECT_TRUE(wrapper.name().empty());
+}
+
+TEST(TestEngineDetailsWrapper, NameOnInvalidWrapperThrows)
+{
+    const EngineDetailsWrapper wrapper(nullptr, 0);
+    EXPECT_THROW(wrapper.name(), std::invalid_argument);
 }

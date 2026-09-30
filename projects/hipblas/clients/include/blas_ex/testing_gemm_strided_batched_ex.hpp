@@ -285,8 +285,8 @@ void testing_gemm_strided_batched_ex_bad_arg(const Arguments& arg)
                 computeType,
                 algo, flags));
 
-            // If K == 0, alpha, A, and B can be nullptr
-            DAPI_CHECK(hipblasGemmStridedBatchedExFn, (handle, transA, transB, M, N, 0, nullptr,
+            // If K == 0, A, and B can be nullptr
+            DAPI_CHECK(hipblasGemmStridedBatchedExFn, (handle, transA, transB, M, N, 0, alpha,
                                               nullptr, aType, lda, stride_A,
                                               nullptr, bType, ldb, stride_B, beta,
                                               dC, cType, ldc, stride_C, batch_count,

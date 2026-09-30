@@ -5,12 +5,12 @@
 
 #include <gmock/gmock.h>
 
-#include "hip/IRunnableKernel.hpp"
+#include "compilation/IRunnableKernel.hpp"
 
 namespace hip_kernel_provider
 {
 
-class MockRunnableKernel : public IRunnableKernel
+class MockRunnableKernel : public compilation::IRunnableKernel
 {
 public:
     MOCK_METHOD(void, setBlockSize, (unsigned int x, unsigned int y, unsigned int z), (override));

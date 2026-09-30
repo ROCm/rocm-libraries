@@ -60,6 +60,41 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
         list(APPEND CK_TILE_GEMM_TEST_TARGETS
             test_ck_tile_gemm_pipeline_comp_async_eight_waves
         )
+
+        add_gtest_executable(test_ck_tile_gemm_pipeline_compv3_async_rrr test_gemm_pipeline_compv3_async_rrr.cpp)
+        target_compile_options(test_ck_tile_gemm_pipeline_compv3_async_rrr PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_ASYNC_OPTIONS})
+
+        list(APPEND CK_TILE_GEMM_TEST_TARGETS
+            test_ck_tile_gemm_pipeline_compv3_async_rrr
+        )
+
+        add_gtest_executable(test_ck_tile_gemm_pipeline_compv3_async_rcr test_gemm_pipeline_compv3_async_rcr.cpp)
+        target_compile_options(test_ck_tile_gemm_pipeline_compv3_async_rcr PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_ASYNC_OPTIONS})
+
+        list(APPEND CK_TILE_GEMM_TEST_TARGETS
+            test_ck_tile_gemm_pipeline_compv3_async_rcr
+        )
+
+        add_gtest_executable(test_ck_tile_gemm_pipeline_compv3_async_ccr test_gemm_pipeline_compv3_async_ccr.cpp)
+        target_compile_options(test_ck_tile_gemm_pipeline_compv3_async_ccr PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_ASYNC_OPTIONS})
+
+        list(APPEND CK_TILE_GEMM_TEST_TARGETS
+            test_ck_tile_gemm_pipeline_compv3_async_ccr
+        )
+
+        add_gtest_executable(test_ck_tile_gemm_pipeline_compv3_async_crr test_gemm_pipeline_compv3_async_crr.cpp)
+        target_compile_options(test_ck_tile_gemm_pipeline_compv3_async_crr PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_ASYNC_OPTIONS})
+
+        list(APPEND CK_TILE_GEMM_TEST_TARGETS
+            test_ck_tile_gemm_pipeline_compv3_async_crr
+        )
+
+        add_gtest_executable(test_ck_tile_gemm_pipeline_compv3_async_persistent test_gemm_pipeline_compv3_async_persistent.cpp)
+        target_compile_options(test_ck_tile_gemm_pipeline_compv3_async_persistent PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_ASYNC_OPTIONS})
+
+        list(APPEND CK_TILE_GEMM_TEST_TARGETS
+            test_ck_tile_gemm_pipeline_compv3_async_persistent
+        )
     endif()
 
     if(GPU_TARGETS MATCHES "gfx11|gfx12")
@@ -77,17 +112,46 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
         add_gtest_executable(test_ck_tile_gemm_pipeline_compv3_wmma test_gemm_pipeline_compv3_wmma.cpp)
         add_gtest_executable(test_ck_tile_gemm_pipeline_compv4_wmma test_gemm_pipeline_compv4_wmma.cpp)
         add_gtest_executable(test_ck_tile_gemm_pipeline_persistent_wmma test_gemm_pipeline_persistent_wmma.cpp)
+        add_gtest_executable(test_ck_tile_gemm_unaligned_mnk_wmma test_gemm_unaligned_mnk.cpp)
         target_compile_options(test_ck_tile_gemm_pipeline_mem_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
         target_compile_options(test_ck_tile_gemm_pipeline_compv3_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
         target_compile_options(test_ck_tile_gemm_pipeline_compv4_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_V4_OPTIONS})
         target_compile_options(test_ck_tile_gemm_pipeline_persistent_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+        target_compile_options(test_ck_tile_gemm_unaligned_mnk_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+        target_include_directories(test_ck_tile_gemm_unaligned_mnk_wmma PRIVATE
+            ${PROJECT_SOURCE_DIR}/example/ck_tile
+            ${PROJECT_SOURCE_DIR}/example/ck_tile/03_gemm)
+
+        # Test GEMM with K not a multiple of the A/B load vector width
+        add_gtest_executable(test_gemm_unaligned_k test_gemm_unaligned_k.cpp)
+        target_include_directories(test_gemm_unaligned_k PRIVATE
+            ${PROJECT_SOURCE_DIR}/example/ck_tile
+            ${CMAKE_SOURCE_DIR}/example/ck_tile/03_gemm)
+        target_compile_options(test_gemm_unaligned_k PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
 
         list(APPEND CK_TILE_GEMM_TEST_TARGETS
             test_ck_tile_gemm_pipeline_mem_wmma
             test_ck_tile_gemm_pipeline_compv3_wmma
             test_ck_tile_gemm_pipeline_compv4_wmma
             test_ck_tile_gemm_pipeline_persistent_wmma
+            test_ck_tile_gemm_unaligned_mnk_wmma
+            test_gemm_unaligned_k
         )
+
+        if(GPU_TARGETS MATCHES "gfx125")
+            add_gtest_executable(test_ck_tile_gemm_pipeline_tdm_wmma test_gemm_pipeline_comp_tdm_wmma.cpp)
+            target_compile_options(test_ck_tile_gemm_pipeline_tdm_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+            add_gtest_executable(test_ck_tile_gemm_pipeline_tdm_subtile_wmma test_gemm_pipeline_comp_tdm_wmma_subtile.cpp)
+            target_compile_options(test_ck_tile_gemm_pipeline_tdm_subtile_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+            # "_wmma" drops gfx9 only; keep just the gfx125 targets (TDM hardware).
+            get_target_property(_tdm_subtile_archs test_ck_tile_gemm_pipeline_tdm_subtile_wmma HIP_ARCHITECTURES)
+            list(FILTER _tdm_subtile_archs INCLUDE REGEX "^gfx125")
+            set_property(TARGET test_ck_tile_gemm_pipeline_tdm_subtile_wmma PROPERTY HIP_ARCHITECTURES ${_tdm_subtile_archs})
+            list(APPEND CK_TILE_GEMM_TEST_TARGETS test_ck_tile_gemm_pipeline_tdm_subtile_wmma)
+            add_gtest_executable(test_ck_tile_gemm_pipeline_comp_async_wmma test_gemm_pipeline_comp_async_wmma.cpp)
+            target_compile_options(test_ck_tile_gemm_pipeline_comp_async_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_ASYNC_OPTIONS})
+            target_compile_options(test_ck_tile_gemm_pipeline_comp_async_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+        endif()
     endif()
 
     # Label all ck_tile gemm tests with CK_TILE_GEMM_TESTS for selective execution

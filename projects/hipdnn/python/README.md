@@ -3,125 +3,207 @@
 > [!CAUTION]
 > **This is a POC of python bindings for hipdnn.  It likely has bugs and features missing.  Making this not a POC has been planned for a future date**
 
+
 This project provides Python bindings for the hipDNN frontend library using the nanobind library. The bindings allow users to access the functionalities of the hipDNN library directly from Python, enabling seamless integration of deep learning operations.
 
 ## Project Structure
 
-The project is organized as follows:
-
 ```
-python
-├── src
-│   ├── module.cpp               # Main entry point for the nanobind module
-│   ├── graph_bindings.cpp       # Bindings for the Graph class and its methods
-│   ├── handle_bindings.cpp      # Bindings for handle management
-│   ├── memory_bindings.cpp      # Bindings for device memory management
-│   ├── tensor_bindings.cpp      # Bindings for tensor-related functionalities
-│   ├── attributes_bindings.cpp  # Bindings for attribute classes
-│   └── types_bindings.cpp       # Bindings for custom types and enums
-├── hipdnn_frontend
-│   ├── __init__.py          # Initializes the hipdnn_frontend package
-│   └── samples
-│       ├── bn_inference.py    # Batch normalization inference sample(DISABLED)
-│       ├── conv_fprop.py      # Convolution forward propagation sample
-│       ├── conv_dgrad.py      # Convolution backward data gradient sample
-│       └── conv_wgrad.py      # Convolution backward weight gradient sample
-├── CMakeLists.txt               # CMake configuration file
-├── pyproject.toml               # Python project configuration
-└── README.md                    # Project documentation
+python/
+├── README.md
+├── download_third_party_deps.py             # Downloads pinned CI third-party source archives
+├── frontend_bindings/
+│   ├── CMakeLists.txt                     # CMake build; superbuild component or standalone
+│   └── src/
+│       ├── module.cpp                     # Main nanobind module entry point
+│       ├── bindings.hpp                   # Shared binding declarations
+│       ├── autotune_bindings.cpp
+│       ├── graph_bindings.cpp
+│       ├── handle_bindings.cpp
+│       ├── memory_bindings.cpp
+│       ├── tensor_bindings.cpp
+│       ├── attributes_bindings.cpp
+│       ├── hip_bindings.cpp
+│       └── types_bindings.cpp
+└── frontend_wheel_package/
+    ├── src/
+    │   └── hipdnn_frontend/
+    │       └── __init__.py                # Runtime package initializer
+    ├── samples/                           # Source-tree sample scripts
+    ├── tests/                             # Source-tree tests
+    ├── pyproject.toml                     # Wheel metadata and pytest config
+    └── pack_frontend_wheel.py             # Stages and packs the wheel package
 ```
 
 ## Prerequisites
 
-- CMake 3.15 or higher
+- CMake 3.26 or higher
+- Ninja or another CMake generator
 - A C++ compiler with C++17 support (e.g. clang++)
-- Python 3.8 or higher
+- Python 3.12 or higher, including development headers
 - ROCm/HIP runtime and libraries
-- hipDNN frontend library (built and installed)
+- Installed hipDNN development artifacts with `hipdnn_frontendConfig.cmake`,
+  `hipdnn_backendConfig.cmake`, headers, and the backend shared library
+- `nanobind` and `tsl-robin-map` CMake packages, or network access during
+  configure so CMake can fetch the pinned source archives
+- The `build` Python package when creating a wheel
+- The `numpy` and `pytest` Python packages when running source-tree tests or samples
 
-## Getting Started
+## Building
 
-### 1. Setting up a Python Virtual Environment
-
-It's recommended to use a Python virtual environment to isolate the project dependencies:
-
-```bash
-# Create a virtual environment
-python3 -m venv hipdnn_env
-
-# Activate the virtual environment
-# On Linux/Mac:
-source hipdnn_env/bin/activate
-# On Windows:
-# hipdnn_env\Scripts\activate
-
-# Upgrade pip
-pip install --upgrade pip
-```
-
-### 2. Building and Installing the Python Bindings
-
-The Python bindings use scikit-build to handle the CMake build process automatically through pip:
+The recommended way to build the bindings is as a component of the
+rocm-libraries superbuild, alongside hipDNN itself — no separate install step
+or `CMAKE_PREFIX_PATH` needed since the extension links the in-tree
+`hipdnn_frontend`/`hipdnn_backend` targets directly. From the repository root:
 
 ```bash
-# Navigate to the hipdnn python directory
-cd python
-
-export CMAKE_PREFIX_PATH=/path/to/hipdnn/install:$CMAKE_PREFIX_PATH
-pip install -v .
-
-or
-
-pip install -v . --config-settings=cmake.define.CMAKE_PREFIX_PATH=/path/to/hipdnn/install
+cmake --preset hipdnn-python -GNinja -DROCM_PATH=/path/to/rocm
+cmake --build build --target hipdnn_frontend_bindings
 ```
 
-### 3. Development Installation
+See [Superbuild](../docs/Building.md#superbuild) for preset details; e.g.
+`hipdnn-dev-all` builds the bindings alongside every provider.
 
-For development work where you want to rebuild and apply the changes you have two options:
-
-#### Editable Installation
-```bash
-# from within the hipdnn python directory
-pip install -e .
-```
-
-#### Uninstall and Reinstall Flow
-Instead of doing an editable install, if you prefer a full reinstall after C++ changes:
+The bindings can also be built standalone against an already-installed hipDNN
+(e.g. a ROCm/hipDNN nightly artifact), which doesn't require a full source
+checkout:
 
 ```bash
-# from within the hipdnn python directory
-pip uninstall hipdnn-frontend -y
-pip install -v .
+cmake -S projects/hipdnn/python/frontend_bindings -B build/hipdnn-python -GNinja \
+    -DCMAKE_PREFIX_PATH=/path/to/hipdnn/install
+cmake --build build/hipdnn-python
 ```
 
-### 4. Running the Sample Applications
+`CMAKE_PREFIX_PATH` is required for the standalone build: point it at the
+installed hipDNN artifact prefix, or set the `CMAKE_PREFIX_PATH` environment
+variable before configuring.
 
-The repository includes several sample applications demonstrating different operations:
+Either way, the build only produces the nanobind extension in the CMake build
+tree. CMake does not know about wheel packaging, does not configure
+`hipdnn_frontend/__init__.py`, and has no install rules.
 
-#### Convolution Forward Propagation
+Run the wheel packer to create the staged import package under
+`<build-dir>/wheel_package/hipdnn_frontend`; downstream environment wiring
+should use that staged package tree.
+
+For a source-tree development import after staging the package, put the staged
+wheel package root on `PYTHONPATH`:
+
 ```bash
-python conv_fprop.py
+PYTHONPATH=build/wheel_package python -c "import hipdnn_frontend"
 ```
 
-This sample demonstrates:
-- Setting up a convolution forward pass
-- Configuring padding, stride, and dilation parameters
-- Executing the convolution and displaying results
+The backend shared library must also be discoverable at runtime: use
+`LD_LIBRARY_PATH=/path/to/hipdnn/install/lib` on Linux, or set `ROCM_PATH` to the
+artifact prefix on Windows so `hipdnn_frontend/__init__.py` can register `bin/`.
 
-#### Convolution Backward Data Gradient
+## Creating a Wheel
+
+After building the bindings, run the packer script:
+
 ```bash
-python conv_dgrad.py
+python projects/hipdnn/python/frontend_wheel_package/pack_frontend_wheel.py \
+    --build-dir <build-dir> \
+    --wheel-dir <build-dir>/wheel_package
 ```
 
-This sample demonstrates:
-- Computing input gradients (dx) given output gradients (dy) and weights
-- Used in backpropagation for training neural networks
+`<build-dir>` is `build` for the superbuild or `build/hipdnn-python` for the
+standalone build; the packer searches the whole tree for the extension, so
+the exact nesting doesn't matter. The wheel is written to
+`<build-dir>/wheel_package/`, beside the `hipdnn_frontend/` package directory.
+The script packs `wheel_package/hipdnn_frontend` into a temporary setuptools
+project. The wheel contains only `hipdnn_frontend/__init__.py` and the native
+extension. It does not include samples or tests, and it does not bundle
+`libhipdnn_backend`; users still need ROCm and hipDNN runtime libraries
+discoverable through ROCm wheels, `ROCM_PATH`, or the platform loader path.
 
-#### Convolution Backward Weight Gradient
+## Testing the Wheel
+
+The `hipDNN Superbuild CI` workflow validates the wheel end-to-end inside the
+matching Linux and Windows superbuild jobs after installing the superbuild
+outputs into the ROCm SDK path. The workflow calls
+`projects/hipdnn/python/download_third_party_deps.py` to download and verify
+pinned third-party source archives from `rocm-third-party-deps`, then passes
+those source directories to CMake FetchContent as part of the single
+superbuild configure. It then builds hipDNN and the bindings together, packs
+the wheel, installs that wheel into the same venv, and runs:
+
 ```bash
-python conv_wgrad.py
+python -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 ```
 
-This sample demonstrates:
-- Computing weight gradients (dw) given output gradients (dy) and input (x)
-- Used for updating convolution filter weights during training
+The wheel package uses a `src/` layout, so running pytest from
+`frontend_wheel_package/` does not accidentally import the source package.
+
+## DLPack Interoperability
+
+`Graph.execute()`, `Graph.execute_timed_ext()`,
+`Graph.execute_plan_at_index()`, `Graph.autotune()`, and
+`Graph.autotune_exhaustive_sweep()` take a `variant_pack` keyed by tensor UID
+or by `Tensor`. Each value, and `workspace`, may be one of these kinds, checked
+in this order:
+
+1. An `int` pointer.
+2. A `hipdnn.DeviceBuffer`.
+3. An object with a `data_ptr()` method (for example a PyTorch tensor).
+4. An object that implements `__dlpack__` in host (`cpu`), ROCm (`rocm`), or
+   pinned host (`rocm_host`) memory. The bindings use the DLPack data pointer
+   plus its byte offset.
+
+No data is copied. The caller must keep each object alive until the HIP work
+completes. The bindings call `__dlpack__(copy=False)`, so a producer that can
+export only a copy raises its own error instead of returning memory that nothing
+keeps alive. Errors raised by `__dlpack__` reach the caller unchanged.
+
+`Graph.tensor_like(obj, name="")` also accepts a `__dlpack__` producer. It
+copies the dims and the element strides (row-major when the producer reports
+none) and maps the data type. A host (`cpu`) producer becomes a
+runtime pass-by-value tensor: pass a host tensor for it in the variant pack of
+each execute call. Runtime pass-by-value tensors need an engine plugin that
+reports plugin API 1.2.0 or later. Sub-byte types follow the DLPack
+definition (`lanes=1`); packed exports such as `torch.float4_e2m1fn_x2`
+(`lanes=2`) raise `ValueError`.
+
+```python
+x = torch.randn(8, 16, device="cuda")
+scale = np.full((1, 1), 0.5, np.float32)
+x_t = graph.tensor_like(x, "x")
+scale_t = graph.tensor_like(scale, "scale")  # runtime pass-by-value
+# ... build the graph and plans with x_t and scale_t, producing y_t ...
+graph.execute(handle, {x_t: x, scale_t: scale, y_t: y}, workspace)
+```
+
+For a compile-time constant (plugin API 1.0.0), call `set_value` on the tensor
+instead. It bakes the value into the graph and clears the runtime flag.
+`set_value(value, data_type=None)` supports `FLOAT`, `DOUBLE`, `HALF`,
+`BFLOAT16`, `UINT8`, `INT32`, `INT64`, and `BOOLEAN`. Without `data_type`, it
+keeps the tensor's data type, or infers `BOOLEAN`, `INT64`, or `FLOAT` from a
+Python `bool`, `int`, or `float`. It resets dims and strides to `[1]`, so the
+tensor must have one element.
+
+```python
+scale_t = graph.tensor_like(scale, "scale").set_value(0.5)  # FLOAT constant
+eps_t = hipdnn.Tensor().set_value(1e-5, hipdnn.DataType.DOUBLE)
+```
+
+Code ported from `cudnn.pygraph` needs these changes, because the method
+signatures follow the hipDNN C++ API:
+
+- `execute` and `execute_plan_at_index` take the handle first:
+  `execute(handle, variant_pack, workspace)`, not
+  `execute(tensor_dict, workspace, handle)`.
+- Variant-pack keys cannot be tensor name strings.
+- `tensor_like` has no `is_virtual` argument; call `set_is_virtual(True)` on the
+  result instead.
+
+## Running the Samples
+
+Sample scripts are source-tree utilities and are not included in the wheel.
+
+```bash
+python projects/hipdnn/python/frontend_wheel_package/samples/conv_fprop.py
+python projects/hipdnn/python/frontend_wheel_package/samples/conv_dgrad.py
+python projects/hipdnn/python/frontend_wheel_package/samples/conv_wgrad.py
+python projects/hipdnn/python/frontend_wheel_package/samples/matmul.py
+python projects/hipdnn/python/frontend_wheel_package/samples/autotune.py
+```

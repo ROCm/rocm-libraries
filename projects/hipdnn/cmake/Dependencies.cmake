@@ -5,35 +5,127 @@ cmake_minimum_required(VERSION 3.25.2)
 
 include(FetchContent)
 
-option(HIPDNN_NO_DOWNLOAD "Disables downloading of any external dependencies" OFF)
+option(ALLOW_FETCH_DEPS
+       "Allow fetching third-party dependencies the build environment does not provide"
+       OFF
+)
 
-if(HIPDNN_NO_DOWNLOAD)
-    set(FETCHCONTENT_FULLY_DISCONNECTED OFF
-        CACHE BOOL "Don't attempt to download or update anything" FORCE
-    )
+# Backstop for fetches that bypass hipdnn_add_dependency(). Uncached, so it
+# applies to this directory and below and not to sibling subprojects, which run
+# their own FetchContent and never opted into this policy.
+if(NOT ALLOW_FETCH_DEPS)
+    set(FETCHCONTENT_FULLY_DISCONNECTED ON)
 endif()
+
+# _hipdnn_suppress_rocm_toolchain_checks()
+#
+# Replace ROCMChecks's watched-variable callback with a no-op while a
+# third-party CMake project configures. Some dependencies mutate compiler flag
+# variables internally, and ROCMChecks reports those writes from variable_watch()
+# regardless of ROCM_WARN_TOOLCHAIN_VAR.
+macro(_hipdnn_suppress_rocm_toolchain_checks)
+    if(COMMAND rocm_check_toolchain_var)
+	# Dummy function
+	function(rocm_check_toolchain_var)
+        endfunction()
+    endif()
+endmacro()
+
+# _hipdnn_restore_rocm_toolchain_checks()
+#
+# Reinstall ROCMChecks's watched-variable callback after a suppression window.
+# The warning and error toggles are disabled only for the include that restores
+# the callback, so restoring does not emit the messages being suppressed.
+macro(_hipdnn_restore_rocm_toolchain_checks)
+    if(COMMAND rocm_check_toolchain_var)
+        _save_var(ROCM_WARN_TOOLCHAIN_VAR)
+        _save_var(ROCM_ERROR_TOOLCHAIN_VAR)
+
+        set(ROCM_WARN_TOOLCHAIN_VAR OFF)
+        set(ROCM_ERROR_TOOLCHAIN_VAR OFF)
+        include(ROCMChecks)
+
+        _restore_var(ROCM_ERROR_TOOLCHAIN_VAR)
+        _restore_var(ROCM_WARN_TOOLCHAIN_VAR)
+    endif()
+endmacro()
 
 # Dependencies where the local version should be used, if available
 set(_hipdnn_all_local_deps GTest flatbuffers spdlog nlohmann_json)
 # Dependencies where we never look for a local version
 set(_hipdnn_all_remote_deps)
 
+# _hipdnn_require_provided(dep_name provides)
+#
+# Fails unless dep_name needs no acquisition, which an explicitly supplied
+# source tree satisfies. The source-tree variables match the FetchContent
+# declarations, not necessarily package names. A non-empty provides names the
+# part of the dependency a found-but-unusable package lacked.
+function(_hipdnn_require_provided dep_name provides)
+    set(_source_dir_GTest "${FETCHCONTENT_SOURCE_DIR_GOOGLETEST}")
+    set(_source_dir_flatbuffers "${FETCHCONTENT_SOURCE_DIR_FLATBUFFERS}")
+    set(_source_dir_spdlog "${FETCHCONTENT_SOURCE_DIR_SPDLOG}")
+    set(_source_dir_nlohmann_json "${FETCHCONTENT_SOURCE_DIR_JSON}")
+    set(_source_dir "${_source_dir_${dep_name}}")
+    if(_source_dir AND IS_DIRECTORY "${_source_dir}")
+        return()
+    endif()
+    if(provides)
+        set(_subject "${dep_name} with ${provides}")
+    else()
+        set(_subject "${dep_name}")
+    endif()
+    message(FATAL_ERROR
+        "${_subject} was not found, and hipDNN does not fetch "
+        "third-party dependencies. They are provided by the build "
+        "environment: TheRock's third-party tree, or an install "
+        "prefix on CMAKE_PREFIX_PATH. Provide ${dep_name}, or "
+        "configure with -DALLOW_FETCH_DEPS=ON to fetch it. See "
+        "https://github.com/ROCm/TheRock/blob/main/docs/development/dependencies.md"
+    )
+endfunction()
+
 # hipdnn_add_dependency( dep_name [NO_LOCAL] [VERSION version] [FIND_PACKAGE_ARGS args...]
 # [COMPONENT component] [PACKAGE_NAME [package_name] [DEB deb_package_name] [RPM rpm_package_name]]
+# [REQUIRED_TARGETS targets...] [PROVIDES description]
 # )
 #
 # Adds a dependency to the project.
+#
+# REQUIRED_TARGETS names imported targets a found package must define to be
+# usable here. A package missing any of them cannot build this project, so it is
+# treated as not found and takes the same acquisition path as an absent one.
+# PROVIDES describes those targets in the diagnostics, e.g. "GoogleMock
+# (GTest::gmock)".
 function(hipdnn_add_dependency dep_name)
     set(options NO_LOCAL)
-    set(oneValueArgs VERSION HASH)
-    set(multiValueArgs FIND_PACKAGE_ARGS PACKAGE_NAME COMPONENTS)
+    set(oneValueArgs VERSION HASH PROVIDES)
+    set(multiValueArgs FIND_PACKAGE_ARGS PACKAGE_NAME COMPONENTS REQUIRED_TARGETS)
     cmake_parse_arguments(PARSE "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
     if(dep_name IN_LIST _hipdnn_all_local_deps)
         message(VERBOSE "----------- Finding ${dep_name} -----------")
         if(NOT PARSE_NO_LOCAL)
             find_package(${dep_name} ${PARSE_VERSION} QUIET ${PARSE_FIND_PACKAGE_ARGS})
         endif()
+        set(_incomplete_package FALSE)
+        foreach(_required_target IN LISTS PARSE_REQUIRED_TARGETS)
+            if(${dep_name}_FOUND AND NOT TARGET ${_required_target})
+                message(STATUS
+                    "Ignoring the ${dep_name} package at ${${dep_name}_DIR}: it "
+                    "does not provide ${PARSE_PROVIDES}, which this build links."
+                )
+                set(${dep_name}_FOUND FALSE)
+                set(_incomplete_package TRUE)
+            endif()
+        endforeach()
         if(NOT ${dep_name}_FOUND)
+            if(NOT ALLOW_FETCH_DEPS)
+                if(_incomplete_package)
+                    _hipdnn_require_provided(${dep_name} "${PARSE_PROVIDES}")
+                else()
+                    _hipdnn_require_provided(${dep_name} "")
+                endif()
+            endif()
             message(STATUS "Did not find ${dep_name}, it will be built locally")
             _build_local()
         else()
@@ -122,10 +214,10 @@ endmacro()
 
 # Fetches GoogleTest
 function(_fetch_gtest VERSION HASH)
-    if(VERSION AND VERSION STREQUAL 1.16.0)
-        set(GIT_TAG v1.16.0)
+    if(VERSION AND VERSION STREQUAL 1.17.0)
+        set(GIT_TAG v1.17.0)
     else()
-        _determine_git_tag(v v1.16.0)
+        _determine_git_tag(v v1.17.0)
     endif()
     if(HASH)
         set(HASH_ARG HASH ${HASH})
@@ -139,23 +231,9 @@ function(_fetch_gtest VERSION HASH)
     _save_var(BUILD_SHARED_LIBS)
     set(BUILD_SHARED_LIBS ${HIPDNN_GTEST_SHARED} CACHE INTERNAL "")
     set(INSTALL_GTEST OFF)
-    # Suppress ROCMChecks warnings from GTest's internal cmake modifying
-    # CMAKE_C_FLAGS/CMAKE_CXX_FLAGS. ROCMChecks uses variable_watch() and always
-    # prints regardless of ROCM_WARN_TOOLCHAIN_VAR. Override the callback with a
-    # flag-gated macro wrapper (same pattern as composablekernel/cmake/gtest.cmake).
-    # Must be a macro (not function) so the flag is read in the caller's scope.
-    if(ROCM_LIBS_SUPERBUILD AND COMMAND rocm_check_toolchain_var
-            AND NOT COMMAND _rocm_check_toolchain_var)
-        # Overrides ROCMChecks callback to suppress warnings from third-party code
-        macro(rocm_check_toolchain_var var access value list_file)
-            if(NOT _HIPDNN_DISABLE_ROCM_CHECKS)
-                _rocm_check_toolchain_var("${var}" "${access}" "${value}" "${list_file}")
-            endif()
-        endmacro()
-    endif()
-    set(_HIPDNN_DISABLE_ROCM_CHECKS TRUE)
+    _hipdnn_suppress_rocm_toolchain_checks()
     fetchcontent_makeavailable(googletest)
-    set(_HIPDNN_DISABLE_ROCM_CHECKS FALSE)
+    _hipdnn_restore_rocm_toolchain_checks()
     _restore_var(BUILD_SHARED_LIBS)
 
     _exclude_from_all(${googletest_SOURCE_DIR})
@@ -166,7 +244,7 @@ endfunction()
 
 # Fetches FlatBuffers
 function(_fetch_flatbuffers VERSION HASH)
-    _determine_git_tag(v 25.9.23)
+    _determine_git_tag(v "${_HIPDNN_DEFAULT_FLATBUFFERS_VERSION}")
 
     _save_var(FLATBUFFERS_BUILD_FLATC)
     _save_var(FLATBUFFERS_INSTALL)
@@ -177,7 +255,7 @@ function(_fetch_flatbuffers VERSION HASH)
 
     set(FLATBUFFERS_BUILD_FLATC ON)
     set(FLATBUFFERS_INSTALL ON)
-    set(FLATBUFFERS_BUILD_FLATLIB OFF)
+    set(FLATBUFFERS_BUILD_FLATLIB ON)
     set(FLATBUFFERS_BUILD_TESTS OFF)
     set(FLATBUFFERS_BUILD_FLATHASH OFF)
     set(FLATBUFFERS_ENABLE_PCH ON)
@@ -186,6 +264,7 @@ function(_fetch_flatbuffers VERSION HASH)
         flatbuffers
         GIT_REPOSITORY https://github.com/google/flatbuffers.git
         GIT_TAG ${GIT_TAG}
+        GIT_SHALLOW TRUE
         DOWNLOAD_EXTRACT_TIMESTAMP
         TRUE
     )
@@ -199,11 +278,6 @@ function(_fetch_flatbuffers VERSION HASH)
     _restore_var(FLATBUFFERS_BUILD_FLATHASH)
     _restore_var(FLATBUFFERS_ENABLE_PCH)
 
-    set(HIP_DNN_FLATBUFFERS_INCLUDE_DIR ${flatbuffers_SOURCE_DIR}/include
-        CACHE PATH "Path to flatbuffers include"
-    )
-
-    _exclude_from_all(${flatbuffers_SOURCE_DIR})
     _mark_targets_as_system(${flatbuffers_SOURCE_DIR})
 endfunction()
 
@@ -215,13 +289,14 @@ function(_fetch_spdlog VERSION HASH)
         spdlog
         GIT_REPOSITORY https://github.com/gabime/spdlog.git
         GIT_TAG ${GIT_TAG}
+        GIT_SHALLOW TRUE
         DOWNLOAD_EXTRACT_TIMESTAMP
         TRUE
     )
 
-    set(_HIPDNN_DISABLE_ROCM_CHECKS TRUE)
+    _hipdnn_suppress_rocm_toolchain_checks()
     fetchcontent_makeavailable(spdlog)
-    set(_HIPDNN_DISABLE_ROCM_CHECKS FALSE)
+    _hipdnn_restore_rocm_toolchain_checks()
 
     set(HIP_DNN_SPDLOG_INCLUDE_DIR ${spdlog_SOURCE_DIR}/include CACHE PATH "Path to spdlog include")
 
@@ -229,14 +304,20 @@ function(_fetch_spdlog VERSION HASH)
     _mark_targets_as_system(${spdlog_SOURCE_DIR})
 endfunction()
 
-# Doesn't conform with the others and ignores the VERSION and HASH arguments, but this will change
-# very soon
-#
 # Fetches nlohmann_json
 function(_fetch_nlohmann_json VERSION HASH)
+    if(NOT VERSION)
+        set(VERSION "3.12.0")
+    endif()
+    if(HASH)
+        set(HASH_ARG HASH ${HASH})
+    endif()
     fetchcontent_declare(
-        json URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
+        json URL https://github.com/nlohmann/json/releases/download/v${VERSION}/json.tar.xz
+                 ${HASH_ARG} DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
+
+    set(JSON_Install ON CACHE BOOL "Install nlohmann_json CMake package files" FORCE)
 
     fetchcontent_makeavailable(json)
 
@@ -244,10 +325,10 @@ function(_fetch_nlohmann_json VERSION HASH)
         CACHE PATH "Path to nlohmann::json include"
     )
 
-    _exclude_from_all(${json_SOURCE_DIR})
     _mark_targets_as_system(${json_SOURCE_DIR})
 
 endfunction()
+
 
 # Utility functions, pulled from rocroller repo
 #

@@ -182,6 +182,7 @@ struct Arguments
     bool HMM; // xnack+
     bool graph_test;
     bool repeatability_check;
+    bool alpha_beta_stride;
 
     int use_hipblaslt;
 
@@ -272,6 +273,7 @@ struct Arguments
     OPER(HMM) SEP                    \
     OPER(graph_test) SEP             \
     OPER(repeatability_check) SEP    \
+    OPER(alpha_beta_stride) SEP      \
     OPER(use_hipblaslt) SEP          \
     OPER(cleanup)
     // clang-format on

@@ -45,6 +45,11 @@ protected:
 
         // Clear any previous callback (may fail if not registered — that's OK)
         setIsolatedUserCallback(HIPDNN_SEV_OFF, HIPDNN_LOG_CALLBACK_ASYNC);
+
+        // These tests use hipdnnCreate/hipdnnDestroy only as backend log sources.
+        // Force an empty absolute plugin search path so superbuild provider plugins
+        // do not turn logging API tests into provider lifecycle stress tests.
+        isolatePluginLoadingForLoggingTests();
     }
 
     void TearDown() override
@@ -58,11 +63,33 @@ protected:
         _logLevelGuard.reset();
         _logFileGuard.reset();
 
+        restoreDefaultPluginLoading();
+
         // Clean up any test log file
         if(!_logFile.empty())
         {
             std::remove(_logFile.c_str());
         }
+    }
+
+    static void isolatePluginLoadingForLoggingTests()
+    {
+        // hipdnnSet*PluginPaths_ext only dereferences pluginPaths when numPaths > 0.
+        // numPaths == 0 maps to an empty path vector; ABSOLUTE mode then suppresses
+        // default provider discovery for handle creation in this fixture.
+        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(0, nullptr, HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+                  HIPDNN_STATUS_SUCCESS);
+        ASSERT_EQ(hipdnnSetHeuristicPluginPaths_ext(0, nullptr, HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+                  HIPDNN_STATUS_SUCCESS);
+    }
+
+    static void restoreDefaultPluginLoading()
+    {
+        // ADDITIVE mode with an empty path vector restores normal default discovery.
+        EXPECT_EQ(hipdnnSetEnginePluginPaths_ext(0, nullptr, HIPDNN_PLUGIN_LOADING_ADDITIVE),
+                  HIPDNN_STATUS_SUCCESS);
+        EXPECT_EQ(hipdnnSetHeuristicPluginPaths_ext(0, nullptr, HIPDNN_PLUGIN_LOADING_ADDITIVE),
+                  HIPDNN_STATUS_SUCCESS);
     }
 
     // Set the isolated user callback. Returns the status without asserting.

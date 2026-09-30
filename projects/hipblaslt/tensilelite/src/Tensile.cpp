@@ -29,7 +29,6 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 
-#ifdef TENSILE_DEFAULT_SERIALIZATION
 #ifdef TENSILE_YAML
 #include <Tensile/llvm/Loading.hpp>
 #endif
@@ -37,18 +36,16 @@
 #ifdef TENSILE_MSGPACK
 #include <Tensile/msgpack/Loading.hpp>
 #endif
-#endif
 
 namespace TensileLite
 {
 
-    TENSILE_API Problem::~Problem()                 = default;
-    TENSILE_API Hardware::Hardware()                = default;
-    TENSILE_API Hardware::~Hardware()               = default;
-    TENSILE_API Solution::~Solution()               = default;
-    TENSILE_API SolutionAdapter::~SolutionAdapter() = default;
+    TENSILELITEHOST_EXPORT Problem::~Problem()                 = default;
+    TENSILELITEHOST_EXPORT Hardware::Hardware()                = default;
+    TENSILELITEHOST_EXPORT Hardware::~Hardware()               = default;
+    TENSILELITEHOST_EXPORT Solution::~Solution()               = default;
+    TENSILELITEHOST_EXPORT SolutionAdapter::~SolutionAdapter() = default;
 
-#ifdef TENSILE_DEFAULT_SERIALIZATION
 #ifdef TENSILE_MSGPACK
     std::map<int, std::string> LoadLibraryMapping(std::string const& filename)
     {
@@ -108,6 +105,9 @@ namespace TensileLite
         return nullptr;
     }
 
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC visibility push(default)
+#endif
     template std::shared_ptr<SolutionLibrary<ContractionProblemGemm, ContractionSolution>>
         LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(std::string const& filename);
 
@@ -118,5 +118,7 @@ namespace TensileLite
     template std::shared_ptr<SolutionLibrary<ContractionProblemGemm, ContractionSolution>>
         LoadLibraryData<ContractionProblemGemm, ContractionSolution>(
             std::vector<uint8_t> const& data);
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC visibility pop
 #endif
 } // namespace TensileLite

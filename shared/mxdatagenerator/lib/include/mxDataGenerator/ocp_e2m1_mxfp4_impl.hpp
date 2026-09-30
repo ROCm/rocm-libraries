@@ -78,7 +78,7 @@ inline bool isNaN<ocp_e2m1_mxfp4_e5m3>(uint8_t const* scaleBytes,
 {
     // no need to check for data as it does not have representation
     uint8_t scale = *(scaleBytes + scaleIndex);
-    return scale == getScaleNan<ScaleType::E5M3>();
+    return isScaleNaN<ScaleInfo<ScaleType::E5M3>>(scale);
 }
 
 template <>
@@ -89,7 +89,7 @@ inline bool isNaN<ocp_e2m1_mxfp4_e4m3>(uint8_t const* scaleBytes,
 {
     // no need to check for data as it does not have representation
     uint8_t scale = *(scaleBytes + scaleIndex);
-    return scale == getScaleNan<ScaleType::E4M3>();
+    return isScaleNaN<ScaleInfo<ScaleType::E4M3>>(scale);
 }
 
 template <>
@@ -116,7 +116,7 @@ inline bool isZero<ocp_e2m1_mxfp4_e5m3>(uint8_t const* scaleBytes,
     if(isNaN<ocp_e2m1_mxfp4_e5m3>(scaleBytes, dataBytes, scaleIndex, dataIndex))
         return false;
 
-    uint8_t scale = *(scaleBytes + scaleIndex);
+    uint8_t scale = getScalePayload<ScaleInfo<ScaleType::E5M3>>(*(scaleBytes + scaleIndex));
     if(scale == 0b0)
         return true;
 
@@ -134,7 +134,7 @@ inline bool isZero<ocp_e2m1_mxfp4_e4m3>(uint8_t const* scaleBytes,
     if(isNaN<ocp_e2m1_mxfp4_e4m3>(scaleBytes, dataBytes, scaleIndex, dataIndex))
         return false;
 
-    uint8_t scale = *(scaleBytes + scaleIndex);
+    uint8_t scale = getScalePayload<ScaleInfo<ScaleType::E4M3>>(*(scaleBytes + scaleIndex));
     if(scale == 0b0)
         return true;
 
@@ -178,13 +178,10 @@ inline double toDouble<ocp_e2m1_mxfp4_e5m3>(uint8_t const* scaleBytes,
         return 0.0f;
 
     uint8_t data = *(dataBytes + dataIndex) & 0b00001111;
+    double  scaleValue
+        = getScaleValue<ScaleInfo<ScaleType::E5M3>>(*(scaleBytes + scaleIndex));
 
-    int scaleExp = getExponentValue<uint8_t>(*(scaleBytes + scaleIndex),
-                                             ocp_e2m1_mxfp4_e5m3::scaleInfo.mantissaBits,
-                                             ocp_e2m1_mxfp4_e5m3::scaleInfo.exponentBits);
-
-    return convertToDouble<uint8_t, OCP_E2M1_MXFP4_DATA, ScaleInfo<ScaleType::E5M3>>(data,
-                                                                                     scaleExp);
+    return convertToDoubleWithScale<uint8_t, OCP_E2M1_MXFP4_DATA>(data, scaleValue);
 }
 
 template <>
@@ -200,13 +197,10 @@ inline double toDouble<ocp_e2m1_mxfp4_e4m3>(uint8_t const* scaleBytes,
         return 0.0f;
 
     uint8_t data = *(dataBytes + dataIndex) & 0b00001111;
+    double  scaleValue
+        = getScaleValue<ScaleInfo<ScaleType::E4M3>>(*(scaleBytes + scaleIndex));
 
-    int scaleExp = getExponentValue<uint8_t>(*(scaleBytes + scaleIndex),
-                                             ocp_e2m1_mxfp4_e4m3::scaleInfo.mantissaBits,
-                                             ocp_e2m1_mxfp4_e4m3::scaleInfo.exponentBits);
-
-    return convertToDouble<uint8_t, OCP_E2M1_MXFP4_DATA, ScaleInfo<ScaleType::E4M3>>(data,
-                                                                                     scaleExp);
+    return convertToDoubleWithScale<uint8_t, OCP_E2M1_MXFP4_DATA>(data, scaleValue);
 }
 
 template <>
@@ -243,12 +237,10 @@ inline float toFloat<ocp_e2m1_mxfp4_e5m3>(uint8_t const* scaleBytes,
         return 0.0f;
 
     uint8_t data = *(dataBytes + dataIndex) & 0b00001111;
+    float   scaleValue
+        = getScaleValueFloat<ScaleInfo<ScaleType::E5M3>>(*(scaleBytes + scaleIndex));
 
-    int scaleExp = getExponentValue<uint8_t>(*(scaleBytes + scaleIndex),
-                                             ocp_e2m1_mxfp4_e5m3::scaleInfo.mantissaBits,
-                                             ocp_e2m1_mxfp4_e5m3::scaleInfo.exponentBits);
-
-    return convertToFloat<uint8_t, OCP_E2M1_MXFP4_DATA, ScaleInfo<ScaleType::E5M3>>(data, scaleExp);
+    return convertToFloatWithScale<uint8_t, OCP_E2M1_MXFP4_DATA>(data, scaleValue);
 }
 
 template <>
@@ -264,12 +256,10 @@ inline float toFloat<ocp_e2m1_mxfp4_e4m3>(uint8_t const* scaleBytes,
         return 0.0f;
 
     uint8_t data = *(dataBytes + dataIndex) & 0b00001111;
+    float   scaleValue
+        = getScaleValueFloat<ScaleInfo<ScaleType::E4M3>>(*(scaleBytes + scaleIndex));
 
-    int scaleExp = getExponentValue<uint8_t>(*(scaleBytes + scaleIndex),
-                                             ocp_e2m1_mxfp4_e4m3::scaleInfo.mantissaBits,
-                                             ocp_e2m1_mxfp4_e4m3::scaleInfo.exponentBits);
-
-    return convertToFloat<uint8_t, OCP_E2M1_MXFP4_DATA, ScaleInfo<ScaleType::E4M3>>(data, scaleExp);
+    return convertToFloatWithScale<uint8_t, OCP_E2M1_MXFP4_DATA>(data, scaleValue);
 }
 
 template <>
@@ -352,7 +342,10 @@ inline bool isZeroPacked<ocp_e2m1_mxfp4_e5m3>(uint8_t const* scaleBytes,
 {
     if(isNaNPacked<ocp_e2m1_mxfp4_e5m3>(scaleBytes, dataBytes, scaleIndex, dataIndex))
         return false;
-    // no need to check for sign as it does not have a 0 representation
+    uint8_t scale = getScalePayload<ScaleInfo<ScaleType::E5M3>>(*(scaleBytes + scaleIndex));
+    if(scale == 0b0)
+        return true;
+
     uint8_t data = getDataFromPackedF4(dataBytes, dataIndex) & ocp_e2m1_mxfp4_e5m3::setSignMask;
 
     return data == 0b0;
@@ -366,7 +359,10 @@ inline bool isZeroPacked<ocp_e2m1_mxfp4_e4m3>(uint8_t const* scaleBytes,
 {
     if(isNaNPacked<ocp_e2m1_mxfp4_e4m3>(scaleBytes, dataBytes, scaleIndex, dataIndex))
         return false;
-    // no need to check for sign as it does not have a 0 representation
+    uint8_t scale = getScalePayload<ScaleInfo<ScaleType::E4M3>>(*(scaleBytes + scaleIndex));
+    if(scale == 0b0)
+        return true;
+
     uint8_t data = getDataFromPackedF4(dataBytes, dataIndex) & ocp_e2m1_mxfp4_e4m3::setSignMask;
 
     return data == 0b0;
@@ -409,13 +405,10 @@ inline double toDoublePacked<ocp_e2m1_mxfp4_e5m3>(uint8_t const* scaleBytes,
         return 0.0f;
 
     uint8_t data = getDataFromPackedF4(dataBytes, dataIndex);
+    double  scaleValue
+        = getScaleValue<ScaleInfo<ScaleType::E5M3>>(*(scaleBytes + scaleIndex));
 
-    int scaleExp = getExponentValue<uint8_t>(*(scaleBytes + scaleIndex),
-                                             ocp_e2m1_mxfp4_e5m3::scaleInfo.mantissaBits,
-                                             ocp_e2m1_mxfp4_e5m3::scaleInfo.exponentBits);
-
-    return convertToDouble<uint8_t, OCP_E2M1_MXFP4_DATA, ScaleInfo<ScaleType::E5M3>>(data,
-                                                                                     scaleExp);
+    return convertToDoubleWithScale<uint8_t, OCP_E2M1_MXFP4_DATA>(data, scaleValue);
 }
 
 template <>
@@ -432,13 +425,10 @@ inline double toDoublePacked<ocp_e2m1_mxfp4_e4m3>(uint8_t const* scaleBytes,
         return 0.0f;
 
     uint8_t data = getDataFromPackedF4(dataBytes, dataIndex);
+    double  scaleValue
+        = getScaleValue<ScaleInfo<ScaleType::E4M3>>(*(scaleBytes + scaleIndex));
 
-    int scaleExp = getExponentValue<uint8_t>(*(scaleBytes + scaleIndex),
-                                             ocp_e2m1_mxfp4_e4m3::scaleInfo.mantissaBits,
-                                             ocp_e2m1_mxfp4_e4m3::scaleInfo.exponentBits);
-
-    return convertToDouble<uint8_t, OCP_E2M1_MXFP4_DATA, ScaleInfo<ScaleType::E4M3>>(data,
-                                                                                     scaleExp);
+    return convertToDoubleWithScale<uint8_t, OCP_E2M1_MXFP4_DATA>(data, scaleValue);
 }
 template <>
 inline float toFloatPacked<ocp_e2m1_mxfp4>(uint8_t const* scaleBytes,
@@ -474,12 +464,10 @@ inline float toFloatPacked<ocp_e2m1_mxfp4_e5m3>(uint8_t const* scaleBytes,
         return 0.0f;
 
     uint8_t data = getDataFromPackedF4(dataBytes, dataIndex);
+    float   scaleValue
+        = getScaleValueFloat<ScaleInfo<ScaleType::E5M3>>(*(scaleBytes + scaleIndex));
 
-    int scaleExp = getExponentValue<uint8_t>(*(scaleBytes + scaleIndex),
-                                             ocp_e2m1_mxfp4_e5m3::scaleInfo.mantissaBits,
-                                             ocp_e2m1_mxfp4_e5m3::scaleInfo.exponentBits);
-
-    return convertToFloat<uint8_t, OCP_E2M1_MXFP4_DATA, ScaleInfo<ScaleType::E5M3>>(data, scaleExp);
+    return convertToFloatWithScale<uint8_t, OCP_E2M1_MXFP4_DATA>(data, scaleValue);
 }
 
 template <>
@@ -495,12 +483,10 @@ inline float toFloatPacked<ocp_e2m1_mxfp4_e4m3>(uint8_t const* scaleBytes,
         return 0.0f;
 
     uint8_t data = getDataFromPackedF4(dataBytes, dataIndex);
+    float   scaleValue
+        = getScaleValueFloat<ScaleInfo<ScaleType::E4M3>>(*(scaleBytes + scaleIndex));
 
-    int scaleExp = getExponentValue<uint8_t>(*(scaleBytes + scaleIndex),
-                                             ocp_e2m1_mxfp4_e4m3::scaleInfo.mantissaBits,
-                                             ocp_e2m1_mxfp4_e4m3::scaleInfo.exponentBits);
-
-    return convertToFloat<uint8_t, OCP_E2M1_MXFP4_DATA, ScaleInfo<ScaleType::E4M3>>(data, scaleExp);
+    return convertToFloatWithScale<uint8_t, OCP_E2M1_MXFP4_DATA>(data, scaleValue);
 }
 
 // no infinity representation in ocp_e2m1_mxfp4 will always return false

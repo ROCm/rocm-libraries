@@ -683,14 +683,14 @@ size_t PP3DNode::GetPPOffDim() const
 {
     auto key
         = PPFMKey(length[0], length[1], length[2], precision, GetRootPlanTransformType(), scheme);
-    if(!pool.has_function(key))
+    if(!pool.has_function(key, batch))
         throw std::runtime_error("GetPPOffDim failed to find a valid kernel");
 
     // CS_3D_PP will have two corresponding kernels in
     // the function pool, both will have the same off-dim
     // value, and at least of one them must be an SBCC PP
     auto child_scheme = CS_KERNEL_STOCKHAM_PP_BLOCK_CC;
-    auto kernel       = pool.get_kernel(key, child_scheme);
+    auto kernel       = pool.get_kernel(key, child_scheme, batch);
 
     return kernel.pp_params.off_dim;
 }

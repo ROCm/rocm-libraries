@@ -6,7 +6,6 @@ set(DEVELOP_MODE OFF CACHE BOOL "Set to ON to create a script for running the Te
 set(VALID_BINS
 "Tensile"
 "TensileBenchmarkCluster"
-"TensileClientConfig"
 "TensileCreateLibrary"
 "TensileGenerateSummations"
 "TensileLogic"

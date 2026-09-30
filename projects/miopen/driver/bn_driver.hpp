@@ -28,7 +28,6 @@
 
 #include "InputFlags.hpp"
 #include "driver.hpp"
-#include "miopen_BatchNormHost.hpp"
 #include "random.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
@@ -62,8 +61,6 @@
 #define ERRTOL_FP16 0.5e-3
 #define RMSTOL_FP32 1e-4
 #define RMSTOL_FP16 2e-3
-
-#define MIO_DRIVER_BN_REFERENCE_COMPUTE_3D_AS_2D 1 // Resolves issue #1974
 
 // #define BN_RUNFOR_PROFILER
 
@@ -601,9 +598,6 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::AllocateBuffersAndCop
 {
     status_t status = STATUS_SUCCESS;
     DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
     status |= in.AllocOnDeviceAndInit(q, ctx, GetTensorSize(&in.GetTensor().desc), buffer_check);
 
     if(isFwdInfer || isFwdTrain)
@@ -2072,9 +2066,8 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::VerifyBackward()
     if(!back)
         return miopenStatusSuccess;
 
-    const Tref maxrms =
-        static_cast<Tref>(((sizeof(TInput) == 4) ? RMSTOL_FP32 : RMSTOL_FP16) * 1000);
-    bool anError = false;
+    const Tref maxrms = static_cast<Tref>((sizeof(TInput) == 4) ? RMSTOL_FP32 : RMSTOL_FP16);
+    bool anError      = false;
 
     RunBackwardCPU();
 

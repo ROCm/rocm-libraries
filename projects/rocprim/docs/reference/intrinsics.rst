@@ -21,6 +21,8 @@ Bitwise
 Warp size
 ===========
 
+.. doxygenfunction:: rocprim::arch::wavefront::max_size()
+.. doxygenfunction:: rocprim::arch::wavefront::min_size()
 .. doxygenfunction:: rocprim::host_warp_size(const int device_id, unsigned int& warp_size)
 .. doxygenfunction:: rocprim::host_warp_size(const hipStream_t stream, unsigned int& warp_size)
 

@@ -148,7 +148,7 @@ namespace rocisa
                 }
                 else
                 {
-                    throw std::runtime_error("RegisterPool::add() invalid status");
+                    throw std::runtime_error("RegisterPool::add(" + std::to_string(start) + "," + std::to_string(size) + "," + tag + ") invalid status");
                 }
             }
             if(m_printRP)
@@ -167,7 +167,7 @@ namespace rocisa
                     if(m_pool[i].status != Status::InUse)
                     {
                         throw std::runtime_error(
-                            "RegisterPool::addFromCheckOut() is not in InUse state");
+                            "RegisterPool::addFromCheckOut(" + std::to_string(start) + ") is not in InUse state");
                     }
                     m_pool[i].status = Status::Available;
                 }
@@ -184,7 +184,7 @@ namespace rocisa
             else
             {
                 throw std::runtime_error(
-                    "RegisterPool::addFromCheckOut() but it was never checked out");
+                    "RegisterPool::addFromCheckOut(" + std::to_string(start) + ") but it was never checked out");
             }
         }
 
@@ -228,7 +228,7 @@ namespace rocisa
                 }
                 else
                 {
-                    throw std::runtime_error("RegisterPool::remove() invalid status");
+                    throw std::runtime_error("RegisterPool::remove(" + std::to_string(start) + "," + std::to_string(size) + "," + tag + ") invalid status");
                 }
             }
         }
@@ -243,7 +243,7 @@ namespace rocisa
                     if(m_pool[i].status != Status::Available)
                     {
                         throw std::runtime_error(
-                            "RegisterPool::removeFromCheckOut() is not in Available state");
+                            "RegisterPool::removeFromCheckOut(" + std::to_string(start) + ", " + std::to_string(size) + ", " + tag + ") is not in Available state");
                     }
                     m_pool[i].status = Status::InUse;
                     m_pool[i].tag    = tag;
@@ -261,7 +261,7 @@ namespace rocisa
             else
             {
                 throw std::runtime_error(
-                    "RegisterPool::removeFromCheckOut() but it was never checked out");
+                    "RegisterPool::removeFromCheckOut(" + std::to_string(start) + ") but it was never checked out");
             }
         }
 
@@ -282,7 +282,7 @@ namespace rocisa
             }
             if(size == 0)
             {
-                throw std::invalid_argument("Size must be greater than 0");
+                throw std::invalid_argument("RegisterPool::checkOutAligned(" + std::to_string(size) + "," + std::to_string(alignment) + "," + tag + ") Size must be greater than 0");
             }
 
             size_t found = -1;
@@ -346,8 +346,9 @@ namespace rocisa
                 // where does tail sequence of available registers begin
                 if(preventOverflow)
                 {
-                    throw std::runtime_error("RegisterPool::checkOutAligned: register overflow "
-                                             "prevented by preventOverflow flag");
+                    throw std::runtime_error("RegisterPool::checkOutAligned: register '"
+                        + tag + "' (" + std::to_string(size) + ", " + std::to_string(alignment) +
+                        ") overflow prevented by preventOverflow flag");
                 }
                 size_t start = m_pool.size();
                 if(start)
@@ -383,7 +384,7 @@ namespace rocisa
                         if(m_occupancyLimitSize < newSize)
                         {
                             throw std::runtime_error(
-                                "RegisterPool::checkOutAligned: occupancy limit exceeded");
+                                "RegisterPool::checkOutAligned(" + std::to_string(size) + "," + std::to_string(alignment) + "," + tag + ") occupancy limit exceeded");
                         }
                     }
                 }
@@ -424,14 +425,20 @@ namespace rocisa
         {
             if(sizes.size() != tags.size())
             {
-                throw std::invalid_argument("Sizes and tags must have the same length");
+                std::string errorMessage = " ";
+                for(const auto& tag : tags)
+                {
+                    errorMessage += tag + " ";
+                }
+                throw std::invalid_argument("RegisterPool::checkOutMulti(sizes.size()=" + std::to_string(sizes.size()) + ", tags.size()=" + std::to_string(tags.size()) + ", tags=" + errorMessage + ") Sizes and tags must have the same length");
             }
             size_t totalSize = 0;
             for(const auto& s : sizes)
             {
                 totalSize += s;
             }
-            size_t idx = checkOutAligned(totalSize, alignment, "", false);
+            std::string multiTag = "multi_" + tags[0] + "_" + std::to_string(tags.size());
+            size_t idx = checkOutAligned(totalSize, alignment, multiTag, false);
             // Overwrite the checkOutSize information
             m_checkOutSize.erase(idx);
             std::vector<size_t> idxVec;
@@ -466,7 +473,7 @@ namespace rocisa
                         module->addT<VMovB32>(vgpr(i), initValue, std::nullopt, "init tmp in pool");
                         break;
                     default:
-                        throw std::runtime_error("Invalid register pool type");
+                        throw std::runtime_error("RegisterPool::initTmps(" + std::to_string(initValue) + "," + std::to_string(start) + "," + std::to_string(stop) + ") Invalid register pool type");
                     }
                 }
             }

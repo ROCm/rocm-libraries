@@ -55,7 +55,7 @@ Graph makeGraph(const UnsupportedBnDtypeCase& tc, const TensorLayout& layout = T
     auto scale = std::make_shared<TensorAttributes>(std::move(scaleAttr));
     auto bias = std::make_shared<TensorAttributes>(std::move(biasAttr));
 
-    BatchnormInferenceAttributes bn;
+    const BatchnormInferenceAttributes bn;
     auto y = g.batchnorm_inference(x, mean, invVar, scale, bias, bn);
     y->set_output(true);
 

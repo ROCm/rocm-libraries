@@ -247,6 +247,22 @@ inline void unit_check_general(
 }
 #endif
 
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+template <>
+inline void unit_check_general(
+    int64_t M, int64_t N, int64_t lda, const hipsparselt_fp8_e4m3_fnuz* hCPU, const hipsparselt_fp8_e4m3_fnuz* hGPU)
+{
+    UNIT_CHECK(M, N, lda, 0, hCPU, hGPU, 1, ASSERT_FP8_EQ);
+}
+
+template <>
+inline void unit_check_general(
+    int64_t M, int64_t N, int64_t lda, const hipsparselt_fp8_e5m2_fnuz* hCPU, const hipsparselt_fp8_e5m2_fnuz* hGPU)
+{
+    UNIT_CHECK(M, N, lda, 0, hCPU, hGPU, 1, ASSERT_BF8_EQ);
+}
+#endif
+
 template <typename T, typename T_hpa = T>
 void unit_check_general(int64_t                        M,
                         int64_t                        N,
@@ -373,6 +389,32 @@ inline void unit_check_general(int64_t               M,
                                int64_t               strideA,
                                const hipsparselt_fp8_e5m2* hCPU,
                                const hipsparselt_fp8_e5m2* hGPU,
+                               int64_t               batch_count)
+{
+    UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_BF8_EQ);
+}
+#endif
+
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+template <>
+inline void unit_check_general(int64_t               M,
+                               int64_t               N,
+                               int64_t               lda,
+                               int64_t               strideA,
+                               const hipsparselt_fp8_e4m3_fnuz* hCPU,
+                               const hipsparselt_fp8_e4m3_fnuz* hGPU,
+                               int64_t               batch_count)
+{
+    UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_FP8_EQ);
+}
+
+template <>
+inline void unit_check_general(int64_t               M,
+                               int64_t               N,
+                               int64_t               lda,
+                               int64_t               strideA,
+                               const hipsparselt_fp8_e5m2_fnuz* hCPU,
+                               const hipsparselt_fp8_e5m2_fnuz* hGPU,
                                int64_t               batch_count)
 {
     UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_BF8_EQ);
@@ -558,7 +600,7 @@ inline void unit_check_general(int64_t                     M,
                                const hipsparselt_fp8_e4m3* const hGPU[],
                                int64_t                     batch_count)
 {
-    unit_check_general(M, N, lda, &hCPU[0], &hGPU[0], batch_count);
+    UNIT_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, ASSERT_FP8_EQ);
 }
 
 template <>
@@ -569,7 +611,31 @@ inline void unit_check_general(int64_t                     M,
                                const hipsparselt_fp8_e5m2* const hGPU[],
                                int64_t                     batch_count)
 {
-    unit_check_general(M, N, lda, &hCPU[0], &hGPU[0], batch_count);
+    UNIT_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, ASSERT_BF8_EQ);
+}
+#endif
+
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+template <>
+inline void unit_check_general(int64_t                          M,
+                               int64_t                          N,
+                               int64_t                          lda,
+                               const hipsparselt_fp8_e4m3_fnuz* const hCPU[],
+                               const hipsparselt_fp8_e4m3_fnuz* const hGPU[],
+                               int64_t                          batch_count)
+{
+    UNIT_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, ASSERT_FP8_EQ);
+}
+
+template <>
+inline void unit_check_general(int64_t                          M,
+                               int64_t                          N,
+                               int64_t                          lda,
+                               const hipsparselt_fp8_e5m2_fnuz* const hCPU[],
+                               const hipsparselt_fp8_e5m2_fnuz* const hGPU[],
+                               int64_t                          batch_count)
+{
+    UNIT_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, ASSERT_BF8_EQ);
 }
 #endif
 
@@ -594,6 +660,9 @@ inline int64_t unit_check_diff(
     using c_type  = std::conditional_t<std::is_same<__half, T>::value
 #ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
 	    || std::is_same<hipsparselt_fp8_e4m3, T>::value || std::is_same<hipsparselt_fp8_e5m2, T>::value
+#endif
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+        || std::is_same<hipsparselt_fp8_e4m3_fnuz, T>::value || std::is_same<hipsparselt_fp8_e5m2_fnuz, T>::value
 #endif
 	    , float, T>;
     int64_t error = 0;

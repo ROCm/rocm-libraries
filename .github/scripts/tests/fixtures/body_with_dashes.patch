@@ -1,0 +1,13 @@
+From abc1234abc1234abc1234abc1234abc1234abc1234 Mon Sep 17 00:00:00 2001
+From: Jane Dev <jane@example.com>
+Date: Mon, 18 Aug 2026 10:00:00 -0400
+Subject: [PATCH] Refactor the API
+
+Here is the first paragraph.
+
+------- separator in body (not the patch separator) -------
+
+Here is the second paragraph after the in-body separator.
+---
+ src/api.cpp | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)

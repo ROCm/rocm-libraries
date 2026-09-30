@@ -83,90 +83,8 @@ struct device_merge_benchmark : public primbench::benchmark_interface
     }
 
 private:
-    // keys benchmark
     template<typename val = ValueType>
-    auto do_run(primbench::state&& state) const ->
-        typename std::enable_if<std::is_same<val, ::rocprim::empty_type>::value, void>::type
-    {
-        const auto& stream = state.stream;
-        const auto& bytes  = state.size;
-        const auto& seed   = state.seed;
-
-        auto seeds = primbench::seeds<2>(seed);
-
-        using key_type = KeyType;
-        using compare_op_type =
-            typename std::conditional<std::is_same<key_type, rocprim::half>::value,
-                                      half_less,
-                                      rocprim::less<key_type>>::type;
-
-        size_t items = bytes / sizeof(key_type);
-
-        const size_t size1 = items / 2;
-        const size_t size2 = items - size1;
-
-        compare_op_type compare_op;
-
-        // Generate data
-        primbench::log("Generating random_range");
-        const auto random_range = limit_random_range<key_type>(0, items);
-
-        primbench::log("Generating keys_input1");
-        std::vector<key_type> keys_input1
-            = get_random_data<key_type>(size1, random_range.first, random_range.second, seeds[0]);
-        primbench::log("Generating keys_input2");
-        std::vector<key_type> keys_input2
-            = get_random_data<key_type>(size2, random_range.first, random_range.second, seeds[1]);
-        primbench::log("Sorting keys_input1");
-        std::sort(keys_input1.begin(), keys_input1.end(), compare_op);
-        primbench::log("Sorting keys_input2");
-        std::sort(keys_input2.begin(), keys_input2.end(), compare_op);
-
-        primbench::log("Creating device pointers");
-        common::device_ptr<key_type> d_keys_input1(keys_input1);
-        common::device_ptr<key_type> d_keys_input2(keys_input2);
-        common::device_ptr<key_type> d_keys_output(items);
-
-        primbench::log("Calculating d_temporary_storage size");
-        common::device_ptr<void> d_temporary_storage;
-        size_t                   temporary_storage_bytes = 0;
-        HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
-                                         temporary_storage_bytes,
-                                         d_keys_input1.get(),
-                                         d_keys_input2.get(),
-                                         d_keys_output.get(),
-                                         size1,
-                                         size2,
-                                         compare_op,
-                                         stream,
-                                         false));
-
-        primbench::log("Resizing d_temporary_storage");
-        d_temporary_storage.resize(temporary_storage_bytes);
-
-        state.set_items(items);
-        state.add_reads<key_type>(items);
-
-        state.run(
-            [&]
-            {
-                HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
-                                                 temporary_storage_bytes,
-                                                 d_keys_input1.get(),
-                                                 d_keys_input2.get(),
-                                                 d_keys_output.get(),
-                                                 size1,
-                                                 size2,
-                                                 compare_op,
-                                                 stream,
-                                                 false));
-            });
-    }
-
-    // pairs benchmark
-    template<typename val = ValueType>
-    auto do_run(primbench::state&& state) const ->
-        typename std::enable_if<!std::is_same<val, ::rocprim::empty_type>::value, void>::type
+    auto do_run(primbench::state&& state) const
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.size;
@@ -204,65 +122,115 @@ private:
         primbench::log("Sorting keys_input2");
         std::sort(keys_input2.begin(), keys_input2.end(), compare_op);
 
-        primbench::log("Allocating values_input1");
-        std::vector<value_type> values_input1(size1);
-        primbench::log("Allocating values_input2");
-        std::vector<value_type> values_input2(size2);
 
-        primbench::log("Filling values_input1");
-        std::iota(values_input1.begin(), values_input1.end(), 0);
-        primbench::log("Filling values_input2");
-        std::iota(values_input2.begin(), values_input2.end(), size1);
+        std::vector<value_type> values_input1;
+        std::vector<value_type> values_input2;
+        if constexpr(!std::is_same<val, ::rocprim::empty_type>::value)
+        {
+            primbench::log("Allocating values_input1");
+            values_input1 = std::vector<value_type>(size1);
+            primbench::log("Allocating values_input2");
+            values_input2 = std::vector<value_type>(size2);
+
+            primbench::log("Filling values_input1");
+            std::iota(values_input1.begin(), values_input1.end(), 0);
+            primbench::log("Filling values_input2");
+            std::iota(values_input2.begin(), values_input2.end(), size1);
+        }
 
         primbench::log("Creating device pointers");
         common::device_ptr<key_type>   d_keys_input1(keys_input1);
         common::device_ptr<key_type>   d_keys_input2(keys_input2);
         common::device_ptr<key_type>   d_keys_output(items);
-        common::device_ptr<value_type> d_values_input1(size1);
-        common::device_ptr<value_type> d_values_input2(size2);
         common::device_ptr<value_type> d_values_output(items);
+        common::device_ptr<value_type> d_values_input1;
+        common::device_ptr<value_type> d_values_input2;
+
+        if constexpr(!std::is_same<val, ::rocprim::empty_type>::value)
+        {
+            d_values_input1 = common::device_ptr<value_type>{values_input1};
+            d_values_input2 = common::device_ptr<value_type>{values_input2};
+        }
 
         primbench::log("Calculating d_temporary_storage size");
         common::device_ptr<void> d_temporary_storage;
         size_t                   temporary_storage_bytes = 0;
-        HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
-                                         temporary_storage_bytes,
-                                         d_keys_input1.get(),
-                                         d_keys_input2.get(),
-                                         d_keys_output.get(),
-                                         d_values_input1.get(),
-                                         d_values_input2.get(),
-                                         d_values_output.get(),
-                                         size1,
-                                         size2,
-                                         compare_op,
-                                         stream,
-                                         false));
+
+        if constexpr(!std::is_same<val, ::rocprim::empty_type>::value)
+        {
+            HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
+                                             temporary_storage_bytes,
+                                             d_keys_input1.get(),
+                                             d_keys_input2.get(),
+                                             d_keys_output.get(),
+                                             d_values_input1.get(),
+                                             d_values_input2.get(),
+                                             d_values_output.get(),
+                                             size1,
+                                             size2,
+                                             compare_op,
+                                             stream,
+                                             false));
+        }
+        else
+        {
+            HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
+                                             temporary_storage_bytes,
+                                             d_keys_input1.get(),
+                                             d_keys_input2.get(),
+                                             d_keys_output.get(),
+                                             size1,
+                                             size2,
+                                             compare_op,
+                                             stream,
+                                             false));
+        }
 
         primbench::log("Resizing d_temporary_storage");
         d_temporary_storage.resize(temporary_storage_bytes);
 
         state.set_items(items);
         state.add_reads<key_type>(items);
-        state.add_reads<value_type>(items);
 
-        state.run(
-            [&]
-            {
-                HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
-                                                 temporary_storage_bytes,
-                                                 d_keys_input1.get(),
-                                                 d_keys_input2.get(),
-                                                 d_keys_output.get(),
-                                                 d_values_input1.get(),
-                                                 d_values_input2.get(),
-                                                 d_values_output.get(),
-                                                 size1,
-                                                 size2,
-                                                 compare_op,
-                                                 stream,
-                                                 false));
-            });
+        if constexpr(!std::is_same<val, ::rocprim::empty_type>::value)
+        {
+            state.add_reads<value_type>(items);
+
+            state.run(
+                [&]
+                {
+                    HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
+                                                     temporary_storage_bytes,
+                                                     d_keys_input1.get(),
+                                                     d_keys_input2.get(),
+                                                     d_keys_output.get(),
+                                                     d_values_input1.get(),
+                                                     d_values_input2.get(),
+                                                     d_values_output.get(),
+                                                     size1,
+                                                     size2,
+                                                     compare_op,
+                                                     stream,
+                                                     false));
+                });
+        }
+        else
+        {
+            state.run(
+                [&]
+                {
+                    HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
+                                                     temporary_storage_bytes,
+                                                     d_keys_input1.get(),
+                                                     d_keys_input2.get(),
+                                                     d_keys_output.get(),
+                                                     size1,
+                                                     size2,
+                                                     compare_op,
+                                                     stream,
+                                                     false));
+                });
+        }
     }
 };
 

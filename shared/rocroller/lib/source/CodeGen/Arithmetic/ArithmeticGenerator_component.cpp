@@ -72,6 +72,8 @@ namespace rocRoller
         registerComponent<BitFieldExtractGenerator<DataType::UInt32>>();
         registerComponent<BitFieldExtractGenerator<DataType::UInt64>>();
         registerComponent<BitFieldExtractGenerator<DataType::E8M0>>();
+        registerComponent<BitFieldExtractGenerator<DataType::E5M3>>();
+        registerComponent<BitFieldExtractGenerator<DataType::E4M3>>();
     }
 
     template <>

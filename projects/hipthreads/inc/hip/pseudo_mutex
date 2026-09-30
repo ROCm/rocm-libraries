@@ -1,0 +1,170 @@
+// -*- C++ -*-
+
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+#ifndef __LIBHIPTHREADS_PSEUDO_MUTEX_H__
+#define __LIBHIPTHREADS_PSEUDO_MUTEX_H__
+
+#include "hip/thread"
+#include "hip/hip_runtime.h"
+#include "hip/__support/misuse.h"
+#include <cassert>
+#include <cstdint>
+
+/**
+ * @file
+ * @brief Spinning mutex with periodic pseudo_yield.
+ * @ingroup mutex
+ *
+ * Similar to cuda::spin_mutex but inserts hip::this_thread::pseudo_yield()
+ * every K failed acquire attempts (current fixed cadence) to reduce contention
+ * impact when a critical section runs slightly longer.
+ *
+ * Differences vs spin_mutex:
+ * - Adds cooperative yielding during extended spin loops.
+ * - Slightly higher latency for extremely short uncontended locks.
+ * - Better fairness / reduced warp residency during longer waits.
+ *
+ * @note pseudo_yield() has important limitations: it prevents the yielding
+ *       thread from resuming until the yieldee completes execution. This means
+ *       yield-loops (A yields to B, B tries to acquire a lock held by A) will
+ *       deadlock. See class documentation for usage constraints.
+ *
+ * - Non-recursive: re-entering from the same block is illegal (debug assert or
+ *   livelock).
+ * - Single-fiber acquire: it is illegal for more than one fiber to be active
+ *   while acquiring the lock (debug assert or livelock). Extra fibers will
+ *   loop trying to acquire a lock already owned by a fiber in the same SIMD
+ *   wave/hip::wthread. Ownership is tracked using the block id so we can detect
+ *   this invalid use in debug and assert instead of livelocking.
+ */
+
+namespace cuda {
+
+/**
+ * @class pseudo_mutex
+ * @brief Busy-wait (spin) mutex with periodic pseudo_yield.
+ * @ingroup mutex
+ *
+ * Characteristics:
+ * - Exclusive, non‑recursive.
+ * - lock(): loops atomicCAS; on repeated failure yields every 0x10000 iterations.
+ * - try_lock(): single CAS attempt.
+ * - unlock(): __threadfence() then atomicExch to release (establishes
+ *   release/acquire ordering with next successful lock).
+ *
+ * Ownership model:
+ * - Tracks owning block via computed block id (not per-thread recursion aware).
+ *
+ * When to choose:
+ * - Prefer spin_mutex for short sections with minimal contention.
+ * - Use pseudo_mutex only when you can guarantee no yield-loops will occur.
+ *
+ * @warning Avoid pseudo_mutex if yield-loops are possible. A deadlock occurs
+ *          when thread A holds the lock and yields to thread B, then thread B
+ *          attempts to acquire the same lock. Since pseudo_yield() prevents
+ *          resumption until the yieldee completes, thread B cannot yield back
+ *          to thread A, causing permanent deadlock. Only use pseudo_mutex when
+ *          you can guarantee this scenario won't occur.
+ */
+class _LIBHIPTHREADS_THREAD_SAFETY_ANNOTATION(capability("pseudo_mutex")) pseudo_mutex {
+    // HIP requires that (gridDim * blockDim) < 2^32
+    enum : uint64_t { INVALID_OWNER = -1ULL };
+    uint64_t owner = INVALID_OWNER; // stores the owner's blockId;
+
+  public:
+    /// Constructs unlocked.
+    __device__ constexpr pseudo_mutex() = default;
+
+    /// \name Deleted copy / move operations
+    /// Instances are neither copyable nor movable.
+    ///@{
+    __device__ pseudo_mutex(const pseudo_mutex &) = delete;
+    __device__ pseudo_mutex &operator=(const pseudo_mutex &) = delete;
+    ///@}
+
+
+    /**
+     * @brief Acquire (spins with periodic pseudo_yield).
+     *
+     * Yields every 0x10000 failed attempts. Debug assert triggers on recursive attempt
+     * or attempting to acquire a lock already owned by another fiber in the same SIMD wave/hip::wthread.
+     */
+    __device__ void lock() _LIBHIPTHREADS_THREAD_SAFETY_ANNOTATION(acquire_capability()) {
+        const uint64_t myBlockId = blockIdx.x + gridDim.x*blockIdx.y + gridDim.x*gridDim.y*blockIdx.z;
+        // The read operation here by atomicCAS counts as an atomic acquire operation, which the 'release fence'
+        // operation in unlock() synchronizes-with.
+        for (uint64_t count = 0, ownerBlockId = atomicCAS(&owner, INVALID_OWNER, myBlockId);
+             ownerBlockId != INVALID_OWNER; ++count, ownerBlockId = atomicCAS(&owner, INVALID_OWNER, myBlockId)) {
+            // Since execution only continues past the loop once ALL threads in a wave have exited the loop,
+            // we need to prevent an entire wave from spinning waiting for one of it's own threads to release the lock.
+            //
+            // Technically this is more strict than we need to be, because we're doing this at a block level and not a
+            // wave level, but that's fine.
+            __HIPTHREADS_ASSERT(ownerBlockId != myBlockId,
+                                "recursive lock of a non-recursive hip::pseudo_mutex: a block already "
+                                "holding the lock tried to acquire it again (would livelock).");
+            if (count % 0x10000ULL == 0) {
+                hip::this_thread::pseudo_yield();
+            }
+        }
+    }
+    // Note that prior calls to lock() do NOT synchronize-with try_lock if it returns false! In otherwords, there is
+    // no memory order relationship between lock and try_lock or between try_lock and itself. Only unlock() establishes
+    // any memory order relationship. (see https://en.cppreference.com/w/cpp/thread/mutex/try_lock)
+     
+
+    /**
+     * @brief Try to acquire without spinning.
+     * @return true on success, false if already owned.
+     *
+     * Provides acquire semantics on success; no synchronizes-with edge on failure.
+     */
+    __device__ bool try_lock() noexcept _LIBHIPTHREADS_THREAD_SAFETY_ANNOTATION(try_acquire_capability(true)) {
+        const uint64_t myBlockId = blockIdx.x + gridDim.x*blockIdx.y + gridDim.x*gridDim.y*blockIdx.z;
+        // The read operation here by atomicCAS counts as an atomic acquire operation, which the 'release fence'
+        // operation in unlock() synchronizes-with.
+        return atomicCAS(&owner, INVALID_OWNER, myBlockId) == INVALID_OWNER;
+    }
+
+    /**
+     * @brief Release ownership.
+     *
+     * Issues device fence to publish prior writes, then clears owner with atomicExch.
+     * Debug assert validates current block was the owner.
+     */
+    __device__ void unlock() noexcept _LIBHIPTHREADS_THREAD_SAFETY_ANNOTATION(release_capability()) {
+        // Create a 'release fence' operation which synchronizes-with the atomic acquire operation in lock() and
+        // try_lock(). This establishes the synchronizes-with relationship required by the C++ standard:
+        //  - Unlock "synchronizes-with any subsequent lock operation that obtains ownership of the same mutex"
+        //    (see https://en.cppreference.com/w/cpp/thread/mutex/unlock)
+        // In other words, we make sure all writes in the critical section are visible to other threads when they
+        // acquire the mutex.
+        __threadfence();
+        // This counts as the atomic store operation 'X' described in "Fence-atomic synchronization" at
+        // https://en.cppreference.com/w/cpp/atomic/atomic_thread_fence.
+        uint64_t oldOwner = atomicExch(&owner, INVALID_OWNER);
+        __HIPTHREADS_ASSERT(oldOwner == blockIdx.x + gridDim.x * blockIdx.y + gridDim.x * gridDim.y * blockIdx.z,
+                            "unlock of a hip::pseudo_mutex by a block that does not own it (corrupts the "
+                            "owner state of whichever block did own it).");
+    }
+};
+
+} // namespace cuda
+
+#endif // __LIBHIPTHREADS_PSEUDO_MUTEX_H__

@@ -1,0 +1,125 @@
+# ########################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+# rocALUTION Test Categories Configuration
+# Organizes GTest suites into CTest categories for CI/CD pipeline efficiency.
+#
+# rocALUTION uses a single test binary (rocalution-test) with all tests.
+# Unlike rocSPARSE/hipSPARSE, it does not use GTest category prefixes.
+# Test subset selection is controlled via environment variables set in
+# CMakeLists.txt per generated CTest suite:
+#
+#   ROCALUTION_EMULATION_SMOKE=1      -> smoke subset (solver tests, reduced params)
+#   ROCALUTION_EMULATION_REGRESSION=1 -> regression subset
+#   ROCALUTION_EMULATION_EXTENDED=1   -> extended subset
+#   (no env var)                      -> full parameter sweep
+#
+# GPU-heavy tests (local_matrix, local_vector, etc.) skip automatically when
+# any ROCALUTION_EMULATION_* variable is set. Solver tests (cg, bicgstab,
+# gmres, etc.) run with reduced parameter sets based on the specific variable.
+#
+# Test suite names (from INSTANTIATE_TEST_CASE_P / TEST):
+#   Krylov: cg, bicgstab, bicgstabl, cr, fcg, fgmres, gmres, idr, qmrcgstab
+#   Direct: lu, qr, inversion
+#   AMG:    pairwise_amg, ruge_stueben_amg, saamg, uaamg
+#   Other:  preconditioner, itersolver, chebyshev, mixed_precision
+#   Local:  local_matrix_*, local_vector, local_stencil  (skip in emulation)
+#   Infra:  backend, backend_init_order                   (skip in emulation)
+
+test_categories:
+  quick:
+    description: "Fast sanity checks via ROCALUTION_EMULATION_SMOKE (target: < 5 min)"
+    test_patterns:
+      - "*"
+    labels:
+      - "quick"
+      - "pre-commit"
+    notes: |
+      CMakeLists.txt sets ROCALUTION_EMULATION_SMOKE=1 for this suite.
+      Solver tests run with reduced params; GPU-heavy tests skip themselves.
+
+  standard:
+    description: "Pre-checkin validation via ROCALUTION_EMULATION_REGRESSION (target: < 30 min)"
+    test_patterns:
+      - "*"
+    labels:
+      - "standard"
+      - "pr"
+    notes: |
+      CMakeLists.txt sets ROCALUTION_EMULATION_REGRESSION=1 for this suite.
+
+  comprehensive:
+    description: "Nightly comprehensive tests via ROCALUTION_EMULATION_EXTENDED (target: < 4 hours)"
+    test_patterns:
+      - "*"
+    labels:
+      - "comprehensive"
+      - "nightly"
+    notes: |
+      CMakeLists.txt sets ROCALUTION_EMULATION_EXTENDED=1 for this suite.
+
+  full:
+    description: "Full test suite — no emulation env var, all parameter combinations (target: < 8 hours)"
+    test_patterns:
+      - "*"
+    labels:
+      - "full"
+      - "weekly"
+
+  ffm-quick:
+    description: "FFM NPI smoke test for PR pipelines — one CG solve to validate the pipeline end-to-end"
+    test_patterns:
+      - "cg/parameterized_cg.cg_float/0"
+    labels:
+      - "ffm-quick"
+      - "ffm"
+    notes: |
+      Intentionally minimal: runs a single CG float test (size=63, one preconditioner,
+      one matrix format) to validate that the FFM runner can build and execute
+      rocalution-test end-to-end. Expand test_patterns once the FFM infrastructure
+      is confirmed working (e.g. add more CG variants, then "cg/*", then full SMOKE set).
+
+  ffm-full:
+    description: "FFM NPI nightly test — initially identical to ffm-quick; widen once infra is proven"
+    test_patterns:
+      - "cg/parameterized_cg.cg_float/0"
+    labels:
+      - "ffm-full"
+      - "ffm"
+    notes: |
+      Starts identical to ffm-quick (single CG float test).
+      Progression plan:
+        1. Validate FFM runner with this single test.
+        2. Expand to "cg/*" (all CG variants under ROCALUTION_EMULATION_SMOKE).
+        3. Expand to "*" with ROCALUTION_EMULATION_SMOKE for the full smoke suite.
+        4. Switch to ROCALUTION_EMULATION_REGRESSION when capacity allows.
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 300
+    standard: 1800
+    comprehensive: 14400
+    full: 28800
+    ffm-quick: 7200    # 2 hours — hard FFM PR budget
+    ffm-full: 7200     # 2 hours — initially same as ffm-quick

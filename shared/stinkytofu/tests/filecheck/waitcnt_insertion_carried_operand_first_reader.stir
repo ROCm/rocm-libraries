@@ -1,0 +1,62 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --BuildUseDefChainPass=includePseudo --StinkyWaitCntInsertionPass --print-output
+#
+# Regression: the s_wait_dscnt that drains a freshly produced operand must be
+# emitted BEFORE the FIRST consumer of that operand, never deferred to a later
+# (reuse) consumer.
+#
+# CFG: a diamond (^bb_a / ^bb_b) feeds ^merge. Both predecessors leave a DS
+# operand (v[60:61] / v[68:69]) outstanding, so ^merge sees them through PHIs.
+# ^merge then issues three local ds_load tiles (v[20:21], v[30:31], v[40:41])
+# and consumes each tile TWICE (once with the v[60:67] operand, once with
+# v[68:75]).
+#
+# Each tile's drain must precede its first reader:
+#   s_wait_dscnt 2   before  wmma(v[20:27], v[60:67])   (first use of tile 0)
+#   s_wait_dscnt 1   before  wmma(v[30:37], v[60:67])   (first use of tile 1)
+#   s_wait_dscnt 0   before  wmma(v[40:47], v[60:67])   (first use of tile 2)
+#
+# The bug this guards against: a relaxed optimizer "floor" at the first reader
+# masked the stricter freshly-recomputed requirement in mergePlanAndComputed,
+# so the dscnt(0) slipped to the SECOND reader (wmma(v[40:47], v[68:75])),
+# leaving the first reader of tile 2 reading possibly-stale LDS.
+#
+# CHECK-LABEL: @carried_operand_first_reader
+# CHECK: ^merge:
+# CHECK: s_wait_dscnt
+# CHECK-SAME: dlcnt = 2
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# CHECK-SAME: (v[20:27], v[60:67]
+# CHECK: s_wait_dscnt
+# CHECK-SAME: dlcnt = 1
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# CHECK-SAME: (v[30:37], v[60:67]
+# CHECK: s_wait_dscnt
+# CHECK-SAME: dlcnt = 0
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# CHECK-SAME: (v[40:47], v[60:67]
+
+st.func @carried_operand_first_reader() {
+^entry:
+  "st.s_cbranch_scc1"("bb_b", SCC0)
+  Successors: ^bb_a, ^bb_b
+^bb_a:
+  v[60:61] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[68:69] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 8, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.s_branch"("merge")
+  Successors: ^merge
+^bb_b:
+  v[60:61] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[68:69] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 24, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.s_branch"("merge")
+  Successors: ^merge
+^merge:
+  v[20:21] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[30:31] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[40:41] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[60:67], a[10:17]) { mod.mfma = { reuseA = false, reuseB = false } }
+  a[18:25] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[68:75], a[18:25]) { mod.mfma = { reuseA = false, reuseB = false } }
+  a[26:33] = "st.v_wmma_f32_16x16x32_bf16"(v[30:37], v[60:67], a[26:33]) { mod.mfma = { reuseA = false, reuseB = false } }
+  a[34:41] = "st.v_wmma_f32_16x16x32_bf16"(v[30:37], v[68:75], a[34:41]) { mod.mfma = { reuseA = false, reuseB = false } }
+  a[42:49] = "st.v_wmma_f32_16x16x32_bf16"(v[40:47], v[60:67], a[42:49]) { mod.mfma = { reuseA = false, reuseB = false } }
+  a[50:57] = "st.v_wmma_f32_16x16x32_bf16"(v[40:47], v[68:75], a[50:57]) { mod.mfma = { reuseA = false, reuseB = false } }
+}

@@ -294,12 +294,14 @@ void testing_spmv_strided_batched(const Arguments& arg)
     int64_t incy        = arg.incy;
     int64_t batch_count = arg.batch_count;
 
-    HOST_MEMCHECK(host_vector<T>, h_alpha, (1));
-    HOST_MEMCHECK(host_vector<T>, h_beta, (1));
-    h_alpha[0] = arg.get_alpha<T>();
-    h_beta[0]  = arg.get_beta<T>();
+    T h_alpha = arg.get_alpha<T>();
+    T h_beta  = arg.get_beta<T>();
 
     rocblas_fill uplo = char2rocblas_fill(arg.uplo);
+
+    bool    ab_striding  = arg.alpha_beta_stride;
+    int64_t alpha_stride = ab_striding ? arg.stride_c : 0;
+    int64_t beta_stride  = ab_striding ? arg.stride_d : 0;
 
     size_t abs_incx = incx >= 0 ? incx : -incx;
     size_t abs_incy = incy >= 0 ? incy : -incy;
@@ -344,6 +346,8 @@ void testing_spmv_strided_batched(const Arguments& arg)
     HOST_MEMCHECK(host_strided_batch_vector<T>, hy, (N, incy, stride_y, batch_count));
     HOST_MEMCHECK(
         host_strided_batch_vector<T>, hy_gold, (N, incy, stride_y, batch_count)); // gold standard
+    HOST_MEMCHECK(host_vector<T>, halpha, (batch_count, alpha_stride));
+    HOST_MEMCHECK(host_vector<T>, hbeta, (batch_count, beta_stride));
 
     // Allocate device memory
     DEVICE_MEMCHECK(device_strided_batch_matrix<T>,
@@ -351,14 +355,17 @@ void testing_spmv_strided_batched(const Arguments& arg)
                     (1, rocblas_packed_matrix_size(N), 1, stride_A, batch_count));
     DEVICE_MEMCHECK(device_strided_batch_vector<T>, dx, (N, incx, stride_x, batch_count));
     DEVICE_MEMCHECK(device_strided_batch_vector<T>, dy, (N, incy, stride_y, batch_count));
-    DEVICE_MEMCHECK(device_vector<T>, d_alpha, (1));
-    DEVICE_MEMCHECK(device_vector<T>, d_beta, (1));
+    DEVICE_MEMCHECK(device_vector<T>, d_alpha, (batch_count, alpha_stride));
+    DEVICE_MEMCHECK(device_vector<T>, d_beta, (batch_count, beta_stride));
 
     // Initialize data on host memory
     rocblas_init_matrix(
         hA, arg, rocblas_client_alpha_sets_nan, rocblas_client_symmetric_matrix, true);
     rocblas_init_vector(hx, arg, rocblas_client_alpha_sets_nan, false, true);
     rocblas_init_vector(hy, arg, rocblas_client_beta_sets_nan);
+
+    rocblas_init_vector_alternating_sign(halpha, h_alpha);
+    rocblas_init_vector_alternating_sign(hbeta, h_beta);
 
     // Helper function to convert regular matrix `hA` to packed matrix `hAp`
     regular_to_packed(uplo == rocblas_fill_upper, hA, hAp, N);
@@ -384,13 +391,13 @@ void testing_spmv_strided_batched(const Arguments& arg)
                        (handle,
                         uplo,
                         N,
-                        h_alpha,
+                        &h_alpha,
                         dAp,
                         stride_A,
                         dx,
                         incx,
                         stride_x,
-                        h_beta,
+                        &h_beta,
                         dy,
                         incy,
                         stride_y,
@@ -404,8 +411,8 @@ void testing_spmv_strided_batched(const Arguments& arg)
         if(arg.pointer_mode_device)
         {
             CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
-            CHECK_HIP_ERROR(d_alpha.transfer_from(h_alpha));
-            CHECK_HIP_ERROR(d_beta.transfer_from(h_beta));
+            CHECK_HIP_ERROR(d_alpha.transfer_from(halpha));
+            CHECK_HIP_ERROR(d_beta.transfer_from(hbeta));
 
             CHECK_HIP_ERROR(dy.transfer_from(hy_gold));
 
@@ -454,15 +461,15 @@ void testing_spmv_strided_batched(const Arguments& arg)
                         device_strided_batch_vector<T>, dx_copy, (N, incx, stride_x, batch_count));
                     DEVICE_MEMCHECK(
                         device_strided_batch_vector<T>, dy_copy, (N, incy, stride_y, batch_count));
-                    DEVICE_MEMCHECK(device_vector<T>, d_alpha_copy, (1));
-                    DEVICE_MEMCHECK(device_vector<T>, d_beta_copy, (1));
+                    DEVICE_MEMCHECK(device_vector<T>, d_alpha_copy, (batch_count, alpha_stride));
+                    DEVICE_MEMCHECK(device_vector<T>, d_beta_copy, (batch_count, beta_stride));
 
                     // copy data from CPU to device
                     CHECK_HIP_ERROR(dx_copy.transfer_from(hx));
                     CHECK_HIP_ERROR(dy_copy.transfer_from(hy));
                     CHECK_HIP_ERROR(dAp_copy.transfer_from(hAp));
-                    CHECK_HIP_ERROR(d_alpha_copy.transfer_from(h_alpha));
-                    CHECK_HIP_ERROR(d_beta_copy.transfer_from(h_beta));
+                    CHECK_HIP_ERROR(d_alpha_copy.transfer_from(halpha));
+                    CHECK_HIP_ERROR(d_beta_copy.transfer_from(hbeta));
 
                     CHECK_ROCBLAS_ERROR(
                         rocblas_set_pointer_mode(handle_copy, rocblas_pointer_mode_device));
@@ -499,7 +506,15 @@ void testing_spmv_strided_batched(const Arguments& arg)
 
         for(size_t b = 0; b < batch_count; b++)
         {
-            ref_spmv<T>(uplo, N, h_alpha[0], hAp[b], hx[b], incx, h_beta[0], hy_gold[b], incy);
+            ref_spmv<T>(uplo,
+                        N,
+                        halpha[b * alpha_stride],
+                        hAp[b],
+                        hx[b],
+                        incx,
+                        hbeta[b * beta_stride],
+                        hy_gold[b],
+                        incy);
         }
 
         cpu_time_used = get_time_us_no_sync() - cpu_time_used;
@@ -544,6 +559,18 @@ void testing_spmv_strided_batched(const Arguments& arg)
 
         CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
 
+        T* alpha = &h_alpha;
+        T* beta  = &h_beta;
+        if(arg.alpha_beta_stride)
+        {
+            CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
+            CHECK_HIP_ERROR(d_alpha.transfer_from(halpha));
+            CHECK_HIP_ERROR(d_beta.transfer_from(hbeta));
+            alpha = d_alpha;
+            beta  = d_beta;
+            handle.pre_test(arg);
+        }
+
         hipStream_t stream;
         CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
 
@@ -556,19 +583,24 @@ void testing_spmv_strided_batched(const Arguments& arg)
                           (handle,
                            uplo,
                            N,
-                           h_alpha,
+                           alpha,
                            dAp,
                            stride_A,
                            dx,
                            incx,
                            stride_x,
-                           h_beta,
+                           beta,
                            dy,
                            incy,
                            stride_y,
                            batch_count));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+
+        if(arg.alpha_beta_stride)
+        {
+            handle.post_test(arg);
+        }
 
         Arguments targ(arg);
         targ.stride_a = stride_A;

@@ -1,0 +1,247 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#include "RMSnormFwdPlan.hpp"
+#include "../PlanUtils.hpp"
+#include "RMSnormCommon.hpp"
+#include "compilation/KernelCompileOptions.hpp"
+
+#include "compilation/IKernelCompiler.hpp"
+#include "core/Utils.hpp"
+
+#include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/utilities/Constants.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+
+using namespace hip_kernel_provider::core::utils;
+
+namespace hip_kernel_provider::rmsnorm
+{
+
+RMSnormFwdParams::RMSnormFwdParams(
+    const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+    : _x(tensorMap.at(attributes.x_tensor_uid()))
+    , _scale(tensorMap.at(attributes.scale_tensor_uid()))
+    , _bias(attributes.bias_tensor_uid().has_value()
+                ? tensorMap.at(attributes.bias_tensor_uid().value())
+                : nullptr)
+    , _y(tensorMap.at(attributes.y_tensor_uid()))
+    , _invRMS(attributes.inv_rms_tensor_uid().has_value()
+                  ? tensorMap.at(attributes.inv_rms_tensor_uid().value())
+                  : nullptr)
+    , _epsilon(hipdnn_plugin_sdk::makeScalarOperand(
+          tensorMap, attributes.epsilon_tensor_uid(), "Epsilon"))
+    , _activationOut(nullptr)
+{
+}
+
+RMSnormFwdParams::RMSnormFwdParams(
+    const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& attributes,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+    : RMSnormFwdParams(attributes, tensorMap)
+{
+    // Initialize activation attributes
+    _optActivation = parseActivation(pointwiseAttributes);
+    _activationOut = tensorMap.at(pointwiseAttributes.out_0_tensor_uid());
+
+    // Validate that activation input matches rmsnorm output
+    if(pointwiseAttributes.in_0_tensor_uid() != attributes.y_tensor_uid())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "RMSnormFwdParams: Activation input must match rmsnorm output");
+    }
+}
+
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormFwdParams::x() const
+{
+    return _x;
+}
+
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormFwdParams::scale() const
+{
+    return _scale;
+}
+
+double RMSnormFwdParams::epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                      uint32_t numDeviceBuffers) const
+{
+    return hipdnn_plugin_sdk::toDouble(
+        hipdnn_plugin_sdk::resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers));
+}
+
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormFwdParams::bias() const
+{
+    return _bias;
+}
+
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormFwdParams::y() const
+{
+    return _y;
+}
+
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormFwdParams::invRMS() const
+{
+    return _invRMS;
+}
+
+const std::optional<ActivationParams>& RMSnormFwdParams::optActivation() const
+{
+    return _optActivation;
+}
+
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
+    RMSnormFwdParams::activationOut() const
+{
+    return _activationOut;
+}
+
+RMSnormFwdPlan::RMSnormFwdPlan(RMSnormFwdParams&& params)
+    : _params(std::move(params))
+{
+}
+
+size_t RMSnormFwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
+{
+    // No workspace needed for RMS norm
+    return 0;
+}
+
+void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
+                             const hipDeviceProp_t& deviceProperties)
+{
+    // Extract dimensions from x tensor
+    const auto* xDims = _params.x()->dims();
+    if(const auto xRank = xDims->size(); xRank < 4 || xRank > 5)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Unsupported tensor dimension: "
+                                                           + std::to_string(xRank));
+    }
+
+    if(_params.optActivation().has_value())
+    {
+        _activationAlpha = static_cast<float>(_params.optActivation()->alpha);
+        _activationBeta = static_cast<float>(_params.optActivation()->beta);
+    }
+
+    const ProblemDescription problem(_params.x(), _params.scale(), Direction::FORWARD);
+    const int64_t stride = problem.stride();
+    const int64_t outerSize = problem.outerSize();
+    const int64_t innerSize = problem.innerSize();
+    if(outerSize * stride >= UINT32_MAX)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Unsupported number of workgroups: "
+                                                           + std::to_string(outerSize * stride));
+    }
+
+    // Calculate block and grid dimensions
+    const unsigned int xlocalsize = 256;
+    const auto xgridsize = static_cast<unsigned int>(outerSize * stride);
+    const unsigned int ylocalsize = 1;
+    const unsigned int ygridsize = 1;
+    const unsigned int zlocalsize = 1;
+    const unsigned int zgridsize = 1;
+
+    // Determine input/output data type configuration
+    const auto inputDataType = _params.x()->data_type();
+    auto outputDataType = _params.y()->data_type();
+    const auto scaleDataType = _params.scale()->data_type();
+    const auto computeDataType = (_params.invRMS() == nullptr)
+                                     ? hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+                                     : _params.invRMS()->data_type();
+
+    // Get activation mode
+    auto activationMode = ActivationMode::PASTHRU;
+    if(_params.optActivation().has_value() && _params.activationOut() != nullptr)
+    {
+        activationMode = _params.optActivation()->mode;
+        outputDataType = _params.activationOut()->data_type();
+    }
+
+    const std::string inputTypeString = getKernelParamTypeString(inputDataType);
+    const std::string outputTypeString = getKernelParamTypeString(outputDataType);
+    const std::string scaleTypeString = getKernelParamTypeString(scaleDataType);
+    const std::string computeTypeString = getKernelParamTypeString(computeDataType);
+
+    // Prepare compilation options
+    KernelCompileOptions options(_params.x(), deviceProperties);
+    options.add("HIP_PLUGIN_RMSNORM_INNER_SIZE", innerSize);
+    options.add("HIP_PLUGIN_RMSNORM_STRIDE", stride);
+    options.add("HIP_PLUGIN_RMSNORM_INPUT_TYPE", inputTypeString);
+    options.add("HIP_PLUGIN_RMSNORM_OUTPUT_TYPE", outputTypeString);
+    options.add("HIP_PLUGIN_RMSNORM_SCALE_TYPE", scaleTypeString);
+    options.add("HIP_PLUGIN_RMSNORM_COMPUTE_TYPE", computeTypeString);
+    options.add("HIP_PLUGIN_RMSNORM_LOCAL_SIZE", xlocalsize);
+    options.add("HIP_PLUGIN_RMSNORM_NRN_OP_ID", static_cast<int>(activationMode));
+
+    // Compile kernel and configure launch dimensions
+    _compiledProgram = kernelCompiler.compile("RMSNormFwd.cpp", options);
+    _runnableKernel = _compiledProgram->getKernel("RMSnormFwd");
+
+    _runnableKernel->setBlockSize(xlocalsize, ylocalsize, zlocalsize);
+    _runnableKernel->setGridSize(xgridsize, ygridsize, zgridsize);
+}
+
+void RMSnormFwdPlan::execute(const Handle& handle,
+                             const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                             uint32_t numDeviceBuffers,
+                             [[maybe_unused]] void* workspace) const
+{
+    if(!_runnableKernel)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "RMSnormFwdPlan::execute() called before compile()");
+    }
+
+    // Get device buffer pointers
+    auto xBuffer
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
+    auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _params.scale()->uid(), deviceBuffers, numDeviceBuffers);
+    hipdnnPluginDeviceBuffer_t yBuffer = {-1, nullptr};
+    if(_params.optActivation().has_value() && _params.activationOut() != nullptr)
+    {
+        yBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+            _params.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
+    }
+    else
+    {
+        yBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+            _params.y()->uid(), deviceBuffers, numDeviceBuffers);
+    }
+
+    void* biasBufferPtr = (_params.bias() == nullptr)
+                              ? nullptr
+                              : hipdnn_plugin_sdk::findDeviceBuffer(
+                                    _params.bias()->uid(), deviceBuffers, numDeviceBuffers)
+                                    .ptr;
+    void* invRMSBufferPtr = (_params.invRMS() == nullptr)
+                                ? nullptr
+                                : hipdnn_plugin_sdk::findDeviceBuffer(
+                                      _params.invRMS()->uid(), deviceBuffers, numDeviceBuffers)
+                                      .ptr;
+
+    double epsilon = _params.epsilonValue(deviceBuffers, numDeviceBuffers);
+
+    _runnableKernel->launch(handle.getStream(),
+                            xBuffer.ptr,
+                            scaleBuffer.ptr,
+                            biasBufferPtr,
+                            yBuffer.ptr,
+                            invRMSBufferPtr,
+                            static_cast<float>(epsilon),
+                            _activationAlpha,
+                            _activationBeta);
+}
+
+}

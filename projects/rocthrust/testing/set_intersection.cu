@@ -125,6 +125,8 @@ DECLARE_VARIABLE_UNITTEST(TestSetIntersection);
 template <typename T>
 void TestSetIntersectionToDiscardIterator(const size_t n)
 {
+  CHECK_ASAN_ENABLEMENT();
+  
   thrust::host_vector<T> temp = unittest::random_integers<T>(2 * n);
   thrust::host_vector<T> h_a(temp.begin(), temp.begin() + n);
   thrust::host_vector<T> h_b(temp.begin() + n, temp.end());
@@ -157,6 +159,8 @@ DECLARE_VARIABLE_UNITTEST(TestSetIntersectionToDiscardIterator);
 template <typename T>
 void TestSetIntersectionEquivalentRanges(const size_t n)
 {
+  CHECK_ASAN_ENABLEMENT();
+  
   thrust::host_vector<T> temp = unittest::random_integers<T>(n);
   thrust::host_vector<T> h_a  = temp;
   thrust::sort(h_a.begin(), h_a.end());
@@ -185,6 +189,8 @@ DECLARE_VARIABLE_UNITTEST(TestSetIntersectionEquivalentRanges);
 template <typename T>
 void TestSetIntersectionMultiset(const size_t n)
 {
+  CHECK_ASAN_ENABLEMENT();
+  
   thrust::host_vector<T> vec = unittest::random_integers<int>(2 * n);
 
   // restrict elements to [min,13)
@@ -244,6 +250,8 @@ void TestSetDifferenceWithBigIndexesHelper(int magnitude)
 
 void TestSetDifferenceWithBigIndexes()
 {
+  CHECK_ASAN_ENABLEMENT();
+  
 #  ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
   TestSetDifferenceWithBigIndexesHelper(30);
   TestSetDifferenceWithBigIndexesHelper(31);

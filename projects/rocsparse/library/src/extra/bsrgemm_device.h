@@ -29,7 +29,10 @@
 namespace rocsparse
 {
     template <uint32_t BLOCKSIZE, uint32_t GROUPS, typename I>
-    ROCSPARSE_DEVICE_ILF void bsrgemm_group_reduce(int tid, I* __restrict__ data)
+    // NOTE: 'data' points into block-shared LDS used for a cross-thread segmented
+    // reduction; it must NOT be __restrict__ (noalias would let the compiler forward
+    // reads across __syncthreads() and drop other threads' contributions).
+    ROCSPARSE_DEVICE_ILF void bsrgemm_group_reduce(int tid, I* data)
     {
         // clang-format off
     if(BLOCKSIZE > 512 && tid < 512) for(uint32_t i = 0; i < GROUPS; ++i) data[tid * GROUPS + i] += data[(tid + 512) * GROUPS + i]; __syncthreads();
@@ -175,9 +178,11 @@ namespace rocsparse
 
     // Hash operation to insert pair into hash table
     template <uint32_t HASHVAL, uint32_t HASHSIZE, uint32_t BLOCKDIM, typename I, typename T>
-    ROCSPARSE_DEVICE_ILF void insert_pair_rxc(
-        I key, T val, int row, int col, I* __restrict__ table, T* __restrict__ data, I empty)
+    ROCSPARSE_DEVICE_ILF void
+        insert_pair_rxc(I key, T val, int row, int col, I* table, T* __restrict__ data, I empty)
     {
+        static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
+                      "HASHSIZE must be a power of two.");
         static constexpr uint32_t BLOCKDIM_SQ = BLOCKDIM * BLOCKDIM;
 
         // Compute hash
@@ -251,6 +256,11 @@ namespace rocsparse
                                            bool                 mul,
                                            bool                 add)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
+                      "HASHSIZE must be a power of two.");
         // Lane id
         int lid = hipThreadIdx_x & (WFSIZE - 1);
         // Wavefront id
@@ -519,6 +529,11 @@ namespace rocsparse
                                               bool                 mul,
                                               bool                 add)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
+                      "HASHSIZE must be a power of two.");
         // Lane id
         int lid = hipThreadIdx_x & (WFSIZE - 1);
         // Wavefront id
@@ -1211,7 +1226,7 @@ namespace rocsparse
                                                       const I* __restrict__ bsr_row_ptr_C,
                                                       J* __restrict__ bsr_col_ind_C,
                                                       T* __restrict__ bsr_val_C,
-                                                      I* __restrict__ workspace_B,
+                                                      I*                   workspace_B,
                                                       rocsparse_index_base idx_base_A,
                                                       rocsparse_index_base idx_base_B,
                                                       rocsparse_index_base idx_base_C,
@@ -1542,7 +1557,7 @@ namespace rocsparse
                                                const I* __restrict__ bsr_row_ptr_C,
                                                J* __restrict__ bsr_col_ind_C,
                                                T* __restrict__ bsr_val_C,
-                                               I* __restrict__ workspace_B,
+                                               I*                   workspace_B,
                                                rocsparse_index_base idx_base_A,
                                                rocsparse_index_base idx_base_B,
                                                rocsparse_index_base idx_base_C,

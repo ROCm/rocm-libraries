@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "ConfigHelpers.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/SdpaConfigConstants.hpp"
 #include "hip_kernel_provider_common/SdpaConfigEnumerations.hpp"
 
@@ -14,14 +15,16 @@ namespace asm_sdpa_engine
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hip_kernel_provider_common;
+using plan_utils::MaskType;
 
-DataType toDataType(const std::string& configDataType)
+static DataType toDataType(const std::string& configDataType)
 {
-    std::unordered_map<std::string, DataType> typeMap = {{config::BFLOAT16, DataType::BFLOAT16},
-                                                         {config::HALF, DataType::HALF},
-                                                         {config::FLOAT, DataType::FLOAT}};
+    const std::unordered_map<std::string, DataType> typeMap
+        = {{config::BFLOAT16, DataType::BFLOAT16},
+           {config::HALF, DataType::HALF},
+           {config::FLOAT, DataType::FLOAT}};
 
-    auto it = typeMap.find(configDataType);
+    const auto it = typeMap.find(configDataType);
     if(it == typeMap.end())
     {
         throw std::runtime_error("Unsupported datatype name in config: " + configDataType);
@@ -29,13 +32,18 @@ DataType toDataType(const std::string& configDataType)
     return it->second;
 }
 
-flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& config)
+flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& config,
+                                                       bool withStats)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
 
-    // Map dtype string to DataType enum
-    DataType dataType = toDataType(config.dtype);
+    // Map dtype string to DataType enums. FP8 configs use FP8_E4M3 inputs with a
+    // BFLOAT16 output and require q/k/v descale tensors (mirrors the engine's fp8
+    // applicability contract); every other config is single-dtype in and out.
+    const bool isFp8 = (config.dtype == config::FP8BF16);
+    const DataType inDataType = isFp8 ? DataType::FP8_E4M3_FNUZ : toDataType(config.dtype);
+    const DataType outDataType = isFp8 ? DataType::BFLOAT16 : inDataType;
 
     // Use arbitrary values for batch, num_heads, and sequence lengths
     const int64_t batch = 2;
@@ -61,22 +69,22 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
     // Q tensor
     const auto qUid = uid++;
     tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, qUid, "q", dataType, &qStrides, &qDims));
+        CreateTensorAttributesDirect(builder, qUid, "q", inDataType, &qStrides, &qDims));
 
     // K tensor
     const auto kUid = uid++;
     tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, kUid, "k", dataType, &kStrides, &kDims));
+        CreateTensorAttributesDirect(builder, kUid, "k", inDataType, &kStrides, &kDims));
 
     // V tensor
     const auto vUid = uid++;
     tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, vUid, "v", dataType, &vStrides, &vDims));
+        CreateTensorAttributesDirect(builder, vUid, "v", inDataType, &vStrides, &vDims));
 
     // O tensor
     const auto oUid = uid++;
     tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, oUid, "o", dataType, &oStrides, &oDims));
+        CreateTensorAttributesDirect(builder, oUid, "o", outDataType, &oStrides, &oDims));
 
     // Scale tensor (always include for SDPA)
     const std::vector<int64_t> scaleDims = {1};
@@ -92,6 +100,60 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
                                      false,
                                      TensorValue::Float32Value,
                                      builder.CreateStruct(scaleVal).Union()));
+
+    // Optional stats (LSE) output tensor: [B, H, Sq, 1], FP32
+    flatbuffers::Optional<int64_t> statsUid = flatbuffers::nullopt;
+    flatbuffers::Optional<bool> generateStats = flatbuffers::nullopt;
+    if(withStats)
+    {
+        const std::vector<int64_t> statsDims = {batch, numHeads, seqQ, 1};
+        const std::vector<int64_t> statsStrides
+            = hipdnn_data_sdk::utilities::generateStrides(statsDims);
+        const auto statsUidVal = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, statsUidVal, "stats", DataType::FLOAT, &statsStrides, &statsDims));
+        statsUid = flatbuffers::Optional<int64_t>(statsUidVal);
+        generateStats = flatbuffers::Optional<bool>(true);
+    }
+
+    // FP8 inputs require per-tensor (scalar) q/k/v descale tensors, else the engine
+    // declines the graph (mirrors AITER's TORCH_CHECK).
+    flatbuffers::Optional<int64_t> descaleQUid = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> descaleKUid = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> descaleVUid = flatbuffers::nullopt;
+    if(isFp8)
+    {
+        const std::vector<int64_t> descaleDims = {1, 1, 1, 1};
+        const std::vector<int64_t> descaleStrides
+            = hipdnn_data_sdk::utilities::generateStrides(descaleDims);
+
+        const auto descaleQTensorUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                                descaleQTensorUid,
+                                                                "descale_q",
+                                                                DataType::FLOAT,
+                                                                &descaleStrides,
+                                                                &descaleDims));
+        descaleQUid = flatbuffers::Optional<int64_t>(descaleQTensorUid);
+
+        const auto descaleKTensorUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                                descaleKTensorUid,
+                                                                "descale_k",
+                                                                DataType::FLOAT,
+                                                                &descaleStrides,
+                                                                &descaleDims));
+        descaleKUid = flatbuffers::Optional<int64_t>(descaleKTensorUid);
+
+        const auto descaleVTensorUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                                descaleVTensorUid,
+                                                                "descale_v",
+                                                                DataType::FLOAT,
+                                                                &descaleStrides,
+                                                                &descaleDims));
+        descaleVUid = flatbuffers::Optional<int64_t>(descaleVTensorUid);
+    }
 
     // Handle GROUP mode - add sequence length tensors
     flatbuffers::Optional<int64_t> seqLenQUid = flatbuffers::nullopt;
@@ -125,7 +187,7 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
     bool causalMask = false;
     bool causalMaskBottomRight = false;
 
-    switch(config.mask)
+    switch(static_cast<MaskType>(config.mask))
     {
     case MaskType::NO_MASK:
         // No mask - leave all defaults
@@ -147,7 +209,7 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
         causalMaskBottomRight = true;
         break;
 
-    case MaskType::WINDOW_GENERIC:
+    case MaskType::SLIDING_WINDOW:
         // Sliding window mask - use arbitrary window bounds
         leftBound = flatbuffers::Optional<int64_t>(64); // Arbitrary left window bound
         rightBound = flatbuffers::Optional<int64_t>(64); // Arbitrary right window bound
@@ -159,60 +221,64 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
     }
 
     // Create SDPA attributes with all the configured options
-    auto sdpaAttributes = CreateSdpaAttributes(builder,
-                                               qUid,
-                                               kUid,
-                                               vUid,
-                                               oUid,
-                                               flatbuffers::nullopt, // attn_mask_tensor_uid
-                                               scaleUid,
-                                               seqLenQUid,
-                                               seqLenKvUid,
-                                               flatbuffers::nullopt, // seed_tensor_uid
-                                               flatbuffers::nullopt, // offset_tensor_uid
-                                               flatbuffers::nullopt, // dropout_mask_tensor_uid
-                                               flatbuffers::nullopt, // dropout_scale_tensor_uid
-                                               flatbuffers::nullopt, // page_table_k_tensor_uid
-                                               flatbuffers::nullopt, // page_table_v_tensor_uid
-                                               flatbuffers::nullopt, // block_mask_tensor_uid
-                                               flatbuffers::nullopt, // sink_token_tensor_uid
-                                               flatbuffers::nullopt, // descale_q_tensor_uid
-                                               flatbuffers::nullopt, // descale_k_tensor_uid
-                                               flatbuffers::nullopt, // descale_v_tensor_uid
-                                               flatbuffers::nullopt, // descale_s_tensor_uid
-                                               flatbuffers::nullopt, // scale_s_tensor_uid
-                                               flatbuffers::nullopt, // scale_o_tensor_uid
-                                               flatbuffers::nullopt, // stats_tensor_uid
-                                               flatbuffers::nullopt, // max_tensor_uid
-                                               flatbuffers::nullopt, // sum_exp_tensor_uid
-                                               flatbuffers::nullopt, // rng_dump_tensor_uid
-                                               flatbuffers::nullopt, // amax_s_tensor_uid
-                                               flatbuffers::nullopt, // amax_o_tensor_uid
-                                               flatbuffers::nullopt, // generate_stats
-                                               false, // alibi_mask
-                                               false, // padding_mask
-                                               causalMask,
-                                               causalMaskBottomRight,
-                                               flatbuffers::nullopt, // dropout_probability
-                                               flatbuffers::nullopt, // attn_scale_value
-                                               leftBound,
-                                               rightBound,
-                                               flatbuffers::nullopt, // max_seq_len_kv
-                                               diagAlignment,
-                                               DataType::FLOAT, // mma_core_mode
-                                               AttentionImplementation::AUTO);
+    const auto sdpaAttributes
+        = CreateSdpaAttributes(builder,
+                               qUid,
+                               kUid,
+                               vUid,
+                               oUid,
+                               flatbuffers::nullopt, // attn_mask_tensor_uid
+                               scaleUid,
+                               seqLenQUid,
+                               seqLenKvUid,
+                               flatbuffers::nullopt, // seed_tensor_uid
+                               flatbuffers::nullopt, // offset_tensor_uid
+                               flatbuffers::nullopt, // dropout_mask_tensor_uid
+                               flatbuffers::nullopt, // dropout_scale_tensor_uid
+                               flatbuffers::nullopt, // page_table_k_tensor_uid
+                               flatbuffers::nullopt, // page_table_v_tensor_uid
+                               flatbuffers::nullopt, // block_mask_tensor_uid
+                               flatbuffers::nullopt, // sink_token_tensor_uid
+                               descaleQUid, // descale_q_tensor_uid
+                               descaleKUid, // descale_k_tensor_uid
+                               descaleVUid, // descale_v_tensor_uid
+                               flatbuffers::nullopt, // descale_s_tensor_uid
+                               flatbuffers::nullopt, // scale_s_tensor_uid
+                               flatbuffers::nullopt, // scale_o_tensor_uid
+                               statsUid, // stats_tensor_uid
+                               flatbuffers::nullopt, // max_tensor_uid
+                               flatbuffers::nullopt, // sum_exp_tensor_uid
+                               flatbuffers::nullopt, // rng_dump_tensor_uid
+                               flatbuffers::nullopt, // amax_s_tensor_uid
+                               flatbuffers::nullopt, // amax_o_tensor_uid
+                               generateStats, // generate_stats
+                               false, // alibi_mask
+                               false, // padding_mask
+                               causalMask,
+                               causalMaskBottomRight,
+                               flatbuffers::nullopt, // dropout_probability
+                               flatbuffers::nullopt, // attn_scale_value
+                               leftBound,
+                               rightBound,
+                               flatbuffers::nullopt, // max_seq_len_kv
+                               diagAlignment,
+                               DataType::UNSET, // mma_core_mode
+                               AttentionImplementation::AUTO);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
-    nodes.push_back(CreateNodeDirect(
-        builder, "sdpa_fwd", dataType, NodeAttributes::SdpaAttributes, sdpaAttributes.Union()));
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_fwd",
+                                     DataType::FLOAT,
+                                     NodeAttributes::SdpaAttributes,
+                                     sdpaAttributes.Union()));
 
-    auto graphOffset = CreateGraphDirect(builder,
-                                         "test",
-                                         DataType::FLOAT,
-                                         DataType::HALF,
-                                         DataType::BFLOAT16,
-                                         &tensorAttributes,
-                                         &nodes);
+    const auto graphOffset = CreateGraphDirect(builder,
+                                               "test",
+                                               DataType::FLOAT,
+                                               DataType::HALF,
+                                               DataType::BFLOAT16,
+                                               &tensorAttributes,
+                                               &nodes);
     builder.Finish(graphOffset);
     return builder;
 }

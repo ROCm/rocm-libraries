@@ -450,7 +450,7 @@ std::string BatchnormOperationDescriptor::toString() const
     str += ", peer_stats_uids=" + vecToString(_data.peer_stats_tensor_uid);
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
-    str += "}";
+    str += '}';
     return str;
 }
 

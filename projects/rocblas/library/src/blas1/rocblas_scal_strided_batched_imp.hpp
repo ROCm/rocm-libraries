@@ -97,7 +97,9 @@ namespace
                              "--stride_x",
                              stridex,
                              "--batch_count",
-                             batch_count);
+                             batch_count,
+                             "--alpha_stride",
+                             handle->get_stride_alpha());
         }
 
         if(layer_mode & rocblas_layer_mode_log_profile)
@@ -110,7 +112,9 @@ namespace
                                "stride_x",
                                stridex,
                                "batch_count",
-                               batch_count);
+                               batch_count,
+                               "stride_alpha",
+                               handle->get_stride_alpha());
 
         if(n <= 0 || incx <= 0 || batch_count <= 0)
             return rocblas_status_success;
@@ -141,7 +145,7 @@ namespace
                 return check_numerics_status;
         }
         rocblas_status status = ROCBLAS_API(rocblas_internal_scal_template)(
-            handle, n, alpha, 0, x, 0, incx, stridex, batch_count);
+            handle, n, alpha, handle->get_stride_alpha(), x, 0, incx, stridex, batch_count);
         if(status != rocblas_status_success)
             return status;
 

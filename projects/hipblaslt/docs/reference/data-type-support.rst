@@ -1,15 +1,63 @@
 .. meta::
-   :description: hipBLASLt library data type support
+   :description: hipBLASLt library precision support
    :keywords: hipBLASLt, ROCm, data type support
 
-.. _data-type-support:
+.. _hipblaslt-data-type-support:
 
 ******************************************
-Data type support
+hipBLASLt precision support
 ******************************************
 
 This topic lists the supported data types for the hipBLASLt GEMM operation,
 which is performed by :ref:`hipblasltmatmul`.
+
+This page lists the data types supported by the library itself and does not
+indicate hardware support. A type listed here is only usable if the GPU
+architecture also supports it; otherwise it is unsupported. For data type support
+across the other ROCm libraries and by GPU architecture, see the
+:doc:`Data types and precision support page <rocm:reference/precision-support>`.
+
+.. _hipblaslt-input-output-type-support:
+
+Supported data types overview
+=============================
+
+The following table summarizes the input and output data types supported by
+hipBLASLt. For the full ``hipDataType`` enumeration, compute modes, and
+supported type combinations, see the sections that follow.
+
+.. list-table::
+    :header-rows: 1
+
+    *
+      - Icon
+      - Definition
+    *
+      - ✅
+      - Fully supported as both an input and output type.
+    *
+      - ⚠️
+      - Partially supported as an input or output type.
+
+Data types not listed in the table below are not supported.
+
+.. datatemplate:yaml:: /data/reference/precision-support.yaml
+
+    .. list-table::
+        :header-rows: 1
+        :widths: 70, 30
+
+        *
+            - Data type
+            - Support
+    {% for data_type in data.data_types %}
+        *
+            - {{ data_type.type }}
+            - {{ data_type.support }}
+    {% endfor %}
+
+hipDataType enumeration
+=======================
 
 The ``hipDataType`` enumeration defines data precision types and is primarily
 used when the data reference itself does not include type information, such as
@@ -39,16 +87,6 @@ The hipBLASLt input and output types are listed in the following table.
       - ``HIP_R_4F_E2M1``
       - N/A
       - 4-bit real float4 precision floating-point
-
-    *
-      - ``HIP_R_6F_E2M3``
-      - N/A
-      - 6-bit real float6 precision floating-point
-
-    *
-      - ``HIP_R_6F_E3M2``
-      - N/A
-      - 6-bit real bfloat6 precision floating-point
 
     *
       - ``HIP_R_8F_E4M3_FNUZ``
@@ -165,6 +203,3 @@ non-transpose, and :math:`alpha` and :math:`beta` are scalars.
 For complete details on supported data type combinations, including specific
 compute types, scale types, and bias configurations, see the
 :ref:`hipBLASLt API reference page <api-reference>`.
-
-For more information about data type support for the other ROCm libraries, see
-:doc:`Data types and precision support page <rocm:reference/precision-support>`.

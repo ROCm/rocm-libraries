@@ -12,10 +12,10 @@
 
 #include "ck/tensor_operation/gpu/thread/threadwise_tensor_slice_transfer_util.hpp"
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck {
 // Assume:
 //   1. src:
@@ -1249,6 +1249,8 @@ struct ThreadwiseTensorSliceTransfer_v3
 //     3. DstOriginIdx is known at compile-time
 //     4. use direct address calculation
 //   3. vector access on src
+//     Note:
+//     SrcScalarStrideInVector is not used in this implementation
 template <typename SrcData,
           typename DstData,
           typename SrcDesc,
@@ -1258,6 +1260,7 @@ template <typename SrcData,
           index_t SrcVectorDim,
           index_t SrcScalarPerVector,
           index_t SrcScalarStrideInVector,
+          bool DoTranspose               = false,
           typename enable_if<SrcDesc::IsKnownAtCompileTime() && DstDesc::IsKnownAtCompileTime(),
                              bool>::type = false>
 struct ThreadwiseTensorSliceTransfer_v4
@@ -1393,8 +1396,8 @@ struct ThreadwiseTensorSliceTransfer_v4
             if constexpr(SrcBuffer::IsDynamicBuffer())
             {
                 src_tmp_vector.template AsType<src_vector_t>()(Number<0>{}) =
-                    src_buf.template Get<src_vector_t>(src_data_coord.GetOffset() / PackedSize,
-                                                       is_src_valid);
+                    src_buf.template Get<src_vector_t, DoTranspose>(
+                        src_data_coord.GetOffset() / PackedSize, is_src_valid);
             }
             else if constexpr(SrcBuffer::IsStaticBuffer())
             {
@@ -2098,4 +2101,6 @@ struct ThreadwiseTensorSliceTransfer_StaticToStatic_IntraRow
 
 } // namespace ck
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

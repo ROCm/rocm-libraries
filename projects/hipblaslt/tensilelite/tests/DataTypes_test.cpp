@@ -70,7 +70,7 @@ TYPED_TEST(TypedDataTypesTest, TypeInfo_Consistency)
     TensileLite::DataTypeInfo const& fromEnum = TensileLite::DataTypeInfo::Get(MyTypeInfo::Enum);
 
     EXPECT_EQ(fromEnum.dataType, MyTypeInfo::Enum);
-    EXPECT_EQ(fromEnum.elementSize, sizeof(TheType));
+    EXPECT_EQ(fromEnum.elementSize * fromEnum.packing, sizeof(TheType));
     EXPECT_EQ(fromEnum.packing, MyTypeInfo::Packing);
 
     EXPECT_EQ(fromEnum.isComplex, MyTypeInfo::IsComplex);
@@ -148,3 +148,21 @@ INSTANTIATE_TEST_SUITE_P(DataTypesTest,
                                            rocisa::DataType::Int8,
                                            rocisa::DataType::Int8x4,
                                            rocisa::DataType::Int32));
+
+// A CustomArgType that toString() emits but fromStringCustomArgType() cannot parse
+// makes that type unusable in a custom kernel's custom.config, and only fails once
+// someone writes a config using it. Walk the whole enum so new types stay covered.
+TEST(DataTypesTest, CustomArgTypeRoundTrip)
+{
+    using TensileLite::CustomArgType;
+
+    for(int i = 0; i < static_cast<int>(CustomArgType::CustomArgType_Count); i++)
+    {
+        auto const  value = static_cast<CustomArgType>(i);
+        std::string name  = TensileLite::toString(value);
+
+        EXPECT_FALSE(name.empty()) << "CustomArgType " << i << " has no string form";
+        EXPECT_EQ(TensileLite::fromStringCustomArgType(name), value)
+            << "round trip failed for \"" << name << "\"";
+    }
+}

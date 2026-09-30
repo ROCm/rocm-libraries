@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocrefact_csrrf_analysis.hpp"
+#include "exceptions.hpp"
 
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
@@ -49,6 +50,7 @@ rocblas_status rocsolver_csrrf_analysis_impl(rocblas_handle handle,
                                              U B,
                                              const rocblas_int ldb,
                                              rocsolver_rfinfo rfinfo)
+try
 {
     ROCSOLVER_ENTER_TOP("csrrf_analysis", "-n", n, "--nnzM", nnzM, "--nnzT", nnzT, "--nrhs", nrhs,
                         "--ldb", ldb);
@@ -88,6 +90,10 @@ rocblas_status rocsolver_csrrf_analysis_impl(rocblas_handle handle,
     // execution
     return rocsolver_csrrf_analysis_template<T>(handle, n, nrhs, nnzM, ptrM, indM, valM, nnzT, ptrT,
                                                 indT, valT, pivP, pivQ, B, ldb, rfinfo, work);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

@@ -620,6 +620,28 @@ class TestDataField:
         df = make_data_field(type="vector_int64")
         assert df.mode_converter_returns_optional is False
 
+    def test_mode_converter_optional_override_forces_optional(self):
+        """mode_converter_optional: true overrides a sentinel-less enum, so a
+        value the converter does not map is rejected instead of silently
+        coerced to the first enumerator."""
+        df = make_data_field(
+            type="mode", mode_sentinel="none", mode_converter_optional=True
+        )
+        assert df.mode_converter_returns_optional is True
+
+    def test_mode_converter_optional_override_forces_plain(self):
+        """The override also works the other way: an enum with a sentinel can
+        still declare a total converter."""
+        ed = EnumDef(values=[EnumValue(name="NOT_SET", value=0, sentinel=True)])
+        df = make_data_field(type="mode", enum_def=ed, mode_converter_optional=False)
+        assert df.effective_mode_sentinel == "required"
+        assert df.mode_converter_returns_optional is False
+
+    def test_mode_converter_optional_override_ignored_for_non_mode_field(self):
+        """The override cannot make a non-mode field claim a converter."""
+        df = make_data_field(type="vector_int64", mode_converter_optional=True)
+        assert df.mode_converter_returns_optional is False
+
     # --- has_enum_def ---
 
     def test_has_enum_def_true(self):
@@ -1438,8 +1460,14 @@ class TestOperationConfigFieldFilters:
         ]
         cfg = self._make_config_with_fields(data_fields=fields)
         result = cfg.graph_verifiable_data_fields
-        assert len(result) == 3
-        assert [f.name for f in result] == ["padding", "mode", "data_type"]
+        assert len(result) == 5
+        assert [f.name for f in result] == [
+            "padding",
+            "mode",
+            "data_type",
+            "alpha",
+            "flag",
+        ]
 
     # --- Boolean properties ---
 

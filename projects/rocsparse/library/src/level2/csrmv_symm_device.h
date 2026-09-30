@@ -95,6 +95,11 @@ namespace rocsparse
                                                           Y*                   y,
                                                           rocsparse_index_base idx_base)
     {
+        static_assert(WG_SIZE > 0 && (WG_SIZE & (WG_SIZE - 1)) == 0,
+                      "WG_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WG_SIZE == 0, "BLOCKSIZE must be a multiple of WG_SIZE.");
+
         __shared__ T           partial_sums[BLOCKSIZE];
         extern __shared__ char cols_in_rows[];
 
@@ -327,16 +332,22 @@ namespace rocsparse
 
                 // {numThreadsForRed} adjacent threads all work on the same row, so their
                 // start and end values are the same.
-                const int st                = lid / numThreadsForRed;
-                const I   local_first_val   = (csr_row_ptr[row + st] - csr_row_ptr[row]);
-                const I   local_last_val    = csr_row_ptr[row + st + 1] - csr_row_ptr[row];
-                const I   workForEachThread = (local_last_val - local_first_val) / numThreadsForRed;
-                const int threadInBlock     = lid & (numThreadsForRed - 1);
+                const int st            = lid / numThreadsForRed;
+                const int threadInBlock = lid & (numThreadsForRed - 1);
 
                 // Not all row blocks are full -- they may have an odd number of rows. As such,
                 // we need to ensure that adjacent-groups only work on real data for this rowBlock.
+                // The csr_row_ptr reads are kept inside the guard: for the last row block
+                // row + st can reach stop_row (== m), so csr_row_ptr[row + st + 1] would read
+                // one past the m+1-length array. Benign on discrete GPUs (padded, zeroed pages)
+                // but faults on unified-memory APUs (e.g. gfx1151).
                 if(st < (stop_row - row))
                 {
+                    const I local_first_val = (csr_row_ptr[row + st] - csr_row_ptr[row]);
+                    const I local_last_val  = csr_row_ptr[row + st + 1] - csr_row_ptr[row];
+                    const I workForEachThread
+                        = (local_last_val - local_first_val) / numThreadsForRed;
+
                     // only works when numThreadsForRed is a power of 2
                     for(I i = 0; i < workForEachThread; i++)
                     {
@@ -508,6 +519,10 @@ namespace rocsparse
                                                                 Y*                   y,
                                                                 rocsparse_index_base idx_base)
     {
+        static_assert(WG_SIZE > 0 && (WG_SIZE & (WG_SIZE - 1)) == 0,
+                      "WG_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE == 4 * WG_SIZE, "BLOCKSIZE must be 4 * WG_SIZE.");
+
         __shared__ T partial_sums[BLOCKSIZE];
 
         const int gid = hipBlockIdx_x;

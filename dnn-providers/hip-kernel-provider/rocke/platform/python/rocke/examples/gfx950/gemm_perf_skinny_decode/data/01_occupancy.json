@@ -1,0 +1,108 @@
+{
+  "rows": [
+    {
+      "label": "t16x64x32_w1x2_a16x16x32_mem",
+      "hypothesis": "smallest N slab, lowest LDS",
+      "vgpr": 48,
+      "agpr": 8,
+      "sgpr": 20,
+      "spill": 0,
+      "lds_bytes": 7168,
+      "waves_per_cu": 32,
+      "wgs_per_cu": 16,
+      "limited_by": "MAX_WAVES_PER_CU",
+      "passes_filter": true
+    },
+    {
+      "label": "t16x128x32_w1x2_a16x16x32_mem",
+      "hypothesis": "default skinny tile",
+      "vgpr": 76,
+      "agpr": 16,
+      "sgpr": 20,
+      "spill": 0,
+      "lds_bytes": 13312,
+      "waves_per_cu": 24,
+      "wgs_per_cu": 12,
+      "limited_by": "LDS",
+      "passes_filter": true
+    },
+    {
+      "label": "t16x128x64_w1x2_a16x16x32_mem",
+      "hypothesis": "wider K window per loop trip",
+      "vgpr": 96,
+      "agpr": 16,
+      "sgpr": 20,
+      "spill": 0,
+      "lds_bytes": 22528,
+      "waves_per_cu": 14,
+      "wgs_per_cu": 7,
+      "limited_by": "LDS",
+      "passes_filter": true
+    },
+    {
+      "label": "t16x256x32_w1x4_a16x16x32_mem",
+      "hypothesis": "wider N slab, 4 warps",
+      "vgpr": 96,
+      "agpr": 16,
+      "sgpr": 20,
+      "spill": 0,
+      "lds_bytes": 25600,
+      "waves_per_cu": 20,
+      "wgs_per_cu": 5,
+      "limited_by": "VGPR",
+      "passes_filter": true
+    },
+    {
+      "label": "t32x128x32_w2x2_a16x16x32_mem",
+      "hypothesis": "more M rows (pad waste, but more warps)",
+      "vgpr": 52,
+      "agpr": 16,
+      "sgpr": 20,
+      "spill": 0,
+      "lds_bytes": 18432,
+      "waves_per_cu": 32,
+      "wgs_per_cu": 8,
+      "limited_by": "MAX_WAVES_PER_CU",
+      "passes_filter": true
+    },
+    {
+      "label": "t16x128x32_w1x2_a16x16x32_compv3",
+      "hypothesis": "double-buffer pipeline",
+      "vgpr": 76,
+      "agpr": 16,
+      "sgpr": 20,
+      "spill": 0,
+      "lds_bytes": 13312,
+      "waves_per_cu": 24,
+      "wgs_per_cu": 12,
+      "limited_by": "LDS",
+      "passes_filter": true
+    },
+    {
+      "label": "t16x128x32_w1x2_a16x16x32_compv4",
+      "hypothesis": "async-DMA + MFMA overlap",
+      "vgpr": 76,
+      "agpr": 16,
+      "sgpr": 20,
+      "spill": 0,
+      "lds_bytes": 13312,
+      "waves_per_cu": 24,
+      "wgs_per_cu": 12,
+      "limited_by": "LDS",
+      "passes_filter": true
+    },
+    {
+      "label": "t16x128x64_w1x2_a16x16x32_compv4",
+      "hypothesis": "compv4 + wider K",
+      "vgpr": 96,
+      "agpr": 16,
+      "sgpr": 20,
+      "spill": 0,
+      "lds_bytes": 22528,
+      "waves_per_cu": 14,
+      "wgs_per_cu": 7,
+      "limited_by": "LDS",
+      "passes_filter": true
+    }
+  ]
+}

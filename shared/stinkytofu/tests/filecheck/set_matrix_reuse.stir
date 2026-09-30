@@ -1,0 +1,78 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --SetMatrixReusePass --print-output
+#
+# SetMatrixReusePass: set mod.mfma reuseA/reuseB from consecutive matrix insn operands;
+# clear stale flags; skip non-scale f8f6f4 and MX f4 (rocisa gating).
+
+#--- Same B (src1), different A: reuseB on first WMMA only
+# CHECK-LABEL: @same_b_operand
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-SAME: mod.mfma = { reuseA = false, reuseB = true }
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-SAME: mod.mfma = { reuseA = false, reuseB = false }
+
+st.func @same_b_operand() {
+^entry:
+  a[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[8:15], v[16:23], a[0:7]) { mod.mfma = { reuseA = true, reuseB = true } }
+  a[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[24:31], v[16:23], a[32:39]) { mod.mfma = { reuseA = true, reuseB = true } }
+}
+
+#--- Non-matrix insn between WMMAs does not break reuse chain
+# CHECK-LABEL: @non_matrix_between
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-SAME: mod.mfma = { reuseA = true, reuseB = true }
+# CHECK: ds_load_b128
+# CHECK: v_wmma_f32_16x16x32_bf16
+
+st.func @non_matrix_between() {
+^entry:
+  a[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[8:15], v[16:23], a[0:7]) { mod.mfma = { reuseA = true, reuseB = true } }
+  v[64:67] = "st.ds_load_b128"(v[72]) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  a[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[8:15], v[16:23], a[32:39]) { mod.mfma = { reuseA = true, reuseB = true } }
+}
+
+#--- Single WMMA: clear stale reuse flags
+# CHECK-LABEL: @clears_stale_on_last
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-SAME: mod.mfma = { reuseA = false, reuseB = false }
+
+st.func @clears_stale_on_last() {
+^entry:
+  a[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[8:15], v[16:23], a[0:7]) { mod.mfma = { reuseA = true, reuseB = true } }
+}
+
+#--- Non-scale WMMA f8f6f4: never set reuse
+# CHECK-LABEL: @skip_f8f6f4
+# CHECK: v_wmma_f32_16x16x128_f8f6f4
+# CHECK-SAME: mod.mfma = { reuseA = false, reuseB = false }
+# CHECK: v_wmma_f32_16x16x128_f8f6f4
+# CHECK-SAME: mod.mfma = { reuseA = false, reuseB = false }
+
+st.func @skip_f8f6f4() {
+^entry:
+  a[0:7] = "st.v_wmma_f32_16x16x128_f8f6f4"(v[8:15], v[16:23], a[0:7]) { mod.mfma = { reuseA = true, reuseB = true } }
+  a[32:39] = "st.v_wmma_f32_16x16x128_f8f6f4"(v[24:31], v[16:23], a[32:39]) { mod.mfma = { reuseA = true, reuseB = true } }
+}
+
+#--- MX scale WMMA f4: never set reuse
+# CHECK-LABEL: @skip_mx_f4_scale
+# CHECK: v_wmma_scale_f32_32x16x128_f4
+# CHECK-SAME: mod.mfma = { reuseA = false, reuseB = false }
+
+st.func @skip_mx_f4_scale() {
+^entry:
+  a[0:7] = "st.v_wmma_scale_f32_32x16x128_f4"(v[8:15], v[16:23], a[0:7]) { mod.mfma = { reuseA = true, reuseB = true } }
+  a[32:39] = "st.v_wmma_scale_f32_32x16x128_f4"(v[24:31], v[16:23], a[32:39]) { mod.mfma = { reuseA = true, reuseB = true } }
+}
+
+#--- MX scale WMMA f8f6f4: reuse allowed when operands match
+# CHECK-LABEL: @allow_mx_f8f6f4_scale
+# CHECK: v_wmma_scale_f32_16x16x128_f8f6f4
+# CHECK-SAME: mod.mfma = { reuseA = false, reuseB = true }
+# CHECK: v_wmma_scale_f32_16x16x128_f8f6f4
+# CHECK-SAME: mod.mfma = { reuseA = false, reuseB = false }
+
+st.func @allow_mx_f8f6f4_scale() {
+^entry:
+  a[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[8:15], v[16:23], a[0:7]) { mod.mfma = { reuseA = true, reuseB = true } }
+  a[32:39] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[24:31], v[16:23], a[32:39]) { mod.mfma = { reuseA = true, reuseB = true } }
+}

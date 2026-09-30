@@ -133,7 +133,7 @@ struct square_diff_fn
     template <class T, class U>
     double operator()(T x, U y) const
     {
-        double diff = static_cast<double>(x - y);
+        double diff = static_cast<double>(x) - static_cast<double>(y);
         return diff * diff;
     }
 };
@@ -223,23 +223,26 @@ std::size_t mismatch_diff(R1&& r1, R2&& r2, T diff)
             float_equal, diff, std::bind(abs_diff, std::placeholders::_1, std::placeholders::_2)));
 }
 
-template <class R1, class R2>
-double rms_range(R1&& r1, R2&& r2)
+// Reference values are 'ref', observed (measured) values are 'obs'.
+template <class RefType, class ObsType>
+double rms_range(RefType&& ref, ObsType&& obs)
 {
-    std::size_t n = range_distance(r1);
-    if(n == range_distance(r2))
-    {
-        if(n == 0)
-            return 0;
-        double square_difference = range_product(r1, r2, 0.0, sum_fn{}, square_diff);
-        double mag1 = static_cast<double>(*std::max_element(r1.begin(), r1.end(), compare_mag));
-        double mag2 = static_cast<double>(*std::max_element(r2.begin(), r2.end(), compare_mag));
-        double mag =
-            std::max({std::fabs(mag1), std::fabs(mag2), std::numeric_limits<double>::min()});
-        return std::sqrt(square_difference) / (std::sqrt(n) * mag);
-    }
-    else
-        return double(std::numeric_limits<range_value<R1>>::max());
+    auto ref_size = range_distance(ref);
+    auto obs_size = range_distance(obs);
+    if(ref_size != obs_size)
+        return std::numeric_limits<double>::max();
+
+    if(ref_size == 0)
+        return 0.0;
+
+    double n                 = static_cast<double>(ref_size);
+    double square_difference = range_product(ref, obs, 0.0, sum_fn{}, square_diff);
+    double mag1 = static_cast<double>(*std::max_element(ref.begin(), ref.end(), compare_mag));
+    // If reference is all 0, avoid dividing by 0 when normalizing
+    mag1              = (mag1 == 0.0) ? 1.0 : std::fabs(mag1);
+    double normalizer = std::max(mag1, std::numeric_limits<double>::min());
+
+    return std::sqrt(square_difference) / (std::sqrt(n) * normalizer);
 }
 } // namespace miopen
 #endif

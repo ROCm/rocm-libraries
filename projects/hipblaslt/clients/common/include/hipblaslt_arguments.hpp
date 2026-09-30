@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -109,11 +109,33 @@ struct Arguments
     int64_t ldd[MAX_SUPPORTED_NUM_PROBLEMS];
     int64_t lde[MAX_SUPPORTED_NUM_PROBLEMS];
 
+    int64_t a2a_extent;
+
     int32_t batch_count;
     int32_t batch_mode;
 
+    // Batch offset support for general batched GEMM
+    int64_t batch_offset_a;
+    int64_t batch_offset_b;
+    int64_t batch_offset_c;
+    int64_t batch_offset_d;
+
     int32_t iters;
     int32_t cold_iters;
+
+    // Adaptive timing; all *_time fields are milliseconds, 0 disables.
+    float   warmup_time; // warm up until this wall-time is reached
+    float   sample_time; // target span per timed sample; 0 => one enqueue per sample
+    float   measure_time; // minimum total measure time (floor)
+    float   max_measure_time; // measure ceiling; 0 => unbounded
+    float   noise_threshold; // rel. std error convergence target; 0 => disabled
+    int32_t min_iters; // floor on total timed iterations
+    int32_t max_iters; // ceiling on total timed iterations; 0 => unbounded
+    float   stability_threshold; // noise-plateau fallback: max rel. spread of recent rel_iqr
+        // readings to call it "stable"; 0 => fallback disabled
+    int32_t stability_window; // rel_iqr readings tested for the plateau (>= 2)
+    int32_t stability_interval; // record a rel_iqr reading every N samples (>= 1)
+    bool    adaptive; // enable the tuned adaptive-timing preset (knobs above override it)
 
     uint32_t algo;
     int32_t  solution_index;
@@ -145,10 +167,12 @@ struct Arguments
 
     // bytes
     uint8_t devices;
+    uint8_t a2a_world;
 
     int8_t norm_check;
     int8_t allclose_check;
     int8_t unit_check;
+    int8_t ulp_check;
     int8_t timing;
 
     char transA;
@@ -162,6 +186,7 @@ struct Arguments
     hipDataType              aux_type;
     hipblaslt_bias_source    bias_source;
     bool                     bias_vector;
+    int32_t                  bias_stride; // Stride within bias vector for strided batch cases where each batch has unique bias value.
     hipblaslt_scaling_format scaleA;
     hipblaslt_scaling_format scaleB;
     bool                     scaleC;
@@ -234,10 +259,26 @@ struct Arguments
     OPER(ldc) SEP                    \
     OPER(ldd) SEP                    \
     OPER(lde) SEP                    \
+    OPER(a2a_extent) SEP             \
     OPER(batch_count) SEP            \
     OPER(batch_mode) SEP             \
+    OPER(batch_offset_a) SEP         \
+    OPER(batch_offset_b) SEP         \
+    OPER(batch_offset_c) SEP         \
+    OPER(batch_offset_d) SEP         \
     OPER(iters) SEP                  \
     OPER(cold_iters) SEP             \
+    OPER(warmup_time) SEP            \
+    OPER(sample_time) SEP            \
+    OPER(measure_time) SEP           \
+    OPER(max_measure_time) SEP       \
+    OPER(noise_threshold) SEP        \
+    OPER(min_iters) SEP              \
+    OPER(max_iters) SEP              \
+    OPER(stability_threshold) SEP    \
+    OPER(stability_window) SEP       \
+    OPER(stability_interval) SEP     \
+    OPER(adaptive) SEP               \
     OPER(algo) SEP                   \
     OPER(solution_index) SEP         \
     OPER(requested_solution_num) SEP \
@@ -257,9 +298,11 @@ struct Arguments
     OPER(threads) SEP                \
     OPER(streams) SEP                \
     OPER(devices) SEP                \
+    OPER(a2a_world) SEP              \
     OPER(norm_check) SEP             \
     OPER(allclose_check) SEP         \
     OPER(unit_check) SEP             \
+    OPER(ulp_check) SEP              \
     OPER(timing) SEP                 \
     OPER(transA) SEP                 \
     OPER(transB) SEP                 \
@@ -270,6 +313,7 @@ struct Arguments
     OPER(aux_type) SEP               \
     OPER(bias_source) SEP            \
     OPER(bias_vector) SEP            \
+    OPER(bias_stride) SEP            \
     OPER(scaleA) SEP                 \
     OPER(scaleB) SEP                 \
     OPER(scaleC) SEP                 \
@@ -655,12 +699,6 @@ enum hipblaslt_argument : int
     FOR_EACH_ARGUMENT(CREATE_ENUM, )
 };
 #undef CREATE_ENUM
-
-#if __clang__
-#define HIPBLASLT_CLANG_STATIC static
-#else
-#define HIPBLASLT_CLANG_STATIC
-#endif
 
 // ArgumentsHelper contains a templated lambda apply<> where there is a template
 // specialization for each line in the CPP macro FOR_EACH_ARGUMENT. For example,

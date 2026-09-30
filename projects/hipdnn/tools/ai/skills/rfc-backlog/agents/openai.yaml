@@ -1,0 +1,4 @@
+interface:
+  display_name: "RFC Backlog"
+  short_description: "Turn an RFC into JIRA stories/tasks"
+  default_prompt: "Use $rfc-backlog to decompose a technical RFC into an actionable backlog of JIRA stories and tasks grounded in the affected codebase, review them, then create the tickets (or use --dry-run to only display them)."

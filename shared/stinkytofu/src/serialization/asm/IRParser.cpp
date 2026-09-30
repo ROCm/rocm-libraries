@@ -25,6 +25,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <climits>
+#include <cstdint>
 #include <iostream>
 #include <optional>
 #include <string_view>
@@ -467,20 +469,21 @@ std::unique_ptr<ParsedBlock> IRParser::parseBlock() {
             break;  // Next block - caller will parse it
         }
 
+        // Try label syntax first: parseInstruction eats `ident:` as a broken destReg and can't
+        // backtrack.
+        if (peek().kind == TokenKind::Identifier && lexer.peekAhead(1).kind == TokenKind::Colon) {
+            auto label = parseLabel();
+            if (label) {
+                block->instructions.push_back(std::move(label));
+                skipNewlines();
+                continue;
+            }
+        }
+
         auto inst = parseInstruction();
         if (inst) {
             block->instructions.push_back(std::move(inst));
         } else {
-            // Try label (flat style) for backward compat
-            if (peek().kind == TokenKind::Identifier &&
-                lexer.peekAhead(1).kind == TokenKind::Colon) {
-                auto label = parseLabel();
-                if (label) {
-                    block->instructions.push_back(std::move(label));
-                    skipNewlines();
-                    continue;
-                }
-            }
             // Error recovery
             while (!lexer.isAtEnd() && peek().kind != TokenKind::Eof &&
                    peek().kind != TokenKind::Newline) {
@@ -657,6 +660,8 @@ bool IRParser::parseAttributes(ParsedInstruction& inst) {
 
     // Parse comma-separated attributes
     while (!lexer.isAtEnd() && peek().kind != TokenKind::Eof) {
+        skipNewlines();  // the block may span lines
+
         // Check for end of attributes
         if (peek().kind == TokenKind::RightBrace) {
             consume();
@@ -723,6 +728,7 @@ bool IRParser::parseAttributes(ParsedInstruction& inst) {
         }
 
         // Check for comma or end of attributes
+        skipNewlines();
         if (peek().kind == TokenKind::Comma) {
             consume();
             continue;
@@ -922,6 +928,18 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
     const Token& regTypeTok = consume();
     std::string regTypeStr(regTypeTok.text);
 
+    // The emitter glues VOP3 neg to the register (-v0) and the lexer returns it
+    // as one identifier, so split the sign off before matching the type.
+    bool isMinus = false;
+    if (regTypeStr.size() > 1 && regTypeStr[0] == '-') {
+        isMinus = true;
+        regTypeStr.erase(0, 1);
+    }
+    auto withSign = [&](StinkyRegister reg) {
+        reg.reg.isMinus = isMinus;
+        return reg;
+    };
+
     // Handle label_*: label reference (e.g. label_LoopEndL, label_LoopBeginL)
     if (regTypeStr.size() >= 6 && regTypeStr.substr(0, 6) == "label_") {
         return StinkyRegister(regTypeStr);
@@ -930,6 +948,46 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
     } else if (regTypeStr == "off") {
         // MUBUF "off" keyword: vaddr field with no address register.
         return StinkyRegister("off");
+    } else if (regTypeStr == "hwreg") {
+        // hwreg(id, offset, size) — numeric form only (matches emitter).
+        if (peek().kind != TokenKind::LeftParen) {
+            emitError("Expected '(' after hwreg");
+            return std::nullopt;
+        }
+        consume();
+        auto readU16 = [&](uint16_t& out) -> bool {
+            if (peek().kind != TokenKind::IntegerLiteral && peek().kind != TokenKind::HexLiteral)
+                return false;
+            auto v = safeStoi(std::string(consume().text));
+            if (!v || *v < 0 || *v > 0xFFFF) return false;
+            out = static_cast<uint16_t>(*v);
+            return true;
+        };
+        uint16_t id = 0, offset = 0, size = 32;
+        if (!readU16(id)) {
+            emitError("Expected hwreg id");
+            return std::nullopt;
+        }
+        if (peek().kind == TokenKind::Comma) {
+            consume();
+            if (!readU16(offset)) {
+                emitError("Expected hwreg offset");
+                return std::nullopt;
+            }
+            if (peek().kind == TokenKind::Comma) {
+                consume();
+                if (!readU16(size)) {
+                    emitError("Expected hwreg size");
+                    return std::nullopt;
+                }
+            }
+        }
+        if (peek().kind != TokenKind::RightParen) {
+            emitError("Expected ')' to close hwreg");
+            return std::nullopt;
+        }
+        consume();
+        return StinkyRegister::Hwreg(id, offset, size);
     }
 
     // Handle "v10" / "s5" / "acc12" etc.: identifier = regType + digits (no space)
@@ -942,7 +1000,7 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
             std::all_of(suffix.begin(), suffix.end(),
                         [](unsigned char c) { return std::isdigit(c); })) {
             auto idx = safeStoi(suffix);
-            if (idx) return StinkyRegister(rt, *idx, 1);
+            if (idx) return withSign(StinkyRegister(rt, *idx, 1));
         }
     }
 
@@ -962,7 +1020,7 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
             emitError("Register index out of range or invalid: " + std::string(idxTok.text));
             return std::nullopt;
         }
-        return StinkyRegister(regType, *idx, 1);  // Single element
+        return withSign(StinkyRegister(regType, *idx, 1));  // Single element
     }
 
     // Check for format: v[12] or v[10:13]
@@ -1019,7 +1077,7 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
         return std::nullopt;
     }
 
-    return StinkyRegister(regType, *startIdx, regNum);
+    return withSign(StinkyRegister(regType, *startIdx, regNum));
 }
 
 bool IRParser::expect(TokenKind kind, const std::string& message) {

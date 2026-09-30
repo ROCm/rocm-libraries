@@ -175,6 +175,7 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
             {"MIO_BN_GFX110X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx110"))},
             {"MIO_BN_GFX115X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx115"))},
             {"MIO_BN_GFX120X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx120"))},
+            {"MIO_BN_GFX125X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx125"))},
             {"MIOPEN_YES_ACTIV", static_cast<int>(1)},
             {"MIOPEN_NRN_OP_ID", static_cast<int>(activ_op.activMode)},
             {"MIOPEN_USE_FP16", static_cast<int>(input_desc.GetType() == miopenHalf)},
@@ -190,10 +191,10 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
 
     result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-            decltype(auto) kernel   = handle_.Run(kernels.front());
-            const auto& invoke_ctx  = raw_params.CastTo<miopen::fusion::FusionInvokeParams>();
-            const auto& bot_ocl_buf = invoke_ctx.in;
-            const auto& top_ocl_buf = invoke_ctx.out;
+            decltype(auto) kernel  = handle_.Run(kernels.front());
+            const auto& invoke_ctx = raw_params.CastTo<miopen::fusion::FusionInvokeParams>();
+            const auto& bot_buf    = invoke_ctx.in;
+            const auto& top_buf    = invoke_ctx.out;
             const auto& bn_invoke =
                 dynamic_cast<miopen::fusion::BatchNormFwdTrainingOpInvokeParam&>(
                     *invoke_ctx.op_args.params[0]);
@@ -224,8 +225,8 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
             kern_args.push_back({bn_invoke.epsilon});
             if(savePopStats)
                 kern_args.push_back({bn_invoke.expAvgFactor});
-            kern_args.push_back({bot_ocl_buf});
-            kern_args.push_back({top_ocl_buf});
+            kern_args.push_back({bot_buf});
+            kern_args.push_back({top_buf});
             kern_args.push_back({bn_invoke.bnBias});
             kern_args.push_back({bn_invoke.bnScale});
             if(savePopStats)

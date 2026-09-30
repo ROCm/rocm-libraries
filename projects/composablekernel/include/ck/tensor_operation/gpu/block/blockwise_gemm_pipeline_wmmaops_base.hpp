@@ -9,10 +9,12 @@
 #include "ck/tensor_operation/gpu/thread/threadwise_tensor_slice_transfer.hpp"
 #include "ck/tensor_operation/gpu/warp/wmma_gemm.hpp"
 #include "ck/tensor_description/tensor_adaptor.hpp"
+#include "ck/utility/thread_buf_to_vec_loader.hpp"
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 
 template <index_t BlockSize,
@@ -34,7 +36,9 @@ template <index_t BlockSize,
           index_t NRepeat,
           index_t KPack,
           index_t KInner,
-          bool TransposeC = false>
+          bool TransposeC       = false,
+          bool UseLdsTransposeA = false,
+          bool UseLdsTransposeB = false>
 struct BlockwiseGemmWmmaops_pipeline_base
 {
     static constexpr auto I0 = Number<0>{};
@@ -45,6 +49,8 @@ struct BlockwiseGemmWmmaops_pipeline_base
     static constexpr auto I6 = Number<6>{};
 
     using ThisThreadBlock = ThisThreadBlock<BlockSize>;
+
+    static constexpr bool TransposeC_ = TransposeC;
 
     static constexpr index_t WaveSize = 32;
 
@@ -68,12 +74,16 @@ struct BlockwiseGemmWmmaops_pipeline_base
                                                TransposeC>{};
 
     static constexpr index_t KPerThread = wmma_gemm.wmma_instr.k_per_blk * KInner;
-    static constexpr index_t A_K1       = ck::math::min(AWmmaTileDesc{}.GetLength(I6), KPerThread);
-    static constexpr index_t B_K1       = ck::math::min(BWmmaTileDesc{}.GetLength(I6), KPerThread);
+    static constexpr index_t A_K1       = UseLdsTransposeA
+                                              ? ck::math::min(AWmmaTileDesc{}.GetLength(I5), KPerThread)
+                                              : ck::math::min(AWmmaTileDesc{}.GetLength(I6), KPerThread);
+    static constexpr index_t B_K1       = UseLdsTransposeB
+                                              ? ck::math::min(BWmmaTileDesc{}.GetLength(I5), KPerThread)
+                                              : ck::math::min(BWmmaTileDesc{}.GetLength(I6), KPerThread);
 
     static_assert(KPack % (A_K1 * A_KRow) == 0, "wrong!");
     static_assert(KPack % (B_K1 * B_KRow) == 0, "wrong!");
-    static constexpr index_t KRepeat = KPerBlock / KPack;
+    static constexpr index_t KRepeat = ck::math::max(KPerBlock / KPack, 1);
 
     static constexpr auto WmmaK = Number<wmma_gemm.wmma_instr.k_per_wmma>{};
 
@@ -280,8 +290,20 @@ struct BlockwiseGemmWmmaops_pipeline_base
 #else
         const auto wmma_krow = 0;
 #endif
-
-        return make_tuple(0, 0, 0, waveId_m, wmma_krow, wmma_a_idx, 0);
+        if constexpr(UseLdsTransposeA)
+        {
+            return make_tuple(0,
+                              0,
+                              0,
+                              waveId_m,
+                              wmma_krow,
+                              wmma_a_idx % A_K1,
+                              (wmma_a_idx / A_K1) * (MPerWmma / 2));
+        }
+        else
+        {
+            return make_tuple(0, 0, 0, waveId_m, wmma_krow, wmma_a_idx, 0);
+        }
     }
 
     __device__ static auto CalculateBThreadOriginDataIndex()
@@ -298,7 +320,20 @@ struct BlockwiseGemmWmmaops_pipeline_base
         const auto wmma_krow = 0;
 #endif
 
-        return make_tuple(0, 0, 0, waveId_n, wmma_krow, wmma_b_idx, 0);
+        if constexpr(UseLdsTransposeB)
+        {
+            return make_tuple(0,
+                              0,
+                              0,
+                              waveId_n,
+                              wmma_krow,
+                              wmma_b_idx % B_K1,
+                              (wmma_b_idx / B_K1) * (NPerWmma / 2));
+        }
+        else
+        {
+            return make_tuple(0, 0, 0, waveId_n, wmma_krow, wmma_b_idx, 0);
+        }
     }
 
     template <index_t m0, index_t n0>
@@ -403,6 +438,7 @@ struct BlockwiseGemmWmmaops_pipeline_base
                        AccStride));
     }
 
+    // C = A * B
     __host__ __device__ static constexpr auto
     GetCBlockDescriptor_MRepeat_MWave_MSubGroup_NRepeat_NWave_NThreadPerSubGroup_MAccVgprs()
     {
@@ -416,6 +452,23 @@ struct BlockwiseGemmWmmaops_pipeline_base
 
         return wmma_gemm
             .MakeCDesc_MBlockxRepeat_MWave_MSubGroup_NBlockxRepeat_NWave_NThreadPerSubGroup_MAccVgprs(
+                c_block_desc_mrepeat_mwave_mperwmma_nrepeat_nwave_nperwmma);
+    }
+
+    // C' = B' * A'
+    __host__ __device__ static constexpr auto
+    GetCBlockDescriptor_MRepeat_MWave_MThreadPerSubGroup_NRepeat_NWave_NSubGroup_MAccVgprs()
+    {
+        constexpr auto c_block_desc_mrepeat_mwave_mperwmma_nrepeat_nwave_nperwmma =
+            make_naive_tensor_descriptor_packed(make_tuple(Number<MRepeat>{},
+                                                           Number<MWaves>{},
+                                                           Number<MPerWmma>{},
+                                                           Number<NRepeat>{},
+                                                           Number<NWaves>{},
+                                                           Number<NPerWmma>{}));
+
+        return wmma_gemm
+            .MakeCDesc_MBlockxRepeat_MWave_MThreadPerSubGroup_NBlockxRepeat_NWave_NSubGroup_NAccVgprs(
                 c_block_desc_mrepeat_mwave_mperwmma_nrepeat_nwave_nperwmma);
     }
 
@@ -470,7 +523,8 @@ struct BlockwiseGemmWmmaops_pipeline_base
                                          Sequence<0, 1, 2, 3, 4, 5, 6>,
                                          6,
                                          A_K1,
-                                         A_K1>;
+                                         A_K1,
+                                         UseLdsTransposeA>;
 
     using BThreadCopy =
         ThreadwiseTensorSliceTransfer_v4<BDataType,
@@ -481,11 +535,14 @@ struct BlockwiseGemmWmmaops_pipeline_base
                                          Sequence<0, 1, 2, 3, 4, 5, 6>,
                                          6,
                                          B_K1,
-                                         B_K1>;
+                                         B_K1,
+                                         UseLdsTransposeB>;
 
     AThreadCopy a_thread_copy_;
     BThreadCopy b_thread_copy_;
 };
 
 } // namespace ck
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

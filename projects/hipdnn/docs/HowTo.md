@@ -23,7 +23,7 @@ This guide provides practical information for both using hipDNN components and e
 ## Consuming hipDNN
 
 > [!TIP]
-> For a minimal end-to-end example of using hipDNN in a CMake project, see the [Consumer Quick Start](./ConsumerQuickStart.md).
+> For a minimal end-to-end example of using hipDNN in a CMake project, see [Add hipDNN to your project](https://rocm.docs.amd.com/projects/hipdnn/en/latest/install/add-project.html) in the published hipDNN documentation.
 
 This section covers how to use the various components of hipDNN in your applications.
 
@@ -114,6 +114,32 @@ hipDNN uses FlatBuffers for schema-based data objects to describe graphs and ope
 - Attributes marked as `long` types in graphs are foreign keys to the `uid` in `tensor_attributes`
 - Schema files are located in [`flatbuffers_sdk/schemas/`](../flatbuffers_sdk/schemas/)
 
+#### Cache-key annotations
+
+Graph fields also feed the kernel-ingestor winner cache, which reuses a benchmarked kernel
+ranking across graphs that describe the same work. Annotations in the `.fbs` files decide
+which fields identify that work.
+
+A field participates unless annotated. When adding one, ask whether a kernel measurement
+taken on one graph would still be valid for another differing only in this field:
+
+- Irrelevant to the measurement — annotate `(cache_ignore)`. Names, ids, and routing hints
+  belong here.
+- Holds a tensor uid — annotate `(cache_uid)`, which folds the tensor's position rather than
+  the caller's uid, so renumbering a graph still matches.
+- Otherwise leave it unannotated.
+
+Annotating wrongly is silent in both directions: `(cache_ignore)` on a field that changes the
+work makes two different graphs share a cached kernel, and a missed `(cache_uid)` keys on the
+raw uid, so identical graphs numbered differently never match.
+
+`cachekey_generated.h` is generated from the schemas by `scripts/gen_cache_key.py`, separately
+from the ordinary `flatc` headers. The `cache-key-hipdnn` pre-commit hook regenerates it, and
+CI runs pre-commit on every pull request, so a stale header fails there.
+
+See [Cache-Key Annotations](./AddingNewOperations.md#cache-key-annotations) for the full
+field-policy reference.
+
 ### Configuring Engine Knobs
 
 hipDNN engines support runtime configuration through **knobs** - configurable parameters that control engine behavior, performance tuning, and feature selection.
@@ -139,147 +165,14 @@ For comprehensive guidance on plugin development, including architecture details
 
 ### Adding a New Operation
 
-Adding a new operation requires coordinated changes across multiple components: Data SDK schemas, backend descriptors, frontend classes, tests, and plugin integration. hipDNN provides a **Descriptor Code Generator** tool that automates the most labor-intensive parts of this process.
-
-#### Overview
-
-The high-level workflow for adding a new operation is:
-
-```
-FBS Schema → YAML Config → Code Generator → Integration → Plugin Implementation → Tests
-```
-
-The code generator (`tools/DescriptorGenerator/`) produces backend descriptors, packers, unpackers, frontend attributes, nodes, graph methods, and comprehensive test suites from a single YAML configuration file. This replaces hours of manual copy-paste-adapt work and ensures consistency across all generated artifacts.
+Adding a new operation touches every layer of the stack — FlatBuffers schema, backend descriptor and enums, frontend attributes/packer/unpacker/node/Graph API, JSON utilities, optional Python bindings, and tests at four levels. The [`hipdnn-codegen`](../tools/DescriptorGenerator/.claude/skills/hipdnn-codegen/SKILL.md) agent skill (backed by [`tools/DescriptorGenerator/`](../tools/DescriptorGenerator/)) automates the mechanical parts.
 
 > [!TIP]
-> See the [Descriptor Code Generator README](../tools/DescriptorGenerator/README.md) for full tool documentation, YAML config format, and field type reference.
+> See the [Adding a New Operation Guide](./AddingNewOperations.md) for the full contributor walkthrough — cuDNN naming parity rules, the recommended workflow, layer-by-layer reference, testing matrix, and PR checklist.
 
-#### Step 1: Define the FlatBuffer Schema
+#### Plugin Integration
 
-> [!NOTE]
-> The FBS schema is used by the **backend** and **Data SDK** for serialization and internal data representation. The frontend does not depend on FlatBuffers directly — it uses the backend C API descriptors to build and inspect operation graphs.
-
-Start by defining the operation's data structures:
-
-1. **Create Attribute Schema**
-   - Add a new `.fbs` file in [`flatbuffers_sdk/schemas/`](../flatbuffers_sdk/schemas/)
-   - Define the operation's attributes (parameters, configurations)
-   - Example: [`flatbuffers_sdk/schemas/batchnorm_attributes.fbs`](../flatbuffers_sdk/schemas/batchnorm_attributes.fbs)
-
-2. **Update Graph Schema**
-   - Modify [`flatbuffers_sdk/schemas/graph.fbs`](../flatbuffers_sdk/schemas/graph.fbs)
-   - Add your new attributes to the `NodeAttributes` union
-   - Include your schema file
-
-Example:
-```flatbuffers
-include "your_operation_attributes.fbs";
-
-union NodeAttributes {
-    BatchnormInferenceAttributes,
-    PointwiseAttributes,
-    ...
-    YourOperationAttributes  // Add your new operation
-}
-```
-
-After updating FlatBuffer schemas, regenerate the C++ headers:
-
-```bash
-ninja generate_hipdnn_data_sdk_headers
-```
-
-#### Step 2: Create the YAML Configuration
-
-Create a YAML config in `tools/DescriptorGenerator/configs/` that maps your FBS schema fields to hipDNN backend API concepts. The config describes tensor fields, data fields, enum modes, frontend class names, and test data.
-
-Use `convolution_fwd.yaml` as the reference config — it is the most complete and validated example. The mapping rules are:
-
-| FBS Field Pattern | YAML Section | YAML `type` |
-|---|---|---|
-| `*_tensor_uid: long` | `tensor_fields` | (implicit) |
-| `field: [long]` | `data_fields` | `vector_int64` |
-| `field: SomeEnum` | `data_fields` | `mode` |
-| `field: float` | `data_fields` | `scalar_float` |
-| `field: long` (non-UID) | `data_fields` | `scalar_int64` |
-| `field: bool` | `data_fields` | `bool` |
-
-See the [Descriptor Code Generator README](../tools/DescriptorGenerator/README.md#yaml-config-format) for the full YAML format and all available field properties.
-
-#### Step 3: Run the Code Generator
-
-```bash
-cd projects/hipdnn/tools/DescriptorGenerator
-
-# One-time setup
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-
-# Generate all backend + frontend artifacts
-.venv/bin/python generate.py \
-    --config configs/your_operation.yaml \
-    --output-dir /tmp/codegen-output \
-    --mode full
-
-# Or generate directly into the project tree
-.venv/bin/python generate.py \
-    --config configs/your_operation.yaml \
-    --output-dir ../../ \
-    --mode full
-```
-
-The generator supports four modes:
-
-| Mode | What It Generates |
-|------|-------------------|
-| `backend` | Descriptor, packer, backend tests, CMake/enum fragments |
-| `frontend` | Attributes class, node class, graph method, frontend tests |
-| `full` | All backend + frontend artifacts |
-| `lift-only` | Unpacker, fromNode tests, lifting integration tests, wiring fragments (for operations that already have descriptors) |
-
-#### Step 4: Integrate Generated Code
-
-After generation, the output directory contains ready-to-use C++ source files and fragment files. Place the generated source files into the project tree and insert the fragment snippets into existing shared files (enum headers, string utilities, factory switches, CMake lists).
-
-The generated files include:
-
-| Generated File | Target Location |
-|----------------|-----------------|
-| `<Op>OperationDescriptor.hpp/.cpp` | `backend/src/descriptors/` |
-| `<Op>Packer.hpp` | `frontend/include/hipdnn_frontend/detail/` |
-| `<Op>Unpacker.hpp` | `frontend/include/hipdnn_frontend/detail/` |
-| `<Op>Attributes.hpp` | `frontend/include/hipdnn_frontend/attributes/` |
-| `<Op>Node.hpp` | `frontend/include/hipdnn_frontend/node/` |
-| `Test<Op>OperationDescriptor.cpp` | `backend/tests/descriptors/` |
-| `TestGraphDescriptor<Op>.cpp` | `backend/tests/descriptors/` |
-| `Integration<Op>DescriptorLowering.cpp` | `tests/frontend/` |
-| `fragments/*.txt` | Snippets for manual insertion into existing files |
-
-The fragment files tell you exactly what to insert and where — enum entries, factory cases, CMake entries, and string utility switch cases.
-
-> [!IMPORTANT]
-> The generator produces a starting point, not a final product. Review generated code against the current state of hipDNN. Files, enums, or plumbing may already exist partially. When a target file already exists, compare and merge rather than overwrite.
-
-#### Step 5: Frontend Implementation
-
-If you used `--mode full`, the generator produces frontend attributes, node, and graph method files. Otherwise, create them manually:
-
-1. **Create Node Class**
-   - Add header file in [`frontend/include/hipdnn_frontend/node/`](../frontend/include/hipdnn_frontend/node/)
-   - Inherit from the base `Node` class
-   - Example: [`frontend/include/hipdnn_frontend/node/BatchnormNode.hpp`](../frontend/include/hipdnn_frontend/node/BatchnormNode.hpp)
-
-2. **Create Attribute Classes**
-   - Add corresponding attribute classes in [`frontend/include/hipdnn_frontend/attributes/`](../frontend/include/hipdnn_frontend/attributes/)
-   - These define operation-specific parameters for the frontend
-
-3. **Update Frontend Tests**
-   - Add tests for your new node and attributes
-   - See examples in [`frontend/tests/`](../frontend/tests/)
-
-#### Step 6: Plugin Integration
-
-Refer to the [Plugin Development Guide](./PluginDevelopment.md) to implement the operation execution in target plugins.
+Once the operation lands across the layers above, refer to the [Plugin Development Guide](./PluginDevelopment.md) to implement execution in target plugins.
 
 ### Descriptor Code Generator
 
@@ -303,7 +196,6 @@ From one YAML config, the tool produces:
 | Brand new operation (nothing exists yet) | `--mode full` |
 | Adding backend only (frontend exists or will be added later) | `--mode backend` |
 | Adding frontend only (backend descriptor already exists) | `--mode frontend` |
-| Adding lifting support to an existing operation | `--mode lift-only` |
 
 #### Existing Configurations
 

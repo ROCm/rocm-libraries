@@ -42,6 +42,8 @@ namespace rocRoller
             return "Buffer";
         case MemoryInstructions::MemoryKind::Buffer2LDS:
             return "Buffer2LDS";
+        case MemoryInstructions::MemoryKind::TDMToLDS:
+            return "TDMToLDS";
         default:
             break;
         }
@@ -63,6 +65,10 @@ namespace rocRoller
             {
                 return 64;
             }
+            else if(arch.HasCapability(GPUCapability::ds_load_tr16_b128))
+            {
+                return 128;
+            }
             else
             {
                 Throw<FatalError>(
@@ -70,7 +76,8 @@ namespace rocRoller
                     arch.target().toString());
             }
         case 8:
-            if(arch.HasCapability(GPUCapability::ds_read_b64_tr_b8))
+            if(arch.HasCapability(GPUCapability::ds_read_b64_tr_b8)
+               || arch.HasCapability(GPUCapability::ds_load_tr8_b64))
             {
                 return 64;
             }
@@ -81,7 +88,8 @@ namespace rocRoller
                     arch.target().toString());
             }
         case 6:
-            if(arch.HasCapability(GPUCapability::ds_read_b96_tr_b6))
+            if(arch.HasCapability(GPUCapability::ds_read_b96_tr_b6)
+               || arch.HasCapability(GPUCapability::ds_load_tr6_b96))
             {
                 return 96;
             }
@@ -92,7 +100,8 @@ namespace rocRoller
                     arch.target().toString());
             }
         case 4:
-            if(arch.HasCapability(GPUCapability::ds_read_b64_tr_b4))
+            if(arch.HasCapability(GPUCapability::ds_read_b64_tr_b4)
+               || arch.HasCapability(GPUCapability::ds_load_tr4_b64))
             {
                 return 64;
             }
@@ -130,6 +139,10 @@ namespace rocRoller
             {
                 return "ds_read_b64_tr_b16";
             }
+            else if(arch.HasCapability(GPUCapability::ds_load_tr16_b128))
+            {
+                return "ds_load_tr16_b128";
+            }
             else
             {
                 Throw<FatalError>(
@@ -140,6 +153,10 @@ namespace rocRoller
             if(arch.HasCapability(GPUCapability::ds_read_b64_tr_b8))
             {
                 return "ds_read_b64_tr_b8";
+            }
+            else if(arch.HasCapability(GPUCapability::ds_load_tr8_b64))
+            {
+                return "ds_load_tr8_b64";
             }
             else
             {
@@ -152,6 +169,10 @@ namespace rocRoller
             {
                 return "ds_read_b96_tr_b6";
             }
+            else if(arch.HasCapability(GPUCapability::ds_load_tr6_b96))
+            {
+                return "ds_load_tr6_b96";
+            }
             else
             {
                 Throw<FatalError>(
@@ -162,6 +183,10 @@ namespace rocRoller
             if(arch.HasCapability(GPUCapability::ds_read_b64_tr_b4))
             {
                 return "ds_read_b64_tr_b4";
+            }
+            else if(arch.HasCapability(GPUCapability::ds_load_tr4_b64))
+            {
+                return "ds_load_tr4_b64";
             }
             else
             {
@@ -306,5 +331,62 @@ namespace rocRoller
             }
             co_yield m_context.lock()->copier()->pack(result->element({i}), values);
         }
+    }
+
+    Generator<Instruction> MemoryInstructions::loadTensorToLDS(Register::ValuePtr tdmDesc)
+    {
+        auto ctx = m_context.lock();
+
+        const auto numRegisters = tdmDesc->registerCount();
+
+        const auto g0 = tdmDesc->subset({0, 1, 2, 3});
+        const auto g1 = tdmDesc->subset({4, 5, 6, 7, 8, 9, 10, 11});
+        const auto g2 = numRegisters > 12 ? tdmDesc->subset({12, 13, 14, 15}) : nullptr;
+        const auto g3 = numRegisters > 16 ? tdmDesc->subset({16, 17, 18, 19}) : nullptr;
+        AssertFatal(not(g2 == nullptr xor g3 == nullptr),
+                    "Either both or neither of TDMGroup2 & TDMGroup3 registers can be used");
+
+        if(g2 != nullptr)
+        {
+            co_yield_(
+                Instruction("tensor_load_to_lds", {}, {g0, g1, g2, g3}, {}, "load tensor to LDS"));
+        }
+        else
+        {
+            co_yield_(Instruction("tensor_load_to_lds", {}, {g0, g1}, {}, "load tensor to LDS"));
+        }
+
+        if(ctx->kernelOptions()->alwaysWaitAfterLoad)
+            co_yield Instruction::Wait(
+                WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after load"));
+    }
+
+    Generator<Instruction> MemoryInstructions::storeTensorFromLDS(Register::ValuePtr tdmDesc)
+    {
+        auto ctx = m_context.lock();
+
+        const auto numRegisters = tdmDesc->registerCount();
+
+        const auto g0 = tdmDesc->subset({0, 1, 2, 3});
+        const auto g1 = tdmDesc->subset({4, 5, 6, 7, 8, 9, 10, 11});
+        const auto g2 = numRegisters > 12 ? tdmDesc->subset({12, 13, 14, 15}) : nullptr;
+        const auto g3 = numRegisters > 16 ? tdmDesc->subset({16, 17, 18, 19}) : nullptr;
+        AssertFatal(not(g2 == nullptr xor g3 == nullptr),
+                    "Either both or neither of TDMGroup2 & TDMGroup3 registers can be used");
+
+        if(g2 != nullptr)
+        {
+            co_yield_(Instruction(
+                "tensor_store_from_lds", {}, {g0, g1, g2, g3}, {}, "store tensor from LDS"));
+        }
+        else
+        {
+            co_yield_(
+                Instruction("tensor_store_from_lds", {}, {g0, g1}, {}, "store tensor from LDS"));
+        }
+
+        if(ctx->kernelOptions()->alwaysWaitAfterStore)
+            co_yield Instruction::Wait(
+                WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after store"));
     }
 }

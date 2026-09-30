@@ -20,6 +20,10 @@ Auxiliary functions
 +------------------------------------------+
 |:cpp:func:`hipsparseDestroy`              |
 +------------------------------------------+
+|:cpp:func:`hipsparseGetErrorName`         |
++------------------------------------------+
+|:cpp:func:`hipsparseGetErrorString`       |
++------------------------------------------+
 |:cpp:func:`hipsparseGetVersion`           |
 +------------------------------------------+
 |:cpp:func:`hipsparseGetGitRevision`       |
@@ -108,41 +112,75 @@ Auxiliary functions
 +------------------------------------------+
 |:cpp:func:`hipsparseCreateSpVec`          |
 +------------------------------------------+
+|:cpp:func:`hipsparseCreateConstSpVec`     |
++------------------------------------------+
 |:cpp:func:`hipsparseDestroySpVec`         |
 +------------------------------------------+
 |:cpp:func:`hipsparseSpVecGet`             |
++------------------------------------------+
+|:cpp:func:`hipsparseConstSpVecGet`        |
 +------------------------------------------+
 |:cpp:func:`hipsparseSpVecGetIndexBase`    |
 +------------------------------------------+
 |:cpp:func:`hipsparseSpVecGetValues`       |
 +------------------------------------------+
+|:cpp:func:`hipsparseConstSpVecGetValues`  |
++------------------------------------------+
 |:cpp:func:`hipsparseSpVecSetValues`       |
 +------------------------------------------+
 |:cpp:func:`hipsparseCreateCoo`            |
++------------------------------------------+
+|:cpp:func:`hipsparseCreateConstCoo`       |
 +------------------------------------------+
 |:cpp:func:`hipsparseCreateCooAoS`         |
 +------------------------------------------+
 |:cpp:func:`hipsparseCreateCsr`            |
 +------------------------------------------+
+|:cpp:func:`hipsparseCreateConstCsr`       |
++------------------------------------------+
 |:cpp:func:`hipsparseCreateCsc`            |
 +------------------------------------------+
+|:cpp:func:`hipsparseCreateConstCsc`       |
++------------------------------------------+
 |:cpp:func:`hipsparseCreateBlockedEll`     |
++------------------------------------------+
+|:cpp:func:`hipsparseCreateConstBlockedEll`|
++------------------------------------------+
+|:cpp:func:`hipsparseCreateSlicedEll`      |
++------------------------------------------+
+|:cpp:func:`hipsparseCreateConstSlicedEll` |
++------------------------------------------+
+|:cpp:func:`hipsparseCreateBsr`            |
++------------------------------------------+
+|:cpp:func:`hipsparseCreateConstBsr`       |
 +------------------------------------------+
 |:cpp:func:`hipsparseDestroySpMat`         |
 +------------------------------------------+
 |:cpp:func:`hipsparseCooGet`               |
 +------------------------------------------+
+|:cpp:func:`hipsparseConstCooGet`          |
++------------------------------------------+
 |:cpp:func:`hipsparseCooAoSGet`            |
 +------------------------------------------+
 |:cpp:func:`hipsparseCsrGet`               |
 +------------------------------------------+
+|:cpp:func:`hipsparseConstCsrGet`          |
++------------------------------------------+
+|:cpp:func:`hipsparseCscGet`               |
++------------------------------------------+
+|:cpp:func:`hipsparseConstCscGet`          |
++------------------------------------------+
 |:cpp:func:`hipsparseBlockedEllGet`        |
++------------------------------------------+
+|:cpp:func:`hipsparseConstBlockedEllGet`   |
 +------------------------------------------+
 |:cpp:func:`hipsparseCsrSetPointers`       |
 +------------------------------------------+
 |:cpp:func:`hipsparseCscSetPointers`       |
 +------------------------------------------+
 |:cpp:func:`hipsparseCooSetPointers`       |
++------------------------------------------+
+|:cpp:func:`hipsparseBlockedEllSetPointers`|
 +------------------------------------------+
 |:cpp:func:`hipsparseSpMatGetSize`         |
 +------------------------------------------+
@@ -152,7 +190,17 @@ Auxiliary functions
 +------------------------------------------+
 |:cpp:func:`hipsparseSpMatGetValues`       |
 +------------------------------------------+
+|:cpp:func:`hipsparseConstSpMatGetValues`  |
++------------------------------------------+
 |:cpp:func:`hipsparseSpMatSetValues`       |
++------------------------------------------+
+|:cpp:func:`hipsparseSpMatGetStridedBatch` |
++------------------------------------------+
+|:cpp:func:`hipsparseSpMatSetStridedBatch` |
++------------------------------------------+
+|:cpp:func:`hipsparseCooSetStridedBatch`   |
++------------------------------------------+
+|:cpp:func:`hipsparseCsrSetStridedBatch`   |
 +------------------------------------------+
 |:cpp:func:`hipsparseSpMatGetAttribute`    |
 +------------------------------------------+
@@ -160,23 +208,39 @@ Auxiliary functions
 +------------------------------------------+
 |:cpp:func:`hipsparseCreateDnVec`          |
 +------------------------------------------+
+|:cpp:func:`hipsparseCreateConstDnVec`     |
++------------------------------------------+
 |:cpp:func:`hipsparseDestroyDnVec`         |
 +------------------------------------------+
 |:cpp:func:`hipsparseDnVecGet`             |
 +------------------------------------------+
+|:cpp:func:`hipsparseConstDnVecGet`        |
++------------------------------------------+
 |:cpp:func:`hipsparseDnVecGetValues`       |
++------------------------------------------+
+|:cpp:func:`hipsparseConstDnVecGetValues`  |
 +------------------------------------------+
 |:cpp:func:`hipsparseDnVecSetValues`       |
 +------------------------------------------+
 |:cpp:func:`hipsparseCreateDnMat`          |
 +------------------------------------------+
+|:cpp:func:`hipsparseCreateConstDnMat`     |
++------------------------------------------+
 |:cpp:func:`hipsparseDestroyDnMat`         |
 +------------------------------------------+
 |:cpp:func:`hipsparseDnMatGet`             |
 +------------------------------------------+
+|:cpp:func:`hipsparseConstDnMatGet`        |
++------------------------------------------+
 |:cpp:func:`hipsparseDnMatGetValues`       |
 +------------------------------------------+
+|:cpp:func:`hipsparseConstDnMatGetValues`  |
++------------------------------------------+
 |:cpp:func:`hipsparseDnMatSetValues`       |
++------------------------------------------+
+|:cpp:func:`hipsparseDnMatGetStridedBatch` |
++------------------------------------------+
+|:cpp:func:`hipsparseDnMatSetStridedBatch` |
 +------------------------------------------+
 
 Sparse level 1 functions
@@ -394,6 +458,11 @@ Function name                                     single double single complex d
 :cpp:func:`hipsparseSpGEMMreuse_nnz()`            x      x      x              x
 :cpp:func:`hipsparseSpGEMMreuse_copy()`           x      x      x              x
 :cpp:func:`hipsparseSpGEMMreuse_compute()`        x      x      x              x
+:cpp:func:`hipsparseSpGEAM_createDescr()`         x      x      x              x
+:cpp:func:`hipsparseSpGEAM_destroyDescr()`        x      x      x              x
+:cpp:func:`hipsparseSpGEAM_bufferSize()`          x      x      x              x
+:cpp:func:`hipsparseSpGEAM_nnz()`                 x      x      x              x
+:cpp:func:`hipsparseSpGEAM()`                     x      x      x              x
 :cpp:func:`hipsparseSDDMM_bufferSize()`           x      x      x              x
 :cpp:func:`hipsparseSDDMM_preprocess()`           x      x      x              x
 :cpp:func:`hipsparseSDDMM()`                      x      x      x              x

@@ -15,90 +15,11 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
-#ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
-#include "GoldenReferenceCpu.hpp"
-#endif
-
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::types;
 using hipdnn_test_sdk::detail::safeTestTypeCast;
-
-#ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
-
-template <class T>
-class TestCpuBatchnormFwdInferenceGoldenReference : public TestGoldenReferenceCpu
-{
-public:
-    void testSuite()
-    {
-        return goldenReferenceTestSuite(batchnorm::getToleranceInference<T>(),
-                                        batchnorm::getToleranceInference<T>());
-    }
-};
-
-class TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp32
-    : public TestCpuBatchnormFwdInferenceGoldenReference<float>
-{
-};
-
-class TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp16
-    : public TestCpuBatchnormFwdInferenceGoldenReference<half>
-{
-};
-
-class TestCpuBatchnormFwdInferenceGoldenReferenceNchwBfp16
-    : public TestCpuBatchnormFwdInferenceGoldenReference<bfloat16>
-{
-};
-
-class TestCpuBatchnormFwdInferenceGoldenReferenceNcdhwFp32
-    : public TestCpuBatchnormFwdInferenceGoldenReference<float>
-{
-};
-
-// Nchw Fp32------------
-TEST_P(TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp32, Correctness)
-{
-    testSuite();
-}
-
-INSTANTIATE_TEST_SUITE_P(,
-                         TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp32,
-                         getGoldenReferenceParams("BatchnormFwdInference/nchw/fp32"));
-
-// Nchw Fp16------------
-TEST_P(TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp16, Correctness)
-{
-    testSuite();
-}
-
-INSTANTIATE_TEST_SUITE_P(,
-                         TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp16,
-                         getGoldenReferenceParams("BatchnormFwdInference/nchw/fp16"));
-
-// Nchw Bfp16------------
-TEST_P(TestCpuBatchnormFwdInferenceGoldenReferenceNchwBfp16, Correctness)
-{
-    testSuite();
-}
-
-INSTANTIATE_TEST_SUITE_P(,
-                         TestCpuBatchnormFwdInferenceGoldenReferenceNchwBfp16,
-                         getGoldenReferenceParams("BatchnormFwdInference/nchw/bfp16"));
-
-// Ncdhw Fp32------------
-TEST_P(TestCpuBatchnormFwdInferenceGoldenReferenceNcdhwFp32, Correctness)
-{
-    testSuite();
-}
-
-INSTANTIATE_TEST_SUITE_P(,
-                         TestCpuBatchnormFwdInferenceGoldenReferenceNcdhwFp32,
-                         getGoldenReferenceParams("BatchnormFwdInference/ncdhw/fp32"));
-
-#endif // HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 
 //--------------------------
 
@@ -273,7 +194,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNcdhw)
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 }
 
-TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormFwdInferenceNdhwc)
+TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNdhwc)
 {
     Tensor<float> inputTensor({2, 3, 4, 5, 6}, TensorLayout::NDHWC);
     Tensor<float> outputTensor({2, 3, 4, 5, 6}, TensorLayout::NDHWC);
@@ -293,6 +214,104 @@ TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormFwdInferenceNdhwc)
 
     CpuFpReferenceBatchnorm::fwdInference(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
+}
+
+TEST(TestCpuFpReferenceBatchnormFp16, BatchnormFwdInferenceComputeUpscale)
+{
+    const std::vector<int64_t> dims = {1, 1, 2, 2};
+
+    Tensor<half> inputTensor(dims);
+    Tensor<half> outputTensor(dims);
+    Tensor<half> scaleTensor({1, 1});
+    Tensor<half> biasTensor({1, 1});
+    Tensor<half> meanTensor({1, 1});
+    Tensor<half> invVarianceTensor({1, 1});
+
+    // x = [1, 2, 3, 4]
+    inputTensor.setHostValue(half{1.0}, 0, 0, 0, 0);
+    inputTensor.setHostValue(half{2.0}, 0, 0, 0, 1);
+    inputTensor.setHostValue(half{3.0}, 0, 0, 1, 0);
+    inputTensor.setHostValue(half{4.0}, 0, 0, 1, 1);
+
+    // fixed scale and bias parameters (one channel)
+    scaleTensor.setHostValue(half{2.0}, 0, 0);
+    biasTensor.setHostValue(half{0.5}, 0, 0);
+
+    // inference uses population statistics per channel:
+    // mean = (1+2+3+4)/4 = 2.5
+    // variance = [(-1.5)^2 + (-0.5)^2 + (0.5)^2 + (1.5)^2] / 4 = 5.0 / 4 = 1.25
+    // where inv_variance = 1 / sqrt(1.25 + 1e-5) = 0.894423613312618
+    // (in practice, computed during training)
+    meanTensor.setHostValue(half{2.5}, 0, 0);
+    invVarianceTensor.setHostValue(half{0.894423613312618}, 0, 0);
+
+    // output is calculated via a pointwise linear transform on x:
+    // y = scale * (x - mean) * inv_variance + bias = 2 * (x - 2.5) * inv_variance + 0.5
+    const std::vector<float> expectedOutput
+        = {-2.18327084f, -0.39442361f, 1.39442361f, 3.18327084f};
+
+    CpuFpReferenceBatchnorm::fwdInference<half, half, half, half, float>(
+        inputTensor, scaleTensor, biasTensor, meanTensor, invVarianceTensor, outputTensor);
+
+    auto tolerance = batchnorm::getToleranceInference<half>();
+
+    EXPECT_NEAR(
+        static_cast<float>(outputTensor.getHostValue(0, 0, 0, 0)), expectedOutput[0], tolerance);
+    EXPECT_NEAR(
+        static_cast<float>(outputTensor.getHostValue(0, 0, 0, 1)), expectedOutput[1], tolerance);
+    EXPECT_NEAR(
+        static_cast<float>(outputTensor.getHostValue(0, 0, 1, 0)), expectedOutput[2], tolerance);
+    EXPECT_NEAR(
+        static_cast<float>(outputTensor.getHostValue(0, 0, 1, 1)), expectedOutput[3], tolerance);
+}
+
+TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormFwdInferenceComputeUpscale)
+{
+    const std::vector<int64_t> dims = {1, 1, 2, 2};
+
+    Tensor<bfloat16> inputTensor(dims);
+    Tensor<bfloat16> outputTensor(dims);
+    Tensor<bfloat16> scaleTensor({1, 1});
+    Tensor<bfloat16> biasTensor({1, 1});
+    Tensor<bfloat16> meanTensor({1, 1});
+    Tensor<bfloat16> invVarianceTensor({1, 1});
+
+    // x = [1, 2, 3, 4]
+    inputTensor.setHostValue(bfloat16{1.0}, 0, 0, 0, 0);
+    inputTensor.setHostValue(bfloat16{2.0}, 0, 0, 0, 1);
+    inputTensor.setHostValue(bfloat16{3.0}, 0, 0, 1, 0);
+    inputTensor.setHostValue(bfloat16{4.0}, 0, 0, 1, 1);
+
+    // fixed scale and bias parameters (one channel)
+    scaleTensor.setHostValue(bfloat16{2.0}, 0, 0);
+    biasTensor.setHostValue(bfloat16{0.5}, 0, 0);
+
+    // inference uses population statistics per channel:
+    // mean = (1+2+3+4)/4 = 2.5
+    // variance = [(-1.5)^2 + (-0.5)^2 + (0.5)^2 + (1.5)^2] / 4 = 5.0 / 4 = 1.25
+    // where inv_variance = 1 / sqrt(1.25 + 1e-5) = 0.894423613312618
+    // (in practice, computed during training)
+    meanTensor.setHostValue(bfloat16{2.5}, 0, 0);
+    invVarianceTensor.setHostValue(bfloat16{0.894423613312618}, 0, 0);
+
+    // output is calculated via a pointwise linear transform on x:
+    // y = scale * (x - mean) * inv_variance + bias = 2 * (x - 2.5) * inv_variance + 0.5
+    const std::vector<float> expectedOutput
+        = {-2.18327084f, -0.39442361f, 1.39442361f, 3.18327084f};
+
+    CpuFpReferenceBatchnorm::fwdInference<bfloat16, bfloat16, bfloat16, bfloat16, float>(
+        inputTensor, scaleTensor, biasTensor, meanTensor, invVarianceTensor, outputTensor);
+
+    auto tolerance = batchnorm::getToleranceInference<bfloat16>();
+
+    EXPECT_NEAR(
+        static_cast<float>(outputTensor.getHostValue(0, 0, 0, 0)), expectedOutput[0], tolerance);
+    EXPECT_NEAR(
+        static_cast<float>(outputTensor.getHostValue(0, 0, 0, 1)), expectedOutput[1], tolerance);
+    EXPECT_NEAR(
+        static_cast<float>(outputTensor.getHostValue(0, 0, 1, 0)), expectedOutput[2], tolerance);
+    EXPECT_NEAR(
+        static_cast<float>(outputTensor.getHostValue(0, 0, 1, 1)), expectedOutput[3], tolerance);
 }
 
 template <typename T1, typename T2, typename T3>

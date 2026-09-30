@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -91,7 +91,7 @@ rocsparse_status rocsparse::nnz_compress_template(rocsparse_handle          hand
             if(handle->pointer_mode == rocsparse_pointer_mode_device)
             {
                 RETURN_IF_HIP_ERROR(
-                    hipMemsetAsync(nnz_C, 0, sizeof(rocsparse_int), handle->stream));
+                    rocsparse_hipMemsetAsync(nnz_C, 0, sizeof(rocsparse_int), handle->stream));
             }
             else
             {
@@ -108,11 +108,11 @@ rocsparse_status rocsparse::nnz_compress_template(rocsparse_handle          hand
 
     // Find number of non-zeros in input CSR matrix on host
     rocsparse_int nnz_A, nnz_A_0;
-    RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
         &nnz_A, &csr_row_ptr_A[m], sizeof(rocsparse_int), hipMemcpyDeviceToHost, handle->stream));
-    RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
         &nnz_A_0, &csr_row_ptr_A[0], sizeof(rocsparse_int), hipMemcpyDeviceToHost, handle->stream));
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
     nnz_A -= nnz_A_0;
     if(nnz_A < 0)
@@ -279,9 +279,9 @@ rocsparse_status rocsparse::nnz_compress_template(rocsparse_handle          hand
 
     if(handle->pointer_mode == rocsparse_pointer_mode_host)
     {
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             nnz_C, dnnz_C, sizeof(rocsparse_int), hipMemcpyDeviceToHost, handle->stream));
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
         RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(dnnz_C, handle->stream));
     }
 

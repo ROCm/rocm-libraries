@@ -1,0 +1,39 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass=classes=s --RegisterAllocationPass=allocator=greedy-compact,classes=s,apply --print-output
+#
+# gfx1250's ScalarTupleAlignment rule, end to end.
+#
+# The assembler rejects a misaligned SGPR tuple with "invalid register
+# alignment": a pair must start even, a quad or wider on a multiple of four. A
+# single SGPR sits anywhere.
+#
+# Compaction is what makes this reachable. s0 is a live-in, so it is pinned and
+# occupies s0 across the whole function, which leaves s1 as the lowest free
+# index. Without this rule greedy-compact takes it and emits
+#
+#     s[1:2] = "st.s_load_b64"(s[24:25], 0)
+#
+# which will not assemble. The rule removes the odd bases from the search, so the
+# pair packs to the lowest *legal* index instead of the lowest one.
+#
+# CHECK-LABEL: @allocation_rule_scalar_alignment
+# CHECK: ^entry:
+#
+# The pair skips s1 and lands even. The quad skips s[1:3] and s[2:4] and lands on
+# a multiple of four.
+# CHECK-NEXT: s[2:3] = "st.s_load_b64"(s[24:25], 0)
+# CHECK-NEXT: s[4:7] = "st.s_load_b128"(s[26:27], 0)
+#
+# Singles are unconstrained, so they still take whatever is left, odd included.
+# CHECK-NEXT: s1 = "st.s_add_u32"(s2, s3)
+#
+# CHECK-NOT: s[1:2] = "st.s_load_b64"
+# CHECK-NOT: %
+
+st.func @allocation_rule_scalar_alignment() {
+^entry:
+  s[40:41] = "st.s_load_b64"(s[24:25], 0)
+  s[44:47] = "st.s_load_b128"(s[26:27], 0)
+  s5 = "st.s_add_u32"(s40, s41)
+  s6 = "st.s_add_u32"(s44, s5)
+  s7 = "st.s_add_u32"(s0, s6)
+}

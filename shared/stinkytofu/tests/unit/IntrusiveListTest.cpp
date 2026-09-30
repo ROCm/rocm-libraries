@@ -397,6 +397,7 @@ TEST_F(IntrusiveListTest, SingleNodeOperations) {
 
 TEST_F(IntrusiveListTest, DestructorBehavior) {
     std::vector<TestNode*> testNodes;
+    testNodes.reserve(3);
     for (int i = 0; i < 3; ++i) {
         testNodes.push_back(nodes[i].get());
     }

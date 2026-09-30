@@ -221,29 +221,21 @@ template <typename FpVecType>
 __forceinline__ __device__ FpVecType exp(FpVecType x)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
-    if constexpr(VecSize == 4)
-    {
-        FpVecType out;
-        out.x = detail::exp(x.x);
-        out.y = detail::exp(x.y);
-        out.z = detail::exp(x.z);
-        out.w = detail::exp(x.w);
-        return out;
-    }
-    else if constexpr(VecSize == 2)
-    {
-        FpVecType out;
-        out.x = detail::exp(x.x);
-        out.y = detail::exp(x.y);
-        return out;
-    }
-    else if constexpr(VecSize == 1)
+    static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4 || VecSize == 8,
+                  "Unsupported miopen vector operation.");
+    if constexpr(VecSize == 1)
     {
         return detail::exp(x);
     }
     else
     {
-        static_assert(false, "Unsupported miopen vector operation.");
+        using ScalarType = typename mapped_vector_info<FpVecType>::UnderlyingType;
+        FpVecType out;
+        auto* outp      = reinterpret_cast<ScalarType*>(&out);
+        const auto* inp = reinterpret_cast<const ScalarType*>(&x);
+        for(int i = 0; i < static_cast<int>(VecSize); ++i)
+            outp[i] = detail::exp(inp[i]);
+        return out;
     }
 }
 
@@ -251,29 +243,21 @@ template <typename FpVecType>
 __forceinline__ __device__ FpVecType log(FpVecType x)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
-    if constexpr(VecSize == 4)
-    {
-        FpVecType out;
-        out.x = detail::log(x.x);
-        out.y = detail::log(x.y);
-        out.z = detail::log(x.z);
-        out.w = detail::log(x.w);
-        return out;
-    }
-    else if constexpr(VecSize == 2)
-    {
-        FpVecType out;
-        out.x = detail::log(x.x);
-        out.y = detail::log(x.y);
-        return out;
-    }
-    else if constexpr(VecSize == 1)
+    static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4 || VecSize == 8,
+                  "Unsupported miopen vector operation.");
+    if constexpr(VecSize == 1)
     {
         return detail::log(x);
     }
     else
     {
-        static_assert(false, "Unsupported miopen vector operation.");
+        using ScalarType = typename mapped_vector_info<FpVecType>::UnderlyingType;
+        FpVecType out;
+        auto* outp      = reinterpret_cast<ScalarType*>(&out);
+        const auto* inp = reinterpret_cast<const ScalarType*>(&x);
+        for(int i = 0; i < static_cast<int>(VecSize); ++i)
+            outp[i] = detail::log(inp[i]);
+        return out;
     }
 }
 
@@ -281,29 +265,21 @@ template <typename FpVecType>
 __forceinline__ __device__ FpVecType sqrt(FpVecType x)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
-    if constexpr(VecSize == 4)
-    {
-        FpVecType out;
-        out.x = detail::sqrt(x.x);
-        out.y = detail::sqrt(x.y);
-        out.z = detail::sqrt(x.z);
-        out.w = detail::sqrt(x.w);
-        return out;
-    }
-    else if constexpr(VecSize == 2)
-    {
-        FpVecType out;
-        out.x = detail::sqrt(x.x);
-        out.y = detail::sqrt(x.y);
-        return out;
-    }
-    else if constexpr(VecSize == 1)
+    static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4 || VecSize == 8,
+                  "Unsupported miopen vector operation.");
+    if constexpr(VecSize == 1)
     {
         return detail::sqrt(x);
     }
     else
     {
-        static_assert(false, "Unsupported miopen vector operation.");
+        using ScalarType = typename mapped_vector_info<FpVecType>::UnderlyingType;
+        FpVecType out;
+        auto* outp      = reinterpret_cast<ScalarType*>(&out);
+        const auto* inp = reinterpret_cast<const ScalarType*>(&x);
+        for(int i = 0; i < static_cast<int>(VecSize); ++i)
+            outp[i] = detail::sqrt(inp[i]);
+        return out;
     }
 }
 
@@ -311,29 +287,21 @@ template <typename FpVecType>
 __forceinline__ __device__ FpVecType rsqrt(FpVecType x)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
-    if constexpr(VecSize == 4)
-    {
-        FpVecType out;
-        out.x = detail::rsqrt(x.x);
-        out.y = detail::rsqrt(x.y);
-        out.z = detail::rsqrt(x.z);
-        out.w = detail::rsqrt(x.w);
-        return out;
-    }
-    else if constexpr(VecSize == 2)
-    {
-        FpVecType out;
-        out.x = detail::rsqrt(x.x);
-        out.y = detail::rsqrt(x.y);
-        return out;
-    }
-    else if constexpr(VecSize == 1)
+    static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4 || VecSize == 8,
+                  "Unsupported miopen vector operation.");
+    if constexpr(VecSize == 1)
     {
         return detail::rsqrt(x);
     }
     else
     {
-        static_assert(false, "Unsupported miopen vector operation.");
+        using ScalarType = typename mapped_vector_info<FpVecType>::UnderlyingType;
+        FpVecType out;
+        auto* outp      = reinterpret_cast<ScalarType*>(&out);
+        const auto* inp = reinterpret_cast<const ScalarType*>(&x);
+        for(int i = 0; i < static_cast<int>(VecSize); ++i)
+            outp[i] = detail::rsqrt(inp[i]);
+        return out;
     }
 }
 
@@ -341,29 +309,23 @@ template <typename FpVecType>
 __forceinline__ __device__ FpVecType fma(FpVecType a, FpVecType b, FpVecType c)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
-    if constexpr(VecSize == 4)
-    {
-        FpVecType out;
-        out.x = detail::fma(a.x, b.x, c.x);
-        out.y = detail::fma(a.y, b.y, c.y);
-        out.z = detail::fma(a.z, b.z, c.z);
-        out.w = detail::fma(a.w, b.w, c.w);
-        return out;
-    }
-    else if constexpr(VecSize == 2)
-    {
-        FpVecType out;
-        out.x = detail::fma(a.x, b.x, c.x);
-        out.y = detail::fma(a.y, b.y, c.y);
-        return out;
-    }
-    else if constexpr(VecSize == 1)
+    static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4 || VecSize == 8,
+                  "Unsupported miopen vector operation.");
+    if constexpr(VecSize == 1)
     {
         return detail::fma(a, b, c);
     }
     else
     {
-        static_assert(false, "Unsupported miopen vector operation.");
+        using ScalarType = typename mapped_vector_info<FpVecType>::UnderlyingType;
+        FpVecType out;
+        auto* outp     = reinterpret_cast<ScalarType*>(&out);
+        const auto* ap = reinterpret_cast<const ScalarType*>(&a);
+        const auto* bp = reinterpret_cast<const ScalarType*>(&b);
+        const auto* cp = reinterpret_cast<const ScalarType*>(&c);
+        for(int i = 0; i < static_cast<int>(VecSize); ++i)
+            outp[i] = detail::fma(ap[i], bp[i], cp[i]);
+        return out;
     }
 }
 
@@ -371,29 +333,22 @@ template <typename FpVecType>
 __forceinline__ __device__ FpVecType fmax(FpVecType x, FpVecType y)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
-    if constexpr(VecSize == 4)
-    {
-        FpVecType out;
-        out.x = detail::fmax(x.x, y.x);
-        out.y = detail::fmax(x.y, y.y);
-        out.z = detail::fmax(x.z, y.z);
-        out.w = detail::fmax(x.w, y.w);
-        return out;
-    }
-    else if constexpr(VecSize == 2)
-    {
-        FpVecType out;
-        out.x = detail::fmax(x.x, y.x);
-        out.y = detail::fmax(x.y, y.y);
-        return out;
-    }
-    else if constexpr(VecSize == 1)
+    static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4 || VecSize == 8,
+                  "Unsupported miopen vector operation.");
+    if constexpr(VecSize == 1)
     {
         return detail::fmax(x, y);
     }
     else
     {
-        static_assert(false, "Unsupported miopen vector operation.");
+        using ScalarType = typename mapped_vector_info<FpVecType>::UnderlyingType;
+        FpVecType out;
+        auto* outp     = reinterpret_cast<ScalarType*>(&out);
+        const auto* xp = reinterpret_cast<const ScalarType*>(&x);
+        const auto* yp = reinterpret_cast<const ScalarType*>(&y);
+        for(int i = 0; i < static_cast<int>(VecSize); ++i)
+            outp[i] = detail::fmax(xp[i], yp[i]);
+        return out;
     }
 }
 
@@ -401,29 +356,22 @@ template <typename FpVecType>
 __forceinline__ __device__ FpVecType fmin(FpVecType x, FpVecType y)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
-    if constexpr(VecSize == 4)
-    {
-        FpVecType out;
-        out.x = detail::fmin(x.x, y.x);
-        out.y = detail::fmin(x.y, y.y);
-        out.z = detail::fmin(x.z, y.z);
-        out.w = detail::fmin(x.w, y.w);
-        return out;
-    }
-    else if constexpr(VecSize == 2)
-    {
-        FpVecType out;
-        out.x = detail::fmin(x.x, y.x);
-        out.y = detail::fmin(x.y, y.y);
-        return out;
-    }
-    else if constexpr(VecSize == 1)
+    static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4 || VecSize == 8,
+                  "Unsupported miopen vector operation.");
+    if constexpr(VecSize == 1)
     {
         return detail::fmin(x, y);
     }
     else
     {
-        static_assert(false, "Unsupported miopen vector operation.");
+        using ScalarType = typename mapped_vector_info<FpVecType>::UnderlyingType;
+        FpVecType out;
+        auto* outp     = reinterpret_cast<ScalarType*>(&out);
+        const auto* xp = reinterpret_cast<const ScalarType*>(&x);
+        const auto* yp = reinterpret_cast<const ScalarType*>(&y);
+        for(int i = 0; i < static_cast<int>(VecSize); ++i)
+            outp[i] = detail::fmin(xp[i], yp[i]);
+        return out;
     }
 }
 
@@ -443,29 +391,21 @@ template <typename FpVecType>
 __forceinline__ __device__ FpVecType tanh(FpVecType x)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
-    if constexpr(VecSize == 4)
-    {
-        FpVecType out;
-        out.x = detail::tanh(x.x);
-        out.y = detail::tanh(x.y);
-        out.z = detail::tanh(x.z);
-        out.w = detail::tanh(x.w);
-        return out;
-    }
-    else if constexpr(VecSize == 2)
-    {
-        FpVecType out;
-        out.x = detail::tanh(x.x);
-        out.y = detail::tanh(x.y);
-        return out;
-    }
-    else if constexpr(VecSize == 1)
+    static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4 || VecSize == 8,
+                  "Unsupported miopen vector operation.");
+    if constexpr(VecSize == 1)
     {
         return detail::tanh(x);
     }
     else
     {
-        static_assert(false, "Unsupported miopen vector operation.");
+        using ScalarType = typename mapped_vector_info<FpVecType>::UnderlyingType;
+        FpVecType out;
+        auto* outp      = reinterpret_cast<ScalarType*>(&out);
+        const auto* inp = reinterpret_cast<const ScalarType*>(&x);
+        for(int i = 0; i < static_cast<int>(VecSize); ++i)
+            outp[i] = detail::tanh(inp[i]);
+        return out;
     }
 }
 
@@ -473,29 +413,22 @@ template <typename FpVecType>
 __forceinline__ __device__ FpVecType pow(FpVecType x, FpVecType y)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
-    if constexpr(VecSize == 4)
-    {
-        FpVecType out;
-        out.x = detail::pow(x.x, y.x);
-        out.y = detail::pow(x.y, y.y);
-        out.z = detail::pow(x.z, y.z);
-        out.w = detail::pow(x.w, y.w);
-        return out;
-    }
-    else if constexpr(VecSize == 2)
-    {
-        FpVecType out;
-        out.x = detail::pow(x.x, y.x);
-        out.y = detail::pow(x.y, y.y);
-        return out;
-    }
-    else if constexpr(VecSize == 1)
+    static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4 || VecSize == 8,
+                  "Unsupported miopen vector operation.");
+    if constexpr(VecSize == 1)
     {
         return detail::pow(x, y);
     }
     else
     {
-        static_assert(false, "Unsupported miopen vector operation.");
+        using ScalarType = typename mapped_vector_info<FpVecType>::UnderlyingType;
+        FpVecType out;
+        auto* outp     = reinterpret_cast<ScalarType*>(&out);
+        const auto* xp = reinterpret_cast<const ScalarType*>(&x);
+        const auto* yp = reinterpret_cast<const ScalarType*>(&y);
+        for(int i = 0; i < static_cast<int>(VecSize); ++i)
+            outp[i] = detail::pow(xp[i], yp[i]);
+        return out;
     }
 }
 
@@ -503,29 +436,21 @@ template <typename FpVecType>
 __forceinline__ __device__ FpVecType fabs(FpVecType x)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
-    if constexpr(VecSize == 4)
-    {
-        FpVecType out;
-        out.x = detail::fabs(x.x);
-        out.y = detail::fabs(x.y);
-        out.z = detail::fabs(x.z);
-        out.w = detail::fabs(x.w);
-        return out;
-    }
-    else if constexpr(VecSize == 2)
-    {
-        FpVecType out;
-        out.x = detail::fabs(x.x);
-        out.y = detail::fabs(x.y);
-        return out;
-    }
-    else if constexpr(VecSize == 1)
+    static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4 || VecSize == 8,
+                  "Unsupported miopen vector operation.");
+    if constexpr(VecSize == 1)
     {
         return detail::fabs(x);
     }
     else
     {
-        static_assert(false, "Unsupported miopen vector operation.");
+        using ScalarType = typename mapped_vector_info<FpVecType>::UnderlyingType;
+        FpVecType out;
+        auto* outp      = reinterpret_cast<ScalarType*>(&out);
+        const auto* inp = reinterpret_cast<const ScalarType*>(&x);
+        for(int i = 0; i < static_cast<int>(VecSize); ++i)
+            outp[i] = detail::fabs(inp[i]);
+        return out;
     }
 }
 

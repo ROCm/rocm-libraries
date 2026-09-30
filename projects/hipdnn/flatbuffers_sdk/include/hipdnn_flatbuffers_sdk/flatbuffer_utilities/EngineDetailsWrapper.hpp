@@ -5,7 +5,9 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <memory>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/KnobWrapper.hpp>
@@ -23,12 +25,19 @@ public:
     virtual int64_t engineId() const = 0;
 
     virtual uint32_t knobCount() const = 0;
+    virtual std::vector<int32_t> behaviorNotes() const = 0;
     virtual const std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::flatbuffer_utilities::IKnob>>&
         knobWrappers() const
         = 0;
     virtual const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IKnob&
         getKnobByName(const std::string& knobName) const
         = 0;
+
+    /// Empty when the engine details carry no name.
+    virtual std::string name() const
+    {
+        return {};
+    }
 };
 
 class EngineDetailsWrapper : public IEngineDetails
@@ -72,6 +81,18 @@ public:
         return _shallowEngineDetails->engine_id();
     }
 
+    std::string name() const override
+    {
+        throwIfNotValid();
+
+        auto rawName = _shallowEngineDetails->name();
+        if(rawName == nullptr)
+        {
+            return {};
+        }
+        return rawName->str();
+    }
+
     uint32_t knobCount() const override
     {
         throwIfNotValid();
@@ -82,6 +103,25 @@ public:
             return 0;
         }
         return knobs->size();
+    }
+
+    std::vector<int32_t> behaviorNotes() const override
+    {
+        throwIfNotValid();
+
+        auto rawNotes = _shallowEngineDetails->behavior_notes();
+        if(rawNotes == nullptr)
+        {
+            return {};
+        }
+
+        std::vector<int32_t> notes;
+        notes.reserve(rawNotes->size());
+        for(uint32_t i = 0; i < rawNotes->size(); ++i)
+        {
+            notes.push_back(rawNotes->Get(i));
+        }
+        return notes;
     }
 
     const std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::flatbuffer_utilities::IKnob>>&

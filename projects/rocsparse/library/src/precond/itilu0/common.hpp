@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -95,28 +95,30 @@ namespace rocsparse
     template <typename T>
     inline hipError_t stay_on_device(T* target_, const T* source_, hipStream_t stream_)
     {
-        return hipMemcpyAsync(target_, source_, sizeof(T), hipMemcpyDeviceToDevice, stream_);
+        return rocsparse_hipMemcpyAsync(
+            target_, source_, sizeof(T), hipMemcpyDeviceToDevice, stream_);
     }
 
     template <typename T>
     inline hipError_t on_host(T* target_, const T* source_, hipStream_t stream_)
     {
-        return hipMemcpyAsync(target_, source_, sizeof(T), hipMemcpyDeviceToHost, stream_);
+        return rocsparse_hipMemcpyAsync(
+            target_, source_, sizeof(T), hipMemcpyDeviceToHost, stream_);
     }
 
     template <typename T>
     inline hipError_t on_device(T* target, const T* source_, hipStream_t stream_)
     {
-        return hipMemcpyAsync(target, source_, sizeof(T), hipMemcpyHostToDevice, stream_);
+        return rocsparse_hipMemcpyAsync(target, source_, sizeof(T), hipMemcpyHostToDevice, stream_);
     }
 
     template <typename IMPL>
     struct buffer_layout_crtp_t
     {
     public:
-        static size_t get_sizeof_double()
+        static size_t get_header_size()
         {
-            return ((sizeof(IMPL) - 1) / sizeof(double) + 1);
+            return align_size<IMPL>(1);
         }
 
         typedef enum enum_ivalue_type
@@ -219,8 +221,8 @@ namespace rocsparse
                  size_t                         nitems_,
                  size_t                         sizelm_)
         {
-            m_tpointers[v]
-                = (void*)rocsparse::assign_b<char>(buffer_size_, buffer_, nitems_ * sizelm_);
+            m_tpointers[v] = (void*)rocsparse::assign_b<char>(
+                buffer_size_, buffer_, align_size<char>(nitems_ * sizelm_));
             m_tsizes[v] = sizelm_ * nitems_;
         }
 
@@ -230,8 +232,9 @@ namespace rocsparse
                  void* __restrict__&            buffer_,
                  size_t                         nitems_)
         {
-            m_jpointers[v] = rocsparse::assign_b<J>(buffer_size_, buffer_, nitems_);
-            m_jsizes[v]    = sizeof(J) * nitems_;
+            m_jpointers[v]
+                = (J*)rocsparse::assign_b<char>(buffer_size_, buffer_, align_size<J>(nitems_));
+            m_jsizes[v] = sizeof(J) * nitems_;
         }
 
         template <typename I>
@@ -240,8 +243,9 @@ namespace rocsparse
                  void* __restrict__&            buffer_,
                  size_t                         nitems_)
         {
-            m_ipointers[v] = rocsparse::assign_b<I>(buffer_size_, buffer_, nitems_);
-            m_isizes[v]    = sizeof(I) * nitems_;
+            m_ipointers[v]
+                = (I*)rocsparse::assign_b<char>(buffer_size_, buffer_, align_size<I>(nitems_));
+            m_isizes[v] = sizeof(I) * nitems_;
         }
 
     public:
@@ -252,9 +256,9 @@ namespace rocsparse
                   size_t&             buffer_size_,
                   void* __restrict__& buffer_)
         {
-            const size_t parent_sizeof_double = parent_t::get_sizeof_double();
-            parent_t::m_buffer_size = buffer_size_ - parent_sizeof_double * sizeof(double);
-            parent_t::m_buffer      = (void*)(((double*)buffer_) + parent_sizeof_double);
+            const size_t header_size = parent_t::get_header_size();
+            parent_t::m_buffer_size  = buffer_size_ - header_size;
+            parent_t::m_buffer       = (void*)(((char*)buffer_) + header_size);
 
             buffer_size_ = parent_t::m_buffer_size;
             buffer_      = parent_t::m_buffer;

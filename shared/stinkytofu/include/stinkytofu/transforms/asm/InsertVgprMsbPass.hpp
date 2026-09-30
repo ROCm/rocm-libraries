@@ -24,6 +24,8 @@
 
 #include <memory>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 class Pass;
 
@@ -37,6 +39,6 @@ class Pass;
 ///
 /// After a label (branch target), the pass conservatively resets MSB state and
 /// inserts an s_nop before s_set_vgpr_msb to satisfy hardware constraints.
-std::unique_ptr<Pass> createInsertVgprMsbPass();
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertVgprMsbPass();
 
 }  // namespace stinkytofu

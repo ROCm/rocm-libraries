@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,7 +31,7 @@
 #ifndef GBYTE_HPP
 #define GBYTE_HPP
 
-#include "rocsparse.h"
+#include "rocsparse.hpp"
 
 /*
  * ===========================================================================
@@ -247,9 +247,10 @@ constexpr double gebsrmm_gbyte_count(rocsparse_int Mb,
 }
 
 template <typename A, typename B, typename C, typename I>
-constexpr double bellmm_gbyte_count(I Mb, I width, I block_dim, I nnz_B, I nnz_C, bool beta = false)
+constexpr double
+    bellmm_gbyte_count(I Mb, I ell_cols, I ell_block_size, I nnz_B, I nnz_C, bool beta = false)
 {
-    return (sizeof(A) * Mb * width * block_dim * block_dim + sizeof(I) * Mb * width
+    return (sizeof(A) * Mb * ell_cols * ell_block_size + sizeof(I) * Mb * ell_cols / ell_block_size
             + sizeof(B) * nnz_B + sizeof(C) * (nnz_C + (beta ? nnz_C : 0)))
            / 1e9;
 }
@@ -521,6 +522,16 @@ constexpr double csric0_gbyte_count(rocsparse_int M, rocsparse_int nnz)
 }
 
 template <typename T>
+constexpr double csrildlt0_gbyte_count(rocsparse_int M, rocsparse_int nnz)
+{
+    // Same accesses as csric0 (read/write of the value array, read of the sparsity pattern),
+    // plus the write of the real diagonal D of M entries.
+    return ((M + 1 + nnz) * sizeof(rocsparse_int) + 2.0 * nnz * sizeof(T)
+            + M * sizeof(floating_data_t<T>))
+           / 1e9;
+}
+
+template <typename T>
 constexpr double csrilu0_gbyte_count(rocsparse_int M, rocsparse_int nnz)
 {
     return ((M + 1 + nnz) * sizeof(rocsparse_int) + 2.0 * nnz * sizeof(T)) / 1e9;
@@ -581,6 +592,17 @@ constexpr double dense2coo_gbyte_count(I M, I N, I nnz)
 {
     size_t reads  = (M * N) * sizeof(T);
     size_t writes = 2 * nnz * sizeof(I) + nnz * sizeof(T);
+
+    return (reads + writes) / 1e9;
+}
+
+template <typename T, typename I>
+constexpr double dense2bell_gbyte_count(I M, I N, I ell_cols, I ell_block_size)
+{
+    const I Mb = (M + ell_block_size - 1) / ell_block_size;
+
+    size_t reads  = sizeof(T) * (M * N);
+    size_t writes = sizeof(I) * Mb * ell_cols / ell_block_size + sizeof(T) * M * ell_cols;
 
     return (reads + writes) / 1e9;
 }

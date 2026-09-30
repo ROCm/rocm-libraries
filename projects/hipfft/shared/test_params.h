@@ -25,8 +25,8 @@
 #include <stdexcept>
 
 extern int verbose;
-extern int ngpus;
 
+extern size_t gpus_per_rank;
 extern size_t n_random_tests;
 
 extern size_t random_seed;
@@ -50,7 +50,5 @@ extern double max_linf_eps_single;
 extern double max_l2_eps_single;
 extern double max_linf_eps_half;
 extern double max_l2_eps_half;
-
-extern int n_hip_failures;
 
 #endif

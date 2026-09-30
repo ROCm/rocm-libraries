@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,231 +18,397 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCRAND_BENCHMARK_UTILS_HPP_
-#define ROCRAND_BENCHMARK_UTILS_HPP_
+#pragma once
 
-#include <benchmark/benchmark.h>
-#include <hip/hip_runtime.h>
+#include <string_view>
 
-#include <iostream>
-#include <string>
+#include "primbench.hpp"
 
-#include "custom_csv_formater.hpp"
-#include <fstream>
+#ifdef __HIP__
+    #include <rocrand/rocrand_kernel.h>
+#elif defined(__CUDACC__)
+    #include <cuda.h>
+    #include <curand_kernel.h>
+#endif
 
-#define HIP_CHECK(condition)                                                            \
-    do                                                                                  \
-    {                                                                                   \
-        hipError_t error_ = condition;                                                  \
-        if(error_ != hipSuccess)                                                        \
-        {                                                                               \
-            std::cout << "HIP error: " << error_ << " line: " << __LINE__ << std::endl; \
-            exit(error_);                                                               \
-        }                                                                               \
-    }                                                                                   \
-    while(0)
+#ifdef __HIP__
+    #define RAND_CHECK(condition)                                                                  \
+        do                                                                                         \
+        {                                                                                          \
+            rocrand_status status_ = condition;                                                    \
+            if(status_ != ROCRAND_STATUS_SUCCESS)                                                  \
+            {                                                                                      \
+                std::cout << "ROCRAND error: " << status_ << " at " << __FILE__ << ":" << __LINE__ \
+                          << std::endl;                                                            \
+                exit(status_);                                                                     \
+            }                                                                                      \
+        }                                                                                          \
+        while(0)
+#elif defined(__CUDACC__)
+    #define RAND_CHECK(condition)                                                                 \
+        do                                                                                        \
+        {                                                                                         \
+            curandStatus_t status_ = condition;                                                   \
+            if(status_ != CURAND_STATUS_SUCCESS)                                                  \
+            {                                                                                     \
+                std::cout << "CURAND error: " << status_ << " at " << __FILE__ << ":" << __LINE__ \
+                          << std::endl;                                                           \
+                exit(status_);                                                                    \
+            }                                                                                     \
+        }                                                                                         \
+        while(0)
+#endif
 
-inline void add_common_benchmark_info()
+#ifdef __HIP__
+using stream_t                     = hipStream_t;
+using rng_type_t                   = rocrand_rng_type;
+using ordering_t                   = rocrand_ordering;
+using generator_t                  = rocrand_generator;
+using memcpy_kind_t                = hipMemcpyKind;
+using rand_discrete_distribution_t = rocrand_discrete_distribution;
+using rand_direction_vector_set_t  = rocrand_direction_vector_set;
+using direction_vectors32_t        = const unsigned int;
+using direction_vectors64_t        = const unsigned long long;
+using gpu_func_attributes_t        = hipFuncAttributes;
+#elif defined(__CUDACC__)
+using stream_t                     = cudaStream_t;
+using rng_type_t                   = curandRngType;
+using ordering_t                   = curandOrdering;
+using generator_t                  = curandGenerator_t;
+using memcpy_kind_t                = cudaMemcpyKind;
+using rand_discrete_distribution_t = curandDiscreteDistribution_t;
+using rand_direction_vector_set_t  = curandDirectionVectorSet_t;
+using direction_vectors32_t        = curandDirectionVectors32_t;
+using direction_vectors64_t        = curandDirectionVectors64_t;
+using gpu_func_attributes_t        = cudaFuncAttributes;
+#endif
+
+#ifdef __HIP__
+constexpr rng_type_t RAND_RNG_PSEUDO_MRG32K3A         = ROCRAND_RNG_PSEUDO_MRG32K3A;
+constexpr rng_type_t RAND_RNG_PSEUDO_XORWOW           = ROCRAND_RNG_PSEUDO_XORWOW;
+constexpr rng_type_t RAND_RNG_PSEUDO_PHILOX4_32_10    = ROCRAND_RNG_PSEUDO_PHILOX4_32_10;
+constexpr rng_type_t RAND_RNG_PSEUDO_MTGP32           = ROCRAND_RNG_PSEUDO_MTGP32;
+constexpr rng_type_t RAND_RNG_QUASI_SOBOL32           = ROCRAND_RNG_QUASI_SOBOL32;
+constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL32 = ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32;
+constexpr rng_type_t RAND_RNG_QUASI_SOBOL64           = ROCRAND_RNG_QUASI_SOBOL64;
+constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL64 = ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64;
+#elif defined(__CUDACC__)
+constexpr rng_type_t RAND_RNG_PSEUDO_MRG32K3A         = CURAND_RNG_PSEUDO_MRG32K3A;
+constexpr rng_type_t RAND_RNG_PSEUDO_XORWOW           = CURAND_RNG_PSEUDO_XORWOW;
+constexpr rng_type_t RAND_RNG_PSEUDO_PHILOX4_32_10    = CURAND_RNG_PSEUDO_PHILOX4_32_10;
+constexpr rng_type_t RAND_RNG_PSEUDO_MTGP32           = CURAND_RNG_PSEUDO_MTGP32;
+constexpr rng_type_t RAND_RNG_QUASI_SOBOL32           = CURAND_RNG_QUASI_SOBOL32;
+constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL32 = CURAND_RNG_QUASI_SCRAMBLED_SOBOL32;
+constexpr rng_type_t RAND_RNG_QUASI_SOBOL64           = CURAND_RNG_QUASI_SOBOL64;
+constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL64 = CURAND_RNG_QUASI_SCRAMBLED_SOBOL64;
+#endif
+
+#ifdef __HIP__
+constexpr memcpy_kind_t MEMCPY_HOST_TO_DEVICE = hipMemcpyHostToDevice;
+#elif defined(__CUDACC__)
+constexpr memcpy_kind_t MEMCPY_HOST_TO_DEVICE = cudaMemcpyHostToDevice;
+#endif
+
+#ifdef __HIP__
+constexpr memcpy_kind_t MEMCPY_DEVICE_TO_HOST = hipMemcpyDeviceToHost;
+#elif defined(__CUDACC__)
+constexpr memcpy_kind_t MEMCPY_DEVICE_TO_HOST = cudaMemcpyDeviceToHost;
+#endif
+
+constexpr std::string_view engine_name(const rng_type_t rng_type)
 {
-    auto str = [](const std::string& name, const std::string& val)
-    { benchmark::AddCustomContext(name, val); };
-
-    auto num = [](const std::string& name, const int& value)
-    { benchmark::AddCustomContext(name, std::to_string(value)); };
-
-    auto dim2 = [num](const std::string& name, const int* values)
+    // The returned names have to be able to reproduce the rocrand_rng_type by prepending
+    // `ROCRAND_RNG_{PSEUDO|QUASI}_` to the name written in all capital letters. The scripts in
+    // scripts/config-tuning/ rely on this.
+    // clang-format off
+    switch(rng_type)
     {
-        num(name + "_x", values[0]);
-        num(name + "_y", values[1]);
+#ifdef __HIP__
+        case ROCRAND_RNG_PSEUDO_XORWOW:           return "xorwow";
+        case ROCRAND_RNG_PSEUDO_MRG32K3A:         return "mrg32k3a";
+        case ROCRAND_RNG_PSEUDO_MTGP32:           return "mtgp32";
+        case ROCRAND_RNG_PSEUDO_PHILOX4_32_10:    return "philox4_32_10";
+        case ROCRAND_RNG_PSEUDO_MRG31K3P:         return "mrg31k3p";
+        case ROCRAND_RNG_PSEUDO_LFSR113:          return "lfsr113";
+        case ROCRAND_RNG_PSEUDO_MT19937:          return "mt19937";
+        case ROCRAND_RNG_PSEUDO_THREEFRY2_32_20:  return "threefry2_32_20";
+        case ROCRAND_RNG_PSEUDO_THREEFRY2_64_20:  return "threefry2_64_20";
+        case ROCRAND_RNG_PSEUDO_THREEFRY4_32_20:  return "threefry4_32_20";
+        case ROCRAND_RNG_PSEUDO_THREEFRY4_64_20:  return "threefry4_64_20";
+        case ROCRAND_RNG_QUASI_SOBOL32:           return "sobol32";
+        case ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32: return "scrambled_sobol32";
+        case ROCRAND_RNG_QUASI_SOBOL64:           return "sobol64";
+        case ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64: return "scrambled_sobol64";
+        case ROCRAND_RNG_PSEUDO_DEFAULT:          return "pseudo_default";
+        case ROCRAND_RNG_QUASI_DEFAULT:           return "quasi_default";
+#elif defined(__CUDACC__)
+        case CURAND_RNG_PSEUDO_XORWOW:           return "xorwow";
+        case CURAND_RNG_PSEUDO_MRG32K3A:         return "mrg32k3a";
+        case CURAND_RNG_PSEUDO_MTGP32:           return "mtgp32";
+        case CURAND_RNG_PSEUDO_PHILOX4_32_10:    return "philox4_32_10";
+        case CURAND_RNG_PSEUDO_MT19937:          return "mt19937";
+        case CURAND_RNG_QUASI_SOBOL32:           return "sobol32";
+        case CURAND_RNG_QUASI_SCRAMBLED_SOBOL32: return "scrambled_sobol32";
+        case CURAND_RNG_QUASI_SOBOL64:           return "sobol64";
+        case CURAND_RNG_QUASI_SCRAMBLED_SOBOL64: return "scrambled_sobol64";
+        case CURAND_RNG_TEST:                    return "test";
+        case CURAND_RNG_PSEUDO_DEFAULT:          return "pseudo_default";
+        case CURAND_RNG_QUASI_DEFAULT:           return "quasi_default";
+#endif
+    }
+    // clang-format on
+    return "unknown";
+}
+
+enum distribution
+{
+    DISTRIBUTION_UNIFORM,
+    DISTRIBUTION_NORMAL,
+    DISTRIBUTION_LOG_NORMAL,
+    DISTRIBUTION_POISSON,
+    DISTRIBUTION_DISCRETE_POISSON,
+    DISTRIBUTION_DISCRETE_CUSTOM,
+};
+
+constexpr const char* distribution_name(distribution d)
+{
+    switch(d)
+    {
+        case DISTRIBUTION_UNIFORM: return "uniform";
+        case DISTRIBUTION_NORMAL: return "normal";
+        case DISTRIBUTION_LOG_NORMAL: return "log_normal";
+        case DISTRIBUTION_POISSON: return "poisson";
+        case DISTRIBUTION_DISCRETE_POISSON: return "discrete_poisson";
+        case DISTRIBUTION_DISCRETE_CUSTOM: return "discrete_custom";
+    }
+    return "unknown";
+}
+
+/// Backend-agnostic wrappers for rocRAND and cuRAND.
+/// The functions in this namespace are sorted alphabetically.
+namespace wrappers
+{
+
+#ifdef __HIP__
+    #define DISPATCH(rocrand_fn, curand_fn) rocrand_fn
+#else
+    #define DISPATCH(rocrand_fn, curand_fn) curand_fn
+#endif
+
+inline auto create_generator(generator_t* generator, rng_type_t rng_type)
+{
+    return DISPATCH(rocrand_create_generator, curandCreateGenerator)(generator, rng_type);
+}
+
+inline auto create_generator_host(generator_t* generator, rng_type_t rng_type)
+{
+    return DISPATCH(rocrand_create_generator_host, curandCreateGeneratorHost)(generator, rng_type);
+}
+
+inline auto destroy_generator(generator_t generator)
+{
+    return DISPATCH(rocrand_destroy_generator, curandDestroyGenerator)(generator);
+}
+
+inline auto gpu_device_synchronize()
+{
+    return DISPATCH(hipDeviceSynchronize, cudaDeviceSynchronize)();
+}
+
+inline auto gpu_free(void* device)
+{
+    return DISPATCH(hipFree, cudaFree)(device);
+}
+
+inline auto gpu_get_last_error()
+{
+    return DISPATCH(hipGetLastError, cudaGetLastError)();
+}
+
+template<typename T>
+inline auto gpu_malloc(T** device, size_t size)
+{
+    return DISPATCH(hipMalloc, cudaMalloc)(device, size);
+}
+
+inline auto gpu_memcpy(void* dst, const void* src, size_t count, memcpy_kind_t kind)
+{
+    return DISPATCH(hipMemcpy, cudaMemcpy)(dst, src, count, kind);
+}
+
+inline auto gpu_occupancy_max_active_blocks_per_mp(int*        num_blocks,
+                                                   const void* f,
+                                                   int         block_size,
+                                                   size_t      dynamic_shared_memory = 0)
+{
+    return DISPATCH(hipOccupancyMaxActiveBlocksPerMultiprocessor,
+                    cudaOccupancyMaxActiveBlocksPerMultiprocessor)(num_blocks,
+                                                                   f,
+                                                                   block_size,
+                                                                   dynamic_shared_memory);
+}
+
+inline auto gpu_get_device(int* device_id)
+{
+    return DISPATCH(hipGetDevice, cudaGetDevice)(device_id);
+}
+
+inline auto gpu_get_mp_count(int* mp_count, int device_id)
+{
+    return DISPATCH(hipDeviceGetAttribute, cudaDeviceGetAttribute)(
+        mp_count,
+        DISPATCH(hipDeviceAttributeMultiprocessorCount, cudaDevAttrMultiProcessorCount),
+        device_id);
+}
+
+inline auto gpu_get_attributes(gpu_func_attributes_t* attr, const void* f)
+{
+    return DISPATCH(hipFuncGetAttributes, cudaFuncGetAttributes)(attr, f);
+}
+
+/// This exposes the C-style device API through template parameters.
+/// This does not check if a requested API is available for an engine.
+/// E.g. the type
+///   `gpu_rand<DISTRIBUTION_POISSON, 4, uint32_t>`
+/// is valid, but it will only compile `operator()(Engine*)` for the
+/// philox engine.
+template<distribution D, int N, typename T>
+struct gpu_rand
+{};
+
+// This macro generates the specialization.
+// * `template_*` is used to generate the template specialization.
+// * `name_*` is used to generate the C-style API call.
+// * `*_d` are distributions.
+// * `*_n` are vectorization widths.
+// * `*_t` are return types.
+#define MK_GPU_RAND_API(template_d, template_n, template_t, name_d, name_n, name_t) \
+    template<>                                                                      \
+    struct gpu_rand<template_d, template_n, template_t>                             \
+    {                                                                               \
+        static constexpr bool is_specialized = true;                                \
+        static constexpr int  n              = template_n;                          \
+        template<typename... Ts>                                                    \
+        __device__ auto operator()(Ts... args)                                      \
+        {                                                                           \
+            return DISPATCH(rocrand##name_d##name_t##name_n,                        \
+                            curand##name_d##name_n##name_t)(args...);               \
+        }                                                                           \
     };
 
-    auto dim3 = [num, dim2](const std::string& name, const int* values)
-    {
-        dim2(name, values);
-        num(name + "_z", values[2]);
-    };
+#define MK_GPU_RAND_API_1_2_4(dist, type, name, name_t) \
+    MK_GPU_RAND_API(dist, 1, type, name, , name_t)      \
+    MK_GPU_RAND_API(dist, 2, type, name, 2, name_t)     \
+    MK_GPU_RAND_API(dist, 4, type, name, 4, name_t)
 
-    auto num_size_t = [](const std::string& name, const size_t& value)
-    { benchmark::AddCustomContext(name, std::to_string(value)); };
+// Stamp out all `gpu_rand` structs and specializations.
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_UNIFORM, unsigned int, , )
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_UNIFORM, unsigned long long, , )
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_UNIFORM, float, _uniform, )
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_UNIFORM, double, _uniform, _double)
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_NORMAL, float, _normal, )
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_NORMAL, double, _normal, _double)
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_LOG_NORMAL, float, _log_normal, )
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_LOG_NORMAL, double, _log_normal, _double)
 
-    int runtime_version;
-    HIP_CHECK(hipRuntimeGetVersion(&runtime_version));
-    num("hip_runtime_version", runtime_version);
+MK_GPU_RAND_API(DISTRIBUTION_POISSON, 1, unsigned int, _poisson, , )
+MK_GPU_RAND_API(DISTRIBUTION_POISSON, 4, unsigned int, _poisson, 4, )
+MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_POISSON, 1, unsigned int, _discrete, , )
+MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_POISSON, 4, unsigned int, _discrete, 4, )
+MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_CUSTOM, 1, unsigned int, _discrete, , )
+MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_CUSTOM, 4, unsigned int, _discrete, 4, )
 
-    // On the NVIDIA platform not all members of this struct will be written to
-    // Zero-initialize to avoid referencing dangling memory
-    hipDeviceProp_t devProp{};
-    int             device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
+#undef MK_GPU_RAND_API
+#undef MK_GPU_RAND_API_1_2_4
 
-    str("hdp_name", devProp.name);
-    num_size_t("hdp_total_global_mem", devProp.totalGlobalMem);
-    num_size_t("hdp_shared_mem_per_block", devProp.sharedMemPerBlock);
-    num("hdp_regs_per_block", devProp.regsPerBlock);
-    num("hdp_warp_size", devProp.warpSize);
-    num("hdp_max_threads_per_block", devProp.maxThreadsPerBlock);
-    dim3("hdp_max_threads_dim", devProp.maxThreadsDim);
-    dim3("hdp_max_grid_size", devProp.maxGridSize);
-    num("hdp_clock_rate", devProp.clockRate);
-    num("hdp_memory_clock_rate", devProp.memoryClockRate);
-    num("hdp_memory_bus_width", devProp.memoryBusWidth);
-    num_size_t("hdp_total_const_mem", devProp.totalConstMem);
-    num("hdp_major", devProp.major);
-    num("hdp_minor", devProp.minor);
-    num("hdp_multi_processor_count", devProp.multiProcessorCount);
-    num("hdp_l2_cache_size", devProp.l2CacheSize);
-    num_size_t("hdp_max_threads_per_multiprocessor", devProp.maxThreadsPerMultiProcessor);
-    num("hdp_compute_mode", devProp.computeMode);
-    num("hdp_clock_instruction_rate", devProp.clockInstructionRate);
-    num("hdp_concurrent_kernels", devProp.concurrentKernels);
-    num("hdp_pci_domain_id", devProp.pciDomainID);
-    num("hdp_pci_bus_id", devProp.pciBusID);
-    num("hdp_pci_device_id", devProp.pciDeviceID);
-    num("hdp_max_shared_memory_per_multi_processor", devProp.maxSharedMemoryPerMultiProcessor);
-    num("hdp_is_multi_gpu_board", devProp.isMultiGpuBoard);
-    num("hdp_can_map_host_memory", devProp.canMapHostMemory);
-    str("hdp_gcn_arch_name", devProp.gcnArchName);
-    num("hdp_integrated", devProp.integrated);
-    num("hdp_cooperative_launch", devProp.cooperativeLaunch);
-    num("hdp_cooperative_multi_device_launch", devProp.cooperativeMultiDeviceLaunch);
-    num_size_t("hdp_max_texture_1d_linear", devProp.maxTexture1DLinear);
-    num("hdp_max_texture_1d", devProp.maxTexture1D);
-    dim2("hdp_max_texture_2d", devProp.maxTexture2D);
-    dim3("hdp_max_texture_3d", devProp.maxTexture3D);
-    num_size_t("hdp_mem_pitch", devProp.memPitch);
-    num("hdp_texture_alignment", devProp.textureAlignment);
-    num("hdp_texture_pitch_alignment", devProp.texturePitchAlignment);
-    num("hdp_kernel_exec_timeout_enabled", devProp.kernelExecTimeoutEnabled);
-    num("hdp_ecc_enabled", devProp.ECCEnabled);
-    num("hdp_tcc_driver", devProp.tccDriver);
-    num("hdp_cooperative_multi_device_unmatched_func", devProp.cooperativeMultiDeviceUnmatchedFunc);
-    num("hdp_cooperative_multi_device_unmatched_grid_dim",
-        devProp.cooperativeMultiDeviceUnmatchedGridDim);
-    num("hdp_cooperative_multi_device_unmatched_block_dim",
-        devProp.cooperativeMultiDeviceUnmatchedBlockDim);
-    num("hdp_cooperative_multi_device_unmatched_shared_mem",
-        devProp.cooperativeMultiDeviceUnmatchedSharedMem);
-    num("hdp_is_large_bar", devProp.isLargeBar);
-    num("hdp_asic_revision", devProp.asicRevision);
-    num("hdp_managed_memory", devProp.managedMemory);
-    num("hdp_direct_managed_mem_access_from_host", devProp.directManagedMemAccessFromHost);
-    num("hdp_concurrent_managed_access", devProp.concurrentManagedAccess);
-    num("hdp_pageable_memory_access", devProp.pageableMemoryAccess);
-    num("hdp_pageable_memory_access_uses_host_page_tables",
-        devProp.pageableMemoryAccessUsesHostPageTables);
-
-    const auto arch = devProp.arch;
-    num("hdp_arch_has_global_int32_atomics", arch.hasGlobalInt32Atomics);
-    num("hdp_arch_has_global_float_atomic_exch", arch.hasGlobalFloatAtomicExch);
-    num("hdp_arch_has_shared_int32_atomics", arch.hasSharedInt32Atomics);
-    num("hdp_arch_has_shared_float_atomic_exch", arch.hasSharedFloatAtomicExch);
-    num("hdp_arch_has_float_atomic_add", arch.hasFloatAtomicAdd);
-    num("hdp_arch_has_global_int64_atomics", arch.hasGlobalInt64Atomics);
-    num("hdp_arch_has_shared_int64_atomics", arch.hasSharedInt64Atomics);
-    num("hdp_arch_has_doubles", arch.hasDoubles);
-    num("hdp_arch_has_warp_vote", arch.hasWarpVote);
-    num("hdp_arch_has_warp_ballot", arch.hasWarpBallot);
-    num("hdp_arch_has_warp_shuffle", arch.hasWarpShuffle);
-    num("hdp_arch_has_funnel_shift", arch.hasFunnelShift);
-    num("hdp_arch_has_thread_fence_system", arch.hasThreadFenceSystem);
-    num("hdp_arch_has_sync_threads_ext", arch.hasSyncThreadsExt);
-    num("hdp_arch_has_surface_funcs", arch.hasSurfaceFuncs);
-    num("hdp_arch_has_3d_grid", arch.has3dGrid);
-    num("hdp_arch_has_dynamic_parallelism", arch.hasDynamicParallelism);
-}
-
-inline size_t next_power2(size_t x)
+inline auto rand_create_poisson_distribution(double                        lambda,
+                                             rand_discrete_distribution_t* discrete_distribution)
 {
-    size_t power = 1;
-    while(power < x)
-    {
-        power *= 2;
-    }
-    return power;
+    return DISPATCH(rocrand_create_poisson_distribution,
+                    curandCreatePoissonDistribution)(lambda, discrete_distribution);
 }
 
-inline benchmark::BenchmarkReporter* getConsoleReporter(const std::string format)
+inline auto rand_destroy_discrete_distribution(rand_discrete_distribution_t discrete_distribution)
 {
-    benchmark::BenchmarkReporter* reporter;
-    if(format == "csv")
-    {
-        static benchmark::customCSVReporter csv_reporter;
-        csv_reporter.SetErrorStream(&std::cout);
-        csv_reporter.SetOutputStream(&std::cout);
-        reporter = &csv_reporter;
-    }
-    else if(format == "json")
-    {
-        static benchmark::customCSVReporter json_reporter;
-        json_reporter.SetErrorStream(&std::cout);
-        json_reporter.SetOutputStream(&std::cout);
-        reporter = &json_reporter;
-    }
-    else
-    {
-        static benchmark::ConsoleReporter terminal_reporter;
-        terminal_reporter.SetErrorStream(&std::cout);
-        terminal_reporter.SetOutputStream(&std::cout);
-        reporter = &terminal_reporter;
-    }
-
-    return reporter;
+    return DISPATCH(rocrand_destroy_discrete_distribution,
+                    curandDestroyDistribution)(discrete_distribution);
 }
 
-inline benchmark::BenchmarkReporter* getOutFileReporter(const std::string format)
+inline auto rand_get_direction_vectors32(direction_vectors32_t**     vectors,
+                                         rand_direction_vector_set_t set)
 {
-    benchmark::BenchmarkReporter* reporter = nullptr;
-    std::ofstream                 output_file;
-    if(format == "csv")
-    {
-        static benchmark::customCSVReporter csv_reporter;
-        csv_reporter.SetOutputStream(&output_file);
-        csv_reporter.SetErrorStream(&output_file);
-        reporter = &csv_reporter;
-    }
-    else if(format == "json")
-    {
-        static benchmark::JSONReporter json_reporter;
-        json_reporter.SetOutputStream(&output_file);
-        json_reporter.SetErrorStream(&output_file);
-        reporter = &json_reporter;
-    }
-    else if(format == "console")
-    {
-        static benchmark::ConsoleReporter console_reporter;
-        console_reporter.SetOutputStream(&output_file);
-        console_reporter.SetErrorStream(&output_file);
-        reporter = &console_reporter;
-    }
-
-    return reporter;
+    return DISPATCH(rocrand_get_direction_vectors32, curandGetDirectionVectors32)(vectors, set);
 }
 
-inline void getFormats(const int    argc,
-                       char*        argv[],
-                       std::string& outFormat,
-                       std::string& filter,
-                       std::string& consoleFormat)
+inline auto rand_get_direction_vectors64(direction_vectors64_t**     vectors,
+                                         rand_direction_vector_set_t set)
 {
-    for(int i = 1; i < argc; i++)
-    {
-        std::string input(argv[i]);
-        int         equalPos = input.find("=");
-
-        if(equalPos < 0)
-            continue;
-
-        std::string arg    = std::string(input.begin() + 2, input.begin() + equalPos);
-        std::string argVal = std::string(input.begin() + 1 + equalPos, input.end());
-
-        if(arg == "benchmark_out_format")
-            outFormat = argVal;
-        else if(arg == "benchmark_filter")
-            filter = argVal;
-        else if(arg == "benchmark_format")
-            consoleFormat = argVal;
-    }
+    return DISPATCH(rocrand_get_direction_vectors64, curandGetDirectionVectors64)(vectors, set);
 }
 
-#endif // ROCRAND_BENCHMARK_UTILS_HPP_
+inline auto rand_get_scramble_constants32(const unsigned int** constants)
+{
+#ifdef __HIP__
+    return rocrand_get_scramble_constants32(constants);
+#else
+    return curandGetScrambleConstants32(const_cast<unsigned int**>(constants));
+#endif
+}
+
+inline auto rand_get_scramble_constants64(const unsigned long long** constants)
+{
+#ifdef __HIP__
+    return rocrand_get_scramble_constants64(constants);
+#else
+    return curandGetScrambleConstants64(const_cast<unsigned long long**>(constants));
+#endif
+}
+
+// Perfect forwarding with variadic templates
+// handles overloads of rocrand_init() and curand_init().
+template<typename... Args>
+__forceinline__ __device__ __host__
+void rand_init(Args&&... args)
+{
+    DISPATCH(rocrand_init, curand_init)(std::forward<Args>(args)...);
+}
+
+inline auto set_offset(generator_t generator, unsigned long long offset)
+{
+    return DISPATCH(rocrand_set_offset, curandSetGeneratorOffset)(generator, offset);
+}
+
+inline auto set_ordering(generator_t generator, ordering_t order)
+{
+    return DISPATCH(rocrand_set_ordering, curandSetGeneratorOrdering)(generator, order);
+}
+
+inline auto set_quasi_random_generator_dimensions(generator_t generator, unsigned int dimensions)
+{
+    return DISPATCH(rocrand_set_quasi_random_generator_dimensions,
+                    curandSetQuasiRandomGeneratorDimensions)(generator, dimensions);
+}
+
+inline auto set_stream(generator_t generator, stream_t stream)
+{
+    return DISPATCH(rocrand_set_stream, curandSetStream)(generator, stream);
+}
+
+#undef DISPATCH
+
+} // namespace wrappers
+
+/// Bring wrappers into this namespace, so we can call
+/// functions like gpu_malloc() without the wrappers:: prefix.
+using namespace wrappers;
+
+PRIMBENCH_REGISTER_TYPE(uint8_t, "u8")
+PRIMBENCH_REGISTER_TYPE(uint16_t, "u16")
+PRIMBENCH_REGISTER_TYPE(uint32_t, "u32")
+PRIMBENCH_REGISTER_TYPE(float, "f32")
+PRIMBENCH_REGISTER_TYPE(double, "f64")
+PRIMBENCH_REGISTER_TYPE(__half, "half")
+
+// rocRAND and cuRAND functions expect `unsigned long long`,
+// so we can't use `uint64_t` unfortunately.
+PRIMBENCH_REGISTER_TYPE(unsigned long long, "u64")

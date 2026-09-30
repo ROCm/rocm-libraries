@@ -1090,6 +1090,7 @@ void testing_csric0_extra_dense_matrix(const Arguments& arg)
         hcsr_row_ptr[i + 1] = hcsr_row_ptr[i] + N;
     }
 
+    rocsparse_seedrand();
     for(rocsparse_int i = 0; i < M; i++)
     {
         rocsparse_int start = hcsr_row_ptr[i] - base;

@@ -50,9 +50,10 @@ namespace rocRoller
 
                         // Determine new highwater mark by simulating the allocation
 
-                        auto allocator = ctx->allocator(alloc->regType());
-                        auto newRegs
-                            = allocator->findFree(alloc->registerCount(), alloc->options());
+                        auto        allocator = ctx->allocator(alloc->regType());
+                        auto const& arch      = m_context.lock()->targetArchitecture();
+                        auto        newRegs
+                            = allocator->findFree(alloc->registerCount(), alloc->options(), arch);
                         if(newRegs.size() > 0)
                         {
                             int myHWM = std::max(0, newRegs.back() - allocator->maxUsed());

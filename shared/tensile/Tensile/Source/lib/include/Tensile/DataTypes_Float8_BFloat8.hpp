@@ -27,6 +27,7 @@
 #pragma once
 
 #ifdef TENSILE_USE_HIP
+#include <hip/hip_fp8.h>
 #include <hip/hip_runtime.h>
 #endif
 
@@ -83,7 +84,11 @@ namespace Tensile
 
     // NOTE: made optimal bias mode default assuming that's the case on device
     static __device__ bool hip_f8_bias_mode_bit_device = true;
-    static bool            hip_f8_bias_mode_bit_host   = true;
+    // inline (not static): the host bias flag must be a single shared instance
+    // across all translation units. As a static header variable each .cpp got
+    // its own copy, so toggling it from the client (main.cpp) never reached the
+    // reference TU (Reference.cpp) and the f8 host reference stayed FNUZ.
+    inline bool hip_f8_bias_mode_bit_host = true;
 
     static __global__ void set_hip_f8_bias_mode_bit(bool v)
     {
@@ -109,6 +114,24 @@ namespace Tensile
 #else
         return hip_f8_bias_mode_bit_host;
 #endif
+    }
+
+    // OCP E4M3 (fp8) has no infinity: 0x7F/0xFF are NaN, max normal is 448.
+    // The generic IEEE cast path treats exp-all-ones as infinity and saturates
+    // at 240, so for OCP fp8 we route through HIP's native __hip_fp8_e4m3 which
+    // implements the correct 448-saturation / no-inf semantics. bf8 (E5M2) is
+    // IEEE-like (has inf, max 57344) and is handled correctly by the generic
+    // path, so it needs no special case here.
+    static inline HIP_HOST_DEVICE uint8_t ocp_fp8_from_float(float v)
+    {
+        return static_cast<uint8_t>(__hip_fp8_e4m3(v).__x);
+    }
+
+    static inline HIP_HOST_DEVICE float ocp_fp8_to_float(uint8_t data)
+    {
+        __hip_fp8_e4m3 t;
+        t.__x = data;
+        return static_cast<float>(t);
     }
 
     // data type
@@ -222,9 +245,8 @@ namespace Tensile
                 }
                 else
                 {
-                    data = tensile_hip_f8_impl::
-                        cast_to_f8<3, 4, float, false /*negative_zero_nan*/, true /*clip*/>(
-                            v, (rm == hip_f8_rounding_mode::stochastic), rng);
+                    // OCP E4M3: use native HIP type for correct 448-sat / no-inf
+                    data = ocp_fp8_from_float(v);
                 }
             }
         }
@@ -273,9 +295,8 @@ namespace Tensile
                 }
                 else
                 {
-                    data = tensile_hip_f8_impl::
-                        cast_to_f8<3, 4, _Float16, false /*negative_zero_nan*/, true /*clip*/>(
-                            v, (rm == hip_f8_rounding_mode::stochastic), rng);
+                    // OCP E4M3: use native HIP type for correct 448-sat / no-inf
+                    data = ocp_fp8_from_float(static_cast<float>(v));
                 }
             }
         }
@@ -346,8 +367,8 @@ namespace Tensile
                 }
                 else
                 {
-                    return tensile_hip_f8_impl::
-                        cast_from_f8<3, 4, float, false /*negative_zero_nan*/>(data);
+                    // OCP E4M3: use native HIP type for correct 448-sat / no-inf
+                    return ocp_fp8_to_float(data);
                 }
             }
         }
@@ -387,8 +408,8 @@ namespace Tensile
                 }
                 else
                 {
-                    return tensile_hip_f8_impl::
-                        cast_from_f8<3, 4, _Float16, false /*negative_zero_nan*/>(data);
+                    // OCP E4M3: use native HIP type for correct 448-sat / no-inf
+                    return static_cast<_Float16>(ocp_fp8_to_float(data));
                 }
             }
         }
@@ -421,15 +442,14 @@ namespace Tensile
             {
                 if(T == hip_f8_type::bf8)
                 {
+                    // OCP E5M2 (IEEE-like): exp all ones + nonzero mantissa
                     return (data == 0x7d) || (data == 0x7e) || (data == 0x7f) || (data == 0xfd)
                            || (data == 0xfe) || (data == 0xff);
                 }
                 else
                 {
-                    return (data == 0x79) || (data == 0x7a) || (data == 0x7b) || (data == 0x7c)
-                           || (data == 0x7d) || (data == 0x7e) || (data == 0x7f) || (data == 0xf9)
-                           || (data == 0xfa) || (data == 0xfb) || (data == 0xfc) || (data == 0xfd)
-                           || (data == 0xfe) || (data == 0xff);
+                    // OCP E4M3: only 0x7F/0xFF are NaN; no infinity
+                    return (data == 0x7f) || (data == 0xff);
                 }
             }
         }
@@ -445,11 +465,13 @@ namespace Tensile
             {
                 if(T == hip_f8_type::bf8)
                 {
+                    // OCP E5M2 (IEEE-like) has infinity at exp all ones, mantissa 0
                     return (data == 0x7c) || (data == 0xfc);
                 }
                 else
                 {
-                    return (data == 0x78) || (data == 0xf8);
+                    // OCP E4M3 has no infinity
+                    return false;
                 }
             }
         }

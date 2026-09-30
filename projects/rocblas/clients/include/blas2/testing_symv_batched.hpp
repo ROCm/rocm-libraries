@@ -249,13 +249,15 @@ void testing_symv_batched(const Arguments& arg)
     int64_t incx = arg.incx;
     int64_t incy = arg.incy;
 
-    HOST_MEMCHECK(host_vector<T>, alpha, (1));
-    HOST_MEMCHECK(host_vector<T>, beta, (1));
-    alpha[0] = arg.get_alpha<T>();
-    beta[0]  = arg.get_beta<T>();
+    T h_alpha = arg.get_alpha<T>();
+    T h_beta  = arg.get_beta<T>();
 
     rocblas_fill uplo        = char2rocblas_fill(arg.uplo);
     int64_t      batch_count = arg.batch_count;
+
+    bool    ab_striding  = arg.alpha_beta_stride;
+    int64_t alpha_stride = ab_striding ? arg.stride_c : 0;
+    int64_t beta_stride  = ab_striding ? arg.stride_d : 0;
 
     rocblas_local_handle handle{arg};
 
@@ -286,19 +288,24 @@ void testing_symv_batched(const Arguments& arg)
     HOST_MEMCHECK(host_batch_vector<T>, hx, (N, incx, batch_count));
     HOST_MEMCHECK(host_batch_vector<T>, hy, (N, incy, batch_count));
     HOST_MEMCHECK(host_batch_vector<T>, hy_gold, (N, incy, batch_count));
+    HOST_MEMCHECK(host_vector<T>, halpha, (batch_count, alpha_stride));
+    HOST_MEMCHECK(host_vector<T>, hbeta, (batch_count, beta_stride));
 
     // Allocate device memory
     DEVICE_MEMCHECK(device_batch_matrix<T>, dA, (N, N, lda, batch_count));
     DEVICE_MEMCHECK(device_batch_vector<T>, dx, (N, incx, batch_count));
     DEVICE_MEMCHECK(device_batch_vector<T>, dy, (N, incy, batch_count));
-    DEVICE_MEMCHECK(device_vector<T>, d_alpha, (1));
-    DEVICE_MEMCHECK(device_vector<T>, d_beta, (1));
+    DEVICE_MEMCHECK(device_vector<T>, d_alpha, (batch_count, alpha_stride));
+    DEVICE_MEMCHECK(device_vector<T>, d_beta, (batch_count, beta_stride));
 
     // Initialize data on host memory
     rocblas_init_matrix(
         hA, arg, rocblas_client_alpha_sets_nan, rocblas_client_symmetric_matrix, true);
     rocblas_init_vector(hx, arg, rocblas_client_alpha_sets_nan, false, true);
     rocblas_init_vector(hy, arg, rocblas_client_beta_sets_nan);
+
+    rocblas_init_vector_alternating_sign(halpha, h_alpha);
+    rocblas_init_vector_alternating_sign(hbeta, h_beta);
 
     // save a copy in hy_gold which will later get output of CPU BLAS
     hy_gold.copy_from(hy);
@@ -323,12 +330,12 @@ void testing_symv_batched(const Arguments& arg)
                        (handle,
                         uplo,
                         N,
-                        alpha,
+                        &h_alpha,
                         dA.ptr_on_device(),
                         lda,
                         dx.ptr_on_device(),
                         incx,
-                        beta,
+                        &h_beta,
                         dy.ptr_on_device(),
                         incy,
                         batch_count));
@@ -342,8 +349,8 @@ void testing_symv_batched(const Arguments& arg)
         {
             // rocblas_pointer_mode_device test
             CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
-            CHECK_HIP_ERROR(d_alpha.transfer_from(alpha));
-            CHECK_HIP_ERROR(d_beta.transfer_from(beta));
+            CHECK_HIP_ERROR(d_alpha.transfer_from(halpha));
+            CHECK_HIP_ERROR(d_beta.transfer_from(hbeta));
 
             CHECK_HIP_ERROR(dy.transfer_from(hy_gold));
 
@@ -387,14 +394,14 @@ void testing_symv_batched(const Arguments& arg)
                     DEVICE_MEMCHECK(device_batch_matrix<T>, dA_copy, (N, N, lda, batch_count));
                     DEVICE_MEMCHECK(device_batch_vector<T>, dx_copy, (N, incx, batch_count));
                     DEVICE_MEMCHECK(device_batch_vector<T>, dy_copy, (N, incy, batch_count));
-                    DEVICE_MEMCHECK(device_vector<T>, d_alpha_copy, (1));
-                    DEVICE_MEMCHECK(device_vector<T>, d_beta_copy, (1));
+                    DEVICE_MEMCHECK(device_vector<T>, d_alpha_copy, (batch_count, alpha_stride));
+                    DEVICE_MEMCHECK(device_vector<T>, d_beta_copy, (batch_count, beta_stride));
 
                     // copy data from CPU to device
                     CHECK_HIP_ERROR(dx_copy.transfer_from(hx));
                     CHECK_HIP_ERROR(dA_copy.transfer_from(hA));
-                    CHECK_HIP_ERROR(d_alpha_copy.transfer_from(alpha));
-                    CHECK_HIP_ERROR(d_beta_copy.transfer_from(beta));
+                    CHECK_HIP_ERROR(d_alpha_copy.transfer_from(halpha));
+                    CHECK_HIP_ERROR(d_beta_copy.transfer_from(hbeta));
 
                     CHECK_ROCBLAS_ERROR(
                         rocblas_set_pointer_mode(handle_copy, rocblas_pointer_mode_device));
@@ -427,7 +434,16 @@ void testing_symv_batched(const Arguments& arg)
         // cpu reference
         for(int64_t b = 0; b < batch_count; b++)
         {
-            ref_symv<T>(uplo, N, alpha[0], hA[b], lda, hx[b], incx, beta[0], hy_gold[b], incy);
+            ref_symv<T>(uplo,
+                        N,
+                        halpha[b * alpha_stride],
+                        hA[b],
+                        lda,
+                        hx[b],
+                        incx,
+                        hbeta[b * beta_stride],
+                        hy_gold[b],
+                        incy);
         }
 
         cpu_time_used = get_time_us_no_sync() - cpu_time_used;
@@ -486,6 +502,18 @@ void testing_symv_batched(const Arguments& arg)
         int    number_cold_calls = arg.cold_iters;
         int    total_calls       = number_cold_calls + arg.iters;
 
+        T* alpha = &h_alpha;
+        T* beta  = &h_beta;
+        if(arg.alpha_beta_stride)
+        {
+            CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
+            CHECK_HIP_ERROR(d_alpha.transfer_from(halpha));
+            CHECK_HIP_ERROR(d_beta.transfer_from(hbeta));
+            alpha = d_alpha;
+            beta  = d_beta;
+            handle.pre_test(arg);
+        }
+
         hipStream_t stream;
         CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
 
@@ -510,6 +538,11 @@ void testing_symv_batched(const Arguments& arg)
         }
 
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+
+        if(arg.alpha_beta_stride)
+        {
+            handle.post_test(arg);
+        }
 
         ArgumentModel<e_uplo, e_N, e_alpha, e_lda, e_incx, e_beta, e_incy, e_batch_count>{}
             .log_args<T>(rocblas_cout,

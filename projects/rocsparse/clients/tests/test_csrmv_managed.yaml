@@ -185,3 +185,20 @@ Tests:
   matrix: [rocsparse_matrix_random]
   spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
   graph_test: true
+
+# Regression: csr_adaptive on managed (unified) memory over-read csr_row_ptr
+# past its m+1-length end for the last, partially-filled row block. Benign on
+# discrete GPUs but faults on unified-memory APUs (gfx1151); caught here on any
+# arch under ASAN. Row counts are chosen so the final adaptive row block holds
+# a non-power-of-two number of short rows.
+- name: csrmv_managed_adaptive_last_rowblock
+  category: quick
+  function: csrmv_managed
+  precision: *single_double_precisions
+  M: [3, 7, 15, 33, 300]
+  N: [3, 7, 15, 33, 300]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]

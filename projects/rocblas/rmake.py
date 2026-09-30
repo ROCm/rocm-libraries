@@ -125,7 +125,10 @@ def parse_args():
                         help='Specify path to a pre-built rocBLAS library, when building clients only using --clients-only flag. (optional, default: /opt/rocm/rocblas)')
 
     experimental_opts.add_argument('-n', '--no_tensile', dest='build_tensile', required=False, default=True, action='store_false',
-                        help='Build a subset of rocBLAS library which does not require Tensile.')
+                        help='Build a subset of rocBLAS library which does not require Tensile or hipBLASLt.')
+
+    experimental_opts.add_argument('-x', '--hipblaslt-only', dest='hipblaslt_only', required=False, default=False, action='store_true',
+                        help='Implies --no_tensile, link only hipBLASLt with no fallback to Tensile GEMMs.')
 
     experimental_opts.add_argument(      '--no_hipblaslt', dest='build_hipblaslt', required=False, default=True, action='store_false',
                         help='Build a subset of rocBLAS library which does not require HipBLASLt.')
@@ -489,6 +492,12 @@ def config_cmd():
     # not just for tensile
     cmake_options.append(f'-DGPU_TARGETS=\"{args.gpu_architecture}\"')
 
+    if args.hipblaslt_only:
+        if not args.build_hipblaslt:
+            fatal("--hipblaslt-only cannot be combined with --no_hipblaslt")
+        args.build_tensile = False # implied
+        cmake_options.append("-DBUILD_WITH_HIPBLASLT_ONLY=ON")
+
     if not args.build_tensile:
         cmake_options.append(f"-DBUILD_WITH_TENSILE=OFF")
     else:
@@ -524,7 +533,9 @@ def config_cmd():
             cmake_options.append(f"-DBUILD_WITH_HIPBLASLT=OFF")
         else:
             cmake_options.append(f"-DBUILD_WITH_HIPBLASLT=ON")
-            if args.hipblaslt_path:
+
+    if args.build_hipblaslt or args.hipblaslt_only:
+        if args.hipblaslt_path:
                 cmake_options.append(f"-Dhipblaslt_path={args.hipblaslt_path}")
 
     if args.run_header_testing:
@@ -602,6 +613,14 @@ def main():
     global args
     os_detect()
     args = parse_args()
+
+    # If the user (or container image) has set CMAKE_GENERATOR=Ninja in the
+    # environment, cmake will generate build.ninja regardless of what flags we
+    # pass. Honor that here so the configure and build steps stay in sync;
+    # otherwise the Linux default path runs `make` against a Ninja build dir.
+    if not args.ninja and os.environ.get("CMAKE_GENERATOR", "").lower() == "ninja":
+        print("CMAKE_GENERATOR=Ninja detected in environment; enabling --ninja")
+        args.ninja = True
 
     if args.ci_labels != "":
         label_modifiers( arg_into_list(args.ci_labels) )

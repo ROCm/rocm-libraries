@@ -193,7 +193,7 @@ std::string MatmulOperationDescriptor::toString() const
     str += ", c_uid=" + std::to_string(_data.c_tensor_uid);
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
-    str += "}";
+    str += '}';
     return str;
 }
 

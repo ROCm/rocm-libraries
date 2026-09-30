@@ -3,6 +3,11 @@
 
 #pragma once
 
+#include <optional>
+#include <unordered_map>
+
+#include <hipdnn_data_sdk/utilities/PackedFp4Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/PackedFp6Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
@@ -19,6 +24,32 @@ inline hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT unpackTensorAttri
     return tensorAttributesT;
 }
 
+/// Folds the two mutually-exclusive SDPA scale sources into a single optional
+/// scalar operand: a real scale tensor if present, else a synthesized baked
+/// FLOAT scalar carrying attn_scale_value, else nullopt (default 1/sqrt(D)).
+/// The frontend (SdpaFwdNode/SdpaBwdNode) enforces that at most one source is
+/// set, so this never has to reconcile a conflict.
+inline std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>
+    foldSdpaScale(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* scaleTensor,
+                  std::optional<float> attnScaleValue)
+{
+    if(scaleTensor != nullptr)
+    {
+        return unpackTensorAttributes(*scaleTensor);
+    }
+    if(attnScaleValue.has_value())
+    {
+        hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT baked;
+        baked.data_type = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+        baked.dims = {1};
+        baked.strides = {1};
+        baked.is_runtime_pass_by_value = false;
+        baked.value.Set(hipdnn_flatbuffers_sdk::data_objects::Float32Value(attnScaleValue.value()));
+        return baked;
+    }
+    return std::nullopt;
+}
+
 template <typename T>
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ShallowTensor<T>> createShallowTensor(
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& tensorDetails, void* ptr)
@@ -27,10 +58,30 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ShallowTensor<T>> createShall
         ptr, tensorDetails.dims, tensorDetails.strides);
 }
 
+/// Binds a required tensor from the variant pack. Throws std::out_of_range
+/// (via unordered_map::at) when the UID is absent, matching existing plans.
+template <typename T>
+inline std::unique_ptr<hipdnn_data_sdk::utilities::ShallowTensor<T>>
+    bindShallowTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& tensorDetails,
+                      const std::unordered_map<int64_t, void*>& variantPack)
+{
+    return createShallowTensor<T>(tensorDetails, variantPack.at(tensorDetails.uid));
+}
+
+/// Binds an optional tensor; returns nullptr when the operand is not present.
+template <typename T>
+inline std::unique_ptr<hipdnn_data_sdk::utilities::ShallowTensor<T>> bindOptionalShallowTensor(
+    const std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>& tensorDetails,
+    const std::unordered_map<int64_t, void*>& variantPack)
+{
+    return tensorDetails.has_value() ? bindShallowTensor<T>(*tensorDetails, variantPack) : nullptr;
+}
+
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     createTensor(hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                  const std::vector<int64_t>& dims,
-                 const std::vector<int64_t>& strides)
+                 const std::vector<int64_t>& strides,
+                 bool packSubByteElements = false)
 {
     using namespace hipdnn_data_sdk::utilities;
     using namespace hipdnn_data_sdk::types;
@@ -59,12 +110,28 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E8M0:
         return std::make_unique<Tensor<fp8_e8m0>>(dims, strides);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1:
+        if(packSubByteElements)
+        {
+            return std::make_unique<PackedFp4Tensor>(dims, strides);
+        }
         return std::make_unique<Tensor<fp4_e2m1>>(dims, strides);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::INT4:
+        if(packSubByteElements)
+        {
+            throw std::runtime_error("createTensor: packed layout not implemented for INT4");
+        }
         return std::make_unique<Tensor<uint8_t>>(dims, strides);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E2M3:
+        if(packSubByteElements)
+        {
+            return std::make_unique<PackedFp6Tensor<fp6_e2m3>>(dims, strides);
+        }
         return std::make_unique<Tensor<fp6_e2m3>>(dims, strides);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E3M2:
+        if(packSubByteElements)
+        {
+            return std::make_unique<PackedFp6Tensor<fp6_e3m2>>(dims, strides);
+        }
         return std::make_unique<Tensor<fp6_e3m2>>(dims, strides);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN:
         return std::make_unique<Tensor<bool>>(dims, strides);
@@ -74,14 +141,22 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
 }
 
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor> createTensorFromAttribute(
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attribute)
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attribute,
+    bool packSubByteElements = false)
 {
     auto dims
         = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(attribute.dims());
     auto strides = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(
         attribute.strides());
 
-    return createTensor(attribute.data_type(), dims, strides);
+    return createTensor(attribute.data_type(), dims, strides, packSubByteElements);
+}
+
+inline bool isSubByteDataType(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+{
+    return dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1
+           || dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E2M3
+           || dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E3M2;
 }
 
 } // namespace hipdnn_test_sdk::detail

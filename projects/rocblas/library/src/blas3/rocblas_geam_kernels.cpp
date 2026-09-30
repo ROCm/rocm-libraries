@@ -42,10 +42,8 @@ rocblas_geam_zero_matrix_device(rocblas_int    m,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         if(tx < m && ty < n)
         {
@@ -53,10 +51,7 @@ rocblas_geam_zero_matrix_device(rocblas_int    m,
             size_t c_index = tx + ldc * ty;
             C[c_index]     = 0.0;
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 // general case for any alpha, beta, lda, ldb, ldc
@@ -90,10 +85,8 @@ rocblas_geam_device(rocblas_operation transA,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         if(tx < m && ty < n)
         {
             auto alpha = load_scalar(alpha_device_host);
@@ -134,10 +127,7 @@ rocblas_geam_device(rocblas_operation transA,
 
             C[c_index] = beta * b_val + alpha * a_val;
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 //  special case:
@@ -166,10 +156,8 @@ rocblas_geam_2matrix_device(rocblas_operation transA,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         if(tx < m && ty < n)
         {
             auto alpha = load_scalar(alpha_device_host);
@@ -202,10 +190,7 @@ rocblas_geam_2matrix_device(rocblas_operation transA,
                 C[c_index] = alpha * a_val;
             }
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 // Tiled transpose with padded shared memory for coalesced reads/writes and no bank conflicts.
@@ -244,10 +229,8 @@ rocblas_geam_transpose_tiled_device(rocblas_operation transA,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
 #define rows n
 #define cols m
@@ -283,10 +266,7 @@ rocblas_geam_transpose_tiled_device(rocblas_operation transA,
 
 #undef rows
 #undef cols
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 // special cases where: lda=ldb=ldc=m && transA==transB=none so matrices
@@ -312,10 +292,8 @@ rocblas_geam_1D_device(size_t         size,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         if(tx < size)
         {
             auto alpha = load_scalar(alpha_device_host);
@@ -335,10 +313,7 @@ rocblas_geam_1D_device(size_t         size,
                 C[tx] = (beta ? beta * B[tx] : 0) + (alpha ? alpha * A[tx] : 0);
             }
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 // special cases where: lda=ldb=ldc=m && transA==transB=none so matrices
@@ -361,10 +336,8 @@ rocblas_geam_1D_2matrix_device(size_t         size,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         if(tx < size)
         {
             auto alpha = load_scalar(alpha_device_host);
@@ -381,10 +354,7 @@ rocblas_geam_1D_2matrix_device(size_t         size,
                 C[tx]   = alpha * A[tx];
             }
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 // special cases where: A == C && lda == ldc && transA == none
@@ -414,10 +384,8 @@ rocblas_geam_inplace_device(rocblas_operation transB,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         if(tx < m && ty < n)
         {
             auto alpha = load_scalar(alpha_device_host);
@@ -459,10 +427,7 @@ rocblas_geam_inplace_device(rocblas_operation transB,
                 }
             }
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /*

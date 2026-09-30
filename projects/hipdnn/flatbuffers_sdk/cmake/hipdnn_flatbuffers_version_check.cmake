@@ -2,8 +2,8 @@
 # SPDX-License-Identifier:  MIT
 
 # Shared FlatBuffers version validation, used by both the in-tree
-# flatbuffers_sdk/CMakeLists.txt at build time and by the installed imported
-# Config (hipdnn_flatbuffers_sdkConfig_imported.cmake.in) at consumer
+# flatbuffers_sdk/CMakeLists.txt at build time and by the installed
+# hipdnn_flatbuffers_sdkConfig.cmake package config at consumer
 # find_package() time. Single-sourcing the comparison and core message keeps
 # the two call sites from drifting.
 #

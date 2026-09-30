@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,20 @@
 
 #define BLOCK_MULTIPLIER 3
 #define WG_SIZE 256
+// RDNA4/gfx12 launch tuning. The 256-thread workgroup used throughout LRB is a wave64-era
+// default (4 wavefronts on wave64). On wave32 hardware (RDNA), 256 threads is 8 wavefronts
+// per block, which coarsens occupancy for the memory-bound medium-row consumer kernels.
+// Using 128-thread blocks (4 wavefronts) lets more workgroups stay resident per SIMD,
+// improving latency hiding and (for the one-block-per-row path) cutting block-reduction
+// width for rows that don't fill a 256-thread block.
+//
+// This is applied ONLY to the medium-row kernels (warp-reduce and one-block-per-row),
+// selected at runtime from handle->wavefront_size so wave64 archs are unaffected.
+// The short-row and long-row kernels deliberately keep WG_SIZE=256:
+//  - short rows: 256 amortizes more rows per block and measured slower at 128;
+//  - long rows: shrinking the block only multiplies the number of cooperating workgroups
+//    per (few) very long rows, increasing cross-workgroup atomic/spin-loop sync contention.
+#define WG_SIZE_WAVE32 128
 #define LR_THRESHOLD 11
 #define VEC_THRESHOLD 5
 #define CSRMV_LRB_SHORT_ROWS_2_LDS_ELEMS 1024
@@ -66,9 +80,11 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
         rocsparse_hipMallocAsync(&csrmv_info->lrb.n_rows_bins, sizeof(J) * 32, stream));
 
     RETURN_IF_HIP_ERROR(
-        hipMemsetAsync(csrmv_info->lrb.rows_offsets_scratch, 0, sizeof(J) * m, stream));
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(csrmv_info->lrb.rows_bins, 0, sizeof(J) * m, stream));
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(csrmv_info->lrb.n_rows_bins, 0, sizeof(J) * 32, stream));
+        rocsparse_hipMemsetAsync(csrmv_info->lrb.rows_offsets_scratch, 0, sizeof(J) * m, stream));
+    RETURN_IF_HIP_ERROR(
+        rocsparse_hipMemsetAsync(csrmv_info->lrb.rows_bins, 0, sizeof(J) * m, stream));
+    RETURN_IF_HIP_ERROR(
+        rocsparse_hipMemsetAsync(csrmv_info->lrb.n_rows_bins, 0, sizeof(J) * 32, stream));
 
     dim3 blocks(256);
     dim3 threads(WG_SIZE);
@@ -89,9 +105,9 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
     // with the phase-2 and phase-3 kernels. Alternatively, we could always launch a fixed grid
     // size and then do more in the (SpMV) kernels to compute intra-kernel iteration bounds.
     J temp[32];
-    RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
         temp, csrmv_info->lrb.n_rows_bins, sizeof(J) * 32, hipMemcpyDeviceToHost, stream));
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
     for(int i = 0; i < 32; i++)
     {
@@ -625,15 +641,16 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
 
                 if(block_size <= 256) // One warp per row
                 {
-                    uint32_t wf_size   = handle->wavefront_size;
-                    uint32_t grid_size = (info->lrb.nRowsBins[j] - 1) / (256 / wf_size) + 1;
-
                     if(handle->wavefront_size == 32)
                     {
+                        // RDNA (wave32): use 128-thread blocks (4 wavefronts) instead of 256.
+                        // One wavefront reduces one row, so grid is sized by wavefronts-per-block.
+                        constexpr uint32_t mr_block = WG_SIZE_WAVE32;
+                        uint32_t grid_size = (info->lrb.nRowsBins[j] - 1) / (mr_block / 32) + 1;
                         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                            (csrmvn_lrb_medium_rows_warp_reduce_kernel<256, 32>),
+                            (csrmvn_lrb_medium_rows_warp_reduce_kernel<mr_block, 32>),
                             grid_size,
-                            256,
+                            mr_block,
                             0,
                             stream,
                             conj,
@@ -657,6 +674,8 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                     }
                     else
                     {
+                        uint32_t grid_size
+                            = (info->lrb.nRowsBins[j] - 1) / (256 / handle->wavefront_size) + 1;
                         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                             (csrmvn_lrb_medium_rows_warp_reduce_kernel<256, 64>),
                             grid_size,
@@ -687,29 +706,60 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                 {
                     uint32_t grid_size = info->lrb.nRowsBins[j]; // One WG per row
 
-                    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (csrmvn_lrb_medium_rows_kernel<WG_SIZE>),
-                        grid_size,
-                        WG_SIZE,
-                        0,
-                        stream,
-                        conj,
-                        nnz,
-                        static_cast<J*>(info->lrb.rows_bins),
-                        static_cast<J*>(info->lrb.n_rows_bins),
-                        j,
-                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                        csr_row_ptr,
-                        csr_col_ind,
-                        csr_val,
-                        x,
-                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-                        y,
-                        num_extra,
-                        gamma_device_array,
-                        z_array,
-                        descr->base,
-                        handle->pointer_mode == rocsparse_pointer_mode_host);
+                    if(handle->wavefront_size == 32)
+                    {
+                        // RDNA (wave32): 128-thread block per row (4 wavefronts) improves
+                        // occupancy vs the 256-thread (8-wavefront) block for these rows.
+                        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                            (csrmvn_lrb_medium_rows_kernel<WG_SIZE_WAVE32>),
+                            grid_size,
+                            WG_SIZE_WAVE32,
+                            0,
+                            stream,
+                            conj,
+                            nnz,
+                            static_cast<J*>(info->lrb.rows_bins),
+                            static_cast<J*>(info->lrb.n_rows_bins),
+                            j,
+                            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                            csr_row_ptr,
+                            csr_col_ind,
+                            csr_val,
+                            x,
+                            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                            y,
+                            num_extra,
+                            gamma_device_array,
+                            z_array,
+                            descr->base,
+                            handle->pointer_mode == rocsparse_pointer_mode_host);
+                    }
+                    else
+                    {
+                        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                            (csrmvn_lrb_medium_rows_kernel<WG_SIZE>),
+                            grid_size,
+                            WG_SIZE,
+                            0,
+                            stream,
+                            conj,
+                            nnz,
+                            static_cast<J*>(info->lrb.rows_bins),
+                            static_cast<J*>(info->lrb.n_rows_bins),
+                            j,
+                            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                            csr_row_ptr,
+                            csr_col_ind,
+                            csr_val,
+                            x,
+                            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                            y,
+                            num_extra,
+                            gamma_device_array,
+                            z_array,
+                            descr->base,
+                            handle->pointer_mode == rocsparse_pointer_mode_host);
+                    }
                 }
             }
         }
@@ -719,7 +769,7 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
         {
             if(info->lrb.nRowsBins[j] != 0)
             {
-                RETURN_IF_HIP_ERROR(hipMemsetAsync(
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
                     info->lrb.wg_flags, 0, sizeof(uint32_t) * info->lrb.size, stream));
 
                 uint32_t block_size      = WG_SIZE;

@@ -39,10 +39,10 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CK_DEFAULT_KERNELS)
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/solver/problem_description_interpreter.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
+#include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
-#include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #endif
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
 
@@ -179,7 +179,7 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
     if(!loader.IsLoaded())
         return;
 
-    const bool is_deterministic = problem.GetConv().attribute.deterministic;
+    [[maybe_unused]] const bool is_deterministic = problem.GetConv().attribute.deterministic;
 
     // AI heuristics (if enabled)
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
@@ -313,7 +313,12 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::IsValid(
         use_tf32 = false;
         return loader.IsArgsSupported(
             CKSolverType::GrpConv3dWrw, problem, kernel_id, miopenBFloat16, false);
-    default: return false;
+
+    case miopenInt32:
+    case miopenDouble:
+    case miopenFloat8_fnuz:
+    case miopenBFloat8_fnuz:
+    case miopenInt64: return false;
     }
 }
 
@@ -375,8 +380,6 @@ bool ConvHipImplicitGemm3DGroupWrwXdlops::IsApplicable(
     const ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem) const
 {
     if(env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS))
-        return false;
-    if(!problem.AllTensorsDimsFitIntoInt())
         return false;
     if(problem.HasMixedDataTypes())
         return false;

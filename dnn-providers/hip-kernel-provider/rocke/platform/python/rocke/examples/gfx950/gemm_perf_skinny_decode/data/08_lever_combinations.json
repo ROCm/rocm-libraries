@@ -1,0 +1,790 @@
+{
+  "shape": {
+    "M": 2,
+    "N": 4096,
+    "K": 4096
+  },
+  "base_tile": {
+    "tile_m": 16,
+    "tile_n": 16,
+    "tile_k": 512,
+    "warp_m": 1,
+    "warp_n": 1,
+    "warp_k": 1,
+    "warp_tile_m": 16,
+    "warp_tile_n": 16,
+    "warp_tile_k": 32
+  },
+  "rocblas_ms": 0.011,
+  "n_combos": 192,
+  "results": [
+    {
+      "label": "mem_intrawave_default",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_default_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_default_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_default_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_default_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_default_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_default_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_default_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_default_pers",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_default_pers_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_default_pers_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_default_pers_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_default_pers_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_default_pers_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_default_pers_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_default_pers_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_cshuffle",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_cshuffle_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_cshuffle_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_cshuffle_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_cshuffle_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_cshuffle_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_cshuffle_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_cshuffle_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_cshuffle_pers",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_cshuffle_pers_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_cshuffle_pers_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_cshuffle_pers_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_cshuffle_pers_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_cshuffle_pers_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_cshuffle_pers_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_intrawave_cshuffle_pers_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_default",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_default_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_default_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_default_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_default_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_default_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_default_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_default_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_default_pers",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_default_pers_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_default_pers_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_default_pers_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_default_pers_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_default_pers_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_default_pers_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_default_pers_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_cshuffle",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_cshuffle_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_cshuffle_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_cshuffle_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_cshuffle_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_cshuffle_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_cshuffle_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_cshuffle_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_cshuffle_pers",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_cshuffle_pers_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_cshuffle_pers_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_cshuffle_pers_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_cshuffle_pers_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_cshuffle_pers_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_cshuffle_pers_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "mem_interwave_cshuffle_pers_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_default",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_default_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_default_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_default_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_default_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_default_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_default_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_default_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_default_pers",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_default_pers_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_default_pers_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_default_pers_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_default_pers_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_default_pers_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_default_pers_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_default_pers_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_cshuffle",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_cshuffle_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_cshuffle_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_cshuffle_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_cshuffle_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_cshuffle_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_cshuffle_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_cshuffle_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_cshuffle_pers",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_cshuffle_pers_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_cshuffle_pers_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_cshuffle_pers_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_cshuffle_pers_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_cshuffle_pers_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_cshuffle_pers_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_intrawave_cshuffle_pers_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_default",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_default_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_default_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_default_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_default_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_default_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_default_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_default_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_default_pers",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_default_pers_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_default_pers_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_default_pers_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_default_pers_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_default_pers_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_default_pers_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_default_pers_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_cshuffle",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_cshuffle_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_cshuffle_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_cshuffle_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_cshuffle_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_cshuffle_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_cshuffle_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_cshuffle_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_cshuffle_pers",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_cshuffle_pers_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_cshuffle_pers_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_cshuffle_pers_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_cshuffle_pers_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_cshuffle_pers_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_cshuffle_pers_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv3_interwave_cshuffle_pers_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_default",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_default_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_default_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_default_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_default_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_default_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_default_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_default_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_default_pers",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_default_pers_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_default_pers_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_default_pers_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_default_pers_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_default_pers_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_default_pers_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_default_pers_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_cshuffle",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_cshuffle_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_cshuffle_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_cshuffle_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_cshuffle_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_cshuffle_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_cshuffle_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_cshuffle_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_cshuffle_pers",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_cshuffle_pers_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_cshuffle_pers_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_cshuffle_pers_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_cshuffle_pers_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_cshuffle_pers_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_cshuffle_pers_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_intrawave_cshuffle_pers_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_default",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_default_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_default_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_default_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_default_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_default_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_default_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_default_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_default_pers",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_default_pers_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_default_pers_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_default_pers_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_default_pers_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_default_pers_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_default_pers_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_default_pers_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_cshuffle",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_cshuffle_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_cshuffle_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_cshuffle_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_cshuffle_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_cshuffle_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_cshuffle_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_cshuffle_chip_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_cshuffle_pers",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_cshuffle_pers_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_cshuffle_pers_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_cshuffle_pers_wpe8",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_cshuffle_pers_chip",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_cshuffle_pers_chip_wpe2",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_cshuffle_pers_chip_wpe4",
+      "error": "no samples"
+    },
+    {
+      "label": "compv4_interwave_cshuffle_pers_chip_wpe8",
+      "error": "no samples"
+    }
+  ]
+}

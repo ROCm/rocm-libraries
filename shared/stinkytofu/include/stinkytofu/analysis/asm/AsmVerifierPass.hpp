@@ -52,7 +52,7 @@ class STINKYTOFU_EXPORT StinkyIRVerifierPass : public Pass {
    public:
     static char ID;
 
-    explicit StinkyIRVerifierPass(AsmVerifierConfig config = {}) : config_(std::move(config)) {}
+    explicit StinkyIRVerifierPass(AsmVerifierConfig config = {}) : config_(config) {}
 
     PassID getPassID() const override {
         return &ID;
@@ -67,6 +67,6 @@ class STINKYTOFU_EXPORT StinkyIRVerifierPass : public Pass {
 };
 
 inline std::unique_ptr<Pass> createStinkyIRVerifierPass(AsmVerifierConfig config = {}) {
-    return std::make_unique<StinkyIRVerifierPass>(std::move(config));
+    return std::make_unique<StinkyIRVerifierPass>(config);
 }
 }  // namespace stinkytofu

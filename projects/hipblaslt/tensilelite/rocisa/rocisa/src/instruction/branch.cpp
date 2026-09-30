@@ -27,6 +27,7 @@
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/variant.h>
+#include <nanobind/stl/vector.h>
 
 namespace nb = nanobind;
 
@@ -91,6 +92,9 @@ void branch_inst(nb::module_ m_branch)
         .def(nb::init<const std::shared_ptr<rocisa::Container>&, const std::string&>(),
              nb::arg("src"),
              nb::arg("comment") = "")
+        // Long-branch target hint -- see SSetPCB64::longBranchLabel in branch.hpp.
+        // Metadata only; does not affect the emitted assembly.
+        .def_rw("longBranchLabel", &rocisa::SSetPCB64::longBranchLabel)
         .def("__deepcopy__",
              [](const rocisa::SSetPCB64& self, nb::dict&) { return new rocisa::SSetPCB64(self); });
 
@@ -101,6 +105,7 @@ void branch_inst(nb::module_ m_branch)
              nb::arg("dst"),
              nb::arg("src"),
              nb::arg("comment") = "")
+        .def_rw("calleeFuncs", &rocisa::SSwapPCB64::calleeFuncs)
         .def("__deepcopy__", [](const rocisa::SSwapPCB64& self, nb::dict&) {
             return new rocisa::SSwapPCB64(self);
         });

@@ -1,0 +1,87 @@
+<svg viewBox="0 0 980 580" width="980" height="580" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13">
+  <rect x="0" y="0" width="980" height="580" fill="#ffffff"/>
+
+  <defs>
+    <marker id="arrow-ukd-adapters" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,4 L0,8 z" fill="#444"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="490" y="34" text-anchor="middle" font-size="17" font-weight="600" fill="#222">Adapters: anything with an adapter is a supported target</text>
+
+  <!-- ===================== MATRIX ===================== -->
+  <!-- Grid geometry:
+       row-label col: x 15..165  (w 150)
+       col A (Build+runtime): x 175..425 (w 250)
+       col B (Build-only):    x 435..685 (w 250)
+       header row: y 70..108
+       row 1: y 116..300
+       row 2: y 308..492
+  -->
+
+  <!-- Column headers -->
+  <rect x="175" y="70" width="250" height="38" rx="8" fill="#faf7fc" stroke="#8e5bc4" stroke-width="1.5"/>
+  <text x="300" y="88" text-anchor="middle" font-weight="600" fill="#333">Build + runtime drop-in</text>
+  <text x="300" y="102" text-anchor="middle" font-size="10" fill="#555">ships and loads at runtime</text>
+
+  <rect x="435" y="70" width="250" height="38" rx="8" fill="#faf7fc" stroke="#8e5bc4" stroke-width="1.5"/>
+  <text x="560" y="88" text-anchor="middle" font-weight="600" fill="#333">Build-only</text>
+  <text x="560" y="102" text-anchor="middle" font-size="10" fill="#555">extra deps, AOT only</text>
+
+  <!-- Row 1: Kernel-source adapters -->
+  <rect x="15" y="116" width="150" height="184" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="90" y="200" text-anchor="middle" font-weight="600" fill="#333">Kernel-source</text>
+  <text x="90" y="218" text-anchor="middle" font-weight="600" fill="#333">adapters</text>
+
+  <!-- Cell 1A: kernel-source / build+runtime -->
+  <rect x="175" y="116" width="250" height="184" rx="8" fill="#ffffff" stroke="#7f8a99" stroke-width="1.5"/>
+  <rect x="235" y="150" width="130" height="30" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="300" y="170" text-anchor="middle" font-family="Consolas, monospace" fill="#333">kpack</text>
+  <rect x="235" y="196" width="130" height="30" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="300" y="216" text-anchor="middle" font-family="Consolas, monospace" fill="#333">hsaco</text>
+
+  <!-- Cell 1B: kernel-source / build-only -->
+  <rect x="435" y="116" width="250" height="184" rx="8" fill="#ffffff" stroke="#7f8a99" stroke-width="1.5"/>
+  <rect x="495" y="150" width="130" height="30" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="560" y="170" text-anchor="middle" font-family="Consolas, monospace" fill="#333">rocKE</text>
+  <rect x="495" y="196" width="130" height="30" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="560" y="216" text-anchor="middle" font-family="Consolas, monospace" fill="#333">hip</text>
+  <rect x="495" y="242" width="130" height="30" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="560" y="261" text-anchor="middle" fill="#333">future DSLs</text>
+
+  <!-- Row 2: Heuristic adapters -->
+  <rect x="15" y="308" width="150" height="184" rx="8" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="90" y="392" text-anchor="middle" font-weight="600" fill="#2b6b40">Heuristic</text>
+  <text x="90" y="410" text-anchor="middle" font-weight="600" fill="#2b6b40">adapters</text>
+
+  <!-- Cell 2A: heuristic / build+runtime -->
+  <rect x="175" y="308" width="250" height="184" rx="8" fill="#ffffff" stroke="#3f9159" stroke-width="1.5"/>
+  <rect x="200" y="332" width="200" height="30" rx="5" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="300" y="352" text-anchor="middle" fill="#2b6b40">LightGBM model</text>
+  <rect x="200" y="372" width="200" height="30" rx="5" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="300" y="392" text-anchor="middle" fill="#2b6b40">custom C-API library</text>
+  <rect x="200" y="412" width="200" height="46" rx="5" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="300" y="430" text-anchor="middle" fill="#2b6b40">static table</text>
+  <text x="300" y="447" text-anchor="middle" font-size="11" fill="#2b6b40">(CSV / order)</text>
+
+  <!-- Cell 2B: heuristic / build-only (none: heuristics run at selection time) -->
+  <rect x="435" y="308" width="250" height="184" rx="8" fill="#f7f7f7" stroke="#c9cdd4" stroke-width="1.5"/>
+  <text x="560" y="392" text-anchor="middle" font-size="11" fill="#888">none</text>
+  <text x="560" y="410" text-anchor="middle" font-size="10" fill="#888">heuristics run at selection time</text>
+
+  <!-- ===================== CONVERGENCE ===================== -->
+  <!-- Kernel-source adapters -> loadable kernel module -->
+  <path d="M685,208 L790,208" fill="none" stroke="#444" stroke-width="1.5" marker-end="url(#arrow-ukd-adapters)"/>
+  <rect x="800" y="170" width="165" height="76" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
+  <text x="882" y="203" text-anchor="middle" font-weight="600" fill="#8a6a12">loadable kernel</text>
+  <text x="882" y="221" text-anchor="middle" font-weight="600" fill="#8a6a12">module</text>
+
+  <!-- Heuristic adapters -> scorer -->
+  <path d="M685,400 L790,400" fill="none" stroke="#444" stroke-width="1.5" marker-end="url(#arrow-ukd-adapters)"/>
+  <rect x="800" y="362" width="165" height="76" rx="8" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="882" y="405" text-anchor="middle" font-weight="600" fill="#2b6b40">scorer</text>
+
+  <!-- Caption -->
+  <text x="490" y="536" text-anchor="middle" font-size="11" fill="#555">The set grows over time; new authoring tools and JIT sources plug in the same way (Section 8.3).</text>
+</svg>

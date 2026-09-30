@@ -4,6 +4,8 @@ A unified kernel dispatch system for AMD GPUs with C++ and Python frontends, sup
 
 **Validated Platform:** AMD Instinct MI300 series (gfx942)
 
+> **Stream-K GEMM:** see [STREAMK.md](STREAMK.md) for how to generate, build, run, and
+> test the Stream-K deep-core path (atomic/linear/tree reductions).
 
 ---
 
@@ -17,8 +19,9 @@ A unified kernel dispatch system for AMD GPUs with C++ and Python frontends, sup
 6. [External Integration](#external-integration)
 7. [Core Concepts](#core-concepts)
 8. [Operation Support Matrix](#operation-support-matrix)
-9. [Troubleshooting](#troubleshooting)
-10. [File Structure](#file-structure)
+9. [Environment Variables](#environment-variables)
+10. [Troubleshooting](#troubleshooting)
+11. [File Structure](#file-structure)
 
 ---
 
@@ -376,6 +379,11 @@ cd build/examples
 
 ### Python Examples
 
+For FP8/FP4 microscaling GEMM on gfx950 or gfx1250, see the
+[MX GEMM bridge guide](docs/mx_gemm.md) for input formats, runnable code, and
+native/bridge regression tests.
+
+
 Run from the `dispatcher` directory:
 
 ```bash
@@ -394,6 +402,12 @@ python3 examples/grouped_conv/python/03_bwd_data.py            # Backward data +
 python3 examples/grouped_conv/python/04_bwd_weight.py          # Backward weight + CPU ref
 python3 examples/grouped_conv/python/05_benchmark.py           # Multi-problem benchmark
 python3 examples/grouped_conv/python/06_registry_json.py       # Heuristic selection + JSON
+
+# FMHA Examples (JIT-compiled on the fly)
+python3 examples/fmha/python/01_basic_fmha.py      # Basic forward attention
+python3 examples/fmha/python/12_masks_fmha.py       # Causal masks
+python3 examples/fmha/python/18_backward_fmha.py    # Backward pass
+python3 examples/fmha/python/16_splitkv_fmha.py     # Split-KV for long sequences
 ```
 
 ### Example Output
@@ -702,6 +716,7 @@ This matrix shows all CK Tile operations with per-data-type, per-layout, and per
 | | | | | | **Data Types** | | | | | **Layouts** | | | | **GPU Targets** | | |
 |:---:|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | **Op** | **CK Tile Kernel** | **fp16** | **fp8** | **bf16** | **bf8** | **int8** | **fp4** | **fp6** | **rcr** | **rrr** | **ccr** | **crr** | **90a** | **942** | **950** | **1201** |
+| GEMM | batched_contraction_multi_abd [9]<br>engine: `dispatcher/` | ✅ | ✅ | ✅ | ✅ |  |  |  | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ |
 | GEMM | gemm_multi_d [5]<br>engine: `dispatcher/`<br>example: `19_gemm_multi_d/` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |  | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | GEMM | gemm_preshuffle [1][2]<br>engine: `dispatcher/` | ✅ | ✅ | ✅ | ✅ | ✅ |  |  | ✅ |  |  |  | ✅ | ✅ | ✅ | ❌ |
 | GEMM | gemm_universal [3][4][7][8]<br>engine: `dispatcher/`<br>example: `03_gemm/` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |  | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -716,7 +731,7 @@ This matrix shows all CK Tile operations with per-data-type, per-layout, and per
 | GEMM | streamk_gemm<br>example: `40_streamk_gemm/` | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Reduce | multi_reduce2d<br>example: `05_reduce/` | ❌ |  | ❌ |  |  |  |  |  |  |  |  | ❌ | ❌ | ❌ | ❌ |
 | Reduce | reduce2d<br>example: `05_reduce/` | ❌ |  | ❌ |  |  |  |  |  |  |  |  | ❌ | ❌ | ❌ | ❌ |
-| Attention | fmha<br>example: `01_fmha/` | ❌ | ❌ | ❌ | ❌ | ❌ |  |  |  |  |  |  | ❌ | ❌ | ❌ | ❌ |
+| Attention | fmha<br>example: `01_fmha/` | ✅ | ✅ | ✅ | ✅ | ❌ |  |  |  |  |  |  | ✅ | ✅ | ✅ | ❌ |
 | Attention | sparse_attn<br>example: `50_sparse_attn/` | ❌ |  | ❌ |  | ❌ |  |  |  |  |  |  | ❌ | ❌ | ❌ | ❌ |
 | Activation | softmax | ❌ |  | ❌ |  |  |  |  |  |  |  |  | ❌ | ❌ | ❌ | ❌ |
 | Activation | topk_softmax<br>example: `09_topk_softmax/` | ❌ | ❌ | ❌ |  |  |  |  |  |  |  |  | ❌ | ❌ | ❌ | ❌ |
@@ -743,6 +758,7 @@ This matrix shows all CK Tile operations with per-data-type, per-layout, and per
 - [6] **grouped_conv:** `arch_filter.py` defines conv operator types (`CONV_FWD`, `CONV_BWD_DATA`, `CONV_BWD_WEIGHT`, `CONV3D_*`) but dispatcher infrastructure is incomplete (ctypes bindings are stubs, `conv_utils.hpp` does not exist).
 - [7] **(all dispatcher ops):** gfx908, gfx1100, and gfx1200 also have `warp_tile_combos` in `arch_specs.json` but are not shown in the matrix's 4 GPU columns.
 - [8] **(all dispatcher ops):** `int4`, `fp32`, `fp64` are valid dispatcher data types (defined in `kernel_key.hpp` `DataType` enum) but have no dedicated matrix columns.
+- [9] **batched_contraction_multi_abd:** Reaches the kernel through the divergent-ABI bridge (`batched_contraction_multi_abd_ctypes_lib.cpp`) rather than the kernel registry, because the argument list is arrays of A/B/D pointers plus per-tensor dim/stride arrays. `fp16` and `bf16` are verified against a NumPy reference on hardware; `fp8`/`bf8` are build-verified only. `fp32` builds for other ops but not for this one, so it is excluded even though it has no column here. Only `rcr` is usable: `rrr`/`ccr`/`crr` trip the row-major-B `static_assert` in `gemm_pipeline_ag_bg_cr_comp_v3.hpp`, which still fires with `pad_k` enabled, at 128x128x32, and on the `mem` pipeline. Multiple D tensors are supported; multiple A or B tensors and `persistent=true` are rejected at config-construction time (see `validate_contraction_multi_abd_params`).
 
 ### Dispatcher GEMM Configuration Detail
 
@@ -796,6 +812,25 @@ This matrix shows all CK Tile operations with per-data-type, per-layout, and per
 | bf8 | bf8 | bf8 | fp32 | fp16 |
 | fp6 | fp6 | fp6 | fp32 | fp32 |
 | fp4 | fp16 or bf16 | fp4 | fp32 | fp16 or bf16 |
+
+## Environment Variables
+
+The dispatcher and its Python tooling read the following environment variables at
+runtime. All are optional; unset means the listed default. (Compile-time `-D`
+defines such as `GEMM_KEY_*` and `CK_TILE_SINGLE_KERNEL_INCLUDE` are build flags,
+not runtime knobs, and are covered under [CMake Options](#cmake-options-reference).)
+
+| Variable | Default | Consumed in | Purpose |
+|----------|---------|-------------|---------|
+| `HIPCC` | `hipcc` (from `PATH`) | `python/dispatcher_common.py`, `scripts/compile_gemm_examples.py`, other `*_builder` scripts | Override the hipcc compiler used to JIT-build the ctypes kernel libraries. |
+| `CK_TILE_HIPCC` | `/opt/rocm/bin/hipcc` | `python/batched_contraction_utils.py`, `python/mx_gemm_utils.py` | Per-op hipcc override for the batched-contraction and mx_gemm bindings (takes precedence there). |
+| `GFX_ARCH` | `gfx942` (parity harness only) | `parity_diag/regression/ab_same_harness.py`; also required as a `-DGFX_ARCH=<arch>` compile flag by the ctypes libs | Target GPU architecture. The ctypes kernel build **requires** it (no silent default); the parity harness falls back to `gfx942`. |
+| `CK_DISPATCHER_LOG_LEVEL` | `info` | `include/ck_tile/dispatcher/dispatcher_log.hpp` | Dispatcher log verbosity. |
+| `CK_DISPATCHER_PRESHUFFLE_CACHE` | off | `bindings/ctypes/gemm_ctypes_lib.cpp` | Opt-in host-side shuffled-B cache for the preshuffle GEMM bridge. Safe **only** when B is immutable and kept alive across calls (perf sweeps); off by default so every call recomputes the shuffle. |
+| `GEMM_PARITY_UNITTEST` | off | `tests/test_gemm_parity.py` | Gate that enables the on-device GEMM parity unittest (skipped unless set). |
+| `PARITY_DEVICE` | `0` | `parity_diag/regression/ab_efficient_sweep.py`, `ab_same_harness.py` | GPU index the A/B parity harness runs on. |
+| `AB_REPEATS` | `3` | `parity_diag/regression/ab_same_harness.py` | Repeat count for the interleaved A/B parity sweep. |
+| `OLD_TE_GEN` | unset | `parity_diag/regression/ab_same_harness.py` | Pin/override the Old-TE baseline generation used by the parity sweep. |
 
 ## Troubleshooting
 
@@ -871,7 +906,14 @@ dispatcher/
 |   |---- grouped_conv_problem.hpp # Grouped conv problem (with builder)
 |   |---- grouped_conv_kernel_decl.hpp  # Grouped conv kernel declarations
 |   |---- grouped_conv_registry.hpp     # Grouped conv registry (thread-safe)
-|   +---- grouped_conv_utils.hpp        # Grouped conv utilities
+|   |---- grouped_conv_utils.hpp        # Grouped conv utilities
+|   |---- fmha_types.hpp           # FMHA fwd/bwd args and traits structs
+|   |---- fmha_problem.hpp         # FmhaProblem, FmhaProblemBuilder
+|   |---- fmha_kernel_key.hpp      # FmhaKernelKey (Signature + Algorithm)
+|   |---- fmha_kernel_instance.hpp # FmhaKernelInstance virtual interface
+|   |---- fmha_kernel_decl.hpp     # Declarative FmhaSignature/FmhaAlgorithm
+|   |---- fmha_registry.hpp        # FmhaRegistry (thread-safe)
+|   +---- fmha_dispatcher.hpp      # FmhaDispatcher (plan, select, run)
 |
 |---- src/                        # C++ implementation
 |
@@ -879,12 +921,17 @@ dispatcher/
 |   |---- codegen_common.py       # Shared: TileConfig, TraitConfigBase, type mappings
 |   |---- unified_gemm_codegen.py # GEMM kernel generator
 |   |---- unified_grouped_conv_codegen.py  # Grouped conv kernel generator
+|   |---- unified_fmha_codegen.py # FMHA kernel generator
+|   |---- fmha_arch_specs.json    # FMHA per-arch tile/pipeline specs
+|   |---- fmha_rules.py           # FMHA validation rules
+|   |---- fmha_profiles.py        # FMHA named profiles/receipts
 |   +---- arch_specs.json         # GPU specifications
 |
 |---- python/                     # Python utilities
 |   |---- dispatcher_common.py    # Shared: paths, validation, Colors, phased output
 |   |---- ctypes_utils.py         # GEMM ctypes utilities
-|   +---- grouped_conv_utils.py   # Grouped conv utilities
+|   |---- grouped_conv_utils.py   # Grouped conv utilities
+|   +---- fmha_utils.py           # FMHA: JIT compile, FmhaRunner, FmhaKernelConfig
 |
 |---- scripts/                    # Build scripts
 |   |---- compile_gemm_examples.py           # GEMM build script
@@ -892,15 +939,19 @@ dispatcher/
 |
 |---- bindings/ctypes/            # Python ctypes interface
 |   |---- gemm_ctypes_lib.cpp     # GEMM Python library
-|   +---- conv_ctypes_lib.cpp     # Grouped conv Python library
+|   |---- conv_ctypes_lib.cpp     # Grouped conv Python library
+|   +---- fmha_ctypes_lib.cpp     # FMHA Python library
 |
 |---- examples/                   # Examples
 |   |---- gemm/
 |   |   |---- cpp/                # C++ GEMM examples (01-07)
 |   |   +---- python/             # Python GEMM examples (01-11)
-|   +---- grouped_conv/
-|       |---- cpp/                # C++ Grouped Conv examples (01-07)
-|       +---- python/             # Python Grouped Conv examples (01-06)
+|   |---- grouped_conv/
+|   |   |---- cpp/                # C++ Grouped Conv examples (01-07)
+|   |   +---- python/             # Python Grouped Conv examples (01-06)
+|   +---- fmha/
+|       |---- cpp/                # C++ FMHA examples (01-35)
+|       +---- python/             # Python FMHA examples (01-38)
 |
 +---- tests/                      # Unit tests (C++ and Python)
 ```
@@ -913,6 +964,8 @@ dispatcher/
 |-----------|--------|
 | GEMM C++ | [examples/gemm/cpp/README.md](examples/gemm/cpp/README.md) |
 | GEMM Python | [examples/gemm/python/README.md](examples/gemm/python/README.md) |
+| FMHA C++ | examples/fmha/cpp/ (35 examples covering all FMHA variants) |
+| FMHA Python | examples/fmha/python/ (38 examples with JIT compilation) |
 | Codegen | [codegen/README.md](codegen/README.md) |
 | Python Utils | [python/README.md](python/README.md) |
 | C++ Headers | [include/ck_tile/dispatcher/README.md](include/ck_tile/dispatcher/README.md) |

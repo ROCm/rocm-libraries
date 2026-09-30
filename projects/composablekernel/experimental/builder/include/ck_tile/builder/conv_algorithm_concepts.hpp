@@ -156,6 +156,30 @@ concept TileOptimizationsDescriptor = requires(T t) {
     { t.split_image } -> std::convertible_to<bool>;
     { t.explicit_gemm } -> std::convertible_to<bool>;
     { t.two_stage } -> std::convertible_to<bool>;
+    { t.streamk.enabled } -> std::convertible_to<bool>;
+    { t.streamk.reduction_strategy } -> std::convertible_to<StreamKReductionStrategy>;
+    { t.streamk.persistent } -> std::convertible_to<bool>;
+};
+
+// Concept to check if struct specifies depthwise convolution tile parameters.
+template <typename T>
+concept DepthwiseConvParamsDescriptor = requires(T t) {
+    { t.block_size } -> std::convertible_to<int>;
+    { t.tile_h } -> std::convertible_to<int>;
+    { t.tile_w } -> std::convertible_to<int>;
+    { t.filter_h } -> std::convertible_to<int>;
+    { t.filter_w } -> std::convertible_to<int>;
+    { t.stride_h } -> std::convertible_to<int>;
+    { t.stride_w } -> std::convertible_to<int>;
+    { t.dilation_h } -> std::convertible_to<int>;
+    { t.dilation_w } -> std::convertible_to<int>;
+    { t.pad_h } -> std::convertible_to<int>;
+    { t.pad_w } -> std::convertible_to<int>;
+    { t.nbatch } -> std::convertible_to<int>;
+    { t.subtile_h } -> std::convertible_to<int>;
+    { t.subtile_w } -> std::convertible_to<int>;
+    { t.in_vec } -> std::convertible_to<int>;
+    { t.out_vec } -> std::convertible_to<int>;
 };
 
 // Base requirement for all ConvAlgorithm concepts, i.e., all conv algorithm concepts must meet this
@@ -290,13 +314,39 @@ concept SpecifiesTileBlockGemm = requires {
     { T::block_gemm.scheduler } -> std::convertible_to<PipelineScheduler>;
 };
 
-// Concept to check if struct specifies block GEMM (CK Tile).
+// Concept to check if struct specifies optimizations (CK Tile).
 template <typename T>
 concept SpecifiesTileOptimizations = requires {
     { T::optimizations.num_groups_to_merge } -> std::convertible_to<int>;
     { T::optimizations.split_image } -> std::convertible_to<bool>;
     { T::optimizations.explicit_gemm } -> std::convertible_to<bool>;
     { T::optimizations.two_stage } -> std::convertible_to<bool>;
+    { T::optimizations.streamk.enabled } -> std::convertible_to<bool>;
+    {
+        T::optimizations.streamk.reduction_strategy
+    } -> std::convertible_to<StreamKReductionStrategy>;
+    { T::optimizations.streamk.persistent } -> std::convertible_to<bool>;
+};
+
+// Concept to check if struct specifies depthwise convolution tile parameters.
+template <typename T>
+concept SpecifiesDepthwiseConvParams = requires {
+    { T::depthwise_params.block_size } -> std::convertible_to<int>;
+    { T::depthwise_params.tile_h } -> std::convertible_to<int>;
+    { T::depthwise_params.tile_w } -> std::convertible_to<int>;
+    { T::depthwise_params.filter_h } -> std::convertible_to<int>;
+    { T::depthwise_params.filter_w } -> std::convertible_to<int>;
+    { T::depthwise_params.stride_h } -> std::convertible_to<int>;
+    { T::depthwise_params.stride_w } -> std::convertible_to<int>;
+    { T::depthwise_params.dilation_h } -> std::convertible_to<int>;
+    { T::depthwise_params.dilation_w } -> std::convertible_to<int>;
+    { T::depthwise_params.pad_h } -> std::convertible_to<int>;
+    { T::depthwise_params.pad_w } -> std::convertible_to<int>;
+    { T::depthwise_params.nbatch } -> std::convertible_to<int>;
+    { T::depthwise_params.subtile_h } -> std::convertible_to<int>;
+    { T::depthwise_params.subtile_w } -> std::convertible_to<int>;
+    { T::depthwise_params.in_vec } -> std::convertible_to<int>;
+    { T::depthwise_params.out_vec } -> std::convertible_to<int>;
 };
 
 template <typename T>

@@ -25,11 +25,13 @@
 
 #include <memory>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 class Pass;
 
 /// Creates a pass that builds the control-flow graph by discovering
 /// basic blocks and setting successor/predecessor edges from branch and label instructions.
-std::unique_ptr<Pass> createCFGBuilderPass();
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createCFGBuilderPass();
 
 }  // namespace stinkytofu

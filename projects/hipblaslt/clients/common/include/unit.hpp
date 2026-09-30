@@ -35,7 +35,111 @@
 #include "hipblaslt_ostream.hpp"
 #include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
+#include <cstring>
 #include <hipblaslt/hipblaslt.h>
+#include <limits>
+#include <type_traits>
+
+/*! \brief Return true when every addressed CPU and GPU element has identical storage.
+ *
+ *  This is only an early-success check. A byte mismatch must fall through to the numerical
+ *  comparison because distinct encodings can still compare equal, for example signed zero or
+ *  different NaN payloads. Padding between columns and batches is intentionally ignored.
+ */
+template <typename TCPU, typename TGPU>
+inline bool unit_check_storage_identical(int64_t     M,
+                                         int64_t     N,
+                                         int64_t     lda,
+                                         int64_t     strideA,
+                                         const TCPU* hCPU,
+                                         const TGPU* hGPU,
+                                         int64_t     batch_count)
+{
+    if constexpr(!std::is_same_v<std::remove_cv_t<TCPU>, std::remove_cv_t<TGPU>>)
+    {
+        return false;
+    }
+    else
+    {
+        if(M == 0 || N == 0 || batch_count == 0)
+            return true;
+        if(M < 0 || N < 0 || batch_count < 0 || lda < M || strideA < 0)
+            return false;
+
+        using value_type       = std::remove_cv_t<TCPU>;
+        const size_t rows      = static_cast<size_t>(M);
+        const size_t columns   = static_cast<size_t>(N);
+        const size_t stride    = static_cast<size_t>(strideA);
+        const size_t batches   = stride == 0 ? 1 : static_cast<size_t>(batch_count);
+        const size_t max_value = std::numeric_limits<size_t>::max();
+        if(rows > max_value / sizeof(value_type))
+            return false;
+        const size_t column_bytes = rows * sizeof(value_type);
+
+        if(static_cast<size_t>(lda) == rows && columns <= max_value / rows)
+        {
+            const size_t matrix_elements = rows * columns;
+            if(matrix_elements > max_value / sizeof(value_type))
+                return false;
+            const size_t matrix_bytes = matrix_elements * sizeof(value_type);
+            for(size_t batch = 0; batch < batches; ++batch)
+            {
+                if(stride != 0 && batch > max_value / stride)
+                    return false;
+                const size_t base = batch * stride;
+                if(base > max_value - matrix_elements)
+                    return false;
+                if(std::memcmp(hCPU + base, hGPU + base, matrix_bytes) != 0)
+                    return false;
+            }
+            return true;
+        }
+
+        for(size_t batch = 0; batch < batches; ++batch)
+        {
+            if(stride != 0 && batch > max_value / stride)
+                return false;
+            const size_t base = batch * stride;
+            for(size_t column = 0; column < columns; ++column)
+            {
+                const size_t leading_dimension = static_cast<size_t>(lda);
+                if(column > (max_value - base) / leading_dimension)
+                    return false;
+                const size_t offset = base + column * leading_dimension;
+                if(offset > max_value - rows)
+                    return false;
+                if(std::memcmp(hCPU + offset, hGPU + offset, column_bytes) != 0)
+                    return false;
+            }
+        }
+        return true;
+    }
+}
+
+template <typename T>
+inline const T* unit_check_data(const T* data)
+{
+    return data;
+}
+
+template <typename Container>
+inline auto unit_check_data(const Container& data) -> decltype(data.data())
+{
+    return data.data();
+}
+
+template <typename TCPU, typename TGPU>
+inline bool unit_check_batched_storage_identical(
+    int64_t M, int64_t N, int64_t lda, const TCPU hCPU[], const TGPU hGPU[], int64_t batch_count)
+{
+    if(batch_count < 0)
+        return false;
+    for(int64_t batch = 0; batch < batch_count; ++batch)
+        if(!unit_check_storage_identical(
+               M, N, lda, 0, unit_check_data(hCPU[batch]), unit_check_data(hGPU[batch]), 1))
+            return false;
+    return true;
+}
 
 #ifndef GOOGLE_TEST
 #define UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, UNIT_ASSERT_EQ)
@@ -44,6 +148,8 @@
 #define UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, UNIT_ASSERT_EQ)                \
     do                                                                                         \
     {                                                                                          \
+        if(unit_check_storage_identical(M, N, lda, strideA, hCPU, hGPU, batch_count))          \
+            break;                                                                             \
         for(size_t k = 0; k < batch_count; k++)                                                \
             for(size_t j = 0; j < N; j++)                                                      \
                 for(size_t i = 0; i < M; i++)                                                  \
@@ -61,6 +167,9 @@
 #define UNIT_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, UNIT_ASSERT_EQ)            \
     do                                                                              \
     {                                                                               \
+        if(unit_check_batched_storage_identical(                                    \
+               M, N, lda, hCPU, hGPU, batch_count))                                 \
+            break;                                                                  \
         for(size_t k = 0; k < batch_count; k++)                                     \
             for(size_t j = 0; j < N; j++)                                           \
                 for(size_t i = 0; i < M; i++)                                       \
@@ -698,3 +807,152 @@ inline void unit_check_general(int64_t     M,
         break;
     }
 }
+
+/*! \brief IEEE classification of a value for special-value comparison. */
+enum class special_value_class
+{
+    finite,
+    positive_inf,
+    negative_inf,
+    not_a_number
+};
+
+inline special_value_class classify_special_value(double v)
+{
+    if(std::isnan(v))
+        return special_value_class::not_a_number;
+    if(std::isinf(v))
+        return std::signbit(v) ? special_value_class::negative_inf
+                               : special_value_class::positive_inf;
+    return special_value_class::finite;
+}
+
+inline const char* special_value_class_name(special_value_class c)
+{
+    switch(c)
+    {
+    case special_value_class::positive_inf:
+        return "+Inf";
+    case special_value_class::negative_inf:
+        return "-Inf";
+    case special_value_class::not_a_number:
+        return "NaN";
+    case special_value_class::finite:
+        break;
+    }
+    return "finite";
+}
+
+/*! \brief Check that CPU and GPU agree on the IEEE class of every element: an element must be
+ *  finite on both sides, +Inf on both, -Inf on both, or NaN on both. Any other combination fails
+ *  with a clear message (e.g. "CPU is +Inf but GPU is NaN"). Finite pairs are left to the
+ *  unit/norm checks. The comparison is symmetric on purpose: a finite reference paired with a
+ *  non-finite result must fail here, because GoogleTest's ULP-based FLOAT_EQ/DOUBLE_EQ treat the
+ *  largest finite value as almost equal to Inf and would otherwise accept that overflow.
+ *  Only for FP types that can have Inf/NaN; no-op for others. Run before unit_check so Inf->NaN bugs are reported clearly.
+ *
+ *  PREFERRED DIRECTION for future work (AIHPBLAS-989): this separate traversal is interim. The
+ *  intended end state is for classify_special_value() to be called from the elementwise
+ *  comparison operators themselves, so that equality policy lives in one place: inline in the
+ *  unit_check_general()/near_check_general() element loops, and during the conversion pass in
+ *  norm_check_general(), which still has no defined behavior for matched non-finite entries
+ *  (Inf - Inf is NaN, and a relative norm over an infinite reference is meaningless). That also
+ *  removes the extra O(M*N*batch_count) host traversal this function costs. Please extend that
+ *  path rather than growing this pre-pass. */
+#ifdef GOOGLE_TEST
+template <typename T>
+inline void check_special_value_consistency_impl(int64_t M,
+                                                 int64_t N,
+                                                 int64_t lda,
+                                                 int64_t strideA,
+                                                 const T* hCPU,
+                                                 const T* hGPU,
+                                                 int64_t  batch_count)
+{
+    if(unit_check_storage_identical(M, N, lda, strideA, hCPU, hGPU, batch_count))
+        return;
+
+    for(int64_t k = 0; k < batch_count; k++)
+        for(int64_t j = 0; j < N; j++)
+            for(int64_t i = 0; i < M; i++)
+            {
+                size_t idx = i + j * size_t(lda) + k * size_t(strideA);
+                T      c   = hCPU[idx];
+                T      g   = hGPU[idx];
+                double cd = double(c);
+                double gd = double(g);
+
+                special_value_class cclass = classify_special_value(cd);
+                special_value_class gclass = classify_special_value(gd);
+                if(cclass != gclass)
+                {
+                    FAIL() << "Special value mismatch: CPU is " << special_value_class_name(cclass)
+                           << " (" << cd << ") but GPU is " << special_value_class_name(gclass)
+                           << " (" << gd << ") at (i=" << i << ", j=" << j << ", batch=" << k
+                           << ")";
+                }
+            }
+}
+
+inline void check_special_value_consistency(int64_t     M,
+                                           int64_t     N,
+                                           int64_t     lda,
+                                           int64_t     strideA,
+                                           void*       hCPU,
+                                           void*       hGPU,
+                                           int64_t     batch_count,
+                                           hipDataType type)
+{
+    switch(type)
+    {
+    case HIP_R_32F:
+        check_special_value_consistency_impl(M,
+                                            N,
+                                            lda,
+                                            strideA,
+                                            static_cast<const float*>(hCPU),
+                                            static_cast<const float*>(hGPU),
+                                            batch_count);
+        break;
+    case HIP_R_64F:
+        check_special_value_consistency_impl(M,
+                                            N,
+                                            lda,
+                                            strideA,
+                                            static_cast<const double*>(hCPU),
+                                            static_cast<const double*>(hGPU),
+                                            batch_count);
+        break;
+    case HIP_R_16F:
+        check_special_value_consistency_impl(M,
+                                            N,
+                                            lda,
+                                            strideA,
+                                            static_cast<const hipblasLtHalf*>(hCPU),
+                                            static_cast<const hipblasLtHalf*>(hGPU),
+                                            batch_count);
+        break;
+    case HIP_R_16BF:
+        check_special_value_consistency_impl(M,
+                                            N,
+                                            lda,
+                                            strideA,
+                                            static_cast<const hip_bfloat16*>(hCPU),
+                                            static_cast<const hip_bfloat16*>(hGPU),
+                                            batch_count);
+        break;
+    default:
+        break; // no-op for non-FP or FP8 types
+    }
+}
+#else
+inline void check_special_value_consistency(int64_t     M,
+                                           int64_t     N,
+                                           int64_t     lda,
+                                           int64_t     strideA,
+                                           void*       hCPU,
+                                           void*       hGPU,
+                                           int64_t     batch_count,
+                                           hipDataType type)
+{}
+#endif

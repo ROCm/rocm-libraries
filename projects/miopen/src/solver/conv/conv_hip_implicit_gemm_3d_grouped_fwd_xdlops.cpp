@@ -34,10 +34,10 @@
 #include <miopen/generic_search.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/solver/problem_description_interpreter.hpp>
+#include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
-#include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #endif
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
@@ -60,7 +60,7 @@ namespace {
 // ============================================================================
 
 // clang-format off
-constexpr SolverHeuristicConfig k3DFwdSolverConfig = {
+[[maybe_unused]] constexpr SolverHeuristicConfig k3DFwdSolverConfig = {
     /* solver_name                 */ "ConvHipImplicitGemm3DGroupFwdXdlops",
     /* solver_name_ktn             */ "ConvHipImplicitGemm3DGroupFwdXdlops", // No KTN for 3D
     /* spatial_dims                */ 3,
@@ -180,14 +180,10 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         MIOPEN_LOG_I2("Step 1: Attempting index override with value: " << idx_override);
 
         use_tf32 = false;
-        switch(problem.GetInDataType())
+        if(problem.GetInDataType() == miopenHalf || problem.GetInDataType() == miopenBFloat16)
         {
-        case miopenHalf:
-        case miopenBFloat16:
             valid_kernels = loader.FillValidKernels(
                 CKSolverType::GrpConv3dFwd, problem, problem.GetInDataType(), false);
-            break;
-        default: break;
         }
 
         if(idx_override < valid_kernels.size())
@@ -465,7 +461,12 @@ bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::IsValid(
         use_tf32 = false;
         return loader.IsArgsSupported(
             CKSolverType::GrpConv3dFwd, problem, kernel_id, miopenBFloat16, false);
-    default: return false;
+
+    case miopenInt32:
+    case miopenDouble:
+    case miopenFloat8_fnuz:
+    case miopenBFloat8_fnuz:
+    case miopenInt64: return false;
     }
 }
 
@@ -513,8 +514,6 @@ bool ConvHipImplicitGemm3DGroupFwdXdlops::IsApplicable(const ExecutionContext& c
     if(env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS))
         return false;
     if(problem.GetConv().attribute.deterministic)
-        return false;
-    if(!problem.AllTensorsDimsFitIntoInt())
         return false;
     if(problem.HasMixedDataTypes())
         return false;

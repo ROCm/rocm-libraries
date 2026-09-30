@@ -100,6 +100,36 @@ cmake --build build --target stinkytofu_python
 cmake --build <build_dir> --target stinkytofu_python
 ```
 
+## Run clang-tidy
+
+We use `clang-tidy-20`, so additional installation may required.
+
+### 1. Download and Run the LLVM Setup Script
+This script automatically detects your OS distribution, adds the correct LLVM stable/nightly APT repository, and updates your package lists[span_2](start_span)[span_2](end_span).
+
+```bash
+# Get the official script and make it executable
+wget [https://apt.llvm.org/llvm.sh](https://apt.llvm.org/llvm.sh)
+chmod +x llvm.sh
+
+# Run the script to add repositories
+sudo ./llvm.sh 20 reponly
+```
+
+### Install `clang-tidy-20`
+
+```bash
+sudo apt-get update
+sudo apt-get install -y clang-tidy-20
+```
+
+### Run clang-tidy
+
+```bash
+invoke build
+invoke tidy
+```
+
 ## Test
 
 ```bash
@@ -137,6 +167,21 @@ hardware/*.def  -->  TableGen  -->  generated .inc files
 
 See [docs/](docs/README.md) for detailed documentation including user guides, developer guides, and design documents.
 
+## Claude Code skills
+
+This directory ships a Claude Code skill under `.claude/skills/`:
+
+- **stinkytofu-guide** — read-only advisor that locates where a feature lives in the
+  StinkyTofu source and recommends where/how to add a new one, grounded in the actual
+  code (not docs). It surfaces the "does this affect scheduling?" question before
+  suggesting a new pass, and enforces design constraints (new architectures via `.def`
+  only, register passes in `stinkytofu-opt`, prefer peephole patterns, skip pseudo-PHIs,
+  and expose any new option through both the Python API and stinkytofu-opt).
+
+Claude Code only discovers skills in `<cwd>/.claude/skills/` and `~/.claude/skills/`, so
+**launch Claude Code from this `shared/stinkytofu/` directory** for `/stinkytofu-guide`
+to be available.
+
 ## License
 
-MIT License. Copyright (C) Advanced Micro Devices, Inc.
+This project is licensed under the MIT License. See [LICENSE.md](LICENSE.md) for details.

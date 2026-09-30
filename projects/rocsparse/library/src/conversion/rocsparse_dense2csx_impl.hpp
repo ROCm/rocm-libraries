@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -171,13 +171,13 @@ namespace rocsparse
         {
             J dimdir = is_row_oriented ? m : n;
 
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 csx_row_col_ptr_A, &descr->base, sizeof(I), hipMemcpyHostToDevice, handle->stream));
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(csx_row_col_ptr_A + 1,
-                                               nnz_per_row_column,
-                                               sizeof(I) * dimdir,
-                                               hipMemcpyDeviceToDevice,
-                                               handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(csx_row_col_ptr_A + 1,
+                                                         nnz_per_row_column,
+                                                         sizeof(I) * dimdir,
+                                                         hipMemcpyDeviceToDevice,
+                                                         handle->stream));
 
             size_t temp_storage_bytes = 0;
             // Obtain rocprim buffer size
@@ -223,26 +223,26 @@ namespace rocsparse
 
             if(is_row_oriented)
             {
-                RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                     &end, &csx_row_col_ptr_A[m], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
-                RETURN_IF_HIP_ERROR(hipMemcpyAsync(&start,
-                                                   &csx_row_col_ptr_A[0],
-                                                   sizeof(I),
-                                                   hipMemcpyDeviceToHost,
-                                                   handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&start,
+                                                             &csx_row_col_ptr_A[0],
+                                                             sizeof(I),
+                                                             hipMemcpyDeviceToHost,
+                                                             handle->stream));
             }
             else
             {
-                RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                     &end, &csx_row_col_ptr_A[n], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
-                RETURN_IF_HIP_ERROR(hipMemcpyAsync(&start,
-                                                   &csx_row_col_ptr_A[0],
-                                                   sizeof(I),
-                                                   hipMemcpyDeviceToHost,
-                                                   handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&start,
+                                                             &csx_row_col_ptr_A[0],
+                                                             sizeof(I),
+                                                             hipMemcpyDeviceToHost,
+                                                             handle->stream));
             }
 
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
             I nnz = (end - start);
 

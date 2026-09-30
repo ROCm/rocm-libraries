@@ -29,6 +29,7 @@ inline int encode_pipeline(Pipeline p)
     case Pipeline::CompV5: return 2;
     case Pipeline::Mem: return 3;
     case Pipeline::PreShuffleV2: return 4;
+    case Pipeline::CompV6: return 5;
     default: return 0;
     }
 }
@@ -339,8 +340,9 @@ class MLHeuristic
         auto f      = extract_features(prob, key, hw_);
         int64_t ol  = 0;
         double pred = 0;
+        // data_type=1 (C_API_DTYPE_FLOAT64): f is std::array<double>.
         if(LGBM_BoosterPredictForMat(
-               b_, f.data(), 0, 1, NUM_FEATURES, 1, 0, 0, 0, "", &ol, &pred) != 0)
+               b_, f.data(), 1, 1, NUM_FEATURES, 1, 0, 0, 0, "", &ol, &pred) != 0)
             return 0;
         return log_t_ ? std::expm1(pred) : pred;
     }

@@ -25,6 +25,8 @@
  *******************************************************************************/
 #include <hiptensor/hiptensor.h>
 
+#include <algorithm>
+
 #include "data_types.hpp"
 #include "hiptensor_options.hpp"
 
@@ -373,7 +375,11 @@ namespace hiptensor
 
             CHECK_HIPTENSOR_ERROR(hiptensorCreate(&handle));
 
-            CHECK_HIPTENSOR_ERROR(hiptensorLoggerSetMask(logLevel));
+            CHECK_HIPTENSOR_ERROR(hiptensorLoggerSetMask(
+                logLevel
+                & ~HIPTENSOR_LOG_LEVEL_PERF_TRACE)); // keep ERROR/API_TRACE diagnostics but strip
+                                                     // PERF_TRACE so the CK backend does not run its
+                                                     // internal cold/hot timed loop
 
             uint32_t alignmentRequirement = 1;
             // lengths - m, n, u, v, h, k
@@ -853,22 +859,40 @@ namespace hiptensor
 
             auto resource = getResource();
 
+            auto& opts     = HiptensorOptions::instance();
+            int   coldRuns = opts->coldRuns();
+            int   hotRuns  = std::max(1, opts->hotRuns()); // guard hot_runs <= 0
+            // untimed warm-up: ramps clocks, primes plan/caches
+            for(int i = 0; i < coldRuns; ++i)
+                CHECK_HIPTENSOR_ERROR(hiptensorContract(handle,
+                                                        plan,
+                                                        (void*)&alphaBuf,
+                                                        resource->deviceA().get(),
+                                                        resource->deviceB().get(),
+                                                        (void*)&betaBuf,
+                                                        resource->deviceC().get(),
+                                                        resource->deviceD().get(),
+                                                        workspace,
+                                                        worksize,
+                                                        0 /* stream */));
+
             hipEvent_t startEvent, stopEvent;
             CHECK_HIP_ERROR(hipEventCreate(&startEvent));
             CHECK_HIP_ERROR(hipEventCreate(&stopEvent));
             CHECK_HIP_ERROR(hipEventRecord(startEvent));
 
-            CHECK_HIPTENSOR_ERROR(hiptensorContract(handle,
-                                                    plan,
-                                                    (void*)&alphaBuf,
-                                                    resource->deviceA().get(),
-                                                    resource->deviceB().get(),
-                                                    (void*)&betaBuf,
-                                                    resource->deviceC().get(),
-                                                    resource->deviceD().get(),
-                                                    workspace,
-                                                    worksize,
-                                                    0 /* stream */));
+            for(int i = 0; i < hotRuns; ++i) // timed: M clean launches
+                CHECK_HIPTENSOR_ERROR(hiptensorContract(handle,
+                                                        plan,
+                                                        (void*)&alphaBuf,
+                                                        resource->deviceA().get(),
+                                                        resource->deviceB().get(),
+                                                        (void*)&betaBuf,
+                                                        resource->deviceC().get(),
+                                                        resource->deviceD().get(),
+                                                        workspace,
+                                                        worksize,
+                                                        0 /* stream */));
 
             CHECK_HIP_ERROR(hipEventRecord(stopEvent));
             CHECK_HIP_ERROR(hipEventSynchronize(stopEvent))
@@ -894,7 +918,7 @@ namespace hiptensor
                 totalLength *= a_ms_ks->mLengths[i + rank];
             }
 
-            mElapsedTimeMs        = float64_t(timeMs);
+            mElapsedTimeMs        = float64_t(timeMs) / hotRuns;
             mTotalGFlops          = 2.0 * totalLength * 1e-9;
             mMeasuredTFlopsPerSec = mTotalGFlops / mElapsedTimeMs;
 

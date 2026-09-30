@@ -956,7 +956,6 @@ struct verify_forward_conv : conv_base<T, Tout>
             }
             break;
         case ConvApi::Invalid: MIOPEN_THROW(miopenStatusInvalidValue);
-        default: MIOPEN_THROW(miopenStatusNotImplemented);
         }
 
         if(count != 0)
@@ -1311,7 +1310,6 @@ struct verify_backward_conv : conv_base<T>
             break;
         }
         case ConvApi::Invalid: MIOPEN_THROW(miopenStatusInvalidValue);
-        default: MIOPEN_THROW(miopenStatusNotImplemented);
         }
 
         if(count != 0)
@@ -1571,7 +1569,6 @@ struct verify_backward_weights_conv : conv_base<T>
             break;
         }
         case ConvApi::Invalid: MIOPEN_THROW(miopenStatusInvalidValue);
-        default: MIOPEN_THROW(miopenStatusNotImplemented);
         }
 
         if(count != 0)
@@ -2272,14 +2269,14 @@ struct conv_driver : test_driver
             {
                 auto output = get_output_tensor<T, Tout>(filter, input, weights, out_layout);
 
-                auto gen_positive_value = [=](auto...) {
+                auto gen_positive_value = [=, this](auto...) {
                     auto data_type = input.desc.GetType();
                     int v_max      = is_int8 ? 16 : (data_type == miopenHalf) ? 4 : 17;
                     return gen_float ? prng::gen_canonical<double>()
                                      : static_cast<double>(prng::gen_A_to_B(1, v_max));
                 };
 
-                auto gen_sign_value = [=](auto... is) {
+                auto gen_sign_value = [=, this](auto... is) {
                     auto data_type = input.desc.GetType();
                     int v_max      = is_int8 ? 16 : (data_type == miopenHalf) ? 4 : 17;
                     return gen_float ? prng::gen_A_to_B(-1.0, 1.0)

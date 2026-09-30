@@ -171,6 +171,13 @@ class RocRollerGemmKernel : public GemmKernel,
      */
     void setPredicates();
 
+    /**
+     * @brief True if any operand's byte extent reaches 4 GiB, which a single rocRoller buffer
+     *        descriptor (32-bit num_records) cannot address. Such problems would silently
+     *        produce wrong (all-zero) results, so they are reported as unsupported instead.
+     */
+    bool exceedsBufferAddressingLimit(const RocblasltContractionProblem& prob) const;
+
 public:
     /**
      * @brief Generate a RocRoller GEMM Kernel

@@ -30,7 +30,6 @@
 #define CSYMM_BATCHED_MIN_NB 32
 #define ZSYMM_BATCHED_MIN_NB 32
 
-#include "asan_helpers.hpp"
 #include "definitions.hpp"
 #include "device_macros.hpp"
 #include "handle.hpp"
@@ -74,15 +73,11 @@ rocblas_symm_scale_kernel(rocblas_int    m,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         auto C = load_ptr_batch(CP_array, batch, shift_c, stride_c);
         rocblas_symm_scale_device<DIM_X, DIM_Y>(m, n, beta, C, ldc);
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /**
@@ -255,10 +250,8 @@ rocblas_symm_hemm_kernel(bool           is_upper,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto A = load_ptr_batch(AP_array, batch, shift_a, stride_a);
         auto B = load_ptr_batch(BP_array, batch, shift_b, stride_b);
@@ -268,10 +261,7 @@ rocblas_symm_hemm_kernel(bool           is_upper,
         // when HERM does ^H in place of ^T for A fetches to symmetric empty side
         rocblas_symm_hemm_mult_add_device<HERM, RIGHT, DIM_XYT>(
             is_upper, m, n, alpha, A, lda, B, ldb, C, ldc);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /**
@@ -306,7 +296,7 @@ rocblas_status rocblas_symm_hemm_dispatch(rocblas_handle handle,
         return rocblas_status_success;
 
     static constexpr int symm_SCALE_DIM_X = 128;
-    static constexpr int symm_SCALE_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 2, 8>;
+    static constexpr int symm_SCALE_DIM_Y = 8;
     rocblas_int          gx               = (m - 1) / (symm_SCALE_DIM_X) + 1;
     rocblas_int          gy = std::min(c_YZ_grid_launch_limit, (n - 1) / (symm_SCALE_DIM_Y) + 1);
 
@@ -315,7 +305,7 @@ rocblas_status rocblas_symm_hemm_dispatch(rocblas_handle handle,
     dim3 symm_scale_grid(gx, gy, batches);
     dim3 symm_scale_threads(symm_SCALE_DIM_X, symm_SCALE_DIM_Y);
 
-    static constexpr int symm_DIM_XY = rocblas::conditional_v<rocblas_enable_asan, 16, 32>;
+    static constexpr int symm_DIM_XY = 32;
     rocblas_int          bx          = (m - 1) / (symm_DIM_XY) + 1;
     rocblas_int          by = std::min(c_YZ_grid_launch_limit, (n - 1) / (symm_DIM_XY) + 1);
     dim3                 symm_grid(bx, by, batches);

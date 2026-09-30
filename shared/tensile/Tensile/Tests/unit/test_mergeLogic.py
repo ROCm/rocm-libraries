@@ -23,7 +23,7 @@
 ################################################################################
 
 from Tensile.Utilities.merge import cmpHelper, fixSizeInconsistencies, removeUnusedKernels, mergeLogic
-from Tensile.Utilities.ConditionalImports import yamlLoader
+from Tensile.Utilities.ConditionalImports import SafeLoader
 
 import yaml, pytest
 
@@ -222,7 +222,7 @@ def checkUniqueSolution(solutionPool):
   (notTrimmedSize, [[1024,1024,1,1024],[128,128,1,128]])
   ])
 def test_fixSizeInconsistencies(sizes, expected):
-  data = yaml.load(sizes, yamlLoader)
+  data = yaml.load(sizes, SafeLoader)
   data_ = fixSizeInconsistencies(data[0], "dummy")
 
   for [size, [_,_]], expected_ in zip(data_[0], expected):
@@ -231,7 +231,7 @@ def test_fixSizeInconsistencies(sizes, expected):
 @pytest.mark.parametrize("input,expectedNumKernelRemoved", [(baseLogic, 1),
                                                             (incLogic, 0)])
 def test_removeUnusedKernels(input, expectedNumKernelRemoved):
-  data = yaml.load(input, yamlLoader)
+  data = yaml.load(input, SafeLoader)
   dataFiltered, numKernelRemoved = removeUnusedKernels(data)
 
   # test if number of solution removed is correct
@@ -267,8 +267,8 @@ def test_removeUnusedKernels(input, expectedNumKernelRemoved):
   ["InUseForSize256", "InUseForSize128or64", "InUseForSize128or64"]),
 ])
 def test_mergeLogic(baseLogic, incLogic, expectedStats, expectedSizes, expectedSolutions):
-  baseData = yaml.load(baseLogic, yamlLoader)
-  incData = yaml.load(incLogic, yamlLoader)
+  baseData = yaml.load(baseLogic, SafeLoader)
+  incData = yaml.load(incLogic, SafeLoader)
 
   mergedData, *stats = mergeLogic(baseData, incData, False)
 
@@ -289,7 +289,7 @@ def test_mergeLogic(baseLogic, incLogic, expectedStats, expectedSizes, expectedS
 
 @pytest.mark.parametrize("input,expected", [(uniqueSolution, True), (notUniqueSolution, False)])
 def test_checkUniqueSolution(input, expected):
-  data = yaml.load(input, yamlLoader)
+  data = yaml.load(input, SafeLoader)
   assert checkUniqueSolution(data[5]) == expected
 
 @pytest.mark.parametrize("baseLogic, incLogic, expectedSizesYaml, expectedSolutions", [
@@ -304,9 +304,9 @@ def test_checkUniqueSolution(input, expected):
    mfmaMergeResNotMatchingMFMA, ["MFMA_base", "VALU_base", "MFMA_inc", "VALU_inc"])
 ])
 def test_mfmaMergeLogic(baseLogic, incLogic, expectedSizesYaml, expectedSolutions):
-  baseData      = yaml.load(baseLogic, yamlLoader)
-  incData       = yaml.load(incLogic,  yamlLoader)
-  expectedSizes = yaml.load(expectedSizesYaml, yamlLoader)[0]
+  baseData      = yaml.load(baseLogic, SafeLoader)
+  incData       = yaml.load(incLogic,  SafeLoader)
+  expectedSizes = yaml.load(expectedSizesYaml, SafeLoader)[0]
 
   mergedData, _, _, _ = mergeLogic(baseData, incData, False, True, True)
 

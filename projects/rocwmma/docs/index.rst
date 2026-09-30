@@ -23,7 +23,8 @@ The rocWMMA public repository is located at `<https://github.com/ROCm/rocm-libra
 
   .. grid-item-card:: Install
 
-    * :doc:`Installation guide <./install/installation>`
+    * :doc:`Install rocWMMA <./install/installation>`
+    * :doc:`Build from source <./install/source-build>`
 
   .. grid-item-card:: Conceptual
 
@@ -37,6 +38,7 @@ The rocWMMA public repository is located at `<https://github.com/ROCm/rocm-libra
   .. grid-item-card:: API reference
 
     * :doc:`API reference guide <./api-reference/api-reference-guide>`
+    * :doc:`Precision support <./api-reference/data-type-support>`
     
 To contribute to the documentation, see `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -28,19 +28,31 @@
 
 namespace rocsparse
 {
-    template <rocsparse_int BLOCK_SIZE, typename T>
-    ROCSPARSE_KERNEL(BLOCK_SIZE)
-    void abs_kernel(rocsparse_int m, rocsparse_int n, const T* A, int64_t lda, T* output)
+    template <uint32_t BLOCKSIZE, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void abs_kernel(
+        int64_t m, int64_t n, const T* __restrict__ A, int64_t lda, T* __restrict__ output)
     {
-        rocsparse_int thread_id = hipThreadIdx_x + hipBlockIdx_x * BLOCK_SIZE;
+        // Cast before each multiply: hipBlockDim_x, hipBlockIdx_x and
+        // hipGridDim_x are unsigned int, so the products wrap at 2^32 and the
+        // int64_t destination cannot recover the lost high bits. The launch
+        // already caps grid_x at 2147483647 and spills the remainder onto
+        // grid_y, so a 256-thread block reaches that wrap at 2^32 elements.
+        const int64_t gid_x = static_cast<int64_t>(hipBlockDim_x) * hipBlockIdx_x + hipThreadIdx_x;
+        const int64_t gid_y = static_cast<int64_t>(hipBlockDim_y) * hipBlockIdx_y + hipThreadIdx_y;
 
-        if(thread_id >= m * n)
+        const int64_t grid_dim_x = static_cast<int64_t>(hipGridDim_x) * hipBlockDim_x;
+
+        // Map a 2D HIP grid to a 1D index
+        const int64_t gid = grid_dim_x * gid_y + gid_x;
+
+        if(gid >= m * n)
         {
             return;
         }
 
-        rocsparse_int row = thread_id % m;
-        rocsparse_int col = thread_id / m;
+        int64_t row = gid % m;
+        int64_t col = gid / m;
 
         output[m * col + row] = rocsparse::abs(A[lda * col + row]);
     }

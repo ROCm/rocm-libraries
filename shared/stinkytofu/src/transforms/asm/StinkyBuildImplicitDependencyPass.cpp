@@ -23,15 +23,13 @@
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 
 #include <cassert>
+#include <cstdint>
 #include <iostream>
-#include <unordered_set>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
-#include "stinkytofu/analysis/LoopAnalysis.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
 
 #define DEBUG_TYPE "StinkyBuildImplicitDependencyPass"
@@ -50,9 +48,9 @@
 // 2) RegType::LDS pseudo-registers (keyed by MemTokenData token IDs). The
 //    instruction type determines src vs dest placement:
 //
-//      tensor_load / ds_write  →  LDS token to dest  (LDS producer)
-//      ds_read                 →  LDS token to src   (LDS consumer)
-//      barrier / signal / wait →  LDS token to both  (synchronization point)
+//      tensor_load / ds_write                      →  LDS token to dest (LDS producer)
+//      ds_read / global_store_async_from_lds_*      →  LDS token to src  (LDS consumer)
+//      barrier / signal / wait                      →  LDS token to both (synchronization point)
 //
 //    The def-use chain builder then sees:
 //      producer(def LDS[t]) → barrier(use+def LDS[t]) → consumer(use LDS[t])
@@ -109,10 +107,12 @@ static void processLdsWriter(StinkyInstruction& inst, const MemTokenData& mt,
     for (int tokenId : mt.tokens) addUniqueLdsDest(inst, tokenId);
 }
 
-// LDS readers (ds_read): LDS tokens to src.
+// LDS readers (ds_read, global_store_async_from_lds_*): LDS tokens to src.
 static void processLdsReader(StinkyInstruction& inst, const MemTokenData& mt,
                              [[maybe_unused]] const std::string& bbLabel) {
-    PASS_DEBUG(std::cerr << "[BuildImplicitDep] LDS reader (ds_read) tokens=[";
+    PASS_DEBUG(std::cerr << "[BuildImplicitDep] LDS reader ("
+                         << (isDSRead(inst) ? "ds_read" : "global_store_async_from_lds")
+                         << ") tokens=[";
                for (int t
                     : mt.tokens) std::cerr
                << t << " ";
@@ -121,92 +121,7 @@ static void processLdsReader(StinkyInstruction& inst, const MemTokenData& mt,
     for (int tokenId : mt.tokens) addUniqueLdsSrc(inst, tokenId);
 }
 
-static bool isMemTokenCandidate(const StinkyInstruction& inst) {
-    return isTensorLoad(inst) || isDSWrite(inst) || isDSRead(inst);
-}
-
-static const char* memTokenCandidateKind(const StinkyInstruction& inst) {
-    if (isTensorLoad(inst)) return "tensor_load";
-    if (isDSWrite(inst)) return "ds_store";
-    if (isDSRead(inst)) return "ds_load";
-    return "unknown";
-}
-
-static std::unordered_set<const BasicBlock*> collectOptLevel3MemTokenCheckBlocks(
-    const std::vector<Loop>& loops) {
-    std::unordered_set<const BasicBlock*> checkBlocks;
-
-    for (const Loop& loop : loops) {
-        // loop BBs
-        for (const BasicBlock* bodyBB : loop.bodyBBs) {
-            checkBlocks.insert(bodyBB);
-        }
-
-        // preloop BBs: predecessors of loop header that are outside loop body.
-        if (loop.headerBB) {
-            for (const BasicBlock* pred : loop.headerBB->getPredecessors()) {
-                if (!loop.contains(pred)) checkBlocks.insert(pred);
-            }
-        }
-
-        // postloop BBs: successors of loop body that are outside loop body.
-        for (const BasicBlock* bodyBB : loop.bodyBBs) {
-            for (const BasicBlock* succ : bodyBB->getSuccessors()) {
-                if (succ && !loop.contains(succ)) checkBlocks.insert(succ);
-            }
-        }
-    }
-
-    return checkBlocks;
-}
-
-static void checkConsistentMemTokens(const BasicBlock& bb) {
-    bool hasWithToken = false;
-    bool hasWithoutToken = false;
-
-    for (auto it = bb.begin(); it != bb.end(); ++it) {
-        const auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-        if (!inst || !isMemTokenCandidate(*inst)) continue;
-
-        if (inst->getModifier<MemTokenData>())
-            hasWithToken = true;
-        else
-            hasWithoutToken = true;
-    }
-
-    if (!hasWithToken || !hasWithoutToken) return;
-
-    std::cerr << "[BuildImplicitDep] ERROR: BB \"" << bb.getLabel()
-              << "\" has inconsistent memory tokens — some ds_load/ds_store/tensor_load"
-                 " instructions have MemTokenData while others do not:\n";
-
-    for (auto it = bb.begin(); it != bb.end(); ++it) {
-        const auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-        if (!inst || !isMemTokenCandidate(*inst)) continue;
-
-        const bool hasToken = inst->getModifier<MemTokenData>() != nullptr;
-        std::cerr << "  " << (hasToken ? "[has token]   " : "[NO TOKEN]    ")
-                  << memTokenCandidateKind(*inst) << " (" << inst->getHwInstDesc()->mnemonic
-                  << ")\n";
-    }
-
-    report_fatal_error(
-        "inconsistent MemTokenData across ds_load/ds_store/tensor_load in basic block");
-}
-
-void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx,
-                               const std::unordered_set<const BasicBlock*>& checkBlocks) {
-    bool doLdsTokenHandling = true;
-    if (!passCtx.getPassFeatureConfig().barrierConfig.unrollMovableBarrier) {
-        PASS_DEBUG(std::cerr << "[BuildImplicitDep] skip LDS-token handling BB label=\""
-                             << bb.getLabel() << "\" (unrollMovableBarrier=false)\n");
-        doLdsTokenHandling = false;
-    }
-
-    if (doLdsTokenHandling) {
-        checkConsistentMemTokens(bb);
-    }
-
+void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
     const uint32_t wavefrontSize = passCtx.getWavefrontSize();
     for (auto it = bb.begin(); it != bb.end(); ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
@@ -214,8 +129,6 @@ void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx,
 
         // Always attach implicit special registers (SCC/VCC/EXEC) declared by HW flags
         legalizeImplicitSpecialRegisters(inst, wavefrontSize);
-
-        if (!doLdsTokenHandling) continue;
 
         const MemTokenData* mt = inst->getModifier<MemTokenData>();
         if (!mt) continue;
@@ -225,12 +138,15 @@ void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx,
             processBarrier(*inst, *mt, bb.getLabel());
         else if (isTensorLoad(*inst) || isDSWrite(*inst))
             processLdsWriter(*inst, *mt, bb.getLabel());
-        else if (isDSRead(*inst))
+        else if (isDSRead(*inst) || isGlobalStoreAsyncFromLds(*inst))
             processLdsReader(*inst, *mt, bb.getLabel());
         else
+            // StinkyWaitCntInsertionPass tags s_wait_tensorcnt with MemTokenData,
+            // which would hit this assert — safe only because it runs strictly after
+            // this pass. If reordered, teach this branch to tolerate wait-cnt insts.
             assert(false &&
                    "instruction has MemTokenData but is not a barrier, fence, "
-                   "tensor_load, ds_write, or ds_read");
+                   "tensor_load, ds_write, ds_read, or global_store_async_from_lds");
     }
 }
 
@@ -246,20 +162,9 @@ class StinkyBuildImplicitDependencyPass : public StinkyInstPass {
         return &StinkyBuildImplicitDependencyPass::ID;
     }
 
-    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
-        const auto& loops = AM.getResult<LoopAnalysis>(func);
-        const auto checkBlocks = collectOptLevel3MemTokenCheckBlocks(loops);
-
-        PASS_DEBUG(std::cerr << "[BuildImplicitDep] mem-token consistency checks on "
-                             << checkBlocks.size() << " BBs (preloop/loop/postloop derived)\n");
-        PASS_DEBUG(for (const BasicBlock* bb
-                        : checkBlocks) {
-            if (bb) std::cerr << "  [BuildImplicitDep] check BB: " << bb->getLabel() << "\n";
-        });
-
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         for (BasicBlock& bb : func) {
-            if (passCtx.shouldProcessBasicBlock(bb))
-                setPseudoRegistersInBlock(bb, passCtx, checkBlocks);
+            if (passCtx.shouldProcessBasicBlock(bb)) setPseudoRegistersInBlock(bb, passCtx);
         }
         return preserveCFGAnalyses();
     }

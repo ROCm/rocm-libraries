@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocauxiliary_latrd_forsytrd.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -47,6 +48,7 @@ rocblas_status rocsolver_latrd_forsytrd_impl(rocblas_handle handle,
                                              T* tau,
                                              T* W,
                                              const rocblas_int ldw)
+try
 {
     ROCSOLVER_ENTER_TOP("latrd_forsytrd", "--uplo", uplo, "-n", n, "-k", k, "--lda", lda, "--ldw",
                         ldw);
@@ -102,6 +104,10 @@ rocblas_status rocsolver_latrd_forsytrd_impl(rocblas_handle handle,
     return rocsolver_latrd_forsytrd_template<T>(
         handle, uplo, n, k, A, shiftA, lda, strideA, E, strideE, tau, strideP, W, shiftW, ldw,
         strideW, batch_count, (T*)scalars, (T*)work, (T*)norms, (T**)workArr);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

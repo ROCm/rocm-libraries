@@ -1,0 +1,36 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --RemoveInstructionPass=tensor_load_to_lds,ds_load_b128,v_wmma_f32_16x16x16_bf16 --print-output
+#
+# RemoveInstructionPass: strip selected unified opcodes from all basic blocks.
+
+#--- Mixed tensor_load, ds_load, and wmma are removed; VALU is preserved.
+# CHECK-LABEL: @remove_mixed_mem_and_matrix
+# CHECK: v_add_f32
+# CHECK-NOT: tensor_load_to_lds
+# CHECK-NOT: ds_load_b128
+# CHECK-NOT: v_wmma_f32_16x16x16_bf16
+
+st.func @remove_mixed_mem_and_matrix() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  v33 = "st.v_add_f32"(v34, v35) { issueCycles = 1, latencyCycles = 5 }
+  v[8:11] = "st.ds_load_b128"(v32) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[24:31], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+}
+
+#--- Multiple instances of each targeted opcode are all removed.
+# CHECK-LABEL: @remove_repeated_targets
+# CHECK: v_mul_f32
+# CHECK-NOT: tensor_load_to_lds
+# CHECK-NOT: ds_load_b128
+# CHECK-NOT: v_wmma_f32_16x16x16_bf16
+
+st.func @remove_repeated_targets() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[12:15], s[20:27]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2] } }
+  v[8:11] = "st.ds_load_b128"(v32) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[12:15] = "st.ds_load_b128"(v32) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[24:31], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[16:23], v[24:31], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v40 = "st.v_mul_f32"(v41, v42) { issueCycles = 1, latencyCycles = 5 }
+}

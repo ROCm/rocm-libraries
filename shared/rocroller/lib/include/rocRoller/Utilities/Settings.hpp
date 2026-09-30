@@ -228,6 +228,12 @@ namespace rocRoller
             std::size_t{1000},
             -1};
 
+        static inline const SettingsOption<int> GFX1250AsicRevisionId{
+            "ROCROLLER_GFX1250_ASIC_REVISION_ID",
+            "Asic revision id to use when targetting GFX1250",
+            1,
+            -1};
+
         /**
          * @brief Creates a help dialog for the environment variables with
          * their names, default values and bit-offset (if it has one).

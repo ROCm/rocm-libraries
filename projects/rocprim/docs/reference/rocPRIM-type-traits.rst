@@ -46,12 +46,8 @@ Available traits
 .. doxygenstruct:: rocprim::traits::float_bit_mask
   :members:
 
-.. doxygenstruct:: rocprim::traits::radix_key_codec 
-  :members:
-
 Type traits wrappers
 ====================
-
 .. doxygenstruct:: rocprim::is_floating_point
   :no-link:
 

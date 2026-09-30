@@ -217,15 +217,16 @@ bool profile_grouped_conv_fwd_bias_clamp_impl(int do_verification,
     else if(do_verification == 2)
     {
         // GPU reference
-        std::vector<ck::index_t> d_lengths_vec(NDimSpatial + 3);
-        std::vector<ck::index_t> d_strides_vec(NDimSpatial + 3);
+        std::vector<ck::long_index_t> d_lengths_vec(NDimSpatial + 3);
+        std::vector<ck::long_index_t> d_strides_vec(NDimSpatial + 3);
 
         d_lengths_vec[0] = conv_param.G_;
         d_lengths_vec[1] = conv_param.N_;
         d_lengths_vec[2] = conv_param.K_;
         for(ck::index_t i = 0; i < NDimSpatial; ++i)
         {
-            d_lengths_vec[3 + i] = static_cast<ck::index_t>(conv_param.output_spatial_lengths_[i]);
+            d_lengths_vec[3 + i] =
+                static_cast<ck::long_index_t>(conv_param.output_spatial_lengths_[i]);
         }
 
         if constexpr(BiasGK)
@@ -247,8 +248,8 @@ bool profile_grouped_conv_fwd_bias_clamp_impl(int do_verification,
 
         std::array<const OutDataType*, 1> d_ptrs = {
             reinterpret_cast<const OutDataType*>(bias_device_buf.GetDeviceBuffer())};
-        std::array<std::vector<ck::index_t>, 1> d_lengths = {d_lengths_vec};
-        std::array<std::vector<ck::index_t>, 1> d_strides = {d_strides_vec};
+        std::array<std::vector<ck::long_index_t>, 1> d_lengths = {d_lengths_vec};
+        std::array<std::vector<ck::long_index_t>, 1> d_strides = {d_strides_vec};
 
         std::array<const InDataType*, 1> in_ptrs = {
             reinterpret_cast<const InDataType*>(in_device_buf.GetDeviceBuffer())};
@@ -288,7 +289,6 @@ bool profile_grouped_conv_fwd_bias_clamp_impl(int do_verification,
     float best_avg_time   = 0;
     float best_tflops     = 0;
     float best_gb_per_sec = 0;
-    int num_kernel        = 0;
     int valids            = 0;
     // profile device op instances
     bool pass = true;
@@ -301,13 +301,6 @@ bool profile_grouped_conv_fwd_bias_clamp_impl(int do_verification,
 
         if(op_ptr->IsSupportedArgument(argument_ptr.get()))
         {
-            ++num_kernel;
-            if((instance_index != -1) && (instance_index + 1 != num_kernel))
-            {
-                // skip test if instance_index is specified
-                std::cout << op_ptr->GetTypeString() << " skipped" << std::endl;
-                return;
-            }
             // re-init output to zero before profiling next kernel
             out_device_buf.SetZero();
 
@@ -371,8 +364,14 @@ bool profile_grouped_conv_fwd_bias_clamp_impl(int do_verification,
         }
     }
 
-    for(auto& op_ptr : op_ptrs)
+    for(size_t i = 0; i < op_ptrs.size(); i++)
     {
+        if((instance_index != -1) && (instance_index != static_cast<int>(i)))
+        {
+            // skip test if instance_index is specified
+            continue;
+        }
+        auto& op_ptr      = op_ptrs[i];
         auto argument_ptr = op_ptr->MakeArgumentPointer(in_device_buf.GetDeviceBuffer(),
                                                         wei_device_buf.GetDeviceBuffer(),
                                                         {bias_device_buf.GetDeviceBuffer()},
@@ -401,11 +400,7 @@ bool profile_grouped_conv_fwd_bias_clamp_impl(int do_verification,
     std::cout << "Best configuration parameters:" << "\nname: " << best_op_name
               << "\navg_time: " << best_avg_time << "\ntflops: " << best_tflops
               << "\nGB/s: " << best_gb_per_sec << std::endl;
-    if(instance_index != -1)
-    {
-        std::cout << "grouped_conv_fwd_bias_clamp_instance (" << instance_index << "/" << num_kernel
-                  << "): Passed" << std::endl;
-    }
+
     return pass;
 }
 

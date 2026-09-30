@@ -201,9 +201,7 @@ rocblas_status rocsolver_potrf_template(rocblas_handle handle,
         return rocblas_status_success;
 
     // everything must be executed with scalars on the host
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
     // if the matrix is small, use the unblocked (BLAS-levelII) variant of the
     // algorithm
@@ -297,7 +295,6 @@ rocblas_status rocsolver_potrf_template(rocblas_handle handle,
                                 info, j, batch_count);
     }
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

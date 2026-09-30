@@ -132,6 +132,29 @@ namespace rocisa
         return item->countExactType(typeid(VMovB32));
     }
 
+    // Counts all MFMA-family instructions (MFMA, SMFMA, MXMFMA) in the item tree
+    // using exact typeid matching.
+    int countMFMA(const std::shared_ptr<Item>& item)
+    {
+        if(auto module = std::dynamic_pointer_cast<Module>(item))
+        {
+            int count = 0;
+            for(const auto& i : module->itemList)
+            {
+                count += countMFMA(i);
+            }
+            return count;
+        }
+
+        const auto& tid = typeid(*item);
+        if(tid == typeid(MFMAInstruction) || tid == typeid(SMFMAInstruction)
+           || tid == typeid(MXMFMAInstruction))
+        {
+            return 1;
+        }
+        return 0;
+    }
+
     // Helper functions
     std::vector<std::shared_ptr<Item>> getMFMAs(const std::shared_ptr<Item>& item)
     {
@@ -200,6 +223,9 @@ void init_count(nb::module_ m)
     m.def("countDSStoreB192", &rocisa::countDSStoreB192);
     m.def("countDSStoreB256", &rocisa::countDSStoreB256);
     m.def("countVMovB32", &rocisa::countVMovB32);
+    m.def("countMFMA",
+          &rocisa::countMFMA,
+          "Count all MFMA-family instructions (MFMA, SMFMA, MXMFMA) in the item tree.");
 
     m.def("getMFMAs", &rocisa::getMFMAs, "Get all MFMA instructions in the item tree.");
     m.def(

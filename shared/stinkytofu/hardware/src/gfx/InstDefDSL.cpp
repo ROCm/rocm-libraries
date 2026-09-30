@@ -23,6 +23,7 @@
 #include "gfx/InstDefDSL.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <iostream>  // todo: don't use iostream.
 

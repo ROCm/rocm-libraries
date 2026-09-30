@@ -20,9 +20,9 @@ ConvBwdParams::ConvBwdParams(
     bool deterministicEnabled)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
           miopen_utils::findTensorAttributes(tensorMap, attributes.dx_tensor_uid())))
-    , _dx(miopen_utils::createTensor(tensorMap, attributes.dx_tensor_uid()))
-    , _w(miopen_utils::createTensor(tensorMap, attributes.w_tensor_uid()))
-    , _dy(miopen_utils::createTensor(tensorMap, attributes.dy_tensor_uid()))
+    , _dx(miopen_utils::createPaddedTensor(tensorMap, attributes.dx_tensor_uid()))
+    , _w(miopen_utils::createPaddedTensor(tensorMap, attributes.w_tensor_uid()))
+    , _dy(miopen_utils::createPaddedTensor(tensorMap, attributes.dy_tensor_uid()))
 {
     const auto& attrDX = miopen_utils::findTensorAttributes(tensorMap, _dx.uid());
     const auto& attrW = miopen_utils::findTensorAttributes(tensorMap, _w.uid());
@@ -124,11 +124,11 @@ void ConvBwdPlan::execute(const HipdnnMiopenHandle& handle,
                           void* workspace) const
 {
     auto xBuffer
-        = miopen_utils::findDeviceBuffer(_params.dx().uid(), deviceBuffers, numDeviceBuffers);
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.dx().uid(), deviceBuffers, numDeviceBuffers);
     auto wBuffer
-        = miopen_utils::findDeviceBuffer(_params.w().uid(), deviceBuffers, numDeviceBuffers);
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.w().uid(), deviceBuffers, numDeviceBuffers);
     auto yBuffer
-        = miopen_utils::findDeviceBuffer(_params.dy().uid(), deviceBuffers, numDeviceBuffers);
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.dy().uid(), deviceBuffers, numDeviceBuffers);
 
     size_t workspaceSize = 0;
     if(workspace != nullptr)
@@ -137,25 +137,26 @@ void ConvBwdPlan::execute(const HipdnnMiopenHandle& handle,
         workspaceSize = _workspaceSize;
     }
 
-    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _executionSettings.benchmarkingEnabled());
+    const ScopedTuningPolicy tuningGuard(handle.miopenHandle,
+                                         _executionSettings.benchmarkingEnabled());
 
     // Algorithm selection is performed on first execute() call rather than in constructor
     // because miopenFindConvolutionBackwardDataAlgorithm requires device memory buffers.
     // These buffers are only available during execute(), not during plan construction.
     // The selected algorithm is cached to avoid redundant find calls on subsequent executions.
     {
-        std::lock_guard<std::mutex> lock(_algorithmMutex);
+        const std::lock_guard<std::mutex> lock(_algorithmMutex);
 
         if(!_algorithm.has_value())
         {
             HIPDNN_PLUGIN_LOG_INFO(
                 "Convolution Bwd: Performing algorithm selection (first execution)");
 
-            bool traceEnabled = HIPDNN_PLUGIN_LOG_IS_TRACE_ENABLED();
+            const bool traceEnabled = HIPDNN_PLUGIN_LOG_IS_TRACE_ENABLED();
             // Find dedupes by algorithm class (ShrinkToFind10Results in
             // projects/miopen/src/ocl/convolutionocl.cpp:238), so it returns at most one
             // entry per value of miopenConvBwdDataAlgorithm_t (6 enumerators incl. deprecated).
-            int requestCount = traceEnabled ? 6 : 1;
+            const int requestCount = traceEnabled ? 6 : 1;
 
             std::vector<miopenConvAlgoPerf_t> perfResults(static_cast<size_t>(requestCount));
             int returnedAlgoCount;

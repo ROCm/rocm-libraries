@@ -649,7 +649,11 @@ constexpr void constexpr_for_gte(F&& f)
 }
 
 template<class T, unsigned int ItemsPerThread, class WordType = int>
-struct __align__(sizeof(WordType)) thread_items_pack
+struct
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // This doesn't work with doxygen
+    __align__(sizeof(WordType))
+#endif
+        thread_items_pack
 {
 private:
     WordType data[ceiling_div(sizeof(T) * ItemsPerThread, sizeof(WordType))];

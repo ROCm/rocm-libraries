@@ -25,6 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#include "exceptions.hpp"
 #include "roclapack_gesv.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -43,6 +44,7 @@ rocblas_status rocsolver_gesv_strided_batched_impl(rocblas_handle handle,
                                                    const rocblas_stride strideB,
                                                    rocblas_int* info,
                                                    const rocblas_int batch_count)
+try
 {
     ROCSOLVER_ENTER_TOP("gesv_strided_batched", "-n", n, "--nrhs", nrhs, "--lda", lda, "--strideA",
                         strideA, "--strideP", strideP, "--ldb", ldb, "--strideB", strideB,
@@ -84,6 +86,10 @@ rocblas_status rocsolver_gesv_strided_batched_impl(rocblas_handle handle,
     return rocsolver_gesv_template<false, true, T>(handle, n, nrhs, A, shiftA, lda, strideA, ipiv,
                                                    strideP, B, shiftB, ldb, strideB, info,
                                                    batch_count, &work_helper);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

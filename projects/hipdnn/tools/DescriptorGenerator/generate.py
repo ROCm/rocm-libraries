@@ -132,16 +132,18 @@ def _preview_files(config, mode: str) -> list[str]:
     ]
     backend_fragments = [f"fragments/{f}" for f in BACKEND_FRAGMENT_FILENAMES]
 
-    # Frontend files
     frontend_files = [
         f"frontend/include/hipdnn_frontend/attributes/{config.attributes_header_filename}",
-        f"frontend/include/hipdnn_frontend/node/{config.node_header_filename}",
     ]
     frontend_test_files = [
         f"frontend/tests/{config.test_attributes_filename}",
-        f"frontend/tests/{config.test_node_filename}",
         f"frontend/tests/{config.test_frontend_graph_filename}",
     ]
+    if config.frontend.generate_node:
+        frontend_files.append(
+            f"frontend/include/hipdnn_frontend/node/{config.node_header_filename}"
+        )
+        frontend_test_files.append(f"frontend/tests/{config.test_node_filename}")
     frontend_fragments = [
         "fragments/graph_method.txt",
         "fragments/graph_includes.txt",

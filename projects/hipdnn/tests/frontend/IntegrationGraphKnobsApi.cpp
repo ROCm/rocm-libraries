@@ -410,7 +410,7 @@ TEST_F(IntegrationGraphKnobsApi, QueryKnobsBeforeGraphBuilt)
     auto result = graph.get_knobs_for_engine(engineId, knobs);
 
     EXPECT_FALSE(result.is_good()) << "Should fail when graph not built";
-    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(result.get_message().find("Graph has not been built"), std::string::npos);
 }
 

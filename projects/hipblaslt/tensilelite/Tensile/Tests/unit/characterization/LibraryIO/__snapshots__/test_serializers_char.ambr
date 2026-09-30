@@ -1,0 +1,222 @@
+# serializer version: 1
+# name: test_fast_yaml_dump_empty
+  ''
+# ---
+# name: test_fast_yaml_dump_flat
+  '''
+  - A: 1
+    B: 2
+    Name: sol0
+  
+  '''
+# ---
+# name: test_fast_yaml_dump_multiple_solutions
+  '''
+  - A: 1
+  - A: 2
+    B: [1, 2]
+  
+  '''
+# ---
+# name: test_fast_yaml_dump_nested_dict
+  '''
+  - Idx: 0
+    ProblemType:
+      DataType: 4
+      OperationType: GEMM
+  
+  '''
+# ---
+# name: test_fast_yaml_flow_list[empty]
+  '[]'
+# ---
+# name: test_fast_yaml_flow_list[ints]
+  '[1, 2, 3]'
+# ---
+# name: test_fast_yaml_flow_list[mixed]
+  '[true, null, 1.5]'
+# ---
+# name: test_fast_yaml_flow_list[nested]
+  '[[1, 2], [3]]'
+# ---
+# name: test_fast_yaml_flow_list[single]
+  '[1]'
+# ---
+# name: test_fast_yaml_flow_list[strs]
+  '[a, b]'
+# ---
+# name: test_fast_yaml_scalar[dict_fallthrough]
+  "{'a': 1}"
+# ---
+# name: test_fast_yaml_scalar[emptylist]
+  '[]'
+# ---
+# name: test_fast_yaml_scalar[emptystr]
+  "''"
+# ---
+# name: test_fast_yaml_scalar[false]
+  'false'
+# ---
+# name: test_fast_yaml_scalar[float]
+  '3.5'
+# ---
+# name: test_fast_yaml_scalar[inf]
+  'inf'
+# ---
+# name: test_fast_yaml_scalar[int0]
+  '0'
+# ---
+# name: test_fast_yaml_scalar[int1]
+  '1'
+# ---
+# name: test_fast_yaml_scalar[list]
+  '[1, 2, 3]'
+# ---
+# name: test_fast_yaml_scalar[negint]
+  '-42'
+# ---
+# name: test_fast_yaml_scalar[negzero]
+  '-0.0'
+# ---
+# name: test_fast_yaml_scalar[none]
+  'null'
+# ---
+# name: test_fast_yaml_scalar[str]
+  'plain'
+# ---
+# name: test_fast_yaml_scalar[true]
+  'true'
+# ---
+# name: test_fast_yaml_str[apostrophe]
+  "it's"
+# ---
+# name: test_fast_yaml_str[colonspace]
+  "'key: value'"
+# ---
+# name: test_fast_yaml_str[dash_notnum]
+  "'-x'"
+# ---
+# name: test_fast_yaml_str[dashstart]
+  "'- dash'"
+# ---
+# name: test_fast_yaml_str[digit_notfloat]
+  '1abc'
+# ---
+# name: test_fast_yaml_str[dot_notfloat]
+  '.name'
+# ---
+# name: test_fast_yaml_str[dotted_notfloat]
+  '1.2.3'
+# ---
+# name: test_fast_yaml_str[empty]
+  "''"
+# ---
+# name: test_fast_yaml_str[endcolon]
+  "'trailing colon:'"
+# ---
+# name: test_fast_yaml_str[false]
+  "'false'"
+# ---
+# name: test_fast_yaml_str[hashcomment]
+  "'has #comment'"
+# ---
+# name: test_fast_yaml_str[leadingspace]
+  "' leading'"
+# ---
+# name: test_fast_yaml_str[newline]
+  '''
+  'line
+  break'
+  '''
+# ---
+# name: test_fast_yaml_str[null]
+  "'null'"
+# ---
+# name: test_fast_yaml_str[numberlike]
+  "'123'"
+# ---
+# name: test_fast_yaml_str[plain]
+  'hello'
+# ---
+# name: test_fast_yaml_str[signedfloat]
+  "'+1.5'"
+# ---
+# name: test_fast_yaml_str[tilde]
+  "'~'"
+# ---
+# name: test_fast_yaml_str[trailingspace]
+  "'trailing '"
+# ---
+# name: test_fast_yaml_str[true]
+  "'true'"
+# ---
+# name: test_fast_yaml_str[yes]
+  "'yes'"
+# ---
+# name: test_get_real_data_type_a[BFloat8Float8]
+  16
+# ---
+# name: test_get_real_data_type_a[BFloat8Float8_fnuz]
+  12
+# ---
+# name: test_get_real_data_type_a[Float8BFloat8]
+  15
+# ---
+# name: test_get_real_data_type_a[Float8BFloat8_fnuz]
+  11
+# ---
+# name: test_get_real_data_type_a[Half_passthrough]
+  4
+# ---
+# name: test_get_real_data_type_b[BFloat8Float8]
+  15
+# ---
+# name: test_get_real_data_type_b[BFloat8Float8_fnuz]
+  11
+# ---
+# name: test_get_real_data_type_b[Float8BFloat8]
+  16
+# ---
+# name: test_get_real_data_type_b[Float8BFloat8_fnuz]
+  12
+# ---
+# name: test_get_real_data_type_b[Half_passthrough]
+  4
+# ---
+# name: test_library_logic_defaults
+  dict({
+    'architecture': 'gfx942',
+    'exactLogic': list([
+      list([
+        'k',
+        'v',
+      ]),
+    ]),
+    'library': '<MasterSolutionLibrary>',
+    'problemType': '<ProblemType>',
+    'schedule': 'aldebaran',
+    'solutions': list([
+      's0',
+      's1',
+    ]),
+    'typeMismatches': dict({
+    }),
+  })
+# ---
+# name: test_library_logic_with_mismatches
+  dict({
+    'architecture': 'gfx950',
+    'exactLogic': None,
+    'library': '<lib>',
+    'problemType': '<PT>',
+    'schedule': 'sched',
+    'solutions': list([
+    ]),
+    'typeMismatches': dict({
+      'DataType': tuple(
+        'bf16',
+        'f16',
+      ),
+    }),
+  })
+# ---

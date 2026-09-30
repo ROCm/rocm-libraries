@@ -4,6 +4,8 @@
 
 #include <miopen/miopen.h>
 
+#include <vector>
+
 // RAII wrapper for MIOpen descriptor types to prevent memory leaks.
 // Template parameters:
 //   DescType  - the descriptor handle type (e.g. miopenTensorDescriptor_t)
@@ -69,3 +71,29 @@ inline void DestroyInternalRnnDropoutDesc(miopenRNNDescriptor_t rnnDesc)
     if(dropDesc != nullptr)
         miopenDestroyDropoutDescriptor(dropDesc);
 }
+
+// Owns a vector of miopenTensorDescriptor_t handles and destroys them on scope exit,
+// so an ASSERT_* failure mid-test does not leak descriptors.
+class TensorDescVecGuard
+{
+public:
+    TensorDescVecGuard() = default;
+    ~TensorDescVecGuard()
+    {
+        for(auto* d : descs)
+        {
+            if(d != nullptr)
+                miopenDestroyTensorDescriptor(d);
+        }
+    }
+
+    TensorDescVecGuard(const TensorDescVecGuard&)            = delete;
+    TensorDescVecGuard& operator=(const TensorDescVecGuard&) = delete;
+    TensorDescVecGuard(TensorDescVecGuard&&)                 = delete;
+    TensorDescVecGuard& operator=(TensorDescVecGuard&&)      = delete;
+
+    miopenTensorDescriptor_t* data() { return descs.data(); }
+    miopenTensorDescriptor_t& operator[](std::size_t i) { return descs[i]; }
+
+    std::vector<miopenTensorDescriptor_t> descs;
+};

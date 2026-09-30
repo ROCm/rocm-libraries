@@ -247,6 +247,42 @@ TEST(TestKnobSetting, GetValueWrongType)
     EXPECT_EQ(stringValue, nullptr);
 }
 
+TEST(TestKnobSetting, EqualityRequiresSameIdAndValue)
+{
+    const KnobSetting lhs("tile_size", int64_t{128});
+    const KnobSetting rhs("tile_size", int64_t{128});
+
+    EXPECT_EQ(lhs, rhs);
+    EXPECT_FALSE(lhs != rhs);
+}
+
+TEST(TestKnobSetting, InequalityDetectsDifferentId)
+{
+    const KnobSetting lhs("tile_size", int64_t{128});
+    const KnobSetting rhs("split_k", int64_t{128});
+
+    EXPECT_NE(lhs, rhs);
+    EXPECT_TRUE(lhs != rhs);
+}
+
+TEST(TestKnobSetting, InequalityDetectsDifferentValue)
+{
+    const KnobSetting lhs("tile_size", int64_t{128});
+    const KnobSetting rhs("tile_size", int64_t{256});
+
+    EXPECT_NE(lhs, rhs);
+    EXPECT_TRUE(lhs != rhs);
+}
+
+TEST(TestKnobSetting, InequalityDetectsDifferentValueType)
+{
+    const KnobSetting lhs("scale", int64_t{1});
+    const KnobSetting rhs("scale", 1.0);
+
+    EXPECT_NE(lhs, rhs);
+    EXPECT_TRUE(lhs != rhs);
+}
+
 // ============================================================================
 // Constraint Tests
 // ============================================================================
@@ -337,6 +373,30 @@ TEST(TestKnobStringConstraint, ConstraintWithValidValues)
     EXPECT_NE(str.find("\"option1\""), std::string::npos);
     EXPECT_NE(str.find("\"option2\""), std::string::npos);
     EXPECT_NE(str.find("\"option3\""), std::string::npos);
+}
+
+TEST(TestKnobIntConstraint, KindReportsInt)
+{
+    const hipdnn_frontend::IntConstraint constraint(0, 100, 1);
+    EXPECT_EQ(constraint.kind(), hipdnn_frontend::ConstraintKind::INT);
+}
+
+TEST(TestKnobFloatConstraint, KindReportsFloat)
+{
+    const hipdnn_frontend::FloatConstraint constraint(0.0, 1.0);
+    EXPECT_EQ(constraint.kind(), hipdnn_frontend::ConstraintKind::FLOAT);
+}
+
+TEST(TestKnobStringConstraint, KindReportsString)
+{
+    const hipdnn_frontend::StringConstraint constraint(100);
+    EXPECT_EQ(constraint.kind(), hipdnn_frontend::ConstraintKind::STRING);
+}
+
+TEST(TestEmptyConstraint, KindReportsEmpty)
+{
+    const hipdnn_frontend::EmptyConstraint constraint;
+    EXPECT_EQ(constraint.kind(), hipdnn_frontend::ConstraintKind::EMPTY);
 }
 
 // ============================================================================

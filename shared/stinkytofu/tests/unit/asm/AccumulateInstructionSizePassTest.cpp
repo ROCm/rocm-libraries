@@ -1,0 +1,679 @@
+/* ************************************************************************
+ * Copyright (C) 2026 Advanced Micro Devices, Inc.
+ * Unit tests: instruction byte costing (VALU promotion + literal extra), shared
+ * with AccumulateInstructionSizePass via InstructionSizeCosting.
+ * ************************************************************************ */
+
+#include <gtest/gtest.h>
+
+#include <cstdint>
+#include <memory>
+#include <unordered_map>
+
+#include "stinkytofu/core/BasicBlock.hpp"
+#include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkyModifiers.hpp"
+#include "stinkytofu/ir/asm/StinkyRegister.hpp"
+#include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
+#include "stinkytofu/transforms/asm/InstructionSizeCosting.hpp"
+
+using namespace stinkytofu;
+
+namespace {
+StinkyRegister litInt(int32_t v) {
+    StinkyRegister r;
+    r.dataType = StinkyRegister::Type::LiteralInt;
+    r.literalInt = v;
+    return r;
+}
+
+StinkyRegister litStr(const char* s) {
+    StinkyRegister r;
+    r.dataType = StinkyRegister::Type::LiteralString;
+    r.literalValue.assign(s);
+    return r;
+}
+}  // namespace
+
+class InstructionSizeCostingTest : public ::testing::Test {
+   protected:
+    GfxArchID arch{};
+    std::unique_ptr<Function> func;
+    BasicBlock* bb{};
+
+    void SetUp() override {
+        arch = getGfxArchID(12, 5, 0);
+        func = std::make_unique<Function>("instruction_size_test");
+        bb = func->createBasicBlock("entry");
+    }
+
+    AsmIRBuilder makeBuilder() {
+        return AsmIRBuilder(*bb, arch);
+    }
+};
+
+// ---------------------------------------------------------------------------
+// .align / label alignment padding (paddingBytesForCodeAlignment)
+// ---------------------------------------------------------------------------
+
+TEST(InstructionSizeCosting_Padding, Align16_FromOffset8_Uses8Bytes) {
+    // Matches two 4B NOPs in disassembly: (16 - 8) % 16 = 8
+    EXPECT_EQ(paddingBytesForCodeAlignment(8, 16), 8);
+    EXPECT_EQ(paddingBytesForCodeAlignment(0, 16), 0);
+    EXPECT_EQ(paddingBytesForCodeAlignment(16, 16), 0);
+    EXPECT_EQ(paddingBytesForCodeAlignment(0, 1), 0);
+    EXPECT_EQ(paddingBytesForCodeAlignment(4, 0), 0);
+}
+
+// ---------------------------------------------------------------------------
+// VOP promotion (getEffectiveBaseSizeInBytes)
+// ---------------------------------------------------------------------------
+
+TEST_F(InstructionSizeCostingTest, VCvtBf16_NoVop3pModifier_LowVgpr_Stays4ByteBase) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f32_bf16, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 199, 1));
+    inst->addSrcReg(StinkyRegister("v", 6, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, VCvtBf16_OpSel0_ModifierForces8Bytes_EvenIfLowVgpr) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f32_bf16, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 199, 1));
+    inst->addSrcReg(StinkyRegister("v", 6, 1));
+    inst->addModifier(VOP3PModifiers({0}, {}, {}));
+
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+    EXPECT_EQ(getLiteralExtraBytes(*inst), 0);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+}
+
+TEST_F(InstructionSizeCostingTest, VCvtBf16_OpSel10_ForcesVop3_8Bytes) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f32_bf16, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 199, 1));
+    inst->addSrcReg(StinkyRegister("v", 254, 1));
+    inst->addModifier(VOP3PModifiers({1, 0}, {}, {}));
+
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+}
+
+TEST_F(InstructionSizeCostingTest, VCvtBf16_Src255_Mod256_Logical255_PromotesTo8Bytes) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f32_bf16, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 199, 1));
+    inst->addSrcReg(StinkyRegister("v", 255, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+}
+
+TEST_F(InstructionSizeCostingTest, VCvtF16F32_OpSel10_ForcesVop3_EvenIfLowVgpr) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 1, 1));
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+    inst->addModifier(VOP3PModifiers({1, 0}, {}, {}));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+}
+
+TEST_F(InstructionSizeCostingTest, VCvtF16F32_V127_Stays4ByteBase) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 127, 1));
+    inst->addSrcReg(StinkyRegister("v", 127, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, VCvtF16F32_V128_PromotesTo8Bytes) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 128, 1));
+    inst->addSrcReg(StinkyRegister("v", 128, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+}
+
+TEST_F(InstructionSizeCostingTest, VCvtF16F32_Src256_Mod256_Logical0_Stays4ByteBase) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 256, 1));
+    inst->addSrcReg(StinkyRegister("v", 256, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, VCvtF16F32_Src383_Mod256_Logical127_Stays4ByteBase) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 0, 1));
+    inst->addSrcReg(StinkyRegister("v", 383, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, VCvtF16F32_Src384_Mod256_Logical128_Stays4ByteBase) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 0, 1));
+    inst->addSrcReg(StinkyRegister("v", 384, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, VCvtF32F16_V132_PromotesTo8Bytes) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f32_f16, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 132, 1));
+    inst->addSrcReg(StinkyRegister("v", 132, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+}
+
+TEST_F(InstructionSizeCostingTest, VCvtF32F16_V12_Stays4ByteBase) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f32_f16, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 12, 1));
+    inst->addSrcReg(StinkyRegister("v", 12, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, VCvtF16F32_Dst128_Src127_DestCounts_PromotesTo8Bytes) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 128, 1));
+    inst->addSrcReg(StinkyRegister("v", 127, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+}
+
+TEST_F(InstructionSizeCostingTest, VCvtF16F32_Dst127_Src128_DestCounts_Stays4ByteBase) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 127, 1));
+    inst->addSrcReg(StinkyRegister("v", 128, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, VCvtF16F32_Dst0_Src132_DestCounts_Stays4ByteBase) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 0, 1));
+    inst->addSrcReg(StinkyRegister("v", 132, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, VCvtF16F32_Dst256_Src132_DestCounts_Stays4ByteBase) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 256, 1));
+    inst->addSrcReg(StinkyRegister("v", 132, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, VCndmask_LastSrcVcc_Stays4ByteBase) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cndmask_b32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 0, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+    inst->addSrcReg(StinkyRegister(RegType::VCC, 0, 1));
+
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, VCndmask_LastSrcNotVcc_PromotesTo8Bytes) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cndmask_b32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 0, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+    inst->addSrcReg(StinkyRegister("v", 3, 1));
+
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+}
+
+TEST_F(InstructionSizeCostingTest, VAddCoCi_LastSrcVcc_4LastNotVcc_8) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_add_co_ci_u32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* i = b.create(d);
+    i->addDestReg(StinkyRegister("v", 0, 1));
+    i->addDestReg(StinkyRegister(RegType::VCC, 0, 1));
+    i->addSrcReg(StinkyRegister("v", 1, 1));
+    i->addSrcReg(StinkyRegister("v", 2, 1));
+    i->addSrcReg(StinkyRegister(RegType::VCC, 0, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*i), 4);
+
+    StinkyInstruction* j = b.create(d);
+    j->addDestReg(StinkyRegister("v", 0, 1));
+    j->addDestReg(StinkyRegister(RegType::VCC, 0, 1));
+    j->addSrcReg(StinkyRegister("v", 1, 1));
+    j->addSrcReg(StinkyRegister("v", 2, 1));
+    j->addSrcReg(StinkyRegister("v", 3, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*j), 8);
+}
+
+TEST_F(InstructionSizeCostingTest, VAddF32_Src1NotVgpr_PromotesTo8) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_add_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 0, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    StinkyRegister c;
+    c.dataType = StinkyRegister::Type::LiteralDouble;
+    c.literalDouble = 1.0;  // not VGPR
+    inst->addSrcReg(c);
+
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+    EXPECT_EQ(getLiteralExtraBytes(*inst), 0);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+}
+
+TEST_F(InstructionSizeCostingTest, VCmp_DestVcc_Base4) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cmp_lt_u32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister(RegType::VCC, 0, 1));
+    inst->addSrcReg(StinkyRegister("v", 0, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, VCmp_DestNotVcc_Promotes8) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cmp_lt_u32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister(RegType::S, 0, 1));
+    inst->addSrcReg(StinkyRegister("v", 0, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+}
+
+// Gfx1250: v_mul_lo_u32 uses VOP3_2SRC (HwInstDesc::encoding = 64 bits).
+// hardwareEncodingBytes is encoding/8 when encoding > 0; else 4 (see
+// InstructionSizeCosting.hpp).
+TEST_F(InstructionSizeCostingTest, VMulLoU32_TableEncoding64_HardwareEncodingBytes8) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_mul_lo_u32, arch);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->encoding, 64u);
+    EXPECT_EQ(d->microcode, MicrocodeFormat::MC_VOP3);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 4, 1));
+    inst->addSrcReg(StinkyRegister("s", 19, 1));
+    inst->addSrcReg(StinkyRegister("v", 4, 1));
+    EXPECT_EQ(hardwareEncodingBytes(*inst), 8);
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+}
+
+// ENC_VOP3PX3 / v_wmma_scale16_* : 128-bit (16 B) instruction word; MCID must
+// not size as 192-bit.
+TEST_F(InstructionSizeCostingTest, VWmmaScale16_MC_VOP3PX3_Total16Bytes_NoLiteralTail) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_wmma_scale16_f32_16x16x128_f8f6f4, arch);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->microcode, MicrocodeFormat::MC_VOP3PX3);
+    EXPECT_EQ(d->encoding, 128u);
+    StinkyInstruction* inst = b.create(d);
+    EXPECT_EQ(hardwareEncodingBytes(*inst), 16);
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 16);
+    EXPECT_EQ(getLiteralExtraBytes(*inst), 0);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 16);
+}
+
+// ---------------------------------------------------------------------------
+// Literal / fixed format (getLiteralExtraBytes)
+// ---------------------------------------------------------------------------
+
+TEST_F(InstructionSizeCostingTest, SMemLoad_LiteralExtraZero) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::s_load_dword, arch);
+    ASSERT_NE(d, nullptr);
+    (void)b.create(d);
+    StinkyInstruction& inst = getStinkyInst(bb->begin());
+    EXPECT_EQ(getLiteralExtraBytes(inst), 0);
+}
+
+TEST_F(InstructionSizeCostingTest, SMovkI32_Simm16Inline_Minus128_NoLiteralExtra) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::s_movk_i32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister(RegType::S, 8, 1));
+    inst->addSrcReg(litInt(-128));
+    EXPECT_EQ(hardwareEncodingBytes(*inst), 4);
+    EXPECT_EQ(getLiteralExtraBytes(*inst), 0);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, SMovkI32_SopkFormat_NoLiteralExtra_LargeImmediate) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::s_movk_i32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister(RegType::S, 8, 1));
+    inst->addSrcReg(litInt(70000));
+    // SOPK is modeled as a fixed 32-bit encoding (simm16 in-word); no
+    // literal-pool add-on.
+    EXPECT_EQ(getLiteralExtraBytes(*inst), 0);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, SMovkI32_HexFF80_InlineNoLiteralExtra) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::s_movk_i32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister(RegType::S, 8, 1));
+    inst->addSrcReg(litStr("0xff80"));
+    EXPECT_EQ(getLiteralExtraBytes(*inst), 0);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, BufferLoadB32_MUBUF_Extra0_Total12) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::buffer_load_b32, arch);
+    ASSERT_NE(d, nullptr);
+    (void)b.create(d);
+    StinkyInstruction& inst = getStinkyInst(bb->begin());
+    EXPECT_EQ(hardwareEncodingBytes(inst), 12);
+    EXPECT_EQ(getLiteralExtraBytes(inst), 0);
+    EXPECT_EQ(totalInstructionEncodingBytes(inst, nullptr, 0, nullptr), 12);
+}
+
+TEST_F(InstructionSizeCostingTest, SWaitcnt_Sopp_Extra0) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::s_waitcnt, arch);
+    ASSERT_NE(d, nullptr);
+    (void)b.create(d);
+    StinkyInstruction& inst = getStinkyInst(bb->begin());
+    EXPECT_EQ(getLiteralExtraBytes(inst), 0);
+}
+
+TEST_F(InstructionSizeCostingTest, SMovB32_LiteralInt100_Plus4) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::s_mov_b32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("s", 0, 1));
+    inst->addSrcReg(litInt(100));
+
+    EXPECT_EQ(getLiteralExtraBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), hardwareEncodingBytes(*inst) + 4);
+}
+
+TEST_F(InstructionSizeCostingTest, SMovB32_ShortInt42_NoLiteralExtra) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::s_mov_b32, arch);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("s", 0, 1));
+    inst->addSrcReg(litInt(42));
+
+    EXPECT_EQ(getLiteralExtraBytes(*inst), 0);
+}
+
+TEST_F(InstructionSizeCostingTest, BufferOOB_String_Plus4) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::s_mov_b32, arch);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("s", 0, 1));
+    inst->addSrcReg(litStr("BufferOOB"));
+
+    EXPECT_EQ(getLiteralExtraBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, LabelString_AlwaysPlus4) {
+    // A label operand is always a FK_PCRel_4 relocation: the assembler uses the
+    // 0xff inline-literal slot and reserves a 32-bit literal word, regardless of
+    // the label's resolved address or its position. Verified with
+    // `llvm-mc -mcpu=gfx1250 -show-encoding` (s_add_i32 s66, label, 0 -> 8 bytes).
+    // So +4 in every case, independent of labelByteOffset / current offset.
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::s_mov_b32, arch);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("s", 0, 1));
+    inst->addSrcReg(litStr("label_foo"));
+
+    // Far label address.
+    std::unordered_map<std::string, int64_t> m;
+    m["label_foo"] = 100;
+    EXPECT_EQ(getLiteralExtraBytes(*inst, &m, 0, nullptr), 4);
+
+    // Near label address (<= 64): still +4 (the old > 64 heuristic was wrong).
+    std::unordered_map<std::string, int64_t> m2;
+    m2["label_foo"] = 8;
+    EXPECT_EQ(getLiteralExtraBytes(*inst, &m2, 0, nullptr), 4);
+
+    // Label not in the map (forward reference) and near current offset: still +4.
+    EXPECT_EQ(getLiteralExtraBytes(*inst, nullptr, 0, nullptr), 4);
+}
+
+// A label operand paired with a short inline immediate: the short immediate
+// contributes 0, but the label still forces the 32-bit literal (+4). Mirrors
+// `llvm-mc -mcpu=gfx1250`: `s_add_i32 s66, label, 0` -> [0xff,0x80,...,A,A,A,A]
+// (8 bytes = 4 base + 4 literal), whereas `s_add_i32 s66, 0, 0` is 4 bytes.
+TEST_F(InstructionSizeCostingTest, LabelWithShortImmediate_OnlyLabelAddsLiteral) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::s_add_i32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("s", 0, 1));
+    inst->addSrcReg(litStr("label_SW_PrefetchAbs_0"));  // -> +4 (FK_PCRel_4)
+    inst->addSrcReg(litInt(0));                         // short inline -> +0
+
+    // Forward reference (label unknown) must still be +4 total.
+    EXPECT_EQ(getLiteralExtraBytes(*inst, nullptr, 0, nullptr), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst, nullptr, 0, nullptr),
+              getEffectiveBaseSizeInBytes(*inst) + 4);
+
+    // Sanity: two short immediates add no literal word.
+    StinkyInstruction* plain = b.create(d);
+    plain->addDestReg(StinkyRegister("s", 0, 1));
+    plain->addSrcReg(litInt(0));
+    plain->addSrcReg(litInt(0));
+    EXPECT_EQ(getLiteralExtraBytes(*plain), 0);
+}
+
+// VALU *_f32: hex `0x........` is float32 bits — same literal-extra as decimal
+// `LiteralDouble`.
+TEST_F(InstructionSizeCostingTest, VMulF32_Hex40800000_MatchesLiteralDouble4_0) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_mul_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* instHex = b.create(d);
+    instHex->addDestReg(StinkyRegister("v", 14, 1));
+    instHex->addSrcReg(litStr("0x40800000"));
+    instHex->addSrcReg(StinkyRegister("v", 14, 1));
+
+    StinkyInstruction* instFloat = b.create(d);
+    instFloat->addDestReg(StinkyRegister("v", 14, 1));
+    StinkyRegister c;
+    c.dataType = StinkyRegister::Type::LiteralDouble;
+    c.literalDouble = 4.0;
+    instFloat->addSrcReg(c);
+    instFloat->addSrcReg(StinkyRegister("v", 14, 1));
+
+    EXPECT_EQ(getLiteralExtraBytes(*instHex), 0);
+    EXPECT_EQ(getLiteralExtraBytes(*instFloat), 0);
+    EXPECT_EQ(getLiteralExtraBytes(*instHex), getLiteralExtraBytes(*instFloat));
+}
+
+// SALU: same hex token keeps integer-style non-short literal (+4), not
+// float-bit reinterpret.
+TEST_F(InstructionSizeCostingTest, SMovB32_Hex40800000_StillPlus4_NotValuF32Rule) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::s_mov_b32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("s", 0, 1));
+    inst->addSrcReg(litStr("0x40800000"));
+
+    EXPECT_EQ(getLiteralExtraBytes(*inst), 4);
+}
+
+// ---------------------------------------------------------------------------
+// Pseudo instructions: no encoding, therefore no bytes
+// ---------------------------------------------------------------------------
+
+TEST_F(InstructionSizeCostingTest, Fence_EmitsNoAssembly_CostsZeroBytes) {
+    auto b = makeBuilder();
+    StinkyInstruction* fence = b.createFence();
+    ASSERT_NE(fence, nullptr);
+    EXPECT_EQ(hardwareEncodingBytes(*fence), 0);
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*fence), 0);
+    EXPECT_EQ(getLiteralExtraBytes(*fence), 0);
+    EXPECT_EQ(totalInstructionEncodingBytes(*fence), 0);
+}
+
+TEST_F(InstructionSizeCostingTest, FunctionAsmPlacementMarker_CostsZeroBytes) {
+    auto b = makeBuilder();
+    StinkyInstruction* marker = b.createFunctionAsmPlacementMarker("label_Activation_None_VW8");
+    ASSERT_NE(marker, nullptr);
+    EXPECT_EQ(hardwareEncodingBytes(*marker), 0);
+    EXPECT_EQ(totalInstructionEncodingBytes(*marker), 0);
+}
+
+TEST_F(InstructionSizeCostingTest, Label_CostsZeroBytes) {
+    auto b = makeBuilder();
+    StinkyInstruction* lbl = b.createLabel("label_LoopBeginL", 16);
+    ASSERT_NE(lbl, nullptr);
+    EXPECT_EQ(hardwareEncodingBytes(*lbl), 0);
+    EXPECT_EQ(totalInstructionEncodingBytes(*lbl), 0);
+}
+
+TEST_F(InstructionSizeCostingTest, RealOpcodeWithoutTablegenEncoding_KeepsFourByteDefault) {
+    // A real opcode with no tablegen .encoding still costs 4 B.
+    auto b = makeBuilder();
+    static const HwInstDesc noEncoding{GFX::s_nop,           GFX::s_nop,     0, 0, 0, 0,
+                                       "s_nop_no_encoding_", makeFlagSet({})};
+    StinkyInstruction* inst = b.create(&noEncoding);
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(hardwareEncodingBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+// ---------------------------------------------------------------------------
+// accumulateInstructionSize: pseudo instructions must not move the byte cursor
+// ---------------------------------------------------------------------------
+
+TEST_F(InstructionSizeCostingTest, Accumulate_FenceCostsNothing) {
+    auto b = makeBuilder();
+    b.create(getMCIDByUOp(GFX::s_nop, arch));
+    b.createFence();
+    b.createFence();
+    b.create(getMCIDByUOp(GFX::s_nop, arch));
+
+    std::unordered_map<std::string, int64_t> labelOff;
+    int64_t totalBytes = -1;
+    accumulateInstructionSize(*bb, labelOff, nullptr, nullptr, &totalBytes);
+    EXPECT_EQ(totalBytes, 8);  // two s_nop; the fences are free
+}
+
+TEST_F(InstructionSizeCostingTest, Accumulate_FencesDoNotPadAnAlreadyAlignedLabel) {
+    // Pseudo ops must not move the byte cursor (would credit padding the assembler never emits).
+    auto b = makeBuilder();
+    for (int i = 0; i < 4; ++i) b.create(getMCIDByUOp(GFX::s_nop, arch));  // 16 B: 16-aligned
+    b.createFence();
+    b.createFence();
+    b.createLabel("label_LoopBeginL", 16);
+    b.create(getMCIDByUOp(GFX::s_nop, arch));
+
+    std::unordered_map<std::string, int64_t> labelOff;
+    int64_t totalBytes = -1;
+    accumulateInstructionSize(*bb, labelOff, nullptr, nullptr, &totalBytes);
+
+    EXPECT_EQ(labelOff["label_LoopBeginL"], 16);  // already aligned -> zero padding
+    EXPECT_EQ(totalBytes, 20);                    // five s_nop, no padding
+}
+
+TEST_F(InstructionSizeCostingTest, Accumulate_MisalignedLabelStillPadsWithFencesPresent) {
+    // Pseudo ops not moving the cursor must not disable label alignment: 12 B + .align 16 owes 4 B.
+    auto b = makeBuilder();
+    for (int i = 0; i < 3; ++i) b.create(getMCIDByUOp(GFX::s_nop, arch));  // 12 B
+    b.createFence();
+    b.createLabel("label_TailLoopBeginL", 16);
+    b.create(getMCIDByUOp(GFX::s_nop, arch));
+
+    std::unordered_map<std::string, int64_t> labelOff;
+    int64_t totalBytes = -1;
+    accumulateInstructionSize(*bb, labelOff, nullptr, nullptr, &totalBytes);
+
+    EXPECT_EQ(labelOff["label_TailLoopBeginL"], 16);  // 12 -> pad 4
+    EXPECT_EQ(totalBytes, 20);                        // 12 + 4 padding + 4
+}
+
+TEST_F(InstructionSizeCostingTest, Accumulate_LabelOffsetsUnaffectedByFenceCount) {
+    // Extra fences must not change label offsets or the total.
+    auto run = [this](int fences) {
+        Function f("fence_invariance");
+        BasicBlock* block = f.createBasicBlock("entry");
+        AsmIRBuilder b(*block, arch);
+        b.create(getMCIDByUOp(GFX::s_nop, arch));
+        for (int i = 0; i < fences; ++i) b.createFence();
+        b.createLabel("label_A", 1);
+        b.create(getMCIDByUOp(GFX::s_nop, arch));
+        b.createLabel("label_B", 16);
+        b.create(getMCIDByUOp(GFX::s_nop, arch));
+        std::unordered_map<std::string, int64_t> off;
+        int64_t total = -1;
+        accumulateInstructionSize(*block, off, nullptr, nullptr, &total);
+        return std::make_pair(off, total);
+    };
+    auto none = run(0);
+    auto many = run(7);
+    EXPECT_EQ(none.second, many.second);
+    EXPECT_EQ(none.first["label_A"], many.first["label_A"]);
+    EXPECT_EQ(none.first["label_B"], many.first["label_B"]);
+}

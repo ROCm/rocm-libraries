@@ -146,7 +146,7 @@ namespace testing
     TESTING_TEMPLATE(Gather)
     TESTING_TEMPLATE(Scatter)
 #endif
-#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 13000))
+#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 14000))
     TESTING_TEMPLATE(Rot)
 #endif
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
@@ -159,7 +159,7 @@ namespace testing
     TESTING_TEMPLATE(SpMM_preprocess)
     TESTING_TEMPLATE(SpMM)
 #endif
-#if(!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
     TESTING_TEMPLATE(SDDMM)
     TESTING_TEMPLATE(SDDMM_bufferSize)
     TESTING_TEMPLATE(SDDMM_preprocess)

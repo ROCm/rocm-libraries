@@ -1,0 +1,6 @@
+{
+  "version": "0.1",
+  "id": "kmd-attention",
+  "name": "Attention metadata",
+  "fields": [{ "name": "family", "type": "string" }]
+}

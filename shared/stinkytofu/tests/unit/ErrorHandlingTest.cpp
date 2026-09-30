@@ -186,7 +186,7 @@ TEST_F(ExpectedTest, RValueDereference) {
 // ============================================================================
 
 // Helper function that returns Expected<int>
-Expected<int> divideOrError(int numerator, int denominator) {
+static Expected<int> divideOrError(int numerator, int denominator) {
     if (denominator == 0) {
         return Expected<int>::Error("Division by zero");
     }
@@ -255,7 +255,8 @@ TEST_F(ExpectedTest, UniquePointer) {
 // ============================================================================
 
 // Simulate architecture check function
-Expected<void*> createInstructionForArch(const std::string& arch, const std::string& instruction) {
+static Expected<void*> createInstructionForArch(const std::string& arch,
+                                                const std::string& instruction) {
     if (arch == "gfx900" && instruction == "s_mul_lo_u32") {
         return Expected<void*>::Error("s_mul_lo_u32 not supported on gfx900 (requires gfx1250+)");
     }

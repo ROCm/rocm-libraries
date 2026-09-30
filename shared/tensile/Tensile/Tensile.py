@@ -26,6 +26,7 @@ if __name__ == "__main__":
     print("This file can no longer be run as a script.  Run 'Tensile/bin/Tensile' instead.")
     exit(1)
 
+import ast
 import os
 import sys
 import argparse
@@ -102,9 +103,19 @@ def addCommonArguments(argParser):
     def splitExtraParameters(par):
         """
         Allows the --global-parameters option to specify any parameters from the command line.
+
+        Each argument is a ``key=value`` pair. The value is parsed as a Python literal
+        (number, string, tuple, list, dict, bool, or None) via ``ast.literal_eval``.
+        Arbitrary expressions are rejected so a CLI/CI argument cannot execute code.
         """
-        (key, value) = par.split("=")
-        value = eval(value)
+        (key, value) = par.split("=", 1)
+        try:
+            value = ast.literal_eval(value)
+        except (ValueError, SyntaxError) as e:
+            raise argparse.ArgumentTypeError(
+                f"invalid --global-parameters value for '{key}': {value!r} must be a "
+                f"Python literal (e.g. 5, True, 'text', [1, 2])"
+            ) from e
         return (key, value)
 
     argParser.add_argument("-d", "--device", dest="device", type=int, \

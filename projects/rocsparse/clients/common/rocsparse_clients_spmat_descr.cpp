@@ -214,7 +214,7 @@ int64_t rocsparse_clients::spmat_descr<T, I, J>::get_size_values() const
             [](const csc_t& that) -> int64_t { return that.host().nnz; },
             [](const ell_t& that) -> int64_t { return that.host().m * that.host().width; },
             [](const bell_t& that) -> int64_t {
-                return that.host().width * that.host().m * that.host().bdim * that.host().bdim;
+                return int64_t(that.host().m) * that.host().ell_cols;
             },
             [](const bsr_t& that) -> int64_t {
                 return that.host().nnzb * that.host().row_block_dim * that.host().col_block_dim;
@@ -235,7 +235,11 @@ int64_t rocsparse_clients::spmat_descr<T, I, J>::get_size_cols() const
             [](const csr_t& that) -> int64_t { return that.host().nnz; },
             [](const csc_t& that) -> int64_t { return that.host().n + 1; },
             [](const ell_t& that) -> int64_t { return that.host().m * that.host().width; },
-            [](const bell_t& that) -> int64_t { return that.host().width * that.host().m; },
+            [](const bell_t& that) -> int64_t {
+                const auto& h = that.host();
+                return (h.bdim > 0) ? (int64_t((h.m + h.bdim - 1) / h.bdim) * (h.ell_cols / h.bdim))
+                                    : 0;
+            },
             [](const bsr_t& that) -> int64_t { return that.host().nnzb; },
             [](const sell_t& that) -> int64_t { return that.host().sell_colval_size; },
         },
@@ -333,8 +337,11 @@ void rocsparse_clients::spmat_descr<T, I, J>::init(const Arguments& arg,
                            throw(rocsparse_status_not_implemented);
                        },
                        [&](csc_t& that) {
-                           std::cerr << "handling csc not yet implemented" << std::endl;
-                           throw(rocsparse_status_not_implemented);
+                           const bool                        to_int = arg.timing ? false : true;
+                           rocsparse_matrix_factory<T, I, J> matrix_factory(arg, to_int, full_rank);
+                           J                                 m = arg.M;
+                           J                                 n = arg.N;
+                           matrix_factory.init_csc(that.host(), m, n, arg.baseA);
                        },
                        [&](ell_t& that) {
                            std::cerr << "handling ell not yet implemented" << std::endl;

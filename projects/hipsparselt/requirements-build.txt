@@ -1,0 +1,19 @@
+# Python packages for the hipSPARSELt build venv (see install.sh / tasks.py).
+# CMake find_package(Python3) + TensileLite (from ../hipblaslt/tensilelite) expect the
+# same stack as hipblaslt/tensilelite/requirements.txt for host-side tooling.
+#
+# Omitted on purpose:
+#   tox       — dev/CI runner only
+#   hip-python — ROCm GPU Python bindings; drop Docker does host codegen only
+#
+wheel
+invoke
+packaging
+PyYAML>=5.1
+msgpack
+joblib>=1.4.0
+simplejson
+ujson
+orjson
+numpy
+yappi

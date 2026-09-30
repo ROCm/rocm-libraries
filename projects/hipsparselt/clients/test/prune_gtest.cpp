@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,26 +42,31 @@ namespace
     // In the general case of <Ti, To, Tc>, these tests do not apply, and if this
     // functor is called, an internal error message is generated. When converted
     // to bool, this functor returns false.
-    template <typename Ti, typename To = Ti, typename Tc = To, typename TBias = Ti, typename = void>
+    template <typename Ti, typename To = Ti, typename Tc = To, typename TBias = Ti, typename TGate = Ti, typename = void>
     struct prune_testing : hipsparselt_test_invalid
     {
     };
 
     // When Ti = To = Tc != void, this test applies.
     // When converted to bool, this functor returns true.
-    template <typename Ti, typename To, typename Tc, typename TBias>
+    template <typename Ti, typename To, typename Tc, typename TBias, typename TGate>
     struct prune_testing<
         Ti,
         To,
         Tc,
         TBias,
+        TGate,
         std::enable_if_t<std::is_same<Ti, __half>{} || std::is_same<Ti, hip_bfloat16>{}
                          || std::is_same<Ti, int8_t>{}
 #ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
-			 || std::is_same<Ti, hipsparselt_fp8_e4m3>{}
+                         || std::is_same<Ti, hipsparselt_fp8_e4m3>{}
                          || std::is_same<Ti, hipsparselt_fp8_e5m2>{}
 #endif
-			 >> : hipsparselt_test_valid
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+                         || std::is_same<Ti, hipsparselt_fp8_e4m3_fnuz>{}
+                         || std::is_same<Ti, hipsparselt_fp8_e5m2_fnuz>{}
+#endif
+                         >> : hipsparselt_test_valid
     {
         void operator()(const Arguments& arg)
         {

@@ -26,7 +26,7 @@
 
 TEST_ROUTINE_WITH_CONFIG(axpby,
                          generic,
-                         hipsparse_test_config_it,
+                         hipsparse_test_config_axpby,
                          arg.N,
                          arg.nnz,
                          arg.alpha,

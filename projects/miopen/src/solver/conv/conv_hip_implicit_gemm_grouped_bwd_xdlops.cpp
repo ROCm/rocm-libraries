@@ -32,10 +32,10 @@
 #include <miopen/generic_search.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/solver/problem_description_interpreter.hpp>
+#include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
-#include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #endif
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
@@ -312,7 +312,7 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
     if(!loader.IsLoaded())
         return;
 
-    const bool is_deterministic = problem.GetConv().attribute.deterministic;
+    [[maybe_unused]] const bool is_deterministic = problem.GetConv().attribute.deterministic;
 
     // AI heuristics (if enabled)
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
@@ -387,13 +387,14 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::SetNextValue(const ProblemD
     // Deterministic mode: only iterate over kernels (index), split_k is always 1
     if(is_deterministic)
     {
-        if(!NextLinear(0, valid_kernels.size() - 1, index))
+        if((index + 1) < static_cast<int>(valid_kernels.size()))
         {
-            return false; // All kernels exhausted
+            ++index;
+            split_k   = 1;
+            kernel_id = valid_kernels[index] + "+1";
+            return true;
         }
-        split_k   = 1;
-        kernel_id = valid_kernels[index] + "+1";
-        return true;
+        return false; // All kernels exhausted
     }
 
     // General (non-deterministic) mode: iterate over both split_k and kernels
@@ -495,8 +496,6 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
     if(env::enabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_GROUP_BWD_XDLOPS))
         return false;
     if(problem.HasMixedDataTypes())
-        return false;
-    if(!problem.AllTensorsDimsFitIntoInt())
         return false;
     if(problem.IsTensorsCasted())
         return false;

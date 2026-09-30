@@ -1,0 +1,9 @@
+*.tgz filter=lfs diff=lfs merge=lfs -text
+*.tar.gz filter=lfs diff=lfs merge=lfs -text
+*.mtx filter=lfs diff=lfs merge=lfs -text
+
+# TheRock CI does not run `git lfs pull`, so this small matrix is committed as a
+# normal (non-LFS) file to keep the spmm example runnable there.
+examples/sparse-mat-mul/data/test_general.mtx !filter !diff !merge text
+
+*.hip linguist-language=cpp

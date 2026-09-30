@@ -25,6 +25,7 @@
 from .Common import assignParameterRequired, assignParameterWithDefault, \
                     defaultProblemType, defaultSolution, \
                     globalParameters, \
+                    isGfx12, \
                     tPrint, printExit, printWarning, \
                     validActivationFormats, validConvolutionConfig, \
                     validMFMA, validWMMA, validParameters, validWeightFormats, \
@@ -73,6 +74,11 @@ def reject(state, *args):
         SolutionIndex: %d (or SolutionName/ProblemType: %s)"%(solutionIndex, solutionNameMin))
   if state != None:
     state["Valid"] = False
+
+def disablePreloadKernelArguments(state):
+  state["PreloadKernelArguments"] = 0
+  if "DelayRemainingArguments" in state:
+    state["DelayRemainingArguments"] = False
 
 # print a labled variable
 def pvar(state, field):
@@ -2401,7 +2407,10 @@ class Solution(collections.abc.Mapping):
       isa = tuple(state["ISA"])
       state['MIInputPerThread'] = state["MatrixInstruction"][0] * state["MatrixInstruction"][2] * state["MatrixInstruction"][3] // state["WavefrontSize"]
       if (not globalParameters["AsmCaps"][isa]['HasMFMA']) and globalParameters["AsmCaps"][isa]['HasWMMA']:
-        state['MIInputPerThread'] = state["MatrixInstruction"][2]
+        # gfx12 WMMA uses the generic MI formula above. Older WMMA paths keep
+        # the historical full-K input packing.
+        if not isGfx12(isa):
+          state['MIInputPerThread'] = state["MatrixInstruction"][2]
 
     else:
       state["EnableMatrixInstruction"] = False
@@ -2615,7 +2624,13 @@ class Solution(collections.abc.Mapping):
 
     numBytes = state["ProblemType"]["DataType"].numBytes()
     numBytesPerLoad = int(state["GlobalLoadVectorWidth%c"%tc] * numBytes)
-    # DTLx2 and DTLx4 for gfx950
+    # x2 (b64/dwordx2) DirectToLds has no valid hardware instruction: the lds
+    # modifier is only legal on the x1 (dword) and x4 (dwordx4) buffer loads.
+    # Reject so the kernel falls back to the non-DTL load path.
+    if numBytesPerLoad == 8:
+      reject(state, "DirectToLds not supported for b64 (x2) buffer loads")
+      return False
+    # x4 (b128) DirectToLds only where supported; x1 (4 bytes) always ok
     if not globalParameters["ArchCaps"][isa]["HasDTLx4"]:
       if numBytesPerLoad != 4:
         reject(state, "DirectToLds can only be used with buffer loads requiring 1 register")
@@ -3037,18 +3052,29 @@ class Solution(collections.abc.Mapping):
 
       return True, ""
 
+    pkaRequested = state["PreloadKernelArguments"]
     pkaSupported, pkaMsg = supportsPreloadKernelArguments()
-    if state["PreloadKernelArguments"] == -1:
+    pkaForcedOff = False
+    if pkaRequested == -1:
       if pkaSupported:
         state["PreloadKernelArguments"] = 1
       else:
         state["PreloadKernelArguments"] = 0
-    elif state["PreloadKernelArguments"] == 1:
+    elif pkaRequested == 1:
       if not pkaSupported:
-        reject(state, pkaMsg)
+        if not globalParameters["AsmCaps"][isa]["KernargPreloading"]:
+          # The hardware cannot preload kernargs; fall back to the normal s_load
+          # path and disable the dependent delayed-argument schedule.
+          disablePreloadKernelArguments(state)
+          pkaForcedOff = True
+        else:
+          reject(state, pkaMsg)
 
     if "DelayRemainingArguments" in state:
       if state["DelayRemainingArguments"] and state["PreloadKernelArguments"] != 1:
+        if pkaForcedOff:
+          state["DelayRemainingArguments"] = False
+        else:
           reject(state, "Delayed kernel arguments only supported when preloading.")
     else:
       state["DelayRemainingArguments"] = False

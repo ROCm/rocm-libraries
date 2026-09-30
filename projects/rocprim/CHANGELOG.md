@@ -2,6 +2,67 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM 4.8.0 for ROCm 10.2.0
+
+### Added
+
+* gfx1250-strict support.
+
+### Optimizations
+
+* Updated existing `ordered_block_id` and `lookback_scan` optimizations to include gfx1250/gfx1250-strict.
+
+### Changed
+
+* Replaced the soon-to-be-deprecated `__hip_atomic_*` builtins with the equivalent `__scoped_atomic_*` builtins.
+
+### Resolved Issues
+
+* Incorrect miscategorization of RDNA4 and CDNA5 GPUs.
+
+## rocPRIM 4.7.0 for ROCm 10.1.0
+
+### Changed 
+
+* SPIR-V support is no longer experimental. `ROCPRIM_EXPERIMENTAL_SPIRV` no longer needs to be defined to build with SPIR-V support; to build with SPIR-V, set `--offload-arch` to `amdgcnspirv`.
+
+### Resolved Issues
+
+* Kernel tuner leaking defines and polluting header libraries.
+
+## rocPRIM 4.6.0 for ROCm 10.0.0
+
+### Added
+
+* Added a parallel `device_topk`, which finds the largest/smallest K elements from an input array of keys.
+* Added a parallel `device_segmented_topk`, which finds the largest/smallest K elements from segmented groups.
+* `device_topk` and `device_segmented_topk` are controlled by cmake flag `ROCPRIM_ENABLE_TOPK`. Passing `-DROCPRIM_ENABLE_TOPK=ON` to enable these features
+
+### Changed
+
+* Combined and simplified separate assertion templates using `std::is_floating_point`, `rocprim::half`, and `rocprim::bfloat16` to use `rocprim::is_floating_point`
+
+## rocPRIM 4.5.0 for ROCm 7.14
+
+### Added
+
+* Added `generate_resource_spec.cpp` to the test directory and built as a new target by CMake. It generates the resource spec file required by CTest when running tests in parallel.
+* gfx1250 support
+
+* Added a parallel `device_topk`, which finds the largest/smallest K elements from an input array of keys.
+
+### Optimizations
+
+* Improved performance for the fallback path of lookback scan where the flag can't be fit into the same atomic load/store.
+
+### Changed
+
+* Updated the documentation on how to run rocPrim tests on multiple GPUs in parallel.
+
+### Removed
+
+* Removed the `GenerateResourceSpec.cmake` script - it is replaced by the added `generate_resource_spec.cpp` code above.
+
 ## Since last release ROCm 7.12
 
 ### Added
@@ -13,6 +74,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 * Reduced build times for unit tests.
 * Memory usage in unit tests.
+
+### Changed
+
+* Changed the `bitonic_sort` algorithm in `warp_sort_shuffle` to use forward-only comparison for better performance. `block_sort_bitonic` is also changed to use forward-only comparison, to align the sorting with `warp_sort`.
 
 ### Resolved issues
 
@@ -93,6 +158,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added a new CMake option `-DUSE_SYSTEM_LIB` to allow tests to be built from `ROCm` libraries provided by the system.
 * Added `rocprim::apply` which applies a function to a `rocprim::tuple`.
 
+
+### Known issues
+
+* benchmark_device_adjacent_difference build hangs due to https://github.com/ROCm/llvm-project/issues/2616.  Workaround is to build with -O1.
 
 ### Changed
 

@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_geblttrs_npvt.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -42,6 +43,7 @@ rocblas_status rocsolver_geblttrs_npvt_impl(rocblas_handle handle,
                                             const rocblas_int ldc,
                                             U X,
                                             const rocblas_int ldx)
+try
 {
     ROCSOLVER_ENTER_TOP("geblttrs_npvt", "--nb", nb, "--nblocks", nblocks, "--nrhs", nrhs, "--lda",
                         lda, "--ldb", ldb, "--ldc", ldc, "--ldx", ldx);
@@ -93,6 +95,10 @@ rocblas_status rocsolver_geblttrs_npvt_impl(rocblas_handle handle,
     return rocsolver_geblttrs_npvt_template<false, false, T>(
         handle, nb, nblocks, nrhs, A, shiftA, inca, lda, strideA, B, shiftB, incb, ldb, strideB, C,
         shiftC, incc, ldc, strideC, X, shiftX, incx, ldx, strideX, batch_count, &work_helper);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

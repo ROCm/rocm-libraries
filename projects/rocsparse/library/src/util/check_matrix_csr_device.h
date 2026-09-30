@@ -161,21 +161,22 @@ namespace rocsparse
             // Check matrix type and fill mode is correct
             if(matrix_type != rocsparse_matrix_type_general)
             {
-                if(uplo == rocsparse_fill_mode_lower)
+                switch(uplo)
                 {
+                case rocsparse_fill_mode_lower:
                     if(row < col)
                     {
                         record_data_status(data_status, rocsparse_data_status_invalid_fill);
                         return;
                     }
-                }
-                else
-                {
+                    break;
+                case rocsparse_fill_mode_upper:
                     if(row > col)
                     {
                         record_data_status(data_status, rocsparse_data_status_invalid_fill);
                         return;
                     }
+                    break;
                 }
             }
 

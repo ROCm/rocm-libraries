@@ -287,6 +287,8 @@ namespace rocRoller
                         s << " default";
                     }
                 }
+                s << "WG Cluster size: " << x.workgroupClusterSizeX << "x"
+                  << x.workgroupClusterSizeY << "x" << x.workgroupClusterSizeZ << std::endl;
                 s << std::endl;
                 s << x.types;
                 return s;

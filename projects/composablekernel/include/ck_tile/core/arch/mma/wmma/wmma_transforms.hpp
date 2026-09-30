@@ -3,26 +3,15 @@
 
 #pragma once
 
-#include "ck_tile/core/config.hpp"
 #include "ck_tile/core/arch/arch.hpp"
+#include "ck_tile/core/arch/mma/mma_op_family.hpp"
 #include "ck_tile/core/arch/mma/mma_transforms.hpp"
+#include "ck_tile/core/config.hpp"
+
+#include <type_traits>
+#include <utility>
 
 namespace ck_tile::core::arch::mma {
-
-/**
- * @struct DuplicateTransform
- * @brief Transform to duplicate low register elements to high register elements
- */
-struct DuplicateTransform
-{
-    template <typename VecType>
-    CK_TILE_DEVICE static decltype(auto) exec(VecType&& v)
-    {
-        // TODO: Implement duplication logic to broadcast low
-        // register elements to high elements [0 - (N/2 -1)] -> [N/2 - (N-1)]
-        return std::forward<VecType>(v);
-    }
-};
 
 /**
  * @struct PadTransform
@@ -59,8 +48,8 @@ struct UnpadTransform
  */
 struct MmaDefaultTransformsGfx11
 {
-    using ATransform = DuplicateTransform;
-    using BTransform = DuplicateTransform;
+    using ATransform = PassThroughTransform;
+    using BTransform = PassThroughTransform;
     using CTransform = PadTransform;
     using DTransform = UnpadTransform;
 };

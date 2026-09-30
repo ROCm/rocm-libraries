@@ -37,6 +37,7 @@
 #include <rocprim/config.hpp>
 #include <rocprim/types.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <stdint.h>
 #include <string>
@@ -72,7 +73,7 @@ void rank_kernel(const T* keys_input, unsigned int* ranks_output)
 
         while(begin_bit < end_bit)
         {
-            const unsigned pass_bits = min(RadixBits, end_bit - begin_bit);
+            const unsigned pass_bits = std::min(RadixBits, end_bit - begin_bit);
             if constexpr(Descending)
             {
                 rank_type().rank_keys_desc(keys, ranks, storage, begin_bit, pass_bits);

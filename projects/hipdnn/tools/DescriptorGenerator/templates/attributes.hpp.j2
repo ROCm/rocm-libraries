@@ -16,6 +16,7 @@
 {% if op.has_mode_fields or op.has_enum_fields %}
 #include <hipdnn_frontend/Types.hpp>
 {% endif %}
+#include <cstdint>
 #include <memory>
 {% set ns = namespace(has_optional=false) %}
 {% for df in op.data_fields %}
@@ -79,6 +80,12 @@ public:
 {% else %}
     float {{ df.name }}{% if df.default_value %} = {{ df.default_value }}{% else %} = 0.0f{% endif %}; ///< {{ df.name | replace('_', ' ') | title }}
 {% endif %}
+{% elif df.type == "scalar_int32" %}
+{% if df.is_optional_scalar %}
+    std::optional<int32_t> {{ df.name }} = std::nullopt; ///< {{ df.name | replace('_', ' ') | title }}
+{% else %}
+    int32_t {{ df.name }}{% if df.default_value %} = {{ df.default_value }}{% else %} = 0{% endif %}; ///< {{ df.name | replace('_', ' ') | title }}
+{% endif %}
 {% elif df.type == "scalar_int64" %}
 {% if df.is_optional_scalar %}
     std::optional<int64_t> {{ df.name }} = std::nullopt; ///< {{ df.name | replace('_', ' ') | title }}
@@ -96,6 +103,7 @@ public:
     // NOLINTEND(readability-identifier-naming)
 
 {% endif %}
+    // NOLINTBEGIN(readability-identifier-naming)
 {% for tensor in op.frontend.inputs %}
     /// @brief Get the {{ tensor.name }} input tensor
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -141,7 +149,9 @@ public:
         return setOutput(OutputNames::{{ tensor.effective_enum_name }}, value);
     }
 {% endfor %}
+    // NOLINTEND(readability-identifier-naming)
 {% for df in op.data_fields %}
+{% if not df.frontend_uses_member_access %}
 {% if df.is_vector %}
 
     /**
@@ -228,6 +238,24 @@ public:
     {
         return {{ df.name }};
     }
+{% elif df.type == "scalar_int32" %}
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    {{ op.frontend.attributes_class }}& {{ df.frontend_setter_name }}(int32_t value)
+    {
+        {{ df.name }} = value;
+        return *this;
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+{% if df.is_optional_scalar %}
+    std::optional<int32_t> {{ df.frontend_getter | replace('()', '') }}() const
+{% else %}
+    int32_t {{ df.frontend_getter | replace('()', '') }}() const
+{% endif %}
+    {
+        return {{ df.name }};
+    }
 {% elif df.type == "scalar_int64" %}
 
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -265,7 +293,44 @@ public:
         return {{ df.name }};
     }
 {% endif %}
+{% endif %}
 {% endfor %}
+{% if op.data_fields %}
+
+    /**
+     * @brief Custom equality hook for {{ op.name }}-specific attributes
+     *
+     * Compares the operation's scalar/enum/vector configuration — the
+     * fields that define its mathematical semantics rather than tensor
+     * layout, so logical and strict equality coincide here.
+     */
+    bool logicallyEqualsImpl(const {{ op.frontend.attributes_class }}& other) const
+    {
+        return {% for df in op.data_fields %}{{ df.name }} == other.{{ df.name }}{% if not loop.last %}
+               && {% endif %}{% endfor %};
+    }
+
+    /// @brief Strict equality delegates to logical equality; no layout-only
+    ///        fields exist in this class to distinguish the two checks.
+    bool strictEqualsImpl(const {{ op.frontend.attributes_class }}& other) const
+    {
+        return logicallyEqualsImpl(other);
+    }
+{% else %}
+
+    // No extra fields beyond tensors: defer entirely to the base class's
+    // tensor/metadata comparison.
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    bool logicallyEqualsImpl([[maybe_unused]] const {{ op.frontend.attributes_class }}& other) const
+    {
+        return true;
+    }
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    bool strictEqualsImpl([[maybe_unused]] const {{ op.frontend.attributes_class }}& other) const
+    {
+        return true;
+    }
+{% endif %}
 };
 {% if op.frontend.compatibility_typedef %}
 typedef {{ op.frontend.attributes_class }} {{ op.frontend.compatibility_typedef }}; ///< @brief Compatibility alias

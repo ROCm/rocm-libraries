@@ -34,6 +34,7 @@
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
+#include "test_utils_types.hpp"
 
 // Required rocprim headers
 #include <rocprim/block/block_load.hpp>
@@ -1282,57 +1283,33 @@ void testLargeIndicesInclusiveScan()
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScan)
 {
-#if defined(__SANITIZE_ADDRESS__)
-    GTEST_SKIP() << "Skip LargeIndices test under ASan";
-#endif
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
 
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
     testLargeIndicesInclusiveScan();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanWithGraphs)
 {
-#if defined(__SANITIZE_ADDRESS__)
-    GTEST_SKIP() << "Skip LargeIndices test under ASan";
-#endif
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
 
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
     testLargeIndicesInclusiveScan<true>();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanWithInitialValue)
 {
-#if defined(__SANITIZE_ADDRESS__)
-    GTEST_SKIP() << "Skip LargeIndices test under ASan";
-#endif
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
 
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
     testLargeIndicesInclusiveScan<false, true>();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanWithInitialValueAndGraphs)
 {
-#if defined(__SANITIZE_ADDRESS__)
-    GTEST_SKIP() << "Skip LargeIndices test under ASan";
-#endif
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
 
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
     testLargeIndicesInclusiveScan<true, true>();
 }
 
@@ -1418,29 +1395,17 @@ void testLargeIndicesExclusiveScan()
 
 TEST(RocprimDeviceScanTests, LargeIndicesExclusiveScan)
 {
-#if defined(__SANITIZE_ADDRESS__)
-    GTEST_SKIP() << "Skip LargeIndices test under ASan";
-#endif
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
 
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
     testLargeIndicesExclusiveScan();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesExclusiveScanWithGraphs)
 {
-#if defined(__SANITIZE_ADDRESS__)
-    GTEST_SKIP() << "Skip LargeIndices test under ASan";
-#endif
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
 
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
     testLargeIndicesExclusiveScan<true>();
 }
 
@@ -1609,7 +1574,32 @@ template<typename Params>
 class RocprimDeviceScanFutureTests : public RocprimDeviceScanTests<Params>
 {};
 
-TYPED_TEST_SUITE(RocprimDeviceScanFutureTests, RocprimDeviceScanFutureTestsParams);
+struct RocprimDeviceScanFutureTestsNameGenerator
+{
+    template<class T>
+    static std::string type_tag_or_array()
+    {
+        if constexpr(std::is_same_v<T, test_utils::custom_test_array_type<long long, 5>>)
+            return "ArrayInt64x5";
+        else
+            return type_tag<T>();
+    }
+
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = type_tag_or_array<typename Params::input_type>() + "_"
+                        + type_tag_or_array<typename Params::output_type>();
+        if constexpr(Params::use_identity_iterator) n += "_Ident";
+        if constexpr(Params::use_graphs) n += "_Graphs";
+        if constexpr(Params::deterministic) n += "_Det";
+        return n;
+    }
+};
+
+TYPED_TEST_SUITE(RocprimDeviceScanFutureTests,
+                 RocprimDeviceScanFutureTestsParams,
+                 RocprimDeviceScanFutureTestsNameGenerator);
 
 TYPED_TEST(RocprimDeviceScanFutureTests, ExclusiveScan)
 {

@@ -15,6 +15,13 @@ struct GemmMicroscalePipelineAgBgCrPolicy : public UniversalGemmPipelineAgBgCrPo
     using Base::I0;
     using Base::I1;
     using Base::I2;
+    template <typename Problem>
+    using ALdsDataType_ = typename Problem::ADataType;
+
+    template <typename Problem>
+    using BLdsDataType_ = std::conditional_t<Problem::BCastPolicy == CastPolicy::BeforeLDSWrite,
+                                             typename Problem::BComputeDataType,
+                                             typename Problem::BDataType>;
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetVectorSizeBQ()
@@ -94,8 +101,8 @@ struct GemmMicroscalePipelineAgBgCrPolicy : public UniversalGemmPipelineAgBgCrPo
             constexpr index_t KPerBlockBQ = KPerBlock / Problem::BQuantGroupSize::kK;
 
             using WarpTile = typename Problem::BlockGemmShape::WarpTile;
-            using WarpGemm = WarpGemmDispatcher<typename Problem::ComputeDataType,
-                                                typename Problem::ComputeDataType,
+            using WarpGemm = WarpGemmDispatcher<typename Problem::AComputeDataType,
+                                                typename Problem::BComputeDataType,
                                                 typename Problem::CDataType,
                                                 WarpTile::at(I0),
                                                 WarpTile::at(I1),
@@ -124,6 +131,12 @@ struct GemmMicroscalePipelineAgBgCrPolicy : public UniversalGemmPipelineAgBgCrPo
                 Problem::FixedVectorSize ? Problem::VectorSizeB : GetVectorSizeB<Problem>();
             constexpr index_t NumWaveGroups = Problem::NumWaveGroups;
 
+            // Guard against a B tile access pattern these encodings never mirrored.
+            static_assert(getBTileAccessPattern() == tile_distribution_pattern::warp_raked ||
+                              getBTileAccessPattern() == tile_distribution_pattern::thread_raked,
+                          "BQuant tile distribution only mirrors the warp_raked and thread_raked "
+                          "B tile access patterns!");
+
             constexpr index_t warp_size  = get_warp_size();
             constexpr index_t num_warps  = BlockSize / get_warp_size();
             constexpr index_t LargestVec = (KPerBlock * NPerBlock) / (num_warps * warp_size);
@@ -142,17 +155,39 @@ struct GemmMicroscalePipelineAgBgCrPolicy : public UniversalGemmPipelineAgBgCrPo
                     constexpr index_t K3 = KScale;
                     constexpr index_t K2 = 1;
 
-                    constexpr index_t N0 = num_warps / NumWaveGroups;
-                    constexpr index_t N1 = warp_size / K0;
-                    constexpr index_t N2 = NPerBlock / (N0 * N1);
+                    // B is ColumnMajor.
+                    // warp_raked defines as num_warps and thread_raked as num_warps /
+                    // NumWaveGroups. Asserting a single wave group pins the two to the same value,
+                    // and costs nothing today because TileGemmQuantTraits hardcodes NumWaveGroups
+                    // to 1.
+                    static_assert(NumWaveGroups == 1,
+                                  "BQuant tile distribution assumes a single wave group!");
+                    constexpr index_t NWarp = num_warps;
+                    constexpr index_t NLane = warp_size / K0;
+                    constexpr index_t NIter = NPerBlock / (NWarp * NLane);
 
-                    return make_static_tile_distribution(
-                        tile_distribution_encoding<sequence<K1>,
-                                                   tuple<sequence<N0, N1, N2>, sequence<K3, K2>>,
-                                                   tuple<sequence<1>, sequence<1, 2, 0>>,
-                                                   tuple<sequence<0>, sequence<1, 0, 0>>,
-                                                   sequence<1, 2>,
-                                                   sequence<2, 1>>{});
+                    if constexpr(getBTileAccessPattern() == tile_distribution_pattern::warp_raked)
+                    {
+                        return make_static_tile_distribution(
+                            tile_distribution_encoding<
+                                sequence<K1>,
+                                tuple<sequence<NWarp, NIter, NLane>, sequence<K3, K2>>,
+                                tuple<sequence<1>, sequence<1, 2, 0>>,
+                                tuple<sequence<0>, sequence<2, 0, 0>>,
+                                sequence<1, 2>,
+                                sequence<1, 1>>{});
+                    }
+                    else
+                    {
+                        return make_static_tile_distribution(
+                            tile_distribution_encoding<
+                                sequence<K1>,
+                                tuple<sequence<NWarp, NLane, NIter>, sequence<K3, K2>>,
+                                tuple<sequence<1>, sequence<1, 2, 0>>,
+                                tuple<sequence<0>, sequence<1, 0, 0>>,
+                                sequence<1, 2>,
+                                sequence<2, 1>>{});
+                    }
                 }
                 else
                 {
@@ -201,20 +236,39 @@ struct GemmMicroscalePipelineAgBgCrPolicy : public UniversalGemmPipelineAgBgCrPo
                     constexpr index_t KRepeatInWave = Problem::BQuantGroupSize::kK / b_vec;
                     constexpr index_t K1            = KScale;
 
-                    constexpr index_t N0 = num_warps / NumWaveGroups;
-                    constexpr index_t N1 = warp_size / (KRepeatInWave * K1);
+                    // B is ColumnMajor.
+                    // warp_raked defines as num_warps and thread_raked as num_warps /
+                    // NumWaveGroups. Asserting a single wave group pins the two to the same value,
+                    // and costs nothing today because TileGemmQuantTraits hardcodes NumWaveGroups
+                    // to 1.
+                    static_assert(NumWaveGroups == 1,
+                                  "BQuant tile distribution assumes a single wave group!");
+                    constexpr index_t NWarp = num_warps;
+                    constexpr index_t NLane = warp_size / (KRepeatInWave * K1);
+                    constexpr index_t NIter = NPerBlock / (NWarp * NLane);
 
-                    // Number of contiguous elements in N dimension when reading B matrix
-                    // becomes the vector size of BQ
-                    constexpr index_t N2 = NPerBlock / (BlockSize / (KPerBlock / b_vec));
-
-                    return make_static_tile_distribution(
-                        tile_distribution_encoding<sequence<1, 1, KRepeatInWave>,
-                                                   tuple<sequence<1, K1, 1>, sequence<N0, N1, N2>>,
-                                                   tuple<sequence<1, 0, 2>, sequence<2, 0, 1, 0>>,
-                                                   tuple<sequence<0, 0, 0>, sequence<1, 1, 1, 2>>,
-                                                   sequence<1, 2>,
-                                                   sequence<2, 2>>{});
+                    if constexpr(getBTileAccessPattern() == tile_distribution_pattern::warp_raked)
+                    {
+                        return make_static_tile_distribution(
+                            tile_distribution_encoding<
+                                sequence<1, 1, KRepeatInWave>,
+                                tuple<sequence<1, K1, 1>, sequence<NWarp, NIter, NLane>>,
+                                tuple<sequence<1, 0, 2>, sequence<2, 0, 1, 0>>,
+                                tuple<sequence<0, 0, 0>, sequence<2, 1, 1, 2>>,
+                                sequence<1, 2>,
+                                sequence<2, 1>>{});
+                    }
+                    else
+                    {
+                        return make_static_tile_distribution(
+                            tile_distribution_encoding<
+                                sequence<1, 1, KRepeatInWave>,
+                                tuple<sequence<1, K1, 1>, sequence<NWarp, NLane, NIter>>,
+                                tuple<sequence<1, 0, 2>, sequence<2, 0, 1, 0>>,
+                                tuple<sequence<0, 0, 0>, sequence<1, 1, 1, 2>>,
+                                sequence<1, 2>,
+                                sequence<2, 2>>{});
+                    }
                 }
             }
         }
@@ -237,17 +291,20 @@ struct GemmMicroscalePipelineAgBgCrPolicy : public UniversalGemmPipelineAgBgCrPo
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetBlockGemm()
     {
-        using BlockWarps      = typename Problem::BlockGemmShape::BlockWarps;
-        using WarpTile        = typename Problem::BlockGemmShape::WarpTile;
-        using ComputeDataType = typename Problem::ComputeDataType;
-        using LDSADataType    = typename Problem::ADataType;
-        using LDSBDataType = std::conditional_t<Problem::BCastPolicy == CastPolicy::BeforeLDSWrite,
-                                                ComputeDataType,
-                                                typename Problem::BDataType>;
+        using BlockWarps       = typename Problem::BlockGemmShape::BlockWarps;
+        using WarpTile         = typename Problem::BlockGemmShape::WarpTile;
+        using AComputeDataType = typename Problem::AComputeDataType;
+        using BComputeDataType = typename Problem::BComputeDataType;
+#if defined(__gfx125__)
+        constexpr auto wg_attr_num_accessA = WGAttrNumAccessEnum::Default;
+        constexpr auto wg_attr_num_accessB = WGAttrNumAccessEnum::Default;
+#else
+
+        using LDSADataType = ALdsDataType_<Problem>;
+        using LDSBDataType = BLdsDataType_<Problem>;
 
         static_assert(Problem::BQuantGroupSize::kK % WarpTile::at(I2) == 0,
                       "KPerWarpGemm must be a multiple of QuantGroupSize!");
-
         constexpr auto thread_elements =
             number<WarpTile::at(I1) * WarpTile::at(I2) / get_warp_size()>{};
 
@@ -256,7 +313,7 @@ struct GemmMicroscalePipelineAgBgCrPolicy : public UniversalGemmPipelineAgBgCrPo
         constexpr auto is_any_load_tr = is_a_load_tr_v || is_b_load_tr_v;
 
         constexpr auto wg_attr_num_access_compute =
-            GetAttrNumAccess<ComputeDataType>(is_any_load_tr, thread_elements);
+            GetAttrNumAccess<AComputeDataType>(is_any_load_tr, thread_elements);
         constexpr auto wg_attr_num_accessA =
             std::is_same_v<LDSADataType, LDSBDataType>
                 ? wg_attr_num_access_compute
@@ -265,19 +322,23 @@ struct GemmMicroscalePipelineAgBgCrPolicy : public UniversalGemmPipelineAgBgCrPo
             std::is_same_v<LDSADataType, LDSBDataType>
                 ? wg_attr_num_access_compute
                 : GetAttrNumAccess<LDSBDataType>(is_b_load_tr_v, thread_elements);
-
-        using WarpGemm = WarpGemmDispatcher<ComputeDataType,
-                                            ComputeDataType,
-                                            typename Problem::CDataType,
-                                            WarpTile::at(I0),
-                                            WarpTile::at(I1),
-                                            WarpTile::at(I2),
-                                            Problem::TransposeC,
-                                            false,
-                                            false,
-                                            wg_attr_num_accessA,
-                                            wg_attr_num_accessB>;
-        static_assert(is_any_of<ComputeDataType, fp8_t, bf8_t, bf16_t, fp16_t>::value);
+#endif
+        constexpr bool use_packed_num_access = (wg_attr_num_accessA != wg_attr_num_accessB);
+        using WarpGemm                       = WarpGemmDispatcher<AComputeDataType,
+                                                                  BComputeDataType,
+                                                                  typename Problem::CDataType,
+                                                                  WarpTile::at(I0),
+                                                                  WarpTile::at(I1),
+                                                                  WarpTile::at(I2),
+                                                                  Problem::TransposeC,
+                                                                  false,
+                                                                  false,
+                                                                  wg_attr_num_accessA,
+                                                                  wg_attr_num_accessB,
+                                                                  false,
+                                                                  use_packed_num_access>;
+        static_assert(is_any_of<AComputeDataType, fp8_t, bf8_t, bf16_t, fp16_t>::value &&
+                      is_any_of<BComputeDataType, fp8_t, bf8_t, bf16_t, fp16_t>::value);
         static_assert(std::is_same_v<typename Problem::CDataType, float>);
 
         using BlockGemmPolicy = BlockGemmASmemBSmemCRegV1CustomPolicy<

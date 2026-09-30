@@ -3,11 +3,11 @@
 A C++20 constexpr API for configuring and distributing
 [CK Tile](../include/ck_tile/) GPU kernels across multiple architectures.
 
-> **Status**: Early development. The current code establishes the directory
-> structure, build integration, and CI pipeline. A single unit test verifies
-> that the build and test infrastructure works end-to-end in Jenkins.
-> The schema types, device bridge, and kernel tests described below are
-> under active development.
+> **Status**: Early development. Foundation types (DataType, Layout, Args,
+> operators, FixedString, PhysicalTensor, ResolvedTensor), schema engine
+> (Signature, resolve(), ArchProperties), and spec factories (GemmSpec,
+> GemmAlgorithm, makeSpec(), validate) are in place. The device bridge
+> is under active development.
 
 ## Why rocm_ck exists
 
@@ -92,6 +92,7 @@ rocm_ck/
 └── tests/
     ├── CMakeLists.txt    # Test tiers: ROCM_CK_SMOKE, ROCM_CK_KERNEL
     ├── unit/             # Fast host-only tests (< 1s, no GPU)
+    ├── compile_fail/     # Static assertion tests — verify invalid configs fail at compile time
     └── kernel/           # (planned) GPU kernel tests
 ```
 

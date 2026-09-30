@@ -70,6 +70,7 @@ Architectures:
       v_pk_fma_f16: 0
     ISAVersion:
       ArchString: gfx950
+      AsicRevisionId: -1
       Sramecc: true
       Xnack: false
     InstructionInfos:

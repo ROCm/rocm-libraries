@@ -19,8 +19,8 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 # ########################################################################
 
-# ROCm software requires Ubuntu 16.04 or Fedora 24, which has cmake 3.5
-cmake_minimum_required( VERSION 3.5 )
+# CMake 3.17 is required by the CUDA backend's FindCUDAToolkit dependency.
+cmake_minimum_required( VERSION 3.17 )
 
 function( get_lapack lapack_lib lapack_inc )
   if(EXISTS  "${BUILD_DIR}/deps/deps-install/lib/liblapack64.a")
@@ -281,10 +281,10 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     endif()
   else() # WIN32
     file(TO_CMAKE_PATH "C:/Program\ Files/AMD/AOCL-Windows" AOCL_ROOT)
-    if (LINK_BLIS AND EXISTS "C:/Program\ Files/AMD/AOCL-Windows/amd-blis/lib/ILP64/AOCL-LibBlis-Win-MT.lib" AND EXISTS "C:/Program\ Files/AMD/AOCL-Windows/amd-libflame/lib/ILP64/AOCL-LibFlame-Win-MT.lib" AND EXISTS "C:/Program\ Files/AMD/AOCL-Windows/amd-utils/lib/libaoclutils_static.lib" )
-      set( BLAS_LIBRARY "-l\"C:/Program\ Files/AMD/AOCL-Windows/amd-blis/lib/ILP64/AOCL-LibBlis-Win-MT\"" "-l\"C:/Program\ Files/AMD/AOCL-Windows/amd-libflame/lib/ILP64/AOCL-LibFlame-Win-MT\"" "-l\"C:/Program\ Files/AMD/AOCL-Windows/amd-utils/lib/libaoclutils_static\"" )
-      set( BLIS_INCLUDE_DIR "C:/Program\ Files/AMD/AOCL-Windows/amd-blis/include/ILP64" )
-      set( FLAME_INCLUDE_DIR "C:/Program\ Files/AMD/AOCL-Windows/amd-libflame/include/ILP64" )
+    if (LINK_BLIS AND EXISTS "${AOCL_ROOT}/amd-blis/lib/ILP64/AOCL-LibBlis-Win-MT.lib" AND EXISTS "${AOCL_ROOT}/amd-libflame/lib/ILP64/AOCL-LibFlame-Win-MT.lib" AND EXISTS "${AOCL_ROOT}/amd-utils/lib/libaoclutils.lib" )
+      set( BLAS_LIBRARY "-l\"${AOCL_ROOT}/amd-blis/lib/ILP64/AOCL-LibBlis-Win-MT\"" "-l\"${AOCL_ROOT}/amd-libflame/lib/ILP64/AOCL-LibFlame-Win-MT\"" "-l\"${AOCL_ROOT}/amd-utils/lib/libaoclutils\"" )
+      set( BLIS_INCLUDE_DIR "${AOCL_ROOT}/amd-blis/include/ILP64" )
+      set( FLAME_INCLUDE_DIR "${AOCL_ROOT}/amd-libflame/include/ILP64" )
       set( BLIS_DEFINES BLIS_ENABLE_NO_UNDERSCORE_API BLIS_ENABLE_CBLAS )
     else()
       # Prefer ILP64 via super-project FindBLAS (TheRock -> OpenBLAS64). If unavailable, fall back to LP64 OPENBLAS_DIR layout.

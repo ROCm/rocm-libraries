@@ -108,6 +108,14 @@ namespace rocRoller
             return "E8M0";
         case DataType::E8M0x4:
             return "E8M0x4";
+        case DataType::E5M3:
+            return "E5M3";
+        case DataType::E5M3x4:
+            return "E5M3x4";
+        case DataType::E4M3:
+            return "E4M3";
+        case DataType::E4M3x4:
+            return "E4M3x4";
         case DataType::None:
             return "None";
         case DataType::Count:;
@@ -187,6 +195,14 @@ namespace rocRoller
             return "E8M0";
         case DataType::E8M0x4:
             return "4xE8M0";
+        case DataType::E5M3:
+            return "E5M3";
+        case DataType::E5M3x4:
+            return "4xE5M3";
+        case DataType::E4M3:
+            return "E4M3";
+        case DataType::E4M3x4:
+            return "4xE4M3";
         case DataType::None:
             return "NA";
 
@@ -221,6 +237,8 @@ namespace rocRoller
             return "WAVE_FROM_GLOBAL";
         case MemoryType::WAVE_LDS_FROM_GLOBAL:
             return "WAVE_LDS_FROM_GLOBAL";
+        case MemoryType::WAVE_TDMToLDS:
+            return "WAVE_TDMToLDS";
         case MemoryType::Literal:
             return "Literal";
         case MemoryType::None:
@@ -328,6 +346,8 @@ namespace rocRoller
             return "PointerGlobal";
         case PointerType::Buffer:
             return "Buffer";
+        case PointerType::TDM:
+            return "TDM";
 
         case PointerType::Count:;
         }
@@ -377,6 +397,8 @@ namespace rocRoller
             return "PG";
         case PointerType::Buffer:
             return "PB";
+        case PointerType::TDM:
+            return "TDM";
 
         case PointerType::Count:;
         }
@@ -401,13 +423,14 @@ namespace rocRoller
             return 8;
         case PointerType::Buffer:
             return 16;
+        case PointerType::TDM:
+            return 48;
 
         default:
         case PointerType::Count:
             break;
         }
-        throw std::runtime_error(
-            concatenate("Invalid pointer type: ", static_cast<int>(pointerType)));
+        Throw<FatalError>(fmt::format("Invalid pointer type: {}", static_cast<int>(pointerType)));
     }
 
     VariableType VariableType::Promote(VariableType lhs, VariableType rhs)
@@ -577,9 +600,16 @@ namespace rocRoller
         registerTypeInfo<PointerLocal>();
         registerTypeInfo<PointerGlobal>();
         registerTypeInfo<Buffer>();
+        registerTypeInfo<TDM>();
 
         registerTypeInfo<E8M0>();
         registerTypeInfo<E8M0x4>();
+
+        registerTypeInfo<E5M3>();
+        registerTypeInfo<E5M3x4>();
+
+        registerTypeInfo<E4M3>();
+        registerTypeInfo<E4M3x4>();
     }
 
     void DataTypeInfo::Data::addInfoObject(DataTypeInfo const& info)

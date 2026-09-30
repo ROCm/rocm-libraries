@@ -177,6 +177,9 @@ namespace rocRoller
         void addNop(int count);
         void setNopMin(int count);
 
+        void                   setModeRegister(uint8_t mode);
+        std::optional<uint8_t> getModeRegister() const;
+
         std::vector<std::string> const& comments() const;
 
         constexpr int nopCount() const;
@@ -288,6 +291,8 @@ namespace rocRoller
 
         Scheduling::LockOperation m_lockOp     = Scheduling::LockOperation::None;
         Scheduling::Dependency    m_dependency = Scheduling::Dependency::None;
+
+        std::optional<uint8_t> m_MODESetValue;
 
         std::array<Register::ValuePtr, MaxDstRegisters> m_inoutDsts;
         std::array<Register::ValuePtr, MaxDstRegisters> m_dst;

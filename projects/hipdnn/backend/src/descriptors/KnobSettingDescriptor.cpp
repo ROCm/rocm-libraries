@@ -135,7 +135,7 @@ std::string KnobSettingDescriptor::toString() const
 {
     std::string str = "KnobSettingDescriptor: {knobId=" + _knobId;
     str += ", valueType=" + std::to_string(static_cast<int>(_value.type));
-    str += "}";
+    str += '}';
     return str;
 }
 

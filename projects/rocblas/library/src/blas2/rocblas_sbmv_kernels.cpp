@@ -20,7 +20,6 @@
  *
  * ************************************************************************ */
 
-#include "asan_helpers.hpp"
 #include "check_numerics_vector.hpp"
 #include "device_macros.hpp"
 #include "handle.hpp"
@@ -180,20 +179,14 @@ rocblas_sbmv_kernel(rocblas_int    n,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         auto beta  = load_scalar(beta_device_host, batch, stride_beta);
         if(!alpha && beta == 1)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         const auto* A = cond_load_ptr_batch(alpha, Aa, batch, shifta, stride_A);
@@ -202,10 +195,7 @@ rocblas_sbmv_kernel(rocblas_int    n,
         auto* y = load_ptr_batch(ya, batch, shifty, stride_y);
 
         rocblas_sbmv_kernel_calc<UPPER, DIM_X, DIM_Y>(n, k, alpha, A, lda, x, incx, beta, y, incy);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename T, typename TScal, typename TConstPtr, typename TPtr>
@@ -244,7 +234,7 @@ rocblas_status rocblas_internal_sbmv_launcher(rocblas_handle handle,
     int batches = handle->getBatchGridDim((int)batch_count);
 
     static constexpr int sbmv_DIM_X = 64;
-    static constexpr int sbmv_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 4, 16>;
+    static constexpr int sbmv_DIM_Y = 16;
     rocblas_int          blocks     = (n - 1) / (sbmv_DIM_X) + 1;
     dim3                 grid(blocks, 1, batches);
     dim3                 threads(sbmv_DIM_X, sbmv_DIM_Y);

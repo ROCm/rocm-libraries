@@ -8,6 +8,10 @@
  * functions for mapping matrix fragment coordinates to register coordinates (lane, vector item) and
  * vice versa. This is only meant for tile distributions encodings that describe register mappings.
  *
+ * Note that in case of compression or packed data types, the matrix minor dimension is effectively
+ * shrunk by that factor. This is because tile distribution encodings always describe compressed /
+ * packed *Datatype* elements, not logical / mathematical uncompressed *value* elements.
+ *
  * A repeat dimension is allowed in which case multiple (lane, vector item) pairs are mapped to the
  * same matrix coordinates. The inverse map takes a "repeat index" to distinguish between them.
  *
@@ -17,9 +21,16 @@
 
 #pragma once
 
-#include <stdio.h>
-#include "ck_tile/core/tensor/tensor_descriptor.hpp"
+#include "ck_tile/core/config.hpp"
+#include "ck_tile/core/container/array.hpp"
+#include "ck_tile/core/container/container_helper.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
+#include "ck_tile/core/numeric/integral_constant.hpp"
+#include "ck_tile/core/numeric/math.hpp"
 #include "ck_tile/core/tensor/tile_distribution.hpp"
+
+#include <array>
+#include <stdio.h>
 
 namespace ck_tile::core::arch::mma {
 

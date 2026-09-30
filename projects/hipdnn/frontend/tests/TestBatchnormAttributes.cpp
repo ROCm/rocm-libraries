@@ -388,3 +388,154 @@ TEST(TestBatchnormAttributes, SimplifiedSetPreviousRunningStatsWithMove)
     EXPECT_NE(batchnormAttributes.get_prev_running_variance(), nullptr);
     EXPECT_NE(batchnormAttributes.get_momentum(), nullptr);
 }
+
+TEST(TestBatchnormAttributes, LogicalAndStrictEquality)
+{
+    hipdnn_frontend::graph::BatchnormAttributes attr1;
+    attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    x1->set_uid(1)
+        .set_name("X")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    auto scale1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    scale1->set_uid(2)
+        .set_name("Scale")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    auto bias1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    bias1->set_uid(3)
+        .set_name("Bias")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    // Set initial core tensors for attr1
+    attr1.set_x(x1).set_scale(scale1).set_bias(bias1);
+
+    hipdnn_frontend::graph::BatchnormAttributes attr2;
+    attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    x2->set_uid(1)
+        .set_name("X")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    auto scale2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    scale2->set_uid(2)
+        .set_name("Scale")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    auto bias2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    bias2->set_uid(3)
+        .set_name("Bias")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    // Set initial core tensors for attr2
+    attr2.set_x(x2).set_scale(scale2).set_bias(bias2);
+
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+
+    attr2.set_compute_data_type(hipdnn_frontend::DataType::HALF);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT); // Revert
+
+    auto momentum1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    momentum1->set_uid(7)
+        .set_name("Momentum")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+    attr1.set_momentum(momentum1);
+
+    // Fails because attr1 specifies an optional tensor that attr2 lacks entirely
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+
+    auto momentum2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    momentum2->set_uid(7)
+        .set_name("Momentum")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+    attr2.set_momentum(momentum2);
+
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+
+    // Test Custom Peer Stats Vector Matrix Structural Differences
+    auto peerTensor1Attr1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    peerTensor1Attr1->set_uid(12)
+        .set_name("Peer1")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    auto peerTensor2Attr1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    peerTensor2Attr1->set_uid(13)
+        .set_name("Peer2")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    auto peerTensor1Attr2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    peerTensor1Attr2->set_uid(12)
+        .set_name("Peer1")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    auto peerTensor2Attr2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    peerTensor2Attr2->set_uid(13)
+        .set_name("Peer2")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    attr1.set_peer_stats({peerTensor1Attr1, peerTensor2Attr1});
+    attr2.set_peer_stats({peerTensor1Attr2}); // Sizing mismatch
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+
+    attr2.set_peer_stats({peerTensor1Attr2, peerTensor2Attr2});
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+
+    EXPECT_TRUE(attr1 == attr2);
+    EXPECT_FALSE(attr1 != attr2);
+
+    auto logicalMatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    logicalMatchX
+        ->set_uid(9999) // Divergent Tracking ID
+        .set_name("DIVERGENT_TRAINING_X") // Divergent Descriptor Name
+        .set_data_type(hipdnn_frontend::DataType::FLOAT) // Layout stays identical
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+    attr2.set_x(logicalMatchX);
+
+    // Expecting: Strict evaluation breaks, but functional graph identity passes
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+    attr2.set_x(x2); // Revert to matching state
+
+    auto logicalMatchPeer2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    logicalMatchPeer2
+        ->set_uid(8888) // Divergent Tracking ID
+        .set_name("PEER2_ALT_NAME") // Divergent Descriptor Name
+        .set_data_type(hipdnn_frontend::DataType::FLOAT) // Layout stays identical
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    attr2.set_peer_stats({peerTensor1Attr2, logicalMatchPeer2});
+
+    // Expecting: peer_stats custom strictEqualsImpl fails, but logicallyEqualsImpl passes
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+}

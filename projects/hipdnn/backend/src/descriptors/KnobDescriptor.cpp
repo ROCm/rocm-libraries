@@ -846,7 +846,7 @@ std::string KnobDescriptor::toString() const
         {
             str += "max=" + std::to_string(*_maxValueDouble);
         }
-        str += "}";
+        str += '}';
     }
     if(!_validValuesString.empty() || _stringMaxLength.has_value())
     {
@@ -855,10 +855,10 @@ std::string KnobDescriptor::toString() const
         {
             str += " maxLen=" + std::to_string(*_stringMaxLength);
         }
-        str += "}";
+        str += '}';
     }
 
-    str += "}";
+    str += '}';
     return str;
 }
 

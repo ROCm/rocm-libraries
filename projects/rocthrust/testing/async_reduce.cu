@@ -334,6 +334,8 @@ struct test_async_reduce
   {
     THRUST_HOST void operator()(std::size_t n)
     {
+      CHECK_ASAN_ENABLEMENT();
+	  
       thrust::host_vector<T> h0(unittest::random_integers<T>(n));
       thrust::device_vector<T> d0a(h0);
       thrust::device_vector<T> d0b(h0);
@@ -554,6 +556,8 @@ struct test_async_reduce_using
 {
   THRUST_HOST void operator()(std::size_t n)
   {
+	CHECK_ASAN_ENABLEMENT();
+	
     thrust::host_vector<T> h0(unittest::random_integers<T>(n));
     thrust::device_vector<T> d0a(h0);
     thrust::device_vector<T> d0b(h0);
@@ -595,6 +599,8 @@ struct test_async_reduce_after
 {
   THRUST_HOST void operator()(std::size_t n)
   {
+    CHECK_ASAN_ENABLEMENT();
+  
     thrust::host_vector<T> h0(unittest::random_integers<T>(n));
     thrust::device_vector<T> d0(h0);
 
@@ -641,6 +647,8 @@ struct test_async_reduce_on_then_after
 {
   THRUST_HOST void operator()(std::size_t n)
   {
+	CHECK_ASAN_ENABLEMENT();
+	
     thrust::host_vector<T> h0(unittest::random_integers<T>(n));
     thrust::device_vector<T> d0(h0);
 
@@ -751,6 +759,8 @@ struct test_async_reduce_caching
 {
   THRUST_HOST void operator()(std::size_t n)
   {
+    CHECK_ASAN_ENABLEMENT();
+  
     constexpr std::int64_t m = 32;
 
     thrust::host_vector<T> h0(unittest::random_integers<T>(n));
@@ -797,6 +807,8 @@ struct test_async_copy_then_reduce
 {
   THRUST_HOST void operator()(std::size_t n)
   {
+    CHECK_ASAN_ENABLEMENT();
+	
     thrust::host_vector<T> h0a(unittest::random_integers<T>(n));
     thrust::host_vector<T> h0b(unittest::random_integers<T>(n));
     thrust::host_vector<T> h0c(unittest::random_integers<T>(n));

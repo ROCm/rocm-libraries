@@ -44,6 +44,10 @@ hipdnn_flatbuffers_sdk::data_objects::DataType toSdkDataType(hipdnnDataType_t ty
         return DataType::INT64;
     case HIPDNN_DATA_BOOLEAN:
         return DataType::BOOLEAN;
+    case HIPDNN_DATA_FP8_E4M3_FNUZ:
+        return DataType::FP8_E4M3_FNUZ;
+    case HIPDNN_DATA_FP8_E5M2_FNUZ:
+        return DataType::FP8_E5M2_FNUZ;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnDataType_t value");
     }
@@ -87,6 +91,10 @@ hipdnnDataType_t fromSdkDataType(hipdnn_flatbuffers_sdk::data_objects::DataType 
         return HIPDNN_DATA_INT64;
     case DataType::BOOLEAN:
         return HIPDNN_DATA_BOOLEAN;
+    case DataType::FP8_E4M3_FNUZ:
+        return HIPDNN_DATA_FP8_E4M3_FNUZ;
+    case DataType::FP8_E5M2_FNUZ:
+        return HIPDNN_DATA_FP8_E5M2_FNUZ;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK DataType");
     }
@@ -111,6 +119,8 @@ int64_t getDataTypeByteSize(hipdnn_flatbuffers_sdk::data_objects::DataType type)
     case DataType::FP8_E4M3:
     case DataType::FP8_E5M2:
     case DataType::BOOLEAN:
+    case DataType::FP8_E4M3_FNUZ:
+    case DataType::FP8_E5M2_FNUZ:
         return 1;
     case DataType::INT64:
         return 8;
@@ -559,6 +569,8 @@ hipdnn_flatbuffers_sdk::data_objects::PaddingMode toSdkPaddingMode(hipdnnPadding
 
     switch(mode)
     {
+    case HIPDNN_PADDING_NOT_SET:
+        return PaddingMode::PADDING_NOT_SET;
     case HIPDNN_PADDING_NEG_INF_PAD:
         return PaddingMode::NEG_INF_PAD;
     case HIPDNN_PADDING_ZERO_PAD:
@@ -574,6 +586,8 @@ hipdnnPaddingMode_t fromSdkPaddingMode(hipdnn_flatbuffers_sdk::data_objects::Pad
 
     switch(mode)
     {
+    case PaddingMode::PADDING_NOT_SET:
+        return HIPDNN_PADDING_NOT_SET;
     case PaddingMode::NEG_INF_PAD:
         return HIPDNN_PADDING_NEG_INF_PAD;
     case PaddingMode::ZERO_PAD:
@@ -583,4 +597,41 @@ hipdnnPaddingMode_t fromSdkPaddingMode(hipdnn_flatbuffers_sdk::data_objects::Pad
     }
 }
 
+hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode
+    toSdkMoeGroupedMatmulMode(hipdnnMoeGroupedMatmulMode_t mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode;
+
+    switch(mode)
+    {
+    case HIPDNN_MOE_GROUPED_MATMUL_MODE_NONE:
+        return MoeGroupedMatmulMode::NONE;
+    case HIPDNN_MOE_GROUPED_MATMUL_MODE_GATHER:
+        return MoeGroupedMatmulMode::GATHER;
+    case HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER:
+        return MoeGroupedMatmulMode::SCATTER;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "Unsupported hipdnnMoeGroupedMatmulMode_t value");
+    }
+}
+
+hipdnnMoeGroupedMatmulMode_t
+    fromSdkMoeGroupedMatmulMode(hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode;
+
+    switch(mode)
+    {
+    case MoeGroupedMatmulMode::NONE:
+        return HIPDNN_MOE_GROUPED_MATMUL_MODE_NONE;
+    case MoeGroupedMatmulMode::GATHER:
+        return HIPDNN_MOE_GROUPED_MATMUL_MODE_GATHER;
+    case MoeGroupedMatmulMode::SCATTER:
+        return HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "Unsupported SDK MoeGroupedMatmulMode value");
+    }
+}
 } // namespace hipdnn_backend

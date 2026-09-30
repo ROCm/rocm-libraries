@@ -37,6 +37,7 @@
 #include <miopen/solution.hpp>
 #include <miopen/conv/solver_finders.hpp>
 
+#include <algorithm>
 #include <functional>
 #include <optional>
 #include <vector>
@@ -156,7 +157,8 @@ public:
     static std::vector<Solution> TryLoad(const Handle& handle,
                                          const TProblemDescription& problem,
                                          const std::function<FindCoreResult()>& regenerator,
-                                         const std::string& path_suffix = "")
+                                         const std::string& path_suffix            = "",
+                                         const AnyInvokeParams* const invokeParams = nullptr)
     {
         FindDbRecord_t<TDb> record{handle, problem, path_suffix};
 
@@ -166,7 +168,30 @@ public:
         {
             auto solutions = std::vector<Solution>{};
             record.CopyTo(solutions);
-            return solutions;
+
+            // The cached record may contain solvers that no longer fit the
+            // caller's workspace (e.g. when a workspace-range walker invokes
+            // Find with a smaller buffer than the one used to populate the
+            // record). Drop those before returning, so the dispatch can't
+            // pick a solver whose invoker will throw "Not enough workspace".
+            if(invokeParams != nullptr)
+            {
+                solutions.erase(std::remove_if(solutions.begin(),
+                                               solutions.end(),
+                                               [&](const Solution& s) {
+                                                   return !conv::IsEnoughWorkspace(
+                                                       "TryLoad",
+                                                       s.GetSolver(),
+                                                       s.GetWorkspaceSize(),
+                                                       invokeParams);
+                                               }),
+                                solutions.end());
+            }
+
+            if(!solutions.empty())
+                return solutions;
+            // All cached entries filtered out: fall through and let the
+            // regenerator re-evaluate against the current workspace.
         }
 
         MIOPEN_LOG_I("Find-db regenerating.");

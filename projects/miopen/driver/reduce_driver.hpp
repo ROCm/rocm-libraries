@@ -264,9 +264,6 @@ int ReduceDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     size_t indices_nelem = this->indices_sizeInBytes / sizeof(int);
 
     DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
     in_dev  = std::make_unique<GPUMem>(ctx, in_nelem, sizeof(Tgpu));
     out_dev = std::make_unique<GPUMem>(ctx, out_nelem, sizeof(Tgpu));
     ws_dev =

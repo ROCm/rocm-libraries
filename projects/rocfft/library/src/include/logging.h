@@ -297,4 +297,9 @@ static void log_plan(const char* msg)
     *kernelplan_stream << msg;
 }
 
+static void log_plan(const std::string& msg)
+{
+    log_plan(msg.c_str());
+}
+
 #endif

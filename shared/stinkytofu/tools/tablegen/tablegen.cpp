@@ -37,7 +37,7 @@ bool genInstructions(const std::string& arch, const std::string& inputDir,
 
 using namespace stinkytofu;
 
-void usage() {
+static void usage() {
     std::cout
         << "Usage: tablegen <outdir> <hardwareDir>\n"
         << "       tablegen --gen-instructions --arch=<gfx> --input-dir=<dir> --output-dir=<dir>\n"
@@ -72,11 +72,11 @@ int main(int argc, char** argv) {
 
         for (int i = 2; i < argc; ++i) {
             std::string arg = argv[i];
-            if (arg.find("--arch=") == 0)
+            if (arg.starts_with("--arch="))
                 arch = arg.substr(7);
-            else if (arg.find("--input-dir=") == 0)
+            else if (arg.starts_with("--input-dir="))
                 inputDir = arg.substr(12);
-            else if (arg.find("--output-dir=") == 0)
+            else if (arg.starts_with("--output-dir="))
                 outputDir = arg.substr(13);
         }
 

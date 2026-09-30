@@ -30,7 +30,7 @@
 #define ROCRAND_2POW32_INV_2PI (1.46291807e-09f)
 #define ROCRAND_2POW53_INV_DOUBLE (1.1102230246251565e-16)
 #define ROCRAND_PI (3.141592653f)
-#define ROCRAND_PI_DOUBLE  (3.1415926535897932)
+#define ROCRAND_PI_DOUBLE (3.1415926535897932)
 #define ROCRAND_2PI (6.2831855f)
 #define ROCRAND_SQRT2 (1.4142135f)
 #define ROCRAND_SQRT2_DOUBLE (1.4142135623730951)
@@ -38,7 +38,9 @@
 #define ROCRAND_NAN_DOUBLE (0x7ff8000000000000)
 
 #include <hip/hip_runtime.h>
-#include <utility>
+#if !defined(__HIPCC_RTC__)
+    #include <utility>
+#endif // !defined(__HIPCC_RTC__)
 
 #define ROCRAND_KERNEL __global__ static
 
@@ -116,8 +118,10 @@
     #endif
 #endif
 
-namespace rocrand_device {
-namespace detail {
+namespace rocrand_device
+{
+namespace detail
+{
 
 __forceinline__ __device__ __host__
 unsigned long long
@@ -137,24 +141,28 @@ unsigned long long mul_u64_u32(const unsigned int x, const unsigned int y)
 template<typename Engine>
 struct engine_boxmuller_helper
 {
-    static __forceinline__ __device__ __host__ bool has_float(const Engine* engine)
+    static __forceinline__ __device__ __host__
+    bool has_float(const Engine* engine)
     {
         return engine->m_state.boxmuller_float != ROCRAND_NAN_FLOAT;
     }
 
-    static __forceinline__ __device__ __host__ float get_float(Engine* engine)
+    static __forceinline__ __device__ __host__
+    float get_float(Engine* engine)
     {
         const float ret                 = engine->m_state.boxmuller_float;
         engine->m_state.boxmuller_float = ROCRAND_NAN_FLOAT;
         return ret;
     }
 
-    static __forceinline__ __device__ __host__ void save_float(Engine* engine, float f)
+    static __forceinline__ __device__ __host__
+    void save_float(Engine* engine, float f)
     {
         engine->m_state.boxmuller_float = f;
     }
 
-    static __forceinline__ __device__ __host__ bool has_double(const Engine* engine)
+    static __forceinline__ __device__ __host__
+    bool has_double(const Engine* engine)
     {
         return engine->m_state.boxmuller_double != ROCRAND_NAN_DOUBLE;
     }
@@ -167,26 +175,28 @@ struct engine_boxmuller_helper
         return ret;
     }
 
-    static __forceinline__ __device__ __host__ void save_double(Engine* engine, double d)
+    static __forceinline__ __device__ __host__
+    void save_double(Engine* engine, double d)
     {
         engine->m_state.boxmuller_double = d;
     }
 };
 
 template<typename T>
-__forceinline__ __device__ __host__ void split_ull(T& lo, T& hi, unsigned long long int val);
+__forceinline__ __device__ __host__
+void split_ull(T& lo, T& hi, unsigned long long int val);
 
 template<>
-__forceinline__ __device__ __host__ void
-    split_ull(unsigned int& lo, unsigned int& hi, unsigned long long int val)
+__forceinline__ __device__ __host__
+void split_ull(unsigned int& lo, unsigned int& hi, unsigned long long int val)
 {
     lo = val & 0xFFFFFFFF;
     hi = (val >> 32) & 0xFFFFFFFF;
 }
 
 template<>
-__forceinline__ __device__ __host__ void
-    split_ull(unsigned long long int& lo, unsigned long long int& hi, unsigned long long int val)
+__forceinline__ __device__ __host__
+void split_ull(unsigned long long int& lo, unsigned long long int& hi, unsigned long long int val)
 {
     lo = val;
     hi = 0;

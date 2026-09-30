@@ -32,9 +32,7 @@
 #include <stdexcept>
 #include <string>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -74,10 +72,10 @@ namespace TensileLite
         Count
     };
 
-    std::string   ToString(PerformanceMetric d);
-    std::string   TypeAbbrev(PerformanceMetric d);
-    std::ostream& operator<<(std::ostream& stream, PerformanceMetric const& t);
-    std::istream& operator>>(std::istream& stream, PerformanceMetric& t);
+    TENSILELITEHOST_EXPORT std::string   ToString(PerformanceMetric d);
+    TENSILELITEHOST_EXPORT std::string   TypeAbbrev(PerformanceMetric d);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, PerformanceMetric const& t);
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, PerformanceMetric& t);
 
     /**
  * \ingroup PerformanceMetrics
@@ -174,4 +172,3 @@ namespace std
     };
 } // namespace std
 
-TENSILE_HIDDEN_END

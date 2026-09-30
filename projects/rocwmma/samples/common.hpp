@@ -109,7 +109,8 @@ bool isGfx12()
     std::string deviceName(mProps.gcnArchName);
 
     return ((deviceName.find("gfx1200") != std::string::npos)
-            || (deviceName.find("gfx1201") != std::string::npos));
+            || (deviceName.find("gfx1201") != std::string::npos)
+            || (deviceName.find("gfx1250") != std::string::npos));
 }
 
 // HIP Host function to find if the device supports f64
@@ -130,7 +131,15 @@ bool isF64Supported()
 
 bool isF32Supported()
 {
-    return isGfx9();
+    hipDevice_t     mHandle;
+    hipDeviceProp_t mProps;
+
+    CHECK_HIP_ERROR(hipGetDevice(&mHandle));
+    CHECK_HIP_ERROR(hipGetDeviceProperties(&mProps, mHandle));
+
+    std::string deviceName(mProps.gcnArchName);
+
+    return isGfx9() || (deviceName.find("gfx1250") != std::string::npos);
 }
 
 inline double calculateGFlops(uint32_t m, uint32_t n, uint32_t k)

@@ -1,32 +1,13 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
+#include <miopen/solver/zero_tensor.hpp>
+#include <miopen/kernel_tuning_mode.hpp>
+
+#include <limits>
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #include <ck/utility/data_type.hpp>
@@ -189,6 +170,34 @@ typename ConvPtrsType::iterator FindConvPtrByID(ConvPtrsType& conv_ptrs,
     });
 }
 
+// Non-large-tensor CK instances silently narrow CK's int64 MakeArgumentPointer overload
+// back to int32 and form byte offsets in 32-bit arithmetic, so any tensor whose byte span
+// exceeds INT_MAX overflows and returns silently wrong results -- even when every individual
+// dim/stride and the raw element count fit in int32. Must use GetNumBytes() (stride-aware
+// byte span), not GetElementSpace()/GetElementSize() (element counts): a tensor can have a
+// large element count but a sub-2GiB byte span (no risk), or the reverse -- a sub-INT_MAX
+// element count with a >2GiB byte span, which does overflow. Applies to every direction:
+// forward and backward-data hit the same 32-bit byte-offset overflow as backward-weights.
+template <typename ProblemDescriptionType>
+inline bool RequiresLargeTensorCKInstance(const ProblemDescriptionType& problem)
+{
+    if(!problem.AllTensorsDimsFitIntoInt())
+        return true;
+
+    constexpr std::size_t max_int32 = static_cast<std::size_t>(std::numeric_limits<int>::max());
+    return problem.GetIn().GetNumBytes() > max_int32 ||
+           problem.GetOut().GetNumBytes() > max_int32 ||
+           problem.GetWeights().GetNumBytes() > max_int32;
+}
+
+// Large-tensor xdl impls embed "Large_Tensor" in their GetTypeString() (see
+// device_grouped_conv_fwd_multiple_d_xdl_large_tensor_cshuffle.hpp:1260).
+template <typename ConvPtr>
+inline bool IsLargeTensorCKInstance(const ConvPtr& ptr)
+{
+    return ptr->GetTypeString().find("Large_Tensor") != std::string::npos;
+}
+
 template <typename DeviceOpType,
           typename CKArgsType,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription>
@@ -198,14 +207,22 @@ std::vector<std::string> FillValidKernelsIDs(const ProblemDescriptionType& probl
     const auto conv_ptrs = DeviceOpType::GetInstances();
     assert(!conv_ptrs.empty());
 
+    const bool require_large_tensor = RequiresLargeTensorCKInstance(problem);
+
     std::vector<std::string> valid_kernels;
     valid_kernels.reserve(conv_ptrs.size());
     for(size_t idx = 0; idx < conv_ptrs.size(); ++idx)
     {
+        if(require_large_tensor && !IsLargeTensorCKInstance(conv_ptrs[idx]))
+            continue;
         if(args.IsSupportedBy(conv_ptrs[idx]))
             valid_kernels.emplace_back(std::move(conv_ptrs[idx]->GetTypeString()));
     }
-    assert(!valid_kernels.empty());
+    // When require_large_tensor is true and no large-tensor instances are
+    // registered for this DeviceOp, returning an empty list is the intended
+    // outcome (caller treats solver as inapplicable). Only assert when the
+    // filter was a no-op.
+    assert(require_large_tensor || !valid_kernels.empty());
     return valid_kernels;
 }
 
@@ -438,7 +455,8 @@ bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string&
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(!kernel_id.empty())
     {
-        auto conv_ptrs = DeviceOpType::GetInstances();
+        auto conv_ptrs                  = DeviceOpType::GetInstances();
+        const bool require_large_tensor = RequiresLargeTensorCKInstance(problem);
         if constexpr(IsSplitKNeeded<DeviceOpType>() || CheckSplitK)
         {
             auto pos = kernel_id.find_last_of('+');
@@ -462,14 +480,20 @@ bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string&
 
             auto ptr_iter = FindConvPtrByID(conv_ptrs, kernel_id.substr(0, pos));
             return (ptr_iter != conv_ptrs.end()) &&
+                   (!require_large_tensor || IsLargeTensorCKInstance(*ptr_iter)) &&
                    CKArgsType{problem}.IsSupportedBySplitK(*ptr_iter, split_k);
         }
         else
         {
             auto ptr_iter = FindConvPtrByID(conv_ptrs, kernel_id);
-            return (ptr_iter != conv_ptrs.end()) && CKArgsType{problem}.IsSupportedBy(*ptr_iter);
+            return (ptr_iter != conv_ptrs.end()) &&
+                   (!require_large_tensor || IsLargeTensorCKInstance(*ptr_iter)) &&
+                   CKArgsType{problem}.IsSupportedBy(*ptr_iter);
         }
     }
+#else
+    (void)problem;
+    (void)kernel_id;
 #endif
     return false;
 }
@@ -481,9 +505,13 @@ bool IsCKApplicable(const ProblemDescriptionType& problem)
 {
     const auto args = CKArgsType{problem};
 
-    const auto ptrs = DeviceOpType::GetInstances();
-    return std::any_of(
-        ptrs.begin(), ptrs.end(), [&args](auto& ptr) { return args.IsSupportedBy(ptr); });
+    const auto ptrs                 = DeviceOpType::GetInstances();
+    const bool require_large_tensor = RequiresLargeTensorCKInstance(problem);
+    return std::any_of(ptrs.begin(), ptrs.end(), [&](auto& ptr) {
+        if(require_large_tensor && !IsLargeTensorCKInstance(ptr))
+            return false;
+        return args.IsSupportedBy(ptr);
+    });
 }
 
 /**
@@ -523,6 +551,9 @@ bool IsCKSplitKSupported(const ProblemDescriptionType& problem,
     {
         return false;
     }
+
+    if(RequiresLargeTensorCKInstance(problem) && !IsLargeTensorCKInstance(*ptr_iter))
+        return false;
 
     const auto args = CKArgsType{problem};
     return args.IsSupportedBySplitK(*ptr_iter, split_k);
@@ -596,12 +627,15 @@ template <typename DeviceOpType,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription>
 size_t GetCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
 {
-    const auto args         = CKArgsType{problem};
-    auto max_workspace_size = 0;
+    const auto args                = CKArgsType{problem};
+    std::size_t max_workspace_size = 0;
 
-    const auto ptrs = DeviceOpType::GetInstances();
+    const auto ptrs                 = DeviceOpType::GetInstances();
+    const bool require_large_tensor = RequiresLargeTensorCKInstance(problem);
     for(auto& ptr : ptrs)
     {
+        if(require_large_tensor && !IsLargeTensorCKInstance(ptr))
+            continue;
         // Cycle `split_k` over {1,2,4,...,128} then `CkSplitkAutoDeduce`.
         // The loop then restarts from 1 for the next conv instance.
         auto split_k = 1;
@@ -664,9 +698,12 @@ ConvSolution InitAnyInvokerFactory(const ProblemDescriptionType& problem,
 #endif
 
     result.invoker_factory =
-        [ck_args_     = CKArgsType{problem},
+        [kernel_id_   = kernel_id,
+         ck_args_     = CKArgsType{problem},
          sh_conv_ptr_ = std::shared_ptr{std::move(*ptr_iter)}](const std::vector<Kernel>&) mutable {
-            return [ck_args2 = std::move(ck_args_), sh_conv_ptr2 = std::move(sh_conv_ptr_)](
+            return [kernel_id2   = std::move(kernel_id_),
+                    ck_args2     = std::move(ck_args_),
+                    sh_conv_ptr2 = std::move(sh_conv_ptr_)](
                        const Handle& handle, const AnyInvokeParams& primitive_parameters) {
                 const auto& data_ctx = primitive_parameters.CastTo<CastType>();
                 auto argument_ptr    = ck_args2.MakeArgPtr(sh_conv_ptr2, data_ctx);
@@ -678,6 +715,7 @@ ConvSolution InitAnyInvokerFactory(const ProblemDescriptionType& problem,
                 if(handle.IsProfilingEnabled())
                 {
                     float elapsed_time = handle.GetKernelTime();
+                    AddKernelToJsonAccumulator(kernel_id2, elapsed_time, false);
                     handle.ResetKernelTime();
                     handle.AccumKernelTime(elapsed_time);
                 }
@@ -691,16 +729,23 @@ OutElemOp GetOutElementOp(const miopen::fusion::ActivationOpInvokeParam& activat
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     auto activationMode = activationOp.activMode;
-    switch(activationMode)
+    if(activationMode == miopenActivationRELU)
     {
-    case miopenActivationRELU: return OutElemOp{0, ck::NumericLimits<DataType>::Max()};
-    case miopenActivationCLIPPEDRELU: return OutElemOp{0, activationOp.activAlpha};
-    case miopenActivationCLAMP: return OutElemOp{activationOp.activAlpha, activationOp.activBeta};
-    default:
-        MIOPEN_THROW(miopenStatusInternalError,
-                     "Unsupported activation type: " + std::to_string(activationMode));
+        return OutElemOp{0, ck::NumericLimits<DataType>::Max()};
     }
+    else if(activationMode == miopenActivationCLIPPEDRELU)
+    {
+        return OutElemOp{0, activationOp.activAlpha};
+    }
+    else if(activationMode == miopenActivationCLAMP)
+    {
+        return OutElemOp{activationOp.activAlpha, activationOp.activBeta};
+    }
+
+    MIOPEN_THROW(miopenStatusInternalError,
+                 "Unsupported activation type: " + std::to_string(activationMode));
 #else
+    (void)activationOp;
     MIOPEN_THROW(miopenStatusNotImplemented, "Not implemented without ck enabled");
 #endif
 }
@@ -951,7 +996,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
         internal::MakeTaggedTransposeInstances<CKArgsType>(
             result, ctx, problem, ck_args, input1_op, input2_op, output_op, _ck_buff_des);
 
-    result.invoker_factory = [kernel_id_           = &kernel_id,
+    result.invoker_factory = [kernel_id_           = kernel_id,
                               split_k_             = split_k,
                               ck_args_             = std::move(ck_args),
                               sh_conv_ptr_         = std::shared_ptr{std::move(*ptr_iter)},
@@ -961,7 +1006,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                               output_init_tr_inst_ = std::move(_output_init_tr_inst),
                               ck_buff_des_ =
                                   _ck_buff_des](const std::vector<Kernel>& kernels) mutable {
-        return [kernel_id2 = kernel_id_,
+        return [kernel_id2 = std::move(kernel_id_),
                 split_k2   = split_k_,
                 kernels,
                 ck_args2             = std::move(ck_args_),
@@ -1045,6 +1090,12 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
             if(handle.IsProfilingEnabled())
             {
                 elapsed += handle.GetKernelTime();
+
+                // Kernel logging for CK kernels
+                if(IsLoggingKernel())
+                {
+                    AddKernelToJsonAccumulator(kernel_id2, elapsed, false);
+                }
                 handle.ResetKernelTime();
                 handle.AccumKernelTime(elapsed);
             }
@@ -1053,6 +1104,13 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
             output_tr_inst2.ConvertTo(handle, kernels, conv_tensors);
         };
     };
+#else
+    (void)ctx;
+    (void)problem;
+    (void)kernel_id;
+    (void)input1_op;
+    (void)input2_op;
+    (void)output_op;
 #endif
     return result;
 }
@@ -1063,7 +1121,7 @@ template <bool ZeroOutputs,
           typename CastType,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription>
 ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
-                                    const ProblemDescriptionType& problem,
+                                    [[maybe_unused]] const ProblemDescriptionType& problem,
                                     const std::string& kernel_id)
 {
     ConvSolution result;
@@ -1128,7 +1186,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                 {
                     if constexpr(ZeroOutputs)
                     {
-                        ZeroOutTensor(handle, data_ctx.tensors.dwDesc, data_ctx.tensors.dw);
+                        ZeroTensor(handle, data_ctx.tensors.dwDesc, data_ctx.tensors.dw);
 
                         if(handle.IsProfilingEnabled())
                         {
@@ -1156,6 +1214,12 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                 if(handle.IsProfilingEnabled())
                 {
                     elapsed += handle.GetKernelTime();
+
+                    // Kernel logging for CK kernels
+                    if(IsLoggingKernel())
+                    {
+                        AddKernelToJsonAccumulator(kernel_id2, elapsed, false);
+                    }
                     handle.ResetKernelTime();
                     handle.AccumKernelTime(elapsed);
                 }
@@ -1194,7 +1258,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                 if constexpr(std::is_same_v<CastType, miopen::conv::DataInvokeParams> &&
                              ZeroOutputs)
                 {
-                    ZeroOutTensor(handle, data_ctx.tensors.outDesc, data_ctx.tensors.out);
+                    ZeroTensor(handle, data_ctx.tensors.outDesc, data_ctx.tensors.out);
 
                     if(handle.IsProfilingEnabled())
                     {
@@ -1211,6 +1275,13 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                 if(handle.IsProfilingEnabled())
                 {
                     elapsed += handle.GetKernelTime();
+
+                    // Kernel logging for CK kernels
+                    if(IsLoggingKernel())
+                    {
+                        AddKernelToJsonAccumulator(kernel_id2, elapsed, false);
+                    }
+
                     handle.ResetKernelTime();
                     handle.AccumKernelTime(elapsed);
                 }
@@ -1294,7 +1365,6 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
         case miopenDouble:
         case miopenFloat8_fnuz:
         case miopenBFloat8_fnuz:
-        default:
             MIOPEN_THROW(miopenStatusInternalError,
                          "3DGroupConvolutionImplicitGemmXdlops operation not implemented for this "
                          "data type");
@@ -1317,7 +1387,6 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
         case miopenDouble:
         case miopenFloat8_fnuz:
         case miopenBFloat8_fnuz:
-        default:
             MIOPEN_THROW(miopenStatusInternalError,
                          "3DGroupConvolutionImplicitGemmXdlops operation not implemented for this "
                          "data type");
@@ -1330,6 +1399,10 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
             "3DGroupConvolutionImplicitGemmXdlops operation not implemented for this data type");
     }
 #else
+    (void)problem;
+    (void)invoker_factory_maker_ncdhw;
+    (void)invoker_factory_maker_ndhwc;
+    (void)use_tf32;
     return {};
 #endif
 }

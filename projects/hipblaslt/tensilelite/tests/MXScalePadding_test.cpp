@@ -45,8 +45,8 @@ static ContractionProblemGemm makeMXProblem(size_t M,
         M, M * N,
         0.0);
 
-    problem.setMXScaleA(mxBlock);
-    problem.setMXScaleB(mxBlock);
+    problem.setMXScaleA(rocisa::DataType::E8, mxBlock);
+    problem.setMXScaleB(rocisa::DataType::E8, mxBlock);
     return problem;
 }
 

@@ -20,7 +20,7 @@ namespace
 // Sentinel: PointwiseMode::COUNT is always one past the last valid mode.
 // New modes inserted before COUNT automatically update the iteration range.
 constexpr auto K_POINTWISE_MODE_COUNT = PointwiseMode::COUNT;
-static_assert(static_cast<int>(K_POINTWISE_MODE_COUNT) == 48,
+static_assert(static_cast<int>(K_POINTWISE_MODE_COUNT) == 51,
               "PointwiseMode enum changed — update this assertion");
 
 // Generic helper function to generate vectors of pointwise modes based on a checker function

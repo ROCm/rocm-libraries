@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_sygvdx_hegvdx_inplace.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -56,6 +57,7 @@ rocblas_status rocsolver_sygvdx_hegvdx_inplace_impl(rocblas_handle handle,
                                                     rocblas_int* h_nev,
                                                     S* W,
                                                     rocblas_int* info)
+try
 {
     const char* name = (!rocblas_is_complex<T> ? "sygvdx_inplace" : "hegvdx_inplace");
     ROCSOLVER_ENTER_TOP(name, "--itype", itype, "--evect", evect, "--erange", erange, "--uplo",
@@ -137,6 +139,10 @@ rocblas_status rocsolver_sygvdx_hegvdx_inplace_impl(rocblas_handle handle,
         work4, work5, (rocblas_int*)work6_ifail, (S*)D, (S*)E, (rocblas_int*)iblock,
         (rocblas_int*)isplit, (T*)tau, (rocblas_int*)d_nev, work7_workArr, (rocblas_int*)iinfo,
         optim_mem);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

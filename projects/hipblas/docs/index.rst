@@ -27,9 +27,9 @@ The hipBLAS public repository is located at
 
   .. grid-item-card:: Install
 
-    * :doc:`hipBLAS prerequisites <./install/prerequisites>`
-    * :doc:`Install hipBLAS on Linux <./install/Linux_Install_Guide>`
-    * :doc:`Install hipBLAS on Windows <./install/Windows_Install_Guide>`
+    * :doc:`Install hipBLAS <./install/install>`
+    * :doc:`Build hipBLAS on Linux <./install/Linux_Install_Guide>`
+    * :doc:`Build hipBLAS on Windows <./install/Windows_Install_Guide>`
 
 .. grid:: 2
   :gutter: 3
@@ -48,7 +48,7 @@ The hipBLAS public repository is located at
 
   .. grid-item-card:: API Reference
 
-    * :doc:`Data type support <./reference/data-type-support>`
+    * :doc:`Precision support <./reference/data-type-support>`
     * :doc:`hipBLAS API <./reference/hipblas-api-functions>`
     * :doc:`Deprecations by version <./reference/deprecation>`
 

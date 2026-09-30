@@ -72,24 +72,21 @@ NetworkConfig ProblemDescription::MakeNetworkConfig() const
 {
     std::ostringstream ss;
 
+    ss << "direction" << static_cast<uint64_t>(direction);
     ss << "dtype" << xDesc.GetType();
-    if((mode == MIOPEN_WEIGHT_BIAS_T5) || (mode == MIOPEN_ELEMENTWISE_AFFINE_T5))
-    {
-        ss << "normalized_dim" << xDesc.GetLengths().size() - 1;
-    }
-    else
-    {
-        ss << "normalized_dim" << normalized_dim;
-    }
     ss << "outer_size" << outer_size;
     ss << "inner_size" << inner_size;
-
-    if((mode == MIOPEN_WEIGHT_BIAS_FUSED_ADD) || (mode == MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD))
-        ss << "addlayernorm";
-    if((mode == MIOPEN_WEIGHT_BIAS_T5) || (mode == MIOPEN_ELEMENTWISE_AFFINE_T5))
-        ss << "t5layernorm";
-
     ss << "stride" << stride;
+    ss << "mode" << mode;
+
+    if(mode == MIOPEN_WEIGHT_BIAS_FUSED_ADD || mode == MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD)
+    {
+        ss << "addlayernorm";
+    }
+    if(mode == MIOPEN_WEIGHT_BIAS_T5 || mode == MIOPEN_ELEMENTWISE_AFFINE_T5)
+    {
+        ss << "t5layernorm";
+    }
 
     return NetworkConfig{ss.str()};
 }

@@ -29,7 +29,6 @@
 #include <Tensile/Tensile.hpp>
 #include <optional>
 
-TENSILE_HIDDEN_BEGIN
 namespace TensileLite
 {
     /**
@@ -40,7 +39,7 @@ namespace TensileLite
  * See subclass in `hip` directory which can create an instance
  * automatically.
  */
-    struct TENSILE_API AMDGPU : public Hardware
+    struct TENSILELITEHOST_EXPORT AMDGPU : public Hardware
     {
         static std::string Type()
         {
@@ -255,9 +254,12 @@ namespace TensileLite
         int         skGridMultiplier         = 1;
         int         skFixedGrid              = 0;
         int         skFullTiles              = 1;
+        int         skTiles                  = -1;
+        int         skSplit                  = -1;
         int         fixedWGM                 = std::numeric_limits<int>::max();
         size_t      fixedWGMXCC              = std::numeric_limits<size_t>::max();
         size_t      fixedWGMXCCCHUNK         = std::numeric_limits<size_t>::max();
+        size_t      fixedWGMXCCSPLITK        = std::numeric_limits<size_t>::max();
         size_t      fixedStaggerUMapping     = std::numeric_limits<size_t>::max();
         size_t      fixedStaggerU            = std::numeric_limits<size_t>::max();
         size_t      fixedStaggerUStrideShift = std::numeric_limits<size_t>::max();
@@ -325,6 +327,20 @@ namespace TensileLite
             return value;
         }
 
+        const int getSKTiles() const
+        {
+            static const char* envStr = std::getenv("TENSILE_STREAMK_TILES");
+            static const int   value  = (envStr == NULL ? -1 : std::atoi(envStr));
+            return value;
+        }
+
+        const int getSKSplit() const
+        {
+            static const char* envStr = std::getenv("TENSILE_STREAMK_SPLIT");
+            static const int   value  = (envStr == NULL ? -1 : std::atoi(envStr));
+            return value;
+        }
+
         const int getFixedWGM() const
         {
             static const char* envStr = std::getenv("TENSILE_FIXED_WGM");
@@ -342,6 +358,13 @@ namespace TensileLite
         const size_t getFixedWGMXCCCHUNK() const
         {
             static const char*  envStr = std::getenv("TENSILE_FIXED_WGMXCCCHUNK");
+            static const size_t value  = (envStr == NULL ? std::numeric_limits<size_t>::max() : std::stoul(envStr));
+            return value;
+        }
+
+        const size_t getFixedWGMXCCSPLITK() const
+        {
+            static const char*  envStr = std::getenv("TENSILE_FIXED_WGMXCCSPLITK");
             static const size_t value  = (envStr == NULL ? std::numeric_limits<size_t>::max() : std::stoul(envStr));
             return value;
         }
@@ -396,7 +419,6 @@ namespace TensileLite
         return static_cast<int>(l) >= static_cast<int>(r);
     }
 
-    TENSILE_API std::ostream& operator<<(std::ostream& stream, AMDGPU::Processor p);
-    TENSILE_API std::ostream& operator<<(std::ostream& stream, AMDGPU g);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, AMDGPU::Processor p);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, AMDGPU g);
 } // namespace TensileLite
-TENSILE_HIDDEN_END

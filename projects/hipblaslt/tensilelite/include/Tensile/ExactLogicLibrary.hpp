@@ -37,9 +37,7 @@
 #include <Tensile/Predicates.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -268,7 +266,12 @@ namespace TensileLite
             SolutionVector<MySolution> rv, solutions;
             const bool                 debug   = Debug::Instance().printPropertyEvaluation();
             const bool                 streamK = Debug::Instance().useExperimentalSelection() == 2;
-            const bool                 predictionLib = Debug::Instance().usePredictionLibrary();
+
+            const auto forceDynamic = Debug::Instance().streamK5ForceMode();
+            const bool effectiveDynamic = 
+                (forceDynamic == 1) ||
+                (forceDynamic != 0 && problem.getParams().streamKTileSchedulingMode() != 0);
+            const bool                 predictionLib = Debug::Instance().usePredictionLibrary() || effectiveDynamic;
 
             // false in case of early return;
             lastFindTopRetAll = false;
@@ -514,4 +517,3 @@ namespace TensileLite
 
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

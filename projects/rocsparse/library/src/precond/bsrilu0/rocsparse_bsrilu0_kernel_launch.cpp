@@ -40,7 +40,7 @@ rocsparse_status rocsparse::bsrilu0_kernel_launch(rocsparse_handle          hand
     rocsparse::bsrilu0_kernel_launch_t launch        = nullptr;
     const std::string                  gcn_arch_name = rocsparse::handle_get_arch_name(handle);
 
-    const bool sleep     = (gcn_arch_name == rocpsarse_arch_names::gfx908 && handle->asic_rev < 2);
+    const bool sleep     = (gcn_arch_name == rocsparse_arch_names::gfx908 && handle->asic_rev < 2);
     const auto block_dim = A->block_dim;
 
     if(sleep || (handle->wavefront_size == 32) || (block_dim > 64)
@@ -64,10 +64,10 @@ rocsparse_status rocsparse::bsrilu0_kernel_launch(rocsparse_handle          hand
     //
     // Set done array to zero.
     //
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
-                                       0,
-                                       sizeof(int32_t) * A->rows * A->batch_count,
-                                       handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
+                                                 0,
+                                                 sizeof(int32_t) * A->rows * A->batch_count,
+                                                 handle->stream));
 
     //
     // Launch gpu kernel.

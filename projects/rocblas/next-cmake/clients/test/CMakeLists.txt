@@ -8,7 +8,8 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_executable(rocblas-test)
 
 set_target_properties(rocblas-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY
-                                              "${PROJECT_BINARY_DIR}/staging")
+                                              "${PROJECT_BINARY_DIR}/staging"
+                                              ENABLE_EXPORTS ON)
 
 target_compile_definitions(rocblas-test PRIVATE GOOGLE_TEST)
 if(ROCBLAS_ENABLE_TENSILE)
@@ -57,6 +58,7 @@ set(yaml_test_files
     "${_CMAKE_CURRENT_SOURCE_DIR}/her_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/herk_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/herkx_gtest.yaml"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/host_alloc_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/hpmv_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/hpr2_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/hpr_gtest.yaml"
@@ -71,6 +73,7 @@ set(yaml_test_files
     "${_CMAKE_CURRENT_SOURCE_DIR}/sbmv_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/scal_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/set_get_atomics_mode_gtest.yaml"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/set_get_alpha_beta_stride_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/set_get_matrix_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/set_get_pointer_mode_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/set_get_vector_gtest.yaml"

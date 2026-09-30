@@ -25,6 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#include "exceptions.hpp"
 #include "roclapack_geblttrf_npvt.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -47,6 +48,7 @@ rocblas_status rocsolver_geblttrf_npvt_interleaved_batched_impl(rocblas_handle h
                                                                 const rocblas_stride strideC,
                                                                 rocblas_int* info,
                                                                 const rocblas_int batch_count)
+try
 {
     ROCSOLVER_ENTER_TOP("geblttrf_npvt_interleaved_batched", "--nb", nb, "--nblocks", nblocks,
                         "--inca", inca, "--lda", lda, "--strideA", strideA, "--incb", incb, "--ldb",
@@ -88,6 +90,10 @@ rocblas_status rocsolver_geblttrf_npvt_interleaved_batched_impl(rocblas_handle h
     return rocsolver_geblttrf_npvt_template<false, true, T>(
         handle, nb, nblocks, A, shiftA, inca, lda, strideA, B, shiftB, incb, ldb, strideB, C,
         shiftC, incc, ldc, strideC, info, batch_count, &work_helper);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

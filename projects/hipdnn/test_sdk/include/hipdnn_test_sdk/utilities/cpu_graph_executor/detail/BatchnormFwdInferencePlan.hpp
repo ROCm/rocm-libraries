@@ -84,12 +84,16 @@ public:
         auto shallowInvVarianceTensor = createShallowTensor<MeanVarianceDataType>(
             _params.invVarianceTensor, variantPack.at(_params.invVarianceTensor.uid));
 
-        utilities::CpuFpReferenceBatchnorm::fwdInference(*shallowXTensor,
-                                                         *shallowScaleTensor,
-                                                         *shallowBiasTensor,
-                                                         *shallowMeanTensor,
-                                                         *shallowInvVarianceTensor,
-                                                         *shallowYTensor);
+        utilities::CpuFpReferenceBatchnorm::fwdInference<XDataType,
+                                                         ScaleBiasDataType,
+                                                         MeanVarianceDataType,
+                                                         OutputDataType,
+                                                         ComputeDataType>(*shallowXTensor,
+                                                                          *shallowScaleTensor,
+                                                                          *shallowBiasTensor,
+                                                                          *shallowMeanTensor,
+                                                                          *shallowInvVarianceTensor,
+                                                                          *shallowYTensor);
     }
 
 private:
@@ -141,6 +145,8 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->mean_tensor_uid(), MeanVarianceDataTypeEnum);
         CHECK_TENSOR_TYPE(
             tensorMap, nodeAttributes->inv_variance_tensor_uid(), MeanVarianceDataTypeEnum);
+
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
 
         return true;
     }

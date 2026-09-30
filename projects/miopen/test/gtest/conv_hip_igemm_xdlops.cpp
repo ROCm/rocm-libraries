@@ -54,6 +54,7 @@ void Run2dDriver(miopenDataType_t prec)
     switch(prec)
     {
     case miopenInt8: params = GPU_ConvHipIgemmXdlops_I8::GetParam(); break;
+
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
     case miopenHalf:
@@ -66,8 +67,6 @@ void Run2dDriver(miopenDataType_t prec)
                   "miopenDouble data "
                   "type not supported by "
                   "test_conv_hip_igemm_xdlops test";
-
-    default: params = GPU_ConvHipIgemmXdlops_I8::GetParam();
     }
 
     for(const auto& test_value : params)
@@ -140,11 +139,6 @@ using namespace conv_hip_igemm_xdlops;
 
 TEST_P(GPU_ConvHipIgemmXdlops_I8, Int8Test)
 {
-#if MIOPEN_BACKEND_OPENCL
-
-    GTEST_SKIP() << "MIOPEN_BACKEND_HIP needed for this test";
-
-#else // MIOPEN_BACKEND_HIP, OCL_DISABLED
 #if MIOPEN_USE_COMPOSABLEKERNEL
     const auto& handle = get_handle();
     if(IsTestSupportedForDevice(handle))
@@ -157,7 +151,6 @@ TEST_P(GPU_ConvHipIgemmXdlops_I8, Int8Test)
     }
 #else
     GTEST_SKIP();
-#endif
 #endif
 };
 

@@ -13,7 +13,9 @@ using hipdnn_data_sdk::types::fp4_e2m1;
 using hipdnn_data_sdk::types::fp6_e2m3;
 using hipdnn_data_sdk::types::fp6_e3m2;
 using hipdnn_data_sdk::types::fp8_e4m3;
+using hipdnn_data_sdk::types::fp8_e4m3_fnuz;
 using hipdnn_data_sdk::types::fp8_e5m2;
+using hipdnn_data_sdk::types::fp8_e5m2_fnuz;
 using hipdnn_data_sdk::types::fp8_e8m0;
 using hipdnn_data_sdk::types::half;
 }
@@ -42,6 +44,10 @@ constexpr auto datatypeToNative()
     {
         return int32_t{};
     }
+    else if constexpr(DT == DataType::BOOLEAN)
+    {
+        return bool{};
+    }
     else if constexpr(DT == DataType::BFLOAT16)
     {
         return bfloat16{};
@@ -50,9 +56,17 @@ constexpr auto datatypeToNative()
     {
         return fp8_e4m3{};
     }
+    else if constexpr(DT == DataType::FP8_E4M3_FNUZ)
+    {
+        return fp8_e4m3_fnuz{};
+    }
     else if constexpr(DT == DataType::FP8_E5M2)
     {
         return fp8_e5m2{};
+    }
+    else if constexpr(DT == DataType::FP8_E5M2_FNUZ)
+    {
+        return fp8_e5m2_fnuz{};
     }
     else if constexpr(DT == DataType::FP8_E8M0)
     {
@@ -77,17 +91,22 @@ constexpr auto datatypeToNative()
     }
 }
 
-inline std::variant<float,
-                    half,
-                    double,
-                    int32_t,
-                    bfloat16,
-                    fp8_e4m3,
-                    fp8_e5m2,
-                    fp8_e8m0,
-                    fp4_e2m1,
-                    fp6_e2m3,
-                    fp6_e3m2>
+using NativeDataTypeVariant = std::variant<float,
+                                           half,
+                                           double,
+                                           int32_t,
+                                           bool,
+                                           bfloat16,
+                                           fp8_e4m3,
+                                           fp8_e5m2,
+                                           fp8_e8m0,
+                                           fp4_e2m1,
+                                           fp6_e2m3,
+                                           fp6_e3m2,
+                                           fp8_e4m3_fnuz,
+                                           fp8_e5m2_fnuz>;
+
+inline NativeDataTypeVariant
     datatypeToNativeVariant(hipdnn_flatbuffers_sdk::data_objects::DataType type)
 {
     using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
@@ -105,6 +124,9 @@ inline std::variant<float,
         break;
     case DataType::INT32:
         return int32_t{};
+        break;
+    case DataType::BOOLEAN:
+        return bool{};
         break;
     case DataType::BFLOAT16:
         return bfloat16{};
@@ -126,6 +148,12 @@ inline std::variant<float,
         break;
     case DataType::FP6_E3M2:
         return fp6_e3m2{};
+        break;
+    case DataType::FP8_E4M3_FNUZ:
+        return fp8_e4m3_fnuz{};
+        break;
+    case DataType::FP8_E5M2_FNUZ:
+        return fp8_e5m2_fnuz{};
         break;
     default:
         throw std::runtime_error("Error: Invalid type");
@@ -151,6 +179,10 @@ constexpr hipdnn_flatbuffers_sdk::data_objects::DataType nativeTypeToDataType()
     {
         return hipdnn_flatbuffers_sdk::data_objects::DataType::INT32;
     }
+    else if constexpr(std::is_same_v<T, bool>)
+    {
+        return hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN;
+    }
     else if constexpr(std::is_same_v<T, bfloat16>)
     {
         return hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16;
@@ -159,9 +191,17 @@ constexpr hipdnn_flatbuffers_sdk::data_objects::DataType nativeTypeToDataType()
     {
         return hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3;
     }
+    else if constexpr(std::is_same_v<T, fp8_e4m3_fnuz>)
+    {
+        return hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ;
+    }
     else if constexpr(std::is_same_v<T, fp8_e5m2>)
     {
         return hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2;
+    }
+    else if constexpr(std::is_same_v<T, fp8_e5m2_fnuz>)
+    {
+        return hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ;
     }
     else if constexpr(std::is_same_v<T, fp8_e8m0>)
     {

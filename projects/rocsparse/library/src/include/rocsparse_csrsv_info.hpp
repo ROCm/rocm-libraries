@@ -39,7 +39,7 @@ public:
         this->rocsparse::trm_data_t::copy(that, stream);
         this->m_singularity_numeric_exact.copy_singular_info_async(
             &that->m_singularity_numeric_exact, stream);
-        THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+        THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
     }
 
     rocsparse::singular_info_t* get_singularity_numeric_exact()

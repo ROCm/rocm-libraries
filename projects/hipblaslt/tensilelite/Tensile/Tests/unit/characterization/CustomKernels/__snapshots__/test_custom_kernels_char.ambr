@@ -1,0 +1,33 @@
+# serializer version: 1
+# name: test_get_all_custom_kernel_names
+  list([
+    'alpha',
+    'beta',
+  ])
+# ---
+# name: test_get_custom_kernel_config_ok
+  dict({
+    'CustomKernelName': 'k',
+    'KernelLanguage': 'Assembly',
+    'isp': dict({
+      'Extra': 9,
+      'KernArgsVersion': 2,
+    }),
+  })
+# ---
+# name: test_read_custom_kernel_config_ok
+  dict({
+    'InternalSupportParams': dict({
+      'KernArgsVersion': 2,
+    }),
+  })
+# ---
+# name: test_read_embedded_yaml_parses_custom_config
+  dict({
+    'custom.config': dict({
+      'InternalSupportParams': dict({
+        'KernArgsVersion': 2,
+      }),
+    }),
+  })
+# ---

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -211,8 +211,8 @@ namespace rocsparse
             rhs_pad,
             static_cast<T>(0));
 
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(w_pad, 0, m_pad * sizeof(T), handle->stream));
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(v_pad, 0, m_pad * sizeof(T), handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(w_pad, 0, m_pad * sizeof(T), handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(v_pad, 0, m_pad * sizeof(T), handle->stream));
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_LBM_wv_kernel<BLOCKSIZE, BLOCKDIM>),
                                            dim3(gridsize),
@@ -303,9 +303,9 @@ namespace rocsparse
                 pivot_pad);
         }
 
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             w2_pad, w_pad, m_pad * sizeof(T), hipMemcpyDeviceToDevice, handle->stream));
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             v2_pad, v_pad, m_pad * sizeof(T), hipMemcpyDeviceToDevice, handle->stream));
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(

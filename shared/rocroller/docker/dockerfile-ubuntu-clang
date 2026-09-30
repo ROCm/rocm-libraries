@@ -9,7 +9,8 @@
 
 # ubuntu-20.04 = focal
 # ubuntu-22.04 = jammy
-FROM mcr.microsoft.com/devcontainers/base:jammy
+# ubuntu-24.04 = noble
+FROM mcr.microsoft.com/devcontainers/base:noble
 
 ARG DEBIAN_FRONTEND=noninteractive
 

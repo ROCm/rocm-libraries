@@ -35,6 +35,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/Expression_toString.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GPUArchitecture.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GPUArchitectureLibrary.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GPUArchitectureTarget.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GPUInstructionInfo.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HIPTimer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelArguments.cpp"

@@ -4,7 +4,7 @@ TestParameters:
 GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   KernelTime: False
   DataInitTypeAlpha: 0
   DataInitTypeBeta: 2
@@ -36,7 +36,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
         # - EdgeType: ["ShiftPtr"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - MatrixInstruction:
           # - [32, 32, 2, 1, 1, 2,2, 2,2]
@@ -84,7 +84,7 @@ BenchmarkProblems:
         # - EdgeType: ["Branch", "ShiftPtr"]
         # - EdgeType: ["ShiftPtr"]
         # - MIArchVgpr: [0, 1]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - StoreVectorWidth: [4]
         # - StoreVectorWidth: [1]
         # - NumElementsPerBatchStore: [0, 2, 4, 8]

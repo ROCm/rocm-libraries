@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1529,9 +1529,9 @@ void testing_sparse_to_sparse_extra(const Arguments& arg)
     hcsc_gold.ind = {0, 1, 3, 1, 1, 2, 1, 2, 3};
     hcsc_gold.val = {1, 1, 1, 2, 3, 3, 4, 4, 5};
 
-    unit_check_garray(rocsparse_indextype_i32, n + 1, hcsc_solution.ptr, hcsc_gold.ptr);
-    unit_check_garray(rocsparse_indextype_i32, nnz, hcsc_solution.ind, hcsc_gold.ind);
-    unit_check_garray(rocsparse_datatype_f32_r, nnz, hcsc_solution.val, hcsc_gold.val);
+    unit_check_segments<int>(n + 1, hcsc_solution.ptr, hcsc_gold.ptr);
+    unit_check_segments<int>(nnz, hcsc_solution.ind, hcsc_gold.ind);
+    unit_check_segments<float>(nnz, hcsc_solution.val, hcsc_gold.val);
 
     CHECK_ROCSPARSE_ERROR(rocsparse_destroy_spmat_descr(source));
     CHECK_ROCSPARSE_ERROR(rocsparse_destroy_spmat_descr(target));

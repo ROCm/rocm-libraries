@@ -111,8 +111,7 @@ inline std::size_t get_data_size(miopenIndexType_t index_type)
 
 inline std::size_t get_index_max(miopenIndexType_t index_type)
 {
-    // Basically, constants defined in cl.h, like CL_UCHAR_MAX, shall be used here.
-    //    However, these are not available for HIP backend.
+    // Maximum values for each index type.
     switch(index_type)
     {
     case miopenIndexUint8: {
@@ -157,7 +156,9 @@ inline KernelBuildParameters GetDataTypeKBP(miopenDataType_t type)
     case miopenDouble: use_fp64 = 1; break;
     case miopenFloat8_fnuz: use_fp8 = 1; break;
     case miopenBFloat8_fnuz: use_bfp8 = 1; break;
-    default: MIOPEN_THROW("Unsupported data type."); break;
+
+    // explicitly unsupported
+    case miopenInt64: MIOPEN_THROW("Unsupported data type."); break;
     }
 
     auto kbp = KernelBuildParameters{
@@ -183,7 +184,7 @@ inline KernelBuildParameters GetDataTypeKBP(miopenDataType_t type)
 
 inline std::string GetDataTypeKernelParams(miopenDataType_t type)
 {
-    return " " + GetDataTypeKBP(type).GenerateFor(kbp::OpenCL{});
+    return " " + GetDataTypeKBP(type).GenerateFor(kbp::HIP{});
 }
 
 } // namespace miopen

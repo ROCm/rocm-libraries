@@ -1,0 +1,79 @@
+# serializer version: 1
+# name: test_parse_library_logic_data_custom_kernel
+  dict({
+    'architecture': 'gfx942',
+    'exact_logic_len': 1,
+    'n_bias_types': 2,
+    'n_solutions': 1,
+    'operationType': 'GEMM',
+    'schedule': 'aquavanjaram',
+    'type_mismatches': list([
+    ]),
+  })
+# ---
+# name: test_parse_library_logic_data_dict_path
+  dict({
+    'architecture': 'gfx942',
+    'exact_logic_len': 1,
+    'n_bias_types': 2,
+    'n_solutions': 1,
+    'operationType': 'GEMM',
+    'schedule': 'aquavanjaram',
+    'type_mismatches': list([
+    ]),
+  })
+# ---
+# name: test_parse_library_logic_data_no_cucount_with_datatypes
+  dict({
+    'architecture': 'gfx942',
+    'exact_logic_len': 1,
+    'n_bias_types': 2,
+    'n_solutions': 1,
+    'operationType': 'GEMM',
+    'schedule': 'aquavanjaram',
+    'type_mismatches': list([
+    ]),
+  })
+# ---
+# name: test_parse_library_logic_data_version_warning
+  dict({
+    'architecture': 'gfx942',
+    'exact_logic_len': 1,
+    'n_bias_types': 2,
+    'n_solutions': 1,
+    'operationType': 'GEMM',
+    'schedule': 'aquavanjaram',
+    'type_mismatches': list([
+    ]),
+  })
+# ---
+# name: test_parse_library_logic_file
+  dict({
+    'architecture': 'gfx942',
+    'exact_logic_len': 1,
+    'n_bias_types': 2,
+    'n_solutions': 1,
+    'operationType': 'GEMM',
+    'schedule': 'aquavanjaram',
+    'type_mismatches': list([
+    ]),
+  })
+# ---
+# name: test_parse_solutions_data_version_warning
+  dict({
+    'n_solutions': 1,
+    'problem_sizes_type': 'ProblemSizes',
+  })
+# ---
+# name: test_parse_solutions_data_with_bias_activation
+  dict({
+    'n_solutions': 1,
+    'problem_sizes_type': 'ProblemSizes',
+  })
+# ---
+# name: test_parse_solutions_file_roundtrip
+  dict({
+    'n_solutions': 1,
+    'problem_sizes_type': 'ProblemSizes',
+  })
+# ---

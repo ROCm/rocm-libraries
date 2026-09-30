@@ -13,7 +13,6 @@ GlobalParameters:
   MaxWorkspaceSize: 13421772800
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
-  NumElementsToValidate: -1
   BoundsCheck: 2
 
 BenchmarkProblems:
@@ -27,8 +26,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       UseBias: 1
@@ -65,11 +64,11 @@ BenchmarkProblems:
         - WaveSeparateGlobalReadB: [0,1,2]
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreRemapVectorWidth: [0]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [16]
         - ClusterLocalRead: [1]
         - UnrollLoopSwapGlobalReadOrder: [1]
@@ -105,8 +104,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
       UseBias: 1
@@ -142,11 +141,11 @@ BenchmarkProblems:
         - WaveSeparateGlobalReadB: [2]
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreRemapVectorWidth: [0]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [0]
         - ClusterLocalRead: [1]
         - UnrollLoopSwapGlobalReadOrder: [1]
@@ -182,8 +181,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: True
+      TransposeB: True
       UseBeta: True
       Batched: True
       UseBias: 1
@@ -220,11 +219,11 @@ BenchmarkProblems:
         - WorkGroupMappingXCC: [8]
         - WorkGroupMappingXCCGroup: [304]
         - 1LDSBuffer: [-1]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [0.5]
         - StoreRemapVectorWidth: [0]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [8]
         - ClusterLocalRead: [1]
         - NonTemporalD: [0]
@@ -248,8 +247,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
       UseBias: 1
@@ -284,11 +283,11 @@ BenchmarkProblems:
         - WorkGroupMappingXCC: [1]
         - WorkGroupMappingXCCGroup: [304]
         - 1LDSBuffer: [-1]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [0.5]
         - StoreRemapVectorWidth: [0]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [16]
         - ClusterLocalRead: [1]
         - NonTemporalD: [0]

@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,6 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#include "exceptions.hpp"
 #include "roclapack_sygst_hegst.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -39,6 +40,7 @@ rocblas_status rocsolver_sygst_hegst_batched_impl(rocblas_handle handle,
                                                   U B,
                                                   const rocblas_int ldb,
                                                   const rocblas_int batch_count)
+try
 {
     const char* name = (!rocblas_is_complex<T> ? "sygst_batched" : "hegst_batched");
     ROCSOLVER_ENTER_TOP(name, "--itype", itype, "--uplo", uplo, "-n", n, "--lda", lda, "--ldb", ldb,
@@ -98,6 +100,10 @@ rocblas_status rocsolver_sygst_hegst_batched_impl(rocblas_handle handle,
     return rocsolver_sygst_hegst_template<true, false, T, S>(
         handle, itype, uplo, n, A, shiftA, lda, strideA, B, shiftB, ldb, strideB, batch_count,
         (T*)scalars, work_x_temp, workArr_temp_arr, store_invA, invA_arr, optim_mem);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

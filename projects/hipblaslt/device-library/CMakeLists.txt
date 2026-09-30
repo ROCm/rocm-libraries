@@ -1,6 +1,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+include(hipblaslt_codegen)
+
 set(TENSILELITE_BUILD_PARALLEL_LEVEL "" CACHE STRING "Number of CPU cores to use for building device libraries (will use nproc if unset).")
 set(TENSILELITE_KEEP_BUILD_TMP OFF CACHE STRING "Keep temporary build directory for device libraries (turning this ON  bloat the build size).")
 set(TENSILELITE_ASM_DEBUG "" CACHE STRING "Keep debug information for built code objects.")
@@ -9,108 +11,122 @@ set(TENSILELITE_NO_COMPRESS "" CACHE STRING "Do not compress device code object 
 set(TENSILELITE_EXPERIMENTAL "" CACHE STRING "Process experimental logic files.")
 set(TENSILELITE_ENABLE_ASM_COMMENTS OFF CACHE STRING "Turn on asm comments when building gemm libraries.")
 set(TENSILELITE_OFFLOADBUNDLER "" CACHE STRING "Path to clang-offload-bundler.")
+mark_as_advanced(
+    TENSILELITE_BUILD_PARALLEL_LEVEL
+    TENSILELITE_KEEP_BUILD_TMP
+    TENSILELITE_ASM_DEBUG
+    TENSILELITE_LOGIC_FILTER
+    TENSILELITE_NO_COMPRESS
+    TENSILELITE_EXPERIMENTAL
+    TENSILELITE_ENABLE_ASM_COMMENTS
+    TENSILELITE_OFFLOADBUNDLER
+)
 
 set(HIPBLASLT_LIBLOGIC_PATH "" CACHE STRING "Path to library logic files (will use 'library' if unset).")
 set(HIPBLASLT_TENSILE_LIBPATH "${hipblaslt_BINARY_DIR}/Tensile" CACHE STRING "Path to output the device gemm libraries.")
-file(MAKE_DIRECTORY "${HIPBLASLT_TENSILE_LIBPATH}/library")
 
-list(JOIN GPU_TARGETS "$<SEMICOLON>" TENSILELITE_GPU_TARGETS_SEMI_ESCAPED)
+set(HIPBLASLT_ASIC_REVISION "" CACHE STRING "gfx1250 ASIC revisions to build ('' = both v0 and v1, 'v1' = v1 only, 'v0' = v0 only).")
 
-set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--architecture=${TENSILELITE_GPU_TARGETS_SEMI_ESCAPED}")
-set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--cxx-compiler=${CMAKE_CXX_COMPILER}")
-if(TENSILELITE_OFFLOADBUNDLER)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--offload-bundler=${TENSILELITE_OFFLOADBUNDLER}")
+# This policy belongs to the caller that owns the logic corpus, not to the
+# gfx1250v0 architecture name itself. hipSPARSELt reuses this device-library
+# CMakeLists with a corpus that deliberately has no v0 overlay, while
+# hipBLASLt's own corpus must retain one. The embedding hipSPARSELt CMakeLists
+# overrides this to OFF before adding hipBLASLt as a subdirectory.
+if(NOT DEFINED HIPBLASLT_REQUIRE_GFX1250V0_OVERLAY)
+    set(HIPBLASLT_REQUIRE_GFX1250V0_OVERLAY ON)
 endif()
-if(HIPBLASLT_ENABLE_ASAN)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--address-sanitizer")
-endif()
-if(TENSILELITE_BUILD_PARALLEL_LEVEL)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--jobs=${TENSILELITE_BUILD_PARALLEL_LEVEL}")
-endif()
-if(TENSILELITE_KEEP_BUILD_TMP)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--keep-build-tmp")
-endif()
-if(TENSILELITE_ASM_DEBUG)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--asm-debug")
-endif()
-if(HIPBLASLT_ENABLE_YAML)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--library-format=yaml")
-endif()
-if(TENSILELITE_LOGIC_FILTER)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--logic-filter=${TENSILELITE_LOGIC_FILTER}")
-endif()
-if(TENSILELITE_NO_COMPRESS)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--no-compress")
-endif()
-if(TENSILELITE_EXPERIMENTAL)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--experimental")
-endif()
-if(NOT HIPBLASLT_ENABLE_LAZY_LOAD)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--no-lazy-library-loading")
-endif()
-if(NOT TENSILELITE_ENABLE_ASM_COMMENTS)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--disable-asm-comments")
+
+# Reject an unrecognized value rather than silently building the wrong revisions.
+if(NOT HIPBLASLT_ASIC_REVISION MATCHES "^(v0|v1)?$")
+    message(FATAL_ERROR "HIPBLASLT_ASIC_REVISION must be '', 'v0' or 'v1', got '${HIPBLASLT_ASIC_REVISION}'")
 endif()
 
 if(NOT HIPBLASLT_LIBLOGIC_PATH)
     set(HIPBLASLT_LIBLOGIC_PATH "${hipblaslt_SOURCE_DIR}/library")
 endif()
+if(NOT HIPBLASLT_CODEGEN_ROOT)
+    set(HIPBLASLT_CODEGEN_ROOT "${hipblaslt_SOURCE_DIR}/tensilelite")
+endif()
 
-# Pre-build gate: validate all library logic YAMLs (WorkGroup, MatrixInstruction,
-# WorkGroupMappingXCC vs CU count, etc.) before generating .dat files. Fails build
-# if any solution fails validation so bad logic is never compiled.
-set(HIPBLASLT_TENSILELOGIC_KNOWN_BUGS
-    "${hipblaslt_SOURCE_DIR}/tensilelite/Tensile/TensileLogic/known_bugs.yaml"
-)
-# Stamp DEPENDS include known_bugs.yaml but not every library logic YAML (thousands
-# of files; CONFIGURE_DEPENDS globs are costly). After editing logic only, run
-# scripts/run_tensile_logic_check.py or touch the stamp input to force re-validation.
-set(TENSILELOGIC_STAMP "${CMAKE_CURRENT_BINARY_DIR}/TensileLogic.stamp")
-add_custom_command(
-    OUTPUT "${TENSILELOGIC_STAMP}"
-    COMMENT "Validating library logic (TensileLogic --check-all) ..."
-    COMMAND ${HIPBLASLT_PYTHON_COMMAND}
-        "${hipblaslt_SOURCE_DIR}/tensilelite/Tensile/bin/TensileLogic"
-        "${HIPBLASLT_LIBLOGIC_PATH}"
-        --known-bugs
-        "${HIPBLASLT_TENSILELOGIC_KNOWN_BUGS}"
-        --check-all
-    COMMAND ${CMAKE_COMMAND} -E touch "${TENSILELOGIC_STAMP}"
-    DEPENDS ${HIPBLASLT_PYTHON_DEPS} "${HIPBLASLT_TENSILELOGIC_KNOWN_BUGS}"
-    VERBATIM
-    USES_TERMINAL
+set(_codegen_host_sanitizer_args "")
+if(HIPBLASLT_ENABLE_ASAN
+        OR THEROCK_SANITIZER STREQUAL "ASAN"
+        OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+    list(APPEND _codegen_host_sanitizer_args HOST_ASAN)
+elseif(HIPBLASLT_ENABLE_TSAN OR THEROCK_SANITIZER STREQUAL "TSAN")
+    list(APPEND _codegen_host_sanitizer_args HOST_TSAN)
+endif()
+
+set(_codegen_product_args "")
+if(HIPBLASLT_ENABLE_ASAN)
+    list(APPEND _codegen_product_args ASAN "${HIPBLASLT_ENABLE_ASAN}")
+endif()
+if(HIPBLASLT_ENABLE_YAML)
+    list(APPEND _codegen_product_args YAML_FORMAT "${HIPBLASLT_ENABLE_YAML}")
+endif()
+if(NOT DEFINED HIPBLASLT_ENABLE_LAZY_LOAD OR NOT HIPBLASLT_ENABLE_LAZY_LOAD)
+    list(APPEND _codegen_product_args LAZY_LOAD "${HIPBLASLT_ENABLE_LAZY_LOAD}")
+endif()
+if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION)
+    list(APPEND _codegen_product_args GEMM_A2A_FUSION "${HIPBLASLT_ENABLE_GEMM_A2A_FUSION}")
+endif()
+
+# gfx1250's two ASIC revisions (v0/v1) need different tuned kernels; the runtime
+# picks library/gfx1250/ (v1) vs library/gfx1250v0/ by asicRevision. The default
+# builds both (v1 here, v0 by the second command below); HIPBLASLT_ASIC_REVISION
+# only prunes which. GPU_TARGETS is untouched (it also feeds extops/transform/
+# validation on the base name); only the bare gfx1250 reaches here.
+set(_main_arches ${GPU_TARGETS})
+set(_build_gfx1250v0 OFF)
+set(_main_requires_gfx1250v0_overlay OFF)
+if("gfx1250" IN_LIST GPU_TARGETS)
+    if(HIPBLASLT_ASIC_REVISION STREQUAL "v0")
+        list(TRANSFORM _main_arches REPLACE "^gfx1250$" "gfx1250v0")  # v0 in place of v1
+        set(_main_requires_gfx1250v0_overlay ${HIPBLASLT_REQUIRE_GFX1250V0_OVERLAY})
+        message(STATUS "hipBLASLt: gfx1250 ASIC revision v0 only")
+    elseif(HIPBLASLT_ASIC_REVISION STREQUAL "v1")
+        message(STATUS "hipBLASLt: gfx1250 ASIC revision v1 only")
+    else()
+        set(_build_gfx1250v0 ON)  # both
+        message(STATUS "hipBLASLt: gfx1250 ASIC revisions v0 and v1 (runtime selects by asicRevision)")
+    endif()
+elseif(HIPBLASLT_ASIC_REVISION STREQUAL "v0")
+    message(WARNING "HIPBLASLT_ASIC_REVISION=v0 but GPU_TARGETS names no gfx1250 "
+                    "(${GPU_TARGETS}); nothing in this build is for the v0 revision.")
+endif()
+
+create_device_library(
+    LOGIC_PATH "${HIPBLASLT_LIBLOGIC_PATH}"
+    OUTPUT_DIR "${HIPBLASLT_TENSILE_LIBPATH}"
+    ARCHES ${_main_arches}
+    REQUIRE_GFX1250V0_OVERLAY ${_main_requires_gfx1250v0_overlay}
+    ${_codegen_host_sanitizer_args}
+    ${_codegen_product_args}
 )
 
-set(output_stamp "${CMAKE_CURRENT_BINARY_DIR}/Tensile.stamp")
-set(TENSILE_CREATE_LIBRARY_COMMAND
-    ${HIPBLASLT_PYTHON_COMMAND} -m Tensile.TensileCreateLibrary
-    ${TENSILELITE_BUILD_OPTS}
-    ${HIPBLASLT_LIBLOGIC_PATH}
-    "${HIPBLASLT_TENSILE_LIBPATH}"
-    HIP
-)
+if(_build_gfx1250v0)
+    # Needs its own OUTPUT_DIR: the two runs share a compiler target and each
+    # writes Kernels.cpp + a build_tmp tree under its output dir (reusing a .o
+    # that is already there), so a shared dir would serialize them or cross-reuse
+    # objects. Installed by the top-level CMakeLists.txt via the property below.
+    set(_gfx1250v0_output_dir "${HIPBLASLT_TENSILE_LIBPATH}-gfx1250v0")
+    file(MAKE_DIRECTORY "${_gfx1250v0_output_dir}/library/gfx1250v0")
+    set_property(GLOBAL PROPERTY HIPBLASLT_GFX1250V0_LIBRARY_DIR
+                 "${_gfx1250v0_output_dir}/library/gfx1250v0")
 
-add_custom_command(
-    OUTPUT "${output_stamp}"
-    COMMENT "Building device libraries to ${HIPBLASLT_TENSILE_LIBPATH} ..."
-    COMMAND ${TENSILE_CREATE_LIBRARY_COMMAND}
-    COMMAND ${CMAKE_COMMAND} -E touch "${output_stamp}"
-    DEPENDS ${HIPBLASLT_PYTHON_DEPS} "${TENSILELOGIC_STAMP}"
-    # Because the command can contain special characters
-    VERBATIM
-    # Because this can be very long running and difficult to debug deadlocks
-    # without streaming.
-    USES_TERMINAL
-)
-
-block(SCOPE_FOR VARIABLES)
-    list(JOIN TENSILE_CREATE_LIBRARY_COMMAND " " FORMATTED_TCL)
-    message(STATUS "Device lib build command: ${FORMATTED_TCL}")
-endblock()
-
-add_custom_target(tensilelite-device-libraries ALL
-    DEPENDS "${output_stamp}"
-)
+    create_device_library(
+        TARGET tensilelite-device-libraries-gfx1250v0
+        LOGIC_PATH "${HIPBLASLT_LIBLOGIC_PATH}"
+        OUTPUT_DIR "${_gfx1250v0_output_dir}"
+        ARCHES gfx1250v0
+        # hipBLASLt owns the gfx1250/gfx1250v0 split for its own corpus, but
+        # hipSPARSELt reuses this CMakeLists with a no-split corpus. Let the
+        # embedding caller choose whether this target requires the directory.
+        REQUIRE_GFX1250V0_OVERLAY ${HIPBLASLT_REQUIRE_GFX1250V0_OVERLAY}
+        ${_codegen_host_sanitizer_args}
+        ${_codegen_product_args}
+    )
+endif()
 
 if(HIPBLASLT_ENABLE_EXTOPS)
     add_subdirectory(extops)

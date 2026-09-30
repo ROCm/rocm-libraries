@@ -4,10 +4,19 @@
 set(GEMM_UNIVERSAL_DATATYPE "fp8;fp16" CACHE STRING "List of datatypes for GEMM Universal (semicolon-separated)")
 set(GEMM_UNIVERSAL_LAYOUT "rcr;rrr;crr;ccr" CACHE STRING "List of layout for GEMM Universal (semicolon-separated)")
 set(GEMM_UNIVERSAL_CONFIG_FILE "" CACHE STRING "Custom config file name (without path, must be in configs/ folder)")
+set(GEMM_UNIVERSAL_MAX_INSTANCES "" CACHE STRING "Max kernel instances per (dtype, layout) combo (empty = no cap)")
 option(ENABLE_CCACHE_GEMM_UNIVERSAL "Enable ccache for GEMM Universal ops compilation" OFF)
 
 # Store the directory path for use in functions
 set(GEMM_UNIVERSAL_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR})
+
+# Sweep config JSONs live at the op root (shared single source of truth with
+# the dispatcher GEMM bridge). Old-TE reads the same files the bridge sweeps.
+set(GEMM_UNIVERSAL_CONFIG_DIR "${CMAKE_CURRENT_LIST_DIR}/../configs"
+    CACHE PATH "Directory holding gemm sweep config JSONs")
+
+# Trait-string splitter that understands multi-token pipelines (comp_tdm_v2)
+include(${CMAKE_CURRENT_LIST_DIR}/../gemm_trait_parse.cmake)
 
 # Function to create individual GEMM Universal targets
 function(create_individual_gemm_universal_target datatype layout trait tile_config config_json)
@@ -101,10 +110,7 @@ function(create_individual_gemm_universal_target datatype layout trait tile_conf
     add_dependencies(benchmark_gemm_universal_${datatype}_${layout} ${target_name})
 
     # Add to trait-specific targets
-    string(REPLACE "_" ";" trait_parts ${trait})
-    list(GET trait_parts 0 pipeline)
-    list(GET trait_parts 1 epilogue)
-    list(GET trait_parts 2 scheduler)
+    ck_tile_gemm_split_trait("${trait}" pipeline epilogue scheduler)
 
     add_dependencies(benchmark_gemm_universal_${pipeline}_pipeline ${target_name})
     add_dependencies(benchmark_gemm_universal_${epilogue}_epilogue ${target_name})
@@ -124,15 +130,19 @@ function(build_individual_gemm_universal_targets datatype layout)
     # Check environment variable first
     if(DEFINED ENV{GEMM_UNIVERSAL_CONFIG_FILE} AND NOT "$ENV{GEMM_UNIVERSAL_CONFIG_FILE}" STREQUAL "")
         set(config_filename "$ENV{GEMM_UNIVERSAL_CONFIG_FILE}")
-        set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/${config_filename}")
+        set(json_blob "${GEMM_UNIVERSAL_CONFIG_DIR}/${config_filename}")
         message(VERBOSE "  Using config from environment variable: ${config_filename}")
     elseif(NOT "${GEMM_UNIVERSAL_CONFIG_FILE}" STREQUAL "")
         # Use CMake variable if set
-        set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/${GEMM_UNIVERSAL_CONFIG_FILE}")
+        set(json_blob "${GEMM_UNIVERSAL_CONFIG_DIR}/${GEMM_UNIVERSAL_CONFIG_FILE}")
         message(VERBOSE "  Using custom config: ${GEMM_UNIVERSAL_CONFIG_FILE}")
+    elseif(GEMM_UNIVERSAL_GPU_TARGETS_INDIVIDUAL MATCHES "gfx1250")
+        # gfx1250 (WMMA) has its own warp-tile set and the TDM/async pipelines
+        set(json_blob "${GEMM_UNIVERSAL_SOURCE_DIR}/configs/default_config_gfx1250.json")
+        message(VERBOSE "  Using gfx1250 default config for layout ${layout}")
     else()
         # Use default config for all layouts
-        set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/default_config.json")
+        set(json_blob "${GEMM_UNIVERSAL_CONFIG_DIR}/default_config.json")
         message(VERBOSE "  Using default config for layout ${layout}")
     endif()
 
@@ -171,6 +181,19 @@ function(build_individual_gemm_universal_targets datatype layout)
                 --gpu_target ${GEMM_UNIVERSAL_GPU_TARGETS_INDIVIDUAL}
                 --list_kernels ")
 
+    # Build optional args for instance builder
+    set(extra_list_args "")
+    if(NOT "${GEMM_UNIVERSAL_MAX_INSTANCES}" STREQUAL "")
+        list(APPEND extra_list_args --max-instances ${GEMM_UNIVERSAL_MAX_INSTANCES})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_TIER}" STREQUAL "")
+        list(APPEND extra_list_args --tier ${TILE_ENGINE_SAMPLING_TIER})
+        list(APPEND extra_list_args --manifest-path ${working_path})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_SEED}" STREQUAL "")
+        list(APPEND extra_list_args --seed ${TILE_ENGINE_SAMPLING_SEED})
+    endif()
+
     # First, just list the kernels (fast operation)
     message(VERBOSE "  Listing kernel configurations...")
     execute_process(
@@ -180,7 +203,8 @@ function(build_individual_gemm_universal_targets datatype layout)
                 --layout ${layout}
                 --config_json ${json_blob}
                 --gpu_target ${GEMM_UNIVERSAL_GPU_TARGETS_INDIVIDUAL}
-                --list_kernels  
+                --list_kernels
+                ${extra_list_args}
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         RESULT_VARIABLE ret
         OUTPUT_VARIABLE list_output
@@ -235,9 +259,30 @@ foreach(target IN LISTS SUPPORTED_GPU_TARGETS)
     endif()
 endforeach()
 
+# gfx1250 uses a different config (WMMA warp tiles, TDM/async pipelines) and a
+# single --gpu_target per kernel, so it is only built when it is the sole
+# matching target. In a mixed target list it is skipped and the other targets
+# are configured exactly as before.
+set(_GEMM_UNIVERSAL_GFX1250_TARGETS "")
+foreach(target IN LISTS SUPPORTED_GPU_TARGETS)
+    if(target MATCHES "^gfx1250(:|$)")
+        list(APPEND _GEMM_UNIVERSAL_GFX1250_TARGETS ${target})
+    endif()
+endforeach()
+list(REMOVE_DUPLICATES _GEMM_UNIVERSAL_GFX1250_TARGETS)
+list(LENGTH _GEMM_UNIVERSAL_GFX1250_TARGETS _gu_n_gfx1250)
+if(_gu_n_gfx1250 GREATER 0)
+    if(NOT GEMM_UNIVERSAL_GPU_TARGETS_INDIVIDUAL AND _gu_n_gfx1250 EQUAL 1)
+        set(GEMM_UNIVERSAL_GPU_TARGETS_INDIVIDUAL ${_GEMM_UNIVERSAL_GFX1250_TARGETS})
+        message(VERBOSE "  Adding GPU target: ${_GEMM_UNIVERSAL_GFX1250_TARGETS}")
+    else()
+        message(WARNING "Skipping gfx1250 for Tile Engine GEMM Universal: gfx1250 must be the only GPU target (found ${SUPPORTED_GPU_TARGETS})")
+    endif()
+endif()
+
 # Skip build if no matching targets found
 if(NOT GEMM_UNIVERSAL_GPU_TARGETS_INDIVIDUAL)
-    message(WARNING "Skipping Tile Engine GEMM Universal build: No supported GPU targets (gfx90a, gfx942, gfx950, gfx1201, gfx12-generic) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
+    message(WARNING "Skipping Tile Engine GEMM Universal build: No supported GPU targets (gfx90a, gfx942, gfx950, gfx1201, gfx12-generic, gfx1250) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
 else()
     message(VERBOSE "Building individual GEMM Universal targets for GPU targets: ${GEMM_UNIVERSAL_GPU_TARGETS_INDIVIDUAL}")
 
@@ -287,6 +332,12 @@ else()
     set(GEMM_UNIVERSAL_PIPELINES "mem;compv3;compv4")
     set(GEMM_UNIVERSAL_EPILOGUES "default;cshuffle")
     set(GEMM_UNIVERSAL_SCHEDULERS "intrawave;interwave")
+    if(GEMM_UNIVERSAL_GPU_TARGETS_INDIVIDUAL MATCHES "gfx1250")
+        # gfx1250 pipelines: non-MX comp_async (cshuffle epilogue) and the TDM
+        # pipelines comp_tdm / comp_tdm_v2 (tdm epilogue)
+        list(APPEND GEMM_UNIVERSAL_PIPELINES "comp_async;comp_tdm;comp_tdm_v2")
+        list(APPEND GEMM_UNIVERSAL_EPILOGUES "tdm")
+    endif()
 
     foreach(pipeline IN LISTS GEMM_UNIVERSAL_PIPELINES)
         add_custom_target(benchmark_gemm_universal_${pipeline}_pipeline)
@@ -299,6 +350,20 @@ else()
     foreach(scheduler IN LISTS GEMM_UNIVERSAL_SCHEDULERS)
         add_custom_target(benchmark_gemm_universal_${scheduler}_scheduler)
     endforeach()
+
+    # Divide MAX_INSTANCES budget across all active (dtype, layout) combos so that
+    # sampling fires per-combo rather than being a single cap larger than any combo's
+    # feasible set (which would make sampling a no-op for most combos).
+    if(NOT "${GEMM_UNIVERSAL_MAX_INSTANCES}" STREQUAL "")
+        list(LENGTH GEMM_UNIVERSAL_DATATYPE _gu_n_dt)
+        list(LENGTH GEMM_UNIVERSAL_LAYOUT _gu_n_lay)
+        math(EXPR _gu_n_combos "${_gu_n_dt} * ${_gu_n_lay}")
+        if(_gu_n_combos GREATER 0)
+            math(EXPR GEMM_UNIVERSAL_MAX_INSTANCES
+                "${GEMM_UNIVERSAL_MAX_INSTANCES} / ${_gu_n_combos}")
+            message(STATUS "  gemm_universal: per-combo budget = ${GEMM_UNIVERSAL_MAX_INSTANCES} (${_gu_n_combos} combos)")
+        endif()
+    endif()
 
     # Build individual targets for each datatype/layout combination
     foreach(dt IN LISTS GEMM_UNIVERSAL_DATATYPE)

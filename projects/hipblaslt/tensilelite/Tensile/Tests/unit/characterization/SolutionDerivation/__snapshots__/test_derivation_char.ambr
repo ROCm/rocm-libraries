@@ -1,0 +1,88 @@
+# serializer version: 1
+# name: test_assign_derived_parameters_rerun
+  dict({
+    'AssignedDerivedParameters': True,
+    'DepthU': 32,
+    'EnableF32XdlMathOp': False,
+    'MacroTile0': 32,
+    'MacroTile1': 32,
+    'MaxLDS': 65536,
+    'NumThreads': 256,
+    'UseF32XEmulation': False,
+    'Valid': True,
+    'WavefrontSize': 64,
+  })
+# ---
+# name: test_assign_problem_independent_rerun
+  dict({
+    'MacroTile0': 32,
+    'MacroTile1': 32,
+    'NumThreads': 256,
+    'SubGroup0': 8,
+    'SubGroup1': 32,
+    'ThreadTile0': 4,
+    'ThreadTile1': 1,
+    'Valid': True,
+    '_ScheduleIterAlg': 3,
+  })
+# ---
+# name: test_dtl_doable_real_state[A]
+  dict({
+    'result': False,
+  })
+# ---
+# name: test_dtl_doable_real_state[B]
+  dict({
+    'result': False,
+  })
+# ---
+# name: test_dtv_doable_real_state[A]
+  dict({
+    'result': False,
+  })
+# ---
+# name: test_dtv_doable_real_state[B]
+  dict({
+    'result': False,
+  })
+# ---
+# name: test_mi_output_info_f64
+  tuple(
+    1,
+    2,
+  )
+# ---
+# name: test_mi_output_info_real_isa
+  tuple(
+    4,
+    1,
+  )
+# ---
+# name: test_set_grvw_invalid_grvw_non_subtile
+  dict({
+    'grvw': 3,
+    'numloads': 2,
+    'rv': False,
+  })
+# ---
+# name: test_set_grvw_invalid_grvw_subtile_bypass
+  dict({
+    'grvw': 3,
+    'rv': True,
+  })
+# ---
+# name: test_set_grvw_totalvectors_not_multiple
+  dict({
+    'rv': False,
+  })
+# ---
+# name: test_set_grvw_valid
+  dict({
+    'grvw': 4,
+    'numloads': 2,
+    'rv': True,
+  })
+# ---
+# name: test_vgpr_lrpacking_result_for_real_state
+  True
+# ---

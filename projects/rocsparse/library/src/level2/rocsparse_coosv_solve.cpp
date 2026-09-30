@@ -84,7 +84,6 @@ rocsparse_status rocsparse::coosv_solve(rocsparse_handle            handle, // 0
     const int64_t csr_row_ptr_stride = (A->offsets_batch_stride == 0) ? 0 : (A->rows + 1);
 
     _rocsparse_spmat_descr csr(rocsparse_format_csr,
-                               A->analysed,
                                A->batch_count,
                                A->rows,
                                A->cols,

@@ -183,26 +183,7 @@ TEST(rocfft_UnitTest, 1D_hermitian_single_small)
     {
         run_1D_hermitian_test(8);
     }
-    catch(const std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const DEVICEBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
 // test a case that's big enough that it needs multiple kernels
@@ -218,26 +199,7 @@ TEST(rocfft_UnitTest, 1D_hermitian_single_large)
     {
         run_1D_hermitian_test(8192);
     }
-    catch(const std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const DEVICEBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
 template <typename T>
@@ -408,26 +370,7 @@ TEST(rocfft_UnitTest, gpu_symmetrizer)
             EXPECT_TRUE(maxdiff < 1e-13) << maxdiff << "\n" << p.str() << "\n";
         }
     }
-    catch(const std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const DEVICEBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
 // Test that the host and device Hermitian symmetrizers produce the same results.
@@ -482,17 +425,12 @@ TEST(rocfft_UnitTest, compare_cpu_gpu_symmetrizers)
                         auto hip_status = gpu_symm_gpubuf[i].alloc(p.ibuffer_sizes()[i]);
                         if(hip_status != hipSuccess)
                         {
-                            ++n_hip_failures;
                             std::stringstream msg;
                             msg << "allocation failure for gpu buffer of " << i << " size "
                                 << p.ibuffer_sizes()[i] << "("
                                 << byte_size_to_str(p.ibuffer_sizes()[i]) << ") with code "
                                 << hipError_to_string(hip_status);
-
-                            if(skip_runtime_fails)
-                                GTEST_SKIP() << msg.str();
-                            else
-                                GTEST_FAIL() << msg.str();
+                            throw hip_runtime_error(msg.str(), hip_status);
                         }
 
                         cpu_symm_hostbuf[i].alloc(p.ibuffer_sizes()[i]);
@@ -514,17 +452,12 @@ TEST(rocfft_UnitTest, compare_cpu_gpu_symmetrizers)
                                                     hipMemcpyDeviceToHost);
                         if(hip_status != hipSuccess)
                         {
-                            ++n_hip_failures;
                             std::stringstream msg;
                             msg << "hipMemcpy failure for buffer of " << i << " size "
                                 << p.ibuffer_sizes()[i] << "("
                                 << byte_size_to_str(p.ibuffer_sizes()[i]) << ") with code "
                                 << hipError_to_string(hip_status);
-
-                            if(skip_runtime_fails)
-                                GTEST_SKIP() << msg.str();
-                            else
-                                GTEST_FAIL() << msg.str();
+                            throw hip_runtime_error(msg.str(), hip_status);
                         }
                     }
 
@@ -552,24 +485,5 @@ TEST(rocfft_UnitTest, compare_cpu_gpu_symmetrizers)
             }
         }
     }
-    catch(const std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const DEVICEBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
 }

@@ -28,6 +28,7 @@
 #include "rocblaslt-auxiliary.h"
 #include <Tensile/Serialization.hpp>
 #include <Tensile/SolutionLibrary.hpp>
+#include <Tensile/msgpack/Loading.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/msgpack/MessagePack.hpp>
 #include <algorithm>
@@ -701,28 +702,9 @@ namespace hipblaslt_ext
         {
             msgpack::object_handle handle;
 
-            std::ifstream ifs(libPath, std::ios::in | std::ios::binary);
-
-            if(!ifs.is_open())
+            if(!TensileLite::fileToMsgObject(libPath, handle))
             {
-                throw std::runtime_error("Invalid ext op lib path");
-            }
-
-            msgpack::unpacker     unpacker;
-            bool                  finished{};
-            constexpr std::size_t bufferSize = 1 << 16;
-
-            while(!finished && !ifs.fail())
-            {
-                unpacker.reserve_buffer(bufferSize);
-                ifs.read(unpacker.buffer(), bufferSize);
-                unpacker.buffer_consumed(ifs.gcount());
-                finished = unpacker.next(handle);
-            }
-
-            if(!finished)
-            {
-                throw std::runtime_error("Unexpected EOF!");
+                throw std::runtime_error("Failed to load ext op library: " + libPath);
             }
 
             msgpack::object                                  root = handle.get();

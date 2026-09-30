@@ -1,0 +1,127 @@
+{
+  "arch": "gfx942",
+  "arch_union_lines": 21900,
+  "ranked": [
+    {
+      "id": "gfx942__BBS_BH_Bias_Act_yaml",
+      "whole_project_lines": 19219,
+      "marginal_lines": 19219,
+      "kernels": 1,
+      "likely_params": [
+        "DataType(bf16)",
+        "ActivationType",
+        "Bias"
+      ]
+    },
+    {
+      "id": "gfx942__F8N_multi_yaml",
+      "whole_project_lines": 18311,
+      "marginal_lines": 1133,
+      "kernels": 4,
+      "likely_params": [
+        "DataType(fp8)",
+        "MatrixInstruction"
+      ]
+    },
+    {
+      "id": "gfx942__GG_yaml",
+      "whole_project_lines": 18194,
+      "marginal_lines": 448,
+      "kernels": 1,
+      "likely_params": [
+        "GroupedGemm",
+        "DataType"
+      ]
+    },
+    {
+      "id": "gfx942__DTV_yaml",
+      "whole_project_lines": 18150,
+      "marginal_lines": 388,
+      "kernels": 1,
+      "likely_params": [
+        "DirectToVgpr",
+        "MatrixInstruction"
+      ]
+    },
+    {
+      "id": "gfx942__LSU_MX_yaml",
+      "whole_project_lines": 18011,
+      "marginal_lines": 366,
+      "kernels": 2,
+      "likely_params": [
+        "LocalSplitU",
+        "DataType(MXFP)"
+      ]
+    },
+    {
+      "id": "gfx942__Grad_yaml",
+      "whole_project_lines": 17643,
+      "marginal_lines": 241,
+      "kernels": 1,
+      "likely_params": [
+        "Gradient",
+        "Bias"
+      ]
+    },
+    {
+      "id": "gfx942__DB_yaml",
+      "whole_project_lines": 16711,
+      "marginal_lines": 53,
+      "kernels": 2,
+      "likely_params": [
+        "DataType(fp64)",
+        "MatrixInstruction"
+      ]
+    },
+    {
+      "id": "gfx942__HSS_BH_Bias_yaml",
+      "whole_project_lines": 17951,
+      "marginal_lines": 32,
+      "kernels": 1,
+      "likely_params": [
+        "DataType(fp16in/fp32out)",
+        "Bias"
+      ]
+    },
+    {
+      "id": "gfx942__HHS_BH_Bias_GG_yaml",
+      "whole_project_lines": 18212,
+      "marginal_lines": 14,
+      "kernels": 1,
+      "likely_params": [
+        "DataType(fp16)",
+        "GroupedGemm",
+        "Bias"
+      ]
+    },
+    {
+      "id": "gfx942__MX_yaml",
+      "whole_project_lines": 17984,
+      "marginal_lines": 3,
+      "kernels": 1,
+      "likely_params": [
+        "DataType(MXFP)",
+        "MatrixInstruction"
+      ]
+    },
+    {
+      "id": "gfx942__SB_Bias_Aux_yaml",
+      "whole_project_lines": 17837,
+      "marginal_lines": 3,
+      "kernels": 1,
+      "likely_params": [
+        "Bias",
+        "Aux/ScaleAlphaVec"
+      ]
+    },
+    {
+      "id": "gfx942__GSU_yaml",
+      "whole_project_lines": 16711,
+      "marginal_lines": 0,
+      "kernels": 2,
+      "likely_params": [
+        "GlobalSplitU"
+      ]
+    }
+  ]
+}

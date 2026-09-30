@@ -1,20 +1,22 @@
 {
-    "generated_on": "27 Mar 2026, 10:51:31",
+    "generated_on": "15 Jun 2026, 02:46:58",
     "gpu": {
         "num_cu": 256,
         "arch": "gfx950"
     },
     "version_info": {
-        "miopen_version": "4d4d42e748"
+        "miopen_version": "3.5.2"
     },
     "sessions": [
-        1,
-        3
+        9,
+        11,
+        13,
+        15
     ],
-    "note": "Data merged from sessions: [1, 3]",
+    "note": "Data merged from sessions: [9, 11, 13, 15]",
     "num_inputs": 21,
     "num_solvers": 21,
-    "num_outputs": 23,
+    "num_outputs": 21,
     "encodings": {
         "in_layout": {
             "NCHW": 0,
@@ -31,7 +33,8 @@
         "precision": {
             "BF16": 0,
             "FP16": 1,
-            "FP32": 2
+            "FP32": 2,
+            "INT8": 3
         },
         "direction": {
             "B": 0,

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,7 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include <cstddef>
+#include <sstream>
 
 namespace TensileLite
 {
@@ -54,11 +55,13 @@ namespace TensileLite
             m_printTensorD             = args["print-tensor-d"].as<bool>();
             m_printTensorRef           = args["print-tensor-ref"].as<bool>();
             m_printTensorBias          = args["print-tensor-bias"].as<bool>();
+            m_printTensorGate          = args["print-tensor-gate"].as<bool>();
             m_printTensorScaleAlphaVec = args["print-tensor-scale-alpha-vec"].as<bool>();
             m_printTensorAmaxD         = args["print-tensor-amaxd"].as<bool>();
 
             m_printAny = m_printTensorA || m_printTensorB || m_printTensorC || m_printTensorD
-                         || m_printTensorRef || m_printTensorBias || m_printTensorAmaxD;
+                         || m_printTensorRef || m_printTensorBias || m_printTensorGate
+                         || m_printTensorAmaxD;
 
             m_enabled = m_elementsToValidate != 0 || m_printAny;
         }
@@ -129,18 +132,21 @@ namespace TensileLite
             m_errorInSolution   = false;
             m_executedSolution  = false;
 
-            // MXFP4 data can depend on the selected solution (e.g. MI-based preSwizzle when
-            // enabled). prepareCPUInputs runs in preProblem before preSolution, so the initial
-            // SolveCPU may not match GPU inputs refreshed in DataInitialization::preSolution.
-            // Re-run the CPU reference after that refresh (CPU "current" buffers are synced there
-            // when the MX path runs).
+            // Re-run CPU reference after DataInitialization refreshes MX inputs.
             if(!m_enabled || m_problem == nullptr || m_referenceInputs == nullptr
                || solution == nullptr)
                 return;
 
             if(auto* gemm = dynamic_cast<ContractionProblemGemm*>(m_problem))
             {
-                if(!isMXFP4Problem(*gemm))
+                // Match DataInitialization MX gate.
+                if(!isMXProblem(*gemm))
+                    return;
+                // Only recompute when DataInitialization actually refreshes MX
+                // inputs for this solution (solution-dependent HostPreSwizzle).
+                // Otherwise the preProblem reference is unchanged, so reuse it
+                // instead of paying a full dense reference GEMM per solution.
+                if(!m_dataInit->referenceNeedsPerSolutionRecompute(*gemm, solution))
                     return;
                 ScopedTimer timer("cpu_reference_gemm_per_solution");
                 SolveCPU(m_problem, m_referenceInputs.get(), m_elementsToValidate);
@@ -378,6 +384,15 @@ namespace TensileLite
             return rv;
         }
 
+        bool ReferenceValidator::shouldSkipNullTensor(const std::string& tensorName,
+                                                      bool hasNullPointer,
+                                                      bool hasZeroElements) const
+        {
+            // Only output tensors reach this function (filtered by isOutput() check)
+            // Output tensors should never have null pointers or zero elements
+            return false;
+        }
+
         bool ReferenceValidator::validate(ContractionProblemGemm const& problem,
                                           ContractionInputs const&      reference,
                                           ContractionInputs const&      result)
@@ -455,6 +470,12 @@ namespace TensileLite
                     resPtr = result.bias;
                 }
                 break;
+                case ContractionProblemGemm::TENSOR::GATE_RESIDUAL:
+                {
+                    refPtr = reference.gateResidual;
+                    resPtr = result.gateResidual;
+                }
+                break;
                 case ContractionProblemGemm::TENSOR::SCALEA:
                 {
                     refPtr = reference.scaleA;
@@ -502,26 +523,54 @@ namespace TensileLite
                     throw std::runtime_error("Unrecognized output tensor.");
                 }
 
+                TensorDescriptor const* validationTensor = &tensor;
+
                 if(Debug::Instance().printTensorInfo())
-                    std::cout << "Validating tensor " << tensor.getName() << ", cpu pointer "
-                              << refPtr << ", gpu pointer " << resPtr
+                    std::cout << "Validating tensor " << validationTensor->getName()
+                              << ", cpu pointer " << refPtr << ", gpu pointer " << resPtr
                               << ", size = " << result.maxElements[i] << std::endl;
-                
-                rv &= checkResults(
-                    tensor, refPtr, resPtr, result.maxElements[i], result.gpu, validationStride, threshold);
+
+                // Check if we should skip this tensor due to null pointers or zero elements
+                bool hasNullPointer = (resPtr == nullptr || refPtr == nullptr);
+                bool hasZeroElements = (result.maxElements[i] == 0);
+
+                if(shouldSkipNullTensor(tensor.getName(), hasNullPointer, hasZeroElements))
+                {
+                    continue;
+                }
+
+                // If we reach here with null pointers or zero elements, it's an error
+                if(hasNullPointer || hasZeroElements)
+                {
+                    std::stringstream ss;
+                    ss << "Unexpected null pointer or zero elements for tensor " << tensor.getName()
+                       << " (resPtr=" << resPtr << ", refPtr=" << refPtr
+                       << ", maxElements=" << result.maxElements[i] << ")";
+                    throw std::runtime_error(ss.str());
+                }
+
+                rv &= checkResults(*validationTensor,
+                    refPtr,
+                    resPtr,
+                    result.maxElements[i],
+                    result.gpu,
+                    validationStride,
+                    threshold);
             }
             return rv;
         }
 
         void ReferenceValidator::allocateResultBuffer(size_t bytes)
         {
-            if(m_cpuResultBufferSize == bytes)
+            // Only skip reallocation if size matches AND buffer is valid
+            if(m_cpuResultBufferSize == bytes && m_cpuResultBuffer.get() != nullptr)
                 return;
+
             m_cpuResultBuffer.reset();
 
             uint8_t* buffer;
-            HIP_CHECK_EXC(hipHostMalloc(&buffer, bytes, 0));
-            m_cpuResultBuffer.reset(buffer, hipFree);
+            HIP_CHECK_EXC(hipHostMalloc((void**)&buffer, bytes, 0));
+            m_cpuResultBuffer.reset(buffer, [](uint8_t* p) { HIP_CHECK_EXC(hipHostFree(p)); });
             m_cpuResultBufferSize = bytes;
         }
 
@@ -554,6 +603,9 @@ namespace TensileLite
             if(m_printTensorBias)
                 requiredBufferSize
                     = std::max(requiredBufferSize, problem.bias().totalAllocatedBytes());
+            if(m_printTensorGate)
+                requiredBufferSize
+                    = std::max(requiredBufferSize, problem.gateResidual().totalAllocatedBytes());
             if(m_printTensorScaleAlphaVec)
                 requiredBufferSize
                     = std::max(requiredBufferSize, problem.scaleAlphaVec().totalAllocatedBytes());
@@ -561,8 +613,7 @@ namespace TensileLite
                 requiredBufferSize
                     = std::max(requiredBufferSize, problem.amaxd().totalAllocatedBytes());
 
-            if(m_cpuResultBufferSize < requiredBufferSize)
-                allocateResultBuffer(requiredBufferSize);
+            allocateResultBuffer(requiredBufferSize);
 
             if(m_printTensorA)
             {
@@ -673,6 +724,18 @@ namespace TensileLite
                                       problem.bias(),
                                       result.bias);
             }
+            if(m_printTensorGate)
+            {
+                HIP_CHECK_EXC(hipMemcpy(m_cpuResultBuffer.get(),
+                                        result.gateResidual,
+                                        problem.gateResidual().totalAllocatedBytes(),
+                                        hipMemcpyDeviceToHost));
+                m_reporter->logTensor(LogLevel::Verbose,
+                                      "gateResidual",
+                                      m_cpuResultBuffer.get(),
+                                      problem.gateResidual(),
+                                      result.gateResidual);
+            }
             if(m_printTensorScaleAlphaVec)
             {
                 HIP_CHECK_EXC(hipMemcpy(m_cpuResultBuffer.get(),
@@ -777,26 +840,68 @@ namespace TensileLite
             size_t elementsAfterData    = 0;
 
             BoundsCheckMode boundsCheck = m_dataInit->getCurBoundsCheck();
+            // For NaN bounds checking, copy the full padded buffer from GPU for all tensors
             if(boundsCheck == BoundsCheckMode::NaN)
                 elementsToCopy = maxElement;
             size_t bytesToCopy = elementsToCopy * sizeof(ValidType);
 
-            if(m_cpuResultBufferSize < bytesToCopy)
-                allocateResultBuffer(bytesToCopy);
+            // Check if we should skip this tensor due to null pointers or no data
+            bool hasNullPointer = (result == nullptr || reference == nullptr);
+            bool hasZeroElements = (bytesToCopy == 0 || maxElement == 0);
+
+            if(shouldSkipNullTensor(tensor.getName(), hasNullPointer, hasZeroElements))
+            {
+                return true;
+            }
+
+            // If we reach here with null pointers or no data, it's an error
+            if(hasNullPointer || hasZeroElements)
+            {
+                std::stringstream ss;
+                ss << "Unexpected null pointer or no data for tensor " << tensor.getName()
+                   << " (result=" << result << ", reference=" << reference
+                   << ", bytesToCopy=" << bytesToCopy << ", maxElement=" << maxElement << ")";
+                throw std::runtime_error(ss.str());
+            }
+
+            allocateResultBuffer(bytesToCopy);
 
             auto copykind = isgpu ? hipMemcpyDeviceToHost : hipMemcpyHostToHost;
 
-            {
-                ScopedTimer timer("validate_gpu_readback");
-                HIP_CHECK_EXC(hipMemcpy(m_cpuResultBuffer.get(), result, bytesToCopy, copykind));
-            }
-
+            // For NaN bounds checking, the result pointer points to valid data (middle of buffer)
+            // We need to adjust it back to buffer start to copy the NaN padding
+            void const* copySource = result;
             if(boundsCheck == BoundsCheckMode::NaN)
             {
-                ptrdiff_t bPadding = maxElement - tensor.totalAllocatedElements();
-                elementsBeforeData = bPadding / 2;
+                // Match the EXACT allocation logic in copyBadInputBuffers:
+                // dPadding = totalElements - totalAllocatedElements()  (in elements)
+                // dPadding = multiplyElementSize(dPadding, elementBytes())  (convert to bytes)
+                // dPadding = round to multiple of (2 * ceil(max(1, elementBytes)))  (ensure alignment)
+                // dstOffset = dst + dPadding / 2  (divide bytes by 2)
+                ptrdiff_t paddingElements = maxElement - tensor.totalAllocatedElements();
+                size_t paddingBytes = multiplyElementSize(paddingElements, tensor.elementBytes());
+
+                // Ensure paddingBytes/2 is properly aligned for the element type
+                // Match the exact rounding logic from copyBadInputBuffers
+                float elementBytes = tensor.elementBytes();
+                size_t alignmentBytes = 2 * static_cast<size_t>(std::ceil(std::max(1.0f, elementBytes)));
+                paddingBytes = (paddingBytes / alignmentBytes) * alignmentBytes;
+
+                size_t bytesBeforeData = paddingBytes / 2;
+
+                copySource = (uint8_t const*)result - bytesBeforeData;
+
+                // Calculate elementsBeforeData for bounds checking display
+                // Note: for sub-byte types this may not be exact due to rounding
+                elementsBeforeData = bytesBeforeData / std::max(static_cast<size_t>(1),
+                                                                 static_cast<size_t>(tensor.elementBytes()));
                 elementsAfterData
                     = elementsToCopy - (tensor.totalAllocatedElements() + elementsBeforeData);
+            }
+
+            {
+                ScopedTimer timer("validate_gpu_readback");
+                HIP_CHECK_EXC(hipMemcpy(m_cpuResultBuffer.get(), copySource, bytesToCopy, copykind));
             }
             // If there was extra data allocated before the tensor to do bounds
             // checking, resultBuffer is the whole allocation, while resultData

@@ -44,10 +44,12 @@
 #include <iostream>
 #include <iterator>
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -330,6 +332,8 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
 
 } // namespace detail
 
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
 /// \brief Parallel reduce-by-key primitive for device level.
 ///
 /// reduce_by_key function performs a device-wide reduction operation on groups
@@ -523,9 +527,9 @@ inline hipError_t deterministic_reduce_by_key(void*                     temporar
         debug_synchronous);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_REDUCE_BY_KEY_HPP_

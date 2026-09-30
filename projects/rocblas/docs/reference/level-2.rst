@@ -85,6 +85,8 @@ The ``gemv`` functions support the ``_64`` interface. See the :ref:`ILP64 API` s
 
 ``gemv_batched`` functions have an implementation which uses atomic operations. See the :ref:`Atomic Operations` section for more information.
 The ``gemv_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
+The ``gemv_batched`` functions support ``rocblas_set_batch_alpha_stride`` and ``rocblas_set_batch_beta_stride`` when the ``rocblas_handle`` is
+in mode ``rocblas_pointer_mode_device``.
 
 .. doxygenfunction:: rocblas_sgemv_strided_batched
    :outline:
@@ -104,6 +106,8 @@ The ``gemv_batched`` functions support the ``_64`` interface. See the :ref:`ILP6
 
 ``gemv_strided_batched`` functions have an implementation which uses atomic operations. See the :ref:`Atomic Operations` section for more information.
 The ``gemv_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
+The ``gemv_strided_batched`` functions support ``rocblas_set_batch_alpha_stride`` and ``rocblas_set_batch_beta_stride`` when the ``rocblas_handle`` is
+in mode ``rocblas_pointer_mode_device``.
 
 .. _rocblas_ger:
 
@@ -136,7 +140,9 @@ The ``ger``, ``geru``, and ``gerc`` functions support the ``_64`` interface.  Se
    :outline:
 .. doxygenfunction:: rocblas_zgerc_batched
 
-The ``ger``, ``geru``, and ``gerc_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
+The ``ger_batched``, ``geru_batched``, and ``gerc_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
+The ``ger_batched``, ``geru_batched``, and ``gerc_batched`` functions support ``rocblas_set_batch_alpha_stride`` when the ``rocblas_handle`` is
+in mode ``rocblas_pointer_mode_device``.
 
 .. doxygenfunction:: rocblas_sger_strided_batched
    :outline:
@@ -150,7 +156,9 @@ The ``ger``, ``geru``, and ``gerc_batched`` functions support the ``_64`` interf
    :outline:
 .. doxygenfunction:: rocblas_zgerc_strided_batched
 
-The ``ger``, ``geru``, and ``gerc_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
+The ``ger_strided_batched``, ``geru_strided_batched``, and ``gerc_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
+The ``ger_strided_batched``, ``geru_strided_batched``, and ``gerc_strided_batched`` functions support ``rocblas_set_batch_alpha_stride`` when the ``rocblas_handle`` is
+in mode ``rocblas_pointer_mode_device``.
 
 .. _rocblas_sbmv:
 
@@ -169,6 +177,8 @@ See the :ref:`ILP64 API` section.
 .. doxygenfunction:: rocblas_dsbmv_batched
 
 The ``sbmv_batched`` functions support the ``_64`` interface. Parameters ``n`` and ``k`` larger than ``int32_t`` max value are not currently supported.
+The ``sbmv_batched`` functions support ``rocblas_set_batch_alpha_stride`` and ``rocblas_set_batch_beta_stride`` when the ``rocblas_handle`` is
+in mode ``rocblas_pointer_mode_device``.
 See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_ssbmv_strided_batched
@@ -176,6 +186,8 @@ See the :ref:`ILP64 API` section.
 .. doxygenfunction:: rocblas_dsbmv_strided_batched
 
 The ``sbmv_strided_batched`` functions support the ``_64`` interface. Parameters ``n`` and ``k`` larger than ``int32_t`` max value are not currently supported.
+The ``sbmv_strided_batched`` functions support ``rocblas_set_batch_alpha_stride`` and ``rocblas_set_batch_beta_stride`` when the ``rocblas_handle`` is
+in mode ``rocblas_pointer_mode_device``.
 See the :ref:`ILP64 API` section.
 
 .. _rocblas_spmv:
@@ -195,6 +207,8 @@ See the :ref:`ILP64 API` section.
 .. doxygenfunction:: rocblas_dspmv_batched
 
 The ``spmv_batched`` functions support the ``_64`` interface. Parameter ``n`` larger than ``int32_t`` max value is not currently supported.
+The ``spmv_batched`` functions support ``rocblas_set_batch_alpha_stride`` and ``rocblas_set_batch_beta_stride`` when the ``rocblas_handle`` is
+in mode ``rocblas_pointer_mode_device``.
 See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_sspmv_strided_batched
@@ -202,6 +216,8 @@ See the :ref:`ILP64 API` section.
 .. doxygenfunction:: rocblas_dspmv_strided_batched
 
 The ``spmv_strided_batched`` functions support the ``_64`` interface. Parameter ``n`` larger than ``int32_t`` max value is not currently supported.
+The ``spmv_strided_batched`` functions support ``rocblas_set_batch_alpha_stride`` and ``rocblas_set_batch_beta_stride`` when the ``rocblas_handle`` is
+in mode ``rocblas_pointer_mode_device``.
 See the :ref:`ILP64 API` section.
 
 .. _rocblas_spr:
@@ -293,6 +309,8 @@ See the :ref:`ILP64 API` section.
 .. doxygenfunction:: rocblas_zsymv_batched
 
 The ``symv_batched`` functions support the ``_64`` interface. Parameter ``n`` larger than ``int32_t`` max value is not currently supported.
+The ``symv_batched`` functions support ``rocblas_set_batch_alpha_stride`` and ``rocblas_set_batch_beta_stride`` when the ``rocblas_handle`` is
+in mode ``rocblas_pointer_mode_device``.
 See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_ssymv_strided_batched
@@ -304,6 +322,8 @@ See the :ref:`ILP64 API` section.
 .. doxygenfunction:: rocblas_zsymv_strided_batched
 
 The ``symv_strided_batched`` functions support the ``_64`` interface. Parameter ``n`` larger than ``int32_t`` max value is not currently supported.
+The ``symv_strided_batched`` functions support ``rocblas_set_batch_alpha_stride`` and ``rocblas_set_batch_beta_stride`` when the ``rocblas_handle`` is
+in mode ``rocblas_pointer_mode_device``.
 See the :ref:`ILP64 API` section.
 
 .. _rocblas_syr:
@@ -331,6 +351,8 @@ See the :ref:`ILP64 API` section.
 .. doxygenfunction:: rocblas_zsyr_batched
 
 The ``syr_batched`` functions support the ``_64`` interface. Parameter ``n`` larger than ``int32_t`` max value is not currently supported.
+The ``syr_batched`` functions support ``rocblas_set_batch_alpha_stride`` when the ``rocblas_handle`` is
+in mode ``rocblas_pointer_mode_device``.
 See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_ssyr_strided_batched
@@ -342,6 +364,8 @@ See the :ref:`ILP64 API` section.
 .. doxygenfunction:: rocblas_zsyr_strided_batched
 
 The ``syr_strided_batched`` functions support the ``_64`` interface. Parameter ``n`` larger than ``int32_t`` max value is not currently supported.
+The ``syr_strided_batched`` functions support ``rocblas_set_batch_alpha_stride`` when the ``rocblas_handle`` is
+in mode ``rocblas_pointer_mode_device``.
 See the :ref:`ILP64 API` section.
 
 .. _rocblas_syr2:
@@ -630,6 +654,8 @@ See the :ref:`ILP64 API` section.
 .. doxygenfunction:: rocblas_zhemv_batched
 
 The ``hemv_batched`` functions support the ``_64`` interface. Parameter ``n`` larger than ``int32_t`` max value is not currently supported.
+The ``hemv_batched`` functions support ``rocblas_set_batch_alpha_stride`` and ``rocblas_set_batch_beta_stride`` when the ``rocblas_handle`` is
+in mode ``rocblas_pointer_mode_device``.
 See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_chemv_strided_batched
@@ -637,6 +663,8 @@ See the :ref:`ILP64 API` section.
 .. doxygenfunction:: rocblas_zhemv_strided_batched
 
 The ``hemv_strided_batched`` functions support the ``_64`` interface. Parameter ``n`` larger than ``int32_t`` max value is not currently supported.
+The ``hemv_strided_batched`` functions support ``rocblas_set_batch_alpha_stride`` and ``rocblas_set_batch_beta_stride`` when the ``rocblas_handle`` is
+in mode ``rocblas_pointer_mode_device``.
 See the :ref:`ILP64 API` section.
 
 .. _rocblas_hbmv:

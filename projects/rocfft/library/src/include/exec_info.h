@@ -24,6 +24,7 @@
 #include "../../../shared/gpubuf.h"
 #include <cstddef>
 #include <hip/hip_runtime_api.h>
+#include <map>
 #include <vector>
 
 // User-specified execution info, to store details that the user can
@@ -49,7 +50,17 @@ struct rocfft_execution_info_t
     void** store_cb_fns       = nullptr;
     void** store_cb_data      = nullptr;
     size_t store_cb_lds_bytes = 0;
+
+    // Copies of user-supplied JIT callback data.  This is necessary
+    // because JIT callback data is specified using separate APIs
+    // from rocfft_execute, so the pointers above need something to
+    // point to that lives long enough.
+    std::vector<void*> load_cb_data_jit;
+    std::vector<void*> store_cb_data_jit;
 };
+
+class InternalTempBuffer;
+struct rocfft_plan_t;
 
 // Internal execution info that we create after we know which plan we
 // are executing.  Stores additional details that are only knowable
@@ -58,14 +69,9 @@ struct rocfft_execution_info_internal
 {
     // construct from a user-specified info, which must live longer
     // than this struct if specified
-    rocfft_execution_info_internal(const rocfft_execution_info_t* user_info);
+    rocfft_execution_info_internal(const rocfft_execution_info_t* user_info,
+                                   const rocfft_plan_t&           plan);
 
-    // Ensure that we have a work buffer of the specified size for
-    // the specified device.  If the user specified one that's big
-    // enough, use that.  If the user specified one that's not big
-    // enough, throw invalid work buffer exception.  Otherwise
-    // allocate one.
-    void ensure_work_buffer_size(const std::vector<size_t>& sizes_bytes_per_device);
     // Get the work buffer for the specified device.
     const gpubuf& get_work_buffer(int device) const;
 
@@ -79,12 +85,37 @@ struct rocfft_execution_info_internal
     // get user-specified stream
     hipStream_t get_user_stream(int device) const;
 
+    // Given a pointer to a plan's conceptual temp buffer, turn that
+    // into a concrete pointer to device memory.  Throws
+    // std::out_of_range if the conceptual buffer is not known and
+    // can't be mapped.
+    void* get_concrete_ptr(const InternalTempBuffer* buf) const
+    {
+        return tempBufferPtrs.at(buf);
+    }
+
 private:
+    // Ensure that we have a work buffer of the specified size for
+    // the specified device.  If the user specified one that's big
+    // enough, use that.  If the user specified one that's not big
+    // enough, throw invalid work buffer exception.  Otherwise
+    // allocate one.
+    void ensure_work_buffer_size(const std::vector<size_t>& sizes_bytes_per_device);
+
     // pointer to user-specified info - may be null if user never specified one
     const rocfft_execution_info_t* user_info = nullptr;
 
     // gpubufs that we own and allocate during execution
     std::vector<gpubuf> execWorkBuffers;
+
+    // map InternalTempBuffers from a plan to actual pointers - this
+    // map is set during rocfft_execute.
+    std::map<const InternalTempBuffer*, void*> tempBufferPtrs;
+
+    // Check that the number of JIT callback data pointers (if
+    // specified) matches the number of input/output brick pointers.
+    // Throws if there is a mismatch.
+    void validate_jit_data_ptr_count(const rocfft_plan_t& plan) const;
 };
 
 #endif

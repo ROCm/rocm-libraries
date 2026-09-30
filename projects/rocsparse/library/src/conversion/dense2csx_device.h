@@ -44,6 +44,8 @@ namespace rocsparse
                           I* __restrict__ csr_row_ptr,
                           J* __restrict__ csr_col_ind)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
         const rocsparse_int wavefront_index = hipThreadIdx_x / WF_SIZE;
         const J             lane_index      = hipThreadIdx_x & (WF_SIZE - 1);
         const uint64_t      filter          = 0xffffffffffffffff >> (63 - lane_index);
@@ -120,6 +122,8 @@ namespace rocsparse
                           I* __restrict__ csc_col_ptr,
                           J* __restrict__ csc_row_ind)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
         const rocsparse_int wavefront_index = hipThreadIdx_x / WF_SIZE;
         const J             lane_index      = hipThreadIdx_x & (WF_SIZE - 1);
         const uint64_t      filter          = 0xffffffffffffffff >> (63 - lane_index);

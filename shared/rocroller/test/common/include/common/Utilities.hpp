@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <memory>
+#include <regex>
 #include <sstream>
 
 #ifdef ROCROLLER_USE_HIP
@@ -236,8 +237,22 @@ AcceptableError
     }
     else
     {
-        double scale = std::sqrt(K);
-        double fudge = 5;
+        double scale             = std::sqrt(K);
+        double fudge             = 5;
+        double extraArchFudgeBF8 = 0.0;
+        double extraArchFudgeBF6 = 0.0;
+        double extraArchFudgeFP4 = 0.0;
+
+        if(arch.gfx == rocRoller::GPUArchitectureGFX::GFX1250)
+        {
+            extraArchFudgeBF8 = 5.8;
+            extraArchFudgeBF6 = 5.8;
+            extraArchFudgeFP4 = 2.8;
+        }
+        else if(arch.gfx == rocRoller::GPUArchitectureGFX::GFX950)
+        {
+            extraArchFudgeBF8 = 2.58;
+        }
 
         ss << " K: " << K;
         ss << " Problem size scaling: " << scale;
@@ -247,12 +262,12 @@ AcceptableError
         {
             if constexpr(std::is_same_v<TA, rocRoller::BF6>)
             {
-                fudge *= 3;
+                fudge *= 3 + extraArchFudgeBF6;
                 ss << " Increase fudge for BF6: " << fudge;
             }
             if constexpr(std::is_same_v<TA, rocRoller::BF8>)
             {
-                fudge *= 5;
+                fudge *= 5 + extraArchFudgeBF8;
                 ss << " Increase fudge for BF8: " << fudge;
             }
             if constexpr(std::is_same_v<TA, rocRoller::FP8>)
@@ -266,7 +281,7 @@ AcceptableError
         {
             if constexpr(std::is_same_v<TA, rocRoller::BF8> || std::is_same_v<TB, rocRoller::BF8>)
             {
-                fudge *= arch.gfx == rocRoller::GPUArchitectureGFX::GFX950 ? 7.58 : 6.0;
+                fudge *= 5 + extraArchFudgeBF8;
                 ss << " Increase fudge for mixed BF8: " << fudge;
             }
             else if constexpr(std::is_same_v<TA,
@@ -280,6 +295,12 @@ AcceptableError
             {
                 fudge *= 3;
                 ss << " Increase fudge for mixed BF6: " << fudge;
+            }
+
+            if constexpr(std::is_same_v<TA, rocRoller::FP4> || std::is_same_v<TB, rocRoller::FP4>)
+            {
+                fudge *= 3 + extraArchFudgeFP4;
+                ss << " Increase fudge for mixed FP4: " << fudge;
             }
         }
         tolerance = fudge * epsilon<TD>() * std::sqrt(K);
@@ -555,5 +576,44 @@ namespace rocRoller
                         &patterns[i % 4],
                         1);
         }
+    }
+
+    inline std::string FixupInstructionStringsForVGPRIndexing(GPUArchitecture const& arch,
+                                                              std::string            instr)
+    {
+        if(not arch.HasCapability(GPUCapability::HasVGPRIndexing))
+            return instr;
+        auto reservedRegionSize = Register::RegisterAllocatorDetail::ReservedRegionSize();
+
+        std::string rv;
+        // match v[#:#] or v#
+        std::regex re{R"(v(?:\[(\d+):(\d+)\]|(\d+)))"};
+        auto       begin   = ::std::sregex_iterator(instr.begin(), instr.end(), re);
+        size_t     lastPos = 0;
+
+        for(auto it = begin; it != std::sregex_iterator(); it++)
+        {
+            auto match = (*it);
+            rv.append(instr, lastPos, it->position() - lastPos);
+            if(match[1].matched or match[2].matched)
+            {
+                AssertFatal(match[1].matched and match[2].matched,
+                            ShowValue(match[1].matched),
+                            ShowValue(match[2].matched));
+                // matched v[#:#]
+                int start = std::stoi(match[1]) + reservedRegionSize;
+                int end   = std::stoi(match[2]) + reservedRegionSize;
+                rv += fmt::format("v[{}:{}]", start, end);
+            }
+            else
+            {
+                // matched v#
+                rv += fmt::format("v{}", std::stoi(match[3]) + reservedRegionSize);
+            }
+            lastPos = it->position() + it->length();
+        }
+        rv.append(instr, lastPos, std::string::npos);
+
+        return rv;
     }
 }

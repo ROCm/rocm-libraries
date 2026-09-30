@@ -46,6 +46,7 @@
 
 #include "HipdnnBackendAttributeName.h"
 #include "HipdnnBackendAttributeType.h"
+#include "HipdnnBackendBehaviorNote.h"
 #include "HipdnnBackendCallbackTypes.h"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnBackendHeuristicType.h"
@@ -54,6 +55,7 @@
 #include "HipdnnBackendPluginUnloadingMode.h"
 #include "HipdnnConvolutionMode.h"
 #include "HipdnnDataType.h"
+#include "HipdnnMoeGroupedMatmulMode.h"
 #include "HipdnnPaddingMode.h"
 #include "HipdnnReduceTensorOp.h"
 #include "HipdnnResampleMode.h"
@@ -325,6 +327,11 @@ HIPDNN_BACKEND_EXPORT void hipdnnPeekLastErrorString_ext(char* message, size_t m
  * into the descriptor. The serialized graph is provided as an input byte array, and the size of
  * the graph in bytes is specified. The created descriptor will encapsulate the deserialized graph.
  *
+ * Container-aware: when @p serializedGraph is a graph-and-plan container blob (as produced by
+ * hipdnnBackendGetSerializedBinaryGraphAndPlan_ext()), the embedded graph payload is extracted and
+ * deserialized; any embedded execution plan is ignored on this path. A legacy bare-graph blob is
+ * deserialized directly. The returned graph descriptor is unfinalized in both cases.
+ *
  * IMPORTANT: Hipdnn expects that the serialized graph is sorted in topological order, has no cycles,
  * and is fully connected (no orphan nodes). Additionally, all tensors in the graph must have unique uids.
  *
@@ -430,9 +437,17 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
 /*!
  * @brief Creates and deserializes a backend execution plan descriptor.
  *
+ * Container-aware: when @p serializedPlan is a graph-and-plan container blob (as produced by
+ * hipdnnBackendGetSerializedBinaryGraphAndPlan_ext()), the embedded execution plan payload is
+ * extracted and deserialized. A container that carries no execution plan is rejected with
+ * HIPDNN_STATUS_BAD_PARAM. A bare execution-plan blob (as produced by
+ * hipdnnBackendGetSerializedExecutionPlan_ext()) is deserialized directly. The returned execution
+ * plan descriptor is finalized in both cases.
+ *
  * @param [in]  handle         A hipDNN handle used to access loaded engine plugins.
  * @param [out] descriptor     Pointer to the created execution plan descriptor.
- * @param [in]  serializedPlan Pointer to bytes produced by hipdnnBackendGetSerializedExecutionPlan_ext().
+ * @param [in]  serializedPlan Pointer to bytes produced by hipdnnBackendGetSerializedExecutionPlan_ext()
+ *                             or hipdnnBackendGetSerializedBinaryGraphAndPlan_ext().
  * @param [in]  planByteSize   Size of @p serializedPlan in bytes.
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t
@@ -440,6 +455,89 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
                                                        hipdnnBackendDescriptor_t* descriptor,
                                                        const uint8_t* serializedPlan,
                                                        size_t planByteSize);
+
+/*!
+ * @brief Bitmask describing the payloads carried by a serialized binary blob.
+ *
+ * Returned through the @p contentFlags out-parameter of
+ * hipdnnBackendGetSerializedBinaryContents_ext(). Values are combined with
+ * bitwise OR; a blob that carries a graph and a plan reports
+ * (HIPDNN_SERIALIZED_CONTENT_GRAPH | HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN).
+ */
+typedef enum
+{
+    HIPDNN_SERIALIZED_CONTENT_GRAPH = 1,
+    HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN = 2
+} hipdnnSerializedContentFlags_t;
+
+/*!
+ * @brief Serializes a graph together with an optional execution plan into a single binary blob.
+ *
+ * Frames the graph and (optionally) the execution plan into one self-contained
+ * container blob. The graph is always written. When @p executionPlanDescriptor
+ * is non-null its serialized execution plan is embedded alongside the graph;
+ * when it is null the container carries the graph only (a graph-only container,
+ * still tagged with the container identifier). The resulting blob can be
+ * inspected with hipdnnBackendGetSerializedBinaryContents_ext(). It is always
+ * accepted by hipdnnBackendCreateAndDeserializeGraph_ext(), which reads the
+ * embedded graph. It is accepted by
+ * hipdnnBackendCreateAndDeserializeExecutionPlan_ext() only when it carries an
+ * execution plan; a graph-only container passed to that API fails with
+ * HIPDNN_STATUS_BAD_PARAM.
+ *
+ * Uses the standard two-call pattern: call first with @p serializedBlob set to
+ * @c nullptr to query the required buffer size, then call again with a
+ * caller-allocated buffer to receive the data.
+ *
+ * @param [in]  graphDescriptor         An operation graph descriptor (required).
+ * @param [in]  executionPlanDescriptor A finalized execution plan descriptor to embed,
+ *                                      or @c nullptr to produce a graph-only container.
+ * @param [in]  requestedByteSize       Size of the caller-allocated buffer in bytes.
+ *                                      Ignored when @p serializedBlob is @c nullptr.
+ * @param [out] blobByteSize            Pointer to receive the size of the container blob in bytes.
+ *                                      ALWAYS written on success, including when
+ *                                      @p serializedBlob is @c nullptr (size query).
+ * @param [out] serializedBlob          Caller-allocated buffer to receive the container blob,
+ *                                      or @c nullptr to query the required size only.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                      The blob was produced, or the size query
+ *                                                    completed successfully.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER       graphDescriptor or blobByteSize is null.
+ * @retval HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT  requestedByteSize is smaller than the blob size.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR               An internal error occurred during serialization.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetSerializedBinaryGraphAndPlan_ext(
+    hipdnnBackendDescriptor_t graphDescriptor,
+    hipdnnBackendDescriptor_t executionPlanDescriptor,
+    size_t requestedByteSize,
+    size_t* blobByteSize,
+    uint8_t* serializedBlob);
+
+/*!
+ * @brief Reports which payloads a serialized binary blob carries.
+ *
+ * Inspects @p serializedBlob without fully deserializing it and writes a bitmask
+ * of hipdnnSerializedContentFlags_t to @p contentFlags. A blob produced by
+ * hipdnnBackendGetSerializedBinaryGraphAndPlan_ext() reports
+ * HIPDNN_SERIALIZED_CONTENT_GRAPH, and additionally
+ * HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN when it embeds a non-empty plan.
+ *
+ * A legacy bare-graph blob (and any blob lacking the container identifier, or
+ * any blob shorter than a container header) is reported as
+ * HIPDNN_SERIALIZED_CONTENT_GRAPH only. A bare execution-plan blob is therefore
+ * also reported as a graph on this path and must not be routed through it; use
+ * the standalone plan-deserialize API for bare plan blobs.
+ *
+ * @param [in]  serializedBlob   Pointer to the serialized blob (required).
+ * @param [in]  blobByteSize     Size of @p serializedBlob in bytes.
+ * @param [out] contentFlags     Pointer to receive the content bitmask. Always written on success.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                 The contents were queried successfully.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER  serializedBlob or contentFlags is null.
+ * @retval HIPDNN_STATUS_BAD_PARAM               The container failed verification.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetSerializedBinaryContents_ext(
+    const uint8_t* serializedBlob, size_t blobByteSize, int* contentFlags);
 
 /*!
  * @brief Creates and deserializes a graph from a JSON string into a backend descriptor.
@@ -499,6 +597,28 @@ HIPDNN_BACKEND_EXPORT void hipdnnLoggingCallback_ext(hipdnnSeverity_t severity, 
  * @retval HIPDNN_STATUS_INTERNAL_ERROR    An internal error occurred.
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
+    size_t numPaths, const char* const* pluginPaths, hipdnnPluginLoadingMode_ext_t loadingMode);
+
+/**
+ * @brief Sets the search paths for hipDNN heuristic plugins.
+ *
+ * Mirrors @ref hipdnnSetEnginePluginPaths_ext for the heuristic plugin search domain.
+ * Must be called before creating a hipDNN handle, as heuristic plugins are loaded
+ * during handle creation.
+ *
+ * Paths can be either directories or specific plugin files. Relative paths are resolved
+ * from the location of the libhipdnn_backend.so file.
+ *
+ * @param[in] numPaths       The number of paths in the `pluginPaths` array.
+ * @param[in] pluginPaths    An array of relative or absolute path strings.
+ * @param[in] loadingMode    Specifies whether to add paths to or replace the default search paths.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                  The operation was successful.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER   `pluginPaths` is nullptr when `numPaths` is greater than 0.
+ * @retval HIPDNN_STATUS_NOT_SUPPORTED            Called with active handle.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR           An internal error occurred.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetHeuristicPluginPaths_ext(
     size_t numPaths, const char* const* pluginPaths, hipdnnPluginLoadingMode_ext_t loadingMode);
 
 /**
@@ -674,6 +794,186 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t hand
                                                              size_t* versionLen,
                                                              char* type,
                                                              size_t* typeLen);
+
+/**
+ * @brief Resolves an engine name to the ID of the engine that carries it.
+ *
+ * This is the inverse of the names reported by hipdnnGetEngineInfo_ext: any name obtained
+ * from that enumeration resolves here, and it resolves to exactly one engine.
+ *
+ * Names are unique across loaded engines. The backend enforces this at load time, dropping
+ * any engine whose reported name does not hash to its ID, or whose ID an earlier plugin
+ * already provides.
+ *
+ * @param[in]  handle       A valid hipDNN handle.
+ * @param[in]  engineName   Null-terminated engine name to resolve.
+ * @param[out] engineId     Pointer where the resolved engine ID will be stored.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                  Success.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER   Null handle, name, or output pointer.
+ * @retval HIPDNN_STATUS_NOT_SUPPORTED            No loaded engine carries the given name.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR           Internal error.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineIdByName_ext(hipdnnHandle_t handle,
+                                                                 const char* engineName,
+                                                                 int64_t* engineId);
+
+/**
+ * @brief Resolves an engine ID to the name that engine carries.
+ *
+ * This is the inverse of hipdnnGetEngineIdByName_ext, and reports the same name as
+ * hipdnnGetEngineInfo_ext without needing the engine's index. Only loaded engines
+ * resolve; any other ID reports HIPDNN_STATUS_NOT_SUPPORTED rather than a synthesized name.
+ *
+ * Uses the same two-call pattern as hipdnnGetEngineInfo_ext: pass `engineName` as `nullptr`
+ * to query the required size, then call again with an allocated buffer.
+ *
+ * @param[in]     handle         A valid hipDNN handle.
+ * @param[in]     engineId       Engine ID to resolve.
+ * @param[out]    engineName     Buffer for the engine name, or `nullptr` to query size.
+ * @param[in,out] engineNameLen  On the size query, receives the required size. On the fill
+ *                               call, supplies the buffer size and is left unchanged.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                  Success.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER   Null handle or null `engineNameLen`.
+ * @retval HIPDNN_STATUS_BAD_PARAM                Supplied buffer is too small.
+ * @retval HIPDNN_STATUS_NOT_SUPPORTED            No loaded engine carries the given ID.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR           Internal error.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineNameById_ext(hipdnnHandle_t handle,
+                                                                 int64_t engineId,
+                                                                 char* engineName,
+                                                                 size_t* engineNameLen);
+
+/**
+ * @brief Gets the count of loaded heuristic policies.
+ *
+ * Returns the number of heuristic policy plugins that have been successfully loaded
+ * and validated by the backend. This count includes all policies available for use
+ * in the outer loop engine selection.
+ *
+ * @param[in]  handle       A valid hipDNN handle.
+ * @param[out] numPolicies  Pointer where the policy count will be stored.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS           Success.
+ * @retval HIPDNN_STATUS_BAD_PARAM         Invalid handle or null pointer.
+ *
+ * @see hipdnnGetHeuristicPolicyInfo_ext for retrieving individual policy metadata
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyCount_ext(hipdnnHandle_t handle,
+                                                                       size_t* numPolicies);
+
+/**
+ * @brief Gets information about a loaded heuristic policy by index.
+ *
+ * Retrieves metadata for a heuristic policy plugin, including policy ID, policy
+ * name, plugin name, plugin version, and API version.
+ *
+ * @note The enumeration order is unspecified and may change between calls or
+ * between backend versions. Callers must not assume a stable ordering across
+ * indices; use the returned `policyId` as the identity, not `policyIndex`.
+ *
+ * This function uses a two-call pattern for string fields:
+ * 1. First call: Pass all string buffers as `nullptr` to query required sizes.
+ *    - Sets `policyNameLen`, `pluginNameLen`, `pluginVersionLen`, and `apiVersionLen`
+ *      to the required buffer sizes (including null terminator). Note: if any
+ *      string buffer is null, all sizes are updated.
+ *
+ * 2. Second call: Pass allocated buffers with sizes set from the first call.
+ *
+ * @param[in]     handle            A valid hipDNN handle.
+ * @param[in]     policyIndex       Zero-based index of the policy to query.
+ * @param[out]    policyId          Pointer where the policy ID will be stored, or `nullptr` to skip.
+ * @param[out]    policyName        Buffer for the policy name, or `nullptr` to query size.
+ * @param[in,out] policyNameLen     Pointer to buffer size; updated with required size.
+ * @param[out]    pluginName        Buffer for the plugin name, or `nullptr` to query size.
+ * @param[in,out] pluginNameLen     Pointer to buffer size; updated with required size.
+ * @param[out]    pluginVersion     Buffer for the plugin version, or `nullptr` to query size.
+ * @param[in,out] pluginVersionLen  Pointer to buffer size; updated with required size.
+ * @param[out]    apiVersion        Buffer for the API version, or `nullptr` to query size.
+ * @param[in,out] apiVersionLen     Pointer to buffer size; updated with required size.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS           Success.
+ * @retval HIPDNN_STATUS_BAD_PARAM         Invalid handle, null pointers, or out-of-range index.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR    Internal error.
+ *
+ * @see hipdnnGetHeuristicPolicyCount_ext for getting the total policy count
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyInfo_ext(hipdnnHandle_t handle,
+                                                                      size_t policyIndex,
+                                                                      int64_t* policyId,
+                                                                      char* policyName,
+                                                                      size_t* policyNameLen,
+                                                                      char* pluginName,
+                                                                      size_t* pluginNameLen,
+                                                                      char* pluginVersion,
+                                                                      size_t* pluginVersionLen,
+                                                                      char* apiVersion,
+                                                                      size_t* apiVersionLen);
+
+/*!
+ * @brief Outcome of a hipdnnBackendWriteEngineRankingResults_ext() call.
+ *
+ * Reported through that call's optional @c outcome out-parameter, and meaningful only
+ * when the call returns HIPDNN_STATUS_SUCCESS. A decline is not an error.
+ */
+typedef enum
+{
+    HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN = 0, ///< The ranking was written to the cache.
+    HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_DISABLED
+    = 1, ///< The exact-match cache is disabled via HIPDNN_DISABLE_EXACT_ENGINE_CACHE.
+    HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_UNKEYABLE_OR_UNFINALIZED
+    = 2, ///< graphDescriptor is unfinalized, or the graph/device could not be keyed.
+    HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_NO_ENGINES
+    = 3, ///< engineIdsInRankOrder was null or engineIdCount was 0.
+    HIPDNN_AUTOTUNE_CACHE_WRITE_UNCHANGED
+    = 4 ///< The cache already held this exact ranking, so nothing was written.
+} hipdnnAutotuneCacheWriteOutcome_ext_t;
+
+/*!
+ * @brief Writes an exhaustive-tuning engine ranking to the exact-match autotune cache.
+ *
+ * Keys on @p graphDescriptor's serialized buffer and the handle's current device.
+ * @p engineIdsInRankOrder is stored verbatim as both the sampled-engine set and the
+ * winning order. Fail-soft: never fails the caller's tuning run over a cache problem;
+ * an unfinalized descriptor, an empty ranking, an unkeyable graph, or a disabled cache
+ * (`HIPDNN_DISABLE_EXACT_ENGINE_CACHE`) is treated as success-with-no-write.
+ *
+ * Because one array serves as both sets, the caller owns two obligations this function
+ * cannot check. A record violating either is declined on every later lookup, and
+ * re-writing an identical record reports UNCHANGED without replacing it, so the record
+ * does not repair itself:
+ *
+ *  - **Each engine id at most once.** The read path filters the stored order to the live
+ *    candidates by set membership, which is non-consuming, so a repeated id survives and
+ *    makes the order longer than the candidate set. Callers holding several results per
+ *    engine (knob variants) must collapse them to one id first.
+ *  - **Every applicable engine present.** The read path's candidate list comes from the
+ *    pre-compile applicability probe, which knows nothing of compile failures, deselect
+ *    filters, or workspace budgets. Omitting an engine that probe reports rejects the
+ *    entry. Engines that were measured and failed, and engines that could not be
+ *    compiled, therefore belong in the array, ranked last. An engine held out by a
+ *    caller-side filter does not: a later run may admit it, so a ranking that never
+ *    measured it must not be written at all.
+ *
+ * @param [in]  handle                Supplies the device identity the ranking is scoped to.
+ * @param [in]  graphDescriptor       Backend graph descriptor; its buffer derives the cache key.
+ * @param [in]  engineIdsInRankOrder  Engine ids in winning rank order (fastest first), each
+ *                                    appearing at most once; see the obligations above.
+ * @param [in]  engineIdCount         Number of entries in @p engineIdsInRankOrder.
+ * @param [out] outcome               Optional; fail-soft outcome, valid on
+ *                                    HIPDNN_STATUS_SUCCESS. See
+ *                                    @ref hipdnnAutotuneCacheWriteOutcome_ext_t.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                 Written, or fail-soft declined (see above).
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER  handle is null.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnBackendWriteEngineRankingResults_ext(hipdnnHandle_t handle,
+                                               hipdnnBackendDescriptor_t graphDescriptor,
+                                               const int64_t* engineIdsInRankOrder,
+                                               size_t engineIdCount,
+                                               hipdnnAutotuneCacheWriteOutcome_ext_t* outcome);
 
 /**
  * @brief Returns hipdnn backend version string. Returns an error if nullptr is passed

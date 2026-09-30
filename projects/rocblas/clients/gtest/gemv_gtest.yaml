@@ -27,6 +27,25 @@ Definitions:
     - { M:  20480, N:   7, lda:    20480, stride_a:   143360 }
     - { M: 131071, N:  63, lda:   131071, stride_a:  8257473 }
 
+  - &skinny_m_matrix_size_range
+    # transA == N, short output and long reduction. m*n >= 2^20 and EITHER:
+    #   A. output_tiles(m) <= 8 AND n_split(n) >= 2, or
+    #   B. m <= crossover (512 real/c-float, 128 double-complex).
+    # output_tiles = (m-1)/(DIM_X*4)+1 for real/c-float, (m-1)/DIM_X+1 for zc,
+    # DIM_X = 32 (real/c-float tile edge at m=1024, zc tile edge at m=256).
+    # n_split = ceil(n / 4096), capped at 256.
+    # Shapes below cover both clauses for both type families; the out-of-gate
+    # rows exercise the unmodified single-stage path.
+    - { M:    40, N:  32768, lda:    40, stride_a:   1310720 } # B: tiny m, all types
+    - { M:   256, N:   4096, lda:   256, stride_a:   1048576 } # B: real crossover, n_split=1 (short-output win, e.g. gfx950)
+    - { M:   512, N:   2048, lda:   512, stride_a:   1048576 } # B: real crossover edge m=512, n_split=1
+    - { M:  1024, N:  12289, lda:  1024, stride_a:  12583936 } # A: real/c-float tile edge m=1024, n_split=4
+    - { M:  1024, N:   6145, lda:  1024, stride_a:   6292480 } # A: real/c-float at split floor n_split=2
+    - { M:   200, N:   8192, lda:   256, stride_a:   2097152 } # A: zc (tiles=7, n_split=2); real via B; lda > M
+    - { M:  1024, N:   2048, lda:  1024, stride_a:   2097152 } # outside gate: m>512, tiles=8, n_split=1 < 2
+    - { M:  1025, N:  12289, lda:  1025, stride_a:  12596225 } # outside gate: real tiles=9 > 8
+    - { M:     7, N:  20480, lda:     7, stride_a:    143360 } # outside gate: m*n < 2^20
+
   - &double_buffered_loads_size_range
     # (n <= 3000 && n >= m) || (n %128 == 0 && m==n)
     - { M:  256, N:  256, lda:  256, stride_a:   65536 }
@@ -328,6 +347,15 @@ Tests:
   incx_incy: *incx_incy_range_small
   alpha_beta: *alpha_beta_range
 
+- name: gemv_skinny_m
+  category: pre_checkin
+  function: gemv
+  precision: *single_double_precisions_complex_real
+  transA: [ N, T, C ]
+  matrix_size: *skinny_m_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_beta_range
+
 - name: gemv_size_t_non_transpose_90a
   category: stress
   function: gemv
@@ -458,6 +486,16 @@ Tests:
   precision: *single_double_precisions_complex_real
   transA: [ N, T, C ]
   matrix_size: *skinny_n_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_beta_range_small
+  batch_count: [ 3 ]
+
+- name: gemv_batched_skinny_m
+  category: pre_checkin
+  function: gemv_batched
+  precision: *single_double_precisions_complex_real
+  transA: [ N, T, C ]
+  matrix_size: *skinny_m_matrix_size_range
   incx_incy: *incx_incy_range_small
   alpha_beta: *alpha_beta_range_small
   batch_count: [ 3 ]
@@ -608,6 +646,16 @@ Tests:
   batch_count: [ 3 ]
 
 
+- name: gemv_strided_batched_skinny_m
+  category: pre_checkin
+  function: gemv_strided_batched
+  precision: *gemv_bfloat_half_single_double_complex_real_precisions
+  transA: [ N, T, C ]
+  matrix_size: *skinny_m_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_beta_range_small
+  batch_count: [ 3 ]
+
 - name: gemv_strided_batched_qmcpack
   category: quick
   function: gemv_strided_batched
@@ -650,6 +698,22 @@ Tests:
   alpha_beta: *alpha_beta_range_small
   batch_count: [ 2 ]
   gpu_arch: '9??'
+
+- name: gemv_stride_alpha_beta
+  category: pre_checkin
+  function:
+    - gemv_batched
+    - gemv_strided_batched
+  precision: *gemv_bfloat_half_single_double_complex_real_precisions
+  transA: [ N, T, C ]
+  matrix_size: *qmcpack_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+  alpha_beta_stride: true
+  stride_c: 2 # alpha beta stride
+  stride_d: 2
+  pointer_mode_host: false
 
 - name: gemv_row_vectorized_coverage
   category: pre_checkin

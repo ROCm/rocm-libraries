@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 set(INST_TARGETS ${SUPPORTED_GPU_TARGETS})
-# Currently only gfx9 and gfx12 archs are supported by FMHA
+# Currently only gfx9, gfx11, and gfx12 archs are supported by FMHA
 list(FILTER INST_TARGETS INCLUDE REGEX "gfx9|gfx1[12]")
 if(NOT INST_TARGETS)
   message(WARNING "Skipping Tile Engine FMHA compilation: No supported GPU targets (gfx9, gfx11, gfx12) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
@@ -42,12 +42,36 @@ set_directory_properties(PROPERTIES CMAKE_CONFIGURE_DEPENDS "${CODE_GEN_SCRIPTS}
 
 list(JOIN INST_TARGETS , FMHA_TARGETS_ARG)
 
+# Select the fwd --optdim head-dim list by architecture. gfx125x (QR-TDM) adds
+# 96/160/192; other archs keep the shared develop list. generate.py applies
+# --optdim uniformly across all --targets, so a mixed gfx9x + gfx125x build would
+# leak the gfx125x-only head dims into the gfx9/gfx11/gfx12 generic QR factories
+# (which also define 96/160/192 tiles). Disallow mixing so the list stays correct.
+set(FMHA_FWD_HAS_GFX125 FALSE)
+set(FMHA_FWD_HAS_NON_GFX125 FALSE)
+foreach(inst_target ${INST_TARGETS})
+  if(inst_target MATCHES "^gfx125")
+    set(FMHA_FWD_HAS_GFX125 TRUE)
+  else()
+    set(FMHA_FWD_HAS_NON_GFX125 TRUE)
+  endif()
+endforeach()
+if(FMHA_FWD_HAS_GFX125 AND FMHA_FWD_HAS_NON_GFX125)
+  message(FATAL_ERROR "CK Tile FMHA: gfx125x cannot be built together with other archs "
+                      "(the fwd --optdim head-dim list differs per arch). INST_TARGETS: ${INST_TARGETS}")
+endif()
+if(FMHA_FWD_HAS_GFX125)
+  set(FMHA_FWD_OPTDIM 32,64,96,128,160,192,256)
+else()
+  set(FMHA_FWD_OPTDIM 32,64,80,128,256)
+endif()
+
 string(REPLACE ";" "," FMHA_FWD_APIS "${FMHA_FWD_ENABLE_APIS}")
 set(FMHA_FWD_CODE_GEN_COMMON_ARGS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
   --targets ${FMHA_TARGETS_ARG}
   --api ${FMHA_FWD_APIS}
-  --optdim 32,64,80,128,256
+  --optdim ${FMHA_FWD_OPTDIM}
 )
 set(FMHA_BWD_CODE_GEN_COMMON_ARGS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
@@ -64,7 +88,7 @@ set(FMHA_BWD_CODE_GEN_COMMON_ARGS
 # there is no corresponding instance for parameters).
 if(BUILD_TESTING)
   # Filters are in the order of FMHA_FWD_KNOWN_APIS: fwd,fwd_splitkv_combine@fwd_splitkv,fwd_appendkv,pagedkv_prefill
-  list(APPEND FMHA_FWD_CODE_GEN_COMMON_ARGS --filter *_nlogits*_nskip*_nsink*,*@*_nlogits*_nbias*_nsink*,*,*_nlogits*_nskip*_pagedkv*)
+  list(APPEND FMHA_FWD_CODE_GEN_COMMON_ARGS --filter *_nlogits*_nskip*,*@*_nlogits*_nbias*,*,*_nlogits*_nskip*_pagedkv*)
 endif()
 
 # generate a list of kernels, but not actually emit files at config sta
@@ -152,6 +176,17 @@ else()
 endif()
 list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS -fgpu-flush-denormals-to-zero)
 
+# Per-kernel VGPR/SGPR/LDS/scratch/spill and occupancy remarks, on stderr at
+# compile time. Must hang off the instance targets: the generated blobs are
+# LANGUAGE HIP, so they take CMAKE_HIP_FLAGS and never see CMAKE_CXX_FLAGS.
+# One remark block per kernel -- narrow the instance set before enabling.
+option(FMHA_RESOURCE_USAGE
+  "emit -Rpass-analysis=kernel-resource-usage remarks for FMHA instances" OFF)
+if(FMHA_RESOURCE_USAGE)
+  list(APPEND FMHA_FWD_PRIVATE_COMPILE_OPTIONS -Rpass-analysis=kernel-resource-usage)
+  list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS -Rpass-analysis=kernel-resource-usage)
+endif()
+
 # conditionally enable call to the fwd_splitkv API in fmha_fwd example and tests
 if("fwd_splitkv" IN_LIST FMHA_FWD_ENABLE_APIS)
   list(APPEND FMHA_FWD_INTERFACE_COMPILE_OPTIONS -DCK_TILE_FMHA_FWD_SPLITKV_API=1)
@@ -234,6 +269,7 @@ message(DEBUG "adding example ${EXAMPLE_FMHA_FWD}")
 add_executable(${EXAMPLE_FMHA_FWD} EXCLUDE_FROM_ALL example_fmha_fwd.cpp)
 target_link_libraries(${EXAMPLE_FMHA_FWD} ${FMHA_FWD_INSTANCES})
 target_include_directories(${EXAMPLE_FMHA_FWD} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+set_property(TARGET ${EXAMPLE_FMHA_FWD} PROPERTY HIP_ARCHITECTURES ${INST_TARGETS})
 
 message(DEBUG "adding example ${EXAMPLE_FMHA_BWD}")
 # not using add_example_executable() to add this target, since we don't want this to be included in
@@ -241,6 +277,7 @@ message(DEBUG "adding example ${EXAMPLE_FMHA_BWD}")
 add_executable(${EXAMPLE_FMHA_BWD} EXCLUDE_FROM_ALL example_fmha_bwd.cpp)
 target_link_libraries(${EXAMPLE_FMHA_BWD} ${FMHA_BWD_INSTANCES})
 target_include_directories(${EXAMPLE_FMHA_BWD} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+set_property(TARGET ${EXAMPLE_FMHA_BWD} PROPERTY HIP_ARCHITECTURES ${INST_TARGETS})
 
 # TODO: we have to turn off this global prop, otherwise the progress bar generated
 # by cmake will print too many files, execvp: /bin/sh: Argument list too long

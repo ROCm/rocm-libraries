@@ -14,20 +14,10 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
     # AQuant tests - split into 10 files
 
     # AQuant Memory Pipeline tests
-    add_gtest_executable(test_tile_gemm_quant_aquant_mem_prefill_interwave
-        test_gemm_quant_aquant_mem_prefill_interwave.cpp
-    )
-    target_compile_options(test_tile_gemm_quant_aquant_mem_prefill_interwave PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
-
     add_gtest_executable(test_tile_gemm_quant_aquant_mem_decode_intrawave
         test_gemm_quant_aquant_mem_decode_intrawave.cpp
     )
     target_compile_options(test_tile_gemm_quant_aquant_mem_decode_intrawave PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
-
-    add_gtest_executable(test_tile_gemm_quant_aquant_mem_decode_interwave
-        test_gemm_quant_aquant_mem_decode_interwave.cpp
-    )
-    target_compile_options(test_tile_gemm_quant_aquant_mem_decode_interwave PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
 
     add_gtest_executable(test_tile_gemm_quant_aquant_base_rcr 
         test_gemm_quant_aquant_base_rcr.cpp
@@ -102,6 +92,11 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
     )
     target_compile_options(test_tile_gemm_quant_abquant_splitk_prefill PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
 
+    add_gtest_executable(test_tile_gemm_quant_abquant_splitk_preshuffleB
+        test_gemm_quant_abquant_splitk_preshuffleB.cpp
+    )
+    target_compile_options(test_tile_gemm_quant_abquant_splitk_preshuffleB PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
+
     add_gtest_executable(test_tile_gemm_quant_abquant_a4w4_base
         test_gemm_quant_abquant_a4w4_base.cpp
     )
@@ -164,7 +159,7 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
     )
     target_compile_options(test_tile_gemm_quant_bquant_splitk_prefill PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
 
-    # BQuant tests (with PreshuffleB) - split into 5 files
+    # BQuant tests (with PreshuffleB) - split into 6 files
     add_gtest_executable(test_tile_gemm_quant_bquant_preshuffle_decode_1d 
         test_gemm_quant_bquant_preshuffle_decode_1d.cpp
     )
@@ -189,6 +184,11 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
         test_gemm_quant_bquant_preshuffle_prefill_2d.cpp
     )
     target_compile_options(test_tile_gemm_quant_bquant_preshuffle_prefill_2d PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
+
+    add_gtest_executable(test_tile_gemm_quant_bquant_preshuffle_large_tensor
+        test_gemm_quant_bquant_preshuffle_large_tensor.cpp
+    )
+    target_compile_options(test_tile_gemm_quant_bquant_preshuffle_large_tensor PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
 
     # BQuant tests (with PreshuffleQuant) - split into 4 files
     add_gtest_executable(test_tile_gemm_quant_bquant_preshuffleQuant_decode_1d 
@@ -258,6 +258,12 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
     )
     target_compile_options(test_tile_gemm_quant_rowcol PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
 
+    # RowColQuant large-tensor tests (64-bit global load/store path).
+    add_gtest_executable(test_tile_gemm_quant_rowcol_large_tensor
+        test_gemm_quant_rowcol_large_tensor.cpp
+    )
+    target_compile_options(test_tile_gemm_quant_rowcol_large_tensor PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
+
     # TensorQuant tests
     add_gtest_executable(test_tile_gemm_quant_tensor 
         test_gemm_quant_tensor.cpp
@@ -267,9 +273,7 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
     # Collect all test targets for umbrella label
     set(CK_TILE_GEMM_BLOCK_SCALE_TEST_TARGETS
         # AQuant tests
-        test_tile_gemm_quant_aquant_mem_prefill_interwave
         test_tile_gemm_quant_aquant_mem_decode_intrawave
-        test_tile_gemm_quant_aquant_mem_decode_interwave
         test_tile_gemm_quant_aquant_base_rcr
         test_tile_gemm_quant_aquant_base_rrr_crr
         test_tile_gemm_quant_aquant_base_ccr
@@ -290,6 +294,7 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
         # ABQuant split-K tests
         test_tile_gemm_quant_abquant_splitk_decode
         test_tile_gemm_quant_abquant_splitk_prefill
+        test_tile_gemm_quant_abquant_splitk_preshuffleB
         # BQuant tests
         test_tile_gemm_quant_bquant_1d_128
         test_tile_gemm_quant_bquant_1d_64
@@ -306,6 +311,7 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
         test_tile_gemm_quant_bquant_preshuffle_tiled_permute
         test_tile_gemm_quant_bquant_preshuffle_decode_2d
         test_tile_gemm_quant_bquant_preshuffle_prefill_2d
+        test_tile_gemm_quant_bquant_preshuffle_large_tensor
         # BQuant preshuffleQuant tests
         test_tile_gemm_quant_bquant_preshuffleQuant_decode_1d
         test_tile_gemm_quant_bquant_preshuffleQuant_prefill_1d
@@ -313,6 +319,7 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
         test_tile_gemm_quant_bquant_preshuffleQuant_prefill_2d
         # Other quant tests
         test_tile_gemm_quant_rowcol
+        test_tile_gemm_quant_rowcol_large_tensor
         test_tile_gemm_quant_tensor
     )
 
@@ -324,9 +331,7 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
     # Target to build only AQuant memory pipeline tests
     add_custom_target(test_tile_gemm_aquant_mem_all)
     add_dependencies(test_tile_gemm_aquant_mem_all
-        test_tile_gemm_quant_aquant_mem_prefill_interwave
         test_tile_gemm_quant_aquant_mem_decode_intrawave
-        test_tile_gemm_quant_aquant_mem_decode_interwave
     )
 
     # Umbrella target to build all gemm quant tests

@@ -37,6 +37,7 @@ tags
 
 # build-in-source directory and documentation artifacts
 build*/
+hipblaslt-install/
 _build/
 _deps/
 _images/

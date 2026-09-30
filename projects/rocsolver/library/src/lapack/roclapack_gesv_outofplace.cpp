@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_gesv_outofplace.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -49,6 +50,7 @@ rocblas_status rocsolver_gesv_outofplace_impl(rocblas_handle handle,
                                               T* X,
                                               const rocblas_int ldx,
                                               rocblas_int* info)
+try
 {
     ROCSOLVER_ENTER_TOP("gesv_outofplace", "-n", n, "--nrhs", nrhs, "--lda", lda, "--ldb", ldb,
                         "--ldx", ldx);
@@ -98,6 +100,10 @@ rocblas_status rocsolver_gesv_outofplace_impl(rocblas_handle handle,
     return rocsolver_gesv_outofplace_template<false, false, T>(
         handle, n, nrhs, A, shiftA, lda, strideA, ipiv, strideP, B, shiftB, ldb, strideB, X, shiftX,
         ldx, strideX, info, batch_count, &work_helper);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

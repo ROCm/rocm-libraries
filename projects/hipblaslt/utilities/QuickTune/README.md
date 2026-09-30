@@ -65,11 +65,11 @@ Before start GEMM tuning, we need to do the following.
     ```bash
     # set-up GPU
     export HIP_FORCE_DEV_KERNARG=1
-    rocm-smi --setperfdeterminism 1900 -d <gpu_id>
+    sudo amd-smi set -g <gpu_id> --perf-determinism 1900
 
     # reset GPU
     unset HIP_FORCE_DEV_KERNARG
-    rocm-smi -r -d <gpu_id>
+    sudo amd-smi reset -g <gpu_id> --perf-determinism
     ```
 
 
@@ -99,7 +99,7 @@ The GEMM Tuning with hipblaslt-bench is to measure the performance of the candid
 
 6. gpu_id
 
-    The gpu_id determines which GPU you choose to run GEMM tuning. Recommand to use  "rocm-smi" to find a idle GPU to run GEMM tuning for an accurate result.
+    The gpu_id determines which GPU you choose to run GEMM tuning. Recommand to use  "amd-smi monitor" to find a idle GPU to run GEMM tuning for an accurate result.
 
 7. stablize_gpu
 

@@ -202,9 +202,7 @@ rocblas_status rocsolver_potf2_template(rocblas_handle handle,
         return rocblas_status_success;
 
     // everything must be executed with scalars on the device
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_device);
 
     if(n <= POTF2_MAX_SMALL_SIZE(T))
     {
@@ -291,7 +289,6 @@ rocblas_status rocsolver_potf2_template(rocblas_handle handle,
         }
     }
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

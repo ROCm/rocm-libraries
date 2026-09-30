@@ -1,0 +1,23 @@
+# serializer version: 1
+# name: test_build_compress_false_moves
+  dict({
+    'bundler_called': False,
+    'co_names': list([
+      'TensileLibrary_gfx942.co',
+    ]),
+  })
+# ---
+# name: test_build_compress_true
+  dict({
+    'bundler_call_count': 2,
+    'co_names': list([
+      'CustomCO.co',
+      'TensileLibrary_gfx942.co',
+    ]),
+    'linker_call_count': 2,
+  })
+# ---
+# name: test_build_empty_kernels
+  list([
+  ])
+# ---

@@ -3,14 +3,13 @@
 
 /**
  * @file TestHeuristicPluginResourceManager.cpp
- * @brief Unit tests for HeuristicPluginResourceManager (RFC 0007 Part 1)
+ * @brief Unit tests for HeuristicPluginResourceManager
  *
  * These tests verify the plugin resource management layer that provides
  * per-handle plugin lifecycle management and policy lookup.
  */
 
 #include "HipdnnException.hpp"
-#include "descriptors/mocks/MockHeuristicPlugin.hpp"
 #include "plugin/HeuristicPluginManager.hpp"
 #include "plugin/HeuristicPluginResourceManager.hpp"
 
@@ -57,9 +56,10 @@ TEST_F(TestHeuristicPluginResourceManager, MoveConstructorTransfersOwnership)
     // Move construct
     const HeuristicPluginResourceManager rm2(std::move(*rm1));
 
-    // rm2 should be usable
+    // rm2 should be usable. The shared plugin manager always contains the
+    // Config + StaticOrdering built-ins, so the policy-info list is not empty.
     const auto infos = rm2.getHeuristicPolicyInfos();
-    EXPECT_TRUE(infos.empty()); // No plugins loaded
+    EXPECT_EQ(infos.size(), 2u);
 }
 
 TEST_F(TestHeuristicPluginResourceManager, MoveAssignmentTransfersOwnership)
@@ -71,10 +71,11 @@ TEST_F(TestHeuristicPluginResourceManager, MoveAssignmentTransfersOwnership)
     // Move assign
     *rm2 = std::move(*rm1);
 
-    // rm2 should be usable
+    // rm2 should be usable. The shared plugin manager always contains the
+    // StaticOrdering built-in, so the policy-info list is not empty.
     const HeuristicPluginResourceManager& constRm2 = *rm2;
     const auto infos = constRm2.getHeuristicPolicyInfos();
-    EXPECT_TRUE(infos.empty());
+    EXPECT_EQ(infos.size(), 2u);
 }
 
 // ========== Policy Lookup Tests ==========
@@ -108,8 +109,10 @@ TEST_F(TestHeuristicPluginResourceManager, GetPolicyInfosWhenNoPluginsLoaded)
     auto pm = std::make_shared<HeuristicPluginManager>();
     auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
 
+    // No external plugin paths configured, but the Config + StaticOrdering built-ins
+    // are always registered in the plugin manager's constructor.
     const auto infos = rm->getHeuristicPolicyInfos();
-    EXPECT_TRUE(infos.empty());
+    EXPECT_EQ(infos.size(), 2u);
 }
 
 TEST_F(TestHeuristicPluginResourceManager, GetPolicyInfosCachesResult)
@@ -256,10 +259,11 @@ TEST_F(TestHeuristicPluginResourceManager, MultipleInstancesCanCoexist)
     EXPECT_NE(rm2, nullptr);
     EXPECT_NE(rm3, nullptr);
 
-    // Each should work independently
-    EXPECT_TRUE(rm1->getHeuristicPolicyInfos().empty());
-    EXPECT_TRUE(rm2->getHeuristicPolicyInfos().empty());
-    EXPECT_TRUE(rm3->getHeuristicPolicyInfos().empty());
+    // Each should work independently. The shared plugin manager always contains
+    // the StaticOrdering built-in, so each resource manager observes it.
+    EXPECT_EQ(rm1->getHeuristicPolicyInfos().size(), 2u);
+    EXPECT_EQ(rm2->getHeuristicPolicyInfos().size(), 2u);
+    EXPECT_EQ(rm3->getHeuristicPolicyInfos().size(), 2u);
 }
 
 // ========== Copy Prevention Tests ==========
@@ -288,9 +292,6 @@ TEST_F(TestHeuristicPluginResourceManager, DestructorCleansUpResources)
         // Use rm
         rm->getHeuristicPolicyInfos();
     } // rm destroyed here
-
-    // If we get here without crashes, cleanup succeeded
-    SUCCEED();
 }
 
 TEST_F(TestHeuristicPluginResourceManager, MultipleDestructionsSucceed)
@@ -303,8 +304,6 @@ TEST_F(TestHeuristicPluginResourceManager, MultipleDestructionsSucceed)
         rm->getHeuristicPolicyInfos();
         // Destroyed at end of loop
     }
-
-    SUCCEED();
 }
 
 // ========== Constructor Null Pointer Tests ==========

@@ -105,12 +105,27 @@ int main(int argc, char const* argv[])
     const std::filesystem::path output_path(argv[4]);
 
     std::ifstream input(binary_path, std::ios_base::in | std::ios_base::binary);
+    if(!input)
+    {
+        std::cerr << "Error: could not open input file: " << binary_path << std::endl;
+        return -1;
+    }
     std::ofstream output(output_path, std::ios_base::out | std::ios_base::trunc);
+    if(!output)
+    {
+        std::cerr << "Error: could not open output file: " << output_path << std::endl;
+        return -1;
+    }
 
     const std::uintmax_t input_size  = std::filesystem::file_size(binary_path);
     auto                 input_bytes = std::make_unique<std::byte[]>(input_size);
 
     input.read(reinterpret_cast<char*>(input_bytes.get()), input_size);
+    if(!input)
+    {
+        std::cerr << "Error: could not read input file: " << binary_path << std::endl;
+        return -1;
+    }
 
     if(!write_as_array_of(type, input_bytes.get(), input_size, symbol, output))
     {

@@ -5,6 +5,7 @@
 
 #include <hipdnn_backend.h>
 
+#include <stdexcept>
 #include <string>
 
 namespace hipdnn_integration_tests
@@ -29,34 +30,44 @@ inline EngineInfo getEngineInfo(hipdnnHandle_t handle, size_t engineIndex)
     size_t versionLen = 0;
     size_t typeLen = 0;
 
-    hipdnnGetEngineInfo_ext(handle,
-                            engineIndex,
-                            &info.engineId,
-                            nullptr,
-                            &engineNameLen,
-                            nullptr,
-                            &pluginNameLen,
-                            nullptr,
-                            &versionLen,
-                            nullptr,
-                            &typeLen);
+    if(hipdnnGetEngineInfo_ext(handle,
+                               engineIndex,
+                               &info.engineId,
+                               nullptr,
+                               &engineNameLen,
+                               nullptr,
+                               &pluginNameLen,
+                               nullptr,
+                               &versionLen,
+                               nullptr,
+                               &typeLen)
+       != HIPDNN_STATUS_SUCCESS)
+    {
+        throw std::runtime_error("[getEngineInfo] size query failed for engine index "
+                                 + std::to_string(engineIndex));
+    }
 
     info.engineName.resize(engineNameLen);
     info.pluginName.resize(pluginNameLen);
     info.version.resize(versionLen);
     info.type.resize(typeLen);
 
-    hipdnnGetEngineInfo_ext(handle,
-                            engineIndex,
-                            &info.engineId,
-                            info.engineName.data(),
-                            &engineNameLen,
-                            info.pluginName.data(),
-                            &pluginNameLen,
-                            info.version.data(),
-                            &versionLen,
-                            info.type.data(),
-                            &typeLen);
+    if(hipdnnGetEngineInfo_ext(handle,
+                               engineIndex,
+                               &info.engineId,
+                               info.engineName.data(),
+                               &engineNameLen,
+                               info.pluginName.data(),
+                               &pluginNameLen,
+                               info.version.data(),
+                               &versionLen,
+                               info.type.data(),
+                               &typeLen)
+       != HIPDNN_STATUS_SUCCESS)
+    {
+        throw std::runtime_error("[getEngineInfo] data fetch failed for engine index "
+                                 + std::to_string(engineIndex));
+    }
 
     if(!info.engineName.empty() && info.engineName.back() == '\0')
     {

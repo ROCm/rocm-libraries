@@ -66,7 +66,9 @@ target_include_directories( hipblas-bench
 target_link_libraries( hipblas-bench PRIVATE roc::hipblas GTest::gtest GTest::gtest_main )
 
 # need mf16c flag for float->half convertion
-target_compile_options( hipblas-bench PRIVATE -mf16c ) # -Wno-deprecated-declarations )
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+  target_compile_options( hipblas-bench PRIVATE -mf16c ) # -Wno-deprecated-declarations )
+endif()
 
 target_compile_options(hipblas-bench PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_CXX_OPTIONS}>)
 

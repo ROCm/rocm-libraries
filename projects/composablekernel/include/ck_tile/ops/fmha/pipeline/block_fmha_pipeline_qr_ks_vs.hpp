@@ -434,7 +434,7 @@ struct BlockFmhaPipelineQRKSVS
             {
                 return make_tile_window(k_scale_dram_block_window_tmp.get_bottom_tensor_view(),
                                         k_scale_dram_block_window_tmp.get_window_lengths(),
-                                        {seqlen_k_start, 0});
+                                        {kv_load_start, 0});
             }
             else
             {
@@ -446,7 +446,7 @@ struct BlockFmhaPipelineQRKSVS
             {
                 return make_tile_window(v_scale_dram_block_window_tmp.get_bottom_tensor_view(),
                                         v_scale_dram_block_window_tmp.get_window_lengths(),
-                                        {0, seqlen_k_start / kVScaleGranularity},
+                                        {0, kv_load_start / kVScaleGranularity},
                                         Policy::template MakeVScaleRegTileDistribution<Problem>());
             }
             else
@@ -491,15 +491,17 @@ struct BlockFmhaPipelineQRKSVS
                                              (kK0 / WarpGemm0K) / (Gemm0MWarp * Gemm0NWarp);
             if constexpr(get_warp_size() == 64 && kQKHeaddim == 256)
             {
-                static_assert(NumMfmaInsts % 8 == 0);
-                static_for<0, NumMfmaInsts / 8, 1>{}([&](auto) {
-                    __builtin_amdgcn_sched_group_barrier(DS_READ, 2, 0); // DS read
-                    __builtin_amdgcn_sched_group_barrier(MFMA, 2, 0);    // MFMA
-                    __builtin_amdgcn_sched_group_barrier(DS_READ, 1, 0); // DS read
-                    __builtin_amdgcn_sched_group_barrier(MFMA, 2, 0);    // MFMA
-                    __builtin_amdgcn_sched_group_barrier(DS_READ, 1, 0); // DS read
-                    __builtin_amdgcn_sched_group_barrier(MFMA, 4, 0);    // MFMA
-                });
+                if constexpr(NumMfmaInsts % 8 == 0)
+                {
+                    static_for<0, NumMfmaInsts / 8, 1>{}([&](auto) {
+                        __builtin_amdgcn_sched_group_barrier(DS_READ, 2, 0); // DS read
+                        __builtin_amdgcn_sched_group_barrier(MFMA, 2, 0);    // MFMA
+                        __builtin_amdgcn_sched_group_barrier(DS_READ, 1, 0); // DS read
+                        __builtin_amdgcn_sched_group_barrier(MFMA, 2, 0);    // MFMA
+                        __builtin_amdgcn_sched_group_barrier(DS_READ, 1, 0); // DS read
+                        __builtin_amdgcn_sched_group_barrier(MFMA, 4, 0);    // MFMA
+                    });
+                }
             }
         };
 
@@ -577,17 +579,22 @@ struct BlockFmhaPipelineQRKSVS
                     {
                         static_for<1, kGemm0KItersPerBlock, 1>{}([&](auto i_tail_k_iter) {
                             constexpr index_t kTailKIters = i_tail_k_iter;
-                            constexpr index_t kTailK0     = kTailKIters * kGemm0WarpK;
 
                             if(gemm0_tail_k_iters == kTailKIters)
                             {
+                                // gfx12 WMMA accumulates (c = a*b + c), so a K=kTailK0 tail
+                                // equals kTailKIters accumulating warp-K(=kGemm0WarpK) sub-GEMMs.
+                                // Slicing the Q A-operand register tile at warp-K granularity
+                                // divides the register layout cleanly for any tail multiple of
+                                // kGemm0WarpK (16/32/48), avoiding the reverse_slice_sequence
+                                // static_assert that a monolithic K=48 slice triggers on WMMA.
                                 using Gemm0TailProblem = BlockGemmProblem<
                                     QDataType,
                                     KDataType,
                                     SaccDataType,
                                     Problem::kNumGemm0Warps * get_warp_size(),
                                     TileGemmShape<
-                                        sequence<kM0, kN0, kTailK0>,
+                                        sequence<kM0, kN0, kGemm0WarpK>,
                                         typename BlockFmhaShape::Gemm0BlockWarps,
                                         sequence<BlockFmhaShape::Gemm0WarpTile::at(number<0>{}),
                                                  BlockFmhaShape::Gemm0WarpTile::at(number<1>{}),
@@ -596,14 +603,20 @@ struct BlockFmhaPipelineQRKSVS
                                     BlockGemmARegBSmemCRegV2<Gemm0TailProblem,
                                                              typename BlockGemm0::Policy>{};
 
-                                auto q_slice =
-                                    get_slice_tile(q_tile,
-                                                   sequence<0, i_k0 * kK0>{},
-                                                   sequence<kM0, i_k0 * kK0 + kTailK0>{});
-                                auto k_tail_window = make_tile_window(
-                                    k_lds, make_tuple(number<kN0>{}, number<kTailK0>{}), {0, 0});
+                                static_for<0, kTailKIters, 1>{}([&](auto j) {
+                                    constexpr index_t kSubKOffset = j.value * kGemm0WarpK;
 
-                                gemm_0_tail(s_acc, q_slice, k_tail_window);
+                                    auto q_slice = get_slice_tile(
+                                        q_tile,
+                                        sequence<0, i_k0 * kK0 + kSubKOffset>{},
+                                        sequence<kM0, i_k0 * kK0 + kSubKOffset + kGemm0WarpK>{});
+                                    auto k_tail_window = make_tile_window(
+                                        k_lds,
+                                        make_tuple(number<kN0>{}, number<kGemm0WarpK>{}),
+                                        {0, kSubKOffset});
+
+                                    gemm_0_tail(s_acc, q_slice, k_tail_window);
+                                });
                             }
                         });
                         return;
@@ -774,7 +787,16 @@ struct BlockFmhaPipelineQRKSVS
             }
             if constexpr(kHasSink)
             {
-                if(i_total_loops == 0)
+                // Jump out of the sink prefix on its last iteration, not on the first.
+                // num_sink_loop comes from sink_seq_end and therefore from mask.sink alone;
+                // a learnable-softmax sink only turns kHasSink on, it never adds sink tiles.
+                // Two cases this guard covers:
+                //   num_sink_loop == 0: bias_dram_window already starts at kv_load_start,
+                //     which equals seqlen_k_start here, so moving would offset it twice.
+                //   num_sink_loop >= 2: the first sink tile is not the last one, so moving
+                //     on iteration 0 would leave the prefix a tile early.
+                // Matches the batch_prefill pipeline.
+                if(i_total_loops == num_sink_loop - 1)
                     move_tile_window(bias_dram_window, {0, seqlen_k_start - sink_seq_end});
             }
             move_tile_window(bias_dram_window, {0, kN0});
@@ -849,6 +871,91 @@ struct BlockFmhaPipelineQRKSVS
                 }
             };
 
+            // Conditional rescaling: skip o_acc rescale when correction factor
+            // exp2(acc_scale_log2) is negligible (< exp2(-8) ~= 0.004, below BF16
+            // precision). Adapted from FlashAttention-4 (Tri Dao, 2025).
+            // Eliminates 70-90% of rescale operations in practice.
+            //
+            // For skip rows we stabilize P with m_old (the previous max) instead of
+            // the new max m_j, so P is computed directly in the m_{j-1} frame and no
+            // post-correction sweep is needed. For rescale rows we use m_j as usual.
+            // FP8 quant modes (PERTENSOR/BLOCKSCALE/etc.) cast P to FP8 after
+            // softmax. In the skip branch P is computed with m_old, so P can
+            // exceed the FP8 representable range and saturate, corrupting the
+            // P*V GEMM. Disable skip for all FP8 paths (threshold 0).
+            static constexpr SMPLComputeDataType kRescaleThreshold =
+                type_convert<SMPLComputeDataType>(
+                    QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ? 8.0f : 0.0f);
+
+            // Per-row stabilizer: m_old for skip rows, m_j for rescale rows.
+            auto m_stab =
+                make_static_distributed_tensor<SMPLComputeDataType>(m.get_tile_distribution());
+            // Per-row rescale factor (exp2 of acc_scale_log2); only valid when
+            // needs_rescale[i] is true.
+            auto rescale_factor =
+                make_static_distributed_tensor<SMPLComputeDataType>(m.get_tile_distribution());
+            auto needs_rescale = make_static_distributed_tensor<bool>(m.get_tile_distribution());
+            set_tile(needs_rescale, false);
+
+            constexpr auto m_spans = decltype(m)::get_distributed_spans();
+            sweep_tile_span(m_spans[number<0>{}], [&](auto idx0) {
+                constexpr auto i_idx = make_tuple(idx0);
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+                const auto acc_scale_log2 = [&]() {
+                    if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                                 BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                    {
+                        return m_old[i_idx] - get_validated_m(m[i_idx]);
+                    }
+                    else
+                    {
+                        if constexpr(kHasLogitsSoftCap)
+                        {
+                            return m_old[i_idx] - get_validated_m(m[i_idx]);
+                        }
+                        else
+                        {
+                            auto row_max = scale_s * get_validated_m(m[i_idx]);
+                            return scale_s * m_old[i_idx] - row_max;
+                        }
+                    }
+                }();
+
+                const bool need_rescale =
+                    (acc_scale_log2 < type_convert<SMPLComputeDataType>(-kRescaleThreshold));
+
+                if(need_rescale)
+                {
+                    rescale_factor(i_idx) = exp2(acc_scale_log2);
+                    m_stab(i_idx)         = m[i_idx];
+                    needs_rescale(i_idx)  = true;
+                }
+                else
+                {
+                    // Skip branch: stabilize P with m_old so P is already in
+                    // m_{j-1} frame; restore m to m_old for downstream iterations.
+                    m_stab(i_idx) = m_old[i_idx];
+                    m(i_idx)      = m_old[i_idx];
+                }
+#else
+                const auto diff = m_old[i_idx] - get_validated_m(m[i_idx]);
+                const bool need_rescale =
+                    (diff < type_convert<SMPLComputeDataType>(-kRescaleThreshold));
+
+                if(need_rescale)
+                {
+                    rescale_factor(i_idx) = exp(diff);
+                    m_stab(i_idx)         = m[i_idx];
+                    needs_rescale(i_idx)  = true;
+                }
+                else
+                {
+                    m_stab(i_idx) = m_old[i_idx];
+                    m(i_idx)      = m_old[i_idx];
+                }
+#endif
+            });
+
             constexpr auto p_spans = decltype(p_compute)::get_distributed_spans();
             sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
@@ -856,7 +963,7 @@ struct BlockFmhaPipelineQRKSVS
                 // For BLOCKSCALE: precompute (m - shift) once per row
                 // Bias/Alibi/SoftCap: exp2(s - m + shift) = exp2(s - (m - shift))
                 // else: exp2(scale_s*s - scale_s*m + shift) = exp2(scale_s*s - (scale_s*m - shift))
-                auto validated_m = get_validated_m(m[i_idx]);
+                auto validated_m = get_validated_m(m_stab[i_idx]);
                 auto row_max     = scale_s * validated_m;
                 if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
                 {
@@ -889,7 +996,7 @@ struct BlockFmhaPipelineQRKSVS
                         }
                     }
 #else
-                    p_compute(i_j_idx)     = exp(s[i_j_idx] - get_validated_m(m[i_idx]));
+                    p_compute(i_j_idx)     = exp(s[i_j_idx] - get_validated_m(m_stab[i_idx]));
 #endif
                 });
             });
@@ -902,38 +1009,20 @@ struct BlockFmhaPipelineQRKSVS
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
             sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-#if CK_TILE_FMHA_FWD_FAST_EXP2
-                const auto tmp = [&]() {
-                    if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                                 BiasEnum == BlockAttentionBiasEnum::ALIBI)
-                    {
-                        return exp2(m_old[i_idx] - get_validated_m(m[i_idx]));
-                    }
-                    else
-                    {
-                        if constexpr(kHasLogitsSoftCap)
-                        {
-
-                            return exp2(m_old[i_idx] - get_validated_m(m[i_idx]));
-                        }
-                        else
-                        {
-                            auto row_max = scale_s * get_validated_m(m[i_idx]);
-                            return exp2(scale_s * m_old[i_idx] - row_max);
-                        }
-                    }
-                }();
-#else
-                const auto tmp       = exp(m_old[i_idx] - get_validated_m(m[i_idx]));
-#endif
-                l(i_idx) = tmp * l[i_idx] + rowsum_p[i_idx];
-                sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
-                    constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                    // FIXME: this use different equation from FA v2 paper,
-                    // but produce correc result.
-                    // Is the equation wrong?
-                    o_acc(i_j_idx) *= tmp;
-                });
+                if(needs_rescale[i_idx])
+                {
+                    const auto tmp = rescale_factor[i_idx];
+                    l(i_idx)       = tmp * l[i_idx] + rowsum_p[i_idx];
+                    sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
+                        constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                        o_acc(i_j_idx) *= tmp;
+                    });
+                }
+                else
+                {
+                    // Skip: P already in m_{j-1} frame, no o_acc rescale needed.
+                    l(i_idx) = l[i_idx] + rowsum_p[i_idx];
+                }
             });
 
             if constexpr(kHasDropout)
@@ -946,7 +1035,10 @@ struct BlockFmhaPipelineQRKSVS
                         return seqlen_k_start + i_total_loops * kN0;
 
                     const bool in_sink_phase = (num_sink_loop > i_total_loops);
-                    if(i_total_loops == num_sink_loop)
+                    // Same reasoning as the bias window above, expressed for a window that
+                    // is moved lazily on the first post-prefix iteration: with
+                    // num_sink_loop == 0 it already starts at seqlen_k_start, so skip.
+                    if(num_sink_loop > 0 && i_total_loops == num_sink_loop)
                         move_tile_window(randval_dram_window, {0, seqlen_k_start - sink_seq_end});
 
                     return in_sink_phase ? (kv_load_start + i_total_loops * kN0)
@@ -1119,10 +1211,24 @@ struct BlockFmhaPipelineQRKSVS
             // move K tile windows
             if constexpr(kHasSink)
             {
-                if(i_total_loops == 0)
+                // Same guard as the bias window: with num_sink_loop == 0 the K/V windows
+                // already start at seqlen_k_start and moving offsets them twice, and with
+                // num_sink_loop >= 2 the move belongs on the last sink tile. Unlike the
+                // async pipeline (which increments i_total_loops before its check), here
+                // the check is live, so getting it wrong read the wrong K/V tiles.
+                if(i_total_loops == num_sink_loop - 1)
                 {
                     move_tile_window(k_dram_block_window, {seqlen_k_start - sink_seq_end, 0});
                     move_tile_window(v_dram_window, {0, seqlen_k_start - sink_seq_end});
+                    if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
+                    {
+                        // The scale windows advance in lockstep with K/V, so they take the
+                        // same jump, expressed in scale elements for V.
+                        move_tile_window(k_scale_dram_block_window,
+                                         {seqlen_k_start - sink_seq_end, 0});
+                        move_tile_window(v_scale_dram_window,
+                                         {0, (seqlen_k_start - sink_seq_end) / kVScaleGranularity});
+                    }
                 }
             }
             move_tile_window(k_dram_block_window, {kN0, 0});

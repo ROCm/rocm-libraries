@@ -147,6 +147,10 @@ The ``axpy`` functions support the ``_64`` interface. See the :ref:`ILP64 API` s
 
 The ``axpy_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
+The ``axpy_batched`` functions support ``rocblas_set_batch_alpha_stride`` when the ``rocblas_handle`` is
+in mode ``rocblas_pointer_mode_device``, which interprets ``alpha`` as a per-batch device array. This also
+applies to ``axpy_batched_ex``.
+
 .. doxygenfunction:: rocblas_saxpy_strided_batched
    :outline:
 .. doxygenfunction:: rocblas_daxpy_strided_batched
@@ -158,6 +162,10 @@ The ``axpy_batched`` functions support the ``_64`` interface. See the :ref:`ILP6
 .. doxygenfunction:: rocblas_zaxpy_strided_batched
 
 The ``axpy_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
+
+The ``axpy_strided_batched`` functions support ``rocblas_set_batch_alpha_stride`` when the ``rocblas_handle`` is
+in mode ``rocblas_pointer_mode_device``, which interprets ``alpha`` as a per-batch device array. This also
+applies to ``axpy_strided_batched_ex``.
 
 .. _rocblas_copy:
 
@@ -449,6 +457,10 @@ The ``scal`` functions support the ``_64`` interface. See the :ref:`ILP64 API` s
 
 The ``scal_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
+The ``scal_batched`` functions support ``rocblas_set_batch_alpha_stride`` when the ``rocblas_handle`` is
+in mode ``rocblas_pointer_mode_device``, which interprets ``alpha`` as a per-batch device array. This also
+applies to ``scal_batched_ex``.
+
 .. doxygenfunction:: rocblas_sscal_strided_batched
    :outline:
 .. doxygenfunction:: rocblas_dscal_strided_batched
@@ -462,6 +474,10 @@ The ``scal_batched`` functions support the ``_64`` interface. See the :ref:`ILP6
 .. doxygenfunction:: rocblas_zdscal_strided_batched
 
 The ``scal_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
+
+The ``scal_strided_batched`` functions support ``rocblas_set_batch_alpha_stride`` when the ``rocblas_handle`` is
+in mode ``rocblas_pointer_mode_device``, which interprets ``alpha`` as a per-batch device array. This also
+applies to ``scal_strided_batched_ex``.
 
 .. _rocblas_swap:
 

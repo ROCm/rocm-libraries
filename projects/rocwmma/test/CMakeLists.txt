@@ -90,6 +90,27 @@ else()
   set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_OLD} CACHE INTERNAL "Build SHARED libraries" FORCE)
 endif()
 
+# YAML-driven CTest test categorisation for the *installed* tree only.
+# The shared helper apply_ctest_category_labels(yaml, install_test_file)
+# scans the install-tree CTestTestfile.cmake fragments we hand-roll
+# below for `add_test()` lines and appends explicit
+# set_tests_properties() lines so `ctest -L <tier>` works against the
+# install tree. Build-tree tests are intentionally not labelled here
+# (mirrors the hipDNN approach).
+set(_ROCWMMA_TEST_CATEGORIES_YAML "${PROJECT_SOURCE_DIR}/test_categories.yaml")
+set(_ROCWMMA_SHARED_CTEST          "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+if(EXISTS "${_ROCWMMA_SHARED_CTEST}" AND EXISTS "${_ROCWMMA_TEST_CATEGORIES_YAML}")
+    include("${_ROCWMMA_SHARED_CTEST}")
+    message(STATUS "rocWMMA: YAML-based CTest categorization enabled (install tree only)")
+else()
+    if(NOT EXISTS "${_ROCWMMA_SHARED_CTEST}")
+        message(STATUS "rocWMMA: shared/ctest not found at ${_ROCWMMA_SHARED_CTEST}; skipping CTest categories")
+    endif()
+    if(NOT EXISTS "${_ROCWMMA_TEST_CATEGORIES_YAML}")
+        message(STATUS "rocWMMA: ${_ROCWMMA_TEST_CATEGORIES_YAML} not found; skipping CTest categories")
+    endif()
+endif()
+
 set(ROCWMMA_TEST_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR})
 set(ROCWMMA_COMMON_TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/hip_device.cpp
                                 ${CMAKE_CURRENT_SOURCE_DIR}/rocwmma_gtest_main.cpp)
@@ -177,6 +198,10 @@ function(add_rocwmma_test TEST_TARGET TEST_SOURCE)
   endif()
   file(APPEND "${INSTALL_TEST_FILE}" "add_test(${TEST_TARGET} \"../${EXE_NAME}\" --omit 5)\n")
   file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(${TEST_TARGET} PROPERTIES SKIP_REGULAR_EXPRESSION \"no ROCm-capable device;unsupported host device\")\n")
+  file(APPEND "${INSTALL_TEST_FILE}" "add_test(\"${TEST_TARGET} smoke\" \"../${EXE_NAME}\" --emulation smoke --omit 5)\n")
+  file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(\"${TEST_TARGET} smoke\" PROPERTIES SKIP_REGULAR_EXPRESSION \"no ROCm-capable device;unsupported host device\")\n")
+  file(APPEND "${INSTALL_TEST_FILE}" "add_test(\"${TEST_TARGET} regression\" \"../${EXE_NAME}\" --emulation regression --omit 5)\n")
+  file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(\"${TEST_TARGET} regression\" PROPERTIES SKIP_REGULAR_EXPRESSION \"no ROCm-capable device;unsupported host device\")\n")
 
   file(APPEND "${INSTALL_SMOKE_TEST_FILE}" "add_test(\"${TEST_TARGET} smoke\" \"../../${EXE_NAME}\" --emulation smoke --omit 5)\n")
   file(APPEND "${INSTALL_SMOKE_TEST_FILE}" "set_tests_properties(\"${TEST_TARGET} smoke\" PROPERTIES SKIP_REGULAR_EXPRESSION \"no ROCm-capable device;unsupported host device\")\n")
@@ -205,6 +230,36 @@ add_subdirectory(dlrm)
 
 if(ROCWMMA_BUILD_REGRESSION_TESTS)
     add_subdirectory(regression)
+endif()
+
+# Sharded smoke entry for load_store_matrix_coop_sync_test: runs 1/8 of
+# the smoke tests via GTest's built-in sharding.  The full smoke run has
+# ~24K tests; this shard brings it down to ~3K tests.
+file(APPEND "${INSTALL_TEST_FILE}" "add_test(\"load_store_matrix_coop_sync_test shard0 smoke\" \"../load_store_matrix_coop_sync_test\" --emulation smoke --omit 5)\n")
+file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(\"load_store_matrix_coop_sync_test shard0 smoke\" PROPERTIES SKIP_REGULAR_EXPRESSION \"no ROCm-capable device;unsupported host device\")\n")
+file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(\"load_store_matrix_coop_sync_test shard0 smoke\" PROPERTIES ENVIRONMENT \"GTEST_TOTAL_SHARDS=8;GTEST_SHARD_INDEX=0\")\n")
+
+# Bake YAML-driven category labels into each install-tree
+# CTestTestfile.cmake fragment so `ctest --test-dir
+# $THEROCK_BIN_DIR/rocwmma[/{smoke,regression}] -L <tier>` works
+# against the install tree. Passing the install file as the 2nd
+# argument tells the shared helper to scan it for the test names
+# already written via add_test() above and emit explicit
+# set_tests_properties(... LABELS ...) lines (the only form ctest's
+# script interpreter exposes through --print-labels / -L).
+if(COMMAND apply_ctest_category_labels)
+    apply_ctest_category_labels(
+        "${_ROCWMMA_TEST_CATEGORIES_YAML}"
+        "${INSTALL_TEST_FILE}"
+    )
+    apply_ctest_category_labels(
+        "${_ROCWMMA_TEST_CATEGORIES_YAML}"
+        "${INSTALL_SMOKE_TEST_FILE}"
+    )
+    apply_ctest_category_labels(
+        "${_ROCWMMA_TEST_CATEGORIES_YAML}"
+        "${INSTALL_REGRESSION_TEST_FILE}"
+    )
 endif()
 
 rocm_install(

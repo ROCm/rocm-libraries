@@ -159,20 +159,35 @@ namespace MEMObserverTest
                 auto context = TestContext::ForTarget(arch);
                 auto s       = context.createRegisters(Register::Type::Scalar, DataType::UInt32, 4);
                 auto v_f16   = context.createRegisters(Register::Type::Vector, DataType::Half, 3);
-                auto a = context.createRegisters(Register::Type::Accumulator, DataType::Float, 2);
-                auto zero = Register::Value::Literal(0);
+                auto zero    = Register::Value::Literal(0);
+                std::vector<Register::ValuePtr> a;
+                std::string                     mi = "";
 
-                std::string const& mfma = "v_mfma_f32_32x32x8f16";
+                auto const& architecture = context.get()->targetArchitecture();
 
-                std::vector<Instruction> insts = {
+                if(architecture.HasCapability(GPUCapability::HasMFMA))
+                {
+                    a  = context.createRegisters(Register::Type::Accumulator, DataType::Float, 2);
+                    mi = "v_mfma_f32_32x32x8f16";
+                }
+                else if(architecture.HasCapability(GPUCapability::HasWMMA_f32_16x16x32_f16))
+                {
+                    a  = context.createRegisters(Register::Type::Vector, DataType::Float, 2);
+                    mi = "v_wmma_f32_16x16x32_f16";
+                }
+                else
+                {
+                    SKIP("Unsupported Matrix Instruction.");
+                }
+
+                std::vector<Instruction> insts{
                     Instruction("buffer_store_dwordx2", {s[1]}, {s[0], zero}, {}, ""),
-                    Instruction(mfma, {a[0]}, {v_f16[0], v_f16[1], a[0]}, {}, ""),
-                    Instruction(mfma, {a[1]}, {v_f16[1], v_f16[2], a[1]}, {}, ""),
+                    Instruction(mi, {a[0]}, {v_f16[0], v_f16[1], a[0]}, {}, ""),
+                    Instruction(mi, {a[1]}, {v_f16[1], v_f16[2], a[1]}, {}, ""),
                     Instruction("buffer_store_dwordx2", {s[3]}, {s[2], zero}, {}, ""),
                 };
 
-                auto const& architecture = context.get()->targetArchitecture();
-                auto        cycles       = architecture.GetInstructionInfo(mfma).getLatency();
+                auto cycles = architecture.GetInstructionInfo(mi).getLatency();
 
                 peekAndSchedule(context, insts[0]);
                 peekAndSchedule(context, insts[1]);

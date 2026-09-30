@@ -248,6 +248,10 @@ namespace MixedArithmeticTest
                 {
                     Throw<FatalError>("Buffer value present in arithmetic test.");
                 }
+                else if constexpr(std::is_same_v<CurType, TDM>)
+                {
+                    Throw<FatalError>("TDM value present in arithmetic test.");
+                }
                 else
                 {
                     return static_cast<NewType>(v);

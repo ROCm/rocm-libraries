@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_gesv.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -39,6 +40,7 @@ rocblas_status rocsolver_gesv_impl(rocblas_handle handle,
                                    T* B,
                                    const rocblas_int ldb,
                                    rocblas_int* info)
+try
 {
     ROCSOLVER_ENTER_TOP("gesv", "-n", n, "--nrhs", nrhs, "--lda", lda, "--ldb", ldb);
 
@@ -83,6 +85,10 @@ rocblas_status rocsolver_gesv_impl(rocblas_handle handle,
     return rocsolver_gesv_template<false, false, T>(handle, n, nrhs, A, shiftA, lda, strideA, ipiv,
                                                     strideP, B, shiftB, ldb, strideB, info,
                                                     batch_count, &work_helper);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

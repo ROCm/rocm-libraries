@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <ostream>
 #include <string>
@@ -92,7 +93,7 @@ struct AsmDirective : public IRBase {
    private:
     AsmDirective() : IRBase(IRType::StinkyAsmDirective), kind(AsmDirectiveKind::SET), intValue(0) {}
 
-    ~AsmDirective() = default;
+    ~AsmDirective() override = default;
 
    public:
     // Implement IRBase::dump()

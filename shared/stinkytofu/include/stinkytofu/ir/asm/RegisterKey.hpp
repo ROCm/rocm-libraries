@@ -22,30 +22,66 @@
  * ************************************************************************ */
 #pragma once
 
+#include <cstdint>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace stinkytofu {
-/// Per-DWORD register key used to track individual register components
-/// across definitions and uses.
+
+/// Sub-DWORD lane: NONE = full DWORD, LOW/HIGH = True16 halves.
+/// Values mirror HighBitSel (RegHalfKeyer casts directly). Pre-RA scaffolding.
+enum class RegHalf : int8_t {
+    NONE = -1,
+    LOW = 0,
+    HIGH = 1,
+};
+
+inline const char* halfName(RegHalf h) {
+    switch (h) {
+        case RegHalf::NONE:
+            return "NONE";
+        case RegHalf::LOW:
+            return "LOW";
+        case RegHalf::HIGH:
+            return "HIGH";
+    }
+    STINKY_UNREACHABLE("invalid RegHalf value");
+}
+
+/// Per-DWORD register key for tracking defs/uses; `half` extends to True16
+/// sub-DWORD halves.
 struct RegKey {
     RegType type;
     unsigned idx;
+    RegHalf half = RegHalf::NONE;
 
     bool operator==(const RegKey& o) const noexcept {
-        return type == o.type && idx == o.idx;
+        return type == o.type && idx == o.idx && half == o.half;
     }
 };
 
 struct RegKeyHash {
     size_t operator()(const RegKey& k) const noexcept {
         size_t h = std::hash<int>{}(static_cast<int>(k.type));
-        h ^= std::hash<unsigned>{}(k.idx) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+        auto combine = [&](size_t v) { h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2); };
+        combine(std::hash<unsigned>{}(k.idx));
+        combine(std::hash<int>{}(static_cast<int>(k.half)));
         return h;
     }
 };
+
+/// Human-readable key, e.g. "v20", "s4", "acc10", or "v20.lo" for a True16 half.
+inline std::string regKeyToString(const RegKey& key) {
+    std::string text = key.type == RegType::AGPR ? "acc" : regTypeToString(key.type);
+    text += std::to_string(key.idx);
+    if (key.half == RegHalf::LOW) text += ".lo";
+    if (key.half == RegHalf::HIGH) text += ".hi";
+    return text;
+}
 
 template <typename V>
 using RegKeyMap = std::unordered_map<RegKey, V, RegKeyHash>;
@@ -72,6 +108,20 @@ void forEachRegUnit(const StinkyRegister& reg, Fn&& fn) {
     for (unsigned i = 0; i < reg.reg.num; ++i) {
         fn(toRegKey(reg, i));
     }
+}
+
+inline void addSources(RegKeySet& sources, const StinkyInstruction& inst) {
+    for (const StinkyRegister& src : inst.getSrcRegs())
+        forEachRegUnit(src, [&](const RegKey& key) { sources.insert(key); });
+}
+
+inline bool hasDestSourceOverlap(const StinkyInstruction& inst, const RegKeySet& sources) {
+    for (const StinkyRegister& dest : inst.getDestRegs()) {
+        bool overlaps = false;
+        forEachRegUnit(dest, [&](const RegKey& key) { overlaps |= sources.contains(key); });
+        if (overlaps) return true;
+    }
+    return false;
 }
 
 }  // namespace stinkytofu

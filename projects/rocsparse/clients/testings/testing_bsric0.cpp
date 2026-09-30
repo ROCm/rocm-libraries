@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,39 @@
 #include "rocsparse_enum.hpp"
 #include "testing.hpp"
 #include <iomanip>
+#include <memory>
+
+// Check that the product of the IC factors L*L^H matches the original matrix A.
+template <typename T>
+static void check_bsr_cholesky(const T* __restrict__ factors,
+                               const T* __restrict__ orig,
+                               rocsparse_int       bd,
+                               rocsparse_direction direction,
+                               floating_data_t<T>  tol)
+{
+    const size_t bds = static_cast<size_t>(bd);
+    auto         LLH = std::make_unique<T[]>(bds * bds);
+    for(rocsparse_int i = 0; i < bd; i++)
+    {
+        for(rocsparse_int j = 0; j < bd; j++)
+        {
+            T sum = static_cast<T>(0);
+            for(rocsparse_int k = 0; k <= std::min(i, j); k++)
+            {
+                const T Lik = (direction == rocsparse_direction_row) ? factors[bds * i + k]
+                                                                     : factors[bds * k + i];
+                const T Ljk = (direction == rocsparse_direction_row) ? factors[bds * j + k]
+                                                                     : factors[bds * k + j];
+                sum         = sum + Lik * rocsparse_conj(Ljk);
+            }
+            if(direction == rocsparse_direction_row)
+                LLH[bds * i + j] = sum;
+            else
+                LLH[bds * j + i] = sum;
+        }
+    }
+    near_check_general<T>(bd, bd, orig, bd, LLH.get(), bd, tol);
+}
 
 template <typename T>
 void testing_bsric0_bad_arg(const Arguments& arg)
@@ -193,6 +226,21 @@ void testing_bsric0(const Arguments& arg)
     matrix_factory.init_bsr(
         hbsr_row_ptr, hbsr_col_ind, hbsr_val_1, direction, Mb, Nb, nnzb, block_dim, base);
     M = Mb * block_dim;
+
+    // For Mb == 1 (single-block case), IC0 is exact Cholesky and we verify L*L^H = A.
+    // The random matrix generator produces a general matrix, which is not Hermitian positive definite.
+    // Make the diagonal block HPD before factoring.
+    if(Mb == 1)
+    {
+        const rocsparse_int bd = block_dim;
+        for(rocsparse_int b = hbsr_row_ptr[0] - base; b < hbsr_row_ptr[1] - base; ++b)
+        {
+            if(hbsr_col_ind[b] - base != 0)
+                continue;
+            rocsparse_matrix_utils::make_block_hpd(
+                hbsr_val_1.data() + size_t(b) * bd * bd, bd, direction);
+        }
+    }
 
     host_vector<T> hbsr_val_orig(hbsr_val_1);
     host_vector<T> hbsr_val_gold(hbsr_val_1);
@@ -392,8 +440,31 @@ void testing_bsric0(const Arguments& arg)
                 rocsparse_reproducibility::save(
                     "P pointer mode host", hbsr_val_1, "P pointer mode device", hbsr_val_2);
             }
+
+            // General case: compare GPU result against CPU reference
             hbsr_val_gold.near_check(hbsr_val_1);
             hbsr_val_gold.near_check(hbsr_val_2);
+
+            if(Mb == 1)
+            {
+                // Mb == 1: IC0 is exact Cholesky. Verify L*L^H = A independently for CPU and GPU.
+                const rocsparse_int      bd = block_dim;
+                const floating_data_t<T> tol
+                    = static_cast<floating_data_t<T>>(bd) * get_near_check_tol<T>(arg);
+
+                check_bsr_cholesky<T>(
+                    hbsr_val_gold.data(), hbsr_val_orig.data(), bd, direction, tol); // CPU
+                check_bsr_cholesky<T>(hbsr_val_1.data(),
+                                      hbsr_val_orig.data(),
+                                      bd,
+                                      direction,
+                                      tol); // GPU pointer mode host
+                check_bsr_cholesky<T>(hbsr_val_2.data(),
+                                      hbsr_val_orig.data(),
+                                      bd,
+                                      direction,
+                                      tol); // GPU pointer mode device
+            }
         }
         else
         {

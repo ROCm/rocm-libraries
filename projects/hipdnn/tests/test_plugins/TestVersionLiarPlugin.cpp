@@ -1,0 +1,68 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// Fake plugin that reports the override API version but omits the override symbol.
+
+#include "TestPluginCommon.hpp"
+#include "TestPluginEngineIdMap.hpp"
+
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
+
+// NOLINTNEXTLINE
+thread_local char
+    hipdnn_plugin_sdk::PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH]
+    = "";
+
+// Define thread-local LastCallRecord storage and the suffixed C-API
+// observation entry points for tests. Must come before the plugin class so
+// the override of `lastCallRecord()` can name the suffixed accessor.
+DEFINE_TEST_PLUGIN_LAST_CALL_STORAGE(VersionLiar)
+
+class VersionLiarPlugin : public TestPluginBase
+{
+public:
+    const char* getPluginName() const override
+    {
+        return "test_VersionLiarPlugin";
+    }
+    const char* getPluginVersion() const override
+    {
+        return "1.0.0";
+    }
+
+    /// Reports the override-capable API version without exporting the override symbol.
+    const char* getPluginApiVersion() const override
+    {
+        return hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION.data();
+    }
+
+    int64_t getEngineId() const override
+    {
+        return hipdnn_tests::plugin_constants::engineId<VersionLiarPlugin>();
+    }
+    uint32_t getNumEngines() const override
+    {
+        return 1;
+    }
+    uint32_t getNumApplicableEngines() const override
+    {
+        return 1;
+    }
+
+    /// Routes the base-class observation hooks to this plugin's suffixed
+    /// thread-local storage so tests can inspect dispatch via
+    /// `getLastCallRecord_VersionLiar()`.
+    TestPluginLastCallRecord& lastCallRecord() const override
+    {
+        return testPluginLastCallRecord_VersionLiar();
+    }
+};
+
+// Initialize plugin instance on load
+__attribute__((constructor)) static void initializePlugin()
+{
+    TestPluginBase::setInstance(std::make_unique<VersionLiarPlugin>());
+}
+
+// Register only the standard plugin API functions.
+REGISTER_TEST_PLUGIN_API()

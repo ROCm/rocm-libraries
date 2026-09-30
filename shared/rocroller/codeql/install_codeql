@@ -6,6 +6,9 @@
 # Installs CodeQL binaries in /opt/codeql
 VERSION=v2.20.4
 DESTINATION=/opt/codeql
+if [[ -n "$1" ]]; then
+  DESTINATION=$1
+fi
 
 mkdir -p $DESTINATION
 cd $DESTINATION

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -690,7 +690,7 @@ void testing_csrgemm(const Arguments& arg)
                 rocsparse_reproducibility::save("d_C pointer mode host", d_C);
             }
 
-            h_C.near_check(d_C);
+            h_C.near_check(d_C, get_near_check_tol<T>(arg));
         }
         {
             //
@@ -711,7 +711,7 @@ void testing_csrgemm(const Arguments& arg)
                 rocsparse_reproducibility::save("d_C pointer mode device", d_C);
             }
 
-            h_C.near_check(d_C);
+            h_C.near_check(d_C, get_near_check_tol<T>(arg));
         }
     }
 

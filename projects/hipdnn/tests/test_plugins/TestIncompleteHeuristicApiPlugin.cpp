@@ -98,9 +98,11 @@ hipdnnPluginStatus_t
 
 hipdnnPluginStatus_t
     hipdnnHeuristicPolicyDescriptorCreate(hipdnnHeuristicHandle_t handle,
+                                          int64_t policy_id,
                                           hipdnnHeuristicPolicyDescriptor_t* out_descriptor)
 {
     (void)handle;
+    (void)policy_id;
     if(out_descriptor == nullptr)
     {
         return HIPDNN_PLUGIN_STATUS_INVALID_VALUE;

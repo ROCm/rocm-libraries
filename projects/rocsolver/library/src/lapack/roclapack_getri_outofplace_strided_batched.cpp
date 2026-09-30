@@ -25,6 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#include "exceptions.hpp"
 #include "roclapack_getri_outofplace.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -43,6 +44,7 @@ rocblas_status rocsolver_getri_outofplace_strided_batched_impl(rocblas_handle ha
                                                                rocblas_int* info,
                                                                const bool pivot,
                                                                const rocblas_int batch_count)
+try
 {
     const char* name
         = (pivot ? "getri_outofplace_strided_batched" : "getri_npvt_outofplace_strided_batched");
@@ -84,6 +86,10 @@ rocblas_status rocsolver_getri_outofplace_strided_batched_impl(rocblas_handle ha
     return rocsolver_getri_outofplace_template<false, true, T>(
         handle, n, A, shiftA, lda, strideA, ipiv, shiftP, strideP, C, shiftC, ldc, strideC, info,
         batch_count, &work_helper, pivot);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

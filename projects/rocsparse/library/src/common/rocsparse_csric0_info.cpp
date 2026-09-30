@@ -29,6 +29,6 @@ void _rocsparse_csric0_info::copy(const _rocsparse_csric0_info* that, hipStream_
                                                                stream);
     this->m_singularity_numeric_near.copy_singular_info_async(&that->m_singularity_numeric_near,
                                                               stream);
-    THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+    THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 }
 _rocsparse_csric0_info::~_rocsparse_csric0_info() {}

@@ -201,7 +201,7 @@ protected:
 
         // Epsilon (pass-by-value)
         auto epsilon = std::make_shared<TensorAttributes>();
-        epsilon->set_name("epsilon").set_value(1e-5f);
+        epsilon->set_name("epsilon").set_compile_time_constant(1e-5f);
         if(useManualUids)
         {
             epsilon->set_uid(uid++);

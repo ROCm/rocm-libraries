@@ -34,8 +34,8 @@ namespace rocRoller
         template <class DerivedObserver>
         void WaitStateObserver<DerivedObserver>::observe(Instruction const& inst)
         {
+            decrementHazardCounters(inst);
             auto* thisDerived = static_cast<DerivedObserver*>(this);
-            thisDerived->decrementHazardCounters(inst);
             thisDerived->observeHazard(inst);
         }
 
@@ -121,8 +121,6 @@ namespace rocRoller
             {
                 return std::nullopt;
             }
-
-            auto const* thisDerived = static_cast<DerivedObserver const*>(this);
 
             int requiredNops = -1;
             for(auto const& regId : reg->getRegisterIds())

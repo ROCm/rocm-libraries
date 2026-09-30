@@ -27,6 +27,9 @@ on:
     branches:
       - 'develop'
 
+permissions:
+  contents: read
+
 concurrency:
   group: pr-merge-sync-patch-${{ github.sha }}
   cancel-in-progress: false
@@ -34,6 +37,9 @@ concurrency:
 jobs:
   patch:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       pr_number: ${{ steps.pr-check.outputs.pr }}
     steps:
@@ -60,7 +66,7 @@ jobs:
       - name: Generate a token
         id: generate-token
         if: steps.pr-check.outputs.skip != 'true'
-        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}

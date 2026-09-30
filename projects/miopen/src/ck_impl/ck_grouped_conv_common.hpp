@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -20,9 +21,13 @@ struct CKKernelListHandle
 /// Convolution dimensions extracted from a ProblemDescription.
 /// Pure integer struct with no CK dependency, so it can live in this
 /// shared header included by all direction impl files.
+///
+/// Members are int64 so downstream stride builders (e.g. Hi*Wi*G*C in the
+/// NCHW layout path) do not silently overflow on tensors whose contiguous
+/// stride exceeds INT_MAX (ROCM-23997).
 struct CKConvDims
 {
-    int G, N, K, C, C1, K1, Hi, Wi, Ho, Wo, Y, X;
+    int64_t G, N, K, C, C1, K1, Hi, Wi, Ho, Wo, Y, X;
 };
 
 /// Extract convolution dimensions from a ProblemDescription.

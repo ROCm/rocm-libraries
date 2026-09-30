@@ -54,19 +54,15 @@ rocblas_internal_flip_vector_kernel(U* __restrict__ data,
         // Load appropriate pointers
         uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
         for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
         {
-#endif
             T*          pdata = load_ptr_batch(data, batch, offset, stride);
             rocblas_int end   = (m - 1 - tx) * abs_incx;
             rocblas_int start = tx * abs_incx;
             T           temp  = pdata[end];
             pdata[end]        = pdata[start];
             pdata[start]      = temp;
-#if DEVICE_GRID_YZ_16BIT
         }
-#endif
     }
 }
 

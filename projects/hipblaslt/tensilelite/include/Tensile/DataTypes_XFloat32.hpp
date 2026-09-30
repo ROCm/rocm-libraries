@@ -30,9 +30,7 @@
 #include <cmath>
 #include <iostream>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 #define TENSILE_USE_XF32
 
@@ -90,12 +88,6 @@ namespace TensileLite
 
     private:
         static constexpr const float XFloat32_ZERO_VALUE = 0.0f;
-
-        // zero extend lower 13 bits of XFloat32 to convert to IEEE float
-        static float XFloat32_to_float(const XFloat32 v)
-        {
-            return v.data;
-        }
 
         // truncate lower 13 bits of IEEE float to convert to XFloat32
         // not reserved the signaling NaN.
@@ -238,5 +230,3 @@ namespace std
         return static_cast<TensileLite::XFloat32>(std::cos(static_cast<float>(a)));
     }
 } // namespace std
-
-TENSILE_HIDDEN_END

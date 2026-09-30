@@ -42,7 +42,7 @@ using namespace hipsparse_test;
 template <typename I, typename T>
 void testing_rot_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 13000))
+#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 14000))
     int64_t size = 100;
     int64_t nnz  = 100;
 
@@ -91,7 +91,7 @@ void testing_rot_bad_arg(const Arguments& argus)
 template <typename I, typename T>
 void testing_rot(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 13000))
+#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 14000))
     I size = argus.N;
     I nnz  = argus.nnz;
 

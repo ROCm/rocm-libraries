@@ -324,6 +324,9 @@ data_layout_t data_layout_t::make_contiguous_intersection_of(const data_layout_t
     if(!first.is_dimensionally_consistent_with(second))
         throw std::invalid_argument("Dimensionally-inconsistent arguments for "
                                     + ROCFFT_CURRENT_FUNCTION);
+    if(first.embedding != second.embedding)
+        throw std::invalid_argument("Different embeddings for arguments of "
+                                    + ROCFFT_CURRENT_FUNCTION);
 
     data_layout_t ret;
     ret.len_axes.resize(first.len_axes.size());
@@ -339,6 +342,7 @@ data_layout_t data_layout_t::make_contiguous_intersection_of(const data_layout_t
         else
             ret[dim].inbuffer_stride = ret[dim - 1].inbuffer_stride * ret[dim - 1].logical_span();
     }
+    ret.embedding = first.embedding;
     return ret;
 }
 
@@ -375,6 +379,19 @@ void data_layout_t::reorder_length_axes(const std::vector<size_t>& len_axis_orde
         const auto len_axis_copy = len_axes;
         for(size_t dim = 0; dim < get_len_rank(); dim++)
             len_axes[dim] = len_axis_copy[len_axis_order[dim]];
+
+        if(embedding)
+        {
+            // Update map according to new order
+            for(auto& axis_idx : *embedding)
+            {
+                if(axis_idx >= get_len_rank())
+                    continue; // batch axes are unmodified herein
+                axis_idx = std::distance(
+                    len_axis_order.begin(),
+                    std::find(len_axis_order.begin(), len_axis_order.end(), axis_idx));
+            }
+        }
     }
 }
 
@@ -458,6 +475,11 @@ std::string data_layout_t::str() const
         ret += " ";
         ret += std::to_string(s_or_d);
     }
+
+    if(is_embedded())
+    {
+        ret += " embedded within a " + std::to_string(embedding->size()) + "-dimensional data set";
+    }
     return ret;
 }
 
@@ -465,6 +487,7 @@ void data_layout_t::clear()
 {
     len_axes.clear();
     batch_axes.clear();
+    embedding.reset();
 }
 
 void data_layout_t::full_range_reset(const std::vector<size_t>& lengths,
@@ -544,7 +567,7 @@ std::optional<data_layout_t>
 
     if(has_some_partial_length_axis())
         throw std::logic_error(ROCFFT_CURRENT_FUNCTION
-                               + " queried on a layout involving partial lengths");
+                               + " queried on a layout involving partial length axes");
 
     if(fft_type == rocfft_transform_type_complex_forward
        || fft_type == rocfft_transform_type_complex_inverse)
@@ -562,9 +585,7 @@ std::optional<data_layout_t>
     // real transform: unit stride is required along the innermost axis
     if((*this)[0].logical_span() > 1 && (*this)[0].inbuffer_stride != 1)
         return std::nullopt;
-    const bool other_is_hermitian_domain
-        = (other_io == io_data_label::INPUT) ^ (fft_type == rocfft_transform_type_real_forward);
-    if(other_is_hermitian_domain)
+    if(is_hermitian_domain(fft_type, other_io))
     {
         bool strides_are_consistent = true;
         for(size_t dim = 1; strides_are_consistent && dim < get_full_rank(); dim++)
@@ -579,14 +600,124 @@ std::optional<data_layout_t>
             return std::nullopt;
     }
     // copy layout and modify what needs be
-    auto ret        = std::make_optional<data_layout_t>(*this);
-    (*ret)[0].upper = other_is_hermitian_domain ? (*this)[0].logical_span() / 2 + 1
-                                                : 2 * ((*this)[0].logical_span() - 1)
-                                                      + (other_innermost_length_is_odd ? 1 : 0);
+    auto ret = std::make_optional<data_layout_t>(*this);
+    (*ret)[0].upper
+        = is_real_domain(fft_type, other_io)
+              ? 2 * ((*this)[0].logical_span() - 1) + (other_innermost_length_is_odd ? 1 : 0)
+              : (*this)[0].logical_span() / 2 + 1;
     for(size_t dim = 1; dim < ret->get_full_rank(); dim++)
     {
-        (*ret)[dim].inbuffer_stride = other_is_hermitian_domain ? (*this)[dim].inbuffer_stride / 2
-                                                                : 2 * (*this)[dim].inbuffer_stride;
+        (*ret)[dim].inbuffer_stride = is_real_domain(fft_type, other_io)
+                                          ? 2 * (*this)[dim].inbuffer_stride
+                                          : (*this)[dim].inbuffer_stride / 2;
     }
+    return ret;
+}
+
+data_layout_t data_layout_t::get_layout_for_len_axes(const std::set<size_t>& len_indices) const
+{
+    const auto len_rank = get_len_rank();
+    if(len_indices.empty() || len_indices.size() > len_rank
+       || std::any_of(len_indices.begin(), len_indices.end(), [&len_rank](const auto& len_idx) {
+              return len_idx >= len_rank;
+          }))
+    {
+        throw std::invalid_argument("Invalid subset of length axis indices given to "
+                                    + ROCFFT_CURRENT_FUNCTION);
+    }
+    if(len_indices.size() == len_rank)
+        return *this;
+
+    data_layout_t ret;
+    // map of current object's to returned object's axis indices
+    std::vector<size_t> current_to_ret(get_full_rank());
+    // Turn non-desired length axes into additional batch axes
+    for(size_t axis_idx = 0; axis_idx < get_full_rank(); axis_idx++)
+    {
+        if(len_indices.contains(axis_idx))
+        {
+            current_to_ret[axis_idx] = ret.len_axes.size();
+            ret.len_axes.push_back((*this)[axis_idx]);
+        }
+        else
+        {
+            current_to_ret[axis_idx] = len_indices.size() + ret.batch_axes.size();
+            ret.batch_axes.push_back((*this)[axis_idx]);
+        }
+    }
+    // Set returned object's embedding map
+    ret.embedding = this->embedding;
+    if(!ret.embedding)
+    {
+        // If no embedding in parent, initialize to default indices
+        ret.embedding = std::vector<size_t>(len_rank);
+        std::iota(ret.embedding->begin(), ret.embedding->end(), 0);
+    }
+    for(auto& embed_idx : *ret.embedding)
+        embed_idx = current_to_ret[embed_idx];
+    return ret;
+}
+
+bool data_layout_t::has_consistent_embedding() const
+{
+    if(!embedding)
+        return true;
+    // Embedding data sets cannot have empty length_axes nor empty batch_axes
+    bool ret = !embedding->empty() && embedding->size() < get_full_rank();
+    // All axis indices in the embedding must be within bounds
+    ret &= std::all_of(embedding->begin(), embedding->end(), [&](const size_t& axis_idx) {
+        return axis_idx < get_full_rank();
+    });
+    // All length axes of current object must be in the embedding
+    for(size_t len_idx = 0; ret && len_idx < get_len_rank(); len_idx++)
+        ret &= std::find(embedding->begin(), embedding->end(), len_idx) != embedding->end();
+    // Embedding cannot have duplicated axis indices
+    for(size_t i = 0; ret && i < embedding->size(); i++)
+        for(size_t j = i + 1; ret && j < embedding->size(); j++)
+            ret &= (*embedding)[i] != (*embedding)[j];
+    return ret;
+}
+
+data_layout_t data_layout_t::get_embedding_layout() const
+{
+    if(!embedding)
+        return *this;
+    if(!has_consistent_embedding())
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " detected an inconsistent embedding map");
+
+    data_layout_t ret;
+    for(const auto& axis_idx : *embedding)
+        ret.len_axes.push_back((*this)[axis_idx]);
+    // all other batch axes that aren't part of the embedding remain batch axes
+    // (conserve relative ordering)
+    for(auto axis_idx = get_len_rank(); axis_idx < get_full_rank(); axis_idx++)
+    {
+        if(std::find(embedding->begin(), embedding->end(), axis_idx) != embedding->end())
+            continue;
+        ret.batch_axes.push_back((*this)[axis_idx]);
+    }
+    return ret;
+}
+
+bool data_layout_t::is_embedded() const
+{
+    return embedding.has_value() && embedding->size() > get_len_rank();
+}
+
+std::vector<size_t> data_layout_t::corresponding_axes_in_embedding() const
+{
+    std::vector<size_t> ret;
+    if(!embedding)
+    {
+        ret.resize(get_len_rank());
+        std::iota(ret.begin(), ret.end(), 0);
+        return ret;
+    }
+    if(!has_consistent_embedding())
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " detected an inconsistent embedding map");
+    for(size_t len_idx = 0; len_idx < get_len_rank(); len_idx++)
+        ret.push_back(std::distance(embedding->begin(),
+                                    std::find(embedding->begin(), embedding->end(), len_idx)));
+
     return ret;
 }

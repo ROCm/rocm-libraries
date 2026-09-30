@@ -8,10 +8,11 @@ namespace ck_tile {
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
 StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>::StreamKTilePartitionerBase(
     index_t m, index_t n, index_t k, index_t max_active_wgs)
-    : max_active_wgs_{max_active_wgs}, n_{n}
+    : max_active_wgs_{max_active_wgs}, n_{n}, k_{k}
 {
-    iters_per_tile_ = integer_divide_ceil(k, KPerBlock);
-    num_tiles_      = integer_divide_ceil(m, MPerBlock) * integer_divide_ceil(n_, NPerBlock);
+    iters_per_tile_    = integer_divide_ceil(k, KPerBlock);
+    num_tiles_         = integer_divide_ceil(m, MPerBlock) * integer_divide_ceil(n_, NPerBlock);
+    remainder_along_k_ = k % KPerBlock;
 
     bool big_enough         = num_tiles_ > max_active_wgs_;
     index_t remainder_tiles = num_tiles_ % max_active_wgs_;
@@ -59,7 +60,7 @@ CK_TILE_HOST_DEVICE index_t
 StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>::get_flags_buffer_size()
     const noexcept
 {
-    constexpr index_t alignment  = 128;
+    constexpr index_t alignment  = 256;
     const index_t required_bytes = sizeof(index_t) * sk_ctas_;
     const index_t padded_bytes   = ck_tile::integer_least_multiple(required_bytes, alignment);
     return padded_bytes;
@@ -251,6 +252,21 @@ StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>::get_n() c
 }
 
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
+CK_TILE_HOST_DEVICE index_t
+StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>::get_k() const noexcept
+{
+    return k_;
+}
+
+template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
+CK_TILE_HOST_DEVICE index_t
+StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>::get_remainder_along_k()
+    const noexcept
+{
+    return remainder_along_k_;
+}
+
+template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
 CK_TILE_HOST index_t
 StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>::estimate_num_wgs_per_tile()
     const noexcept
@@ -281,6 +297,82 @@ StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>::estimate_
     return std::max(num_wgs_per_tile, 1);
 }
 
+/**
+ * @brief XCDs access ids in round robin format, this function remaps the 1D ids to continguous
+ * XCD segments
+ *
+ * @param block_1d_id       grid 1D id
+ * @param total_num_tiles   size of the 1D grid
+ * @param num_xcds          number of XCDs
+ * @return index_t  The id after XCD remap
+ */
+template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
+CK_TILE_HOST_DEVICE /* static */ index_t
+StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>::remap_xcd(
+    index_t block_1d_id, index_t total_num_tiles, index_t num_xcds) noexcept
+{
+    if(num_xcds == 1)
+    {
+        return block_1d_id;
+    }
+    // Number of ids per XCD in the new arrangement
+    index_t ids_per_xcd = (total_num_tiles + num_xcds - 1) / num_xcds;
+
+    // When total_num_tiles cannot divide num_xcds, some xcds will have
+    // ids_per_xcd ids, the other will have ids_per_xcd - 1 ids.
+    // We calculate the number of xcds that have ids_per_xcd ids as tall_xcds
+    index_t tall_xcds = total_num_tiles % num_xcds;
+    tall_xcds         = (tall_xcds == 0) ? num_xcds : tall_xcds;
+
+    // Compute current XCD and local id within the XCD
+    index_t xcd      = block_1d_id % num_xcds;
+    index_t local_id = block_1d_id / num_xcds;
+
+    // Calculate new id based on the new grouping
+    if(xcd < tall_xcds)
+    {
+        block_1d_id = xcd * ids_per_xcd + local_id;
+    }
+    else
+    {
+        block_1d_id = tall_xcds * ids_per_xcd + (xcd - tall_xcds) * (ids_per_xcd - 1) + local_id;
+    }
+
+    /**
+     * original ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+     * XCD 0 gets: [0, 8], XCD 1 gets: [1, 9], ...
+     *
+     * post-remap ids: [0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15]
+     * XCD 0 gets: [0, 1], XCD 1 gets: [2, 3], ...
+     *
+     * after remap the ids are continguous on each XCD
+     */
+    return block_1d_id;
+}
+
+template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
+CK_TILE_DEVICE index_t
+StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>::get_k_size(
+    index_t num_macro_tiles, index_t local_iter_end) const noexcept
+{
+    // Determine if this workgroup is responsible for the last macro tile in the K dimension
+    bool last_tile = get_iters_per_tile() == local_iter_end;
+    index_t k_size;
+    // If there is no remainder or if the workgroup was not assigned the last macro tile along K,
+    // then their k_size will be a multiple of KPerBlock.
+    if(!remainder_along_k_ || !last_tile)
+    {
+        k_size = num_macro_tiles * KPerBlock;
+    }
+    // Otherwise, there's a remainder. So, k_size is not a multiple of KPerBlock.
+    else
+    {
+        k_size = (num_macro_tiles - 1) * KPerBlock + remainder_along_k_;
+    }
+
+    return k_size;
+}
+
 template <typename BlockGemmShapeType,
           StreamKReductionStrategy ReductionStrategyType,
           bool Persistent>
@@ -297,7 +389,7 @@ StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>::StreamK
 }
 
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
-CK_TILE_HOST auto
+CK_TILE_HOST_DEVICE auto
 StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>::grid_size() const noexcept
     -> dim3
 {
@@ -339,7 +431,7 @@ StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, false>::Stream
 }
 
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
-CK_TILE_HOST auto
+CK_TILE_HOST_DEVICE auto
 StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, false>::grid_size() const noexcept
     -> dim3
 {

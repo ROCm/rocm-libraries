@@ -13,14 +13,7 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#else
-#include <dlfcn.h>
-#endif
+#include <test_plugins/TestPluginCommon.hpp>
 
 namespace hipdnn_tests
 {
@@ -39,57 +32,23 @@ using hipdnn_flatbuffers_sdk::data_objects::UnPackEngineConfig;
 /// The pluginPath passed to the constructor should be the exact resolved path the
 /// backend used when loading the plugin. Use hipdnn_frontend::getLoadedEnginePluginPaths()
 /// to obtain it, ensuring dlopen returns a handle to the same loaded library.
+///
+/// Handle lifecycle (dlopen/dlsym and cross-platform loading) is owned by the
+/// composed ScopedTestPluginLibrary; this class only adds the typed accessors.
 class TestPluginKnobRecorder
 {
 public:
     /// Opens the plugin library at the given absolute path and resolves recording symbols.
     /// Throws std::runtime_error on failure.
     explicit TestPluginKnobRecorder(const std::filesystem::path& pluginPath)
+        : _lib(pluginPath.string())
     {
-        // Re-open the already-loaded plugin to get a handle for symbol lookup.
-        // The backend loads plugins with RTLD_LOCAL (Linux), so symbols are not
-        // visible via dlsym(RTLD_DEFAULT). This just bumps the refcount.
-#ifdef _WIN32
-        _handle = LoadLibraryW(pluginPath.wstring().c_str());
-        if(_handle == nullptr)
-        {
-            throw std::runtime_error("Failed to load plugin: " + pluginPath.string()
-                                     + " (Error Code: " + std::to_string(GetLastError()) + ")");
-        }
-#else
-        _handle = dlopen(pluginPath.string().c_str(), RTLD_NOW | RTLD_LOCAL);
-        if(_handle == nullptr)
-        {
-            const char* error = dlerror();
-            throw std::runtime_error("Failed to load plugin: " + pluginPath.string() + " ("
-                                     + (error != nullptr ? std::string(error) : "Unknown error")
-                                     + ")");
-        }
-#endif
-        try
-        {
-            _fnGetCount = resolveSymbol<GetCountFn>("hipdnnTestKnobsPluginGetReceivedKnobsCount");
-            _fnGetDataAt
-                = resolveSymbol<GetDataAtFn>("hipdnnTestKnobsPluginGetReceivedKnobsDataAt");
-            _fnGetSizeAt
-                = resolveSymbol<GetSizeAtFn>("hipdnnTestKnobsPluginGetReceivedKnobsSizeAt");
-            _fnReset = resolveSymbol<ResetFn>("hipdnnTestKnobsPluginResetReceivedKnobs");
-        }
-        catch(...)
-        {
-            cleanup();
-            throw;
-        }
-    }
-
-    TestPluginKnobRecorder(const TestPluginKnobRecorder&) = delete;
-    TestPluginKnobRecorder& operator=(const TestPluginKnobRecorder&) = delete;
-    TestPluginKnobRecorder(TestPluginKnobRecorder&&) = delete;
-    TestPluginKnobRecorder& operator=(TestPluginKnobRecorder&&) = delete;
-
-    ~TestPluginKnobRecorder()
-    {
-        cleanup();
+        _fnGetCount = _lib.requireSymbol<GetCountFn>("hipdnnTestKnobsPluginGetReceivedKnobsCount");
+        _fnGetDataAt
+            = _lib.requireSymbol<GetDataAtFn>("hipdnnTestKnobsPluginGetReceivedKnobsDataAt");
+        _fnGetSizeAt
+            = _lib.requireSymbol<GetSizeAtFn>("hipdnnTestKnobsPluginGetReceivedKnobsSizeAt");
+        _fnReset = _lib.requireSymbol<ResetFn>("hipdnnTestKnobsPluginResetReceivedKnobs");
     }
 
     /// Returns the number of knob setting entries recorded since last reset.
@@ -158,49 +117,7 @@ private:
         });
     }
 
-    template <typename T>
-    T resolveSymbol(const char* name)
-    {
-#ifdef _WIN32
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-        auto* sym = reinterpret_cast<void*>(GetProcAddress(_handle, name));
-#else
-        void* sym = dlsym(_handle, name);
-#endif
-        if(sym == nullptr)
-        {
-#ifdef _WIN32
-            throw std::runtime_error("Failed to get symbol: " + std::string(name)
-                                     + " (Error Code: " + std::to_string(GetLastError()) + ")");
-#else
-            const char* error = dlerror();
-            throw std::runtime_error("Failed to get symbol: " + std::string(name) + " ("
-                                     + (error != nullptr ? std::string(error) : "Unknown error")
-                                     + ")");
-#endif
-        }
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-        return reinterpret_cast<T>(sym);
-    }
-
-    void cleanup() noexcept
-    {
-        if(_handle != nullptr)
-        {
-#ifdef _WIN32
-            FreeLibrary(_handle);
-#else
-            dlclose(_handle);
-#endif
-            _handle = nullptr;
-        }
-    }
-
-#ifdef _WIN32
-    HMODULE _handle = nullptr;
-#else
-    void* _handle = nullptr;
-#endif
+    ScopedTestPluginLibrary _lib;
     GetCountFn _fnGetCount = nullptr;
     GetDataAtFn _fnGetDataAt = nullptr;
     GetSizeAtFn _fnGetSizeAt = nullptr;

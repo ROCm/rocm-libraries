@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -41,7 +41,7 @@ rocsparse_status rocsparse::bsric0_kernel_launch(rocsparse_handle      handle,
     ROCSPARSE_ROUTINE_TRACE;
 
     const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
-    const bool sleep    = (gcn_arch_name == rocpsarse_arch_names::gfx908 && handle->asic_rev < 2);
+    const bool sleep    = (gcn_arch_name == rocsparse_arch_names::gfx908 && handle->asic_rev < 2);
     auto       trm_info = bsric0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
     const auto max_nnzb = trm_info->get_max_nnz();
 
@@ -80,10 +80,10 @@ rocsparse_status rocsparse::bsric0_kernel_launch(rocsparse_handle      handle,
                                                "No suitable kernel detected from bsric0");
     }
 
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
-                                       0,
-                                       sizeof(int32_t) * A->rows * A->batch_count,
-                                       handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
+                                                 0,
+                                                 sizeof(int32_t) * A->rows * A->batch_count,
+                                                 handle->stream));
 
     RETURN_IF_ROCSPARSE_ERROR(launch(handle, bsric0_info, A, buffer_size, buffer));
 

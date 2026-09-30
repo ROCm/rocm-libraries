@@ -34,6 +34,14 @@
 #include <iostream>
 #include <rocblaslt.h>
 
+namespace
+{
+    bool uniformSummationOrderEnabled(hipblasLtHandle_t handle, bool pref)
+    {
+        return pref || (handle && static_cast<rocblaslt_handle>(handle)->uniform_summation_order);
+    }
+}
+
 namespace hipblaslt_ext
 {
     static_assert(sizeof(hipblasLtMatmulHeuristicResult_t) == sizeof(rocblaslt_matmul_heuristic_result),
@@ -43,7 +51,9 @@ namespace hipblaslt_ext
     class GemmPreference::GemmPreferenceImpl
     {
     public:
-        size_t workspace_bytes;
+        size_t                           workspace_bytes          = 0;
+        hipblasLtStreamKTileSchedulingMode_t streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF;
+        bool                             uniform_summation_order  = false;
     };
 
     GemmPreference::GemmPreference()
@@ -75,6 +85,36 @@ namespace hipblaslt_ext
     const size_t GemmPreference::getMaxWorkspaceBytes() const
     {
         return pimpl->workspace_bytes;
+    }
+
+    void GemmPreference::setStreamKTileSchedulingMode(hipblasLtStreamKTileSchedulingMode_t mode)
+    {
+        switch(mode)
+        {
+        case HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF:
+        case HIPBLASLT_STREAMK_TILE_SCHEDULING_ON:
+        case HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO:
+            pimpl->streamk_tile_scheduling_mode = mode;
+            break;
+        default:
+            pimpl->streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF;
+            break;
+        }
+    }
+
+    hipblasLtStreamKTileSchedulingMode_t GemmPreference::getStreamKTileSchedulingMode() const
+    {
+        return pimpl->streamk_tile_scheduling_mode;
+    }
+
+    void GemmPreference::setUniformSummationOrder(bool value)
+    {
+        pimpl->uniform_summation_order = value;
+    }
+
+    bool GemmPreference::getUniformSummationOrder() const
+    {
+        return pimpl->uniform_summation_order;
     }
 
     class GemmProblemType::GemmProblemTypeImpl
@@ -298,42 +338,79 @@ namespace hipblaslt_ext
         pimpl->aux_stride = aux_stride;
     }
 
+    namespace
+    {
+        RocblasltContractionProblem::ScalingFormat
+            mapMatrixScaleToFormat(hipblasLtMatmulMatrixScale_t s, const char* which)
+        {
+            switch(s)
+            {
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F:
+                return RocblasltContractionProblem::ScalingFormat::Scalar;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F:
+                return RocblasltContractionProblem::ScalingFormat::Vector;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0:
+                return RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT:
+                return RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT:
+                return RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3:
+                return RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT:
+                return RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT:
+                return RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT:
+                return RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT;
+            default:
+                std::cerr << "Unsupported scaling type for " << which
+                          << " matrix: " << static_cast<int>(s) << std::endl;
+                throw std::invalid_argument(std::string("Unsupported scaling type for ") + which
+                                            + " matrix");
+            }
+        }
+
+        hipblasLtMatmulMatrixScale_t
+            mapFormatToMatrixScale(RocblasltContractionProblem::ScalingFormat f, const char* which)
+        {
+            switch(f)
+            {
+            case RocblasltContractionProblem::ScalingFormat::Scalar:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
+            case RocblasltContractionProblem::ScalingFormat::Vector:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;
+            case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+            case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT;
+            case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT;
+            case RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3;
+            case RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT;
+            case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT;
+            case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+            default:
+                std::cerr << "Unsupported scaling type for " << which
+                          << " matrix: " << static_cast<int>(f) << std::endl;
+                throw std::invalid_argument(std::string("Unsupported scaling type for ") + which
+                                            + " matrix");
+            }
+        }
+    }
+
     void GemmEpilogue::setScalingAType(hipblasLtMatmulMatrixScale_t scaling_a_type)
     {
-        switch(scaling_a_type)
-        {
-        case HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F:
-            pimpl->scaling_a_type = RocblasltContractionProblem::ScalingFormat::Scalar;
-            break;
-        case HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F:
-            pimpl->scaling_a_type = RocblasltContractionProblem::ScalingFormat::Vector;
-            break;
-        case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3:
-        case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0:
-        default:
-            std::cerr << "Unsupported scaling type for A matrix: "
-                      << static_cast<int>(scaling_a_type) << std::endl;
-            throw std::invalid_argument("Unsupported scaling type for A matrix");
-        }
+        pimpl->scaling_a_type = mapMatrixScaleToFormat(scaling_a_type, "A");
     }
 
     void GemmEpilogue::setScalingBType(hipblasLtMatmulMatrixScale_t scaling_b_type)
     {
-        switch(scaling_b_type)
-        {
-        case HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F:
-            pimpl->scaling_b_type = RocblasltContractionProblem::ScalingFormat::Scalar;
-            break;
-        case HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F:
-            pimpl->scaling_b_type = RocblasltContractionProblem::ScalingFormat::Vector;
-            break;
-        case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3:
-        case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0:
-        default:
-            std::cerr << "Unsupported scaling type for B matrix: "
-                      << static_cast<int>(scaling_b_type) << std::endl;
-            throw std::invalid_argument("Unsupported scaling type for B matrix");
-        }
+        pimpl->scaling_b_type = mapMatrixScaleToFormat(scaling_b_type, "B");
     }
 
     void GemmEpilogue::setAct0(float act0)
@@ -373,32 +450,12 @@ namespace hipblaslt_ext
 
     hipblasLtMatmulMatrixScale_t GemmEpilogue::getScalingAType() const
     {
-        switch(pimpl->scaling_a_type)
-        {
-        case RocblasltContractionProblem::ScalingFormat::Scalar:
-            return HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
-        case RocblasltContractionProblem::ScalingFormat::Vector:
-            return HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;
-        default:
-            std::cerr << "Unsupported scaling type for A matrix: "
-                      << static_cast<int>(pimpl->scaling_a_type) << std::endl;
-            throw std::invalid_argument("Unsupported scaling type for A matrix");
-        }
+        return mapFormatToMatrixScale(pimpl->scaling_a_type, "A");
     }
 
     hipblasLtMatmulMatrixScale_t GemmEpilogue::getScalingBType() const
     {
-        switch(pimpl->scaling_b_type)
-        {
-        case RocblasltContractionProblem::ScalingFormat::Scalar:
-            return HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
-        case RocblasltContractionProblem::ScalingFormat::Vector:
-            return HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;
-        default:
-            std::cerr << "Unsupported scaling type for B matrix: "
-                      << static_cast<int>(pimpl->scaling_b_type) << std::endl;
-            throw std::invalid_argument("Unsupported scaling type for B matrix");
-        }
+        return mapFormatToMatrixScale(pimpl->scaling_b_type, "B");
     }
 
     float GemmEpilogue::getAct0()
@@ -654,64 +711,6 @@ namespace hipblaslt_ext
     // End of pimpl classes
     /////////////////////////////////////////////////////
 
-    bool currentArchSupportsFp8()
-    {
-        using std::begin;
-        using std::end;
-
-        static const std::string fp8Archs[] = {"gfx942", "gfx950"};
-        const auto               archName   = rocblaslt_internal_get_arch_name();
-        return std::find(begin(fp8Archs), end(fp8Archs), archName) != end(fp8Archs);
-    }
-
-    template <typename SrcType, typename DstType, typename ScaleType = float>
-    __global__ void datatypeConversion(const SrcType*   src,
-                                       DstType*         dst,
-                                       const ScaleType* scale,
-                                       std::size_t      numElements)
-    {
-        const auto tId        = threadIdx.x;
-        const auto bId        = blockIdx.x;
-        const auto blockSize  = blockDim.x * blockDim.y * blockDim.z;
-        const auto elemOffset = bId * blockSize + tId;
-        const auto scaleValue = scale ? *scale : 1.f;
-
-        if(elemOffset < numElements)
-        {
-            dst[elemOffset] = DstType(float(src[elemOffset]) * scaleValue);
-        }
-    }
-
-    template <typename SrcType, typename DstType>
-    void datatypeConversionCpu(const SrcType* src, DstType* dst, std::size_t numElements)
-    {
-        for(std::size_t i = 0; i < numElements; ++i)
-        {
-            dst[i] = DstType(src[i]);
-        }
-    }
-
-    auto NullDeleter = [](void*) { return hipSuccess; };
-
-    HipBufferPtr makeHipBuffer(std::size_t numBytes)
-    {
-        if(!numBytes)
-        {
-            return HipBufferPtr(nullptr, NullDeleter);
-        }
-
-        void* ptr = nullptr;
-        auto  err = hipMalloc(&ptr, numBytes);
-
-        if(err != hipSuccess)
-        {
-            return HipBufferPtr(nullptr, NullDeleter);
-        }
-
-        return HipBufferPtr(ptr, &hipFree);
-    }
-
-    ////////////////////////////////////////////////////////////
     // Gemm Instance
     ////////////////////////////////////////////////////////////
 
@@ -745,6 +744,9 @@ namespace hipblaslt_ext
             rocblaslt::Debug::Instance().markerStop();
             return HIPBLAS_STATUS_INVALID_VALUE;
         }
+        m_streamk_tile_scheduling_mode
+            = static_cast<int32_t>(pref.pimpl->streamk_tile_scheduling_mode);
+        m_uniform_summation_order = pref.pimpl->uniform_summation_order;
         auto gemmType = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
         auto results
             = reinterpret_cast<std::vector<rocblaslt_matmul_heuristic_result>*>(&heuristicResults);
@@ -754,6 +756,8 @@ namespace hipblaslt_ext
                                              gemmType,
                                              m_data,
                                              pref.pimpl->workspace_bytes,
+                                             m_streamk_tile_scheduling_mode,
+                                             uniformSummationOrderEnabled(m_handle, m_uniform_summation_order),
                                              requestedAlgoCount,
                                              *results));
         rocblaslt::Debug::Instance().markerStop();
@@ -766,6 +770,9 @@ namespace hipblaslt_ext
     {
         rocblaslt::Debug::Instance().markerStart("hipblasLtIsAlgoSupportedCpp");
         auto                    gemmType = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
+        applyStreamKTileSchedulingMode(m_data, gemmType, m_streamk_tile_scheduling_mode);
+        applyUniformSummationOrder(
+            m_data, gemmType, uniformSummationOrderEnabled(m_handle, m_uniform_summation_order));
         auto                    rocalgo  = reinterpret_cast<rocblaslt_matmul_algo*>(&algo);
         rocblaslt::RocTuningV2* tuning   = nullptr;
         auto                    status = RocBlasLtStatusToHIPStatus(rocblaslt_is_algo_supported_cpp(
@@ -785,6 +792,9 @@ namespace hipblaslt_ext
     {
         rocblaslt::Debug::Instance().markerStart("hipblasLtIsAlgoSupportedTuningV2Cpp");
         auto gemmType  = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
+        applyStreamKTileSchedulingMode(m_data, gemmType, m_streamk_tile_scheduling_mode);
+        applyUniformSummationOrder(
+            m_data, gemmType, uniformSummationOrderEnabled(m_handle, m_uniform_summation_order));
         auto rocalgo   = reinterpret_cast<rocblaslt_matmul_algo*>(&algo);
         auto roctuning = reinterpret_cast<rocblaslt::RocTuningV2*>(tuning.pimpl.get());
         auto status
@@ -1480,4 +1490,42 @@ namespace hipblaslt_ext
         return status;
     }
 
+    /* This function is introduced for supporting rocblas hipblaslt integration
+     * This function is invoked from hipblaslt_host.cpp (runHipblasltContractionProblem())
+     * when rocblas already knows the solution index. This function checks if the 
+     * kernel corresponding to the solution index is supported on a given GPU and
+     * returns the workspace size required for the kernel.
+     */
+    hipblasStatus_t isSolutionSupported(hipblasLtMatmulHeuristicResult_t* heuristicResultsArray,
+                                         hipblasLtHandle_t                  handle,
+                                         hipblasLtMatmulDesc_t              matmulDesc,
+                                         const void*                        alpha,
+                                         hipblasLtMatrixLayout_t            matA,
+                                         hipblasLtMatrixLayout_t            matB,
+                                         const void*                        beta,
+                                         hipblasLtMatrixLayout_t            matC,
+                                         hipblasLtMatrixLayout_t            matD,
+                                         size_t*                            workspaceSize,
+                                         int*                               returnAlgoCount)
+    {
+        if(heuristicResultsArray[0].algo.data[0] != 0)
+        {
+            rocblaslt_status status = rocblaslt_matmul_is_algo_supported((rocblaslt_handle)handle,
+                                                                         (rocblaslt_matmul_desc)matmulDesc,
+                                                                         alpha,
+                                                                         (rocblaslt_matrix_layout)matA,
+                                                                         (rocblaslt_matrix_layout)matB,
+                                                                         beta,
+                                                                         (rocblaslt_matrix_layout)matC,
+                                                                         (rocblaslt_matrix_layout)matD,
+                                                                         (rocblaslt_matmul_algo*)&heuristicResultsArray[0].algo,
+                                                                         &heuristicResultsArray[0].workspaceSize);
+            if(rocblaslt_status_success == status)
+                (*returnAlgoCount)++;
+            if(workspaceSize != nullptr)
+                *workspaceSize = heuristicResultsArray[0].workspaceSize;
+            return (hipblasStatus_t)status;
+        }
+        return HIPBLAS_STATUS_SUCCESS;
+    }
 } // End of namespace hipblasltext

@@ -28,6 +28,8 @@ def run(args):
     if suite is None:
         if utils.rocm_gfx().startswith("gfx120"):
             suite = "all_gfx120X"
+        if utils.rocm_gfx().startswith("gfx1250"):
+            suite = "all_gfx1250"
         else:
             suite = "all"
 

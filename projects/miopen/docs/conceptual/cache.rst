@@ -59,7 +59,7 @@ warning message similar to:
 
 .. code:: bash
 
-   > MIOpen(HIP): Warning [SQLiteBase] Missing system database file:gfx906_60.kdb Performance may degrade
+   > MIOpen: Warning [SQLiteBase] Missing system database file:gfx906_60.kdb Performance may degrade
 
 The performance degradation mentioned in the warning only affects the network start-up time (the
 "initial iteration time") and can be safely ignored.

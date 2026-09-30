@@ -63,7 +63,7 @@ static void LogCmdGetitem(const miopenTensorDescriptor_t dyDesc,
         {
             dy_s += std::to_string(dy_dims[i]);
             if(i != dy_dims.size() - 2)
-                dy_s += ",";
+                dy_s += ',';
         }
         ss << " -doutput " << dy_s;
 
@@ -75,7 +75,7 @@ static void LogCmdGetitem(const miopenTensorDescriptor_t dyDesc,
             {
                 index_s += std::to_string(index_dims[j]);
                 if(j != index_dims.size() - 2)
-                    index_s += ",";
+                    index_s += ',';
             }
             ss << " -index" << i + 1 << " " << index_s;
         }
@@ -87,7 +87,7 @@ static void LogCmdGetitem(const miopenTensorDescriptor_t dyDesc,
         {
             dx_s += std::to_string(dx_dims[i]);
             if(i != dx_dims.size() - 2)
-                dx_s += ",";
+                dx_s += ',';
         }
 
         ss << " -dx " << dx_s;
@@ -97,7 +97,7 @@ static void LogCmdGetitem(const miopenTensorDescriptor_t dyDesc,
         {
             dims_s += std::to_string(dims[i]);
             if(i != dimCount - 2)
-                dims_s += ",";
+                dims_s += ',';
         }
         ss << " -dims" << dims_s;
 
@@ -106,7 +106,7 @@ static void LogCmdGetitem(const miopenTensorDescriptor_t dyDesc,
         {
             slices_s += std::to_string(slices[i]);
             if(i != sliceCount - 2)
-                slices_s += ",";
+                slices_s += ',';
         }
         ss << " -slice" << slices_s;
 

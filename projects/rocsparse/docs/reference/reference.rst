@@ -25,4 +25,4 @@ The rocSPARSE API Reference Guide presents an index of the rocSPARSE functions a
 * :ref:`rocsparse_generic_functions_` for manipulating sparse matrices
 * :ref:`reproducibility`
 
-It also includes a discussion of the :doc:`precision support <./precision>` for the various rocSPARSE functions.
+It also includes a discussion of the :doc:`precision support <./data_type_support>` for the various rocSPARSE functions.

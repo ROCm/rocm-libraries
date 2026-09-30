@@ -42,6 +42,7 @@ namespace nb = nanobind;
 
 namespace stinkytofu {
 namespace logical {
+namespace {
 
 // ============================================================================
 // Instruction category checks (using InstFlag - same as Assembly IR)
@@ -196,6 +197,7 @@ std::pair<int, bool> findInstIndex(const PyLogicalModule& module,
     return {-1, false};
 }
 
+}  // namespace
 }  // namespace logical
 }  // namespace stinkytofu
 
@@ -203,6 +205,7 @@ std::pair<int, bool> findInstIndex(const PyLogicalModule& module,
 // Python bindings
 // ============================================================================
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void init_logical_count(nb::module_& m) {
     using namespace stinkytofu::logical;
 

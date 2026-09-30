@@ -4,8 +4,7 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: True
-  NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   PrintSolutionRejectionReason: True
   PrintWinnersOnly: False
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
@@ -67,7 +66,7 @@ BenchmarkProblems:
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]
         - TransposeLDS: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]
@@ -101,7 +100,7 @@ BenchmarkProblems:
           # - Exact: [256, 256, 1, 64] # classic format
           - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 256] # classic format
-          # - Exact: [1024, 1024, 1, 1024] # classic format
+          - Exact: [1024, 1024, 1, 1024] # classic format
         - BiasTypeArgs: ['s']
         - FactorDimArgs: [0]
         - ActivationArgs:
@@ -148,7 +147,7 @@ BenchmarkProblems:
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]
         - TransposeLDS: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]
@@ -182,7 +181,7 @@ BenchmarkProblems:
           # - Exact: [256, 256, 1, 64] # classic format
           - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 256] # classic format
-          # - Exact: [1024, 1024, 1, 1024] # classic format
+          - Exact: [1024, 1024, 1, 1024] # classic format
         - BiasTypeArgs: ['s']
         - FactorDimArgs: [0]
         - ActivationArgs:
@@ -229,7 +228,7 @@ BenchmarkProblems:
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]
         - TransposeLDS: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]
@@ -263,7 +262,7 @@ BenchmarkProblems:
           # - Exact: [256, 256, 1, 64] # classic format
           - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 256] # classic format
-          # - Exact: [1024, 1024, 1, 1024] # classic format
+          - Exact: [1024, 1024, 1, 1024] # classic format
         - BiasTypeArgs: ['s']
         - FactorDimArgs: [0]
         - ActivationArgs:
@@ -311,7 +310,7 @@ BenchmarkProblems:
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]
         - TransposeLDS: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]
@@ -345,7 +344,7 @@ BenchmarkProblems:
           # - Exact: [256, 256, 1, 64] # classic format
           - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 256] # classic format
-          # - Exact: [1024, 1024, 1, 1024] # classic format
+          - Exact: [1024, 1024, 1, 1024] # classic format
         - BiasTypeArgs: ['s']
         - FactorDimArgs: [0]
         - ActivationArgs:

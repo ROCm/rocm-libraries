@@ -57,31 +57,14 @@ static inline bool use_sytrs2(I const n, I const nrhs, [[maybe_unused]] I const 
 template <typename T, typename I>
 __device__ static T reduce_sum_shfl_wsize(I const wsize, T val)
 {
-    // Each iteration halves the number of active threads
-    // Each thread adds its partial sum[i] to sum[lane+i]
-    if(wsize == 64)
+    if(wsize == 64 || wsize == 32)
     {
-        val += shift_left(val, 32); // offset = 32
-        val += shift_left(val, 16); // offset = 16
-        val += shift_left(val, 8); // offset = 8
-        val += shift_left(val, 4); // offset = 4
-        val += shift_left(val, 2); // offset = 2
-        val += shift_left(val, 1); // offset = 1
-    }
-    else if(wsize == 32)
-    {
-        val += shift_left(val, 16); // offset = 16
-        val += shift_left(val, 8); // offset = 8
-        val += shift_left(val, 4); // offset = 4
-        val += shift_left(val, 2); // offset = 2
-        val += shift_left(val, 1); // offset = 1
+        reduce_wave_sum(val);
     }
     else
     {
         for(auto offset = wsize / 2; offset > 0; offset /= 2)
-        {
             val += shift_left(val, offset);
-        }
     }
     return val; // note: only thread 0 will return full sum
 }

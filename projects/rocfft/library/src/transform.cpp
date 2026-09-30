@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -27,7 +27,6 @@
 
 #include "../../shared/array_predicate.h"
 #include "../../shared/precision_type.h"
-#include "callback_map.h"
 #include "logging.h"
 #include "plan.h"
 #include "rocfft/rocfft.h"
@@ -68,8 +67,6 @@ rocfft_status rocfft_execution_info_set_work_buffer(rocfft_execution_info info,
 try
 {
     log_trace(__func__, "info", info, "work_buffer", work_buffer, "size_in_bytes", size_in_bytes);
-    if(!work_buffer)
-        return rocfft_status_invalid_work_buffer;
 
     if(!info)
         return rocfft_status_invalid_arg_value;
@@ -79,7 +76,18 @@ try
     if(hipGetDevice(&deviceid) != hipSuccess)
         return rocfft_status_failure;
 
-    info->workBuffers[deviceid] = gpubuf::make_nonowned(work_buffer, size_in_bytes);
+    if(size_in_bytes)
+    {
+        if(!work_buffer)
+            return rocfft_status_invalid_work_buffer;
+
+        info->workBuffers[deviceid] = gpubuf::make_nonowned(work_buffer, size_in_bytes);
+    }
+    else
+    {
+        // clear out any buffer that was set
+        info->workBuffers[deviceid] = {};
+    }
 
     return rocfft_status_success;
 }
@@ -96,9 +104,10 @@ try
     if(!info)
         return rocfft_status_invalid_arg_value;
 
-    // The specified stream is for the current HIP device
     int deviceid = hipInvalidDeviceId;
-    if(hipGetDevice(&deviceid) != hipSuccess)
+    // Note: hipStreamGetDevice returns the current device
+    // for the default stream, i.e., if stream == nullptr.
+    if(hipStreamGetDevice(static_cast<hipStream_t>(stream), &deviceid) != hipSuccess)
         return rocfft_status_failure;
 
     info->rocfft_streams[deviceid] = (hipStream_t)stream;
@@ -115,6 +124,15 @@ rocfft_status rocfft_execution_info_set_load_callback(rocfft_execution_info info
                                                       size_t                shared_mem_bytes)
 try
 {
+    log_trace(__func__,
+              "info",
+              info,
+              "cb_functions",
+              cb_functions,
+              "cb_data",
+              cb_data,
+              "shared_mem_bytes",
+              shared_mem_bytes);
     if(!info)
         return rocfft_status_invalid_arg_value;
 
@@ -133,12 +151,44 @@ catch(...)
     return rocfft_handle_exception();
 }
 
+rocfft_status rocfft_execution_info_set_load_callback_data(rocfft_execution_info info,
+                                                           void**                cb_data,
+                                                           size_t                count)
+try
+{
+    log_trace(__func__, "info", info, "cb_data", cb_data, "count", count);
+    if(!info)
+        return rocfft_status_invalid_arg_value;
+
+    // nullptr cannot be combined with a nonzero count
+    if(!cb_data && count)
+        return rocfft_status_invalid_arg_value;
+
+    info->load_cb_data_jit.resize(count);
+    std::copy(cb_data, cb_data + count, info->load_cb_data_jit.begin());
+    info->load_cb_data = count ? info->load_cb_data_jit.data() : nullptr;
+    return rocfft_status_success;
+}
+catch(...)
+{
+    return rocfft_handle_exception();
+}
+
 rocfft_status rocfft_execution_info_set_store_callback(rocfft_execution_info info,
                                                        void**                cb_functions,
                                                        void**                cb_data,
                                                        size_t                shared_mem_bytes)
 try
 {
+    log_trace(__func__,
+              "info",
+              info,
+              "cb_functions",
+              cb_functions,
+              "cb_data",
+              cb_data,
+              "shared_mem_bytes",
+              shared_mem_bytes);
     if(!info)
         return rocfft_status_invalid_arg_value;
 
@@ -150,6 +200,29 @@ try
     info->store_cb_fns       = cb_functions;
     info->store_cb_data      = cb_data;
     info->store_cb_lds_bytes = shared_mem_bytes;
+    return rocfft_status_success;
+}
+catch(...)
+{
+    return rocfft_handle_exception();
+}
+
+rocfft_status rocfft_execution_info_set_store_callback_data(rocfft_execution_info info,
+                                                            void**                cb_data,
+                                                            size_t                count)
+try
+{
+    log_trace(__func__, "info", info, "cb_data", cb_data, "count", count);
+    if(!info)
+        return rocfft_status_invalid_arg_value;
+
+    // nullptr cannot be combined with a nonzero count
+    if(!cb_data && count)
+        return rocfft_status_invalid_arg_value;
+
+    info->store_cb_data_jit.resize(count);
+    std::copy(cb_data, cb_data + count, info->store_cb_data_jit.begin());
+    info->store_cb_data = count ? info->store_cb_data_jit.data() : nullptr;
     return rocfft_status_success;
 }
 catch(...)
@@ -362,8 +435,6 @@ void rocfft_plan_t::Execute(void*                                 in_buffer[],
 
     LogSortedPlan(sortedIdx);
 
-    auto callbacks = DeviceCallbackMap(info, desc, local_comm_rank);
-
     for(auto i = sortedIdx.begin(); i != sortedIdx.end(); ++i)
     {
         const auto idx = *i;
@@ -395,7 +466,7 @@ void rocfft_plan_t::Execute(void*                                 in_buffer[],
         // Launch this item async:
         if(item.ExecutesOnRank(local_comm_rank))
         {
-            item.ExecuteAsync(this, in_buffer, out_buffer, info, idx, callbacks);
+            item.ExecuteAsync(this, in_buffer, out_buffer, info, idx);
         }
     }
 
@@ -429,8 +500,15 @@ try
 
     try
     {
-        rocfft_execution_info_internal info_internal(info);
-        info_internal.ensure_work_buffer_size(plan->WorkBufBytesPerDevice());
+        rocfft_execution_info_internal info_internal(info, *plan);
+
+        // disallow combining JIT callbacks and legacy callbacks
+        if((plan->desc.loadOps.has_spirv() || plan->desc.storeOps.has_spirv())
+           && (info_internal.get_load_cb_fns() || info_internal.get_store_cb_fns()))
+        {
+            return rocfft_status_invalid_arg_value;
+        }
+
         plan->Execute(in_buffer, out_buffer, info_internal);
     }
     catch(std::exception& e)
@@ -448,12 +526,11 @@ catch(...)
     return rocfft_handle_exception();
 }
 
-void ExecPlan::ExecuteAsync(const rocfft_plan                       plan,
-                            void*                                   in_buffer[],
-                            void*                                   out_buffer[],
-                            const rocfft_execution_info_internal&   exec_info,
-                            size_t                                  multiPlanIdx,
-                            const std::map<int, device_callback_t>& callbacks)
+void ExecPlan::ExecuteAsync(const rocfft_plan                     plan,
+                            void*                                 in_buffer[],
+                            void*                                 out_buffer[],
+                            const rocfft_execution_info_internal& exec_info,
+                            size_t                                multiPlanIdx)
 {
     rocfft_scoped_device dev(location.device);
 
@@ -483,7 +560,7 @@ void ExecPlan::ExecuteAsync(const rocfft_plan                       plan,
 
         // if input/output are overridden, override now
         if(inputPtr)
-            in_buffer_copy[0] = inputPtr.get(in_buffer, out_buffer, local_comm_rank);
+            in_buffer_copy[0] = inputPtr.get(in_buffer, out_buffer, local_comm_rank, exec_info);
 
         if(rootPlan->placement == rocfft_placement_notinplace)
         {
@@ -492,7 +569,8 @@ void ExecPlan::ExecuteAsync(const rocfft_plan                       plan,
                             plan->desc.outFields, plan->desc.outArrayType, local_comm_rank),
                         std::back_inserter(out_buffer_copy));
             if(outputPtr)
-                out_buffer_copy[0] = outputPtr.get(in_buffer, out_buffer, local_comm_rank);
+                out_buffer_copy[0]
+                    = outputPtr.get(in_buffer, out_buffer, local_comm_rank, exec_info);
         }
     }
 
@@ -508,13 +586,13 @@ void ExecPlan::ExecuteAsync(const rocfft_plan                       plan,
 
     try
     {
-        TransformPowX(*this,
+        TransformPowX(*plan,
+                      *this,
                       in_transform_ptrs,
                       (rootPlan->placement == rocfft_placement_inplace) ? in_transform_ptrs
                                                                         : out_transform_ptrs,
                       exec_info,
-                      multiPlanIdx,
-                      callbacks);
+                      multiPlanIdx);
         // all work is enqueued to the stream, record the event on
         // the stream. Not needed for single-device plans.
         if(mgpuPlan)

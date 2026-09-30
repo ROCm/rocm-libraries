@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -609,6 +610,13 @@ void initialize_a_b_c_bias(std::vector<TiA>&        ha,
         hipblaslt_init_hpl<Tout>(hc, size_c);
         hipblaslt_init_hpl<float>(h_bias, size_bias);
     }
+    else if(initialization == hipblaslt_initialization::uniform_low_precision)
+    {
+        hipblaslt_init_low_precision<TiA>(ha, size_a);
+        hipblaslt_init_low_precision<TiB>(hb, size_b);
+        hipblaslt_init_low_precision<Tout>(hc, size_c);
+        hipblaslt_init_low_precision<float>(h_bias, size_bias);
+    }
     else if(initialization == hipblaslt_initialization::special)
     {
         hipblaslt_init_alt_impl_big<TiA>(ha, size_a);
@@ -1063,7 +1071,7 @@ int test_hipblaslt(hipDataType                 in_datatype,
                                             hd[i][i1 + i2 * ldd[i] + i3 * stride_d[i]]))
                             {
                                 printf(
-                                    "Err: Index %ld: %f vs %f\n",
+                                    "Err: Index %" PRId64 ": %f vs %f\n",
                                     i1 + i2 * ldd[i] + i3 * stride_d[i],
                                     static_cast<float>(
                                         hd_gold[i][i1 + i2 * ldd[i] + i3 * stride_d[i]]),

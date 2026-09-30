@@ -30,9 +30,7 @@
 #include <cstdint>
 #include <iostream>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -42,7 +40,7 @@ namespace TensileLite
  * @{
  */
     template <typename T>
-    struct TENSILE_API vector2
+    struct TENSILELITEHOST_EXPORT vector2
     {
         vector2() = default;
         vector2(T _x, T _y)
@@ -60,19 +58,19 @@ namespace TensileLite
     };
 
     template <typename T>
-    TENSILE_API inline bool operator==(vector2<T> const& l, vector2<T> const& r)
+    TENSILELITEHOST_EXPORT inline bool operator==(vector2<T> const& l, vector2<T> const& r)
     {
         return (l.x == r.x) && (l.y == r.y);
     }
 
     template <typename T>
-    TENSILE_API inline std::ostream& operator<<(std::ostream& stream, vector2<T> const& v)
+    TENSILELITEHOST_EXPORT inline std::ostream& operator<<(std::ostream& stream, vector2<T> const& v)
     {
         return stream << "(" << v.x << ", " << v.y << ")";
     }
 
     template <typename T>
-    struct TENSILE_API vector3
+    struct TENSILELITEHOST_EXPORT vector3
     {
         vector3() = default;
         vector3(T _x, T _y, T _z)
@@ -93,19 +91,19 @@ namespace TensileLite
     };
 
     template <typename T>
-    inline TENSILE_API bool operator==(vector3<T> const& l, vector3<T> const& r)
+    inline TENSILELITEHOST_EXPORT bool operator==(vector3<T> const& l, vector3<T> const& r)
     {
         return (l.x == r.x) && (l.y == r.y) && (l.z == r.z);
     }
 
     template <typename T>
-    inline TENSILE_API std::ostream& operator<<(std::ostream& stream, vector3<T> const& v)
+    inline TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, vector3<T> const& v)
     {
         return stream << "(" << v.x << ", " << v.y << ", " << v.z << ")";
     }
 
     template <typename T>
-    struct TENSILE_API vector4
+    struct TENSILELITEHOST_EXPORT vector4
     {
         vector4() = default;
         vector4(T _x, T _y, T _z, T _w)
@@ -128,13 +126,13 @@ namespace TensileLite
     };
 
     template <typename T>
-    inline TENSILE_API bool operator==(vector4<T> const& l, vector4<T> const& r)
+    inline TENSILELITEHOST_EXPORT bool operator==(vector4<T> const& l, vector4<T> const& r)
     {
         return (l.x == r.x) && (l.y == r.y) && (l.z == r.z) && (l.w == r.w);
     }
 
     template <typename T>
-    inline TENSILE_API std::ostream& operator<<(std::ostream& stream, vector4<T> const& v)
+    inline TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, vector4<T> const& v)
     {
         return stream << "(" << v.x << ", " << v.y << ", " << v.z << ", " << v.w << ")";
     }
@@ -147,4 +145,3 @@ namespace TensileLite
  */
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

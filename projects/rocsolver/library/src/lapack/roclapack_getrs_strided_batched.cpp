@@ -25,6 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#include "exceptions.hpp"
 #include "roclapack_getrs.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -44,6 +45,7 @@ rocblas_status rocsolver_getrs_strided_batched_impl(rocblas_handle handle,
                                                     const rocblas_stride strideB,
                                                     const bool pivot,
                                                     const I batch_count)
+try
 {
     const char* name = (pivot ? "getrs_strided_batched" : "getrs_npvt_strided_batched");
     ROCSOLVER_ENTER_TOP(name, "--trans", trans, "-n", n, "--nrhs", nrhs, "--lda", lda, "--strideA",
@@ -88,6 +90,10 @@ rocblas_status rocsolver_getrs_strided_batched_impl(rocblas_handle handle,
     return rocsolver_getrs_template<false, true, T>(handle, trans, n, nrhs, A, shiftA, inca, lda,
                                                     strideA, ipiv, strideP, B, shiftB, incb, ldb,
                                                     strideB, batch_count, &work_helper, pivot);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

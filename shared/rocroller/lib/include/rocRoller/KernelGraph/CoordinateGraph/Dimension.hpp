@@ -215,6 +215,15 @@ namespace rocRoller
             std::string name() const override;
         };
 
+        struct VGPRBlockSet : public BaseDimension
+        {
+            static constexpr bool HasValue = false;
+
+            using BaseDimension::BaseDimension;
+
+            std::string name() const override;
+        };
+
         struct VGPRBlockNumber : public BaseDimension
         {
             static constexpr bool HasValue = false;

@@ -31,10 +31,10 @@
 
 #include "device_partition.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Parallel select primitive for device level using range of flags.
 ///
@@ -676,9 +676,9 @@ inline hipError_t unique_by_key(void*                           temporary_storag
                                                no_predicate);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_SELECT_HPP_

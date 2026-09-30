@@ -156,9 +156,7 @@ rocblas_status rocsolver_getrs_template(rocblas_handle handle,
     rocblas_get_stream(handle, &stream);
 
     // everything must be executed with scalars on the host
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
     // prepare workspace
     const bool optim_mem = work_helper->get_optim_mem();
@@ -171,86 +169,41 @@ rocblas_status rocsolver_getrs_template(rocblas_handle handle,
     {
         // first apply row interchanges to the right hand sides
         if(pivot)
-        {
-            rocblas_status const istat = rocsolver_laswp_template<T, I>(
-                handle, nrhs, B, shiftB, incb, ldb, strideB, 1, n, ipiv, 0, 1, strideP, batch_count);
-            if(istat != rocblas_status_success)
-            {
-                rocblas_set_pointer_mode(handle, old_mode);
-                return (istat);
-            }
-        }
+            ROCBLAS_CHECK(rocsolver_laswp_template<T, I>(handle, nrhs, B, shiftB, incb, ldb, strideB,
+                                                         1, n, ipiv, 0, 1, strideP, batch_count));
 
         // solve L*X = B, overwriting B with X
-        {
-            rocblas_status const istat = rocsolver_trsm_lower<BATCHED, STRIDED, T>(
-                handle, rocblas_side_left, trans, rocblas_diagonal_unit, n, nrhs, A, shiftA, inca,
-                lda, strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1, work2,
-                work3, work4);
-            if(istat != rocblas_status_success)
-            {
-                rocblas_set_pointer_mode(handle, old_mode);
-                return (istat);
-            }
-        }
+        ROCBLAS_CHECK(rocsolver_trsm_lower<BATCHED, STRIDED, T>(
+            handle, rocblas_side_left, trans, rocblas_diagonal_unit, n, nrhs, A, shiftA, inca, lda,
+            strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1, work2, work3,
+            work4));
 
         // solve U*X = B, overwriting B with X
-        {
-            rocblas_status const istat = rocsolver_trsm_upper<BATCHED, STRIDED, T>(
-                handle, rocblas_side_left, trans, rocblas_diagonal_non_unit, n, nrhs, A, shiftA,
-                inca, lda, strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1,
-                work2, work3, work4);
-            if(istat != rocblas_status_success)
-            {
-                rocblas_set_pointer_mode(handle, old_mode);
-                return (istat);
-            }
-        }
+        ROCBLAS_CHECK(rocsolver_trsm_upper<BATCHED, STRIDED, T>(
+            handle, rocblas_side_left, trans, rocblas_diagonal_non_unit, n, nrhs, A, shiftA, inca,
+            lda, strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1, work2,
+            work3, work4));
     }
     else
     {
         // solve U'*X = B or U**H *X = B, overwriting B with X
-        {
-            rocblas_status const istat = rocsolver_trsm_upper<BATCHED, STRIDED, T>(
-                handle, rocblas_side_left, trans, rocblas_diagonal_non_unit, n, nrhs, A, shiftA,
-                inca, lda, strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1,
-                work2, work3, work4);
-            if(istat != rocblas_status_success)
-            {
-                rocblas_set_pointer_mode(handle, old_mode);
-                return (istat);
-            }
-        }
+        ROCBLAS_CHECK(rocsolver_trsm_upper<BATCHED, STRIDED, T>(
+            handle, rocblas_side_left, trans, rocblas_diagonal_non_unit, n, nrhs, A, shiftA, inca,
+            lda, strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1, work2,
+            work3, work4));
 
         // solve L'*X = B, or L**H *X = B overwriting B with X
-        {
-            rocblas_status const istat = rocsolver_trsm_lower<BATCHED, STRIDED, T>(
-                handle, rocblas_side_left, trans, rocblas_diagonal_unit, n, nrhs, A, shiftA, inca,
-                lda, strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1, work2,
-                work3, work4);
-            if(istat != rocblas_status_success)
-            {
-                rocblas_set_pointer_mode(handle, old_mode);
-                return (istat);
-            }
-        }
+        ROCBLAS_CHECK(rocsolver_trsm_lower<BATCHED, STRIDED, T>(
+            handle, rocblas_side_left, trans, rocblas_diagonal_unit, n, nrhs, A, shiftA, inca, lda,
+            strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1, work2, work3,
+            work4));
 
         // then apply row interchanges to the solution vectors
         if(pivot)
-        {
-            rocblas_status const istat
-                = rocsolver_laswp_template<T, I>(handle, nrhs, B, shiftB, incb, ldb, strideB, 1, n,
-                                                 ipiv, 0, -1, strideP, batch_count);
-
-            if(istat != rocblas_status_success)
-            {
-                rocblas_set_pointer_mode(handle, old_mode);
-                return (istat);
-            }
-        }
+            ROCBLAS_CHECK(rocsolver_laswp_template<T, I>(handle, nrhs, B, shiftB, incb, ldb, strideB,
+                                                         1, n, ipiv, 0, -1, strideP, batch_count));
     }
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

@@ -4520,7 +4520,6 @@ void UniformRNNFwdTrainCPUVerify(
                         rsvspace,
                         hx_is_null);
         break;
-    default: MIOPEN_THROW("ERROR : rnn_mode unknown"); break;
     };
 }
 
@@ -4643,7 +4642,6 @@ void UniformRNNBwdTrainCPUVerify(
                             hx_is_null,
                             dhy_is_null);
         break;
-    default: MIOPEN_THROW("ERROR : rnn_mode unknown"); break;
     };
 }
 
@@ -4737,7 +4735,6 @@ void UniformRNNBwdWeightCPUVerify(bool use_dropout,
                               wkspace,
                               hx_is_null);
         break;
-    default: MIOPEN_THROW("ERROR : rnn_mode unknown"); break;
     };
 }
 

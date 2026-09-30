@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -52,9 +52,9 @@ struct rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_sync_split>
                                     void*                       buffer_)
         {
             using layout_t = buffer_layout_crtp_t<IMPL>;
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 &layout_, buffer_, sizeof(IMPL), hipMemcpyDeviceToHost, handle_->stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle_->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
             void*  p_buffer      = layout_.get_pointer(layout_t::buffer);
             size_t p_buffer_size = layout_.get_size(layout_t::buffer);
             RETURN_IF_ROCSPARSE_ERROR((rocsparse::csritilu0x_history_template<T, J>(
@@ -95,35 +95,37 @@ struct rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_sync_split>
                                     rocsparse_datatype   datatype_,
                                     size_t* __restrict__ buffer_size_)
         {
+            using layout_t = buffer_layout_contiguous_t;
+
             size_t buffer_size = 0;
-            buffer_size += buffer_layout_contiguous_t::get_sizeof_double() * sizeof(double);
+            buffer_size += layout_t::get_header_size();
 
             //
             // solution.
             //
             if(datatype_ == rocsparse_datatype_f32_r)
             {
-                buffer_size += sizeof(float) * nnz_;
+                buffer_size += rocsparse::align_size<float>(nnz_);
             }
             else if(datatype_ == rocsparse_datatype_f64_r)
             {
-                buffer_size += sizeof(double) * nnz_;
+                buffer_size += rocsparse::align_size<double>(nnz_);
             }
             else if(datatype_ == rocsparse_datatype_f32_c)
             {
-                buffer_size += sizeof(rocsparse_float_complex) * nnz_;
+                buffer_size += rocsparse::align_size<rocsparse_float_complex>(nnz_);
             }
             else if(datatype_ == rocsparse_datatype_f64_c)
             {
-                buffer_size += sizeof(rocsparse_double_complex) * nnz_;
+                buffer_size += rocsparse::align_size<rocsparse_double_complex>(nnz_);
             }
 
-            buffer_size += sizeof(I) * 1; // lnnz
-            buffer_size += sizeof(I) * (m_ + 1); // lptr
-            buffer_size += sizeof(I) * 1; // unnz
-            buffer_size += sizeof(I) * (m_ + 1); // uptr
-            buffer_size += sizeof(J) * nnz_; // ind
-            buffer_size += sizeof(I) * nnz_; // perm
+            buffer_size += rocsparse::align_size<I>(1); // lnnz
+            buffer_size += rocsparse::align_size<I>(m_ + 1); // lptr
+            buffer_size += rocsparse::align_size<I>(1); // unnz
+            buffer_size += rocsparse::align_size<I>(m_ + 1); // uptr
+            buffer_size += rocsparse::align_size<J>(nnz_); // ind
+            buffer_size += rocsparse::align_size<I>(nnz_); // perm
 
             size_t buffer_size_csritilu0x = 0;
             RETURN_IF_ROCSPARSE_ERROR(
@@ -246,11 +248,11 @@ struct rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_sync_split>
                                                                  p_uptr,
                                                                  base_,
                                                                  p_buffer)));
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 p_lnnz, &host_lnnz, sizeof(I), hipMemcpyHostToDevice, handle_->stream));
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 p_unnz, &host_unnz, sizeof(I), hipMemcpyHostToDevice, handle_->stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle_->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
 
             if(nnz_ != m_ + host_lnnz + host_unnz)
             {
@@ -342,9 +344,9 @@ struct rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_sync_split>
             //
             // Copy the struct to device.
             //
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 buffer__, &layout, sizeof(layout_t), hipMemcpyHostToDevice, handle_->stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle_->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
             return rocsparse_status_success;
         }
 
@@ -402,9 +404,9 @@ struct rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_sync_split>
             static constexpr int BLOCKSIZE_PERM = 1024;
             using layout_t                      = buffer_layout_contiguous_t;
             layout_t layout;
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 &layout, buffer_, sizeof(layout_t), hipMemcpyDeviceToHost, handle_->stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle_->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
 
             const I* p_lnnz        = (const I*)layout.get_pointer(layout_t::lnnz);
             const I* p_unnz        = (const I*)layout.get_pointer(layout_t::unnz);
@@ -418,11 +420,11 @@ struct rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_sync_split>
 
             I host_lnnz = -1;
             I host_unnz = -1;
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 &host_lnnz, p_lnnz, sizeof(I), hipMemcpyDeviceToHost, handle_->stream));
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 &host_unnz, p_unnz, sizeof(I), hipMemcpyDeviceToHost, handle_->stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle_->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
 
             const J* p_lind = p_ind;
             const J* p_uind = p_ind + host_lnnz;

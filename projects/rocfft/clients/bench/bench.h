@@ -160,66 +160,72 @@ void alloc_bench_bricks(const Tparams&                            params,
                         std::vector<hostbuf>&                     host_buffers,
                         bool                                      is_host_gen)
 {
-    auto alloc_buffers = [&params, &host_buffers](const std::vector<fft_params::fft_brick>& bricks,
-                                                  fft_array_type                            type,
-                                                  std::vector<gpubuf>&                      output,
-                                                  bool is_host_gen) {
-        auto       elem_size = var_size<size_t>(params.precision, type);
-        const bool is_planar
-            = type == fft_array_type_complex_planar || type == fft_array_type_hermitian_planar;
-        // alloc 2x buffers, each half size for planar
-        if(is_planar)
-            elem_size /= 2;
-
-        for(const auto& b : bricks)
+    ibuffers.clear();
+    obuffer_data.clear();
+    if(is_host_gen)
+        host_buffers.clear();
+    for(size_t b_idx = 0; b_idx < std::max(ibricks.size(), obricks.size()); b_idx++)
+    {
+        const auto* ibrick = b_idx < ibricks.size() ? &ibricks[b_idx] : nullptr;
+        const auto* obrick = b_idx < obricks.size() ? &obricks[b_idx] : nullptr;
+        size_t      isize  = ibrick ? compute_ptrdiff(ibrick->length(), ibrick->stride) : 0;
+        size_t      osize  = obrick ? compute_ptrdiff(obrick->length(), obrick->stride) : 0;
+        if(params.placement == fft_placement_inplace && is_real(params.transform_type))
         {
-            rocfft_scoped_device dev(b.device);
-
-            size_t brick_size_bytes = compute_ptrdiff(b.length(), b.stride) * elem_size;
-            output.emplace_back();
-            if(output.back().alloc(brick_size_bytes) != hipSuccess)
-                throw std::runtime_error("hipMalloc failed");
-            if(is_planar)
+            // we may need slightly more than compute_ptrdiff's value if real innermost length
+            // is not divided (typically two more real elements or one more complex element)
+            const auto real_io
+                = is_fwd(params.transform_type) ? fft_io::fft_io_in : fft_io::fft_io_out;
+            const auto* real_brick = real_io == fft_io::fft_io_in ? ibrick : obrick;
+            auto&       real_size  = real_io == fft_io::fft_io_in ? isize : osize;
+            if(real_brick && real_brick->lower.back() == 0
+               && real_brick->upper.back() == params.length.back())
             {
-                output.emplace_back();
-                if(output.back().alloc(brick_size_bytes) != hipSuccess)
-                    throw std::runtime_error("hipMalloc failed");
-            }
-            if(is_host_gen)
-            {
-                host_buffers.emplace_back();
-                host_buffers.back().alloc(brick_size_bytes);
-                if(is_planar)
+                const auto brick_length = real_brick->length();
+                for(size_t dim = 0; dim < brick_length.size(); dim++)
                 {
-                    host_buffers.emplace_back();
-                    host_buffers.back().alloc(brick_size_bytes);
+                    real_size = std::max(real_size, brick_length[dim] * real_brick->stride[dim]);
                 }
             }
         }
-    };
+        isize *= var_size<size_t>(params.precision, params.itype);
+        osize *= var_size<size_t>(params.precision, params.otype);
 
-    // If brick shape differs, inplace is only allowed for single
-    // bricks.  e.g. in-place real-complex
-    if(params.placement == fft_placement_inplace)
-    {
-        // allocate the larger of the two bricks
-        auto isize_bytes = compute_ptrdiff(ibricks.front().length(), ibricks.front().stride)
-                           * var_size<size_t>(params.precision, params.itype);
-        auto osize_bytes = compute_ptrdiff(obricks.front().length(), obricks.front().stride)
-                           * var_size<size_t>(params.precision, params.otype);
+        for(auto io : {fft_io::fft_io_in, fft_io::fft_io_out})
+        {
+            const auto* iobrick = io == fft_io::fft_io_in ? ibrick : obrick;
+            if(!iobrick)
+                continue;
+            auto& iobuffers = params.placement == fft_placement_inplace || io == fft_io::fft_io_in
+                                  ? ibuffers
+                                  : obuffer_data;
+            const auto iobuffer_size = params.placement == fft_placement_inplace
+                                           ? std::max(isize, osize)
+                                           : (io == fft_io::fft_io_in ? isize : osize);
 
-        alloc_buffers(isize_bytes > osize_bytes ? ibricks : obricks,
-                      isize_bytes > osize_bytes ? params.itype : params.otype,
-                      ibuffers,
-                      is_host_gen);
-        obuffers = &ibuffers;
+            rocfft_scoped_device dev(iobrick->device);
+            const bool io_is_planar = io == fft_io::fft_io_in ? array_type_is_planar(params.itype)
+                                                              : array_type_is_planar(params.otype);
+            for(auto tmp = 0; tmp < (io_is_planar ? 2 : 1); tmp++)
+            {
+                iobuffers.emplace_back();
+                if(iobuffers.back().alloc(iobuffer_size) != hipSuccess)
+                    throw std::runtime_error("hipMalloc failed");
+                if(is_host_gen)
+                {
+                    host_buffers.emplace_back();
+                    host_buffers.back().alloc(iobuffer_size);
+                }
+            }
+            if(params.placement == fft_placement_inplace)
+            {
+                // no need to redo the above for the output if
+                // this point was reached for the input
+                break;
+            }
+        }
     }
-    else
-    {
-        alloc_buffers(ibricks, params.itype, ibuffers, is_host_gen);
-        alloc_buffers(obricks, params.otype, obuffer_data, false);
-        obuffers = &obuffer_data;
-    }
+    obuffers = params.placement == fft_placement_inplace ? &ibuffers : &obuffer_data;
 }
 
 void copy_host_input_to_dev(std::vector<hostbuf>& host_buffers, std::vector<gpubuf>& buffers)

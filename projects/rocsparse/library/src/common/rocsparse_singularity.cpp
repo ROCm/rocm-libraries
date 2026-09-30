@@ -178,7 +178,7 @@ namespace rocsparse
                                                    p_near + igroup * p_near_shift,
                                                    buffer);
 
-                RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                     data + igroup * data_shift, buffer, sizeofelm * m, hipMemcpyDefault, stream));
             }
 
@@ -195,11 +195,11 @@ namespace rocsparse
                                                    p_exact + nfullgroups * p_exact_shift,
                                                    p_near + nfullgroups * p_near_shift,
                                                    buffer);
-                RETURN_IF_HIP_ERROR(hipMemcpyAsync(data + nfullgroups * data_shift,
-                                                   buffer,
-                                                   sizeofelm * rem,
-                                                   hipMemcpyDefault,
-                                                   stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(data + nfullgroups * data_shift,
+                                                             buffer,
+                                                             sizeofelm * rem,
+                                                             hipMemcpyDefault,
+                                                             stream));
             }
 
             return rocsparse_status_success;

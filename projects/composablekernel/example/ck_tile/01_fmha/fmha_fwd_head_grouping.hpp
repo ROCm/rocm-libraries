@@ -22,9 +22,10 @@
 #define CK_TILE_FMHA_ENABLE_HEAD_GROUPING 1
 #endif
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 #if CK_TILE_FMHA_ENABLE_HEAD_GROUPING
 CK_TILE_DECLARE_ENV_VAR_BOOL(CK_TILE_FMHA_HEAD_GROUP_LOG)
 CK_TILE_DECLARE_ENV_VAR_BOOL(CK_TILE_FMHA_DISABLE_HEAD_GROUPING)
@@ -358,7 +359,7 @@ float run_fwd_head_grouped(const ck_tile::stream_config& sc,
                            ck_tile::index_t nhead,
                            ck_tile::index_t nhead_k,
                            ck_tile::index_t group_size_q,
-                           bool use_blockscale_qscale,
+                           bool descale_varies_by_head,
                            RunKernelFn&& run_kernel_fn)
 {
     auto base_args                   = base_args_in;
@@ -394,7 +395,7 @@ float run_fwd_head_grouped(const ck_tile::stream_config& sc,
         args.rand_val_ptr = ptr_offset<RandValOutputDataType>(
             base_args.rand_val_ptr, head_start * base_args.nhead_stride_randval);
 
-        if(use_blockscale_qscale)
+        if(descale_varies_by_head)
         {
             args.q_descale_ptr = ptr_offset<float>(base_args.q_descale_ptr,
                                                    head_start * base_args.nhead_stride_q_descale);
@@ -430,4 +431,6 @@ float run_fwd_head_grouped(const ck_tile::stream_config& sc,
 
 } // namespace fmha_fwd_head_grouping
 #endif // CK_TILE_FMHA_ENABLE_HEAD_GROUPING
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

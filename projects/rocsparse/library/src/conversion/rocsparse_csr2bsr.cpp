@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -158,8 +158,8 @@ rocsparse_status rocsparse::csr2bsr_core(rocsparse_handle          handle,
     //
     // TODO: should it be user responsibility ?
     //
-    RETURN_IF_HIP_ERROR(
-        hipMemsetAsync(bsr_val, 0, sizeof(T) * nnzb * block_dim * block_dim, handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+        bsr_val, 0, sizeof(T) * nnzb * block_dim * block_dim, handle->stream));
     // Stream
     hipStream_t stream = handle->stream;
 
@@ -326,11 +326,11 @@ rocsparse_status rocsparse::csr2bsr_quickreturn(rocsparse_handle          handle
     const int64_t mb    = (m + block_dim - 1) / block_dim;
     I             start = 0;
     I             end   = 0;
-    RETURN_IF_HIP_ERROR(
-        hipMemcpyAsync(&end, &bsr_row_ptr[mb], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
-    RETURN_IF_HIP_ERROR(
-        hipMemcpyAsync(&start, &bsr_row_ptr[0], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+        &end, &bsr_row_ptr[mb], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+        &start, &bsr_row_ptr[0], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
     nnzb[0] = int64_t(end) - start;
     if(nnzb[0] == 0)

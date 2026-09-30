@@ -8,10 +8,10 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha.hpp"
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 // keep sync with BlockAttentionQuantScaleEnum
 enum class quant_scale_enum
 {
@@ -20,6 +20,7 @@ enum class quant_scale_enum
     blockscale    = 2,
     kv_blockscale = 3, // Q per-tensor, K/V per-page block scale
     mx            = 4, // Microscaling (MX)
+    perhead       = 5, // one descale per (batch, head)
 };
 
 struct quant_scale_info
@@ -38,6 +39,8 @@ struct quant_scale_info
             os << "kvbs";
         else if(type == quant_scale_enum::mx)
             os << "mx";
+        else if(type == quant_scale_enum::perhead)
+            os << "ph";
     }
 
     static quant_scale_info decode(std::string str)
@@ -63,6 +66,10 @@ struct quant_scale_info
         {
             info.type = quant_scale_enum::mx;
         }
+        else if(str == "ph" || str == "5")
+        {
+            info.type = quant_scale_enum::perhead;
+        }
         else
         {
             throw std::invalid_argument("invalid quant scale value: " + str);
@@ -76,4 +83,6 @@ struct quant_scale_info
         return os;
     }
 };
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

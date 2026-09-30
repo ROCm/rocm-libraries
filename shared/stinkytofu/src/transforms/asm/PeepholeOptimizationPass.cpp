@@ -149,6 +149,7 @@ class PeepholeOptimizationPassImpl : public Pass {
             // Try all patterns in order (first match wins)
             for (auto& pattern : patternMatchers) {
                 // Try matching with original operand order
+                // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
                 if (auto result = pattern->tryMatchAndRewrite(inst, context)) {
                     std::cout << "  [Peephole] Applied " << pattern->getName() << "\n";
 
@@ -169,6 +170,7 @@ class PeepholeOptimizationPassImpl : public Pass {
                     inst->setSrcReg(1, temp);
 
                     // Try matching again with swapped operands
+                    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
                     if (auto result = pattern->tryMatchAndRewrite(inst, context)) {
                         std::cout << "  [Peephole] Applied " << pattern->getName()
                                   << " (commutative match)\n";

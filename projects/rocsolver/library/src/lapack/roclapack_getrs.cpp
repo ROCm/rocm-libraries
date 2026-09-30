@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_getrs.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -40,6 +41,7 @@ rocblas_status rocsolver_getrs_impl(rocblas_handle handle,
                                     T* B,
                                     const I ldb,
                                     const bool pivot)
+try
 {
     const char* name = (pivot ? "getrs" : "getrs_npvt");
     ROCSOLVER_ENTER_TOP("name", "--trans", trans, "-n", n, "--nrhs", nrhs, "--lda", lda, "--ldb",
@@ -86,6 +88,10 @@ rocblas_status rocsolver_getrs_impl(rocblas_handle handle,
     return rocsolver_getrs_template<false, false, T>(handle, trans, n, nrhs, A, shiftA, inca, lda,
                                                      strideA, ipiv, strideP, B, shiftB, incb, ldb,
                                                      strideB, batch_count, &work_helper, pivot);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

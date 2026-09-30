@@ -17,7 +17,6 @@
 # Platform-specific configuration
 if(WIN32)
     set(_ROCM_COMPILER_EXTENSION ".exe")
-    set(CMAKE_RC_COMPILER "CMAKE_RC_COMPILER-NOTREQUIRED")
 else()
     set(_ROCM_COMPILER_EXTENSION "")
 endif()
@@ -71,6 +70,19 @@ endif()
 
 set(CMAKE_C_COMPILER "${ROCM_LLVM_BIN_DIR}/clang${_ROCM_COMPILER_EXTENSION}" CACHE FILEPATH "C compiler")
 set(CMAKE_CXX_COMPILER "${ROCM_LLVM_BIN_DIR}/clang++${_ROCM_COMPILER_EXTENSION}" CACHE FILEPATH "C++/HIP compiler")
+
+# Some Windows components (e.g. hipDNN) embed a VERSIONINFO resource that needs a resource compiler.
+# Prefer llvm-rc from the ROCm LLVM toolchain, then any rc on PATH. If none is found, mark RC as
+# not-required so configuration still succeeds; components guard their .rc sources on a real compiler
+# and warn when version metadata will be omitted.
+if(WIN32 AND NOT CMAKE_RC_COMPILER)
+    find_program(_ROCM_RC_COMPILER NAMES llvm-rc rc HINTS "${ROCM_LLVM_BIN_DIR}")
+    if(_ROCM_RC_COMPILER)
+        set(CMAKE_RC_COMPILER "${_ROCM_RC_COMPILER}")
+    else()
+        set(CMAKE_RC_COMPILER "CMAKE_RC_COMPILER-NOTREQUIRED")
+    endif()
+endif()
 
 # Cache ROCM_PATH and add to CMAKE_PREFIX_PATH for find_package(hip)
 set(ROCM_PATH "${ROCM_PATH}" CACHE PATH "Path to ROCm installation")

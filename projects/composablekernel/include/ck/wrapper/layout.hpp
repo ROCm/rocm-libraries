@@ -5,10 +5,10 @@
 
 #include "ck/wrapper/utils/layout_utils.hpp"
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 // Disable from doxygen docs generation
 /// @cond INTERNAL
 namespace ck {
@@ -26,6 +26,12 @@ namespace wrapper {
 template <typename Shape, typename UnrolledDescriptorType>
 struct Layout
 {
+    // Both are stored as members below, so a reference type would silently turn
+    // the Layout into a non-owning alias of whatever it was built from.
+    static_assert(!std::is_reference_v<Shape> && !std::is_reference_v<UnrolledDescriptorType>,
+                  "Layout must own its shape and descriptor; strip references with "
+                  "remove_cvref_t before instantiating it.");
+
     // Disable from doxygen docs generation
     /// @cond INTERNAL
     private:
@@ -485,4 +491,6 @@ struct Layout
 
 } // namespace wrapper
 } // namespace ck
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

@@ -274,6 +274,16 @@ namespace rocRoller::KernelGraph
         }
     }
 
+    void ControlFlowRWTracer::trackTDM(int control, ReadWrite rw)
+    {
+        AssertFatal(control > 0);
+        for(auto const& c : m_graph.mapper.getConnections(control))
+        {
+            if(m_graph.coordinates.get<TDM>(c.coordinate).has_value())
+                trackRegister(control, c.coordinate, rw);
+        }
+    }
+
     bool ControlFlowRWTracer::hasGeneratedInputs(int const& tag)
     {
         auto inputs = m_graph.control.getInputNodeIndices<Sequence>(tag);
@@ -598,6 +608,17 @@ namespace rocRoller::KernelGraph
         trackConnections(tag, {source, dst}, ReadWrite::READ);
         trackOffsetAndStride(tag, ReadWrite::READ);
         trackBuffer(tag, ReadWrite::READ);
+    }
+
+    void ControlFlowRWTracer::operator()(LoadTiledTDMToLDS const& op, int tag)
+    {
+        auto source = m_graph.mapper.get<MacroTile>(tag);
+        auto dst    = m_graph.mapper.get<LDS>(tag);
+        trackRegister(tag, source, ReadWrite::READ);
+        trackRegister(tag, dst, ReadWrite::WRITE);
+        trackConnections(tag, {source, dst}, ReadWrite::READ);
+        trackOffsetAndStride(tag, ReadWrite::READ);
+        trackTDM(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(StoreLinear const& op, int tag)

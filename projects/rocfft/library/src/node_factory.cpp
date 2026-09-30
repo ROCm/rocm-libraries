@@ -1064,17 +1064,8 @@ bool NodeFactory::use_CS_3D_RC(const function_pool& pool, NodeMetaData& nodeData
     return false;
 }
 
-// Batch size for enabling partial-pass 3D kernels may vary by GPU architecture, precision, and length
-static constexpr std::size_t batchLow           = 5;
-static constexpr std::size_t batchLowException1 = 25;
-static constexpr std::size_t batchLowException2 = 20;
-static constexpr std::size_t batchHigh          = 7500;
-
-// Partial pass is currently restricted to batch sizes in the batchLow to batchHigh range,
-// unit stride, and non-planar array types, to target the cases where it has the most performance
-// benefit and avoid regressions in other cases.
-auto check_pp_restrictions =
-    [](const NodeMetaData& nodeData, const size_t& batchLow, const size_t& batchHigh = 0) -> bool {
+// Partial pass is currently restricted to unit stride, and non-planar array types.
+auto check_pp_restrictions = [](const NodeMetaData& nodeData) -> bool {
     size_t checkiDist = 0, checkoDist = 0;
 
     auto inputLength = nodeData.length;
@@ -1094,19 +1085,8 @@ auto check_pp_restrictions =
                               && (nodeData.inArrayType != rocfft_array_type_hermitian_planar)
                               && (nodeData.outArrayType != rocfft_array_type_complex_planar)
                               && (nodeData.outArrayType != rocfft_array_type_hermitian_planar);
-    bool batchCondition
-        = (nodeData.batch >= batchLow && (batchHigh == 0 || nodeData.batch <= batchHigh));
 
-    return (batchCondition && distCondition && strideCondition && arrayTypeCondition);
-};
-
-// Length exceptions for partial-pass 3D kernels may vary by GPU architecture and precision
-auto check_pp_length = [](const std::vector<std::vector<size_t>>& exceptions,
-                          const std::vector<size_t>&              length) -> bool {
-    const bool length_found
-        = std::find(exceptions.begin(), exceptions.end(), length) != exceptions.end();
-
-    return length_found;
+    return (distCondition && strideCondition && arrayTypeCondition);
 };
 
 bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData)
@@ -1118,27 +1098,11 @@ bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData
                    nodeData.length[2],
                    nodeData.precision,
                    nodeData.rootTransformType,
-                   CS_3D_PP)))
+                   CS_3D_PP),
+           nodeData.batch))
         return false;
 
-    size_t bLow = batchLow;
-    if(nodeData.precision == rocfft_precision_single)
-    {
-        bool lenExceptionFound = false;
-
-        // Set a different batch cut-off for gfx1201/gfx950 when
-        // not hitting the excepted lengths in single-precision
-        std::vector<std::vector<size_t>> gfx1201LenException = {{52, 64, 64}, {128, 64, 64}};
-        lenExceptionFound = check_pp_length(gfx1201LenException, nodeData.length);
-        if(get_curr_gcn_arch_name() == "gfx1201" && !lenExceptionFound)
-            bLow = batchLowException1;
-        std::vector<std::vector<size_t>> gfx950LenException = {{52, 64, 64}};
-        lenExceptionFound = check_pp_length(gfx950LenException, nodeData.length);
-        if(get_curr_gcn_arch_name() == "gfx950" && !lenExceptionFound)
-            bLow = batchLowException1;
-    }
-
-    return check_pp_restrictions(nodeData, bLow);
+    return check_pp_restrictions(nodeData);
 }
 
 bool NodeFactory::use_CS_REAL_3D_PP(const function_pool& pool, NodeMetaData& nodeData)
@@ -1159,22 +1123,9 @@ bool NodeFactory::use_CS_REAL_3D_PP(const function_pool& pool, NodeMetaData& nod
                                   realLength[2],
                                   nodeData.precision,
                                   nodeData.rootTransformType,
-                                  CS_REAL_3D_PP)))
+                                  CS_REAL_3D_PP),
+                          nodeData.batch))
         return false;
 
-    // The batch cut-off for real 3D partial-pass is generally higher than complex 3D partial-pass,
-    // and it also varies more across architectures, so we have more fine-grained cut-offs here.
-    size_t bLow = nodeData.precision == rocfft_precision_double ? batchLow : batchLowException1;
-    if(get_curr_gcn_arch_name() == "gfx950" || get_curr_gcn_arch_name() == "gfx90a")
-        bLow = batchLowException2;
-    else if(get_curr_gcn_arch_name() == "gfx942")
-        bLow = batchLow;
-
-    size_t                           bHigh              = 0;
-    std::vector<std::vector<size_t>> gfx950LenException = {{80, 108, 108}};
-    bool lenExceptionFound = check_pp_length(gfx950LenException, nodeData.length);
-    if(lenExceptionFound && get_curr_gcn_arch_name() == "gfx950")
-        bHigh = batchHigh;
-
-    return check_pp_restrictions(nodeData, bLow, bHigh);
+    return check_pp_restrictions(nodeData);
 }

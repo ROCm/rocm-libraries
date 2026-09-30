@@ -76,13 +76,7 @@ inline void execute_fft(Tparams&              params,
                                     hipMemcpyDeviceToHost);
         if(hip_status != hipSuccess)
         {
-            ++n_hip_failures;
-            std::stringstream msg;
-            msg << "hipMemcpy failure";
-            if(skip_runtime_fails)
-                throw ROCFFT_SKIP{msg.str()};
-            else
-                throw ROCFFT_FAIL{msg.str()};
+            throw hip_runtime_error("hipMemcpy failure", hip_status);
         }
     }
     if(verbose > 2)
@@ -118,20 +112,7 @@ void compute_fft_data(Tparams&              params,
     // Create FFT plan - this will also allocate work buffer, but
     // will throw a specific exception if that step fails
     auto plan_status = fft_status_success;
-    try
-    {
-        plan_status = params.create_plan();
-    }
-    catch(fft_params::work_buffer_alloc_failure& e)
-    {
-        ++n_hip_failures;
-        std::stringstream msg;
-        msg << "Work buffer allocation failed with size: " << e.attempted_size;
-        if(skip_runtime_fails)
-            throw ROCFFT_SKIP{msg.str()};
-        else
-            throw ROCFFT_FAIL{msg.str()};
-    }
+    plan_status      = params.create_plan();
     ASSERT_EQ(plan_status, fft_status_success) << "plan creation failed";
 
     std::vector<gpubuf> ibuffer(ibuffer_sizes.size());
@@ -145,11 +126,7 @@ void compute_fft_data(Tparams&              params,
             msg << "hipMalloc failure for input buffer " << i << " size " << ibuffer_sizes[i] << "("
                 << byte_size_to_str(ibuffer_sizes[i]) << ") with code "
                 << hipError_to_string(hip_status);
-            ++n_hip_failures;
-            if(skip_runtime_fails)
-                throw ROCFFT_SKIP{msg.str()};
-            else
-                throw ROCFFT_FAIL{msg.str()};
+            throw hip_runtime_error(msg.str(), hip_status);
         }
         pibuffer[i] = ibuffer[i].data();
     }
@@ -175,14 +152,7 @@ void compute_fft_data(Tparams&              params,
                                hipMemcpyDeviceToHost);
         if(hip_status != hipSuccess)
         {
-            std::stringstream msg;
-            msg << "hipMemcpy failure with error " << hip_status;
-
-            ++n_hip_failures;
-            if(skip_runtime_fails)
-                throw ROCFFT_SKIP{msg.str()};
-            else
-                throw ROCFFT_FAIL{msg.str()};
+            throw hip_runtime_error("hipMemcpy failure", hip_status);
         }
     }
 #else
@@ -199,17 +169,7 @@ void compute_fft_data(Tparams&              params,
 
         if(hip_status != hipSuccess)
         {
-            ++n_hip_failures;
-            std::stringstream ss;
-            ss << "hipMemcpy failure with error " << hip_status;
-            if(skip_runtime_fails)
-            {
-                throw ROCFFT_SKIP{ss.str()};
-            }
-            else
-            {
-                throw ROCFFT_FAIL{ss.str()};
-            }
+            throw hip_runtime_error("hipMemcpy failure", hip_status);
         }
     }
 #endif
@@ -232,15 +192,11 @@ void compute_fft_data(Tparams&              params,
             hip_status = obuffer_data[i].alloc(obuffer_sizes[i]);
             if(hip_status != hipSuccess)
             {
-                ++n_hip_failures;
                 std::stringstream msg;
                 msg << "hipMalloc failure for output buffer " << i << " size " << obuffer_sizes[i]
                     << "(" << byte_size_to_str(obuffer_sizes[i]) << ") with code "
                     << hipError_to_string(hip_status);
-                if(skip_runtime_fails)
-                    throw ROCFFT_SKIP{msg.str()};
-                else
-                    throw ROCFFT_FAIL{msg.str()};
+                throw hip_runtime_error(msg.str(), hip_status);
             }
         }
     }

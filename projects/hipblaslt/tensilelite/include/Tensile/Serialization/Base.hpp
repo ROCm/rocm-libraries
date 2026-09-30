@@ -34,14 +34,13 @@
 #include <vector>
 
 #include <Tensile/Activation.hpp>
+#include <Tensile/ContractionSolution.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/KernelLanguageTypes.hpp>
 #include <Tensile/ScalarValueTypes.hpp>
 #include <Tensile/geom.hpp>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -371,6 +370,64 @@ namespace TensileLite
         };
 
         template <typename IO>
+        struct EnumTraits<CustomArgType, IO>
+        {
+            using iot = IOTraits<IO>;
+
+            static void enumeration(IO& io, CustomArgType& value)
+            {
+                for(int i = 0; i < static_cast<int>(CustomArgType::CustomArgType_Count); i++)
+                {
+                    auto const& info = static_cast<CustomArgType>(i);
+                    iot::enumCase(io, value, TensileLite::toString(info).c_str(), info);
+                }
+            }
+        };
+
+        template <typename IO>
+        struct EnumTraits<CustomArgSemantic, IO>
+        {
+            using iot = IOTraits<IO>;
+
+            static void enumeration(IO& io, CustomArgSemantic& value)
+            {
+                for(int i = 0; i < static_cast<int>(CustomArgSemantic::COUNT); i++)
+                {
+                    auto const& info = static_cast<CustomArgSemantic>(i);
+                    iot::enumCase(io, value, TensileLite::toString(info).c_str(), info);
+                }
+            }
+        };
+
+        template <typename IO>
+        struct EnumTraits<CustomGridSize, IO>
+        {
+            using iot = IOTraits<IO>;
+            static void enumeration(IO& io, CustomGridSize& value)
+            {
+                for(int i = 0; i < static_cast<int>(CustomGridSize::CustomGridSize_Count); i++)
+                {
+                    auto const& info = static_cast<CustomGridSize>(i);
+                    iot::enumCase(io, value, TensileLite::toString(info).c_str(), info);
+                }
+            }
+        };
+
+        template <typename IO>
+        struct EnumTraits<CustomWorkspaceType, IO>
+        {
+            using iot = IOTraits<IO>;
+            static void enumeration(IO& io, CustomWorkspaceType& value)
+            {
+                for(int i = 0; i < static_cast<int>(CustomWorkspaceType::CustomWorkspaceType_Count); i++)
+                {
+                    auto const& info = static_cast<CustomWorkspaceType>(i);
+                    iot::enumCase(io, value, TensileLite::toString(info).c_str(), info);
+                }
+            }
+        };
+
+        template <typename IO>
         struct EnumTraits<ActivationType, IO>
         {
             using iot = IOTraits<IO>;
@@ -417,4 +474,3 @@ namespace TensileLite
     } // namespace Serialization
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

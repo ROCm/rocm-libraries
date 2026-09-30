@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,10 +25,10 @@
 
 #include <hip/device_functions.h>
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup intrinsicsmodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Returns a single bit at 'i' from 'x'
 ROCPRIM_DEVICE ROCPRIM_INLINE
@@ -108,9 +108,9 @@ int clz(unsigned long long x)
     return __builtin_clzll(x);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group intrinsicsmodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_INTRINSICS_BIT_HPP_

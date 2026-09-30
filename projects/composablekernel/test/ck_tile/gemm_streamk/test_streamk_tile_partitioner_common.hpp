@@ -14,7 +14,8 @@ enum StreamKTilePartitionerBaseMethodId
     GET_TILE_INDEX,
     GET_ITER_BOUNDARIES,
     GET_OUTPUT_TILE_INDEX,
-    GET_TILE_LOCAL_CTA_INDEX
+    GET_TILE_LOCAL_CTA_INDEX,
+    GET_K_SIZE,
 };
 
 // Base kernel wrapper class to facilitate testing class device functions.
@@ -109,6 +110,20 @@ struct KernelWrapperSpecialized<TilePartitioner,
 };
 
 template <typename TilePartitioner>
+struct KernelWrapperSpecialized<TilePartitioner, StreamKTilePartitionerBaseMethodId::GET_K_SIZE>
+    : public KernelWrapper<TilePartitioner>
+{
+
+    using Base = KernelWrapper<TilePartitioner>;
+
+    CK_TILE_DEVICE void operator()(typename Base::KernelArgs kargs)
+    {
+        *(static_cast<ck_tile::index_t*>(kargs.result1)) =
+            kargs.tile_partitioner.get_k_size(kargs.arg1, kargs.arg2);
+    }
+};
+
+template <typename TilePartitioner>
 struct KernelWrapperSpecialized<TilePartitioner, StreamKTilePartitionerBaseMethodId::GET_TILE_INDEX>
     : public KernelWrapper<TilePartitioner>
 {
@@ -167,6 +182,8 @@ struct StreamKTilePartitionerBaseExpected
     ck_tile::index_t num_tiles_;
     ck_tile::index_t max_active_wgs_;
     ck_tile::index_t n_;
+    ck_tile::index_t k_;
+    ck_tile::index_t remainder_along_k_;
 };
 
 template <typename GemmShape>
@@ -185,6 +202,8 @@ void validate_streamk_base_constructor(
     EXPECT_EQ(tile_partitioner.get_num_tiles(), expected_values.num_tiles_);
     EXPECT_EQ(tile_partitioner.get_max_active_wgs(), expected_values.max_active_wgs_);
     EXPECT_EQ(tile_partitioner.get_n(), expected_values.n_);
+    EXPECT_EQ(tile_partitioner.get_k(), expected_values.k_);
+    EXPECT_EQ(tile_partitioner.get_remainder_along_k(), expected_values.remainder_along_k_);
 }
 
 struct StreamKTilePartitionerBaseConfig
@@ -202,7 +221,7 @@ struct StreamKTilePartitionerBaseConfigDP2TileSK : public StreamKTilePartitioner
     static constexpr ck_tile::index_t N = 4;
     static constexpr ck_tile::index_t K = 16;
     // The minimum number of bytes needed for the flags array is MAX_ACTIVE_WGS * 4B = 3 * 4B = 12B.
-    // To ensure the total byte size of the array is 128B-aligned, the flags array must be 128B.
+    // To ensure the total byte size of the array is 256B-aligned, the flags array must be 256B.
     static constexpr ck_tile::index_t MAX_ACTIVE_WGS = 3;
 
     static constexpr ck_tile::index_t M_TILE = 4;
@@ -214,15 +233,15 @@ struct StreamKTilePartitionerBaseConfigDP2TileSK : public StreamKTilePartitioner
                                              ck_tile::sequence<UNUSED, UNUSED, UNUSED>>;
 };
 
-struct StreamKTilePartitionerBaseConfigFlagsSizeEqual128Bytes
+struct StreamKTilePartitionerBaseConfigFlagsSizeEqual256Bytes
     : public StreamKTilePartitionerBaseConfig
 {
     static constexpr ck_tile::index_t M = 28;
     static constexpr ck_tile::index_t N = 4;
     static constexpr ck_tile::index_t K = 32;
-    // The minimum number of bytes needed for the flags array is MAX_ACTIVE_WGS * 4B = 32 * 4B =
-    // 128B. So, the number of bytes for the flags array should be 128B.
-    static constexpr ck_tile::index_t MAX_ACTIVE_WGS = 32;
+    // The minimum number of bytes needed for the flags array is MAX_ACTIVE_WGS * 4B = 64 * 4B =
+    // 256B. So, the number of bytes for the flags array should be 256B.
+    static constexpr ck_tile::index_t MAX_ACTIVE_WGS = 64;
 
     static constexpr ck_tile::index_t M_TILE = 4;
     static constexpr ck_tile::index_t N_TILE = 4;
@@ -233,16 +252,16 @@ struct StreamKTilePartitionerBaseConfigFlagsSizeEqual128Bytes
                                              ck_tile::sequence<UNUSED, UNUSED, UNUSED>>;
 };
 
-struct StreamKTilePartitionerBaseConfigFlagsSizeGreaterThan128Bytes
+struct StreamKTilePartitionerBaseConfigFlagsSizeGreaterThan256Bytes
     : public StreamKTilePartitionerBaseConfig
 {
     static constexpr ck_tile::index_t M = 28;
     static constexpr ck_tile::index_t N = 4;
     static constexpr ck_tile::index_t K = 33;
-    // The minimum number of bytes needed for the flags array is MAX_ACTIVE_WGS * 4B = 33 * 4B =
-    // 132B. So, the number of bytes for the flags array should be 2 * 128B = 256B to ensure the
-    // total byte size of the array is 128B-aligned.
-    static constexpr ck_tile::index_t MAX_ACTIVE_WGS = 33;
+    // The minimum number of bytes needed for the flags array is MAX_ACTIVE_WGS * 4B = 65 * 4B =
+    // 260B. So, the number of bytes for the flags array should be 2 * 256B = 512B to ensure the
+    // total byte size of the array is 256B-aligned.
+    static constexpr ck_tile::index_t MAX_ACTIVE_WGS = 65;
 
     static constexpr ck_tile::index_t M_TILE = 4;
     static constexpr ck_tile::index_t N_TILE = 4;
@@ -310,6 +329,37 @@ struct StreamKTilePartitionerBaseConfigSKOnlyLargeK : public StreamKTilePartitio
     static constexpr ck_tile::index_t MAX_ACTIVE_WGS = 5;
 
     static constexpr ck_tile::index_t M_TILE = 4;
+    static constexpr ck_tile::index_t N_TILE = 2;
+    static constexpr ck_tile::index_t K_TILE = 2;
+
+    using GemmShape = ck_tile::TileGemmShape<ck_tile::sequence<M_TILE, N_TILE, K_TILE>,
+                                             ck_tile::sequence<UNUSED, UNUSED, UNUSED>,
+                                             ck_tile::sequence<UNUSED, UNUSED, UNUSED>>;
+};
+
+struct StreamKTilePartitionerBaseConfigRemainderAlongK : public StreamKTilePartitionerBaseConfig
+{
+    /*
+    Since K % K_Tile <=> 5 % 2 = 1, there will be 2 full macro tiles along K of size MPerBlock x
+    KPerBlock for A and KPerBlock x NPerBlock for B. The final macro tile along K will be of size
+    (K % K_Tile) along the K dimension.
+
+    Consider the A tensor as an example: Let R = K % K_TILE
+               -------------------------------------
+               |             |             |       |
+    MPerBlock  |    WG0      |     WG0     |  WG1  |
+               |             |             |       |
+               -------------------------------------
+               |<-KPerBlock->|<-KPerBlock->|<--R-->|
+
+    */
+
+    static constexpr ck_tile::index_t M              = 2;
+    static constexpr ck_tile::index_t N              = 2;
+    static constexpr ck_tile::index_t K              = 5;
+    static constexpr ck_tile::index_t MAX_ACTIVE_WGS = 2;
+
+    static constexpr ck_tile::index_t M_TILE = 2;
     static constexpr ck_tile::index_t N_TILE = 2;
     static constexpr ck_tile::index_t K_TILE = 2;
 
@@ -419,6 +469,24 @@ void test_get_tile_local_cta_idx(ck_tile::index_t tile_iter_start,
     ck_tile::index_t tile_local_cta_idx;
     tile_local_cta_idx_dev.FromDevice(&tile_local_cta_idx);
     EXPECT_EQ(tile_local_cta_idx, expected_tile_local_cta_idx);
+}
+
+template <typename GemmShape>
+void test_remap_xcd(
+    const std::vector<ck_tile::index_t>& initial_values,
+    const std::vector<ck_tile::index_t>& expected_values,
+    ck_tile::StreamKTilePartitioner<GemmShape, ck_tile::StreamKReductionStrategy::Atomic, true>&
+        tile_partitioner,
+    const int num_xcds = 8)
+{
+    std::vector<ck_tile::index_t> remapped_values(initial_values.size());
+    for(std::size_t i = 0; i < initial_values.size(); ++i)
+    {
+        remapped_values[i] =
+            tile_partitioner.remap_xcd(initial_values[i], initial_values.size(), num_xcds);
+    }
+
+    EXPECT_EQ(remapped_values, expected_values);
 }
 
 // Configs for TilePartitioner Child structs

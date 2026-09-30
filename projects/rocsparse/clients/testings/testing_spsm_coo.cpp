@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -153,7 +153,7 @@ void testing_spsm_coo(const Arguments& arg)
         {
             mx = std::max(mx, std::abs(hcoo_val[i]));
         }
-        mx = floating_data_t<T>(1.0) / mx;
+        mx = (mx != floating_data_t<T>(0)) ? floating_data_t<T>(1.0) / mx : floating_data_t<T>(1.0);
         for(size_t i = 0; i < size; ++i)
         {
             hcoo_val[i] *= mx;
@@ -478,8 +478,8 @@ void testing_spsm_coo(const Arguments& arg)
 
         if(analysis_pivot == -1 && solve_pivot == -1)
         {
-            hC_gold.near_check(hC_1);
-            hC_gold.near_check(hC_2);
+            hC_gold.near_check(hC_1, get_near_check_tol<T>(arg));
+            hC_gold.near_check(hC_2, get_near_check_tol<T>(arg));
         }
     }
 

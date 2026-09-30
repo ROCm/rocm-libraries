@@ -175,6 +175,9 @@ void initData(DType* data, std::size_t numElements, hipblaslt_initialization ini
     case hipblaslt_initialization::hpl:
         hipblaslt_init_hpl<DType>(data, numElements, 1, 1);
         break;
+    case hipblaslt_initialization::uniform_low_precision:
+        hipblaslt_init_low_precision<DType>(data, numElements, 1, 1);
+        break;
     case hipblaslt_initialization::special:
         hipblaslt_init_alt_impl_big<DType>(data, numElements, 1, 1);
         break;

@@ -4,29 +4,25 @@
 
 .. _installation:
 
-*********************************
-Building and installing hipBLASLt
-*********************************
+***************************
+Build and install hipBLASLt
+***************************
 
-This topic describes how to build and install hipBLASLt on Linux systems.
+To build hipBLASLt as part of the ROCm Core SDK, see `TheRock build
+instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
+
+Alternatively, you can build hipBLASLt standalone using the following
+instructions.
 
 Prerequisites
 =============
 
 To install hipBLASLt, your system must include these components:
 
-*  A ROCm-enabled platform. For more information, see the :doc:`ROCm documentation <rocm:index>`.
-*  A compatible version of :doc:`hipBLAS <hipblas:index>`.
-
-Installing prebuilt packages
-=============================
-
-Download the prebuilt packages from the native package manager for your distribution.
-For more information, see the :doc:`ROCm quick start installation guide <rocm-install-on-linux:install/quick-start>`.
-
-.. code-block:: bash
-
-   sudo apt update && sudo apt install hipblaslt
+* A ROCm-enabled platform. For more information, see :ref:`ROCm Core SDK components <rocm:release-components>`.
+* A compatible version of :doc:`hipBLAS <hipblas:index>`.
 
 Building hipBLASLt using invoke
 ================================
@@ -86,6 +82,17 @@ Here are some common ways to build the dependencies, library, and client:
    "``inv build --install-deps --clients``", "Install system dependencies and build the library and client."
    "``inv build --clients``", "Build the library and client. Assumes dependencies are already installed."
    "``inv build --install-deps --clients --install-pkg``", "Build everything and install the hipBLASLt package."
+   "``inv build --clients --fortran-compiler gfortran``", "Build the library and client using gfortran instead of auto-detected ROCm flang."
+
+Client builds require a Fortran compiler because they link LAPACK.
+``inv build --clients`` passes ``-DCMAKE_Fortran_COMPILER`` (and the same
+value to the ``deps`` CMake when ``--install-deps`` is used). The compiler is
+taken from ``--fortran-compiler`` if given, otherwise ``FC``, otherwise
+``CMAKE_Fortran_COMPILER``, otherwise ROCm ``flang`` under ``--rocm-path`` /
+``ROCM_PATH`` / ``/opt/rocm`` (``llvm/bin/flang``, ``bin/amdflang``,
+``bin/flang``, then ``flang`` on ``PATH``), otherwise ``gfortran`` on
+``PATH``. Invoke exits if none of those are found.
+Without ``--clients``, Fortran is not enabled.
 
 Static library
 --------------

@@ -503,7 +503,7 @@ inline Error validateScalarParameter(const std::shared_ptr<graph::TensorAttribut
                             + " must be a scalar (single element), but has "
                             + std::to_string(totalElements) + " elements");
 
-    HIPDNN_RETURN_IF_FALSE(param->get_pass_by_value(),
+    HIPDNN_RETURN_IF_FALSE(param->get_is_pass_by_value(),
                            ErrorCode::INVALID_VALUE,
                            getTensorNameForError(param, fallbackName)
                                + " must be a pass-by-value tensor");

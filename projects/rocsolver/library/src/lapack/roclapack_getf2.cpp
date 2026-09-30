@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_getf2.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -38,6 +39,7 @@ rocblas_status rocsolver_getf2_impl(rocblas_handle handle,
                                     I* ipiv,
                                     I* info,
                                     const bool pivot)
+try
 {
     const char* name = (pivot ? "getf2" : "getf2_npvt");
     ROCSOLVER_ENTER_TOP(name, "-m", m, "-n", n, "--lda", lda);
@@ -82,6 +84,10 @@ rocblas_status rocsolver_getf2_impl(rocblas_handle handle,
     return rocsolver_getf2_template<false, T>(handle, m, n, A, shiftA, inca, lda, strideA, ipiv,
                                               shiftP, strideP, info, batch_count, &work_helper,
                                               pivot);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

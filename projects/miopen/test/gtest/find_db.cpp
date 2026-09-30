@@ -17,6 +17,7 @@ void RunFindDbDriver(miopenDataType_t prec)
     switch(prec)
     {
     case miopenFloat: break;
+
     case miopenHalf:
     case miopenBFloat16:
     case miopenInt8:
@@ -29,8 +30,6 @@ void RunFindDbDriver(miopenDataType_t prec)
                   "miopenFloat8_fnuz, miopenBFloat8_fnuz "
                   "data type not supported by "
                   "find_db test";
-
-    default: break;
     }
 
     // Set up environment variables with automatic restoration

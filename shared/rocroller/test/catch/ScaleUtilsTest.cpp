@@ -11,7 +11,9 @@
 using namespace rocRoller;
 using namespace Catch::Matchers;
 
-TEMPLATE_TEST_CASE("ConvertScales", "[datatypes]", E8M0)
+// TODO Fix this on main to be able to support E4M3 and E5M3.
+//      The prevValue != 0 check is currently specialized for E8M0.
+TEMPLATE_TEST_CASE("ConvertScales", "[datatypes]", E8M0 /*, E5M3, E4M3*/)
 {
     float prevValue = 0;
     for(int i = 0; i < 255; i++)

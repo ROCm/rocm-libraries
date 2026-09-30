@@ -14,10 +14,10 @@
 
 #include <hip/hip_runtime.h>
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck_tile {
 
 /// @brief The Grouped GEMM kernel host arguments.
@@ -198,7 +198,11 @@ struct GroupedGemmKernel
         const auto kernel     = kentry<1, Kernel, ConstantPointer, index_t>;
         int occupancy;
         HIP_CHECK_ERROR(
-            hipOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy, kernel, kBlockSize, 0));
+            hipOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy, kernel, BlockSize().x, 0));
+        // TODO: the below is a temporary fix which is due to kernel metadata
+        // .workgroup_processor_mode isn't used correctly in clr for gfx1250. Will removed when clr
+        // and compiler team fix this.
+        occupancy           = occupancy > 0 ? occupancy : 1;
         const int grid_size = get_available_compute_units(s) * occupancy;
         return dim3(grid_size, 1, 1);
     }
@@ -313,7 +317,6 @@ struct GroupedGemmKernel
         // Can we simplify this branching logic?
         if constexpr(GemmPipeline::DoubleSmemBuffer == true)
         {
-
             RunGemmWithPipelineSelection2LDS(
                 a_ptr, b_ptr, c_ptr, kargs.ds_ptr, smem_ptr, kargs, splitk_batch_offset, i_m, i_n);
         }
@@ -377,13 +380,17 @@ struct GroupedGemmKernel
                                  const index_t block_idx_m,
                                  const index_t block_idx_n)
     {
-        // Create block windows using specialized methods
-        const auto& a_block_window =
+        // Create block windows using specialized methods.
+        // Copy the block windows out of the temporary tuple to avoid dangling references.
+        const auto a_block_window =
             Base::MakeABlockWindows({a_ptr}, kargs, splitk_batch_offset.splitted_k, block_idx_m)
                 .at(Base::I0);
-        const auto& b_block_window =
+        const auto b_block_window =
             Base::MakeBBlockWindows({b_ptr}, kargs, splitk_batch_offset.splitted_k, block_idx_n)
                 .at(Base::I0);
+        static_assert(!std::is_reference_v<decltype(a_block_window)> &&
+                          !std::is_reference_v<decltype(b_block_window)>,
+                      "block windows must be copies, not references into the temporary tuple");
         const auto& d_block_window =
             Base::MakeDBlockWindows(ds_ptr, kargs, block_idx_m, block_idx_n);
 
@@ -438,13 +445,17 @@ struct GroupedGemmKernel
                                      const index_t block_idx_m,
                                      const index_t block_idx_n)
     {
-        // Create block windows using specialized methods
-        const auto& a_block_window =
+        // Create block windows using specialized methods.
+        // Copy the block windows out of the temporary tuple to avoid dangling references.
+        const auto a_block_window =
             Base::MakeABlockWindows({a_ptr}, kargs, splitk_batch_offset.splitted_k, block_idx_m)
                 .at(Base::I0);
-        const auto& b_block_window =
+        const auto b_block_window =
             Base::MakeBBlockWindows({b_ptr}, kargs, splitk_batch_offset.splitted_k, block_idx_n)
                 .at(Base::I0);
+        static_assert(!std::is_reference_v<decltype(a_block_window)> &&
+                          !std::is_reference_v<decltype(b_block_window)>,
+                      "block windows must be copies, not references into the temporary tuple");
         const auto& d_block_window =
             Base::MakeDBlockWindows(ds_ptr, kargs, block_idx_m, block_idx_n);
 
@@ -580,4 +591,6 @@ struct GroupedGemmKernel
 
 } // namespace ck_tile
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

@@ -250,6 +250,10 @@ void TestSetDifferenceWithBigIndexesHelper(int magnitude)
 
 TEST(SetDifferenceTests, TestSetDifferenceWithBigIndexes)
 {
+#ifdef ADDRESS_SANITIZER_BUILD
+  GTEST_SKIP() << "Skipping test due to memory constraints in address sanitizer build.";
+#endif
+	
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
 #  ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE

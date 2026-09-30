@@ -1,11 +1,11 @@
 .. meta::
-  :description: hipBLAS library data type support
+  :description: hipBLAS library precision support
   :keywords: hipBLAS, ROCm, API, Linear Algebra, documentation, data type support
 
-.. _data-types-support:
+.. _hipblas-data-type-support:
 
 ********************************************************************
-Data type support
+hipBLAS precision support
 ********************************************************************
 
 This topic lists the data type support for the hipBLAS library on AMD GPUs for
@@ -17,35 +17,50 @@ these interfaces, all ``int`` arguments are replaced by the type name
 ``int64_t``. For more information on these ``_64`` functions, see the
 :ref:`ILP64 API` section.
 
-The icons representing different levels of support are explained in the
-following table.
+This page lists the data types supported by the library itself and does not
+indicate hardware support. A type listed here is only usable if the GPU
+architecture also supports it; otherwise it is unsupported. For data type support
+across the other ROCm libraries and by GPU architecture, see the
+:doc:`Data types and precision support page <rocm:reference/precision-support>`.
+
+.. _hipblas-input-output-type-support:
+
+Supported data types overview
+=============================
+
+The following table summarizes the input and output data types supported by
+hipBLAS. For per-function support details, see the operation-level tables in the
+following sections.
 
 .. list-table::
     :header-rows: 1
 
     *
-      -  Icon
+      - Icon
       - Definition
-
-    *
-      - NA
-      - Not applicable
-
-    *
-      - ❌
-      - Not supported
-
-    *
-      - ⚠️
-      - Partial support
-
     *
       - ✅
-      - Full support
+      - Fully supported as both an input and output type.
+    *
+      - ⚠️
+      - Partially supported as an input or output type.
 
+Data types not listed in the table below are not supported.
 
-For more information about data type support for the other ROCm libraries, see
-:doc:`Data types and precision support page <rocm:reference/precision-support>`.
+.. datatemplate:yaml:: /data/reference/precision-support.yaml
+
+    .. list-table::
+        :header-rows: 1
+        :widths: 70, 30
+
+        *
+            - Data type
+            - Support
+    {% for data_type in data.data_types %}
+        *
+            - {{ data_type.type }}
+            - {{ data_type.support }}
+    {% endfor %}
 
 .. _custom_types:
 
@@ -84,11 +99,37 @@ Complex data types
 hipBLAS uses the HIP types ``hipComplex`` and ``hipDoubleComplex`` in its API.
 
 Functions data type support
-=======================================
+===========================
 
 This section collects the data type support tables of BLAS functions and
 solver functions. The cuBLAS backend does not support all the functions and all
 the types. For more information, see :ref:`cuBLAS backend <hipblas-backend>`.
+
+The icons representing different levels of support are explained in the following
+table.
+
+.. list-table::
+    :header-rows: 1
+
+    *
+      - Icon
+      - Definition
+
+    *
+      - NA
+      - Not applicable
+
+    *
+      - ❌
+      - Not supported
+
+    *
+      - ⚠️
+      - Partial support
+
+    *
+      - ✅
+      - Full support
 
 Level 1 functions - vector operations
 -------------------------------------
@@ -385,7 +426,6 @@ Level-2 functions perform matrix-vector operations.
           - NA
           - NA
 
-
         *
           - :ref:`HPR <hipblas_hpr>`, :ref:`HPR2 <hipblas_hpr2>`
           - Hermitian packed rank-1 and rank-2 update of packed.
@@ -393,8 +433,6 @@ Level-2 functions perform matrix-vector operations.
           - NA
           - NA
           - NA
-
-
 
   .. tab-item:: Complex types
     :sync: complex-type
@@ -687,7 +725,6 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - Diagonal matrix matrix multiplication.
           - ✅
           - ✅
-
 
 Extensions
 ----------

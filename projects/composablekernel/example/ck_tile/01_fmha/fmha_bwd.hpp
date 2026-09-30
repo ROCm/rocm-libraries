@@ -18,6 +18,31 @@
 #include <utility>
 #include <variant>
 
+// Function pointer type for workspace packing (no captures, points to code segment)
+using PrepareWorkspaceHostFunc = size_t (*)(void*,                   // host_ws
+                                            ck_tile::index_t,        // batch
+                                            ck_tile::index_t,        // hdim_q
+                                            ck_tile::index_t,        // nhead_q
+                                            ck_tile::index_t,        // seqlen_q
+                                            ck_tile::index_t,        // seqlen_k
+                                            const ck_tile::index_t*, // seqstart_q
+                                            const ck_tile::index_t*  // seqstart_k
+);
+
+// Function pointer type for the on-device workspace-metadata kernel launch. Launches a
+// single-thread kernel that writes nsplits[]/offsets[] straight into the device workspace,
+// so no host callback, pinned staging, or metadata D2H/H2D is needed (graph-capturable).
+using PrepareWorkspaceDeviceFunc = void (*)(void*,                   // device_ws
+                                            ck_tile::index_t,        // batch
+                                            ck_tile::index_t,        // hdim_q
+                                            ck_tile::index_t,        // nhead_q
+                                            ck_tile::index_t,        // seqlen_q
+                                            ck_tile::index_t,        // seqlen_k
+                                            ck_tile::index_t,        // num_cus
+                                            const ck_tile::index_t*, // seqstart_q (device)
+                                            const ck_tile::index_t*, // seqstart_k (device)
+                                            const ck_tile::stream_config&);
+
 struct FmhaBwdFp32
 {
 };
@@ -117,8 +142,7 @@ struct fmha_bwd_args
     void* dv_ptr;
     void* dbias_ptr;
     void* workspace_ptr;
-    const void*
-        sink_ptr; // sink scores [batch, nhead] in log-space (LSEDataType); nullptr disables sink
+    const void* sink_ptr; // sink scores [nhead] in log-space (LSEDataType); nullptr disables sink
     void* d_sink_ptr; // sink gradient output [nhead] (LSEDataType); nullptr disables sink gradient
 
     // Usage notes for sequence length pointer parameters:
@@ -487,6 +511,19 @@ size_t fmha_bwd_dq_dk_dv_dq_prepare_ws_host_(void* cpu_ws,
                                              ck_tile::index_t seqlen_k,
                                              const ck_tile::index_t* seqstart_qs,
                                              const ck_tile::index_t* seqstart_ks);
+// On-device metadata preparation: launches a kernel that writes nsplits[]/offsets[] into
+// the device workspace on stream `s`. Replaces the host-callback + H2D staging path.
+template <typename Traits_, typename Arch = void>
+void fmha_bwd_dq_dk_dv_dq_prepare_ws_device_(void* device_ws,
+                                             ck_tile::index_t batch_size,
+                                             ck_tile::index_t hdim_q,
+                                             ck_tile::index_t nhead_q,
+                                             ck_tile::index_t seqlen_q,
+                                             ck_tile::index_t seqlen_k,
+                                             ck_tile::index_t num_cus,
+                                             const ck_tile::index_t* seqstart_qs,
+                                             const ck_tile::index_t* seqstart_ks,
+                                             const ck_tile::stream_config& s);
 template <typename Traits_, typename Arch = void>
 bool fmha_bwd_dq_dk_dv_needs_zero_dq_acc_();
 
@@ -600,21 +637,23 @@ struct fmha_bwd_launcher
     fmha_bwd_launcher(fmha_bwd_launcher&&)            = delete;
     fmha_bwd_launcher& operator=(fmha_bwd_launcher&&) = delete;
 
-    ~fmha_bwd_launcher() noexcept { schedule_pin_staging_release(); }
+    ~fmha_bwd_launcher() = default;
 
-    // Stream-async: zero dq_acc, D2H seqstart, host-pack metadata, H2D into device_ws.
-    // `pinned_host_alloc` returns a shared_ptr to a pinned host buffer; its deleter
-    // is invoked on the stream tail after the H2D completes.
+    // Stream-async workspace preparation. Zeroes the dq_acc region (if the kernel
+    // accumulates) and launches a single-thread device kernel that writes the
+    // nsplits[]/offsets[] metadata straight into the device workspace. Every op is
+    // stream-ordered and capturable -- there is no host callback, no pinned host staging,
+    // and no metadata D2H/H2D. seqstart_q_dev/seqstart_k_dev are read on-device in group
+    // mode and must already be resident on the device.
     void prepare_workspace_async( //
         void* device_ws_ptr,
         const int* seqstart_q_dev,
         const int* seqstart_k_dev,
-        const ck_tile::stream_config& s,
-        const std::function<std::shared_ptr<void>(size_t)>& pinned_host_alloc)
+        const ck_tile::stream_config& s)
     {
         hipStream_t stream = s.stream_id_;
 
-        // Fast path: no host-side metadata to stage; just zero dq_acc if needed.
+        // Fast path: no metadata region; just zero dq_acc if needed.
         if(host_ws_size_ == 0)
         {
             if(needs_zero_dq_acc_ && workspace_size > 0)
@@ -622,114 +661,62 @@ struct fmha_bwd_launcher
             return;
         }
 
-        if(!pinned_host_alloc)
-            throw std::runtime_error(
-                "fmha_bwd_launcher::prepare_workspace_async: pinned_host_alloc is required");
+        if(traits_.is_group_mode && (!seqstart_q_dev || !seqstart_k_dev))
+            throw std::runtime_error("fmha_bwd_launcher::prepare_workspace_async: "
+                                     "seqstart_q_dev and seqstart_k_dev are required in "
+                                     "group mode");
 
-        // Allocate pinned host staging first: if it throws we haven't issued any
-        // stream work yet, leaving the workspace cleanly un-prepared.
-        const size_t seqstart_bytes = traits_.is_group_mode ? sizeof(int) * (traits_.batch + 1) : 0;
-        const size_t total_bytes    = 2 * seqstart_bytes + host_ws_size_;
-        auto pin_base               = pinned_host_alloc(total_bytes);
-
+        // Zero only the dq_acc region that follows the metadata region; the metadata
+        // region is fully overwritten by the prepare kernel below.
         if(needs_zero_dq_acc_ && workspace_size > host_ws_size_)
             HIP_CHECK_ERROR(hipMemsetAsync(static_cast<char*>(device_ws_ptr) + host_ws_size_,
                                            0,
                                            workspace_size - host_ws_size_,
                                            stream));
 
-        char* base                   = static_cast<char*>(pin_base.get());
-        int* pin_q                   = reinterpret_cast<int*>(base);
-        int* pin_k                   = reinterpret_cast<int*>(base + seqstart_bytes);
-        void* pin_w                  = base + 2 * seqstart_bytes;
-        const int* seqstart_q_pinned = traits_.is_group_mode ? pin_q : nullptr;
-        const int* seqstart_k_pinned = traits_.is_group_mode ? pin_k : nullptr;
+        prepare_ws_dev_func_(device_ws_ptr,
+                             batch_,
+                             hdim_q_,
+                             nhead_q_,
+                             seqlen_q_,
+                             seqlen_k_,
+                             num_cus_,
+                             reinterpret_cast<const ck_tile::index_t*>(seqstart_q_dev),
+                             reinterpret_cast<const ck_tile::index_t*>(seqstart_k_dev),
+                             s);
+    }
 
-        if(traits_.is_group_mode)
-        {
-            if(!seqstart_q_dev || !seqstart_k_dev)
-                throw std::runtime_error("fmha_bwd_launcher::prepare_workspace_async: "
-                                         "seqstart_q_dev and seqstart_k_dev are required in "
-                                         "group mode");
-            HIP_CHECK_ERROR(hipMemcpyAsync(
-                pin_q, seqstart_q_dev, seqstart_bytes, hipMemcpyDeviceToHost, stream));
-            HIP_CHECK_ERROR(hipMemcpyAsync(
-                pin_k, seqstart_k_dev, seqstart_bytes, hipMemcpyDeviceToHost, stream));
-        }
-
-        auto pack_closure = std::make_unique<std::function<void()>>(
-            [=, fn = pack_workspace_host_]() { fn(pin_w, seqstart_q_pinned, seqstart_k_pinned); });
-        // Callback runs on the HIP driver helper thread across a C ABI boundary;
-        // any exception escaping it would call std::terminate.
-        HIP_CHECK_ERROR(hipLaunchHostFunc(
-            stream,
-            [](void* ud) {
-                std::unique_ptr<std::function<void()>> c{static_cast<std::function<void()>*>(ud)};
-                try
-                {
-                    (*c)();
-                }
-                catch(const std::exception& e)
-                {
-                    // The H2D queued after this callback will copy indeterminate
-                    // metadata to device and the kernel will produce wrong results;
-                    // unlikely in practice since pack_workspace_host_ only throws on
-                    // precondition violations.
-                    std::cerr << "fmha_bwd_launcher: pack_workspace_host threw: " << e.what()
-                              << '\n';
-                }
-                catch(...)
-                {
-                    std::cerr << "fmha_bwd_launcher: pack_workspace_host threw unknown\n";
-                }
-            },
-            pack_closure.get()));
-        // Ownership transferred to the callback only after a successful launch.
-        pack_closure.release();
-
-        HIP_CHECK_ERROR(
-            hipMemcpyAsync(device_ws_ptr, pin_w, host_ws_size_, hipMemcpyHostToDevice, stream));
-
-        // Release any previous in-flight buffer before taking a new one.
-        schedule_pin_staging_release();
-        pin_staging_    = std::move(pin_base);
-        release_stream_ = stream;
+    // Backward-compatible overload for callers written against the previous API,
+    // which passed a pinned-host-buffer allocator for staging workspace metadata.
+    // Metadata is now produced by an on-device kernel, so the allocator is unused.
+    template <typename HostAllocFn>
+    void prepare_workspace_async( //
+        void* device_ws_ptr,
+        const int* seqstart_q_dev,
+        const int* seqstart_k_dev,
+        const ck_tile::stream_config& s,
+        const HostAllocFn&)
+    {
+        prepare_workspace_async(device_ws_ptr, seqstart_q_dev, seqstart_k_dev, s);
     }
 
     private:
     fmha_bwd_traits traits_{};
     size_t host_ws_size_    = 0;
     bool needs_zero_dq_acc_ = false;
-    // Pure CPU; safe to invoke from a hipLaunchHostFunc callback.
-    std::function<void(void* host_ws, const int* seqstart_q, const int* seqstart_k)>
-        pack_workspace_host_{[](void*, const int*, const int*) {
-            std::cerr
-                << "fmha_bwd: no kernel found for given traits, skipping pack_workspace_host\n";
-        }};
-    std::shared_ptr<void> pin_staging_;
-    hipStream_t release_stream_ = nullptr;
 
-    // The pin_staging_ deleter MUST NOT call any HIP API: it fires from the
-    // hipLaunchHostFunc callback on the driver helper thread, which holds
-    // runtime locks (would deadlock against main-thread hipFree). PyTorch's
-    // CachingHostAllocator is safe; bare hipHostMalloc users should defer
-    // hipHostFree via ck_tile::pinned_host_releaser.
-    void schedule_pin_staging_release() noexcept
-    {
-        if(!pin_staging_)
-            return;
-        auto* heap_ref       = new std::shared_ptr<void>(std::move(pin_staging_));
-        const hipError_t err = hipLaunchHostFunc(
-            release_stream_,
-            [](void* ud) { delete static_cast<std::shared_ptr<void>*>(ud); },
-            heap_ref);
-        if(err != hipSuccess)
-        {
-            std::cerr << "fmha_bwd_launcher: hipLaunchHostFunc failed: " << hipGetErrorString(err)
-                      << "; releasing eagerly\n";
-            delete heap_ref;
-        }
-    }
+    // Function pointer (points to code segment, survives launcher destruction)
+    PrepareWorkspaceDeviceFunc prepare_ws_dev_func_ = nullptr;
+
+    // Captured data passed to the prepare kernel at dispatch time.
+    ck_tile::index_t batch_    = 0;
+    ck_tile::index_t hdim_q_   = 0;
+    ck_tile::index_t nhead_q_  = 0;
+    ck_tile::index_t seqlen_q_ = 0;
+    ck_tile::index_t seqlen_k_ = 0;
+    // CU count queried on the host (persistent deterministic nsplits depends on it, and
+    // must match the value used when sizing the device workspace upper bound).
+    ck_tile::index_t num_cus_ = 0;
 
     template <typename T0 /*dot_do_o_trait*/,
               typename T1 /*dq_dk_dv_trait*/,
@@ -751,15 +738,17 @@ struct fmha_bwd_launcher
                 t.is_group_mode ? t.seqlen_q : t.batch * t.seqlen_q;
             device_ws_size = fmha_bwd_dq_dk_dv_dq_ws_device_upper_bound_<T1, Arch>(
                 t.batch, t.hdim_q, t.nhead_q, total_seqlen_q_padded, t.max_seqlen_k);
-            pack_workspace_host_ = [batch    = t.batch,
-                                    hdim_q   = t.hdim_q,
-                                    nhead_q  = t.nhead_q,
-                                    seqlen_q = t.seqlen_q,
-                                    seqlen_k = t.seqlen_k //
-            ](void* host_ws, const int* seqstart_q, const int* seqstart_k) {
-                fmha_bwd_dq_dk_dv_dq_prepare_ws_host_<T1, Arch>(
-                    host_ws, batch, hdim_q, nhead_q, seqlen_q, seqlen_k, seqstart_q, seqstart_k);
-            };
+
+            // Store function pointer (directly assign template-instantiated function)
+            prepare_ws_dev_func_ = &fmha_bwd_dq_dk_dv_dq_prepare_ws_device_<T1, Arch>;
+
+            // Store captured data as member variables
+            batch_    = t.batch;
+            hdim_q_   = t.hdim_q;
+            nhead_q_  = t.nhead_q;
+            seqlen_q_ = t.seqlen_q;
+            seqlen_k_ = t.seqlen_k;
+            num_cus_  = ck_tile::get_num_cus();
         }
         workspace_size     = host_ws_size_ + device_ws_size;
         needs_zero_dq_acc_ = fmha_bwd_dq_dk_dv_needs_zero_dq_acc_<T1, Arch>();

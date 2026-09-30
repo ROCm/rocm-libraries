@@ -481,6 +481,27 @@ miopenConvolutionForwardGetWorkSpaceSize(miopenHandle_t handle,
     });
 }
 
+MIOPEN_EXPORT extern "C" miopenStatus_t
+miopenConvolutionForwardGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                              const miopenTensorDescriptor_t wDesc,
+                                              const miopenTensorDescriptor_t xDesc,
+                                              const miopenConvolutionDescriptor_t convDesc,
+                                              const miopenTensorDescriptor_t yDesc,
+                                              size_t* minWorkspaceSize,
+                                              size_t* maxWorkspaceSize)
+{
+    if(minWorkspaceSize == nullptr || maxWorkspaceSize == nullptr)
+        return miopenStatusBadParm;
+    MIOPEN_LOG_FUNCTION(handle, wDesc, xDesc, convDesc, yDesc);
+    return miopen::try_([&] {
+        auto ctx               = ExecutionContext{};
+        auto problem           = ProblemDescription{};
+        std::tie(ctx, problem) = MakeFwdCtxAndProblem(handle, xDesc, wDesc, convDesc, yDesc);
+        miopen::deref(convDesc).GetWorkSpaceSizeRange(
+            ctx, problem, minWorkspaceSize, maxWorkspaceSize);
+    });
+}
+
 namespace miopen {
 namespace debug {
 
@@ -1323,6 +1344,27 @@ miopenConvolutionBackwardDataGetWorkSpaceSize(miopenHandle_t handle,
 }
 
 MIOPEN_EXPORT extern "C" miopenStatus_t
+miopenConvolutionBackwardDataGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                                   const miopenTensorDescriptor_t dyDesc,
+                                                   const miopenTensorDescriptor_t wDesc,
+                                                   const miopenConvolutionDescriptor_t convDesc,
+                                                   const miopenTensorDescriptor_t dxDesc,
+                                                   size_t* minWorkspaceSize,
+                                                   size_t* maxWorkspaceSize)
+{
+    if(minWorkspaceSize == nullptr || maxWorkspaceSize == nullptr)
+        return miopenStatusBadParm;
+    MIOPEN_LOG_FUNCTION(handle, dyDesc, wDesc, convDesc, dxDesc);
+    return miopen::try_([&] {
+        auto ctx               = ExecutionContext{};
+        auto problem           = ProblemDescription{};
+        std::tie(ctx, problem) = MakeBwdCtxAndProblem(handle, dyDesc, wDesc, convDesc, dxDesc);
+        miopen::deref(convDesc).GetWorkSpaceSizeRange(
+            ctx, problem, minWorkspaceSize, maxWorkspaceSize);
+    });
+}
+
+MIOPEN_EXPORT extern "C" miopenStatus_t
 miopenConvolutionBackwardWeightsGetWorkSpaceSize(miopenHandle_t handle,
                                                  const miopenTensorDescriptor_t dyDesc,
                                                  const miopenTensorDescriptor_t xDesc,
@@ -1336,6 +1378,27 @@ miopenConvolutionBackwardWeightsGetWorkSpaceSize(miopenHandle_t handle,
         auto problem           = ProblemDescription{};
         std::tie(ctx, problem) = MakeWrWCtxAndProblem(handle, dyDesc, xDesc, convDesc, dwDesc);
         *workSpaceSize         = miopen::deref(convDesc).GetWorkSpaceSize(ctx, problem);
+    });
+}
+
+MIOPEN_EXPORT extern "C" miopenStatus_t
+miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                                      const miopenTensorDescriptor_t dyDesc,
+                                                      const miopenTensorDescriptor_t xDesc,
+                                                      const miopenConvolutionDescriptor_t convDesc,
+                                                      const miopenTensorDescriptor_t dwDesc,
+                                                      size_t* minWorkspaceSize,
+                                                      size_t* maxWorkspaceSize)
+{
+    if(minWorkspaceSize == nullptr || maxWorkspaceSize == nullptr)
+        return miopenStatusBadParm;
+    MIOPEN_LOG_FUNCTION(handle, dyDesc, xDesc, convDesc, dwDesc);
+    return miopen::try_([&] {
+        auto ctx               = ExecutionContext{};
+        auto problem           = ProblemDescription{};
+        std::tie(ctx, problem) = MakeWrWCtxAndProblem(handle, dyDesc, xDesc, convDesc, dwDesc);
+        miopen::deref(convDesc).GetWorkSpaceSizeRange(
+            ctx, problem, minWorkspaceSize, maxWorkspaceSize);
     });
 }
 

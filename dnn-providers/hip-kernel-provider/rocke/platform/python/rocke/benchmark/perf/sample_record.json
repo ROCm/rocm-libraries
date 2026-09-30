@@ -1,0 +1,63 @@
+{
+  "schema": "rocke.bench.measurement/v1",
+  "run": {
+    "run_id": "2026-07-14T18:00:00+00:00_4f7a2c18b903",
+    "timestamp": "2026-07-14T18:00:00+00:00",
+    "arch": "gfx1201",
+    "gpu_name": "AMD Radeon RX 9070 XT",
+    "rocm_version": "7.2"
+  },
+  "kernel": {
+    "kernel_name": "gemm_fp16_rcr_512x512x512_t128x128x32",
+    "op": "gemm",
+    "shape": {"M": 512, "N": 512, "K": 512},
+    "grid": [64],
+    "block": [256],
+    "dispatch_symbol": "gemm_fp16_rcr_512x512x512_t128x128x32"
+  },
+  "wall": {
+    "ms_median": 0.0472,
+    "ms_spread_pct": 0.9,
+    "tflops": 5.68,
+    "gbs": 33.3,
+    "pct_peak": 6.0,
+    "samples": [{"ms": 0.0471}, {"ms": 0.0472}, {"ms": 0.0474}]
+  },
+  "profiled": {
+    "ms_median": 0.0521,
+    "ms_spread_pct": 1.2,
+    "tflops": 5.15,
+    "gbs": 30.1,
+    "samples": [{"ms": 0.0518}, {"ms": 0.0521}, {"ms": 0.0524}]
+  },
+  "counters": {
+    "total_clocks": 105000,
+    "busy_cycles": 98000,
+    "sq_busy_cycles": 91000,
+    "waves": 256,
+    "valu_insts": 1200000,
+    "lds_insts": 64000,
+    "wait_cycles": 7000,
+    "l2_hit": 480000,
+    "l2_miss": 20000
+  },
+  "resources": {
+    "vgpr": 96,
+    "agpr": 0,
+    "sgpr": 48,
+    "lds_bytes": 16384,
+    "occupancy": 8,
+    "source": "rocprofv3"
+  },
+  "derived": {
+    "busy_fraction": 0.933,
+    "l2_hit_rate": 0.96
+  },
+  "captured_counters": [
+    "busy_cycles", "l2_hit", "l2_miss", "lds_insts", "sq_busy_cycles",
+    "total_clocks", "valu_insts", "wait_cycles", "waves"
+  ],
+  "spread": {"busy_cycles_pct": 1.1, "ms_pct": 0.9},
+  "n_samples": 3,
+  "verify": {"ok": true, "max_abs_diff": 0.0, "bad_count": 0, "total": 262144}
+}

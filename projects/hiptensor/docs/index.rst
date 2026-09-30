@@ -48,6 +48,7 @@ The hipTensor library is included in the rocm-libraries public repository, and i
 
   .. grid-item-card:: API reference
 
+    * :doc:`Precision support <./api-reference/data-type-support>`
     * :doc:`API reference guide <./api-reference/api-reference>`
 
 To contribute to the documentation, see `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.

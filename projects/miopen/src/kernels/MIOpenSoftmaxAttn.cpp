@@ -26,6 +26,9 @@
 
 // rocblas operates with non-ieee FP8
 #define MIOPEN_FP8_IEEE_EXPONENT_BIAS 0
+#ifndef MIOPEN_FP8_CLIPPING
+#define MIOPEN_FP8_CLIPPING 1
+#endif
 
 #ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_fp16.h>

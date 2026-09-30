@@ -79,8 +79,9 @@ miopen::HipEventPtr make_hip_fast_event()
 }
 } // namespace
 
-bool MhaBackward::IsApplicable([[maybe_unused]] const ExecutionContext& context,
-                               const miopen::mha::ProblemDescription& problem) const
+bool MhaBackward::IsApplicable(
+    [[maybe_unused]] const ExecutionContext& context,
+    [[maybe_unused]] const miopen::mha::ProblemDescription& problem) const
 {
 #if MIOPEN_USE_ROCBLAS
     // It's important to have this check before problem.GetDescsBackward() call

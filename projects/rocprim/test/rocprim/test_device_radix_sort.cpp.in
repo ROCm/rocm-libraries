@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -43,13 +43,13 @@
     TYPED_TEST_P(SUITE, SortKeys                ) { sort_keys<TestFixture>(); }
     REGISTER_TYPED_TEST_SUITE_P(SUITE, SortKeys);
 #elif ROCPRIM_TEST_SUITE_SLICE == 1
-    TYPED_TEST_P(SUITE, SortPairs               ) { sort_pairs<TestFixture>(); } 
+    TYPED_TEST_P(SUITE, SortPairs               ) { sort_pairs<TestFixture>(); }
     REGISTER_TYPED_TEST_SUITE_P(SUITE, SortPairs);
 #elif ROCPRIM_TEST_SUITE_SLICE == 2
-    TYPED_TEST_P(SUITE, SortKeysDoubleBuffer    ) { sort_keys_double_buffer<TestFixture>(); } 
+    TYPED_TEST_P(SUITE, SortKeysDoubleBuffer    ) { sort_keys_double_buffer<TestFixture>(); }
     REGISTER_TYPED_TEST_SUITE_P(SUITE, SortKeysDoubleBuffer);
 #elif ROCPRIM_TEST_SUITE_SLICE == 3
-    TYPED_TEST_P(SUITE, SortPairsDoubleBuffer   ) { sort_pairs_double_buffer<TestFixture>(); } 
+    TYPED_TEST_P(SUITE, SortPairsDoubleBuffer   ) { sort_pairs_double_buffer<TestFixture>(); }
     REGISTER_TYPED_TEST_SUITE_P(SUITE, SortPairsDoubleBuffer);
 #endif
 
@@ -99,7 +99,7 @@ using __custom__uint64_t2 = common::custom_type<uint64_t, uint64_t, true>;
     INSTANTIATE(params<uint8_t,             uint8_t,                                true,   4, 10>)
     INSTANTIATE(params<unsigned int,        double,                                 true,   4, 21>)
     INSTANTIATE(params<unsigned int,        rocprim::half,                          true,   0, 15>)
-    INSTANTIATE(params<unsigned short,      rocprim::half,                          false,  3, 22>)
+    INSTANTIATE(params<unsigned short,      rocprim::half,                          false,  3, 14>)
     INSTANTIATE(params<unsigned int,        rocprim::bfloat16,                      true,   0, 12>)
     INSTANTIATE(params<unsigned short,      rocprim::bfloat16,                      false,  3, 11>)
     INSTANTIATE(params<unsigned long long,  char,                                   false,  8, 20>)

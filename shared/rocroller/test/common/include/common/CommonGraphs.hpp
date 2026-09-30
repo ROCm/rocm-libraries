@@ -217,7 +217,7 @@ namespace rocRollerTest
                       typename TC  = TA,
                       typename TD  = TC,
                       typename ACC = float>
-            auto getCommandArguments() const
+            auto getCommandArguments(ContextPtr context) const
             {
                 using namespace rocRoller;
 
@@ -252,12 +252,19 @@ namespace rocRollerTest
                 if(m_problem.scaleAMode == Operations::ScaleMode::Separate
                    || m_problem.scaleBMode == Operations::ScaleMode::Separate)
                 {
-                    auto scaleBlockSize = m_problem.scaleBlockSize;
+                    auto const& arch           = context->targetArchitecture();
+                    auto        scaleBlockSize = m_problem.scaleBlockSize;
                     AssertFatal(scaleBlockSize > 0, "scaleBlockSize must be set to scale A or B.");
+                    AssertFatal(
+                        arch.isSupportedScaleBlockSize(scaleBlockSize),
+                        fmt::format("Architecture {} does not support block scaling (size: {}).",
+                                    arch.target().toString(),
+                                    scaleBlockSize));
                     AssertFatal(m_problem.k % scaleBlockSize == 0,
                                 fmt::format("K: {} must be a multiple of the scale block size: {}",
                                             m_problem.k,
                                             scaleBlockSize));
+
                     DGenInput(seed,
                               hostA,
                               descA,
@@ -267,8 +274,8 @@ namespace rocRollerTest
                               descC,
                               hostScaleA,
                               hostScaleB,
-                              m_problem.scaleAMode == Operations::ScaleMode::Separate,
-                              m_problem.scaleBMode == Operations::ScaleMode::Separate,
+                              m_problem.scaleTypeA,
+                              m_problem.scaleTypeB,
                               -1.f,
                               1.f,
                               static_cast<uint>(scaleBlockSize));

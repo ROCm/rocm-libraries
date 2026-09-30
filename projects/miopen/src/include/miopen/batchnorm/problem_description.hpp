@@ -450,8 +450,9 @@ private:
         case Direction::ForwardInference: return "Inf";
         case Direction::ForwardTraining: return "Trn";
         case Direction::Backward: return "Bwd";
-        default: MIOPEN_THROW(miopenStatusInvalidValue, "Wrong Batchnorm Direction provided");
         }
+
+        MIOPEN_THROW(miopenStatusInvalidValue, "Wrong Batchnorm Direction provided");
     }
 
     std::string GetModeStr() const
@@ -460,18 +461,19 @@ private:
         {
         case miopenBNPerActivation: return "0";
         case miopenBNSpatial: return "1";
-        default: MIOPEN_THROW(miopenStatusInvalidValue, "Wrong Batchnorm Mode provided");
         }
+
+        MIOPEN_THROW(miopenStatusInvalidValue, "Wrong Batchnorm Mode provided");
     }
 };
 
-bool IsOCLInferTypeValid(const ProblemDescription& bn_problem);
+bool IsInferTypeValid(const ProblemDescription& bn_problem);
 bool IsCKInferTypeValid(const ProblemDescription& bn_problem);
 
-bool IsOCLFwdTrainTypeValid(const ProblemDescription& bn_problem);
+bool IsFwdTrainTypeValid(const ProblemDescription& bn_problem);
 bool IsCKFwdTrainTypeValid(const ProblemDescription& bn_problem);
 
-bool IsOCLBwdTypeValid(const ProblemDescription& bn_problem);
+bool IsBwdTypeValid(const ProblemDescription& bn_problem);
 bool IsCKBwdTypeValid(const ProblemDescription& bn_problem);
 
 } // namespace batchnorm

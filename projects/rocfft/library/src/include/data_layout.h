@@ -25,6 +25,7 @@
 
 #include <cstring>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -37,10 +38,10 @@ enum class io_data_label
 };
 
 /**
-  * @return `io_data_label::OUTPUT` for the argument value `io_data_label::INPUT` and vice versa. 
-  * @throw An `std::invalid_argument` is thrown if `io` is not `io_data_label::INPUT` 
-  * nor `io_data_label::OUTPUT`.
-  */
+ * @return `io_data_label::OUTPUT` for the argument value `io_data_label::INPUT` and vice versa.
+ * @throw An `std::invalid_argument` is thrown if `io` is not `io_data_label::INPUT`
+ * nor `io_data_label::OUTPUT`.
+ */
 io_data_label other(io_data_label io);
 
 /**
@@ -51,6 +52,18 @@ io_data_label other(io_data_label io);
  * nor `io_data_label::OUTPUT`.
  */
 std::string to_str(io_data_label io);
+
+constexpr bool is_real_domain(rocfft_transform_type fft_type, io_data_label io)
+{
+    return (fft_type == rocfft_transform_type_real_forward && io == io_data_label::INPUT)
+           || (fft_type == rocfft_transform_type_real_inverse && io == io_data_label::OUTPUT);
+}
+
+constexpr bool is_hermitian_domain(rocfft_transform_type fft_type, io_data_label io)
+{
+    return (fft_type == rocfft_transform_type_real_forward && io == io_data_label::OUTPUT)
+           || (fft_type == rocfft_transform_type_real_inverse && io == io_data_label::INPUT);
+}
 
 /**
  * @brief Helper structure encapsulating the details pertaining to the description
@@ -283,7 +296,7 @@ struct data_layout_t
      * are set to their default contiguous values.
      * 
      * @throw An `std::invalid_argument` is thrown if `first` and `second` are not
-     * dimensionally consistent.
+     * dimensionally consistent, or have different embeddings (if any).
      */
     static data_layout_t make_contiguous_intersection_of(const data_layout_t& first,
                                                          const data_layout_t& second);
@@ -293,6 +306,7 @@ struct data_layout_t
      * @return `true` if this data layout is dimensionally consistent with `other` 
      */
     bool is_dimensionally_consistent_with(const data_layout_t& other) const;
+
     /**
      * @return `true` if any length axis covers a partial range.
      */
@@ -314,8 +328,8 @@ struct data_layout_t
     /**
      * @brief Verifies whether this object's layout is consistent as input
      * (resp. output) for specific types of in-place Discrete Fourier Transforms
-     * along its full lengths axes and, if so, returns the corresponding output
-     * (resp. input) layout.
+     * and, if so, returns the corresponding output (resp. input) layout. This
+     * object must have no partial length axis.
      * 
      * @param[in] other_io I/O label for the data layout to be returned. Explicitly,
      * the calling object's layout is considered an input (resp. output) layout
@@ -344,6 +358,48 @@ struct data_layout_t
                                                               rocfft_transform_type fft_type,
                                                               bool other_innermost_length_is_odd
                                                               = false) const;
+
+    /**
+     * @return The data layout corresponding to a (possibly) sub-dimensional data set
+     * embedded in what the current object describes. 
+     * 
+     * @param[in] len_indices set of indices of the length axes of the current object
+     * that define the length axes of the sub-dimensional data set of interest.
+     * @note Relative ordering of length axes is unchanged in the returned object when
+     * compared to this object's. Remaining length axes (of the current object) are
+     * turned into batch axes (in the returned object).
+     * @throw An `std::invalid_argument` exception is thrown if `len_indices` is empty,
+     * or if any of the values in `len_indices` is out of bounds.
+     * @note If `len_indices = {0, 1, ..., get_len_rank() - 1}`, this function is
+     * equivalent to a simple copy of the current object.
+     */
+    data_layout_t get_layout_for_len_axes(const std::set<size_t>& len_indices) const;
+
+    /**
+     * @return The data layout of the data set in which the data set described by the
+     * current object is embedded.
+     * @note If this object is not representing the data layout of an embedded data set,
+     * this function is equivalent to a simple copy of the current object.
+     * @throw An `std::logic_error` exception is thrown if the object's embedding map is
+     * found inconsistent.
+     */
+    data_layout_t get_embedding_layout() const;
+
+    /**
+     * @return An `std::vector<size_t>` of the length axis indices in the embedding data
+     * set to which the current object's length axes correspond.
+     * @note If this object is not representing the data layout of an embedded data set,
+     * this function returns `{0, 1, ..., get_len_rank() - 1}`.
+     * @throw An `std::logic_error` exception is thrown if the object's embedding map is
+     * found inconsistent.
+     */
+    std::vector<size_t> corresponding_axes_in_embedding() const;
+
+    /**
+     * @return `true` iff the current object is registered as the data layout of a
+     * data set embedded within another, higher-dimensional one.
+     */
+    bool is_embedded() const;
 
     //-------------------------------------------------------------------------
     //                        DEFAULT COPIES AND MOVES
@@ -397,6 +453,16 @@ private:
 
     std::vector<axis_t> len_axes;
     std::vector<axis_t> batch_axes;
+    // If the current object captures the data layout for a sub-dimensional data set
+    // embedded within another, an embedding map is required to keep track of which of
+    // the current object's axes correspond to the embedding set's length axes. If
+    // `embedding` has a value set, the current object captures the layout for data
+    // embedded within a higher dimensional data set of rank `embedding->size()`, for
+    // which the `j`-th length axis (`0 <= j < embedding->size()`) is the current
+    // object's axis of (flattened) index `(*embedding)[j]`.
+    std::optional<std::vector<size_t>> embedding;
+
+    inline bool has_consistent_embedding() const;
 
     /**
      * @brief Implementation-simplifying helper accessor for the length and batch
@@ -427,6 +493,11 @@ private:
      * @param[in] len_axis_order a vector that is a permutation of
      * `{0, 1, ..., get_len_rank() - 1}`
      *
+     * @warning Unless trivial, this operation breaks consistency between this
+     * object and (previously-created) embedded ones obtained from the current
+     * object, if any. If this object is embedded itself, consistency with its
+     * embedding data set is maintained under this re-ordering operation.
+     * 
      * @throw An `std::invalid_argument` is thrown if `len_axis_order`
      * is not a permutation of `{0, 1, ..., get_len_rank() - 1}`.
      */

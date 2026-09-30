@@ -86,7 +86,7 @@ Each GPU processes a subset of the problems concurrently:
     results.csv (all results, same format as single-GPU)
 
 Process Flow:
-1. Detect available GPUs via rocm-smi or hipInfo
+1. Detect available GPUs via amd-smi or hipInfo
 2. Count problems in the config file
 3. Create per-GPU config files with:
    - Assigned device-idx (GPU index)
@@ -107,6 +107,7 @@ Key Functions:
 - runClientParallel(): Main orchestration function
 """
 
+import json
 import os
 import re
 import shutil
@@ -121,19 +122,19 @@ GPU_WALL_TIMEOUT_SECS = 60
 
 
 def detectAvailableGpus():
-    """Detect the number of available GPUs using rocm-smi."""
+    """Detect the number of available GPUs using amd-smi."""
     try:
         result = subprocess.run(
-            ["rocm-smi", "--showid"],
+            ["amd-smi", "list", "--json"],
             capture_output=True,
             text=True,
             timeout=10
         )
         if result.returncode == 0:
-            # Count unique GPU indices (GPU[N] appears multiple times per device)
-            gpu_indices = set(re.findall(r'GPU\[(\d+)\]', result.stdout))
-            if gpu_indices:
-                return len(gpu_indices)
+            # amd-smi list --json returns one object per GPU
+            gpus = json.loads(result.stdout)
+            if gpus:
+                return len(gpus)
     except Exception:
         pass
 

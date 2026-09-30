@@ -170,7 +170,8 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
                                        const NetworkConfig& network_config,
                                        const AnyInvokeParams& invoke_ctx,
                                        FindCoreResult& core_result,
-                                       bool force_attach_binary);
+                                       bool force_attach_binary,
+                                       bool& non_naive_succeeded);
 
 FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
                         const ExecutionContext& ctx,

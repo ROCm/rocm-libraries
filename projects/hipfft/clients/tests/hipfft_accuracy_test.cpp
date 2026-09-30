@@ -145,34 +145,7 @@ TEST_P(accuracy_test, vs_fftw)
         {
             fft_vs_reference(params, do_round_trip);
         }
-        catch(const std::bad_alloc&)
-        {
-            // explicitly clear cache
-            reference_fft_data_t::clear_cache();
-            GTEST_SKIP() << "host memory allocation failure";
-        }
-        catch(const HOSTBUF_MEM_USAGE& e)
-        {
-            // explicitly clear cache
-            reference_fft_data_t::clear_cache();
-            GTEST_SKIP() << e.what();
-        }
-        catch(const DEVICEBUF_MEM_USAGE& e)
-        {
-            GTEST_SKIP() << e.what();
-        }
-        catch(const ROCFFT_SKIP& e)
-        {
-            GTEST_SKIP() << e.what();
-        }
-        catch(const fft_params::unimplemented_exception& e)
-        {
-            GTEST_SKIP() << "Unimplemented exception: " << e.what();
-        }
-        catch(const ROCFFT_FAIL& e)
-        {
-            GTEST_FAIL() << e.what();
-        }
+        ROCFFT_CATCH_TEST_EXCEPTIONS;
         break;
     }
     case fft_params::fft_mp_lib_mpi:

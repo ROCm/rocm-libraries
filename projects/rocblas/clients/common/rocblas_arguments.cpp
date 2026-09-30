@@ -152,6 +152,7 @@ void Arguments::init()
     HMM                 = false;
     graph_test          = false;
     repeatability_check = false;
+    alpha_beta_stride   = false;
 
     use_hipblaslt = -1;
 

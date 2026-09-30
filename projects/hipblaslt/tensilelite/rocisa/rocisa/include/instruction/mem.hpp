@@ -109,10 +109,13 @@ namespace rocisa
                     kStr = isa[0] < 11 ? "short_d16_hi" : "d16_hi_b16";
                     break;
                 case InstType::INST_TR8_B64:
-                    kStr = isa <= std::array<int, 3>{12, 0, 1} ? "tr_b64" : "";
+                    // All gfx12 (RDNA4 12.0/12.1 and CDNA5 gfx1250 12.5+) accept
+                    // "tr_b64" as a compatibility alias (same encoding as the
+                    // gfx1250 canonical "tr8_b64"; amdclang normalizes on disasm).
+                    kStr = isa < std::array<int, 3>{13, 0, 0} ? "tr_b64" : "";
                     break;
                 case InstType::INST_TR16_B128:
-                    kStr = isa <= std::array<int, 3>{12, 0, 1} ? "tr_b128" : "";
+                    kStr = isa < std::array<int, 3>{13, 0, 0} ? "tr_b128" : "";
                     break;
                 default:
                     break;
@@ -336,7 +339,7 @@ namespace rocisa
         {
             std::string dstStr     = dst ? dst->toString() + ", " : "";
             auto        soffsetStr = InstructionInputToString(soffset);
-            if(getAsmCaps()["HasMUBUFConst"])
+            if(capOrDefault(getAsmCaps(), "HasMUBUFConst"))
             {
                 return dstStr + vaddr->toString() + ", " + saddr->toString() + ", " + soffsetStr;
             }
@@ -374,54 +377,37 @@ namespace rocisa
 
     struct AtomicReadWriteInstruction : public ReadWriteInstruction
     {
-        std::shared_ptr<Container> dst;
-        std::shared_ptr<Container> srcs;
+        std::shared_ptr<Container>   dst;
+        std::shared_ptr<Container>   base;
+        InstructionInput             soffset;
+        std::optional<SMEMModifiers> smem;
 
         AtomicReadWriteInstruction(InstType                          instType,
                                    const std::shared_ptr<Container>& dst,
-                                   const std::shared_ptr<Container>& srcs,
+                                   const std::shared_ptr<Container>& base,
+                                   const InstructionInput&           soffset = 0,
+                                   std::optional<SMEMModifiers>      smem    = std::nullopt,
                                    const std::string&                comment = "")
             : ReadWriteInstruction(instType, RWType::RW_TYPE1, comment)
             , dst(dst)
-            , srcs(srcs)
+            , base(base)
+            , soffset(soffset)
+            , smem(smem)
         {
         }
 
         AtomicReadWriteInstruction(const AtomicReadWriteInstruction& other)
             : ReadWriteInstruction(other)
             , dst(other.dst ? other.dst->clone() : nullptr)
-            , srcs(other.srcs ? other.srcs->clone() : nullptr)
-        {
-        }
-    };
-
-    struct SMemAtomicDecInstruction : public AtomicReadWriteInstruction
-    {
-        std::shared_ptr<Container>   base;
-        std::optional<SMEMModifiers> smem;
-
-        SMemAtomicDecInstruction(InstType                          instType,
-                                 const std::shared_ptr<Container>& dst,
-                                 const std::shared_ptr<Container>& base,
-                                 std::optional<SMEMModifiers>      smem    = std::nullopt,
-                                 const std::string&                comment = "")
-            : AtomicReadWriteInstruction(instType, dst, nullptr, comment)
-            , base(base)
-            , smem(smem)
-        {
-            instStr = "s_atomic_dec";
-        }
-
-        SMemAtomicDecInstruction(const SMemAtomicDecInstruction& other)
-            : AtomicReadWriteInstruction(other)
             , base(other.base ? other.base->clone() : nullptr)
+            , soffset(copyInstructionInput(other.soffset))
             , smem(other.smem)
         {
         }
 
         std::vector<InstructionInput> getParams() const override
         {
-            return {dst, base};
+            return {dst, base, soffset};
         }
 
         std::vector<InstructionInput> getDstParams() const override
@@ -431,23 +417,67 @@ namespace rocisa
 
         std::vector<InstructionInput> getSrcParams() const override
         {
-            return {base};
+            return {base, soffset};
         }
 
-        std::string getArgStr() const
+        virtual std::string getArgStr() const
         {
-            return dst->toString() + ", " + base->toString();
+            return dst->toString() + ", " + base->toString() + ", "
+                   + InstructionInputToString(soffset);
         }
 
         std::string toString() const override
         {
-            auto        newInstStr = preStr();
-            std::string kStr       = newInstStr + " " + getArgStr();
+            std::string kStr = preStr() + " " + getArgStr();
             if(smem)
             {
                 kStr += smem->toString();
             }
             return formatWithComment(kStr);
+        }
+    };
+
+    struct SMemAtomicIncInstruction : public AtomicReadWriteInstruction
+    {
+        using AtomicReadWriteInstruction::AtomicReadWriteInstruction;
+
+        SMemAtomicIncInstruction(InstType                          instType,
+                                 const std::shared_ptr<Container>& dst,
+                                 const std::shared_ptr<Container>& base,
+                                 const InstructionInput&           soffset,
+                                 std::optional<SMEMModifiers>      smem    = std::nullopt,
+                                 const std::string&                comment = "")
+            : AtomicReadWriteInstruction(instType, dst, base, soffset, smem, comment)
+        {
+            instStr = "s_atomic_inc";
+        }
+    };
+
+    struct SMemAtomicDecInstruction : public AtomicReadWriteInstruction
+    {
+        SMemAtomicDecInstruction(InstType                          instType,
+                                 const std::shared_ptr<Container>& dst,
+                                 const std::shared_ptr<Container>& base,
+                                 std::optional<SMEMModifiers>      smem    = std::nullopt,
+                                 const std::string&                comment = "")
+            : AtomicReadWriteInstruction(instType, dst, base, 0, smem, comment)
+        {
+            instStr = "s_atomic_dec";
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {dst, base};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {base};
+        }
+
+        std::string getArgStr() const override
+        {
+            return dst->toString() + ", " + base->toString();
         }
     };
 
@@ -700,7 +730,7 @@ namespace rocisa
         std::string getArgStr() const
         {
             auto soffsetStr = InstructionInputToString(soffset);
-            if(getAsmCaps()["HasMUBUFConst"])
+            if(capOrDefault(getAsmCaps(), "HasMUBUFConst"))
             {
                 return srcData->toString() + ", " + vaddr->toString() + ", " + saddr->toString()
                        + ", " + soffsetStr;
@@ -1062,6 +1092,52 @@ namespace rocisa
         }
     };
 
+    struct BufferLoadB16 : public MUBUFReadInstruction
+    {
+        BufferLoadB16(const std::shared_ptr<RegisterContainer>& dst,
+                      const std::shared_ptr<RegisterContainer>& vaddr,
+                      const std::shared_ptr<RegisterContainer>& saddr,
+                      const InstructionInput&                   soffset,
+                      std::optional<MUBUFModifiers>             mubuf   = std::nullopt,
+                      const std::string&                        comment = "")
+            : MUBUFReadInstruction(InstType::INST_B16, dst, vaddr, saddr, soffset, mubuf, comment)
+        {
+        }
+
+        BufferLoadB16(const BufferLoadB16& other)
+            : MUBUFReadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<BufferLoadB16>(*this);
+        }
+    };
+
+    struct BufferLoadU16 : public MUBUFReadInstruction
+    {
+        BufferLoadU16(const std::shared_ptr<RegisterContainer>& dst,
+                      const std::shared_ptr<RegisterContainer>& vaddr,
+                      const std::shared_ptr<RegisterContainer>& saddr,
+                      const InstructionInput&                   soffset,
+                      std::optional<MUBUFModifiers>             mubuf   = std::nullopt,
+                      const std::string&                        comment = "")
+            : MUBUFReadInstruction(InstType::INST_U16, dst, vaddr, saddr, soffset, mubuf, comment)
+        {
+        }
+
+        BufferLoadU16(const BufferLoadU16& other)
+            : MUBUFReadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<BufferLoadU16>(*this);
+        }
+    };
+
     struct BufferLoadB32 : public MUBUFReadInstruction
     {
         BufferLoadB32(const std::shared_ptr<RegisterContainer>& dst,
@@ -1389,6 +1465,205 @@ namespace rocisa
         }
     };
 
+    struct GlobalLoadD16HIB16 : public GLOBALLoadInstruction
+    {
+        GlobalLoadD16HIB16(const std::shared_ptr<RegisterContainer>& dst,
+                           const std::shared_ptr<RegisterContainer>& vaddr,
+                           const std::shared_ptr<RegisterContainer>& saddr,
+                           std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                           const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(InstType::INST_D16_HI_B16, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadD16HIB16(const GlobalLoadD16HIB16& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadD16HIB16>(*this);
+        }
+    };
+
+    struct GlobalLoadD16B16 : public GLOBALLoadInstruction
+    {
+        GlobalLoadD16B16(const std::shared_ptr<RegisterContainer>& dst,
+                         const std::shared_ptr<RegisterContainer>& vaddr,
+                         const std::shared_ptr<RegisterContainer>& saddr,
+                         std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                         const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(InstType::INST_D16_B16, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadD16B16(const GlobalLoadD16B16& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadD16B16>(*this);
+        }
+    };
+
+    struct GlobalLoadB32 : public GLOBALLoadInstruction
+    {
+        GlobalLoadB32(const std::shared_ptr<RegisterContainer>& dst,
+                      const std::shared_ptr<RegisterContainer>& vaddr,
+                      const std::shared_ptr<RegisterContainer>& saddr,
+                      std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                      const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(InstType::INST_B32, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadB32(const GlobalLoadB32& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadB32>(*this);
+        }
+    };
+
+    struct GlobalLoadB64 : public GLOBALLoadInstruction
+    {
+        GlobalLoadB64(const std::shared_ptr<RegisterContainer>& dst,
+                      const std::shared_ptr<RegisterContainer>& vaddr,
+                      const std::shared_ptr<RegisterContainer>& saddr,
+                      std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                      const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(InstType::INST_B64, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadB64(const GlobalLoadB64& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadB64>(*this);
+        }
+    };
+
+    struct GlobalLoadB128 : public GLOBALLoadInstruction
+    {
+        GlobalLoadB128(const std::shared_ptr<RegisterContainer>& dst,
+                       const std::shared_ptr<RegisterContainer>& vaddr,
+                       const std::shared_ptr<RegisterContainer>& saddr,
+                       std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                       const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(InstType::INST_B128, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadB128(const GlobalLoadB128& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadB128>(*this);
+        }
+    };
+
+    struct GlobalLoadB192 : public GLOBALLoadInstruction
+    {
+        GlobalLoadB192(const std::shared_ptr<RegisterContainer>& dst,
+                       const std::shared_ptr<RegisterContainer>& vaddr,
+                       const std::shared_ptr<RegisterContainer>& saddr,
+                       std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                       const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(InstType::INST_B192, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadB192(const GlobalLoadB192& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadB192>(*this);
+        }
+    };
+
+    struct GlobalLoadB96 : public GLOBALLoadInstruction
+    {
+        GlobalLoadB96(const std::shared_ptr<RegisterContainer>& dst,
+                      const std::shared_ptr<RegisterContainer>& vaddr,
+                      const std::shared_ptr<RegisterContainer>& saddr,
+                      std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                      const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(InstType::INST_B96, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadB96(const GlobalLoadB96& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadB96>(*this);
+        }
+    };
+
+    struct GlobalLoadD16U8 : public GLOBALLoadInstruction
+    {
+        GlobalLoadD16U8(const std::shared_ptr<RegisterContainer>& dst,
+                        const std::shared_ptr<RegisterContainer>& vaddr,
+                        const std::shared_ptr<RegisterContainer>& saddr,
+                        std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                        const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(InstType::INST_D16_U8, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadD16U8(const GlobalLoadD16U8& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadD16U8>(*this);
+        }
+    };
+
+    struct GlobalLoadD16HIU8 : public GLOBALLoadInstruction
+    {
+        GlobalLoadD16HIU8(const std::shared_ptr<RegisterContainer>& dst,
+                          const std::shared_ptr<RegisterContainer>& vaddr,
+                          const std::shared_ptr<RegisterContainer>& saddr,
+                          std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                          const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(
+                InstType::INST_D16_HI_U8, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadD16HIU8(const GlobalLoadD16HIU8& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadD16HIU8>(*this);
+        }
+    };
+
     struct BufferStoreB8 : public MUBUFStoreInstruction
     {
         BufferStoreB8(const std::shared_ptr<RegisterContainer>& src,
@@ -1644,6 +1919,44 @@ namespace rocisa
         }
     };
 
+    struct BufferAtomicPkAddBF16 : public MUBUFStoreInstruction
+    {
+        // srcData is a single dword holding two packed BF16 lanes; the hardware
+        // performs both adds in BF16. The old value is returned only when the
+        // temporal hint asks for it, so leave mubuf unset for fire-and-forget.
+        BufferAtomicPkAddBF16(const std::shared_ptr<RegisterContainer>& src,
+                              const std::shared_ptr<RegisterContainer>& vaddr,
+                              const std::shared_ptr<RegisterContainer>& saddr,
+                              const InstructionInput&                   soffset,
+                              std::optional<MUBUFModifiers>             mubuf   = std::nullopt,
+                              const std::string&                        comment = "")
+            : MUBUFStoreInstruction(InstType::INST_BF16, src, vaddr, saddr, soffset, mubuf, comment)
+        {
+            setInst("buffer_atomic_pk_add_bf16");
+        }
+
+        BufferAtomicPkAddBF16(const BufferAtomicPkAddBF16& other)
+            : MUBUFStoreInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<BufferAtomicPkAddBF16>(*this);
+        }
+
+        // Deliberately no getDstParams() override: srcData is read-only. The
+        // hardware only returns the pre-add value when a temporal hint asks for
+        // it, and we never do, so modelling vdata as a destination would make
+        // the emitter append th:TH_ATOMIC_RETURN and clobber a register the
+        // store code has already reused.
+
+        std::string typeConvert() const override
+        {
+            return "";
+        }
+    };
+
     struct BufferAtomicCmpswapB32 : public MUBUFStoreInstruction
     {
         BufferAtomicCmpswapB32(const std::shared_ptr<RegisterContainer>& src,
@@ -1867,6 +2180,433 @@ namespace rocisa
         std::shared_ptr<RegisterContainer> tmp;
     };
 
+    struct FlatAtomicDecU32 : public FLATStoreInstruction
+    {
+        FlatAtomicDecU32(const std::shared_ptr<RegisterContainer>& dst,
+                         const std::shared_ptr<RegisterContainer>& addr,
+                         const std::shared_ptr<RegisterContainer>& data,
+                         std::optional<FLATModifiers>              modifier = std::nullopt,
+                         const std::string&                        comment = "")
+            : FLATStoreInstruction(InstType::INST_B32, addr, data, modifier, comment)
+            , dst(dst)
+        {
+            setInst("flat_atomic_dec_u32");
+        }
+
+        FlatAtomicDecU32(const FlatAtomicDecU32& other)
+            : FLATStoreInstruction(other)
+            , dst(other.dst ? other.dst->clone2() : nullptr)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<FlatAtomicDecU32>(*this);
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {dst};
+        }
+
+        std::string getArgStr() const override
+        {
+            std::string kStr = dst ? dst->toString() + ", " : "";
+            return kStr + vaddr->toString() + ", " + srcData->toString();
+        }
+
+        std::string typeConvert() const override
+        {
+            return "";
+        }
+
+        std::string toString() const override
+        {
+            std::string kStr = instStr + " " + getArgStr();
+            kStr += " th:TH_ATOMIC_RETURN";
+            if(flat)
+                kStr += flat->toString();
+            kStr = formatWithComment(kStr);
+            return kStr;
+        }
+    private:
+        std::shared_ptr<RegisterContainer> dst;
+    };
+
+    struct GLOBALStoreInstruction : public GlobalWriteInstruction
+    {
+        std::shared_ptr<Container>     vaddr;
+        std::shared_ptr<Container>     saddr;
+        std::optional<GLOBALModifiers> modifier;
+
+        GLOBALStoreInstruction(InstType                          instType,
+                               const std::shared_ptr<Container>& vaddr,
+                               const std::shared_ptr<Container>& srcData,
+                               const std::shared_ptr<Container>& saddr,
+                               std::optional<GLOBALModifiers>    modifier = std::nullopt,
+                               const std::string&                comment  = "")
+            : GlobalWriteInstruction(instType, srcData, comment)
+            , vaddr(vaddr)
+            , saddr(saddr)
+            , modifier(modifier)
+        {
+            instStr = "global_store_";
+        }
+
+        GLOBALStoreInstruction(const GLOBALStoreInstruction& other)
+            : GlobalWriteInstruction(other)
+            , vaddr(other.vaddr ? other.vaddr->clone() : nullptr)
+            , saddr(other.saddr ? other.saddr->clone() : nullptr)
+            , modifier(other.modifier)
+        {
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {vaddr, srcData, saddr};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {vaddr, srcData, saddr};
+        }
+
+        virtual std::string getArgStr() const
+        {
+            return vaddr->toString() + ", " + srcData->toString() + ", " + saddr->toString();
+        }
+
+        std::string toString() const override
+        {
+            auto        newInstStr = preStr();
+            std::string kStr       = newInstStr + " " + getArgStr();
+            if(modifier)
+            {
+                kStr += modifier->toString();
+            }
+            return formatWithComment(kStr);
+        }
+    };
+
+    struct GlobalAtomicIncU32Saddr : public GLOBALStoreInstruction
+    {
+        GlobalAtomicIncU32Saddr(const std::shared_ptr<Container>& dst,
+                           const std::shared_ptr<Container>& vaddr,
+                           const std::shared_ptr<Container>& data,
+                           const std::shared_ptr<Container>& saddr,
+                           std::optional<GLOBALModifiers>    modifier = std::nullopt,
+                           const std::string&                comment  = "")
+            : GLOBALStoreInstruction(InstType::INST_B32, vaddr, data, saddr, modifier, comment)
+            , dst(dst)
+        {
+            setInst("global_atomic_inc_u32");
+        }
+
+        GlobalAtomicIncU32Saddr(const GlobalAtomicIncU32Saddr& other)
+            : GLOBALStoreInstruction(other)
+            , dst(other.dst ? other.dst->clone() : nullptr)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalAtomicIncU32Saddr>(*this);
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {dst};
+        }
+
+        std::string getArgStr() const override
+        {
+            std::string kStr = dst ? dst->toString() + ", " : "";
+            return kStr + vaddr->toString() + ", " + srcData->toString() + ", " + saddr->toString();
+        }
+
+        std::string typeConvert() const override
+        {
+            return "";
+        }
+
+        std::string toString() const override
+        {
+            // SADDR returning atomic: "global_atomic_inc_u32 vdst, vaddr, vsrc, saddr".
+            // th:TH_ATOMIC_RETURN is emitted unconditionally; scope: (when the ISA caps
+            // allow) is rendered first to match StinkyTofu's canonical order.
+            std::string kStr = instStr + " " + getArgStr();
+            if(modifier)
+                kStr += modifier->toString();
+            kStr += " th:TH_ATOMIC_RETURN";
+            kStr = formatWithComment(kStr);
+            setMsb(kStr, {vaddr, srcData, saddr}, dst);
+            return kStr;
+        }
+
+    private:
+        std::shared_ptr<Container> dst;
+    };
+
+    struct GlobalStoreB8 : public GLOBALStoreInstruction
+    {
+        GlobalStoreB8(const std::shared_ptr<RegisterContainer>& vaddr,
+                      const std::shared_ptr<RegisterContainer>& src,
+                      const std::shared_ptr<RegisterContainer>& saddr,
+                      std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                      const std::string&                        comment  = "")
+            : GLOBALStoreInstruction(InstType::INST_B8, vaddr, src, saddr, modifier, comment)
+        {
+        }
+
+        GlobalStoreB8(const GlobalStoreB8& other)
+            : GLOBALStoreInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreB8>(*this);
+        }
+    };
+
+    struct GlobalStoreB16 : public GLOBALStoreInstruction
+    {
+        GlobalStoreB16(const std::shared_ptr<RegisterContainer>& vaddr,
+                       const std::shared_ptr<RegisterContainer>& src,
+                       const std::shared_ptr<RegisterContainer>& saddr,
+                       std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                       const std::string&                        comment  = "")
+            : GLOBALStoreInstruction(InstType::INST_B16, vaddr, src, saddr, modifier, comment)
+        {
+        }
+
+        GlobalStoreB16(const GlobalStoreB16& other)
+            : GLOBALStoreInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreB16>(*this);
+        }
+    };
+
+    struct GlobalStoreD16HIB16 : public GLOBALStoreInstruction
+    {
+        GlobalStoreD16HIB16(const std::shared_ptr<RegisterContainer>& vaddr,
+                            const std::shared_ptr<RegisterContainer>& src,
+                            const std::shared_ptr<RegisterContainer>& saddr,
+                            std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                            const std::string&                        comment  = "")
+            : GLOBALStoreInstruction(InstType::INST_D16_HI_B16, vaddr, src, saddr, modifier, comment)
+        {
+        }
+
+        GlobalStoreD16HIB16(const GlobalStoreD16HIB16& other)
+            : GLOBALStoreInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreD16HIB16>(*this);
+        }
+    };
+
+    struct GlobalStoreB32 : public GLOBALStoreInstruction
+    {
+        GlobalStoreB32(const std::shared_ptr<RegisterContainer>& vaddr,
+                       const std::shared_ptr<RegisterContainer>& src,
+                       const std::shared_ptr<RegisterContainer>& saddr,
+                       std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                       const std::string&                        comment  = "")
+            : GLOBALStoreInstruction(InstType::INST_B32, vaddr, src, saddr, modifier, comment)
+        {
+        }
+
+        GlobalStoreB32(const GlobalStoreB32& other)
+            : GLOBALStoreInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreB32>(*this);
+        }
+    };
+
+    struct GlobalStoreB64 : public GLOBALStoreInstruction
+    {
+        GlobalStoreB64(const std::shared_ptr<RegisterContainer>& vaddr,
+                       const std::shared_ptr<RegisterContainer>& src,
+                       const std::shared_ptr<RegisterContainer>& saddr,
+                       std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                       const std::string&                        comment  = "")
+            : GLOBALStoreInstruction(InstType::INST_B64, vaddr, src, saddr, modifier, comment)
+        {
+        }
+
+        GlobalStoreB64(const GlobalStoreB64& other)
+            : GLOBALStoreInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreB64>(*this);
+        }
+    };
+
+    struct GlobalStoreB128 : public GLOBALStoreInstruction
+    {
+        GlobalStoreB128(const std::shared_ptr<RegisterContainer>& vaddr,
+                        const std::shared_ptr<RegisterContainer>& src,
+                        const std::shared_ptr<RegisterContainer>& saddr,
+                        std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                        const std::string&                        comment  = "")
+            : GLOBALStoreInstruction(InstType::INST_B128, vaddr, src, saddr, modifier, comment)
+        {
+        }
+
+        GlobalStoreB128(const GlobalStoreB128& other)
+            : GLOBALStoreInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreB128>(*this);
+        }
+    };
+
+    struct GlobalStoreAsyncFromLdsInstruction : public GLOBALStoreInstruction
+    {
+        GlobalStoreAsyncFromLdsInstruction(InstType                                  instType,
+                                           const std::shared_ptr<RegisterContainer>& vaddr,
+                                           const std::shared_ptr<RegisterContainer>& dsaddr,
+                                           const std::shared_ptr<RegisterContainer>& saddr,
+                                           std::optional<GLOBALModifiers> modifier = std::nullopt,
+                                           const std::string&             comment  = "")
+            : GLOBALStoreInstruction(instType, vaddr, dsaddr, saddr, modifier, comment)
+        {
+            instStr = "global_store_async_from_lds_";
+        }
+
+        GlobalStoreAsyncFromLdsInstruction(const GlobalStoreAsyncFromLdsInstruction& other)
+            : GLOBALStoreInstruction(other)
+        {
+        }
+
+        std::string toString() const override
+        {
+            std::string kStr = preStr() + " " + getArgStr();
+            if(modifier)
+            {
+                kStr += modifier->toString();
+            }
+            kStr = formatWithComment(kStr);
+            setMsb(kStr, {vaddr, srcData}, nullptr);
+            return kStr;
+        }
+    };
+
+    struct GlobalStoreAsyncFromLdsB8 : public GlobalStoreAsyncFromLdsInstruction
+    {
+        GlobalStoreAsyncFromLdsB8(const std::shared_ptr<RegisterContainer>& vaddr,
+                                  const std::shared_ptr<RegisterContainer>& dsaddr,
+                                  const std::shared_ptr<RegisterContainer>& saddr,
+                                  std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                                  const std::string&                        comment  = "")
+            : GlobalStoreAsyncFromLdsInstruction(InstType::INST_B8, vaddr, dsaddr, saddr, modifier,
+                                                 comment)
+        {
+        }
+
+        GlobalStoreAsyncFromLdsB8(const GlobalStoreAsyncFromLdsB8& other)
+            : GlobalStoreAsyncFromLdsInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreAsyncFromLdsB8>(*this);
+        }
+    };
+
+    struct GlobalStoreAsyncFromLdsB32 : public GlobalStoreAsyncFromLdsInstruction
+    {
+        GlobalStoreAsyncFromLdsB32(const std::shared_ptr<RegisterContainer>& vaddr,
+                                   const std::shared_ptr<RegisterContainer>& dsaddr,
+                                   const std::shared_ptr<RegisterContainer>& saddr,
+                                   std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                                   const std::string&                        comment  = "")
+            : GlobalStoreAsyncFromLdsInstruction(InstType::INST_B32, vaddr, dsaddr, saddr, modifier,
+                                                 comment)
+        {
+        }
+
+        GlobalStoreAsyncFromLdsB32(const GlobalStoreAsyncFromLdsB32& other)
+            : GlobalStoreAsyncFromLdsInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreAsyncFromLdsB32>(*this);
+        }
+    };
+
+    struct GlobalStoreAsyncFromLdsB64 : public GlobalStoreAsyncFromLdsInstruction
+    {
+        GlobalStoreAsyncFromLdsB64(const std::shared_ptr<RegisterContainer>& vaddr,
+                                   const std::shared_ptr<RegisterContainer>& dsaddr,
+                                   const std::shared_ptr<RegisterContainer>& saddr,
+                                   std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                                   const std::string&                        comment  = "")
+            : GlobalStoreAsyncFromLdsInstruction(InstType::INST_B64, vaddr, dsaddr, saddr, modifier,
+                                                 comment)
+        {
+        }
+
+        GlobalStoreAsyncFromLdsB64(const GlobalStoreAsyncFromLdsB64& other)
+            : GlobalStoreAsyncFromLdsInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreAsyncFromLdsB64>(*this);
+        }
+    };
+
+    struct GlobalStoreAsyncFromLdsB128 : public GlobalStoreAsyncFromLdsInstruction
+    {
+        GlobalStoreAsyncFromLdsB128(const std::shared_ptr<RegisterContainer>& vaddr,
+                                    const std::shared_ptr<RegisterContainer>& dsaddr,
+                                    const std::shared_ptr<RegisterContainer>& saddr,
+                                    std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                                    const std::string&                        comment  = "")
+            : GlobalStoreAsyncFromLdsInstruction(InstType::INST_B128, vaddr, dsaddr, saddr, modifier,
+                                                 comment)
+        {
+        }
+
+        GlobalStoreAsyncFromLdsB128(const GlobalStoreAsyncFromLdsB128& other)
+            : GlobalStoreAsyncFromLdsInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreAsyncFromLdsB128>(*this);
+        }
+    };
+
     struct DSLoadU8 : public DSLoadInstruction
     {
         DSLoadU8(const std::shared_ptr<RegisterContainer>& dst,
@@ -2069,7 +2809,7 @@ namespace rocisa
         {
             if(ds)
                 ds->na = 1;
-            setInst("ds_load_tr4_b64");
+            setInst("ds_load_b64_tr_b4");
         }
 
         DSLoadB64TrB4(const DSLoadB64TrB4& other)
@@ -2870,6 +3610,56 @@ namespace rocisa
         }
     };
 
+    struct SAtomicInc : public SMemAtomicIncInstruction
+    {
+        SAtomicInc(const std::shared_ptr<Container>& dst,
+                   const std::shared_ptr<Container>& base,
+                   const InstructionInput&           soffset,
+                   std::optional<SMEMModifiers>      smem    = std::nullopt,
+                   const std::string&                comment = "")
+            : SMemAtomicIncInstruction(InstType::INST_B32, dst, base, soffset, smem, comment)
+        {
+        }
+
+        SAtomicInc(const SAtomicInc& other)
+            : SMemAtomicIncInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SAtomicInc>(*this);
+        }
+    };
+
+    struct SAtomicCmpswapX2 : public AtomicReadWriteInstruction
+    {
+        SAtomicCmpswapX2(const std::shared_ptr<Container>& dst,
+                         const std::shared_ptr<Container>& base,
+                         const InstructionInput&           soffset,
+                         std::optional<SMEMModifiers>      smem    = std::nullopt,
+                         const std::string&                comment = "")
+            : AtomicReadWriteInstruction(InstType::INST_B128, dst, base, soffset, smem, comment)
+        {
+            instStr = "s_atomic_cmpswap_x2";
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {dst, base, soffset};
+        }
+
+        SAtomicCmpswapX2(const SAtomicCmpswapX2& other)
+            : AtomicReadWriteInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SAtomicCmpswapX2>(*this);
+        }
+    };
+
     struct SAtomicDec : public SMemAtomicDecInstruction
     {
         SAtomicDec(const std::shared_ptr<Container>& dst,
@@ -2888,6 +3678,34 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<SAtomicDec>(*this);
+        }
+    };
+
+    struct SAtomicUmaxX2 : public AtomicReadWriteInstruction
+    {
+        SAtomicUmaxX2(const std::shared_ptr<Container>& dst,
+                      const std::shared_ptr<Container>& base,
+                      const InstructionInput&           soffset,
+                      std::optional<SMEMModifiers>      smem    = std::nullopt,
+                      const std::string&                comment = "")
+            : AtomicReadWriteInstruction(InstType::INST_B64, dst, base, soffset, smem, comment)
+        {
+            instStr = "s_atomic_umax_x2";
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {dst, base, soffset};
+        }
+
+        SAtomicUmaxX2(const SAtomicUmaxX2& other)
+            : AtomicReadWriteInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SAtomicUmaxX2>(*this);
         }
     };
 
@@ -3208,5 +4026,87 @@ namespace rocisa
         RegContainerPtr group1;
         RegContainerPtr group2;
         RegContainerPtr group3;
+    };
+
+    struct GlobalPrefetchB8 : public Instruction
+    {
+        GlobalPrefetchB8(const std::shared_ptr<Container>&    v_addr,
+                         const std::shared_ptr<Container>&    s_addr,
+                         const std::optional<GLOBALModifiers> gm = std::nullopt,
+                         const std::string&             comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , v_addr(v_addr)
+            , s_addr(s_addr)
+            , gm(gm)
+        {
+            if(capOrDefault(getAsmCaps(), "HasGlobalPrefetch"))
+            {
+                setInst("global_prefetch_b8");
+            }
+            else
+            {
+                throw std::runtime_error("global_prefetch_b8 is not supported.");
+            }
+        }
+
+        GlobalPrefetchB8(const GlobalPrefetchB8& other)
+            : GlobalPrefetchB8(other.v_addr ? other.v_addr->clone() : nullptr,
+                               other.s_addr ? other.s_addr->clone() : nullptr,
+                               other.gm,
+                               other.comment)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalPrefetchB8>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {v_addr, s_addr};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {v_addr, s_addr};
+        }
+
+        std::string toString() const override
+        {
+            std::string kStr = instStr;
+            if(v_addr && !v_addr->toString().empty())
+            {
+                kStr += " " + v_addr->toString();
+            }
+            if(s_addr && !s_addr->toString().empty())
+            {
+                kStr += ", " + s_addr->toString();
+            }
+            else{
+                kStr += ", off";
+            }
+            if(gm)
+                kStr += gm->toString();
+
+            kStr = formatWithComment(kStr);
+            setMsb(kStr, {v_addr, s_addr}, nullptr);
+            return kStr;
+        }
+
+        // Read-only access to the temporal-hint / cache-scope modifiers
+        // (gfx1250 gl2-prefetch). Lets consumers (e.g. the StinkyTofu converter)
+        // read them directly instead of re-parsing the emitted instruction string.
+        const std::optional<GLOBALModifiers>& getModifier() const { return gm; }
+
+    private:
+        std::shared_ptr<Container> v_addr;
+        std::shared_ptr<Container> s_addr;
+        std::optional<GLOBALModifiers> gm;
     };
 } // namespace rocisa

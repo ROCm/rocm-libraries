@@ -33,7 +33,7 @@ namespace miopen {
 class Timer
 {
 public:
-    Timer(){};
+    Timer() {};
     void start() { st = std::chrono::steady_clock::now(); }
     float elapsed_ms()
     {
@@ -46,6 +46,28 @@ private:
     void capture() { et = std::chrono::steady_clock::now(); }
     std::chrono::time_point<std::chrono::steady_clock> st;
     std::chrono::time_point<std::chrono::steady_clock> et;
+};
+
+// RAII section timer: logs "<label>: <ms> ms" at Info2 (log level 6) when it
+// goes out of scope. Handles early returns since the log fires in the
+// destructor. The steady_clock reads are cheap; the message is only formatted
+// when Info2 logging is enabled.
+class ScopedTimeLogger
+{
+public:
+    explicit ScopedTimeLogger(std::string label) : label_(std::move(label)) { timer_.start(); }
+    ScopedTimeLogger(const ScopedTimeLogger&)            = delete;
+    ScopedTimeLogger& operator=(const ScopedTimeLogger&) = delete;
+    ScopedTimeLogger(ScopedTimeLogger&&)                 = delete;
+    ScopedTimeLogger& operator=(ScopedTimeLogger&&)      = delete;
+    ~ScopedTimeLogger()
+    {
+        MIOPEN_LOG_I2("[find-timing] " << label_ << ": " << timer_.elapsed_ms() << " ms");
+    }
+
+private:
+    Timer timer_;
+    std::string label_;
 };
 
 class CompileTimer

@@ -47,6 +47,7 @@ namespace rocsparse
                                              bool                 conj_B,
                                              J                    m,
                                              J                    n,
+                                             int64_t              batch_count,
                                              int64_t              offsets_batch_stride_A,
                                              int64_t              columns_values_batch_stride_A,
                                              const I*             csr_row_ptr,
@@ -68,26 +69,32 @@ namespace rocsparse
             return;
         }
 
-        rocsparse::csrmmnn_row_split_shared_device<BLOCKSIZE, WF_SIZE>(
-            alpha,
-            beta,
-            conj_A,
-            conj_B,
-            m,
-            n,
-            offsets_batch_stride_A,
-            columns_values_batch_stride_A,
-            csr_row_ptr,
-            csr_col_ind,
-            csr_val,
-            dense_B,
-            ldb,
-            batch_stride_B,
-            dense_C,
-            ldc,
-            batch_stride_C,
-            order_C,
-            idx_base);
+        // Grid-stride loop over the batch dimension (grid z). The batch index is
+        // forwarded to the device kernel so it stays batch-agnostic.
+        for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
+        {
+            rocsparse::csrmmnn_row_split_shared_device<BLOCKSIZE, WF_SIZE>(
+                alpha,
+                beta,
+                conj_A,
+                conj_B,
+                m,
+                n,
+                offsets_batch_stride_A,
+                columns_values_batch_stride_A,
+                csr_row_ptr,
+                csr_col_ind,
+                csr_val,
+                dense_B,
+                ldb,
+                batch_stride_B,
+                dense_C,
+                ldc,
+                batch_stride_C,
+                order_C,
+                idx_base,
+                batch);
+        }
     }
 
     template <uint32_t BLOCKSIZE,
@@ -108,6 +115,7 @@ namespace rocsparse
                                       J                    start,
                                       J                    m,
                                       J                    n,
+                                      int64_t              batch_count,
                                       int64_t              offsets_batch_stride_A,
                                       int64_t              columns_values_batch_stride_A,
                                       const I*             csr_row_ptr,
@@ -129,27 +137,33 @@ namespace rocsparse
             return;
         }
 
-        rocsparse::csrmmnn_row_split_device<BLOCKSIZE, WF_SIZE, LOOPS>(
-            alpha,
-            beta,
-            conj_A,
-            conj_B,
-            start,
-            m,
-            n,
-            offsets_batch_stride_A,
-            columns_values_batch_stride_A,
-            csr_row_ptr,
-            csr_col_ind,
-            csr_val,
-            dense_B,
-            ldb,
-            batch_stride_B,
-            dense_C,
-            ldc,
-            batch_stride_C,
-            order_C,
-            idx_base);
+        // Grid-stride loop over the batch dimension (grid z). The batch index is
+        // forwarded to the device kernel so it stays batch-agnostic.
+        for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
+        {
+            rocsparse::csrmmnn_row_split_device<BLOCKSIZE, WF_SIZE, LOOPS>(
+                alpha,
+                beta,
+                conj_A,
+                conj_B,
+                start,
+                m,
+                n,
+                offsets_batch_stride_A,
+                columns_values_batch_stride_A,
+                csr_row_ptr,
+                csr_col_ind,
+                csr_val,
+                dense_B,
+                ldb,
+                batch_stride_B,
+                dense_C,
+                ldc,
+                batch_stride_C,
+                order_C,
+                idx_base,
+                batch);
+        }
     }
 
     template <uint32_t BLOCKSIZE,
@@ -172,6 +186,7 @@ namespace rocsparse
                                                        J        col_end,
                                                        J        m,
                                                        J        n,
+                                                       int64_t  batch_count,
                                                        int64_t  offsets_batch_stride_A,
                                                        int64_t  columns_values_batch_stride_A,
                                                        const I* csr_row_ptr,
@@ -193,28 +208,34 @@ namespace rocsparse
             return;
         }
 
-        rocsparse::csrmmnt_row_split_shared_remainder_device<BLOCKSIZE, WF_SIZE, SUB_WF_SIZE>(
-            alpha,
-            beta,
-            conj_A,
-            conj_B,
-            col_start,
-            col_end,
-            m,
-            n,
-            offsets_batch_stride_A,
-            columns_values_batch_stride_A,
-            csr_row_ptr,
-            csr_col_ind,
-            csr_val,
-            dense_B,
-            ldb,
-            batch_stride_B,
-            dense_C,
-            ldc,
-            batch_stride_C,
-            order_C,
-            idx_base);
+        // Grid-stride loop over the batch dimension (grid y). The batch index is
+        // forwarded to the device kernel so it stays batch-agnostic.
+        for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
+        {
+            rocsparse::csrmmnt_row_split_shared_remainder_device<BLOCKSIZE, WF_SIZE, SUB_WF_SIZE>(
+                alpha,
+                beta,
+                conj_A,
+                conj_B,
+                col_start,
+                col_end,
+                m,
+                n,
+                offsets_batch_stride_A,
+                columns_values_batch_stride_A,
+                csr_row_ptr,
+                csr_col_ind,
+                csr_val,
+                dense_B,
+                ldb,
+                batch_stride_B,
+                dense_C,
+                ldc,
+                batch_stride_C,
+                order_C,
+                idx_base,
+                batch);
+        }
     }
 
     template <uint32_t BLOCKSIZE,
@@ -233,6 +254,7 @@ namespace rocsparse
                                       bool                 conj_B,
                                       J                    m,
                                       J                    n,
+                                      int64_t              batch_count,
                                       int64_t              offsets_batch_stride_A,
                                       int64_t              columns_values_batch_stride_A,
                                       const I*             csr_row_ptr,
@@ -255,24 +277,30 @@ namespace rocsparse
             return;
         }
 
-        rocsparse::csrmmtn_row_split_device<BLOCKSIZE, WF_SIZE>(alpha,
-                                                                conj_A,
-                                                                conj_B,
-                                                                m,
-                                                                n,
-                                                                offsets_batch_stride_A,
-                                                                columns_values_batch_stride_A,
-                                                                csr_row_ptr,
-                                                                csr_col_ind,
-                                                                csr_val,
-                                                                dense_B,
-                                                                ldb,
-                                                                batch_stride_B,
-                                                                dense_C,
-                                                                ldc,
-                                                                batch_stride_C,
-                                                                order_C,
-                                                                idx_base);
+        // Grid-stride loop over the batch dimension (grid z). The batch index is
+        // forwarded to the device kernel so it stays batch-agnostic.
+        for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
+        {
+            rocsparse::csrmmtn_row_split_device<BLOCKSIZE, WF_SIZE>(alpha,
+                                                                    conj_A,
+                                                                    conj_B,
+                                                                    m,
+                                                                    n,
+                                                                    offsets_batch_stride_A,
+                                                                    columns_values_batch_stride_A,
+                                                                    csr_row_ptr,
+                                                                    csr_col_ind,
+                                                                    csr_val,
+                                                                    dense_B,
+                                                                    ldb,
+                                                                    batch_stride_B,
+                                                                    dense_C,
+                                                                    ldc,
+                                                                    batch_stride_C,
+                                                                    order_C,
+                                                                    idx_base,
+                                                                    batch);
+        }
     }
 
     template <uint32_t BLOCKSIZE,
@@ -291,6 +319,7 @@ namespace rocsparse
                                       bool                 conj_B,
                                       J                    m,
                                       J                    n,
+                                      int64_t              batch_count,
                                       int64_t              offsets_batch_stride_A,
                                       int64_t              columns_values_batch_stride_A,
                                       const I*             csr_row_ptr,
@@ -311,24 +340,30 @@ namespace rocsparse
         {
             return;
         }
-        rocsparse::csrmmtt_row_split_device<BLOCKSIZE, WF_SIZE>(alpha,
-                                                                conj_A,
-                                                                conj_B,
-                                                                m,
-                                                                n,
-                                                                offsets_batch_stride_A,
-                                                                columns_values_batch_stride_A,
-                                                                csr_row_ptr,
-                                                                csr_col_ind,
-                                                                csr_val,
-                                                                dense_B,
-                                                                ldb,
-                                                                batch_stride_B,
-                                                                dense_C,
-                                                                ldc,
-                                                                batch_stride_C,
-                                                                order_C,
-                                                                idx_base);
+        // Grid-stride loop over the batch dimension (grid z). The batch index is
+        // forwarded to the device kernel so it stays batch-agnostic.
+        for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
+        {
+            rocsparse::csrmmtt_row_split_device<BLOCKSIZE, WF_SIZE>(alpha,
+                                                                    conj_A,
+                                                                    conj_B,
+                                                                    m,
+                                                                    n,
+                                                                    offsets_batch_stride_A,
+                                                                    columns_values_batch_stride_A,
+                                                                    csr_row_ptr,
+                                                                    csr_col_ind,
+                                                                    csr_val,
+                                                                    dense_B,
+                                                                    ldb,
+                                                                    batch_stride_B,
+                                                                    dense_C,
+                                                                    ldc,
+                                                                    batch_stride_C,
+                                                                    order_C,
+                                                                    idx_base,
+                                                                    batch);
+        }
     }
 
     template <uint32_t BLOCKSIZE,
@@ -349,6 +384,7 @@ namespace rocsparse
         J                    end,
         J                    m,
         J                    n,
+        int64_t              batch_count,
         int64_t              offsets_batch_stride_A,
         int64_t              columns_values_batch_stride_A,
         int64_t              ldb,
@@ -372,31 +408,37 @@ namespace rocsparse
             return;
         }
 
-        rocsparse::csrmmnt_row_split_subwfsize_x_loop_columns_device<BLOCKSIZE,
-                                                                     WF_SIZE,
-                                                                     SUB_WF_SIZE,
-                                                                     LOOPS>(
-            alpha,
-            beta,
-            start,
-            end,
-            m,
-            n,
-            offsets_batch_stride_A,
-            columns_values_batch_stride_A,
-            ldb,
-            batch_stride_B,
-            ldc,
-            batch_stride_C,
-            csr_row_ptr,
-            csr_col_ind,
-            csr_val,
-            dense_B,
-            dense_C,
-            order_C,
-            idx_base,
-            conj_A,
-            conj_B);
+        // Grid-stride loop over the batch dimension (grid y). The batch index is
+        // forwarded to the device kernel so it stays batch-agnostic.
+        for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
+        {
+            rocsparse::csrmmnt_row_split_subwfsize_x_loop_columns_device<BLOCKSIZE,
+                                                                         WF_SIZE,
+                                                                         SUB_WF_SIZE,
+                                                                         LOOPS>(
+                alpha,
+                beta,
+                start,
+                end,
+                m,
+                n,
+                offsets_batch_stride_A,
+                columns_values_batch_stride_A,
+                ldb,
+                batch_stride_B,
+                ldc,
+                batch_stride_C,
+                csr_row_ptr,
+                csr_col_ind,
+                csr_val,
+                dense_B,
+                dense_C,
+                order_C,
+                idx_base,
+                conj_A,
+                conj_B,
+                batch);
+        }
     }
 
     template <uint32_t BLOCKSIZE,
@@ -419,6 +461,7 @@ namespace rocsparse
             J                    end,
             J                    m,
             J                    n,
+            int64_t              batch_count,
             int64_t              offsets_batch_stride_A,
             int64_t              columns_values_batch_stride_A,
             const I*             csr_row_ptr,
@@ -442,32 +485,38 @@ namespace rocsparse
             return;
         }
 
-        rocsparse::csrmmnt_row_split_subwfsize_x_loop_plus_swfs_columns_device<BLOCKSIZE,
-                                                                               WFSIZE,
-                                                                               SUBWFSIZE,
-                                                                               LOOPS,
-                                                                               SUBWFSIZES_LIST...>(
-            alpha,
-            beta,
-            start,
-            end,
-            m,
-            n,
-            offsets_batch_stride_A,
-            columns_values_batch_stride_A,
-            csr_row_ptr,
-            csr_col_ind,
-            csr_val,
-            dense_B,
-            ldb,
-            batch_stride_B,
-            dense_C,
-            ldc,
-            batch_stride_C,
-            order_C,
-            idx_base,
-            conj_A,
-            conj_B);
+        // Grid-stride loop over the batch dimension (grid y). The batch index is
+        // forwarded to the device kernel so it stays batch-agnostic.
+        for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
+        {
+            rocsparse::csrmmnt_row_split_subwfsize_x_loop_plus_swfs_columns_device<
+                BLOCKSIZE,
+                WFSIZE,
+                SUBWFSIZE,
+                LOOPS,
+                SUBWFSIZES_LIST...>(alpha,
+                                    beta,
+                                    start,
+                                    end,
+                                    m,
+                                    n,
+                                    offsets_batch_stride_A,
+                                    columns_values_batch_stride_A,
+                                    csr_row_ptr,
+                                    csr_col_ind,
+                                    csr_val,
+                                    dense_B,
+                                    ldb,
+                                    batch_stride_B,
+                                    dense_C,
+                                    ldc,
+                                    batch_stride_C,
+                                    order_C,
+                                    idx_base,
+                                    conj_A,
+                                    conj_B,
+                                    batch);
+        }
     }
 }
 
@@ -482,6 +531,7 @@ namespace rocsparse
             J                    end,                                                           \
             J                    m,                                                             \
             J                    n,                                                             \
+            int64_t              batch_count,                                                   \
             int64_t              offsets_batch_stride_A,                                        \
             int64_t              columns_values_batch_stride_A,                                 \
             int64_t              ldb,                                                           \
@@ -513,6 +563,7 @@ namespace rocsparse
             J                    end,                                                     \
             J                    m,                                                       \
             J                    n,                                                       \
+            int64_t              batch_count,                                             \
             int64_t              offsets_batch_stride_A,                                  \
             int64_t              columns_values_batch_stride_A,                           \
             const I*             csr_row_ptr,                                             \
@@ -545,6 +596,7 @@ namespace rocsparse
             J                    end,                                                     \
             J                    m,                                                       \
             J                    n,                                                       \
+            int64_t              batch_count,                                             \
             int64_t              offsets_batch_stride_A,                                  \
             int64_t              columns_values_batch_stride_A,                           \
             const I*             csr_row_ptr,                                             \
@@ -578,6 +630,7 @@ namespace rocsparse
             J                    end,                                                     \
             J                    m,                                                       \
             J                    n,                                                       \
+            int64_t              batch_count,                                             \
             int64_t              offsets_batch_stride_A,                                  \
             int64_t              columns_values_batch_stride_A,                           \
             const I*             csr_row_ptr,                                             \
@@ -606,6 +659,7 @@ namespace rocsparse
             J                    col_end,                                                         \
             J                    m,                                                               \
             J                    n,                                                               \
+            int64_t              batch_count,                                                     \
             int64_t              offsets_batch_stride_A,                                          \
             int64_t              columns_values_batch_stride_A,                                   \
             const I*             csr_row_ptr,                                                     \
@@ -631,6 +685,7 @@ namespace rocsparse
             J                    start,                                      \
             J                    m,                                          \
             J                    n,                                          \
+            int64_t              batch_count,                                \
             int64_t              offsets_batch_stride_A,                     \
             int64_t              columns_values_batch_stride_A,              \
             const I*             csr_row_ptr,                                \
@@ -655,6 +710,7 @@ namespace rocsparse
             bool                 conj_B,                              \
             J                    m,                                   \
             J                    n,                                   \
+            int64_t              batch_count,                         \
             int64_t              offsets_batch_stride_A,              \
             int64_t              columns_values_batch_stride_A,       \
             const I*             csr_row_ptr,                         \
@@ -679,6 +735,7 @@ namespace rocsparse
             bool                 conj_B,                              \
             J                    m,                                   \
             J                    n,                                   \
+            int64_t              batch_count,                         \
             int64_t              offsets_batch_stride_A,              \
             int64_t              columns_values_batch_stride_A,       \
             const I*             csr_row_ptr,                         \

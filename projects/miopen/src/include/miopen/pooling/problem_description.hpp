@@ -185,8 +185,9 @@ private:
         {
         case Direction::Forward: return "Fwd";
         case Direction::Backward: return "Bwd";
-        default: MIOPEN_THROW(miopenStatusInvalidValue, "Wrong pooling direction provided");
         }
+
+        MIOPEN_THROW(miopenStatusInvalidValue, "Wrong pooling direction provided");
     }
     std::string GetModeStr() const
     {
@@ -195,8 +196,9 @@ private:
         case miopenPoolingMax: return "max";
         case miopenPoolingAverage: return "avg";
         case miopenPoolingAverageInclusive: return "avg_in";
-        default: MIOPEN_THROW(miopenStatusInvalidValue, "Wrong pooling mode provided");
         }
+
+        MIOPEN_THROW(miopenStatusInvalidValue, "Wrong pooling mode provided");
     }
 };
 

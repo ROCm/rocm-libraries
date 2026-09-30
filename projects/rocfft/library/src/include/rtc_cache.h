@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -72,10 +73,12 @@ struct RTCCache
     // the source, and updates the cache before returning the compiled
     // kernel.  Tries in-process compile first and falls back to
     // subprocess if necessary.
-    static std::vector<char> cached_compile(const std::string&          kernel_name,
-                                            const std::string&          gpu_arch_with_flags,
-                                            kernel_src_gen_t            generate_src,
-                                            const std::array<char, 32>& generator_sum);
+    static std::vector<char> cached_compile(const std::string&                kernel_name,
+                                            const std::string&                gpu_arch_with_flags,
+                                            kernel_src_gen_t                  generate_src,
+                                            const std::array<char, 32>&       generator_sum,
+                                            const std::optional<std::string>& forced_rtc_helper
+                                            = std::nullopt);
 
     RTCCache();
     ~RTCCache() = default;

@@ -25,6 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#include "exceptions.hpp"
 #include "roclapack_sytrs.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -41,6 +42,7 @@ rocblas_status rocsolver_sytrs_batched_impl(rocblas_handle handle,
                                             T* const B[],
                                             const I ldb,
                                             const I batch_count)
+try
 {
     ROCSOLVER_ENTER_TOP("sytrs_batched", "--uplo", uplo, "-n", n, "--nrhs", nrhs, "--lda", lda,
                         "--strideP", strideP, "--ldb", ldb, "--batch_count", batch_count);
@@ -83,6 +85,10 @@ rocblas_status rocsolver_sytrs_batched_impl(rocblas_handle handle,
     // execution
     return rocsolver_sytrs_template<T>(handle, uplo, n, nrhs, A, shiftA, lda, strideA, ipiv, strideP,
                                        B, shiftB, ldb, strideB, batch_count, work, size_work);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

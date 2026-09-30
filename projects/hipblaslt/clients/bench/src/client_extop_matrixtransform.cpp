@@ -93,6 +93,9 @@ private:
         case hipblaslt_initialization::hpl:
             hipblaslt_init_hpl<DType>(ref.data(), ref.size(), 1, 1);
             break;
+        case hipblaslt_initialization::uniform_low_precision:
+            hipblaslt_init_low_precision<DType>(ref.data(), ref.size(), 1, 1);
+            break;
         case hipblaslt_initialization::special:
             hipblaslt_init_alt_impl_big<DType>(ref.data(), ref.size(), 1, 1);
             break;

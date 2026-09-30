@@ -39,14 +39,6 @@ static std::string GenerateDefines(const std::vector<KernelBuildParameter>& opti
     return JoinStrings(strs, " ");
 }
 
-std::string kbp::OpenCL::Generate(const std::vector<KernelBuildParameter>& options)
-{
-    // Ensure only one space after the -cl-std.
-    // >1 space can cause an Apple compiler bug. See clSPARSE issue #141.
-
-    return GenerateDefines(options, "D");
-}
-
 std::string kbp::GcnAsm::Generate(const std::vector<KernelBuildParameter>& options)
 {
     return GenerateDefines(options, "Wa,-defsym,");

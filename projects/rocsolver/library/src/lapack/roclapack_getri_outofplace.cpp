@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_getri_outofplace.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -39,6 +40,7 @@ rocblas_status rocsolver_getri_outofplace_impl(rocblas_handle handle,
                                                const rocblas_int ldc,
                                                rocblas_int* info,
                                                const bool pivot)
+try
 {
     const char* name = (pivot ? "getri_outofplace" : "getri_npvt_outofplace");
     ROCSOLVER_ENTER_TOP(name, "-n", n, "--lda", lda, "--ldc", ldc);
@@ -84,6 +86,10 @@ rocblas_status rocsolver_getri_outofplace_impl(rocblas_handle handle,
     return rocsolver_getri_outofplace_template<false, false, T>(
         handle, n, A, shiftA, lda, strideA, ipiv, shiftP, strideP, C, shiftC, ldc, strideC, info,
         batch_count, &work_helper, pivot);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

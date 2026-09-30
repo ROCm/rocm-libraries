@@ -10,7 +10,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
 #include "ConvolutionFwdGraphTestUtils.hpp"
-#include "harness/gpu_graph_executor/detail/GpuConvolutionFwdSignatureKey.hpp"
+#include "harness/gpu-graph-executor/detail/GpuConvolutionFwdSignatureKey.hpp"
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests::test_utils;

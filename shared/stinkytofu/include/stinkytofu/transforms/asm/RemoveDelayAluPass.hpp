@@ -29,7 +29,7 @@
 namespace stinkytofu {
 class Pass;
 
-/// Removes all existing s_delay_alu instructions from the function.
+/// Removes all existing s_delay_alu instructions.
 /// Run before InsertDelayAlu to recompute optimal placements after scheduling.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createRemoveDelayAluPass();
 

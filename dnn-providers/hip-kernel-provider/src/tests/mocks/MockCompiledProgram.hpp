@@ -5,15 +5,15 @@
 
 #include <gmock/gmock.h>
 
-#include "hip/ICompiledProgram.hpp"
+#include "compilation/ICompiledProgram.hpp"
 
 namespace hip_kernel_provider
 {
 
-class MockCompiledProgram : public ICompiledProgram
+class MockCompiledProgram : public compilation::ICompiledProgram
 {
 public:
-    MOCK_METHOD(std::unique_ptr<IRunnableKernel>,
+    MOCK_METHOD(std::unique_ptr<compilation::IRunnableKernel>,
                 getKernel,
                 (const std::string& kernelName),
                 (const, override));

@@ -30,6 +30,6 @@ void _rocsparse_csrilu0_info::copy(const _rocsparse_csrilu0_info* that, hipStrea
                                                                stream);
     this->m_singularity_numeric_near.copy_singular_info_async(&that->m_singularity_numeric_near,
                                                               stream);
-    THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+    THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 }
 _rocsparse_csrilu0_info::~_rocsparse_csrilu0_info() {}

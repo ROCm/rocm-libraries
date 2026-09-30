@@ -45,7 +45,7 @@ from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from Tensile.KernelWriterBase import KernelWriterBase
 from Tensile.KernelWriterSource import KernelWriterSource
 from Tensile.SolutionStructs import ProblemSizes, Solution
-from Tensile.Utilities.ConditionalImports import yamlLoader
+from Tensile.Utilities.ConditionalImports import SafeLoader
 from Tensile.Utilities.Toolchain import ToolchainDefaults, validateToolchain
 
 mylogger = logging.getLogger()
@@ -156,7 +156,7 @@ def test_WriteClientLibraryFromSolutions(tmpdir):
         stream = open(tensileYamlFilePath, "r")
     except IOError:
         mylogger.error("Cannot open file: %s" % tensileYamlFilePath)
-    config = yaml.load(stream, yamlLoader)
+    config = yaml.load(stream, SafeLoader)
     stream.close()
     actualSolutions = config["solutions"]
 
@@ -170,7 +170,7 @@ def test_WriteClientLibraryFromSolutions(tmpdir):
         stream = open(metadataYamlFilePath, "r")
     except IOError:
         mylogger.error("Cannot open file: %s" % metadataYamlFilePath)
-    metadata = yaml.load(stream, yamlLoader)
+    metadata = yaml.load(stream, SafeLoader)
     stream.close()
     actualProblemType = metadata["ProblemType"]
 
@@ -1137,6 +1137,37 @@ def sanityCheck_oldLogic(sourceLibPaths, asmLibPaths, codeObjectFiles, genSource
     assert len(sanityCheck0) == 0, "Unexpected code object files: {}".format(sanityCheck0)
     if not genSourcesAndExit:
         assert len(sanityCheck1) == 0, "Missing expected code object files: {}".format(sanityCheck1)
+
+
+@pytest.fixture
+def restoreArchitecture():
+    """Save/restore globalParameters['Architecture'] around a test."""
+    saved = Common.globalParameters.get("Architecture")
+    yield
+    if saved is None:
+        Common.globalParameters.pop("Architecture", None)
+    else:
+        Common.globalParameters["Architecture"] = saved
+
+
+def test_addFallback_splitPreservesStrictSuffix(restoreArchitecture):
+    """
+    addFallback keys the fallback library by the architecture name with the
+    xnack qualifier stripped. Splitting on a bare '-' would fold
+    'gfx1250-strict' back to 'gfx1250' (colliding with the non-strict variant),
+    so the split must be anchored on '-xnack'.
+    """
+    # splitArchs() converts ':xnack+' to '-xnack+', so these are the post-split
+    # forms addFallback iterates over.
+    Common.globalParameters["Architecture"] = "gfx90a:xnack+;gfx1250-strict"
+    masterLibraries = {"fallback": MagicMock()}
+
+    tcl.addFallback(masterLibraries)
+
+    # gfx90a-xnack+ must fold to gfx90a; gfx1250-strict must be preserved.
+    assert "gfx90a" in masterLibraries, "xnack qualifier not stripped from fallback key"
+    assert "gfx1250-strict" in masterLibraries, "strict suffix wrongly stripped from fallback key"
+    assert "gfx1250" not in masterLibraries, "strict arch collided onto the non-strict gfx1250 key"
 
 
 ###############################################################################

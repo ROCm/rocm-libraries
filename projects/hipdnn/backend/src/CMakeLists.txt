@@ -3,20 +3,23 @@
 
 include(CMakePackageConfigHelpers)
 
-# Version handling
+# Version handling: independent component version from backend/version.json.
 hipdnn_setup_version(hipdnn_backend)
-
-# Set project with version
 project(hipdnn_backend VERSION ${HIPDNN_BACKEND_VERSION} LANGUAGES CXX)
 
 find_package(hip REQUIRED)
+
+# Logging.cpp builds a spdlog::async_logger, whose thread pool spawns a thread. Spdlog.cmake takes
+# spdlog by include directories only, which drops its Threads::Threads requirement, so name it here.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
 
 set(HIP_DNN_BACKEND_EXPORT_INCLUDE_DIR "${PROJECT_BINARY_DIR}/backend/include/")
 set(HIP_DNN_BACKEND_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/backend")
 set(HIP_DNN_BACKEND_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(
-    hipdnn_backend_private
+    hipdnn_backend_private STATIC
     descriptors/BatchnormBackwardOperationDescriptor.cpp
     descriptors/BatchnormInferenceOperationDescriptor.cpp
     descriptors/BatchnormOperationDescriptor.cpp
@@ -39,8 +42,13 @@ add_library(
     descriptors/KnobDescriptor.cpp
     descriptors/KnobSettingDescriptor.cpp
     descriptors/LayernormOperationDescriptor.cpp
+    descriptors/LayernormBackwardOperationDescriptor.cpp
     descriptors/MatmulOperationDescriptor.cpp
+    descriptors/MoeGroupedMatmulOperationDescriptor.cpp
+    descriptors/MoeGroupedMatmulBwdOperationDescriptor.cpp
     descriptors/PointwiseOperationDescriptor.cpp
+    descriptors/ProfilingControlDescriptor.cpp
+    descriptors/ResampleBwdOperationDescriptor.cpp
     descriptors/ResampleFwdOperationDescriptor.cpp
     descriptors/ReductionOperationDescriptor.cpp
     descriptors/RMSNormBackwardOperationDescriptor.cpp
@@ -55,6 +63,11 @@ add_library(
     logging/GraphLogger.cpp
     logging/Logging.cpp
     FlatbufferUtilities.cpp
+    heuristics/DeviceProperties.cpp
+    heuristics/BuiltInHeuristics.cpp
+    heuristics/SelectionHeuristic.cpp
+    heuristics/config/ConfigBuiltIn.cpp
+    heuristics/static_ordering/StaticOrderingBuiltIn.cpp
     plugin/EnginePlugin.cpp
     plugin/EnginePluginResourceManager.cpp
     plugin/HeuristicPlugin.cpp
@@ -73,7 +86,13 @@ target_include_directories(
 )
 
 target_compile_options(hipdnn_backend_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
-target_link_libraries(hipdnn_backend_private PUBLIC hip::host hipdnn_data_sdk hipdnn_plugin_sdk hipdnn_flatbuffers_sdk)
+# Threads::Threads is PUBLIC so it reaches hipdnn_backend.so, whose pthread references otherwise
+# trip --no-allow-shlib-undefined in executables linking it, and the backend tests. It stops at
+# hipdnn_backend, which links this target privately, so the installed export set is unaffected.
+target_link_libraries(
+    hipdnn_backend_private PUBLIC hip::host hipdnn_data_sdk hipdnn_plugin_sdk hipdnn_flatbuffers_sdk
+                                  Threads::Threads
+)
 # Backend implementation files use nlohmann::json unconditionally (graph (de)serialization,
 # JSON logging). Link as PRIVATE so the dep stays inside the .so and isn't propagated to consumers.
 if(NOT TARGET nlohmann_json::nlohmann_json)
@@ -92,6 +111,23 @@ clang_tidy_check(hipdnn_backend_private)
 add_library(hipdnn_backend SHARED HipdnnBackend.cpp)
 
 hipdnn_generate_version_header(hipdnn_backend)
+
+# Embed Windows VERSIONINFO into the DLL. cmake/ResourceCompiler.cmake has already established a
+# resource compiler that compiles a probe resource, or failed configuration, so no guard is needed
+# here.
+if(WIN32)
+    string(TIMESTAMP HIPDNN_COPYRIGHT_YEAR "%Y")
+    # HIPDNN_BACKEND_VERSION_TWEAK (short rocm-libraries commit hash, RFC 0005)
+    # comes from hipdnn_setup_version above. It is used only in the StringFileInfo
+    # version strings; the binary FILEVERSION/PRODUCTVERSION fields are four 16-bit
+    # integers and cannot hold a non-numeric hash, so they keep 0.
+    configure_file(
+        "${CMAKE_CURRENT_LIST_DIR}/../backend.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/backend.rc"
+        @ONLY
+    )
+    target_sources(hipdnn_backend PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/backend.rc")
+endif()
 
 target_include_directories(
     hipdnn_backend
@@ -165,7 +201,7 @@ configure_package_config_file(
 # Generate package version file for find_package version checking
 write_basic_package_version_file(
     "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendConfigVersion.cmake"
-    VERSION ${HIPDNN_BACKEND_VERSION}
+    VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion
 )
 

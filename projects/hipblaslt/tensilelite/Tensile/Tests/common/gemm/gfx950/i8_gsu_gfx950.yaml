@@ -4,8 +4,7 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: True
-  NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   # PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
   ValidationPrintValids: False # print matches too
@@ -18,9 +17,6 @@ GlobalParameters:
   #PrintTensorD: 1
   #PrintTensorRef: 1
   PrintWinnersOnly: True
-  MinKForGSU: 1
-  MaxLDS: 163840
-  DeviceLDS: 163840
 
 BenchmarkProblems:
   #######################################
@@ -44,6 +40,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 64, 1,  1,  1, 1,  1, 1 ]
@@ -60,7 +57,7 @@ BenchmarkProblems:
         - GlobalSplitU: [2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [1]
       BenchmarkForkParameters:
@@ -93,6 +90,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 64, 1,  1,  1, 1,  1, 1 ]
@@ -109,7 +107,7 @@ BenchmarkProblems:
         - GlobalSplitU: [2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [1]
       BenchmarkForkParameters:
@@ -142,6 +140,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 32, 1,  1,  1, 1,  1, 1 ]
@@ -158,7 +157,7 @@ BenchmarkProblems:
         - GlobalSplitU: [2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [1]
       BenchmarkForkParameters:
@@ -191,6 +190,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 32, 1,  1,  1, 1,  1, 1 ]
@@ -207,7 +207,7 @@ BenchmarkProblems:
         - GlobalSplitU: [2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [1]
       BenchmarkForkParameters:

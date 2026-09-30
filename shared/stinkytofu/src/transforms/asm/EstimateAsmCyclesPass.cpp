@@ -34,6 +34,7 @@
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
@@ -46,8 +47,11 @@ constexpr const char* kEstimateAsmTotalCyclesMetadataKey = "EstimateAsmCyclesPas
 class AsmCycleEstimator {
    public:
     void setLocalReadLatencyByArch(stinkytofu::GfxArchID arch) {
-        if (arch == GfxArchID::Gfx1250) {
-            // FIXME: need to verify
+        // The gfx12.5 branch is intentionally identical to the default for now. It is a
+        // placeholder for future measured gfx12.5 local read/write latencies (the v0 and v1
+        // steppings may differ here), kept as its own branch so those values can land without
+        // reintroducing arch branching. FIXME: populate with measured gfx12.5 values.
+        if (isGfx125(arch)) {
             LocalReadBaseLatencyB128 = 1;
             LocalReadBaseLatencyB64 = 1;
             LocalReadBaseLatencyB32 = 1;
@@ -241,7 +245,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
             calculateMathClocksInUnrolledLoop(bb, passCtx);
         }
         // std::cout << "[EstimateAsmCycles] Total Asm Cycles: " << totalCycles_ << "\n";
-        func.setMetaData(kEstimateAsmTotalCyclesMetadataKey, totalCycles_);
+        if (publishMetadata_) func.setMetaData(kEstimateAsmTotalCyclesMetadataKey, totalCycles_);
 
         return PreservedAnalyses::all();
     }
@@ -249,6 +253,33 @@ class EstimateAsmCyclesPassImpl : public Pass {
     /// Get the total cycles calculated by this pass
     unsigned int getTotalCycles() const {
         return totalCycles_;
+    }
+
+    /// Per-instruction cumulative cycle positions recorded during the last run.
+    const std::unordered_map<const StinkyInstruction*, uint32_t>& getPerInstructionCycles() const {
+        return perInstCycles_;
+    }
+
+    /// When false, suppress the `<This is N-cycle>` comment annotations so the
+    /// pass can be used purely as a cycle-position query by other passes.
+    void setAnnotateComments(bool annotate) {
+        annotateComments_ = annotate;
+    }
+
+    /// When false, suppress publishing the total-cycles function metadata
+    /// (`EstimateAsmCyclesPass.totalCycles`). Read-only query callers set this
+    /// alongside setAnnotateComments(false) so run() has no IR/function side
+    /// effects — the AnalysisManager contract for a pure analysis.
+    void setPublishMetadata(bool publish) {
+        publishMetadata_ = publish;
+    }
+
+    /// When true, also model non-loop blocks that contain an embedded
+    /// `label_LoopBeginL` (hierarchical / sub-loop IR). Used only by
+    /// computeEstimatedCyclesPerInstruction(); the published pass total stays
+    /// loop-block-only.
+    void setPerInstructionCycleQuery(bool query) {
+        perInstructionCycleQuery_ = query;
     }
 
    private:
@@ -292,7 +323,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
         if (!inst.getHwInstDesc()) return profile;
 
         const std::string mnemonic = toUpperASCII(inst.getHwInstDesc()->mnemonic);
-        if (mnemonic.find("V_WMMA_") != 0) return profile;
+        if (!mnemonic.starts_with("V_WMMA_")) return profile;
 
         // Keep a valid default when latency is absent/invalid.
         if (inst.latencyCycles <= 0) return profile;
@@ -380,7 +411,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
                                   std::unordered_map<std::string, int64_t>& vgprState,
                                   const std::unordered_map<std::string, int64_t>& sgprState) {
         // Try to cast to CommonInstruction first (most VALU instructions inherit from this)
-        auto dstReg = inst->getDestRegs();
+        const auto& dstReg = inst->getDestRegs();
 
         // v_add_co_u32: dst = src0 + src1 (with carry out, dst1 is vcc)
         if (GFX::v_add_co_u32 == inst->getUnifiedOpcode()) {
@@ -637,9 +668,6 @@ class EstimateAsmCyclesPassImpl : public Pass {
 
         // Initialize thread IDs (v[vgprSerial])
         std::string vgprSerial = "vgprSerial";
-        std::string vgprLocalReadAddrA = "vgprLocalReadAddrA";
-        std::string vgprLocalReadAddrB = "vgprLocalReadAddrB";
-
         // parse the basic block to find the local read addresses
         std::vector<StinkyInstruction*> instructions;
         for (IRBase& irNode : bb) {
@@ -738,7 +766,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
         AsmCycleEstimator asmCycleEstimator;
         asmCycleEstimator.setLocalReadLatencyByArch(arch_);
 
-        if (arch_ != GfxArchID::Gfx1250) {
+        if (!isGfx125(arch_)) {
             // FIXME: Add support for gfx1201
             return;
         }
@@ -753,17 +781,22 @@ class EstimateAsmCyclesPassImpl : public Pass {
 
         if (instructions.empty()) return;
 
+        const HWModel& hw = passCtx.getHWModel();
+        const int barrierSignalToWait = hw.barrier.signalToWaitLatency;
+
         // Estimate cycles for each instruction
         // initial values
         int cycles = 0;
         int hwMFMA = -99;
-        int jumpOverhead = 6;
+        int jumpOverhead = hw.barrier.jumpOverheadCycles;
         int previousLW = 0;
         std::queue<int> hwLRFIFO;
         std::queue<int> lgkmLRFIFO;
         std::deque<int> hwGRFIFO;
         int numPreviousLRs = 0;
-        int previousBarrierSignal = -11;  // gfx1250 barrier signal latency is 11 cycles
+        // Seeded to -latency so that before any signal is seen, the wait clamp
+        // (previousBarrierSignal + latency) is 0 and therefore never binding.
+        int previousBarrierSignal = -barrierSignalToWait;
         int activeWmmaStartCycle = -1;
         int activeWmmaCoExecAdvance = 0;
         std::vector<bool> activeWmmaValuSlots;
@@ -773,17 +806,25 @@ class EstimateAsmCyclesPassImpl : public Pass {
         std::string vgprLocalReadAddrB = "vgprLocalReadAddrB";
 
         uint32_t totalCycles = 0;
-        // When IR is hierarchical (e.g. populateFunctionFromString), ^block: is only a block
-        // boundary. "LoopBeginL" avoids parser conflating label_* with branch target;
-        // "label_LoopBeginL" for compat.
-        bool isLoopBeginL = (bb.getLabel() == "label_LoopBeginL" || bb.getLabel() == "LoopBeginL");
-        for (StinkyInstruction* inst : instructions) {
-            if (isLoopBeginL == false) {
-                if (isLabel(*inst) && inst->getModifier<LabelData>()->label == "label_LoopBeginL") {
-                    isLoopBeginL = true;
-                } else
-                    continue;
+        // Loop-body modelling runs in the LoopBeginL basic block (tensilelite names the block
+        // ^label_LoopBeginL and the leading label instruction matches bb.getLabel()).
+        // computeEstimatedCyclesPerInstruction() also covers blocks that embed that label.
+        std::size_t startIdx = 0;
+        if (bb.getLabel() != "label_LoopBeginL" && bb.getLabel() != "LoopBeginL") {
+            startIdx = instructions.size();
+            if (perInstructionCycleQuery_) {
+                for (std::size_t i = 0; i < instructions.size(); ++i) {
+                    const LabelData* labelData = instructions[i]->getModifier<LabelData>();
+                    if (isLabel(*instructions[i]) && labelData != nullptr &&
+                        labelData->label == "label_LoopBeginL") {
+                        startIdx = i;
+                        break;
+                    }
+                }
             }
+        }
+        for (std::size_t idx = startIdx; idx < instructions.size(); ++idx) {
+            StinkyInstruction* inst = instructions[idx];
             bool isCoIssued =
                 (!isMatrixInstruction(*inst) &&
                  canCoExecAtCurrentCycle(cycles, activeWmmaStartCycle, activeWmmaCoExecAdvance,
@@ -797,7 +838,8 @@ class EstimateAsmCyclesPassImpl : public Pass {
                 if (opcode.find("s_barrier_signal") != std::string::npos)
                     previousBarrierSignal = cycles;
                 if (opcode.find("s_barrier_wait") != std::string::npos)
-                    cycles = std::max(cycles + inst->issueCycles, previousBarrierSignal + 11);
+                    cycles = std::max(cycles + inst->issueCycles,
+                                      previousBarrierSignal + barrierSignalToWait);
                 else
                     cycles += inst->issueCycles;
             } else if (isDSRead(*inst)) {
@@ -854,7 +896,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
                 activeWmmaStartCycle = cycles;
                 activeWmmaCoExecAdvance = 0;
                 activeWmmaValuSlots = wmmaCoExec->valuCoExecSlots;
-            } else if (isBranch(*inst)) {
+            } else if (isBranch(*inst) || isCall(*inst)) {
                 cycles = std::max(cycles + jumpOverhead, hwMFMA + 4);
                 // End of loop (LabelData set when branch comes from rocisa; IR-from-string may omit
                 // it)
@@ -862,7 +904,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
                 if (labelData != nullptr) {
                     const std::string& labelName = labelData->label;
                     auto pos = labelName.find("label_LoopBeginL");
-                    if (pos != std::string::npos && pos == 0) {
+                    if (pos == 0) {
                         break;
                     }
                 }
@@ -874,7 +916,8 @@ class EstimateAsmCyclesPassImpl : public Pass {
                 if (waitCntData != nullptr) {
                     int dlcnt = waitCntData->dlcnt;
                     int dscnt = waitCntData->dscnt;
-                    std::size_t numWaits = static_cast<std::size_t>(dlcnt + dscnt);
+                    std::size_t numWaits =
+                        static_cast<std::size_t>(dlcnt) + static_cast<std::size_t>(dscnt);
                     cycles = asmCycleEstimator.getLocalReadCompletionCycle(cycles + 1, lgkmLRFIFO,
                                                                            numWaits);
                 } else if (tensorCntData != nullptr) {
@@ -911,7 +954,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
                     // std::cout<<"srcReg: "<<srcReg.getSymbolicName()<<std::endl;
                     if (srcReg.isRegister()) {
                         auto srcStr = srcReg.getSymbolicName();
-                        if (srcStr.find("s") != std::string::npos) {
+                        if (srcStr.find('s') != std::string::npos) {
                             hasSgprOffset = true;
                         }
                     }
@@ -940,15 +983,15 @@ class EstimateAsmCyclesPassImpl : public Pass {
             // Accumulate issue cycles from each instruction
             // totalCycles += estimateInstructionCycles(inst, passCtx);
 
+            // Record the cumulative cycle position of every processed
+            // instruction so other passes can query it (see
+            // computeEstimatedCyclesPerInstruction).
+            perInstCycles_[inst] = static_cast<uint32_t>(cycles < 0 ? 0 : cycles);
+
             // Update total cycles
-            if (!isLabel(*inst)) {
+            if (annotateComments_ && !isLabel(*inst)) {
                 // inst->dump(std::cout, false, "AsmCycles "+std::to_string(cycles - totalCycles));
-                if (auto* c = inst->getModifier<CommentData>()) {
-                    c->comment = "<This is " + std::to_string(cycles) + "-cycle>";
-                } else {
-                    inst->addModifier<CommentData>(
-                        CommentData{"<This is " + std::to_string(cycles) + "-cycle>"});
-                }
+                appendComment(inst, "<This is " + std::to_string(cycles) + "-cycle>");
             }
             // std::cout << "cycles: " << cycles - totalCycles << std::endl;
             totalCycles = cycles;
@@ -966,7 +1009,16 @@ class EstimateAsmCyclesPassImpl : public Pass {
         return static_cast<unsigned>(inst->issueCycles > 0 ? inst->issueCycles : 0);
     }
 
-    GfxArchID arch_ = GfxArchID::Gfx1250;
+    // Placeholder only; overwritten from the tile config in
+    // calculateMathClocksInUnrolledLoop before any use. Index 0 is the single
+    // registered stepping in any build, so this cannot name a specific enumerator
+    // without breaking the build that did not select it.
+    GfxArchID arch_ = static_cast<GfxArchID>(0);
+
+    bool annotateComments_ = true;
+    bool perInstructionCycleQuery_ = false;
+    bool publishMetadata_ = true;
+    std::unordered_map<const StinkyInstruction*, uint32_t> perInstCycles_;
 
     unsigned int totalCycles_ = 0;
 
@@ -994,10 +1046,32 @@ EstimateAsmCyclesAnalysis::Result EstimateAsmCyclesAnalysis::run(Function& func,
     return calculateEstimateAsmCycles(func, passCtx);
 }
 
+EstimateAsmCyclesPerInstructionAnalysis::Result EstimateAsmCyclesPerInstructionAnalysis::run(
+    Function& func, AnalysisManager& AM) {
+    (void)AM;
+    PassContext passCtx;
+    passCtx.setGemmTileConfig(func.getGemmTileConfig());
+    passCtx.setBasicBlockFilter(BasicBlockFilterBuilder::all());
+    return computeEstimatedCyclesPerInstruction(func, passCtx);
+}
+
 unsigned int calculateEstimateAsmCycles(Function& func, PassContext& passCtx) {
     EstimateAsmCyclesPassImpl pass;
+    pass.setAnnotateComments(false);
+    pass.setPublishMetadata(false);
     AnalysisManager AM;
     (void)pass.run(func, passCtx, AM);
     return pass.getTotalCycles();
+}
+
+std::unordered_map<const StinkyInstruction*, uint32_t> computeEstimatedCyclesPerInstruction(
+    Function& func, PassContext& passCtx) {
+    EstimateAsmCyclesPassImpl pass;
+    pass.setAnnotateComments(false);
+    pass.setPublishMetadata(false);
+    pass.setPerInstructionCycleQuery(true);
+    AnalysisManager AM;
+    (void)pass.run(func, passCtx, AM);
+    return pass.getPerInstructionCycles();
 }
 }  // namespace stinkytofu

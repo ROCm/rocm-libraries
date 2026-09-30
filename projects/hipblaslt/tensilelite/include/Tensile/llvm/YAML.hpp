@@ -33,9 +33,7 @@
 
 #include <cstddef>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 LLVM_YAML_IS_FLOW_SEQUENCE_VECTOR(rocisa::DataType)
 LLVM_YAML_IS_FLOW_SEQUENCE_VECTOR(TensileLite::ActivationType)
@@ -158,6 +156,25 @@ namespace TensileLite
             static void mapOptional(IO& io, const char* key, T& obj, Context& ctx)
             {
                 io.mapOptional(key, obj, ctx);
+            }
+
+            // YAML has no binary scalar, and the indexed library format is only
+            // ever written as msgpack, so there is nothing to read here. Always
+            // failing keeps the shared MappingTraits compiling for this backend
+            // while forcing the indexed branch to report a format error.
+            static bool mapRawBytes(IO& io, const char* key, const uint8_t*& ptr, size_t& size)
+            {
+                return false;
+            }
+
+            // Never reached: mapRawBytes above fails first, so the indexed
+            // branch reports a format error before it needs a deserializer.
+            // Present so the shared MappingTraits instantiates for this backend.
+            template <typename MySolution>
+            static std::function<std::shared_ptr<MySolution>(const uint8_t*, size_t)>
+                solutionDeserializer(IO& io)
+            {
+                return {};
             }
 
             static bool outputting(IO& io)
@@ -317,4 +334,3 @@ namespace llvm
     } // namespace yaml
 } // namespace llvm
 
-TENSILE_HIDDEN_END
