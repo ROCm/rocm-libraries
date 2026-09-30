@@ -635,7 +635,8 @@ rocsparse_status rocsparse::csxsort(rocsparse_handle            handle,
 
     // Only uniform batches are supported, so every batch has the sparsity pattern of the first
     // one. Its indices are sorted once, and the resulting permutation is applied to the values
-    // of every batch.
+    // of every batch. A single source matrix has zero batch strides, so its values are sorted
+    // into every batch of target.
 
     // The index sort works in place, so the offsets and indices of source are first copied into
     // target. A matrix without rows may have a null offsets array.
