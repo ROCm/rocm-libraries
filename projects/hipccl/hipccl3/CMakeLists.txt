@@ -36,6 +36,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 include(GNUInstallDirs)
 include(add_subdirectory_with_message)
 include(fetch_rocm_cmake)
+include(install_legacy_header_symlink)
 # NOTE(hipccl3): shared_third_party.cmake (copied alongside for parity with
 # rocm-libraries) declares rocm_libs_declare_shared_deps() for hipdnn/miopen's
 # nlohmann_json/GTest fetches. None of rocprim/hipcub/rocthrust/libhipcxx use
@@ -53,6 +54,18 @@ include(fetch_rocm_cmake)
 # override yet (see HIPCCL_BUILD_LIBHIPCXX below) - NOTE(hipccl3) placeholder.
 set(CMAKE_INSTALL_INCLUDEDIR "include/hipccl" CACHE PATH
     "Unified hipCCL include install directory" FORCE)
+
+# NOTE(hipccl3): temporary migration aid, default ON. Pre-hipccl code doing
+# `#include <rocprim/...>` (etc.) against a plain `-I<prefix>/include` breaks
+# once headers move to include/hipccl/rocprim above. When enabled, installs a
+# relative symlink at <prefix>/include/<component> pointing back into
+# <prefix>/include/hipccl/<component>, so that old include paths keep
+# resolving during a deprecation window. See
+# cmake/modules/install_legacy_header_symlink.cmake for why this isn't just
+# rocm-cmake's rocm_install_symlink_subdir(). Intended to be removed once
+# downstream consumers have migrated - not a permanent feature.
+option(HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS
+    "Install compatibility symlinks at the old, pre-hipccl flat include paths (temporary migration aid)" ON)
 
 # --- Component versioning ---
 # NOTE(hipccl3): HIPCCL_VERSION above versions the hipCCL *umbrella* package
@@ -86,6 +99,13 @@ option(HIPCCL_BUILD_ROCTHRUST "Build rocThrust as part of the unified hipCCL bui
 # find_package(hipccl) config below - only the build (add_subdirectory) is
 # wired up so far.
 option(HIPCCL_BUILD_LIBHIPCXX "Build libhipcxx as part of the unified hipCCL build" OFF)
+
+# --- Documentation ---
+# NOTE(hipccl3): ../docs is shared with hipccl2 (it documents the hipCCL
+# project as a whole, not a specific layout) - reach up one level rather than
+# the plain in-tree add_subdirectory(docs) rocprim/hipcub/rocthrust each use
+# for their own, per-component docs.
+option(BUILD_DOCS "Build hipCCL project documentation (requires sphinx)" OFF)
 
 # One switch to build everything, matching the "build the entire hipccl
 # project" requirement.
@@ -147,6 +167,31 @@ if(HIPCCL_BUILD_LIBHIPCXX)
         PREFIX_PATH .
         EXPECT_TARGET libhipcxx::libhipcxx
     )
+endif()
+
+# --- Legacy header symlinks (temporary migration aid) ---
+# One call per actually-enabled component, matching the subdir names each
+# component's own install(...) rule produces under
+# ${CMAKE_INSTALL_INCLUDEDIR} (verified against each component's own
+# CMakeLists.txt: rocprim's and hipcub's source include/ trees already
+# contain a rocprim/ and hipcub/ subdirectory respectively; rocthrust's own
+# install rule appends "/thrust" itself). libhipcxx is intentionally excluded
+# - its install rules haven't been audited against CMAKE_INSTALL_INCLUDEDIR
+# at all yet (see HIPCCL_BUILD_LIBHIPCXX above).
+if(HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS)
+    if(HIPCCL_BUILD_ROCPRIM)
+        hipccl_install_legacy_header_symlink(rocprim)
+    endif()
+    if(HIPCCL_BUILD_HIPCUB)
+        hipccl_install_legacy_header_symlink(hipcub)
+    endif()
+    if(HIPCCL_BUILD_ROCTHRUST)
+        hipccl_install_legacy_header_symlink(thrust)
+    endif()
+endif()
+
+if(BUILD_DOCS)
+    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../docs" "${CMAKE_CURRENT_BINARY_DIR}/docs")
 endif()
 
 # --- Unified packaging ---
