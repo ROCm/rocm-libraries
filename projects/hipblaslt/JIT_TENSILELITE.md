@@ -12,9 +12,10 @@ it.
 
 **Status:** the direct entry point below is internal.
 `hipblaslt-jit-tensilelite.hpp` is in `library/src/amd_detail/`; it is not
-installed, and only the JIT tests and `hipblaslt-bench --jit-gemm` use it. After
-[roadmap](JIT.md#roadmap) step 5, applications reach TensileLite generation
-through `hipblasLtMatmulAlgoGetHeuristic` with `HIPBLASLT_JIT`.
+installed, and only the JIT tests use it. Applications reach TensileLite
+generation through `hipblasLtMatmulAlgoGetHeuristic` and
+`GemmInstance::algoGetHeuristic` with `HIPBLASLT_JIT`; see
+[heuristic integration](JIT.md#heuristic-integration).
 
 ## Current direct entry point
 
@@ -177,14 +178,14 @@ returns each bundle's one-solution library entry, main kernel assembly and
 helper source, and builds and loads nothing; the comgr builder builds one code
 object per solution, and the Tensile loader checks support and loads it.
 
-## Planned changes
+## Heuristic queries
 
-The rows below are planned; the code does not implement them yet. Each row names
-the roadmap step that changes it.
-
-| Concern | Current | Planned |
-| --- | --- | --- |
-| Entry point | Internal direct `tensilelite::getGemmAlgo` and `tensilelite::createBackend`, both used by tests and the benchmark. | Reached from the heuristic query. The headers remain for unit tests (step 5). |
+With `HIPBLASLT_JIT` set, the heuristic queries reach this backend without an
+application `Options`: hipBLASLt configures it once per process from the
+[built-in tool paths](JIT.md#tool-paths-and-scratch-files), with Origami
+prediction, and publishes its solutions into the JIT solution library.
+`tensilelite::getGemmAlgo` and `tensilelite::createBackend` remain internal
+entry points for the tests.
 
 TensileLite remains one of several independent backends. rocRoller and
 HipKittens are future backends behind the same interface; they do not route

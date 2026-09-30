@@ -1,37 +1,36 @@
-# Request a JIT GEMM algorithm with hipblaslt-bench
+# Benchmark JIT GEMM solutions with hipblaslt-bench
 
-`hipblaslt-bench --jit-gemm` generates a kernel for the requested matrix
-multiplication, then checks and times it through hipBLASLt. For problems covered
-by its GPU performance model, Origami ranks kernel parameter recipes.
-`Tensile.JitGemm` validates those recipes in order and asks `Tensile.SingleSolution` to generate the
-first valid solution, including any helper kernels it needs, and hipBLASLt
-compiles it with comgr.
+With `HIPBLASLT_JIT=2`, `hipblaslt-bench` benchmarks just-in-time (JIT)
+generated kernels through its ordinary heuristic query. For problems covered by
+its GPU performance model, Origami ranks kernel parameter recipes.
+`Tensile.JitGemm` validates those recipes in order and asks
+`Tensile.SingleSolution` to generate the first valid solutions, including any
+helper kernels they need, and hipBLASLt compiles them with comgr and publishes
+them into the JIT solution library.
 
-Generation finishes before correctness checks, warmup, and timing. CPU timing
-still includes host dispatch for each GEMM. This feature targets functional
-coverage; the predicted solution is not guaranteed to be the fastest available
-kernel. Incorporating tuning knowledge into prediction is planned work in the
-[JIT roadmap](../../JIT.md#roadmap).
+Generation finishes inside the heuristic query, before correctness checks,
+warmup, and timing. CPU timing still includes host dispatch for each GEMM. This
+feature targets functional coverage; the predicted solution is not guaranteed to
+be the fastest available kernel. Incorporating tuning knowledge into prediction
+is planned work in the [JIT roadmap](../../JIT.md#roadmap).
 
 The components interact in this order:
 
-1. The benchmark creates ordinary matrix descriptors and a generic JIT request
-   through the internal JIT entry points.
-2. The library-owned TensileLite backend translates that request and asks Origami
-   for ranked tuning parameters. Its private selection plan names the ranked
-   request consumed by the builder.
+1. The benchmark creates ordinary matrix descriptors and calls
+   `hipblasLtMatmulAlgoGetHeuristic` or `GemmInstance::algoGetHeuristic`.
+2. hipBLASLt looks the problem up in the JIT solution library. For the solutions
+   it lacks, the library-owned TensileLite backend asks Origami for ranked
+   tuning parameters.
 3. `Tensile.JitGemm` validates the supplied candidates, and `SingleSolution`
-   writes the first valid one as a source bundle: main kernel assembly, helper
+   writes the first valid ones as source bundles: main kernel assembly, helper
    source and library entry.
-4. hipBLASLt builds the bundle into one code object with comgr and loads it.
-5. The generic result is adapted to a GEMM algorithm, then the benchmark's
-   existing C or C++ execution path checks and times it.
+4. hipBLASLt builds each bundle into one code object with comgr, publishes it
+   into the JIT solution library, and returns its solution index.
+5. The benchmark's existing C or C++ execution path checks and times the
+   returned algorithms.
 
-The benchmark does not own prediction policy or launch generated code directly.
-The request, backend, solution, and operation adapter are internal: their
-headers are not installed, and the benchmark includes them from
-`library/src/amd_detail`. The [JIT guide](../../JIT.md#entry-points) describes
-them.
+The benchmark has no JIT-specific code. The [JIT guide](../../JIT.md#heuristic-integration)
+describes the modes, the order of the lookup and the failure reports.
 
 ## Build and run
 
@@ -39,25 +38,31 @@ JIT GEMM is a build-time opt-in feature enabled by
 `HIPBLASLT_ENABLE_JIT=ON`. Building `hipblaslt-bench` also requires
 `HIPBLASLT_ENABLE_CLIENT=ON`. The [JIT build instructions](../../JIT.md#build)
 describe the required host library, comgr, Python dependencies, and compiler
-setup.
-The JIT path does not require a prebuilt hipBLASLt device library.
+setup. With `HIPBLASLT_JIT=2`, the benchmark does not require a prebuilt
+hipBLASLt device library.
 
 ```bash
-hipblaslt-bench --jit-gemm -m 256 -n 128 -k 512 \
+HIPBLASLT_JIT=2 HIPBLASLT_JIT_LIBRARY_PATH=/path/to/jit-library \
+  hipblaslt-bench -m 256 -n 128 -k 512 \
   --alpha 1.25 --beta 0.5 \
   --verify --iters 3 --cold_iters 1 --print_kernel_info
 ```
 
-In JIT mode, `hipblaslt-bench` defaults to FP16 A/B inputs and FP32 C/D matrices
-and accumulation. Explicit datatype options override those defaults;
-`-r f32_r` selects FP32 matrices. The `--api_method` option
-chooses how hipBLASLt prepares and executes the generated algorithm:
+`HIPBLASLT_JIT=1` benchmarks the pre-tuned solutions first and uses JIT only
+for the part of `--requested_solution` that they leave unfilled. Datatype
+options keep their usual defaults and meaning. The `--api_method` option chooses
+how hipBLASLt prepares and executes the algorithms:
 
 | Value | API calls |
 | --- | --- |
-| `c` (default) | C descriptors and `hipblasLtMatmul` |
-| `mix` | C descriptors passed to the C++ extension `Gemm`, followed by extension initialization and execution |
-| `cpp` | C++ extension problem setup, initialization, and execution |
+| `c` (default) | C descriptors, `hipblasLtMatmulAlgoGetHeuristic` and `hipblasLtMatmul` |
+| `mix` | C descriptors passed to the C++ extension `Gemm`, followed by its heuristic query, initialization and execution |
+| `cpp` | C++ extension problem setup, heuristic query, initialization, and execution |
+
+`--requested_solution N` returns up to N generated solutions. `--algo_method all`
+and `--algo_method index` list or select pre-tuned solutions and do not
+generate. Grouped GEMM is not supported: its heuristic query reports an error
+and returns no solutions.
 
 ## Prediction and supported problems
 
@@ -85,6 +90,9 @@ The manifest records which values came from prediction, defaults, or derivation.
 If Origami returns no finite positive-latency ranking, the request fails before
 invoking the generator. If every ranked recipe is invalid, the request reports
 all candidate rejection reasons. Neither path adds a default or native recipe.
+In both cases the heuristic query returns no solution, stderr has one
+`hipblaslt error: JIT ...` line naming the cause, and the benchmark reports
+that no solution was found.
 The provider records descriptor scale modes separately; its Python translation
 chooses the corresponding physical layout and shared TensileLite validators
 check it.
@@ -116,42 +124,25 @@ route. Its current reduction needs final output and does not combine batch
 offsets. Supporting those combinations requires changes to the reduction and
 its runtime predicates.
 
-`--jit-gemm` selects one generated algorithm. Multi-algorithm selection and
-tuning are outside this initial integration, so it rejects `--algo_method all`,
-`--algo_method index`, an explicit `--solution_index`, `--requested_solution`
-other than 1, nonzero `--splitk` or `--wgm`, and `HIPBLASLT_TUNING_FILE`.
-Datafile mode, grouped GEMM, and pointer-array batches also need additional JIT
-request and lifetime handling and are not supported. A rejected tuning-file
-combination does not create a tuning file.
-
 ## Artifacts and reuse
 
-Each request retains its generated files in a fresh temporary directory.
-`--jit-output-dir /path/to/artifact-parent` chooses the parent directory.
-The recipe, manifest path, and prediction summary are printed to stderr;
-result CSV is printed to stdout. Generator diagnostics are kept in the
-generator log. The artifact directory holds the chosen solution's source
-bundle: its library entry, main kernel assembly and helper source, which
-hipBLASLt builds into one code object with comgr. The manifest also records
-rejected recipes and the sources belonging to the chosen solution. Invalid
-recipes are skipped before compilation; a build or resource failure ends the
-request, and a comgr failure names its retained log.
+Published solutions stay in the JIT solution library, so a later run of the same
+problem with the same library, tools and device reuses them without generating.
+`--print_kernel_info` prints the kernel name. Generation runs in a new
+directory under the system temporary directory, which hipBLASLt removes after
+success and keeps after a failure; the failure report names the generator log
+inside it. To keep the recipe, prediction and bundles of a successful
+generation, point `HIPBLASLT_JIT_PYTHON` at a wrapper that runs the real
+interpreter and then copies them, as `test_jit_gemm.py` does.
 
-Repeated GEMM calls reuse the generated algorithm without compiling again.
-The algorithm and its loaded modules remain registered until process exit and
-are valid only on the device that created them. Loading a retained bundle in
-a later process is not exposed by this initial API. Retain the YAML to
-reproduce a recipe; the opaque algorithm value and its index cannot be saved
-as a reusable library entry.
-
-CMake selects the Python interpreter, TensileLite source and rocisa import
-paths, and the compiler that TensileLite uses to probe assembler capabilities.
-The environment variables `HIPBLASLT_JIT_PYTHON`,
+The library compiles in the Python interpreter, TensileLite source and rocisa
+import paths, and the compiler that TensileLite uses to probe assembler
+capabilities. The environment variables `HIPBLASLT_JIT_PYTHON`,
 `HIPBLASLT_JIT_TENSILE_SOURCE`, `HIPBLASLT_JIT_PYTHONPATH`, and
-`HIPBLASLT_JIT_CXX` override those paths for local development.
+`HIPBLASLT_JIT_CXX` override those paths.
 `HIPBLASLT_JIT_PYTHONPATH` uses the platform path separator (`:` on Linux,
-`;` on Windows) between additional Python import directories. Using `--jit-gemm` in a build without the feature reports
-that `HIPBLASLT_ENABLE_JIT` must be enabled.
+`;` on Windows) between additional Python import directories. A build without
+the feature ignores `HIPBLASLT_JIT` and prints a warning once.
 
 ## Check the result
 
@@ -159,9 +150,12 @@ that `HIPBLASLT_ENABLE_JIT` must be enabled.
 returning a failing exit status. Inspect `norm_error` and the reported
 `atol`/`rtol`; `failed` denotes an allclose failure.
 
-The accompanying `test_jit_gemm.py` checks numerical results, recipe provenance,
-generation before timing, repeated execution, and incompatible options. For
-example, with a configured Python environment and local build:
+The accompanying `test_jit_gemm.py` runs the benchmark with `HIPBLASLT_JIT=2`
+and a fresh JIT solution library for each case. It checks numerical results,
+recipe provenance, one generation per case before timing, publication, scratch
+cleanup, reuse of a published solution without generation, several generated
+solutions, and one error report for each request that cannot produce a recipe.
+For example, with a configured Python environment and local build:
 
 ```bash
 python projects/hipblaslt/clients/bench/test_jit_gemm.py \
@@ -172,16 +166,10 @@ python projects/hipblaslt/clients/bench/test_jit_gemm.py \
 ```
 
 The output path must be new. `--case half-c-default` selects a smoke case;
-`--negative-only` checks option conflicts without GPU execution. With JIT
-disabled in the build, `--feature-off` checks its diagnostic. Architecture
-checks verify that the recorded instructions and cache hints are legal for
-the executing GPU. Cross-compilation checks establish generation and compiler
-support; numerical correctness also requires execution on that GPU.
-
-## Next integration steps
-
-The [target design](../../JIT.md#target-design) moves generation behind the
-heuristic query, controlled by `HIPBLASLT_JIT`, with a persistent JIT solution
-library. The library exists (roadmap step 4 in the [JIT guide](../../JIT.md#roadmap)),
-but `--jit-gemm` does not use it. Step 5 adds the heuristic integration and
-removes `--jit-gemm`.
+`--negative-only` checks only the grouped-GEMM rejection. With JIT disabled in
+the build, `--feature-off` checks that `HIPBLASLT_JIT` is ignored with one
+warning. A failing case does not stop the others; the script lists the failed
+cases and returns a failing status. Architecture checks verify that the
+recorded instructions and cache hints are legal for the executing GPU.
+Cross-compilation checks establish generation and compiler support; numerical
+correctness also requires execution on that GPU.

@@ -28,23 +28,22 @@ tests. The [design notes](jit-design/README.md) hold the KernelFromAnywhere
 
 ## Summary
 
-Today, JIT generation is an explicit path behind internal entry points. The JIT
-test binaries and `hipblaslt-bench --jit-gemm` call an entry point with GEMM
-descriptors, hipBLASLt compiles one solution through TensileLite, and the caller
-passes the returned algorithm to `hipblasLtMatmul` or `hipblaslt_ext::Gemm`. An
-internal entry point can instead publish generated solutions into a persistent
-JIT solution library on disk, from which any later process runs them by
-solution index. An ordinary heuristic query or matmul call does not initiate
-generation or consult that library. The separate, existing rocRoller
-integration has its own runtime generation path and can compile during normal
-library use.
+Applications reach JIT generation through the existing heuristic query. In a
+build with `HIPBLASLT_ENABLE_JIT=ON`, the environment variable `HIPBLASLT_JIT`
+lets `hipblasLtMatmulAlgoGetHeuristic`, `GemmInstance::algoGetHeuristic` and
+`hipblasLtMatmul` without an algorithm return solutions from a persistent JIT
+solution library on disk. Solutions that the library lacks are generated
+through TensileLite, published into it, and returned by solution index, so any
+later process runs them without generating again. In fallback mode the
+pre-tuned libraries are consulted first; in forced mode JIT is the only source.
+See [heuristic integration](#heuristic-integration).
 
-In the target design, JIT generation moves behind the existing heuristic query.
-`hipblasLtMatmulAlgoGetHeuristic` and `GemmInstance::algoGetHeuristic` consult
-the pre-tuned libraries first. When the environment variable `HIPBLASLT_JIT`
-enables it, they fill a shortfall from a persistent JIT solution library and
-then from newly generated solutions. The explicit JIT entry points are internal
-interfaces used by tests; they are not part of the public API.
+The JIT test binaries also call internal entry points directly: they pass GEMM
+descriptors, hipBLASLt compiles one solution through TensileLite, and the test
+passes the returned algorithm to `hipblasLtMatmul` or `hipblaslt_ext::Gemm`, or
+publishes generated solutions into the JIT solution library. These entry points
+are not part of the public API. The separate, existing rocRoller integration
+has its own runtime generation path and can compile during normal library use.
 
 ## Current behavior
 
@@ -62,11 +61,13 @@ return an algorithm for the existing C/C++ GEMM execution APIs.
 Both headers are internal: they are not installed and `hipblaslt-ext.hpp` does
 not include them. The six functions keep
 `HIPBLASLT_EXPORT`, so `libhipblaslt.so` still exports them for the JIT test
-binaries and `hipblaslt-bench --jit-gemm`, which link against the shared
-library. No installed header declares them, and they are not a supported API.
+binaries, which link against the shared library. No installed header declares
+them, and they are not a supported API.
 
-Python, compiler, recipe and output paths belong to the TensileLite backend's
-`tensilelite::Options`. The application owns its buffers and workspace. The
+For these entry points, Python, compiler, recipe and output paths belong to the
+TensileLite backend's `tensilelite::Options`; heuristic queries use the
+[built-in tool paths](#tool-paths-and-scratch-files) instead. The application
+owns its buffers and workspace. The
 request owns descriptor values and host scalars; it does not take ownership of
 device pointers. Compilation and support checks finish before graphics
 processing unit (GPU) work is submitted. The Jit interfaces are for
@@ -95,7 +96,8 @@ adaptation token, not a general owning executable object.
 | JIT solution library | `hipblaslt-jit-library.cpp`, with `hipblaslt-jit-msgpack.cpp` writing the library files and `hipblaslt-jit-fs.cpp` providing the directory checks, file lock and atomic replacement. It publishes built solutions as a standard lazy TensileLite library on disk, looks them up by exact problem, and resolves their reserved solution indices for `tensile_host.cpp`. See [persistent solution library](#persistent-solution-library). |
 | Direct entry point and test | An explicit recipe and GEMM descriptors produce a checked algorithm. `hipblaslt-jit-direct-gemm-test` exercises C/C++ execution independently of the generic entry point. |
 | Generic entry point and adapters | `makeGemmRequest`, `getJitAlgo` and `getGemmAlgo` connect Jit to existing execution. `hipblaslt-jit-generic-gemm-test` covers this flow. |
-| Benchmark | `hipblaslt-bench --jit-gemm` uses the generic TensileLite backend with prediction, completing selection and compilation before correctness checks and execution timing. It includes the internal headers until step 5 removes the option. See the [benchmark guide](clients/bench/README.jit.md). |
+| Heuristic integration | `hipblaslt-jit-mode.cpp` reads `HIPBLASLT_JIT`. `hipblaslt-jit-tensilelite.cpp` configures one Jit per process from the built-in tool paths, with the JIT solution library as its store, and `hipblaslt-jit-backend.cpp` looks a problem up in that library and generates what it lacks. `hipblaslt-jit-report.cpp` prints failures. `rocblaslt_auxiliary.cpp` calls them from both heuristic queries, and `tensile_host.cpp` from `hipblasLtMatmul` without an algorithm. See [heuristic integration](#heuristic-integration). |
+| Benchmark | `hipblaslt-bench` has no JIT option. With `HIPBLASLT_JIT=2`, its ordinary heuristic query returns generated solutions, so selection and compilation finish before correctness checks and execution timing. See the [benchmark guide](clients/bench/README.jit.md). |
 | Mock backend | `hipblaslt-jit-mock-backend.cpp` replays one source bundle that `Tensile.SingleSolution` or `Tensile.JitGemm` wrote, without Python or a subprocess, for problems and devices that the replayed solution's predicates accept; the comgr builder still builds it. Its faults fail generation, replace the main kernel assembly with an invalid instruction so the build fails, or abort the process. Tests reach it through `jit::mock::createBackend` in `hipblaslt-jit-mock.hpp`; it is not a production backend. |
 
 The host runs the Python generator as a child process: POSIX spawning on Linux
@@ -181,7 +183,9 @@ calls `getAllSolutions`, excluding the GridBased and Prediction libraries that
 were already consulted, and appends supported, non-duplicate solutions until the
 count is reached. When the rocRoller route applies (`HIPBLASLT_USE_ROCROLLER=1`,
 or by default for eligible block-scaled problems), `getBestSolutions` and
-`getAllSolutions` return rocRoller results before Tensile lookup.
+`getAllSolutions` return rocRoller results before Tensile lookup. With
+`HIPBLASLT_JIT` set, the [heuristic integration](#heuristic-integration)
+extends or replaces this lookup.
 
 ### Build
 
@@ -266,7 +270,9 @@ indices, first the published solutions that match the request, in the order
 they were first published, then solutions that Jit generates with the supplied
 backend and publishes. Any process then passes an index to
 `hipblaslt_ext::getAlgosFromIndex`, `hipblasLtMatmul` and `Gemm` as it would a
-prebuilt index. Heuristic queries do not consult the library.
+prebuilt index. With `HIPBLASLT_JIT` set, heuristic queries and
+`hipblasLtMatmul` without an algorithm use the same lookup and publication; see
+[heuristic integration](#heuristic-integration).
 
 **Location and permissions.** The root is `HIPBLASLT_JIT_LIBRARY_PATH` or, when
 that is unset or empty, `/tmp/hipblaslt-jit-<uid>/` on Linux and
@@ -355,6 +361,93 @@ solution already resolved from an earlier master stays valid.
 
 **Clearing.** hipBLASLt never deletes entries. To clear the library, delete
 the root directory, or one key directory, while no process is using it.
+
+### Heuristic integration
+
+`HIPBLASLT_JIT` selects the JIT mode for the process. hipBLASLt reads it once,
+when the first handle is created.
+
+| `HIPBLASLT_JIT` | Mode | Behavior |
+| --- | --- | --- |
+| unset, empty or `0` | Off | Heuristic queries and `hipblasLtMatmul` behave as in a build without JIT. |
+| `1` | Fallback | The existing lookup runs to completion first. JIT fills a result that is still shorter than `requestedAlgoCount`. |
+| `2` | Forced | JIT is the only source. The query skips the override file, every pre-tuned library, rocRoller's early path and the `getAllSolutions` fill. |
+
+Any other value leaves JIT off and prints
+`hipblaslt warning: HIPBLASLT_JIT=<value> is not 0, 1 or 2; JIT is off` once.
+A build without JIT ignores a nonzero value and prints
+`hipblaslt warning: HIPBLASLT_JIT=<value> is ignored: hipBLASLt was built without HIPBLASLT_ENABLE_JIT`
+once. The [comgr cache policy](#code-object-construction-with-comgr) follows
+the same parsing.
+
+**Order.** In fallback mode, `hipblasLtMatmulAlgoGetHeuristic` and
+`GemmInstance::algoGetHeuristic` first run the override file, `getBestSolutions`
+(with rocRoller's early path when it applies, and the xf32 retry) and the
+`getAllSolutions` fill. rocRoller results count toward the request. If the
+result is still short, JIT continues:
+
+1. It looks the problem up in the JIT solution library under the process's
+   cache key.
+2. If that is still short, Jit generates the rest: Origami ranks candidates,
+   TensileLite generates them, comgr builds them, and the library publishes
+   them. Every kernel that the query has already returned is excluded.
+
+In forced mode, these two steps are the whole query. Each JIT result passes the
+same support and workspace checks as a `getAllSolutions` result and is appended
+after the results already found. Its solution index is in the reserved JIT
+range.
+
+**Return count.** The query sets `*returnAlgoCount` to 0 on entry. Returning
+fewer results than requested, including none, is success, as it already was for
+the pre-tuned lookup. In fallback mode, a query whose pre-tuned lookup failed,
+for example because no pre-tuned library could be loaded, succeeds when JIT adds
+a result and otherwise keeps its error. In forced mode the query succeeds even
+when JIT fails; it then returns no results and reports the failure.
+
+**`hipblasLtMatmul` without an algorithm.** In fallback mode it uses a JIT
+solution only when the pre-tuned lookup finds none. In forced mode it uses only
+JIT solutions. When no solution is found it returns
+`HIPBLAS_STATUS_NOT_SUPPORTED`.
+
+**Failure reporting.** JIT problems are printed on stderr without any
+`HIPBLASLT_LOG_LEVEL` setting, once per distinct message in a process, and are
+also passed to the existing error or info log. A failure is an error when the
+query gets no JIT result and a warning when JIT still added one. A shortfall
+without a failure is a warning. Each line names the stage (configure, predict,
+generate, build, support, load, lookup or publish), the problem and the cause.
+A generator or build failure names its kept log:
+
+```text
+hipblaslt error: JIT configure failed for GEMM M=256 N=128 K=512 batch=1 opA=OP_N opB=OP_N A=R_16F B=R_16F C=R_16F D=R_16F compute=COMPUTE_32F epilogue=EPILOGUE_DEFAULT: Python not found at /nonexistent; set HIPBLASLT_JIT_PYTHON
+hipblaslt error: JIT generate failed for GEMM M=256 N=128 K=512 ... EPILOGUE_DEFAULT: TensileLite generator: Provider exited with code 1; see /tmp/hipblaslt-jit-hG2kQx/tensilelite.log
+hipblaslt warning: JIT returned 1 of 2 requested solutions for GEMM M=256 N=128 K=512 ... EPILOGUE_DEFAULT: Origami ranked 72 parameter candidates; the first 2 candidates accepted by TensileLite were compiled
+```
+
+Once generation falls short for a problem, later queries for it in the same
+process look it up in the library but do not generate again. Queries for the
+same problem and workspace limit in one process generate one at a time, so the
+second one finds what the first published; separate processes coordinate
+through the library lock. An empty output (M=0 or N=0) gets no JIT result.
+Grouped GEMM is not supported and reports an error.
+
+#### Tool paths and scratch files
+
+A JIT build compiles the generator's tool paths into the library as defaults:
+the configured `Python_EXECUTABLE`, the source tree's `tensilelite` directory,
+the directory above the built rocisa extension as the import path, and
+`CMAKE_CXX_COMPILER`. `HIPBLASLT_JIT_PYTHON`, `HIPBLASLT_JIT_TENSILE_SOURCE`,
+`HIPBLASLT_JIT_PYTHONPATH` and `HIPBLASLT_JIT_CXX` override them. The defaults
+point into the build and source trees, so an installed library without those
+trees reports a configure failure that names the variable to set. The tool
+paths and files are part of the TensileLite
+[cache key](#persistent-solution-library), so a process with different tools
+uses a different key directory. hipBLASLt checks the tools and computes the key
+once per process.
+
+A query that generates waits for the whole generation, which takes seconds to
+minutes per problem. Generation runs in a new directory under the system
+temporary directory (`TMPDIR` on Linux). It is removed after success and kept
+after a failure, whose report names the log inside it.
 
 ### Validation
 
@@ -528,12 +621,12 @@ separate mechanisms.
 
 Generation needs the Python interpreter, the TensileLite source directory and
 its import paths, and the compiler that TensileLite uses to probe assembler
-capabilities. Their locations become build-time defaults baked into the
-library. The existing `HIPBLASLT_JIT_PYTHON`, `HIPBLASLT_JIT_TENSILE_SOURCE`,
+capabilities. A heuristic query has no application `Options`, so their
+locations are build-time defaults compiled into the library, and the
+`HIPBLASLT_JIT_PYTHON`, `HIPBLASLT_JIT_TENSILE_SOURCE`,
 `HIPBLASLT_JIT_PYTHONPATH` and `HIPBLASLT_JIT_CXX` environment variables
-override them. Today only
-`hipblaslt-bench` bakes these defaults and reads the overrides. A heuristic query
-has no application `Options`, so the library must own them.
+override them. Step 5 implements this; see
+[tool paths and scratch files](#tool-paths-and-scratch-files).
 
 ### Heuristic integration and `HIPBLASLT_JIT`
 
@@ -541,7 +634,7 @@ has no application `Options`, so the library must own them.
 | --- | --- |
 | `0` or unset (default) | JIT is off. Heuristic queries behave as they do today. |
 | `1` | Fallback. JIT runs only when the existing lookup leaves the result short of `requestedAlgoCount`. |
-| `2` | Forced. JIT is the only source: the query skips Equality, Origami (Prediction), all other pre-tuned libraries and rocRoller's early path. It looks up the JIT solution library first, then generates. |
+| `2` | Forced. JIT is the only source: the query skips the override file, Equality, Origami (Prediction), all other pre-tuned libraries, rocRoller's early path and the `getAllSolutions` fill. It looks up the JIT solution library first, then generates. |
 
 In fallback mode, the existing lookup runs unchanged and to completion first:
 
@@ -564,13 +657,16 @@ Generated solutions therefore can fill a partial result, not only an empty one.
 Failures follow these rules:
 
 - JIT failures are always reported, in both modes.
-- In fallback mode, failing to reach `requestedAlgoCount` is a hard error unless
-  the existing heuristic contract already allows returning fewer results. Step 5
-  verifies that contract before implementing the rule.
+- In fallback mode, a result shorter than `requestedAlgoCount` is not an error:
+  the existing heuristic contract already returns fewer results with success,
+  so the query returns what it found and reports the shortfall.
 - In forced mode, a failure returns zero results and is still reported.
 
-A build with `HIPBLASLT_ENABLE_JIT=OFF` ignores `HIPBLASLT_JIT` and prints a
-one-time warning when it is set.
+`hipblasLtMatmul` without an algorithm follows the mode: in fallback mode it
+uses JIT only when the pre-tuned lookup finds nothing, and in forced mode it uses
+only JIT. A build with `HIPBLASLT_ENABLE_JIT=OFF` ignores `HIPBLASLT_JIT` and
+prints a one-time warning when it is set. Step 5 implements this section; see
+[heuristic integration](#heuristic-integration).
 
 ### Public API changes
 
@@ -588,11 +684,10 @@ which is Done, implements this part of the design:
 - The `hipblaslt-jit-direct-gemm-test` and `hipblaslt-jit-generic-gemm-test`
   binaries under `clients/tests/jit` exercise the two entry points and are run
   by `.github/scripts/test_hipblaslt_jit.py`.
-- `hipblaslt-bench --jit-gemm` works through the internal headers until step 5,
-  which removes the option once `HIPBLASLT_JIT` exists.
+- Step 5 removed `hipblaslt-bench --jit-gemm`. The benchmark reaches JIT
+  through `HIPBLASLT_JIT` like any other application.
 
-After step 5, applications reach JIT only through the heuristic query and
-`HIPBLASLT_JIT`.
+Applications reach JIT only through the heuristic query and `HIPBLASLT_JIT`.
 
 ## Roadmap
 
@@ -602,11 +697,11 @@ each step advances.
 
 | Step | Status | Scope | Work area |
 | --- | --- | --- | --- |
-| 1. Demote the public API | Done | `hipblaslt-jit.hpp` and `hipblaslt-jit-tensilelite.hpp` are not installed and `hipblaslt-ext.hpp` does not include them; they are internal headers used by unit tests. The direct and generic GEMM test binaries under `clients/tests/jit` are run by the shared driver. `hipblaslt-bench --jit-gemm` uses the internal header until step 5. | Backend interface |
+| 1. Demote the public API | Done | `hipblaslt-jit.hpp` and `hipblaslt-jit-tensilelite.hpp` are not installed and `hipblaslt-ext.hpp` does not include them; they are internal headers used by unit tests. The direct and generic GEMM test binaries under `clients/tests/jit` are run by the shared driver. `hipblaslt-bench --jit-gemm` used the internal header until step 5 removed it. | Backend interface |
 | 2. Jit component and interfaces | Done | Add Jit, the backend interface, the mock backend, and the Predictor and TuningKnowledge interfaces. Wrap the existing TensileLite provider and C++ predictor behind them; TuningKnowledge returns TensileLite defaults. | Backend interface; prediction; tuning blueprints |
 | 3. comgr code-object builder | Done | hipBLASLt builds one code object per solution through comgr, adapted from rocRoller's `InProcessAssembler`, linking the main kernel assembly and the helper HIP source together. With `--source-only`, TensileLite emits only assembly, helper source and metadata, and `Tensile.JitGemm` can publish several ranked bundles. hipBLASLt disables the comgr cache when `HIPBLASLT_JIT` is `1` or `2`. | Backend interface |
-| 4. JIT solution library | Done | One standard lazy TensileLite library per cache key under `HIPBLASLT_JIT_LIBRARY_PATH` or a private per-user default, with exact-size entries merged under a file lock by atomic rename, loaded as a second master library that reloads when other processes publish, with reserved solution indices from 2^30 to `INT32_MAX`. `jit::getLibraryAlgos` looks solutions up and publishes them; heuristic queries do not use it yet. | JIT solution library (cache) |
-| 5. Heuristic integration | Planned | Add `HIPBLASLT_JIT` modes 0, 1 and 2 to `hipblasLtMatmulAlgoGetHeuristic` and `GemmInstance::algoGetHeuristic`, with the fallback order and failure rules above. Bake the tool-path defaults into the library, warn once when a JIT-off build sees `HIPBLASLT_JIT`, and remove `hipblaslt-bench --jit-gemm`. | JustInTime library type; backend interface |
+| 4. JIT solution library | Done | One standard lazy TensileLite library per cache key under `HIPBLASLT_JIT_LIBRARY_PATH` or a private per-user default, with exact-size entries merged under a file lock by atomic rename, loaded as a second master library that reloads when other processes publish, with reserved solution indices from 2^30 to `INT32_MAX`. `jit::getLibraryAlgos` looks solutions up and publishes them; step 5 connects the heuristic queries to it. | JIT solution library (cache) |
+| 5. Heuristic integration | Done | `HIPBLASLT_JIT` modes 0, 1 and 2 in `hipblasLtMatmulAlgoGetHeuristic`, `GemmInstance::algoGetHeuristic` and `hipblasLtMatmul` without an algorithm, with the fallback order and failure rules above and every JIT failure reported on stderr. The tool-path defaults are compiled into the library, a JIT-off build warns once when it sees `HIPBLASLT_JIT`, and `hipblaslt-bench --jit-gemm` is removed. The shared driver checks each mode, reuse of the library by a second process, failure reports and the JIT-off warning. | JustInTime library type; backend interface |
 | 6. Validation sweep | Planned | Rerun the shared JIT driver and add heuristic, cache and mode coverage. | Overall JIT validation |
 
 The following work sits outside the six steps and remains future:

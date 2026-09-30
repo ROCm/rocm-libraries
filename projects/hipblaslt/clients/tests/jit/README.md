@@ -7,6 +7,7 @@ layered above it. Neither header is installed. The tests include them from
 the entry points. Each path reaches the existing C/C++ GEMM execution APIs. The
 `direct-gemm` and `generic-gemm` binaries run each path once from start to
 finish; the other cases exercise failures, repeated calls and ownership changes.
+The heuristic routes cover `HIPBLASLT_JIT` through the public heuristic queries.
 The [roadmap](../../../JIT.md#roadmap) distinguishes the implemented layers from
 planned work.
 
@@ -28,7 +29,7 @@ cmake --build "$project_build" --parallel 8 --target \
   _rocisa hipblaslt-bench hipblaslt-jit-direct-gemm-test hipblaslt-jit-generic-gemm-test \
   hipblaslt-jit-api-test hipblaslt-jit-generic-api-test hipblaslt-jit-mock-backend-test \
   hipblaslt-jit-component-test hipblaslt-jit-process-test hipblaslt-jit-artifacts-test \
-  hipblaslt-jit-code-object-test hipblaslt-jit-library-test
+  hipblaslt-jit-code-object-test hipblaslt-jit-library-test hipblaslt-jit-heuristic-test
 "$project_python" .github/scripts/test_hipblaslt_jit.py \
   --build "$project_build" --architecture gfx950 --output "$(mktemp -d)/jit-validation"
 ```
@@ -37,13 +38,17 @@ Choose a fresh output directory. When other work shares the host, set
 `HIP_VISIBLE_DEVICES` to keep the tests on one GPU. The driver checks that the shared library and
 Python modules come from the checkout/build, points device-library lookup at
 an empty directory, and points `HIPBLASLT_JIT_LIBRARY_PATH` into the output
-directory so that no case uses the default JIT solution library. It records
-commands, logs, generated bundles, and a
-`summary.json`. A failed case makes the driver return a failing status.
+directory so that no case uses the default JIT solution library. It removes
+`HIPBLASLT_JIT`, every other `HIPBLASLT_JIT_*` variable and every
+`AMD_COMGR_*` variable from the inherited environment, and points
+`XDG_CACHE_HOME` into the output directory. It records commands, logs,
+generated bundles, and a `summary.json`. A failed case makes the driver return
+a failing status.
 
 The default run tests the disabled configuration last. It reconfigures the same
-build directory with `HIPBLASLT_ENABLE_JIT=OFF`, rebuilds the disabled consumer
-and benchmark, and checks their rejection diagnostics. Restore `ON` and rebuild
+build directory with `HIPBLASLT_ENABLE_JIT=OFF`, rebuilds the disabled consumer,
+the heuristic test and the benchmark, and checks that the extension API links
+and that `HIPBLASLT_JIT` is ignored with one warning. Restore `ON` and rebuild
 before continuing enabled development. To run a focused enabled check without
 reconfiguration, select cases explicitly, for example `--case jit-component`
 or `--case bench`. `--case` can be repeated; this smoke run covers both entry
@@ -82,8 +87,14 @@ to replay, publish or rebuild it.
 | `alpha-zero-api` | Alpha=0 with nonzero descriptor K and null A/B still computes beta*C and output-amax through both public APIs |
 | `helper-failures` | A missing helper source or renamed helper symbols are detected before output/workspace writes; an earlier C++ launch remains usable |
 | `bundle-failures` | Damaged source bundles are rejected through the public API: a foreign target, an escaping symbolic link, missing sources or main assembly, an undefined main kernel, invalid assembly or helper source (the message names the comgr log), corrupt or truncated library entries, missing helper source or symbols, and unsupported problems |
-| `bench` | Genuine Origami ranking and first-valid selection, unchanged numerical checks, compilation outside timing, and explicit failure when ranking or validation cannot produce a recipe |
-| `disabled-api` | The JIT headers are absent from the public include tree, `hipblaslt-ext.hpp` compiles without them, and the extension API links against the disabled library; the disabled benchmark reports that JIT is unavailable |
+| `heuristic-fallback-c`, `heuristic-fallback-cpp` | `HIPBLASLT_JIT=1` with an empty device library: the C or C++ heuristic query returns only JIT indices for one and three requested solutions, each checked through `hipblasLtMatmul` or `Gemm`, publishes them, and reports any shortfall as a warning |
+| `heuristic-forced` | `HIPBLASLT_JIT=2` with an empty and with the build's device library: both queries return only JIT indices with checked numerics, and comgr's on-disk cache stays unused |
+| `heuristic-cache-hit` | A second process whose generator fails if it runs gets the first process's published index from both queries and from `hipblasLtMatmul` without an algorithm, with no JIT report |
+| `heuristic-null-algo` | `hipblasLtMatmul` without an algorithm runs a JIT solution with checked numerics in modes 1 and 2, and does not use JIT in mode 0 |
+| `heuristic-report` | In modes 1 and 2, a missing Python and a failing generator each print exactly one `hipblaslt error: JIT` line across two handles, two queries and both APIs; the queries return no results with the status the mode defines, and the generator log named in the report is kept |
+| `heuristic-partial-fill` | With the build's device library, JIT indices follow the unchanged pre-tuned results in mode 1; prints SKIP when the build has no device library for the problem |
+| `bench` | `HIPBLASLT_JIT=2` through the benchmark's ordinary heuristic query: genuine Origami ranking and first-valid selection, unchanged numerical checks, compilation outside timing, publication and reuse, and one error report when ranking or validation cannot produce a recipe |
+| `disabled-api` | The JIT headers are absent from the public include tree, `hipblaslt-ext.hpp` compiles without them, and the extension API links against the disabled library; the disabled benchmark and heuristic test print one warning that `HIPBLASLT_JIT` is ignored, and the heuristic results match a run without it |
 
 The C/C++ routes use `hipblasLtMatmul` and `hipblaslt_ext::Gemm`. They are distinct
 from the benchmark case, which drives the same interfaces through benchmark
@@ -156,6 +167,23 @@ it creates; it ignores `HIPBLASLT_JIT_LIBRARY_PATH`. Adding
 processes each publish M entries shared by all writers and M of their own,
 while one reader process looks them up.
 
+## Heuristic tests
+
+`hipblaslt-jit-heuristic-test` uses only the public API, so it is built with
+and without JIT. It queries `hipblasLtMatmulAlgoGetHeuristic` and
+`GemmInstance::algoGetHeuristic` for an FP16 GEMM with FP32 accumulation
+(M=256, N=128, K=512 by default), prints one JSON line per query with the
+status, the returned solution indices and their workspace sizes, and then runs
+every returned algorithm and compares the output with a CPU reference.
+`--api c|cpp|both|none`, `--requested`, `--m`, `--n`, `--k`, `--handles`,
+`--queries` and `--workspace` shape the queries, `--null-algo` also checks
+`hipblasLtMatmul` without an algorithm, and `--no-run` skips execution.
+
+`test_heuristic.py <binary> <route> <fresh-output>` runs the binary for one
+driver route in fresh processes, each with its own JIT solution library,
+temporary and cache directories under the output directory, and an empty
+`HIPBLASLT_TENSILE_LIBPATH` unless the route uses the build's device library.
+
 ## Code-object tests
 
 `hipblaslt-jit-code-object-test` compiles the comgr code-object builder
@@ -174,7 +202,8 @@ and `HOME` to name existing scratch directories. `--only` selects tests by name.
 The shared `hipblaslt-jit-gemm-ci.yml` workflow builds the JIT test binaries and
 the benchmark, then runs the driver: direct and generic GEMM tests, the mock
 backend and Jit component checks, the JIT solution library checks, the comgr
-code-object and cache checks, and the prediction/benchmark layer. The workflow obtains native
+code-object and cache checks, the heuristic routes, and the prediction/benchmark
+layer. The workflow obtains native
 runner labels from the shared GPU map for gfx90a, gfx942, gfx950 and gfx1250.
 Missing native runners fail setup instead of silently substituting another GPU.
 The SDK supplies build dependencies; project libraries are built from the source
@@ -193,6 +222,5 @@ ranked recipes lacking required subtile choices fail with candidate-specific
 reasons. Complex, zero-K, alpha-zero, and mixed MAC-type cases verify the absence
 of a usable ranking and the absence of generation. These are diagnostic checks,
 not successful numerical executions. Explicit supported recipes have their own
-builder/runtime coverage. None of these tests establishes the heuristic
-integration, exact epilogue specialization, or tuning-blueprint behavior
-described in the roadmap.
+builder/runtime coverage. None of these tests establishes the exact epilogue
+specialization or tuning-blueprint behavior described in the roadmap.

@@ -6,7 +6,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
-* Internal just-in-time (JIT) GEMM generation, built only when `HIPBLASLT_ENABLE_JIT` is `ON` (the default is `OFF`). TensileLite compiles an explicit recipe or the first Origami-ranked candidate it accepts, and the result runs through `hipblasLtMatmul` and `hipblaslt_ext::Gemm`. The JIT entry points are internal: their headers are not installed, and only the JIT tests and `hipblaslt-bench --jit-gemm` use them. JIT will be enabled for applications through the `HIPBLASLT_JIT` environment variable.
+* Just-in-time (JIT) GEMM generation through the heuristic query, built only when `HIPBLASLT_ENABLE_JIT` is `ON` (the default is `OFF`). With the `HIPBLASLT_JIT` environment variable set to `1`, `hipblasLtMatmulAlgoGetHeuristic` and `GemmInstance::algoGetHeuristic` fill a result shorter than the requested count from a persistent JIT solution library (`HIPBLASLT_JIT_LIBRARY_PATH`) and then from newly generated solutions; with `2`, they return only JIT solutions. `hipblasLtMatmul` without an algorithm follows the same mode. TensileLite generates the first Origami-ranked candidates it accepts, and hipBLASLt builds them with comgr and publishes them for later processes. JIT failures are printed on stderr. A build without JIT ignores `HIPBLASLT_JIT` and prints a warning once.
 * `FusedGemmA2A` TensileLite problem-type parameter (default `0`, off) that fuses an all-to-all redistribution into the GEMM store path using SDMA, avoiding a separate collective kernel and staging buffer; currently limited to gfx950 and bf16.
 * Tensor swizzling (pre-swizzled/pre-tiled A/B tensors) support for gfx11 (WMMA) architectures.
 * Batch-offset support for General Batched GEMM on gfx1250.
@@ -36,6 +36,8 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Resolved issues
 
+* Fixed `hipblasLtMatmulAlgoGetHeuristic` leaving `returnAlgoCount` unset when it fails, and reading past the result array when a tuning override matches a query for one solution.
+* Fixed `hipblasLtMatmul` crashing, instead of returning `HIPBLAS_STATUS_NOT_SUPPORTED`, for an algorithm whose solution index is not in the loaded library.
 * Fixed `hipblaslt-bench` using C's batch stride for D and computing its CPU reference with the wrong layout when C and D have different leading dimensions or batch strides.
 * Fixed output-amax accumulation omitting packed-store values and returning zero when C/D scaling is disabled. Invalid Stream-K or split-reduction combinations with output-amax are rejected during solution validation.
 * Fixed GEMM output scaling reading C/D scale values before their scalar memory loads completed.
