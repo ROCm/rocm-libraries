@@ -1,7 +1,7 @@
 ---
 name: hipdnn-trigger-ci
 description: Dispatch TheRock CI, TheRock Multi-Arch CI or the hipDNN superbuild CI on a rocm-libraries branch with chosen GPU families, projects and test labels, then check status or watch the run. Always dry-runs first; a real dispatch needs explicit user approval.
-argument-hint: "[therock-ci|multi-arch|hipdnn-superbuild|status|watch] [--gfx <families>] [--windows-gfx <families>] [--projects <paths>] [--test-labels <labels>] [--branch <branch>] [--pr <pr-number>] [--run-id <run-id>]"
+argument-hint: "[therock-ci|multi-arch|hipdnn-superbuild|status|watch] [--gfx <families>] [--windows-gfx <families>] [--projects <paths>] [--test-labels <labels>] [--dry-run|--yes] [--branch <branch>] [--pr <pr-number>] [--run-id <run-id>]"
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
@@ -9,7 +9,7 @@ allowed-tools: Bash, Read, Grep, Glob
 
 Use this skill when the user asks to trigger, re-run with different settings, check or watch GitHub Actions CI for a rocm-libraries branch or PR. It wraps `gh workflow run`, `gh run list`, `gh pr checks` and `gh run watch` for `ROCm/rocm-libraries`.
 
-A dispatch starts real CI on shared runners. **Always run the `--dry-run` form first, show the printed `gh workflow run` command to the user, and dispatch for real only after they explicitly approve that exact command.** `status` and `watch` are read-only.
+A dispatch starts real CI on shared runners. **Always run the `--dry-run` form first, show the printed `gh workflow run` command to the user, and dispatch for real only after they explicitly approve that exact command.** `dispatch` requires either `--dry-run` or `--yes`; `--yes` is the real dispatch, so pass it only after approval. `status` and `watch` are read-only.
 
 ## Inputs
 
@@ -19,7 +19,7 @@ Infer options from the user request:
   - `multi-arch` → `.github/workflows/therock-multi-arch-ci.yml`. Builds ROCm with TheRock and runs component tests on the chosen GPU families. This is the one to use for hipDNN/provider test labels.
   - `therock-ci` → `.github/workflows/therock-ci.yml`. Single-arch TheRock CI for a set of rocm-libraries subtrees.
   - `hipdnn-superbuild` → `.github/workflows/hipdnn-superbuild-ci.yml`. Takes no inputs.
-- **Branch**: `--branch <branch>` (a global option, placed before the subcommand). If omitted, `--pr <pr-number>` resolves the PR head branch; otherwise the current git branch is used, under its upstream name when it tracks one. The branch must already be pushed to `ROCm/rocm-libraries` for a dispatch to find it.
+- **Branch**: `--branch <branch>` (a global option, placed before the subcommand). If omitted, `--pr <pr-number>` resolves the PR head branch; otherwise the current git branch is used, under its upstream name when it tracks one. If that upstream is on a remote other than `ROCm/rocm-libraries` (a fork), the script stops and asks for `--branch`. The branch must already be pushed to `ROCm/rocm-libraries` for a dispatch to find it.
 - **GPU families**: `--gfx` (Linux) and `--windows-gfx`, comma-separated. When omitted the workflow defaults apply:
   - `multi-arch`: Linux `gfx94X,gfx950,gfx125X`, Windows `gfx110X` (`.github/workflows/therock-multi-arch-ci.yml`, `setup` job inputs). Pass `none` to skip a platform, for example `--windows-gfx none` for a Linux-only run.
   - `therock-ci`: Linux `gfx94X, gfx950, gfx125X`, Windows `gfx1151` (`.github/workflows/therock-ci.yml`, "Fetch Linux/Windows targets for build and test" steps).
@@ -28,7 +28,7 @@ Infer options from the user request:
 
 `dispatch` rejects an option the chosen workflow does not take (for example `--test-labels` with `-w therock-ci`, or any option with `-w hipdnn-superbuild`) instead of dropping it.
 
-The accepted GPU family names come from TheRock's `build_tools/github_actions/amdgpu_family_matrix.py` at the TheRock ref pinned in `.github/actions/ci-env/action.yml` (`therock-ref`). `trigger_ci.py --help` prints a hardcoded snapshot of the list and names the TheRock commit it was taken from; if that commit differs from the current `therock-ref`, or a name is rejected, re-read `amdgpu_family_matrix.py` at the current `therock-ref`. Names are case-insensitive. A family that has no entry for the target platform is dropped for that platform (for example `gfx94X` and `gfx950` are Linux-only). `multi-arch` rejects an unknown name with an error listing the known families; `therock-ci` skips unknown names silently, so check the spelling. `multi-arch` also accepts `gfx1250-strict` (dispatch-only) and `all`.
+The accepted GPU family names come from TheRock's `build_tools/github_actions/amdgpu_family_matrix.py` at the TheRock ref pinned in `.github/actions/ci-env/action.yml` (`therock-ref`). `trigger_ci.py --help` prints a hardcoded snapshot of the list and names the TheRock commit it was taken from, and `dispatch` warns when the checkout's `therock-ref` differs from it; in that case, or when a name is rejected, re-read `amdgpu_family_matrix.py` at the current `therock-ref`. Names are case-insensitive. A family that has no entry for the target platform is dropped for that platform (for example `gfx94X` and `gfx950` are Linux-only). `multi-arch` rejects an unknown name with an error listing the known families; `therock-ci` skips unknown names silently, so check the spelling. `multi-arch` also accepts `gfx1250-strict` (dispatch-only) and `all`.
 
 Multi-arch has further dispatch inputs (`prebuilt_stages`, `baseline_run_id`, `baseline_repository`, `build_python_packages`, `build_pytorch`, `build_jax`, `build_native_linux`) that this script does not expose. Read `.github/workflows/therock-multi-arch-ci.yml` if the user needs one; pass it through `gh workflow run` directly only after showing the user the command.
 
@@ -44,7 +44,7 @@ Multi-arch has further dispatch inputs (`prebuilt_stages`, `baseline_run_id`, `b
    ```
    Here `<workflow>` is `multi-arch`, `therock-ci` or `hipdnn-superbuild`; `<families>`, `<paths>` and `<labels>` are the values described under Inputs.
 
-4. After explicit approval, run the same command without `--dry-run`. The script dispatches, waits up to about 15 seconds for the new run to appear and prints its run ID with `gh run watch` / `gh run view --log` commands.
+4. After explicit approval, run the same command with `--yes` in place of `--dry-run`. The script dispatches, waits up to about 15 seconds for the new run to appear and prints its run ID with `gh run watch` / `gh run view --log` commands.
 
 5. Check status or watch:
    ```bash
@@ -52,7 +52,7 @@ Multi-arch has further dispatch inputs (`prebuilt_stages`, `baseline_run_id`, `b
    python3 <skill-directory>/scripts/trigger_ci.py --pr <pr-number> status
    python3 <skill-directory>/scripts/trigger_ci.py [--branch <branch>] watch [--run-id <run-id>]
    ```
-   `status` with `--pr` shows `gh pr checks`; otherwise it lists the 10 most recent runs on the branch. `--branch` takes precedence over `--pr` in every subcommand. `status` exits non-zero when the query itself fails; failing or pending checks are reported, not treated as errors. `watch` without `--run-id` follows the in-progress or queued run with the highest run ID on the branch and exits with the run's status. After a real dispatch, the reported run ID is the newest `workflow_dispatch` run of that workflow on the branch, so a run someone else dispatched on the same branch at the same moment can still be picked up.
+   `status` with `--pr` shows `gh pr checks`; otherwise it lists the 10 most recent runs on the branch. `--branch` takes precedence over `--pr` in every subcommand. `status` exits non-zero when the query itself fails; failing or pending checks are reported, not treated as errors. `watch` without `--run-id` follows the in-progress or queued run with the highest run ID on the branch and exits with the run's status, or exits non-zero when there is no such run; with `--run-id` on a finished run it prints the conclusion and exits with it. After a real dispatch, the reported run ID is the newest `workflow_dispatch` run of that workflow on the branch, so a run someone else dispatched on the same branch at the same moment can still be picked up.
 
 ## Test reference
 

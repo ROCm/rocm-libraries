@@ -6,21 +6,25 @@
 Defaults to the current git branch (its upstream name when it tracks one).
 Override with --branch.
 
+dispatch needs --dry-run (print the gh command only) or --yes (dispatch for
+real, after the --dry-run command was approved).
+
 Examples:
-    # Dispatch TheRock CI for integration-tests on gfx94X (current branch)
+    # Dry-run TheRock CI for integration-tests on gfx94X (current branch)
     python3 <skill>/scripts/trigger_ci.py dispatch -w therock-ci --gfx gfx94X \\
-        --projects "dnn-providers/integration-tests"
+        --projects "dnn-providers/integration-tests" --dry-run
 
-    # Dry-run: print the gh command without executing
-    python3 <skill>/scripts/trigger_ci.py dispatch -w therock-ci --gfx gfx94X --dry-run
+    # Same, dispatched for real after approval
+    python3 <skill>/scripts/trigger_ci.py dispatch -w therock-ci --gfx gfx94X \\
+        --projects "dnn-providers/integration-tests" --yes
 
-    # Dispatch on a specific branch
+    # Dry-run on a specific branch
     python3 <skill>/scripts/trigger_ci.py --branch users/someone/feature dispatch \\
-        -w hipdnn-superbuild
+        -w hipdnn-superbuild --dry-run
 
-    # Multi-arch CI with test labels
+    # Dry-run multi-arch CI with test labels
     python3 <skill>/scripts/trigger_ci.py dispatch -w multi-arch --gfx gfx94X,gfx950 \\
-        --test-labels test:hipdnn,test:miopenprovider
+        --test-labels test:hipdnn,test:miopenprovider --dry-run
 
     # Check CI status for a PR
     python3 <skill>/scripts/trigger_ci.py --pr 10770 status
@@ -37,12 +41,21 @@ Examples:
 
 import json
 import argparse
+import re
 import shlex
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 REPO = "ROCm/rocm-libraries"
+CANONICAL_REMOTE_URL = re.compile(
+    r"github\.com[:/]ROCm/rocm-libraries(\.git)?/?$", re.IGNORECASE
+)
+
+# TheRock commit the --help family and label lists were taken from.
+THEROCK_SNAPSHOT_REF = "7440cb8578f4daae0d85a428fadd6645dc5464a0"
+CI_ENV_ACTION = ".github/actions/ci-env/action.yml"
 
 WORKFLOWS = {
     "therock-ci": {
@@ -131,9 +144,32 @@ def current_git_branch():
     merge_ref = run_cmd(
         ["git", "config", "--get", f"branch.{branch}.merge"], check=False
     )
-    if merge_ref.startswith("refs/heads/"):
-        return merge_ref[len("refs/heads/") :]
-    return branch
+    if not merge_ref.startswith("refs/heads/"):
+        return branch
+    # The upstream name is only valid on REPO; a branch tracking a fork would
+    # otherwise dispatch on whatever REPO branch has the same name.
+    remote = run_cmd(["git", "config", "--get", f"branch.{branch}.remote"], check=False)
+    url = run_cmd(["git", "remote", "get-url", remote], check=False) if remote else ""
+    if not CANONICAL_REMOTE_URL.search(url):
+        print(
+            f"error: branch '{branch}' tracks remote '{remote}' ({url or 'no URL'}), "
+            f"not {REPO}; push it to {REPO} and pass --branch",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return merge_ref[len("refs/heads/") :]
+
+
+def checkout_therock_ref():
+    root = run_cmd(["git", "rev-parse", "--show-toplevel"], check=False)
+    if not root:
+        return ""
+    try:
+        text = Path(root, CI_ENV_ACTION).read_text()
+    except OSError:
+        return ""
+    match = re.search(r'therock-ref:\n(?:.*\n)*?\s*value:\s*"([0-9a-f]+)"', text)
+    return match.group(1) if match else ""
 
 
 def pr_branch(pr_number):
@@ -215,7 +251,7 @@ def dispatch_workflow(workflow_file, ref, inputs, dry_run=False):
     print(f"  {shlex.join(cmd)}")
 
     if dry_run:
-        print("  (dry-run — not dispatched)")
+        print("  (dry-run — not dispatched; after approval, re-run with --yes)")
         return None
 
     before_id = latest_run_id(workflow_file, ref)
@@ -277,6 +313,14 @@ def cmd_dispatch(args):
         value = getattr(args, field, "") or ""
         if value:
             inputs[INPUT_MAP[field]] = value
+    pinned = checkout_therock_ref()
+    if pinned and pinned != THEROCK_SNAPSHOT_REF:
+        print(
+            f"warning: {CI_ENV_ACTION} pins TheRock {pinned}, but the --help family "
+            f"and label lists are from {THEROCK_SNAPSHOT_REF}; re-read the TheRock "
+            f"files at {pinned} before relying on them",
+            file=sys.stderr,
+        )
     print(f"Dispatching '{args.workflow}' on '{ref}':")
     dispatch_workflow(wf["file"], ref, inputs, dry_run=args.dry_run)
 
@@ -317,9 +361,13 @@ def cmd_watch(args):
         ref = resolve_branch(args)
         active = find_active_run(ref)
         if not active:
-            print(f"No active runs on '{ref}'.")
-            print(f"Check: gh run list --repo {REPO} --branch {ref} --limit 5")
-            return
+            # Exit non-zero so "nothing to watch" is not read as a passing run.
+            print(f"No active runs on '{ref}'.", file=sys.stderr)
+            print(
+                f"Check: gh run list --repo {REPO} --branch {ref} --limit 5",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         run_id = active["databaseId"]
         print(f"Watching '{active['workflowName']}' (run {run_id}):\n")
 
@@ -349,10 +397,10 @@ def main():
     parser = argparse.ArgumentParser(
         description="Trigger CI on a rocm-libraries branch",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-The lists below are a snapshot of TheRock at 7440cb8578f4daae0d85a428fadd6645dc5464a0.
-If therock-ref in .github/actions/ci-env/action.yml differs, re-read the TheRock files
-named below at that ref.
+        epilog=f"""
+The lists below are a snapshot of TheRock at {THEROCK_SNAPSHOT_REF}.
+If therock-ref in {CI_ENV_ACTION} differs, re-read the TheRock files
+named below at that ref (dispatch warns when it does).
 
 GPU families (case-insensitive; from TheRock build_tools/github_actions/amdgpu_family_matrix.py):
   presubmit:   gfx94X, gfx110X, gfx1151, gfx120X, gfx125X
@@ -415,8 +463,15 @@ hipDNN test labels (multi-arch; from TheRock fetch_test_configurations.py test_m
         default="",
         help="Windows test labels, comma-separated (multi-arch only)",
     )
-    dispatch.add_argument(
+    # A real dispatch needs --yes, so it cannot happen by leaving a flag out.
+    mode = dispatch.add_mutually_exclusive_group(required=True)
+    mode.add_argument(
         "--dry-run", action="store_true", help="Print the gh command without executing"
+    )
+    mode.add_argument(
+        "--yes",
+        action="store_true",
+        help="Dispatch for real; pass only after the --dry-run command was approved",
     )
 
     sub.add_parser("status", help="Show CI check status for a PR or branch")
