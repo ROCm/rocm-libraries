@@ -143,8 +143,10 @@ namespace rocsparse
         }
     }
 
-    // Copy an array
-    template <uint32_t BLOCKSIZE, typename I, typename J>
+    // Copy an array. GRID_STRIDE must be true when the grid was clamped below
+    // (size - 1) / BLOCKSIZE + 1 blocks. Without the clamp the grid holds at
+    // most 2^32 - 1 work-items, so size and idx fit in 32 bits.
+    template <uint32_t BLOCKSIZE, bool GRID_STRIDE, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void bsrgemm_copy(I size,
                       const J* __restrict__ in,
@@ -152,11 +154,23 @@ namespace rocsparse
                       rocsparse_index_base idx_base_in,
                       rocsparse_index_base idx_base_out)
     {
-        for(int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
-            idx < size;
-            idx += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
+        if constexpr(GRID_STRIDE)
         {
-            out[idx] = in[idx] - idx_base_in + idx_base_out;
+            for(int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+                idx < size;
+                idx += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
+            {
+                out[idx] = in[idx] - idx_base_in + idx_base_out;
+            }
+        }
+        else
+        {
+            const uint32_t idx = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+
+            if(idx < static_cast<uint32_t>(size))
+            {
+                out[idx] = in[idx] - idx_base_in + idx_base_out;
+            }
         }
     }
 
