@@ -3,6 +3,12 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## rocRAND 5.2.0 for ROCm 10.2.0
+
+### Optimized
+
+* Added `__restrict__` qualifiers to the device API benchmark, enabling better compiler optimization.
+
 ## rocRAND 5.1.0 for ROCm 10.1.0
 
 ### Optimized
