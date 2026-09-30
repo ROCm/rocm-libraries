@@ -225,6 +225,48 @@ def tdmPapRejectReason(ks):
                " + ".join("{%s}" % ",".join(g) for g in shared)))
 
 
+def tdmKDimField(ks, tc):
+    """(group1 dword whose high half holds `tc`'s K dim, dim units per k-tile), or None.
+
+    Unroll-major data tensors keep K in dim0; MX scales keep it in dim1, counted
+    in MatrixInstK groups. None where one per-k-tile step does not describe every
+    wave: K along a data tensor's dim1, the sparse side, or iterate mode.
+    """
+    pt = ks["ProblemType"]
+    du = ks["DepthU"]
+    if tc in TDM_SCALE_TENSORS:
+        return 2, du // ks["MatrixInstK"]
+    if pt["TLU%s" % tc] or pt.get("Sparse") or ks.get("_TDMIterateMode%s" % tc, False):
+        return None
+    dtype = pt["DataType%s" % tc]
+    if dtype.isFloat4():
+        return 1, du // 2
+    if dtype.is6bitFloat():
+        return 1, du // 4 * 3
+    return 1, du
+
+
+def tdmKDimStepIsAddrInc(ks, tc):
+    """True when `tc`'s K dim counts bytes, so its step is its own per-k-tile address increment."""
+    return tc not in TDM_SCALE_TENSORS and ks["ProblemType"]["DataType%s" % tc].numBytes() <= 1
+
+
+def tdmKDimTrackable(ks):
+    """True when one subtract per descriptor set can shrink every member's K dim.
+
+    Members must keep K in the same field. Their steps must match, or each must
+    equal its own address increment, which the set already selects per wave.
+    """
+    for group in liveGroups(ks):
+        fields = [tdmKDimField(ks, tc) for tc in group]
+        if None in fields or len({dword for dword, _ in fields}) != 1:
+            return False
+        if len({step for _, step in fields}) != 1 \
+           and not all(tdmKDimStepIsAddrInc(ks, tc) for tc in group):
+            return False
+    return True
+
+
 def tdmGroupPartner(ks, tc, fallback):
     """Return the other member of a two-member set, or `fallback`."""
     for group in tdmGrouping(ks).groups:

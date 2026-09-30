@@ -603,19 +603,14 @@ class ProblemPredicate(Properties.Predicate):
             # M-tile is safe because row m of C depends only on row m of A and the
             # edge store masks the rows past M.
             #
-            # K is a range, not a point: the loop shell owns every resident k-tile
-            # and leaves when the counter runs out, so any whole number of them up
-            # to the count the kernel holds works. It must land on a k-tile boundary
-            # because a section's registers are picked by a codegen-time k-tile
-            # number, and the floor is one because the InitCIterWmma clone that
-            # zeroes C lives inside the loop. SizeGreaterThan and SizeLessThan are
-            # strict, hence the -1 and +1.
+            # K is a range: the loop runs ceil(K / DepthU) resident k-tiles, a
+            # partial last one included because TDM clamps it at K, so any K up to
+            # the block the kernel holds works and ASEM's BoundSizeMultiple sets the
+            # granularity. K = 0 is out: the InitCIterWmma clone that zeroes C lives
+            # inside the loop. SizeLessThan is strict, hence the +1.
             kIdx = state['ProblemType']['NumIndicesC']
             kTiles = state['_RAPNumResidentKTiles']
-            floorTiles = 1
-            rv += [cls('SizeMultiple', index=kIdx, value=state['DepthU'])]
-            rv += [cls('SizeGreaterThan', index=kIdx,
-                       value=floorTiles * state['DepthU'] - 1)]
+            rv += [cls('SizeGreaterThan', index=kIdx, value=0)]
             rv += [cls('SizeLessThan', index=kIdx,
                        value=kTiles * state['DepthU'] + 1)]
 

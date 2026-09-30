@@ -53,7 +53,8 @@ from Tensile.Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrL
                                        pgrAutoPairRequested, \
                                        resolvePrefetchGlobalReadSpecialValues
 from Tensile.Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
-                                       tdmGroupingName, tdmPapRejectReason
+                                       tdmGroupingName, tdmPapRejectReason, \
+                                       tdmKDimTrackable
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload
 from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -3704,6 +3705,18 @@ class Solution(collections.abc.Mapping):
     state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockA"], state["AssertSummationElementMultiple"])
     state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockB"], state["AssertSummationElementMultiple"])
 
+    # Checked here rather than with ReuseAcrossPersistent's other conditions
+    # because the fp4/fp6 and MX overrides above run after depthUIteration and
+    # can leave a K remainder those never saw. A partial last k-tile is clamped
+    # by shrinking each descriptor's K dim as its address advances, one subtract
+    # per descriptor set, which needs every member of the set to keep K in the
+    # same field.
+    if state["Valid"] and state["ReuseAcrossPersistent"] \
+        and state["AssertSummationElementMultiple"] % state["DepthU"] != 0 \
+        and not tdmKDimTrackable(state):
+      reject(state, printRejectionReason, "ReuseAcrossPersistent with AssertSummationElementMultiple % DepthU != 0 requires TDM descriptor sets that keep K in one field (TDMFuse = 0, K-contiguous A and B that step K alike or by bytes, no sparse, no TDM iterate mode)")
+      return
+
     # We have the real "1LDSBuffer" value now, so we have to test the rejection condition here
     # TODO-
     #  On gfx1250, i8, f8, it seem working for 1LDSBuffer=0 "BUT EPS=0", haven't checked for other archs/types, so we still reject by 1LDSBuffer only
@@ -5401,8 +5414,12 @@ class Solution(collections.abc.Mapping):
 
     # NoTailLoop parameter initialization.
     # If ASEM is multiple of DepthU TailLoop will not be used.
+    # ReuseAcrossPersistent runs a partial last k-tile through the resident loop
+    # instead, so there NoTailLoop only means no tail is emitted: K need not be a
+    # multiple of DepthU.
     state["NoTailLoop"] = False
-    if state["AssertSummationElementMultiple"] % state["DepthU"] == 0:
+    if state["AssertSummationElementMultiple"] % state["DepthU"] == 0 \
+        or state.get("ReuseAcrossPersistent", 0):
       state["NoTailLoop"] = True
 
     # TailloopInNll optimization check
@@ -7230,9 +7247,6 @@ class Solution(collections.abc.Mapping):
         return
       if state["InnerUnroll"] != 1:
         reject(state, printRejectionReason, "ReuseAcrossPersistent requires InnerUnroll = 1")
-        return
-      if not state["NoTailLoop"]:
-        reject(state, printRejectionReason, "ReuseAcrossPersistent requires NoTailLoop (AssertSummationElementMultiple % DepthU == 0)")
         return
       if state["DirectToVgprA"] or state.get("DirectToVgprMXSA", False):
         reject(state, printRejectionReason, "ReuseAcrossPersistent is not supported with DirectToVgpr on A")

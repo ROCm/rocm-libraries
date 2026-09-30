@@ -84,7 +84,8 @@ from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
                                 tdmSharedScaleSetOwner, tdmSetOwner, tdmSetGroup, \
                                 tdmGrouping, tdmSharedSetOrder, tdmSharedScaleSetActive, \
                                 tdmMemberIsLive
-from .Components.TDMFuse import tdmWaveComponents, tdmWavePartition, tdmSoleWave, tdmWaveRangeText
+from .Components.TDMFuse import tdmWaveComponents, tdmWavePartition, tdmSoleWave, tdmWaveRangeText, \
+                                tdmKDimField, tdmKDimStepIsAddrInc
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
@@ -418,6 +419,62 @@ class KernelWriterAssembly(KernelWriter):
       % (withheld, batches, batchesWithout, neutralKTiles * kernel["DepthU"],
          self.rapResidentKTiles(kernel) * kernel["DepthU"]))
     self.states.overflowedResources = 9
+
+  def rapTracksKDim(self, kernel) -> bool:
+    """Does this RAP kernel shrink its TDM K dims as the loop advances?
+
+    Only one whose K can end in a partial k-tile: that k-tile runs through the
+    resident loop, and the descriptor clamps it at K only if its K dim, measured
+    from the moving base, has shrunk in step.
+    """
+    return bool(kernel["ReuseAcrossPersistent"]) \
+      and kernel["AssertSummationElementMultiple"] % kernel["DepthU"] != 0
+
+  def rapMxsKSplitOffsetExceedsOneGroup(self, kernel, tc) -> bool:
+    """Can a K-split scale wave's offset outrun the last k-tile's K groups?"""
+    numComp, _ = tdmWaveComponents(kernel, tc)
+    numMxKGroups = kernel["DepthU"] // kernel["MatrixInstK"]
+    if numMxKGroups < numComp:
+      return False
+    return (numComp - 1) * (numMxKGroups // numComp) > 1
+
+  def rapTdmShrinkKDim(self, kernel, tPA, tPB) -> Module:
+    """Shrink a descriptor set's K dim by the k-tile its address just advanced.
+
+    K < 2^16 keeps the dim's high half zero, so one subtract on the dword that
+    holds the low half is enough. Members stepping K differently count it in
+    bytes, so the per-wave address increment is the step. A scale wave whose K
+    offset can outrun the last k-tile clamps at zero rather than wrapping.
+    """
+    tcA, tcB = tPA["tensorChar"], tPB["tensorChar"]
+    module = Module("RAP shrink TDM K dim (%s/%s)" % (tcA, tcB))
+    fields = [tdmKDimField(kernel, tc) for tc in (tcA, tcB)]
+    assert None not in fields and fields[0][0] == fields[1][0], \
+      "%s/%s do not keep K in one field: %s" % (tcA, tcB, fields)
+    assert self.rapResidentKTiles(kernel) * kernel["DepthU"] < (1 << 16), \
+      "the TDM K dim's high half is not zero"
+    dword = fields[0][0]
+    group1 = "tdm%sGroup1+%u" % (self._tdmPairedParityOrder(kernel, tPA, tPB)[0]["tensorChar"], dword)
+    if fields[0][1] == fields[1][1]:
+      step = fields[0][1]
+      module.add(SSubU32(dst=sgpr(group1), src0=sgpr(group1), src1=hex(step << 16),
+                         comment="RAP: K dim -= %u, the k-tile the address just advanced" % step))
+    else:
+      assert tdmKDimStepIsAddrInc(kernel, tcA) and tdmKDimStepIsAddrInc(kernel, tcB), \
+        "%s/%s step K differently and not by bytes" % (tcA, tcB)
+      with self.allocTmpSgpr(1, tag="rapTdmShrinkKDimStep") as tmpSgprRes:
+        module.add(SLShiftLeftB32(dst=sgpr(tmpSgprRes.idx), shiftHex=hex(16), src=sgpr("tdm%s%sIncs" % (tcA, tcB)),
+                                  comment="RAP: this wave's K step is its address increment"))
+        module.add(SSubU32(dst=sgpr(group1), src0=sgpr(group1), src1=sgpr(tmpSgprRes.idx),
+                           comment="RAP: K dim -= the k-tile the address just advanced"))
+    if any(tc.startswith("MXS") and self.rapMxsKSplitOffsetExceedsOneGroup(kernel, tc)
+           for tc in (tcA, tcB)):
+      with self.allocTmpSgpr(1, tag="rapTdmShrinkKDim") as tmpSgprRes:
+        module.add(SCSelectB32(dst=sgpr(tmpSgprRes.idx), src0=hex(0x0000FFFF), src1=-1,
+                               comment="RAP: a borrow means this wave's K ran out"))
+        module.add(SAndB32(dst=sgpr(group1), src0=sgpr(group1), src1=sgpr(tmpSgprRes.idx),
+                           comment="RAP: clamp the K dim at zero"))
+    return module
 
   def rapNullTdmDescriptorForEvenWaves(self, kernel, groupSgprName) -> Module:
     """Stop this wave's next tensor_load_to_lds if it is the one carrying A.
@@ -20650,6 +20707,19 @@ class KernelWriterAssembly(KernelWriter):
             mod.add(SMulI32(sgpr(tmpSgprWaveOffset), sgpr(tmpSgprWaveOffset), round(mt // numComp), "woffset = wId * (mt // numComp)"))
             mod.add(SSubU32(sgpr(dim0), sgpr(dim0), sgpr(tmpSgprWaveOffset), "consider multiple waves"))
             mod.add(SCMovB32(sgpr(dim0), 0, "set to 0 for waves that no enough data to load"))
+          elif numComp > 1 and self.rapTracksKDim(kernel):
+            # K-splitting: this wave's K groups start compId * DepthU / numComp
+            # into each k-tile, so RAP's K dim has to start that much shorter for
+            # the partial last k-tile to clamp where the tail loop would.
+            if compShift == 1:
+              mod.add(VReadfirstlaneB32(sgpr(tmpSgprWaveOffset), vgpr("Serial"), "first tId"))
+              mod.add(SLShiftRightB32(sgpr(tmpSgprWaveOffset), ceil(log2(wavelen)) + 1, sgpr(tmpSgprWaveOffset), "wId=fTid // wavelen // 2"))
+            else:
+              self._emitTdmCompId(mod, kernel, tc, tmpSgprWaveOffset, waveIdxSgpr)
+            mod.add(SMulI32(sgpr(tmpSgprWaveOffset), sgpr(tmpSgprWaveOffset), kernel["DepthU"] // numComp, "RAP: this wave's K offset"))
+            mod.add(SSubU32(sgpr(tmpSgprWaveOffset), sgpr(dim1), sgpr(tmpSgprWaveOffset), "RAP: K left from this wave's base"))
+            mod.add(SCMovB32(sgpr(tmpSgprWaveOffset), 0, "RAP: no K left for this wave"))
+            dim1 = tmpSgprWaveOffset
           mod.add(comp.setTensorDim0(descSgprName(1), dim0, self, ceil(log2(mxUnit)), True))
           mod.add(comp.setTensorDim1(descSgprName(1), dim1, self, ceil(log2(duScale*mxUnit)), True))
 #        mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(ti), self, ceil(log2(mxUnit)), True))
@@ -21418,6 +21488,7 @@ class KernelWriterAssembly(KernelWriter):
     # Separate descriptors advance independently, each by its own GlobalReadIncs,
     # so the wrap is per tensor because the pointer it wraps is per tensor.
     if tdmSharedScaleSetActive(kernel):
+      assert not self.rapTracksKDim(kernel), "a shared scale set has no single K dim step"
       # Only the A/B call advances the shared scale set.
       if tcA != "A":
         return mod
@@ -21474,6 +21545,9 @@ class KernelWriterAssembly(KernelWriter):
                 src1=sgpr(incTmpLo, 2), comment="TDM addr += inc (with wrap, 64-bit)"))
     else:
       mod.add(comp.incrementGlobalAddr(self, tdmGroup0, incSgprName))
+
+    if self.rapTracksKDim(kernel):
+      mod.add(self.rapTdmShrinkKDim(kernel, tPA, tPB))
 
     if kernel["TDMSplit"] and not (("MXS" in tcA) or ("MXS" in tcB)) and not kernel["ProblemType"]["Sparse"]:
       # Recompute the split increments transiently (see _tdmSplitMultiWaveInc). The

@@ -31,11 +31,11 @@ GlobalParameters:
 # can fail on it. DataInitTypeA does not help -- SerialIdx is mapped away too.
 #
 # A rejected size looks like a pass. Sizes are a union across the MacroTiles in a
-# group, so each tile rejects the ones that miss its RAP predicates (M == MT0,
-# N % MT1 == 0, K a whole number of resident k-tiles). Those come back as
+# group, so each tile rejects the ones that miss its RAP predicate (K beyond its
+# resident block) or its ASEM multiple. Those come back as
 # DID_NOT_SATISFY_ASSERTS, which leaves clientExit at 0 -- and so does a build
 # that silently produced no kernel. Check the per-size verdicts, not the exit
-# code. A full run is 252 rows: 202 PASSED, 50 rejected, 0 FAILED, about 33
+# code. A full run is 516 rows: 494 PASSED, 22 rejected, 0 FAILED, about 18
 # minutes. No size is dead: every one of them runs on some tile.
 
 BenchmarkProblems:
@@ -267,8 +267,7 @@ BenchmarkProblems:
           - Exact: [128, 12288, 2, 1024]  # ceiling for 128x128
           # The M-tile and N-edge relaxations against the one data type whose A
           # really does differ per batch, so both halves of the entry guard are
-          # under load at once. MT 128x128 rejects the M=192 row (192 is not a
-          # multiple of 128) and takes the rest.
+          # under load at once. MT 128x128 takes the M=192 row as an M edge.
           - Exact: [192, 4096, 2, 512]    # nWG0=3 at 64x256, batch 2
           # Odd N, which these kernels can take because they derive
           # GlobalReadVectorWidthB 1 and so assert Free1ElementMultiple 1. The
@@ -341,5 +340,141 @@ BenchmarkProblems:
           - Exact: [64, 12288, 4, 256]    # K floor
           - Exact: [64, 12288, 4, 512]
           - Exact: [64, 12288, 4, 768]    # K ceiling
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################################################
+  # 5. A=F8 B=F4 (MX) -- K % DepthU != 0.
+  #    ASEM 32 leaves a partial last k-tile, which RAP runs through the resident
+  #    loop: each TDM descriptor's K dim shrinks with its address, so the clamp
+  #    stops that k-tile at K. A and B step K by 256 and 128 bytes, so each wave
+  #    shrinks by its own address increment. kTiles: 64x256 -> 8, 64x512 -> 3.
+  ########################################################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: F4
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: E8
+      DataTypeMXSB: E8
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2,  8,  2, 2] # MT 64x256
+          - [16, 16, 128, 1,  1,  2, 16,  2, 2] # MT 64x512
+        # Required by RAP.
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - TDMInst: [3]
+        - DepthU: [256]
+        - AssertSummationElementMultiple: [32]
+        - ExpandPointerSwap: [False]
+        - PrefetchGlobalRead: [2]
+        - PrefetchAcrossPersistent: [0,1]
+        - ReuseAcrossPersistent: [0,1]
+        # Rest of the audited configuration.
+        - ScheduleIterAlg: [4]
+        - StaggerU: [0]
+        - SourceSwap: [True]
+        - InitCIterWmma: [1]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 12288, 4, 32]     # the whole K is one partial k-tile
+          - Exact: [64, 12288, 4, 288]    # the second prologue load is the partial one
+          - Exact: [64, 12288, 2, 512]    # a whole number of k-tiles on a tracking kernel
+          - Exact: [64, 12288, 2, 736]    # the partial k-tile is 64x512's last
+          - Exact: [64, 12288, 1, 2016]   # the partial k-tile is 64x256's last
+          - Exact: [192, 4096, 1, 416]    # nWG0=3, the guard refills A every tile
+          - Exact: [130, 4098, 2, 288]    # M edge, N edge and a batch
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################################################
+  # 6. A=F8 B=F8 -- K % DepthU != 0, with the batch coverage MX lacks.
+  #    A partial k-tile past the first is where the K dim shrink matters:
+  #    without it that k-tile reads the next row's real data instead of zeros.
+  #    MX hides much of that behind the zero-padded scales of the blocks past
+  #    K, so this group is the discriminating one. kTiles: 64x256 -> 9,
+  #    128x128 -> 4.
+  ########################################################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: F8
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2,  8,  2, 2] # MT 64x256, kTiles 9
+          - [16, 16, 128, 1,  1,  4,  4,  2, 2] # MT 128x128, kTiles 4
+        # Required by RAP.
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - TDMInst: [3]
+        - DepthU: [256]
+        - AssertSummationElementMultiple: [32]
+        - ExpandPointerSwap: [False]
+        - PrefetchGlobalRead: [1,2]
+        - ReuseAcrossPersistent: [0,1]
+        - PrefetchAcrossPersistent: [0,1]
+        # Rest of the audited configuration.
+        - ScheduleIterAlg: [4]
+        - StaggerU: [0]
+        - SourceSwap: [True]
+        - InitCIterWmma: [1]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 12288, 4, 160]    # the whole K is one partial k-tile
+          - Exact: [64, 12288, 2, 480]    # the second prologue load is the partial one
+          - Exact: [128, 12288, 2, 992]   # the partial k-tile is 128x128's last
+          - Exact: [64, 12288, 1, 2272]   # the partial k-tile is 64x256's last
+          - Exact: [192, 4096, 2, 416]    # several M-tiles and a batch
+          - Exact: [129, 6145, 2, 288]    # both dims odd and partial, and a batch
         - ActivationArgs:
           - [Enum: none]
