@@ -15,6 +15,26 @@ namespace hipblaslt_jit
     // JitLibrary::process(). Null, with why set, when a tool is missing.
     std::shared_ptr<const Jit> processJit(Status& why);
 
+    // The JIT solutions for one heuristic query.
+    struct HeuristicFill
+    {
+        std::vector<int32_t> indices; // JIT library indices, published ones first
+        std::vector<Status>  failures; // in the order they happened
+        std::string          summary; // the backend's note, when it generated
+        bool                 repeated = false; // generation fell short before; not retried
+    };
+
+    // Up to count JIT library indices for request on device that need at most
+    // workspaceLimit and use none of excludeKernels: solutions already published
+    // for exactly this problem, then new ones processJit() generates and
+    // publishes. One thread at a time generates a problem, and a problem whose
+    // generation fell short is not generated again in this process.
+    HeuristicFill fillHeuristic(const OperationRequest&         request,
+                                int                             device,
+                                size_t                          count,
+                                size_t                          workspaceLimit,
+                                const std::vector<std::string>& excludeKernels);
+
     enum class Severity
     {
         Warning,

@@ -3,6 +3,7 @@
 
 #include "hipblaslt-jit-component.hpp"
 #include "hipblaslt-jit-gemm-internal.hpp"
+#include "hipblaslt-jit-heuristic.hpp"
 #include "hipblaslt-jit-library.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
 #include "hipblaslt_internal.hpp"
@@ -10,6 +11,8 @@
 #include "rocblaslt_arch_revision.hpp"
 #include <Tensile/hip/HipHardware.hpp>
 #include <algorithm>
+#include <map>
+#include <memory>
 #include <mutex>
 #include <random>
 #include <stdexcept>
@@ -130,6 +133,111 @@ namespace hipblaslt_jit
         makeLibraryStore(JitLibrary& library, const BackendInfo& backend, int codeObjectVersion)
     {
         return std::make_shared<const LibraryStore>(library, backend, codeObjectVersion);
+    }
+
+    namespace
+    {
+        struct Generation
+        {
+            std::mutex mutex;
+            bool       fellShort = false;
+        };
+
+        // One per problem this process has tried to generate; never removed.
+        Generation& generation(const std::string& key)
+        {
+            static auto*                guard = new std::mutex;
+            static auto*                all = new std::map<std::string, std::unique_ptr<Generation>>;
+            std::lock_guard<std::mutex> lock(*guard);
+            auto&                       entry = (*all)[key];
+            if(!entry)
+                entry = std::make_unique<Generation>();
+            return *entry;
+        }
+
+        std::string generationKey(const OperationRequest& request,
+                                  const DeviceTarget&     target,
+                                  size_t                  workspaceLimit)
+        {
+            using GemmRequest = hipblaslt_ext::experimental::jit::detail::GemmRequest;
+            auto key          = target.targetId + '\n' + std::to_string(workspaceLimit);
+            if(const auto* gemm = dynamic_cast<const GemmRequest*>(&request))
+            {
+                const auto problem = lowerForJit(*gemm);
+                key += '\n' + problemTypeKey(problem);
+                for(auto size : problemSizes(problem))
+                    key += ' ' + std::to_string(size);
+            }
+            return key;
+        }
+    }
+
+    HeuristicFill fillHeuristic(const OperationRequest&         request,
+                                int                             device,
+                                size_t                          count,
+                                size_t                          workspaceLimit,
+                                const std::vector<std::string>& excludeKernels)
+    {
+        HeuristicFill fill;
+        try
+        {
+            Status       status;
+            const auto   jit = processJit(status);
+            DeviceTarget target;
+            if(status.ok())
+                status = DeviceTarget::make(device, target);
+            const auto lookup = [&] {
+                status = jit->components().store->lookup(
+                    request, target, count, workspaceLimit, excludeKernels, fill.indices);
+                if(!status.ok())
+                    status.stage = Stage::Lookup;
+                return status.ok();
+            };
+            if(!status.ok() || !lookup())
+            {
+                fill.failures.push_back(std::move(status));
+                return fill;
+            }
+            if(fill.indices.size() >= count)
+                return fill;
+
+            auto& generating = generation(generationKey(request, target, workspaceLimit));
+            std::lock_guard<std::mutex> lock(generating.mutex);
+            // Another thread may have published this problem while this one waited.
+            if(!lookup())
+            {
+                fill.failures.push_back(std::move(status));
+                return fill;
+            }
+            if(fill.indices.size() >= count)
+                return fill;
+            if(generating.fellShort)
+            {
+                fill.repeated = true;
+                return fill;
+            }
+            auto exclude = excludeKernels;
+            for(auto index : fill.indices)
+            {
+                Status why;
+                if(auto solution = JitLibrary::process().solutionByIndex(
+                       device, *target.hardware, index, why))
+                    exclude.push_back(solution->kernelName);
+            }
+            auto outcome = jit->generate(
+                request, target, count - fill.indices.size(), workspaceLimit, exclude);
+            for(auto index : outcome.indices)
+                if(std::find(fill.indices.begin(), fill.indices.end(), index) == fill.indices.end())
+                    fill.indices.push_back(index);
+            fill.failures        = std::move(outcome.failures);
+            fill.summary         = std::move(outcome.summary);
+            generating.fellShort = fill.indices.size() < count;
+        }
+        catch(const std::exception& e)
+        {
+            fill.failures.push_back({Status::Code::Failed, Stage::Configure, e.what()});
+        }
+        return fill;
     }
 }
 

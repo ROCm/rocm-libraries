@@ -175,6 +175,10 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                     result.emplace_back(value.name, value.json);
                 return json::object(result);
             };
+            // Heuristic queries have no buffers, so C and D compare equal even when their
+            // layouts differ; Tensile rejects C equal to D unless the strides match.
+            const bool cEqualsD
+                = problem.cEqualsD() && problem.c().strides() == problem.d().strides();
             std::ostringstream out;
             out << std::setprecision(17) << std::boolalpha;
             out << "{\n\"schema_version\":1,\"modeled_contract\":" << json::quote(prediction.modeledContract)
@@ -183,7 +187,7 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                 << ",\"problem_type\":" << json::object(hipblaslt_jit::problemTypeFields(problem))
                 << ",\"problem\":{\"m\":" << gemm.m << ",\"n\":" << gemm.n << ",\"k\":" << gemm.k
                 << ",\"batch\":" << gemm.batch << ",\"transpose_a\":" << gemm.transA
-                << ",\"transpose_b\":" << gemm.transB << ",\"c_equals_d\":" << problem.cEqualsD()
+                << ",\"transpose_b\":" << gemm.transB << ",\"c_equals_d\":" << cEqualsD
                 << ",\"num_cus\":" << static_cast<size_t>(problem.getParams().smCountTarget());
             if(problem.mxBlockA() || problem.mxBlockB())
                 out << ",\"scale_mode_a\":"

@@ -214,6 +214,28 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   const int              requestedAlgoCount,
                                   std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults);
 
+#ifdef HIPBLASLT_ENABLE_JIT
+/*******************************************************************************
+ * jitHeuristicFill() appends JIT solutions until there are requestedAlgoCount *
+ * results, skipping kernels the existing results already use, and reports     *
+ * every failure. It never throws.                                             *
+ *******************************************************************************/
+void jitHeuristicFill(rocblaslt_handle                  handle,
+                      RocblasltContractionProblem&      prob,
+                      std::shared_ptr<void>             gemmData,
+                      int                               requestedAlgoCount,
+                      size_t                            maxWorkSpaceBytes,
+                      rocblaslt_matmul_heuristic_result heuristicResultsArray[],
+                      int*                              returnAlgoCount);
+
+void jitHeuristicFill(rocblaslt_handle                                handle,
+                      rocblaslt::RocGemmType                          gemmType,
+                      std::shared_ptr<void>                           gemmData,
+                      int                                             requestedAlgoCount,
+                      size_t                                          maxWorkSpaceBytes,
+                      std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults);
+#endif
+
 /******************************************************
  * Map a hipblaslt data type to a corresponding Tensile type *
  ******************************************************/

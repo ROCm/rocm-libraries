@@ -41,6 +41,7 @@
 #include <cstring>
 #endif
 
+#include "../../hipblaslt-jit-mode.hpp"
 #include "UserDrivenTuningParser.hpp"
 #include "definitions.h"
 #include "handle.h"
@@ -2366,6 +2367,24 @@ rocblaslt_status
             TensileLite::Debug::Instance().setExcludedLibFromGetAll(emptySet);
         }
 
+#ifdef HIPBLASLT_ENABLE_JIT
+        if(hipblaslt_jit::mode() == hipblaslt_jit::Mode::Fallback
+           && *returnAlgoCount < requestedAlgoCount)
+        {
+            const int found = *returnAlgoCount;
+            jitHeuristicFill(handle,
+                             prob,
+                             tensile_data,
+                             requestedAlgoCount,
+                             pref->max_workspace_bytes,
+                             heuristicResultsArray,
+                             returnAlgoCount);
+            if(*returnAlgoCount > found)
+                status = rocblaslt_status_success;
+            log_api(__func__, "returnAlgoCount with JIT", *returnAlgoCount);
+        }
+#endif
+
         if(status != rocblaslt_status_success)
         {
             throw status;
@@ -2631,6 +2650,19 @@ rocblaslt_status
             // reset
             TensileLite::Debug::Instance().setExcludedLibFromGetAll(emptySet);
         }
+
+#ifdef HIPBLASLT_ENABLE_JIT
+        if(hipblaslt_jit::mode() == hipblaslt_jit::Mode::Fallback
+           && results.size() < static_cast<size_t>(requestedAlgoCount))
+        {
+            const size_t found = results.size();
+            jitHeuristicFill(
+                handle, gemmType, gemmData, requestedAlgoCount, maxWorkspaceBytes, results);
+            if(results.size() > found)
+                status = rocblaslt_status_success;
+            log_api(__func__, "returnAlgoCount with JIT", results.size());
+        }
+#endif
 
         log_api(__func__, "duplicated counts from getAll", duplicated_counts);
 
