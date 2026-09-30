@@ -72,7 +72,8 @@ namespace rocsparse
     // (dir == rocsparse_direction_column) into the COO matrix target, which must have the
     // same sizes, types, index base and batch layout as source. Each array of target may
     // either alias the matching array of source, in which case it is sorted in place, or
-    // not overlap it at all. Each batch is sorted independently.
+    // not overlap it at all. The batches must be uniform: they all share the sparsity
+    // pattern of the first batch, and only their values differ.
     rocsparse_status coosort(rocsparse_handle            handle,
                              rocsparse_coosort_alg       alg,
                              rocsparse_direction         dir,
