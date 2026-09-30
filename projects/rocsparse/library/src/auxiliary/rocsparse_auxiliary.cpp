@@ -509,6 +509,21 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_datatype value_)
 }
 
 template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_hyb_partition value)
+{
+    switch(value)
+    {
+    case rocsparse_hyb_partition_auto:
+    case rocsparse_hyb_partition_user:
+    case rocsparse_hyb_partition_max:
+    {
+        return false;
+    }
+    }
+    return true;
+}
+
+template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_order value_)
 {
     switch(value_)

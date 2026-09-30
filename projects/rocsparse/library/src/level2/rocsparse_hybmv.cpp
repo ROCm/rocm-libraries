@@ -49,21 +49,6 @@ const char* rocsparse::enum_utils::to_string(rocsparse_hyb_partition value)
 }
 // LCOV_EXCL_STOP
 
-template <>
-bool rocsparse::enum_utils::is_invalid(rocsparse_hyb_partition value)
-{
-    switch(value)
-    {
-    case rocsparse_hyb_partition_auto:
-    case rocsparse_hyb_partition_user:
-    case rocsparse_hyb_partition_max:
-    {
-        return false;
-    }
-    }
-    return true;
-}
-
 template <typename T>
 rocsparse_status rocsparse::hybmv_template(rocsparse_handle          handle,
                                            rocsparse_operation       trans,
