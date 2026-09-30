@@ -312,7 +312,7 @@ namespace TensileLite
                 ("a2a-multigpu-skew-gemm-us",po::value<int>()->default_value(0), "Microseconds of busy-wait the a2a-multigpu arm enqueues on the last rank's stream between the second boundary barrier and the GEMM.")
                 ("a2a-multigpu-war-barrier", po::value<int>()->default_value(1), "Enqueue the a2a-multigpu arm's boundary barrier ahead of the x rewrite (1=on). At 0 the arm keeps only the barrier ahead of the GEMM, which leaves a rewrite racing a peer's in-flight read of x untested.")
                 ("a2a-multigpu-time",        po::value<int>()->default_value(0), "Report the a2a-multigpu arm's makespan (1=on). The arm synchronizes after staging x and the gathered buffer, then times the flag reset, the boundary barrier and the GEMM across all ranks. Requires --a2a-multigpu-batch 1.")
-                ("a2a-multigpu-sdma-spread", po::value<int>()->default_value(0), "Give each xGMI port group at most one of a rank's peer queues in the a2a-multigpu arm (1=on). A group's second queue moves to the lowest even engine id whose own group this rank has not taken. At 0 every queue keeps the KFD recommendation.")
+                ("a2a-multigpu-sdma-rotate", po::value<int>()->default_value(0), "Move each peer queue of the a2a-multigpu arm k steps along the even xGMI engines 2,4,...,14 from its KFD recommendation (gfx950 only). At 0 every queue keeps the KFD recommendation.")
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
 
                 ("num-warmups",              po::value<int>()->default_value(0), "Number of warmups to run")

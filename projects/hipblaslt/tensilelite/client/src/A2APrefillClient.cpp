@@ -384,13 +384,6 @@ namespace TensileLite
             // Launch i rewrites x with variant i % A2A_X_VARIANTS.
             constexpr int A2A_X_VARIANTS = 8;
 
-            // Port group an xGMI engine drives: e4-7, e8-11 and e12-15 each serve
-            // the two ports of one group; e0-3 have none (-1).
-            inline int a2aPortGroup(uint32_t engine)
-            {
-                return engine >= 4 ? (int)((engine - 4) / 4) : -1;
-            }
-
             void a2aFillX(int variant, size_t n, std::vector<BFloat16>& hostX)
             {
                 const uint64_t base = 0x5A2Aull + (uint64_t)variant * 0x1000003ull;
@@ -628,6 +621,7 @@ namespace TensileLite
                 const int skewGemmUs = std::max(0, args["a2a-multigpu-skew-gemm-us"].as<int>());
                 const bool warBarrier = args["a2a-multigpu-war-barrier"].as<int>() != 0;
                 const bool timing     = args["a2a-multigpu-time"].as<int>() != 0;
+                const int  rotate     = args["a2a-multigpu-sdma-rotate"].as<int>();
 
                 int deviceCount = 0;
                 HIP_CHECK_EXC(hipGetDeviceCount(&deviceCount));
@@ -642,6 +636,17 @@ namespace TensileLite
                     std::cerr << "[a2a-multigpu] ERROR: timing needs batch 1, got " << batch
                               << std::endl;
                     return 1;
+                }
+                for(int d = 0; rotate != 0 && d < W; d++)
+                {
+                    hipDeviceProp_t prop;
+                    HIP_CHECK_EXC(hipGetDeviceProperties(&prop, d));
+                    if(std::string(prop.gcnArchName).find("gfx950") == std::string::npos)
+                    {
+                        std::cerr << "[a2a-multigpu] ERROR: sdma-rotate needs gfx950, device " << d
+                                  << " is " << prop.gcnArchName << std::endl;
+                        return 1;
+                    }
                 }
 
                 uint64_t wallTicksPerUs = 0;
@@ -770,7 +775,6 @@ namespace TensileLite
                 // enqueued.
                 std::vector<std::vector<std::unique_ptr<SdmaQueue>>> queues(W);
                 {
-                    const bool spread = args["a2a-multigpu-sdma-spread"].as<int>() != 0;
                     std::vector<uint32_t> nodes(W);
                     for(int j = 0; j < W; j++)
                         nodes[j] = sdmaNodeIdForDevice(j);
@@ -780,45 +784,19 @@ namespace TensileLite
                         std::vector<uint32_t> engine(W);
                         for(int j = 0; j < W; j++)
                             engine[j] = sdmaSelectEngine(nodes[d], nodes[j]);
-                        if(spread)
+                        for(int j = 0; rotate != 0 && j < W; j++)
                         {
-                            uint32_t         usedEngines = 0, usedGroups = 0;
-                            std::vector<int> regroup;
-                            for(int j = 0; j < W; j++)
+                            if(j == d)
+                                continue;
+                            if(engine[j] < 2 || engine[j] > 14 || engine[j] % 2 != 0)
                             {
-                                if(j == d)
-                                    continue;
-                                const int g = a2aPortGroup(engine[j]);
-                                if(g >= 0 && (usedGroups & (1u << g)))
-                                {
-                                    regroup.push_back(j);
-                                    continue;
-                                }
-                                if(g >= 0)
-                                    usedGroups |= 1u << g;
-                                usedEngines |= 1u << engine[j];
+                                std::cerr << "[a2a-multigpu] ERROR: sdma-rotate needs an even "
+                                             "engine in 2..14, rank "
+                                          << d << "'s queue to rank " << j << " has " << engine[j]
+                                          << std::endl;
+                                return 1;
                             }
-                            for(int j : regroup)
-                            {
-                                uint32_t c = 2;
-                                for(; c <= 14; c += 2)
-                                {
-                                    const int cg = a2aPortGroup(c);
-                                    if((usedEngines & (1u << c))
-                                       || (cg >= 0 && (usedGroups & (1u << cg))))
-                                        continue;
-                                    engine[j] = c;
-                                    usedEngines |= 1u << c;
-                                    if(cg >= 0)
-                                        usedGroups |= 1u << cg;
-                                    break;
-                                }
-                                if(c > 14)
-                                    std::cerr << "[a2a-multigpu] WARNING: sdma-spread found no free "
-                                                 "port group for rank "
-                                              << d << "'s queue to rank " << j << ", keeping engine "
-                                              << engine[j] << std::endl;
-                            }
+                            engine[j] = 2 + 2 * ((((int)engine[j] - 2) / 2 + rotate % 7 + 7) % 7);
                         }
                         for(int j = 0; j < W; j++)
                             queues[d].push_back(
