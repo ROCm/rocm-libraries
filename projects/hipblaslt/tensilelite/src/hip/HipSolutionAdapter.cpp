@@ -47,6 +47,12 @@ namespace TensileLite
         {
         }
 
+        SolutionAdapter::SolutionAdapter(ModuleApi moduleApi)
+            : SolutionAdapter()
+        {
+            m_moduleApi = moduleApi;
+        }
+
         SolutionAdapter::SolutionAdapter(bool debug)
             : m_debug(debug)
         {
@@ -64,23 +70,19 @@ namespace TensileLite
         {
             Debug::Instance().markerStart("UnloadCodeObjectFiles");
             for(auto module : m_modules)
-                HIP_CHECK_PRINT(hipModuleUnload(module),
-                    [&](hipError_t error) {
-                        std::cerr << "hipModuleUnload failed: " << std::endl
-                                << " error: " << hipGetErrorString(error) << std::endl;
-                    }
-                );
+                HIP_CHECK_PRINT(m_moduleApi.unload(module), [&](hipError_t error) {
+                    std::cerr << "hipModuleUnload failed: " << std::endl
+                              << " error: " << hipGetErrorString(error) << std::endl;
+                });
             // Extra rotation copies are independent hipModule_t handles loaded
             // by loadCodeObjectFileExtraCopies(); they own their own device
             // memory and must be unloaded too or we leak it per copy.
             for(auto const& copyModules : m_extraModuleCopies)
                 for(auto module : copyModules)
-                    HIP_CHECK_PRINT(hipModuleUnload(module),
-                        [&](hipError_t error) {
-                            std::cerr << "hipModuleUnload failed: " << std::endl
-                                    << " error: " << hipGetErrorString(error) << std::endl;
-                        }
-                    );
+                    HIP_CHECK_PRINT(m_moduleApi.unload(module), [&](hipError_t error) {
+                        std::cerr << "hipModuleUnload failed: " << std::endl
+                                  << " error: " << hipGetErrorString(error) << std::endl;
+                    });
             Debug::Instance().markerStop();
         }
 
@@ -129,11 +131,11 @@ namespace TensileLite
             }
 
             // Reset the error code from the failed hipModuleLoad.
-            (void)hipGetLastError();
+            (void)m_moduleApi.getLastError();
             std::cout << "Clearing modules and retrying hipModuleLoad" << std::endl;
             for(auto module : m_modules)
             {
-                HIP_CHECK_PRINT(hipModuleUnload(module), [&](hipError_t error_t) {
+                HIP_CHECK_PRINT(m_moduleApi.unload(module), [&](hipError_t error_t) {
                     std::cerr << "hipModuleUnload failed: " << std::endl
                               << " error: " << hipGetErrorString(error_t) << std::endl;
                 });
@@ -151,7 +153,7 @@ namespace TensileLite
             {
                 for(auto module : copyModules)
                 {
-                    HIP_CHECK_PRINT(hipModuleUnload(module), [&](hipError_t error_t) {
+                    HIP_CHECK_PRINT(m_moduleApi.unload(module), [&](hipError_t error_t) {
                         std::cerr << "hipModuleUnload failed: " << std::endl
                                   << " error: " << hipGetErrorString(error_t) << std::endl;
                     });
@@ -189,7 +191,7 @@ namespace TensileLite
             Debug::Instance().markerStart("loadCodeObjectFile", path);
             hipModule_t module;
 
-            hipError_t error = hipModuleLoad(&module, path.c_str());
+            hipError_t error = m_moduleApi.load(&module, path.c_str());
             if(error != hipSuccess)
             {
                 Debug::Instance().markerStop();
@@ -384,7 +386,7 @@ namespace TensileLite
                 }
                 else
                 {
-                    (void)hipGetLastError(); // clear hipErrorNotFound
+                    (void)m_moduleApi.getLastError(); // clear hipErrorNotFound
                 }
             }
 
@@ -414,7 +416,7 @@ namespace TensileLite
             for(int i = 0; i < extraCopies; ++i)
             {
                 hipModule_t module;
-                hipError_t  error = hipModuleLoad(&module, path.c_str());
+                hipError_t  error = m_moduleApi.load(&module, path.c_str());
                 if(error != hipSuccess)
                 {
                     std::cerr << "loadCodeObjectFileExtraCopies hipModuleLoad failed: " << path
@@ -519,7 +521,7 @@ namespace TensileLite
                     {
                         // We expect that we could fail for cases when we have xnack variations
                         // so clear hipErrorFileNotFound between iterations.
-                        (void)hipGetLastError();
+                        (void)m_moduleApi.getLastError();
                     }
                 }
 

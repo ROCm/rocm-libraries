@@ -43,7 +43,17 @@ namespace TensileLite
         class TENSILELITEHOST_EXPORT SolutionAdapter : public TensileLite::SolutionAdapter
         {
         public:
+            // Keep file-module operations together so load/recovery behavior can
+            // be tested without a GPU or process-wide HIP symbol interposition.
+            struct ModuleApi
+            {
+                decltype(&hipModuleLoad)   load         = hipModuleLoad;
+                decltype(&hipModuleUnload) unload       = hipModuleUnload;
+                decltype(&hipGetLastError) getLastError = hipGetLastError;
+            };
+
             SolutionAdapter();
+            explicit SolutionAdapter(ModuleApi moduleApi);
             SolutionAdapter(bool debug);
             SolutionAdapter(bool debug, std::string const& name);
             ~SolutionAdapter();
@@ -117,6 +127,7 @@ namespace TensileLite
             hipError_t loadCodeObjectFileOnce(std::string const& path);
             hipError_t getKernel(hipFunction_t& rv, std::string const& name);
 
+            ModuleApi  m_moduleApi;
             std::mutex m_access;
 
             std::vector<hipModule_t>                       m_modules;

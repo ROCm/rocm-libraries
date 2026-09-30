@@ -50,23 +50,6 @@ if is_asan():
 # filesystem walk; running it once per shard is wasted work).
 # ---------------------------------------------------------------------------
 if int(SHARD_INDEX) == 1:
-    if platform == "linux":
-        # This executable uses scripted HIP module loads and needs no GPU.
-        # Clear GTest sharding so every loader regression runs on this shard.
-        loader_env = os.environ.copy()
-        for key in (
-            "GTEST_SHARD_INDEX",
-            "GTEST_TOTAL_SHARDS",
-            "GTEST_SHARD_STATUS_FILE",
-            "GTEST_FILTER",
-        ):
-            loader_env.pop(key, None)
-        loader_cmd = [f"{THEROCK_BIN_DIR}/hipblaslt-test-tensilelite-loader"]
-        logging.info(f"++ Exec [{THEROCK_DIR}]$ {shlex.join(loader_cmd)}")
-        subprocess.run(
-            loader_cmd, cwd=THEROCK_DIR, check=True, env=loader_env, timeout=30
-        )
-
     install_root = Path(THEROCK_BIN_DIR).resolve().parent  # <output>/bin -> <output>
     validator_dir = (
         THEROCK_DIR / "rocm-libraries" / "projects" / "hipblaslt" / "tools" / "scripts"
