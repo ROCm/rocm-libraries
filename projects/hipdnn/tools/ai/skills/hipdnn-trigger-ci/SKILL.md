@@ -54,23 +54,25 @@ Multi-arch has further dispatch inputs (`prebuilt_stages`, `baseline_run_id`, `b
 
 ## Test reference
 
-Sources, all at the pinned TheRock ref: [fetch_test_configurations.py](https://github.com/ROCm/TheRock/blob/7440cb8578f4daae0d85a428fadd6645dc5464a0/build_tools/github_actions/fetch_test_configurations.py) (component matrix and label matching), [configure_multi_arch_ci.py](https://github.com/ROCm/TheRock/blob/7440cb8578f4daae0d85a428fadd6645dc5464a0/build_tools/github_actions/configure_multi_arch_ci.py) (`_determine_test_type`), [test_runner.py](https://github.com/ROCm/TheRock/blob/7440cb8578f4daae0d85a428fadd6645dc5464a0/build_tools/github_actions/test_executable_scripts/test_runner.py) (ctest invocation) and [amdgpu_family_matrix.py](https://github.com/ROCm/TheRock/blob/7440cb8578f4daae0d85a428fadd6645dc5464a0/build_tools/github_actions/amdgpu_family_matrix.py). Re-read them if the pin in `.github/actions/ci-env/action.yml` has moved.
+Sources, all at the pinned TheRock ref: [fetch_test_configurations.py](https://github.com/ROCm/TheRock/blob/7440cb8578f4daae0d85a428fadd6645dc5464a0/build_tools/github_actions/fetch_test_configurations.py) (component matrix and label matching), [configure_multi_arch_ci.py](https://github.com/ROCm/TheRock/blob/7440cb8578f4daae0d85a428fadd6645dc5464a0/build_tools/github_actions/configure_multi_arch_ci.py) (`_determine_test_type`), [test_runner.py](https://github.com/ROCm/TheRock/blob/7440cb8578f4daae0d85a428fadd6645dc5464a0/build_tools/github_actions/test_executable_scripts/test_runner.py) (ctest invocation), [amdgpu_family_matrix.py](https://github.com/ROCm/TheRock/blob/7440cb8578f4daae0d85a428fadd6645dc5464a0/build_tools/github_actions/amdgpu_family_matrix.py) and [test_artifacts.yml](https://github.com/ROCm/TheRock/blob/7440cb8578f4daae0d85a428fadd6645dc5464a0/.github/workflows/test_artifacts.yml) (sanity gate and component test jobs). Re-read them if the pin in `.github/actions/ci-env/action.yml` has moved.
 
 ### Component labels
 
-`--test-labels` values are the `linux_test_labels` / `windows_test_labels` workflow_dispatch inputs, not GitHub PR labels. Each label names one TheRock test component. The `test:` prefix is optional (`test:hipdnn` and `hipdnn` select the same component) and matching is exact. The `sanity` component always runs. With no labels, every component that applies to the family and platform runs.
+`--test-labels` values are the `linux_test_labels` / `windows_test_labels` workflow_dispatch inputs, not GitHub PR labels. The string is passed through as is, so no matching label has to exist in the repo. Each label is a key of `test_matrix` in `fetch_test_configurations.py` and selects one TheRock test component. The `test:` prefix is optional (it is stripped, so `test:hipdnn` and `hipdnn` select the same component) and matching is exact. The `sanity` component always runs and gates the rest: component test jobs start only after it passes (`test_components` needs `test_sanity_check` in `test_artifacts.yml`). With no labels, every component that applies to the family and platform runs.
 
 hipDNN components (all run on Linux and Windows, one shard, 30-minute timeout):
 
-| Label | Artifacts fetched | CTest directory in the test job |
+| Label | `fetch_artifact_args` | CTest directory in the test job |
 |---|---|---|
-| `test:hipdnn` | hipDNN | `hipdnn` |
+| `test:hipdnn` | `--hipdnn --tests` | `hipdnn` |
 | `test:hipdnn_install` | none | none (runs `test_hipdnn_install.py`) |
-| `test:hipdnn-integration-tests` | hipDNN, integration tests | `hipdnn_integration_tests_ctest` |
-| `test:hipdnn-samples` | BLAS, MIOpen, hipDNN, MIOpen provider, samples | `hipdnn_samples` |
-| `test:miopenprovider` | BLAS, MIOpen, hipDNN, MIOpen provider, integration tests | `miopen_plugin` |
-| `test:hipblasltprovider` | BLAS, hipDNN, hipBLASLt provider, integration tests | `hipblaslt_plugin` |
-| `test:hipkernelprovider` | hipDNN, hip-kernel-provider, integration tests | `hip_kernel_provider` (installs the rocKE wheels first) |
+| `test:hipdnn-integration-tests` | `--hipdnn --hipdnn-integration-tests --tests` | `hipdnn_integration_tests_ctest` |
+| `test:hipdnn-samples` | `--blas --miopen --hipdnn --miopenprovider --hipdnn-samples --tests` | `hipdnn_samples` |
+| `test:miopenprovider` | `--blas --miopen --hipdnn --miopenprovider --hipdnn-integration-tests --tests` | `miopen_plugin` |
+| `test:hipblasltprovider` | `--blas --hipdnn --hipblasltprovider --hipdnn-integration-tests --tests` | `hipblaslt_plugin` |
+| `test:hipkernelprovider` | `--hipdnn --hipkernelprovider --hipdnn-integration-tests --tests` | `hip_kernel_provider` (installs the rocKE wheels first) |
+
+`test:hipdnn_install` uses an underscore; `test:hipdnn-install` matches nothing. The three provider labels also fetch `--hipdnn-integration-tests` and exercise the integration-test harness, so for a change under `dnn-providers/integration-tests` select `test:hipdnn-integration-tests,test:miopenprovider,test:hipblasltprovider,test:hipkernelprovider`.
 
 Other components use their own names (for example `test:rocblas`, `test:hipblaslt`); read the component matrix for the full list. Do not invent labels: an unknown label matches no component, so only sanity runs.
 
