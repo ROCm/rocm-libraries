@@ -22,7 +22,7 @@ from Tensile.Components.Subtile.SubtileScaleEmit import (
 from rocisa.code import Module
 from rocisa.instruction import (
     SWaitCnt, SBarrier, DSLoadB32, SCmpEQU32, SCmpLeU32,
-    SCBranchSCC1, SMovB32, VAddU32, VAndB32, VCmpGEI32, VCmpGTI32, VCmpLeI32,
+    SCBranchSCC1, SMovB32, SAddU32, SAddCU32, VAddU32, VAndB32, VCmpGEI32, VCmpGTI32, VCmpLeI32,
     VCmpLtI32, VCndMaskB32, VLShiftLeftB32, VLShiftRightB32, VMovB32, VSubI32,
 )
 from rocisa.instruction import SWaitTensorcnt
@@ -258,13 +258,23 @@ class InstructionEmitter:
         if tensor in ('A', 'B'):
             ti = self.tileInfoMap[tensor]
             grGran = self.config.grA if tensor == 'A' else self.config.grB
-            uid_k_base = placement.unrollId * grGran.k
+            uid = placement.unrollId
+            uid_k_base = uid * grGran.k
             subtileShapeK = int(ti.subtileShape[1])
+            extraG = extraL = 0
+            if placement.uidOffset and uid > 0:
+                # uid u: K-slice at +u*DU bytes from the shared SRD; LDS
+                # buffer alternates per uid (what the per-uid swap used to do).
+                assert not self.kernel.get("enableTDM%s" % tensor, False)
+                extraG = uid * int(ti.depthUBytes)
+                extraL = (uid % 2) * int(self.writer.ldsTotalSize)
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):
                     subtileK = (k - uid_k_base) // subtileShapeK
                     module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK,
-                                                    writer=self.writer))
+                                                    writer=self.writer,
+                                                    extraGlobalBytes=extraG,
+                                                    extraLdsBytes=extraL))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             module.add(globalReadDoScaleSubtile(tc, self.writer, self.kernel))
@@ -333,11 +343,21 @@ class InstructionEmitter:
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
         module = Module()
+        numSteps = getattr(source, 'numSteps', 1)
         if tensor in ('SA', 'SB'):
+            assert numSteps == 1
             module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel))
-        else:
+        elif numSteps == 1:
             module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
-        module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
+        else:
+            assert not self.kernel.get("enableTDM%s" % tensor, False)
+            inc = numSteps * int(self.tileInfoMap[tensor].depthUBytes)
+            module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc,
+                               comment=f"{tc}: advance SRD by {inc} bytes ({numSteps} uids)"))
+            module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
+                                comment=f"{tc}: carry"))
+        if getattr(source, 'swap', True):
+            module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
     def emit_gl2_prefetch(self):

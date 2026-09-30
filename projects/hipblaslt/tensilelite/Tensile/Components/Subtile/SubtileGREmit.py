@@ -1546,8 +1546,14 @@ def _grComputeSubtileOffsets_tlu(writer, module, tileInfo):
 ##################################################
 # Subroutine to generate GR load code
 #
-def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
+def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None,
+                         extraGlobalBytes=0, extraLdsBytes=0):
   """Emit buffer_load instructions for a single subtile (sId0, sId1).
+
+  extraGlobalBytes/extraLdsBytes: constant K-offset (folded into offset12) and
+  LDS-buffer offset (folded into m0) — used by multi-DU uid>0 loads that share
+  the uid0 SRD / LocalWriteBaseAddr instead of incrementing/swapping per uid.
+  TLU=0 only.
 
   When loadRatioGR > 1, multiple local subtiles share the same global read.
   Only the first subtile in each group emits the load; others return empty.
@@ -1599,6 +1605,10 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
   useSgpr = regList.is_sgpr
 
   offsetK = sId1 * int(tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1] * tileInfo.bpe)
+  if extraGlobalBytes or extraLdsBytes:
+    assert not isTLU1, "per-uid GR offsets need unit-stride K (TLU=0)"
+    offsetK += int(extraGlobalBytes)
+    assert offsetK < 4096, "buffer_load offset12 overflow (%u)" % offsetK
 
   subtileOffset = int(math.ceil(tileInfo.loadRatioGR*tileInfo.subtileSize))
   # loadRatioGR folds in grLoadWaves, so subtileOffset is the bytes one
@@ -1661,7 +1671,7 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
       mubuf = MUBUFModifiers(offen=True, glc=isGlc, slc=isSlc, nt=isNT, lds=True)
       soffset = sgpr(kWindowSoffset) if kWindowSoffset is not None else baseSoffset
     else:
-      module.add(SAddU32(dst=mgpr(0), src0=sgpr(WriteBaseAddr), src1=(m0Offset - offsetK)))
+      module.add(SAddU32(dst=mgpr(0), src0=sgpr(WriteBaseAddr), src1=(m0Offset + int(extraLdsBytes) - offsetK)))
       mubuf = MUBUFModifiers(offen=True, offset12=offsetK, glc=isGlc, slc=isSlc, nt=isNT, lds=True)
       soffset = baseSoffset
     voff = tileInfo.sharedVgprGROffset[i] if useSgpr or len(regList) == 0 else regList.indices[i]

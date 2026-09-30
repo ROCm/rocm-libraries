@@ -233,6 +233,10 @@ class SchedulerConfig:
     pgr: int = 2              # Prefetch Global Read
     grPlacement: GRPlacementStrategy = GRPlacementStrategy.SPREAD
     pgl: int = 0              # Prefetch GL2 (0=off, 1 or 2 tiles ahead)
+    # Multi-DU PGR=1: uid>0 A/B GRs address their K-slice / LDS buffer via
+    # constant offsets from the uid0 SRD and write base, so a single GRInc per
+    # MT (SRD += numUnroll*DU, no LDS swap) replaces the per-uid inc+swap chain.
+    grUidOffset: bool = False
 
     # Resolve a partition spec into per-partition sizes along one dimension.
     # spec is either:
@@ -441,6 +445,7 @@ class GRPlacement(Emittable):
     subIterK_slot: int         # which subIterK this GR is placed in
     partition: int = 0         # which partition this GR belongs to
     unrollId: int = 0          # which inner-DU iteration (0 for single-DU configs)
+    uidOffset: bool = False    # address uid via constant offsets (see SchedulerConfig.grUidOffset)
     deps: List['Dep'] = field(default_factory=list)      # populated by annotate_deps()
     preOps: List['BaseOp'] = field(default_factory=list)     # populated by remove_cross_deps()
     postOps: List['BaseOp'] = field(default_factory=list)    # populated by insert_gr_lr_inc()
@@ -577,11 +582,15 @@ class GRIncOp(BaseOp):
     """Pointer update + LDS swap for global reads on a specific tensor."""
     tensor: str = ""
     unrollId: int = 0
+    numSteps: int = 1          # SRD advance in units of DU
+    swap: bool = True          # also swap the GR LDS write buffer
 
     def __post_init__(self):
         self.kind = 'gr_inc'
 
     def __str__(self):
+        if self.numSteps != 1 or not self.swap:
+            return f"gr_inc({self.tensor} x{self.numSteps}{'' if self.swap else ' noswap'})"
         return f"gr_inc({self.tensor})"
 
 
@@ -1308,16 +1317,44 @@ class LogicalScheduler:
                         upper[key] = flat
         return lower, upper
 
+    def _first_consumer_lr_flat(self, tensor, mt_val, ts, te, ks, ke):
+        """First flat slot with an LR(tensor) reading [ts,te)x[ks,ke) of MT mt_val.
+
+        LR(mt) in this iteration, else LR(mt-1) in the next one (flat + numSlots).
+        """
+        numK = self.config.numSubIterK
+        numSlots = self.config.numPartitions * numK
+        best = None
+        for pi, pslots in enumerate(self._partitions):
+            for slot in pslots:
+                flat = pi * numK + slot.subIterK
+                for lr in slot.lrs:
+                    if (lr.tensor != tensor or
+                            not (lr.tiles.tileId_start < te and ts < lr.tiles.tileId_end and
+                                 lr.tiles.subIterK_start < ke and ks < lr.tiles.subIterK_end)):
+                        continue
+                    if lr.mtIteration == mt_val:
+                        cand = flat
+                    elif lr.mtIteration == mt_val - 1:
+                        cand = flat + numSlots
+                    else:
+                        continue
+                    if best is None or cand < best:
+                        best = cand
+        return numSlots if best is None else best
+
     @staticmethod
     def _has_lr_conflict(lr_lower, tensor, mt_val, flat,
-                         gr_t_start, gr_t_end, gr_k_start, gr_k_end):
+                         gr_t_start, gr_t_end, gr_k_start, gr_k_end,
+                         conflict_mt=2):
         """Return True if placing GR(mt_val) at flat slot conflicts.
 
         GR(MT n+2) writes the same LDS buffer as MT n, so it conflicts if a
         later LR(MT n) — in flat execution order across all partitions —
         still reads an overlapping tile/subIterK range from that buffer.
+        conflict_mt=1 for buffers with period 1 (multi-DU uid-offset A/B).
         """
-        if mt_val != 2:
+        if mt_val != conflict_mt:
             return False
         for lr_flat, lr_ts, lr_te, lr_ks, lr_ke in lr_lower.get(tensor, []):
             if (lr_flat > flat and
@@ -1368,9 +1405,15 @@ class LogicalScheduler:
         atoms = []
         for tensor, mt_val, t_start, t_end, k_start, k_end, gr_gran in gr_list:
             mn = gr_gran.mn
-            last = max(dist_slots[0], min(upper.get((tensor, mt_val), numSlots) - 1,
-                                          dist_slots[-1]))
             for pos in range(t_start, t_end, mn):
+                if self._uid_offset_tensor(tensor):
+                    # Bound by the first LR that actually reads this atom's
+                    # tile/k range (the next MT's LR(mt=0) when none this MT).
+                    first = self._first_consumer_lr_flat(tensor, mt_val, pos, pos + mn,
+                                                         k_start, k_end)
+                else:
+                    first = upper.get((tensor, mt_val), numSlots)
+                last = max(dist_slots[0], min(first - 1, dist_slots[-1]))
                 atoms.append((tensor, mt_val, pos, pos + mn, k_start, k_end, last))
 
         # 2b. Place atoms across dist_slots weighted by partition MFMA
@@ -1391,7 +1434,22 @@ class LogicalScheduler:
         total_weight = weight_prefix[-1]
         slot_boundaries = [p * nAtoms for p in weight_prefix[1:]]
 
+        asap = (cfg.grUidOffset and cfg.pgr == 1 and collapse_slot is None
+                and cfg.grPlacement == GRPlacementStrategy.SPREAD
+                and any(self._uid_offset_tensor(t) for t in ('A', 'B')))
         for i, (tensor, mt_val, ts, te, ks, ke, last) in enumerate(atoms):
+            if asap:
+                # ASAP: the slot right after the last LR(mt=0) still reading
+                # the buffer this GR overwrites (max cover until its consumer).
+                conflict_mt = 1 if self._uid_offset_tensor(tensor) else 2
+                free = dist_slots[0]
+                if mt_val == conflict_mt:
+                    for lr_flat, lr_ts, lr_te, lr_ks, lr_ke in lower.get(tensor, []):
+                        if (ts < lr_te and lr_ts < te and ks < lr_ke and lr_ks < ke):
+                            free = max(free, lr_flat + 1)
+                slot = min(max(free, dist_slots[0]), last)
+                buckets[slot].append((tensor, mt_val, ts, te, ks, ke))
+                continue
             if cfg.grPlacement == GRPlacementStrategy.BUNCHED:
                 # TDM: pin every GR atom to partition 0, subIterK 0.
                 rel = 0
@@ -1403,7 +1461,8 @@ class LogicalScheduler:
             slot_idx = rel
             while (slot < last and
                    self._has_lr_conflict(lower, tensor, mt_val,
-                                         slot, ts, te, ks, ke)):
+                                         slot, ts, te, ks, ke,
+                                         conflict_mt=1 if self._uid_offset_tensor(tensor) else 2)):
                 slot_idx += 1
                 if slot_idx >= len(dist_slots):
                     break
@@ -1478,7 +1537,7 @@ class LogicalScheduler:
         gr_slot_bounds = self._build_gr_slot_bounds()
         numK = self.config.numSubIterK
         last_uid_slot = None
-        if maxUnroll > 1 and pgr == 1:
+        if maxUnroll > 1 and pgr == 1 and not self.config.grUidOffset:
             # Multi-DU shares one SRD: all uid=0 GRs must finish (and
             # GRInc(uid=0) fire) before any uid>0 GR.  Place uid>0 only in
             # the last subIterK slot of the last partition so _gr_sort_key and
@@ -1496,6 +1555,11 @@ class LogicalScheduler:
                                       allowed_slots=[last_uid_slot])
             else:
                 self._distribute_grs(gr_list, gr_slot_bounds, unrollId=uid)
+
+        for slots in self._partitions:
+            for slot in slots:
+                for gr in slot.grs:
+                    gr.uidOffset = self._uid_offset_tensor(gr.tensor)
 
         return self._partitions[0]
 
@@ -1657,8 +1721,11 @@ class LogicalScheduler:
 
             # GR: depends on collision LR (LDS double-buffer)
             # GR(n+x) collides with LR(n+x-2) — same buffer, period 2.
+            # Multi-DU uid-offset A/B: uid u always owns buffer u, so the
+            # period is 1 (GR(n+1, u) overwrites LR(n, u)'s buffer).
             for gr in slot.grs:
-                target_data = gr.mtIteration - 2
+                period = 1 if self._uid_offset_tensor(gr.tensor) else 2
+                target_data = gr.mtIteration - period
                 for lr in lr_by_tensor.get(gr.tensor, []):
                     if _range_overlaps(lr.tiles, gr.tiles):
                         mt_off = target_data - lr.mtIteration
@@ -2254,6 +2321,12 @@ class LogicalScheduler:
                     gr.preOps = [WaitLROp(has_sync=True)] if has_lr_dep else []
 
 
+    def _uid_offset_tensor(self, tensor: str) -> bool:
+        """A/B tensor using per-uid offset GRs (LDS data buffer period = 1 MT)."""
+        return (self.config.grUidOffset and self.config.pgr == 1
+                and tensor in ('A', 'B')
+                and self.config.numUnroll.get(tensor, 1) == 2)
+
     def _per_uid_k(self, tensor: str) -> int:
         """Number of subIterK slots per unrollId for a tensor."""
         return self.config.numSubIterK // self.config.numUnroll.get(tensor, 1)
@@ -2322,7 +2395,16 @@ class LogicalScheduler:
                                 gr.preOps.append(GRIncOp(tensor=tensor, unrollId=uid))
                     last_gr_mt[key] = mt
 
-        if multiDU:
+        if multiDU and self.config.grUidOffset:
+            # One inc per tensor per MT, after the tensor's last-issued GR.
+            last_by_tensor = {}
+            for pi, slots in enumerate(self._partitions):
+                for slot in slots:
+                    for gr in sorted(slot.grs, key=self._gr_sort_key):
+                        last_by_tensor[gr.tensor] = gr
+            for tensor, gr in last_by_tensor.items():
+                gr.postOps.append(self._make_gr_inc_mt(tensor))
+        elif multiDU:
             for (tensor, uid), gr in last_gr.items():
                 gr.postOps.append(GRIncOp(tensor=tensor, unrollId=uid))
 
@@ -3162,6 +3244,12 @@ class LogicalScheduler:
                                       unrollId=uid))
         return result
 
+    def _make_gr_inc_mt(self, tensor: str) -> GRIncOp:
+        """Whole-MT GRInc: uid-offset tensors advance numUnroll*DU, no swap."""
+        if self._uid_offset_tensor(tensor):
+            return GRIncOp(tensor=tensor, numSteps=self.config.numUnroll[tensor], swap=False)
+        return GRIncOp(tensor=tensor)
+
     def _make_depops_uid(self, cls, uid: int) -> List[BaseOp]:
         """Create a BaseOp subclass instance for a single uid across all tensors.
 
@@ -3341,7 +3429,23 @@ class LogicalScheduler:
 
         if cfg.pgr == 1:
             maxUnroll = max(cfg.numUnroll.values()) if cfg.numUnroll else 1
-            if maxUnroll > 1:
+            if maxUnroll > 1 and cfg.grUidOffset:
+                preloop_ops = []
+                for uid in range(maxUnroll):
+                    grs = self._make_gr_all_tensors_uid(0, all_tiles, uid)
+                    for gr in grs:
+                        gr.uidOffset = self._uid_offset_tensor(gr.tensor)
+                    preloop_ops.extend(grs)
+                preloop_ops.extend(self._make_gr_inc_mt(t) for t in self.tensors)
+                emitted = self._to_emitted([
+                    *preloop_ops,
+                    initC_op,
+                    WaitGROp(wait_gr_counts=WaitGRCounts()),
+                    SyncOp(),
+                    *self._make_lr_all_tensors(lr_tiles),
+                    SkipOp(compare='LE', value=1, target='NLL'),
+                ])
+            elif maxUnroll > 1:
                 preloop_ops = []
                 for uid in range(maxUnroll):
                     preloop_ops.extend(self._make_gr_all_tensors_uid(0, all_tiles, uid))
@@ -3408,6 +3512,67 @@ class LogicalScheduler:
         self._preloop_emitted = [[emitted]]
         return self._preloop_emitted
 
+    @staticmethod
+    def _set_exact_vmcnt(body_slots):
+        """Set each mainloop wait_gr vmcnt to the exact in-order bound.
+
+        Loads retire in issue order, so an LR only needs the most recent
+        buffer_load that produced its data: vmcnt = #loads issued after it.
+        Walks the scheduled body backwards from the wait, wrapping into the
+        previous iteration (LR mt=0 <- GR mt=1 one iteration back; LR mt=1 <-
+        GR mt=1 this iteration). Replaces the static per-slot inflight
+        estimate / force_drain. The first iteration follows the preloop's
+        vmcnt(0), so fewer loads are outstanding and the bound still holds.
+        """
+        from Tensile.Components.Subtile.InstructionScheduler import (
+            _isBufferLoad, _isWaitGr)
+
+        def _overlap(a, b):
+            return (a.tileId_start < b.tileId_end and b.tileId_start < a.tileId_end and
+                    a.subIterK_start < b.subIterK_end and b.subIterK_start < a.subIterK_end)
+
+        flat = []  # (inst, gr source or None, slot index)
+        for si, (insts, gr_src, _) in enumerate(body_slots):
+            for inst in insts:
+                flat.append((inst, gr_src.get(id(inst)) if _isBufferLoad(inst) else None, si))
+        n = len(flat)
+        nSlots = len(body_slots)
+        wait_slots = {si for inst, _, si in flat if _isWaitGr(inst) and inst.vlcnt >= 0}
+        for idx, (inst, _, si) in enumerate(flat):
+            if not (_isWaitGr(inst) and inst.vlcnt >= 0):
+                continue
+            # A wait also guards LRs in the following slots that have no
+            # wait_gr of their own (their deps were folded into this one).
+            lrs = list(body_slots[si][2])
+            for d in range(1, nSlots):
+                nxt = (si + d) % nSlots
+                if nxt in wait_slots:
+                    break
+                lrs.extend(body_slots[nxt][2])
+            if not lrs:
+                continue
+            count = 0
+            found = False
+            for step in range(1, 2 * n + 1):
+                j = idx - step
+                walk_iter = 0 if j >= 0 else (1 if j >= -n else 2)
+                cand, gr, _ = flat[j % n]
+                if not _isBufferLoad(cand):
+                    continue
+                if gr is not None and any(
+                        lr.tensor == gr.tensor and _overlap(lr.tiles, gr.tiles)
+                        and gr.mtIteration - lr.mtIteration == walk_iter
+                        for lr in lrs):
+                    found = True
+                    break
+                count += 1
+            if found:
+                inst.vlcnt = min(count, 63)  # vmcnt field is 6 bits on gfx9
+                try:
+                    inst.comment = (inst.comment or "") + f" -> exact vmcnt({count})"
+                except AttributeError:
+                    pass
+
     def _emitLoop(self, writer, kernel, label, emitted_3d, schedule=True):
         """Emit a loop section from a 3D emitted structure.
 
@@ -3444,6 +3609,9 @@ class LogicalScheduler:
         pap_merge_label = Label("SubtilePAPPreloopFirstGRMerge", "") if use_pap_preloop_skip else None
         skipping_first_gr_group = False
         first_gr_group_done = False
+        exact_vmcnt = (schedule and label.startswith("MAINLOOP")
+                       and any(self._uid_offset_tensor(t) for t in ('A', 'B')))
+        body_slots = []  # exact_vmcnt: [(scheduled insts, gr_src by id(inst), slot LRs)]
         for pi, partition_emitted in enumerate(emitted_3d):
             for k, em_list in enumerate(partition_emitted):
                 module.addComment0(f"partition={pi} subIterK={k}")
@@ -3455,6 +3623,11 @@ class LogicalScheduler:
                         multiDU=self._is_multi_du(),
                         minGapDsReadToWait=minGapDsReadToWait)
                     module.add(scheduled)
+                    if exact_vmcnt:
+                        gr_src = {id(inst): em.source for em in em_list
+                                  if em.opType == 'gr' for inst in em.instructions}
+                        lrs = [em.source for em in em_list if em.opType == 'lr']
+                        body_slots.append((list(scheduled.flatitems()), gr_src, lrs))
                 else:
                     for em in em_list:
                         if use_pap_preloop_skip and not first_gr_group_done:
@@ -3476,6 +3649,8 @@ class LogicalScheduler:
             module.add(pap_merge_label)
             module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
                                comment="Subtile PAP: clear after first PRELOOP GR merge"))
+        if exact_vmcnt:
+            self._set_exact_vmcnt(body_slots)
         module.addComment0(f"{label} end")
         # SCHED_MODE 2: guard the LR offset-swap -> ds_read RAW hazard once, against
         # the final post-schedule order (no-op on other archs).

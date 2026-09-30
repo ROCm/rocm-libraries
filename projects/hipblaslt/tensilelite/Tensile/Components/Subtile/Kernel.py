@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import math
+import os
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from copy import deepcopy
@@ -1461,6 +1462,15 @@ def mainLoop(writer, kernel):
   grSBGran = ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]) if scaleTiB else None
 
   schedulerPgr = pgr
+  # Multi-DU PGR=1 buffer_load path: address uid>0 via offset12/m0 offsets
+  # (see SchedulerConfig.grUidOffset). Not for TDM or PAP (PAP copies preloop GRs),
+  # nor TLU=1 (its K step is strided, carried in soffset rather than offset12).
+  grUidOffset = (pgr == 1
+                 and not kernel.get("enableTDMA", False) and not kernel.get("enableTDMB", False)
+                 and not any(isinstance(getattr(ti.gr.config, "tag", None), GRTag_TLU1)
+                             for ti in (tiA, tiB) if ti.gr is not None)
+                 and not kernel.get("PrefetchAcrossPersistent", False)
+                 and not os.environ.get("SUBTILE_NO_UID_OFFSET"))
 
   vgprBudget = writer.states.regCaps["MaxVgpr"]
   vgprUsed = writer.vgprPool.size() - writer.vgprPool.available()
@@ -1488,6 +1498,7 @@ def mainLoop(writer, kernel):
           pgr=schedulerPgr,
           grPlacement=grPlacement,
           pgl=kernel.get("PrefetchGL2", 0),
+          grUidOffset=grUidOffset,
       )
 
       scheduler = LogicalScheduler(cfg)
