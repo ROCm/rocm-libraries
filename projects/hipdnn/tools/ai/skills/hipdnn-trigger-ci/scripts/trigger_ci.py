@@ -350,6 +350,10 @@ def main():
         description="Trigger CI on a rocm-libraries branch",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+The lists below are a snapshot of TheRock at 7440cb8578f4daae0d85a428fadd6645dc5464a0.
+If therock-ref in .github/actions/ci-env/action.yml differs, re-read the TheRock files
+named below at that ref.
+
 GPU families (case-insensitive; from TheRock build_tools/github_actions/amdgpu_family_matrix.py):
   presubmit:   gfx94X, gfx110X, gfx1151, gfx120X, gfx125X
   postsubmit:  gfx90a, gfx950
