@@ -39,7 +39,7 @@ extern "C" {
 #include "rocke/instance_batched_gemm.h"
 #include "rocke/instance_block_scale_gemm.h"
 #include "rocke/instance_conv_direct_grouped.h"
-#include "rocke/instance_conv_direct_nhwc.h"
+#include "rocke/instance_conv_direct_nongrouped.h"
 #include "rocke/instance_conv_implicit_gemm.h"
 #include "rocke/instance_conv_implicit_gemm_wgrad.h"
 #include "rocke/instance_conv_wgrad_workspace_reduce.h"
@@ -1714,17 +1714,18 @@ std::vector<std::string> conv_direct_grouped_verify(const py::dict& d, const std
     return out;
 }
 
-/* ======================== conv_direct_nhwc ========================== */
+/* ======================== conv_direct_nongrouped ========================== */
 
-/* Non-grouped (groups == 1) direct conv. The dict mirrors DirectNhwcConvSpec
+/* Non-grouped (groups == 1) direct conv. The dict mirrors DirectNongroupedConvSpec
  * with the problem nested; `iglp` / `waves_per_eu` may be None (absent knob). */
-rocke_direct_conv_nhwc_spec_t dnhwc_build_spec(const py::dict& d, std::deque<std::string>& store)
+rocke_direct_conv_nongrouped_spec_t dnongrouped_build_spec(const py::dict& d,
+                                                           std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
         return store.back().c_str();
     };
-    rocke_direct_conv_nhwc_spec_t s = rocke_direct_conv_nhwc_spec_default();
+    rocke_direct_conv_nongrouped_spec_t s = rocke_direct_conv_nongrouped_spec_default();
     if(d.contains("problem") && py::isinstance<py::dict>(d["problem"]))
     {
         py::dict pd = d["problem"].cast<py::dict>();
@@ -1760,32 +1761,33 @@ rocke_direct_conv_nhwc_spec_t dnhwc_build_spec(const py::dict& d, std::deque<std
     return s;
 }
 
-std::string conv_direct_nhwc_lower_llvm(const py::dict& d, const std::string& arch)
+std::string conv_direct_nongrouped_lower_llvm(const py::dict& d, const std::string& arch)
 {
     std::deque<std::string> store;
-    rocke_direct_conv_nhwc_spec_t s = dnhwc_build_spec(d, store);
+    rocke_direct_conv_nongrouped_spec_t s = dnongrouped_build_spec(d, store);
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    rocke_status_t st = rocke_direct_conv_nhwc_lower_to_llvm(
+    rocke_status_t st = rocke_direct_conv_nongrouped_lower_to_llvm(
         &s, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
-    return take_lowered(st, ll, err, "rocke_engine.conv_direct_nhwc_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.conv_direct_nongrouped_lower_llvm");
 }
 
-std::string conv_direct_nhwc_serialize_ir(const py::dict& d, const std::string& arch)
+std::string conv_direct_nongrouped_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    ROCKE_FAMILY_SERIALIZE_BODY("rocke_engine.conv_direct_nhwc_serialize_ir",
-                                rocke_direct_conv_nhwc_spec_t,
-                                dnhwc_build_spec,
-                                rocke_build_direct_conv_nhwc_new(&b, &s, arch_or_default(arch)));
+    ROCKE_FAMILY_SERIALIZE_BODY(
+        "rocke_engine.conv_direct_nongrouped_serialize_ir",
+        rocke_direct_conv_nongrouped_spec_t,
+        dnongrouped_build_spec,
+        rocke_build_direct_conv_nongrouped_new(&b, &s, arch_or_default(arch)));
 }
 
-std::vector<std::string> conv_direct_nhwc_verify(const py::dict& d, const std::string& arch)
+std::vector<std::string> conv_direct_nongrouped_verify(const py::dict& d, const std::string& arch)
 {
-    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.conv_direct_nhwc_verify",
-                             rocke_direct_conv_nhwc_spec_t,
-                             dnhwc_build_spec,
-                             rocke_build_direct_conv_nhwc_new(&b, &s, arch_or_default(arch)));
+    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.conv_direct_nongrouped_verify",
+                             rocke_direct_conv_nongrouped_spec_t,
+                             dnongrouped_build_spec,
+                             rocke_build_direct_conv_nongrouped_new(&b, &s, arch_or_default(arch)));
 }
 
 /* ======================= deep_fused_conv_pool ======================= */
@@ -3709,10 +3711,10 @@ PYBIND11_MODULE(rocke_engine, m)
          &conv_direct_grouped_lower_llvm,
          &conv_direct_grouped_serialize_ir,
          &conv_direct_grouped_verify);
-    reg3("conv_direct_nhwc",
-         &conv_direct_nhwc_lower_llvm,
-         &conv_direct_nhwc_serialize_ir,
-         &conv_direct_nhwc_verify);
+    reg3("conv_direct_nongrouped",
+         &conv_direct_nongrouped_lower_llvm,
+         &conv_direct_nongrouped_serialize_ir,
+         &conv_direct_nongrouped_verify);
     register_img2col(m); /* separate TU; see note at top of file */
     reg3("deep_fused_conv_pool",
          &deep_fused_conv_pool_lower_llvm,

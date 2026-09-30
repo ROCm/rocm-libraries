@@ -113,7 +113,7 @@ prefix for brevity).
 | `instances/grouped_gemm.py` | `GroupedGemmProblem`, `GroupedGemmSpec`, `build_grouped_gemm`, `grouped_gemm_signature`, `GroupedGemmLauncher`, `grouped_gemm_problems`. |
 | `instances/conv_implicit_gemm.py` | `ConvProblem`, `ImplicitGemmConvSpec`, `make_a_descriptor`, `make_b_descriptor`, `make_d_descriptor`, `build_implicit_gemm_conv`. |
 | `instances/conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec`, `build_direct_conv_16c`, `build_direct_conv_4c`. |
-| `instances/conv_direct_nhwc.py` | `DirectNhwcConvSpec`, `is_valid_nhwc_spec`, `build_direct_conv_nhwc`, `nongrouped_specs`, `tile_w_candidates` (`groups == 1`). |
+| `instances/conv_direct_nongrouped.py` | `DirectNongroupedConvSpec`, `is_valid_nongrouped_spec`, `build_direct_conv_nongrouped`, `nongrouped_specs`, `tile_w_candidates` (`groups == 1`). |
 | `instances/img2col.py` | `Img2ColSpec`, `build_img2col`, `img2col_grid`, `img2col_signature`. (CK Tile 04.) |
 | `instances/pooling.py` | `PoolingProblem`, `Pooling2DSpec`, `PoolOp`, `build_pooling2d`, `pooling2d_grid`, `pooling2d_signature`. (CK Tile 36.) |
 | `instances/permute_nd.py` | `PermuteSpec`, `build_permute`, `permute_grid`, `permute_signature`. Rank-up-to-8 n-D permute. (CK Tile 06.) |

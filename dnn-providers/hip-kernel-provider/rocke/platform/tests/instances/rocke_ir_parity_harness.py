@@ -1081,7 +1081,7 @@ def build_direct_depthwise_dgrad(
     return _build
 
 
-def build_direct_nhwc(
+def build_direct_nongrouped(
     name,
     arch,
     N,
@@ -1097,15 +1097,15 @@ def build_direct_nhwc(
     **spec_kw,
 ):
     """Non-grouped (groups == 1) direct conv; ``spec_kw`` overrides
-    DirectNhwcConvSpec fields. Configs mirror parity/conv_direct_grouped_emit.*
+    DirectNongroupedConvSpec fields. Configs mirror parity/conv_direct_grouped_emit.*
     (indices 25+), where the C++ engine is gated byte-identical by
     check_byte_identity.py."""
 
     def _build():
         from kernels.common.conv_direct_grouped import DirectConvProblem
-        from kernels.common.conv_direct_nhwc import (
-            DirectNhwcConvSpec,
-            build_direct_conv_nhwc,
+        from kernels.common.conv_direct_nongrouped import (
+            DirectNongroupedConvSpec,
+            build_direct_conv_nongrouped,
         )
 
         p = DirectConvProblem(
@@ -1121,8 +1121,8 @@ def build_direct_nhwc(
             stride=stride,
             dtype=dtype,
         )
-        spec = DirectNhwcConvSpec(problem=p, name=name, **spec_kw)
-        return build_direct_conv_nhwc(spec, arch=arch)
+        spec = DirectNongroupedConvSpec(problem=p, name=name, **spec_kw)
+        return build_direct_conv_nongrouped(spec, arch=arch)
 
     return _build
 
@@ -3119,12 +3119,12 @@ def cases():
         ),
     )
 
-    # --- conv_direct_nhwc: non-grouped (groups == 1) direct conv ---
+    # --- conv_direct_nongrouped: non-grouped (groups == 1) direct conv ---
     # LDS halo-reuse tile, tap-shared activation fragments, fragment-order
     # weights, hoisted staging predication. One case per structural branch; the
     # full branch matrix (and the C++ twin) lives in
     # library/tests/parity/conv_direct_grouped_emit.* (indices 25+).
-    _nhwc_base = dict(
+    _nongrouped_base = dict(
         tile_h=8, tile_w=32, tile_k=64, ck=32, waves_m=2, waves_n=2, iglp=0
     )
     for _case_id, _arch, _shape, _over in (
@@ -3155,14 +3155,14 @@ def cases():
         ),
     ):
         add(
-            "conv_direct_nhwc",
-            f"conv_direct_nhwc/{_arch}/{_case_id}",
+            "conv_direct_nongrouped",
+            f"conv_direct_nongrouped/{_arch}/{_case_id}",
             _arch,
-            build_direct_nhwc(
-                f"irhash_direct_nhwc_{_case_id}",
+            build_direct_nongrouped(
+                f"irhash_direct_nongrouped_{_case_id}",
                 _arch,
                 **_shape,
-                **{**_nhwc_base, **_over},
+                **{**_nongrouped_base, **_over},
             ),
         )
 

@@ -4,7 +4,7 @@
 
 Three kernel families are covered:
   cpg == 1  (groups == C == K) — depthwise:   ``DirectDepthwiseSpec``, scalar fma.
-  groups == 1                  — non-grouped: ``DirectNhwcConvSpec``, LDS halo
+  groups == 1                  — non-grouped: ``DirectNongroupedConvSpec``, LDS halo
                                  reuse + mfma_f32_32x32x16 / 16x16x32.
   cpg >= 4, cpg % 4 == 0       — grouped:     ``DirectConvSpec``, mfma_f32_16x16x16.
 
@@ -44,7 +44,7 @@ _DW_BLOCK_W = (4, 8, 16, 32)
 _DW_BLOCK_WAVES = (1, 2, 4)
 
 # The non-grouped (groups == 1) geometry sweep lives next to the kernel, in
-# ``kernels.common.conv_direct_nhwc.nongrouped_specs``, because the useful
+# ``kernels.common.conv_direct_nongrouped.nongrouped_specs``, because the useful
 # tile widths depend on Wo.
 
 
@@ -899,7 +899,7 @@ def _run_nongrouped_sweep(
     LaunchConfig,
     u8,
 ) -> "tuple[int, List[NonGroupedResult]]":
-    """Sweep :class:`DirectNhwcConvSpec` over tile / wave / swizzle geometry.
+    """Sweep :class:`DirectNongroupedConvSpec` over tile / wave / swizzle geometry.
 
     The grouped ``DirectConvSpec`` draws its parallelism from the ``groups``
     axis and collapses to a single wave per output row when ``groups == 1``,
@@ -908,8 +908,8 @@ def _run_nongrouped_sweep(
     import torch
 
     from rocke.helpers.manifest import conv_args_signature
-    from kernels.common.conv_direct_nhwc import (
-        build_direct_conv_nhwc,
+    from kernels.common.conv_direct_nongrouped import (
+        build_direct_conv_nongrouped,
         nongrouped_specs,
     )
     from rocke.runtime.hip_module import HipError
@@ -928,7 +928,7 @@ def _run_nongrouped_sweep(
     flop = float(p.flops)
     sig = conv_args_signature(dtype)
 
-    specs = nongrouped_specs(p, arch=arch, name="rocke_bench_direct_conv_nhwc")
+    specs = nongrouped_specs(p, arch=arch, name="rocke_bench_direct_conv_nongrouped")
     if args.sample is not None:
         total = len(specs)
         specs = _sample_combos(specs, args.sample, args.seed)
@@ -948,7 +948,7 @@ def _run_nongrouped_sweep(
     pending = []
     for spec in specs:
         try:
-            kernel = build_direct_conv_nhwc(spec, arch=arch)
+            kernel = build_direct_conv_nongrouped(spec, arch=arch)
         except ValueError:
             n_skipped += 1
             continue

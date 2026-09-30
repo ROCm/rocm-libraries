@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Direct NHWC convolution for the non-grouped (``groups == 1``) case.
+"""Direct non-grouped (``groups == 1``) convolution, NHWC layout.
 
 Why a second direct-conv family
 -------------------------------
@@ -99,7 +99,7 @@ _ATOMS = {
 
 
 @dataclass(frozen=True)
-class DirectNhwcConvSpec:
+class DirectNongroupedConvSpec:
     """One concrete non-grouped direct-conv kernel configuration.
 
     ``problem.groups`` must be 1; the grouped families in
@@ -107,7 +107,7 @@ class DirectNhwcConvSpec:
     """
 
     problem: DirectConvProblem
-    name: str = "direct_conv_nhwc"
+    name: str = "direct_conv_nongrouped"
 
     tile_h: int = 16  # output rows per workgroup
     tile_w: int = 32  # output cols per workgroup (multiple of 32)
@@ -220,7 +220,7 @@ class DirectNhwcConvSpec:
 
     @property
     def lds_bytes(self) -> int:
-        # + one scratch fragment per array (see build_direct_conv_nhwc).
+        # + one scratch fragment per array (see build_direct_conv_nongrouped).
         one = self.lds_x_halves + _X_LOAD_VEC + self.lds_w_halves + self.frag
         return 2 * one * (2 if self.double_buffer else 1)
 
@@ -264,10 +264,10 @@ class DirectNhwcConvSpec:
     def validate(self) -> None:
         p = self.problem
         if p.dtype not in ("fp16", "bf16"):
-            raise ValueError(f"DirectNhwcConvSpec: unsupported dtype {p.dtype!r}")
+            raise ValueError(f"DirectNongroupedConvSpec: unsupported dtype {p.dtype!r}")
         if p.groups != 1:
             raise ValueError(
-                f"DirectNhwcConvSpec is the groups==1 family (got groups={p.groups}); "
+                f"DirectNongroupedConvSpec is the groups==1 family (got groups={p.groups}); "
                 f"use conv_direct_grouped for grouped shapes"
             )
         if self.atom not in _ATOMS:
@@ -316,8 +316,8 @@ class DirectNhwcConvSpec:
             )
 
 
-def is_valid_nhwc_spec(
-    spec: DirectNhwcConvSpec, arch: str = "gfx950"
+def is_valid_nongrouped_spec(
+    spec: DirectNongroupedConvSpec, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for ``spec`` on ``arch`` without raising."""
     from rocke.core.arch import ArchTarget
@@ -381,18 +381,18 @@ def nongrouped_specs(
     problem: DirectConvProblem,
     *,
     arch: str = "gfx950",
-    name: str = "direct_conv_nhwc",
+    name: str = "direct_conv_nongrouped",
     iglp: "tuple[int | None, ...]" = (0,),
     waves_per_eu: "tuple[int | None, ...]" = (None, 3),
     swizzle_wgm: "tuple[int, ...]" = (8,),
-) -> "list[DirectNhwcConvSpec]":
-    """Every valid :class:`DirectNhwcConvSpec` worth benchmarking for ``problem``.
+) -> "list[DirectNongroupedConvSpec]":
+    """Every valid :class:`DirectNongroupedConvSpec` worth benchmarking for ``problem``.
 
     Deduplicated by kernel name, so callers can compile the list directly.
     """
     import itertools
 
-    out: "list[DirectNhwcConvSpec]" = []
+    out: "list[DirectNongroupedConvSpec]" = []
     seen = set()
     for atom in _SWEEP_ATOMS:
         at = _ATOMS[atom][0]
@@ -406,7 +406,7 @@ def nongrouped_specs(
                 iglp,
                 waves_per_eu,
             ):
-                spec = DirectNhwcConvSpec(
+                spec = DirectNongroupedConvSpec(
                     problem=problem,
                     name=name,
                     tile_h=th,
@@ -420,7 +420,7 @@ def nongrouped_specs(
                     iglp=ig,
                     waves_per_eu=we,
                 )
-                ok, _ = is_valid_nhwc_spec(spec, arch=arch)
+                ok, _ = is_valid_nongrouped_spec(spec, arch=arch)
                 if not ok:
                     continue
                 key = spec.kernel_name()
@@ -431,11 +431,13 @@ def nongrouped_specs(
     return out
 
 
-def build_direct_conv_nhwc(spec: DirectNhwcConvSpec, arch: str = "gfx950") -> KernelDef:
+def build_direct_conv_nongrouped(
+    spec: DirectNongroupedConvSpec, arch: str = "gfx950"
+) -> KernelDef:
     """Build the IR for one non-grouped NHWC direct convolution kernel."""
-    ok, why = is_valid_nhwc_spec(spec, arch=arch)
+    ok, why = is_valid_nongrouped_spec(spec, arch=arch)
     if not ok:
-        raise ValueError(f"invalid DirectNhwcConvSpec for {arch}: {why}")
+        raise ValueError(f"invalid DirectNongroupedConvSpec for {arch}: {why}")
 
     p = spec.problem
     io_type = _io_type(p.dtype)
@@ -526,7 +528,7 @@ def build_direct_conv_nhwc(spec: DirectNhwcConvSpec, arch: str = "gfx950") -> Ke
 
     # ---- grid decode ------------------------------------------------------
     # Flat 1-D grid of (spatial cell x channel tile). The swizzle decides which
-    # of the two a single XCD walks contiguously; see DirectNhwcConvSpec.
+    # of the two a single XCD walks contiguously; see DirectNongroupedConvSpec.
     n_wt, n_ht, n_kt = spec.tile_counts
     n_cells = n_wt * n_ht * p.N
     total_wgs = n_cells * n_kt

@@ -3,7 +3,7 @@
 """Correctness tests for direct grouped convolution across cpg variants.
 
 Covers all four grouped variants (cpg = 4, 8, 16, 32), the depthwise
-variant (cpg = 1), and the non-grouped (groups == 1) ``DirectNhwcConvSpec``.  Each test builds a kernel, compiles it, launches it on
+variant (cpg = 1), and the non-grouped (groups == 1) ``DirectNongroupedConvSpec``.  Each test builds a kernel, compiles it, launches it on
 GPU, and compares the output against a float32 reference produced by
 torch.nn.functional.conv2d.
 
@@ -995,7 +995,7 @@ class _NgCase:
     waves_m: int = 2
     waves_n: int = 2
     atom: str = "32x32x16"
-    # Schedule / pipeline knobs (DirectNhwcConvSpec defaults).
+    # Schedule / pipeline knobs (DirectNongroupedConvSpec defaults).
     double_buffer: bool = False
     iglp: "int | None" = None
     waves_per_eu: "int | None" = None
@@ -1078,7 +1078,7 @@ _NG_CASES: List[_NgCase] = [
 def _run_nongrouped_one(arch: str, case: _NgCase) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one non-grouped direct-conv kernel."""
     from kernels.common.conv_direct_grouped import DirectConvProblem
-    from kernels.common.conv_direct_nhwc import DirectNhwcConvSpec
+    from kernels.common.conv_direct_nongrouped import DirectNongroupedConvSpec
 
     p = DirectConvProblem(
         N=case.N,
@@ -1093,7 +1093,7 @@ def _run_nongrouped_one(arch: str, case: _NgCase) -> Tuple[bool, str]:
         stride=case.stride,
         dtype=case.dtype,
     )
-    spec = DirectNhwcConvSpec(
+    spec = DirectNongroupedConvSpec(
         problem=p,
         tile_h=case.tile_h,
         tile_w=case.tile_w,
@@ -1112,26 +1112,28 @@ def _run_nongrouped_one(arch: str, case: _NgCase) -> Tuple[bool, str]:
 
 
 def _run_nongrouped_spec(arch: str, spec, case_id: str) -> Tuple[bool, str]:
-    """Compile, launch and verify one ``DirectNhwcConvSpec`` against conv2d."""
+    """Compile, launch and verify one ``DirectNongroupedConvSpec`` against conv2d."""
     import torch
 
     from rocke import compile_kernel
     from rocke.helpers.manifest import conv_args_signature
-    from kernels.common.conv_direct_nhwc import (
-        build_direct_conv_nhwc,
-        is_valid_nhwc_spec,
+    from kernels.common.conv_direct_nongrouped import (
+        build_direct_conv_nongrouped,
+        is_valid_nongrouped_spec,
     )
     from rocke.runtime import synchronize_and_release
     from rocke.runtime.hip_module import HipError, Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     p = spec.problem
-    ok, why = is_valid_nhwc_spec(spec, arch=arch)
+    ok, why = is_valid_nongrouped_spec(spec, arch=arch)
     if not ok:
         return False, f"skip {why}"
 
     try:
-        artifact = compile_kernel(build_direct_conv_nhwc(spec, arch=arch), arch=arch)
+        artifact = compile_kernel(
+            build_direct_conv_nongrouped(spec, arch=arch), arch=arch
+        )
     except Exception as e:  # noqa: BLE001
         return False, f"build/compile failed: {e}"
 
@@ -1193,7 +1195,7 @@ def _run_nongrouped_spec(arch: str, spec, case_id: str) -> Tuple[bool, str]:
 
 
 @unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "no GPU")
-class TestDirectConvNhwcCorrectness(unittest.TestCase):
+class TestDirectConvNongroupedCorrectness(unittest.TestCase):
     """Correctness sweep for the non-grouped (groups == 1) direct-conv family."""
 
     def test_nongrouped(self):
@@ -1211,7 +1213,7 @@ class TestDirectConvNhwcCorrectness(unittest.TestCase):
         hand-picked geometries above. Wo=48 exercises both the exact-width
         16-wide atom and the padded 32-wide one."""
         from kernels.common.conv_direct_grouped import DirectConvProblem
-        from kernels.common.conv_direct_nhwc import nongrouped_specs
+        from kernels.common.conv_direct_nongrouped import nongrouped_specs
 
         p = DirectConvProblem(N=2, H=16, W=48, groups=1, cpg=64, kpg=128, dtype="bf16")
         specs = nongrouped_specs(p, arch=GPU_ARCH)
@@ -1223,7 +1225,7 @@ class TestDirectConvNhwcCorrectness(unittest.TestCase):
                 self.assertTrue(passed, f"FAIL {name} on {GPU_ARCH}: {reason}")
 
 
-class TestDirectConvNhwcValidation(unittest.TestCase):
+class TestDirectConvNongroupedValidation(unittest.TestCase):
     """Non-grouped validation that does not require a GPU."""
 
     @staticmethod
@@ -1235,11 +1237,11 @@ class TestDirectConvNhwcValidation(unittest.TestCase):
         return DirectConvProblem(**base)
 
     def test_grouped_problem_rejected(self):
-        from kernels.common.conv_direct_nhwc import DirectNhwcConvSpec
+        from kernels.common.conv_direct_nongrouped import DirectNongroupedConvSpec
 
         p = self._problem(groups=4, cpg=16, kpg=16)
         with self.assertRaises(ValueError):
-            DirectNhwcConvSpec(problem=p).validate()
+            DirectNongroupedConvSpec(problem=p).validate()
 
     def test_oversized_accumulator_rejected(self):
         """A tile needing more than 256 accumulator registers must not build.
@@ -1247,9 +1249,9 @@ class TestDirectConvNhwcValidation(unittest.TestCase):
         Left unguarded this is not just slow: a 2048-register tile hangs the
         backend scheduler rather than failing, which stalls a whole sweep.
         """
-        from kernels.common.conv_direct_nhwc import DirectNhwcConvSpec
+        from kernels.common.conv_direct_nongrouped import DirectNongroupedConvSpec
 
-        spec = DirectNhwcConvSpec(
+        spec = DirectNongroupedConvSpec(
             problem=self._problem(),
             tile_h=16,
             tile_w=64,
@@ -1264,7 +1266,7 @@ class TestDirectConvNhwcValidation(unittest.TestCase):
 
     def test_tile_w_candidates_cover_exactly(self):
         """Candidate widths must tile Wo without wasted columns when possible."""
-        from kernels.common.conv_direct_nhwc import tile_w_candidates
+        from kernels.common.conv_direct_nongrouped import tile_w_candidates
 
         for wo, at in ((96, 32), (160, 32), (112, 16), (208, 16)):
             for tw in tile_w_candidates(wo, at):
@@ -1274,8 +1276,8 @@ class TestDirectConvNhwcValidation(unittest.TestCase):
         self.assertEqual(tile_w_candidates(40, 32), [32])
 
     def test_specs_are_unique_and_valid(self):
-        from kernels.common.conv_direct_nhwc import (
-            is_valid_nhwc_spec,
+        from kernels.common.conv_direct_nongrouped import (
+            is_valid_nongrouped_spec,
             nongrouped_specs,
         )
 
@@ -1284,7 +1286,7 @@ class TestDirectConvNhwcValidation(unittest.TestCase):
         names = [s.kernel_name() for s in specs]
         self.assertEqual(len(names), len(set(names)))
         for s in specs:
-            self.assertTrue(is_valid_nhwc_spec(s)[0])
+            self.assertTrue(is_valid_nongrouped_spec(s)[0])
 
 
 class TestDirectConvValidation(unittest.TestCase):

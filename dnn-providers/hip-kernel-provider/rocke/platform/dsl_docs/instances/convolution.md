@@ -4,7 +4,7 @@ This page covers:
 
 - `library/kernels/common/conv_implicit_gemm.py`
 - `library/kernels/common/conv_direct_grouped.py`
-- `library/kernels/common/conv_direct_nhwc.py`
+- `library/kernels/common/conv_direct_nongrouped.py`
 - `library/kernels/common/img2col.py`
 - `instances/common/pooling.py`
 
@@ -23,7 +23,7 @@ Implicit GEMM:
 Direct grouped:
   Specialized streaming kernels for grouped small-channel cases (16c, 4c)
 
-Direct NHWC (groups == 1):
+Direct non-grouped (groups == 1):
   LDS-staged, halo-inclusive input tile shared by all KH*KW taps
 ```
 
@@ -647,11 +647,11 @@ Uses the same `_UNROLL_THRESH` / `scf_for_iter` branch logic as
 Parity gate: configs 10 (stride=1, groups=3) and 11 (stride=2, groups=3) in
 `tests/instances/parity/conv_direct_grouped_emit.{c,py}`.
 
-## Direct NHWC Convolution (non-grouped)
+## Direct Non-grouped Convolution
 
-Source: `library/kernels/common/conv_direct_nhwc.py`. Full write-up (every
+Source: `library/kernels/common/conv_direct_nongrouped.py`. Full write-up (every
 optimization, rejected levers, gates):
-`library/kernels/common/README_conv_direct_nhwc.md`.
+`library/kernels/common/README_conv_direct_nongrouped.md`.
 
 The `groups == 1` counterpart of the grouped direct kernels, which draw all
 their parallelism from `groups` and degenerate to one wave per output row when
@@ -660,7 +660,7 @@ there is a single group. It shares `DirectConvProblem` and the conv ABI
 
 ```python
 @dataclass(frozen=True)
-class DirectNhwcConvSpec:
+class DirectNongroupedConvSpec:
     problem: DirectConvProblem      # groups must be 1
     tile_h: int = 16; tile_w: int = 32; tile_k: int = 128; ck: int = 16
     waves_m: int = 2; waves_n: int = 4
@@ -704,12 +704,12 @@ channel tile fast-varying. Candidates: `nongrouped_specs(problem, arch)`;
 `tile_w_candidates(Wo, atom_tile)` prefers widths that divide `Wo` exactly, and
 the 16-wide atoms exist for widths that are not a multiple of 32.
 
-C++ engine twin: `rocke_build_direct_conv_nhwc` in
-`cpp/instances/common/conv_direct_nhwc.cpp`; byte-identity gated by
+C++ engine twin: `rocke_build_direct_conv_nongrouped` in
+`cpp/instances/common/conv_direct_nongrouped.cpp`; byte-identity gated by
 `library/tests/parity/conv_direct_grouped_emit.{c,py}` (configs 25+)
 (`tools/check_byte_identity.py --only conv_direct_grouped`), Python IR golden
-`conv_direct_nhwc/*` in `tests/instances/rocke_ir_parity_harness.py`, binding
-`rocke_engine.conv_direct_nhwc_*` / `rocke.core.backend.lower_conv_direct_nhwc`.
+`conv_direct_nongrouped/*` in `tests/instances/rocke_ir_parity_harness.py`, binding
+`rocke_engine.conv_direct_nongrouped_*` / `rocke.core.backend.lower_conv_direct_nongrouped`.
 
 ## Img2Col
 

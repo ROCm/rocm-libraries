@@ -1,11 +1,11 @@
-# Direct NHWC Convolution (non-grouped, `groups == 1`)
+# Direct Non-grouped Convolution (`groups == 1`)
 
-Source: [`conv_direct_nhwc.py`](conv_direct_nhwc.py) —
-`DirectNhwcConvSpec`, `is_valid_nhwc_spec`, `build_direct_conv_nhwc`,
+Source: [`conv_direct_nongrouped.py`](conv_direct_nongrouped.py) —
+`DirectNongroupedConvSpec`, `is_valid_nongrouped_spec`, `build_direct_conv_nongrouped`,
 `nongrouped_specs`, `tile_w_candidates`.
 
-C++ engine twin: `platform/cpp/instances/common/conv_direct_nhwc.cpp`
-(public header `rocke/instance_conv_direct_nhwc.h`), byte-identical `.ll`.
+C++ engine twin: `platform/cpp/instances/common/conv_direct_nongrouped.cpp`
+(public header `rocke/instance_conv_direct_nongrouped.h`), byte-identical `.ll`.
 
 ## Why a separate family
 
@@ -141,9 +141,9 @@ target shapes:
 
 ```python
 @dataclass(frozen=True)
-class DirectNhwcConvSpec:
+class DirectNongroupedConvSpec:
     problem: DirectConvProblem      # groups must be 1
-    name: str = "direct_conv_nhwc"
+    name: str = "direct_conv_nongrouped"
     tile_h: int = 16                # output rows per workgroup
     tile_w: int = 32                # output cols per workgroup
     tile_k: int = 128               # output channels per workgroup
@@ -162,7 +162,7 @@ class DirectNhwcConvSpec:
     waves_per_eu: int | None = None # nongrouped_specs sweeps (None, 3)
 ```
 
-Constraints (`validate()` then `is_valid_nhwc_spec(spec, arch)`):
+Constraints (`validate()` then `is_valid_nongrouped_spec(spec, arch)`):
 
 * `groups == 1`, dtype fp16/bf16, atom known and present on the target
   (`32x32x16` and `16x16x32` need gfx950; `32x32x8` / `16x16x16` also gfx942);
@@ -176,15 +176,15 @@ Usage:
 
 ```python
 from kernels.common.conv_direct_grouped import DirectConvProblem
-from kernels.common.conv_direct_nhwc import (
-    DirectNhwcConvSpec, build_direct_conv_nhwc, is_valid_nhwc_spec,
+from kernels.common.conv_direct_nongrouped import (
+    DirectNongroupedConvSpec, build_direct_conv_nongrouped, is_valid_nongrouped_spec,
 )
 
 p = DirectConvProblem(N=4, H=64, W=64, groups=1, cpg=640, kpg=640, dtype="bf16")
-spec = DirectNhwcConvSpec(problem=p, tile_h=16, tile_w=64, tile_k=128, ck=16,
+spec = DirectNongroupedConvSpec(problem=p, tile_h=16, tile_w=64, tile_k=128, ck=16,
                           waves_m=2, waves_n=4, iglp=0)
-ok, why = is_valid_nhwc_spec(spec, arch="gfx950")
-kernel = build_direct_conv_nhwc(spec, arch="gfx950")
+ok, why = is_valid_nongrouped_spec(spec, arch="gfx950")
+kernel = build_direct_conv_nongrouped(spec, arch="gfx950")
 ```
 
 ## Launch grid
@@ -220,14 +220,14 @@ geometries, so the correctness suite runs an evenly spaced sample of
 |------|----------------|---------|
 | C++ ↔ Python byte-identity | the C++ port emits identical `.ll` for 15 configs covering every atom, dtype, stride, filter size, partial tile, uneven staging pass, DB/SB, swizzle on/off, iglp, waves_per_eu, gfx942/gfx950 | `python platform/tools/check_byte_identity.py --only conv_direct_grouped` (also with `ROCKE_LLVM_FLAVOR=llvm22`) |
 | Emitters | the two sides of that gate; shared with the grouped direct-conv family, non-grouped configs are indices 25+ | `tests/parity/conv_direct_grouped_emit.{py,c}` |
-| IR golden | Python lowering is byte-stable (5 cases, all llvm flavors) | `conv_direct_nhwc/*` in `platform/tests/instances/rocke_ir_parity_harness.py` |
-| On-silicon numerics | output vs `torch.nn.functional.conv2d` (fp32 reference), rel. tol 5e-2 fp16 / 1e-1 bf16 | `pytest tests/test_direct_conv_correctness.py -k Nhwc` |
+| IR golden | Python lowering is byte-stable (5 cases, all llvm flavors) | `conv_direct_nongrouped/*` in `platform/tests/instances/rocke_ir_parity_harness.py` |
+| On-silicon numerics | output vs `torch.nn.functional.conv2d` (fp32 reference), rel. tol 5e-2 fp16 / 1e-1 bf16 | `pytest tests/test_direct_conv_correctness.py -k Nongrouped` |
 
-`rocke.core.backend.lower_conv_direct_nhwc(spec, backend="python"|"cpp"|"both")`
-reaches the C++ builder directly through the `rocke_engine.conv_direct_nhwc_*`
+`rocke.core.backend.lower_conv_direct_nongrouped(spec, backend="python"|"cpp"|"both")`
+reaches the C++ builder directly through the `rocke_engine.conv_direct_nongrouped_*`
 binding.
 
-When changing the builder, change `conv_direct_nhwc.cpp` in the same change and
+When changing the builder, change `conv_direct_nongrouped.cpp` in the same change and
 keep one IR op per C++ statement in Python order: C++ leaves argument evaluation
 order unspecified, so folding two emitting calls into one argument list
 reorders `arith.constant`s and breaks byte-identity.
