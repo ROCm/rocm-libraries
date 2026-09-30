@@ -1289,8 +1289,19 @@ class TestSBarrierConstruction(unittest.TestCase):
     def test_default_construction(self):
         b = SBarrier()
         self.assertIsInstance(b, Instruction)
-        self.assertEqual(b.instStr, "s_barrier")
         self.assertEqual(b.instType, InstType.INST_NOTYPE)
+        # instStr is caps-dependent (mirrors SBarrier.__init__): on HasNewBarrier
+        # (e.g. gfx1250) a default, non-separate barrier renders as the
+        # split-barrier pair (workgroup code -1); otherwise a bare "s_barrier".
+        from rocisa_stinkytofu_adaptor.base import getAsmCaps  # noqa: WPS433
+        try:
+            caps = getAsmCaps()
+        except RuntimeError:
+            caps = {}
+        if caps.get("HasNewBarrier", 0):
+            self.assertEqual(b.instStr, "s_barrier_signal -1\ns_barrier_wait -1")
+        else:
+            self.assertEqual(b.instStr, "s_barrier")
 
     def test_with_comment(self):
         b = SBarrier(comment="sync")
