@@ -2273,6 +2273,25 @@ rocblaslt_status
         auto prob = construct_rocblaslt_problem(
             handle, matmul_desc, matA, matB, matC, matD, &alpha, &beta, pref->max_workspace_bytes);
 
+#ifdef HIPBLASLT_ENABLE_JIT
+        if(hipblaslt_jit::mode() == hipblaslt_jit::Mode::Forced)
+        {
+            jitHeuristicFill(handle,
+                             prob,
+                             tensile_data,
+                             requestedAlgoCount,
+                             pref->max_workspace_bytes,
+                             heuristicResultsArray,
+                             returnAlgoCount);
+            for(int i = *returnAlgoCount; i < requestedAlgoCount; ++i)
+                heuristicResultsArray[i].state = rocblaslt_status_invalid_value;
+            if(dummy_bias_address)
+                matmul_desc->bias = nullptr;
+            log_api(__func__, "returnAlgoCount", *returnAlgoCount);
+            return rocblaslt_status_success;
+        }
+#endif
+
         OverrideSingleton& override         = OverrideSingleton::getInstance();
         bool               override_success = false;
         if(override.env_mode)
@@ -2567,6 +2586,16 @@ rocblaslt_status
     rocblaslt_status status = rocblaslt_status_success;
     try
     {
+#ifdef HIPBLASLT_ENABLE_JIT
+        if(hipblaslt_jit::mode() == hipblaslt_jit::Mode::Forced)
+        {
+            results.clear();
+            jitHeuristicFill(
+                handle, gemmType, gemmData, requestedAlgoCount, maxWorkspaceBytes, results);
+            log_api(__func__, "returnAlgoCount", results.size());
+            return rocblaslt_status_success;
+        }
+#endif
         OverrideSingleton&                             override = OverrideSingleton::getInstance();
         bool                                           override_success = false;
         std::vector<rocblaslt_matmul_heuristic_result> override_result;

@@ -44,6 +44,7 @@
 #include "../../hipblaslt-jit-heuristic.hpp"
 #include "../../hipblaslt-jit-library.hpp"
 #include "../../hipblaslt-jit-loader.hpp"
+#include "../../hipblaslt-jit-mode.hpp"
 #include "../../hipblaslt-jit-problem-type.hpp"
 #include "../../hipblaslt_internal.hpp"
 namespace jit = hipblaslt_ext::experimental::jit::detail;
@@ -3328,6 +3329,17 @@ namespace
         return false;
 #endif
     }
+
+    // A process-local JIT algorithm or a JIT library index; rocRoller runs neither.
+    [[maybe_unused]] bool isJitSolution(const rocblaslt_matmul_algo* algo)
+    {
+#ifdef HIPBLASLT_ENABLE_JIT
+        return isJitAlgorithm(algo)
+               || (algo && hipblaslt_jit::isJitIndex(*reinterpret_cast<const int*>(algo->data)));
+#else
+        return false;
+#endif
+    }
 }
 
 TensileLite::ProblemOverride
@@ -3626,8 +3638,26 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     rocblaslt_status status = rocblaslt_status_internal_error;
     try
     {
+#ifdef HIPBLASLT_ENABLE_JIT
+        rocblaslt_matmul_heuristic_result selected;
+        if(algo == nullptr && hipblaslt_jit::mode() != hipblaslt_jit::Mode::Off)
+        {
+            int count = 0;
+            if(hipblaslt_jit::mode() == hipblaslt_jit::Mode::Fallback)
+                getBestSolutions(prob, handle, gemmData, 1, &selected, &count, prob.workspaceSize);
+            if(count == 0)
+            {
+                auto jitProb = prob;
+                jitHeuristicFill(
+                    handle, jitProb, gemmData, 1, prob.workspaceSize, &selected, &count);
+            }
+            if(count == 0)
+                return rocblaslt_status_not_implemented;
+            algo = &selected.algo;
+        }
+#endif
 #ifdef HIPBLASLT_USE_ROCROLLER
-        if(!isJitAlgorithm(algo) && useRocRoller(handle, prob))
+        if(!isJitSolution(algo) && useRocRoller(handle, prob))
             return runRocRollerContractionProblem(handle, algo, prob);
 #endif
         std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
@@ -5547,7 +5577,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle             handle,
 #endif
 
 #ifdef HIPBLASLT_USE_ROCROLLER
-    if(!isJitAlgorithm(algo) && useRocRoller(handle, prob))
+    if(!isJitSolution(algo) && useRocRoller(handle, prob))
         return isRocRollerSolutionSupported(handle, prob, algo, workspaceSizeInBytes);
 #endif
     std::shared_ptr<TensileDataGemm> data = getTensileData(gemmData);
