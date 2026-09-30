@@ -77,7 +77,7 @@ extern "C" __global__ void Col2Im2dU(FLOAT* col,
     const int current_group      = c / channels_per_group;
     const int channel_in_group   = c % channels_per_group;
 
-    unsigned int input_size = channels * height * width;
+    const index_t input_size = index_t{channels} * height * width;
 
     const index_t size_of_group = index_t{col_h} * col_w * (channels / num_groups) * wei_h * wei_w;
 
@@ -117,8 +117,8 @@ extern "C" __global__ void Col2Im2dU(FLOAT* col,
             if(cx < 0 || cx >= col_w)
                 continue;
 
-            size_t col_idx =
-                (((((cy * col_w + cx) * wei_h + fy) * wei_w + fx) * channels_per_group) +
+            const index_t col_idx =
+                (((((index_t{cy} * col_w + cx) * wei_h + fy) * wei_w + fx) * channels_per_group) +
                  channel_in_group) +
                 size_of_group * current_group;
 
