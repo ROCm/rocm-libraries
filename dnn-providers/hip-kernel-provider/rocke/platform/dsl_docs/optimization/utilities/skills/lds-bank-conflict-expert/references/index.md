@@ -43,6 +43,7 @@ Both copies are invoked through Python and do not require executable permissions
 - Read [model-contract.md](model-contract.md) for access, result, diagnostic, and
   serialization semantics.
 - Read [gfx90a.md](gfx90a.md) for the `gfx90a` profile scope.
+- Read [gfx942.md](gfx942.md) for the explicit `gfx942` profile scope.
 - Read [gfx950.md](gfx950.md) for the width- and direction-sensitive `gfx950`
   profile scope.
 - Read [comparison.md](comparison.md) before comparing target profiles.
