@@ -390,8 +390,8 @@ TEST_F(checkin_misc_memory_model, NestedWorkspace_GEBLTTRS_reuses_GETRS)
         ASSERT_EQ(hipMalloc(&dC, sizeof(double) * ldc * nb * nblocks), hipSuccess);
         ASSERT_EQ(hipMalloc(&dX, sizeof(double) * ldx * nrhs * nblocks), hipSuccess);
 
-        size = query_workspace_size(rocsolver_dgeblttrs_npvt, nb, nblocks, nrhs, dA, lda, dB, ldb, dC,
-                                    ldc, dX, ldx);
+        size = query_workspace_size(rocsolver_dgeblttrs_npvt, nb, nblocks, nrhs, dA, lda, dB, ldb,
+                                    dC, ldc, dX, ldx);
 
         hipFree(dA);
         hipFree(dB);
@@ -406,8 +406,8 @@ TEST_F(checkin_misc_memory_model, NestedWorkspace_GEBLTTRS_reuses_GETRS)
     ASSERT_EQ(hipMalloc(&dGB, sizeof(double) * ldb * nrhs), hipSuccess);
     ASSERT_EQ(hipMalloc(&dGP, sizeof(rocblas_int) * nb), hipSuccess);
 
-    size_t getrs_size = query_workspace_size(rocsolver_dgetrs, rocblas_operation_none, nb, nrhs, dGA,
-                                             lda, dGP, dGB, ldb);
+    size_t getrs_size = query_workspace_size(rocsolver_dgetrs, rocblas_operation_none, nb, nrhs,
+                                             dGA, lda, dGP, dGB, ldb);
 
     hipFree(dGA);
     hipFree(dGB);
@@ -617,23 +617,23 @@ TEST_F(checkin_misc_memory_model, BatchedFunction_GETRF_Correctness)
 {
     const rocblas_int n = 30;
     const rocblas_int lda = n;
+    const rocblas_stride stA = lda * n;
     const rocblas_int batch_count = 5;
 
     // Allocate batched arrays (pointers array)
     std::vector<double*> hA_array(batch_count);
-    std::vector<double> hA_data(batch_count * lda * n);
+    std::vector<double> hA_data(stA);
 
     for(int b = 0; b < batch_count; b++)
     {
-        ASSERT_EQ(hipMalloc(&hA_array[b], sizeof(double) * lda * n), hipSuccess);
+        ASSERT_EQ(hipMalloc(&hA_array[b], sizeof(double) * stA), hipSuccess);
 
         // Initialize each batch with different matrix
-        std::vector<double> hA(lda * n);
         for(int i = 0; i < n; i++)
             for(int j = 0; j < n; j++)
-                hA[i + j * lda] = (i == j) ? (2.0 + b * 0.1) : 0.01;
+                hA_data[i + j * lda] = (i == j) ? (2.0 + b * 0.1) : 0.01;
 
-        ASSERT_EQ(hipMemcpy(hA_array[b], hA.data(), sizeof(double) * lda * n, hipMemcpyHostToDevice),
+        ASSERT_EQ(hipMemcpy(hA_array[b], hA_data.data(), sizeof(double) * stA, hipMemcpyHostToDevice),
                   hipSuccess);
     }
 
@@ -681,6 +681,7 @@ TEST_F(checkin_misc_memory_model, StressTest_RapidAllocationDeallocation)
 {
     const rocblas_int n = 50;
     const rocblas_int lda = n;
+    const rocblas_stride stA = lda * n;
 
     double* dA;
     rocblas_int *dP, *dinfo;
@@ -688,7 +689,7 @@ TEST_F(checkin_misc_memory_model, StressTest_RapidAllocationDeallocation)
     ASSERT_EQ(hipMalloc(&dP, sizeof(rocblas_int) * n), hipSuccess);
     ASSERT_EQ(hipMalloc(&dinfo, sizeof(rocblas_int)), hipSuccess);
 
-    std::vector<double> hA(lda * n);
+    std::vector<double> hA(stA);
     for(int i = 0; i < n; i++)
         for(int j = 0; j < n; j++)
             hA[i + j * lda] = (i == j) ? 2.0 : 0.01;
@@ -696,8 +697,7 @@ TEST_F(checkin_misc_memory_model, StressTest_RapidAllocationDeallocation)
     // Execute 100 times rapidly
     for(int iter = 0; iter < 100; iter++)
     {
-        ASSERT_EQ(hipMemcpy(dA, hA.data(), sizeof(double) * lda * n, hipMemcpyHostToDevice),
-                  hipSuccess);
+        ASSERT_EQ(hipMemcpy(dA, hA.data(), sizeof(double) * stA, hipMemcpyHostToDevice), hipSuccess);
 
         rocblas_status status = rocsolver_dgetrf(handle, n, n, dA, lda, dP, dinfo);
         EXPECT_EQ(status, rocblas_status_success) << "Failed at iteration " << iter;
@@ -731,14 +731,14 @@ TEST_F(checkin_misc_memory_model, StressTest_RandomSizes)
     {
         rocblas_int n = sizes[iter % sizes.size()];
         rocblas_int lda = n;
+        rocblas_stride stA = lda * n;
 
-        std::vector<double> hA(lda * n);
+        std::vector<double> hA(stA);
         for(int i = 0; i < n; i++)
             for(int j = 0; j < n; j++)
                 hA[i + j * lda] = (i == j) ? 2.0 : 0.01;
 
-        ASSERT_EQ(hipMemcpy(dA, hA.data(), sizeof(double) * lda * n, hipMemcpyHostToDevice),
-                  hipSuccess);
+        ASSERT_EQ(hipMemcpy(dA, hA.data(), sizeof(double) * stA, hipMemcpyHostToDevice), hipSuccess);
 
         rocblas_status status = rocsolver_dgetrf(handle, n, n, dA, lda, dP, dinfo);
         EXPECT_EQ(status, rocblas_status_success)
