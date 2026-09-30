@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "harness/bundle/BundleReferenceValidationHarness.hpp"
+#include "harness/reference-validation/BundleReferenceValidationHarness.hpp"
 
 #include <string>
 
@@ -12,8 +12,8 @@
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/OutputComparison.hpp"
-#include "harness/bundle/ReferenceOpCoverage.hpp"
 #include "harness/bundle/VariantPackBuilder.hpp"
+#include "harness/reference-validation/ReferenceOpCoverage.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -82,6 +82,43 @@ std::unordered_map<int64_t, void*>
 
 void BundleReferenceValidationHarness::TestBody()
 {
+    // Checked before any allocation: a known-gap bundle never reaches execution, and
+    // building a variant pack for a graph the reference will decline is wasted work.
+    if(_expectedGap.has_value())
+    {
+        // Declining by throwing ReferenceCapabilityError is the same answer as
+        // returning false, so both satisfy the entry. Any other exception is a
+        // broken reference or bundle, and says which gap entry it happened under.
+        bool applicable = false;
+        try
+        {
+            applicable = referenceExecutor().isApplicable(_bundle->graphBuffer.data(),
+                                                          _bundle->graphBuffer.size());
+        }
+        catch(const ReferenceCapabilityError&)
+        {
+            applicable = false;
+        }
+        catch(const std::exception& e)
+        {
+            FAIL() << referenceLabel(_referenceType) << " errored checking applicability of "
+                   << _expectedGap->bundleId
+                   << " (listed in knownReferenceGaps() as: " << _expectedGap->reason
+                   << "): " << e.what() << "\n  bundle: " << _bundlePath;
+        }
+
+        // Inverted on purpose. The entry says this reference cannot run this graph;
+        // if it can now, the entry is stale and the bundle should be validated for
+        // real. Failing here is how the list gets deleted.
+        ASSERT_FALSE(applicable)
+            << referenceLabel(_referenceType) << " now reports this graph applicable, but "
+            << _expectedGap->bundleId
+            << " is still listed in knownReferenceGaps() as: " << _expectedGap->reason
+            << "\n  Remove that entry so the bundle is validated against its golden data."
+            << "\n  bundle: " << _bundlePath;
+        return;
+    }
+
     auto referenceOutputs = allocateOutputs();
     auto variantPack = buildVariantPack(referenceOutputs);
 
@@ -96,7 +133,8 @@ void BundleReferenceValidationHarness::TestBody()
             << referenceLabel(_referenceType)
             << " is required to support this graph (its node types are in the reference's "
                "supported-op set) but reports it is not applicable: "
-            << _bundlePath;
+            << _bundlePath
+            << "\n  If this gap is known and tracked, add an entry to knownReferenceGaps().";
 
         executor.execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
     }

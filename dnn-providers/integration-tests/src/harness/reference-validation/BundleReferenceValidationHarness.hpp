@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -18,6 +19,7 @@
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/reference-validation/ReferenceOpCoverage.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -37,6 +39,11 @@ namespace hipdnn_integration_tests::bundle
 /// cannot run the graph is a gap in the reference, so it fails rather than skips.
 /// The one skip is device availability, checked before that gate: the GPU
 /// reference needs a device, so its suite skips on a runner that has none.
+///
+/// A bundle named in knownReferenceGaps() is the sole exception, and it is still
+/// not a skip: the test runs and asserts the reference reports the graph
+/// *inapplicable*. Closing the gap therefore turns that test red until its entry
+/// is removed.
 class BundleReferenceValidationHarness : public ::testing::Test
 {
 public:
@@ -51,10 +58,17 @@ public:
     {
     }
 
-    void setBundle(std::shared_ptr<IntegrationTestBundle> bundle, std::filesystem::path path)
+    /// `expectedGap` is the knownReferenceGaps() entry this test asserts, or empty to
+    /// validate against golden data. It is decided at registration by
+    /// planGoldenDataValidation() and not looked up here, so the harness cannot
+    /// disagree with the plan about which bundles are gaps.
+    void setBundle(std::shared_ptr<IntegrationTestBundle> bundle,
+                   std::filesystem::path path,
+                   std::optional<KnownReferenceGap> expectedGap)
     {
         _bundle = std::move(bundle);
         _bundlePath = std::move(path);
+        _expectedGap = expectedGap;
     }
 
     static const char* referenceLabel(ReferenceExecutorType type)
@@ -87,6 +101,7 @@ private:
     /// Where the comparison runs. AUTO means the host: golden data is loaded there.
     ValidatorDevice _validator;
     std::filesystem::path _bundlePath;
+    std::optional<KnownReferenceGap> _expectedGap;
     std::shared_ptr<IntegrationTestBundle> _bundle;
 };
 
