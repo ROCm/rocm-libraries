@@ -629,6 +629,15 @@ def test_metadata_arg_magic_size_index():
     assert b["semantic"] == "MagicShiftSize" and b["index"] == 1
 
 
+def test_metadata_arg_streamk_sk4_semantics():
+    # SK4 (dynamic work-stealing) raw metadata names map 1:1 to their own
+    # CustomArgSemantic entries, distinct from the SK3 (static) names.
+    assert _metadataArgToCustomArg(_meta_arg("TotalItems"))["semantic"] == "TotalItems"
+    assert _metadataArgToCustomArg(_meta_arg("SKTiles"))["semantic"] == "SKTiles"
+    assert _metadataArgToCustomArg(_meta_arg("SKSplit"))["semantic"] == "SKSplit"
+    assert _metadataArgToCustomArg(_meta_arg("SKItersPerWI"))["semantic"] == "SKItersPerWI"
+
+
 def test_metadata_arg_missing_field_raises():
     with pytest.raises(RuntimeError, match="missing required field"):
         _metadataArgToCustomArg({".name": "D"})
@@ -798,6 +807,59 @@ def test_validate_metadata_custom_kernel_not_mapping(tmp_path):
 
     assert not valid
     assert "CustomKernel (mapping)" in msg
+
+
+def test_validate_external_rejects_combined_streamk_semantic(tmp_path):
+    # Combined (SK5-hybrid) semantics are Tensile-internal only; an externally
+    # sourced kernel must never declare one in its args.
+    write_kernel(tmp_path / "external.s", """\
+          Source:
+            Origin: test
+          Version: 1.0.0
+          Features: {}
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {}
+          MatrixInstruction: [16, 16, 16, 1]
+          CustomKernel:
+            args:
+              - {type: uint32, semantic: SKItersPerWGOrSKSplit}
+            macrotile: [16, 16, 16]
+            threads: [64, 1, 1]
+            grid: [TilesX, TilesY, One]
+        """)
+
+    valid, msg = validateCustomKernelMetadata("external", str(tmp_path))
+
+    assert not valid
+    assert "combined StreamK semantics" in msg
+    assert "SKItersPerWGOrSKSplit" in msg
+
+
+def test_validate_external_allows_individual_sk4_semantics(tmp_path):
+    # Individual SK4 (work-stealing) semantics are fair game for external
+    # kernels -- only the combined SK5-hybrid names are forbidden.
+    write_kernel(tmp_path / "external.s", """\
+          Source:
+            Origin: test
+          Version: 1.0.0
+          Features: {}
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {}
+          MatrixInstruction: [16, 16, 16, 1]
+          CustomKernel:
+            args:
+              - {type: uint32, semantic: SKSplit}
+              - {type: uint32, semantic: SKItersPerWI}
+            macrotile: [16, 16, 16]
+            threads: [64, 1, 1]
+            grid: [TilesX, TilesY, One]
+        """)
+
+    valid, msg = validateCustomKernelMetadata("external", str(tmp_path))
+
+    assert valid, msg
 
 
 # --------------------------------------------------------------------------- #

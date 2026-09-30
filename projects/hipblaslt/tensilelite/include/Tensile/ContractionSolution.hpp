@@ -138,6 +138,15 @@ namespace TensileLite
         X_MACRO(SKItersPerWG) \
         X_MACRO(SKGrid) \
         X_MACRO(SKTilesAndSplit) \
+        X_MACRO(TotalItems) \
+        X_MACRO(SKTiles) \
+        X_MACRO(SKSplit) \
+        X_MACRO(SKItersPerWI) \
+        X_MACRO(MagicNumberItersPerTileOrTotalItems) \
+        X_MACRO(MagicShiftItersPerTileOrSKTiles) \
+        X_MACRO(SKItersPerWGOrSKSplit) \
+        X_MACRO(SKGridOrSKItersPerWI) \
+        X_MACRO(SKTilesAndSplitOrSKGrid) \
         /* Packed batch dimension divisors */ \
         X_MACRO(MagicNumberSize) \
         X_MACRO(MagicShiftSize) \
@@ -158,6 +167,14 @@ namespace TensileLite
         #undef X_MACRO
         COUNT,
     };
+
+    // The 5 SK5-hybrid combined semantics (...OrSKSplit, ...OrSKTiles, etc. --
+    // see CustomArgSemantic_MACRO above) are Tensile-internal only: they may
+    // never appear in an externally-sourced kernel's custom.config. That is
+    // enforced on the Python side, in Tensile/CustomKernels.py's
+    // _COMBINED_ARG_SEMANTICS / validateCustomKernelMetadata -- there is no
+    // Python binding for this enum, so there is currently no C++-side
+    // enforcement point to wire a helper into here.
 
     TENSILELITEHOST_EXPORT std::string toString(CustomArgSemantic arg);
     TENSILELITEHOST_EXPORT CustomArgSemantic fromStringCustomArgSemantic(std::string& str);

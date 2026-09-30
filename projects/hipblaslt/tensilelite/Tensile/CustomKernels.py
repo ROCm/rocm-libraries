@@ -76,6 +76,10 @@ _METADATA_NAME_TO_SEMANTIC = {
     "SKItersPerWG":           "SKItersPerWG",
     "skGrid":                 "SKGrid",
     "skTiles":                "SKTilesAndSplit",
+    "TotalItems":             "TotalItems",
+    "SKTiles":                "SKTiles",
+    "SKSplit":                "SKSplit",
+    "SKItersPerWI":           "SKItersPerWI",
 }
 
 _ACTIVATION_ARG_INDEX = {
@@ -448,8 +452,44 @@ _TENSILE_HINT = (
     "kernel writer."
 )
 
+_COMBINED_ARG_SEMANTICS = frozenset((
+    "MagicNumberItersPerTileOrTotalItems",
+    "MagicShiftItersPerTileOrSKTiles",
+    "SKItersPerWGOrSKSplit",
+    "SKGridOrSKItersPerWI",
+    "SKTilesAndSplitOrSKGrid",
+))
+
+_COMBINED_SEMANTIC_HINT = (
+    "Combined StreamK semantics (e.g. SKItersPerWGOrSKSplit) describe a kernarg "
+    "slot whose meaning Tensile's own kernel writer resolves at launch time "
+    "between an SK3 (static) and SK4 (dynamic) argument; they are meaningless "
+    "outside Tensile's SK5-hybrid RegSet-aliasing convention. Use the individual "
+    "SK3 or SK4 semantic that matches what your kernel actually expects for that "
+    "slot instead.\n"
+)
+
 def _requiredFieldsMissing(config, fields):
     return [field for field in fields if field not in config]
+
+def _forbiddenCombinedSemantics(custom_kernel):
+    """Return the combined semantics used by an external CustomKernel's args, if any."""
+    args = custom_kernel.get("args")
+    if not isinstance(args, list):
+        return []
+    return sorted({
+        arg["semantic"] for arg in args
+        if isinstance(arg, dict) and arg.get("semantic") in _COMBINED_ARG_SEMANTICS
+    })
+
+def _forbiddenCombinedSemanticMessage(name, filepath, semantics):
+    return (
+        f"External kernel '{name}' uses Tensile-internal combined StreamK "
+        f"semantics in CustomKernel.args, which is not allowed:\n"
+        f"  Found: {', '.join(semantics)}\n"
+        f"  File: {filepath}\n"
+        f"{_COMBINED_SEMANTIC_HINT}"
+    )
 
 def _missingMetadataMessage(kind, name, filepath, missing):
     hint = _EXTERNAL_HINT if kind == "External" else _TENSILE_HINT
@@ -525,5 +565,13 @@ def validateCustomKernelMetadata(name, directory=None):
     if missing:
         kind = "External" if is_external else "Tensile"
         return False, _missingMetadataMessage(kind, name, filepath, missing)
+
+    # Combined (SK5-hybrid) semantics are Tensile-internal only -- they must
+    # never appear in an externally-sourced kernel's declared args, regardless
+    # of whether the required-fields check above already passed.
+    if is_external and isinstance(config.get("CustomKernel"), dict):
+        forbidden = _forbiddenCombinedSemantics(config["CustomKernel"])
+        if forbidden:
+            return False, _forbiddenCombinedSemanticMessage(name, filepath, forbidden)
 
     return True, f"Kernel '{name}' metadata is valid"

@@ -165,3 +165,107 @@ TEST(CustomKernelTest, ScalarsFillTheDeclaredThirtyTwoBitSlot)
             sizeof(float));
     }
 }
+
+// Every CustomArgSemantic value, including the new SK4 individual
+// (TotalItems/SKTiles/SKSplit/SKItersPerWI) and SK5 combined
+// (...Or... entries, Tensile-internal only) semantics, must round-trip
+// through toString/fromStringCustomArgSemantic -- this is what lets a
+// custom.config YAML's `semantic:` string survive a deserialize/reserialize
+// cycle unchanged.
+TEST(CustomKernelTest, EveryCustomArgSemanticRoundTripsThroughItsString)
+{
+    for(int i = 0; i < static_cast<int>(CustomArgSemantic::COUNT); i++)
+    {
+        auto        semantic = static_cast<CustomArgSemantic>(i);
+        std::string str      = toString(semantic);
+        EXPECT_EQ(fromStringCustomArgSemantic(str), semantic) << "for '" << str << "'";
+    }
+}
+
+namespace
+{
+    // Configures a probe kernel that declares the custom.config fields a
+    // handwritten kernel needs to participate in GSU's MultipleBuffer
+    // multi-buffer pattern (workspaceType + workspaceSizePerElemC), plus two
+    // pointer args -- AddressC then AddressD, back to back with no padding
+    // in between -- so the emitted buffer's first two 8-byte slots decode
+    // directly to those addresses.
+    void configureMultiBufferGsuKernel(ContractionSolution& solution,
+                                       int16_t              gsu,
+                                       size_t                workspaceSizePerElemC)
+    {
+        configureProbeKernel(solution, {CustomArgType::address, CustomArgSemantic::AddressC});
+        solution.customKernel.args = {
+            {CustomArgType::address, CustomArgSemantic::AddressC},
+            {CustomArgType::address, CustomArgSemantic::AddressD},
+        };
+        solution.customKernel.workspaceType         = CustomWorkspaceType::SplitK;
+        solution.customKernel.workspaceSizePerElemC = workspaceSizePerElemC;
+
+        solution.sizeMapping.globalSplitU       = gsu;
+        solution.sizeMapping.globalAccumulation = 2; // MultipleBuffer
+        // Large enough that the conversion kernel's _PostGSU<N> suffix below
+        // is not clamped down to something smaller than the requested gsu.
+        solution.sizeMapping.globalSplitUPGR = 64;
+    }
+}
+
+// GFA's multi-kernel path has existed but was never exercised end-to-end for
+// a handwritten custom kernel: solve() chains a second (conversion/reduction)
+// kernel onto GSU's MultipleBuffer mode identically for custom and
+// Tensile-generated kernels, and generateCustomCall() already redirects
+// AddressC/AddressD to the workspace for that mode -- but nothing called
+// solve() on a custom kernel to confirm the two kernels, the workspace
+// redirection, and the workspace sizing all actually agree with each other.
+TEST(CustomKernelTest, MultipleBufferGsuChainsWorkspaceRedirectedConversionKernel)
+{
+    ContractionSolution solution;
+    constexpr int16_t gsu                   = 4;
+    constexpr size_t  workspaceSizePerElemC = 4;
+    configureMultiBufferGsuKernel(solution, gsu, workspaceSizePerElemC);
+
+    auto problem = dummyProblem();
+    auto device  = probeDevice();
+
+    int cStorage = 0, dStorage = 0, wsStorage = 0;
+    ContractionInputs inputs;
+    inputs.c  = &cStorage;
+    inputs.d  = &dStorage;
+    inputs.ws = &wsStorage;
+
+    auto rv = solution.solve(problem, inputs, device);
+
+    // Exactly two kernels: the main custom kernel and the shared
+    // generateOutputConversionCall() reduction/conversion kernel -- no
+    // beta-only pre-kernel (excluded for globalAccumulation == 2) and no
+    // bias-gradient kernel (the dummy problem has no bias).
+    ASSERT_EQ(rv.size(), 2u);
+
+    // The main kernel's AddressC/AddressD args must be redirected to the
+    // workspace, not the user's C/D: MultipleBuffer writes untouched partial
+    // sums there for the conversion kernel to reduce.
+    ASSERT_EQ(rv[0].args.size(), 2 * sizeof(void const*));
+    void const* emittedAddressC = nullptr;
+    void const* emittedAddressD = nullptr;
+    std::memcpy(&emittedAddressC, rv[0].args.data(), sizeof(emittedAddressC));
+    std::memcpy(&emittedAddressD,
+               static_cast<uint8_t const*>(rv[0].args.data()) + sizeof(emittedAddressC),
+               sizeof(emittedAddressD));
+    EXPECT_EQ(emittedAddressC, inputs.ws);
+    EXPECT_EQ(emittedAddressD, inputs.ws);
+    EXPECT_NE(emittedAddressC, inputs.c);
+    EXPECT_NE(emittedAddressD, inputs.d);
+
+    // The conversion kernel's name carries a _PostGSU<N> suffix identifying
+    // the (power-of-two-rounded, PGR-clamped) split factor it reduces.
+    EXPECT_NE(rv[1].kernelName.find("_PostGSU4"), std::string::npos) << rv[1].kernelName;
+
+    // Workspace sizing must follow the custom kernel's own macrotile and
+    // workspaceSizePerElemC (what a handwritten kernel actually declares in
+    // custom.config), not sizeMapping's -- only generated kernels populate
+    // sizeMapping's copies of those fields.
+    size_t tiles    = problem.getNumTiles(solution.sizeMapping, gsu) * problem.d().sizes()[2];
+    size_t tileSize = solution.customKernel.macrotile.x * solution.customKernel.macrotile.y
+                      * workspaceSizePerElemC;
+    EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), tiles * tileSize);
+}
