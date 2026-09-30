@@ -79,6 +79,9 @@ def _sweep_shape(
     scale = float(_HD**-0.5)
     wave_size = 64
 
+    max_blocks = (kv_len + _BS - 1) // _BS
+    num_blocks = max_blocks * num_seqs + 4
+
     au._RESOLVED_ATTENTION_ARCH = arch
     problem = au.UnifiedAttentionProblem(
         total_q=total_q,
@@ -95,6 +98,7 @@ def _sweep_shape(
         use_sinks=use_sinks,
         use_fp8=True,
         num_cus=256,
+        num_kv_blocks=num_blocks,
     )
     _Spec3D, ReduceSpec, build_seg, build_red, _ = au._tiled_3d_impl(arch)
     from dataclasses import replace
@@ -102,8 +106,6 @@ def _sweep_shape(
     base_seg = au._tiled_3d_spec_from_problem(problem)
 
     rng = np.random.default_rng(seed)
-    max_blocks = (kv_len + _BS - 1) // _BS
-    num_blocks = max_blocks * num_seqs + 4
     q_f32 = (rng.standard_normal((total_q, _NQH, _HD)) * 0.3).astype(np.float32)
     kc = (rng.standard_normal((num_blocks, _BS, _NKVH, _HD)) * 0.3).astype(_FP8)
     vc = (rng.standard_normal((num_blocks, _BS, _NKVH, _HD)) * 0.3).astype(_FP8)

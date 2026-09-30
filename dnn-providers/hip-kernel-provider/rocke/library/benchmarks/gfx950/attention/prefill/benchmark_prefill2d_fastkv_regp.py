@@ -102,7 +102,7 @@ class RockeFastKvRegPBench:
         self.num_cus = num_cus
         self._launchers: dict[tuple[Any, ...], tuple[Any, Any, str]] = {}
 
-    def _problem(self, shape, sliding_window: int):
+    def _problem(self, shape, sliding_window: int, num_kv_blocks: int = 0):
         from kernels import UnifiedAttentionProblem
 
         return UnifiedAttentionProblem(
@@ -123,6 +123,7 @@ class RockeFastKvRegPBench:
             use_fp8=False,
             num_cus=self.num_cus,
             compile_backend=self.compile_backend,
+            num_kv_blocks=num_kv_blocks,
         )
 
     def _base_r4_spec(self, shape, sliding_window: int, *, tile_mult: int = 2):
@@ -306,14 +307,27 @@ class RockeFastKvRegPBench:
         raise ValueError(f"unknown variant: {variant}")
 
     def _launcher(self, shape, problem, variant: str, sliding_window: int):
+        from dataclasses import replace
+
         from rocke import compile_kernel
-        from kernels.common.attention_unified import _attn_signature
+        from kernels.common.attention_unified import (
+            _attn_signature,
+            _enable_i64_kv_addr,
+        )
         from rocke.runtime import KernelLauncher
 
         spec, builder, policy = self._variant_spec_and_builder(
             shape, problem, variant, sliding_window
         )
-        key = (variant, shape.signature, spec.kernel_name(), self.compile_backend)
+        spec = replace(spec, use_i64_kv_addr=_enable_i64_kv_addr(problem))
+        # kernel_name() does not encode the KV addressing width, so key on it too.
+        key = (
+            variant,
+            shape.signature,
+            spec.kernel_name(),
+            spec.use_i64_kv_addr,
+            self.compile_backend,
+        )
         if key not in self._launchers:
             kernel = builder(spec)
             # The display name omits compile-time shape constants.  Keep the
@@ -349,7 +363,9 @@ class RockeFastKvRegPBench:
         from rocke.runtime import LaunchConfig, synchronize_and_release, time_launches
 
         sliding_window = _sliding_window(shape)
-        problem = self._problem(shape, sliding_window)
+        problem = self._problem(
+            shape, sliding_window, num_kv_blocks=int(data["key_cache"].shape[0])
+        )
         launcher, spec, policy = self._launcher(shape, problem, variant, sliding_window)
         hip_stream = _bench_stream_handle()
         vals = _attn_values(
@@ -370,6 +386,7 @@ class RockeFastKvRegPBench:
             qq_bias=None,
             qq_bias_stride_0=0,
             include_qq_bias_stride=True,
+            use_i64_kv_addr=spec.use_i64_kv_addr,
         )
         cfg = LaunchConfig(
             grid=(
