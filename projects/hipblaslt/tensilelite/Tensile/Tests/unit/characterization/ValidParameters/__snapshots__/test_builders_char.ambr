@@ -1893,7 +1893,7 @@
         'MultipleBuffer',
         'MultipleBufferSingleKernel',
       ]),
-      'len': 3,
+      'len': 4,
       'type': 'list',
     }),
     'GlobalSplitUCoalesced': dict({

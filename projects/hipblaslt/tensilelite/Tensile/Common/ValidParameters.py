@@ -360,7 +360,10 @@ validParameters = { # we need to make sure this matches develop
     # 0: disable
     # 1: prefetch one load tile (MTxDepthU) ahead of PrefetchGlobalRead
     # 2: prefetch two load tiles (MTxDepthU) ahead of PrefetchGlobalRead
-    # Currently we do not support GSU, StaggerU, StreamK and general batch. May remove these limitations in the future.
+    # Currently we do not support StaggerU (forced off), general batch, 6-bit float,
+    # or Stream-K other than DP-first (StreamK==3). GSU is supported; with a
+    # workgroup cluster it forces GlobalSplitUWorkGroupMappingRoundRobin on so the
+    # cluster's peers share a K chunk. May remove these limitations in the future.
     "PrefetchGL2": [0, 1, 2],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
@@ -443,7 +446,9 @@ validParameters = { # we need to make sure this matches develop
     # 1: use atomic operation to accumulate on one buffer
     # 2: each GSU group write to each own buffer and accumulate by another kernel
     # 3: each GSU group write to each own buffer and accumulate by same kernel
-    "GlobalSplitUAlgorithm": ["SingleBuffer", "MultipleBuffer", "MultipleBufferSingleKernel"],
+    # 4: no buffer at all - every GSU group atomically accumulates into D in the
+    #    dest precision, so neither a staging buffer nor a conversion kernel exists
+    "GlobalSplitUAlgorithm": ["SingleBuffer", "MultipleBuffer", "MultipleBufferSingleKernel", "AtomicDest"],
     # don't create a whole copy of the Unroll loop with loads removed - instead
     # use buffer limits to suppress global loads and ignore unnecessary ds_reads
     "SuppressNoLoadLoop": [False, True],

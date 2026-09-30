@@ -5,7 +5,7 @@
 #include "flops.hpp"
 #include "program_options.hpp"
 
-#include <algorithm>
+#include <functional>
 
 using namespace hipblaslt_bench;
 using namespace roc; // For emulated program_options
@@ -93,37 +93,11 @@ try
     }
     arg.a2a_world = uint8_t(env.world);
 
-    if(env.world > HIPBLASLT_DEVICE_COMM_MAX_WORLD)
-    {
-        hipblaslt_cout << "skipped: WORLD_SIZE " << env.world << " exceeds "
-                       << HIPBLASLT_DEVICE_COMM_MAX_WORLD << "\n";
-        return 0;
-    }
-
     hipblaslt_bench::TcpRendezvous rendezvous(env, kRendezvousTimeoutSec);
-    if(!rendezvous.same_host_group())
-    {
-        hipblaslt_cout << "skipped: ranks span hosts\n";
+    if(!join_group(env, rendezvous, HIPBLASLT_DEVICE_COMM_MAX_WORLD))
         return 0;
-    }
 
-    const uint8_t reachable = peers_reachable(env, arg) ? 1 : 0;
-
-    std::vector<uint8_t> allReachable(env.world);
-    if(rendezvous.allgather(&reachable, allReachable.data(), sizeof(reachable))
-       != HIPBLAS_STATUS_SUCCESS)
-    {
-        hipblaslt_cerr << "error: allgather for peer pre-check failed\n";
-        return 1;
-    }
-    bool groupReachable = true;
-    for(uint32_t j = 0; j < env.world; ++j)
-        groupReachable = groupReachable && allReachable[j] != 0;
-    if(!groupReachable)
-    {
-        hipblaslt_cout << "skipped: peer access unavailable on at least one rank\n";
-        return 0;
-    }
+    const auto agreement = make_agreement(rendezvous, env.world);
 
     RankResources res;
     res.rendezvous = &rendezvous;
@@ -138,18 +112,7 @@ try
         hipblaslt_cerr << "error: hipblasLtMatmulAlgoGetHeuristic -> " << int(algoStatus) << "\n";
         return 1;
     }
-    const uint8_t found = algoCount > 0 ? 1 : 0;
-
-    std::vector<uint8_t> allFound(env.world);
-    if(rendezvous.allgather(&found, allFound.data(), sizeof(found)) != HIPBLAS_STATUS_SUCCESS)
-    {
-        hipblaslt_cerr << "error: allgather for algo selection failed\n";
-        return 1;
-    }
-    bool groupFound = true;
-    for(uint32_t j = 0; j < env.world; ++j)
-        groupFound = groupFound && allFound[j] != 0;
-    if(!groupFound)
+    if(!agreement.agree(algoCount > 0, std::logical_and<>{}))
     {
         hipblaslt_cout << "skipped: no fused GEMM+A2A solution in the loaded library\n";
         return 0;
@@ -180,27 +143,17 @@ try
             cfg.stability_interval  = arg.stability_interval;
         }
 
-        uint8_t verified = 1;
+        bool verified = true;
         if(arg.norm_check || arg.allclose_check)
             for(int32_t i = 0; i < arg.iters; ++i)
             {
                 launch(0);
                 if(hipStreamSynchronize(res.stream) != hipSuccess
                    || !check_recv(env, arg, res, hostGold, hostLanded))
-                    verified = 0;
+                    verified = false;
             }
 
-        std::vector<uint8_t> allVerified(env.world);
-        if(rendezvous.allgather(&verified, allVerified.data(), sizeof(verified))
-           != HIPBLAS_STATUS_SUCCESS)
-        {
-            hipblaslt_cerr << "error: allgather for verification failed\n";
-            return 1;
-        }
-        bool groupVerified = true;
-        for(uint32_t j = 0; j < env.world; ++j)
-            groupVerified = groupVerified && allVerified[j] != 0;
-        if(!groupVerified)
+        if(!agreement.agree(verified, std::logical_and<>{}))
         {
             if(lastStatus != HIPBLAS_STATUS_SUCCESS)
                 hipblaslt_cerr << "error: matmul -> " << int(lastStatus) << "\n";
@@ -214,38 +167,22 @@ try
                 launch(0);
 
         hipblaslt_bench::TimingResult result;
-        const auto                    agreement = make_agreement(rendezvous, env.world);
         hipblaslt_bench::run_measurement(
             launch, cfg, nullptr, nullptr, res.stream, result, {}, agreement);
 
-        struct LatencyContribution
+        const bool ok = lastStatus == HIPBLAS_STATUS_SUCCESS;
+        if(!agreement.agree(ok, std::logical_and<>{}))
         {
-            uint8_t ok;
-            double  median_us;
-        };
-        LatencyContribution mine{lastStatus == HIPBLAS_STATUS_SUCCESS ? uint8_t(1) : uint8_t(0),
-                                 result.median_us};
-        std::vector<LatencyContribution> perRank(env.world);
-        if(rendezvous.allgather(&mine, perRank.data(), sizeof(mine)) != HIPBLAS_STATUS_SUCCESS)
-            return 1;
-
-        bool groupOk = true;
-        for(uint32_t j = 0; j < env.world; ++j)
-            groupOk = groupOk && perRank[j].ok != 0;
-        if(!groupOk)
-        {
-            if(mine.ok != 0)
+            if(ok)
                 hipblaslt_cerr << "error: peer rank failed\n";
             else
                 hipblaslt_cerr << "error: matmul -> " << int(lastStatus) << "\n";
             return 1;
         }
 
+        const double slowest = agreement.agree(result.median_us, MaxOp{});
         if(env.rank == 0)
         {
-            double slowest = perRank[0].median_us;
-            for(uint32_t j = 1; j < env.world; ++j)
-                slowest = std::max(slowest, perRank[j].median_us);
             const double gflops = gemm_gflop_count<hipblasLtBfloat16>(arg.M[0], arg.N[0], arg.K[0]);
 
             hipblaslt_cout << "a2a_world,a2a_extent,M,N,K,hipblaslt-Gflops,us\n"
@@ -263,24 +200,15 @@ try
                            << "," << arg.N[0] << "," << arg.K[0] << "\n";
 
         launch(0);
-        uint8_t ok = (hipStreamSynchronize(res.stream) == hipSuccess
-                      && lastStatus == HIPBLAS_STATUS_SUCCESS)
-                         ? 1
-                         : 0;
-        if(ok != 0 && (arg.norm_check || arg.allclose_check)
+        bool ok = hipStreamSynchronize(res.stream) == hipSuccess
+                  && lastStatus == HIPBLAS_STATUS_SUCCESS;
+        if(ok && (arg.norm_check || arg.allclose_check)
            && !check_recv(env, arg, res, hostGold, hostLanded))
-            ok = 0;
+            ok = false;
 
-        std::vector<uint8_t> allOk(env.world);
-        if(rendezvous.allgather(&ok, allOk.data(), sizeof(ok)) != HIPBLAS_STATUS_SUCCESS)
-            return 1;
-
-        bool groupOk = true;
-        for(uint32_t j = 0; j < env.world; ++j)
-            groupOk = groupOk && allOk[j] != 0;
-        if(!groupOk)
+        if(!agreement.agree(ok, std::logical_and<>{}))
         {
-            if(ok != 0)
+            if(ok)
                 hipblaslt_cerr << "error: peer rank failed\n";
             else if(lastStatus != HIPBLAS_STATUS_SUCCESS)
                 hipblaslt_cerr << "error: matmul -> " << int(lastStatus) << "\n";
