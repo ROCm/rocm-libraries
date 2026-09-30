@@ -358,6 +358,20 @@ int main()
       return EXIT_FAILURE;
     }
 
+    // An error the application has not read yet must still be reported after
+    // such an interposer-internal failure, although HIP replaces its code.
+    static_cast<void>(hipSetDevice(-1));
+    page_aligned = runtime_aligned_alloc(page_size, page_size);
+    if (!page_aligned)
+    {
+      return EXIT_FAILURE;
+    }
+    runtime_free(page_aligned);
+    if (hipGetLastError() == hipSuccess)
+    {
+      return EXIT_FAILURE;
+    }
+
 #if defined(__HIPSTDPAR_INTERPOSE_ALLOC_CAN_MMAP__)
     // mmap reports failure with MAP_FAILED, not nullptr.
     errno = 0;
