@@ -113,8 +113,9 @@ namespace
                     expected[row + col * m] = __half2float(
                         __float2half(alpha * sum + beta * __half2float(hostC[row + col * m])));
                 }
-            check(hipMalloc(&a, hostA.size() * sizeof(__half)), "Allocate A");
-            check(hipMalloc(&b, hostB.size() * sizeof(__half)), "Allocate B");
+            // Gemm rejects a null A or B when alpha is nonzero, even when K is zero.
+            check(hipMalloc(&a, std::max<size_t>(hostA.size(), 1) * sizeof(__half)), "Allocate A");
+            check(hipMalloc(&b, std::max<size_t>(hostB.size(), 1) * sizeof(__half)), "Allocate B");
             check(hipMalloc(&c, hostC.size() * sizeof(__half)), "Allocate C");
             check(hipMalloc(&d, hostD.size() * sizeof(__half)), "Allocate D");
             check(hipMalloc(&workspace, s.workspace), "Allocate workspace");
