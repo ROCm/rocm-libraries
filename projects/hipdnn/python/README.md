@@ -137,7 +137,8 @@ The wheel package uses a `src/` layout, so running pytest from
 
 ## DLPack Interoperability
 
-`Graph.execute()`, `Graph.execute_plan_at_index()`, `Graph.autotune()`, and
+`Graph.execute()`, `Graph.execute_timed_ext()`,
+`Graph.execute_plan_at_index()`, `Graph.autotune()`, and
 `Graph.autotune_exhaustive_sweep()` take a `variant_pack` keyed by tensor UID
 or by `Tensor`. Each value, and `workspace`, may be one of these kinds, checked
 in this order:
