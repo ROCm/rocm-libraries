@@ -51,7 +51,7 @@ set(USER_ROCM_WARN_TOOLCHAIN_VAR ${ROCM_WARN_TOOLCHAIN_VAR})
 # anyway. The restore below intentionally still doesn't use FORCE, matching
 # today's standalone behavior (where it's already a no-op and the suppression
 # quietly outlives this block for the rest of that configure).
-set(ROCM_WARN_TOOLCHAIN_VAR OFF CACHE BOOL "" FORCE)
+qq
 # Turn off warnings and errors for all warnings in dependencies
 separate_arguments(CXX_FLAGS_LIST NATIVE_COMMAND ${CMAKE_CXX_FLAGS})
 list(REMOVE_ITEM CXX_FLAGS_LIST /WX -Werror -Werror=pendantic -pedantic-errors)
@@ -121,7 +121,18 @@ if(BUILD_TEST)
     add_library(GTest::GTest ALIAS gtest)
     add_library(GTest::Main  ALIAS gtest_main)
   else()
-    find_package(GTest REQUIRED)
+    # NOTE(hipccl3): only look GTest up if we don't already have the target.
+    # Reaching this else() means GTest::GTest or GTest::gtest already exists -
+    # but it may have been created by a *sibling* project's FetchContent
+    # rather than by the find_package(GTest QUIET) above (in the unified
+    # hipCCL build the components are add_subdirectory()'d into one configure,
+    # so whichever runs first fetches googletest and defines these targets for
+    # everyone after it). In that case GTest is not installed on the system at
+    # all, and an unguarded find_package(GTest REQUIRED) here fails the entire
+    # configure even though usable targets are already present.
+    if(NOT TARGET GTest::GTest)
+      find_package(GTest REQUIRED)
+    endif()
     if(TARGET GTest::gtest_main AND NOT TARGET GTest::Main)
       add_library(GTest::GTest ALIAS GTest::gtest)
       add_library(GTest::Main  ALIAS GTest::gtest_main)
