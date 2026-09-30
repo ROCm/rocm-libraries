@@ -1036,6 +1036,25 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "s.prefetch.inst.p4": (
         "declare void @llvm.amdgcn.s.prefetch.inst.p4(ptr addrspace(4), i32)"
     ),
+    # gfx1250 data prefetch (llvm23). ``s.prefetch.data`` is overloaded by
+    # address space exactly like ``s.prefetch.inst``; see
+    # _S_PREFETCH_DATA_PTR_TYPES.
+    "s.setreg": "declare void @llvm.amdgcn.s.setreg(i32 immarg, i32)",
+    "s.prefetch.data.p0": "declare void @llvm.amdgcn.s.prefetch.data.p0(ptr, i32)",
+    "s.prefetch.data.p1": (
+        "declare void @llvm.amdgcn.s.prefetch.data.p1(ptr addrspace(1), i32)"
+    ),
+    "s.prefetch.data.p4": (
+        "declare void @llvm.amdgcn.s.prefetch.data.p4(ptr addrspace(4), i32)"
+    ),
+    "s.buffer.prefetch.data": (
+        "declare void @llvm.amdgcn.s.buffer.prefetch.data("
+        "ptr addrspace(8), i32 immarg, i32)"
+    ),
+    "global.prefetch": (
+        "declare void @llvm.amdgcn.global.prefetch(ptr addrspace(1), i32 immarg)"
+    ),
+    "flat.prefetch": "declare void @llvm.amdgcn.flat.prefetch(ptr, i32 immarg)",
 }
 
 # Address spaces each ``llvm_anyptr_ty`` intrinsic accepts, mapped to their LLVM
@@ -1046,6 +1065,12 @@ _INTRINSIC_DECLS: Dict[str, str] = {
 # ``s.prefetch.inst`` reaches instruction memory through a flat, global, or
 # constant pointer (LLVM's own test uses ``addrspace(4)``).
 _S_PREFETCH_INST_PTR_TYPES: Dict[int, str] = {
+    0: "ptr",
+    1: "ptr addrspace(1)",
+    4: "ptr addrspace(4)",
+}
+# ``s.prefetch.data`` takes the same flat, global, or constant pointers.
+_S_PREFETCH_DATA_PTR_TYPES: Dict[int, str] = {
     0: "ptr",
     1: "ptr addrspace(1)",
     4: "ptr addrspace(4)",
@@ -4185,6 +4210,81 @@ class _Lowerer:
         self._current().emit(
             f"  call void @llvm.amdgcn.s.prefetch.inst.p{space}("
             f"{ptr_ty} {self._operand(ptr)}, i32 {self._operand(length)})"
+        )
+
+    # ----- gfx1250 data prefetch -----
+
+    def _check_cachepolicy(self, op: str, value: object) -> int:
+        v = int(value)  # type: ignore[call-overload]
+        if not 0 <= v <= 31:
+            raise ValueError(f"{op} cachepolicy must be in 0..31, got {v}")
+        return v
+
+    def _op_tile_s_setreg(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("s_setreg")
+        (value,) = op.operands
+        simm16 = self._check_u16("s_setreg", "simm16", op.attrs.get("simm16", 0))
+        self._need("s.setreg")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.s.setreg(i32 {simm16}, i32 {self._operand(value)})"
+        )
+
+    def _op_tile_s_prefetch_data(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("s_prefetch_data")
+        ptr, length = op.operands
+        space, ptr_ty = self._anyptr_space(
+            "s_prefetch_data", ptr, _S_PREFETCH_DATA_PTR_TYPES
+        )
+        self._need(f"s.prefetch.data.p{space}")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.s.prefetch.data.p{space}("
+            f"{ptr_ty} {self._operand(ptr)}, i32 {self._operand(length)})"
+        )
+
+    def _op_tile_s_buffer_prefetch_data(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("s_buffer_prefetch_data")
+        rsrc, length = op.operands
+        offset = int(op.attrs.get("offset", 0))
+        if not -(2**31) <= offset <= 2**31 - 1:
+            raise ValueError(
+                f"s_buffer_prefetch_data offset must fit signed i32, got {offset}"
+            )
+        self._need("s.buffer.prefetch.data")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.s.buffer.prefetch.data("
+            f"ptr addrspace(8) {self._operand(rsrc)}, i32 {offset}, "
+            f"i32 {self._operand(length)})"
+        )
+
+    def _op_tile_global_prefetch(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("global_prefetch")
+        (ptr,) = op.operands
+        if self._ptr_llvm_type(ptr) != "ptr addrspace(1)":
+            raise TypeError(
+                f"global_prefetch ptr must be a global pointer, "
+                f"got {self._ptr_llvm_type(ptr)}"
+            )
+        cp = self._check_cachepolicy(
+            "global_prefetch", op.attrs.get("cachepolicy", 0)
+        )
+        self._need("global.prefetch")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.global.prefetch("
+            f"ptr addrspace(1) {self._operand(ptr)}, i32 {cp})"
+        )
+
+    def _op_tile_flat_prefetch(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("flat_prefetch")
+        (ptr,) = op.operands
+        if self._ptr_llvm_type(ptr) != "ptr":
+            raise TypeError(
+                f"flat_prefetch ptr must be a flat pointer, "
+                f"got {self._ptr_llvm_type(ptr)}"
+            )
+        cp = self._check_cachepolicy("flat_prefetch", op.attrs.get("cachepolicy", 0))
+        self._need("flat.prefetch")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.flat.prefetch(ptr {self._operand(ptr)}, i32 {cp})"
         )
 
     def _op_tile_permlane32_swap(self, op: Op) -> None:

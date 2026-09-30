@@ -98,6 +98,10 @@ families in `cpp/bindings/prove_parity_binding.py`.
 gfx11 `s_waitcnt` *layout*, exactly as in Python's `Gfx1250Backend`. The gfx1250
 57-bit SRD is deferred; the waitcnt layout is unreachable because
 `emits_legacy_s_waitcnt` is false. Both are faithful mirrors, not C++-side debt.
+`s_buffer_prefetch_data` consumes a `buffer_rsrc` value and so carries the same
+word3 placeholder; it is a hint, so a wrong word3 loses the prefetch rather
+than the result, but `isa_features/data_prefetch_verify.py` is the check that
+confirms the functional run on a device.
 
 ---
 

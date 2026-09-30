@@ -128,6 +128,8 @@ typedef struct rocke_ll_anyptr_space
 
 extern const rocke_ll_anyptr_space_t ROCKE_LL_S_PREFETCH_INST_PTR_TYPES[];
 extern const int ROCKE_LL_S_PREFETCH_INST_PTR_TYPES_COUNT;
+extern const rocke_ll_anyptr_space_t ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES[];
+extern const int ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES_COUNT;
 extern const rocke_ll_anyptr_space_t ROCKE_LL_AV_B128_PTR_TYPES[];
 extern const int ROCKE_LL_AV_B128_PTR_TYPES_COUNT;
 

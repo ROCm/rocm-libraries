@@ -301,6 +301,28 @@ def _scale_coordinates(block_k):
 CONFIGS.extend((_scale_coordinates(block), "gfx1250") for block in (32, 16))
 
 
+def build_data_prefetch(b: IRBuilder) -> None:
+    """Every data-prefetch op once, over each pointer space s_prefetch_data
+    accepts, with non-default immediates so a dropped attr shows up."""
+    src = b.param("src", PtrType(F32, "global"), readonly=True, align=16)
+    table = b.param("table", PtrType(I32, "global"), addr_space="constant")
+    flat = b.param("flat", PtrType(F32, "private"))
+    nbytes = b.param("nbytes", I32)
+    lines = b.const_i32(4)
+    b.enable_scalar_prefetch()
+    b.s_prefetch_data(src, lines)
+    b.s_prefetch_data(table, lines)
+    b.s_prefetch_data(flat, lines)
+    rsrc = b.buffer_rsrc(src, nbytes)
+    b.s_buffer_prefetch_data(rsrc, lines, offset=256)
+    b.global_prefetch(src, cachepolicy=3)
+    b.flat_prefetch(flat, cachepolicy=5)
+    b.ret()
+
+
+CONFIGS.append((build_data_prefetch, "gfx1250"))
+
+
 def _spec(idx: int):
     """Config selector: the (builder, arch) pair the shared driver expects."""
     if not 0 <= idx < len(CONFIGS):

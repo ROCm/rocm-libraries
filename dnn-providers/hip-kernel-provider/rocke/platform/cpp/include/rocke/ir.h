@@ -399,6 +399,11 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_WAIT_ASYNCMARK,
     ROCKE_OP_TILE_S_WAIT_EVENT,
     ROCKE_OP_TILE_S_PREFETCH_INST,
+    ROCKE_OP_TILE_S_SETREG,
+    ROCKE_OP_TILE_S_PREFETCH_DATA,
+    ROCKE_OP_TILE_S_BUFFER_PREFETCH_DATA,
+    ROCKE_OP_TILE_GLOBAL_PREFETCH,
+    ROCKE_OP_TILE_FLAT_PREFETCH,
     ROCKE_OP_TILE_S_SETPRIO,
     ROCKE_OP_TILE_IGLP_OPT,
     ROCKE_OP_TILE_SCHED_BARRIER,
@@ -1372,6 +1377,23 @@ void rocke_b_asyncmark(rocke_ir_builder_t* b);
 void rocke_b_wait_asyncmark(rocke_ir_builder_t* b, int n);
 void rocke_b_s_wait_event(rocke_ir_builder_t* b, int imm);
 void rocke_b_s_prefetch_inst(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* length);
+
+/* gfx1250 data prefetch. S_SETREG's SIMM16 packs id | offset<<6 | (size-1)<<11
+ * (Python rocke.core.ir.hwreg). The MODE bit that enables scalar data
+ * prefetch is taken from the gfx1250 ISA description; verify against the
+ * toolchain in use. */
+#define ROCKE_HW_REG_MODE 1
+#define ROCKE_MODE_SCALAR_PREFETCH_EN_BIT 24
+#define ROCKE_HWREG(id, offset, size) ((id) | ((offset) << 6) | (((size)-1) << 11))
+void rocke_b_s_setreg(rocke_ir_builder_t* b, int simm16, rocke_value_t* value);
+void rocke_b_enable_scalar_prefetch(rocke_ir_builder_t* b);
+void rocke_b_s_prefetch_data(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* length);
+void rocke_b_s_buffer_prefetch_data(rocke_ir_builder_t* b,
+                                    rocke_value_t* rsrc,
+                                    rocke_value_t* length,
+                                    int offset);
+void rocke_b_global_prefetch(rocke_ir_builder_t* b, rocke_value_t* ptr, int cachepolicy);
+void rocke_b_flat_prefetch(rocke_ir_builder_t* b, rocke_value_t* ptr, int cachepolicy);
 void rocke_b_s_setprio(rocke_ir_builder_t* b, int level);
 void rocke_b_iglp_opt(rocke_ir_builder_t* b, int level);
 void rocke_b_sched_barrier(rocke_ir_builder_t* b, int mask);

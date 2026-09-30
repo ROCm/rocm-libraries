@@ -683,6 +683,345 @@ void case_s_prefetch_inst()
     EXPECT_IR(ir, "call void @llvm.amdgcn.s.prefetch.inst.p1(ptr addrspace(1) %code, i32 64)");
 }
 
+/* ---- gfx1250 data prefetch (Python tests/core/test_gfx1250_prefetch.py) ---- */
+
+/* Lower a kernel that is expected to be rejected; return the status and fill
+ * `err` with the lowerer's message. */
+template <typename BuildFn>
+rocke_status_t lower_expect_error(const char* name,
+                                  BuildFn build,
+                                  const char* arch,
+                                  rocke_llvm_flavor_t flavor,
+                                  std::string* err_out)
+{
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, name) != ROCKE_OK)
+    {
+        fail("rocke_ir_builder_init", __LINE__);
+        return ROCKE_OK;
+    }
+    build(&b);
+    rocke_b_ret(&b);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    const rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        rocke_ir_builder_kernel(&b), flavor, arch, &ll, err, sizeof(err));
+    err_out->assign(err);
+    std::free(ll);
+    rocke_ir_builder_free(&b);
+    return st;
+}
+
+rocke_value_t* private_ptr_param(rocke_ir_builder_t* b, const char* name, const rocke_type_t* elem)
+{
+    return rocke_b_param(b, name, rocke_ptr_type(b, elem, "private"), nullptr);
+}
+
+/* Mirrors _build_all in the Python test: every op once, each pointer space
+ * s_prefetch_data accepts, and non-default immediates so a dropped attr shows. */
+void build_gfx1250_data_prefetch(rocke_ir_builder_t* b)
+{
+    rocke_param_opts_t readonly{};
+    readonly.readonly = true;
+    readonly.readonly_set = true;
+    readonly.align = 16;
+    readonly.align_set = true;
+    rocke_param_opts_t constant{};
+    constant.addr_space = "constant";
+
+    rocke_value_t* src
+        = rocke_b_param(b, "src", rocke_ptr_type(b, rocke_f32(), "global"), &readonly);
+    rocke_value_t* table
+        = rocke_b_param(b, "table", rocke_ptr_type(b, rocke_i32(), "global"), &constant);
+    rocke_value_t* flat = private_ptr_param(b, "flat", rocke_f32());
+    rocke_value_t* nbytes = rocke_b_param(b, "nbytes", rocke_i32(), nullptr);
+    rocke_value_t* lines = rocke_b_const_i32(b, 4);
+
+    rocke_b_enable_scalar_prefetch(b);
+    rocke_b_s_prefetch_data(b, src, lines);
+    rocke_b_s_prefetch_data(b, table, lines);
+    rocke_b_s_prefetch_data(b, flat, lines);
+    rocke_value_t* rsrc = rocke_b_buffer_rsrc(b, src, nbytes);
+    rocke_b_s_buffer_prefetch_data(b, rsrc, lines, /*offset=*/256);
+    rocke_b_global_prefetch(b, src, /*cachepolicy=*/3);
+    rocke_b_flat_prefetch(b, flat, /*cachepolicy=*/5);
+}
+
+void case_gfx1250_data_prefetch()
+{
+    const std::string ir = lower_one(
+        "gfx1250_prefetch", build_gfx1250_data_prefetch, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23);
+
+    /* hwreg(MODE=1, offset=24, size=1) == 1 | (24 << 6) == 1537. */
+    EXPECT_IR(ir, "call void @llvm.amdgcn.s.setreg(i32 1537, i32 1)");
+    /* s.prefetch.data is llvm_anyptr_ty: the overload follows the param's
+     * header type, including the constant-space override on `table`. */
+    EXPECT_IR(ir, "call void @llvm.amdgcn.s.prefetch.data.p1(ptr addrspace(1) %src, i32 4)");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.s.prefetch.data.p4(ptr addrspace(4) %table, i32 4)");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.s.prefetch.data.p0(ptr %flat, i32 4)");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.s.buffer.prefetch.data(ptr addrspace(8) %");
+    EXPECT_IR(ir, ", i32 256, i32 4)");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.global.prefetch(ptr addrspace(1) %src, i32 3)");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.flat.prefetch(ptr %flat, i32 5)");
+
+    EXPECT_IR_COUNT(ir, "declare void @llvm.amdgcn.s.setreg(i32 immarg, i32)", 1);
+    EXPECT_IR_COUNT(ir, "declare void @llvm.amdgcn.s.prefetch.data.p0(ptr, i32)", 1);
+    EXPECT_IR_COUNT(ir, "declare void @llvm.amdgcn.s.prefetch.data.p1(ptr addrspace(1), i32)", 1);
+    EXPECT_IR_COUNT(ir, "declare void @llvm.amdgcn.s.prefetch.data.p4(ptr addrspace(4), i32)", 1);
+    EXPECT_IR_COUNT(ir,
+                    "declare void @llvm.amdgcn.s.buffer.prefetch.data("
+                    "ptr addrspace(8), i32 immarg, i32)",
+                    1);
+    EXPECT_IR_COUNT(
+        ir, "declare void @llvm.amdgcn.global.prefetch(ptr addrspace(1), i32 immarg)", 1);
+    EXPECT_IR_COUNT(ir, "declare void @llvm.amdgcn.flat.prefetch(ptr, i32 immarg)", 1);
+}
+
+void case_gfx1250_data_prefetch_declares_only_used()
+{
+    const std::string ir = lower_one(
+        "only_global",
+        [](rocke_ir_builder_t* b) {
+            rocke_b_global_prefetch(b, global_ptr_param(b, "src", rocke_f32()), 0);
+        },
+        "gfx1250",
+        ROCKE_LLVM_FLAVOR_LLVM23);
+    EXPECT_IR(ir, "call void @llvm.amdgcn.global.prefetch(");
+    EXPECT_NO_IR(ir, "@llvm.amdgcn.s.setreg");
+    EXPECT_NO_IR(ir, "@llvm.amdgcn.s.prefetch.data");
+    EXPECT_NO_IR(ir, "@llvm.amdgcn.s.buffer.prefetch");
+    EXPECT_NO_IR(ir, "@llvm.amdgcn.flat.prefetch");
+}
+
+void case_gfx1250_data_prefetch_distinct_from_inst()
+{
+    const std::string ir = lower_one(
+        "both",
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* src = global_ptr_param(b, "src", rocke_f32());
+            rocke_value_t* n = rocke_b_const_i32(b, 2);
+            rocke_b_s_prefetch_inst(b, src, n);
+            rocke_b_s_prefetch_data(b, src, n);
+        },
+        "gfx1250",
+        ROCKE_LLVM_FLAVOR_LLVM23);
+    EXPECT_IR(ir, "call void @llvm.amdgcn.s.prefetch.inst.p1(");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.s.prefetch.data.p1(");
+}
+
+/* Each op is gfx1250 + llvm23 only; the message names the op that tripped. */
+void case_gfx1250_data_prefetch_gated()
+{
+    struct Gate
+    {
+        const char* name;
+        void (*emit)(rocke_ir_builder_t*, rocke_value_t*, rocke_value_t*);
+    };
+    static const Gate gates[] = {
+        {"s_setreg",
+         [](rocke_ir_builder_t* b, rocke_value_t*, rocke_value_t*) {
+             rocke_b_s_setreg(b, 1537, rocke_b_const_i32(b, 1));
+         }},
+        {"s_prefetch_data",
+         [](rocke_ir_builder_t* b, rocke_value_t* s, rocke_value_t*) {
+             rocke_b_s_prefetch_data(b, s, rocke_b_const_i32(b, 1));
+         }},
+        {"s_buffer_prefetch_data",
+         [](rocke_ir_builder_t* b, rocke_value_t* s, rocke_value_t*) {
+             rocke_b_s_buffer_prefetch_data(
+                 b, rocke_b_buffer_rsrc(b, s, rocke_b_const_i32(b, 64)), rocke_b_const_i32(b, 1), 0);
+         }},
+        {"global_prefetch",
+         [](rocke_ir_builder_t* b, rocke_value_t* s, rocke_value_t*) {
+             rocke_b_global_prefetch(b, s, 0);
+         }},
+        {"flat_prefetch",
+         [](rocke_ir_builder_t* b, rocke_value_t*, rocke_value_t* f) {
+             rocke_b_flat_prefetch(b, f, 0);
+         }},
+    };
+    for(const Gate& g : gates)
+    {
+        const auto build = [&g](rocke_ir_builder_t* b) {
+            rocke_value_t* src = global_ptr_param(b, "src", rocke_f32());
+            rocke_value_t* flat = private_ptr_param(b, "flat", rocke_f32());
+            g.emit(b, src, flat);
+        };
+        const struct
+        {
+            const char* arch;
+            rocke_llvm_flavor_t flavor;
+            const char* suffix;
+        } bad[] = {
+            {"gfx950", ROCKE_LLVM_FLAVOR_LLVM22, " requires gfx1250"},
+            {"gfx1250", ROCKE_LLVM_FLAVOR_LLVM22, " requires LLVM flavor llvm23"},
+        };
+        for(const auto& t : bad)
+        {
+            std::string err;
+            const rocke_status_t st = lower_expect_error("gate", build, t.arch, t.flavor, &err);
+            const std::string want = std::string(g.name) + t.suffix;
+            if(st != ROCKE_ERR_VALUE || err.find(want) == std::string::npos)
+            {
+                char msg[ROCKE_ERR_MSG_CAP + 128];
+                snprintf(msg,
+                         sizeof(msg),
+                         "%s on %s: status %d, err \"%s\"",
+                         g.name,
+                         t.arch,
+                         (int)st,
+                         err.c_str());
+                fail(msg, __LINE__);
+            }
+        }
+    }
+}
+
+/* Builder-side operand and immediate validation. */
+void case_gfx1250_data_prefetch_builder_rejects()
+{
+    struct Reject
+    {
+        const char* what;
+        void (*emit)(rocke_ir_builder_t*, rocke_value_t*, rocke_value_t*);
+    };
+    static const Reject rejects[] = {
+        {"s_setreg simm16 65536",
+         [](rocke_ir_builder_t* b, rocke_value_t*, rocke_value_t*) {
+             rocke_b_s_setreg(b, 65536, rocke_b_const_i32(b, 1));
+         }},
+        {"s_setreg simm16 -1",
+         [](rocke_ir_builder_t* b, rocke_value_t*, rocke_value_t*) {
+             rocke_b_s_setreg(b, -1, rocke_b_const_i32(b, 1));
+         }},
+        {"s_setreg i64 value",
+         [](rocke_ir_builder_t* b, rocke_value_t*, rocke_value_t*) {
+             rocke_b_s_setreg(b, 1537, rocke_b_const_i64(b, 1));
+         }},
+        {"s_prefetch_data non-pointer",
+         [](rocke_ir_builder_t* b, rocke_value_t*, rocke_value_t*) {
+             rocke_b_s_prefetch_data(b, rocke_b_const_i64(b, 0), rocke_b_const_i32(b, 1));
+         }},
+        {"s_prefetch_data i64 length",
+         [](rocke_ir_builder_t* b, rocke_value_t* s, rocke_value_t*) {
+             rocke_b_s_prefetch_data(b, s, rocke_b_const_i64(b, 1));
+         }},
+        {"s_buffer_prefetch_data non-rsrc",
+         [](rocke_ir_builder_t* b, rocke_value_t*, rocke_value_t*) {
+             rocke_b_s_buffer_prefetch_data(
+                 b, rocke_b_zero_vec(b, rocke_i32(), 8), rocke_b_const_i32(b, 1), 0);
+         }},
+        {"global_prefetch cachepolicy 32",
+         [](rocke_ir_builder_t* b, rocke_value_t* s, rocke_value_t*) {
+             rocke_b_global_prefetch(b, s, 32);
+         }},
+        {"global_prefetch flat pointer",
+         [](rocke_ir_builder_t* b, rocke_value_t*, rocke_value_t* f) {
+             rocke_b_global_prefetch(b, f, 0);
+         }},
+        {"flat_prefetch global pointer",
+         [](rocke_ir_builder_t* b, rocke_value_t* s, rocke_value_t*) {
+             rocke_b_flat_prefetch(b, s, 0);
+         }},
+    };
+    for(const Reject& r : rejects)
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "bad");
+        bool rejected = false;
+        try
+        {
+            rocke_value_t* src = global_ptr_param(&b, "src", rocke_f32());
+            rocke_value_t* flat = private_ptr_param(&b, "flat", rocke_f32());
+            r.emit(&b, src, flat);
+            rejected = rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE;
+        }
+        catch(...)
+        {
+            rejected = true;
+        }
+        if(!rejected)
+            fail(r.what, __LINE__);
+        rocke_ir_builder_free(&b);
+    }
+}
+
+/* Serialized or pass-rewritten IR reaches the lowerer without the builder's
+ * checks, so the lowerer re-validates immediates and pointer spaces. */
+void emit_raw_op(rocke_ir_builder_t* b,
+                 rocke_opcode_t opcode,
+                 rocke_value_t* operand,
+                 const char* attr,
+                 int64_t value)
+{
+    rocke_attr_map_t attrs;
+    rocke_attr_map_init(&attrs);
+    rocke_attr_set_int(b, &attrs, attr, value);
+    rocke_value_t* operands[] = {operand};
+    rocke_b_op(b, opcode, operands, 1, nullptr, 0, &attrs, nullptr, 0, nullptr, nullptr);
+}
+
+void case_gfx1250_data_prefetch_lowerer_rechecks()
+{
+    struct Recheck
+    {
+        const char* want;
+        void (*build)(rocke_ir_builder_t*);
+    };
+    static const Recheck rechecks[] = {
+        {"global_prefetch cachepolicy must be in 0..31, got 40",
+         [](rocke_ir_builder_t* b) {
+             emit_raw_op(b,
+                         ROCKE_OP_TILE_GLOBAL_PREFETCH,
+                         global_ptr_param(b, "src", rocke_f32()),
+                         "cachepolicy",
+                         40);
+         }},
+        {"flat_prefetch cachepolicy must be in 0..31, got -1",
+         [](rocke_ir_builder_t* b) {
+             emit_raw_op(b,
+                         ROCKE_OP_TILE_FLAT_PREFETCH,
+                         private_ptr_param(b, "flat", rocke_f32()),
+                         "cachepolicy",
+                         -1);
+         }},
+        {"s_setreg simm16 must fit an unsigned i16",
+         [](rocke_ir_builder_t* b) {
+             emit_raw_op(b, ROCKE_OP_TILE_S_SETREG, rocke_b_const_i32(b, 1), "simm16", 70000);
+         }},
+        /* The builder sees a global PtrType, but the param ABI moved it to
+         * constant space: the header says ptr addrspace(4), which
+         * global.prefetch cannot take. */
+        {"global_prefetch ptr must be a global pointer, got ptr addrspace(4)",
+         [](rocke_ir_builder_t* b) {
+             rocke_param_opts_t constant{};
+             constant.addr_space = "constant";
+             rocke_b_global_prefetch(
+                 b,
+                 rocke_b_param(b, "table", rocke_ptr_type(b, rocke_i32(), "global"), &constant),
+                 0);
+         }},
+    };
+    for(const Recheck& r : rechecks)
+    {
+        std::string err;
+        const rocke_status_t st
+            = lower_expect_error("recheck", r.build, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23, &err);
+        if(st != ROCKE_ERR_VALUE || err.find(r.want) == std::string::npos)
+        {
+            char msg[ROCKE_ERR_MSG_CAP + 128];
+            snprintf(msg,
+                     sizeof(msg),
+                     "want \"%s\", status %d, err \"%s\"",
+                     r.want,
+                     (int)st,
+                     err.c_str());
+            fail(msg, __LINE__);
+        }
+    }
+}
+
 /* ---- async buffer / global -> LDS ---- */
 void case_buffer_load_lds_async()
 {
@@ -860,6 +1199,11 @@ void case_opcode_names_are_aligned()
         {ROCKE_OP_TILE_S_WAKEUP_BARRIER, "tile.s_wakeup_barrier"},
         {ROCKE_OP_TILE_S_BARRIER_LEAVE, "tile.s_barrier_leave"},
         {ROCKE_OP_TILE_S_PREFETCH_INST, "tile.s_prefetch_inst"},
+        {ROCKE_OP_TILE_S_SETREG, "tile.s_setreg"},
+        {ROCKE_OP_TILE_S_PREFETCH_DATA, "tile.s_prefetch_data"},
+        {ROCKE_OP_TILE_S_BUFFER_PREFETCH_DATA, "tile.s_buffer_prefetch_data"},
+        {ROCKE_OP_TILE_GLOBAL_PREFETCH, "tile.global_prefetch"},
+        {ROCKE_OP_TILE_FLAT_PREFETCH, "tile.flat_prefetch"},
         {ROCKE_OP_TILE_BUFFER_LOAD_LDS_ASYNC, "tile.buffer_load_lds_async"},
         {ROCKE_OP_TILE_GLOBAL_LOAD_ASYNC_TO_LDS, "tile.global_load_async_to_lds"},
         {ROCKE_OP_TILE_GLOBAL_STORE_ASYNC_FROM_LDS, "tile.global_store_async_from_lds"},
@@ -976,6 +1320,12 @@ const TestCase k_cases[] = {
     {"wait_asyncmark", case_wait_asyncmark},
     {"s_wait_event", case_s_wait_event},
     {"s_prefetch_inst", case_s_prefetch_inst},
+    {"gfx1250_data_prefetch", case_gfx1250_data_prefetch},
+    {"gfx1250_data_prefetch_declares_only_used", case_gfx1250_data_prefetch_declares_only_used},
+    {"gfx1250_data_prefetch_distinct_from_inst", case_gfx1250_data_prefetch_distinct_from_inst},
+    {"gfx1250_data_prefetch_gated", case_gfx1250_data_prefetch_gated},
+    {"gfx1250_data_prefetch_builder_rejects", case_gfx1250_data_prefetch_builder_rejects},
+    {"gfx1250_data_prefetch_lowerer_rechecks", case_gfx1250_data_prefetch_lowerer_rechecks},
     {"buffer_load_lds_async", case_buffer_load_lds_async},
     {"global_load_async_to_lds_b8", case_global_load_async_to_lds_b8},
     {"hip_zext_uses_unsigned_source_cast", case_hip_zext_uses_unsigned_source_cast},

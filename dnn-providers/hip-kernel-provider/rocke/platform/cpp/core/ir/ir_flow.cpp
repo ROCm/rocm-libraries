@@ -1531,6 +1531,107 @@ void rocke_b_s_prefetch_inst(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_va
     rocke_i_op0(b, ROCKE_OP_TILE_S_PREFETCH_INST, ops, 2, NULL);
 }
 
+/* ----- gfx1250 data prefetch (Python IRBuilder.s_setreg .. flat_prefetch) ----- */
+
+void rocke_b_s_setreg(rocke_ir_builder_t* b, int simm16, rocke_value_t* value)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!rocke_i_check_u16(b, "s_setreg", "simm16", simm16))
+        return;
+    if(!rocke_i_check_i32_value(b, "s_setreg", "value", value))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "simm16", simm16);
+    rocke_i_op0(b, ROCKE_OP_TILE_S_SETREG, &value, 1, &attrs);
+}
+
+void rocke_b_enable_scalar_prefetch(rocke_ir_builder_t* b)
+{
+    if(!rocke_i_live(b))
+        return;
+    rocke_b_s_setreg(b,
+                     ROCKE_HWREG(ROCKE_HW_REG_MODE, ROCKE_MODE_SCALAR_PREFETCH_EN_BIT, 1),
+                     rocke_b_const_i32(b, 1));
+}
+
+void rocke_b_s_prefetch_data(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* length)
+{
+    rocke_value_t* ops[2];
+    if(!rocke_i_live(b))
+        return;
+    if(!ptr || !ptr->type || ptr->type->kind != ROCKE_TYPE_PTR)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "s_prefetch_data ptr must be a pointer");
+        return;
+    }
+    if(!rocke_i_check_i32_value(b, "s_prefetch_data", "length", length))
+        return;
+    ops[0] = ptr;
+    ops[1] = length;
+    rocke_i_op0(b, ROCKE_OP_TILE_S_PREFETCH_DATA, ops, 2, NULL);
+}
+
+void rocke_b_s_buffer_prefetch_data(rocke_ir_builder_t* b,
+                                    rocke_value_t* rsrc,
+                                    rocke_value_t* length,
+                                    int offset)
+{
+    rocke_value_t* ops[2];
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!rocke_i_check_tensor_group(b, "s_buffer_prefetch_data", "rsrc", rsrc, 4))
+        return;
+    if(!rocke_i_check_i32_value(b, "s_buffer_prefetch_data", "length", length))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "offset", offset);
+    ops[0] = rsrc;
+    ops[1] = length;
+    rocke_i_op0(b, ROCKE_OP_TILE_S_BUFFER_PREFETCH_DATA, ops, 2, &attrs);
+}
+
+void rocke_b_global_prefetch(rocke_ir_builder_t* b, rocke_value_t* ptr, int cachepolicy)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!rocke_i_is_global_ptr(ptr))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "global_prefetch ptr must be a global pointer");
+        return;
+    }
+    if(!rocke_i_check_cachepolicy(b, "global_prefetch", cachepolicy))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "cachepolicy", cachepolicy);
+    rocke_i_op0(b, ROCKE_OP_TILE_GLOBAL_PREFETCH, &ptr, 1, &attrs);
+}
+
+void rocke_b_flat_prefetch(rocke_ir_builder_t* b, rocke_value_t* ptr, int cachepolicy)
+{
+    rocke_attr_map_t attrs;
+    const char* space;
+    if(!rocke_i_live(b))
+        return;
+    /* shared/private lower to a bare (flat) `ptr`; the others carry an
+     * explicit address space and are not flat pointers. */
+    space = (ptr && ptr->type && ptr->type->kind == ROCKE_TYPE_PTR) ? ptr->type->space : NULL;
+    if(!space || strcmp(space, "global") == 0 || strcmp(space, "constant") == 0
+       || strcmp(space, "lds") == 0)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "flat_prefetch ptr must be a flat pointer");
+        return;
+    }
+    if(!rocke_i_check_cachepolicy(b, "flat_prefetch", cachepolicy))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "cachepolicy", cachepolicy);
+    rocke_i_op0(b, ROCKE_OP_TILE_FLAT_PREFETCH, &ptr, 1, &attrs);
+}
+
 void rocke_b_s_setprio(rocke_ir_builder_t* b, int level)
 {
     rocke_attr_map_t attrs;

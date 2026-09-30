@@ -377,6 +377,36 @@ static void build_scale_coordinates_k16(rocke_ir_builder_t* b)
     build_scale_coordinates(b, ROCKE_MMA_SCALE_K16);
 }
 
+/* Every data-prefetch op once, over each pointer space s_prefetch_data
+ * accepts, with non-default immediates so a dropped attr shows up. */
+static void build_data_prefetch(rocke_ir_builder_t* b)
+{
+    rocke_param_opts_t src_o;
+    rocke_param_opts_t table_o;
+    memset(&src_o, 0, sizeof(src_o));
+    memset(&table_o, 0, sizeof(table_o));
+    src_o.readonly = true;
+    src_o.readonly_set = true;
+    src_o.align = 16;
+    src_o.align_set = true;
+    table_o.addr_space = "constant";
+    rocke_value_t* src = rocke_b_param(b, "src", rocke_ptr_type(b, rocke_f32(), "global"), &src_o);
+    rocke_value_t* table
+        = rocke_b_param(b, "table", rocke_ptr_type(b, rocke_i32(), "global"), &table_o);
+    rocke_value_t* flat = rocke_b_param(b, "flat", rocke_ptr_type(b, rocke_f32(), "private"), NULL);
+    rocke_value_t* nbytes = rocke_b_param(b, "nbytes", rocke_i32(), NULL);
+    rocke_value_t* lines = rocke_b_const_i32(b, 4);
+    rocke_b_enable_scalar_prefetch(b);
+    rocke_b_s_prefetch_data(b, src, lines);
+    rocke_b_s_prefetch_data(b, table, lines);
+    rocke_b_s_prefetch_data(b, flat, lines);
+    rocke_value_t* rsrc = rocke_b_buffer_rsrc(b, src, nbytes);
+    rocke_b_s_buffer_prefetch_data(b, rsrc, lines, /*offset=*/256);
+    rocke_b_global_prefetch(b, src, /*cachepolicy=*/3);
+    rocke_b_flat_prefetch(b, flat, /*cachepolicy=*/5);
+    rocke_b_ret(b);
+}
+
 typedef void (*build_fn_t)(rocke_ir_builder_t*);
 
 typedef struct config
@@ -415,6 +445,7 @@ static const config_t CONFIGS[] = {
     {build_wmma_scale16_bf8, "gfx1250"},
     {build_scale_coordinates_k32, "gfx1250"},
     {build_scale_coordinates_k16, "gfx1250"},
+    {build_data_prefetch, "gfx1250"},
 };
 
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));

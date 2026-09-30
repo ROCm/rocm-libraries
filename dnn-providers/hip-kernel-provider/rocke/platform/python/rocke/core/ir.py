@@ -131,6 +131,32 @@ def _check_cachepolicy(op: str, value: int) -> int:
     return v
 
 
+# Hardware-register ids for ``s_setreg``.
+HW_REG_MODE = 1
+# Bit in ``MODE`` that lets gfx1250 issue scalar data prefetches. Verify against
+# the llvm23 AMDGPU backend and the gfx1250 ISA before relying on it; keep every
+# use going through this name so a correction is a one-line change.
+MODE_SCALAR_PREFETCH_EN_BIT = 24
+
+
+def hwreg(reg_id: int, offset: int = 0, size: int = 32) -> int:
+    """Pack an ``s_setreg`` / ``s_getreg`` field selector.
+
+    Layout: ``id`` in bits [5:0], bit ``offset`` in [10:6], ``size - 1`` in
+    [15:11] -- the same packing as the assembler's ``hwreg(id, offset, size)``.
+    """
+    reg_id, offset, size = int(reg_id), int(offset), int(size)
+    if not 0 <= reg_id <= 0x3F:
+        raise ValueError(f"hwreg id must be in 0..63, got {reg_id}")
+    if not 0 <= offset <= 31:
+        raise ValueError(f"hwreg offset must be in 0..31, got {offset}")
+    if not 1 <= size <= 32 - offset:
+        raise ValueError(
+            f"hwreg size must be in 1..{32 - offset} for offset {offset}, got {size}"
+        )
+    return reg_id | (offset << 6) | ((size - 1) << 11)
+
+
 def _mma_c_frag_len(op_id: str) -> int:
     """Accumulator fragment length for ``op_id`` from the arch SSOT.
 
@@ -2719,6 +2745,94 @@ class IRBuilder:
     def s_prefetch_inst(self, ptr: Value, length: Value) -> None:
         """``llvm.amdgcn.s.prefetch.inst`` — instruction-cache prefetch."""
         self._op("tile.s_prefetch_inst", [ptr, length])
+
+    # ----- gfx1250 data prefetch -----
+    #
+    # All of these are hints: they must never change a kernel's results, only
+    # when data arrives. Lowering requires gfx1250 and the llvm23 flavor.
+
+    def s_setreg(self, simm16: int, value: Value) -> None:
+        """``llvm.amdgcn.s.setreg`` — write ``value`` into a hardware-register field.
+
+        ``simm16`` selects the register field; build it with :func:`hwreg`.
+        Field layouts differ between generations, so the op is gfx1250-only.
+        """
+        simm16 = _check_u16("s_setreg", "simm16", simm16)
+        self._check_i32_value("s_setreg", "value", value)
+        self._op("tile.s_setreg", [value], attrs={"simm16": simm16})
+
+    def enable_scalar_prefetch(self) -> None:
+        """Set the ``MODE`` bit that lets ``s_prefetch_data`` issue on gfx1250.
+
+        Scalar data prefetches are dropped until this bit is set; see
+        :data:`MODE_SCALAR_PREFETCH_EN_BIT`.
+        """
+        self.s_setreg(
+            hwreg(HW_REG_MODE, MODE_SCALAR_PREFETCH_EN_BIT, 1), self.const_i32(1)
+        )
+
+    def s_prefetch_data(self, ptr: Value, length: Value) -> None:
+        """``llvm.amdgcn.s.prefetch.data`` — scalar data-cache prefetch.
+
+        ``ptr`` is a flat, global, or constant pointer and must be wave-uniform:
+        the instruction reads it from an SGPR pair. ``length`` is an i32
+        cache-line count.
+        """
+        if not isinstance(ptr.type, PtrType):
+            raise TypeError(f"s_prefetch_data ptr must be a pointer, got {ptr.type}")
+        self._check_i32_value("s_prefetch_data", "length", length)
+        self._op("tile.s_prefetch_data", [ptr, length])
+
+    def s_buffer_prefetch_data(
+        self, rsrc: Value, length: Value, *, offset: int = 0
+    ) -> None:
+        """``llvm.amdgcn.s.buffer.prefetch.data`` — scalar prefetch through a buffer.
+
+        ``rsrc`` comes from :meth:`buffer_rsrc`; ``offset`` is an immediate
+        byte offset and ``length`` an i32 cache-line count.
+        """
+        ty = rsrc.type
+        if not isinstance(ty, VectorType) or ty.elem is not I32 or ty.count != 4:
+            raise TypeError(
+                f"s_buffer_prefetch_data rsrc must come from buffer_rsrc, got {ty}"
+            )
+        self._check_i32_value("s_buffer_prefetch_data", "length", length)
+        self._op(
+            "tile.s_buffer_prefetch_data",
+            [rsrc, length],
+            attrs={"offset": _check_i32("s_buffer_prefetch_data", "offset", offset)},
+        )
+
+    def global_prefetch(self, ptr: Value, *, cachepolicy: int = 0) -> None:
+        """``llvm.amdgcn.global.prefetch`` — per-lane prefetch of a global address."""
+        if not isinstance(ptr.type, PtrType) or ptr.type.space != "global":
+            raise TypeError(
+                f"global_prefetch ptr must be a global pointer, got {ptr.type}"
+            )
+        self._op(
+            "tile.global_prefetch",
+            [ptr],
+            attrs={"cachepolicy": _check_cachepolicy("global_prefetch", cachepolicy)},
+        )
+
+    def flat_prefetch(self, ptr: Value, *, cachepolicy: int = 0) -> None:
+        """``llvm.amdgcn.flat.prefetch`` — per-lane prefetch of a flat address.
+
+        rocKE has no ``flat`` address space: the spaces that lower to a bare
+        ``ptr`` (``shared``, ``private``) are the flat ones. Global pointers
+        belong to :meth:`global_prefetch`.
+        """
+        if not isinstance(ptr.type, PtrType) or ptr.type.space in (
+            "global",
+            "constant",
+            "lds",
+        ):
+            raise TypeError(f"flat_prefetch ptr must be a flat pointer, got {ptr.type}")
+        self._op(
+            "tile.flat_prefetch",
+            [ptr],
+            attrs={"cachepolicy": _check_cachepolicy("flat_prefetch", cachepolicy)},
+        )
 
     def buffer_load_lds_async(
         self,

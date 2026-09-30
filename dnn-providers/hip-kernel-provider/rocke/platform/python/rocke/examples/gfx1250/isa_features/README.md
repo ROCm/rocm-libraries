@@ -16,6 +16,7 @@ python -m rocke.examples.gfx1250.isa_features.barrier_verify
 python -m rocke.examples.gfx1250.isa_features.async_store_verify
 python -m rocke.examples.gfx1250.isa_features.global_transpose_verify
 python -m rocke.examples.gfx1250.isa_features.tdm_verify
+python -m rocke.examples.gfx1250.isa_features.data_prefetch_verify
 ```
 
 Each file can also be run directly with the same `PYTHONPATH`. Use `--arch
@@ -55,7 +56,13 @@ check. It is resolved from `LLVM_OBJDUMP`, then `$ROCM_PATH/llvm/bin`, then
   are zero only to validate code generation; they are never launched because
   ROCKE does not yet expose construction of a valid D# global-memory/LDS
   descriptor.
+- `data_prefetch_verify.py`: LLVM/ISA and functional. Enables scalar prefetch
+  through `s_setreg` on `MODE`, then issues `s_prefetch_data` through global,
+  constant, and flat views of one buffer, `s_buffer_prefetch_data` through a
+  buffer resource, `global_prefetch_b8`, and `flat_prefetch_b8` before an exact
+  i32 copy/transform. Prefetch is a hint, so the check is that results are
+  unchanged.
 
-`--compile-only` additionally skips the three otherwise-safe functional checks.
+`--compile-only` additionally skips the four otherwise-safe functional checks.
 An intentional functional skip is reported as `SKIP` and does not hide a failed
 LLVM or ISA check.

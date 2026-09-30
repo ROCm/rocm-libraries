@@ -1277,6 +1277,124 @@ static void _op_tile_s_prefetch_inst(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, op->operands[1]));
 }
 
+/* ----- gfx1250 data prefetch (Python _op_tile_s_setreg .. _op_tile_flat_prefetch) ----- */
+
+static int64_t ll_check_cachepolicy(rocke_lower_t* L, const rocke_op_t* op, const char* name)
+{
+    int64_t cp = 0;
+    rocke_attr_get_int(&op->attrs, "cachepolicy", &cp);
+    if(cp < 0 || cp > 31)
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "%s cachepolicy must be in 0..31, got %lld", name, (long long)cp);
+    return cp;
+}
+
+static void ll_expect_operands(rocke_lower_t* L, const rocke_op_t* op, const char* name, int n)
+{
+    if(op->num_operands != n)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects %d operand(s)", name, n);
+}
+
+static void _op_tile_s_setreg(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t simm16 = 0;
+    if(!rocke_ll_live(L))
+        return;
+    ll_require_gfx1250_llvm23(L, "s_setreg");
+    ll_expect_operands(L, op, "s_setreg", 1);
+    rocke_attr_get_int(&op->attrs, "simm16", &simm16);
+    ll_check_u16(L, "s_setreg", "simm16", simm16);
+    rocke_ll_need(L, "s.setreg");
+    rocke_ll_emitf(L,
+                   "  call void @llvm.amdgcn.s.setreg(i32 %lld, i32 %s)",
+                   (long long)simm16,
+                   rocke_ll_operand(L, op->operands[0]));
+}
+
+static void _op_tile_s_prefetch_data(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const char* ptr_ty = NULL;
+    int space;
+    if(!rocke_ll_live(L))
+        return;
+    ll_require_gfx1250_llvm23(L, "s_prefetch_data");
+    ll_expect_operands(L, op, "s_prefetch_data", 2);
+    space = rocke_ll_anyptr_space(L,
+                                  "s_prefetch_data",
+                                  op->operands[0],
+                                  ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES,
+                                  ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES_COUNT,
+                                  &ptr_ty);
+    rocke_ll_need(L, rocke_arena_printf(&L->arena, "s.prefetch.data.p%d", space));
+    rocke_ll_emitf(L,
+                   "  call void @llvm.amdgcn.s.prefetch.data.p%d(%s %s, i32 %s)",
+                   space,
+                   ptr_ty,
+                   rocke_ll_operand(L, op->operands[0]),
+                   rocke_ll_operand(L, op->operands[1]));
+}
+
+static void _op_tile_s_buffer_prefetch_data(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t offset = 0;
+    if(!rocke_ll_live(L))
+        return;
+    ll_require_gfx1250_llvm23(L, "s_buffer_prefetch_data");
+    ll_expect_operands(L, op, "s_buffer_prefetch_data", 2);
+    rocke_attr_get_int(&op->attrs, "offset", &offset);
+    if(offset < INT32_MIN || offset > INT32_MAX)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "s_buffer_prefetch_data offset must fit signed i32, got %lld",
+                      (long long)offset);
+    rocke_ll_need(L, "s.buffer.prefetch.data");
+    rocke_ll_emitf(L,
+                   "  call void @llvm.amdgcn.s.buffer.prefetch.data("
+                   "ptr addrspace(8) %s, i32 %lld, i32 %s)",
+                   rocke_ll_operand(L, op->operands[0]),
+                   (long long)offset,
+                   rocke_ll_operand(L, op->operands[1]));
+}
+
+static void _op_tile_global_prefetch(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const char* ty;
+    int64_t cp;
+    if(!rocke_ll_live(L))
+        return;
+    ll_require_gfx1250_llvm23(L, "global_prefetch");
+    ll_expect_operands(L, op, "global_prefetch", 1);
+    ty = rocke_ll_value_ptr_type(L, op->operands[0]);
+    if(strcmp(ty, "ptr addrspace(1)") != 0)
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "global_prefetch ptr must be a global pointer, got %s", ty);
+    cp = ll_check_cachepolicy(L, op, "global_prefetch");
+    rocke_ll_need(L, "global.prefetch");
+    rocke_ll_emitf(L,
+                   "  call void @llvm.amdgcn.global.prefetch(ptr addrspace(1) %s, i32 %lld)",
+                   rocke_ll_operand(L, op->operands[0]),
+                   (long long)cp);
+}
+
+static void _op_tile_flat_prefetch(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const char* ty;
+    int64_t cp;
+    if(!rocke_ll_live(L))
+        return;
+    ll_require_gfx1250_llvm23(L, "flat_prefetch");
+    ll_expect_operands(L, op, "flat_prefetch", 1);
+    ty = rocke_ll_value_ptr_type(L, op->operands[0]);
+    if(strcmp(ty, "ptr") != 0)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "flat_prefetch ptr must be a flat pointer, got %s", ty);
+    cp = ll_check_cachepolicy(L, op, "flat_prefetch");
+    rocke_ll_need(L, "flat.prefetch");
+    rocke_ll_emitf(L,
+                   "  call void @llvm.amdgcn.flat.prefetch(ptr %s, i32 %lld)",
+                   rocke_ll_operand(L, op->operands[0]),
+                   (long long)cp);
+}
+
 /* Python _op_tile_iglp_opt. */
 static void _op_tile_iglp_opt(rocke_lower_t* L, const rocke_op_t* op)
 {
@@ -2213,6 +2331,11 @@ void rocke_ll_register_vector(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_WAIT_ASYNCMARK, _op_tile_wait_asyncmark);
     rocke_ll_set_handler(ROCKE_OP_TILE_S_WAIT_EVENT, _op_tile_s_wait_event);
     rocke_ll_set_handler(ROCKE_OP_TILE_S_PREFETCH_INST, _op_tile_s_prefetch_inst);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_SETREG, _op_tile_s_setreg);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_PREFETCH_DATA, _op_tile_s_prefetch_data);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_BUFFER_PREFETCH_DATA, _op_tile_s_buffer_prefetch_data);
+    rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_PREFETCH, _op_tile_global_prefetch);
+    rocke_ll_set_handler(ROCKE_OP_TILE_FLAT_PREFETCH, _op_tile_flat_prefetch);
     rocke_ll_set_handler(ROCKE_OP_TILE_S_SETPRIO, _op_tile_s_setprio);
     rocke_ll_set_handler(ROCKE_OP_TILE_IGLP_OPT, _op_tile_iglp_opt);
     rocke_ll_set_handler(ROCKE_OP_TILE_SCHED_BARRIER, _op_tile_sched_barrier);

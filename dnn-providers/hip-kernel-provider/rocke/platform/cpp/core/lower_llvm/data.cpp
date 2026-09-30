@@ -415,6 +415,16 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"s.prefetch.inst.p0", "declare void @llvm.amdgcn.s.prefetch.inst.p0(ptr, i32)"},
     {"s.prefetch.inst.p1", "declare void @llvm.amdgcn.s.prefetch.inst.p1(ptr addrspace(1), i32)"},
     {"s.prefetch.inst.p4", "declare void @llvm.amdgcn.s.prefetch.inst.p4(ptr addrspace(4), i32)"},
+    /* gfx1250 data prefetch (llvm23). s.prefetch.data is llvm_anyptr_ty like
+     * s.prefetch.inst above; see ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES. */
+    {"s.setreg", "declare void @llvm.amdgcn.s.setreg(i32 immarg, i32)"},
+    {"s.prefetch.data.p0", "declare void @llvm.amdgcn.s.prefetch.data.p0(ptr, i32)"},
+    {"s.prefetch.data.p1", "declare void @llvm.amdgcn.s.prefetch.data.p1(ptr addrspace(1), i32)"},
+    {"s.prefetch.data.p4", "declare void @llvm.amdgcn.s.prefetch.data.p4(ptr addrspace(4), i32)"},
+    {"s.buffer.prefetch.data",
+     "declare void @llvm.amdgcn.s.buffer.prefetch.data(ptr addrspace(8), i32 immarg, i32)"},
+    {"global.prefetch", "declare void @llvm.amdgcn.global.prefetch(ptr addrspace(1), i32 immarg)"},
+    {"flat.prefetch", "declare void @llvm.amdgcn.flat.prefetch(ptr, i32 immarg)"},
 };
 
 const int ROCKE_LL_INTRINSIC_DECLS_COUNT
@@ -435,6 +445,16 @@ const rocke_ll_anyptr_space_t ROCKE_LL_S_PREFETCH_INST_PTR_TYPES[] = {
 const int ROCKE_LL_S_PREFETCH_INST_PTR_TYPES_COUNT
     = (int)(sizeof(ROCKE_LL_S_PREFETCH_INST_PTR_TYPES)
             / sizeof(ROCKE_LL_S_PREFETCH_INST_PTR_TYPES[0]));
+
+/* s.prefetch.data takes the same flat, global, or constant pointers. */
+const rocke_ll_anyptr_space_t ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES[] = {
+    {0, "ptr"},
+    {1, "ptr addrspace(1)"},
+    {4, "ptr addrspace(4)"},
+};
+const int ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES_COUNT
+    = (int)(sizeof(ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES)
+            / sizeof(ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES[0]));
 
 /* av.load/store.b128 are documented as flat or global only: a global pointer
  * selects global_load/store, a flat pointer flat_load/store. */
