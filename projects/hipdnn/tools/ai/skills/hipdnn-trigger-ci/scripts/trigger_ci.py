@@ -162,6 +162,8 @@ def resolve_branch(args):
 
 
 def latest_run_id(workflow_file, ref):
+    # Filter on the event so a push-triggered run of the same workflow on the
+    # same branch is not mistaken for the dispatched one.
     out = run_cmd(
         [
             "gh",
@@ -173,6 +175,8 @@ def latest_run_id(workflow_file, ref):
             workflow_file,
             "--branch",
             ref,
+            "--event",
+            "workflow_dispatch",
             "--limit",
             "1",
             "--json",
@@ -234,6 +238,7 @@ def dispatch_workflow(workflow_file, ref, inputs, dry_run=False):
 
 
 def find_active_run(ref):
+    active = []
     for status in ("in_progress", "queued"):
         out = run_cmd(
             [
@@ -252,10 +257,8 @@ def find_active_run(ref):
                 "databaseId,workflowName",
             ]
         )
-        runs = json.loads(out) if out else []
-        if runs:
-            return runs[0]
-    return None
+        active.extend(json.loads(out) if out else [])
+    return max(active, key=lambda run: run["databaseId"], default=None)
 
 
 def cmd_dispatch(args):
@@ -279,19 +282,15 @@ def cmd_dispatch(args):
 
 
 def cmd_status(args):
-    if args.pr:
-        run_cmd(
-            [
-                "gh",
-                "pr",
-                "checks",
-                str(args.pr),
-                "--repo",
-                REPO,
-            ],
-            check=False,
-            capture=False,
-        )
+    if args.pr and not args.branch:
+        # gh pr checks exits 1 for failing checks as well as for errors, so
+        # confirm the PR resolves first; failures there exit via run_cmd.
+        pr_branch(args.pr)
+        cmd = ["gh", "pr", "checks", str(args.pr), "--repo", REPO]
+        returncode = subprocess.run(cmd).returncode
+        # 0 = all passed, 1 = some failed, 8 = some pending.
+        if returncode not in (0, 1, 8):
+            sys.exit(returncode)
     else:
         ref = resolve_branch(args)
         print(f"Recent runs on '{ref}':\n")
@@ -307,7 +306,6 @@ def cmd_status(args):
                 "--limit",
                 "10",
             ],
-            check=False,
             capture=False,
         )
 
@@ -338,6 +336,13 @@ def cmd_watch(args):
             ]
         ).returncode
     )
+
+
+COMMANDS = {
+    "dispatch": cmd_dispatch,
+    "status": cmd_status,
+    "watch": cmd_watch,
+}
 
 
 def main():
@@ -423,14 +428,7 @@ hipDNN test labels (multi-arch; from TheRock fetch_test_configurations.py test_m
         sys.exit(0)
 
     check_gh_auth()
-
-    {
-        "dispatch": cmd_dispatch,
-        "status": cmd_status,
-        "watch": cmd_watch,
-    }[
-        args.command
-    ](args)
+    COMMANDS[args.command](args)
 
 
 if __name__ == "__main__":

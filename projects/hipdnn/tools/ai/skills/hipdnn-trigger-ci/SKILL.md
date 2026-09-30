@@ -52,7 +52,7 @@ Multi-arch has further dispatch inputs (`prebuilt_stages`, `baseline_run_id`, `b
    python3 <skill-directory>/scripts/trigger_ci.py --pr <pr-number> status
    python3 <skill-directory>/scripts/trigger_ci.py [--branch <branch>] watch [--run-id <run-id>]
    ```
-   `status` with `--pr` shows `gh pr checks`; otherwise it lists the 10 most recent runs on the branch. `watch` without `--run-id` follows the newest in-progress or queued run on the branch and exits with the run's status.
+   `status` with `--pr` shows `gh pr checks`; otherwise it lists the 10 most recent runs on the branch. `--branch` takes precedence over `--pr` in every subcommand. `status` exits non-zero when the query itself fails; failing or pending checks are reported, not treated as errors. `watch` without `--run-id` follows the in-progress or queued run with the highest run ID on the branch and exits with the run's status. After a real dispatch, the reported run ID is the newest `workflow_dispatch` run of that workflow on the branch, so a run someone else dispatched on the same branch at the same moment can still be picked up.
 
 ## Test reference
 
