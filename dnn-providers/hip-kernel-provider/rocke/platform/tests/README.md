@@ -45,9 +45,11 @@ Four distinct things run here; don't conflate them:
 
 1. **Default runner** (`python tests/run_all.py`): relative-path guard -> byte-identity
    gate (`tools/check_byte_identity.py`) -> `pytest` (the `test_*.py` modules
-   above) -> `ctest` **iff** the registered binaries (`rocke_ir_serialize_roundtrip`,
-   `rocke_tiled_attention_2d_reentrancy`) are present in `--build-root`. This is the
-   only set that is gated.
+   above) -> `ctest` when any registered test executable is built in `--build-root`
+   for the selected `--config`. CTest supplies the executable paths, including
+   configuration directories and platform suffixes. The entire registered suite
+   runs, so a partial build exposes missing tests as failures. No configured test
+   build or no built registered tests is reported explicitly as a skipped stage.
 2. **Diagnostics** (opt-in, not in the gate): `run_diff.py --ir` (IR-canonical
    diff), `fuzz_diff.py`, `ir_artifact_diff.py`.
 3. **GPU / manual numeric lanes** (need a HIP device; skipped/not-collected
@@ -104,3 +106,16 @@ divergence - the Python builder correctly rejects wave32 WMMA on gfx942.)
 - EXCLUDED from rocKE: `test_gen_instances.py` (imports `ck4inductor`, a separate
   package) and `test_rocke_examples.py` (drives the external `example/ck_tile/dsl`
   tree, not part of rocKE) stay in `composablekernel/python/test`.
+
+### Native storage parity in the standard runner
+
+`run_all.py --build-root <build>` builds all configured targets before pytest,
+then obtains the `rocke_storage` executable path from CTest. Both pytest passes
+receive that path, so storage IR/HIP parity and serialization tests run automatically.
+`--config` selects the native test configuration (default `Release`). A build or
+fixture-discovery failure stops the runner instead of silently skipping coverage.
+
+An explicit `ROCKE_STORAGE_TEST` overrides discovery and must name an existing
+executable; it does not skip the configured build. With no configured build or
+explicit override, the runner reports native storage parity as skipped; direct
+pytest invocations can use the same override.

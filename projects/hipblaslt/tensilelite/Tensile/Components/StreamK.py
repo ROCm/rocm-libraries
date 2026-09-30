@@ -466,6 +466,22 @@ class StreamK(Component):
         assert(0)
 
     @staticmethod
+    def _summationStride(writer, kernel, tc):
+        """K stride, in tensor elements, for the StreamK partial-tile offset.
+
+        A swizzled MX scale buffer is block-linear, so one K element is one scale
+        byte and the K stride is 1. The logical strides describe the unswizzled
+        tensor: strideRef gives the canonical stride, and KernelWriter overwrites
+        Strides<tc> with the MN group span. Either would place a workgroup that
+        starts mid-tile far outside the buffer.
+        """
+        if ("MXS" in tc) and kernel.get("UseSubtileImpl") \
+           and kernel.get("MXScaleFormat", "NoSwizzle") in ("InMemorySwizzle",
+                                                            "HostPreSwizzle"):
+            return 1
+        return writer.strideRef(tc, kernel["ProblemType"]["IndicesSummation"][0])
+
+    @staticmethod
     def _depthUForTc(kernel, tc):
         """Return the per-StreamK-iteration K-stride (element count) for a tensor.
 
@@ -1323,7 +1339,7 @@ class StreamK(Component):
         depthU = self._depthUForTc(kernel, tc)
         # StreamK partial tile - offset to tile start index
         module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr("StreamKLocalStart"), src1=depthU, comment="StreamK tile start offset"))
-        strideL = writer.strideRef(tc, kernel["ProblemType"]["IndicesSummation"][0])
+        strideL = self._summationStride(writer, kernel, tc)
         module.add(writer.s_mul_u64_u32(sgpr(sTmp), sgpr(sTmp+1), sgpr(sTmp), strideL, comment="StreamK tile start offset"))
         # Overflow check removed
         # if kernel["CheckDimOverflow"] >=2:
@@ -1412,7 +1428,7 @@ class StreamK(Component):
         # StreamK partial tile - offset to tile start index
         tmpOffset = writer.sgprPool.checkOut(2, "skStartOffset")
         module.add(SMulI32(dst=sgpr(tmpOffset), src0=sgpr("StreamKLocalStart"), src1=int(depthU * tP["bpe"]), comment="StreamK tile start offset"))
-        strideL = writer.strideRef(tc, kernel["ProblemType"]["IndicesSummation"][0])
+        strideL = self._summationStride(writer, kernel, tc)
         module.add(writer.s_mul_u64_u32(sgpr(tmpOffset), sgpr(tmpOffset+1), sgpr(tmpOffset), strideL, comment="StreamK tile start offset"))
         # Overflow check removed
         # if kernel["CheckDimOverflow"] >=2:
@@ -2237,7 +2253,8 @@ class StreamK(Component):
                 module.add(self.partialsWriteBatch(writer, kernel, ss, batchIdx, alpha, beta, edge, gwvw, atomicW, \
                         elementsThisBatch, writer.vgprs.addrD, writer.vgprs.addrC, \
                         tmpVgpr, cvtVgprStruct, \
-                        elementSgprs, tmpSgpr, codeAccVgprRead, clsLoop=useCLS))
+                        elementSgprs, tmpSgpr, codeAccVgprRead, \
+                        elementStartIdx, clsLoop=useCLS))
 
             if useCLS:
                 self._skCLSLoopClose(writer, module, clsCounter, clsM0Base, clsLabel)
@@ -2418,7 +2435,8 @@ class StreamK(Component):
 
     def partialsWriteBatch(self, writer, kernel, ss, batchIdx, applyAlpha, beta, edge, gwvw, atomicW, \
             batchElements, addrD, addrC, \
-            tmpVgpr, cvtVgprStruct, batchElementSgprs, tmpSgpr, codeAccVgprRead, clsLoop=False):
+            tmpVgpr, cvtVgprStruct, batchElementSgprs, tmpSgpr, codeAccVgprRead, \
+            elementStartIdx=0, clsLoop=False):
         module = Module("StreamK Common partialsWriteBatch")
 
         module.addComment0("optSingleColVgpr=%u optSharedColVgpr=%u optSGPRUsage=%s optSrdIncForRow=%u" % \
@@ -2442,7 +2460,8 @@ class StreamK(Component):
         # allow expanding vgpr pool for OptNLL
         # preventOverflow = (not isOptNLL)
         # ss.setupStoreElementsForBatch(kernel, gwvw, batchElements, batchElementSgprs, isOptNLL=isOptNLL, isWorkspace=True)
-        ss.setupStoreElementsForBatch(kernel, gwvw, batchElements, batchElementSgprs, isOptNLL=False, factorDim=0, isWorkspace=True)
+        # elementStartIdx advances the source accumulator base across batches when LocalSplitU > 1.
+        ss.setupStoreElementsForBatch(kernel, gwvw, batchElements, batchElementSgprs, isOptNLL=False, factorDim=0, isWorkspace=True, elementStartIdx=elementStartIdx)
 
         storesIssued = 0
         tmpS01 = tmpSgpr # scratch sgprs
