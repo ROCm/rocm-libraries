@@ -3432,61 +3432,6 @@ class Solution(collections.abc.Mapping):
     if "ValidDepthU" in state:
       del state["ValidDepthU"]
 
-    halfPLR: int = state["HalfPLR"]
-    state["HalfPLRA"] = bool(halfPLR & 0x01)
-    state["HalfPLRB"] = bool(halfPLR & 0x02)
-    if state["HalfPLR"]:
-      state["ClusterLocalRead"] = 0
-      state["SuppressNoLoadLoop"] = True
-      state["ExpandPointerSwap"] = False
-      if state.get("PrefetchAcrossPersistent", 0):
-        if state["StreamK"] != 3 or state["StreamKForceDPOnly"] != 1:
-          reject(state, printRejectionReason, "HalfPLR + PrefetchAcrossPersistent currently requires StreamK = 3 and StreamKForceDPOnly = 1")
-          return
-      # The subtile main loop ignores SuppressNoLoadLoop, which HalfPLR forces;
-      # the HalfPLR tail fixup lives only in the legacy calculateLoopNumIter path.
-      if state["UseSubtileImpl"]:
-        reject(state, printRejectionReason, "HalfPLR is not supported with UseSubtileImpl (subtile main loop does not honor SuppressNoLoadLoop)")
-        return
-      if state["PrefetchLocalRead"] != 1:
-        reject(state, printRejectionReason, "Need to set PrefetchLocalRead = 1 as it shares some common logic with HalfPLR")
-        return
-      if state["PrefetchGlobalRead"] == 0:
-        reject(state, printRejectionReason, "HalfPLR only supports PGR > 0")
-        return
-      if not (state["enableTDMA"] and state["enableTDMB"]):
-        reject(state, printRejectionReason, "HalfPLR only supports TDMInst")
-        return
-      if (state["HalfPLRA"] and (state["MIWaveTileA"] % 2 != 0)) or \
-        (state["HalfPLRB"] and (state["MIWaveTileB"] % 2 != 0)):
-        reject(state, printRejectionReason, "HalfPLR does not support odd WaveTile")
-        return
-      if not state["EnableMatrixInstruction"]:
-        reject(state, printRejectionReason, "Currently HalfPLR only supports MatrixInstruction")
-        return
-      if state["_ScheduleIterAlg"] != 0:
-        reject(state, printRejectionReason, "Currently HalfPLR only supports SIA = 0 or 4")
-        return
-      # SIA=4 is remapped to _ScheduleIterAlg=0 + _StinkyTofuOptLevel=3, so both
-      # SIA=0 and SIA=4 pass the check above. On StreamK, HalfPLR requires the
-      # StinkyTofu backend (SIA=4); plain SIA=0 is only allowed for non-StreamK.
-      if state["StreamK"] != 0 and state["ScheduleIterAlg"] != 4:
-        reject(state, printRejectionReason, "HalfPLR on StreamK requires ScheduleIterAlg = 4 (StinkyTofu)")
-        return
-      if (state["HalfPLRA"] and not (state["UnrollMajorLDSA"] or state["enableLDSTrA"])) or \
-        (state["HalfPLRB"] and not (state["UnrollMajorLDSB"] or state["enableLDSTrB"])):
-        reject(state, printRejectionReason, "Currently HalfPLR does not support packing (need UnrollMajorLDS or use LDSTrInst)")
-        return
-      if state["InnerUnroll"] != 1:
-        reject(state, printRejectionReason, "Currently HalfPLR only supports InnerUnroll = 1")
-        return
-      if state["ConvertAfterDS"]:
-        reject(state, printRejectionReason, "Currently HalfPLR does not support ConvertAfterDS")
-        return
-      if state["UseF32XEmulation"]:
-        reject(state, printRejectionReason, "Currently HalfPLR does not support UseF32XEmulation")
-        return
-
     if state["UseDirect32XEmulation"] == True:
       #   Turn off Direct32X for the following kernels:
       #   Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT16x16x512_MI16x16x1
@@ -6934,6 +6879,65 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["TLUA"] and state["ProblemType"]["TLUB"]:
           # TODO: Now in rocBLAS, lot of logic yamls are Type=NT and TLDS=1? Why aren't they rejected and how to get rid of them?
           reject(state, printRejectionReason, "TransposeLds requires TLUA=0 or TLUB=0")
+
+    # HalfPLR forces ClusterLocalRead=0. That has to land before the wider
+    # local-read check below, which treats ClusterLocalRead as a legal way to
+    # support LocalReadVectorWidth > MIInputPerThread.
+    halfPLR: int = state["HalfPLR"]
+    state["HalfPLRA"] = bool(halfPLR & 0x01)
+    state["HalfPLRB"] = bool(halfPLR & 0x02)
+    if state["HalfPLR"]:
+      state["ClusterLocalRead"] = 0
+      state["SuppressNoLoadLoop"] = True
+      state["ExpandPointerSwap"] = False
+      if state.get("PrefetchAcrossPersistent", 0):
+        if state["StreamK"] != 3 or state["StreamKForceDPOnly"] != 1:
+          reject(state, printRejectionReason, "HalfPLR + PrefetchAcrossPersistent currently requires StreamK = 3 and StreamKForceDPOnly = 1")
+          return
+      # The subtile main loop ignores SuppressNoLoadLoop, which HalfPLR forces;
+      # the HalfPLR tail fixup lives only in the legacy calculateLoopNumIter path.
+      if state["UseSubtileImpl"]:
+        reject(state, printRejectionReason, "HalfPLR is not supported with UseSubtileImpl (subtile main loop does not honor SuppressNoLoadLoop)")
+        return
+      if state["PrefetchLocalRead"] != 1:
+        reject(state, printRejectionReason, "Need to set PrefetchLocalRead = 1 as it shares some common logic with HalfPLR")
+        return
+      if state["PrefetchGlobalRead"] == 0:
+        reject(state, printRejectionReason, "HalfPLR only supports PGR > 0")
+        return
+      if not (state["enableTDMA"] and state["enableTDMB"]):
+        reject(state, printRejectionReason, "HalfPLR only supports TDMInst")
+        return
+      if (state["HalfPLRA"] and (state["MIWaveTileA"] % 2 != 0)) or \
+        (state["HalfPLRB"] and (state["MIWaveTileB"] % 2 != 0)):
+        reject(state, printRejectionReason, "HalfPLR does not support odd WaveTile")
+        return
+      if not state["EnableMatrixInstruction"]:
+        reject(state, printRejectionReason, "Currently HalfPLR only supports MatrixInstruction")
+        return
+      if state["_ScheduleIterAlg"] != 0:
+        reject(state, printRejectionReason, "Currently HalfPLR only supports SIA = 0 or 4")
+        return
+      # SIA=4 is remapped to _ScheduleIterAlg=0 + _StinkyTofuOptLevel=3, so both
+      # SIA=0 and SIA=4 pass the check above. On StreamK, HalfPLR requires the
+      # StinkyTofu backend (SIA=4); plain SIA=0 is only allowed for non-StreamK.
+      if state["StreamK"] != 0 and state["ScheduleIterAlg"] != 4:
+        reject(state, printRejectionReason, "HalfPLR on StreamK requires ScheduleIterAlg = 4 (StinkyTofu)")
+        return
+      if (state["HalfPLRA"] and not (state["UnrollMajorLDSA"] or state["enableLDSTrA"])) or \
+        (state["HalfPLRB"] and not (state["UnrollMajorLDSB"] or state["enableLDSTrB"])):
+        reject(state, printRejectionReason, "Currently HalfPLR does not support packing (need UnrollMajorLDS or use LDSTrInst)")
+        return
+      if state["InnerUnroll"] != 1:
+        reject(state, printRejectionReason, "Currently HalfPLR only supports InnerUnroll = 1")
+        return
+      if state["ConvertAfterDS"]:
+        reject(state, printRejectionReason, "Currently HalfPLR does not support ConvertAfterDS")
+        return
+      if state["UseF32XEmulation"]:
+        reject(state, printRejectionReason, "Currently HalfPLR does not support UseF32XEmulation")
+        return
+
     if state["EnableMatrixInstruction"]:
       # enable widerLocalRead
       if state["LocalReadVectorWidthA"] > state["MIInputPerThreadA"]:
