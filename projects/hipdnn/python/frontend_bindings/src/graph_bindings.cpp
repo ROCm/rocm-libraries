@@ -290,6 +290,42 @@ void graphBindings(nb::module_& m)
             "producers in host, ROCm, or pinned host memory; a runtime pass-by-value "
             "tensor takes a host tensor. Callers must keep producers alive until the HIP "
             "work completes.")
+        .def(
+            "execute_timed_ext",
+            [](const graph::Graph& g,
+               const nb::object& handle,
+               const nb::dict& variantPack,
+               const nb::object& workspace) {
+                auto handlePtr = handle.attr("get")();
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+
+                auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
+                void* workspacePtr = workspace.is_none()
+                                         ? nullptr
+                                         : hipdnn_python::toDataPointer(workspace, "workspace");
+
+                ExecutionTiming timing;
+                Error err;
+                {
+                    const nb::gil_scoped_release release;
+                    err = g.execute_timed_ext(rawHandle, cppVariantPack, workspacePtr, timing);
+                }
+                return std::make_pair(err, timing);
+            },
+            nb::arg("handle"),
+            nb::arg("variant_pack"),
+            nb::arg("workspace") = 0,
+            "Execute the active plan once and return (Error, ExecutionTiming). "
+            "Blocks until timing completes, with no hidden warmup or retry. "
+            "Allocate workspace before the call. variant_pack and workspace accept the "
+            "same keys and values as execute().\n"
+            "On success, quality is DEVICE_ONLY when the stall removed host submission "
+            "overhead, UNSTALLED when the stall was not used, or INVALID when the "
+            "watchdog invalidated timing after execution completed. A watchdog release "
+            "sets timed_out=True and elapsed_ms=None; it does not disable later calls.\n"
+            "A bad Error reports execution or profiling failure and invalidates timing. "
+            "Profiling can fail after execution; do not assume an error means no work ran.")
         .def("get_execution_plan_count",
              &graph::Graph::get_execution_plan_count,
              "Number of compiled plans, including ones that failed to compile. Use with "
