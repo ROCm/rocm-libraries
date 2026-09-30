@@ -107,6 +107,17 @@ inline std::pmr::synchronized_pool_resource heap{
 
     return &r;
   }()};
+
+// True if p was handed out by the managed pool. Query p itself rather than the
+// Header before it: for a libc block that address lies outside the block, for
+// example in the preceding mapping when glibc serves the block with mmap.
+inline bool __is_pool_allocation(const void* p) noexcept
+{
+  hipPointerAttribute_t tmp{};
+  static_cast<void>(__consume_error(hipPointerGetAttributes(&tmp, p)));
+
+  return tmp.isManaged;
+}
 } // Namespace hipstd.
 
 extern "C" inline __attribute__((used)) void* __hipstdpar_aligned_alloc(std::size_t a, std::size_t n)
@@ -228,12 +239,7 @@ extern "C" inline __attribute__((used)) void* __hipstdpar_realloc(void* p, std::
     return nullptr;
   }
 
-  auto h = static_cast<hipstd::Header*>(p) - 1;
-
-  hipPointerAttribute_t tmp{};
-  static_cast<void>(hipstd::__consume_error(hipPointerGetAttributes(&tmp, h)));
-
-  if (!tmp.isManaged)
+  if (!hipstd::__is_pool_allocation(p))
   {
     std::size_t old = n;
 #    if defined(__HIPSTDPAR_HAS_MALLOC_USABLE_SIZE__)
@@ -244,6 +250,7 @@ extern "C" inline __attribute__((used)) void* __hipstdpar_realloc(void* p, std::
   }
   else
   {
+    const auto h   = static_cast<hipstd::Header*>(p) - 1;
     const auto old = reinterpret_cast<std::uintptr_t>(h->alloc_ptr) + h->size
                      - reinterpret_cast<std::uintptr_t>(p);
     std::memcpy(q, p, std::min<std::size_t>(old, n));
@@ -274,15 +281,12 @@ extern "C" inline __attribute__((used)) void __hipstdpar_free(void* p)
     return;
   }
 
-  auto h = static_cast<hipstd::Header*>(p) - 1;
-
-  hipPointerAttribute_t tmp{};
-  static_cast<void>(hipstd::__consume_error(hipPointerGetAttributes(&tmp, h)));
-
-  if (!tmp.isManaged)
+  if (!hipstd::__is_pool_allocation(p))
   {
     return __hipstdpar_hidden_free(p);
   }
+
+  const auto h = static_cast<hipstd::Header*>(p) - 1;
 
   return hipstd::heap.deallocate(h->alloc_ptr, h->size, h->align);
 }
