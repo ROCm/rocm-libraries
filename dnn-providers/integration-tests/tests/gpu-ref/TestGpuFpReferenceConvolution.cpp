@@ -453,10 +453,6 @@ TEST(TestGpuConvFwdRefAlphaBeta, AlphaOnly)
     fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
     fillWithRandomValues(wTensor, -1.0f, 1.0f, seed + 1);
 
-    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
-    xTensor.memory().hostData();
-    wTensor.memory().hostData();
-
     // Compute with alpha=1.0
     GpuFpReferenceConvolution::fprop<float>(xTensor, wTensor, yRef, {1, 1}, {1, 1}, {0, 0});
 
@@ -484,10 +480,6 @@ TEST(TestGpuConvFwdRefAlphaBeta, BetaAccumulate)
     fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
     fillWithRandomValues(wTensor, -1.0f, 1.0f, seed + 1);
     yTensor.fillWithValue(1.0f);
-
-    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
-    xTensor.memory().hostData();
-    wTensor.memory().hostData();
 
     // Pre-fill y with 1.0, then compute with alpha=1.0, beta=1.0
     // Result should be conv(x,w) + 1.0
@@ -518,10 +510,6 @@ TEST(TestGpuConvFwdRefAlphaBeta, BetaZeroSkipsRead)
     const unsigned int seed = 42;
     fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
     fillWithRandomValues(wTensor, -1.0f, 1.0f, seed + 1);
-
-    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
-    xTensor.memory().hostData();
-    wTensor.memory().hostData();
 
     // Pre-fill with garbage — should be ignored when beta=0
     yBetaZero.fillWithValue(999.0f);
@@ -689,10 +677,6 @@ TEST(TestGpuConvFwdRefInt8, Int8ToInt32)
     xTensor.fillWithRandomValues(static_cast<int8_t>(-3), static_cast<int8_t>(3), seed);
     wTensor.fillWithRandomValues(static_cast<int8_t>(-2), static_cast<int8_t>(2), seed + 1);
 
-    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
-    xTensor.memory().hostData();
-    wTensor.memory().hostData();
-
     GpuFpReferenceConvolution::fprop<int8_t, int8_t, int32_t, int32_t>(
         xTensor, wTensor, yGpu, {1, 1}, {1, 1}, {0, 0});
 
@@ -732,10 +716,6 @@ TEST(TestGpuConvFwdRefInt8, Int8ToFloat)
     const unsigned int seed = 42;
     xTensor.fillWithRandomValues(static_cast<int8_t>(-3), static_cast<int8_t>(3), seed);
     wTensor.fillWithRandomValues(static_cast<int8_t>(-2), static_cast<int8_t>(2), seed + 1);
-
-    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
-    xTensor.memory().hostData();
-    wTensor.memory().hostData();
 
     GpuFpReferenceConvolution::fprop<int8_t, int8_t, float, float>(
         xTensor, wTensor, yGpu, {1, 1}, {1, 1}, {0, 0});
@@ -783,10 +763,6 @@ TEST(TestGpuConvFwdRefTf32, DiffersFromNonTf32)
     const unsigned int seed = 42;
     fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
     fillWithRandomValues(wTensor, -1.0f, 1.0f, seed + 1);
-
-    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
-    xTensor.memory().hostData();
-    wTensor.memory().hostData();
 
     // Regular computation with float accumulation
     GpuFpReferenceConvolution::fprop<float, float, float, float>(
