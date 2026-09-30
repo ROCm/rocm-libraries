@@ -31,7 +31,7 @@ namespace rocsparse
     // Shift CSR offsets
     template <uint32_t BLOCKSIZE, typename I>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrsort_shift_kernel(int64_t size, const I* in, I* out)
+    void csrsort_shift_kernel(I size, const I* in, I* out)
     {
         const int64_t gid = int64_t(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
