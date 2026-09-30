@@ -320,6 +320,26 @@ namespace
         }
     }
 
+    // The format hipblaslt-bench writes has the same hazard, and there it is
+    // worse: a row cut before its name reads as one that records no name, which
+    // a file stamped by this build would trust. The cut can fall on either side
+    // of the comma before the name.
+    TEST_F(TuningStore, LegacyRowCutShortIsRejected)
+    {
+        const auto whole     = legacyRow(halfKey(), 7, "kernel");
+        auto       cut       = cutBefore(whole, "kernel_name");
+        auto       withComma = cut;
+        withComma.insert(withComma.size() - 1, ",");
+
+        for(const auto& row : {cut, withComma})
+        {
+            SCOPED_TRACE(row);
+            OverrideMap map;
+            EXPECT_EQ(loadInto(map, fileOf({row})).accepted, 0u);
+            EXPECT_TRUE(map.findLegacy(halfKey()).empty());
+        }
+    }
+
     // A process that dies between a header and its value row leaves an orphan
     // header, which must not swallow the next record's header as its values.
     TEST_F(TuningStore, OrphanHeaderDoesNotHideTheNextRow)

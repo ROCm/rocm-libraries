@@ -586,12 +586,13 @@ namespace TensileLite
             const auto names  = splitCsv(header);
             const auto values = splitCsv(value);
 
-            // A current row has exactly one value per column. zipRow pairs only
-            // up to the shorter list, so a value line cut short by an
-            // interrupted append would otherwise read as whatever prefix it
-            // kept, a kernel name cut partway included.
-            if(names.size() != values.size()
-               && std::find(names.begin(), names.end(), "schema_version") != names.end())
+            // zipRow pairs only up to the shorter list, so a value line cut
+            // short by an interrupted append would otherwise read as whatever
+            // prefix it kept. A legacy row cut before its kernel_name would
+            // read as a row that records no name and be trusted on the version
+            // line alone. splitCsv yields no cell after a final comma, so a row
+            // cut just after one is short as well.
+            if(names.size() != values.size())
                 continue;
 
             auto parsed = problemFromEntries(zipRow(names, values));
