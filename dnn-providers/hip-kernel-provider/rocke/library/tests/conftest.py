@@ -31,6 +31,13 @@ _PYROOT = Path(__file__).resolve().parents[2] / "platform" / "python"
 if str(_PYROOT) not in sys.path:
     sys.path.insert(0, str(_PYROOT))
 
+# Test support packages are also used by standalone worker subprocesses. Make
+# them importable with pytest's importlib mode in both source and install trees,
+# after the library packages so tests/dispatch cannot shadow dispatch/.
+_TESTROOT = Path(__file__).resolve().parent
+if str(_TESTROOT) not in sys.path:
+    sys.path.append(str(_TESTROOT))
+
 
 @pytest.fixture(autouse=True)
 def _restore_attention_arch_state():

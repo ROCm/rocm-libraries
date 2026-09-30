@@ -114,6 +114,30 @@ the strategy's biggest holes live (see
   [`instances/differential/numeric.py`](platform/tests/instances/differential/numeric.py))
   drive kernels on device and check the result within tolerance. Model-glue lanes
   exercise end-to-end kernel wiring for real model shapes.
+- The pinned SDPA reference lane qualifies old rocKE
+  against independent NumPy SDPA offline, then executes old and current rocKE
+  on gfx942 using a conservative triangle-inequality error budget. Required
+  executions fail when hardware or qualification is missing. The first cohort
+  is enrolled in installed tests when a qualified bundle is supplied at build time.
+  Provider builds enable `ROCKE_INSTALL_SDPA_REFERENCE` by default. Run
+  `dvc pull dnn-providers/hip-kernel-provider/rocke/library/tests/sdpa_reference_bundle.tar.gz.dvc`
+  from the repository root before configuring. TheRock already performs this
+  DVC download during source preparation. CMake extracts the archive, validates
+  every payload hash against
+  [`baseline_lock.json`](library/tests/sdpa_reference/baseline_lock.json), and
+  installs it under the existing provider `tests/**` artifact capture.
+  Missing or corrupt data fails configuration. For builds that intentionally
+  omit this GPU lane, use `-DROCKE_INSTALL_SDPA_REFERENCE=OFF`.
+  `-DROCKE_SDPA_REFERENCE_BUNDLE=<qualified-bundle>` remains an explicit local
+  override. Standalone platform builds do not enable archive staging by default.
+  For source verification, run
+  `python library/tests/run_sdpa_reference.py verify --bundle <qualified-bundle> --current-root .`
+  from the rocKE root with NumPy, HIP, and COMGR; Torch is not required.
+  To publish a replacement, independently qualify it first, update the source
+  lock, and use `python library/tests/sdpa_reference/artifact.py pack --bundle <qualified-bundle> --lock library/tests/sdpa_reference/baseline_lock.json --archive library/tests/sdpa_reference_bundle.tar.gz`
+  from the rocKE root. Then run `dvc add` and a scoped `dvc push` for the
+  archive from the repository root before pushing its Git pointer. Git tracks
+  the lock, pointer, and ignore entry; compiled kernels and inputs stay in DVC.
 - **Nothing else in this document proves the math is right.** Byte-identity
   ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) and golden IR
   ([§4.2](#42-does-the-platforms-output-stay-stable)) are both blind to a
@@ -235,24 +259,24 @@ Four distinct things run here; **do not conflate them**:
 | **3. GPU / numeric** | reference-oracle kernel-correctness lanes | ❌ skipped off-device |
 | **4. Manual demos/tools** | hand-compiled CLIs / demos | ❌ |
 
-**Two entrypoints, one gated scope.** [`run_all.py`](platform/tests/run_all.py) is
+**Developer and installed entrypoints.** [`run_all.py`](platform/tests/run_all.py) is
 the **developer** runner (guard → gate → pytest → ctest). **CI does not run
 `run_all.py`** — it runs
 **ctest** (wired from TheRock; project selection via `get_changed_projects.py`),
-whose registered pytest targets the **`platform/tests`** tree only. The exact
+whose registered pytest entries include the platform suite and selected library
+host/GPU suites. The exact
 CTest-registered targets are authoritative in
 [`platform/tests/CMakeLists.txt`](platform/tests/CMakeLists.txt) and
 [`platform/CMakeLists.txt`](platform/CMakeLists.txt) — read them there rather than
 trusting a copy here.
 
 **The tree/gating reality (a second axis, orthogonal to the two questions).**
-*Where* a test lives currently decides *whether it runs at all*. Both the dev
-pytest step and the CI ctest pytest target `platform/tests`, so every test outside
-that tree is in no gated tier — the byte-identity gate is the one exception, since
-its parity corpus reaches `library/`. This is the **emerging platform/library
-modularity boundary**, and it is why the orphaned-`library` and
-orphaned-`platform/python` suites are gaps ([§7](#7-current-state-vs-target-the-gap-registry-wip)),
-not just untidy: they answer real quality questions but run nowhere.
+*Where* a test lives and its explicit CTest selection decide whether it runs.
+Installed library GPU selection includes attention tests, but their Torch and
+architecture gates can still skip all numeric execution. The pinned SDPA lane
+uses an independently qualified bundle to run its enrolled cases without Torch.
+Inspect collection and GPU comparison counts separately from host-test passes;
+directory coverage alone does not establish GPU correctness.
 
 **Harness lane bridge.** The differential harness numbers its lanes `L1…L6` (L1
 `verify`, L3 `ll` = the byte-identity gate, L5 the golden anchor, L6 numeric). Read

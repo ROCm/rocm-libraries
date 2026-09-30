@@ -33,7 +33,9 @@ test_categories:
       - "rocke_golden_static"
       - "rocke_library_conv_pytest"
       - "rocke_pytest"
-      - "rocke_library_conv_gpu_pytest"
+      - "rocke_library_gpu_pytest"
+      - "rocke_sdpa_reference_unit_pytest"
+      - "rocke_sdpa_gpu_pytest"
     labels:
       - "quick"
       - "pre-commit"
@@ -50,6 +52,8 @@ test_categories:
       - "rocke_golden_static"
       - "rocke_library_conv_pytest"
       - "rocke_pytest"
-      - "rocke_library_conv_gpu_pytest"
+      - "rocke_library_gpu_pytest"
+      - "rocke_sdpa_reference_unit_pytest"
+      - "rocke_sdpa_gpu_pytest"
     labels:
       - "ffm-full"
