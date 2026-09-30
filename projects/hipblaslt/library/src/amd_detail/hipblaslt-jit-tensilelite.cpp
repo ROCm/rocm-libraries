@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "hipblaslt-jit-hash.hpp"
+#include "hipblaslt-jit-heuristic.hpp"
+#include "hipblaslt-jit-library.hpp"
 #include "hipblaslt-jit-loader.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
 #include "hipblaslt-jit-process.hpp"
@@ -9,6 +11,7 @@
 #include "hipblaslt_internal.hpp"
 #include "rocblaslt-functions.h"
 #include "rocblaslt.h"
+#include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
 #include "utility.hpp"
 #include <Tensile/Tensile.hpp>
@@ -385,6 +388,8 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                             Stage::Generate,
                             "TensileLite does not implement this operation"};
                 auto configured = m_options;
+                if(configured.outputPath.empty())
+                    configured.outputPath = (request.scratch / "tensilelite").u8string();
                 if(configured.architecture.empty())
                     configured.architecture = request.target.targetId;
                 if(!targetMatchesDevice(configured.architecture, request.target.targetId))
@@ -468,5 +473,73 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
             diagnostics.message = "Cannot allocate TensileLite backend";
             return HIPBLAS_STATUS_ALLOC_FAILED;
         }
+    }
+}
+
+namespace hipblaslt_jit
+{
+    namespace
+    {
+        namespace fs = std::filesystem;
+
+        std::string configured(const char* variable, const char* builtIn)
+        {
+            const char* value = rocblaslt_secure_getenv(variable);
+            return value && *value ? value : builtIn;
+        }
+
+        Status missing(const char* what, const std::string& path, const char* variable)
+        {
+            return {Status::Code::Failed,
+                    Stage::Configure,
+                    std::string(what) + " not found at " + path + "; set " + variable};
+        }
+
+        std::pair<std::shared_ptr<const Jit>, Status> makeProcessJit()
+        {
+            namespace tensilelite = hipblaslt_ext::experimental::jit::tensilelite;
+            tensilelite::Options options;
+            options.pythonExecutable
+                = configured("HIPBLASLT_JIT_PYTHON", HIPBLASLT_JIT_DEFAULT_PYTHON);
+            options.tensileSourceDirectory
+                = configured("HIPBLASLT_JIT_TENSILE_SOURCE", HIPBLASLT_JIT_DEFAULT_TENSILE_SOURCE);
+            options.pythonPath
+                = configured("HIPBLASLT_JIT_PYTHONPATH", HIPBLASLT_JIT_DEFAULT_PYTHONPATH);
+            options.cxxCompiler = configured("HIPBLASLT_JIT_CXX", HIPBLASLT_JIT_DEFAULT_CXX);
+            std::error_code error;
+            if(!fs::is_regular_file(tensilelite::findProgram(options.pythonExecutable), error))
+                return {nullptr, missing("Python", options.pythonExecutable, "HIPBLASLT_JIT_PYTHON")};
+            if(!fs::is_directory(fs::u8path(options.tensileSourceDirectory) / "Tensile", error))
+                return {nullptr,
+                        missing("TensileLite source",
+                                options.tensileSourceDirectory,
+                                "HIPBLASLT_JIT_TENSILE_SOURCE")};
+            if(!fs::is_regular_file(tensilelite::findProgram(options.cxxCompiler), error))
+                return {nullptr, missing("C++ compiler", options.cxxCompiler, "HIPBLASLT_JIT_CXX")};
+            try
+            {
+                auto backend = std::make_shared<const tensilelite::TensileLiteBackend>(options);
+                auto store
+                    = makeLibraryStore(JitLibrary::process(), backend->info(), jitCodeObjectVersion);
+                return {std::make_shared<const Jit>(Jit::Components{std::move(backend),
+                                                                    makeOrigamiPredictor(),
+                                                                    makeTensileLiteDefaults(),
+                                                                    makeComgrBuilder(),
+                                                                    makeTensileLoader(),
+                                                                    std::move(store)}),
+                        {}};
+            }
+            catch(const std::exception& e)
+            {
+                return {nullptr, {Status::Code::Failed, Stage::Configure, e.what()}};
+            }
+        }
+    }
+
+    std::shared_ptr<const Jit> processJit(Status& why)
+    {
+        static const auto process = makeProcessJit();
+        why                       = process.second;
+        return process.first;
     }
 }

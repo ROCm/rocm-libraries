@@ -13,10 +13,20 @@ target_sources(hipblaslt
 )
 
 if(HIPBLASLT_ENABLE_JIT)
+    if(NOT TARGET _rocisa)
+        message(FATAL_ERROR "HIPBLASLT_ENABLE_JIT requires the local _rocisa target")
+    endif()
     find_package(ZLIB REQUIRED)
     find_package(amd_comgr CONFIG REQUIRED)
     target_link_libraries(hipblaslt PRIVATE ZLIB::ZLIB amd_comgr)
-    target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_JIT)
+    # The generator HIPBLASLT_JIT runs by default; each path has an environment override.
+    target_compile_definitions(hipblaslt PRIVATE
+        HIPBLASLT_ENABLE_JIT
+        HIPBLASLT_JIT_DEFAULT_PYTHON="${Python_EXECUTABLE}"
+        HIPBLASLT_JIT_DEFAULT_TENSILE_SOURCE="${PROJECT_SOURCE_DIR}/tensilelite"
+        HIPBLASLT_JIT_DEFAULT_PYTHONPATH="$<TARGET_FILE_DIR:_rocisa>/.."
+        HIPBLASLT_JIT_DEFAULT_CXX="${CMAKE_CXX_COMPILER}")
+    add_dependencies(hipblaslt _rocisa)
     target_sources(hipblaslt PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-code-object.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-fs.cpp"
