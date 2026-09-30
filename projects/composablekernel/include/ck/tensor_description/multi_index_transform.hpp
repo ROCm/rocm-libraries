@@ -1746,7 +1746,7 @@ struct ConvBwdDataImplicitGemmOutTransform
     IsValidUpperIndexMappedToValidLowerIndex(const UpIdx& idx_up) const
     {
         // Padding
-        index_t K_idx  = idx_up[Number<0>{}] * up_lengths_[Number<2>{}] + idx_up[Number<2>{}];
+        index_t K_idx     = idx_up[Number<0>{}] * up_lengths_[Number<2>{}] + idx_up[Number<2>{}];
         const auto& M_idx = idx_up[Number<1>{}];
 
         bool pad_valid = M_idx < up_lengths_[Number<1>{}] - MPad_ &&
