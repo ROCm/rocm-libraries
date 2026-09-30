@@ -176,9 +176,9 @@ void testing_gemm_ex_get_solutions(const Arguments& arg)
         // a valid result differs from the reference by about K*eps. gfx11 with 16-bit
         // inputs uses testing_gemm_ex's looser absolute bound as-is (that constant is
         // calibrated for absolute K*tol use, not for magnitude scaling). Every other
-        // case scales the relative epsilon by an analytical bound on |D|_max, derived
-        // from the init ranges. A gross error such as a dropped alpha or beta term stays
-        // well above either bound and still fails.
+        // case scales a relative epsilon by an analytical bound on |D|_max, derived from
+        // the init ranges. A gross error such as a dropped alpha or beta term stays well
+        // above either bound and still fails.
         if(rocblas_handle(handle)->getArchMajor() == 11 && sizeof(Ti) == 2)
         {
             check_tol = K * sum_error_tolerance_for_gfx11<Tc, Ti, To>;
@@ -187,7 +187,7 @@ void testing_gemm_ex_get_solutions(const Arguments& arg)
         {
             const double result_bound
                 = gemm_result_abs_bound<Ti, To, Tc>(arg.initialization, K, h_alpha_Tc, h_beta_Tc);
-            check_tol = result_bound * K * sum_error_tolerance<Tc>;
+            check_tol = result_bound * K * get_epsilon<Tc>();
         }
     }
 
