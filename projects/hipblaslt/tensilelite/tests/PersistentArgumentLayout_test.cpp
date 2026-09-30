@@ -409,3 +409,37 @@ TEST(PersistentArgumentLayout, DataParallelCustomDescriptorMatchesCompleteNormal
         EXPECT_FLOAT_EQ(value<float>(custom.args, "beta"), useBeta ? -1.25f : 0.0f);
     }
 }
+
+TEST(PersistentArgumentLayout, SharedClusterGeometryPreservesDataParallelGridAndPap)
+{
+    // 3 x 4 real tiles in each of three batches. The expected grids are
+    // physical workgroups, including the boundary block's phantom peers.
+    for(auto [cs, cn, budget, grid] :
+        std::vector<std::tuple<size_t, size_t, size_t, size_t>>{
+            {2, 1, 7, 6}, {4, 1, 7, 4},
+            {2, 2, 7, 4}, {2, 4, 7, 8},
+            {2, 1, 256, 48}, {2, 4, 256, 48}})
+    for(bool pap : {false, true})
+    {
+        ContractionSolution solution;
+        configurePersistentSolution(solution, 3, 1);
+        solution.sizeMapping.clusterDim = {cs, cn, 1};
+        solution.sizeMapping.prefetchAcrossPersistent = pap;
+        auto problem = persistentProblem(257, 385, 129, 3);
+        auto device = persistentDevice(budget);
+        auto launch = solution.resolvePersistentSettings(problem, device);
+        const size_t expectedGrid = grid;
+        EXPECT_FALSE(launch.clusterGridClamp);
+        EXPECT_EQ(launch.selectedGrid, budget);
+        EXPECT_EQ(launch.grid, expectedGrid);
+        EXPECT_EQ(launch.totalTiles, 36u);
+        auto invocation = solution.generateSingleCall<true>(
+            problem, persistentInputs(), device, launch, GSUSettings{});
+        EXPECT_EQ(invocation.numWorkGroups.x, expectedGrid / cn);
+        EXPECT_EQ(invocation.numWorkGroups.y, cn);
+        EXPECT_EQ(invocation.numWorkGroups.z, 1u);
+        EXPECT_EQ(value<uint32_t>(invocation.args, "PersistentGrid"), expectedGrid);
+        // Preserve the legacy DP launch-header convention in this extraction.
+        EXPECT_EQ(value<uint32_t>(invocation.args, "numWorkGroups"), expectedGrid / cn);
+    }
+}

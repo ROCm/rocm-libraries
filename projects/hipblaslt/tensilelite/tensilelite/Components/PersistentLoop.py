@@ -6,15 +6,388 @@
 from contextlib import contextmanager
 from copy import deepcopy
 from rocisa.code import Module, Label
-from rocisa.container import sgpr, vgpr, MemTokenData
+from rocisa.container import sgpr, vgpr, ContinuousRegister, EXEC, MemTokenData
 from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, SCBranchSCC1, SBranch, SWaitCnt, SBitcmp1B32, SBarrier, SLShiftRightB32, SLongBranchNegative
 from ..ExecutionPolicy import isPersistent
 from math import ceil, log2
 from ..Component import Component
+from ..Common import persistentSpatialCluster
 import abc
+from rocisa.instruction import SAddU32, SAndB32, SCBranchSCC0, SCSelectB32, SLShiftLeftB32, SMinU32, SMulI32, SOrB32, SSubU32, SCmpGeU32, SSchedulingFence, SAddCU32
+from rocisa.functions import scalarUInt32DivideAndRemainder
 
 class PersistentKernelState:
     """Emitter state and borrowed registers for the persistent loop lifecycle."""
+
+    def papLocalReadPayloadRanges(self, kernel):
+        """First PLR operands kept live across both store and persistent setup.
+
+        Reuse X0 in each existing operand block. X1 and alignment gaps remain
+        available to the store/setup allocators. The conservative headroom test
+        rejects geometries whose withheld payload plus local-address scratch
+        could exceed the VGPR limit; the ordinary two-group path still works.
+        """
+        if hasattr(self.states, "papLocalReadPayload"):
+            return self.states.papLocalReadPayload
+        ranges = []
+        if (kernel.get("PrefetchAcrossPersistent") and getattr(self, "tPA", None) is not None
+                and getattr(self, "tPB", None) is not None
+                and self.papPgr2PipelineEnabled(kernel, self.tPA, self.tPB)):
+            tensors = [("A", self.states.a), ("B", self.states.b)]
+            if kernel["ProblemType"]["MXBlockA"]:
+                tensors += [("MXSA", self.states.mxsa), ("MXSB", self.states.mxsb)]
+            # Packed/converted inputs need an additional pack lifetime contract.
+            # The initial path uses reads that already produce WMMA operands.
+            if all(kernel["UnrollMajorLDS" + tc] for tc, _ in tensors):
+                ranges = [(info.startVgprValu, info.numVgprValuPerBlock)
+                          for _, info in tensors]
+                if (self.states.totalVgprs + sum(size for _, size in ranges) + 16
+                        > self.states.regCaps["MaxVgpr"]):
+                    ranges = []
+        self.states.papLocalReadPayload = tuple(ranges)
+        return self.states.papLocalReadPayload
+
+
+    def papReclaimValuRegisters(self, kernel, start, size, tag, *, add=True):
+        """Apply a normal RAP reclaim range minus any live PAP PLR payload."""
+        ranges = [(start, start + size)]
+        for held, count in self.papLocalReadPayloadRanges(kernel):
+            end = held + count
+            ranges = [(lo, hi) for first, last in ranges
+                      for lo, hi in ((first, min(last, held)), (max(first, end), last))
+                      if lo < hi]
+        operation = self.vgprPool.add if add else self.vgprPool.remove
+        for first, last in ranges:
+            operation(first, last - first, tag)
+
+
+    def papLocalReadEntry(self, kernel, reads, packs):
+        """Keep normal pointer increments outside the already-primed read skip."""
+        from rocisa.instruction import Instruction
+        if not self.papLocalReadPayloadRanges(kernel):
+            return reads
+        # Reject actual pack work too, rather than assuming every unroll-major
+        # format has no conversion. Such formats retain the ordinary entry PLR.
+        if any(isinstance(item, Instruction) for pack in packs for item in pack.flatitems()):
+            return reads
+        self.states.papFirstPlrReads = deepcopy(reads)
+        module = Module("PAP consume retained first PLR operands")
+        ready = Label(self.labels.getNameInc("PapFirstPlrReady"), "")
+        module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=4,
+                              comment="PAP first PLR operands already ready?"))
+        module.add(SCBranchSCC1(labelName=ready.getLabelName(),
+                               comment="PAP skip redundant first local reads"))
+        module.add(reads)
+        module.add(ready)
+        module.add(SAndB32(dst=sgpr("PersistentPrefetchState"),
+                           src0=sgpr("PersistentPrefetchState"), src1=hex(0xffffffef),
+                           comment="PAP consume first PLR ready flag"))
+        return module
+
+
+    def papLocalReadCompletion(self):
+        """Complete carried DS operands at the common entry consumer boundary.
+
+        The native pass rebuilds ordinary waits from cold-entry operand order.
+        This real rendezvous instead names every pending group0 DS operation,
+        including the differently ordered retained reads across the backedge.
+        Group1's separate tensor token is allowed to remain outstanding.
+        """
+        module = Module("Persistent PAP retained operand completion")
+        barrier = SBarrier(comment="PAP complete all carried first PLR operands before first WMMA")
+        barrier.setMemToken(MemTokenData([self.states.memTokenLdsBuffer0]))
+        module.add(barrier)
+        return module
+
+    def papPrefetchLocalRead(self, kernel, tPA, tPB):
+        """Read next group0 after the final current WMMA releases X0 operands."""
+        from rocisa.container import MemTokenData
+        from rocisa.instruction import DSLoadInstruction, SSchedulingFence, VAddU32
+        module = Module("PAP next tile first local reads")
+        reads = getattr(self.states, "papFirstPlrReads", None)
+        if reads is None:
+            return module
+        skip = Label(self.labels.getNameInc("PapSkipNextLocalRead"), "")
+        module.add(SSchedulingFence(comment="PAP current final WMMA releases first PLR operands"))
+        module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=3,
+                              comment="PAP both next groups issued?"))
+        module.add(SCBranchSCC0(labelName=skip.getLabelName()))
+        # Rebuild lane-relative base pointers using scratch allocated while C and
+        # all operands are unavailable. A copy of setup's code could clobber C.
+        snapshot = self.rapSnapshotEmitterState(kernel, tPA, tPB)
+        try:
+            module.add(self.localReadAddresses(kernel, tPA, tPB, tPA["tpsMetadata"]))
+        finally:
+            self.rapRestoreEmitterState(kernel, tPA, tPB, snapshot)
+        with self.allocTmpSgpr(1, tag="PAP first PLR bank") as bank:
+            module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=1,
+                                  comment="PAP group0 physical bank"))
+            module.add(SCSelectB32(dst=sgpr(bank.idx), src0=kernel["LdsOffsetA_Blk"], src1=0))
+            tensors = [tPA, tPB]
+            if kernel["ProblemType"]["MXBlockA"]:
+                tensors += [tPA["MX"], tPB["MX"]]
+            for tp in tensors:
+                tc = tp["tensorChar"]
+                info = getattr(self.states, tc.lower())
+                for i in range(info.numVgprLocalReadAddr):
+                    addr = vgpr("LocalReadAddr%s+%d" % (tc, i))
+                    module.add(VAddU32(dst=addr, src0=addr, src1=sgpr(bank.idx),
+                                       comment="PAP select group0 bank for " + tc))
+        module.add(self._wait(kernel, tPA, tPB, self.papPgr2TensorCount(kernel), -1, -1,
+                              "PAP PLR waits group0; younger group1 may remain in flight"))
+        token = self.states.memTokenLdsBuffer0
+        module.add(self._syncThreads(kernel, "PAP group0 ready for next PLR", memoryToken=[token]))
+        retainedReads = deepcopy(reads)
+        for item in retainedReads.flatitems():
+            if isinstance(item, DSLoadInstruction):
+                item.setMemToken(MemTokenData([token]))
+        module.add(retainedReads)
+        # Bit4 means issued into durable slots, not yet completed. The common
+        # entry/first WMMA consumer waits for DS completion after store/setup.
+        module.add(SOrB32(dst=sgpr("PersistentPrefetchState"),
+                          src0=sgpr("PersistentPrefetchState"), src1=16,
+                          comment="PAP record first PLR operands issued into durable slots"))
+        module.add(skip)
+        return module
+
+
+    def papPgr2PipelineEnabled(self, kernel, tPA, tPB):
+        """Two next-tile groups in the ordinary full-K, two-bank PLR1 drain."""
+        pt = kernel["ProblemType"]
+        return (self.papTdmSupportsShadowAddressPair(kernel, tPA, tPB)
+                and bool(pt["MXBlockA"]) == bool(pt["MXBlockB"])
+                and (not pt["MXBlockA"] or self.papTdmSupportsShadowAddressPair(
+                    kernel, tPA["MX"], tPB["MX"]))
+                and kernel["NoTailLoop"] and not self.states.tailloopInNll
+                and kernel["PrefetchLocalRead"] == 1 and self.states.numItersPLR == 1
+                and kernel["LoopIters"] >= 2 and kernel["InnerUnroll"] == 1
+                and not kernel["ForceUnrollSubIter"]
+                and not self.states.doFullPackCodePrefetch
+                and not kernel["1LDSBuffer"] and not self.states.IncLdsBufSwitch
+                and kernel["NoLdsWriteCode"]
+                and kernel.get("LocalSplitU", 1) == 1
+                and not pt.get("UseBias", 0)
+                and not pt.get("UseScaleAlphaVec", 0)
+                and pt.get("UseScaleAB", "") != "Vector"
+                and not pt.get("OutputAmaxD", False)
+                and not persistentSpatialCluster(kernel))
+
+    @staticmethod
+    def papPgr2TensorCount(kernel):
+        # The aliased wave-separated descriptors issue once per wave for data,
+        # and once more for paired MX; descriptor group operands are not loads.
+        return 2 if kernel["ProblemType"]["MXBlockA"] else 1
+
+    def papPgr2AdvanceDescriptor(self, kernel):
+        """One positive DepthU step, independent of the current tile counters.
+
+        The ordinary increment helper can select WrapU even with StaggerU=0:
+        NGLL leaves LoopCounter equal to StaggerUIter. A next-tile group1 step
+        must never consume that current-tile wrap predicate.
+        """
+        module = Module("PAP PGR2 unconditional next K increment")
+        pairs = [("tdmAGroup0", "tdmABIncs")]
+        if kernel["ProblemType"]["MXBlockA"]:
+            pairs.append(("tdmMXSAGroup0", "tdmMXSAMXSBIncs"))
+        for descriptor, increment in pairs:
+            module.add(SAddU32(dst=sgpr(descriptor + "+2"), src0=sgpr(descriptor + "+2"),
+                               src1=sgpr(increment), comment="PAP group1 positive DepthU increment"))
+            module.add(SAddCU32(dst=sgpr(descriptor + "+3"), src0=sgpr(descriptor + "+3"),
+                                src1=0, comment="PAP group1 address carry"))
+        return module
+
+    def papPgr2IssueGroup(self, kernel, tPA, tPB, group):
+        """Bind an entry-bank token without changing the surrounding emit state."""
+        module = Module("PAP PGR2 issue group %d" % group)
+        previous = self.states.ldsTensorTokenIdx
+        token = self.states.memTokenLdsBuffer0
+        self.states.ldsTensorTokenIdx = token if group == 0 else self._nextLdsToken(token)
+        try:
+            module.add(self.globalReadDo(kernel, 0, tPA))
+            if "MX" in tPA:
+                module.add(self.globalReadDo(kernel, 0, tPA["MX"]))
+            if "MX" in tPB:
+                module.add(self.globalReadDo(kernel, 0, tPB["MX"]))
+            module.add(self.globalReadDo(kernel, 0, tPB))
+        finally:
+            self.states.ldsTensorTokenIdx = previous
+        return module
+
+    def papPgr2EntryWait(self, kernel, tPA, tPB):
+        module = Module("PAP PGR2 first group readiness")
+        ordinary = Label(self.labels.getNameInc("PapPgr2ColdEntryWait"), "")
+        done = Label(self.labels.getNameInc("PapPgr2EntryWaitDone"), "")
+        module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=3,
+                              comment="PAP second group already issued?"))
+        module.add(SCBranchSCC0(labelName=ordinary.getLabelName()))
+        module.add(self._wait(kernel, tPA, tPB, self.papPgr2TensorCount(kernel), -1, -1,
+                              "PAP group0 ready; retain younger group1"))
+        module.add(SBranch(labelName=done.getLabelName()))
+        module.add(ordinary)
+        module.add(self.getWaitcntCodeForPGR(kernel, tPA, tPB, "wait for global read"))
+        module.add(done)
+        return module
+
+    @staticmethod
+    def papClearPreparedAddress(comment):
+        # Bit 0 (issued), bit 1 (bank), and bit 31 (reserved) remain untouched.
+        return SAndB32(dst=sgpr("PersistentPrefetchState"),
+                       src0=sgpr("PersistentPrefetchState"), src1=hex(0xfffffffb),
+                       comment=comment)
+
+    def papAddressCarrierPlan(self, kernel, tPA, tPB, *, enabled=True):
+        """Check every simultaneous scratch shape on copies of the real pools."""
+        if (not enabled or self.states.tailloopInNll or kernel.get("AdaptiveGemmNTAB", 0)
+                or not self.papTdmSupportsShadowAddressPair(kernel, tPA, tPB)):
+            return None
+        scales = bool(kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"])
+        if scales and not self.papTdmSupportsShadowAddressPair(kernel, tPA["MX"], tPB["MX"]):
+            return None
+        limit = self.states.regCaps["MaxSgpr"]
+        # A kernel already at the architectural budget retains its old path.
+        if self.sgprPool.size() >= limit:
+            return None
+        # Producer, swap, ordinary mapper/WGM, descriptor refresh/full tail,
+        # counter and elected-handoff scratch lifetimes. These are nested
+        # checkouts, so alignment gaps and fragmentation matter as well as sum.
+        # Rebuilt NGLL increments nest a parity temporary under four wrap words.
+        shapes = (((4, 2),), ((1, 1),),
+                  ((4, 2), (1, 1)),
+                  ((1, 1), (2, 2), (1, 1), (1, 1)),
+                  ((1, 1), (1, 1), (1, 1), (1, 1)),
+                  ((1, 1), (3, 2), (1, 1)), ((1, 1), (1, 1), (2, 2)),
+                  ((4, 2),))
+        needsNestedDivide = (persistentSpatialCluster(kernel)
+                             or (not kernel["NoTailLoop"] and kernel["DepthU"] & (kernel["DepthU"] - 1)))
+        shapes += (((3, 2), (4, 2)),) if needsNestedDivide else (((3, 2),),)
+        try:
+            vectors = deepcopy(self.vgprPool)
+            # DefaultWGM's ordinary fallback borrows four aligned VGPRs;
+            # producer division and descriptor arithmetic need only two.
+            vectors.checkOutAligned(4, 2, "PAP mapper preflight", preventOverflow=False)
+            if vectors.size() > self.states.regCaps["MaxVgpr"]:
+                return None
+        except RuntimeError:
+            return None
+        for size in ((7, 5) if scales else (5,)):
+            pool = deepcopy(self.sgprPool)
+            try:
+                base = pool.checkOutAligned(size, 2, "PAP address carrier preflight", preventOverflow=False)
+                fits = True
+                for shape in shapes:
+                    scratch = deepcopy(pool)
+                    for count, alignment in shape:
+                        scratch.checkOutAligned(count, alignment, "PAP scratch preflight", preventOverflow=False)
+                    if scratch.size() > limit:
+                        fits = False
+                        break
+                if fits:
+                    return dict(base=base, size=size, data=base, mx=base + 2 if size == 7 else None,
+                                coordinates={i: base + size - 3 + i for i in range(3)})
+            except RuntimeError:
+                continue
+        return None
+
+    @contextmanager
+    def allocPapAddressCarrier(self, kernel, tPA, tPB, *, enabled=True):
+        plan = self.papAddressCarrierPlan(kernel, tPA, tPB, enabled=enabled)
+        self.states.papAddressCarrier = plan
+        if plan is None:
+            yield None
+            return
+        base = self.sgprPool.checkOutAligned(plan["size"], 2, "PAP address carrier", preventOverflow=False)
+        assert base == plan["base"]
+        # These placeholders were emitted before any tile activation or NGLL
+        # bypass can run. Fill them only after the bounded allocation succeeds.
+        self.states.papAddressActivationReset.add(self.papClearPreparedAddress(
+            "PAP: invalidate prepared address at tile activation"))
+        self.states.papAddressRoutingReset.add(self.papClearPreparedAddress(
+            "PAP: invalidate prepared address before NGLL entry or bypass"))
+        try:
+            yield plan
+        finally:
+            self.sgprPool.checkIn(base)
+            self.states.papAddressCarrier = None
+
+    def papPrepareNextTileAddresses(self, kernel, tPA, tPB):
+        """Return mapping and pure addresses together for standalone callers."""
+        mapper, address = self.papNextTileAddressModules(kernel, tPA, tPB)
+        module = Module("PAP NGLL address preparation")
+        module.add(mapper)
+        module.add(address)
+        return module
+
+    def papNextTileAddressModules(self, kernel, tPA, tPB):
+        """Separate EXEC-changing mapping from schedulable scalar addresses."""
+        mapper = Module("PAP next coordinate mapping")
+        address = Module("PAP pure next addresses")
+        module = mapper
+        plan = getattr(self.states, "papAddressCarrier", None)
+        if plan is None:
+            return mapper, address
+        c = plan["coordinates"]
+        # The data-address output does not become live until mapping finishes.
+        # Borrow it to save EXEC, and restore the exact incoming mask before the
+        # pure leaf overwrites that word. Full EXEC makes the divider's readlane
+        # independent of whichever lanes the current computation has active.
+        module.add(SMovB32(dst=sgpr(plan["data"]), src=EXEC(), comment="PAP mapper save current EXEC"))
+        module.add(SMovB32(dst=EXEC(), src=-1, comment="PAP mapper scratch uses full EXEC"))
+        with self.allocTmpSgpr(4, alignment=2, tag="PAP address preparation scratch") as scratch:
+            a, b, d, rem = (scratch.idx + i for i in range(4))
+            vectors = self.vgprPool.checkOut(2, "PAP next tile divide")
+            try:
+                vr = ContinuousRegister(vectors, 2)
+                module.add(SMovB32(dst=sgpr(a), src=sgpr("NextTile"), comment="PAP speculative next tile"))
+                if persistentSpatialCluster(kernel):
+                    cs, ck = kernel["ClusterDim"]
+                    module.add(SLShiftRightB32(dst=sgpr(a), shiftHex=int(log2(cs * ck)), src=sgpr(a)))
+                    module.add(SAddU32(dst=sgpr(b), src0=sgpr("NumWorkGroups0"), src1=cs - 1))
+                    module.add(SLShiftRightB32(dst=sgpr(b), shiftHex=int(log2(cs)), src=sgpr(b)))
+                    module.add(SAddU32(dst=sgpr(d), src0=sgpr("NumWorkGroups1"), src1=ck - 1))
+                    module.add(SLShiftRightB32(dst=sgpr(d), shiftHex=int(log2(ck)), src=sgpr(d)))
+                    module.add(SMulI32(dst=sgpr(d), src0=sgpr(d), src1=sgpr(b)))
+                    divisor = b
+                else:
+                    module.add(SMulI32(dst=sgpr(d), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1")))
+                    divisor = "NumWorkGroups0"
+                module.add(scalarUInt32DivideAndRemainder(qReg=c[2], dReg=a, divReg=d, rReg=rem,
+                    tmpVgprRes=vr, wavewidth=32, doRemainder=True, comment="PAP next tile batch"))
+                module.add(scalarUInt32DivideAndRemainder(qReg=c[1], dReg=rem, divReg=divisor, rReg=c[0],
+                    tmpVgprRes=vr, wavewidth=32, doRemainder=True, comment="PAP next tile coordinates"))
+                if persistentSpatialCluster(kernel):
+                    module.add(SAndB32(dst=sgpr(a), src0=sgpr("NextTile"), src1=cs * ck - 1))
+                    module.add(SLShiftLeftB32(dst=sgpr(c[0]), shiftHex=int(log2(cs)), src=sgpr(c[0])))
+                    module.add(SAndB32(dst=sgpr(rem), src0=sgpr(a), src1=cs - 1))
+                    module.add(SAddU32(dst=sgpr(c[0]), src0=sgpr(c[0]), src1=sgpr(rem)))
+                    module.add(SLShiftLeftB32(dst=sgpr(c[1]), shiftHex=int(log2(ck)), src=sgpr(c[1])))
+                    module.add(SLShiftRightB32(dst=sgpr(a), shiftHex=int(log2(cs)), src=sgpr(a)))
+                    module.add(SAddU32(dst=sgpr(c[1]), src0=sgpr(c[1]), src1=sgpr(a)))
+                    for i in (0, 1):
+                        module.add(SSubU32(dst=sgpr(rem), src0=sgpr("NumWorkGroups%u" % i), src1=1))
+                        module.add(SMinU32(dst=sgpr(c[i]), src0=sgpr(c[i]), src1=sgpr(rem), comment="PAP clamp phantom coordinate"))
+            finally:
+                self.vgprPool.checkIn(vectors)
+            module.add(SMovB32(dst=EXEC(), src=sgpr(plan["data"]), comment="PAP mapper restore exact current EXEC"))
+            module = address
+            module.add(self.papTdmPrepareAddressPair(kernel, tPA, tPB, c, plan["data"], scratch))
+            if plan["mx"] is not None:
+                module.add(self.papTdmPrepareAddressPair(kernel, tPA["MX"], tPB["MX"], c, plan["mx"], scratch))
+            module.add(SMovB32(dst=sgpr(b), src=hex(0x80000004)))
+            if not persistentSpatialCluster(kernel):
+                # Equality to +1 needs only the encoded low field; sign extension
+                # cannot turn any other low value into +1. No branch or join label
+                # separates the useful address leaf from NGLL WMMA scheduling.
+                mask = 0x3ff if kernel["WorkGroupMappingXCC"] == -1 else 0xffff
+                module.add(SAndB32(dst=sgpr(a), src0=sgpr("WGM"), src1=hex(mask)))
+                module.add(SCmpEQU32(src0=sgpr(a), src1=1, comment="PAP prepared mapping requires runtime WGM +1"))
+                module.add(SCSelectB32(dst=sgpr(b), src0=sgpr(b), src1=0))
+            if kernel["ProblemType"].get("SupportUserArgs"):
+                module.add(SAndB32(dst=sgpr(a), src0=sgpr("ArgType"), src1=0xff))
+                module.add(SCmpEQU32(src0=sgpr(a), src1=0, comment="PAP prepared address requires direct ArgType 0"))
+                module.add(SCSelectB32(dst=sgpr(b), src0=sgpr(b), src1=0))
+            module.add(SOrB32(dst=sgpr("PersistentPrefetchState"), src0=sgpr("PersistentPrefetchState"), src1=sgpr(b),
+                              comment="PAP record branchless address preparation validity"))
+        return mapper, address
 
     def papTileIdentityNames(self, kernel):
         return self.states.currentTileWork.borrowedIdentity(kernel)
@@ -412,7 +785,11 @@ class PersistentLoop(Component):
 
     def activateReservedOrAcquire(self, writer, kernel, tPA, tPB):
         processing = Component.TileProcessingStrategy.find(writer)
-        return Component.WorkAssignment.find(writer).activateReservedOrAcquire(writer, kernel, processing, tPA, tPB)
+        module = Module("Persistent activation")
+        writer.states.papAddressActivationReset = Module("PAP address activation reset")
+        module.add(writer.states.papAddressActivationReset)
+        module.add(Component.WorkAssignment.find(writer).activateReservedOrAcquire(writer, kernel, processing, tPA, tPB))
+        return module
 
     def compute(self, writer, kernel, tensorParametersA, tensorParametersB, module, expand, tPM):
         if kernel["ReuseAcrossPersistent"]:
@@ -505,8 +882,127 @@ class PersistentLoop(Component):
         module.add(assignment.reserveNext(writer, kernel, skip))
         module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="Next assignment data already issued?"))
         module.add(SCBranchSCC1(labelName=skip.getLabelName(), comment="Do not prefetch a reservation twice"))
-        if not skipBarrier:
-            module.add(SBarrier(comment="Subtile PAP: sync before next-tile prefetch" if subtile else "PAP: sync before next-tile prefetch"))
+        def handoff():
+            if persistentSpatialCluster(kernel):
+                return assignment.persistentClusterPrefetchHandoff(writer, kernel)
+            handoffModule = Module("Persistent PAP local handoff")
+            if not skipBarrier:
+                handoffModule.add(SBarrier(comment="Subtile PAP: sync before next-tile prefetch" if subtile else "PAP: sync before next-tile prefetch"))
+            return handoffModule
+
+        # This path only prepares scalar descriptors and loop state. Let it run
+        # while the previous bank's reads finish, then release the bank just
+        # before issuing the same first-PGR group. Keep other paths unchanged.
+        lateHandoffEligible = (not subtile and kernel.get("ScheduleIterAlg") == 4
+                               and writer.papTdmSupportsIncrementalUpdate(kernel))
+        # In the classic multicast NLL, the native cluster-barrier pass can
+        # climb from a later rendezvous to this explicit wait and nominate an
+        # anchor beyond its own segment. Keep that path's original boundary.
+        classicClusterFallback = (lateHandoffEligible and persistentSpatialCluster(kernel)
+                                  and not kernel["HalfPLR"])
+        lateHandoff = lateHandoffEligible and not classicClusterFallback
+        if classicClusterFallback:
+            module.addComment0("PAP: early handoff for classic multicast (native Rule3 segment limit)")
+        if not lateHandoff:
+            module.add(handoff())
+        carrier = getattr(writer.states, "papAddressCarrier", None)
+        if carrier is not None and not subtile:
+            module.add(self.prefetchPreparedClassic(writer, kernel, tPA, tPB, processing, carrier,
+                                                   beforeIssue=handoff if lateHandoff else None))
+        else:
+            module.add(self.prefetchBorrowedIdentity(writer, kernel, tPA, tPB, processing,
+                subtile=subtile, preloopGrModule=preloopGrModule, beforeIssue=handoff if lateHandoff else None))
+        if (not subtile and kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["NoTailLoop"] and not kernel["HalfPLR"]):
+            module.add(writer.papTdmUpdateDescriptor(kernel, tPA, tPB, preservePapBank=False))
+            if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+                module.add(writer.papTdmUpdateDescriptor(kernel, tPA["MX"], tPB["MX"], preservePapBank=False))
+        module.add(skip)
+        return module
+
+    def prefetchPgr2Group(self, writer, kernel, tPA, tPB, group):
+        """Reuse the released P/F bank, preserving both entry-group contracts."""
+        module = Module("Persistent PAP PGR2 group %d" % group)
+        carrier = getattr(writer.states, "papAddressCarrier", None)
+        if carrier is None or not writer.papPgr2PipelineEnabled(kernel, tPA, tPB):
+            return module
+        def releaseBank():
+            # This explicit handoff is required on both conditional paths. A linear
+            # token walk cannot reconstruct a bank release across their joins.
+            release = Module("Persistent PAP explicit bank handoff")
+            release.add(SWaitCnt(dscnt=0, comment="PAP PGR2 group%d: all old-bank reads complete" % group))
+            barrier = SBarrier(comment="PAP PGR2 group%d: release old LDS bank on all waves" % group)
+            first = writer.states.memTokenLdsBuffer0
+            final = writer._nextLdsToken(first)
+            # Group0 is the quiescent role transition: finish both old tensor
+            # producers and all old P reads before F is named by the entry token1.
+            # Group1 releases only F; next group0 on token0 may stay in flight.
+            barrier.setMemToken(MemTokenData([first, final] if group == 0 else [final]))
+            release.add(barrier)
+            return release
+
+        if group == 0:
+            # F reads use the rebased token even when preparation/next-tile
+            # eligibility fails. Complete the old roles on every NGLL path.
+            module.add(releaseBank())
+        skip = Label(writer.labels.getNameInc("PapPgr2SkipGroup%d" % group), "")
+        if group == 0:
+            processing = Component.TileProcessingStrategy.find(writer)
+            assignment = Component.WorkAssignment.find(writer)
+            module.add(processing.prefetchEligibility(writer, kernel, skip))
+            module.add(assignment.reserveNext(writer, kernel, skip))
+        module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=2,
+                              comment="PAP PGR2 requires valid prepared next addresses"))
+        module.add(SCBranchSCC0(labelName=skip.getLabelName()))
+        module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0,
+                              comment="PAP PGR2 first group issued?"))
+        module.add((SCBranchSCC1 if group == 0 else SCBranchSCC0)(labelName=skip.getLabelName()))
+        if group == 1:
+            module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=3,
+                                  comment="PAP PGR2 second group already issued?"))
+            module.add(SCBranchSCC1(labelName=skip.getLabelName()))
+        module.add(SCmpGeU32(src0=sgpr("OrigLoopCounter"), src1=2,
+                            comment="PAP PGR2 requires two full K chunks"))
+        module.add(SCBranchSCC0(labelName=skip.getLabelName()))
+        module.add(SSchedulingFence(comment="PAP PGR2 released-bank issue begins"))
+
+        def swapCoordinates():
+            swap = Module("PAP PGR2 borrow or restore coordinates")
+            with writer.allocTmpSgpr(1, tag="PAP PGR2 swap coordinates") as tmp:
+                for i in range(3):
+                    swap.add(SMovB32(dst=sgpr(tmp.idx), src=sgpr("WorkGroup%u" % i)))
+                    swap.add(SMovB32(dst=sgpr("WorkGroup%u" % i), src=sgpr(carrier["coordinates"][i])))
+                    swap.add(SMovB32(dst=sgpr(carrier["coordinates"][i]), src=sgpr(tmp.idx)))
+            return swap
+
+        if group == 0:
+            module.add(swapCoordinates())
+            module.add(writer.papTdmUpdateDescriptor(kernel, tPA, tPB, preparedGlobalAddr=carrier["data"]))
+            if kernel["ProblemType"]["MXBlockA"]:
+                module.add(writer.papTdmUpdateDescriptor(kernel, tPA["MX"], tPB["MX"],
+                                                        preparedGlobalAddr=carrier["mx"]))
+        else:
+            module.addComment1("PAP PGR2 advance next descriptor by one DepthU to group1")
+            module.add(writer.papPgr2AdvanceDescriptor(kernel))
+            module.add(writer.tdmSwapLdsOffset(kernel, tPA))
+            if kernel["ProblemType"]["MXBlockA"]:
+                module.add(writer.tdmSwapLdsOffset(kernel, tPA["MX"]))
+
+        if group == 1:
+            module.add(releaseBank())
+        module.add(writer.papPgr2IssueGroup(kernel, tPA, tPB, group))
+        module.add(SSchedulingFence(comment="PAP PGR2 publish only after group%d issue" % group))
+        module.add(SOrB32(dst=sgpr("PersistentPrefetchState"), src0=sgpr("PersistentPrefetchState"),
+                          src1=1 if group == 0 else 8, comment="PAP PGR2 group%d actually issued" % group))
+        if group == 0:
+            module.add(writer.papTdmSaveLdsBank(kernel))
+            module.add(swapCoordinates())
+        module.add(SSchedulingFence(comment="PAP PGR2 released-bank issue ends"))
+        module.add(skip)
+        return module
+
+    def prefetchBorrowedIdentity(self, writer, kernel, tPA, tPB, processing, *,
+                                 subtile=False, preloopGrModule=None, beforeIssue=None):
+        module = Module("Persistent PAP borrowed identity")
         with writer.allocPapTileIdentity(kernel, subtile=subtile) as previous:
             module.add(writer.papCheckpointCurrentTileIdentity(kernel, previous, subtile=subtile))
             module.add(processing.prefetchAcrossPersistentSetupNextTile(writer, kernel, tPA, tPB, skipLroReset=True))
@@ -516,20 +1012,50 @@ class PersistentLoop(Component):
                 if subtile:
                     module.add(writer.setupPrefetchAcrossPersistentSubtileLoads(kernel, tPA, tPB, preloopGrModule))
                 else:
-                    module.add(self.prefetchClassicLoads(writer, kernel, tPA, tPB))
+                    module.add(self.prefetchClassicLoads(
+                        writer, kernel, tPA, tPB,
+                        beforeIssue=beforeIssue))
             finally:
                 writer.states.rapInPapNextTilePrefetch = rapOuter
             module.add(writer.papRestoreCurrentTileIdentity(kernel, previous, subtile=subtile))
-        if (not subtile and kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["NoTailLoop"] and not kernel["HalfPLR"]):
-            module.add(writer.papTdmUpdateDescriptor(kernel, tPA, tPB, preservePapBank=False))
-            if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-                module.add(writer.papTdmUpdateDescriptor(kernel, tPA["MX"], tPB["MX"], preservePapBank=False))
-        module.add(skip)
         return module
 
-    def prefetchClassicLoads(self, writer, kernel, tPA, tPB):
+    def prefetchPreparedClassic(self, writer, kernel, tPA, tPB, processing, carrier, *, beforeIssue=None):
+        module = Module("Persistent PAP prepared address consumer")
+        fallback = Label(writer.labels.getNameInc("PapAddressFallback"), "")
+        ready = Label(writer.labels.getNameInc("PapAddressReady"), "")
+        coordinates = carrier["coordinates"]
+        module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=2, comment="PAP next addresses prepared by NGLL?"))
+        module.add(SCBranchSCC0(labelName=fallback.getLabelName(), comment="PAP use ordinary mapping on preparation bypass"))
+        with writer.allocTmpSgpr(1, tag="PAP swap coordinates") as tmp:
+            for i in range(3):
+                module.add(SMovB32(dst=sgpr(tmp.idx), src=sgpr("WorkGroup%u" % i)))
+                module.add(SMovB32(dst=sgpr("WorkGroup%u" % i), src=sgpr(coordinates[i]), comment="PAP borrow prepared next coordinate"))
+                module.add(SMovB32(dst=sgpr(coordinates[i]), src=sgpr(tmp.idx), comment="PAP retain current coordinate for common restore"))
+        module.add(writer.papTdmUpdateDescriptor(kernel, tPA, tPB, preparedGlobalAddr=carrier["data"]))
+        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+            module.add(writer.papTdmUpdateDescriptor(kernel, tPA["MX"], tPB["MX"], preparedGlobalAddr=carrier["mx"]))
+        module.add(SBranch(labelName=ready.getLabelName()))
+        module.add(fallback)
+        for i in range(3):
+            module.add(SMovB32(dst=sgpr(coordinates[i]), src=sgpr("WorkGroup%u" % i), comment="checkpoint current coordinate on PAP fallback"))
+        if persistentSpatialCluster(kernel):
+            module.add(SMovB32(dst=sgpr(carrier["data"]), src=sgpr("PersistentPhantomTile"), comment="PAP fallback checkpoint phantom locally"))
+        module.add(processing.prefetchAcrossPersistentSetupNextTile(writer, kernel, tPA, tPB, skipLroReset=True))
+        if persistentSpatialCluster(kernel):
+            module.add(SMovB32(dst=sgpr("PersistentPhantomTile"), src=sgpr(carrier["data"]), comment="PAP fallback restore current phantom before issue"))
+        module.add(writer.papTdmUpdateDescriptor(kernel, tPA, tPB))
+        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+            module.add(writer.papTdmUpdateDescriptor(kernel, tPA["MX"], tPB["MX"]))
+        module.add(ready)
+        module.add(self.prefetchClassicLoads(writer, kernel, tPA, tPB, beforeIssue=beforeIssue, updateDescriptors=False))
+        for i in range(3):
+            module.add(SMovB32(dst=sgpr("WorkGroup%u" % i), src=sgpr(coordinates[i]), comment="restore current WorkGroup%u after PAP" % i))
+        return module
+
+    def prefetchClassicLoads(self, writer, kernel, tPA, tPB, *, beforeIssue=None, updateDescriptors=True):
         module = Module("Persistent classic PAP load handoff")
-        if kernel["enableTDMA"] and kernel["enableTDMB"]:
+        if updateDescriptors and kernel["enableTDMA"] and kernel["enableTDMB"]:
             module.add(writer.papTdmUpdateDescriptor(kernel, tPA, tPB))
             if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
                 module.add(writer.papTdmUpdateDescriptor(kernel, tPA["MX"], tPB["MX"]))
@@ -540,6 +1066,13 @@ class PersistentLoop(Component):
             module.add(VMovB32(dst=vgpr(previous), src=sgpr(loopCounterName), comment="checkpoint LoopCounter for PAP restore"))
             module.add(VMovB32(dst=vgpr(previous + 1), src=sgpr("OrigLoopCounter"), comment="checkpoint OrigLoopCounter for PAP restore"))
         module.add(writer.calculateLoopNumIter(kernel, tPA, tPB, writer.states.unrollIdx))
+        if beforeIssue is not None:
+            # Build this here, while the identity checkpoint remains allocated,
+            # so the elected-wave temporary cannot alias the saved identity.
+            # Descriptor parity branches have joined. Keep any predicate
+            # created or consumed by the issue helper after this handoff;
+            # the current OptNLL PAP path does not need an issue predicate.
+            module.add(beforeIssue())
         module.add(writer.setupPrefetchAcrossPersistentLoads(kernel, tPA, tPB, isOptNLL=True))
         if snapshotLoopCounter:
             module.add(VReadfirstlaneB32(dst=sgpr(loopCounterName), src=vgpr(previous), comment="restore LoopCounter after PAP"))

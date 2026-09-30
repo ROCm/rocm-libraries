@@ -1,0 +1,41 @@
+--- a/shared/stinkytofu/src/transforms/asm/InsertClusterBarrierPass.cpp
++++ b/shared/stinkytofu/src/transforms/asm/InsertClusterBarrierPass.cpp
+@@ -428,3 +428,5 @@
+-/// Forward scan from ``wgSignal`` for its paired ``s_barrier_wait -1`` and
+-/// return the first real instruction after that wait.
+-IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* defaultAnchor) {
++/// Scan only within the hard stop's segment and before the wait being led.
++/// A later WG pair cannot anchor an earlier signal, and labels/branches/calls
++/// end the straight-line proof even though labels are pseudo instructions.
++IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* defaultAnchor,
++                                      const IRBase* limit) {
+@@ -433,0 +436 @@
++        if (it.getNodePtr() == limit) break;
+@@ -434,0 +438 @@
++        if (inst != nullptr && isSegmentBoundary(*inst)) break;
+@@ -438,0 +443 @@
++            if (after.getNodePtr() == limit) break;
+@@ -439,0 +445 @@
++            if (next != nullptr && isSegmentBoundary(*next)) break;
+@@ -448,4 +454,4 @@
+-/// Forward scan from ``afterWait`` for the next workgroup barrier handshake
+-/// (signal then wait).  Returns the first real instruction after that wait, or
+-/// ``defaultAnchor`` when the pair is missing or incomplete.
+-IRBase* anchorAfterWorkgroupBarrierFollowing(StinkyInstruction* afterWait, IRBase* defaultAnchor) {
++/// Find a complete earlier WG pair after the previous cluster wait. Missing or
++/// out-of-bounds pairs leave the signal co-located with its own wait.
++IRBase* anchorAfterWorkgroupBarrierFollowing(StinkyInstruction* afterWait, IRBase* defaultAnchor,
++                                           const IRBase* limit) {
+@@ -454,0 +461 @@
++        if (it.getNodePtr() == limit) break;
+@@ -455,0 +463 @@
++        if (inst != nullptr && isSegmentBoundary(*inst)) break;
+@@ -458 +466 @@
+-        return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor);
++        return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor, limit);
+@@ -831 +839 @@
+-            return anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor);
++            return anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor, sccLimit(inst));
+@@ -833 +841 @@
+-            return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor);
++            return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor, sccLimit(inst));

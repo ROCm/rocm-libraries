@@ -1804,3 +1804,46 @@ def test_nonpersistent_vector_epilogue_keeps_its_existing_lds_layout(
     assert not sol["_SeparateEpilogueLds"]
     assert sol["LdsOffsetBias"] == 0
     assert sol["LdsNumBytes"] == baseline["LdsNumBytes"]
+
+
+@pytest.mark.parametrize("problem, reason", [
+    ({"UseBias": 1, "Gradient": True, "BiasSrc": "A"}, "bias"),
+    ({"UseBias": 1, "Gradient": True, "BiasSrc": "B"}, "bias"),
+])
+def test_pap_epilogue_lds_overwrite_rejected(_gp_gfx1250, gfx1250_iim, assembler, capsys,
+                                             problem, reason):
+    sol, out = _derive(gfx1250_iim, assembler, capsys,
+                       PrefetchAcrossPersistent=1, ProblemType=problem)
+    assert not sol.get("Valid"), "PAP accepted an epilogue that overwrites its LDS data"
+    assert reason + " epilogue LDS overwrite" in out
+
+
+def test_pap_epilogue_local_split_u_rejected(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+    params = _make_params(gfx1250_iim, PrefetchAcrossPersistent=1)
+    params["LocalSplitU"] = 2
+    params["WorkGroup"][2] = 2
+    sol = Solution(params, False, True, False, assembler, gfx1250_iim)
+    out = capsys.readouterr().out
+    assert not sol.get("Valid")
+    assert "LocalSplitU epilogue LDS overwrite" in out
+
+
+@pytest.mark.parametrize("problem", [
+    {"UseBias": 1}, {"UseScaleAlphaVec": 1}, {"UseScaleAB": "Vector"},
+])
+def test_pap_epilogue_lds_features_remain_valid_without_pap(_gp_gfx1250, gfx1250_iim,
+                                                          assembler, capsys, problem):
+    sol, out = _derive(gfx1250_iim, assembler, capsys,
+                       PrefetchAcrossPersistent=0, ProblemType=problem)
+    assert sol.get("Valid"), out
+
+
+@pytest.mark.parametrize("problem", [
+    {}, {"UseScaleAB": "Scalar"}, {"OutputAmaxD": True},
+    {"UseBias": 1, "Gradient": True, "BiasSrc": "D"},
+])
+def test_pap_epilogue_without_lds_overlap_remains_valid(_gp_gfx1250, gfx1250_iim,
+                                                       assembler, capsys, problem):
+    sol, out = _derive(gfx1250_iim, assembler, capsys,
+                       PrefetchAcrossPersistent=1, ProblemType=problem)
+    assert sol.get("Valid"), out

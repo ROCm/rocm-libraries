@@ -60,6 +60,41 @@ _SHAPES = [((4, 1), False), ((2, 2), True)]
 _SHAPE_IDS = ["cs4_ck1", "cs2_ck2"]
 
 
+def _assert_pap_handoff(src, *, late=False):
+    # A redundant waitcnt may merge with an earlier drain; the complete
+    # local/cluster rendezvous must remain between eligibility and first issue.
+    start = src.index("Do not prefetch a reservation twice")
+    checkpoint = src.index("checkpoint WorkGroup0 for PAP restore", start)
+    issue = src.index("tensor_load_to_lds", start)
+    assert checkpoint < issue
+    # The issue helper can add its own automatic cluster phases. Isolate the
+    # explicit PAP handoff, while still bounding it by the very first load.
+    phase_end = src.index("Begin setupPrefetchAcrossPersistentLoads", checkpoint) if late else checkpoint
+    assert phase_end < issue
+    region = src[start:phase_end]
+    barriers = list(re.finditer(r"s_barrier_(signal|wait)\s+(-[13])", region))
+    assert [match.groups() for match in barriers] == [
+        ("signal", "-1"), ("wait", "-1"), ("signal", "-3"), ("wait", "-3")]
+    handoff_start = start + barriers[0].start()
+    handoff_end = start + barriers[-1].end()
+    if late:
+        # Both parity alternatives, including the scale-address pair, and
+        # the next-loop alpha check must join before every wave rendezvous.
+        joins = list(re.finditer(
+            r"^label_TDM(?:Init|GlobalOffset)\w*End\w*:\s*$", region, re.MULTILINE))
+        assert len(joins) >= 4
+        alpha_join = re.search(r"^label_PersistentAlphaCheck\w*:\s*$", region, re.MULTILINE)
+        assert alpha_join is not None
+        assert checkpoint < start + joins[-1].end() < handoff_start
+        assert start + alpha_join.end() < handoff_start
+    else:
+        # StreamK and unsupported layouts retain their original early handoff.
+        assert handoff_end < checkpoint
+    assert handoff_end < issue
+    assert "restore current PersistentPhantomTile after PAP" in src
+    assert "PAP already completed the next-tile cluster handoff?" in src
+
+
 def _max_sgpr(src):
     return max((int(m.group(1)) for m in _NEXT_FREE_SGPR.finditer(src)), default=0)
 
@@ -82,6 +117,7 @@ def test_streamk_pap_cluster_multicast_gfx1250_mask_liveness(cluster_dim, a_has_
     assert_real_gfx1250_kernels(results)
     for base, src, _err in results:
         assert_assembles(src, base)
+        _assert_pap_handoff(src)
         # B broadcasts along Cs in both shapes, so it is always re-applied.
         assert _B_ATTACH in src, (
             f"Kernel {base!r} dropped the B-multicast mask (MulticastMaskB)"
@@ -124,3 +160,13 @@ def test_streamk_pap_cluster_multicast_gfx1250_mask_liveness(cluster_dim, a_has_
 def test_streamk_pap_cluster_multicast_gfx1250_golden(snapshot, cluster_dim, _a_has_peers):
     """Golden: order-invariant {basename, err} digest, one per cluster shape."""
     assert golden_digest(_emit(cluster_dim)) == snapshot
+
+
+def test_dataparallel_halfplr_pap_preserves_handoff_after_barrier_rebuild():
+    config = os.path.join(os.path.dirname(_CONFIG), "dataparallel_halfplr_pap_multicast.yaml")
+    results = emit_kernels_from_config(config, limit=1, arch=_ARCH)
+    assert_real_gfx1250_kernels(results)
+    for base, src, _err in results:
+        assert_assembles(src, base)
+        _assert_pap_handoff(src, late=True)
+        assert 0 < _max_sgpr(src) <= _SGPR_BUDGET
