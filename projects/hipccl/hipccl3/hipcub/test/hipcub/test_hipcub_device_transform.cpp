@@ -171,6 +171,62 @@ TYPED_TEST(HipcubDeviceTransformTests, Transform)
     }
 }
 
+TYPED_TEST(HipcubDeviceTransformTests, EnvTransform)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using input_type  = typename TestFixture::input_type;
+    using output_type = typename TestFixture::output_type;
+    using unary_op    = typename TestFixture::unary_op;
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        for(size_t size : test_utils::get_sizes(seed_value))
+        {
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate data
+            std::vector<input_type> h_input
+                = test_utils::get_random_data<input_type>(size, 1, 100, seed_value);
+            std::vector<output_type> h_output(size);
+
+            // Device pointers
+            input_type*  d_input;
+            output_type* d_output;
+
+            // Allocate memory
+            size_t num_input_bytes  = size * sizeof(input_type);
+            size_t num_output_bytes = size * sizeof(output_type);
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, num_input_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, num_output_bytes));
+
+            // Prepare input
+            HIP_CHECK(hipMemcpy(d_input, h_input.data(), num_input_bytes, hipMemcpyHostToDevice));
+
+            // Do the thing
+            HIP_CHECK(hipcub::DeviceTransform::Transform(d_input, d_output, size, unary_op{}));
+
+            // Fetch output
+            HIP_CHECK(hipMemcpy(h_output.data(), d_output, num_output_bytes, hipMemcpyDeviceToHost))
+
+            // Check output
+            for(size_t i = 0; i < size; ++i)
+            {
+                ASSERT_EQ(unary_op{}(h_input[i]), h_output[i]);
+            }
+
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
+        }
+    }
+}
+
 template<class T>
 struct predicate_t
 {
@@ -255,6 +311,74 @@ TYPED_TEST(HipcubDeviceTransformTests, TransformIf)
     }
 }
 
+TYPED_TEST(HipcubDeviceTransformTests, EnvTransformIf)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using input_type  = typename TestFixture::input_type;
+    using output_type = input_type;
+    using unary_op    = typename TestFixture::unary_op;
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        for(size_t size : test_utils::get_sizes(seed_value))
+        {
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate data
+            std::vector<input_type> h_input
+                = test_utils::get_random_data<input_type>(size, 1, 100, seed_value);
+            std::vector<output_type> h_output(size);
+            auto                     predicate    = predicate_t<input_type>{};
+            auto                     transform_op = unary_op{};
+
+            // Device pointers
+            input_type*  d_input;
+            output_type* d_output;
+
+            // Allocate memory
+            size_t num_input_bytes  = size * sizeof(input_type);
+            size_t num_output_bytes = size * sizeof(output_type);
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, num_input_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, num_output_bytes));
+
+            // Prepare input
+            HIP_CHECK(hipMemcpy(d_input, h_input.data(), num_input_bytes, hipMemcpyHostToDevice));
+
+            // Prepare output, TransformIf should not write to output if predicate is false
+            HIP_CHECK(hipMemcpy(d_output, h_input.data(), num_input_bytes, hipMemcpyHostToDevice));
+
+            // Do the thing
+            HIP_CHECK(hipcub::DeviceTransform::TransformIf(d_input,
+                                                           d_output,
+                                                           size,
+                                                           predicate,
+                                                           transform_op));
+
+            // Fetch output
+            HIP_CHECK(hipMemcpy(h_output.data(), d_output, num_output_bytes, hipMemcpyDeviceToHost))
+
+            // Check output
+            for(size_t i = 0; i < size; ++i)
+            {
+                const auto h_input_val = h_input[i];
+                const auto expected
+                    = predicate(h_input_val) ? transform_op(h_input_val) : h_input_val;
+                ASSERT_EQ(expected, h_output[i]) << "where index = " << i;
+            }
+
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
+        }
+    }
+}
+
 template<class T>
 struct generate_op
 {
@@ -301,6 +425,53 @@ TYPED_TEST(HipcubDeviceTransformTests, Generate)
                                                         size,
                                                         generate_op<output_type>{value},
                                                         stream));
+
+            // Fetch output
+            HIP_CHECK(hipMemcpy(h_output.data(), d_output, num_output_bytes, hipMemcpyDeviceToHost))
+
+            // Check output
+            for(size_t i = 0; i < size; ++i)
+            {
+                ASSERT_EQ(value, h_output[i]);
+            }
+
+            HIP_CHECK(hipFree(d_output));
+        }
+    }
+}
+
+TYPED_TEST(HipcubDeviceTransformTests, EnvGenerate)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using output_type = typename TestFixture::output_type;
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        for(size_t size : test_utils::get_sizes(seed_value))
+        {
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate data
+            std::vector<output_type> h_output(size);
+            const output_type value = test_utils::get_random_value<output_type>(1, 100, seed_value);
+
+            // Device pointers
+            output_type* d_output;
+
+            // Allocate memory
+            size_t num_output_bytes = size * sizeof(output_type);
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, num_output_bytes));
+
+            // Do the thing
+            HIP_CHECK(
+                hipcub::DeviceTransform::Generate(d_output, size, generate_op<output_type>{value}));
 
             // Fetch output
             HIP_CHECK(hipMemcpy(h_output.data(), d_output, num_output_bytes, hipMemcpyDeviceToHost))
@@ -363,6 +534,52 @@ TYPED_TEST(HipcubDeviceTransformTests, Fill)
     }
 }
 
+TYPED_TEST(HipcubDeviceTransformTests, EnvFill)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using output_type = typename TestFixture::output_type;
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        for(size_t size : test_utils::get_sizes(seed_value))
+        {
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate data
+            std::vector<output_type> h_output(size);
+            const output_type value = test_utils::get_random_value<output_type>(1, 100, seed_value);
+
+            // Device pointers
+            output_type* d_output;
+
+            // Allocate memory
+            size_t num_output_bytes = size * sizeof(output_type);
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, num_output_bytes));
+
+            // Do the thing
+            HIP_CHECK(hipcub::DeviceTransform::Fill(d_output, size, value));
+
+            // Fetch output
+            HIP_CHECK(hipMemcpy(h_output.data(), d_output, num_output_bytes, hipMemcpyDeviceToHost))
+
+            // Check output
+            for(size_t i = 0; i < size; ++i)
+            {
+                ASSERT_EQ(value, h_output[i]);
+            }
+
+            HIP_CHECK(hipFree(d_output));
+        }
+    }
+}
+
 TYPED_TEST(HipcubDeviceTransformTests, TransformAddrStableNonCopyable)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -408,6 +625,65 @@ TYPED_TEST(HipcubDeviceTransformTests, TransformAddrStableNonCopyable)
                                                                                 size,
                                                                                 unary_op{},
                                                                                 stream));
+
+            // Fetch output
+            HIP_CHECK(hipMemcpy(h_output.data(), d_output, num_output_bytes, hipMemcpyDeviceToHost))
+
+            // Check output
+            for(size_t i = 0; i < size; ++i)
+            {
+                ASSERT_EQ(unary_op{}(h_input[i]), h_output[i]);
+            }
+
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
+        }
+    }
+}
+
+TYPED_TEST(HipcubDeviceTransformTests, EnvTransformAddrStableNonCopyable)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using input_type  = typename TestFixture::input_type;
+    using output_type = typename TestFixture::output_type;
+    using unary_op    = DoubleIt<NonCopyable<input_type>>;
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        for(size_t size : test_utils::get_sizes(seed_value))
+        {
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate data
+            std::vector<input_type> h_input
+                = test_utils::get_random_data<input_type>(size, 1, 100, seed_value);
+            std::vector<output_type> h_output(size);
+
+            // Device pointers
+            NonCopyable<input_type>*  d_input;
+            NonCopyable<output_type>* d_output;
+
+            // Allocate memory
+            size_t num_input_bytes  = size * sizeof(input_type);
+            size_t num_output_bytes = size * sizeof(output_type);
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, num_input_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, num_output_bytes));
+
+            // Prepare input
+            HIP_CHECK(hipMemcpy(d_input, h_input.data(), num_input_bytes, hipMemcpyHostToDevice));
+
+            // Do the thing
+            HIP_CHECK(hipcub::DeviceTransform::TransformStableArgumentAddresses(d_input,
+                                                                                d_output,
+                                                                                size,
+                                                                                unary_op{}));
 
             // Fetch output
             HIP_CHECK(hipMemcpy(h_output.data(), d_output, num_output_bytes, hipMemcpyDeviceToHost))
