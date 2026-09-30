@@ -317,19 +317,45 @@ int main(int argc, char** argv)
     CHECK(rocke_quant_ir_type("e4m3") == rocke_fp8e4m3());
     CHECK(rocke_scalar_by_name("e4m3") == rocke_fp8e4m3());
     CHECK(rocke_dtype_info("e5m3") != rocke_dtype_info("bf8e5m2"));
-    for(const char* elem_type : {"unknown", "fp4e2m1"})
+    for(const char* elem_type : {"unknown", "fp4e2m1", "fp6e2m3", "fp6e3m2"})
+        for(bool lds : {false, true})
+        {
+            rocke_ir_builder_t b;
+            CHECK(rocke_ir_builder_init(&b, "invalid_element") == ROCKE_OK);
+            auto* zero = rocke_b_const_i32(&b, 0);
+            int shape[] = {16};
+            auto* ptr
+                = lds ? rocke_b_smem_alloc(&b, rocke_i8(), shape, 1, "payload")
+                      : rocke_b_param(&b, "A", rocke_ptr_type(&b, rocke_i8(), "global"), NULL);
+            auto* value = lds ? rocke_b_smem_load_vN(&b, ptr, &zero, 1, rocke_i8(), 16)
+                              : rocke_b_global_load_vN(&b, ptr, zero, rocke_i8(), 16, 16);
+            CHECK(value);
+            // Raw IR bypasses the typed loader: this tests the HIP operation boundary.
+            rocke_attr_set_str(&b, &value->op->attrs, "elem_type", elem_type);
+            rocke_strbuf_t text;
+            CHECK(rocke_strbuf_init(&text, 256) == 0);
+            rocke_lower_hip_opts_t opts = {};
+            opts.arch = "gfx1250";
+            CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &text) == ROCKE_ERR_KEY);
+            rocke_strbuf_free(&text);
+            rocke_ir_builder_free(&b);
+        }
+    for(const char* dtype : {"fp4", "fp6", "bf6"})
     {
         rocke_ir_builder_t b;
-        CHECK(rocke_ir_builder_init(&b, "invalid_element") == ROCKE_OK);
-        auto* ptr = rocke_b_param(&b, "A", rocke_ptr_type(&b, rocke_i8(), "global"), NULL);
-        auto* value = rocke_b_global_load_vN(&b, ptr, rocke_b_const_i32(&b, 0), rocke_i8(), 16, 16);
+        CHECK(rocke_ir_builder_init(&b, "logical_vector") == ROCKE_OK);
+        auto* value = rocke_b_const_i32(&b, 0);
         CHECK(value);
-        rocke_attr_set_str(&b, &value->op->attrs, "elem_type", elem_type);
+        // The constant lowers from its ity attribute; its raw result type reaches
+        // the extra-vector walk after body lowering has completed.
+        value->type = rocke_vector_type(&b, rocke_dtype_to_ir_type(dtype), 16);
+        CHECK(value->type);
         rocke_strbuf_t text;
         CHECK(rocke_strbuf_init(&text, 256) == 0);
         rocke_lower_hip_opts_t opts = {};
         opts.arch = "gfx1250";
         CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &text) == ROCKE_ERR_KEY);
+        CHECK(text.len > 0); // The prologue is assembled before the vector walk.
         rocke_strbuf_free(&text);
         rocke_ir_builder_free(&b);
     }
@@ -426,6 +452,7 @@ int main(int argc, char** argv)
         CHECK(rocke_ir_builder_init(&b, "types") == ROCKE_OK);
         CHECK(rocke_ir_builder_init(&parsed, "parsed") == ROCKE_OK);
         rocke_b_param(&b, "pattern", logical, NULL);
+        rocke_b_param(&b, "patterns", rocke_vector_type(&b, logical, 16), NULL);
         char* text = NULL;
         CHECK(rocke_ir_serialize(b.kernel, &text) == ROCKE_OK);
         rocke_kernel_def_t* kernel = NULL;

@@ -244,7 +244,7 @@ def test_scaled_catalog_identity_and_backend_contract():
         selector = {"fp8e4m3": 0, "bf8e5m2": 1, "fp6e2m3": 2, "fp6e3m2": 3}[row.a_dtype]
         assert packing.matrix_formats == (selector, selector)
         assert packing.scales.count * packing.scales.block_k == row.k
-        assert packing.matrix_llvm_types == ("<16 x i32>", "<16 x i32>")
+        assert (row.a_frag_len, row.b_frag_len) == (16, 16)
     for family in ("wmma_scale", "wmma_scale16"):
         old_id = f"{family}_f32_16x16x128_fp8_fp8"
         assert catalog.by_op_id(old_id) is None
