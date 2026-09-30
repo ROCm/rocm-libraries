@@ -531,6 +531,43 @@ def getRealDataTypeB(dataType):
         return DataTypeEnum.Float8_fnuz.value
     else:
         return dataType
+
+
+def normalizeLogicProblemType(problemType: Dict[str, Any]) -> None:
+    """Split a library logic's mixed A/B data type into the per-operand fields (in place).
+
+    A logic file may record only ``DataType`` for a mixed-precision problem, so
+    the operand types ProblemType reads are filled in from it before it is built.
+    """
+    if 'MacDataTypeA' not in problemType: #it will either be set as d['MacDataType'] or a specified input
+        problemType['MacDataTypeA'] = getRealDataTypeA(problemType['DataType'])
+
+    if 'MacDataTypeB' not in problemType:
+        problemType['MacDataTypeB'] = getRealDataTypeB(problemType['DataType'])
+
+    if 'DataTypeA' not in problemType:
+        problemType['DataTypeA'] = problemType['MacDataTypeA']
+    else:
+        problemType['DataTypeA'] = getRealDataTypeA(problemType['DataTypeA'])
+
+    if 'DataTypeB' not in problemType:
+        problemType['DataTypeB'] = problemType['MacDataTypeB']
+    else:
+        problemType['DataTypeB'] = getRealDataTypeB(problemType['DataTypeB'])
+
+
+def fillSolutionDefaults(solutionState: Dict[str, Any], libDefaults: Optional[Dict[str, Any]]) -> None:
+    """Fill a logic solution's missing keys: the file's DefaultSolution, then defaultSolution.
+
+    The dict-format writer drops every key equal to the file's DefaultSolution, so
+    a solution read back without this lacks those parameters (in place).
+    """
+    for key, val in (libDefaults or {}).items():
+        if key not in solutionState:
+            solutionState[key] = val
+    for key, val in defaultSolution.items():
+        if key not in solutionState:
+            solutionState[key] = val
     
 class LibraryLogic(NamedTuple):
     """Return tuple for parseLibraryLogicData()"""
@@ -686,21 +723,7 @@ def parseLibraryLogicData(
 
     if "CUCount" not in data:
         data["CUCount"] = None
-    if 'MacDataTypeA' not in data["ProblemType"]: #it will either be set as d['MacDataType'] or a specified input
-        data["ProblemType"]['MacDataTypeA'] = getRealDataTypeA(data["ProblemType"]['DataType'])
-
-    if 'MacDataTypeB' not in data["ProblemType"]:
-        data["ProblemType"]['MacDataTypeB'] = getRealDataTypeB(data["ProblemType"]['DataType'])
-
-    if 'DataTypeA' not in data["ProblemType"]:
-        data["ProblemType"]['DataTypeA'] = data["ProblemType"]['MacDataTypeA']
-    else:
-        data["ProblemType"]['DataTypeA'] = getRealDataTypeA(data["ProblemType"]['DataTypeA'])
-
-    if 'DataTypeB' not in data["ProblemType"]:
-        data["ProblemType"]['DataTypeB'] = data["ProblemType"]['MacDataTypeB']
-    else:
-        data["ProblemType"]['DataTypeB'] = getRealDataTypeB(data["ProblemType"]['DataTypeB'])
+    normalizeLogicProblemType(data["ProblemType"])
 
     if not versionIsCompatible(data["MinimumRequiredVersion"]):
         printWarning("Version = {} in library logic file {} does not match Tensile version = {}" \
@@ -722,13 +745,7 @@ def parseLibraryLogicData(
 
     # unpack solution
     def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Optional[Solution]:
-        # Fill missing keys: library DefaultSolution, then GlobalParameters defaultSolution.
-        for key, val in libDefaults.items():
-            if key not in solutionState:
-                solutionState[key] = val
-        for key, val in defaultSolution.items():
-            if key not in solutionState:
-                solutionState[key] = val
+        fillSolutionDefaults(solutionState, libDefaults)
 
         if "KernelLanguage" not in solutionState.keys():
             solutionState["KernelLanguage"] = defaultSolution["KernelLanguage"]

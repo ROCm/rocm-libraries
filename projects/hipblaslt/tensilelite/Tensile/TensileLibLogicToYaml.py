@@ -24,18 +24,28 @@
 
 from Tensile import __version__
 from Tensile import LibraryIO
-from Tensile.Common.GlobalParameters import defaultBenchmarkCommonParameters
+from Tensile.Common.GlobalParameters import defaultInternalSupportParams, defaultSolution
 from Tensile.Common.Constants import HR
+from Tensile.CustomKernels import isCustomKernelConfig
+from Tensile.SolutionStructs.Problem import ProblemType
 from Tensile.SolutionStructs.Problem import _defaultProblemType as defaultProblemType
 from Tensile.Common.GlobalParameters import globalParameters
-from Tensile.Common.Architectures import isaToGfx
+from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, gfxToIsa, isaToGfx
 from Tensile.Common import IsaVersion
-from Tensile.Common.ValidParameters import validParameters
+from Tensile.Common.ValidParameters import (
+    checkParametersAreValid,
+    validParameters,
+    validParametersForArch,
+)
 from Tensile.Common.GlobalParameters import globalParameters as globalParameterDefaults
+from Tensile.Common.Utilities import versionIsCompatible
 
 import argparse
 import ast
+import contextlib
+import copy
 import inspect
+import io
 import os
 import sys
 import re
@@ -100,11 +110,15 @@ CLIENT_NAME_LOOKUPS = {"bounds-check": "boundsCheckName", "prune-mode": "pruneMo
 #: config that produced a benchmark data file can be recovered from its path.
 BUILD_DIR_PREFIX = "build_"
 
-#: Problem type keys this script carries in dedicated fields instead of inside
-#: the ProblemType block.
-PROBLEM_TYPE_RELOCATED_KEYS = ("BiasDataTypeList", "GateResidualDataTypeList")
+#: A problem's benchmark data directory: "<problem>/Data/<step>.yaml".
+BENCHMARK_DATA_DIRNAME = "Data"
 
-#: Always emitted, whether or not they match the registry default.
+#: Position of the DefaultSolution block among rawLibraryLogic's optional
+#: fields (TileSelectionIndices, PerfMetric, LibraryType, DefaultSolution), in
+#: both logic formats.
+RAW_LOGIC_DEFAULT_SOLUTION_INDEX = 3
+
+#: Always emitted, even when the rest of the problem type implies them.
 PROBLEM_TYPE_ALWAYS_EMITTED = (
     "DataType",
     "DestDataType",
@@ -114,8 +128,13 @@ PROBLEM_TYPE_ALWAYS_EMITTED = (
     "TransposeB",
 )
 
-#: Solution keys re-emitted in richer form inside the Groups block.
-SOLUTION_KEYS_IN_GROUPS = ("MatrixInstruction", "WorkGroup")
+#: Solution keys emitted somewhere other than ForkParameters: MatrixInstruction
+#: and WorkGroup in the Groups block, ISA as the build target in
+#: GlobalParameters, and CustomKernel as a CustomKernels entry when the kernel
+#: is handwritten. On a generated kernel CustomKernel is the stamp KernelWriter
+#: records during codegen, so it is rebuilt rather than carried; pinning it
+#: would fix the kernel name to the stamped string.
+SOLUTION_KEYS_EMITTED_ELSEWHERE = ("MatrixInstruction", "WorkGroup", "ISA", "CustomKernel")
 
 
 class Quoted(str):
@@ -224,64 +243,117 @@ def setGlobalParams(
     # The input file is authoritative for the version it was produced with, and
     # it stays the first key so the emitted block keeps its conventional order.
     return {
-        "MinimumRequiredVersion": versionString["MinimumRequiredVersion"],
+        "MinimumRequiredVersion": configVersion(versionString["MinimumRequiredVersion"]),
         **{k: v for k, v in res.items() if k != "MinimumRequiredVersion"},
     }
 
 
+def configVersion(recordedVersion) -> str:
+    """The MinimumRequiredVersion for the config: the recorded one if this Tensile accepts it.
+
+    Tensile refuses a config whose version it is not compatible with, so an
+    input from another major version would otherwise produce an unusable config.
+    """
+    try:
+        if versionIsCompatible(recordedVersion):
+            return recordedVersion
+    except (AttributeError, ValueError):
+        pass
+    tPrint(
+        1,
+        "Warning: the input records MinimumRequiredVersion {!r}, which Tensile {} does not "
+        "accept in a config, so the config requires {} instead.".format(
+            recordedVersion, __version__, __version__
+        ),
+    )
+    return __version__
+
+
+def buildProblemTypeState(config: dict, strict: bool) -> Optional[dict]:
+    """Builds a ProblemType from `config` and returns its state, or None if Tensile rejects it.
+
+    `strict` type-checks the way a config is read; library logic is read with it
+    off. ProblemType reports some problems through printExit, hence SystemExit.
+    """
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        try:
+            return ProblemType(copy.deepcopy(config), False, raiseOnTypeMismatch=strict).state
+        except (Exception, SystemExit):  # noqa: BLE001 - any rejection means "cannot build"
+            return None
+
+
+def normalizedLogicProblemType(problemTypeState: dict) -> dict:
+    """A copy of a recorded problem type, prepared the way Tensile reads library logic."""
+    recorded = copy.deepcopy(problemTypeState)
+    if "DataType" in recorded:
+        LibraryIO.normalizeLogicProblemType(recorded)
+    return recorded
+
+
+def effectiveDataTypes(problemTypeState: dict, key: str) -> list:
+    """The data types a problem type uses for `key`, as the ints library logic records.
+
+    A block may enable bias or gate residual without listing their types, and
+    ProblemType then derives a default list; that list is what the kernel uses.
+    """
+    recorded = problemTypeState.get(key)
+    if recorded:
+        return list(recorded)
+    state = buildProblemTypeState(normalizedLogicProblemType(problemTypeState), strict=False)
+    return [dataType.value for dataType in (state or {}).get(key, [])]
+
+
+def coerceProblemTypeValue(key: str, value: Any) -> Any:
+    """Shipped library logic encodes some bool fields as int 0/1; a config is read strictly."""
+    if isinstance(defaultProblemType.get(key), bool) and type(value) is int:
+        return bool(value)
+    return value
+
+
 def formProblemTypeYamlData(problemTypeState: dict) -> dict:
+    """Forms the ProblemType block from every key ProblemType reads.
+
+    The block is reduced by construction rather than by comparing values against
+    a registry: a key is left out only when building the problem type without it
+    gives the same state as building it from the input the way Tensile reads
+    library logic. Many defaults are derived from other keys (ComputeDataType
+    from DestDataType, for instance), so comparing each value to a fixed default
+    would drop keys that matter and keep keys that do not.
+    """
     if len(problemTypeState) == 0:
         raise RuntimeError(
             "Length of problem Type Parameters is empty!!, Please re-check the library logic file !"
         )
 
-    data = {}
-    dropped = []
-    data["OperationType"] = problemTypeState["OperationType"]
-    for problemTypeKey, problemTypeValue in problemTypeState.items():
-        # Always print HighPrecisionAccumulate, TransposeA, TransposeB fields
-        if problemTypeKey in [
-            "DataType",
-            "DestDataType",
-            "ComputeDataType",
-            "HighPrecisionAccumulate",
-            "TransposeA",
-            "TransposeB",
-        ]:
-            data[problemTypeKey] = problemTypeValue
-            continue
+    recorded = normalizedLogicProblemType(problemTypeState)
+    reference = buildProblemTypeState(recorded, strict=False)
 
-        # Print default keys with no default values
-        if problemTypeKey not in defaultProblemType:
-            dropped.append(problemTypeKey)
-        else:
-            if problemTypeValue != defaultProblemType[problemTypeKey]:
-                # Shipped library-logic encodes some bool fields as int 0/1;
-                # ProblemType type-checks them strictly.
-                if isinstance(defaultProblemType[problemTypeKey], bool):
-                    problemTypeValue = bool(problemTypeValue)
-                data[problemTypeKey] = makeFlow(problemTypeValue)
-                continue
+    readKeys = problemTypeConfigKeys()
+    kept = {
+        key: coerceProblemTypeValue(key, value)
+        for key, value in recorded.items()
+        if key in readKeys
+    }
 
-    warnDroppedKeys("ProblemType", dropped, set(problemTypeConfigOnlyKeys()))
-    return data
-
-
-def warnDroppedKeys(name: str, dropped, settable) -> None:
-    """Reports keys the emitters skipped that a config could actually have set.
-
-    The emitters keep only keys present in their registry, so anything else is
-    discarded with no trace. Most such keys are values Tensile derives and
-    recomputes, which is correct; this makes the exceptions visible.
-    """
-    lost = sorted(key for key in dropped if key in settable)
-    if lost:
+    if reference is None or buildProblemTypeState(kept, strict=True) != reference:
         tPrint(
             1,
-            "Warning: {} key(s) dropped from {} because the emitter has no default for "
-            "them, though a config can set them: {}. The generated config will fall back "
-            "to Tensile's defaults for these.".format(len(lost), name, ", ".join(lost)),
+            "Warning: the problem type cannot be rebuilt from its recorded keys, so every "
+            "key ProblemType reads is emitted unreduced. Check the ProblemType block.",
         )
+    else:
+        for key in list(kept):
+            if key == "OperationType" or key in PROBLEM_TYPE_ALWAYS_EMITTED:
+                continue
+            trial = {k: v for k, v in kept.items() if k != key}
+            if buildProblemTypeState(trial, strict=True) == reference:
+                kept = trial
+
+    data = {"OperationType": problemTypeState["OperationType"]}
+    for key, value in kept.items():
+        if key != "OperationType":
+            data[key] = makeFlow(value)
+    return data
 
 
 def formGroups(MIInstruction9Bits: dict) -> dict:
@@ -313,45 +385,91 @@ def form9BitMIInst(currentSolutionState: dict) -> dict:
     groups = {}
     groups["MatrixInstruction"] = FlowList(MIInstruction9Bits)
     groups["WorkGroup"] = FlowList(currentSolutionState["WorkGroup"])
-    groups["MIArchVgpr"] = currentSolutionState["MIArchVgpr"]
+    groups["MIArchVgpr"] = coerceParameterValue("MIArchVgpr", currentSolutionState["MIArchVgpr"])
 
     return groups
 
 
-def formForkParams(currentIndexSolution: dict, skipMI: bool) -> dict:
+def coerceParameterValue(key: str, value: Any) -> Any:
+    """Converts a recorded value to a type validParameters allows for its key, when lossless.
 
+    Logic written by older Tensile stores some bool parameters as 0/1 and some
+    float ones as ints, while the config validator compares types exactly.
+    Anything that does not convert exactly is left for the validator to judge.
+    """
+    allowed = validParameters.get(key)
+    if not isinstance(allowed, list):
+        return value
+    allowedTypes = {type(v) for v in allowed}
+    if type(value) in allowedTypes:
+        return value
+    if bool in allowedTypes and type(value) is int and value in (0, 1):
+        return bool(value)
+    if int in allowedTypes and type(value) is bool:
+        return int(value)
+    if float in allowedTypes and type(value) is int:
+        return float(value)
+    return value
+
+
+def isDefaultParameter(key: str, value: Any) -> bool:
+    """True when a config that omits `key` gives the solution this same value."""
+    return (
+        key in defaultSolution
+        and type(value) is type(defaultSolution[key])
+        and value == defaultSolution[key]
+    )
+
+
+def parameterRejection(key: str, value: Any, validParams: dict) -> Optional[str]:
+    """Returns why Tensile's config validator rejects `key: [value]`, or None if it accepts it."""
+    try:
+        checkParametersAreValid((key, [value]), validParams)
+    except Exception as e:  # noqa: BLE001 - the validator raises plain Exception
+        return str(e).splitlines()[0]
+    return None
+
+
+def handwrittenCustomKernelName(solution: dict) -> Optional[str]:
+    """Names the handwritten custom kernel a solution is, or None for a generated kernel.
+
+    Tensile's own test tells a handwritten kernel apart from the CustomKernel
+    stamp every generated kernel carries.
+    """
+    if not isCustomKernelConfig(solution):
+        return None
+    customKernel = solution.get("CustomKernel")
+    if isinstance(customKernel, dict) and customKernel.get("name"):
+        return customKernel["name"]
+    return solution["CustomKernelName"]
+
+
+def formForkParams(
+    currentIndexSolution: dict, skipMI: bool, architectureName: Optional[str] = None
+) -> dict:
+    """Forms the solution block: every parameter a config can set, pinned to its recorded value.
+
+    Settable means listed in validParameters, the registry Tensile validates a
+    config against, so a parameter Tensile gains is carried with no change here.
+    Values a config would get anyway are left out, and so is any value Tensile's
+    validator rejects for `architectureName`; Tensile re-derives those.
+    """
     data = {}
     data["InitialSolutionParameters"] = None
     kernelLang = {}
     kernelLang["KernelLanguage"] = FlowList(["Assembly"])
     data["BenchmarkCommonParameters"] = [kernelLang]
 
-    forkData = []
-    dropped = []
-    for forkKey, forkValue in currentIndexSolution.items():
-        temp = {}
-        # # ignore MatrixInstruction
-        if forkKey in SOLUTION_KEYS_IN_GROUPS:
-            continue
-        # Find the matching index for fork key name from list of dictionaries => defaultBenchmarkCommonParameters
-        index = next(
-            (i for i, d in enumerate(defaultBenchmarkCommonParameters) if forkKey in d),
-            None,
-        )
-        if index is None:
-            dropped.append(forkKey)
-        else:
-            forkValue = [forkValue]  # convert to list
-            if forkValue != defaultBenchmarkCommonParameters[index][forkKey]:
-                temp[forkKey] = FlowList(forkValue)
-                forkData.append(temp)
-
-    # ISA is carried as the architecture name; the Groups keys are re-emitted below.
-    warnDroppedKeys(
-        "ForkParameters",
-        [key for key in dropped if key != "ISA"],
-        set(validParameters) - set(SOLUTION_KEYS_IN_GROUPS),
-    )
+    customKernelName = handwrittenCustomKernelName(currentIndexSolution)
+    if customKernelName:
+        # Tensile builds a handwritten kernel from its own custom.config; fork
+        # parameters would add a generated kernel beside it.
+        data["ForkParameters"] = None
+        data["CustomKernels"] = [customKernelName]
+        internalSupportParams = currentIndexSolution.get("InternalSupportParams")
+        if internalSupportParams:
+            data["InternalSupportParams"] = internalSupportParams
+        return data
 
     # Skip the MI calculation if 9 bit MI is not needed or MatrixInstruction field is disabled
     isMatrixInsEnabled = False
@@ -373,9 +491,53 @@ def formForkParams(currentIndexSolution: dict, skipMI: bool) -> dict:
     if skipMI != True and isMatrixInsEnabled:
         groups = form9BitMIInst(currentIndexSolution)
     else:
-        # formGroups is the only emitter for WorkGroup, since the loop above
-        # skips SOLUTION_KEYS_IN_GROUPS.
+        # formGroups is the only emitter for WorkGroup, since the loop below
+        # skips SOLUTION_KEYS_EMITTED_ELSEWHERE.
         groups = {"WorkGroup": FlowList(currentIndexSolution["WorkGroup"])}
+
+    validParams = validParametersForArch(architectureName) if architectureName else validParameters
+    forkData = []
+    rejected = []
+    for forkKey, forkValue in currentIndexSolution.items():
+        # Keys outside validParameters are derived state Tensile recomputes.
+        if (
+            forkKey in SOLUTION_KEYS_EMITTED_ELSEWHERE
+            or forkKey in groups
+            or forkKey not in validParameters
+        ):
+            continue
+        forkValue = coerceParameterValue(forkKey, forkValue)
+        if isDefaultParameter(forkKey, forkValue):
+            continue
+        reason = parameterRejection(forkKey, forkValue, validParams)
+        if reason is not None:
+            rejected.append("{}={!r} ({})".format(forkKey, forkValue, reason))
+            continue
+        forkData.append({forkKey: FlowList([forkValue])})
+
+    if rejected:
+        tPrint(
+            1,
+            "Warning: {} recorded value(s) omitted because Tensile's config validator "
+            "rejects them; Tensile re-derives these, which may not reproduce the recorded "
+            "kernel: {}".format(len(rejected), "; ".join(rejected)),
+        )
+
+    recordedSupport = currentIndexSolution.get("InternalSupportParams")
+    if isinstance(recordedSupport, dict):
+        differing = [
+            "{}={!r}".format(key, value)
+            for key, value in recordedSupport.items()
+            if defaultInternalSupportParams.get(key) != value
+        ]
+        if differing:
+            tPrint(
+                1,
+                "Warning: a config can set InternalSupportParams only beside a handwritten "
+                "custom kernel, so Tensile derives them from its defaults instead of the "
+                "recorded {}. The kernel's argument layout or runtime support flags may "
+                "differ.".format(", ".join(differing)),
+            )
 
     forkData.append(formGroups(groups))
 
@@ -454,15 +616,22 @@ def formProblemSize(
         for size, mapping in exactLogic:
             if mapping[0] == solutionIndex:
                 temp["ProblemSizes"] = [{"Exact": FlowList(size)}]
+        if "ProblemSizes" not in temp:
+            tPrint(
+                1,
+                "Warning: the exact logic maps no size to solution {}, so ProblemSizes "
+                "needs to be set manually".format(solutionIndex),
+            )
+            temp["ProblemSizes"] = [{"Exact": FlowList([1, 1, 1, 1])}]
 
     data["BenchmarkFinalParameters"].append(temp)
 
     temp = {}
     biasTypeArgs = normalizeBiasTypeArgs(biasTypeArgs)
     if not biasTypeArgs:
-        biasTypeArgs = problemTypeStat["BiasDataTypeList"]
+        biasTypeArgs = effectiveDataTypes(problemTypeStat, "BiasDataTypeList")
     temp["BiasTypeArgs"] = FlowList(biasTypeArgs)
-    gateTypeArgs = problemTypeStat.get("GateResidualDataTypeList", [])
+    gateTypeArgs = effectiveDataTypes(problemTypeStat, "GateResidualDataTypeList")
     if gateTypeArgs:
         temp["GateTypeArgs"] = FlowList(gateTypeArgs)
     data["BenchmarkFinalParameters"].append(temp)
@@ -569,6 +738,11 @@ class BenchmarkDataReader(SourceReader):
             )
         architectureName = isaToGfx(IsaVersion(*isa))
 
+        # Benchmark data records the full state; this only covers keys an older
+        # Tensile did not write, as Solution does when it builds one.
+        solution = dict(solution)
+        LibraryIO.fillSolutionDefaults(solution, None)
+
         # Every size the benchmark ran is attributed to the requested solution.
         problemSizes = data[1].get("ProblemSizes") or []
         exactLogic = [
@@ -633,7 +807,7 @@ class LibraryLogicReader(SourceReader):
             _,  # indexOrder
             exactLogic,
             _,  # rangeLogic
-            _,  # otherFields
+            otherFields,
         ) = LibraryIO.rawLibraryLogic(data)
 
         try:
@@ -652,6 +826,11 @@ class LibraryLogicReader(SourceReader):
                 )
             )
 
+        # Dict-format logic stores every value equal to the file's DefaultSolution
+        # only there, so restore the solution the way Tensile reads it back.
+        solution = dict(solution)
+        LibraryIO.fillSolutionDefaults(solution, LibraryLogicReader._defaultSolution(otherFields))
+
         return SolutionSource(
             versionString=versionString,
             scheduleName=scheduleName,
@@ -662,6 +841,15 @@ class LibraryLogicReader(SourceReader):
             exactLogic=exactLogic,
             origin="library logic, solution {}".format(solutionIndex),
         )
+
+    @staticmethod
+    def _defaultSolution(otherFields) -> Optional[dict]:
+        """The file's DefaultSolution block, if it records one."""
+        if otherFields and len(otherFields) > RAW_LOGIC_DEFAULT_SOLUTION_INDEX:
+            block = otherFields[RAW_LOGIC_DEFAULT_SOLUTION_INDEX]
+            if isinstance(block, dict):
+                return block
+        return None
 
 
 #: Ordered most specific first; LibraryLogicReader matches anything else.
@@ -811,12 +999,12 @@ def clientParameterMap() -> Tuple[Dict[str, str], Dict[str, str]]:
 
 
 @lru_cache(maxsize=1)
-def problemTypeConfigOnlyKeys() -> Tuple[str, ...]:
-    """Problem type keys a config can set that formProblemTypeYamlData cannot emit.
+def problemTypeConfigKeys() -> frozenset:
+    """Every problem type key ProblemType reads out of its config argument.
 
-    Derived by scanning ProblemType for keys read out of its config argument and
-    subtracting the registry the emitter filters on, so the warning keeps working
-    as Tensile gains problem type options.
+    Derived by scanning ProblemType rather than listed here, so an option Tensile
+    gains is carried the moment ProblemType reads it. The registry keys are
+    included because ProblemType fills each of them from the config.
     """
     # import_module, not "from ... import Problem": the package re-exports a
     # class of that name.
@@ -825,7 +1013,7 @@ def problemTypeConfigOnlyKeys() -> Tuple[str, ...]:
     try:
         tree = ast.parse(inspect.getsource(problemModule))
     except (OSError, TypeError, SyntaxError):  # pragma: no cover
-        return ()
+        return frozenset(defaultProblemType)
 
     read = set()
     for node in ast.walk(tree):
@@ -844,7 +1032,7 @@ def problemTypeConfigOnlyKeys() -> Tuple[str, ...]:
             isinstance(node, ast.Compare)
             and isinstance(node.left, ast.Constant)
             and isinstance(node.left.value, str)
-            and any(isinstance(op, ast.In) for op in node.ops)
+            and any(isinstance(op, (ast.In, ast.NotIn)) for op in node.ops)
             and any(isinstance(c, ast.Name) and c.id == "config" for c in node.comparators)
         ):
             read.add(node.left.value)
@@ -857,13 +1045,7 @@ def problemTypeConfigOnlyKeys() -> Tuple[str, ...]:
         ):
             read.add(node.slice.value)
 
-    return tuple(
-        sorted(
-            key
-            for key in read
-            if key not in defaultProblemType and key not in PROBLEM_TYPE_RELOCATED_KEYS
-        )
-    )
+    return frozenset(read | set(defaultProblemType))
 
 
 def findClientParameters(inputPath: str) -> Optional[str]:
@@ -871,9 +1053,13 @@ def findClientParameters(inputPath: str) -> Optional[str]:
 
     Benchmark data lives at "<problem>/Data/<step>.yaml" and the client config at
     "<problem>/<step>/source/ClientParameters.ini". Falls back to any single
-    ClientParameters.ini under the problem directory.
+    ClientParameters.ini under the problem directory. Returns None for an input
+    outside a Data directory: nothing there was written by a benchmark step, and
+    a search above it would find an unrelated client config.
     """
     dataDir = os.path.dirname(os.path.abspath(inputPath))
+    if os.path.basename(dataDir) != BENCHMARK_DATA_DIRNAME:
+        return None
     problemDir = os.path.dirname(dataDir)
     step = os.path.splitext(os.path.basename(inputPath))[0]
 
@@ -1164,6 +1350,39 @@ def formLibraryLogic(
     }
 
 
+def buildTarget(libraryLogic: dict) -> str:
+    """The architecture the solution was generated for, read from its LibraryLogic block.
+
+    A revision (gfx1250v0) shares its arch's ISA, so its logic declares the arch's
+    name and only ScheduleName tells the two apart -- the rule TensileCreateLibrary
+    applies when it picks logic for a revision build.
+    """
+    scheduleName = str(libraryLogic["ScheduleName"])
+    if scheduleName in ARCH_COMPILER_TARGET:
+        return scheduleName
+    return str(libraryLogic["ArchitectureName"])
+
+
+def addBuildTarget(globalParams: dict, target: str) -> None:
+    """Names the build target in GlobalParameters unless the run settings already do.
+
+    Without it Tensile builds for whatever GPU it detects. ISA selects the
+    architecture; a revision can only be named through Architecture, which
+    Tensile reads for an ISA it is building.
+    """
+    isa = gfxToIsa(target)
+    if isa is None:
+        return
+    globalParams.setdefault("ISA", [FlowList(list(isa))])
+    builtIsas = [tuple(entry) for entry in globalParams["ISA"]]
+    if (
+        target in ARCH_COMPILER_TARGET
+        and "Architecture" not in globalParams
+        and tuple(isa) in builtIsas
+    ):
+        globalParams["Architecture"] = target
+
+
 def writeToTensileYamlFile(tensileYamlFile: str, tensileYamlData: str) -> Optional[str]:
     ret = None
     try:
@@ -1248,16 +1467,19 @@ def TensileLibLogicToYaml(
 
     source = readSource(libYaml, solutionIndex)
     runSettings = resolveRunSettings(logicFilePath, runConfigPath, useRunConfig)
+    libraryLogic = formLibraryLogic(source, runSettings)
+    target = buildTarget(libraryLogic)
 
     tensileYamlFileData = {}
     tensileYamlFileData["GlobalParameters"] = setGlobalParams(
         source.versionString, source.problemType, runSettings
     )
+    addBuildTarget(tensileYamlFileData["GlobalParameters"], target)
 
     benchmarkProblems = [[]]
     benchmarkProblems[0].append(formProblemTypeYamlData(source.problemType))
 
-    benchmarkProblemsData = formForkParams(source.solution, skipMI)
+    benchmarkProblemsData = formForkParams(source.solution, skipMI, target)
     benchmarkProblemsData.update(
         formProblemSize(
             source.exactLogic,
@@ -1270,7 +1492,7 @@ def TensileLibLogicToYaml(
     benchmarkProblems[0].append(benchmarkProblemsData)
 
     tensileYamlFileData["BenchmarkProblems"] = benchmarkProblems
-    tensileYamlFileData["LibraryLogic"] = formLibraryLogic(source, runSettings)
+    tensileYamlFileData["LibraryLogic"] = libraryLogic
 
     if runSettings is not None and runSettings.extraSections:
         tensileYamlFileData.update(runSettings.extraSections)

@@ -15,7 +15,7 @@ explicitly: "when that lands, flip this golden and supersede this ADR."
 PR #11538 fixes it as a side effect of rewriting the extraction path. The
 MI-disabled branch now builds a real group from the solution's `WorkGroup`,
 which `formGroups` is the only emitter for (the fork loop above it skips every
-key in `SOLUTION_KEYS_IN_GROUPS`).
+key in `SOLUTION_KEYS_EMITTED_ELSEWHERE`).
 
 ## Decision
 Flip the pin. `test_form_fork_params_skip_mi_raises`, which asserted the

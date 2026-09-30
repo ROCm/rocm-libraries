@@ -35,10 +35,19 @@ def test_tprint_gated(monkeypatch, capsys):
 # setGlobalParams
 # ---------------------------------------------------------------------------
 def test_set_global_params_non_i8():
-    res = M.setGlobalParams({"MinimumRequiredVersion": "1.2.3"}, {"DataType": "S"})
-    assert res["MinimumRequiredVersion"] == "1.2.3"
+    res = M.setGlobalParams({"MinimumRequiredVersion": M.__version__}, {"DataType": "S"})
+    assert res["MinimumRequiredVersion"] == M.__version__
     assert res["DataInitTypeA"] == 12
     assert res["NumElementsToValidate"] == 0
+
+
+def test_set_global_params_replaces_a_version_tensile_refuses(capsys, monkeypatch):
+    # Tensile refuses a config from another major version (DECISIONS D47).
+    monkeypatch.setitem(M.globalParameters, "ClientLogLevel", 1)
+    for recorded in ("1.2.3", "1", None):
+        res = M.setGlobalParams({"MinimumRequiredVersion": recorded}, {"DataType": "S"})
+        assert res["MinimumRequiredVersion"] == M.__version__
+    assert "does not accept in a config" in capsys.readouterr().out
 
 
 def test_set_global_params_i8():
@@ -139,11 +148,10 @@ def test_form_fork_params_with_mi():
     assert "MatrixInstruction" in grp
 
 
-def test_form_fork_params_includes_nondefault_fork_key(monkeypatch):
-    # craft a fork key present in defaultBenchmarkCommonParameters with a value
-    # differing from its default so it is emitted. MI enabled + skipMI=False to
-    # avoid the formGroups("None") bug (see D14).
-    monkeypatch.setattr(M, "defaultBenchmarkCommonParameters", [{"GlobalSplitU": [[1]]}])
+def test_form_fork_params_includes_nondefault_fork_key():
+    # A settable key whose value differs from the one a config would otherwise
+    # get is emitted (DECISIONS D47). MI enabled + skipMI=False keeps this on
+    # the MI group path.
     sol = {
         "EnableMatrixInstruction": True,
         "MatrixInstruction": [16, 16, 4, 1],

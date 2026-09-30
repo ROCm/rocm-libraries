@@ -667,3 +667,9 @@ whole-project floor from 75% to 82%.
 **ADR:** [`adr/0030-fix-formgroups-none-crash.md`](adr/0030-fix-formgroups-none-crash.md), superseding [`adr/0010-pin-formgroups-none-crash.md`](adr/0010-pin-formgroups-none-crash.md)
 
 **Decision:** D14 pinned the `AttributeError` that `formGroups` raised when `formForkParams` passed the string sentinel `"None"` on the skipMI / MI-disabled path (AIHPBLAS-4409). PR #11538 fixes it: that branch now builds a real `{"WorkGroup": ...}` group. `test_form_fork_params_skip_mi_raises` is replaced by `test_form_fork_params_skip_mi_emits_workgroup`, which asserts the working behavior, plus a companion test pinning the `KeyError` a solution with no `WorkGroup` still raises. ADR 0010 anticipated exactly this flip.
+
+## D47 — TensileLibLogicToYaml: carry every settable parameter, reduced by Tensile's own rules
+
+**ADR:** [`adr/0031-carry-every-settable-parameter.md`](adr/0031-carry-every-settable-parameter.md)
+
+**Decision:** The converter chose what to emit from two defaults tables, so every settable parameter without a default entry (`PrefetchGlobalReadA`/`B`, `TDMFuse`, `ActivationType`, ...) was dropped, and dict-format solutions lost their file's `DefaultSolution`. It now carries every `validParameters` key a solution records, filtered by Tensile's validator, reduces the problem type by rebuilding it, names the build target, and requires a version Tensile accepts. `test_form_fork_params_includes_nondefault_fork_key` stops patching the removed lookup, `test_set_global_params_non_i8` records an accepted version, and the gfx950 `test_TensileLibLogicToYaml` golden is re-recorded. Intended behavior change.
