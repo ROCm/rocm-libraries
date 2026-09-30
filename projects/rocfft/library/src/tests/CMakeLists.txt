@@ -47,7 +47,10 @@ target_link_libraries( rocfft-internal-test PRIVATE
   rocfft-rtc-cache
   rocfft-rtc-common
   rocfft-rtc-compile
+  rocfft-rtc-gen
+  rocfft-rtc-launch
   rocfft-rtc-subprocess
+  generator
   hip::host
   ${ROCFFT_SQLITE_LIB}
 )

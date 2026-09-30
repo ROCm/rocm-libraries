@@ -539,6 +539,13 @@ DEF_FORMAT(MXWMMA,
 DEF_FORMAT(MXWMMA_SCALE,
     .parent = MXWMMA,
     .microcode = MC_VOP3PX2,
+    // The encoding is a back-to-back VOP3P pair: the WMMA plus an LD_SCALE that hardware
+    // always runs in the last cycle of the window. Nothing of any pipe can be issued
+    // there, which the VALU-only co-issue window cannot express. The mask is anchored at
+    // the window END (bit 0 = last cycle), so it stays correct across the per-format cost
+    // overrides below without needing an override of its own.
+    // (Keep literal field names out of .def comments: the parser substring-matches them.)
+    .blockedScale = 0x0001,
     .maxOperands = 6,
     .encoding = {128},
     .fields = {
@@ -555,6 +562,13 @@ DEF_FORMAT(MXWMMA_SCALE,
 DEF_FORMAT(MXWMMA_SCALE16,
     .parent = MXWMMA,
     .microcode = MC_VOP3PX3,
+    // The encoding is a back-to-back VOP3P pair: the WMMA plus an LD_SCALE that hardware
+    // always runs in the last cycle of the window. Nothing of any pipe can be issued
+    // there, which the VALU-only co-issue window cannot express. The mask is anchored at
+    // the window END (bit 0 = last cycle), so it stays correct across the per-format cost
+    // overrides below without needing an override of its own.
+    // (Keep literal field names out of .def comments: the parser substring-matches them.)
+    .blockedScale = 0x0001,
     .maxOperands = 6,
     .encoding = {128},
     .fields = {
@@ -730,12 +744,26 @@ DEF_FORMAT(VGLOBAL,
 // hazards bucket it as VMEM (EV_VGPR_VMEM_READ) -- not FLAT. NOTE: like all returning
 // atomics, it is NOT tracked by the waitcnt dataflow (returning atomics are untracked) --
 // the consumer's wait is emitted manually by the caller.
+// ImplicitReadEXEC: the hardware reads EXEC.
 DEF_FORMAT(VGLOBAL_ATOMIC_SADDR,
     .parent = VGLOBAL,
-    .flags = {GLOBALAtomic},
+    .flags = {GLOBALAtomic, ImplicitReadEXEC},
     .fields = {
         {D0, vdst, vgpr, 32},
         {S0, vaddr, vgpr, 32},
+        {S1, vsrc, vgpr, 32},
+        {S2, saddr, sreg, 64},
+    },
+)
+
+// VGLOBAL_ASYNC_FROM_LDS - gfx1250 async store LDS -> global:
+//   global_store_async_from_lds_* vaddr(64), dsaddr(32), saddr(64); no dest.
+// Shared by all size variants (b8/b32/b64/b128) via the DEF_BATCH.
+DEF_FORMAT(VGLOBAL_ASYNC_FROM_LDS,
+    .parent = VGLOBAL,
+    .flags = {GLOBALStoreAsyncFromLds},
+    .fields = {
+        {S0, vaddr, vgpr, 64},
         {S1, vsrc, vgpr, 32},
         {S2, saddr, sreg, 64},
     },

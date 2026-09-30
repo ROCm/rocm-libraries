@@ -212,6 +212,20 @@ TEST(PluginLoadingTest, LoadMissingPluginReturnsFalse) {
     EXPECT_FALSE(PassBuilder::loadPlugin("/nonexistent/libstinkytofu-plugin-does-not-exist.so"));
 }
 
+// A plugin reporting a stinkytofu version different from the one actually
+// running must be rejected before registerPlugin() ever executes — StinkyTofu
+// does not support cross-version plugin loading (exact string match only).
+#ifdef STINKYTOFU_PLUGIN_BAD_VERSION_PATH
+TEST(PluginLoadingTest, RejectsVersionMismatch) {
+    EXPECT_FALSE(PassBuilder::loadPlugin(STINKYTOFU_PLUGIN_BAD_VERSION_PATH));
+
+    StinkyAsmModule::ModuleOptions opts{};
+    StinkyAsmModule module("test", {12, 5, 0}, opts);
+    EXPECT_EQ(PassBuilder::createPassByName("BadVersionPluginShouldNeverRegister", module),
+              nullptr);
+}
+#endif  // STINKYTOFU_PLUGIN_BAD_VERSION_PATH
+
 // Note: examplePluginPath() resolves the plugin relative to the *installed*
 // libstinkytofu layout (<libdir>/stinkytofu/plugins), which does not exist in the
 // build tree, so it is not asserted here. Its end-to-end resolution is covered by

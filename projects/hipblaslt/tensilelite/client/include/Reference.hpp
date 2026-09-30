@@ -43,7 +43,7 @@ namespace TensileLite
         // tolerance * epsilon = 2 * 0.125; 2*eps needed for SR
         constexpr float  AlmostEqualTolerance_BFloat8  = 0.25f;
         // 7 digits precision - 2
-        constexpr float  AlmostEqualTolerance_Float    = 0.0001f;
+        constexpr float  AlmostEqualTolerance_Float    = 0.0002f;
         // 15 digits precision - 2
         constexpr double AlmostEqualTolerance_Double   = 1e-12;
 

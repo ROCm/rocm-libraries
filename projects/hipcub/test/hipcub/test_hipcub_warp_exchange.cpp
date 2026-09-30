@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -133,7 +133,11 @@ __device__ auto warp_exchange_test(T* d_input, T* d_output)
         thread_data[i] = d_input[threadIdx.x * ItemsPerThread + i];
     }
 
-    using WarpExchangeT = ::hipcub::WarpExchange<T, ItemsPerThread, LogicalWarpSize, Algorithm>;
+    using WarpExchangeT                                           = ::hipcub::WarpExchange<T,
+                                                 ItemsPerThread,
+                                                 LogicalWarpSize,
+                                                 1, // ARCH
+                                                 Algorithm>;
     constexpr unsigned warps_in_block = BlockSize / LogicalWarpSize;
     __shared__ typename WarpExchangeT::TempStorage temp_storage[warps_in_block];
     const unsigned                                 warp_id = threadIdx.x / LogicalWarpSize;
@@ -218,7 +222,7 @@ std::enable_if_t<is_warp_exchange_test_enabled<Params, Algorithm>> run_warp_exch
         input[i] = test_utils::convert_to_device<T>(i);
     }
     std::vector<T> expected;
-    if(std::is_same_v<Op, BlockedToStripedOp>)
+    if(std::is_same<Op, BlockedToStripedOp>::value)
     {
         expected = input;
         input    = stripe_vector(input, warp_size, items_per_thread);

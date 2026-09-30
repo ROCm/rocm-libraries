@@ -22,6 +22,7 @@
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
 #include <hipdnn_frontend/node/LayernormBackwardNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
+#include <hipdnn_frontend/node/MoeGroupedMatmulBwdNode.hpp>
 #include <hipdnn_frontend/node/MoeGroupedMatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
@@ -533,4 +534,14 @@ TEST(TestOperationUnpacker, CreateNodeForTypeCreatesMoeGroupedMatmulNode)
     EXPECT_TRUE(error.is_good()) << error.get_message();
     ASSERT_NE(node, nullptr);
     EXPECT_EQ(node->getNodeType(), NodeType::MOE_GROUPED_MATMUL);
+}
+
+TEST(TestOperationUnpacker, CreateNodeForTypeCreatesMoeGroupedMatmulBwdNode)
+{
+    const GraphAttributes graphAttrs;
+    const auto [node, error]
+        = createNodeForType(HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_BWD_EXT, graphAttrs);
+    EXPECT_TRUE(error.is_good()) << error.get_message();
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(node->getNodeType(), NodeType::MOE_GROUPED_MATMUL_BWD);
 }

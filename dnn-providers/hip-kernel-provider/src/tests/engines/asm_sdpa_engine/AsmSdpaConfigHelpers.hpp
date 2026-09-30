@@ -3,7 +3,9 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -11,25 +13,35 @@
 #include "asm_fmha_v3_fwd_configs.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
 namespace asm_sdpa_engine
 {
 
 /**
- * @brief A test case containing a graph and name.
+ * @brief Lightweight, GPU-free parameters for building an SDPA forward graph.
  *
- * Uses shared_ptr for Graph since Graph is not copyable.
+ * The graph is built on demand in the test fixture (buildSdpaFwdGraph) so it and
+ * its GPU-backed backend descriptors are destroyed while the HIP runtime is still
+ * alive, rather than during GTest's atexit teardown of the static parameter list.
  */
 struct GraphTestCase
 {
-    std::shared_ptr<hipdnn_frontend::graph::Graph> graph;
+    fmha_v3_fwdConfig config;
+
+    int64_t batch = 2;
+    int64_t numHeads = 4;
+    int64_t seqQ = 256;
+    int64_t seqKv = 128;
+
+    std::optional<float> attnScale;
+    bool withStats = false;
+
     std::string name;
     std::string arch;
 
-    GraphTestCase(std::shared_ptr<hipdnn_frontend::graph::Graph> g,
-                  std::string desc,
-                  std::string archId)
-        : graph(std::move(g))
+    GraphTestCase(fmha_v3_fwdConfig cfg, std::string desc, std::string archId)
+        : config(std::move(cfg))
         , name(std::move(desc))
         , arch(std::move(archId))
     {
@@ -90,35 +102,39 @@ struct SdpaFwdTestCase
 std::string getConfigDescription(const fmha_v3_fwdConfig& config);
 
 /**
- * @brief Converts a kernel config to a compatible hipdnn_frontend::Graph.
+ * @brief Wraps a kernel config in a GraphTestCase descriptor with default dimensions.
  *
- * Creates a graph with dimensions matching the config's hdim_q and hdim_v,
- * using arbitrary values for batch, num_heads, seq_q, and seq_kv.
- * Supports all MaskType values and BATCH/GROUP modes.
- *
- * @param config The fmha_v3_fwdConfig containing kernel configuration
- * @return GraphTestCase containing the graph and description
+ * @param config The kernel configuration
+ * @param withStats When true, sets the withStats flag on the test case
  */
-GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config);
+GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config, bool withStats = false);
 
-/**
- * @brief Generates compatible graph test cases for all configs.
- * @note ConfigType requires a corresponding configToCompatibleGraphTestCase and getConfigDescription function
- * @todo If we upgrade to C++20, add a concept that guarantees these functions are declared
- *
- * @tparam ConfigType The config type
- * @param configMap The map of all configs
- * @return Vector of GraphTestCase objects for each config
- */
+/// An SDPA forward graph together with its STATS output attribute.
+struct SdpaFwdGraph
+{
+    std::shared_ptr<hipdnn_frontend::graph::Graph> graph;
+    /// The log-sum-exp output, or null when the test case does not enable stats.
+    std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> stats;
+};
+
+/// Builds the SDPA forward graph topology described by @p testCase, enabling stats when
+/// testCase.withStats is set and returning that output's attribute alongside the graph so
+/// callers can address it by identity.
+SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase);
+
+/// GraphTestCase descriptors for every config in @p configMap, stats-enabled when
+/// @p withStats is set. ConfigType requires matching configToTestCase and
+/// getConfigDescription overloads.
 template <typename ConfigType>
 std::vector<GraphTestCase>
-    getCompatibleGraphTestCases(const std::unordered_map<std::string, ConfigType>& configMap)
+    getCompatibleGraphTestCases(const std::unordered_map<std::string, ConfigType>& configMap,
+                                bool withStats = false)
 {
     std::vector<GraphTestCase> testCases;
     testCases.reserve(configMap.size());
     for(const auto& [key, config] : configMap)
     {
-        testCases.push_back(configToCompatibleGraphTestCase(config));
+        testCases.push_back(configToTestCase(config, withStats));
     }
     return testCases;
 }

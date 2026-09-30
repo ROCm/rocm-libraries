@@ -49,8 +49,8 @@ def get_sizes(config: Dict) -> List[List[int]]:
             logger.info("Grid density not specified, using default value of 4")
             config["GRID_DENSITY"] = 4
 
-        if config['MACROTILE_OPT'] and config['GA']:
-            raise NotImplementedError(f'GA MacroTile Optimization is not implemented in Grid mode.')
+        if config['MACROTILE_OPT']:
+            raise NotImplementedError('MACROTILE_OPT is not supported in grid mode.')
         logger.info(" Generating Grid-based library sizes ...")
         all_sizes = _generate_grid_sizes(config)
         return _deduplicate([s for sizez in all_sizes for s in sizez])

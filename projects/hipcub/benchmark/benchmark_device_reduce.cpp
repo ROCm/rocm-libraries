@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,182 +20,142 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_benchmark_header.hpp"
+#include "benchmark_utils.hpp"
+
 #include "hipcub/config.hpp"
 
-// HIP API
 #include <hipcub/device/device_reduce.hpp>
 
-#ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 128;
-#endif
-
-const unsigned int batch_size  = 10;
-const unsigned int warmup_size = 5;
-
 template<class T, class OutputT, class ReduceKernel>
-void run_benchmark(benchmark::State& state,
-                   size_t            size,
-                   const hipStream_t stream,
-                   ReduceKernel      reduce)
+class reduce_benchmark : public primbench::benchmark_interface
 {
-    std::vector<T> input = benchmark_utils::get_random_data<T>(size, T(0), T(1000));
-
-    T*       d_input;
-    OutputT* d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, sizeof(OutputT)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Allocate temporary storage memory
-    size_t temp_storage_size_bytes = 0;
-    void*  d_temp_storage          = nullptr;
-    // Get size of d_temp_storage
-    HIP_CHECK(reduce(d_temp_storage, temp_storage_size_bytes, d_input, d_output, size, stream));
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
-    HIP_CHECK(hipDeviceSynchronize());
-    for(size_t i = 0; i < warmup_size; i++)
+    primbench::json meta() const override
     {
-        HIP_CHECK(reduce(d_temp_storage, temp_storage_size_bytes, d_input, d_output, size, stream));
+        return primbench::json{}
+            .add("algo", "device_reduce")
+            .add("lvl", "device")
+            .add("data_type", primbench::name<T>())
+            .add("op", ReduceKernel::name);
     }
-    HIP_CHECK(hipDeviceSynchronize());
 
-    for(auto _ : state)
+    void run(primbench::state& state) override
     {
-        auto start = std::chrono::high_resolution_clock::now();
+        const size_t items  = state.size;
+        const auto&  stream = state.stream;
 
-        for(size_t i = 0; i < batch_size; i++)
-        {
-            HIP_CHECK(
-                reduce(d_temp_storage, temp_storage_size_bytes, d_input, d_output, size, stream));
-        }
-        HIP_CHECK(hipStreamSynchronize(stream));
+        std::vector<T> input = benchmark_utils::get_random_data<T>(items, T(0), T(1000));
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds
-            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        state.SetIterationTime(elapsed_seconds.count());
+        T*       d_input;
+        OutputT* d_output;
+        HIP_CHECK(hipMalloc(&d_input, items * sizeof(T)));
+        HIP_CHECK(hipMalloc(&d_output, sizeof(OutputT)));
+        HIP_CHECK(hipMemcpy(d_input, input.data(), items * sizeof(T), hipMemcpyHostToDevice));
+
+        auto reduce = ReduceKernel::kernel;
+
+        void*  d_temp_storage = nullptr;
+        size_t temp_storage_bytes;
+
+        const auto launch = [&] {
+            HIP_CHECK(reduce(d_temp_storage, temp_storage_bytes, d_input, d_output, items, stream));
+        };
+
+        launch();
+
+        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+        HIP_CHECK(hipDeviceSynchronize());
+
+        state.set_items(items);
+        state.add_writes<T>(items);
+
+        state.run(launch);
+
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output));
+        HIP_CHECK(hipFree(d_temp_storage));
     }
-    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
-    HIP_CHECK(hipFree(d_temp_storage));
-}
+};
 
 template<typename T, typename Op>
 struct Benchmark;
 
-template<typename T>
-struct Benchmark<T, benchmark_utils::plus>
+template<class T>
+struct sum_kernel
 {
-    static void run(benchmark::State& state, size_t size, const hipStream_t stream)
-    {
-        hipError_t (*ptr_to_sum)(void*, size_t&, T*, T*, int, hipStream_t)
-            = &hipcub::DeviceReduce::Sum;
-        run_benchmark<T, T>(state, size, stream, ptr_to_sum);
-    }
+    static constexpr const char* name = "sum";
+
+    static constexpr hipError_t (*kernel)(void*, size_t&, T*, T*, int, hipStream_t)
+        = &hipcub::DeviceReduce::Sum;
 };
 
 template<typename T>
-struct Benchmark<T, benchmark_utils::minimum>
+struct Benchmark<T, hipcub::Sum>
 {
-    static void run(benchmark::State& state, size_t size, const hipStream_t stream)
-    {
-        hipError_t (*ptr_to_min)(void*, size_t&, T*, T*, int, hipStream_t)
-            = &hipcub::DeviceReduce::Min;
-        run_benchmark<T, T>(state, size, stream, ptr_to_min);
-    }
+    using type = reduce_benchmark<T, T, sum_kernel<T>>;
 };
 
+template<class T>
+struct min_kernel
+{
+    static constexpr const char* name = "min";
+
+    static constexpr hipError_t (*kernel)(void*, size_t&, T*, T*, int, hipStream_t)
+        = &hipcub::DeviceReduce::Min;
+};
+
+template<typename T>
+struct Benchmark<T, hipcub::Min>
+{
+    using type = reduce_benchmark<T, T, min_kernel<T>>;
+};
+
+template<class T>
+struct argmin_kernel
+{
+    static constexpr const char* name = "argmin";
+
+    using Difference = int;
+    using Iterator   = hipcub::ArgIndexInputIterator<T*, Difference>;
+    using KeyValue   = typename Iterator::value_type;
+
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+    static constexpr hipError_t (*kernel)(void*, size_t&, T*, KeyValue*, int, hipStream_t)
+        = &hipcub::DeviceReduce::ArgMin;
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+};
 template<typename T>
 struct Benchmark<T, hipcub::ArgMin>
 {
-    using Difference = int;
-    using Iterator   = typename hipcub::ArgIndexInputIterator<T*, Difference>;
-    using KeyValue   = typename Iterator::value_type;
-
-    static void run(benchmark::State& state, size_t size, const hipStream_t stream)
-    {
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-        hipError_t (*ptr_to_argmin)(void*, size_t&, T*, KeyValue*, int, hipStream_t)
-        = &hipcub::DeviceReduce::ArgMin;
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
-        run_benchmark<T, KeyValue>(state, size, stream, ptr_to_argmin);
-    }
+    using type = reduce_benchmark<T, typename argmin_kernel<T>::KeyValue, argmin_kernel<T>>;
 };
 
-#define CREATE_BENCHMARK(T, REDUCE_OP)                                                \
-    benchmark::RegisterBenchmark(std::string("device_reduce"                          \
-                                             "<data_type:" #T ",op:" #REDUCE_OP ">.") \
-                                     .c_str(),                                        \
-                                 &Benchmark<T, REDUCE_OP>::run,                       \
-                                 size,                                                \
-                                 stream)
+#define CREATE_BENCHMARK(T, REDUCE_OP) executor.queue<Benchmark<T, REDUCE_OP>::type>()
 
-#define CREATE_BENCHMARKS(REDUCE_OP)                                             \
-    CREATE_BENCHMARK(int, REDUCE_OP), CREATE_BENCHMARK(long long, REDUCE_OP),    \
-        CREATE_BENCHMARK(float, REDUCE_OP), CREATE_BENCHMARK(double, REDUCE_OP), \
-        CREATE_BENCHMARK(int8_t, REDUCE_OP)
+#define CREATE_BENCHMARKS(REDUCE_OP)        \
+    CREATE_BENCHMARK(int, REDUCE_OP);       \
+    CREATE_BENCHMARK(int64_t, REDUCE_OP); \
+    CREATE_BENCHMARK(float, REDUCE_OP);     \
+    CREATE_BENCHMARK(double, REDUCE_OP);    \
+    CREATE_BENCHMARK(int8_t, REDUCE_OP)
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.run_and_exit_if_error();
+    primbench::settings settings;
+    settings.size                 = 128 * primbench::MiB; // In items
+    settings.min_gpu_ms_per_batch = 100;
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
+    primbench::executor executor(argc, argv, settings);
 
-    std::cout << "benchmark_device_reduce" << std::endl;
-
-    // HIP
-    hipStream_t     stream = 0; // default
-    hipDeviceProp_t devProp;
-    int             device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
-    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
-
-    using custom_double2 = benchmark_utils::custom_type<double, double>;
-
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks = {
-        CREATE_BENCHMARKS(benchmark_utils::plus),
-        CREATE_BENCHMARK(custom_double2, benchmark_utils::plus),
-        CREATE_BENCHMARKS(benchmark_utils::minimum),
+    CREATE_BENCHMARKS(hipcub::Sum);
+    CREATE_BENCHMARK(custom_double2, hipcub::Sum);
+    CREATE_BENCHMARKS(hipcub::Min);
 #ifdef HIPCUB_ROCPRIM_API
-        CREATE_BENCHMARK(custom_double2, benchmark_utils::minimum),
+    CREATE_BENCHMARK(custom_double2, hipcub::Min);
 #endif
-        CREATE_BENCHMARKS(hipcub::ArgMin),
+    CREATE_BENCHMARKS(hipcub::ArgMin);
 #ifdef HIPCUB_ROCPRIM_API
-        CREATE_BENCHMARK(custom_double2, hipcub::ArgMin),
+    CREATE_BENCHMARK(custom_double2, hipcub::ArgMin);
 #endif
-    };
 
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-
-    return 0;
+    executor.run();
 }

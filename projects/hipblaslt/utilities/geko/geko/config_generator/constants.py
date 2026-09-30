@@ -7,9 +7,9 @@ VERSION = "2.01"
 # apply value with N_dim <=step
 stepValue_EnqueuesPerSync = [[64*64*8192,200], [256*256*8192,30], [1024*1024*8192,20], [1000000000000000,10]]
 
-dataSize = {'H': 2, 'B': 2, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 1, 'X': 4, 'F8': 1,'F8N': 1, 'F8B8': 1, 'B8F8': 1, 'X1': 4}
+dataSize = {'H': 2, 'B': 2, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 1, 'X': 4, 'F8': 1, 'F8N': 1, 'F8B8': 1, 'B8F8': 1, 'X1': 4, 'F4': 1}
 
-LIST_OF_MIN_DIM={'H': 7, 'B': 7, 'S': 3, 'D': 1, 'C': 1, 'Z': 1, 'I8': 7, 'X': 3, 'F8': 7,'F8N': 7, 'F8B8': 7, 'B8F8': 7, 'X1': 4}
+LIST_OF_MIN_DIM={'H': 7, 'B': 7, 'S': 3, 'D': 1, 'C': 1, 'Z': 1, 'I8': 7, 'X': 3, 'F8': 7, 'F8N': 7, 'F8B8': 7, 'B8F8': 7, 'X1': 4, 'F4': 7}
 
 depthURange = {}  # [for small/mid MT], [for large  MT]
 depthURange['H'] = [[64,128,256,512], [32,64,128,256], [32,64,128], [32,64]]
@@ -25,8 +25,10 @@ depthURange['F8'] = depthURange['I8']
 depthURange['F8N'] = depthURange['I8']
 depthURange['F8B8'] = depthURange['F8']
 depthURange['B8F8'] = depthURange['F8']
+# fp4 MI16x16x128: DepthU must be a multiple of 2*MI_K = 256.
+depthURange['F4'] = [[256,512,768,1024], [256,512,768], [256,512], [256]]
 
-computeDataTypeSize = {'H': 4, 'B': 4, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 4, 'X': 4, 'F8': 4,'F8N': 4, 'F8B8': 4, 'B8F8': 4, 'X1': 4}
+computeDataTypeSize = {'H': 4, 'B': 4, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 4, 'X': 4, 'F8': 4, 'F8N': 4, 'F8B8': 4, 'B8F8': 4, 'X1': 4, 'F4': 4}
 
 
 # TODO update for every new arch, or import from tensilelite commons
@@ -41,6 +43,7 @@ validMFMA["Z"] = validMFMA["D"]
 validMFMA["X"] = validMFMA["B"]
 validMFMA["X1"] = validMFMA["B"]
 validMFMA["F8"] = [[32,32,16,1], [16,16,32,1], [32,32,64,1], [16,16,128,1]]
+validMFMA["F4"] = [[16,16,128,1], [32,32,64,1]]
 validMFMA["B8"] = validMFMA["F8"]
 validMFMA["F8N"] = validMFMA["F8"]
 validMFMA["F8B8"] = validMFMA["F8"]
@@ -51,23 +54,42 @@ validMFMA["I8"] = validMFMA["H"] + validMFMA["F8"]
 
 MAX_GSU_WORKSPACE_SIZE = 128 * 1024 * 1024
 
-# TODO: check if we can use larger MT0xMT1 for all datatypes
-LARGE_MT0xMT1=256*464
-REGULAR_MT0xMT1=256*256
-LIST_OF_MT_MAX_SIZE = {
-    'H': LARGE_MT0xMT1,
-    'B': LARGE_MT0xMT1,
-    'S': REGULAR_MT0xMT1, # Is larger MT valid for for F32?
-    'D': REGULAR_MT0xMT1,
-    'C': 32768,
-    'Z': 16384,
-    'I8': LARGE_MT0xMT1,
-    'X': LARGE_MT0xMT1, # X3 (3 BF16 implementation)
-    'X1': LARGE_MT0xMT1, # X1 (1 BF16 implementation)
-    'F8': LARGE_MT0xMT1,
-    'F8N': LARGE_MT0xMT1,
-    'F8B8': LARGE_MT0xMT1,
-    'B8F8': LARGE_MT0xMT1}
+_LARGE_MT0xMT1_DEFAULT = 256 * 464
+_REGULAR_MT0xMT1_DEFAULT = 256 * 256
+
+
+def _build_mt_max_size(large: int, regular: int):
+    return {
+        'H': large,
+        'B': large,
+        'S': regular,
+        'D': regular,
+        'C': 32768,
+        'Z': 16384,
+        'I8': large,
+        'X': large,
+        'X1': large,
+        'F8': large,
+        'F8N': large,
+        'F8B8': large,
+        'B8F8': large,
+        'F4': large,
+    }
+
+
+LIST_OF_MT_MAX_SIZE_DEFAULT = _build_mt_max_size(_LARGE_MT0xMT1_DEFAULT, _REGULAR_MT0xMT1_DEFAULT)
+
+
+def get_list_of_mt_max_size(search_space=None):
+    """Return MT-area cap dict for search_space.
+
+    Stage 1 supports heuristic/generic only, both using default caps.
+    """
+    return LIST_OF_MT_MAX_SIZE_DEFAULT
+
+
+# Backward-compatible alias.
+LIST_OF_MT_MAX_SIZE = LIST_OF_MT_MAX_SIZE_DEFAULT
 
 ONLY_INCLUDE_MIs_GFX950 = {
     'H':
@@ -119,6 +141,11 @@ ONLY_INCLUDE_MIs_GFX950 = {
     ],
     'F8':  # similar to I8
 
+    [
+        [16, 16, 128, 1],
+        [32, 32, 64, 1],
+    ],
+    'F4':  # fp4 / MX
     [
         [16, 16, 128, 1],
         [32, 32, 64, 1],
@@ -201,11 +228,27 @@ ONLY_INCLUDE_MIs_GFX942 = {
 
 }
 
+# commenting out other data types so that if and when required it fails and
+# we confirm exact MIs needed for each data type.
+ONLY_INCLUDE_MIs_MI45X = {
+    'H': [[16, 16, 32, 1]],
+    'B': [[16, 16, 32, 1]],
+    # 'X': [[16, 16, 32, 1]],
+    # 'X1': [[16, 16, 32, 1]],
+    # 'S': [[16, 16, 4, 1]],
+    # 'I8': [[16, 16, 32, 1], [16, 16, 64, 1]],
+    # 'F8': [[16, 16, 64, 1], [16, 16, 128, 1], [32, 16, 128, 1]],
+    # 'F8B8': [[16, 16, 64, 1], [16, 16, 128, 1], [32, 16, 128, 1]],
+    # 'B8F8': [[16, 16, 64, 1], [16, 16, 128, 1], [32, 16, 128, 1]],
+    # 'F4': [[16, 16, 128, 1], [32, 16, 128, 1]],
+}
+
 from geko.constants import SUPPORTED_ARCH
 
 # Tensile LibraryLogic ``DeviceNames`` as emitted in YAML (asm_full conventions).
 LIBRARY_LOGIC_DEVICE_NAMES_GFX950 = '["Device 75a0"]'
 LIBRARY_LOGIC_DEVICE_NAMES_GFX942 = '["Device 0049", "Device 0050"]'
+LIBRARY_LOGIC_DEVICE_NAMES_GFX1250 = '["Device 73f0"]'
 
 # Shared Tensile LibraryLogic fields (ScheduleName / ArchitectureName / DeviceNames) per silicon family.
 _LIBRARY_LOGIC_FIELDS_GFX950 = {
@@ -218,17 +261,25 @@ _LIBRARY_LOGIC_FIELDS_GFX942 = {
     "ArchitectureName": '"gfx942"',
     "DeviceNames": LIBRARY_LOGIC_DEVICE_NAMES_GFX942,
 }
+_LIBRARY_LOGIC_FIELDS_GFX1250 = {
+    "ScheduleName": '"gfx1250"',
+    "ArchitectureName": '"gfx1250"',
+    "DeviceNames": LIBRARY_LOGIC_DEVICE_NAMES_GFX1250,
+}
 
-# gfx-style ARCH (YAML) → CUs, XCC, dtype→MI allowlist, Tensile LibraryLogic fields
-# (keys align with geko.constants.SUPPORTED_ARCH).
+# gfx-style ARCH (YAML) → CUs, XCC, dtype→MI allowlist, Tensile LibraryLogic fields, MX scale value,
+# MX block size (keys align with geko.constants.SUPPORTED_ARCH).
+# mx_scale: hipblaslt scaleA/scaleB value for MX block scaling (0 = MX not supported on this arch).
+# mx_block_size: MXBlockA/MXBlockB size (None = MX not supported on this arch).
 _ARCH_SPECS = {
-    "gfx950": (256, 8, ONLY_INCLUDE_MIs_GFX950, _LIBRARY_LOGIC_FIELDS_GFX950),
-    "gfx950_128cu": (128, 4, ONLY_INCLUDE_MIs_GFX950, _LIBRARY_LOGIC_FIELDS_GFX950),
-    "gfx942": (304, 8, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942),
-    "gfx942_80cu": (80, 4, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942),
-    "gfx942_38cu": (38, 8, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942),
-    "gfx942_20cu": (20, 4, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942),
-    "gfx942_228cu": (228, 6, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942),
+    "gfx950": (256, 8, ONLY_INCLUDE_MIs_GFX950, _LIBRARY_LOGIC_FIELDS_GFX950, 1001, 32),
+    "gfx950_128cu": (128, 4, ONLY_INCLUDE_MIs_GFX950, _LIBRARY_LOGIC_FIELDS_GFX950, 1001, 32),
+    "gfx942": (304, 8, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0, None),
+    "gfx942_80cu": (80, 4, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0, None),
+    "gfx942_38cu": (38, 8, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0, None),
+    "gfx942_20cu": (20, 4, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0, None),
+    "gfx942_228cu": (228, 6, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0, None),
+    "gfx1250": (256, 8, ONLY_INCLUDE_MIs_MI45X, _LIBRARY_LOGIC_FIELDS_GFX1250, 3, 32),
 }
 
 HARDWARE_MAP = {
@@ -237,8 +288,10 @@ HARDWARE_MAP = {
         "XCC": xcc,
         "ONLY_INCLUDE_MIs": mis,
         "LibraryLogic": ll,
+        "mx_scale": mx_scale,
+        "mx_block_size": mx_block_size,
     }
-    for arch, (cus, xcc, mis, ll) in _ARCH_SPECS.items()
+    for arch, (cus, xcc, mis, ll, mx_scale, mx_block_size) in _ARCH_SPECS.items()
 }
 
 assert set(SUPPORTED_ARCH) == set(_ARCH_SPECS), (
@@ -256,12 +309,10 @@ LIST_OF_WAVEs_TO_INCLUDE = [[4, 1], [2, 2], [1, 4], [1, 2], [2, 1], [1, 1]]
 
 # MT Configs
 MIN_MT0 = 4
-MAX_MT0 = 512
+MAX_MT0 = 1024
 
 MIN_MT1 = 4
-MAX_MT1 = 512
-
-MAX_MT_AREA = 464 * 256
+MAX_MT1 = 1024
 
 # <<< Controls for number of MIs in the config file
 # these params are only for MI_FILTER = 2
@@ -278,15 +329,16 @@ ROUND3 = 5
 # The  larger the number is, the more MI it keeps
 LSUTHRESHOLD = 65536
 
-# Cap on kernels per config file for non-GA (exhaustive) tuning.
-# In GA mode this is ignored (set to sys.maxsize). User can override via config YAML.
+# Kernel cap for heuristic search space (generic uses sys.maxsize).
 MAX_NUM_KERNELS_PER_CONFIG = 180_000_000
 
 
-# GA VALIDATION PROFILE NUM ELEMENTS TO VALIDATE
-# This is used to cap the number of elements used for GA kernel validation 
-# after the last generation.
-GA_VALIDATION_PROFILE_MAP = {
+VALID_BACKENDS = ("ductile", "tensile")
+VALID_SEARCH_SPACES = ("heuristic", "generic", "subtile")
+
+
+# Ductile validation profile: caps elements validated after the last generation.
+DUCTILE_VALIDATION_PROFILE_MAP = {
     0: 0, 
     1: 128, 
     2: -1,  # -1 means no cap (use all elements)
@@ -300,8 +352,9 @@ REQUIRED_CONFIG_FIELDS = ["TRANSA", "TRANSB", "DataType", "DestDataType", "Compu
 # User YAML overrides via ``setdefault`` in ``load_input_config._prepare_config``.
 # To add or change per-ARCH optional defaults, edit ``CONFIG_DEFAULTS_BY_ARCH`` below.
 _CONFIG_OPTIONAL_COMMON = {
+    "MX": False,
     "StreamK": True,
-    "GA": True,
+    "search_space": None,
     "MACROTILE_OPT": False,
     "MT_DU": None,
     "USE_HEURISTICS": False,
@@ -310,18 +363,19 @@ _CONFIG_OPTIONAL_COMMON = {
     "MI_FILTER": 2,
     "EPILOGUES": True,
     "CLUSTER": 0,
-    "GA_VALIDATION_PROFILE": 1,
+    "DUCTILE_VALIDATION_PROFILE": 1,
 }
 
 # Config fields that can be overridden by environment variables (if set). Used in _apply_env_config_overrides.
 ENV_UPDATABLE_KEYS = {
     "StreamK",
     "MI_FILTER",
-    "GA_VALIDATION_PROFILE",
+    "DUCTILE_VALIDATION_PROFILE",
 }
 
 _CMS_DEFAULTS_GFX950 = {"CMS": True, "CMS_PRIORITY": False}
-_CMS_DEFAULTS_GFX942_FAMILY = {"CMS": False, "CMS_PRIORITY": False}
+_CMS_DEFAULTS_GFX942_FAMILY = {"CMS": False, "CMS_PRIORITY": False, "StreamK": False}
+_CMS_DEFAULTS_GFX1250 = {"CMS": False, "CMS_PRIORITY": False}
 
 CONFIG_DEFAULTS_BY_ARCH = {
     "gfx950": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX950},
@@ -331,6 +385,7 @@ CONFIG_DEFAULTS_BY_ARCH = {
     "gfx942_38cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX942_FAMILY},
     "gfx942_20cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX942_FAMILY},
     "gfx942_228cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX942_FAMILY},
+    "gfx1250": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250},
 }
 
 assert set(CONFIG_DEFAULTS_BY_ARCH) == set(SUPPORTED_ARCH), (

@@ -69,7 +69,6 @@ RppStatus rppt_erode_host(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstP
                           RpptDescPtr dstDescPtr, Rpp32u kernelSize, RpptROIPtr roiTensorPtrSrc,
                           RpptRoiType roiType, rppHandle_t rppHandle);
 
-#ifdef GPU_SUPPORT
 /*! \brief Erode augmentation on HIP backend for a NCHW/NHWC layout tensor
  * \details The erode augmentation runs for a batch of RGB(3 channel) / greyscale(1 channel) images
  * with an NHWC/NCHW tensor layout.<br>
@@ -96,7 +95,6 @@ RppStatus rppt_erode_host(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstP
 RppStatus rppt_erode(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                      RpptDescPtr dstDescPtr, Rpp32u kernelSize, RpptROIPtr roiTensorPtrSrc,
                      RpptRoiType roiType, rppHandle_t rppHandle, RppBackend executionBackend);
-#endif  // GPU_SUPPORT
 
 /*! \brief Dilate augmentation on HOST backend for a NCHW/NHWC layout tensor
  * \details The dilate augmentation runs for a batch of RGB(3 channel) / greyscale(1 channel) images
@@ -125,7 +123,6 @@ RppStatus rppt_dilate_host(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
                            RpptDescPtr dstDescPtr, Rpp32u kernelSize, RpptROIPtr roiTensorPtrSrc,
                            RpptRoiType roiType, rppHandle_t rppHandle);
 
-#ifdef GPU_SUPPORT
 /*! \brief Dilate augmentation on HIP backend for a NCHW/NHWC layout tensor
  * \details The dilate augmentation runs for a batch of RGB(3 channel) / greyscale(1 channel) images
  * with an NHWC/NCHW tensor layout.<br>
@@ -152,7 +149,6 @@ RppStatus rppt_dilate_host(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
 RppStatus rppt_dilate(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                       RpptDescPtr dstDescPtr, Rpp32u kernelSize, RpptROIPtr roiTensorPtrSrc,
                       RpptRoiType roiType, rppHandle_t rppHandle, RppBackend executionBackend);
-#endif  // GPU_SUPPORT
 
 /*! @}
  */

@@ -6,9 +6,12 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace hipdnn_data_sdk::utilities
@@ -185,5 +188,43 @@ std::enable_if_t<!std::is_arithmetic_v<T>, std::string> vecToString(const std::v
     vecToStream(stream, vec);
     return stream.str();
 }
+
+namespace detail
+{
+
+/// UTF-8 text of @p path for a diagnostic message, never for comparison or loading.
+///
+/// A downstream consumer may compile these headers as C++20, where
+/// std::filesystem::path::u8string() returns std::u8string; the char8_t bytes are
+/// bridged explicitly rather than converted through the lossy active code page.
+///
+/// A path that cannot be expressed as UTF-8 -- an unpaired UTF-16 surrogate on
+/// Windows, for instance -- yields a fixed ASCII marker instead of propagating the
+/// conversion error out of the caller's diagnostic, which would abandon candidates
+/// that are still worth trying. Only conversion errors are absorbed: this function
+/// allocates, so it is not noexcept and an allocation failure still propagates.
+inline std::string pathForDiagnostic(const std::filesystem::path& path)
+{
+    try
+    {
+#ifdef __cpp_lib_char8_t
+        const std::u8string utf8 = path.u8string();
+        return {reinterpret_cast<const char*>(utf8.data()), utf8.size()};
+#else
+        // Already a std::string; returning it directly moves rather than copies.
+        return path.u8string();
+#endif
+    }
+    catch(const std::system_error&)
+    {
+        return "<unprintable>";
+    }
+    catch(const std::range_error&)
+    {
+        return "<unprintable>";
+    }
+}
+
+} // namespace detail
 
 } // namespace hipdnn_data_sdk::utilities

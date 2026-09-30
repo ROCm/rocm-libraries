@@ -258,3 +258,112 @@ TEST(TestRMSNormBackwardAttributes, SetTensorsConstRef)
     EXPECT_NE(scaleTensor, nullptr);
     EXPECT_NE(dxTensor, nullptr);
 }
+
+TEST(TestRMSNormBackwardAttributes, LogicalAndStrictEquality)
+{
+    hipdnn_frontend::graph::RMSNormBackwardAttributes attr1;
+    attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_compute_dbias(true);
+
+    auto dy1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    dy1->set_uid(1).set_name("DY").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_dy(dy1);
+
+    auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    x1->set_uid(2).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_x(x1);
+
+    auto scale1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    scale1->set_uid(3).set_name("Scale").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_scale(scale1);
+
+    auto invRms1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    invRms1->set_uid(4).set_name("InvRms").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_inv_rms(invRms1);
+
+    auto dx1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    dx1->set_uid(5).set_name("DX").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_dx(dx1);
+
+    auto dscale1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    dscale1->set_uid(6).set_name("DScale").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_dscale(dscale1);
+
+    auto dbias1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    dbias1->set_uid(7).set_name("DBias").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_dbias(dbias1);
+
+    hipdnn_frontend::graph::RMSNormBackwardAttributes attr2;
+    attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_compute_dbias(true);
+
+    auto dy2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    dy2->set_uid(1).set_name("DY").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_dy(dy2);
+
+    auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    x2->set_uid(2).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_x(x2);
+
+    auto scale2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    scale2->set_uid(3).set_name("Scale").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_scale(scale2);
+
+    auto invRms2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    invRms2->set_uid(4).set_name("InvRms").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_inv_rms(invRms2);
+
+    auto dx2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    dx2->set_uid(5).set_name("DX").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_dx(dx2);
+
+    auto dscale2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    dscale2->set_uid(6).set_name("DScale").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_dscale(dscale2);
+
+    auto dbias2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    dbias2->set_uid(7).set_name("DBias").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_dbias(dbias2);
+
+    // Initial check: everything matches exactly
+    EXPECT_TRUE(attr1 == attr2);
+    EXPECT_FALSE(attr1 != attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+
+    // Structural tensor mismatch: different UID/name/type entirely
+    auto structuralMismatchDy = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    structuralMismatchDy->set_uid(99).set_name("MismatchedDY");
+    attr2.set_dy(structuralMismatchDy);
+
+    EXPECT_TRUE(attr1 != attr2);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2)); // Structural/type gap implies logical inequality
+    attr2.set_dy(dy2); // Revert
+
+    // compute_dbias mismatch: semantic, must fail both checks
+    attr2.set_compute_dbias(false);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_compute_dbias(true); // Revert
+
+    // has_dbias is an alias for set_compute_dbias — verify it produces the
+    // same equality behavior as the primary setter
+    hipdnn_frontend::graph::RMSNormBackwardAttributes aliasAttr1;
+    aliasAttr1.set_compute_dbias(true);
+    hipdnn_frontend::graph::RMSNormBackwardAttributes aliasAttr2;
+    aliasAttr2.has_dbias(true);
+    EXPECT_TRUE(aliasAttr1 == aliasAttr2);
+    EXPECT_TRUE(aliasAttr1.logicallyEquals(aliasAttr2));
+
+    // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
+    auto logicalMatchDy = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    logicalMatchDy
+        ->set_uid(555) // Diverges from attr1's dy1 (uid: 1)
+        .set_name("DIVERGENT_NAME") // Diverges from attr1's dy1 ("DY")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT); // Layout matches
+    attr2.set_dy(logicalMatchDy);
+
+    // Expecting: strict evaluation fails, but functional logical comparison passes
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+}

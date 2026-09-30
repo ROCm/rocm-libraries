@@ -134,7 +134,7 @@ def test_output_writer_scripts_and_orchestrator(tmp_path: Path) -> None:
     assert (tmp_path / "Config_HHS_NN.log").is_file()
 
 
-def _section_cfg(dtype="H", epilogues=True, ga=False):
+def _section_cfg(dtype="H", epilogues=True, backend="tensile", search_space="heuristic"):
     gt = GemmType.from_tensile("N", "N", dtype, dtype, "S" if dtype != "D" else "D")
     return {
         "GemmProblem": type("GP", (), {"gemm_type": gt})(),
@@ -142,25 +142,26 @@ def _section_cfg(dtype="H", epilogues=True, ga=False):
         "CUs": 256,
         "XCC": 8,
         "EPILOGUES": epilogues,
-        "GA": ga,
+        "backend": backend,
+        "search_space": search_space,
         "SIZE_OPTION": 0,
     }
 
 
 def test_config_sections_generator_paths(monkeypatch) -> None:
-    gen = csg.ConfigSectionGenerator(_section_cfg(dtype="H", epilogues=True, ga=False))
+    gen = csg.ConfigSectionGenerator(_section_cfg(dtype="H", epilogues=True, backend="tensile", search_space="heuristic"))
     assert gen._is_tf32("X") is True
     assert gen._convert_type("X1") == "B"
     assert gen._calc_iters(16, 16, 1, 16) >= 5
 
     e = _mk_entry((16, 16, 1, 16), {"Groups": _fp("Groups", [[{"MatrixInstruction": _fp("MatrixInstruction", [1], metadata={"MT": (64, 64), "wave": (2, 2), "GSU": 1, "LSU": 1})}]])})
-    cfg = gen.build_config(e, is_ga=False)
+    cfg = gen.build_config(e, backend="tensile")
     assert "GlobalParameters" in cfg
     assert "BenchmarkProblems" in cfg
 
-    # GA path with deterministic cost function inputs.
-    gen_ga = csg.ConfigSectionGenerator(_section_cfg(dtype="H", epilogues=True, ga=True))
-    cfg2 = gen_ga.build_config(e, is_ga=True, config_name="x", cms_priority=False, soo=True)
+    # Ductile path with deterministic cost function inputs.
+    gen_ga = csg.ConfigSectionGenerator(_section_cfg(dtype="H", epilogues=True, backend="ductile", search_space="generic"))
+    cfg2 = gen_ga.build_config(e, backend="ductile", config_name="x", cms_priority=False, soo=True)
     assert cfg2["Backend"]["Name"] == "Ductile"
     assert "Config" in cfg2["Backend"]
     assert "weights" not in cfg2["Backend"]["Config"]
@@ -178,15 +179,15 @@ def test_config_sections_generator_paths(monkeypatch) -> None:
             )
         },
     )
-    cfg3 = gen_ga.build_config(e2, is_ga=True, config_name="x2", cms_priority=False, soo=True)
+    cfg3 = gen_ga.build_config(e2, backend="ductile", config_name="x2", cms_priority=False, soo=True)
     assert "weights" in cfg3["Backend"]["Config"]
     assert "# Total #kernels" in gen_ga.generate_comment(10)
 
     # Invalid validation profile branch.
-    bad = _section_cfg(dtype="H", epilogues=True, ga=True)
-    bad["GA_VALIDATION_PROFILE"] = 999
+    bad = _section_cfg(dtype="H", epilogues=True, backend="ductile", search_space="generic")
+    bad["DUCTILE_VALIDATION_PROFILE"] = 999
     gen_bad = csg.ConfigSectionGenerator(bad)
-    with pytest.raises(ValueError, match="Invalid GA_VALIDATION_PROFILE"):
+    with pytest.raises(ValueError, match="Invalid DUCTILE_VALIDATION_PROFILE"):
         gen_bad._build_ductile(e.fork_params, e.sizes, "x", False, False)
 
 
@@ -216,3 +217,84 @@ def test_gfx942_params_branches(monkeypatch) -> None:
     assert "DepthU" in params_ga
     assert "GlobalReadVectorWidthA" in params_ga
     assert len(groups_ga) >= 1
+
+
+# ---------------------------------------------------------------------------
+# MX (Microscaling) config_sections_generator tests
+# ---------------------------------------------------------------------------
+
+def _section_cfg_mx(dtype="F4", mx=True, epilogues=True, arch="gfx950"):
+    dest = "S" if dtype not in ("D",) else "D"
+    gt = GemmType.from_tensile("T", "N", dtype, dest, "S")
+    return {
+        "GemmProblem": type("GP", (), {"gemm_type": gt})(),
+        "ARCH": arch,
+        "CUs": 256,
+        "XCC": 8,
+        "EPILOGUES": epilogues,
+        "MX": mx,
+        "backend": "ductile",
+        "search_space": "generic",
+        "SIZE_OPTION": 0,
+    }
+
+
+def test_mx_problem_type_emits_mxblock():
+    gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F4", mx=True))
+    pt = gen._problem_type
+    assert pt.get("MXBlockA") == 32
+    assert pt.get("MXBlockB") == 32
+
+
+def test_mx_problem_type_emits_mxblock_gfx1250():
+    gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F4", mx=True, arch="gfx1250"))
+    pt = gen._problem_type
+    assert pt.get("MXBlockA") == 32
+    assert pt.get("MXBlockB") == 32
+
+
+def test_mx_problem_type_raises_on_unsupported_arch():
+    with pytest.raises(ValueError, match="MX is not supported on ARCH 'gfx942'"):
+        csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F4", mx=True, arch="gfx942"))
+
+
+def test_mx_problem_type_no_mxblock_when_disabled():
+    gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F8", mx=False))
+    pt = gen._problem_type
+    assert "MXBlockA" not in pt
+    assert "MXBlockB" not in pt
+
+
+def test_mx_global_params_emit_scale_init():
+    gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F8", mx=True))
+    gp = gen._global_params_base
+    assert gp["DataInitTypeMXSA"] == 3
+    assert gp["DataInitTypeMXSB"] == 3
+    assert gp["MXScaleFormat"] == 1
+
+
+def test_non_mx_global_params_no_scale_init():
+    gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F8", mx=False))
+    gp = gen._global_params_base
+    assert "DataInitTypeMXSA" not in gp
+    assert "MXScaleFormat" not in gp
+
+
+def test_mx_bias_type_forced_to_s():
+    gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F8", mx=True, epilogues=True))
+    bias = gen._resolve_bias_type()
+    assert bias == "[S]"
+
+
+def test_mx_f8_problem_type_skips_use_scale_ab():
+    """MX F8 should not emit UseScaleAB."""
+    gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F8", mx=True))
+    pt = gen._problem_type
+    assert "UseScaleAB" not in pt
+
+
+def test_non_mx_f8_problem_type_has_use_scale_ab():
+    """Non-MX F8 should emit UseScaleAB: Scalar."""
+    gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F8", mx=False))
+    pt = gen._problem_type
+    assert "UseScaleAB" in pt or any("UseScaleAB" in k for k in pt)

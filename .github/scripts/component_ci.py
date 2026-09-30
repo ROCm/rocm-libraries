@@ -4,6 +4,7 @@ Determines which component CI jobs to run based on changed files.
 Outputs boolean flags per component via GITHUB_OUTPUT:
   - stinkytofu=true/false
   - rocisa=true/false
+  - geko=true/false
   - miopen=true/false
   - tensilelite_coverage=true/false
 
@@ -26,8 +27,17 @@ COMPONENTS = {
         "projects/hipblaslt/tensilelite/rocisa/**",
         "shared/stinkytofu/**",
     ],
+    "geko": [
+        "projects/hipblaslt/utilities/geko/**",
+        ".github/workflows/component-ci-geko.yml",
+    ],
     "miopen": [
         "projects/miopen/**",
+        # The hipDNN MIOpen provider hand-maintains copies of MIOpen's private
+        # entry-point declarations, which MIOpen CI cross-checks against the
+        # originals. A PR touching only the provider is exactly the drift that
+        # gate exists to catch, so it has to trigger this component too.
+        "dnn-providers/miopen-provider/**",
         ".github/workflows/component-ci-miopen.yml",
     ],
     "tensilelite_coverage": [

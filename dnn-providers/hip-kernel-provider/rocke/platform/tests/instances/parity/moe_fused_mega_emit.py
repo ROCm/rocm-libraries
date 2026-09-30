@@ -46,13 +46,16 @@ def _spec(idx: int) -> FusedMegaKernelSpec:
             dtype="fp16",
         )
     if idx == 3:
+        # tile_k_down is 32 rather than 64 to keep the LDS pool inside gfx950's
+        # 163840 B: at 64 this config needs 165888 B. Both wide-N dims are the
+        # point of the sample, so the down-GEMM K tile is what gives.
         return FusedMegaKernelSpec(
             name="moe_mega_wide_n",
             tile_m=32,
             tile_n_inter=512,
             tile_k_gu=32,
             tile_n_down=512,
-            tile_k_down=64,
+            tile_k_down=32,
             dtype="fp16",
         )
     if idx == 4:

@@ -16,17 +16,43 @@ Functions:
 
 import pandas as pd
 import io
+import re
 
 from pathlib import Path
 from geko.constants import GEMM_FIELDS, PERF_FIELDS
 import logging
+
 logger = logging.getLogger("GEKO")
+
+_SCALE_DEFAULTS = {"scaleA": 0, "scaleB": 0}
+
+
+def ensure_scale_columns(df):
+    """Add scaleA/scaleB columns defaulting to 0 (no scaling) if missing. Mutates df in place."""
+    for col, default in _SCALE_DEFAULTS.items():
+        if col not in df.columns:
+            df[col] = default
+    return df
+
+# Quote parenthesized complex values like (1,0) so embedded commas do not
+# split CSV fields.
+_COMPLEX_CSV_RE = re.compile(r'\(([^()]*,[^()]*)\)')
 
 import yaml
 try:
-    DEFAULT_YAML_LOADER = yaml.CSafeLoader
+    SafeLoader = yaml.CSafeLoader
 except (ModuleNotFoundError, AttributeError):
-    DEFAULT_YAML_LOADER = yaml.SafeLoader
+    SafeLoader = yaml.SafeLoader
+
+
+def is_built_custom_library(custom_lib_dir: str | Path) -> bool:
+    """Return True when custom_lib_dir contains compiled Tensile library artifacts."""
+    custom_lib_dir = Path(custom_lib_dir)
+    patterns = (
+        "library/**/TensileLibrary_lazy_gfx*.dat",
+        "library/**/TensileLibrary_lazy_gfx*.dat.zlib",
+    )
+    return any(any(custom_lib_dir.glob(pattern)) for pattern in patterns)
 
 def parse_benchmark_output(file: str | Path) -> pd.DataFrame:
     """
@@ -52,6 +78,7 @@ def parse_benchmark_output(file: str | Path) -> pd.DataFrame:
     try:
         header = blocks[0].split("\n")[0]
         data = [header] + [b.split("\n")[1].strip() for b in blocks]
+        data = [_COMPLEX_CSV_RE.sub(r'"(\1)"', line) for line in data]
         df = pd.read_csv(io.StringIO("\n".join(data)))
         
         kernel_col = []
@@ -72,6 +99,7 @@ def parse_benchmark_output(file: str | Path) -> pd.DataFrame:
         if solution_idx_col:
             df["solutionIdx"] = solution_idx_col
 
+        ensure_scale_columns(df)
         required_cols = list(GEMM_FIELDS) + list(PERF_FIELDS)
         if not all(c in df.columns for c in required_cols) or df[required_cols].isnull().values.any():
             raise ValueError(f"The benchmark output is not complete")
@@ -144,7 +172,7 @@ def update_lib_source(df: pd.DataFrame, match_table_path: str | Path) -> pd.Data
     """
     try:
         with open(match_table_path) as f:
-            match_table = yaml.load(f, Loader=DEFAULT_YAML_LOADER)
+            match_table = yaml.load(f, Loader=SafeLoader)
             df["lib_source"] = [Path(match_table[int(idx)][0]).parts[-2] for idx in df['solutionIdx']]
     except FileNotFoundError:
             logger.warning("MatchTable.yaml file not found.")

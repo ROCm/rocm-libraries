@@ -32,12 +32,17 @@
 #endif // no system header
 #include <thrust/universal_allocator.h>
 
-#ifndef THRUST_DOXYGEN_INVOKED
+/*! \cond
+ *  skip overloaded implementation
+ */
+
 // #include the device system's vector header
-#  define __THRUST_DEVICE_SYSTEM_VECTOR_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/vector.h>
-#  include __THRUST_DEVICE_SYSTEM_VECTOR_HEADER
-#  undef __THRUST_DEVICE_SYSTEM_VECTOR_HEADER
-#endif
+#define __THRUST_DEVICE_SYSTEM_VECTOR_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/vector.h>
+#include __THRUST_DEVICE_SYSTEM_VECTOR_HEADER
+#undef __THRUST_DEVICE_SYSTEM_VECTOR_HEADER
+
+/*! \endcond
+ */
 
 THRUST_NAMESPACE_BEGIN
 
@@ -58,14 +63,12 @@ THRUST_NAMESPACE_BEGIN
  *  \see device_vector
  *  \see universal_host_pinned_vector
  */
-template <typename T, typename Allocator = universal_allocator<T>>
-using universal_vector = thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::universal_vector<T, Allocator>;
+using thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::universal_vector;
 
 //! Like \ref universal_vector but uses pinned memory when the system supports it.
 //! \see device_vector
 //! \see universal_vector
-template <typename T>
-using universal_host_pinned_vector = thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::universal_host_pinned_vector<T>;
+using thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::universal_host_pinned_vector;
 
 /*! \} // containers
  */

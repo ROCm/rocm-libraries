@@ -22,13 +22,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/type_traits.h>
 #include <thrust/system/error_code.h>
 
@@ -135,7 +128,7 @@ enum errc_t
  *        shall return <tt>error_condition(ev,cuda_category())</tt>.
  *        Otherwise, the function shall return <tt>system_category.default_error_condition(ev)</tt>.
  */
-inline const error_category& cuda_category();
+inline const error_category& cuda_category(void);
 
 // XXX N3000 prefers is_error_code_enum<cuda::errc>
 

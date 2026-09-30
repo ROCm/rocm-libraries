@@ -22,6 +22,7 @@ from geko.config_generator.load_input_config import (
     get_gemm_problem,
     validate_input_config,
 )
+from geko.config_generator.config_sections_generator import ConfigSectionGenerator
 from geko.config_generator.mi_designer import MIDesign
 
 
@@ -42,7 +43,8 @@ def _base_template() -> dict:
         "ComputeDataType": "S",
         "ARCH": "gfx950",
         "StreamK": True,
-        "GA": False,
+        "backend": "tensile",
+        "search_space": "heuristic",
         "MACROTILE_OPT": False,
         "SIZE_OPTION": 0,
         "ONE_SIZE_PER_CONFIG": True,
@@ -59,25 +61,25 @@ def _base_template() -> dict:
 
 @pytest.mark.cg_components
 @pytest.mark.parametrize(
-    "arch,ga,transa,transb,size",
+    "arch,search_space,transa,transb,size",
     [
-        ("gfx950", False, "N", "N", (128, 128, 1, 128)),
-        ("gfx950", True, "N", "N", (256, 256, 1, 256)),
-        ("gfx942", False, "N", "T", (128, 256, 1, 128)),
-        ("gfx942", True, "T", "N", (64, 64, 1, 64)),
+        ("gfx950", "heuristic", "N", "N", (128, 128, 1, 128)),
+        ("gfx950", "generic", "N", "N", (256, 256, 1, 256)),
+        ("gfx942", "heuristic", "N", "T", (128, 256, 1, 128)),
+        ("gfx942", "generic", "T", "N", (64, 64, 1, 64)),
         # M and N both < 8 (tiny tiles)
-        ("gfx950", False, "N", "N", (4, 4, 1, 128)),
-        ("gfx950", True, "N", "N", (1, 7, 1, 128)),
-        ("gfx942", False, "N", "T", (2, 6, 1, 128)),
+        ("gfx950", "heuristic", "N", "N", (4, 4, 1, 128)),
+        ("gfx950", "generic", "N", "N", (1, 7, 1, 128)),
+        ("gfx942", "heuristic", "N", "T", (2, 6, 1, 128)),
         # M and N both >= 8192 (large problems)
-        ("gfx950", False, "N", "N", (8192, 8192, 1, 4096)),
-        ("gfx950", True, "N", "N", (12288, 8192, 1, 2048)),
-        ("gfx942", False, "N", "T", (8192, 16384, 1, 1024)),
+        ("gfx950", "heuristic", "N", "N", (8192, 8192, 1, 4096)),
+        ("gfx950", "generic", "N", "N", (12288, 8192, 1, 2048)),
+        ("gfx942", "heuristic", "N", "T", (8192, 16384, 1, 1024)),
     ],
 )
 def test_mi_opt_fork_pipeline_non_empty(
     arch: str,
-    ga: bool,
+    search_space: str,
     transa: str,
     transb: str,
     size: tuple[int, int, int, int],
@@ -91,7 +93,7 @@ def test_mi_opt_fork_pipeline_non_empty(
 
     cfg = _base_template()
     cfg["ARCH"] = arch
-    cfg["GA"] = ga
+    cfg["search_space"] = search_space
     cfg["TRANSA"] = transa
     cfg["TRANSB"] = transb
     cfg["Sizes"] = [list(size)]
@@ -103,15 +105,44 @@ def test_mi_opt_fork_pipeline_non_empty(
     mi_log = tmp_path / "MI_finder_log"
     mi_log.mkdir(parents=True, exist_ok=True)
 
-    mi_designer = MIDesign(str(mi_log), copy.deepcopy(cfg))
+    # Extract MX block values from ConfigSectionGenerator (same flow as config_generator)
+    csg = ConfigSectionGenerator(cfg)
+    mx_block_values = None
+    if csg._problem_type.get("MXBlockA") and csg._problem_type.get("MXBlockB"):
+        mx_block_values = (csg._problem_type["MXBlockA"], csg._problem_type["MXBlockB"])
+
+    # Extract subtile_enabled from config
+    subtile_enabled = cfg.get("search_space") == "subtile"
+
+    if mx_block_values is not None and not subtile_enabled:
+        subtile_enabled = True
+
+    # Create MI designer with MX and subtile flags only
+    mi_designer = MIDesign(
+        str(mi_log),
+        copy.deepcopy(cfg),
+        mx_block_values=mx_block_values,
+        subtile_enabled=subtile_enabled,
+    )
     opt_params = get_optimization_params(cfg)
     post_processor = get_post_processor(cfg)
 
+    # Extract DepthU values and wavefront size from opt_params (same flow as fork_param_generator)
+    fork_dict, opt_groups = opt_params.generate_for_size(size)
+
+    depthu_values = None
+    if "DepthU" in fork_dict:
+        depthu_values = fork_dict["DepthU"].values
+
+    wavefront_size = 64  # Default
+    if "WavefrontSize" in fork_dict:
+        wavefront_size = fork_dict["WavefrontSize"].values[0]
+
+    # Call generate_for_size with per-size DepthU and wavefront_size
     M, N, B, K = size
-    mi_groups = mi_designer.generate_for_size(size)
+    mi_groups = mi_designer.generate_for_size(size, depthu_values=depthu_values, wavefront_size=wavefront_size)
     assert len(mi_groups) > 0, "MIDesign.generate_for_size returned no MI groups"
 
-    fork_dict, opt_groups = opt_params.generate_for_size(size)
     assert len(fork_dict) > 0, "Optimization params produced empty fork dict"
     assert any(opt_groups), "Optimization params produced no group dimensions"
 

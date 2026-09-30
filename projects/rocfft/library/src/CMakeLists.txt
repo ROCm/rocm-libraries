@@ -144,6 +144,7 @@ set( kgen_embed_files
      ${CMAKE_SOURCE_DIR}/shared/rocfft_hip.h
      ${CMAKE_SOURCE_DIR}/shared/gpubuf.h
      ${CMAKE_SOURCE_DIR}/shared/hip_object_wrapper.h
+     ${CMAKE_SOURCE_DIR}/library/src/include/rtc_generator.h
      ${CMAKE_SOURCE_DIR}/library/src/include/rtc_kernel.h
      ${CMAKE_SOURCE_DIR}/library/src/rtc_kernel.cpp
      ${CMAKE_SOURCE_DIR}/library/src/rtc_test_harness_helper.cpp
@@ -260,7 +261,6 @@ set( rocfft_source
   tree_node_real.cpp
   fuse_shim.cpp
   assignment_policy.cpp
-  callback_map.cpp
   node_factory.cpp
   enum_printer.cpp
   rtc_exports.cpp
@@ -305,6 +305,7 @@ add_library( rocfft-rtc-gen OBJECT
   rtc_chirp_gen.cpp
   rtc_test_harness.cpp
   load_store_ops_gen.cpp
+  ${CMAKE_SOURCE_DIR}/shared/sha256.c
 )
 # caching of generation/compilation
 add_library( rocfft-rtc-cache OBJECT
@@ -570,6 +571,7 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1152 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1153 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1200 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT amdgcnspirv )
 
   # On Windows, to run rocfft_aot_helper we need to be able to find
   # the hiprtc and HIP runtime DLLs.  So add those dirs to the PATH

@@ -89,7 +89,7 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     }
 
     size_t I_size = sizeof(uint16_t);
-    switch(src->index_type_I)
+    switch(static_cast<int>(src->index_type_I))
     {
     case deprecated_rocsparse_indextype_u16:
     {
@@ -109,7 +109,7 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     }
 
     size_t J_size = sizeof(uint16_t);
-    switch(src->index_type_J)
+    switch(static_cast<int>(src->index_type_J))
     {
     case deprecated_rocsparse_indextype_u16:
     {

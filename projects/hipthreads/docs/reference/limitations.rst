@@ -9,17 +9,17 @@ Limitations
 ******************************************
 
 hipThreads presents a standard-library-like interface, but GPU hardware imposes constraints that have no counterpart on the CPU.
-The rules below are not compile-time errors; ignoring them causes deadlocks, crashes, or undefined behavior at run time.
-For background on *why* these apply, see the :ref:`execution model <execution-model>`.
+The rules are not compile-time errors. Ignoring them causes deadlocks, crashes, or undefined behavior at run time.
+For background on why these apply, see the :ref:`execution model <execution-model>`.
 
 No synchronous HIP calls while threads are alive
-================================================
+=================================================
 
 Creating a ``hip::wthread`` launches a persistent scheduler kernel that stays resident until the last wthread is destroyed.
-Synchronous HIP calls such as ``hipDeviceSynchronize``, synchronous ``hipMemcpy``, or ``thrust::copy`` wait for *all* GPU work, including the scheduler, and therefore deadlock.
+Synchronous HIP calls such as ``hipDeviceSynchronize()``, synchronous ``hipMemcpy()``, or ``thrust::copy()`` wait for all GPU work, including the scheduler, and therefore deadlock.
 
-* Use asynchronous APIs (``hipMemcpyAsync``, ``hipMemsetAsync``) instead.
-* Or wrap your ``hip::wthread`` objects in a scoped block ``{ ... }`` so they are joined and the scheduler is torn down before any synchronous call.
+- Use asynchronous APIs such as ``hipMemcpyAsync()`` and ``hipMemsetAsync()`` instead.
+- Or wrap your ``hip::wthread`` objects in a scoped block so they are joined and the scheduler is torn down before any synchronous call.
 
 Callables must be ``__device__`` extended lambdas
 =================================================
@@ -173,6 +173,18 @@ Applications should use separate host-only and device-only functions instead:
    }
 
 Avoid placing the ``hip::wthread`` construction itself in a shared ``__host__ __device__`` function.
+
+
+Multi-GPU systems are not supported
+====================================
+  
+hipThreads assumes a single GPU for the life of the process.
+
+``hip::wthread::hardware_concurrency()`` reports the current device correctly (it honors ``hipSetDevice``), but the persistent scheduler itself does not. The first ``hip::wthread`` you create binds the scheduler kernel and its stream to whichever device is current at that moment, and there is no mechanism to run a second scheduler on another device or to migrate work between GPUs.
+
+* Do not call ``hipSetDevice`` to switch devices after constructing your first ``hip::wthread``. The scheduler stays bound to the original device regardless.
+* On a multi-GPU system, select the intended device with ``hipSetDevice`` *before* creating any ``hip::wthread``, and confine all wthread-based work in that process to that one device.
+* ``HSA_CU_MASK`` and compute-partitioned (CPX/SPX) execution are also not accounted for: the scheduler sizes itself from the device's full compute-unit count regardless of any mask or partition restricting what the process can actually use.
 
 Unsupported standard library facilities
 =======================================

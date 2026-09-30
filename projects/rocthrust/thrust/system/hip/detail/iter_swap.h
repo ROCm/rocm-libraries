@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -27,17 +27,14 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_HAS_HIP_COMPILER()
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/detail/raw_pointer_cast.h>
 #  include <thrust/swap.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
-
-#  if _THRUST_HAS_DEVICE_SYSTEM_STD
-#    include _THRUST_STD_INCLUDE(utility)
-#  endif
+#  include <thrust/system/hip/detail/nv/target.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -56,16 +53,12 @@ inline THRUST_HOST_DEVICE void iter_swap(thrust::hip::execution_policy<DerivedPo
 
     THRUST_DEVICE inline static void device_path(Pointer1 a, Pointer2 b)
     {
-#  if _THRUST_HAS_DEVICE_SYSTEM_STD
-      using _THRUST_STD::swap;
-#  else
       using thrust::swap;
-#  endif
       swap(*thrust::raw_pointer_cast(a), *thrust::raw_pointer_cast(b));
     }
   };
 
-  _THRUST_IF_TARGET(_THRUST_IS_HOST, (war_nvbugs_881631::host_path(a, b);), (war_nvbugs_881631::device_path(a, b);));
+  NV_IF_TARGET(NV_IS_HOST, (war_nvbugs_881631::host_path(a, b);), (war_nvbugs_881631::device_path(a, b);));
 
 } // end iter_swap()
 

@@ -18,7 +18,7 @@ import os
 
 import pytest
 
-from config_harness import emit_kernels_from_config
+from config_harness import assert_assembles, emit_kernels_from_config
 
 pytestmark = pytest.mark.unit
 
@@ -43,6 +43,7 @@ def test_cluster_padding_gfx1250_emits_early_exit_and_reduced_mask():
         + str([(b, e) for (b, _s, e) in results if e != 0])
     )
     for base, src, _err in results:
+        assert_assembles(src, base)
         assert ".amdgcn_target" in src, f"Kernel {base!r} missing .amdgcn_target"
         assert "gfx1250" in src, f"Kernel {base!r} missing gfx1250 arch marker"
         # Cluster WG-id decode arm must be present.

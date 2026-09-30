@@ -44,6 +44,7 @@ from typing import List, Tuple, Iterator
 
 from geko import bench
 from geko.constants import INDEX_TYPE_MAP
+from geko.config_generator.constants import HARDWARE_MAP
 from geko.concurrency import parallel_for
 
 __all__ = ["Library", "LibraryCollection"]
@@ -305,6 +306,10 @@ class Library:
             Assumes no epilogues were previously added. Updates all solution
             names with appropriate suffixes and sets library flags.
         """
+        _NO_EPILOGUE_DTYPES = (1, 2, 3)  # f64_r, f32_c, f64_c
+        if self.problem.get("DataType") in _NO_EPILOGUE_DTYPES:
+            return
+
         # This assumes no epilogues were added before, otherwise this may create inconsistencies
 
         self.problem["Activation"] = True
@@ -352,7 +357,7 @@ class Library:
         iters: int = 100,
         cold_iters: int = 100,
         rotating: int = 512,
-        beta: bool = True,
+        beta: bool = False,
         flush: bool = True,
         print_kernel_info: bool = True,
         initialization: str = "trig_float",
@@ -372,7 +377,7 @@ class Library:
             rotating (int, optional): Memory rotation parameter.
                 Defaults to 512.
             beta (bool, optional): Whether to use non-zero beta values.
-                Defaults to True.
+                Defaults to False.
             flush (bool, optional): Whether to flush GPU caches.
                 Defaults to True.
             print_kernel_info (bool, optional): Whether to print solution information.
@@ -393,8 +398,10 @@ class Library:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        transA = "T" if self.problem["TransposeA"] else "N"
-        transB = "T" if self.problem["TransposeB"] else "N"
+        ccA = self.problem.get("ComplexConjugateA", False)
+        ccB = self.problem.get("ComplexConjugateB", False)
+        transA = "C" if (self.problem["TransposeA"] and ccA) else ("T" if self.problem["TransposeA"] else "N")
+        transB = "C" if (self.problem["TransposeB"] and ccB) else ("T" if self.problem["TransposeB"] else "N")
 
         if initialization != "rand_int" and INDEX_TYPE_MAP[self.problem["DataType"]] == "i8_r":
             initialization = "rand_int"
@@ -414,6 +421,10 @@ class Library:
 
         if "ComputeDataType" in self.problem:
             compute_type = INDEX_TYPE_MAP[self.problem["ComputeDataType"]]
+
+            _COMPLEX_TO_REAL_COMPUTE = {"f32_c": "f32_r", "f64_c": "f64_r"}
+            compute_type = _COMPLEX_TO_REAL_COMPUTE.get(compute_type, compute_type)
+
             common["scale_type"] = compute_type
 
             if "F32XdlMathOp" in self.problem and self.problem["F32XdlMathOp"] == 10:  # TF32
@@ -437,6 +448,11 @@ class Library:
 
         if "F32XdlMathOp" in self.problem and self.problem["F32XdlMathOp"] == 9:  # TF32
             common["math_mode"] = 1
+        
+        if self.problem.get("MXBlockA"):
+            common["scaleA"] = HARDWARE_MAP.get(self.arch, {}).get("mx_scale", 0)
+        if self.problem.get("MXBlockB"):
+            common["scaleB"] = HARDWARE_MAP.get(self.arch, {}).get("mx_scale", 0)
 
         gemms = []
         latency = []

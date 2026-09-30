@@ -237,6 +237,12 @@ class DataField:
     #   None       — unset; resolved by `effective_mode_sentinel` via auto-detection
     mode_sentinel: Optional[str] = None
 
+    # Overrides whether the frontend->backend mode converter returns
+    # ``std::optional<T>``. Unset means "derive from ``mode_sentinel``". Set it
+    # for sentinel-less enums that must still reject an unmapped value instead
+    # of silently coercing it to the first enumerator.
+    mode_converter_optional: Optional[bool] = None
+
     # True when a frontend-only sentinel is intentionally absent from the
     # backend C API and FlatBuffers enum. The packer rejects it before the
     # backend descriptor is built, so finalize must not test the SDK enum for
@@ -452,14 +458,19 @@ class DataField:
     def mode_converter_returns_optional(self) -> bool:
         """Whether the frontend→backend mode converter returns ``std::optional<T>``.
 
-        Mode converters return ``std::optional<T>`` when the enum has a
-        sentinel value (so the converter can signal "unsupported/unset" by
-        returning ``std::nullopt``). When ``mode_sentinel`` is explicitly
-        ``"none"`` the enum has no sentinel by design and the converter
-        returns plain ``T`` — so the packer must NOT emit the
-        ``.has_value()`` / ``*deref`` plumbing around the converter result.
+        Defaults to whether the enum carries a sentinel: with one the converter
+        signals "unsupported/unset" by returning ``std::nullopt``; with
+        ``mode_sentinel: "none"`` it returns plain ``T`` and the packer must not
+        emit ``.has_value()`` / ``*deref`` plumbing.
+
+        ``mode_converter_optional`` overrides that default, for enums that have
+        no sentinel by design but must still reject a value they do not map.
         """
-        return self.is_mode and self.effective_mode_sentinel != "none"
+        if not self.is_mode:
+            return False
+        if self.mode_converter_optional is not None:
+            return self.mode_converter_optional
+        return self.effective_mode_sentinel != "none"
 
 
 @dataclass

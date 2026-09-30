@@ -36,6 +36,7 @@ class PersistentAllocation:
         self.jobid: Optional[str] = None
         self.nodename: Optional[str] = None
         self._remote_pkg: Optional[str] = None
+        self._remote_lib: Optional[str] = None
 
     # --- detach / reattach -------------------------------------------------
     def save_state(self) -> None:
@@ -48,6 +49,7 @@ class PersistentAllocation:
                     "jobid": self.jobid,
                     "nodename": self.nodename,
                     "remote_pkg": self._remote_pkg,
+                    "remote_lib": self._remote_lib,
                 }
             )
         )
@@ -63,6 +65,7 @@ class PersistentAllocation:
         self.jobid = data.get("jobid")
         self.nodename = data.get("nodename")
         self._remote_pkg = data.get("remote_pkg")
+        self._remote_lib = data.get("remote_lib")
         if not self.jobid:
             raise RuntimeError(f"saved session for {arch} has no jobid")
         # Confirm the holder job is still RUNNING on the recorded node.
@@ -152,8 +155,9 @@ class PersistentAllocation:
             self.release()
             raise TimeoutError(f"job {self.jobid} did not reach RUNNING in {wait_s}s")
 
-        # Push rocke tree once
+        # Push rocke tree + library adapters once
         self._remote_pkg = slurm.push_rocke_tree()
+        self._remote_lib = slurm.push_library_tree()
 
     def run_test(
         self, extra_args: list[str] | None = None, env: dict | None = None
@@ -178,7 +182,7 @@ class PersistentAllocation:
 
         inner = (
             f"set -e; cd {shlex.quote(self._remote_pkg)}; "
-            f"export PYTHONPATH={shlex.quote(self._remote_pkg)}:$PYTHONPATH; "
+            f"export PYTHONPATH={shlex.quote(slurm.pythonpath(self._remote_pkg, self._remote_lib or ''))}:$PYTHONPATH; "
             f"{env_exports}"
             f"echo '[remote] host='$(hostname)' arch={self.arch}'; "
             f"python3 -m rocke.run_manifest {shlex.quote(hsaco)} "

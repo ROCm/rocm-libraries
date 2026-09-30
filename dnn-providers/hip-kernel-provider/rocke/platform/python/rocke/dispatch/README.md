@@ -34,6 +34,12 @@ per architecture — `common.py`, `generic.py`, `gfx942.py`, `gfx950.py`,
 points. It uses the same `core.py` contracts and is subject to the same coverage
 invariants.
 
+Chunkwise KDA is outside this package for the same reason, in
+`library/dispatch/kda/` (`common.py` + `gfx942.py`, with `__init__.py` holding
+`KDA_REGISTRY` and `dispatch_kda`). It is a separate family, not an attention
+candidate: a gated delta-rule linear recurrence sharing no code with SDPA. See
+`dsl_docs/instances/kda.md`.
+
 ## Current Scope
 
 Two GEMM cases are fully implemented: UniversalGemm FP16 RCR and BF16 RCR. The
@@ -192,7 +198,7 @@ rocke/dispatch/gemm/
 Reuse:
 
 - `GemmRequest` from `gemm/common.py` if the request shape is compatible;
-- `selector_matches` for `algorithm` / `spec_id` filtering;
+- `selector_matches` from `dispatch/core.py` for `algorithm` / `spec_id` filtering;
 - `GemmSupportQuery`, `gemm_config_supported`, and `request_shape_supported`
   from `gemm/support.py` when the support model matches UniversalGemm.
 

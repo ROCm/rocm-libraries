@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,7 +40,6 @@
 
 #if defined(__HIPSTDPAR__)
 
-#  include <thrust/detail/config/namespace.h>
 #  include <thrust/execution_policy.h>
 #  include <thrust/iterator/discard_iterator.h>
 #  include <thrust/set_operations.h>
@@ -60,9 +59,9 @@ inline bool includes(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  THRUST_NS_QUALIFIER::discard_iterator<> cnt{0};
+  ::thrust::discard_iterator<> cnt{0};
 
-  return THRUST_NS_QUALIFIER::set_difference(THRUST_NS_QUALIFIER::device, f1, l1, f0, l0, cnt) == cnt;
+  return ::thrust::set_difference(::thrust::device, f1, l1, f0, l0, cnt) == cnt;
 }
 
 template <typename I0, typename I1, enable_if_t<!::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
@@ -83,9 +82,9 @@ inline bool includes(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  THRUST_NS_QUALIFIER::discard_iterator<> cnt{0};
+  ::thrust::discard_iterator<> cnt{0};
 
-  return THRUST_NS_QUALIFIER::set_difference(THRUST_NS_QUALIFIER::device, f1, l1, f0, l0, cnt, ::std::move(r)) == cnt;
+  return ::thrust::set_difference(::thrust::device, f1, l1, f0, l0, cnt, ::std::move(r)) == cnt;
 }
 
 template <typename I0,
@@ -115,7 +114,7 @@ inline O set_union(execution::parallel_unsequenced_policy, I0 fi0, I0 li0, I1 fi
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::set_union(THRUST_NS_QUALIFIER::device, fi0, li0, fi1, li1, fo);
+  return ::thrust::set_union(::thrust::device, fi0, li0, fi1, li1, fo);
 }
 
 template <typename I0, typename I1, typename O, enable_if_t<!::hipstd::is_offloadable_iterator<I0, I1, O>>* = nullptr>
@@ -139,7 +138,7 @@ inline O set_union(execution::parallel_unsequenced_policy, I0 fi0, I0 li0, I1 fi
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::set_union(THRUST_NS_QUALIFIER::device, fi0, li0, fi1, li1, fo, ::std::move(r));
+  return ::thrust::set_union(::thrust::device, fi0, li0, fi1, li1, fo, ::std::move(r));
 }
 
 template <
@@ -172,7 +171,7 @@ inline O set_intersection(execution::parallel_unsequenced_policy, I0 fi0, I0 li0
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::set_intersection(THRUST_NS_QUALIFIER::device, fi0, li0, fi1, li1, fo);
+  return ::thrust::set_intersection(::thrust::device, fi0, li0, fi1, li1, fo);
 }
 
 template <typename I0, typename I1, typename O, enable_if_t<!::hipstd::is_offloadable_iterator<I0, I1, O>()>* = nullptr>
@@ -196,7 +195,7 @@ inline O set_intersection(execution::parallel_unsequenced_policy, I0 fi0, I0 li0
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::set_intersection(THRUST_NS_QUALIFIER::device, fi0, li0, fi1, li1, fo, ::std::move(r));
+  return ::thrust::set_intersection(::thrust::device, fi0, li0, fi1, li1, fo, ::std::move(r));
 }
 
 template <
@@ -229,7 +228,7 @@ inline O set_difference(execution::parallel_unsequenced_policy, I0 fi0, I0 li0, 
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::set_difference(THRUST_NS_QUALIFIER::device, fi0, li0, fi1, li1, fo);
+  return ::thrust::set_difference(::thrust::device, fi0, li0, fi1, li1, fo);
 }
 
 template <typename I0, typename I1, typename O, enable_if_t<!::hipstd::is_offloadable_iterator<I0, I1, O>()>* = nullptr>
@@ -253,7 +252,7 @@ inline O set_difference(execution::parallel_unsequenced_policy, I0 fi0, I0 li0, 
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::set_difference(THRUST_NS_QUALIFIER::device, fi0, li0, fi1, li1, fo, ::std::move(r));
+  return ::thrust::set_difference(::thrust::device, fi0, li0, fi1, li1, fo, ::std::move(r));
 }
 
 template <
@@ -286,7 +285,7 @@ inline O set_symmetric_difference(execution::parallel_unsequenced_policy, I0 fi0
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::set_symmetric_difference(THRUST_NS_QUALIFIER::device, fi0, li0, fi1, li1, fo);
+  return ::thrust::set_symmetric_difference(::thrust::device, fi0, li0, fi1, li1, fo);
 }
 
 template <typename I0, typename I1, typename O, enable_if_t<!::hipstd::is_offloadable_iterator<I0, I1, O>()>* = nullptr>
@@ -310,8 +309,7 @@ inline O set_symmetric_difference(execution::parallel_unsequenced_policy, I0 fi0
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::set_symmetric_difference(
-    THRUST_NS_QUALIFIER::device, fi0, li0, fi1, li1, fo, ::std::move(r));
+  return ::thrust::set_symmetric_difference(::thrust::device, fi0, li0, fi1, li1, fo, ::std::move(r));
 }
 
 template <

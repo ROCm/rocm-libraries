@@ -59,6 +59,10 @@ void rocsparse::trm_t::destroy_bsric0_info()
 {
     this->m_bsric0_info.reset();
 }
+void rocsparse::trm_t::destroy_ellsv_info()
+{
+    this->m_ellsv_info.reset();
+}
 
 rocsparse_csrsv_info rocsparse::trm_t::create_csrsv_info()
 {
@@ -144,6 +148,15 @@ rocsparse_bsric0_info rocsparse::trm_t::create_bsric0_info()
     return this->m_bsric0_info.get();
 }
 
+rocsparse_ellsv_info rocsparse::trm_t::create_ellsv_info()
+{
+    if(this->m_ellsv_info.get() == nullptr)
+    {
+        this->m_ellsv_info = std::shared_ptr<_rocsparse_ellsv_info>(new _rocsparse_ellsv_info());
+    }
+    return this->m_ellsv_info.get();
+}
+
 void rocsparse::trm_t::clear_csrsv_info()
 {
     this->uncouple(this->m_csrsv_info.get());
@@ -192,6 +205,12 @@ void rocsparse::trm_t::clear_bsric0_info()
 {
     this->uncouple(this->m_bsric0_info.get());
     this->destroy_bsric0_info();
+}
+
+void rocsparse::trm_t::clear_ellsv_info()
+{
+    this->uncouple(this->m_ellsv_info.get());
+    this->destroy_ellsv_info();
 }
 
 void rocsparse::trm_t::copy(const trm_t& that, hipStream_t stream)
@@ -265,6 +284,14 @@ void rocsparse::trm_t::copy(const trm_t& that, hipStream_t stream)
             this->create_bsric0_info()->copy(p, stream);
         }
     }
+
+    {
+        auto p = that.m_ellsv_info.get();
+        if(p != nullptr)
+        {
+            this->create_ellsv_info()->copy(p, stream);
+        }
+    }
 }
 
 rocsparse::trm_t::~trm_t()
@@ -296,6 +323,9 @@ rocsparse::trm_t::~trm_t()
 
     this->uncouple(m_bsric0_info.get());
     m_bsric0_info.reset();
+
+    this->uncouple(m_ellsv_info.get());
+    m_ellsv_info.reset();
 }
 
 #define GET_SHARED_INFO(TOKEN)                                                               \
@@ -315,6 +345,7 @@ GET_SHARED_INFO(bsrsv);
 GET_SHARED_INFO(bsrsm);
 GET_SHARED_INFO(bsrilu0);
 GET_SHARED_INFO(bsric0);
+GET_SHARED_INFO(ellsv);
 
 void rocsparse::trm_t::uncouple(rocsparse::trm_data_t* p)
 {
@@ -329,5 +360,6 @@ void rocsparse::trm_t::uncouple(rocsparse::trm_data_t* p)
         p->uncouple(this->m_bsrsm_info.get());
         p->uncouple(this->m_bsrilu0_info.get());
         p->uncouple(this->m_bsric0_info.get());
+        p->uncouple(this->m_ellsv_info.get());
     }
 }

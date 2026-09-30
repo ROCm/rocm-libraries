@@ -33,6 +33,7 @@
 #include "utility.hpp"
 
 #include <hip/hip_runtime_api.h>
+#include <new>
 
 #ifdef __cplusplus
 extern "C" {
@@ -59,9 +60,7 @@ rocsparselt_status rocsparselt_init(rocsparselt_handle* handle)
         // Allocate
         try
         {
-            auto                _handle = reinterpret_cast<_rocsparselt_handle*>(handle);
-            _rocsparselt_handle tmpHandle;
-            memcpy((void*)_handle, &tmpHandle, sizeof(_rocsparselt_handle));
+            auto _handle = new(handle) _rocsparselt_handle();
             _handle->init();
             log_api(_handle, __func__, "handle[out]", _handle);
         }
@@ -149,9 +148,7 @@ rocsparselt_status rocsparselt_dense_descr_init(const rocsparselt_handle* handle
             if(status != rocsparselt_status_success)
                 throw status;
 
-            auto                   _matDescr = reinterpret_cast<_rocsparselt_mat_descr*>(matDescr);
-            _rocsparselt_mat_descr tmpMatDescr(_handle);
-            memcpy((void*)_matDescr, &tmpMatDescr, sizeof(_rocsparselt_mat_descr));
+            auto _matDescr = new(matDescr) _rocsparselt_mat_descr(_handle);
             _matDescr->m_type       = rocsparselt_matrix_type_dense;
             _matDescr->m            = rows;
             _matDescr->n            = cols;
@@ -239,9 +236,7 @@ rocsparselt_status rocsparselt_structured_descr_init(const rocsparselt_handle* h
             if(status != rocsparselt_status_success)
                 throw status;
 
-            auto                   _matDescr = reinterpret_cast<_rocsparselt_mat_descr*>(matDescr);
-            _rocsparselt_mat_descr tmpMatDescr(_handle);
-            memcpy((void*)_matDescr, &tmpMatDescr, sizeof(_rocsparselt_mat_descr));
+            auto _matDescr = new(matDescr) _rocsparselt_mat_descr(_handle);
             _matDescr->m_type       = rocsparselt_matrix_type_structured;
             _matDescr->m            = rows;
             _matDescr->n            = cols;
@@ -648,9 +643,7 @@ rocsparselt_status rocsparselt_matmul_descr_init(const rocsparselt_handle*    ha
             if(status != rocsparselt_status_success)
                 return status;
 
-            auto _matmulDescr = reinterpret_cast<_rocsparselt_matmul_descr*>(matmulDescr);
-            _rocsparselt_matmul_descr tmpDescr(_handle);
-            memcpy((void*)_matmulDescr, &tmpDescr, sizeof(_rocsparselt_matmul_descr));
+            auto _matmulDescr = new(matmulDescr) _rocsparselt_matmul_descr(_handle);
 
             log_api(_handle,
                     __func__,
@@ -1247,14 +1240,14 @@ rocsparselt_status
                 return rocsparselt_status_invalid_handle;
             }
 
-            auto _algSelection = reinterpret_cast<_rocsparselt_matmul_alg_selection*>(algSelection);
             _rocsparselt_matmul_datatype matmul_datatype = is_matmul_datatype_valid(_matmulDescr->matrix_A->type, _matmulDescr->matrix_B->type, _matmulDescr->matrix_C->type, _matmulDescr->matrix_D->type, _matmulDescr->compute_type);
 
             int                               config_max_id = 0;
-            _rocsparselt_matmul_alg_selection tmpAlgSelection(_handle);
 
-#if BUILD_WITH_TENSILE
             constexpr int requestConfigs = 10; // find top 10 configs.
+            // Allocate exactly requestConfigs slots — caller controls capacity.
+            auto _algSelection = new(algSelection) _rocsparselt_matmul_alg_selection(_handle, requestConfigs);
+#if BUILD_WITH_TENSILE
 
             rocsparselt_status status = rocsparselt_status_success;
 
@@ -1262,46 +1255,46 @@ rocsparselt_status
             {
             case MATMUL_DATATYPE_H_H_S:
                 status = findTopConfigs<__half, __half, float>(
-                    _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
+                    _matmulDescr, &(_algSelection->configs[0]), &config_max_id, requestConfigs);
                 break;
             case MATMUL_DATATYPE_B_B_S:
                 status = findTopConfigs<hip_bfloat16, hip_bfloat16, float>(
-                    _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
+                    _matmulDescr, &(_algSelection->configs[0]), &config_max_id, requestConfigs);
                 break;
             case MATMUL_DATATYPE_I8_I8_S:
                 status = findTopConfigs<int8_t, int8_t, float>(
-                    _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
+                    _matmulDescr, &(_algSelection->configs[0]), &config_max_id, requestConfigs);
                 break;
             case MATMUL_DATATYPE_I8_H_S:
                 status = findTopConfigs<int8_t, __half, float>(
-                    _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
+                    _matmulDescr, &(_algSelection->configs[0]), &config_max_id, requestConfigs);
                 break;
             case MATMUL_DATATYPE_I8_B_S:
                 status = findTopConfigs<int8_t, hip_bfloat16, float>(
-                    _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
+                    _matmulDescr, &(_algSelection->configs[0]), &config_max_id, requestConfigs);
                 break;
             case MATMUL_DATATYPE_I8_I_S:
                 status = findTopConfigs<int8_t, int32_t, float>(
-                    _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
+                    _matmulDescr, &(_algSelection->configs[0]), &config_max_id, requestConfigs);
                 break;                
 #if HIP_FP8_TYPE_OCP
             case MATMUL_DATATYPE_E4M3_S_S:
                 status = findTopConfigs<__hip_fp8_e4m3, float, float>(
-                    _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
+                    _matmulDescr, &(_algSelection->configs[0]), &config_max_id, requestConfigs);
                 break;
             case MATMUL_DATATYPE_E5M2_S_S:
                 status = findTopConfigs<__hip_fp8_e5m2, float, float>(
-                    _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
+                    _matmulDescr, &(_algSelection->configs[0]), &config_max_id, requestConfigs);
                 break;
 #endif
 #if HIP_FP8_TYPE_FNUZ
             case MATMUL_DATATYPE_E4M3_FNUZ_S_S:
                 status = findTopConfigs<__hip_fp8_e4m3_fnuz, float, float>(
-                    _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
+                    _matmulDescr, &(_algSelection->configs[0]), &config_max_id, requestConfigs);
                 break;
             case MATMUL_DATATYPE_E5M2_FNUZ_S_S:
                 status = findTopConfigs<__hip_fp8_e5m2_fnuz, float, float>(
-                    _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
+                    _matmulDescr, &(_algSelection->configs[0]), &config_max_id, requestConfigs);
                 break;
 #endif
             default:
@@ -1338,7 +1331,6 @@ rocsparselt_status
                 log_error(_handle, __func__, "There are no solutions for this problem size");
                 return rocsparselt_status_not_implemented;
             }
-            memcpy((void*)_algSelection, &tmpAlgSelection, sizeof(_rocsparselt_matmul_alg_selection));
             _algSelection->alg           = alg;
             _algSelection->config_max_id = config_max_id;
             log_api(_handle,
@@ -1379,7 +1371,7 @@ rocsparselt_status rocsparselt_matmul_alg_selection_destroy(const rocsparselt_ma
     }
 
     const auto* _log_handle = _algSelection->handle;
-    log_api(_log_handle, __func__, "algSelection[in]", algSelection);
+    log_api(_log_handle, __func__, "algSelection[in]", *_algSelection);
     _algSelection->clear();
     return rocsparselt_status_success;
 }
@@ -1662,20 +1654,20 @@ rocsparselt_status
             return rocsparselt_status_invalid_size;
         }
 
-        auto                     _plan = reinterpret_cast<_rocsparselt_matmul_plan*>(plan);
-        _rocsparselt_matmul_plan tmpPlan(_handle);
-        memcpy((void*)_plan, &tmpPlan, sizeof(_rocsparselt_matmul_plan));
-
+        auto _plan = new(plan) _rocsparselt_matmul_plan(_handle);
+        // Deep copy of matmul_descr: plan owns this copy (restored from original design).
+        // Changes to the original matmul after plan init do NOT affect the plan.
         _plan->matmul_descr  = new _rocsparselt_matmul_descr(*_matmulDescr);
+        // alg_selection remains a non-owning reference.
         _plan->alg_selection = const_cast<_rocsparselt_matmul_alg_selection*>(_algSelection);
         log_api(_handle,
                 __func__,
                 "plan[out]",
-                plan,
+                *_plan,
                 "matmulDescr[in]",
-                matmulDescr,
+                *_matmulDescr,
                 "algSelection[in]",
-                algSelection);
+                *_algSelection);
     }
     catch(const rocsparselt_status& status)
     {
@@ -1696,23 +1688,21 @@ rocsparselt_status rocsparselt_matmul_plan_destroy(const rocsparselt_matmul_plan
         return rocsparselt_status_invalid_handle;
     }
 
-    auto _plan
-        = reinterpret_cast<_rocsparselt_matmul_plan*>(const_cast<rocsparselt_matmul_plan*>(plan));
+    auto _plan = reinterpret_cast<_rocsparselt_matmul_plan*>(
+        const_cast<rocsparselt_matmul_plan*>(plan));
     if(!check_is_init_plan(_plan))
     {
         hipsparselt_cerr << "plan was not initialized or has already been destroyed" << std::endl;
         return rocsparselt_status_invalid_handle;
     }
 
-    log_api(_plan->handle, __func__, "plan[in]", plan);
-    // Destruct
+    log_api(_plan->handle, __func__, "plan[in]", *_plan);
     try
     {
         _plan->clear();
     }
     catch(const rocsparselt_status& status)
     {
-        log_info(_plan->handle, __func__, "status", status);
         return status;
     }
     return rocsparselt_status_success;

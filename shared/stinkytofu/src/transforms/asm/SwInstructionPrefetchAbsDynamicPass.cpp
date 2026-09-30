@@ -54,16 +54,22 @@
 namespace stinkytofu {
 
 namespace {
-// Return the entry-BB insertion point AFTER the gfx1250 hardware-entrypoint prologue
-// (`global_prefetch_b8` + `v_nop`, inserted by InsertInitialUnclausedVmemPass) so the entry
-// CP-cover burst is placed after the prologue and the prologue stays the kernel's first executed
-// instruction(s). Falls back to begin() when no prologue is present (isolated unit tests /
-// non-gfx1250), preserving prior behavior and the empty-entry-BB APPEND (begin()==end()).
+// True when \p it points at a real instruction in \p bb with unified opcode \p uop.
+// False at end(), or on an asm directive (non-StinkyTofu node).
+bool isUnifiedOpcodeAt(BasicBlock& bb, IRList::iterator it, uint16_t uop) {
+    if (it == bb.end()) return false;
+    IRBase* node = it.getNodePtr();
+    if (node->getType() != IRBase::IRType::StinkyTofu) return false;
+    return static_cast<const StinkyInstruction*>(node)->getUnifiedOpcode() == uop;
+}
+
 // Returns {BB, iterator} for the entry CP-cover insertion point: immediately AFTER the gfx1250
-// hardware-entrypoint prologue (global_prefetch_b8 [+ v_nop]) wherever it lives in the function
-// (it may be in a later BB than getEntryBlock(), e.g. after an empty preamble + label_ASM_Start),
-// so the prologue stays first. Falls back to {entryBB, begin()} when no prologue is present,
-// preserving prior behavior and the empty-entry-BB APPEND (begin()==end()).
+// hardware-entrypoint prologue (`s_mov_b64 s[64:65], 0` + `v_nop` + `global_prefetch_b8`, inserted
+// by InsertInitialUnclausedVmemPass) so the entry CP-cover burst is placed after the prologue and
+// the prologue stays the kernel's first executed instruction(s). The prologue may live in a later
+// BB than getEntryBlock() (e.g. after an empty preamble + label_ASM_Start), so we scan the whole
+// function. Falls back to {entryBB, begin()} when no prologue is present (isolated unit tests /
+// non-gfx1250), preserving prior behavior and the empty-entry-BB APPEND (begin()==end()).
 std::pair<BasicBlock*, IRList::iterator> entryBurstInsertPoint(Function& func) {
     for (BasicBlock& bb : func) {
         for (IRList::iterator it = bb.begin(); it != bb.end(); ++it) {
@@ -74,16 +80,18 @@ std::pair<BasicBlock*, IRList::iterator> entryBurstInsertPoint(Function& func) {
             // find the "first real instruction" (LABEL/PHI/FENCE/placement marker), so both passes
             // agree on where the prologue sits.
             if (isPseudoInst(inst)) continue;
-            if (inst->getUnifiedOpcode() == GFX::global_prefetch_b8) {
+            // First real instruction of the function. Walk the prologue shape
+            //   s_mov_b64 s[64:65], 0 ; v_nop ; global_prefetch_b8 v0, s[64:65]
+            // leading pieces are tolerated as absent (isolated unit tests), but the
+            // global_prefetch_b8 must be there for this to be the prologue.
+            {
                 IRList::iterator after = it;
-                ++after;  // past global_prefetch_b8
-                if (after != bb.end()) {
-                    IRBase* n2 = after.getNodePtr();
-                    if (n2->getType() == IRBase::IRType::StinkyTofu &&
-                        static_cast<const StinkyInstruction*>(n2)->getUnifiedOpcode() == GFX::v_nop)
-                        ++after;  // past v_nop
+                if (isUnifiedOpcodeAt(bb, after, GFX::s_mov_b64)) ++after;
+                if (isUnifiedOpcodeAt(bb, after, GFX::v_nop)) ++after;
+                if (isUnifiedOpcodeAt(bb, after, GFX::global_prefetch_b8)) {
+                    ++after;  // past global_prefetch_b8
+                    return {&bb, after};
                 }
-                return {&bb, after};
             }
             BasicBlock* entry = func.getEntryBlock();
             if (entry == nullptr) entry = &bb;
@@ -586,7 +594,7 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
         const uint32_t hi = static_cast<uint32_t>(m_baseSgpr + 1);
         const uint32_t tmp = static_cast<uint32_t>(m_baseSgpr + 2);
         static const HwInstDesc labelMCID{
-            GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+            GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
 
         auto emitLabel = [&](const std::string& name) {
             StinkyInstruction* l = b.create(&labelMCID, siteAnchor);
@@ -663,10 +671,10 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
         // is layout-safe (always +4 / FK_PCRel_4) even before the label exists.
         bool coverEmitted = false;
         if (emitCover && coverN > 0) {
-            // Insert the CP cover AFTER the gfx1250 prologue (global_prefetch_b8 + v_nop), wherever
-            // it lives, so the prologue stays the kernel's first executed instruction(s). Falls
-            // back to the entry BB begin() (empty-CFG-stub APPEND preserved) when no prologue is
-            // present.
+            // Insert the CP cover AFTER the gfx1250 prologue (s_mov_b64 + v_nop +
+            // global_prefetch_b8), wherever it lives, so the prologue stays the kernel's first
+            // executed instruction(s). Falls back to the entry BB begin() (empty-CFG-stub APPEND
+            // preserved) when no prologue is present.
             auto [coverBB, coverAt] = entryBurstInsertPoint(func);
             if (coverBB != nullptr) {
                 emitBurst(*coverBB, coverAt, std::string(kCpBoundaryLabel), coverN);

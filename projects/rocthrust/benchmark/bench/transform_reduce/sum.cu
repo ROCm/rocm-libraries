@@ -27,20 +27,12 @@
  ******************************************************************************/
 
 // Benchmark utils
-#include "../../bench_utils/bench_utils.hpp"
+#include "bench_utils.hpp"
 
 // rocThrust
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 #include <thrust/transform_reduce.h>
-
-// Google Benchmark
-#include <benchmark/benchmark.h>
-
-// STL
-#include <cstddef>
-#include <string>
-#include <vector>
 
 template <class T>
 struct square_t
@@ -51,121 +43,66 @@ struct square_t
   }
 };
 
-struct sum
+template <typename T>
+struct transform_reduce_benchmark : public primbench::benchmark_interface
 {
-  template <typename T, typename Policy>
-  float64_t run(thrust::device_vector<T>& in, Policy policy)
+  transform_reduce_benchmark(size_t items)
+      : m_items(items)
+  {}
+
+  primbench::json meta() const override
   {
-    bench_utils::do_not_optimize(
-      thrust::transform_reduce(policy, in.begin(), in.end(), square_t<T>{}, T{}, thrust::plus<T>{}));
-
-    bench_utils::gpu_timer d_timer;
-
-    d_timer.start(0);
-    bench_utils::do_not_optimize(
-      thrust::transform_reduce(policy, in.begin(), in.end(), square_t<T>{}, T{}, thrust::plus<T>{}));
-    d_timer.stop(0);
-
-    return d_timer.get_duration();
+    return primbench::json{}
+      .add("algo", "transform_reduce")
+      .add("subalgo", "sum")
+      .add("input_type", primbench::name<T>())
+      .add("elements", m_items);
   }
+
+  void run(primbench::state& state) override
+  {
+    bench_utils::caching_allocator_t alloc{};
+    thrust::detail::device_t policy{};
+
+    thrust::device_vector<T> in = bench_utils::generate(m_items, state.seed);
+
+    state.set_items(m_items);
+    state.add_reads<T>(m_items);
+    state.add_writes<T>(1);
+
+    state.run([&] {
+      thrust::transform_reduce(
+        policy(alloc).on(state.stream), in.begin(), in.end(), square_t<T>{}, T{}, thrust::plus<T>{});
+    });
+  }
+
+private:
+  size_t m_items;
 };
 
-template <class Benchmark, class T>
-void run_benchmark(benchmark::State& state, const std::size_t elements, const std::string seed_type)
-{
-  // Benchmark object
-  Benchmark benchmark{};
-
-  // GPU times
-  std::vector<double> gpu_times;
-
-  // Generate input
-  thrust::device_vector<T> in = bench_utils::generate(elements, seed_type);
-
-  bench_utils::caching_allocator_t alloc{};
-  thrust::detail::device_t policy{};
-
-  for (auto _ : state)
-  {
-    float64_t duration = benchmark.template run<T>(in, policy(alloc));
-    state.SetIterationTime(duration);
-    gpu_times.push_back(duration);
-  }
-
-  // BytesProcessed include read and written bytes, so when the BytesProcessed/s are reported
-  // it will actually be the global memory bandwidth gotten.
-  state.SetBytesProcessed(state.iterations() * (elements + 1) * sizeof(T));
-  state.SetItemsProcessed(state.iterations() * elements);
-
-  const double gpu_cv         = bench_utils::StatisticsCV(gpu_times);
-  state.counters["gpu_noise"] = gpu_cv;
-}
-
-#define CREATE_BENCHMARK(T, Elements)                                                                   \
-  benchmark::RegisterBenchmark(                                                                         \
-    bench_utils::bench_naming::format_name("{algo:transform_reduce,subalgo:" + name + ",input_type:" #T \
-                                           + ",elements:" + bench_utils::format_pow2(Elements))         \
-      .c_str(),                                                                                         \
-    run_benchmark<Benchmark, T>,                                                                        \
-    Elements,                                                                                           \
-    seed_type)
-
-#define BENCHMARK_TYPE(type)                                               \
-  for (size_t size : bench_utils::sizes)                                   \
-  {                                                                        \
-    if (sizeof(type) * size <= bench_utils::system.devProp.totalGlobalMem) \
-      bs.push_back(CREATE_BENCHMARK(type, size));                          \
-  }
-
-template <class Benchmark>
-void add_benchmarks(const std::string& name, std::vector<benchmark::Benchmark*>& benchmarks, const std::string seed_type)
-{
-  std::vector<benchmark::Benchmark*> bs;
-  BENCHMARK_TYPE(int8_t)
-  BENCHMARK_TYPE(int16_t)
-  BENCHMARK_TYPE(int32_t)
-  BENCHMARK_TYPE(int64_t)
-#if THRUST_BENCHMARKS_HAVE_INT128_SUPPORT
-  BENCHMARK_TYPE(int128_t)
-#endif
-  BENCHMARK_TYPE(float32_t)
-  BENCHMARK_TYPE(float64_t)
-
-  benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
-}
+#define QUEUE(T)                                    \
+  for (size_t size : bench_utils::sizes(sizeof(T))) \
+    executor.queue<transform_reduce_benchmark<T>>(size);
 
 int main(int argc, char* argv[])
 {
-  cli::Parser parser(argc, argv);
-  parser.set_optional<std::string>("name_format", "name_format", "human", "either: json,human,txt");
-  parser.set_optional<std::string>("seed", "seed", "random", bench_utils::get_seed_message());
-  parser.run_and_exit_if_error();
+  primbench::settings settings;
+  settings.size                 = 1; // bench_utils::sizes() calculates it later.
+  settings.min_gpu_ms_per_batch = 300;
+  settings.batch_window_size    = 5;
+  primbench::executor executor(argc, argv, settings, primbench::flags::sync);
 
-  // Parse argv
-  benchmark::Initialize(&argc, argv);
-  bench_utils::bench_naming::set_format(parser.get<std::string>("name_format")); /* either: json,human,txt */
-  const std::string seed_type = parser.get<std::string>("seed");
+  QUEUE(int8_t)
+  QUEUE(int16_t)
+  QUEUE(int32_t)
+  QUEUE(int64_t)
 
-  // Benchmark info
-  bench_utils::add_common_benchmark_info();
-  benchmark::AddCustomContext("seed", seed_type);
+#ifndef _MSC_VER
+  QUEUE(int128_t)
+#endif
 
-  // Add benchmark
-  std::vector<benchmark::Benchmark*> benchmarks;
-  add_benchmarks<sum>("sum", benchmarks, seed_type);
+  QUEUE(float)
+  QUEUE(double)
 
-  // Use manual timing
-  for (auto& b : benchmarks)
-  {
-    b->UseManualTime();
-    b->Unit(benchmark::kMicrosecond);
-    b->MinTime(0.4); // in seconds
-  }
-
-  // Run benchmarks
-  benchmark::RunSpecifiedBenchmarks(bench_utils::ChooseCustomReporter());
-
-  // Finish
-  benchmark::Shutdown();
-  return 0;
+  executor.run();
 }

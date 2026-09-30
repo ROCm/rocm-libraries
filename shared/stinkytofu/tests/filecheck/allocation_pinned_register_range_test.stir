@@ -1,0 +1,25 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass=classes=s --RegisterAllocationPass=allocator=greedy-compact,classes=s,pinReg=s0:3,apply --print-output
+#
+# Holding s0 through s3: each keeps what was lifted into it and takes nothing
+# new, so compaction starts above the run instead of at s0.
+#
+# CHECK-LABEL: @allocation_pinned_register_range
+# CHECK: ^entry:
+#
+# Every line is checked, which is what shows nothing landed in s0..s3.
+# CHECK-NEXT: s[4:5] = "st.s_load_b64"(s[24:25], 0)
+# CHECK-NEXT: s4 = "st.s_add_u32"(s4, s5)
+#
+# s0 is still read: holding keeps the occupant rather than evicting it.
+# CHECK-NEXT: s5 = "st.s_add_u32"(s0, s4)
+# CHECK-NEXT: s4 = "st.s_add_u32"(s5, s4)
+#
+# CHECK-NOT: %
+
+st.func @allocation_pinned_register_range() {
+^entry:
+  s[40:41] = "st.s_load_b64"(s[24:25], 0)
+  s5 = "st.s_add_u32"(s40, s41)
+  s6 = "st.s_add_u32"(s0, s5)
+  s7 = "st.s_add_u32"(s6, s5)
+}

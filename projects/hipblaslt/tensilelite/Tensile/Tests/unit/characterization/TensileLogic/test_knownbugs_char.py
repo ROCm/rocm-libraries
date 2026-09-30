@@ -25,11 +25,11 @@
 
 """Characterization tests for ``TensileLogic.KnownBugs``.
 
-The existing ``test_KnownBugs.py`` (loaded via importlib) covers the happy
-round-trip, the missing-file return, the ``skips: not-a-list`` error, and the
-missing-PyYAML guard. This suite pins the remaining branches the baseline left
-uncovered — every input-validation path of ``load_known_bugs`` — plus the two
-pure helpers, using syrupy snapshots of the structured result.
+The existing ``test_KnownBugs.py`` covers the happy round-trip, the missing-file
+return, the ``skips: not-a-list`` error, and the missing-PyYAML guard. This suite
+pins the remaining branches the baseline left uncovered — every input-validation
+path of ``load_known_bugs`` — plus the two pure helpers, using syrupy snapshots
+of the structured result.
 
 Determinism: ``load_known_bugs`` returns a ``frozenset`` (unordered); every
 snapshot sorts it first. YAML inputs are written to ``tmp_path``.
@@ -81,7 +81,7 @@ def test_is_known_bug_hit_and_miss(snapshot):
 # --- load_known_bugs: frozenset-returning branches --------------------------
 
 def test_load_none_returns_empty(snapshot):
-    # config_path is None -> early empty frozenset (L57-58).
+    # config_path is None -> early empty frozenset.
     assert _sorted(load_known_bugs(None)) == snapshot
 
 

@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "a06e0cb1-b421-5364-beca-d2be0a7652ec",
+  "name": "example: kernel dtype matches graph (rocKE half)",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.pointwise.kernel_match"
+}

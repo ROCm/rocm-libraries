@@ -325,9 +325,11 @@ TEST_CASE("origami: negative_occupancy", "[origami]") {
       size_t MT_M = best_tile.config.mt.m;
       size_t MT_N = best_tile.config.mt.n;
       size_t MT_K = best_tile.config.mt.k;
-      REQUIRE(MT_M == 32);   //"MT_M should be 32"
-      REQUIRE(MT_N == 256);  //"MT_N should be 256"
-      REQUIRE(MT_K == 16);   //"MT_K should be 16"
+      // All architectures select the M-matched 32x256x16 tile for this
+      // skinny-M, huge-N problem.
+      REQUIRE(MT_M == 32);
+      REQUIRE(MT_N == 256);
+      REQUIRE(MT_K == 16);
     }
   }
 }
@@ -481,6 +483,9 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
         mixed_configs.push_back(heuristic_rejected);
 
         auto mixed_results = origami::rank_configs(small_k_problem, hardware, mixed_configs);
+        // Both the LDS-invalid 512x512x256 and the heuristic-rejected subtile
+        // 128x128x64 (gfx950 BF16 TN, K<512) drop out; only the valid 64x64
+        // tile survives with a finite latency.
         REQUIRE(mixed_results.size() == 1);
         REQUIRE(mixed_results.front().latency < std::numeric_limits<double>::max());
         REQUIRE(mixed_results.front().config.mt.m == 64);
@@ -499,6 +504,9 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
 
         auto fallback_results =
             origami::rank_configs(small_k_problem, hardware, all_rejected_configs);
+        // Every path rejects (LDS-invalid + heuristic-rejected subtile), so the
+        // catastrophic fallback keeps all candidates pegged at max latency rather
+        // than returning an empty set.
         REQUIRE(fallback_results.size() == all_rejected_configs.size());
         for (const auto& result : fallback_results) {
           REQUIRE(result.latency == std::numeric_limits<double>::max());
@@ -543,13 +551,18 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
       portable_setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "-1.0", 1);
       // Read back and parse
       env_val = origami::runtime_options::read_heuristics_variance_from_env();
-      REQUIRE(env_val == 0.01);  // Return default value 0.01 when
-                                 // ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to -1.0
+      REQUIRE(env_val == 0.0);  // Return default value (tie-break disabled) when
+                                // ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to -1.0
 
       portable_setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "1.0", 1);
       // Read back and parse
       env_val = origami::runtime_options::read_heuristics_variance_from_env();
       REQUIRE(env_val == 1.0);  // Return ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to 1.0
+
+      // Restore a clean environment: this variable injects random latency
+      // variance, and leaving it set would make every subsequently-run test
+      // (e.g. select_topk_configs, select_config_mnk) nondeterministic.
+      portable_unsetenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE");
     }
   }
 }
@@ -615,7 +628,9 @@ TEST_CASE("Origami: select_config_mnk unit test", "[origami]") {
         REQUIRE(result_config.config.mt.m == config[1].mt.m);
 
       result_config = origami::select_config_mnk(201, 201, 201, hardware, config);  // M = N = K
-      REQUIRE(result_config.config.mt.m == config[0].mt.m);
+      // All architectures prefer the square 192x160x64 tile (Tile B) for this
+      // small cube.
+      REQUIRE(result_config.config.mt.m == config[1].mt.m);
 
       // Test 2: Verify default problem settings (transpose, data types)
       origami::problem_t problem = {
@@ -921,6 +936,7 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       // Default values
       size_t default_wgmxccchunk = 0;
       size_t default_wgmxcc      = hardware.NUM_XCD;
+      int32_t default_wgm        = static_cast<int32_t>(std::ceil(std::sqrt(hardware.N_CU / hardware.NUM_XCD)));
       size_t chunk_size          = std::min((numMT_M * numMT_N + hardware.NUM_XCD - 1) / hardware.NUM_XCD, 
                                             (hardware.N_CU + hardware.NUM_XCD - 1) / hardware.NUM_XCD);
 
@@ -959,17 +975,17 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       auto out_wgm_batch =
           origami::select_workgroup_mapping(problem_batch, hardware, config, skGrid);
       REQUIRE(out_wgm_batch.wgmxccchunk == default_wgmxccchunk);
-      REQUIRE(out_wgm_batch.wgmxcc == 0);
-      REQUIRE(out_wgm_batch.wgm == 1);
+      REQUIRE(out_wgm_batch.wgmxcc == default_wgmxcc);
+      REQUIRE(out_wgm_batch.wgm == default_wgm);
 
-      // Test 3: Test small GEMMs (numMTs <= NUM_XCD)
+      // Test 3: Test small GEMMs
       auto problem_small = make_problem(1024, 1024, 1024);
       auto skGrid_small  = (1024 + 256 - 1) / 256 * (1024 + 256 - 1) / 256;
       auto out_wgm_problem_small =
           origami::select_workgroup_mapping(problem_small, hardware, config, skGrid_small);
       REQUIRE(out_wgm_problem_small.wgmxccchunk == default_wgmxccchunk);
       REQUIRE(out_wgm_problem_small.wgmxcc == default_wgmxcc);
-      REQUIRE(out_wgm_problem_small.wgm == 1);
+      REQUIRE(out_wgm_problem_small.wgm == 2);
 
       // Test 4: Test cases where splitFactor is multiple of NUM_XCD
       auto out_wgm_split_multiple_num_xcd =
@@ -995,7 +1011,9 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       REQUIRE(out_wgm_mall_is_important.wgmxcc == default_wgmxcc);
       REQUIRE(out_wgm_mall_is_important.wgm == 5);
 
-      // Test 7: Test WGM prediction with various wgmList values
+      // Test 7: Test WGM prediction with various wgmList values.
+      // bf16 with MT_K=32 is 64 bytes per K-iteration, so this shape sits exactly at
+      // kCoherentMinBytesPerKIter and takes the smaller of the tied WGM candidates.
       auto out_wgm = origami::select_workgroup_mapping(problem, hardware, config, skGrid);
       REQUIRE(out_wgm.wgmxccchunk == default_wgmxccchunk);
       REQUIRE(out_wgm.wgmxcc == default_wgmxcc);
@@ -1003,31 +1021,132 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
         REQUIRE(out_wgm.wgm == 4);
       else if (gpu_arch == 950)
         REQUIRE(out_wgm.wgm == 4);
+      else if (gpu_arch == 1250)
+        REQUIRE(out_wgm.wgm == 4);
 
-      // Test 8: K-split StreamK (skGrid > tiles) must NOT use the chunk transform.
-      // Splitting a tile across multiple workgroups requires the StreamK fixup, whose
-      // spin-wait handoff assumes a tile's co-op workgroups stay in consecutive physical
-      // order. The chunk remap reorders them and can deadlock, so chunking must be off.
+      // K-coherent split-K needs a grid that splits K within one wave of
+      // workgroups, so these cases use fewer tiles than the machine has CUs.
+      // bf16 with MT_K=64 gives 128 bytes per k-iter, one full cache line.
+      auto split_problem     = make_problem(2048, 2048, 65536);
+      size_t numMTs_split    = (2048 / 256) * (2048 / 256);  // 64 tiles
+      size_t skGrid_one_wave = 256;                          // <= N_CU on every test arch
+      REQUIRE(skGrid_one_wave <= hardware.N_CU);
+
+      // Test 8: K-coherent split-K mapping is selected when split-K workgroups
+      // cover cache-line-aligned K chunks and the split factor is useful across XCDs.
       {
-        auto skGrid_split = 2 * numMT_M * numMT_N;  // split_factor = 2 (skGrid > tiles)
+        auto split_config = config;
+        split_config.mt.k = 64;
 
-        // Non-temporal case that produces a non-zero chunk for a data-parallel grid
-        // (see Test 1) must report chunk == 0 once the grid is K-split.
-        config.cache_hints_a = 4;
-        config.cache_hints_b = 3;
-        auto out_wgm_split_nt =
-            origami::select_workgroup_mapping(problem, hardware, config, skGrid_split);
-        REQUIRE(out_wgm_split_nt.wgmxccchunk == 0);
-        config.cache_hints_a = 0;
-        config.cache_hints_b = 0;
+        auto out_wgm_splitk = origami::select_workgroup_mapping(
+            split_problem, hardware, split_config, skGrid_one_wave);
+        REQUIRE(out_wgm_splitk.wgmxccsplitk == skGrid_one_wave / numMTs_split);
+        REQUIRE(out_wgm_splitk.wgmxccchunk == skGrid_one_wave / hardware.NUM_XCD);
+        REQUIRE(out_wgm_splitk.wgmxcc == hardware.NUM_XCD);
+      }
 
-        // Main path (no cache hints) must also report chunk == 0 when K-split.
-        auto out_wgm_split =
-            origami::select_workgroup_mapping(problem, hardware, config, skGrid_split);
-        REQUIRE(out_wgm_split.wgmxccchunk == 0);
+      // Non-multiple skGrid is allowed: the first K*MN workgroups are remapped and
+      // tail workgroups are identity-mapped by codegen.
+      {
+        auto split_config = config;
+        split_config.mt.k = 64;
+        auto skGrid_with_tail = skGrid_one_wave - 1;
+
+        auto out_wgm_splitk_tail = origami::select_workgroup_mapping(
+            split_problem, hardware, split_config, skGrid_with_tail);
+        REQUIRE(out_wgm_splitk_tail.wgmxccsplitk == skGrid_with_tail / numMTs_split);
+        REQUIRE(out_wgm_splitk_tail.wgmxccchunk == skGrid_with_tail / hardware.NUM_XCD);
+        REQUIRE(out_wgm_splitk_tail.wgmxcc == hardware.NUM_XCD);
+      }
+
+      // A grid larger than the CU budget spans more than one wave of workgroups,
+      // so there are no k-levels to group and the mapping stays disabled. This
+      // also keeps the chunk inside the 8-bit field of the kernel argument.
+      {
+        auto split_config = config;
+        split_config.mt.k = 64;
+
+        for (size_t skGrid_multi_wave :
+             {hardware.N_CU + 1, 2 * hardware.N_CU, 3 * hardware.N_CU}) {
+          INFO("skGrid=" << skGrid_multi_wave << " N_CU=" << hardware.N_CU);
+          auto out_wgm_multi_wave = origami::select_workgroup_mapping(
+              split_problem, hardware, split_config, skGrid_multi_wave);
+          REQUIRE(out_wgm_multi_wave.wgmxccsplitk == 0);
+        }
+      }
+
+      // A CU budget below the physical count tightens the gate: the same grid
+      // that fits a full machine spans more than one wave of the budget.
+      {
+        auto split_config      = config;
+        split_config.mt.k      = 64;
+        auto capped_problem    = split_problem;
+        capped_problem.num_cus = skGrid_one_wave / 2;
+
+        auto out_wgm_capped = origami::select_workgroup_mapping(
+            capped_problem, hardware, split_config, skGrid_one_wave);
+        REQUIRE(out_wgm_capped.wgmxccsplitk == 0);
+      }
+
+      // If the split factor is already XCD-aligned, hardware round-robin dispatch
+      // distributes k-splits evenly and K-coherent remapping should stay disabled.
+      {
+        auto split_config = config;
+        split_config.mt.k = 64;
+        auto skGrid_xcd_aligned = hardware.NUM_XCD * numMT_M * numMT_N;
+
+        auto out_wgm_splitk_xcd_aligned =
+            origami::select_workgroup_mapping(problem, hardware, split_config, skGrid_xcd_aligned);
+        REQUIRE(out_wgm_splitk_xcd_aligned.wgmxccsplitk == 0);
+        REQUIRE(out_wgm_splitk_xcd_aligned.wgmxccchunk == 0);
+        REQUIRE(out_wgm_splitk_xcd_aligned.wgmxcc == 0);
       }
     }
   }
+}
+
+TEST_CASE("Origami: config_t cluster_dim defaults to 1x1x1", "[origami][config][cluster_dim]") {
+  origami::config_t config;
+  config.mt.m        = 256;
+  config.mt.n        = 256;
+  config.mt.k        = 64;
+  config.mi          = {16, 16, 16};
+  config.occupancy   = 4;
+
+  REQUIRE(config.cluster_dim.m == 1);
+  REQUIRE(config.cluster_dim.n == 1);
+  REQUIRE(config.cluster_dim.k == 1);
+
+  const auto from_helper = make_config(256, 256, 64);
+  REQUIRE(from_helper.cluster_dim.m == 1);
+  REQUIRE(from_helper.cluster_dim.n == 1);
+  REQUIRE(from_helper.cluster_dim.k == 1);
+}
+
+TEST_CASE("Origami: config_t operator== distinguishes cluster_dim",
+          "[origami][config][cluster_dim]") {
+  origami::config_t base;
+  base.mt        = {256, 256, 64};
+  base.mi        = {16, 16, 16};
+  base.occupancy = 4;
+
+  auto other = base;
+  other.cluster_dim = {2, 1, 1};
+
+  REQUIRE(base == base);
+  REQUIRE(!(base == other));
+
+  other = base;
+  other.cluster_dim = {1, 2, 1};
+  REQUIRE(!(base == other));
+
+  other = base;
+  other.cluster_dim = {1, 1, 2};
+  REQUIRE(!(base == other));
+
+  other.cluster_dim = {2, 1, 1};
+  const auto same = other;
+  REQUIRE(other == same);
 }
 
 TEST_CASE("Origami: config_t hash function", "[origami]") {
@@ -1113,6 +1232,38 @@ TEST_CASE("Origami: config_t hash function", "[origami]") {
     config2.tensile().depth_u = 32;  // Different depth_u
 
     REQUIRE(config1.hash() != config2.hash());
+  }
+
+  SECTION("different cluster_dim produces different hashes") {
+    origami::config_t config1;
+    config1.mt           = {256, 256, 32};
+    config1.mi           = {16, 16, 16};
+    config1.occupancy    = 4;
+    config1.cluster_dim  = {1, 1, 1};
+
+    origami::config_t config2 = config1;
+    config2.cluster_dim       = {2, 1, 1};
+
+    origami::config_t config3 = config1;
+    config3.cluster_dim       = {1, 2, 1};
+
+    origami::config_t config4 = config1;
+    config4.cluster_dim       = {1, 1, 2};
+
+    REQUIRE(config1.hash() != config2.hash());
+    REQUIRE(config1.hash() != config3.hash());
+    REQUIRE(config1.hash() != config4.hash());
+  }
+
+  SECTION("identical cluster_dim preserves hash") {
+    origami::config_t config1;
+    config1.mt           = {256, 256, 32};
+    config1.mi           = {16, 16, 16};
+    config1.occupancy    = 4;
+    config1.cluster_dim  = {2, 2, 1};
+
+    origami::config_t config2 = config1;
+    REQUIRE(config1.hash() == config2.hash());
   }
 }
 
@@ -1312,8 +1463,10 @@ TEST_CASE("Origami: num_cus changes selected config", "[origami]") {
                  << " | capped winner=" << capped_mt.m << "x" << capped_mt.n << "x" << capped_mt.k
                  << " (lat " << capped[0].latency << ")");
 
-      // The identity of the winning config must change with the CU budget,
-      // not merely the latency magnitude.
+      // On raw latency (tie-break disabled) the CU budget flips the winner:
+      // 256x128x64 (more, more-efficient tiles) wins with the full budget, while
+      // 192x192x64 (fewer tiles -> fewer timesteps) wins when the budget is
+      // squeezed to N_CU / 8.
       const bool winner_flipped =
           full_mt.m != capped_mt.m || full_mt.n != capped_mt.n || full_mt.k != capped_mt.k;
       REQUIRE(winner_flipped);
@@ -1323,6 +1476,63 @@ TEST_CASE("Origami: num_cus changes selected config", "[origami]") {
       REQUIRE(full_mt.n == 128);
       REQUIRE(capped_mt.m == 192);
       REQUIRE(capped_mt.n == 192);
+    }
+  }
+}
+
+// Helper: a config with a Tensile backend carrying MIWaveGroup + LocalSplitU.
+static origami::config_t lsu_config(size_t mtm, size_t mtn, size_t mtk,
+                                    int wgm, int wgn, int lsu) {
+  auto c = make_config(mtm, mtn, mtk, 16, 16, 16, false, 1, 1);
+  c.tensile().wave_group_m  = wgm;
+  c.tensile().wave_group_n  = wgn;
+  c.tensile().local_split_u = lsu;
+  return c;
+}
+
+TEST_CASE("Origami: K-split LSU ranking respects MT_K cap", "[origami][lsu]") {
+  // Regression guard for the depthU-512 leak.  On a skinny deep-K shape a real
+  // K-split LSU kernel uses a shallow per-iter DepthU (32x16x32, MIWaveGroup=
+  // [1,1], LSU=4).  A deep phantom tile (16x16x512 LSU=4) is NOT a real K-split
+  // kernel; K_SPLIT_LSU_MTK_MAX keeps the box relaxation (and its LSU
+  // K-shortening credit) off it, so it must not out-rank the shallow tile.
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - shallow K-split LSU out-ranks deep phantom") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(28, 256, 4096, origami::transpose_t::N,
+                                   origami::transpose_t::T);  // skinny-M NT, min=28<=32
+
+      std::vector<origami::config_t> configs;
+      configs.push_back(lsu_config(16, 16, 512, 1, 1, 4));  // deep phantom
+      configs.push_back(lsu_config(32, 16, 32, 1, 1, 4));   // real K-split kernel
+
+      auto results = origami::rank_configs(problem, hardware, configs);
+      INFO("winner=" << results[0].config.mt.m << "x" << results[0].config.mt.n
+                     << "x" << results[0].config.mt.k);
+      REQUIRE(results[0].config.mt.k == 32);   // shallow DepthU wins
+      REQUIRE(results[0].config.mt.m == 32);
+    }
+  }
+}
+
+TEST_CASE("Origami: sub-MI GEMV prefers LSU K-split kernel", "[origami][lsu]") {
+  // N=1 huge-K reduction is CU-starved; LSU splits K across waves to parallelize.
+  // The sub-MI box relaxation lets the model credit the LSU K-shortening even
+  // though K > DEEPEN_K_MAX, so the LSU K-split kernel must out-rank the
+  // otherwise-identical non-LSU tile.
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - LSU out-ranks non-LSU for N=1 huge-K") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(256, 1, 8192, origami::transpose_t::N,
+                                   origami::transpose_t::N);  // N=1 sub-MI
+
+      std::vector<origami::config_t> configs;
+      configs.push_back(lsu_config(32, 32, 64, 2, 2, 1));  // non-LSU
+      configs.push_back(lsu_config(32, 32, 64, 1, 1, 4));  // LSU K-split (should win)
+
+      auto results = origami::rank_configs(problem, hardware, configs);
+      INFO("winner lsu=" << results[0].config.tensile().local_split_u);
+      REQUIRE(results[0].config.tensile().local_split_u == 4);
     }
   }
 }

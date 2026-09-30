@@ -23,6 +23,7 @@
 
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
+#include <cassert>
 #include <cstdint>
 #include <iostream>  // TODO: don't use iostream.
 #include <ostream>
@@ -57,6 +58,61 @@ void StinkyInstruction::dump(std::ostream& out) const {
     printer.print(*this);
 }
 
+void StinkyInstruction::attachSSA(AttachedSSA ssa) {
+    clearAttachedSSA();
+    attachedSSA_ = std::move(ssa);
+    for (size_t i = 0; i < attachedSSA_->results.size(); ++i) {
+        StinkySSAValue* value = attachedSSA_->results[i];
+        if (value != nullptr) value->bindDef(this, static_cast<uint16_t>(i));
+    }
+    for (size_t i = 0; i < attachedSSA_->operands.size(); ++i) {
+        if (attachedSSA_->operands[i])
+            attachedSSA_->operands[i]->bindOwner(this, static_cast<uint16_t>(i));
+    }
+}
+
+void StinkyInstruction::clearAttachedSSA() {
+    if (!attachedSSA_) return;
+    for (StinkySSAValue* value : attachedSSA_->results) {
+        if (value != nullptr && value->defOp() == this) value->unbindDef();
+    }
+    attachedSSA_.reset();
+}
+
+size_t StinkyInstruction::getNumSSAResults() const {
+    return attachedSSA_ ? attachedSSA_->results.size() : 0;
+}
+
+StinkySSAValue* StinkyInstruction::getSSAResult(size_t i) const {
+    assert(attachedSSA_ && "getSSAResult requires attached SSA");
+    return attachedSSA_->results.at(i);
+}
+
+size_t StinkyInstruction::getNumSSAOperands() const {
+    return attachedSSA_ ? attachedSSA_->operands.size() : 0;
+}
+
+StinkyOpOperand* StinkyInstruction::getSSAOperand(size_t i) {
+    assert(attachedSSA_ && "getSSAOperand requires attached SSA");
+    return attachedSSA_->operands.at(i).get();
+}
+
+const StinkyOpOperand* StinkyInstruction::getSSAOperand(size_t i) const {
+    assert(attachedSSA_ && "getSSAOperand requires attached SSA");
+    return attachedSSA_->operands.at(i).get();
+}
+
+StinkySSAValue* StinkyInstruction::getSSAOperandValue(size_t i) const {
+    const StinkyOpOperand* operand = getSSAOperand(i);
+    return operand != nullptr ? operand->value() : nullptr;
+}
+
+void StinkyInstruction::setSSAOperandValue(size_t i, StinkySSAValue* v) {
+    StinkyOpOperand* operand = getSSAOperand(i);
+    assert(operand != nullptr);
+    operand->setValue(v);
+}
+
 void StinkyInstruction::resolveMatrixFmtOverrides() {
     if (!hwInstDesc) return;
     const bool hasCost = !hwInstDesc->matrixFmtCostOverrides.empty();
@@ -88,7 +144,7 @@ void StinkyInstruction::resolveMatrixFmtOverrides() {
 //----------------------------------------------------------------------
 StinkyInstruction* AsmIRBuilder::createLabel(const std::string& label, uint16_t alignment) {
     static const HwInstDesc labelMCID{
-        GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+        GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
 
     StinkyInstruction* labelInst = create(&labelMCID);
     labelInst->addModifier<LabelData>(LabelData{label, alignment});
@@ -97,7 +153,7 @@ StinkyInstruction* AsmIRBuilder::createLabel(const std::string& label, uint16_t 
 
 StinkyInstruction* AsmIRBuilder::createPhi(RegType type, unsigned regIdx, IRBase* insertPt) {
     static const HwInstDesc phiMCID{
-        GFX::PHI, GFX::PHI, 0, 0, 0, "PHI", makeFlagSet({InstFlag::IF_HasSideEffect})};
+        GFX::PHI, GFX::PHI, 0, 0, 0, 0, "PHI", makeFlagSet({InstFlag::IF_HasSideEffect})};
 
     const size_t numPreds = bb->getPredecessors().size();
 

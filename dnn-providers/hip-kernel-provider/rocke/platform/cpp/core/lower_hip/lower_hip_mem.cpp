@@ -15,6 +15,7 @@
  * rocke_h_name, rocke_h_type_to_hip, rocke_h_hip_scalar, rocke_h_vec_prefix,
  * rocke_h_smem_set_storage/_storage, rocke_h_fail, rocke_h_live) are NOT defined here.
  */
+#include "rocke/dtypes.h"
 #include "rocke/lower_hip_internal.h"
 
 #include <stdint.h>
@@ -194,7 +195,7 @@ static rocke_status_t _op_tile_smem_store_vN(rocke_h_lowerer_t* lw, const rocke_
     }
     idx_str = mem_idx_join(lw, &op->operands[1], op->num_operands - 2);
     elem_name = mem_attr_str(op, "elem_type", "f16");
-    prefix = rocke_h_vec_prefix(elem_name, /*full_map=*/true);
+    prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "smem_store_vN");
     rocke_h_emitf(lw,
                   "*reinterpret_cast<%s%lld*>(&%s[%s]) = %s;",
                   prefix,
@@ -324,7 +325,9 @@ static rocke_status_t _op_tile_smem_load_vN(rocke_h_lowerer_t* lw, const rocke_o
     smem = op->operands[0];
     n = mem_attr_int(op, "vec", 0);
     elem_name = mem_attr_str(op, "elem_type", "f16");
-    prefix = rocke_h_vec_prefix(elem_name, /*full_map=*/false);
+    /* Full map, like Python _smem_vec_prefix: an f32/i32/i8 LDS vector load must
+     * not be reinterpreted through the f16 view. */
+    prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "smem_load_vN");
     storage = mem_storage_of(lw, smem);
     if(!storage)
     {
@@ -332,6 +335,21 @@ static rocke_status_t _op_tile_smem_load_vN(rocke_h_lowerer_t* lw, const rocke_o
     }
     idx_str = mem_idx_join(lw, &op->operands[1], op->num_operands - 1);
     res = rocke_h_name(lw, op->results[0]);
+    const int64_t byte_count = n * (rocke_dtype_info(elem_name)->encoded_bits / 8);
+    if(byte_count & (byte_count - 1))
+    {
+        /* Clang pads vector objects; copy only the actual LDS payload. */
+        rocke_h_emitf(lw,
+                      "%s%lld %s; __builtin_memcpy(&%s, &%s[%s], %lld);",
+                      prefix,
+                      (long long)n,
+                      res,
+                      res,
+                      storage,
+                      idx_str,
+                      (long long)byte_count);
+        return lw->status;
+    }
     rocke_h_emitf(lw,
                   "%s%lld %s = *reinterpret_cast<const %s%lld*>(&%s[%s]);",
                   prefix,
@@ -526,8 +544,29 @@ static rocke_status_t _op_memref_global_load_vN(rocke_h_lowerer_t* lw, const roc
     idx = op->operands[1];
     vec = mem_attr_int(op, "vec", 0);
     elem_name = mem_attr_str(op, "elem_type", "f16");
-    prefix = rocke_h_vec_prefix(elem_name, /*full_map=*/false);
+    prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "global_load_vN");
     res = rocke_h_name(lw, op->results[0]);
+    const int64_t byte_count = vec * (rocke_dtype_info(elem_name)->encoded_bits / 8);
+    const int64_t align = mem_attr_int(op, "align", vec * 2);
+    if(align <= 0 || (align & (align - 1)))
+        return rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "global_load_vN: alignment must be a positive power of two");
+    if(align < byte_count || (byte_count & (byte_count - 1)))
+    {
+        /* Copy only the payload, not vector padding, with the IR's alignment. */
+        rocke_h_emitf(
+            lw,
+            "%s%lld %s; __builtin_memcpy(&%s, __builtin_assume_aligned(%s + %s, %lld), %lld);",
+            prefix,
+            (long long)vec,
+            res,
+            res,
+            rocke_h_name(lw, ptr),
+            rocke_h_name(lw, idx),
+            (long long)align,
+            (long long)byte_count);
+        return lw->status;
+    }
     rocke_h_emitf(lw,
                   "%s%lld %s = *reinterpret_cast<const %s%lld*>(%s + %s);",
                   prefix,
@@ -601,7 +640,7 @@ static rocke_status_t _op_memref_global_store_vN(rocke_h_lowerer_t* lw, const ro
     val = op->operands[2];
     n = mem_attr_int(op, "vec", 0);
     elem_name = mem_attr_str(op, "elem_type", "f16");
-    prefix = rocke_h_vec_prefix(elem_name, /*full_map=*/false);
+    prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "global_store_vN");
     rocke_h_emitf(lw,
                   "*reinterpret_cast<%s%lld*>(%s + %s) = %s;",
                   prefix,
@@ -930,7 +969,15 @@ static rocke_status_t _op_tile_buffer_load_vN(rocke_h_lowerer_t* lw, const rocke
     soffset = op->operands[2];
     dwords = mem_attr_int(op, "dwords", 0);
     elem = mem_attr_str(op, "elem_type", "f16");
-    prefix = rocke_h_vec_prefix(elem, /*full_map=*/false);
+    /* Python _op_tile_buffer_load_vN indexes a 4-entry map ({f16,bf16,f32,i32})
+     * and raises KeyError otherwise, so f32/i32 must not resolve to "f16x". */
+    if(strcmp(elem, "f16") != 0 && strcmp(elem, "bf16") != 0 && strcmp(elem, "f32") != 0
+       && strcmp(elem, "i32") != 0)
+    {
+        return rocke_h_fail(
+            lw, ROCKE_ERR_KEY, "tile.buffer_load_vN: unsupported element type '%s'", elem);
+    }
+    prefix = rocke_h_vec_prefix(elem, /*full_map=*/true);
     n = (strcmp(elem, "f16") == 0 || strcmp(elem, "bf16") == 0) ? dwords * 2 : dwords;
     if(dwords == 1)
     {

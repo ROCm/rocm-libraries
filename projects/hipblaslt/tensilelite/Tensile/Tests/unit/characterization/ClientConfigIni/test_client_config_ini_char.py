@@ -173,6 +173,7 @@ def _set_all_gp(monkeypatch):
         "LibraryUpdateFile": "",
         "LibraryUpdateComment": "",
         "UseUserArgs": False,
+        "BatchMode": 0,
         "RotatingBufferSize": 0,
         "RotatingMode": 0,
         "RocProfCounter": [],
@@ -385,6 +386,24 @@ class TestWriteClientConfigIniPlain:
         content = _write_ini(tmp_path, monkeypatch, pt, _PLAIN_GEMM_PT_DICT,
                              libraryFile="/explicit/TensileLibrary.yaml")
         assert "library-file=/explicit/TensileLibrary.yaml" in content
+
+    def test_pointer_array_batch_mode_written_when_requested(self, tmp_path, monkeypatch):
+        """BatchMode=1 reaches the standalone client as pointer-array mode."""
+        pt = _make_problem_type(_PLAIN_GEMM_PT_DICT)
+        content = _write_ini(
+            tmp_path,
+            monkeypatch,
+            pt,
+            _PLAIN_GEMM_PT_DICT,
+            extra_gp={"BatchMode": 1},
+        )
+        assert "batch-mode=1" in content
+
+    def test_default_batch_mode_is_omitted(self, tmp_path, monkeypatch):
+        """Keep legacy INI files unchanged when strided mode is selected."""
+        pt = _make_problem_type(_PLAIN_GEMM_PT_DICT)
+        content = _write_ini(tmp_path, monkeypatch, pt, _PLAIN_GEMM_PT_DICT)
+        assert "batch-mode=" not in content
 
     def test_library_file_none_raises(self, tmp_path, monkeypatch):
         """Line 582: libraryFile=None is rejected -- AssertionError."""

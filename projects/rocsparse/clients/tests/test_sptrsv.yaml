@@ -100,6 +100,116 @@ Tests:
   formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [2,4]
 
+# Diagonal solve, smoke coverage.
+- name: sptrsv_diagonal
+  category: quick
+  function: sptrsv
+  indextype: *i32
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_csr_range_quick
+  alpha_alphai: *alpha_csr_range_quick
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  solve_mode: [rocsparse_solve_mode_diagonal]
+  diagonal_modifier: [rocsparse_diagonal_modifier_none, rocsparse_diagonal_modifier_absolute]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
+  batch_count: [2]
+
+# Diagonal solve, index/precision coverage. M = 1024 spans several thread blocks.
+- name: sptrsv_diagonal
+  category: pre_checkin
+  function: sptrsv
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_csr_range_checkin
+  alpha_alphai: *alpha_csr_range_checkin
+  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  solve_mode: [rocsparse_solve_mode_diagonal]
+  diagonal_modifier: [rocsparse_diagonal_modifier_none, rocsparse_diagonal_modifier_absolute]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  apol: [rocsparse_analysis_policy_reuse]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
+  batch_count: [2]
+
+# Diagonal solve, large matrices.
+- name: sptrsv_diagonal
+  category: nightly
+  function: sptrsv
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_csr_range_nightly
+  alpha_alphai: *alpha_csr_range_nightly
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  solve_mode: [rocsparse_solve_mode_diagonal]
+  diagonal_modifier: [rocsparse_diagonal_modifier_none, rocsparse_diagonal_modifier_absolute]
+  baseA: [rocsparse_index_base_zero]
+  apol: [rocsparse_analysis_policy_reuse]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
+  batch_count: [2]
+
+# Diagonal solve, real matrices with the full operation/base/analysis policy sweep.
+- name: sptrsv_diagonal_file
+  category: nightly
+  function: sptrsv
+  indextype: *i32
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_csr_range_checkin
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  solve_mode: [rocsparse_solve_mode_diagonal]
+  diagonal_modifier: [rocsparse_diagonal_modifier_none, rocsparse_diagonal_modifier_absolute]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  apol: *all_rocsparse_analysis_policy
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [nos5,
+             nos7,
+             mplate]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
+  batch_count: [3]
+  batch_count_A: [1]
+
+# Diagonal solve, batch strides.
+- name: sptrsv_diagonal
+  category: nightly
+  function: sptrsv
+  indextype: *i64i32
+  precision: *single_double_precisions_complex
+  M_N: *M_N_csr_range_quick
+  alpha_alphai: *alpha_csr_range_checkin
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  solve_mode: [rocsparse_solve_mode_diagonal]
+  diagonal_modifier: [rocsparse_diagonal_modifier_none, rocsparse_diagonal_modifier_absolute]
+  baseA: [rocsparse_index_base_zero]
+  apol: [rocsparse_analysis_policy_reuse]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
+  batch_count: [1, 4, 96, 1024]
+  batch_count_A: [0, 1]
+
 - name: sptrsv_file
   category: pre_checkin
   function: sptrsv

@@ -50,7 +50,7 @@ template <typename GridwiseGemm,
           TailNumber TailNum       = TailNumber::Full>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif
     kernel_grouped_conv_bwd_data_xdl_cshuffle_v3(
         typename GridwiseGemm::Argument karg,
@@ -146,12 +146,12 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
         }
         else
         {
-            if(gemm_kernel_args[group_id].HasMainKBlockLoop_)
+            if constexpr(HasMainKBlockLoop || NoMainKBlockLoop)
             {
                 GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
                                            BGridDesc_BK0_N_BK1,
                                            EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                           true,
+                                           HasMainKBlockLoop,
                                            EGlobalMemoryDataOperation,
                                            TailNum>(
                     karg.p_a_grid + a_batch_offset,
@@ -168,23 +168,46 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
             }
             else
             {
-                GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
-                                           BGridDesc_BK0_N_BK1,
-                                           EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                           false,
-                                           EGlobalMemoryDataOperation,
-                                           TailNum>(
-                    karg.p_a_grid + a_batch_offset,
-                    karg.p_b_grid + b_batch_offset,
-                    karg.p_c_grid + e_batch_offset,
-                    p_shared,
-                    karg,
-                    gemm_kernel_args[group_id].a_grid_desc_ak0_m_ak1_,
-                    gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_,
-                    gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
-                    k_idx,
-                    gridDim.z,
-                    blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+                if(gemm_kernel_args[group_id].HasMainKBlockLoop_)
+                {
+                    GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
+                                               BGridDesc_BK0_N_BK1,
+                                               EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                               true,
+                                               EGlobalMemoryDataOperation,
+                                               TailNum>(
+                        karg.p_a_grid + a_batch_offset,
+                        karg.p_b_grid + b_batch_offset,
+                        karg.p_c_grid + e_batch_offset,
+                        p_shared,
+                        karg,
+                        gemm_kernel_args[group_id].a_grid_desc_ak0_m_ak1_,
+                        gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_,
+                        gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                        k_idx,
+                        gridDim.z,
+                        blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+                }
+                else
+                {
+                    GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
+                                               BGridDesc_BK0_N_BK1,
+                                               EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                               false,
+                                               EGlobalMemoryDataOperation,
+                                               TailNum>(
+                        karg.p_a_grid + a_batch_offset,
+                        karg.p_b_grid + b_batch_offset,
+                        karg.p_c_grid + e_batch_offset,
+                        p_shared,
+                        karg,
+                        gemm_kernel_args[group_id].a_grid_desc_ak0_m_ak1_,
+                        gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_,
+                        gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                        k_idx,
+                        gridDim.z,
+                        blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+                }
             }
         }
     }
@@ -967,6 +990,15 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        // Memory access runtime error on gfx1250 (inconsistent across runs)
+        // TODO: need fix
+        if constexpr(LargeTensors)
+        {
+            if(is_gfx125_supported())
+            {
+                return false;
+            }
+        }
         if constexpr(!LargeTensors)
         {
             if(arg.stride_overflow)
@@ -1233,10 +1265,19 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                  const AElementwiseOp& a_element_op,
                  const BElementwiseOp& b_element_op,
                  const CDEElementwiseOp& cde_element_op,
-                 const ck::index_t split_k = 1)
+                 const index_t split_k = 1)
     {
         if constexpr(!LargeTensors)
         {
+            bool ds_ovf = false;
+            static_for<0, NumDTensor, 1>{}([&](auto i) {
+                using DDataType = remove_cvref_t<tuple_element_t<i.value, DsDataType>>;
+                ds_ovf |= tensor_exceeds_2gb<DDataType>(ds_g_n_c_wis_lengths[i]);
+            });
+            const bool stride_ovf = tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths) ||
+                                    tensor_exceeds_2gb<BDataType>(b_g_k_c_xs_lengths) ||
+                                    tensor_exceeds_2gb<EDataType>(e_g_n_c_wis_lengths) || ds_ovf;
+
             return Argument{p_a,
                             p_b,
                             p_ds,
@@ -1256,7 +1297,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                             a_element_op,
                             b_element_op,
                             cde_element_op,
-                            split_k};
+                            split_k,
+                            stride_ovf};
         }
         else
         {
@@ -1453,6 +1495,15 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
     {
         if constexpr(!LargeTensors)
         {
+            bool ds_ovf = false;
+            static_for<0, NumDTensor, 1>{}([&](auto i) {
+                using DDataType = remove_cvref_t<tuple_element_t<i.value, DsDataType>>;
+                ds_ovf |= tensor_exceeds_2gb<DDataType>(ds_g_n_c_wis_lengths[i]);
+            });
+            const bool stride_ovf = tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths) ||
+                                    tensor_exceeds_2gb<BDataType>(b_g_k_c_xs_lengths) ||
+                                    tensor_exceeds_2gb<EDataType>(e_g_n_c_wis_lengths) || ds_ovf;
+
             return std::make_unique<Argument>(p_a,
                                               p_b,
                                               p_ds,
@@ -1472,7 +1523,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                                               a_element_op,
                                               b_element_op,
                                               cde_element_op,
-                                              split_k);
+                                              split_k,
+                                              stride_ovf);
         }
         else
         {

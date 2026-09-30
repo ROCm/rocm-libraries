@@ -16,7 +16,7 @@
 # Unit tests in tests/ use TEST/TEST_F with class prefixes Test*; the
 # integration_tests/ binary now only builds
 # IntegrationGpuMxMatmulUnsupported.cpp (MX GEMM shape-rejection checks,
-# gated behind HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM) since the plain
+# gated behind HIPBLASLTPROVIDER_ENABLE_MX_GEMM) since the plain
 # matmul/matmul-bias/matmul-activ/matmul-bias-activ and MX correctness
 # suites were ported to dnn-providers/integration-tests (see
 # test_categories_integration.yaml, applied when hipdnn_integration_tests is
@@ -76,6 +76,16 @@ test_categories:
       - "full"
       - "all"
 
+  ffm-quick:
+    description: "Fast-feedback mechanism (FFM) quick tier - currently mirrors the quick tier"
+    test_patterns:
+      - "*"
+    exclude:
+      - "Full*"
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
 execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
@@ -84,3 +94,4 @@ execution_settings:
     standard: 2700        # 45 minutes
     comprehensive: 25200  # 7 hours
     full: 28800           # 8 hours
+    ffm-quick: 7200       # 2 hours

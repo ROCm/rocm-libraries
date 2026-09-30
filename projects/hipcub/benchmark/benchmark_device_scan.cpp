@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,17 +26,10 @@
     #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
 
-#include "common_benchmark_header.hpp"
+#include "benchmark_utils.hpp"
 
-// HIP API
 #include <hipcub/device/device_reduce.hpp>
 #include <hipcub/device/device_scan.hpp>
-
-#include _HIPCUB_STD_INCLUDE(functional)
-
-#ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
-#endif
 
 template<bool Exclusive, class T, class BinaryFunction>
 auto run_device_scan(void*             temporary_storage,
@@ -100,7 +93,7 @@ auto run_device_scan_by_key(void*             temporary_storage,
                                                   scan_op,
                                                   initial_value,
                                                   static_cast<int>(input_size),
-                                                  _HIPCUB_STD::equal_to<>(),
+                                                  hipcub::Equality(),
                                                   stream);
 }
 
@@ -123,227 +116,183 @@ auto run_device_scan_by_key(void*   temporary_storage,
                                                   output,
                                                   scan_op,
                                                   static_cast<int>(input_size),
-                                                  _HIPCUB_STD::equal_to<>(),
+                                                  hipcub::Equality(),
                                                   stream);
 }
 
-template<bool Exclusive, class T, class BinaryFunction>
-void run_benchmark(benchmark::State& state,
-                   size_t            size,
-                   const hipStream_t stream,
-                   BinaryFunction    scan_op)
+template<bool Exclusive, class T, class BinaryFunction, class Tag>
+class scan_benchmark : public primbench::benchmark_interface
 {
-    std::vector<T> input         = benchmark_utils::get_random_data<T>(size, T(0), T(1000));
-    T              initial_value = T(123);
-    T*             d_input;
-    T*             d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Allocate temporary storage memory
-    size_t temp_storage_size_bytes = 0;
-    void*  d_temp_storage          = nullptr;
-    // Get size of d_temp_storage
-    HIP_CHECK((run_device_scan<Exclusive>(d_temp_storage,
-                                          temp_storage_size_bytes,
-                                          d_input,
-                                          d_output,
-                                          initial_value,
-                                          size,
-                                          scan_op,
-                                          stream)));
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Warm-up
-    for(size_t i = 0; i < 5; i++)
+    primbench::json meta() const override
     {
-        HIP_CHECK((run_device_scan<Exclusive>(d_temp_storage,
-                                              temp_storage_size_bytes,
-                                              d_input,
-                                              d_output,
-                                              initial_value,
-                                              size,
-                                              scan_op,
-                                              stream)));
+        return primbench::json{}
+            .add("algo", "device_scan")
+            .add("subalgo", "scan")
+            .add("lvl", "device")
+            .add("exclusive", Exclusive)
+            .add("data_type", primbench::name<T>())
+            .add("op", Tag::name);
     }
-    HIP_CHECK(hipDeviceSynchronize());
 
-    const unsigned int batch_size = 10;
-    for(auto _ : state)
+    void run(primbench::state& state) override
     {
-        auto start = std::chrono::high_resolution_clock::now();
-        for(size_t i = 0; i < batch_size; i++)
+        const size_t items  = state.size;
+        const auto&  stream = state.stream;
+
+        BinaryFunction scan_op{};
+
+        std::vector<T> input         = benchmark_utils::get_random_data<T>(items, T(0), T(1000));
+        T              initial_value = T(123);
+        T*             d_input;
+        T*             d_output;
+        HIP_CHECK(hipMalloc(&d_input, items * sizeof(T)));
+        HIP_CHECK(hipMalloc(&d_output, items * sizeof(T)));
+        HIP_CHECK(hipMemcpy(d_input, input.data(), items * sizeof(T), hipMemcpyHostToDevice));
+        HIP_CHECK(hipDeviceSynchronize());
+
+        void*  d_temp_storage = nullptr;
+        size_t temp_storage_bytes;
+
+        const auto launch = [&]
         {
-            HIP_CHECK((run_device_scan<Exclusive>(d_temp_storage,
-                                                  temp_storage_size_bytes,
-                                                  d_input,
-                                                  d_output,
-                                                  initial_value,
-                                                  size,
-                                                  scan_op,
-                                                  stream)));
-        }
-        HIP_CHECK(hipStreamSynchronize(stream));
-
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds
-            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        state.SetIterationTime(elapsed_seconds.count());
-    }
-    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
-    HIP_CHECK(hipFree(d_temp_storage));
-}
-
-template<bool Exclusive, class T, class BinaryFunction>
-void run_benchmark_by_key(benchmark::State& state,
-                          size_t            size,
-                          const hipStream_t stream,
-                          BinaryFunction    scan_op)
-{
-    using key_type                      = int;
-    constexpr size_t max_segment_length = 100;
-
-    const std::vector<key_type> keys
-        = benchmark_utils::get_random_segments<key_type>(size,
-                                                         max_segment_length,
-                                                         std::random_device{}());
-    const std::vector<T> input         = benchmark_utils::get_random_data<T>(size, T(0), T(1000));
-    const T              initial_value = T(123);
-    key_type*            d_keys;
-    T*                   d_input;
-    T*                   d_output;
-    HIP_CHECK(hipMalloc(&d_keys, size * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
-    HIP_CHECK(hipMemcpy(d_keys, keys.data(), size * sizeof(key_type), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Allocate temporary storage memory
-    size_t temp_storage_size_bytes = 0;
-    void*  d_temp_storage          = nullptr;
-    // Get size of d_temp_storage
-    HIP_CHECK((run_device_scan_by_key<Exclusive>(d_temp_storage,
-                                                 temp_storage_size_bytes,
-                                                 d_keys,
+            HIP_CHECK(run_device_scan<Exclusive>(d_temp_storage,
+                                                 temp_storage_bytes,
                                                  d_input,
                                                  d_output,
                                                  initial_value,
-                                                 size,
+                                                 items,
                                                  scan_op,
-                                                 stream)));
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
-    HIP_CHECK(hipDeviceSynchronize());
+                                                 stream));
+        };
 
-    // Warm-up
-    for(size_t i = 0; i < 5; i++)
-    {
-        HIP_CHECK((run_device_scan_by_key<Exclusive>(d_temp_storage,
-                                                     temp_storage_size_bytes,
-                                                     d_keys,
-                                                     d_input,
-                                                     d_output,
-                                                     initial_value,
-                                                     size,
-                                                     scan_op,
-                                                     stream)));
+        launch();
+
+        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+        HIP_CHECK(hipDeviceSynchronize());
+
+        state.set_items(items);
+        state.add_writes<T>(items);
+
+        state.run(launch);
+
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output));
+        HIP_CHECK(hipFree(d_temp_storage));
     }
-    HIP_CHECK(hipDeviceSynchronize());
+};
 
-    const unsigned int batch_size = 10;
-    for(auto _ : state)
+template<bool Exclusive, class T, class BinaryFunction, class Tag>
+class scan_by_key_benchmark : public primbench::benchmark_interface
+{
+    primbench::json meta() const override
     {
-        auto start = std::chrono::high_resolution_clock::now();
-        for(size_t i = 0; i < batch_size; i++)
+        return primbench::json{}
+            .add("algo", "device_scan")
+            .add("subalgo", "scan_by_key")
+            .add("lvl", "device")
+            .add("exclusive", Exclusive)
+            .add("data_type", primbench::name<T>())
+            .add("op", Tag::name);
+    }
+
+    void run(primbench::state& state) override
+    {
+        const size_t items  = state.size;
+        const auto&  stream = state.stream;
+
+        BinaryFunction scan_op{};
+
+        using Key                           = int;
+        constexpr size_t max_segment_length = 100;
+
+        const std::vector<Key> keys
+            = benchmark_utils::get_random_segments<Key>(items,
+                                                        max_segment_length,
+                                                        std::random_device{}());
+        const std::vector<T> input = benchmark_utils::get_random_data<T>(items, T(0), T(1000));
+        const T              initial_value = T(123);
+        Key*                 d_keys;
+        T*                   d_input;
+        T*                   d_output;
+        HIP_CHECK(hipMalloc(&d_keys, items * sizeof(Key)));
+        HIP_CHECK(hipMalloc(&d_input, items * sizeof(T)));
+        HIP_CHECK(hipMalloc(&d_output, items * sizeof(T)));
+        HIP_CHECK(hipMemcpy(d_keys, keys.data(), items * sizeof(Key), hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(d_input, input.data(), items * sizeof(T), hipMemcpyHostToDevice));
+        HIP_CHECK(hipDeviceSynchronize());
+
+        void*  d_temp_storage = nullptr;
+        size_t temp_storage_bytes;
+
+        const auto launch = [&]
         {
-            HIP_CHECK((run_device_scan_by_key<Exclusive>(d_temp_storage,
-                                                         temp_storage_size_bytes,
-                                                         d_keys,
-                                                         d_input,
-                                                         d_output,
-                                                         initial_value,
-                                                         size,
-                                                         scan_op,
-                                                         stream)));
-        }
-        HIP_CHECK(hipStreamSynchronize(stream));
+            HIP_CHECK(run_device_scan_by_key<Exclusive>(d_temp_storage,
+                                                        temp_storage_bytes,
+                                                        d_keys,
+                                                        d_input,
+                                                        d_output,
+                                                        initial_value,
+                                                        items,
+                                                        scan_op,
+                                                        stream));
+        };
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds
-            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        state.SetIterationTime(elapsed_seconds.count());
+        launch();
+
+        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+        HIP_CHECK(hipDeviceSynchronize());
+
+        state.set_items(items);
+        state.add_writes<T>(items);
+
+        state.run(launch);
+
+        HIP_CHECK(hipFree(d_keys));
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output));
+        HIP_CHECK(hipFree(d_temp_storage));
     }
-    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * batch_size * size);
+};
 
-    HIP_CHECK(hipFree(d_keys));
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
-    HIP_CHECK(hipFree(d_temp_storage));
-}
+struct sum_tag
+{
+    static constexpr const char* name = "sum";
+};
 
-#define CREATE_BENCHMARK(EXCL, T, SCAN_OP)                                                \
-    benchmark::RegisterBenchmark(                                                         \
-        std::string(std::string(EXCL ? "device_exclusive_scan" : "device_inclusive_scan") \
-                    + "<data_type:" #T ",op:" #SCAN_OP ">.")                              \
-            .c_str(),                                                                     \
-        &run_benchmark<EXCL, T, SCAN_OP>,                                                 \
-        size,                                                                             \
-        stream,                                                                           \
-        SCAN_OP()),                                                                       \
-        benchmark::RegisterBenchmark(                                                     \
-            std::string(std::string(EXCL ? "device_exclusive_scan_by_key"                 \
-                                         : "device_inclusive_scan_by_key")                \
-                        + "<data_type:" #T ",op:" #SCAN_OP ">.")                          \
-                .c_str(),                                                                 \
-            &run_benchmark_by_key<EXCL, T, SCAN_OP>,                                      \
-            size,                                                                         \
-            stream,                                                                       \
-            SCAN_OP())
+struct min_tag
+{
+    static constexpr const char* name = "min";
+};
 
-#define CREATE_BENCHMARKS(SCAN_OP)                                                                 \
-    CREATE_BENCHMARK(false, int, SCAN_OP), CREATE_BENCHMARK(true, int, SCAN_OP),                   \
-        CREATE_BENCHMARK(false, float, SCAN_OP), CREATE_BENCHMARK(true, float, SCAN_OP),           \
-        CREATE_BENCHMARK(false, double, SCAN_OP), CREATE_BENCHMARK(true, double, SCAN_OP),         \
-        CREATE_BENCHMARK(false, long long, SCAN_OP), CREATE_BENCHMARK(true, long long, SCAN_OP),   \
-        CREATE_BENCHMARK(false, custom_float2, SCAN_OP),                                           \
-        CREATE_BENCHMARK(true, custom_float2, SCAN_OP),                                            \
-        CREATE_BENCHMARK(false, custom_double2, SCAN_OP),                                          \
-        CREATE_BENCHMARK(true, custom_double2, SCAN_OP), CREATE_BENCHMARK(false, int8_t, SCAN_OP), \
-        CREATE_BENCHMARK(true, int8_t, SCAN_OP), CREATE_BENCHMARK(false, uint8_t, SCAN_OP),        \
-        CREATE_BENCHMARK(true, uint8_t, SCAN_OP)
+#define CREATE_BENCHMARK(EXCL, T, SCAN_OP, TAG)              \
+    executor.queue<scan_benchmark<EXCL, T, SCAN_OP, TAG>>(); \
+    executor.queue<scan_by_key_benchmark<EXCL, T, SCAN_OP, TAG>>()
+
+#define CREATE_BENCHMARKS(SCAN_OP, TAG)                    \
+    CREATE_BENCHMARK(false, int, SCAN_OP, TAG);            \
+    CREATE_BENCHMARK(true, int, SCAN_OP, TAG);             \
+    CREATE_BENCHMARK(false, float, SCAN_OP, TAG);          \
+    CREATE_BENCHMARK(true, float, SCAN_OP, TAG);           \
+    CREATE_BENCHMARK(false, double, SCAN_OP, TAG);         \
+    CREATE_BENCHMARK(true, double, SCAN_OP, TAG);          \
+    CREATE_BENCHMARK(false, int64_t, SCAN_OP, TAG);      \
+    CREATE_BENCHMARK(true, int64_t, SCAN_OP, TAG);       \
+    CREATE_BENCHMARK(false, custom_float2, SCAN_OP, TAG);  \
+    CREATE_BENCHMARK(true, custom_float2, SCAN_OP, TAG);   \
+    CREATE_BENCHMARK(false, custom_double2, SCAN_OP, TAG); \
+    CREATE_BENCHMARK(true, custom_double2, SCAN_OP, TAG);  \
+    CREATE_BENCHMARK(false, int8_t, SCAN_OP, TAG);         \
+    CREATE_BENCHMARK(true, int8_t, SCAN_OP, TAG);          \
+    CREATE_BENCHMARK(false, uint8_t, SCAN_OP, TAG);        \
+    CREATE_BENCHMARK(true, uint8_t, SCAN_OP, TAG)
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.run_and_exit_if_error();
+    primbench::settings settings;
+    settings.size                 = 32 * primbench::MiB; // In items
+    settings.min_gpu_ms_per_batch = 100;
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
-
-    std::cout << "benchmark_device_scan" << std::endl;
-
-    // HIP
-    hipStream_t     stream = 0; // default
-    hipDeviceProp_t devProp;
-    int             device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
-    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
-
-    using custom_double2 = benchmark_utils::custom_type<double, double>;
-    using custom_float2  = benchmark_utils::custom_type<float, float>;
+    primbench::executor executor(argc, argv, settings);
 
     // Compilation may never finish, if the compiler needs to compile too many
     // kernels, it is recommended to compile benchmarks only for 1-2 types when
@@ -351,29 +300,8 @@ int main(int argc, char* argv[])
     // commented/removed).
 
     // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks = {
-        CREATE_BENCHMARKS(benchmark_utils::plus),
-        CREATE_BENCHMARKS(benchmark_utils::minimum),
-    };
+    CREATE_BENCHMARKS(hipcub::Sum, sum_tag);
+    CREATE_BENCHMARKS(hipcub::Min, min_tag);
 
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-
-    return 0;
+    executor.run();
 }

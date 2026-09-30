@@ -22,14 +22,18 @@ DTYPE = {
     "f8_fnuz_r": "F8N",
     "bf8_r": "B8",
     "xf32_r": "X",
-    # C,Z,I8
+    "f4_r": "F4",
+    "f32_c": "C",
+    "f64_c": "Z",
+    # I8
 }
 
 # Bytes per element for hipBLASLt dtype tokens.
 DTYPE_BYTES = {
     "f64_r": 8, "f32_r": 4, "f16_r": 2, "bf16_r": 2,
     "f8_r": 1, "bf8_r": 1, "i8_r": 1, "i32_r": 4,
-    "xf32_r": 4,
+    "xf32_r": 4, "f4_r": 1,
+    "f32_c": 8, "f64_c": 16,
 }
 
 GEMM_FIELDS = (
@@ -44,6 +48,8 @@ GEMM_FIELDS = (
     "c_type",
     "d_type",
     "compute_type",
+    "scaleA",
+    "scaleB",
 )
 
 GEMM_LOG_FIELDS = (
@@ -58,6 +64,8 @@ GEMM_LOG_FIELDS = (
     "c_type",
     "d_type",
     "compute_type",
+    "scaleA",
+    "scaleB",
 )
 GEMM_TYPE_FIELDS = (
     "transA",
@@ -156,4 +164,5 @@ SUPPORTED_ARCH: tuple[str, ...] = (
     "gfx942_38cu",
     "gfx942_20cu",
     "gfx942_228cu",
+    "gfx1250",
 )

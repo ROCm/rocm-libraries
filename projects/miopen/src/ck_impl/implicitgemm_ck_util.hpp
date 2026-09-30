@@ -4,7 +4,10 @@
 #pragma once
 
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
+#include <miopen/solver/zero_tensor.hpp>
 #include <miopen/kernel_tuning_mode.hpp>
+
+#include <limits>
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #include <ck/utility/data_type.hpp>
@@ -167,19 +170,24 @@ typename ConvPtrsType::iterator FindConvPtrByID(ConvPtrsType& conv_ptrs,
     });
 }
 
-// Returns true when any tensor stride/dim exceeds INT_MAX, so the problem
-// must be dispatched to a CK instance whose argument types are int64 end-to-end.
-//
-// CK exposes both index_t (int32) and long_index_t (int64) MakeArgumentPointer
-// overloads, but most non-large-tensor impls override the int64 overload by
-// silently narrowing back to int32 (e.g.
-// device_grouped_conv_fwd_multiple_abd_xdl_cshuffle.hpp:2090-2117). Without
-// this filter the loader would happily pick a narrowing instance for an
-// out-of-range stride and corrupt the kernel arguments.
+// Non-large-tensor CK instances silently narrow CK's int64 MakeArgumentPointer overload
+// back to int32 and form byte offsets in 32-bit arithmetic, so any tensor whose byte span
+// exceeds INT_MAX overflows and returns silently wrong results -- even when every individual
+// dim/stride and the raw element count fit in int32. Must use GetNumBytes() (stride-aware
+// byte span), not GetElementSpace()/GetElementSize() (element counts): a tensor can have a
+// large element count but a sub-2GiB byte span (no risk), or the reverse -- a sub-INT_MAX
+// element count with a >2GiB byte span, which does overflow. Applies to every direction:
+// forward and backward-data hit the same 32-bit byte-offset overflow as backward-weights.
 template <typename ProblemDescriptionType>
 inline bool RequiresLargeTensorCKInstance(const ProblemDescriptionType& problem)
 {
-    return !problem.AllTensorsDimsFitIntoInt();
+    if(!problem.AllTensorsDimsFitIntoInt())
+        return true;
+
+    constexpr std::size_t max_int32 = static_cast<std::size_t>(std::numeric_limits<int>::max());
+    return problem.GetIn().GetNumBytes() > max_int32 ||
+           problem.GetOut().GetNumBytes() > max_int32 ||
+           problem.GetWeights().GetNumBytes() > max_int32;
 }
 
 // Large-tensor xdl impls embed "Large_Tensor" in their GetTypeString() (see
@@ -1178,7 +1186,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                 {
                     if constexpr(ZeroOutputs)
                     {
-                        ZeroOutTensor(handle, data_ctx.tensors.dwDesc, data_ctx.tensors.dw);
+                        ZeroTensor(handle, data_ctx.tensors.dwDesc, data_ctx.tensors.dw);
 
                         if(handle.IsProfilingEnabled())
                         {
@@ -1250,7 +1258,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                 if constexpr(std::is_same_v<CastType, miopen::conv::DataInvokeParams> &&
                              ZeroOutputs)
                 {
-                    ZeroOutTensor(handle, data_ctx.tensors.outDesc, data_ctx.tensors.out);
+                    ZeroTensor(handle, data_ctx.tensors.outDesc, data_ctx.tensors.out);
 
                     if(handle.IsProfilingEnabled())
                     {

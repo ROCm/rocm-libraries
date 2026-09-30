@@ -9,6 +9,8 @@ hipdnn_setup_version(hipdnn_data_sdk)
 # Set project with version
 project(hipdnn_data_sdk VERSION ${HIPDNN_DATA_SDK_VERSION} LANGUAGES CXX)
 
+find_package(Threads REQUIRED)
+
 set(HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/data_sdk")
 set(HIP_DNN_DATA_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
@@ -17,11 +19,44 @@ add_library(hipdnn_data_sdk INTERFACE)
 # Generate version header
 hipdnn_generate_version_header(hipdnn_data_sdk)
 
+# CMake-baked per-platform default cache root -- see CacheRoot.hpp for resolution order.
+# expandUser() resolves the leading ~/%USERPROFILE% token at run time.
+if(WIN32)
+    set(HIPDNN_CACHE_ROOT_DEFAULT "%USERPROFILE%\\\\.hipdnn\\\\cache\\\\")
+else()
+    set(HIPDNN_CACHE_ROOT_DEFAULT "~/.cache/hipdnn/")
+endif()
+configure_file(
+    "${HIP_DNN_DATA_SDK_INCLUDE_DIR}/hipdnn_data_sdk/utilities/CacheRootDefaults.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/include/hipdnn_data_sdk/utilities/CacheRootDefaults.h"
+    @ONLY
+)
+
 target_include_directories(
     hipdnn_data_sdk INTERFACE $<BUILD_INTERFACE:${HIP_DNN_DATA_SDK_INCLUDE_DIR}>
                               $<INSTALL_INTERFACE:${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}>
 )
-target_link_libraries(hipdnn_data_sdk INTERFACE ${CMAKE_DL_LIBS})
+target_link_libraries(hipdnn_data_sdk INTERFACE ${CMAKE_DL_LIBS} Threads::Threads)
+
+# Sanitizers.cmake applies the sanitizer flags with add_compile_options/add_link_options, which are
+# directory-scoped and so reach nothing outside this build. Every other hipDNN target reaches
+# hipdnn_data_sdk transitively, which makes it the one place that propagates them to consumers of
+# the installed package.
+#
+# The link flags are what let a consumer link at all: hipDNN's Linux ASAN build uses
+# -shared-libasan, and an application or plugin that links the default static runtime instead dies
+# at start-up with "Your application is linked against incompatible ASan runtimes" -- a message that
+# names neither hipDNN nor the flag. ADDRESS_SANITIZER is what makes the suppressions hook in
+# hipdnn_test_sdk compile to something rather than to an empty translation unit.
+if(BUILD_ADDRESS_SANITIZER
+   OR THEROCK_SANITIZER STREQUAL "ASAN"
+   OR THEROCK_SANITIZER STREQUAL "HOST_ASAN"
+)
+    target_compile_definitions(hipdnn_data_sdk INTERFACE ADDRESS_SANITIZER)
+    if(SANITIZER_LINK_FLAGS)
+        target_link_options(hipdnn_data_sdk INTERFACE ${SANITIZER_LINK_FLAGS})
+    endif()
+endif()
 
 export(TARGETS hipdnn_data_sdk
        FILE "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk/hipdnn_data_sdkTargets.cmake"
@@ -46,6 +81,13 @@ install(
 install(
     FILES "${CMAKE_CURRENT_BINARY_DIR}/include/hipdnn_data_sdk/version.h"
     DESTINATION ${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}/hipdnn_data_sdk
+    COMPONENT Development
+)
+
+# Install generated cache-root defaults header
+install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/include/hipdnn_data_sdk/utilities/CacheRootDefaults.h"
+    DESTINATION ${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}/hipdnn_data_sdk/utilities
     COMPONENT Development
 )
 

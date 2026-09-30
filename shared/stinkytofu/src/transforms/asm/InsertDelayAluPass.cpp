@@ -26,13 +26,13 @@
 #include <cstdint>
 #include <iostream>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/BBIndexAnalysis.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -107,22 +107,21 @@ bool instructionWaitsForVALU(const StinkyInstruction& inst) {
 // Per-register delay info
 // ---------------------------------------------------------------------------
 struct DelayInfo {
-    static constexpr unsigned VALU_MAX = 5;         // scoreboard: 4 entries (DEP_1..4)
-    static constexpr unsigned TRANS_MAX = 4;        // scoreboard: 3 entries (DEP_1..3)
-    static constexpr unsigned SALU_CYCLES_MAX = 4;  // SALU_CYCLE_1..3
+    // "No dependency" default for the position counters (>= any arch depth).
+    static constexpr uint8_t kNoDep = 0xFF;
 
     uint8_t VALUCycles = 0;
-    uint8_t VALUNum = VALU_MAX;
+    uint8_t VALUNum = kNoDep;
 
     uint8_t TRANSCycles = 0;
-    uint8_t TRANSNum = TRANS_MAX;
-    uint8_t TRANSNumVALU = VALU_MAX;  // VALU count since TRANS (for encoding priority)
+    uint8_t TRANSNum = kNoDep;
+    uint8_t TRANSNumVALU = kNoDep;  // VALU count since TRANS (for encoding priority)
 
     uint8_t SALUCycles = 0;
 
     DelayInfo() = default;
 
-    DelayInfo(DelayType type, unsigned cycles) {
+    DelayInfo(DelayType type, unsigned cycles, const HWModel::DelayAlu& depth) {
         switch (type) {
             case VALU:
                 VALUCycles = cycles;
@@ -134,21 +133,11 @@ struct DelayInfo {
                 TRANSNumVALU = 0;
                 break;
             case SALU:
-                SALUCycles = std::min(cycles, SALU_CYCLES_MAX);
+                SALUCycles = std::min<unsigned>(cycles, depth.saluCycleMax);
                 break;
             default:
                 break;
         }
-    }
-
-    bool operator==(const DelayInfo& rhs) const {
-        return VALUCycles == rhs.VALUCycles && VALUNum == rhs.VALUNum &&
-               TRANSCycles == rhs.TRANSCycles && TRANSNum == rhs.TRANSNum &&
-               TRANSNumVALU == rhs.TRANSNumVALU && SALUCycles == rhs.SALUCycles;
-    }
-
-    bool operator!=(const DelayInfo& rhs) const {
-        return !(*this == rhs);
     }
 
     // Merge another DelayInfo, taking worst-case (smallest position / largest cycles).
@@ -162,12 +151,12 @@ struct DelayInfo {
     }
 
     // Advance after issuing an instruction. Returns true if entry can be erased.
-    bool advance(DelayType type, unsigned cycles) {
+    bool advance(DelayType type, unsigned cycles, const HWModel::DelayAlu& depth) {
         bool erase = true;
 
         VALUNum += (type == VALU);
-        if (VALUNum >= VALU_MAX || VALUCycles <= cycles) {
-            VALUNum = VALU_MAX;
+        if (VALUNum >= depth.valuDepth || VALUCycles <= cycles) {
+            VALUNum = kNoDep;
             VALUCycles = 0;
         } else {
             VALUCycles -= cycles;
@@ -176,9 +165,9 @@ struct DelayInfo {
 
         TRANSNum += (type == TRANS);
         TRANSNumVALU += (type == VALU);
-        if (TRANSNum >= TRANS_MAX || TRANSCycles <= cycles) {
-            TRANSNum = TRANS_MAX;
-            TRANSNumVALU = VALU_MAX;
+        if (TRANSNum >= depth.transDepth || TRANSCycles <= cycles) {
+            TRANSNum = kNoDep;
+            TRANSNumVALU = kNoDep;
             TRANSCycles = 0;
         } else {
             TRANSCycles -= cycles;
@@ -209,9 +198,9 @@ struct DelayState : RegKeyMap<DelayInfo> {
     }
 
     // Advance all entries after issuing an instruction. Erase expired entries.
-    void advance(DelayType type, unsigned cycles) {
+    void advance(DelayType type, unsigned cycles, const HWModel::DelayAlu& depth) {
         for (auto it = begin(); it != end();) {
-            if (it->second.advance(type, cycles))
+            if (it->second.advance(type, cycles, depth))
                 it = erase(it);
             else
                 ++it;
@@ -227,6 +216,8 @@ class InsertDelayAluPassImpl : public Pass {
     std::unordered_map<BasicBlock*, DelayState> blockExitState;
 
     int minWavesPerSimd_;
+
+    const HWModel::DelayAlu* depth_ = nullptr;
 
     // delay_alu only pays off when sibling waves exist to hide ALU latency.
     // Missing metadata => false (run the pass).
@@ -267,14 +258,14 @@ class InsertDelayAluPassImpl : public Pass {
         bool hasId1 = false;
 
         // TRANS dep -> first slot
-        if (delay.TRANSNum < DelayInfo::TRANS_MAX) {
+        if (delay.TRANSNum < depth_->transDepth) {
             id0Type = SDelayAluData::InstType::TRANS;
             id0Dist = static_cast<int8_t>(delay.TRANSNum);
         }
 
         // VALU dep -> first or second slot (first if no TRANS, second if TRANS present).
         // Only encode if VALU is more recent than any TRANS dep we're also waiting on.
-        if (delay.VALUNum < DelayInfo::VALU_MAX && delay.VALUNum <= delay.TRANSNumVALU) {
+        if (delay.VALUNum < depth_->valuDepth && delay.VALUNum <= delay.TRANSNumVALU) {
             if (id0Dist != 0) {
                 // TRANS already in id0 -> put VALU in id1
                 id1Type = SDelayAluData::InstType::VALU;
@@ -286,9 +277,9 @@ class InsertDelayAluPassImpl : public Pass {
             }
         }
 
-        // SALU dep -> fills remaining slot
-        if (delay.SALUCycles > 0) {
-            assert(delay.SALUCycles < DelayInfo::SALU_CYCLES_MAX);
+        // SALU dep -> fills remaining slot. Skip the SALU_CYCLE_1 case.
+        if (delay.SALUCycles > 1) {
+            assert(delay.SALUCycles < depth_->saluCycleMax);
             if (hasId1) {
                 // Both slots used (TRANS + VALU), drop SALU
             } else if (id0Dist != 0) {
@@ -341,16 +332,16 @@ class InsertDelayAluPassImpl : public Pass {
         return hasId1 ? nullptr : delayInst;
     }
 
-    // Process a single basic block.
-    // Phase 1 (emit=false): compute delay state, return true if exit state changed.
-    // Phase 2 (emit=true): insert s_delay_alu instructions.
-    bool runOnBasicBlock(BasicBlock& bb, bool emit, GfxArchID archId) {
+    // Merge predecessor exit states, then emit s_delay_alu in one BB walk.
+    // Visited once per BB in RPO, so forward predecessors are ready; back-edges
+    // are not iterated (a missing loop-carried hint is safe for a perf hint).
+    void runOnBasicBlock(BasicBlock& bb, GfxArchID archId) {
         // Merge predecessor exit states into entry state
         DelayState state;
         for (auto* pred : bb.getPredecessors()) state.merge(blockExitState[pred]);
 
-        PASS_DEBUG(std::cerr << "[DelayAlu] " << (emit ? "emit" : "analyze") << " bb=\""
-                             << bb.getLabel() << "\"" << " preds=" << bb.getPredecessors().size()
+        PASS_DEBUG(std::cerr << "[DelayAlu] bb=\"" << bb.getLabel() << "\""
+                             << " preds=" << bb.getPredecessors().size()
                              << " state_entries=" << state.size() << "\n");
 
         StinkyInstruction* lastDelayAlu = nullptr;
@@ -382,8 +373,8 @@ class InsertDelayAluPassImpl : public Pass {
                                  << delayTypeName(type) << " state_sz=" << state.size() << "\n");
             PASS_DEBUG(for (const auto& [key, info]
                             : state) {
-                if (info.SALUCycles > 0 || info.VALUNum < DelayInfo::VALU_MAX ||
-                    info.TRANSNum < DelayInfo::TRANS_MAX) {
+                if (info.SALUCycles > 0 || info.VALUNum < depth_->valuDepth ||
+                    info.TRANSNum < depth_->transDepth) {
                     std::cerr << "  state[" << (key.type == RegType::S ? "s" : "v") << key.idx
                               << "]" << " SALU=" << (int)info.SALUCycles
                               << " VALUNum=" << (int)info.VALUNum
@@ -416,30 +407,30 @@ class InsertDelayAluPassImpl : public Pass {
                     });
                 }
 
-                PASS_DEBUG(if (delay.SALUCycles > 0 || delay.VALUNum < DelayInfo::VALU_MAX ||
-                               delay.TRANSNum < DelayInfo::TRANS_MAX) {
+                PASS_DEBUG(if (delay.SALUCycles > 0 || delay.VALUNum < depth_->valuDepth ||
+                               delay.TRANSNum < depth_->transDepth) {
                     std::cerr << "[DelayAlu]   emit: SALU=" << (int)delay.SALUCycles
                               << " VALUNum=" << (int)delay.VALUNum
                               << " TRANSNum=" << (int)delay.TRANSNum << "\n";
                 });
 
                 // Emit s_delay_alu if needed
-                if (emit) {
-                    auto* prev = lastDelayAlu;
-                    lastDelayAlu = emitDelayAlu(bb, inst, delay, lastDelayAlu, irBuilder, archId);
-                    PASS_DEBUG(if (lastDelayAlu != prev) {
-                        if (lastDelayAlu)
-                            std::cerr << "[DelayAlu]   new s_delay_alu before "
-                                      << inst->getHwInstDesc()->mnemonic << "\n";
-                        else if (!prev)
-                            std::cerr << "[DelayAlu]   packed into prev before "
-                                      << inst->getHwInstDesc()->mnemonic << "\n";
-                    });
-                }
+                auto* prev = lastDelayAlu;
+                lastDelayAlu = emitDelayAlu(bb, inst, delay, lastDelayAlu, irBuilder, archId);
+                PASS_DEBUG(if (lastDelayAlu != prev) {
+                    if (lastDelayAlu)
+                        std::cerr << "[DelayAlu]   new s_delay_alu before "
+                                  << inst->getHwInstDesc()->mnemonic << "\n";
+                    else if (!prev)
+                        std::cerr << "[DelayAlu]   packed into prev before "
+                                  << inst->getHwInstDesc()->mnemonic << "\n";
+                });
             }
 
-            // Record dest registers with fresh delay info
-            if (type != OTHER) {
+            // Record dest registers with fresh delay info.
+            // Skip WMMA/XDL as a delay producer: matrix ops are meant to issue
+            // back-to-back or co-execute with core/side MACC, not yield via a delay hint.
+            if (type != OTHER && !isMatrixInstruction(*inst)) {
                 unsigned latency = inst->latencyCycles;
                 PASS_DEBUG(std::cerr << "[DelayAlu]   " << delayTypeName(type)
                                      << " def: " << inst->getHwInstDesc()->mnemonic
@@ -450,7 +441,7 @@ class InsertDelayAluPassImpl : public Pass {
                         PASS_DEBUG(std::cerr << "[DelayAlu]     dest: "
                                              << (key.type == RegType::S ? "s" : "v") << key.idx
                                              << "\n");
-                        state[key] = DelayInfo(type, latency);
+                        state[key] = DelayInfo(type, latency, *depth_);
                     });
                 }
             }
@@ -458,21 +449,11 @@ class InsertDelayAluPassImpl : public Pass {
             // Advance all state entries by the number of wait states
             // (1 for most instructions, N+1 for s_nop).
             unsigned cycles = getNumWaitStates(*inst);
-            state.advance(type, cycles);
+            state.advance(type, cycles, *depth_);
         }
 
-        // Save or compare exit state
-        if (emit) {
-            return false;
-        }
-        DelayState& saved = blockExitState[&bb];
-        if (state != saved) {
-            PASS_DEBUG(std::cerr << "[DelayAlu]   state changed for bb=\"" << bb.getLabel()
-                                 << "\", re-queue successors\n");
-            saved = std::move(state);
-            return true;  // state changed, successors need re-processing
-        }
-        return false;
+        // Save exit state for successors.
+        blockExitState[&bb] = std::move(state);
     }
 
    public:
@@ -492,44 +473,18 @@ class InsertDelayAluPassImpl : public Pass {
 
         if (shouldSkipForLowOccupancy(func, archId)) return PreservedAnalyses::all();
 
-        // Get RPO ordering from BBIndexAnalysis for efficient convergence.
+        depth_ = &passCtx.getHWModel().delayAlu;
+
+        // Single RPO walk: each BB is visited once, after its forward
+        // predecessors, so their exit states are ready to merge in. Delay state
+        // and emission happen together. Loop back-edges are not iterated.
         const auto& bbIndex = AM.getResult<BBIndexAnalysis>(func);
         const auto& rpoOrder = bbIndex.rpo;
 
-        PASS_DEBUG(std::cerr << "[DelayAlu] Phase 1: fixed-point state computation ("
-                             << rpoOrder.size() << " BBs in RPO)\n");
+        PASS_DEBUG(std::cerr << "[DelayAlu] single RPO pass (" << rpoOrder.size() << " BBs)\n");
 
-        // Phase 1: fixed-point iteration to compute stable delay state per BB.
-        // Initialize worklist in reverse RPO so pop_back gives RPO processing order.
-        std::vector<BasicBlock*> workList;
-        std::unordered_set<BasicBlock*> inWorkList;
-        for (auto it = rpoOrder.rbegin(); it != rpoOrder.rend(); ++it) {
-            workList.push_back(*it);
-            inWorkList.insert(*it);
-        }
-
-        unsigned iteration = 0;
-        while (!workList.empty()) {
-            BasicBlock* bb = workList.back();
-            workList.pop_back();
-            inWorkList.erase(bb);
-            ++iteration;
-
-            bool changed = runOnBasicBlock(*bb, /*emit=*/false, archId);
-            if (changed) {
-                for (auto* succ : bb->getSuccessors()) {
-                    if (inWorkList.insert(succ).second) workList.push_back(succ);
-                }
-            }
-        }
-
-        PASS_DEBUG(std::cerr << "[DelayAlu] Phase 1 converged after " << iteration
-                             << " BB visits\n");
-        PASS_DEBUG(std::cerr << "[DelayAlu] Phase 2: emitting s_delay_alu instructions\n");
-
-        // Phase 2: emit s_delay_alu instructions using converged state.
         for (auto* bb : rpoOrder) {
-            runOnBasicBlock(*bb, /*emit=*/true, archId);
+            runOnBasicBlock(*bb, archId);
         }
 
         blockExitState.clear();

@@ -27,194 +27,124 @@
  ******************************************************************************/
 
 // Benchmark utils
-#include "../../bench_utils/bench_utils.hpp"
+#include "bench_utils.hpp"
 
 // rocThrust
-#include <thrust/detail/config/namespace.h>
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 #include <thrust/reduce.h>
 #include <thrust/unique.h>
 
-// Google Benchmark
-#include <benchmark/benchmark.h>
-
-// STL
-#include <cstddef>
-#include <string>
-#include <vector>
-
-struct by_key
+template <typename T, typename K>
+struct reduce_benchmark : public primbench::benchmark_interface
 {
-  template <typename KeyT, typename ValueT, typename Policy>
-  float64_t run(thrust::device_vector<KeyT>& in_keys,
-                thrust::device_vector<ValueT>& in_vals,
-                thrust::device_vector<KeyT>& out_keys,
-                thrust::device_vector<ValueT>& out_vals,
-                Policy policy)
+  reduce_benchmark(size_t items, size_t max_segment_size)
+      : m_items(items)
+      , max_segment_size(max_segment_size)
+  {}
+
+  primbench::json meta() const override
   {
-    thrust::reduce_by_key(policy, in_keys.begin(), in_keys.end(), in_vals.begin(), out_keys.begin(), out_vals.begin());
-
-    bench_utils::gpu_timer d_timer;
-
-    d_timer.start(0);
-    thrust::reduce_by_key(policy, in_keys.begin(), in_keys.end(), in_vals.begin(), out_keys.begin(), out_vals.begin());
-    d_timer.stop(0);
-
-    return d_timer.get_duration();
+    return primbench::json{}
+      .add("algo", "reduce")
+      .add("subalgo", "by_key")
+      .add("value_type", primbench::name<T>())
+      .add("key_type", primbench::name<K>())
+      .add("elements", m_items)
+      .add("max_segment_size", max_segment_size);
   }
+
+  void run(primbench::state& state) override
+  {
+    bench_utils::caching_allocator_t alloc{};
+    thrust::detail::device_t policy{};
+
+    constexpr size_t min_segment_size = 1;
+
+    // Generate input and output
+    thrust::device_vector<K> in_keys;
+    thrust::device_vector<K> out_keys;
+    thrust::device_vector<T> in_vals;
+
+    in_keys  = bench_utils::generate.uniform.key_segments(m_items, state.seed, min_segment_size, max_segment_size);
+    out_keys = in_keys;
+    in_vals  = thrust::device_vector<T>(m_items);
+
+    const size_t unique_keys = thrust::distance(out_keys.begin(), thrust::unique(out_keys.begin(), out_keys.end()));
+    thrust::device_vector<T> out_vals;
+    out_vals = thrust::device_vector<T>(unique_keys);
+
+    state.set_items(m_items);
+    state.add_reads<T>(m_items);
+    state.add_reads<K>(m_items);
+    state.add_writes<T>(unique_keys);
+    state.add_writes<K>(unique_keys);
+
+    state.run([&] {
+      thrust::reduce_by_key(
+        policy(alloc).on(state.stream),
+        in_keys.begin(),
+        in_keys.end(),
+        in_vals.begin(),
+        out_keys.begin(),
+        out_vals.begin());
+    });
+  }
+
+private:
+  size_t m_items;
+  size_t max_segment_size;
 };
 
-template <class Benchmark, class KeyT, class ValueT>
-void run_benchmark(
-  benchmark::State& state, const std::size_t elements, const std::string seed_type, const std::size_t max_segment_size)
-{
-  // Benchmark object
-  Benchmark benchmark{};
-
-  // GPU times
-  std::vector<double> gpu_times;
-
-  constexpr std::size_t min_segment_size = 1;
-
-  // Generate input and output
-  thrust::device_vector<KeyT> in_keys;
-  thrust::device_vector<KeyT> out_keys;
-  thrust::device_vector<ValueT> in_vals;
-  try
-  {
-    in_keys  = bench_utils::generate.uniform.key_segments(elements, seed_type, min_segment_size, max_segment_size);
-    out_keys = in_keys;
-    in_vals  = thrust::device_vector<ValueT>(elements);
-  }
-  catch (const THRUST_NS_QUALIFIER::system::detail::bad_alloc& e)
-  {
-    (void) hipGetLastError();
-    state.SkipWithError(("thrust::system::detail::bad_alloc: " + std::string(e.what())).c_str());
-    return;
-  }
-  const std::size_t unique_keys = thrust::distance(out_keys.begin(), thrust::unique(out_keys.begin(), out_keys.end()));
-  thrust::device_vector<ValueT> out_vals;
-  try
-  {
-    out_vals = thrust::device_vector<ValueT>(unique_keys);
-  }
-  catch (const THRUST_NS_QUALIFIER::system::detail::bad_alloc& e)
-  {
-    (void) hipGetLastError();
-    state.SkipWithError(("thrust::system::detail::bad_alloc: " + std::string(e.what())).c_str());
-    return;
+#define QUEUE(K, T)                                                     \
+  for (size_t max_seg : max_segment_sizes)                              \
+  {                                                                     \
+    for (size_t size : bench_utils::sizes(2 * (sizeof(T) + sizeof(K)))) \
+    {                                                                   \
+      executor.queue<reduce_benchmark<T, K>>(size, max_seg);            \
+    }                                                                   \
   }
 
-  bench_utils::caching_allocator_t alloc{};
-  thrust::detail::device_t policy{};
-
-  for (auto _ : state)
-  {
-    float64_t duration = benchmark.template run<KeyT, ValueT>(in_keys, in_vals, out_keys, out_vals, policy(alloc));
-    state.SetIterationTime(duration);
-    gpu_times.push_back(duration);
-  }
-
-  // BytesProcessed include read and written bytes, so when the BytesProcessed/s are reported
-  // it will actually be the global memory bandwidth gotten.
-  state.SetBytesProcessed(state.iterations() * ((elements + unique_keys) * (sizeof(KeyT) + sizeof(ValueT))));
-  state.SetItemsProcessed(state.iterations() * elements);
-
-  const double gpu_cv         = bench_utils::StatisticsCV(gpu_times);
-  state.counters["gpu_noise"] = gpu_cv;
-}
-
-#define CREATE_BENCHMARK(KeyT, ValueT, Elements, MaxSegmentSize)                                  \
-  benchmark::RegisterBenchmark(                                                                   \
-    bench_utils::bench_naming::format_name(                                                       \
-      "{algo:reduce,subalgo:" + name + ",key_type:" #KeyT + ",value_type:" #ValueT                \
-      + ",elements:" + bench_utils::format_pow2(Elements) + ",max_segment_size:" #MaxSegmentSize) \
-      .c_str(),                                                                                   \
-    run_benchmark<Benchmark, KeyT, ValueT>,                                                       \
-    Elements,                                                                                     \
-    seed_type,                                                                                    \
-    MaxSegmentSize)
-
-#define BENCHMARK_ELEMENTS(key_type, value_type, elements)           \
-  bs.push_back(CREATE_BENCHMARK(key_type, value_type, elements, 1)); \
-  bs.push_back(CREATE_BENCHMARK(key_type, value_type, elements, 4)); \
-  bs.push_back(CREATE_BENCHMARK(key_type, value_type, elements, 8));
-
-#define BENCHMARK_VALUE_TYPE(key_type, value_type)                                                           \
-  for (size_t size : bench_utils::sizes)                                                                     \
-  {                                                                                                          \
-    if ((sizeof(key_type) * size + sizeof(value_type) * size) <= bench_utils::system.devProp.totalGlobalMem) \
-      BENCHMARK_ELEMENTS(key_type, value_type, size)                                                         \
-  }
-
-#if THRUST_BENCHMARKS_HAVE_INT128_SUPPORT
-#  define BENCHMARK_KEY_TYPE(key_type)       \
-    BENCHMARK_VALUE_TYPE(key_type, int8_t)   \
-    BENCHMARK_VALUE_TYPE(key_type, int16_t)  \
-    BENCHMARK_VALUE_TYPE(key_type, int32_t)  \
-    BENCHMARK_VALUE_TYPE(key_type, int64_t)  \
-    BENCHMARK_VALUE_TYPE(key_type, int128_t) \
-    BENCHMARK_VALUE_TYPE(key_type, float)    \
-    BENCHMARK_VALUE_TYPE(key_type, double)
+#ifndef _MSC_VER
+#  define QUEUE_KEY(K) \
+    QUEUE(K, int8_t)   \
+    QUEUE(K, int16_t)  \
+    QUEUE(K, int32_t)  \
+    QUEUE(K, int64_t)  \
+    QUEUE(K, int128_t) \
+    QUEUE(K, float)    \
+    QUEUE(K, double)
 #else
-#  define BENCHMARK_KEY_TYPE(key_type)      \
-    BENCHMARK_VALUE_TYPE(key_type, int8_t)  \
-    BENCHMARK_VALUE_TYPE(key_type, int16_t) \
-    BENCHMARK_VALUE_TYPE(key_type, int32_t) \
-    BENCHMARK_VALUE_TYPE(key_type, int64_t) \
-    BENCHMARK_VALUE_TYPE(key_type, float)   \
-    BENCHMARK_VALUE_TYPE(key_type, double)
+#  define QUEUE_KEY(K) \
+    QUEUE(K, int8_t)   \
+    QUEUE(K, int16_t)  \
+    QUEUE(K, int32_t)  \
+    QUEUE(K, int64_t)  \
+    QUEUE(K, float)    \
+    QUEUE(K, double)
 #endif
-
-template <class Benchmark>
-void add_benchmarks(const std::string& name, std::vector<benchmark::Benchmark*>& benchmarks, const std::string seed_type)
-{
-  std::vector<benchmark::Benchmark*> bs;
-  BENCHMARK_KEY_TYPE(int8_t)
-  BENCHMARK_KEY_TYPE(int16_t)
-  BENCHMARK_KEY_TYPE(int32_t)
-  BENCHMARK_KEY_TYPE(int64_t)
-#if THRUST_BENCHMARKS_HAVE_INT128_SUPPORT
-  BENCHMARK_KEY_TYPE(int128_t)
-#endif
-  BENCHMARK_KEY_TYPE(float32_t)
-  BENCHMARK_KEY_TYPE(float64_t)
-  benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
-}
 
 int main(int argc, char* argv[])
 {
-  cli::Parser parser(argc, argv);
-  parser.set_optional<std::string>("name_format", "name_format", "human", "either: json,human,txt");
-  parser.set_optional<std::string>("seed", "seed", "random", bench_utils::get_seed_message());
-  parser.run_and_exit_if_error();
+  primbench::settings settings;
+  settings.size                 = 1; // bench_utils::sizes() calculates it later.
+  settings.min_gpu_ms_per_batch = 200;
+  settings.batch_window_size    = 5;
+  primbench::executor executor(argc, argv, settings, primbench::flags::sync);
 
-  // Parse argv
-  benchmark::Initialize(&argc, argv);
-  bench_utils::bench_naming::set_format(parser.get<std::string>("name_format")); /* either: json,human,txt */
-  const std::string seed_type = parser.get<std::string>("seed");
+  constexpr size_t max_segment_sizes[] = {1, 4, 8};
 
-  // Benchmark info
-  bench_utils::add_common_benchmark_info();
-  benchmark::AddCustomContext("seed", seed_type);
+  QUEUE_KEY(int8_t)
+  QUEUE_KEY(int16_t)
+  QUEUE_KEY(int32_t)
+  QUEUE_KEY(int64_t)
 
-  // Add benchmark
-  std::vector<benchmark::Benchmark*> benchmarks;
-  add_benchmarks<by_key>("by_key", benchmarks, seed_type);
+#ifndef _MSC_VER
+  QUEUE_KEY(int128_t)
+#endif
 
-  // Use manual timing
-  for (auto& b : benchmarks)
-  {
-    b->UseManualTime();
-    b->Unit(benchmark::kMicrosecond);
-    b->MinTime(0.4); // in seconds
-  }
+  QUEUE_KEY(float)
+  QUEUE_KEY(double)
 
-  // Run benchmarks
-  benchmark::RunSpecifiedBenchmarks(bench_utils::ChooseCustomReporter());
-
-  // Finish
-  benchmark::Shutdown();
-  return 0;
+  executor.run();
 }

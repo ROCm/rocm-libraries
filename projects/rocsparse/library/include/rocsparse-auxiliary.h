@@ -55,7 +55,6 @@ extern "C" {
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_create_handle(rocsparse_handle* handle);
 
-#ifdef ROCSPARSE_WITH_HANDLE_CREATE
 /*! \ingroup aux_module
  *  \brief Create a rocSPARSE handle on a user-defined stream.
  *
@@ -95,7 +94,6 @@ rocsparse_status rocsparse_create_handle(rocsparse_handle* handle);
 ROCSPARSE_EXPORT
 rocsparse_status
     rocsparse_handle_create(rocsparse_handle* handle, hipStream_t stream, rocsparse_error* p_error);
-#endif
 
 /*! \ingroup aux_module
  *  \brief Destroy a rocSPARSE handle.
@@ -114,7 +112,6 @@ rocsparse_status
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_destroy_handle(rocsparse_handle handle);
 
-#ifdef ROCSPARSE_WITH_HANDLE_CREATE
 /*! \ingroup aux_module
  *  \brief Destroy a rocSPARSE handle.
  *
@@ -132,7 +129,6 @@ rocsparse_status rocsparse_destroy_handle(rocsparse_handle handle);
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_handle_destroy(rocsparse_handle handle, rocsparse_error* p_error);
-#endif
 
 /*! \ingroup aux_module
  *  \brief Destroy a rocSPARSE error descriptor.
@@ -2082,7 +2078,6 @@ rocsparse_status rocsparse_spilu0_get_output(rocsparse_handle        handle,
                                              size_t                  output_size_in_bytes,
                                              rocsparse_error*        p_error);
 
-#ifdef ROCSPARSE_WITH_ILDLT0
 /*! \ingroup aux_module
 *  \brief Create SpILDLT0 descriptor.
 *
@@ -2196,7 +2191,6 @@ rocsparse_status rocsparse_spildlt0_get_output(rocsparse_handle          handle,
                                                void*                     output,
                                                size_t                    output_size_in_bytes,
                                                rocsparse_error*          p_error);
-#endif /* ROCSPARSE_WITH_ILDLT0 */
 
 /*! \ingroup aux_module
  *  \brief Get the fields of the sparse COO matrix descriptor.
@@ -2993,6 +2987,21 @@ rocsparse_status rocsparse_spmat_set_strided_batch(rocsparse_spmat_descr descr,
  *  @param[in]
  *  batch_stride batch stride of the sparse COO matrix.
  *
+ *  \details
+ *  The row index, column index, and value arrays of a batched COO matrix each store
+ *  \p batch_count matrices back to back. The entries belonging to batch \f$i\f$ (where
+ *  \f$0 \le i < batch\_count\f$) begin at an offset of \f$i \times batch\_stride\f$ elements
+ *  from the start of each of these arrays. In other words, the same \p batch_stride is
+ *  applied to the row indices, the column indices, and the values. Setting \p batch_stride
+ *  equal to the number of non-zeros of a single batch stores the batches contiguously with
+ *  no gap, while a larger value can be used to leave padding between consecutive batches.
+ *
+ *  \note
+ *  For the COO AoS format (\ref rocsparse_format_coo_aos), the row and column indices are
+ *  interleaved in a single array with two index entries per non-zero. In this case the value
+ *  array advances by \p batch_stride elements per batch, while the interleaved index array
+ *  advances by \f$2 \times batch\_stride\f$ entries per batch.
+ *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
  *  \retval rocsparse_status_invalid_size if \p batch_count or \p batch_stride is invalid.
@@ -3045,6 +3054,26 @@ rocsparse_status rocsparse_csc_set_strided_batch(rocsparse_spmat_descr descr,
                                                  rocsparse_int         batch_count,
                                                  int64_t               offsets_batch_stride,
                                                  int64_t               rows_values_batch_stride);
+
+/*! \ingroup aux_module
+ *  \brief Set the batch count and batch stride in the sparse ELL matrix descriptor.
+ *
+ *  @param[inout]
+ *  descr        the pointer to the sparse ELL matrix descriptor.
+ *  @param[in]
+ *  batch_count  batch_count of the sparse ELL matrix.
+ *  @param[in]
+ *  batch_stride batch stride of the sparse ELL matrix. The same stride is
+ *               applied to both the column indices and the values arrays.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
+ *  \retval rocsparse_status_invalid_size if \p batch_count or \p batch_stride is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_ell_set_strided_batch(rocsparse_spmat_descr descr,
+                                                 rocsparse_int         batch_count,
+                                                 int64_t               batch_stride);
 
 /*! \ingroup aux_module
  *  \brief Get the requested attribute data from the sparse matrix descriptor.

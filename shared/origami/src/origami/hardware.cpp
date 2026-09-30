@@ -48,6 +48,7 @@ hardware_t::hardware_t(architecture_t arch,
     , mem2_perf_ratio(mem2_perf_ratio)
     , mem3_perf_ratio(mem3_perf_ratio)
     , L2_capacity(L2_capacity)
+    , l1_capacity(get_l1_capacity(arch))
     , CU_per_L2(N_CU / NUM_XCD)
     , compute_clock_ghz(compute_clock_ghz)
     , parallel_mi_cu(parallel_mi_cu)
@@ -92,6 +93,7 @@ hardware_t::hardware_t(const hardware_t& other)
     , mem2_perf_ratio(other.mem2_perf_ratio)
     , mem3_perf_ratio(other.mem3_perf_ratio)
     , L2_capacity(other.L2_capacity)
+    , l1_capacity(other.l1_capacity)
     , CU_per_L2(other.CU_per_L2)
     , compute_clock_ghz(other.compute_clock_ghz)
     , parallel_mi_cu(other.parallel_mi_cu)
@@ -107,6 +109,7 @@ namespace {
 size_t cus_per_multiProcessorCount(hardware_t::architecture_t arch) {
   switch (arch) {
     case hardware_t::architecture_t::gfx1100:  // RDNA3
+    case hardware_t::architecture_t::gfx1101:  // RDNA3 (Navi 32)
     case hardware_t::architecture_t::gfx1150:  // RDNA3.5 (Strix)
     case hardware_t::architecture_t::gfx1151:
     case hardware_t::architecture_t::gfx1152:
@@ -217,12 +220,12 @@ size_t hardware_t::get_default_num_xcds(architecture_t arch) {
     case architecture_t::gfx1200: return 1;
     case architecture_t::gfx1201: return 1;
     case architecture_t::gfx1100: return 1;
+    case architecture_t::gfx1101: return 1;
     case architecture_t::gfx1150: return 1;
     case architecture_t::gfx1151: return 1;
     case architecture_t::gfx1152: return 1;
     case architecture_t::gfx1153: return 1;
-    // TODO: Update this with real value
-    case architecture_t::gfx1250: return 1;
+    case architecture_t::gfx1250: return 8;
     default:
       throw std::runtime_error(
           std::string("No default XCD count for architecture ") +
@@ -300,6 +303,7 @@ bool hardware_t::has_MALL() const {
     case architecture_t::gfx1200:
     case architecture_t::gfx1201:
     case architecture_t::gfx1100:
+    case architecture_t::gfx1101:
     case architecture_t::gfx1151:
       return true;
     case architecture_t::gfx1150:
@@ -321,6 +325,7 @@ bool hardware_t::has_native_TF32() const {
     case architecture_t::gfx1200:
     case architecture_t::gfx1201:
     case architecture_t::gfx1100:
+    case architecture_t::gfx1101:
     case architecture_t::gfx1150:
     case architecture_t::gfx1151:
     case architecture_t::gfx1152:

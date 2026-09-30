@@ -22,14 +22,14 @@ Contents:
 
 import json
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 from pathlib import Path
 from typing import ClassVar, List, Tuple
 
 from .constants import DTYPE, GEMM_LOG_FIELDS
 from .utils import get_utc_timestamp, compute_file_sha256
 
-TRANSPOSE_TYPES = ("N", "T")
+TRANSPOSE_TYPES = ("N", "T", "C")
 
 
 def _compute_type_for_workload_log(compute_type: str) -> str:
@@ -128,6 +128,11 @@ class GemmType:
         dest_data_type = Dc
         compute_data_type = Dcomp
 
+        # Complex data types use real accumulation in hipBLASLt but Tensile
+        # tags compute_data_type as C/Z.
+        if Da in ("C", "Z") and Dcomp in ("S", "D"):
+            compute_data_type = Da
+
         if Dcomp == "X":
             if (Da != Db != "S") or Dc != "S":
                 raise NotImplementedError(
@@ -207,33 +212,44 @@ class GemmType:
         m = GemmType._TENSILE_LETTER_TO_HIPBLASLT
 
         if dt == "X" and dd == "S" and cd == "S":
-            return "xf32_r", "f32_r", "f32_r", "xf32_r"
+            return "f32_r", "f32_r", "f32_r", "xf32_r"
 
-        if len(dt) == 1:
-            try:
-                a_type = b_type = m[dt]
-            except KeyError as e:
-                raise ValueError(f"Unknown Tensile DataType letter {dt!r}") from e
-        elif len(dt) == 2:
-            try:
-                a_type = m[dt[0]]
-                b_type = m[dt[1]]
-            except KeyError as e:
-                raise ValueError(f"Unknown Tensile DataType code {dt!r}") from e
+        if dt in m:
+            a_type = b_type = m[dt]
         else:
-            raise ValueError(
-                f"Tensile DataType must be 1 or 2 letters for this mapper, got {dt!r}"
-            )
+            # Collect every split point that yields an ordered pair of known
+            # type keys; more than one candidate means the split is
+            # ambiguous and must not be silently resolved.
+            candidates = [
+                (m[dt[:i]], m[dt[i:]])
+                for i in range(1, len(dt))
+                if dt[:i] in m and dt[i:] in m
+            ]
+            if not candidates:
+                raise ValueError(
+                    f"Cannot resolve Tensile DataType {dt!r}: not a known type "
+                    f"or a valid ordered pair of types."
+                )
+            if len(candidates) > 1:
+                raise ValueError(
+                    f"Ambiguous Tensile DataType {dt!r}: multiple valid ordered-pair "
+                    f"splits found ({candidates}). Cannot resolve unambiguously."
+                )
+            a_type, b_type = candidates[0]
 
         try:
             c_type = m[dd]
         except KeyError as e:
             raise ValueError(f"Unknown Tensile DestDataType letter {dd!r}") from e
 
-        try:
-            compute_type = m[cd]
-        except KeyError as e:
-            raise ValueError(f"Unknown Tensile ComputeDataType letter {cd!r}") from e
+        _COMPLEX_COMPUTE_TO_REAL = {"C": "f32_r", "Z": "f64_r"}
+        if cd in _COMPLEX_COMPUTE_TO_REAL:
+            compute_type = _COMPLEX_COMPUTE_TO_REAL[cd]
+        else:
+            try:
+                compute_type = m[cd]
+            except KeyError as e:
+                raise ValueError(f"Unknown Tensile ComputeDataType letter {cd!r}") from e
 
         check_dt, check_dd, check_cd = GemmType._hipblaslt_to_tensile(
             a_type, b_type, c_type, compute_type
@@ -283,6 +299,18 @@ class GemmType:
                 "data_type, dest_data_type, and compute_data_type must be non-empty strings"
             )
 
+        _COMPLEX_DTYPES = ("C", "Z")
+        if self.transA == "C" and self.data_type not in _COMPLEX_DTYPES:
+            raise ValueError(
+                f"transA='C' (conjugate-transpose) is only valid for complex data types "
+                f"({_COMPLEX_DTYPES}), got data_type='{self.data_type}'"
+            )
+        if self.transB == "C" and self.data_type not in _COMPLEX_DTYPES:
+            raise ValueError(
+                f"transB='C' (conjugate-transpose) is only valid for complex data types "
+                f"({_COMPLEX_DTYPES}), got data_type='{self.data_type}'"
+            )
+
     def workload_log_type_fields(self) -> dict:
         """Workload-log transpose and dtype fields only (no M, N, K, batch_count).
 
@@ -299,22 +327,30 @@ class GemmType:
         }
 
 
+_MX_ONLY_DATA_TYPES = frozenset({"F4"})
+_MX_COMPATIBLE_DATA_TYPES = frozenset({"F4", "F8"})
+
+
 @dataclass(frozen=True)
 class GemmConfig:
     """Full GEMM optimization configuration.
 
     Bundles a GEMM logical type (GemmType) with the concrete set of
-    problem sizes.
+    problem sizes and an optional MX (Microscaling) flag.
 
     Attributes:
         gemm_type (GemmType): Logical GEMM description
             (transpose flags, data types).
         sizes (List[List[int]]): List of GEMM sizes, each formatted as
             [M, N, batch_count, K].
+        mx (bool): Whether Microscaling mode is enabled. Auto-set to True
+            for MX-only data types (F4). Only compatible with FP4 and FP8
+            data types (F4, F8).
     """
 
     gemm_type: GemmType
     sizes: List[List[int]]
+    mx: bool = False
 
     def __post_init__(self):
         # Validate that sizes is a list of lists of length 4
@@ -325,9 +361,25 @@ class GemmConfig:
             if not isinstance(s, list) or len(s) != 4 or not all(isinstance(x, int) and x > 0 for x in s):
                 raise ValueError(f"Each size must be a list of four positive integers [M, N, batch_count, K], got: {s}")
 
-    def workload_log_rows(self) -> List[dict]:
-        """One hipBLASLt-shaped row per size (keys match constants.GEMM_LOG_FIELDS)."""
+        dt = self.gemm_type.data_type
+        if dt in _MX_ONLY_DATA_TYPES:
+            object.__setattr__(self, "mx", True)
+        elif self.mx and dt not in _MX_COMPATIBLE_DATA_TYPES:
+            raise ValueError(
+                f"MX mode is not compatible with data type '{dt}'. "
+                f"MX is only supported for {sorted(_MX_COMPATIBLE_DATA_TYPES)}."
+            )
+
+    def workload_log_rows(self, mx_scale: int = 3) -> List[dict]:
+        """One hipBLASLt-shaped row per size (keys match constants.GEMM_LOG_FIELDS).
+
+        Args:
+            mx_scale: hipblaslt scaleA/scaleB value for MX block scaling.
+                Arch-specific: 1001 for gfx950, 3 for others.
+                Only used when self.mx is True; non-MX always uses 0 (no scaling).
+        """
         base = self.gemm_type.workload_log_type_fields()
+        scale_val = mx_scale if self.mx else 0
         rows: List[dict] = []
         for m, n, b, kk in self.sizes:
             row = {
@@ -336,6 +388,8 @@ class GemmConfig:
                 "M": int(m),
                 "N": int(n),
                 "K": int(kk),
+                "scaleA": scale_val,
+                "scaleB": scale_val,
             }
             if set(row) != set(GEMM_LOG_FIELDS) or len(row) != len(GEMM_LOG_FIELDS):
                 raise ValueError("row keys must match GEMM_LOG_FIELDS exactly")
@@ -396,7 +450,8 @@ class RunState:
         """Load RunState from a JSON file."""
         with Path(path).open("r") as f:
             data = json.load(f)
-        return cls(**data)
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in known})
 
     def verify(self, current_input: str | Path) -> None:
         """Validate that the current input matches the one used to create this run.

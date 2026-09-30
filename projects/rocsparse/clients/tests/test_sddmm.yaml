@@ -330,6 +330,83 @@ Tests:
             rocsparse_format_ell]
 
 #
+# QUICK - coverage widening (default-alg branch coverage)
+#
+# Small-K sweep to exercise the k>4 / k>2 / k>1 / else launch branches
+# in each rocsparse_sddmm_<fmt>.cpp default-algorithm compute path.
+- name: sddmm
+  category: quick
+  function: sddmm
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [35]
+  N: [17]
+  K: [1, 2, 3, 4]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseC: [rocsparse_index_base_zero]
+  order: [rocsparse_order_column]
+  orderB: [rocsparse_order_column]
+  sddmm_alg: [rocsparse_sddmm_alg_default]
+  matrix: [rocsparse_matrix_random]
+  formatC: [rocsparse_format_coo,
+            rocsparse_format_coo_aos,
+            rocsparse_format_csr,
+            rocsparse_format_csc,
+            rocsparse_format_ell]
+
+# alpha == 0 && beta == 1 early-return branch (pointer-mode host) for each format.
+- name: sddmm
+  category: quick
+  function: sddmm
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [35]
+  N: [17]
+  K: [8]
+  alpha_beta:
+    - { alpha: 0.0, beta: 1.0, alphai: 0.0, betai: 0.0 }
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseC: [rocsparse_index_base_zero]
+  order: [rocsparse_order_column]
+  orderB: [rocsparse_order_column]
+  sddmm_alg: [rocsparse_sddmm_alg_default]
+  matrix: [rocsparse_matrix_random]
+  formatC: [rocsparse_format_coo,
+            rocsparse_format_coo_aos,
+            rocsparse_format_csr,
+            rocsparse_format_csc,
+            rocsparse_format_ell]
+
+# transpose x order x base variety (default alg) across all formats.
+# Moved to pre_checkin: this is the largest sddmm coverage block (full
+# transA x transB x baseC x order x orderB x format sweep); keeping it in
+# quick pushed quick/sddmm well past the ~5s per-routine quick budget.
+- name: sddmm
+  category: pre_checkin
+  function: sddmm
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  M: [42]
+  N: [23]
+  K: [16]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  order: [rocsparse_order_row, rocsparse_order_column]
+  orderB: [rocsparse_order_row, rocsparse_order_column]
+  sddmm_alg: [rocsparse_sddmm_alg_default]
+  matrix: [rocsparse_matrix_random]
+  formatC: [rocsparse_format_coo,
+            rocsparse_format_coo_aos,
+            rocsparse_format_csr,
+            rocsparse_format_csc,
+            rocsparse_format_ell]
+
+#
 # NIGHTLY
 #
 - name: sddmm

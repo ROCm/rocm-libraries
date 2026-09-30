@@ -20,9 +20,13 @@ ConvFwdParams::ConvFwdParams(
     bool deterministicEnabled)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
           miopen_utils::findTensorAttributes(tensorMap, attributes.x_tensor_uid())))
-    , _x(miopen_utils::createTensor(tensorMap, attributes.x_tensor_uid()))
-    , _w(miopen_utils::createTensor(tensorMap, attributes.w_tensor_uid()))
-    , _y(miopen_utils::createTensor(tensorMap, attributes.y_tensor_uid()))
+    , _unpaddedWDimCount(
+          miopen_utils::findTensorAttributes(tensorMap, attributes.w_tensor_uid()).dims()->size())
+    , _unpaddedYDimCount(
+          miopen_utils::findTensorAttributes(tensorMap, attributes.y_tensor_uid()).dims()->size())
+    , _x(miopen_utils::createPaddedTensor(tensorMap, attributes.x_tensor_uid()))
+    , _w(miopen_utils::createPaddedTensor(tensorMap, attributes.w_tensor_uid()))
+    , _y(miopen_utils::createPaddedTensor(tensorMap, attributes.y_tensor_uid()))
 {
     const auto& attrX = miopen_utils::findTensorAttributes(tensorMap, _x.uid());
     const auto& attrW = miopen_utils::findTensorAttributes(tensorMap, _w.uid());
@@ -65,6 +69,16 @@ size_t ConvFwdParams::spatialDimCount() const
     return _spatialDimCount;
 }
 
+size_t ConvFwdParams::unpaddedWDimCount() const
+{
+    return _unpaddedWDimCount;
+}
+
+size_t ConvFwdParams::unpaddedYDimCount() const
+{
+    return _unpaddedYDimCount;
+}
+
 bool ConvFwdParams::validTensors() const
 {
     return _tensorsValid;
@@ -76,24 +90,23 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnMiopenHandle& handle,
     : _params(std::move(params))
     , _executionSettings(executionSettings)
 {
+    // Check the ranks the graph declared, not the MIOpen descriptors: padding a
+    // 1D convolution to 2D makes a padded 3D tensor indistinguishable from a
+    // genuine 4D one, so checking post-pad would accept a mismatched graph.
     const size_t expectedDims = _params.spatialDimCount() + 2;
-    int wDimCount = 0;
-    int yDimCount = 0;
-    miopenGetTensorDescriptorSize(_params.w().tensorDescriptor(), &wDimCount);
-    miopenGetTensorDescriptorSize(_params.y().tensorDescriptor(), &yDimCount);
-    if(static_cast<size_t>(wDimCount) != expectedDims)
+    if(_params.unpaddedWDimCount() != expectedDims)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Weight tensor has " + std::to_string(wDimCount) + " dimensions, expected "
-                + std::to_string(expectedDims));
+            "Weight tensor has " + std::to_string(_params.unpaddedWDimCount())
+                + " dimensions, expected " + std::to_string(expectedDims));
     }
-    if(static_cast<size_t>(yDimCount) != expectedDims)
+    if(_params.unpaddedYDimCount() != expectedDims)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Output tensor has " + std::to_string(yDimCount) + " dimensions, expected "
-                + std::to_string(expectedDims));
+            "Output tensor has " + std::to_string(_params.unpaddedYDimCount())
+                + " dimensions, expected " + std::to_string(expectedDims));
     }
 
     // Validate that there are solutions available for this configuration.

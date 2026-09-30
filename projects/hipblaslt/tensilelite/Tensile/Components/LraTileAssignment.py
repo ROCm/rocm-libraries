@@ -256,6 +256,16 @@ class LraTileAssignmentTransposedMFMAFP32(LraTileAssignmentTransposedMFMA):
                   "DataType": DataType("s")
               }}
 
+class LraTileAssignmentTransposedMFMAFP32C(LraTileAssignmentTransposedMFMA):
+    # complex has no LDS-transpose path (numBytes=8); __call__ delegates to
+    # LraTileAssignmentMFMA, matching the non-LDSTr arch (e.g. gfx950) complex path.
+    kernel = {"EnableMatrixInstruction": True,
+              "DirectToVgprA": False,
+              "DirectToVgprB": False,
+              "ProblemType": {
+                  "DataType": DataType("c")
+              }}
+
 class LraTileAssignmentTransposedMFMAFP16(LraTileAssignmentTransposedMFMA):
     kernel = {"EnableMatrixInstruction": True,
               "DirectToVgprA": False,
@@ -870,13 +880,17 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         # stride. A narrower VW straddles components; then LocalRead applies the jump instead, so
         # keep the baseline wave stride. A/B only: MX scales keep their own stride (relocated, not split).
         segILWaveSpansComp = False
-        # bcontig: B keeps its baseline wave stride (not interleaved) -> only A gets the override.
-        if kernel.get("LDSSegmentInterleave") == 1 and (
-                tc == "A" or (tc == "B" and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False))):
+        # Active tensor only: the baseline tensor keeps its normal wave stride.
+        # [2,2] interleaves both; bcontig ([4,1]) sets bBaseline on B; the [1,4] mirror sets aBaseline on A.
+        _segOff = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
+        segILActive = kernel.get("LDSSegmentInterleave") == 1 and (
+                (tc == "A" and not _segOff.get("aBaseline", False)) or
+                (tc == "B" and not _segOff.get("bBaseline", False)))
+        if segILActive:
             _compCols  = kernel["MacroTile%u" % tile01] // (kernel["NumWaves"] // 2)
             segILWaveSpansComp = min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * vectorWidth >= _compCols
-            # portSplitA (fine A): the A0->A1 segment jump is carried on the wave stride, so force it on.
-            if tc == "A" and kernel["LDSSegInterleaveOffsets"].get("portSplitA", False):
+            # portSplitA (VWA==WaveTileA/2): the A0->A1 segment jump is carried on the wave stride, so force it on.
+            if tc == "A" and _segOff.get("portSplitA", False):
                 segILWaveSpansComp = True
 
         lsu              = kernel["LocalSplitU"]
@@ -1019,8 +1033,34 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                     "7. wave offset in N dimen: wtid = tid / dividedForWaveId(%u)" % dividedForWaveId))
                 module.add(vectorStaticRemainder(dummy, dummy, dummy, num1DWaves, tmpVgprRes, tmpSgprInfo, \
                     "7. wave offset in M dimen: wtid0 = wtid / num1DWaves(%u)" % num1DWaves))
-                if kernel.get("LDSSegmentInterleave") == 1 and kernel["LDSSegInterleaveOffsets"].get("footprintPacked") and segILWaveSpansComp:
-                    # wave spans a whole component: stash its component jump; added post-pad in lraFinalOffset.
+                _segPacked = kernel.get("LDSSegmentInterleave") == 1 \
+                    and kernel["LDSSegInterleaveOffsets"].get("footprintPacked") and segILActive
+                _segWavesPerComp = (num1DWaves // (kernel["NumWaves"] // 2)) if _segPacked else 1
+                if _segPacked and _segWavesPerComp > 1:
+                    # [4,1]/[1,4]: wtid0 = segment jump + within-comp offset. portSplit jumps on the
+                    # read port (wtid0 & 1), otherwise on the component (wtid0 // 2). wavesPerComp == 2.
+                    _portSplit = (tc == "A" and _segOff.get("portSplitA", False)) or \
+                                 (tc == "B" and _segOff.get("portSplitB", False))
+                    compReg = writer.vgprPool.checkOut(1, tag="segCompId")
+                    if _portSplit:
+                        module.add(VAndB32(dst=vgpr(compReg), src0=1, src1=vgpr(dummy), \
+                            comment="seg interleave: segId = port = wtid0 & 1 (read-port axis)"))
+                        module.add(vectorStaticDivide(dummy, dummy, _segWavesPerComp, tmpVgprRes, \
+                            "seg interleave: withinComp = wtid0 // %u" % _segWavesPerComp))
+                    else:
+                        module.add(vectorStaticDivide(compReg, dummy, _segWavesPerComp, tmpVgprRes, \
+                            "seg interleave: compId = wtid0 // wavesPerComp(%u)" % _segWavesPerComp))
+                        module.add(vectorStaticRemainder(dummy, dummy, dummy, _segWavesPerComp, tmpVgprRes, tmpSgprInfo, \
+                            "seg interleave: withinComp = wtid0 %% %u" % _segWavesPerComp))
+                    module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(dummy), strideWave, vgpr(tReg), tmpSgprInfo, \
+                        "seg interleave: within-comp wave offset = withinComp * W0Stride(%u)" % strideWave))
+                    segOff = writer.vgprPool.checkOut(1, tag="segWaveByteOff")
+                    module.add(vectorStaticMultiply(vgpr(segOff), vgpr(compReg), kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"], tmpSgprInfo, \
+                        "seg interleave: component byte offset = compId * writeStrideBytes"))
+                    tP["gpr"]["segWaveByteOff"] = segOff
+                    writer.vgprPool.checkIn(compReg)
+                elif _segPacked and segILWaveSpansComp:
+                    # [2,2]: each wave spans a whole component; stash its jump (added post-pad in lraFinalOffset).
                     segOff = writer.vgprPool.checkOut(1, tag="segWaveByteOff")
                     module.add(vectorStaticMultiply(vgpr(segOff), vgpr(dummy), kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"], tmpSgprInfo, \
                                              "seg interleave: component byte offset = wtid0 * (fA+fB)"))

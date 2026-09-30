@@ -3,7 +3,7 @@
 
 from typing import Any, Dict, List, Tuple
 
-from geko.config_generator.mi_designer import MIDesign
+from geko.config_generator.mi_designer import MFMA, MIDesign
 from geko.config_generator.fork_params.optimization_param import BaseParamBuilder
 from geko.config_generator.shared_utils import (
     ForkParameter,
@@ -18,11 +18,41 @@ def mark_post_process(fn):
     return fn
 
 
+# ---------------------------------------------------------------------
+# Non-temporal load/store hints
+# ---------------------------------------------------------------------
+# The four NonTemporal* ForkParameters control the non-temporal cache
+# hint on the A / B / C / D global accesses.  When the input config sets
+# ``IGNORE_NON_TEMPORAL: True`` these are marked ``active=False`` so the
+# YAML writer comments them out and the search-space count drops them.
+NON_TEMPORAL_PARAMS = frozenset({
+    "NonTemporalA",
+    "NonTemporalB",
+    "NonTemporalC",
+    "NonTemporalD",
+})
+
+
+def _apply_ignore_non_temporal_filter(
+    fork_params: Dict[str, ForkParameter],
+) -> Dict[str, ForkParameter]:
+    """Mark the NonTemporal* fork params inactive (``IGNORE_NON_TEMPORAL``).
+
+    Applied regardless of subtile mode; runs last so it overrides any earlier
+    pinning of these axes.
+    """
+    for name in NON_TEMPORAL_PARAMS:
+        fp = fork_params.get(name)
+        if fp is not None:
+            fp.active = False
+    return fork_params
+
+
 class BasePostProcessor(BaseParamBuilder):
     """Base class for post-processing MI groups and fork params.
 
     Runs after MIDesigner + OptimizationParams have produced their
-    outputs.  Heuristic-only (GA params don't depend on MI properties).
+    outputs.  Heuristic-only (generic params don't depend on MI properties).
 
     Decorate methods with @mark_post_process.  Each receives
     (fork_params, mi_groups) and returns the modified pair.
@@ -53,6 +83,15 @@ class BasePostProcessor(BaseParamBuilder):
             fork_params, mi_groups = self._apply_mt_du(fork_params, mi_groups, mt_du)
         for method_name in self._post_process_methods:
             fork_params, mi_groups = getattr(self, method_name)(fork_params, mi_groups, ctx)
+        if self.config.get("IGNORE_NON_TEMPORAL", False):
+            fork_params = _apply_ignore_non_temporal_filter(fork_params)
+
+        # Remove DepthU from fork_params if present in all MI groups
+        if "DepthU" in fork_params and all(
+            "DepthU" in entry for entry in mi_groups
+        ):
+            del fork_params["DepthU"]
+
         return fork_params, mi_groups
 
     # -----------------------------------------------------------------
@@ -98,6 +137,5 @@ class BasePostProcessor(BaseParamBuilder):
 
 def _mi_matches_mt(entry: Dict[str, ForkParameter], fixed_MT0: int, fixed_MT1: int) -> bool:
     """Check if an MI group entry's macro tile matches the fixed MT."""
-    mi = entry["MatrixInstruction"].values
-    MT0, MT1, *_ = MIDesign.calculate_mfma_parameters(mi)
-    return MT0 == fixed_MT0 and MT1 == fixed_MT1
+    mfma_params = MIDesign.calculate_mfma_parameters(MFMA.from_list(entry["MatrixInstruction"].values))
+    return mfma_params.MT0 == fixed_MT0 and mfma_params.MT1 == fixed_MT1

@@ -3,9 +3,8 @@
 
 """Load and normalize input YAML configuration.
 
-Defaults, validation, ARCH-derived hardware (``CUs``, ``XCC``, ``DTYPE_MIs``,
-``WGMUnit``), and GA / kernel-cap rules live here so every entry point shares
-the same behavior.
+Defaults, validation, ARCH-derived hardware, backend / search-space resolution,
+and kernel-cap rules live here so every entry point shares the same behavior.
 """
 
 from __future__ import annotations
@@ -13,6 +12,7 @@ from __future__ import annotations
 __all__ = [
     "load_prepared_config_from_yaml",
     "validate_input_config",
+    "validate_mx_arch_support",
     "apply_input_config_defaults",
     "get_gemm_problem",
     "gemm_configs_from_gemm_log_path",
@@ -27,6 +27,7 @@ from typing import Any, Dict, List
 import pandas as pd
 import yaml
 import logging
+import warnings
 
 from geko.bench.log import parse as parse_gemm_log
 from geko.config_generator.constants import (
@@ -35,6 +36,8 @@ from geko.config_generator.constants import (
     HARDWARE_MAP,
     MAX_NUM_KERNELS_PER_CONFIG,
     REQUIRED_CONFIG_FIELDS,
+    VALID_BACKENDS,
+    VALID_SEARCH_SPACES,
 )
 from geko.config_generator.sizes import get_sizes
 from geko.constants import GEMM_TYPE_FIELDS
@@ -111,24 +114,35 @@ def _apply_env_config_overrides(config: Dict[str, Any]) -> None:
             )
 
 
-def gemm_configs_from_gemm_dataframe(df: pd.DataFrame) -> List[GemmConfig]:
-    """Group df by GEMM_TYPE_FIELDS; sizes use M,N,K or m,n,k columns per summarize output.
+def gemm_configs_from_gemm_dataframe(
+    df: pd.DataFrame,
+) -> List[GemmConfig]:
+    """Group df by GEMM_TYPE_FIELDS + scale columns; sizes use M,N,K or m,n,k.
+
+    MX is detected per-group from scaleA/scaleB columns (>= 3 means MX).
+    MX-only data types (F4) auto-enable MX in GemmConfig regardless.
 
     Args:
         df: Non-empty GEMM table; empty or None yields [].
 
     Returns:
-        One GemmConfig per dtype/transpose group (GemmType.from_hipblaslt).
+        One GemmConfig per unique GEMM-type/MX combination.
     """
     if df is None or df.empty:
         return []
     size_cols = (
         ["M", "N", "batch_count", "K"] if "M" in df.columns else ["m", "n", "batch_count", "k"]
     )
+    has_scale = "scaleA" in df.columns and "scaleB" in df.columns
+    df = df.copy()
+    df["_mx"] = (df["scaleA"] >= 3) | (df["scaleB"] >= 3) if has_scale else False
+
+    group_cols = list(GEMM_TYPE_FIELDS) + ["_mx"]
     gemm_configs: List[GemmConfig] = []
-    for gemm_key, gby in df.groupby(list(GEMM_TYPE_FIELDS), sort=False):
+    for group_key, gby in df.groupby(group_cols, sort=False):
+        *type_vals, is_mx = group_key
         sizes = gby[size_cols].values.tolist()
-        fields = dict(zip(GEMM_TYPE_FIELDS, gemm_key))
+        fields = dict(zip(GEMM_TYPE_FIELDS, type_vals))
         gt = GemmType.from_hipblaslt(
             fields["transA"],
             fields["transB"],
@@ -137,7 +151,7 @@ def gemm_configs_from_gemm_dataframe(df: pd.DataFrame) -> List[GemmConfig]:
             fields["c_type"],
             fields["compute_type"],
         )
-        gemm_configs.append(GemmConfig(gt, sizes))
+        gemm_configs.append(GemmConfig(gt, sizes, mx=bool(is_mx)))
     return gemm_configs
 
 
@@ -145,6 +159,27 @@ def gemm_configs_from_gemm_log_path(log_file: str | Path) -> List[GemmConfig]:
     """parse_gemm_log(as_df=True) then gemm_configs_from_gemm_dataframe (no bench)."""
     df = parse_gemm_log(log_file, as_df=True)
     return gemm_configs_from_gemm_dataframe(df)
+
+
+def validate_mx_arch_support(gemm_configs: List[GemmConfig], arch: str) -> None:
+    """Raise if any GemmConfig requests MX on an arch that doesn't support it.
+
+    Args:
+        gemm_configs: GemmConfigs to check (each may have mx True/False).
+        arch: Target gfx architecture; looked up in HARDWARE_MAP for mx_scale
+            (0 means MX is not supported on that arch).
+
+    Raises:
+        ValueError: If any gemm_configs entry has mx=True while
+            HARDWARE_MAP[arch]["mx_scale"] == 0.
+    """
+    if HARDWARE_MAP.get(arch, {}).get("mx_scale", 0) != 0:
+        return
+    if any(gc.mx for gc in gemm_configs):
+        raise ValueError(
+            f"MX (Microscaling) is not supported on ARCH '{arch}'. "
+            f"Remove MX: True / the inline 'MX' arg, or target an MX-capable arch."
+        )
 
 
 def get_gemm_problem(config: dict) -> None:
@@ -169,7 +204,7 @@ def get_gemm_problem(config: dict) -> None:
         str(config["ComputeDataType"]),
     )
     sizes = get_sizes(config)
-    config["GemmProblems"] = [GemmConfig(gemm_type, sizes)]
+    config["GemmProblems"] = [GemmConfig(gemm_type, sizes, mx=config.get("MX", False))]
 
 
 def _load_config_from_yaml(config_path: str | Path) -> Dict[str, Any]:
@@ -239,14 +274,38 @@ def validate_input_config(config: Dict[str, Any]) -> None:
         )
 
 
+def _resolve_search_space(config: Dict[str, Any]) -> str:
+    """Resolve search_space from explicit value or backend defaults."""
+    backend = config.get("backend", "ductile").lower()
+    if backend not in VALID_BACKENDS:
+        raise ValueError(
+            f"Invalid backend '{backend}'; must be one of {VALID_BACKENDS}"
+        )
+
+    ss = config.get("search_space")
+    if ss is None:
+        ss = "generic" if backend == "ductile" else "heuristic"
+    else:
+        ss = ss.lower()
+        if ss not in VALID_SEARCH_SPACES:
+            raise ValueError(
+                f"Invalid search_space '{ss}'; must be one of {VALID_SEARCH_SPACES}"
+            )
+        if backend == "tensile" and ss == "generic":
+            warnings.warn(
+                "Using generic search space with Tensile backend: exhaustive search "
+                "will most likely fail due to the large number of kernels defined.",
+                stacklevel=3,
+            )
+
+    config["search_space"] = ss
+    return ss
+
+
 def apply_input_config_defaults(config: Dict[str, Any]) -> None:
-    """Apply per-ARCH optional defaults, hardware fields, and kernel-cap rules in place.
+    """Apply per-ARCH defaults, hardware fields, search-space resolution, and kernel-cap rules.
 
-    Run validate_input_config first for YAML-loaded dicts. Callers must set
-    ARCH and either classic GEMM keys or GEMM_LOG_PATH with SIZE_OPTION 2;
-    optional keys are filled from CONFIG_DEFAULTS_BY_ARCH.
-
-    Mutates config.
+    Mutates config in place. Call validate_input_config first for YAML-loaded dicts.
     """
     for key, default in CONFIG_DEFAULTS_BY_ARCH[config["ARCH"]].items():
         config.setdefault(key, default)
@@ -256,10 +315,33 @@ def apply_input_config_defaults(config: Dict[str, Any]) -> None:
     if not config["MACROTILE_OPT"]:
         config["MT_DU"] = None
 
-    if config["MACROTILE_OPT"] and not config["GA"]:
-        raise NotImplementedError("MACROTILE_OPT only valid with GA.")
+    backend = config.get("backend", "ductile").lower()
+    if config["MACROTILE_OPT"] and backend != "ductile":
+        if config.get("SIZE_OPTION", 0) != 0:
+            raise NotImplementedError(
+                "MACROTILE_OPT without the Ductile backend is only supported "
+                "for SIZE_OPTION=0 (explicit Sizes list); got "
+                f"SIZE_OPTION={config.get('SIZE_OPTION')}."
+            )
+    ss = _resolve_search_space(config)
 
-    if config["GA"]:
+    if ss == "heuristic":
+        _complex = ("C", "Z")
+        dt = str(config.get("DataType", ""))
+        if dt in _complex:
+            raise NotImplementedError(
+                f"Heuristic search space is not yet supported for complex data type "
+                f"'{dt}'. Use search_space='generic' instead."
+            )
+        for gp in config.get("GemmProblems", []):
+            gdt = gp.gemm_type.data_type
+            if gdt in _complex:
+                raise NotImplementedError(
+                    f"Heuristic search space is not yet supported for complex data type "
+                    f"'{gdt}'. Use search_space='generic' instead."
+                )
+
+    if ss == "generic":
         config["MAX_NUM_KERNELS_PER_CONFIG"] = sys.maxsize
     else:
         config.setdefault("MAX_NUM_KERNELS_PER_CONFIG", MAX_NUM_KERNELS_PER_CONFIG)
@@ -312,5 +394,7 @@ def load_prepared_config_from_yaml(
         config["GemmProblems"] = gemm_problems
     else:
         get_gemm_problem(config)
+
+    validate_mx_arch_support(config["GemmProblems"], config["ARCH"])
 
     return config

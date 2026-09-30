@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,7 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_HAS_HIP_COMPILER()
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
@@ -149,8 +149,8 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ItemsOutputIt> merge(
 {
   using size_type = size_t;
 
-  using KeyType   = thrust::detail::it_value_t<KeysIt1>;
-  using ValueType = thrust::detail::it_value_t<ItemsIt1>;
+  using KeyType   = typename iterator_traits<KeysIt1>::value_type;
+  using ValueType = typename iterator_traits<ItemsIt1>::value_type;
 
   predicate_wrapper<KeyType, ValueType, CompareOp> wrapped_binary_pred(compare_op);
 
@@ -234,7 +234,7 @@ merge(execution_policy<Derived>& policy,
     {
       return __merge::merge(policy, keys1_begin, keys1_end, keys2_begin, keys2_end, result_begin, compare_op);
     }
-#  if defined(__HIP_DEVICE_COMPILE__)
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static ResultIt
     seq(execution_policy<Derived>& policy,
         KeysIt1 keys1_begin,
@@ -249,7 +249,7 @@ merge(execution_policy<Derived>& policy,
     }
 #  endif
   };
-#  if !defined(__HIP_DEVICE_COMPILE__)
+#  if __THRUST_HAS_HIPRT__
   return workaround::par(policy, keys1_begin, keys1_end, keys2_begin, keys2_end, result_begin, compare_op);
 #  else
   return workaround::seq(policy, keys1_begin, keys1_end, keys2_begin, keys2_end, result_begin, compare_op);
@@ -304,7 +304,7 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE merge_by_key(
         items_out_begin,
         compare_op);
     }
-#  if defined(__HIP_DEVICE_COMPILE__)
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static pair<KeysOutputIt, ItemsOutputIt> seq(
       execution_policy<Derived>& policy,
       KeysIt1 keys1_begin,
@@ -332,7 +332,7 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE merge_by_key(
 #  endif
   };
 
-#  if !defined(__HIP_DEVICE_COMPILE__)
+#  if __THRUST_HAS_HIPRT__
   return workaround::par(
     policy,
     keys1_begin,

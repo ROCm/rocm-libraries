@@ -259,6 +259,7 @@ namespace TensileLite
         int         fixedWGM                 = std::numeric_limits<int>::max();
         size_t      fixedWGMXCC              = std::numeric_limits<size_t>::max();
         size_t      fixedWGMXCCCHUNK         = std::numeric_limits<size_t>::max();
+        size_t      fixedWGMXCCSPLITK        = std::numeric_limits<size_t>::max();
         size_t      fixedStaggerUMapping     = std::numeric_limits<size_t>::max();
         size_t      fixedStaggerU            = std::numeric_limits<size_t>::max();
         size_t      fixedStaggerUStrideShift = std::numeric_limits<size_t>::max();
@@ -357,6 +358,13 @@ namespace TensileLite
         const size_t getFixedWGMXCCCHUNK() const
         {
             static const char*  envStr = std::getenv("TENSILE_FIXED_WGMXCCCHUNK");
+            static const size_t value  = (envStr == NULL ? std::numeric_limits<size_t>::max() : std::stoul(envStr));
+            return value;
+        }
+
+        const size_t getFixedWGMXCCSPLITK() const
+        {
+            static const char*  envStr = std::getenv("TENSILE_FIXED_WGMXCCSPLITK");
             static const size_t value  = (envStr == NULL ? std::numeric_limits<size_t>::max() : std::stoul(envStr));
             return value;
         }

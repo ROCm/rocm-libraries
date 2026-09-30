@@ -341,10 +341,10 @@ class GFX942Params(BaseOptimizationParams):
 
 
 class GFX942GAParams(BaseOptimizationParams):
-    """GFX942 GA (genetic algorithm) profile.
+    """GFX942 generic search-space profile.
 
     Broad exploratory ranges for all parameters.
-    Inherits directly from BaseOptimizationParams — GA defines its own
+    Inherits directly from BaseOptimizationParams — generic defines its own
     complete parameter set, independent of heuristic.
     """
 
@@ -354,7 +354,11 @@ class GFX942GAParams(BaseOptimizationParams):
 
     @param
     def depth_u(self, ctx: SizeContext) -> ForkParameter:
-        if self._gt.data_type == "D": return self._make_param("DepthU", [8, 16, 32, 64, 128, 256])
+        dt = self._gt.data_type
+        if dt in ("D", "Z"):
+            return self._make_param("DepthU", [8, 16, 32, 64, 128, 256])
+        if dt == "C":
+            return self._make_param("DepthU", [16, 32, 64, 128, 256, 512])
         return self._make_param("DepthU", [32, 64, 128, 256, 512, 1024])
 
     @param
@@ -418,6 +422,10 @@ class GFX942GAParams(BaseOptimizationParams):
         return self._make_param("StoreSyncOpt", [0, 1, 4])
 
     @param
+    def store_vector_width(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("StoreVectorWidth", [-1, 1, 2, 4, 8])
+
+    @param
     def work_group_mapping(self, ctx: SizeContext) -> ForkParameter:
         return self._make_param(
             "WorkGroupMapping",
@@ -439,10 +447,6 @@ class GFX942GAParams(BaseOptimizationParams):
     @param
     def transpose_lds(self, ctx: SizeContext) -> ForkParameter:
         return self._make_param("TransposeLDS", [-1, 0, 1, 2])
-
-    @param
-    def adaptive_gemm(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("AdaptiveGemm", [0, 1])
 
     @param
     def tailloop_in_nll(self, ctx: SizeContext) -> ForkParameter:

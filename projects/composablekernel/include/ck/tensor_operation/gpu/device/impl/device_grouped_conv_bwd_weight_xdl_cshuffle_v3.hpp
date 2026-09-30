@@ -51,7 +51,7 @@ template <typename GridwiseGemm,
           TailNumber TailNum       = TailNumber::Full>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif
     kernel_grouped_conv_bwd_weight_xdl_cshuffle_v3(
         typename GridwiseGemm::Argument karg,
@@ -151,7 +151,7 @@ template <typename GridwiseGemm,
           TailNumber TailNum       = TailNumber::Full>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif
     kernel_grouped_conv_bwd_weight_xdl_cshuffle_v3_2lds(
         typename GridwiseGemm::Argument karg,
@@ -1437,6 +1437,16 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        // Memory access runtime error on gfx1250 (inconsistent across runs)
+        // TODO: need fix
+        if constexpr(LargeTensors)
+        {
+            if(is_gfx125_supported())
+            {
+                return false;
+            }
+        }
+
         if constexpr(!LargeTensors)
         {
             if(arg.stride_overflow)
@@ -1660,17 +1670,20 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
                  const std::array<index_t, NDimSpatial + 3>& e_g_k_c_xs_strides,
                  const std::array<index_t, NDimSpatial + 3>& a_g_n_k_wos_lengths, // output
                  const std::array<index_t, NDimSpatial + 3>& a_g_n_k_wos_strides,
-                 const std::array<ck::index_t, NDimSpatial>& conv_filter_strides,
-                 const std::array<ck::index_t, NDimSpatial>& conv_filter_dilations,
-                 const std::array<ck::index_t, NDimSpatial>& input_left_pads,
-                 const std::array<ck::index_t, NDimSpatial>& input_right_pads,
+                 const std::array<index_t, NDimSpatial>& conv_filter_strides,
+                 const std::array<index_t, NDimSpatial>& conv_filter_dilations,
+                 const std::array<index_t, NDimSpatial>& input_left_pads,
+                 const std::array<index_t, NDimSpatial>& input_right_pads,
                  InElementwiseOperation in_element_op,
                  WeiElementwiseOperation wei_element_op,
                  OutElementwiseOperation out_element_op,
-                 const ck::index_t split_k)
+                 const index_t split_k)
     {
         if constexpr(!LargeTensors)
         {
+            const bool stride_ovf = tensor_exceeds_2gb<BDataType>(b_g_n_c_wis_lengths) ||
+                                    tensor_exceeds_2gb<CDataType>(e_g_k_c_xs_lengths) ||
+                                    tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths);
             return Argument{p_in_grid,
                             p_wei_grid,
                             p_out_grid,
@@ -1689,7 +1702,8 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
                             in_element_op,
                             wei_element_op,
                             out_element_op,
-                            split_k};
+                            split_k,
+                            stride_ovf};
         }
         else
         {
@@ -1840,17 +1854,21 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
                         const std::array<index_t, NDimSpatial + 3>& e_g_k_c_xs_strides,
                         const std::array<index_t, NDimSpatial + 3>& a_g_n_k_wos_lengths, // output
                         const std::array<index_t, NDimSpatial + 3>& a_g_n_k_wos_strides,
-                        const std::array<ck::index_t, NDimSpatial>& conv_filter_strides,
-                        const std::array<ck::index_t, NDimSpatial>& conv_filter_dilations,
-                        const std::array<ck::index_t, NDimSpatial>& input_left_pads,
-                        const std::array<ck::index_t, NDimSpatial>& input_right_pads,
+                        const std::array<index_t, NDimSpatial>& conv_filter_strides,
+                        const std::array<index_t, NDimSpatial>& conv_filter_dilations,
+                        const std::array<index_t, NDimSpatial>& input_left_pads,
+                        const std::array<index_t, NDimSpatial>& input_right_pads,
                         InElementwiseOperation in_element_op,
                         WeiElementwiseOperation wei_element_op,
                         OutElementwiseOperation out_element_op,
-                        const ck::index_t split_k) override
+                        const index_t split_k) override
     {
         if constexpr(!LargeTensors)
         {
+            const bool stride_ovf = tensor_exceeds_2gb<BDataType>(b_g_n_c_wis_lengths) ||
+                                    tensor_exceeds_2gb<CDataType>(e_g_k_c_xs_lengths) ||
+                                    tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths);
+
             return std::make_unique<Argument>(static_cast<const InDataType*>(p_in_grid),
                                               static_cast<WeiDataType*>(p_wei_grid),
                                               static_cast<const OutDataType*>(p_out_grid),
@@ -1869,7 +1887,8 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
                                               in_element_op,
                                               wei_element_op,
                                               out_element_op,
-                                              split_k);
+                                              split_k,
+                                              stride_ovf);
         }
         else
         {

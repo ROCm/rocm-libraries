@@ -46,7 +46,8 @@ using xorwow_generator_prng_offset_tests_types = ::testing::Types<
 
 INSTANTIATE_TYPED_TEST_SUITE_P(xorwow_generator,
                                generator_prng_tests,
-                               xorwow_generator_prng_tests_types);
+                               xorwow_generator_prng_tests_types,
+                               generator_prng_test_name);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(xorwow_generator,
                                generator_prng_continuity_tests,

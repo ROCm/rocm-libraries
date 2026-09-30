@@ -5,7 +5,6 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 
-#include <exception>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <optional>
 #include <string>
@@ -166,7 +165,28 @@ inline std::vector<ActivTestCase> createFwdActivationSmokeCases()
     return cases;
 }
 
-inline std::vector<ActivTestCase> createFwdActivationFullCases()
+inline std::vector<ActivTestCase> createBwdActivationSmokeCases()
+{
+    using PM = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+
+    std::vector<ActivTestCase> cases;
+
+    // RELU_BWD (standard ReLU) - Only activation supported by fusion ops
+    cases.emplace_back(PM::RELU_BWD,
+                       std::nullopt, // reluLowerClip
+                       std::nullopt, // reluUpperClip
+                       std::nullopt, // reluLowerClipSlope
+                       std::nullopt, // swishBeta
+                       std::nullopt, // eluAlpha
+                       std::nullopt // softplusBeta
+    );
+
+    return cases;
+}
+
+// The ReLU parameterisations MIOpen can represent: standard, clipped, clamped and leaky.
+// Shared by the fused-activation and standalone-activation case lists below.
+inline std::vector<ActivTestCase> createFwdReluCases()
 {
     using PM = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
@@ -192,7 +212,7 @@ inline std::vector<ActivTestCase> createFwdActivationFullCases()
                        std::nullopt // softplusBeta
     );
 
-    // CLAMP: both lower and upper clips (e.g., clip to range [0.0, 0.5])
+    // CLAMP: both lower and upper clips (e.g., clip to range [0.1, 0.5])
     cases.emplace_back(PM::RELU_FWD,
                        0.1f, // reluLowerClip
                        0.5f, // reluUpperClip
@@ -213,6 +233,87 @@ inline std::vector<ActivTestCase> createFwdActivationFullCases()
     );
 
     return cases;
+}
+
+// Activation cases for an activation fused onto a producer op (batchnorm, conv).
+inline std::vector<ActivTestCase> createFwdActivationFullCases()
+{
+    return createFwdReluCases();
+}
+
+// Activation cases for a standalone unary activation node.
+//
+// NOTE: SIGMOID_FWD and TANH_FWD belong here rather than in createFwdReluCases() because the
+// fused batchnorm path declines them (MiopenBatchnormApplicabilityChecks.cpp,
+// checkBatchnormActivationModeSupported), so widening the shared list would turn them into
+// permanent skips in the batchnorm suites.
+inline std::vector<ActivTestCase> createFwdUnaryActivationCases()
+{
+    using PM = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+
+    auto cases = createFwdReluCases();
+
+    // Sigmoid
+    cases.emplace_back(PM::SIGMOID_FWD);
+
+    // Tanh
+    cases.emplace_back(PM::TANH_FWD);
+
+    return cases;
+}
+
+inline std::vector<ActivTestCase> createBwdReluCases()
+{
+    using PM = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+
+    std::vector<ActivTestCase> cases;
+
+    // RELU_BWD (standard ReLU)
+    cases.emplace_back(PM::RELU_BWD,
+                       0.0f, // reluLowerClip
+                       std::nullopt, // reluUpperClip
+                       std::nullopt, // reluLowerClipSlope
+                       std::nullopt, // swishBeta
+                       std::nullopt, // eluAlpha
+                       std::nullopt // softplusBeta
+    );
+
+    // ReLU6: upper clip at 6.0 (Clipped ReLU)
+    cases.emplace_back(PM::RELU_BWD,
+                       std::nullopt, // reluLowerClip
+                       6.0f, // reluUpperClip
+                       std::nullopt, // reluLowerClipSlope
+                       std::nullopt, // swishBeta
+                       std::nullopt, // eluAlpha
+                       std::nullopt // softplusBeta
+    );
+
+    // CLAMP: both lower and upper clips (e.g., clip to range [0.1, 0.5])
+    cases.emplace_back(PM::RELU_BWD,
+                       0.1f, // reluLowerClip
+                       0.5f, // reluUpperClip
+                       std::nullopt, // reluLowerClipSlope
+                       std::nullopt, // swishBeta
+                       std::nullopt, // eluAlpha
+                       std::nullopt // softplusBeta
+    );
+
+    // Leaky ReLU: ReLU but with a non-negative slope for negative inputs
+    cases.emplace_back(PM::RELU_BWD,
+                       std::nullopt, // reluLowerClip
+                       std::nullopt, // reluUpperClip
+                       0.01f, // reluLowerClipSlope
+                       std::nullopt, // swishBeta
+                       std::nullopt, // eluAlpha
+                       std::nullopt // softplusBeta
+    );
+
+    return cases;
+}
+
+inline std::vector<ActivTestCase> createBwdActivationFullCases()
+{
+    return createBwdReluCases();
 }
 
 inline std::vector<ActivTestCase> createBatchnormBwdActivationTestCases()
