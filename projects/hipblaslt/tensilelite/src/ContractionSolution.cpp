@@ -1080,6 +1080,13 @@ namespace TensileLite
         bool const useModernArgLayout
             = internalArgsSupport.version >= 3 || customKernel.generated;
 
+        // Generated KernArgsVersion < 3 StreamK kernels use the modern A/B-before-D/C
+        // ordering but still expect AddressWS and AddressFlags together right after the
+        // strides, exactly as the legacy layout packs them; only KernArgsVersion >= 3
+        // defers AddressWS to after alpha/beta. The kernel's compiled .kd metadata is the
+        // source of truth, so this tracks internalArgsSupport.version, not useModernArgLayout.
+        bool const deferWorkspaceAfterAlphaBeta = internalArgsSupport.version >= 3;
+
         if(!useModernArgLayout)
         {
             bool singleWSD = false;
@@ -1267,14 +1274,18 @@ namespace TensileLite
                 args.template append<unsigned char const*>("metadata", inputs.metadata);
 
             // See the version < 3 branch above for why streamKForceDPOnly must not
-            // append ws/Flags. In the modern layout only Flags stays here; ws is appended after
-            // alpha/beta.
+            // append ws/Flags. KernArgsVersion >= 3 keeps only Flags here and appends ws
+            // after alpha/beta; generated version < 3 kernels expect ws and Flags together
+            // here, matching the legacy layout their .kd metadata was built with.
             if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0
                 && sizeMapping.streamKForceDPOnly == 0)
             {
                 // Assert hardware is not null
                 // For now grouped gemm is not supported and passes nullptr
                 TENSILE_ASSERT_EXC(hardware != nullptr);
+
+                if(!deferWorkspaceAfterAlphaBeta)
+                    args.template append<void const*>("ws", inputs.ws);
 
                 if(sk.reduction == origami::reduction_t::parallel)
                     args.template append<void*>("Flags", nullptr);
@@ -1576,9 +1587,10 @@ namespace TensileLite
                     args.append("beta_2", 0.0f, problem.betaType());
             }
 
-            // The modern layout places AddressWS after alpha/beta, see the StreamK block above.
-            if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0
-                && sizeMapping.streamKForceDPOnly == 0)
+            // KernArgsVersion >= 3 places AddressWS after alpha/beta; generated version < 3
+            // kernels already appended it next to Flags in the StreamK block above.
+            if(deferWorkspaceAfterAlphaBeta && sizeMapping.streamK > 0
+                && sizeMapping.streamKAtomic == 0 && sizeMapping.streamKForceDPOnly == 0)
             {
                 args.template append<void const*>("ws", inputs.ws);
             }
