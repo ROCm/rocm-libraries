@@ -189,6 +189,9 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
     rv["HasMovRelsD2B32"] = hasMnemonic(m, "v_movrelsd_2_b32");
 
     rv["HasAtomicAdd"] = hasAnyMnemonic(m, {"buffer_atomic_add_f32"});
+    // Packed 2xBF16 atomic add gating GSU AtomicDest for a BF16 D
+    // (mirrors rocisa hardware_caps.hpp HasAtomicPkAddBF16).
+    rv["HasAtomicPkAddBF16"] = hasAnyMnemonic(m, {"buffer_atomic_pk_add_bf16"});
 
     // Scalar-memory atomics (s_atomic_*): false on gfx12/gfx1250. The GSU and
     // StreamK paths gate on asmCaps["HasSAtomic"] (mirrors rocisa
