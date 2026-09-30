@@ -208,8 +208,8 @@ def test_all_d64_registry_candidates_are_correct(harness):
 
 
 @requires_gfx950
-def test_production_dispatch_smoke(harness):
-    """Compile and launch only through the production auto DispatchResult."""
+def test_dispatcher_auto_smoke(harness):
+    """Compile and launch only through the dispatcher-auto DispatchResult."""
     from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence

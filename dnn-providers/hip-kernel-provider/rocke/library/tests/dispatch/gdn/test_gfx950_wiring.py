@@ -57,7 +57,7 @@ class TestRegistration(unittest.TestCase):
 
 
 class TestStaticSelection(unittest.TestCase):
-    """Production auto must use one static default rather than batch winners."""
+    """Dispatcher auto must use one static default rather than batch winners."""
 
     def test_all_batch_anchors_select_the_default_tile(self):
         for batch in (1, 16, 64, 256):

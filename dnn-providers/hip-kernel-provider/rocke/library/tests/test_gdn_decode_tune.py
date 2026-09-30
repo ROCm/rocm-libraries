@@ -75,3 +75,48 @@ def test_main_fails_when_any_requested_registry_cell_is_missing(monkeypatch, cap
     assert (
         "batch 2: no candidate was both correct and timeable" in capsys.readouterr().out
     )
+
+
+def test_main_reports_dispatcher_default_outside_top_rows(monkeypatch, capsys):
+    monkeypatch.setattr(tune, "device_is_visible", lambda: True)
+    monkeypatch.setattr(
+        tune,
+        "dispatch_gdn_decode_all",
+        lambda request: (object(), object(), object()),
+    )
+    monkeypatch.setattr(
+        tune,
+        "sweep_registry_batch",
+        lambda batch, results: [
+            (5.0, (4, 16, 8), "fast", 0.0),
+            (6.1, (2, 16, 8), "default", 0.0),
+            (6.4, (1, 8, 1), "other", 0.0),
+        ],
+    )
+    monkeypatch.setattr(
+        tune,
+        "dispatch_gdn_decode",
+        lambda request: SimpleNamespace(candidate=SimpleNamespace(spec_id="default")),
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        ["tune.py", "--batches", "1", "--geometries", "16/32", "--top", "1"],
+    )
+
+    assert tune.main() == 0
+    output = capsys.readouterr().out
+    assert "dispatcher default: 6.100us  default tile=(2, 16, 8) rank=2/3" in output
+    assert "fastest legal candidate: 5.000us  fast tile=(4, 16, 8)" in output
+    assert "default / fastest = 1.220x" in output
+    assert "consider DEFAULT_TILE = (4, 16, 8)" in output
+
+
+def test_report_gdn_dispatcher_default_keeps_fastest_default(capsys):
+    tune.report_gdn_dispatcher_default([(5.0, (2, 16, 8), "default", 0.0)], "default")
+
+    assert capsys.readouterr().out.splitlines() == [
+        "  dispatcher default: 5.000us  default tile=(2, 16, 8) rank=1/1",
+        "  fastest legal candidate: 5.000us  default tile=(2, 16, 8)",
+        "  default / fastest = 1.000x",
+        "  manual review: retain DEFAULT_TILE",
+    ]

@@ -4,9 +4,9 @@
 """Measure gfx950 GDN registry candidates and KDA tile-table alternatives.
 
 GDN dispatch has a static registry priority. Its sweep measures every legal
-registered candidate but does not change production selection. KDA keeps its
-separate work-keyed table, so its sweep enumerates every validator-admitted tile
-to challenge the selected work band.
+registered candidate but does not change dispatcher-default selection. KDA keeps
+its separate work-keyed table, so its sweep enumerates every validator-admitted
+tile to challenge the selected work band.
 
 Every candidate is correctness-gated before device timing. Host launch cost can
 hide kernel differences at small batch, so device time is the comparison metric.
@@ -37,7 +37,7 @@ ARCH = "gfx950"
 DEFAULT_BATCHES = (1, 16, 64, 256)
 
 # KDA's study deliberately searches the registry's configured tile space. GDN
-# production uses the registry instead, so its sweep only receives registry
+# dispatcher auto uses the registry instead, so its sweep only receives registry
 # dispatch results.
 
 
@@ -212,6 +212,29 @@ def sweep_batch(base: GdnDecodeSpec, batch: int, configs):
     return rows
 
 
+def report_gdn_dispatcher_default(rows, auto_id: str) -> None:
+    """Print the shipped GDN default against the fastest measured candidate."""
+    best_micros, best_tile, best_id, _ = rows[0]
+    for rank, (micros, tile, spec_id, _) in enumerate(rows, start=1):
+        if spec_id != auto_id:
+            continue
+        print(
+            f"  dispatcher default: {micros:.3f}us  {spec_id} "
+            f"tile={tile} rank={rank}/{len(rows)}"
+        )
+        print(
+            f"  fastest legal candidate: {best_micros:.3f}us  {best_id} "
+            f"tile={best_tile}"
+        )
+        print(f"  default / fastest = {micros / best_micros:.3f}x")
+        if spec_id == best_id:
+            print("  manual review: retain DEFAULT_TILE")
+        else:
+            print(f"  manual review: consider DEFAULT_TILE = {best_tile}")
+        return
+    raise RuntimeError(f"dispatcher-selected GDN spec {auto_id!r} was not measured")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -275,7 +298,7 @@ def main() -> int:
                     f"top {args.top} ==="
                 )
                 for micros, tile, err in rows[: args.top]:
-                    mark = " <- production auto" if tile == auto_tile else ""
+                    mark = " <- dispatcher default" if tile == auto_tile else ""
                     print(f"  {micros:9.3f}us tile={tile} err={err:.2e}{mark}")
                 continue
 
@@ -293,10 +316,13 @@ def main() -> int:
                 f"top {args.top} ==="
             )
             for micros, tile, spec_id, err in rows[: args.top]:
-                mark = " <- production auto" if spec_id == auto_id else ""
+                mark = " <- dispatcher default" if spec_id == auto_id else ""
                 print(f"  {micros:9.3f}us  {spec_id} tile={tile} err={err:.2e}{mark}")
+            report_gdn_dispatcher_default(rows, auto_id)
 
-    print("\nProduction auto is deterministic; measurements do not change selection.")
+    print(
+        "\nDispatcher default is deterministic; measurements do not change selection."
+    )
     return 1 if failed else 0
 
 

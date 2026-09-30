@@ -34,8 +34,8 @@ retune either decode mode or the GDN prefill path.
 | [`gdn_decode.py`](gdn_decode.py) | Compile a spec, build inputs, launch the shared decode emitter, and compare with the independent fp32 reference |
 | [`tune.py`](tune.py) | Measure legal GDN registry candidates or KDA work-keyed candidates |
 | [`ALGORITHM.md`](ALGORITHM.md) | Explain the gated delta rule, gate kinds, and GPU mapping |
-| [`library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_gdn_decode.py) | Benchmark every legal GDN registry candidate and the static production selection |
-| [`library/benchmarks/gfx950/gdn/benchmark_kda_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_kda_decode.py) | Benchmark KDA fused/precomputed/simple variants from the production dispatcher; optionally sweep all legal tiles |
+| [`library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_gdn_decode.py) | Benchmark every legal GDN registry candidate and the static dispatcher default |
+| [`library/benchmarks/gfx950/gdn/benchmark_kda_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_kda_decode.py) | Benchmark KDA fused/precomputed/simple variants from the dispatcher; optionally sweep all legal tiles |
 | [`library/dispatch/gdn/gfx950.py`](../../../dispatch/gdn/gfx950.py) | Declare the GDN registry/static default and KDA work-keyed table |
 | [`library/tests/dispatch/gdn/test_gfx950_registry.py`](../../../tests/dispatch/gdn/test_gfx950_registry.py) | CPU GDN registry count, identity, legality, and selection coverage |
 | [`library/tests/test_gdn_decode_spec.py`](../../../tests/test_gdn_decode_spec.py) | CPU validator and IR-emission coverage |
@@ -113,8 +113,8 @@ measurement after correctness has already been established.
 ## Benchmark registered candidates
 
 The GDN benchmark asks the registry for every legal candidate. The default D128
-request admits 54 of 180 configured triples and also reports static production
-`auto`:
+request admits 54 of 180 configured triples and also reports the static
+dispatcher-default `auto` selection:
 
 ```bash
 python3 library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py \
@@ -122,7 +122,7 @@ python3 library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py \
 ```
 
 Each row includes a stable `spec_id`
-`nw<num_warps>_wtk<warp_threads_k>_bpv<blocks_per_v_dim>`. Production `auto`
+`nw<num_warps>_wtk<warp_threads_k>_bpv<blocks_per_v_dim>`. Dispatcher `auto`
 prefers `(2, 16, 8)` whenever legal; measurements never change that choice.
 
 KDA remains a separate work-keyed benchmark:
@@ -148,6 +148,10 @@ python3 library/builders/gfx950/gdn/tune.py \
   --gate-kind gdn --batches 1,16,64,256 --top 5
 ```
 
+For every GDN cell, it also reports the static dispatcher default, the fastest
+legal candidate, the default's rank and time ratio, and a manual
+`DEFAULT_TILE` recommendation. Measurements never update the shipped default.
+
 Use KDA's work-keyed study across head geometries when retuning KDA:
 
 ```bash
@@ -167,7 +171,9 @@ CPU-only coverage:
 python3 -m pytest \
   library/tests/test_gdn_decode_spec.py \
   library/tests/test_gdn_decode_golden.py \
+  library/tests/dispatch/gdn/test_gfx950_registry.py \
   library/tests/dispatch/gdn/test_gfx950_wiring.py \
+  library/tests/test_gdn_decode_tune.py \
   -m "not gpu"
 ```
 

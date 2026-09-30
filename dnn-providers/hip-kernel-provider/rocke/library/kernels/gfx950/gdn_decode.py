@@ -141,9 +141,8 @@ class GdnDecodeSpec:
     # recurrence-only kernel at an identical work boundary.
     fuse_gate: bool = True
     wave_size: int = 64
-    # Known-good fallback for direct callers. Production dispatch replaces
-    # these values with a batch-tuned tile; callers that construct the spec
-    # directly still get a valid general-purpose configuration.
+    # GDN's dispatcher default uses these values whenever they are legal.
+    # Direct callers still get a valid general-purpose configuration.
     num_warps: int = 2
     warp_threads_k: int = 16
     blocks_per_v_dim: int = (
