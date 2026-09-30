@@ -27,8 +27,10 @@
 // adaptive partial_scale_y kernel (AISPARSE-662).
 //
 // Every LRB compute launch clamps grid.x with rocsparse::get_grid_size_x, i.e.
-// to min(maxGridSize[0], (2^32 - 1) / blockDim.x) blocks, and the kernels
-// grid-stride over the full logical block count. The long-rows grid is further
+// to min(maxGridSize[0], (2^32 - 1) / blockDim.x) blocks. When the clamp binds,
+// the host launches the GRID_STRIDE variant of the kernel, which grid-strides
+// over the full logical block count; otherwise it launches the straight-line
+// variant, one block per block index. The long-rows grid is further
 // rounded down to a whole multiple of num_wgs_per_row, so that all workgroups
 // cooperating on one row run in the same grid-stride wave (the spin-wait
 // hand-off needs that). At real sizes the clamp needs more than 16.7M blocks.
@@ -603,8 +605,8 @@ TEST_F(CsrmvLrbGrids, clamped_grid_stride_f64_i64)
     check_lrb<double, int64_t, int64_t>(handle, true);
 }
 
-// Control: the same problems with the real grid.x limit. If this fails the
-// clamped cases above prove nothing.
+// Control: the same problems with the real grid.x limit, which run the
+// straight-line variants. If this fails the clamped cases above prove nothing.
 TEST_F(CsrmvLrbGrids, unclamped_grid_matches_host)
 {
     check_lrb<float, int32_t, int32_t>(handle, false);

@@ -241,7 +241,14 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
 
 namespace rocsparse
 {
-    template <typename I, typename J, typename A, typename X, typename Y, typename Z, typename T>
+    template <bool GRID_STRIDE,
+              typename I,
+              typename J,
+              typename A,
+              typename X,
+              typename Y,
+              typename Z,
+              typename T>
     ROCSPARSE_KERNEL(WG_SIZE)
     void csrmvn_lrb_short_rows_kernel(bool conj,
                                       I    nnz,
@@ -265,7 +272,7 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         if(alpha != 0 || beta != 1 || num_extra > 0)
         {
-            rocsparse::csrmvn_lrb_short_rows_device<WG_SIZE, I, J, A, X, Y, Z, T>(
+            rocsparse::csrmvn_lrb_short_rows_device<WG_SIZE, GRID_STRIDE, I, J, A, X, Y, Z, T>(
                 conj,
                 nnz,
                 rows_bins,
@@ -285,7 +292,14 @@ namespace rocsparse
         }
     }
 
-    template <typename I, typename J, typename A, typename X, typename Y, typename Z, typename T>
+    template <bool GRID_STRIDE,
+              typename I,
+              typename J,
+              typename A,
+              typename X,
+              typename Y,
+              typename Z,
+              typename T>
     ROCSPARSE_KERNEL(WG_SIZE)
     void csrmvn_lrb_short_rows_2_kernel(bool conj,
                                         I    nnz,
@@ -311,6 +325,7 @@ namespace rocsparse
         {
             rocsparse::csrmvn_lrb_short_rows_2_device<WG_SIZE,
                                                       CSRMV_LRB_SHORT_ROWS_2_LDS_ELEMS,
+                                                      GRID_STRIDE,
                                                       I,
                                                       J,
                                                       A,
@@ -338,6 +353,7 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE,
               uint32_t WF_SIZE,
+              bool     GRID_STRIDE,
               typename I,
               typename J,
               typename A,
@@ -369,7 +385,7 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         if(alpha != 0 || beta != 1 || num_extra > 0)
         {
-            rocsparse::csrmvn_lrb_medium_rows_warp_reduce_device<BLOCKSIZE, WF_SIZE>(
+            rocsparse::csrmvn_lrb_medium_rows_warp_reduce_device<BLOCKSIZE, WF_SIZE, GRID_STRIDE>(
                 conj,
                 nnz,
                 count,
@@ -391,6 +407,7 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE,
+              bool     GRID_STRIDE,
               typename I,
               typename J,
               typename A,
@@ -422,27 +439,34 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         if(alpha != 0 || beta != 1 || num_extra > 0)
         {
-            rocsparse::csrmvn_lrb_medium_rows_device<BLOCKSIZE>(conj,
-                                                                nnz,
-                                                                count,
-                                                                rows_bins,
-                                                                n_rows_bins,
-                                                                bin_id,
-                                                                alpha,
-                                                                csr_row_ptr,
-                                                                csr_col_ind,
-                                                                csr_val,
-                                                                x,
-                                                                beta,
-                                                                y,
-                                                                num_extra,
-                                                                gamma_device_array,
-                                                                z_arrays,
-                                                                idx_base);
+            rocsparse::csrmvn_lrb_medium_rows_device<BLOCKSIZE, GRID_STRIDE>(conj,
+                                                                             nnz,
+                                                                             count,
+                                                                             rows_bins,
+                                                                             n_rows_bins,
+                                                                             bin_id,
+                                                                             alpha,
+                                                                             csr_row_ptr,
+                                                                             csr_col_ind,
+                                                                             csr_val,
+                                                                             x,
+                                                                             beta,
+                                                                             y,
+                                                                             num_extra,
+                                                                             gamma_device_array,
+                                                                             z_arrays,
+                                                                             idx_base);
         }
     }
 
-    template <typename I, typename J, typename A, typename X, typename Y, typename Z, typename T>
+    template <bool GRID_STRIDE,
+              typename I,
+              typename J,
+              typename A,
+              typename X,
+              typename Y,
+              typename Z,
+              typename T>
     ROCSPARSE_KERNEL(WG_SIZE)
     void csrmvn_lrb_long_rows_kernel(bool    conj,
                                      J       m,
@@ -469,26 +493,34 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         if(alpha != 0 || beta != 1 || num_extra > 0)
         {
-            rocsparse::csrmvn_lrb_long_rows_device<WG_SIZE, BLOCK_MULTIPLIER, I, J, A, X, Y, Z, T>(
-                conj,
-                m,
-                nnz,
-                count,
-                wg_flags,
-                rows_bins,
-                n_rows_bins,
-                bin_id,
-                alpha,
-                csr_row_ptr,
-                csr_col_ind,
-                csr_val,
-                x,
-                beta,
-                y,
-                num_extra,
-                gamma_device_array,
-                z_arrays,
-                idx_base);
+            rocsparse::csrmvn_lrb_long_rows_device<WG_SIZE,
+                                                   BLOCK_MULTIPLIER,
+                                                   GRID_STRIDE,
+                                                   I,
+                                                   J,
+                                                   A,
+                                                   X,
+                                                   Y,
+                                                   Z,
+                                                   T>(conj,
+                                                      m,
+                                                      nnz,
+                                                      count,
+                                                      wg_flags,
+                                                      rows_bins,
+                                                      n_rows_bins,
+                                                      bin_id,
+                                                      alpha,
+                                                      csr_row_ptr,
+                                                      csr_col_ind,
+                                                      csr_val,
+                                                      x,
+                                                      beta,
+                                                      y,
+                                                      num_extra,
+                                                      gamma_device_array,
+                                                      z_arrays,
+                                                      idx_base);
         }
     }
 }
@@ -582,31 +614,37 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                     // row counts above 2^24). nRowsBins[j] is guaranteed non-zero here.
                     int64_t num_wgs
                         = (static_cast<int64_t>(info->lrb.nRowsBins[j]) - 1) / block_size + 1;
-                    uint32_t grid_size = rocsparse::get_grid_size_x(handle, num_wgs, block_size);
 
-                    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (csrmvn_lrb_short_rows_kernel),
-                        grid_size,
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+                        handle,
+                        num_wgs,
                         block_size,
-                        lds_size,
-                        stream,
-                        conj,
-                        nnz,
-                        static_cast<J*>(info->lrb.rows_bins),
-                        static_cast<J*>(info->lrb.n_rows_bins),
-                        j,
-                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                        csr_row_ptr,
-                        csr_col_ind,
-                        csr_val,
-                        x,
-                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-                        y,
-                        num_extra,
-                        gamma_device_array,
-                        z_array,
-                        descr->base,
-                        handle->pointer_mode == rocsparse_pointer_mode_host);
+                        [&](auto grid_stride, uint32_t grid_size) -> rocsparse_status {
+                            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                                (csrmvn_lrb_short_rows_kernel<decltype(grid_stride)::value>),
+                                grid_size,
+                                block_size,
+                                lds_size,
+                                stream,
+                                conj,
+                                nnz,
+                                static_cast<J*>(info->lrb.rows_bins),
+                                static_cast<J*>(info->lrb.n_rows_bins),
+                                j,
+                                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                                csr_row_ptr,
+                                csr_col_ind,
+                                csr_val,
+                                x,
+                                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                                y,
+                                num_extra,
+                                gamma_device_array,
+                                z_array,
+                                descr->base,
+                                handle->pointer_mode == rocsparse_pointer_mode_host);
+                            return rocsparse_status_success;
+                        }));
                 }
                 // Static LDS allocation, for when dynamic would grow too large
                 else
@@ -616,31 +654,37 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                     // row counts above 2^24). nRowsBins[j] is guaranteed non-zero here.
                     int64_t num_wgs
                         = (static_cast<int64_t>(info->lrb.nRowsBins[j]) - 1) / rows_per_wg + 1;
-                    uint32_t grid_size = rocsparse::get_grid_size_x(handle, num_wgs, block_size);
 
-                    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (csrmvn_lrb_short_rows_2_kernel),
-                        grid_size,
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+                        handle,
+                        num_wgs,
                         block_size,
-                        0,
-                        stream,
-                        conj,
-                        nnz,
-                        static_cast<J*>(info->lrb.rows_bins),
-                        static_cast<J*>(info->lrb.n_rows_bins),
-                        j,
-                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                        csr_row_ptr,
-                        csr_col_ind,
-                        csr_val,
-                        x,
-                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-                        y,
-                        num_extra,
-                        gamma_device_array,
-                        z_array,
-                        descr->base,
-                        handle->pointer_mode == rocsparse_pointer_mode_host);
+                        [&](auto grid_stride, uint32_t grid_size) -> rocsparse_status {
+                            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                                (csrmvn_lrb_short_rows_2_kernel<decltype(grid_stride)::value>),
+                                grid_size,
+                                block_size,
+                                0,
+                                stream,
+                                conj,
+                                nnz,
+                                static_cast<J*>(info->lrb.rows_bins),
+                                static_cast<J*>(info->lrb.n_rows_bins),
+                                j,
+                                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                                csr_row_ptr,
+                                csr_col_ind,
+                                csr_val,
+                                x,
+                                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                                y,
+                                num_extra,
+                                gamma_device_array,
+                                z_array,
+                                descr->base,
+                                handle->pointer_mode == rocsparse_pointer_mode_host);
+                            return rocsparse_status_success;
+                        }));
                 }
             }
         }
@@ -661,126 +705,157 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                         // RDNA (wave32): use 128-thread blocks (4 wavefronts) instead of 256.
                         // One wavefront reduces one row, so grid is sized by wavefronts-per-block.
                         constexpr uint32_t mr_block = WG_SIZE_WAVE32;
-                        int64_t  num_wgs   = (info->lrb.nRowsBins[j] - 1) / (mr_block / 32) + 1;
-                        uint32_t grid_size = rocsparse::get_grid_size_x(handle, num_wgs, mr_block);
-                        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                            (csrmvn_lrb_medium_rows_warp_reduce_kernel<mr_block, 32>),
-                            grid_size,
+                        int64_t num_wgs = (info->lrb.nRowsBins[j] - 1) / (mr_block / 32) + 1;
+                        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+                            handle,
+                            num_wgs,
                             mr_block,
-                            0,
-                            stream,
-                            conj,
-                            nnz,
-                            info->lrb.nRowsBins[j],
-                            static_cast<J*>(info->lrb.rows_bins),
-                            static_cast<J*>(info->lrb.n_rows_bins),
-                            j,
-                            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                            csr_row_ptr,
-                            csr_col_ind,
-                            csr_val,
-                            x,
-                            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-                            y,
-                            num_extra,
-                            gamma_device_array,
-                            z_array,
-                            descr->base,
-                            handle->pointer_mode == rocsparse_pointer_mode_host);
+                            [&](auto grid_stride, uint32_t grid_size) -> rocsparse_status {
+                                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                                    (csrmvn_lrb_medium_rows_warp_reduce_kernel<
+                                        mr_block,
+                                        32,
+                                        decltype(grid_stride)::value>),
+                                    grid_size,
+                                    mr_block,
+                                    0,
+                                    stream,
+                                    conj,
+                                    nnz,
+                                    info->lrb.nRowsBins[j],
+                                    static_cast<J*>(info->lrb.rows_bins),
+                                    static_cast<J*>(info->lrb.n_rows_bins),
+                                    j,
+                                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                                    csr_row_ptr,
+                                    csr_col_ind,
+                                    csr_val,
+                                    x,
+                                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                                    y,
+                                    num_extra,
+                                    gamma_device_array,
+                                    z_array,
+                                    descr->base,
+                                    handle->pointer_mode == rocsparse_pointer_mode_host);
+                                return rocsparse_status_success;
+                            }));
                     }
                     else
                     {
                         int64_t num_wgs
                             = (info->lrb.nRowsBins[j] - 1) / (256 / handle->wavefront_size) + 1;
-                        uint32_t grid_size = rocsparse::get_grid_size_x(handle, num_wgs, 256);
-                        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                            (csrmvn_lrb_medium_rows_warp_reduce_kernel<256, 64>),
-                            grid_size,
+                        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+                            handle,
+                            num_wgs,
                             256,
-                            0,
-                            stream,
-                            conj,
-                            nnz,
-                            info->lrb.nRowsBins[j],
-                            static_cast<J*>(info->lrb.rows_bins),
-                            static_cast<J*>(info->lrb.n_rows_bins),
-                            j,
-                            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                            csr_row_ptr,
-                            csr_col_ind,
-                            csr_val,
-                            x,
-                            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-                            y,
-                            num_extra,
-                            gamma_device_array,
-                            z_array,
-                            descr->base,
-                            handle->pointer_mode == rocsparse_pointer_mode_host);
+                            [&](auto grid_stride, uint32_t grid_size) -> rocsparse_status {
+                                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                                    (csrmvn_lrb_medium_rows_warp_reduce_kernel<
+                                        256,
+                                        64,
+                                        decltype(grid_stride)::value>),
+                                    grid_size,
+                                    256,
+                                    0,
+                                    stream,
+                                    conj,
+                                    nnz,
+                                    info->lrb.nRowsBins[j],
+                                    static_cast<J*>(info->lrb.rows_bins),
+                                    static_cast<J*>(info->lrb.n_rows_bins),
+                                    j,
+                                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                                    csr_row_ptr,
+                                    csr_col_ind,
+                                    csr_val,
+                                    x,
+                                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                                    y,
+                                    num_extra,
+                                    gamma_device_array,
+                                    z_array,
+                                    descr->base,
+                                    handle->pointer_mode == rocsparse_pointer_mode_host);
+                                return rocsparse_status_success;
+                            }));
                     }
                 }
                 else // One block per row
                 {
-                    int64_t        count = info->lrb.nRowsBins[j]; // One WG per row
-                    const uint32_t mr_block
-                        = (handle->wavefront_size == 32) ? WG_SIZE_WAVE32 : WG_SIZE;
-                    uint32_t grid_size = rocsparse::get_grid_size_x(handle, count, mr_block);
+                    int64_t count = info->lrb.nRowsBins[j]; // One WG per row
 
                     if(handle->wavefront_size == 32)
                     {
                         // RDNA (wave32): 128-thread block per row (4 wavefronts) improves
                         // occupancy vs the 256-thread (8-wavefront) block for these rows.
-                        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                            (csrmvn_lrb_medium_rows_kernel<WG_SIZE_WAVE32>),
-                            grid_size,
-                            WG_SIZE_WAVE32,
-                            0,
-                            stream,
-                            conj,
-                            nnz,
+                        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+                            handle,
                             count,
-                            static_cast<J*>(info->lrb.rows_bins),
-                            static_cast<J*>(info->lrb.n_rows_bins),
-                            j,
-                            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                            csr_row_ptr,
-                            csr_col_ind,
-                            csr_val,
-                            x,
-                            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-                            y,
-                            num_extra,
-                            gamma_device_array,
-                            z_array,
-                            descr->base,
-                            handle->pointer_mode == rocsparse_pointer_mode_host);
+                            WG_SIZE_WAVE32,
+                            [&](auto grid_stride, uint32_t grid_size) -> rocsparse_status {
+                                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                                    (csrmvn_lrb_medium_rows_kernel<WG_SIZE_WAVE32,
+                                                                   decltype(grid_stride)::value>),
+                                    grid_size,
+                                    WG_SIZE_WAVE32,
+                                    0,
+                                    stream,
+                                    conj,
+                                    nnz,
+                                    count,
+                                    static_cast<J*>(info->lrb.rows_bins),
+                                    static_cast<J*>(info->lrb.n_rows_bins),
+                                    j,
+                                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                                    csr_row_ptr,
+                                    csr_col_ind,
+                                    csr_val,
+                                    x,
+                                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                                    y,
+                                    num_extra,
+                                    gamma_device_array,
+                                    z_array,
+                                    descr->base,
+                                    handle->pointer_mode == rocsparse_pointer_mode_host);
+                                return rocsparse_status_success;
+                            }));
                     }
                     else
                     {
-                        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                            (csrmvn_lrb_medium_rows_kernel<WG_SIZE>),
-                            grid_size,
-                            WG_SIZE,
-                            0,
-                            stream,
-                            conj,
-                            nnz,
+                        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+                            handle,
                             count,
-                            static_cast<J*>(info->lrb.rows_bins),
-                            static_cast<J*>(info->lrb.n_rows_bins),
-                            j,
-                            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                            csr_row_ptr,
-                            csr_col_ind,
-                            csr_val,
-                            x,
-                            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-                            y,
-                            num_extra,
-                            gamma_device_array,
-                            z_array,
-                            descr->base,
-                            handle->pointer_mode == rocsparse_pointer_mode_host);
+                            WG_SIZE,
+                            [&](auto grid_stride, uint32_t grid_size) -> rocsparse_status {
+                                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                                    (csrmvn_lrb_medium_rows_kernel<WG_SIZE,
+                                                                   decltype(grid_stride)::value>),
+                                    grid_size,
+                                    WG_SIZE,
+                                    0,
+                                    stream,
+                                    conj,
+                                    nnz,
+                                    count,
+                                    static_cast<J*>(info->lrb.rows_bins),
+                                    static_cast<J*>(info->lrb.n_rows_bins),
+                                    j,
+                                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                                    csr_row_ptr,
+                                    csr_col_ind,
+                                    csr_val,
+                                    x,
+                                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                                    y,
+                                    num_extra,
+                                    gamma_device_array,
+                                    z_array,
+                                    descr->base,
+                                    handle->pointer_mode == rocsparse_pointer_mode_host);
+                                return rocsparse_status_success;
+                            }));
                     }
                 }
             }
@@ -816,32 +891,44 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                 }
                 uint32_t grid_size = static_cast<uint32_t>(rocsparse::min(capped, count));
 
-                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                    (csrmvn_lrb_long_rows_kernel),
-                    grid_size,
-                    block_size,
-                    0,
-                    stream,
-                    conj,
-                    m,
-                    nnz,
-                    count,
-                    info->lrb.wg_flags,
-                    static_cast<J*>(info->lrb.rows_bins),
-                    static_cast<J*>(info->lrb.n_rows_bins),
-                    j,
-                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                    csr_row_ptr,
-                    csr_col_ind,
-                    csr_val,
-                    x,
-                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-                    y,
-                    num_extra,
-                    gamma_device_array,
-                    z_array,
-                    descr->base,
-                    handle->pointer_mode == rocsparse_pointer_mode_host);
+                const auto launch = [&](auto grid_stride) -> rocsparse_status {
+                    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                        (csrmvn_lrb_long_rows_kernel<decltype(grid_stride)::value>),
+                        grid_size,
+                        block_size,
+                        0,
+                        stream,
+                        conj,
+                        m,
+                        nnz,
+                        count,
+                        info->lrb.wg_flags,
+                        static_cast<J*>(info->lrb.rows_bins),
+                        static_cast<J*>(info->lrb.n_rows_bins),
+                        j,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                        csr_row_ptr,
+                        csr_col_ind,
+                        csr_val,
+                        x,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                        y,
+                        num_extra,
+                        gamma_device_array,
+                        z_array,
+                        descr->base,
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
+                    return rocsparse_status_success;
+                };
+
+                if(grid_size < count)
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(launch(std::true_type{}));
+                }
+                else
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(launch(std::false_type{}));
+                }
             }
         }
     }
