@@ -584,11 +584,11 @@ class TestConvDgradGfx1250Emit(unittest.TestCase):
     def _lower_gfx1250_kouter(self, dtype: str) -> str:
         """Lower a K-outer (transpose-read) gfx1250 dgrad kernel, CPU-only."""
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-        from rocke.instances.common._conv_implicit_gemm_common import (
+        from kernels.common._conv_implicit_gemm_common import (
             ConvDataSpec,
             ConvProblem,
         )
-        from rocke.instances.common.conv_implicit_gemm_dgrad import (
+        from kernels.common.conv_implicit_gemm_dgrad import (
             DgradConvSpec,
             build_implicit_gemm_conv_dgrad,
             is_valid_dgrad_spec,
@@ -629,11 +629,11 @@ class TestConvDgradGfx1250Emit(unittest.TestCase):
         """
         import dataclasses
 
-        from rocke.instances.common._conv_implicit_gemm_common import (
+        from kernels.common._conv_implicit_gemm_common import (
             ConvDataSpec,
             ConvProblem,
         )
-        from rocke.instances.common.conv_implicit_gemm_dgrad import (
+        from kernels.common.conv_implicit_gemm_dgrad import (
             DgradConvSpec,
             is_valid_dgrad_spec,
         )

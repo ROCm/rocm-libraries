@@ -22,6 +22,14 @@ version = 1
 #   atol: absolute tolerance
 #   rtol: relative tolerance
 #
+# The bshd bf16 hd128 SdpaFwd bundles are the only shared bundles ASM ranks, and in an
+# installed artifact it cannot load their kernels: AITER_ASM_DIR is the configure-time
+# absolute install prefix, and this entry sets no HIPDNN_AITER_ASM_DIR. Arch-independent,
+# so 'archs' is omitted.
+[[test_skips]]
+filters = ["*_SdpaFwd_bshd_bf16_hd128_*"]
+reason  = "ALMIOPEN-2766 — ASM SDPA fwd .co load fails (hipError 301) from a relocated install"
+
 # The common suite's ToleranceResolver maps both SdpaAttributes and
 # SdpaBackwardAttributes to tol::sdpa::getToleranceFwd<T>() (tight, tuned for
 # forward). SDPA backward gradients (dQ/dK/dV) accumulate more numerical error

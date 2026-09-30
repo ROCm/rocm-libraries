@@ -153,6 +153,7 @@ public:
 
     virtual bool hasRaggedTensors() const;
     virtual bool hasNonDefaultTensorAlignment() const;
+    virtual bool hasRaggedOffsetMultiplier() const;
     virtual bool isRuntimePassByValueEnabled() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();

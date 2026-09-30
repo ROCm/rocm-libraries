@@ -11,6 +11,8 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
     * GEHD2
     * GEHRD
 
+* Support added for the gfx1250-strict architecture.
+
 ### Changed
 ### Removed
 ### Optimized

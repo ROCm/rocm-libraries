@@ -26,7 +26,7 @@
 #include "launch_params.h"
 #include "persistent_grid.h"
 #include "types.h"
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 #include <hip/hip_bf16.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
@@ -126,20 +126,21 @@ private:
 
 // How many images this layer should pack into a column block.
 //
-// The packing that runs the fewest padded output columns, ties to the smaller. Width alone
-// decides it, the packing and the arrangement trading against nothing in common; see
-// direct-wgrad-estimated-cost.md.
+// The packing that runs the fewest padded output pixels, ties to the smaller.
+//
+// divup(n, u) * u images run where n exist, which outweighs the column padding on a small
+// batch. padded_pixels less the row factor, common to every packing.
 //
 // HIPCONV_WGRAD_UNFOLD_N pins the answer, on the same terms as the arrangement knobs.
 // Over the packings rather than the table: every spread carries all three, and the column block's
 // width follows the packing alone, so the table has nothing to add and is_valid_config asks this
 // once per entry.
-inline int preferred_unfold_n(const Conv2dParams& par)
+inline int preferred_unfold_n(const ConvParams& par)
 {
     const int pinned = Pins::instance().unfold_n();
 
-    int chosen = 0;
-    int fewest = 0;
+    int chosen     = 0;
+    int64_t fewest = 0;
     for(const int unfold_n : packings)
     {
         if(pinned != 0)
@@ -151,10 +152,14 @@ inline int preferred_unfold_n(const Conv2dParams& par)
 
         // Strictly fewer, so a tie leaves the smaller packing in place.
         // The table lists the packings in increasing order.
-        const int columns = packed_columns(par, unfold_n);
-        if(chosen == 0 || columns < fewest)
+        //
+        // Rows are the same factor under every packing, so they cancel and this is
+        // padded_pixels without them.
+        const int64_t pixels =
+            int64_t{divup(par.n, unfold_n)} * unfold_n * packed_columns(par, unfold_n);
+        if(chosen == 0 || pixels < fewest)
         {
-            fewest = columns;
+            fewest = pixels;
             chosen = unfold_n;
         }
     }
@@ -168,7 +173,7 @@ inline int preferred_unfold_n(const Conv2dParams& par)
 // it admits no padding on either channel axis, and the group count has to divide or a short last
 // block leaves waves writing past dW. The same tests keep it off an ungrouped layer, where it
 // would compute the block diagonal of a tile with no block structure.
-inline bool serves(const Conv2dParams& par, const Config& cfg)
+inline bool serves(const ConvParams& par, const Config& cfg)
 {
     if(cfg.waves_g == 1)
         return true;
@@ -180,13 +185,13 @@ inline bool serves(const Conv2dParams& par, const Config& cfg)
 //
 // Field compares only. is_valid_config leads with these because they reject most of the table,
 // and what follows them is per-layer work that would otherwise run once per entry.
-inline bool fits_the_layer(const Conv2dParams& par, const Config& cfg)
+inline bool fits_the_layer(const ConvParams& par, const Config& cfg)
 {
     return cfg.kh == par.kh && cfg.kw == par.kw && serves(par, cfg);
 }
 
 // Whether this entry is one of the layer's candidates, before the pins narrow them.
-inline bool is_a_candidate(const Conv2dParams& par, const Config& cfg, int unfold_n)
+inline bool is_a_candidate(const ConvParams& par, const Config& cfg, int unfold_n)
 {
     return fits_the_layer(par, cfg) && cfg.unfold_n == unfold_n;
 }
@@ -195,7 +200,7 @@ inline bool is_a_candidate(const Conv2dParams& par, const Config& cfg, int unfol
 //
 // When they name none, every caller below ignores them and proceeds as if none were set, so a
 // mistyped knob does not look like a missing kernel.
-inline bool the_pins_name_a_candidate(const Conv2dParams& par, int unfold_n)
+inline bool the_pins_name_a_candidate(const ConvParams& par, int unfold_n)
 {
     for(const Config& c : configs)
         if(is_a_candidate(par, c, unfold_n) && Pins::instance().match(c))
@@ -203,25 +208,68 @@ inline bool the_pins_name_a_candidate(const Conv2dParams& par, int unfold_n)
     return false;
 }
 
-// Whether the images one loader spans fit in 32 bits.
-inline bool window_fits_a_buffer(const Conv2dParams& par)
+// Bytes one loader's window spans, per operand, at the given row count.
+//
+// A row count of zero asks for the whole image, which is what an untiled config addresses from
+// one base.
+struct WindowBytes
 {
-    const int64_t images = preferred_unfold_n(par);
-    const int64_t s_bytes =
-        images * par.h * par.w * (int64_t{par.groups} * par.channels_per_group()) * 2;
-    const int64_t delta_bytes =
-        images * par.p * par.q * (int64_t{par.groups} * par.filters_per_group()) * 2;
+    int64_t s;
+    int64_t delta;
+};
+
+inline WindowBytes window_bytes(const ConvParams& par, int s_rows, int delta_rows)
+{
+    const int64_t images  = preferred_unfold_n(par);
+    const int64_t s_row   = int64_t{par.w} * par.groups * par.channels_per_group() * 2;
+    const int64_t d_row   = int64_t{par.q} * par.groups * par.filters_per_group() * 2;
+    const int64_t s_count = s_rows > 0 ? s_rows : images * par.h;
+    const int64_t d_count = delta_rows > 0 ? delta_rows : images * par.p;
+    return {s_count * s_row, d_count * d_row};
+}
+
+// Whether the images one loader spans fit in 32 bits, which is what an untiled config needs.
+inline bool window_fits_a_buffer(const ConvParams& par)
+{
     constexpr int64_t int32_max = 0x7fffffff;
-    return s_bytes <= int32_max && delta_bytes <= int32_max;
+    const WindowBytes w         = window_bytes(par, 0, 0);
+    return w.s <= int32_max && w.delta <= int32_max;
+}
+
+// Whether one tile fits instead, for a shape whose whole image does not.
+//
+// Complementary to window_fits_a_buffer, so exactly one of the two claims a shape and none is
+// left matching nothing: a tiled config declines what the baseline already serves. A tiled
+// config also runs at unfold_n 1, which is what keeps the packed-image term, and the int it
+// would overflow, out of the address; see RowLoader.
+inline bool tile_fits_a_buffer(const ConvParams& par, const Config& cfg)
+{
+    constexpr int64_t int32_max = 0x7fffffff;
+    if(window_fits_a_buffer(par))
+        return false;
+    if(preferred_unfold_n(par) != 1)
+        return false;
+    const WindowBytes w = window_bytes(par,
+                                       cfg.rows_per_tile + cfg.prefetch_rows,
+                                       cfg.rows_per_tile + par.pad_h + cfg.prefetch_rows);
+    return w.s <= int32_max && w.delta <= int32_max;
+}
+
+// Whether this entry can address the layer at all, tiled or not.
+inline bool addressing_fits(const ConvParams& par, const Config& cfg)
+{
+    return cfg.rows_per_tile > 0 ? tile_fits_a_buffer(par, cfg) : window_fits_a_buffer(par);
 }
 
 // Whether this entry may run this layer, which several entries of a layer may.
 //
 // Which of them the dispatcher prefers is the ranking's answer, not this one. A launch reaches
 // this through ConvLaunch::make, which admits any entry the ranking offered.
-inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
+inline bool is_valid_config(const ConvParams& par, const Config& cfg)
 {
     if(!fits_the_layer(par, cfg))
+        return false;
+    if(!addressing_fits(par, cfg))
         return false;
     const int unfold_n = preferred_unfold_n(par);
     if(cfg.unfold_n != unfold_n)
@@ -243,7 +291,7 @@ inline LaunchParams get_launch_params(const Config& cfg)
 //
 // Mirrors the construction in conv2d_direct_wgrad_impl. The launch is the persistent grid, whose
 // width is a constant, so this needs nothing the kernel discovers at run time.
-inline FlatGrid flat_grid(const Conv2dParams& par, const Config& cfg)
+inline FlatGrid flat_grid(const ConvParams& par, const Config& cfg)
 {
     return FlatGrid{.groups           = par.groups,
                     .c_per_group      = par.channels_per_group(),
@@ -262,7 +310,7 @@ inline FlatGrid flat_grid(const Conv2dParams& par, const Config& cfg)
 //
 // See docs/algorithms/direct/direct-wgrad-tolerance.md. The main loop runs over the S rows, so
 // RowSchedule::iterations() is the chain length.
-inline size_t accumulation_depth(const Conv2dParams& par, const Config& cfg)
+inline size_t accumulation_depth(const ConvParams& par, const Config& cfg)
 {
     const RowSchedule sched{.kh            = cfg.kh,
                             .prefetch_rows = cfg.prefetch_rows,
@@ -318,7 +366,8 @@ __device__ void conv2d_direct_wgrad_impl(const ToType<DT>* __restrict__ in,
                             .prefetch_rows = cfg.prefetch_rows,
                             .pad_h         = py,
                             .s_rows        = hi,
-                            .row_buffers   = cfg.row_buffers()};
+                            .row_buffers   = cfg.row_buffers(),
+                            .rows_per_tile = cfg.rows_per_tile};
 
     // The launch's own width rather than the persistent constant.
     // A launch narrower than the cell space still covers it, one cell per stride.
@@ -388,14 +437,18 @@ __device__ void conv2d_direct_wgrad_impl(const ToType<DT>* __restrict__ in,
                                                    valid,
                                                    item.image,
                                                    item.col_block * cfg.w_unfold() - px,
-                                                   s_chan0);
+                                                   s_chan0,
+                                                   sched.tile_origin(0),
+                                                   sched.s_tile_rows());
                 const DeltaRowLoader<cfg, DT> delta_loader(volatile_pars(delta_pars),
                                                            delta,
                                                            slot.item,
                                                            valid,
                                                            item.image,
                                                            item.col_block * cfg.w_unfold(),
-                                                           tile.k_origin);
+                                                           tile.k_origin,
+                                                           sched.tile_origin(0),
+                                                           sched.delta_tile_rows());
 
                 run_prologue<cfg, DT>(slot.load_wave,
                                       slot.item,
@@ -488,7 +541,7 @@ __global__ __launch_bounds__(cfg.threads(),
 // epilogue reduces into with atomicAdd, so the launch zeroes it first.
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
-                 const Conv2dParams& par,
+                 const ConvParams& par,
                  const void* in,
                  const void* wei,
                  void* out,
@@ -498,7 +551,7 @@ void launch_impl(const LaunchParams& lp,
     auto typed_launch = [&]<DataType DT>() {
         using dtype = ToType<DT>;
 
-        HIP_CHECK(hipMemsetAsync(out, 0, Conv2dSize(par).weight_grad_bytes(), stream));
+        HIP_CHECK(hipMemsetAsync(out, 0, ConvSize(par).weight_grad_bytes(), stream));
 
         conv2d_direct_wgrad_cdna4<cfg, DT>
             <<<lp.grid, lp.block_size, lp.dynamic_shared_bytes, stream>>>(
@@ -547,7 +600,7 @@ public:
 
     // Does not chain to DirectConvKernel::is_applicable.
     // That base serves the fprop/dgrad families and rejects Wgrad outright.
-    bool is_applicable(const Conv2dParams& par) const override
+    bool is_applicable(const ConvParams& par) const override
     {
         // S and Delta are fp16 or bf16 and share a type; dW is fp32.
         if(par.input_type != DataType::fp16 && par.input_type != DataType::bf16)
@@ -568,26 +621,29 @@ public:
             return false;
         if(par.dilation_h != 1 || par.dilation_w != 1)
             return false;
-        return window_fits_a_buffer(par);
+        // Whether the layer can be addressed is per-entry, like the filter shape: a baseline
+        // entry spans the image from one base and a tiled one spans a tile. See
+        // addressing_fits.
+        return true;
     }
 
-    bool is_valid_config(const Conv2dParams& par) const override
+    bool is_valid_config(const ConvParams& par) const override
     {
         return direct_wgrad::is_valid_config(par, cfg_);
     }
 
-    float get_weighted_throughput_index(const Conv2dParams& par) const override
+    float get_weighted_throughput_index(const ConvParams& par) const override
     {
         return throughput_index(par, cfg_);
     }
 
-    LaunchParams get_launch_params(const Conv2dParams&) const override
+    LaunchParams get_launch_params(const ConvParams&) const override
     {
         return direct_wgrad::get_launch_params(cfg_);
     }
 
     // Supplies the blocked accumulation depth; the default would use all N*P*Q products.
-    void get_tolerance(const Conv2dParams& par, float& atol, float& rtol) const override
+    void get_tolerance(const ConvParams& par, float& atol, float& rtol) const override
     {
         get_mixed_precision_tolerance(par, accumulation_depth(par, cfg_), atol, rtol);
     }

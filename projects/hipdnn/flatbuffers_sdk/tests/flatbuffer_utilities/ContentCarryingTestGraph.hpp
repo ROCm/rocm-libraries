@@ -41,6 +41,8 @@ public:
         /// A required (non-optional) `value: TensorValue` union, so tests can prove the
         /// scalar Float memcmp site folds every byte, not just presence/absence.
         std::optional<float> value = std::nullopt;
+        int64_t alignment = 16;
+        int64_t raggedOffsetMultiplier = 1;
     };
     struct NodeSpec
     {
@@ -167,6 +169,8 @@ private:
             tensorBuilder.add_data_type(tensor.dataType);
             tensorBuilder.add_dims(dims);
             tensorBuilder.add_strides(strides);
+            tensorBuilder.add_alignment(tensor.alignment);
+            tensorBuilder.add_ragged_offset_multiplier(tensor.raggedOffsetMultiplier);
             if(tensor.raggedOffsetTensorUid.has_value())
             {
                 tensorBuilder.add_ragged_offset_tensor_uid(*tensor.raggedOffsetTensorUid);
