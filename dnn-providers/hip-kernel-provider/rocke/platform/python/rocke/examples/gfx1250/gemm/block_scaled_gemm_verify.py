@@ -5,7 +5,7 @@
 The default invocation keeps the K=64 FP8/BF8 WMMA + FP32-scale verifier.
 Native ``--matrix-path wmma_scale`` / ``wmma_scale16`` use homogeneous FP8 or FP6 and
 E8M0 scales with K=32 / K=16 groups. Native fixtures cover K=128 or 256 and use
-bounded dyadic values, permitting exact comparison after BF16 rounding.
+bounded dyadic values, permitting exact comparison after output-type rounding.
 
 Run on visible HIP device 0 (must be gfx1250), for example::
 
@@ -86,6 +86,16 @@ def decode_fp6(packed: np.ndarray, dtype: str = "fp6") -> np.ndarray:
     return np.copysign(magnitude, np.where(codes & 32, -1.0, 1.0))
 
 
+def _output_dtype(dtype: str):
+    import ml_dtypes
+
+    if dtype == "bf16":
+        return ml_dtypes.bfloat16
+    if dtype in ("fp16", "f16"):
+        return np.float16
+    raise ValueError(f"verifier output must be bf16/fp16 (got {dtype!r})")
+
+
 def reference_result(
     a: np.ndarray,
     b: np.ndarray,
@@ -96,16 +106,17 @@ def reference_result(
     native: bool,
     dtype_a: str | None = None,
     dtype_b: str | None = None,
+    dtype_c: str = "bf16",
 ) -> np.ndarray:
-    """Expand scales onto logical A/B elements, multiply, then round to BF16.
+    """Expand scales onto logical A/B elements, multiply, then round the output.
 
     The native fixtures use quarter-integer inputs of magnitude <=1 and
     scales 2**[-2,3]. At K<=256, even the sum of absolute products fits in
     2**22 units of 2**-8, so every FP32 partial sum is exact. Float64 host
-    arithmetic and a single BF16 rounding provide an independent oracle.
+    arithmetic and a single output-type rounding provide an independent oracle.
     FP6 all-code fixtures isolate one K element, avoiding accumulation error.
     """
-    import ml_dtypes
+    output_dtype = _output_dtype(dtype_c)
 
     sa = decode_e8m0(a_scale) if native else a_scale.astype(np.float64)
     sb = decode_e8m0(b_scale) if native else b_scale.astype(np.float64)
@@ -121,7 +132,7 @@ def reference_result(
     scaled_b = b_values * np.repeat(sb.T, block_k, axis=1)
     ref = scaled_a @ scaled_b.T
     if native:
-        ref = ref.astype(ml_dtypes.bfloat16)
+        ref = ref.astype(output_dtype)
     return ref.astype(np.float32)
 
 
@@ -235,10 +246,10 @@ def _u8_buffer(array: np.ndarray):
 
 
 def _launch(rt, fn, spec, inputs):
-    import ml_dtypes
+    output_dtype = _output_dtype(spec.dtype_c)
 
     # A NaN sentinel makes missing output stores fail, including expected zeros.
-    out = np.full((spec.M, spec.N), np.nan, dtype=ml_dtypes.bfloat16)
+    out = np.full((spec.M, spec.N), np.nan, dtype=output_dtype)
     allocations = []
     try:
         for array in (*inputs, out):
@@ -251,7 +262,7 @@ def _launch(rt, fn, spec, inputs):
         host_out = (ctypes.c_uint8 * int(out.nbytes))()
         rt.memcpy_d2h(host_out, allocations[-1], out.nbytes)
         return (
-            np.frombuffer(bytes(host_out), dtype=ml_dtypes.bfloat16)
+            np.frombuffer(bytes(host_out), dtype=output_dtype)
             .reshape(spec.M, spec.N)
             .astype(np.float32)
         )
@@ -271,8 +282,6 @@ def run_cases(
     ok, reason = is_valid_spec(spec, arch="gfx1250")
     if not ok:
         raise ValueError(reason)
-    if spec.dtype_c != "bf16":
-        raise ValueError("this verifier requires BF16 output")
     native = spec.resolved_matrix_path() != "wmma"
     if native and spec.K not in (128, 256):
         raise ValueError("exact native fixtures require K=128 or K=256")
@@ -305,6 +314,7 @@ def run_cases(
                 native=native,
                 dtype_a=spec.dtype_a,
                 dtype_b=spec.dtype_b,
+                dtype_c=spec.dtype_c,
             )
             label = (
                 f"{spec.resolved_matrix_path()}/{spec.dtype_a}/{compile_route}/{case} "

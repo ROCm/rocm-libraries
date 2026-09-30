@@ -30,6 +30,33 @@ def test_numeric(numeric_case, dtype, matrix_path, route, m, n, k, case, count):
 @pytest.mark.parametrize("dtype", ["fp6", "bf6"])
 @pytest.mark.parametrize("matrix_path", ["wmma_scale", "wmma_scale16"])
 @pytest.mark.parametrize("route", ["comgr", "hip"])
+def test_fp16_output_numeric(gpu_env, dtype, matrix_path, route):
+    script = """
+from rocke.instances.gfx1250.block_scaled_gemm import BlockScaledGemmSpec
+from rocke.examples.gfx1250.gemm.block_scaled_gemm_verify import run_cases
+import sys
+dtype, path, route = sys.argv[1:]
+spec = BlockScaledGemmSpec(name='fp6_fp16_output', M=32, N=48, K=256,
+    dtype_a=dtype, dtype_b=dtype, dtype_c='fp16', matrix_path=path,
+    scale_dtype='e8m0', block_k=16 if path == 'wmma_scale16' else 32)
+assert run_cases(spec, ('mixed',), compile_route=route) == 1
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, dtype, matrix_path, route],
+        env=gpu_env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert output.count("bad=0") == 1, output
+    print(output, end="")
+
+
+@pytest.mark.parametrize("dtype", ["fp6", "bf6"])
+@pytest.mark.parametrize("matrix_path", ["wmma_scale", "wmma_scale16"])
+@pytest.mark.parametrize("route", ["comgr", "hip"])
 def test_all_fp6_codes_numeric(gpu_env, dtype, matrix_path, route):
     # All 64 x 64 code products at both sides of the lane-half/K-group boundaries.
     script = """

@@ -65,6 +65,13 @@ isolated K groups, K=256, with E8M0 scales. These are
 bounded correctness fixtures; they do not establish arbitrary-input rounding,
 E8M0 NaN behavior, or performance.
 
+The numerical suite covers BF16 output throughout and FP16 output for mixed-scale
+`M=32, N=48, K=256` cases across both six-bit formats, SCALE/SCALE16, and
+COMGR/HIP compilation. The shared `run_cases` verifier selects reference rounding
+and output-buffer decoding from `BlockScaledGemmSpec.dtype_c`; BF16 remains the
+default. The FP16 cases exercise the existing builder output mode without a
+separate launch script.
+
 ```sh
 ROCKE_LLVM_FLAVOR=llvm23 ROCKE_BACKEND=both ROCKE_CPP_STRICT=1 \
 ROCKE_REQUIRE_GFX1250=1 python -m pytest -q -s \

@@ -40,6 +40,30 @@ def test_reference_matches_hand_computed_group_scales():
             check_result(wrong, expected, exact=True)
 
 
+@pytest.mark.parametrize(
+    "dtype_c,expected",
+    [("bf16", 1.0), ("fp16", 1.0 + 2**-10), ("f16", 1.0 + 2**-10)],
+)
+def test_reference_rounds_to_selected_output_type(dtype_c, expected):
+    a = np.array([[1.0, 2**-10]], dtype=np.float32)
+    b = np.ones((1, 2), dtype=np.float32)
+    scale = np.array([[127]], dtype=np.uint8)
+    got = reference_result(a, b, scale, scale, 2, native=True, dtype_c=dtype_c)
+    np.testing.assert_array_equal(got, [[expected]])
+    wrong_output_type = np.array(
+        [[1.0 + 2**-10 if dtype_c == "bf16" else 1.0]], dtype=np.float32
+    )
+    with pytest.raises(AssertionError, match="bad=1/1"):
+        check_result(wrong_output_type, got, exact=True)
+
+
+def test_reference_rejects_unsupported_output_type():
+    value = np.ones((1, 1), dtype=np.float32)
+    scale = np.array([[127]], dtype=np.uint8)
+    with pytest.raises(ValueError, match="output"):
+        reference_result(value, value, scale, scale, 1, native=True, dtype_c="fp32")
+
+
 @pytest.mark.parametrize("path,bk", [("wmma_scale", 32), ("wmma_scale16", 16)])
 @pytest.mark.parametrize("k", [128, 256])
 def test_fixtures_exercise_each_scale_group_and_high_bytes(path, bk, k):
