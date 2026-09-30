@@ -81,9 +81,11 @@ rocsparse_status rocsparse::spsort_check_arguments(rocsparse_spsort_descr      d
                        descr,
                        rocsparse::enum_utils::is_invalid(descr->get_alg()),
                        rocsparse_status_invalid_value);
+    // Only the COO format uses the direction.
     ROCSPARSE_CHECKARG(1,
                        descr,
-                       rocsparse::enum_utils::is_invalid(descr->get_direction()),
+                       (source->format == rocsparse_format_coo
+                        && rocsparse::enum_utils::is_invalid(descr->get_direction())),
                        rocsparse_status_invalid_value);
 
     return rocsparse_status_success;
