@@ -36,6 +36,7 @@ _LOWBIT_FORMATS = {
     "bf8e5m2": "bf8",
     "fp6e2m3": "fp6",
     "fp6e3m2": "bf6",
+    "fp4e2m1": "fp4",
 }
 _LOWBIT_DTYPES = frozenset(_LOWBIT_FORMATS)
 _OUTPUT_DTYPES = {"fp16", "f16", "bf16"}
@@ -173,7 +174,7 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
         or normalize_dtype(spec.dtype_b) not in _LOWBIT_DTYPES
     ):
         return False, (
-            f"A/B must be fp8, bf8, fp6, or bf6 (got A={spec.dtype_a!r}, B={spec.dtype_b!r})"
+            f"A/B must be fp8, bf8, fp6, bf6, or fp4 (got A={spec.dtype_a!r}, B={spec.dtype_b!r})"
         )
     matrix_path = spec.resolved_matrix_path()
     native_scale = matrix_path in ("wmma_scale", "wmma_scale16")
@@ -307,6 +308,9 @@ def build_block_scaled_gemm(
     accumulator layout. FP6 uses prepacked E2M3 or E3M2 bytes: A is
     [M, 3*K/4], B is [N, 3*K/4], four codes per three little-endian bytes.
     Each lane pads twelve packed i32 words to the sixteen-word builtin ABI.
+    FP4 uses prepacked E2M1 bytes: A is [M, K/2], B is [N, K/2],
+    low nibble first along K. Each lane pads eight packed i32 words
+    to the sixteen-word builtin ABI.
     Scale arrays remain A_scale[M, K/block_k] and B_scale[K/block_k, N].
     """
     ok, reason = is_valid_spec(spec, arch=arch)
@@ -318,7 +322,9 @@ def build_block_scaled_gemm(
     c_ty = storage_ir_type(spec.dtype_c)
     matrix_path = spec.resolved_matrix_path()
     native_scale = matrix_path in ("wmma_scale", "wmma_scale16")
-    scale_ty = I8 if native_scale else _scale_type(spec.scale_dtype)
+    scale_ty = (
+        storage_ir_type("e8m0") if native_scale else _scale_type(spec.scale_dtype)
+    )
     atom = (
         _native_scaled_atom(spec, ArchTarget.from_gfx(arch)) if native_scale else None
     )

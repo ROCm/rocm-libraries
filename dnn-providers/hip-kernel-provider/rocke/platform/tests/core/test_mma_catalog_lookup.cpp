@@ -307,7 +307,7 @@ static int test_scale_contracts()
             ++scaled_rows;
         }
     }
-    CHECK(packed_rows == 4 && scaled_rows == 8);
+    CHECK(packed_rows == 4 && scaled_rows == 10);
     return 0;
 }
 
@@ -376,7 +376,7 @@ static int test_scale_layouts_and_families()
             }
         }
     }
-    CHECK(scaled == 8);
+    CHECK(scaled == 10);
     return 0;
 }
 
