@@ -135,6 +135,11 @@ inline size_t orgqr_panel_work_size(const I m, const I jb)
     return size_t(2) * jb * jb + size_t(m) * jb;
 }
 
+// (the blocked algorithm starts with a block of xxGQx_BLOCKSIZE columns that must end within the
+// k reflectors: j + jb <= k with j = ((k - xxGQx_xxGQx2_SWITCHSIZE - 1) / jb) * jb)
+static_assert(xxGQx_BLOCKSIZE <= xxGQx_xxGQx2_SWITCHSIZE,
+              "xxGQx_BLOCKSIZE must not exceed xxGQx_xxGQx2_SWITCHSIZE");
+
 template <bool BATCHED, typename T>
 void rocsolver_orgqr_ungqr_getMemorySize(const rocblas_int m,
                                          const rocblas_int n,
