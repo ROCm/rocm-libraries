@@ -1465,10 +1465,11 @@ def mainLoop(writer, kernel):
   # Multi-DU PGR=1 buffer_load path: address uid>0 via offset12/m0 offsets
   # (see SchedulerConfig.grUidOffset). Not for TDM or PAP (PAP copies preloop GRs),
   # nor TLU=1 (its K step is strided, carried in soffset rather than offset12).
-  grUidOffset = (pgr == 1
-                 and not kernel.get("enableTDMA", False) and not kernel.get("enableTDMB", False)
-                 and not any(isinstance(getattr(ti.gr.config, "tag", None), GRTag_TLU1)
-                             for ti in (tiA, tiB) if ti.gr is not None)
+  # The tail needs the same offset12 addressing for any pgr (SchedulerConfig.tailUidOffset).
+  tailUidOffset = (not kernel.get("enableTDMA", False) and not kernel.get("enableTDMB", False)
+                   and not any(isinstance(getattr(ti.gr.config, "tag", None), GRTag_TLU1)
+                               for ti in (tiA, tiB) if ti.gr is not None))
+  grUidOffset = (pgr == 1 and tailUidOffset
                  and not kernel.get("PrefetchAcrossPersistent", False)
                  and not os.environ.get("SUBTILE_NO_UID_OFFSET"))
 
@@ -1499,6 +1500,7 @@ def mainLoop(writer, kernel):
           grPlacement=grPlacement,
           pgl=kernel.get("PrefetchGL2", 0),
           grUidOffset=grUidOffset,
+          tailUidOffset=tailUidOffset,
       )
 
       scheduler = LogicalScheduler(cfg)

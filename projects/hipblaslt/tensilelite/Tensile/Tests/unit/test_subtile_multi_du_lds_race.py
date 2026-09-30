@@ -83,7 +83,7 @@ class _Kernel:
         """(tensor, lds const) -> end; a GR covers up to the next per-load step."""
         consts, m0 = defaultdict(set), None
         for l in self.ins:
-            m = re.match(r"s_(?:add_u32|mov_b32) m0, s\[sgprLocalWriteBaseAddr(\w+)\](?:, (\d+))?$", l)
+            m = re.match(r"s_(?:add_u32|mov_b32) m0, s\[sgprLocalWriteBaseAddr(\w+)\](?:, (-?\d+))?$", l)
             if m:
                 m0 = (m[1], int(m[2] or 0))
             elif l.startswith("buffer_load") and l.endswith(" lds") and m0:
@@ -167,7 +167,7 @@ def _replay(k, loopCount):
                 q = vmq if kind == "vmcnt" else lgq
                 while len(q) > int(n):
                     q.popleft()["ret"] = t
-        elif m := re.match(r"s_(?:add_u32|mov_b32) m0, s\[sgprLocalWriteBaseAddr(\w+)\](?:, (\d+))?$", l):
+        elif m := re.match(r"s_(?:add_u32|mov_b32) m0, s\[sgprLocalWriteBaseAddr(\w+)\](?:, (-?\d+))?$", l):
             m0 = (m[1], int(m[2] or 0))
         elif l.startswith(("s_mov_b32 m0", "s_add_u32 m0")):
             m0 = None

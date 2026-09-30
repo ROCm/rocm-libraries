@@ -267,7 +267,8 @@ class InstructionEmitter:
                 # buffer alternates per uid (what the per-uid swap used to do).
                 assert not self.kernel.get("enableTDM%s" % tensor, False)
                 extraG = uid * int(ti.depthUBytes)
-                extraL = (uid % 2) * int(self.writer.ldsTotalSize)
+                if not placement.uidLdsSwap:
+                    extraL = (uid % 2) * int(self.writer.ldsTotalSize)
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):
                     subtileK = (k - uid_k_base) // subtileShapeK
@@ -347,6 +348,8 @@ class InstructionEmitter:
         if tensor in ('SA', 'SB'):
             assert numSteps == 1
             module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel))
+        elif numSteps == 0:
+            pass  # LDS write-buffer swap only
         elif numSteps == 1:
             module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
         else:

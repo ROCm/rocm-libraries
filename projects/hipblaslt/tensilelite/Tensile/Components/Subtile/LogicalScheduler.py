@@ -237,6 +237,10 @@ class SchedulerConfig:
     # constant offsets from the uid0 SRD and write base, so a single GRInc per
     # MT (SRD += numUnroll*DU, no LDS swap) replaces the per-uid inc+swap chain.
     grUidOffset: bool = False
+    # Multi-DU tail: uid>0 A/B GRs load their K-slice via offset12 (+uid*DU
+    # bytes) into the other LDS buffer (explicit write-base swap). Requires a
+    # contiguous-K buffer_load (no TDM, no TLU=1); independent of pgr.
+    tailUidOffset: bool = False
 
     # Resolve a partition spec into per-partition sizes along one dimension.
     # spec is either:
@@ -446,6 +450,7 @@ class GRPlacement(Emittable):
     partition: int = 0         # which partition this GR belongs to
     unrollId: int = 0          # which inner-DU iteration (0 for single-DU configs)
     uidOffset: bool = False    # address uid via constant offsets (see SchedulerConfig.grUidOffset)
+    uidLdsSwap: bool = False   # with uidOffset: LDS buffer already selected by a write-base swap (tail)
     deps: List['Dep'] = field(default_factory=list)      # populated by annotate_deps()
     preOps: List['BaseOp'] = field(default_factory=list)     # populated by remove_cross_deps()
     postOps: List['BaseOp'] = field(default_factory=list)    # populated by insert_gr_lr_inc()
@@ -2327,6 +2332,11 @@ class LogicalScheduler:
                 and tensor in ('A', 'B')
                 and self.config.numUnroll.get(tensor, 1) == 2)
 
+    def _tail_uid_offset_tensor(self, tensor: str) -> bool:
+        """Multi-DU A/B tensor whose tail uid1 K-slice needs its own GR + LDS buffer."""
+        return (self.config.tailUidOffset and tensor in ('A', 'B')
+                and self.config.numUnroll.get(tensor, 1) == 2)
+
     def _per_uid_k(self, tensor: str) -> int:
         """Number of subIterK slots per unrollId for a tensor."""
         return self.config.numSubIterK // self.config.numUnroll.get(tensor, 1)
@@ -3061,7 +3071,18 @@ class LogicalScheduler:
             'A': MFMATileRange(0, numK, 0, cfg.numMFMATilesM),
             'B': MFMATileRange(0, numK, 0, cfg.numMFMATilesN),
         }
-        preamble.extend(self._make_gr_all_tensors(0, all_tiles))
+        # Multi-DU: the tail has no GRInc between uids, so uid1 must carry its
+        # own K offset (+DU bytes) and land in the other LDS buffer; otherwise it
+        # re-loads uid0's K-slice over uid0. The write-base swap is an XOR, so
+        # swapping around the uid1 GRs is correct from either buffer and leaves
+        # the write base unchanged.
+        for gr in self._make_gr_all_tensors(0, all_tiles):
+            if gr.unrollId > 0 and self._tail_uid_offset_tensor(gr.tensor):
+                gr.uidOffset = gr.uidLdsSwap = True
+                swap = GRIncOp(tensor=gr.tensor, unrollId=gr.unrollId, numSteps=0)
+                preamble.extend([swap, gr, copy.copy(swap)])
+            else:
+                preamble.append(gr)
         # bf16-only: an OOB dwordx4 load can corrupt the trailing 16-bit
         # element at the K-boundary (buffer instructions enforce dword
         # granularity on OOB). We patch it with a 16-bit DTL load. Wider
@@ -3109,8 +3130,19 @@ class LogicalScheduler:
                 for ui, m in enumerate(src):
                     dst[ui].update(m)
 
+        # Multi-DU: point the LRs at the uid's LDS buffer (see the GRs above).
+        # The previous k already drained its LRs (WaitLROp), so swapping here is
+        # safe. Not undone: LR addresses are re-derived before any later loop.
+        swap_lr_tensors = [t for t in ('A', 'B') if self._tail_uid_offset_tensor(t)]
+        lr_uid = {t: 0 for t in swap_lr_tensors}
+
         for k in range(numK):
             ops = []
+            for tensor in swap_lr_tensors:
+                uid = k // self._per_uid_k(tensor)
+                if uid != lr_uid[tensor]:
+                    ops.append(LRIncOp(tensor=tensor, isUnrollSwap=True, unrollId=uid))
+                    lr_uid[tensor] = uid
             # Dedup LRs across partitions by tileId range — with flat tile
             # ids, same range ⇒ same vgprs, so one LR populates all readers.
             seen_lr = set()
