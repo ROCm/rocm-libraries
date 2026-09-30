@@ -9853,7 +9853,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if kernel["ProblemType"]["FusedGemmA2A"]:
       self.defineSgpr("FusedTotalWGs", 1)
       # Counter-block base, loaded once in the prologue. Every region is reached
-      # from it by immediate offset (FusedA2ACounterSentinel.hpp).
+      # from it by immediate offset (client/src/FusedA2ARunner.cpp).
       # Aligned to 2 because S_ATOMIC_INC takes SBASE as an SGPR pair with the low
       # address bit omitted from the encoding.
       self.defineSgpr("FusedCounterPtr", 2, 2)

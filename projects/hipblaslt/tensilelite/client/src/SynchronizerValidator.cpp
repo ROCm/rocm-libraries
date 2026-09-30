@@ -5,6 +5,7 @@
 
 #include "ResultReporter.hpp"
 
+#include <Tensile/Utils.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
 #include <algorithm>
@@ -46,8 +47,10 @@ namespace TensileLite
             return true;
         }
 
-        SynchronizerValidator::SynchronizerValidator(po::variables_map const& args)
+        SynchronizerValidator::SynchronizerValidator(
+            po::variables_map const& args, std::vector<std::shared_ptr<DeviceContext>> devices)
             : m_enabled(args["check-synchronizer"].as<bool>())
+            , m_devices(std::move(devices))
         {
         }
 
@@ -98,7 +101,8 @@ namespace TensileLite
                                 || a.semantic == CustomArgSemantic::AmaxSync;
                      });
             m_mayUseSynchronizer = partialReduction || customStreamK || mbsk || customArg
-                                   || solution->problemType.outputAmaxD;
+                                   || solution->problemType.outputAmaxD
+                                   || solution->problemType.fusedGemmA2A;
         }
 
         void SynchronizerValidator::postSolution()
@@ -114,13 +118,26 @@ namespace TensileLite
             m_failedInSolution = false;
         }
 
-        void SynchronizerValidator::validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                                    TimingEvents const&            startEvents,
-                                                    TimingEvents const&            stopEvents)
+        void SynchronizerValidator::validateWarmups(std::vector<size_t> const& slots,
+                                                    TimingEvents const&        startEvents,
+                                                    TimingEvents const&        stopEvents)
         {
             try
             {
-                checkInputs(inputs, "warmup");
+                for(auto const& device : m_devices)
+                {
+                    for(size_t slot : slots)
+                        checkInputs(device->deviceId, device->inputArr[slot], "warmup");
+                    if(active() && device->commFlags != nullptr
+                       && !checkRegion(device->deviceId,
+                                       device->commFlags,
+                                       device->commFlagsBytes,
+                                       concatenate("fused-A2A flag block left dirty after warmup "
+                                                   "(device ",
+                                                   device->deviceId,
+                                                   ")")))
+                        m_failedInSolution = true;
+                }
             }
             catch(...)
             {
@@ -131,7 +148,8 @@ namespace TensileLite
             }
         }
 
-        void SynchronizerValidator::checkInputs(std::shared_ptr<ProblemInputs> inputs,
+        void SynchronizerValidator::checkInputs(int                            deviceId,
+                                                std::shared_ptr<ProblemInputs> inputs,
                                                 char const*                    stage)
         {
             if(!active() || m_problem == nullptr || inputs == nullptr)
@@ -142,14 +160,15 @@ namespace TensileLite
                 auto const& result = dynamic_cast<ContractionGroupedInputs const&>(*inputs);
                 for(size_t j = 0; j < problems->gemms.size(); j++)
                 {
-                    if(!checkBuffer(problems->gemms[j], result.grouped[j].Synchronizer, stage, j))
+                    if(!checkBuffer(
+                           deviceId, problems->gemms[j], result.grouped[j].Synchronizer, stage, j))
                         m_failedInSolution = true;
                 }
             }
             else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
             {
                 auto const& result = dynamic_cast<ContractionInputs const&>(*inputs);
-                if(!checkBuffer(*problem, result.Synchronizer, stage, 0))
+                if(!checkBuffer(deviceId, *problem, result.Synchronizer, stage, 0))
                     m_failedInSolution = true;
             }
             else
@@ -180,19 +199,22 @@ namespace TensileLite
             return m_staging;
         }
 
-        uint8_t* SynchronizerValidator::readBuffer(void* device, size_t bytes)
+        uint8_t* SynchronizerValidator::readBuffer(int deviceId, void* device, size_t bytes)
         {
-            auto host = stagingBuffer(bytes);
+            ScopedDevice guard(deviceId);
+            auto         host = stagingBuffer(bytes);
             HIP_CHECK_EXC(hipMemcpy(host, device, bytes, hipMemcpyDeviceToHost));
             return host;
         }
 
-        void SynchronizerValidator::clearBuffer(void* device, size_t bytes)
+        void SynchronizerValidator::clearBuffer(int deviceId, void* device, size_t bytes)
         {
+            ScopedDevice guard(deviceId);
             HIP_CHECK_EXC(hipMemset(device, 0, bytes));
         }
 
-        bool SynchronizerValidator::checkBuffer(ContractionProblemGemm const& problem,
+        bool SynchronizerValidator::checkBuffer(int                           deviceId,
+                                                ContractionProblemGemm const& problem,
                                                 void*                         deviceSynchronizer,
                                                 char const*                   stage,
                                                 size_t                        gemmIdx)
@@ -225,25 +247,36 @@ namespace TensileLite
                 return true;
             }
 
+            return checkRegion(
+                deviceId,
+                deviceSynchronizer,
+                bytes,
+                concatenate("Synchronizer left dirty after ", stage, " (gemm ", gemmIdx, ")"));
+        }
+
+        bool SynchronizerValidator::checkRegion(int                deviceId,
+                                                void*              device,
+                                                size_t             bytes,
+                                                std::string const& what)
+        {
             // Once per solution, so the copy is hot: pinned staging avoids the
             // pageable bounce buffer.
-            uint8_t* host = readBuffer(deviceSynchronizer, bytes);
+            uint8_t* host = readBuffer(deviceId, device, bytes);
 
             SynchronizerResidue residue;
             if(!scanSynchronizerResidue(host, bytes, residue))
                 return true;
 
             std::ostringstream msg;
-            msg << "Synchronizer left dirty after " << stage << " (gemm " << gemmIdx
-                << "): " << residue.nonzeroInts << "/" << residue.totalInts
+            msg << what << ": " << residue.nonzeroInts << "/" << residue.totalInts
                 << " ints nonzero, first at int offset " << residue.firstInt
-                << " -- the kernel did not reset the shared Synchronizer buffer on exit.\n";
+                << " -- the kernel did not reset it on exit.\n";
             m_reporter->log(LogLevel::Error, msg.str());
 
             // resetOutput skips the Synchronizer (it is not an output tensor),
             // so clear the residue here to report it once rather than for every
             // solution that follows.
-            clearBuffer(deviceSynchronizer, bytes);
+            clearBuffer(deviceId, device, bytes);
 
             return false;
         }

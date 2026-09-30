@@ -1132,7 +1132,7 @@ def FusedA2AWgRemap(writer, kernel):
     hardware dispatching in t order -- only the benefit does.
 
     Precondition: A <= N0, enforced host-side by the AM <= M check in
-    client/src/FusedA2AClient.cpp (with AM % MT0 == 0 and M % MT0 == 0 making
+    client/src/FusedA2ARunner.cpp (with AM % MT0 == 0 and M % MT0 == 0 making
     both quotients exact), so neither this nor the emitted assembly re-checks it.
 
     Placed in graWorkGroup after DefaultWGM, ahead of every consumer of

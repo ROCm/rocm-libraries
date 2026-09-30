@@ -2683,7 +2683,7 @@ class GlobalWriteBatchWriter:
     leaves ALREADY IN PACKET ELEMENTS while outRectYS stays in ROWS, the
     hardware not scaling y.  outNShardPkS is both dst_pitch and rect_x, the
     same nShard.  Divisibility by the packet element is a launch-time
-    precondition (FusedA2AClient.cpp); a non-multiple truncates here.
+    precondition (FusedA2ARunner.cpp); a non-multiple truncates here.
 
     The two shifts use different amounts: elements->bytes uses D_ELEMENT_LOG2,
     elements->packet-elements uses packetElementLog2 minus it.  Conflating them
@@ -2796,7 +2796,7 @@ class GlobalWriteBatchWriter:
     _fusedA2AComputeCopyFields and emitted as literal 0, leaving N unconstrained.
     What still has to fit -- rect_x, rect_y, src_pitch -- is packed unmasked, so
     an over-range value corrupts a neighbouring field. The bounds are enforced
-    at launch time by client/src/FusedA2AClient.cpp::runFusedA2A.
+    at launch time by client/src/FusedA2ARunner.cpp.
 
     Args:
       dstRankSgpr:  1 SGPR, the peer rank p (== this WG's dst_rank).
@@ -3193,7 +3193,7 @@ class GlobalWriteBatchWriter:
     module.add(localSyncModule)
 
     # counter3: one u32 at FUSED_A2A_COUNTER3_OFFSET in the counter block (host
-    # mirror: client/include/FusedA2ACounterSentinel.hpp),
+    # mirror: client/src/FusedA2ARunner.cpp),
     # incremented by EVERY surviving WG -- PUSH WGs fall through the block above,
     # local WGs jump straight here from the PUSH gate.  The WG that takes it to
     # FusedTotalWGs is the globally last one; by then nothing else is queued, so
