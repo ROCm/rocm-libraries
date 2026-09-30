@@ -45,9 +45,16 @@ ROLES=${UHD_ROLES:-l2+l1}
 # Ranking metrics to train, `+`-separated for the same reason (RFC 0019 §4.4): one UHD per
 # metric per role from one run. Unset keeps generate's default (tflops, with the metric-less
 # fallback for an engine publishing no work count) and the `<role>/model/` layout; several
-# metrics write `<role>/model_<metric>/`.
-METRIC_ARGS=()
-[ -n "${UHD_METRICS:-}" ] && METRIC_ARGS=(--metric ${UHD_METRICS//+/ })
+# metrics write `<role>/model_<metric>/`. UHD_L2_METRICS / UHD_L1_METRICS override
+# UHD_METRICS for one role: a catalog enumeration page publishes no graph.flops yet, so an
+# L2 `tflops` label is refused after the whole collection (run 68007459, 35 min) while
+# `time` trains, and L1's immediate measurement carries both.
+L2_METRICS=${UHD_L2_METRICS:-${UHD_METRICS:-}}
+L1_METRICS=${UHD_L1_METRICS:-${UHD_METRICS:-}}
+L2_METRIC_ARGS=()
+[ -n "$L2_METRICS" ] && L2_METRIC_ARGS=(--metric ${L2_METRICS//+/ })
+L1_METRIC_ARGS=()
+[ -n "$L1_METRICS" ] && L1_METRIC_ARGS=(--metric ${L1_METRICS//+/ })
 SHARDS=${UHD_SHARDS:-1}
 SHARD=${UHD_SHARD:-0}
 ARCH=${UHD_ARCH:-gfx942}
@@ -129,7 +136,7 @@ git -C "$SRC" log --oneline -1
 # the run instead of training a model nobody reads. UHD_IDS=tflops=<uuid>+time=<uuid>
 # overrides the table.
 source "$SRC/projects/hipdnn/tools/uhd_gen/reproduce/declared_ids.sh"
-mapfile -t ID_ARGS < <(uhd_id_args "${UHD_IDS:-$(declared_uhd_ids "$ENGINE" "$ARCH")}" "${UHD_METRICS:-tflops}")
+mapfile -t ID_ARGS < <(uhd_id_args "${UHD_IDS:-$(declared_uhd_ids "$ENGINE" "$ARCH")}" "${L1_METRICS:-tflops}")
 echo "declared ids: ${ID_ARGS[*]:-none (a UED engine, or ids reported by the engine description)}"
 
 step "configure: $PROVIDERS"
@@ -327,7 +334,7 @@ if [[ "+$ROLES+" == *"+l2+"* ]]; then
         --engine "$ENGINE" --engine-id "$ENGINE_ID" \
         --bench "$BENCH" --plugin-dir "$PLUGIN_DIR" \
         --feature-evaluator "$FEATURE_EVAL" \
-        --role sort_kernel_catalog "${METRIC_ARGS[@]}" --arch "$ARCH" \
+        --role sort_kernel_catalog "${L2_METRIC_ARGS[@]}" --arch "$ARCH" \
         --name "$ENGINE catalog ranker ($ARCH, $ADMITTED graphs)" \
         --output-dir "$OUT/l2" > "$OUT/l2.stdout" 2> "$OUT/l2.stderr"
     echo "L2 generate rc=$? in $(( $(date +%s) - L2_START ))s"
@@ -345,7 +352,7 @@ if [[ "+$ROLES+" == *"+l1+"* ]]; then
         --engine "$ENGINE" --engine-id "$ENGINE_ID" \
         --bench "$BENCH" --plugin-dir "$PLUGIN_DIR" \
         --feature-evaluator "$FEATURE_EVAL" \
-        --role predict_engine "${METRIC_ARGS[@]}" "${ID_ARGS[@]}" --arch "$L1_ARCH" \
+        --role predict_engine "${L1_METRIC_ARGS[@]}" "${ID_ARGS[@]}" --arch "$L1_ARCH" \
         --name "$ENGINE estimate ($ARCH, $ADMITTED graphs)" \
         --output-dir "$OUT/l1" > "$OUT/l1.stdout" 2> "$OUT/l1.stderr"
     echo "L1 generate rc=$? in $(( $(date +%s) - L1_START ))s"
@@ -357,6 +364,12 @@ mkdir -p "$KEEP"
 for dir in l1 l2; do
     [ -d "$OUT/$dir" ] && cp -r "$OUT/$dir" "$KEEP/" 2>/dev/null
     cp "$OUT/$dir.stdout" "$OUT/$dir.stderr" "$KEEP/" 2>/dev/null
+done
+# A generate that refuses to train preserves its collected corpus beside --output-dir, and
+# that directory dies with the container unless it is kept: the measurements are the
+# expensive part.
+for preserved in "$OUT"/.uhd-generate-*; do
+    [ -d "$preserved" ] && cp -r "$preserved" "$KEEP/preserved-$(basename "$preserved")" 2>/dev/null
 done
 cp "$OUT/engines.log" "$KEEP/" 2>/dev/null
 ls "$OUT/declined" 2>/dev/null | sed -E 's/\.(json|fb)$//' > "$KEEP/declined.txt"
