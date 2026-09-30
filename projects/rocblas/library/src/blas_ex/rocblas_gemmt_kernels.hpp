@@ -188,8 +188,9 @@ rocblas_status rocblas_internal_gemmt_general_template(rocblas_handle    handle,
     hipStream_t stream  = handle->get_stream();
     int         batches = handle->getBatchGridDim((int)batch_count);
 
-    constexpr bool rocblas_is_complex = std::is_same_v<TScal, rocblas_float_complex>
-                                        || std::is_same_v<TScal, rocblas_double_complex>;
+    constexpr bool rocblas_is_complex
+        = std::is_same_v<TScal,
+                         rocblas_float_complex> || std::is_same_v<TScal, rocblas_double_complex>;
 
     const int dim_n = 16;
     const int blk_n = 32;
@@ -998,10 +999,10 @@ rocblas_status rocblas_internal_gemmt_launcher(rocblas_handle    handle,
            && (is_float || is_double || rocblas_is_complex_float)))
     {
         // BATCHED is true for _batched and false for _strided_batched and non-batched
-        constexpr bool BATCHED = std::is_same_v<TConstPtr, const float* const*>
-                                 || std::is_same_v<TConstPtr, const double* const*>
-                                 || std::is_same_v<TConstPtr, const rocblas_float_complex* const*>
-                                 || std::is_same_v<TConstPtr, const rocblas_double_complex* const*>;
+        constexpr bool BATCHED
+            = std::is_same_v<
+                  TConstPtr,
+                  const float* const*> || std::is_same_v<TConstPtr, const double* const*> || std::is_same_v<TConstPtr, const rocblas_float_complex* const*> || std::is_same_v<TConstPtr, const rocblas_double_complex* const*>;
 
         // Copy over alpha and beta
         TScal alpha_h, beta_h;

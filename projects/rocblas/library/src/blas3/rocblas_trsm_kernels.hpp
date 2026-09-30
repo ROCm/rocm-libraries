@@ -3236,12 +3236,11 @@ ROCBLAS_KERNEL_NO_BOUNDS rocblas_trsm_block_backward_substitution(rocblas_operat
                 __syncthreads();
 
                 if(tx < i)
-                    valB
-                        -= (CONJ
-                                ? conj(A_shared_or_global[i * size_t(lda_norm)
-                                                          + tx * size_t(lda_trans)])
-                                : A_shared_or_global[i * size_t(lda_norm) + tx * size_t(lda_trans)])
-                           * sB[ty];
+                    valB -= (CONJ ? conj(
+                                 A_shared_or_global[i * size_t(lda_norm) + tx * size_t(lda_trans)])
+                                  : A_shared_or_global[i * size_t(lda_norm)
+                                                       + tx * size_t(lda_trans)])
+                            * sB[ty];
             }
 
             if(!UNIT && tx == 0)

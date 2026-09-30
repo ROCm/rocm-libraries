@@ -167,8 +167,7 @@ public:
 template <
     typename... Ss,
     std::enable_if_t<sizeof...(Ss) && rocblas_conjunction<std::is_convertible<Ss, size_t>...>{},
-                     int>
-    = 0>
+                     int> = 0>
 inline rocblas_status rocblas_set_optimal_device_memory_size(rocblas_handle handle, Ss... sizes)
 {
     return rocblas_set_optimal_device_memory_size_impl(handle, sizeof...(sizes), size_t(sizes)...);

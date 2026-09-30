@@ -72,7 +72,9 @@
 
 #undef stdout
 #undef stderr
-#pragma GCC poison cout cerr clog stdout stderr gets puts putchar fputs fprintf printf sprintf vfprintf vprintf vsprintf perror strerror strtok gmtime ctime asctime localtime tmpnam putenv clearenv fcloseall ecvt fcvt sleep abort strsignal
+#pragma GCC poison cout cerr clog stdout stderr gets puts putchar fputs fprintf printf sprintf    \
+    vfprintf vprintf vsprintf perror strerror strtok gmtime ctime asctime localtime tmpnam putenv \
+        clearenv fcloseall ecvt fcvt sleep abort strsignal
 #else
 // Suppress warnings about hipMalloc(), hipFree() except in rocblas-test and rocblas-bench
 #undef hipMalloc
@@ -130,10 +132,10 @@ public:
 
     ~rocblas_local_handle();
 
-    rocblas_local_handle(const rocblas_local_handle&)            = delete;
-    rocblas_local_handle(rocblas_local_handle&&)                 = delete;
+    rocblas_local_handle(const rocblas_local_handle&) = delete;
+    rocblas_local_handle(rocblas_local_handle&&)      = delete;
     rocblas_local_handle& operator=(const rocblas_local_handle&) = delete;
-    rocblas_local_handle& operator=(rocblas_local_handle&&)      = delete;
+    rocblas_local_handle& operator=(rocblas_local_handle&&) = delete;
 
     // Allow rocblas_local_handle to be used anywhere rocblas_handle is expected
     operator rocblas_handle&()
