@@ -759,6 +759,9 @@ taken for and a later model can train on all of them:
 python -m uhd_gen generate --collect-only --graphs corpus/sdpa_fwd/graphs \
     --descriptor-tree tree --engine-id 4714091817493728420 --role predict_engine --output-dir col_1
 
+# Or across N GPUs: --shard K/N measures every N-th graph, one collection per shard.
+python -m uhd_gen generate --collect-only --shard 0/4 --graphs corpus/sdpa_fwd/graphs ... --output-dir col_1_s0
+
 # Train on any number of collections.
 python -m uhd_gen generate --collection col_1 col_2 col_3 --descriptor-tree tree ... --output-dir model
 ```

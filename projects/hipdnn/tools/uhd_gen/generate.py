@@ -42,6 +42,10 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
                              "on each shape, the newest winning")
     parser.add_argument("--collect-only", action="store_true",
                         help="Measure --graphs, write the collection to --output-dir, and stop")
+    parser.add_argument("--shard", metavar="K/N",
+                        help="With --collect-only: measure the K-th of N slices of --graphs "
+                             "(0-based, every N-th graph in path order), so N GPUs can collect "
+                             "one corpus in parallel as N collections")
     parser.add_argument("--descriptor-tree", required=True, help="Shipping descriptor tree; authored knobs are preserved")
     parser.add_argument("--engine", help="UED name/UUID or canonical immediate engine name")
     parser.add_argument("--engine-id", type=int, help="Public hipDNN engine ID used by hipdnn_bench (required to measure)")
@@ -111,7 +115,7 @@ def _corpus_name(sources: list, source) -> str:
 def write_collection(stage: Path, *, collected_at: str, role: str, engine: str | None,
                      engine_id: int, sources: list, rows: dict, published: set, commands: list,
                      graph_inputs: list, provenance, knob_encodings: dict, shipping_knobs: list,
-                     collection_knobs: list, kernel_fields: set) -> dict:
+                     collection_knobs: list, kernel_fields: set, shard: str | None = None) -> dict:
     """Write what a measuring run produced so a later `--collection` can train from it.
 
     Everything training reads from a collection is here, and nothing training decides is:
@@ -146,8 +150,23 @@ def write_collection(stage: Path, *, collected_at: str, role: str, engine: str |
         "knob_encodings": knob_encodings, "shipping_knobs": shipping_knobs,
         "collection_knobs": collection_knobs, "graphs": graph_inputs, "commands": commands,
     }
+    if shard:
+        # Which slice of its corpus this is: N shards of one corpus are N collections, and
+        # together -- not alone -- they are the corpus's measurement.
+        manifest["shard"] = shard
     _write_json(stage / COLLECTION_MANIFEST, manifest)
     return manifest
+
+
+def parse_shard(text: str) -> tuple[int, int]:
+    """`K/N` -> (K, N), with 0 <= K < N."""
+    try:
+        index, count = (int(part) for part in str(text).split("/"))
+    except ValueError:
+        raise ValueError(f"--shard takes K/N, not {text!r}") from None
+    if count < 1 or not 0 <= index < count:
+        raise ValueError(f"--shard {text}: need 0 <= K < N")
+    return index, count
 
 
 def _measurement_key(row: dict) -> tuple:
@@ -564,6 +583,14 @@ def _measure(args: argparse.Namespace, tree: Path, stage: Path, sources: list, i
         graphs.update([*path.rglob("*.json"), *path.rglob("*.fb")] if path.is_dir() else [path])
     if not graphs or any(not path.is_file() for path in graphs):
         raise ValueError("--graphs must identify existing graph .json or .fb files")
+    if args.shard:
+        index, count = parse_shard(args.shard)
+        # Every N-th in path order, not a contiguous block: a corpus is written regime by
+        # regime, so a block would hand one GPU all the decode shapes.
+        total = len(graphs)
+        graphs = set(sorted(graphs)[index::count])
+        if not graphs:
+            raise ValueError(f"shard {args.shard} of {total} graph(s) is empty")
     collected_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     provenance, ued, exposed, kernel_fields, ordinals = None, {}, {}, set(), {}
     if not immediate:
@@ -677,6 +704,8 @@ def run_generate(args: argparse.Namespace) -> int:
             raise ValueError("--output-dir must be outside the shipping descriptor tree")
         if not 0 < args.eval_fraction < 1:
             raise ValueError("generate requires a true problem holdout: 0 < --eval-fraction < 1")
+        if args.shard and not args.collect_only:
+            raise ValueError("--shard slices a collection; it needs --collect-only")
         if args.collect_only and args.collection:
             raise ValueError("--collect-only measures --graphs; it cannot also read --collection")
         if args.collection and (args.knob or args.device or args.workspace_limit is not None):
@@ -705,7 +734,8 @@ def run_generate(args: argparse.Namespace) -> int:
                     published=measured["published"], commands=measured["commands"],
                     graph_inputs=measured["graph_inputs"], provenance=measured["provenance"],
                     knob_encodings=measured["knob_encodings"], shipping_knobs=measured["shipping_knobs"],
-                    collection_knobs=measured["collection_knobs"], kernel_fields=measured["kernel_fields"])
+                    collection_knobs=measured["collection_knobs"], kernel_fields=measured["kernel_fields"],
+                    shard=args.shard)
                 stage.rename(output)
                 stage = None
                 print(f"Collected {sum(manifest['row_counts'].values())} measurement(s) of "

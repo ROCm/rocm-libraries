@@ -242,3 +242,37 @@ def test_graphs_without_a_corpus_manifest_carry_no_regime(world):
     collection = _collect(world, "unlabelled")
     rows = json.loads((collection / "corpus.json").read_text(encoding="utf-8"))
     assert not any("regime" in row for row in rows)
+
+
+def test_shards_partition_a_corpus_into_collections_that_train_as_one(world, evaluator):
+    """N GPUs, N collections: every graph measured exactly once, and trained on together."""
+    from uhd_gen.__main__ import main
+
+    shards = []
+    for index in range(3):
+        output = world["root"] / f"shard{index}"
+        assert main(["generate", "--collect-only", "--shard", f"{index}/3", "--graphs",
+                     str(world["graphs"]), "--descriptor-tree", str(world["tree"]),
+                     "--engine-id", "7", "--role", "predict_engine", "--output-dir", str(output)]) == 0
+        shards.append(output)
+    measured = [{r["benchmark"] for r in json.loads((s / "corpus.json").read_text(encoding="utf-8"))}
+                for s in shards]
+    assert sum(len(m) for m in measured) == GRAPHS and set().union(*measured) == {
+        f"graph-{i}" for i in range(GRAPHS)}, "a partition: nothing twice, nothing missed"
+    assert [json.loads((s / "collection_manifest.json").read_text())["shard"] for s in shards] == [
+        "0/3", "1/3", "2/3"]
+    code, output = _train(world, "sharded", evaluator, collections=shards)
+    assert code == 0
+    manifest = json.loads((output / "generation_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["superseded_rows"] == 0
+    assert len(json.loads((output / "corpus.json").read_text(encoding="utf-8"))) == GRAPHS
+
+
+@pytest.mark.parametrize("shard, message", [("3/3", "0 <= K < N"), ("x", "K/N"), ("1/0", "0 <= K < N")])
+def test_a_malformed_shard_is_refused(world, caplog, shard, message):
+    from uhd_gen.__main__ import main
+
+    assert main(["generate", "--collect-only", "--shard", shard, "--graphs", str(world["graphs"]),
+                 "--descriptor-tree", str(world["tree"]), "--engine-id", "7", "--role",
+                 "predict_engine", "--output-dir", str(world["root"] / "bad")]) == 1
+    assert message in caplog.text
