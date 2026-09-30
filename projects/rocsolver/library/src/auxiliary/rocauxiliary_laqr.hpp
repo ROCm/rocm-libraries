@@ -142,7 +142,8 @@ __host__ __device__ S hqr_block_nrm2(const I m, const T* x, S (*s_red)[HQR_RED(B
     stride 1) is overwritten with the tail of the Householder vector. tau is returned
     to all the threads. **/
 template <int BS, typename T, typename I, typename S>
-__host__ __device__ T hqr_block_larfg(const I m, T* alpha, T* x, S (*s_red)[HQR_RED(BS)], int& buf)
+__host__ __device__ __forceinline__ T
+    hqr_block_larfg(const I m, T* alpha, T* x, S (*s_red)[HQR_RED(BS)], int& buf)
 {
     const I tid = hqr_tid();
 
@@ -286,22 +287,22 @@ __host__ __device__ void
     false. Otherwise, it copies the upper Hessenberg part of the window to T (zero
     below), sets V = I, and returns true. **/
 template <int BS, typename T, typename I>
-__device__ bool aed_setup_block(const I n,
-                                const I ktop,
-                                const I kbot,
-                                const I nw,
-                                T* H,
-                                const I ldh,
-                                T* W,
-                                T* Tw,
-                                const I ldt,
-                                T* V,
-                                const I ldv,
-                                I& jw,
-                                I& kwtop,
-                                T& s,
-                                I& ns,
-                                I& nd)
+__device__ __forceinline__ bool aed_setup_block(const I n,
+                                                const I ktop,
+                                                const I kbot,
+                                                const I nw,
+                                                T* H,
+                                                const I ldh,
+                                                T* W,
+                                                T* Tw,
+                                                const I ldt,
+                                                T* V,
+                                                const I ldv,
+                                                I& jw,
+                                                I& kwtop,
+                                                T& s,
+                                                I& ns,
+                                                I& nd)
 {
     using S = decltype(std::real(T{}));
 
@@ -366,7 +367,7 @@ __device__ bool aed_setup_block(const I n,
 /** HSEQR_IPARMQ returns the number of shifts (ISPEC = 15) and the deflation window
     size (ISPEC = 13) recommended by LAPACK IPARMQ for an active block of order nh. **/
 template <typename I>
-__host__ __device__ void hseqr_iparmq(const I nh, I& ns, I& nw)
+__host__ __device__ __forceinline__ void hseqr_iparmq(const I nh, I& ns, I& nw)
 {
     ns = 2;
     if(nh >= 30)
@@ -391,20 +392,20 @@ __host__ __device__ void hseqr_iparmq(const I nh, I& ns, I& nw)
 #define LAQR4_NMIN 64
 
 template <int BS, typename T, typename I>
-__device__ I laqr4_block(const I n,
-                         T* H,
-                         const I ldh,
-                         T* W,
-                         T* Z,
-                         const I ldz,
-                         I* st,
-                         T* stT,
-                         T (*sV)[3],
-                         I (*s_ired)[HQR_RED(BS)],
-                         decltype(std::real(T{})) (*s_sred)[HQR_RED(BS)],
-                         int& ibuf,
-                         int& sbuf,
-                         T* lds_ws);
+__device__ __forceinline__ I laqr4_block(const I n,
+                                         T* H,
+                                         const I ldh,
+                                         T* W,
+                                         T* Z,
+                                         const I ldz,
+                                         I* st,
+                                         T* stT,
+                                         T (*sV)[3],
+                                         I (*s_ired)[HQR_RED(BS)],
+                                         decltype(std::real(T{})) (*s_sred)[HQR_RED(BS)],
+                                         int& ibuf,
+                                         int& sbuf,
+                                         T* lds_ws);
 
 /** HQR_HOST_OPS holds host versions of the routines that aed_core_block uses (BS = 1),
     which may be compiled for other instruction sets than the rest of the library (see
@@ -443,28 +444,29 @@ struct hqr_host_ops
     function without MULTISHIFT. (It is a template parameter so that the kernels of small
     windows do not contain laqr4_block.) **/
 template <int BS, typename T, typename I, bool MULTISHIFT = false>
-__host__ __device__ void aed_core_block(const I n,
-                                        const I jw,
-                                        T s,
-                                        T* Tw,
-                                        const I ldt,
-                                        T* V,
-                                        const I ldv,
-                                        T* work,
-                                        T* Wsh,
-                                        I& ns_out,
-                                        I& nd_out,
-                                        bool& update,
-                                        T& spike,
-                                        I (*s_ired)[HQR_RED(BS)],
-                                        decltype(std::real(T{})) (*s_sred)[HQR_RED(BS)],
-                                        int& ibuf,
-                                        int& sbuf,
-                                        T* lds_ws = nullptr,
-                                        I* st4 = nullptr,
-                                        T* stT4 = nullptr,
-                                        T (*sV4)[3] = nullptr,
-                                        const hqr_host_ops<T, I>* host_ops = nullptr)
+__host__ __device__ __forceinline__ void
+    aed_core_block(const I n,
+                   const I jw,
+                   T s,
+                   T* Tw,
+                   const I ldt,
+                   T* V,
+                   const I ldv,
+                   T* work,
+                   T* Wsh,
+                   I& ns_out,
+                   I& nd_out,
+                   bool& update,
+                   T& spike,
+                   I (*s_ired)[HQR_RED(BS)],
+                   decltype(std::real(T{})) (*s_sred)[HQR_RED(BS)],
+                   int& ibuf,
+                   int& sbuf,
+                   T* lds_ws = nullptr,
+                   I* st4 = nullptr,
+                   T* stT4 = nullptr,
+                   T (*sV4)[3] = nullptr,
+                   const hqr_host_ops<T, I>* host_ops = nullptr)
 {
     using S = decltype(std::real(T{}));
 
@@ -642,14 +644,14 @@ __host__ __device__ void aed_core_block(const I n,
 /** AED_FINISH_BLOCK copies the window T back into H(kwtop:kwtop+jw-1, ...) and sets
     H(kwtop, kwtop-1) = spike, if update is true. **/
 template <int BS, typename T, typename I>
-__device__ void aed_finish_block(const I kwtop,
-                                 const I jw,
-                                 T* H,
-                                 const I ldh,
-                                 const T* Tw,
-                                 const I ldt,
-                                 const bool update,
-                                 const T spike)
+__device__ __forceinline__ void aed_finish_block(const I kwtop,
+                                                 const I jw,
+                                                 T* H,
+                                                 const I ldh,
+                                                 const T* Tw,
+                                                 const I ldt,
+                                                 const bool update,
+                                                 const T spike)
 {
     const I tid = hqr_tid();
     if(update)
@@ -817,26 +819,26 @@ __device__ inline void laqr5_grid_barrier(unsigned* bar, const unsigned G)
  * ===========================================================================
  */
 template <int BS, typename T, typename I>
-__device__ void laqr5_chunk_block(const bool wantt,
-                                  const bool wantz,
-                                  const bool accum,
-                                  const I n,
-                                  const I ktop,
-                                  const I kbot,
-                                  const I nbmps,
-                                  const I incol,
-                                  const T* sh,
-                                  T* H,
-                                  const I ldh,
-                                  const I iloz,
-                                  const I ihiz,
-                                  T* Z,
-                                  const I ldz,
-                                  T* Vbuf,
-                                  T (*sV)[3],
-                                  const I G = 1,
-                                  const I w = 0,
-                                  unsigned* bar = nullptr)
+__device__ __forceinline__ void laqr5_chunk_block(const bool wantt,
+                                                  const bool wantz,
+                                                  const bool accum,
+                                                  const I n,
+                                                  const I ktop,
+                                                  const I kbot,
+                                                  const I nbmps,
+                                                  const I incol,
+                                                  const T* sh,
+                                                  T* H,
+                                                  const I ldh,
+                                                  const I iloz,
+                                                  const I ihiz,
+                                                  T* Z,
+                                                  const I ldz,
+                                                  T* Vbuf,
+                                                  T (*sV)[3],
+                                                  const I G = 1,
+                                                  const I w = 0,
+                                                  unsigned* bar = nullptr)
 {
     using S = decltype(std::real(T{}));
 
@@ -1318,16 +1320,16 @@ __device__ void laqr5_chunk_block(const bool wantt,
     Vbuf, with the rows in shared memory (tile, nr-by-kdu with leading dimension nr).
     Within a step the reflections act on disjoint columns; one barrier per step. **/
 template <int BS, typename T, typename I>
-__device__ void laqr5_build_u_block(const I ktop,
-                                    const I kbot,
-                                    const I nbmps,
-                                    const I incol,
-                                    const T* Vbuf,
-                                    const I r0,
-                                    const I nr,
-                                    T* tile,
-                                    T* U,
-                                    const I ldu)
+__device__ __forceinline__ void laqr5_build_u_block(const I ktop,
+                                                    const I kbot,
+                                                    const I nbmps,
+                                                    const I incol,
+                                                    const T* Vbuf,
+                                                    const I r0,
+                                                    const I nr,
+                                                    T* tile,
+                                                    T* U,
+                                                    const I ldu)
 {
     const I tid = hipThreadIdx_x;
     const I kdu = 6 * nbmps - 3;
@@ -1399,16 +1401,16 @@ __device__ void laqr5_build_u_block(const I ktop,
     act on disjoint rows. This updates the columns that the next chunk will use, so that
     the matrix-matrix products with U can run concurrently with the next chunk. **/
 template <int BS, typename T, typename I>
-__device__ void laqr5_left_apply_block(const I n,
-                                       const I ktop,
-                                       const I kbot,
-                                       const I nbmps,
-                                       const I incol,
-                                       const T* Vbuf,
-                                       T* H,
-                                       const I ldh,
-                                       const I j,
-                                       T* col)
+__device__ __forceinline__ void laqr5_left_apply_block(const I n,
+                                                       const I ktop,
+                                                       const I kbot,
+                                                       const I nbmps,
+                                                       const I incol,
+                                                       const T* Vbuf,
+                                                       T* H,
+                                                       const I ldh,
+                                                       const I j,
+                                                       T* col)
 {
     const I tid = hipThreadIdx_x;
     const I kdu = 6 * nbmps - 3;
@@ -1617,21 +1619,21 @@ __host__ __device__ void laqr0_shifts_tail(const bool sort,
  * ===========================================================================
  */
 template <int BS, typename T, typename I>
-__device__ void laqr0_part1_block(const I n,
-                                  const I ilo,
-                                  const I kbot,
-                                  const I ndfl,
-                                  const I nw_prev,
-                                  const I ndec_prev,
-                                  const I nwr,
-                                  const I nwmax,
-                                  T* H,
-                                  const I ldh,
-                                  T* W,
-                                  I* status,
-                                  T* statusT,
-                                  I (*s_ired)[HQR_RED(BS)],
-                                  int& ibuf)
+__device__ __forceinline__ void laqr0_part1_block(const I n,
+                                                  const I ilo,
+                                                  const I kbot,
+                                                  const I ndfl,
+                                                  const I nw_prev,
+                                                  const I ndec_prev,
+                                                  const I nwr,
+                                                  const I nwmax,
+                                                  T* H,
+                                                  const I ldh,
+                                                  T* W,
+                                                  I* status,
+                                                  T* statusT,
+                                                  I (*s_ired)[HQR_RED(BS)],
+                                                  int& ibuf)
 {
     const I tid = hqr_tid();
     auto h = [&](const I i, const I j) -> T& { return H[idx2D(i - 1, j - 1, ldh)]; };
@@ -1704,19 +1706,19 @@ __device__ void laqr0_part1_block(const I n,
 }
 
 template <int BS, typename T, typename I>
-__device__ void laqr0_part2_block(const I n,
-                                  const I kbot,
-                                  const I ndfl,
-                                  const I nwmax,
-                                  const I nsr,
-                                  const I nsmax,
-                                  T* H,
-                                  const I ldh,
-                                  T* W,
-                                  I* status,
-                                  T* statusT,
-                                  I (*s_ired)[HQR_RED(BS)],
-                                  int& ibuf)
+__device__ __forceinline__ void laqr0_part2_block(const I n,
+                                                  const I kbot,
+                                                  const I ndfl,
+                                                  const I nwmax,
+                                                  const I nsr,
+                                                  const I nsmax,
+                                                  T* H,
+                                                  const I ldh,
+                                                  T* W,
+                                                  I* status,
+                                                  T* statusT,
+                                                  I (*s_ired)[HQR_RED(BS)],
+                                                  int& ibuf)
 {
     using S = decltype(std::real(T{}));
 
@@ -1822,7 +1824,7 @@ __device__ void laqr0_part2_block(const I n,
     reached when the window has shrunk after several iterations without deflations, or
     when the Schur form of the window fails. **/
 template <int BS, typename T, typename I>
-__device__ void
+__device__ __forceinline__ void
     laqr0_toofew_block(const I n, T* H, const I ldh, T* W, I* status, I (*s_ired)[HQR_RED(BS)], int& ibuf)
 {
     const I tid = hqr_tid();
@@ -1865,18 +1867,18 @@ __device__ void
     is the inner dimension) in the scratch Wk (ldw), then copies it back into C (which
     may be A or B). All the threads of the block must call it. **/
 template <int BS, typename T, typename I>
-__device__ void hqr_block_gemm_copy(const bool conjA,
-                                    const I m,
-                                    const I nn,
-                                    const I k,
-                                    const T* A,
-                                    const I lda,
-                                    const T* B,
-                                    const I ldb,
-                                    T* C,
-                                    const I ldc,
-                                    T* Wk,
-                                    const I ldw)
+__device__ __forceinline__ void hqr_block_gemm_copy(const bool conjA,
+                                                    const I m,
+                                                    const I nn,
+                                                    const I k,
+                                                    const T* A,
+                                                    const I lda,
+                                                    const T* B,
+                                                    const I ldb,
+                                                    T* C,
+                                                    const I ldc,
+                                                    T* Wk,
+                                                    const I ldw)
 {
     const I tid = hqr_tid();
     if(m <= 0 || nn <= 0)
@@ -1912,20 +1914,20 @@ __device__ void hqr_block_gemm_copy(const bool conjA,
     Returns 0, or kbot > 0 if the iterations failed to converge (as in LAPACK). All the
     threads of the block must call it. **/
 template <int BS, typename T, typename I>
-__device__ I laqr4_block(const I n,
-                         T* H,
-                         const I ldh,
-                         T* W,
-                         T* Z,
-                         const I ldz,
-                         I* st,
-                         T* stT,
-                         T (*sV)[3],
-                         I (*s_ired)[HQR_RED(BS)],
-                         decltype(std::real(T{})) (*s_sred)[HQR_RED(BS)],
-                         int& ibuf,
-                         int& sbuf,
-                         T* lds_ws)
+__device__ __forceinline__ I laqr4_block(const I n,
+                                         T* H,
+                                         const I ldh,
+                                         T* W,
+                                         T* Z,
+                                         const I ldz,
+                                         I* st,
+                                         T* stT,
+                                         T (*sV)[3],
+                                         I (*s_ired)[HQR_RED(BS)],
+                                         decltype(std::real(T{})) (*s_sred)[HQR_RED(BS)],
+                                         int& ibuf,
+                                         int& sbuf,
+                                         T* lds_ws)
 {
     const I tid = hqr_tid();
     auto h = [&](const I i, const I j) -> T& { return H[idx2D(i - 1, j - 1, ldh)]; };
@@ -2057,21 +2059,21 @@ __device__ I laqr4_block(const I n,
 /** LAQR0_ITERATION_BLOCK runs one iteration (both parts and the AED core) on the
     device. **/
 template <int BS, typename T, typename I>
-__device__ void laqr0_iteration_block(const I n,
-                                      const I ilo,
-                                      const I kbot,
-                                      const I ndfl,
-                                      const I nw_prev,
-                                      const I ndec_prev,
-                                      const I nwr,
-                                      const I nwmax,
-                                      const I nsr,
-                                      const I nsmax,
-                                      T* H,
-                                      const I ldh,
-                                      T* W,
-                                      I* status,
-                                      T* statusT)
+__device__ __forceinline__ void laqr0_iteration_block(const I n,
+                                                      const I ilo,
+                                                      const I kbot,
+                                                      const I ndfl,
+                                                      const I nw_prev,
+                                                      const I ndec_prev,
+                                                      const I nwr,
+                                                      const I nwmax,
+                                                      const I nsr,
+                                                      const I nsmax,
+                                                      T* H,
+                                                      const I ldh,
+                                                      T* W,
+                                                      I* status,
+                                                      T* statusT)
 {
     using S = decltype(std::real(T{}));
     __shared__ I s_ired[2][HQR_RED(BS)];
@@ -2127,17 +2129,17 @@ __device__ void laqr0_iteration_block(const I n,
     (status[LAQR0_DEFER]) because of a large deflation window: the AED core, with the
     Schur form of the window computed by laqr4_block, and part 2. **/
 template <int BS, typename T, typename I>
-__device__ void laqr0_core4_block(const I n,
-                                  const I kbot,
-                                  const I ndfl,
-                                  const I nwmax,
-                                  const I nsr,
-                                  const I nsmax,
-                                  T* H,
-                                  const I ldh,
-                                  T* W,
-                                  I* status,
-                                  T* statusT)
+__device__ __forceinline__ void laqr0_core4_block(const I n,
+                                                  const I kbot,
+                                                  const I ndfl,
+                                                  const I nwmax,
+                                                  const I nsr,
+                                                  const I nsmax,
+                                                  T* H,
+                                                  const I ldh,
+                                                  T* W,
+                                                  I* status,
+                                                  T* statusT)
 {
     using S = decltype(std::real(T{}));
     __shared__ I s_ired[2][HQR_RED(BS)];

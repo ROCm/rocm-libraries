@@ -479,20 +479,20 @@ __host__ __device__ I hqr_block_max(I v, I (*s_red)[HQR_RED(BS)], int& buf)
     decisions; the updates of rows and columns of H and Z are distributed among
     the threads. s_red is a shared buffer of 2 x BS/32 integers. **/
 template <int BS, typename T, typename I>
-__host__ __device__ I lahqr_block(const bool wantt,
-                                  const bool wantz,
-                                  const I n,
-                                  const I ilo,
-                                  const I ihi,
-                                  T* H,
-                                  const I ldh,
-                                  T* W,
-                                  const I iloz,
-                                  const I ihiz,
-                                  T* Z,
-                                  const I ldz,
-                                  I (*s_red)[HQR_RED(BS)],
-                                  int& buf)
+__host__ __device__ __forceinline__ I lahqr_block(const bool wantt,
+                                                  const bool wantz,
+                                                  const I n,
+                                                  const I ilo,
+                                                  const I ihi,
+                                                  T* H,
+                                                  const I ldh,
+                                                  T* W,
+                                                  const I iloz,
+                                                  const I ihiz,
+                                                  T* Z,
+                                                  const I ldz,
+                                                  I (*s_red)[HQR_RED(BS)],
+                                                  int& buf)
 {
     using S = decltype(std::real(T{}));
 
@@ -943,7 +943,8 @@ __device__ inline T hqr_larfg2_fast(T& alpha, T& x)
 }
 
 template <int BS, typename T, typename I>
-__device__ I lahqr_lds_block(const I n, T* Hg, const I ldh, T* Wg, T* Zg, const I ldz, T* ws)
+__device__ __forceinline__ I
+    lahqr_lds_block(const I n, T* Hg, const I ldh, T* Wg, T* Zg, const I ldz, T* ws)
 {
     static_assert(BS >= HQR_LDS_NMAX, "lahqr_lds_block needs at least HQR_LDS_NMAX threads");
     using S = decltype(std::real(T{}));

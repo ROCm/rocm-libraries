@@ -49,14 +49,14 @@ ROCSOLVER_BEGIN_NAMESPACE
     The rotations of each swap are computed redundantly by all the threads, and their
     application to the rows and columns of T and Q is distributed among the threads. **/
 template <int BS, typename T, typename I>
-__host__ __device__ void trexc_block(const bool wantq,
-                                     const I n,
-                                     T* A,
-                                     const I ldt,
-                                     T* Q,
-                                     const I ldq,
-                                     const I ifst,
-                                     const I ilst)
+__host__ __device__ __forceinline__ void trexc_block(const bool wantq,
+                                                     const I n,
+                                                     T* A,
+                                                     const I ldt,
+                                                     T* Q,
+                                                     const I ldq,
+                                                     const I ifst,
+                                                     const I ilst)
 {
     using S = decltype(std::real(T{}));
 

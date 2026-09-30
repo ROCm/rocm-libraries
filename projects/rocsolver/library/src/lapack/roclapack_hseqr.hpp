@@ -46,7 +46,7 @@ ROCSOLVER_BEGIN_NAMESPACE
     H(ilo:ihi, ilo:ihi) of H contains a NaN or an infinite entry (all the threads of the
     thread-block must call it). **/
 template <int BS, typename T, typename I>
-__device__ bool hseqr_nonfinite_block(const I ilo, const I ihi, const T* H, const I ldh)
+__device__ __forceinline__ bool hseqr_nonfinite_block(const I ilo, const I ihi, const T* H, const I ldh)
 {
     const I nh = ihi - ilo + 1;
     int bad = 0;
