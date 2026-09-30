@@ -194,7 +194,7 @@ namespace rocsparse
     }
 
     // Computes the offsets of the segments of equal sorted major indices, for the segmented
-    // sort of the minor indices. The number of segments is copied back to the host. 
+    // sort of the minor indices. The number of segments is copied back to the host.
     template <typename J>
     static rocsparse_status coosort_segments_template(rocsparse_handle handle,
                                                       int64_t          nnz,
@@ -969,7 +969,8 @@ rocsparse_status rocsparse::coosort(rocsparse_handle            handle,
 
     // Only uniform batches are supported, so every batch has the sparsity pattern of the first
     // one. Its indices are sorted once, and the resulting permutation is applied to the values
-    // of every batch.
+    // of every batch. A single source matrix has a zero batch stride, so its values are sorted
+    // into every batch of target.
 
     // The index sort works in place, so the indices of source are first copied into target.
     if(row_ind_target != row_ind_source)
@@ -1005,7 +1006,7 @@ rocsparse_status rocsparse::coosort(rocsparse_handle            handle,
                                                          sort_buffer));
 
     // The batches run one after the other on the handle stream, so they share the buffer.
-    for(int64_t batch = 0; batch < source->batch_count; ++batch)
+    for(int64_t batch = 0; batch < target->batch_count; ++batch)
     {
         char* batch_row_ind_target = row_ind_target + batch * idx_stride_target;
         char* batch_col_ind_target = col_ind_target + batch * idx_stride_target;

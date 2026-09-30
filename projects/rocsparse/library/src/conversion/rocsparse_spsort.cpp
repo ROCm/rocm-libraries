@@ -28,6 +28,55 @@
 #include "rocsparse_coosort.hpp"
 #include "rocsparse_spsort.hpp"
 
+namespace rocsparse
+{
+    static bool spsort_has_zero_batch_strides(rocsparse_const_spmat_descr mat)
+    {
+        switch(mat->format)
+        {
+        case rocsparse_format_coo:
+        {
+            return mat->batch_stride == 0;
+        }
+        case rocsparse_format_csr:
+        case rocsparse_format_csc:
+        case rocsparse_format_coo_aos:
+        case rocsparse_format_bsr:
+        case rocsparse_format_ell:
+        case rocsparse_format_bell:
+        case rocsparse_format_sell:
+        {
+            return false;
+        }
+        }
+        return false;
+    }
+
+    static rocsparse_status spsort_check_batch_strides(int arg, rocsparse_const_spmat_descr mat)
+    {
+        switch(mat->format)
+        {
+        case rocsparse_format_coo:
+        {
+            ROCSPARSE_CHECKARG(
+                arg, mat, (mat->batch_stride < mat->nnz), rocsparse_status_invalid_size);
+            return rocsparse_status_success;
+        }
+        case rocsparse_format_csr:
+        case rocsparse_format_csc:
+        case rocsparse_format_coo_aos:
+        case rocsparse_format_bsr:
+        case rocsparse_format_ell:
+        case rocsparse_format_bell:
+        case rocsparse_format_sell:
+        {
+            ROCSPARSE_CHECKARG(arg, mat, true, rocsparse_status_not_implemented);
+        }
+        }
+        return rocsparse_status_success;
+    }
+}
+
 rocsparse_status rocsparse::spsort_check_arguments(rocsparse_spsort_descr      descr,
                                                    rocsparse_const_spmat_descr source,
                                                    rocsparse_const_spmat_descr target)
@@ -48,33 +97,22 @@ rocsparse_status rocsparse::spsort_check_arguments(rocsparse_spsort_descr      d
                         || target->idx_base != source->idx_base),
                        rocsparse_status_invalid_value);
 
-    ROCSPARSE_CHECKARG(
-        3, target, (target->batch_count != source->batch_count), rocsparse_status_invalid_value);
+    // The batch count is given by the target. The source either has the same batch count, or is a
+    // single matrix that is sorted into every sample of the target.
+    ROCSPARSE_CHECKARG(2,
+                       source,
+                       (source->batch_count != target->batch_count
+                        && (source->batch_count != 1 || !spsort_has_zero_batch_strides(source))),
+                       rocsparse_status_invalid_value);
 
+    // Samples that overlap cannot be sorted independently.
     if(source->batch_count > 1)
     {
-        // Batches that overlap cannot be sorted independently.
-        switch(source->format)
-        {
-        case rocsparse_format_coo:
-        {
-            ROCSPARSE_CHECKARG(
-                2, source, (source->batch_stride < source->nnz), rocsparse_status_invalid_size);
-            ROCSPARSE_CHECKARG(
-                3, target, (target->batch_stride < target->nnz), rocsparse_status_invalid_size);
-            break;
-        }
-        case rocsparse_format_csr:
-        case rocsparse_format_csc:
-        case rocsparse_format_coo_aos:
-        case rocsparse_format_bsr:
-        case rocsparse_format_ell:
-        case rocsparse_format_bell:
-        case rocsparse_format_sell:
-        {
-            ROCSPARSE_CHECKARG(2, source, true, rocsparse_status_not_implemented);
-        }
-        }
+        RETURN_IF_ROCSPARSE_ERROR(spsort_check_batch_strides(2, source));
+    }
+    if(target->batch_count > 1)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(spsort_check_batch_strides(3, target));
     }
 
     ROCSPARSE_CHECKARG(1,
@@ -180,7 +218,7 @@ extern "C" rocsparse_status rocsparse_spsort(rocsparse_handle            handle,
                                              rocsparse_spsort_stage      stage, //4
                                              size_t                      buffer_size_in_bytes, //5
                                              void*                       buffer, //6
-                                             rocsparse_error*            error)
+                                             rocsparse_error*            p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
