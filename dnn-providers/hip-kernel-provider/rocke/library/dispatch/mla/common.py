@@ -31,9 +31,9 @@ implementable; this module follows it.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import List, Tuple
+from typing import List
 
-from rocke.dispatch.core import KernelCandidate, OperatorRequest
+from rocke.dispatch.core import OperatorRequest, selector_matches
 
 FAMILY = "mla"
 MLA_ABI_VERSION = "hipkg-mla/v1"
@@ -145,21 +145,9 @@ def _request_errors(req: OperatorRequest) -> List[str]:
     return errors
 
 
-def _selector_matches(req: MLARequest, candidate: KernelCandidate) -> Tuple[bool, str]:
-    """Honour an explicit ``algorithm``/``spec_id`` pin on the request.
-
-    ``"auto"`` matches anything; anything else must name this candidate. Copied
-    rather than imported from the attention family: importing it would couple
-    two registries that are deliberately independent, and the function is five
-    lines.
-    """
-    algorithm = req.algorithm.strip().lower()
-    spec_id = req.spec_id.strip().lower()
-    if algorithm not in ("auto", candidate.algorithm):
-        return False, f"request algorithm {req.algorithm!r} != {candidate.algorithm!r}"
-    if spec_id not in ("auto", candidate.spec_id):
-        return False, f"request spec_id {req.spec_id!r} != {candidate.spec_id!r}"
-    return True, "ok"
+# Shared pin-selector: identical across families, so it lives in the dispatch
+# core and each family re-exports it under its own name.
+_selector_matches = selector_matches
 
 
 def num_q_blocks_for(req: MLARequest, block_q: int) -> int:

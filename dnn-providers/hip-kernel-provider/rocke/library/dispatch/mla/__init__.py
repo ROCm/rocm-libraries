@@ -19,8 +19,7 @@ selectable-but-not-compilable set by omission.
 
 from __future__ import annotations
 
-from dataclasses import asdict
-from typing import Sequence, Tuple
+from typing import Any, Sequence, Tuple
 
 from rocke.dispatch.core import (
     CandidateRegistry,
@@ -29,7 +28,7 @@ from rocke.dispatch.core import (
     KernelId,
     OperatorRequest,
     Ranker,
-    stable_json_hash,
+    make_kernel_id,
 )
 
 from . import gfx942
@@ -56,37 +55,33 @@ def mla_candidates() -> Tuple[KernelCandidate, ...]:
     return MLA_REGISTRY.candidates()
 
 
-def _kernel_id(req: MLARequest, candidate: KernelCandidate, spec) -> KernelId:
-    request_hash = stable_json_hash(req.normalized(), n=16)
-    spec_hash = stable_json_hash(asdict(spec), n=16)
-    return KernelId(
-        # ``req.op`` rather than a literal: this family already anticipates a
-        # second op (decode-absorb), and a hard-coded "mla_prefill_fwd" would
-        # give two different ops the same selection key.
-        op=req.op,
-        family=_FAMILY,
-        candidate=candidate.name,
-        algorithm=candidate.algorithm,
-        spec_id=candidate.spec_id,
-        arch=req.arch,
-        abi_version=candidate.abi_version,
-        request_hash=request_hash,
-        spec_hash=spec_hash,
-    )
+def _kernel_id(req: MLARequest, candidate: KernelCandidate, spec: Any) -> KernelId:
+    # ``req.op`` rather than a literal: this family already anticipates a
+    # second op (decode-absorb), and a hard-coded "mla_prefill_fwd" would give
+    # two different ops the same selection key.
+    return make_kernel_id(req, candidate, spec, op=req.op)
 
 
-def mla_sweep_space(req: OperatorRequest) -> Sequence[object]:
+def registered_mla_combos(
+    req: OperatorRequest,
+) -> Tuple[Tuple[KernelCandidate, Any], ...]:
+    """Every registered MLA ``(candidate, spec)`` that can launch ``req``."""
     if _request_errors(req):
         return ()
-    specs = []
-    seen = set()
-    for candidate in MLA_REGISTRY.supported(req):
-        spec = candidate.select_spec(req)
-        h = stable_json_hash(asdict(spec), n=16)
-        if h not in seen:
-            seen.add(h)
-            specs.append(spec)
-    return tuple(specs)
+    return MLA_REGISTRY.combos(req)
+
+
+def mla_sweep_space(req: OperatorRequest) -> Sequence[Any]:
+    if _request_errors(req):
+        return ()
+    return MLA_REGISTRY.sweep_space(req)
+
+
+def dispatch_mla_all(req: MLARequest) -> Tuple[DispatchResult, ...]:
+    """Every eligible MLA kernel for ``req``, one result per combo."""
+    if _request_errors(req):
+        return ()
+    return MLA_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 
 
 def dispatch_mla(req: MLARequest, *, ranker: Ranker | None = None) -> DispatchResult:
@@ -125,7 +120,9 @@ __all__ = [
     "MLA_REGISTRY",
     "MLARequest",
     "dispatch_mla",
+    "dispatch_mla_all",
     "mla_candidates",
     "mla_sweep_space",
     "num_q_blocks_for",
+    "registered_mla_combos",
 ]
