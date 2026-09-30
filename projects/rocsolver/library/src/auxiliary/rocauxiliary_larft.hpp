@@ -444,10 +444,11 @@ ROCSOLVER_KERNEL void larft_kernel_backward(const rocblas_storev storev,
     V2^H V2 (V2: the rows u1_n:n-1 of the k columns of V, forward direction, column-wise; the
     only part of the product that larft uses) for large n, where the matrix product with a
     k x k result and a long inner dimension would run on few compute units. Each thread-block of
-    LARFT_GRAM_PARTIAL computes the partial product of a chunk of LARFT_SPLITK_ROWS rows (through
-    shared memory, in tiles of rows), into the workspace P (k x k per chunk); LARFT_GRAM_SUM adds
-    the chunks in a fixed order (so that the result is deterministic) into F. **/
-template <int BS, typename T, typename I, typename U>
+    LARFT_GRAM_PARTIAL computes, for a chunk of LARFT_SPLITK_ROWS rows (through shared memory, in
+    tiles of rows), the partial products of a group of BS * NPT pairs (i, j), i < j (the third
+    grid dimension runs over the groups), into the workspace P (k x k per chunk);
+    LARFT_GRAM_SUM adds the chunks in a fixed order (so that the result is deterministic) into F. **/
+template <int BS, int NPT, typename T, typename I, typename U>
 ROCSOLVER_KERNEL void __launch_bounds__(BS) larft_gram_partial(const I rows,
                                                                 const I k,
                                                                 U VA,
@@ -458,7 +459,6 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) larft_gram_partial(const I rows,
                                                                 const rocblas_stride strideP)
 {
     constexpr int LDSE = 2048; // entries of the tile in shared memory (32 KB for complex double)
-    constexpr int NPT = 16; // pairs per thread (k <= 64: k(k-1)/2 <= 2016 <= BS * NPT)
     __shared__ T tile[LDSE];
 
     const I b = hipBlockIdx_y;
@@ -470,14 +470,15 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) larft_gram_partial(const I rows,
     const I tr = std::max(I(1), I(LDSE) / k); // rows per tile
     const I npairs = k * (k - 1) / 2;
 
-    // the pairs (i, j), i < j, of this thread: e = tid + q * BS, in column order
+    // the pairs (i, j), i < j, of this thread: e = e0 + tid + q * BS, in column order
+    const I e0 = hipBlockIdx_z * I(BS * NPT);
     I pi[NPT], pj[NPT];
     T acc[NPT];
 #pragma unroll
     for(int q = 0; q < NPT; q++)
     {
         acc[q] = T(0);
-        I e = tid + q * BS;
+        I e = e0 + tid + q * BS;
         I j = 1;
         while(j < k && e >= j)
         {
@@ -502,7 +503,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) larft_gram_partial(const I rows,
 #pragma unroll
         for(int q = 0; q < NPT; q++)
         {
-            if(tid + q * BS < npairs)
+            if(e0 + tid + q * BS < npairs)
             {
                 const T* vi = tile + pi[q] * tr;
                 const T* vj = tile + pj[q] * tr;
@@ -522,7 +523,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) larft_gram_partial(const I rows,
     T* Pb = P + b * strideP + chunk * size_t(k) * k;
 #pragma unroll
     for(int q = 0; q < NPT; q++)
-        if(tid + q * BS < npairs)
+        if(e0 + tid + q * BS < npairs)
             Pb[pi[q] + pj[q] * k] = acc[q];
 }
 
@@ -549,7 +550,7 @@ ROCSOLVER_KERNEL void larft_gram_sum(const I k,
 }
 
 /** LARFT_SPLITK returns whether larft computes V2^H V2 with larft_gram_partial (forward,
-    column-wise, k <= 64, at least LARFT_SPLITK_MIN rows in V2), and the number of chunks. **/
+    column-wise, k <= 128, at least LARFT_SPLITK_MIN rows in V2), and the number of chunks. **/
 template <typename I>
 inline bool larft_splitk(const rocblas_direct direct,
                          const rocblas_storev storev,
@@ -558,7 +559,7 @@ inline bool larft_splitk(const rocblas_direct direct,
                          I* nchunks = nullptr)
 {
     const bool use = direct == rocblas_forward_direction && storev == rocblas_column_wise
-        && k <= 64 && n - k >= I(LARFT_SPLITK_MIN);
+        && k <= 128 && n - k >= I(LARFT_SPLITK_MIN);
     if(nchunks)
         *nchunks = use ? (n - k - 1) / I(LARFT_SPLITK_ROWS) + 1 : 0;
     return use;
@@ -587,7 +588,7 @@ void rocsolver_larft_getMemorySize(const I n,
     // size of re-usable workspace (and of the partial products of larft_gram_partial, in the
     // forward column-wise case with many rows; the size grows with n and k)
     *size_work = sizeof(T) * k * batch_count;
-    if(k <= 64 && n - k >= I(LARFT_SPLITK_MIN))
+    if(k <= 128 && n - k >= I(LARFT_SPLITK_MIN))
     {
         const size_t nchunks = (n - k - 1) / I(LARFT_SPLITK_ROWS) + 1;
         *size_work = std::max(*size_work, sizeof(T) * nchunks * k * k * batch_count);
@@ -691,9 +692,12 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
         if(larft_splitk(direct, storev, n, k, &nchunks))
         {
             const rocblas_stride strideP = rocblas_stride(nchunks) * k * k;
-            ROCSOLVER_LAUNCH_KERNEL((larft_gram_partial<128, T>), dim3(nchunks, batch_count),
-                                    dim3(128), 0, stream, u2_n, k, V, shiftV + idx2D(u1_n, 0, ldv),
-                                    ldv, strideV, work, strideP);
+            constexpr int GBS = 128;
+            constexpr int GNPT = 16;
+            const I npg = (k * (k - 1) / 2 - 1) / (GBS * GNPT) + 1;
+            ROCSOLVER_LAUNCH_KERNEL((larft_gram_partial<GBS, GNPT, T>),
+                                    dim3(nchunks, batch_count, npg), dim3(GBS), 0, stream, u2_n, k,
+                                    V, shiftV + idx2D(u1_n, 0, ldv), ldv, strideV, work, strideP);
             ROCSOLVER_LAUNCH_KERNEL((larft_gram_sum<T>), dim3((k * k - 1) / 256 + 1, batch_count),
                                     dim3(256), 0, stream, k, nchunks, (const T*)work, strideP, F,
                                     ldf, strideF);

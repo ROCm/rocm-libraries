@@ -72,7 +72,7 @@
 #endif
 
 /*! \brief Determine when LARFT (forward direction, column-wise) computes the product V2^H * V2
-    (k <= 64 columns, a long inner dimension) with its own kernels: with at least
+    (k <= 128 columns, a long inner dimension) with its own kernels: with at least
     LARFT_SPLITK_MIN rows in V2, split into chunks of LARFT_SPLITK_ROWS rows whose partial
     products are added in a fixed order. A matrix product with a small result and a long
     inner dimension would run on few compute units. */
