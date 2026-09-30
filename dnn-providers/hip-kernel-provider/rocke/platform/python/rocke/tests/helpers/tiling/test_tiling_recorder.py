@@ -177,5 +177,20 @@ def test_undeclared_is_unchanged():
 
 def test_roundtrip_driver_names_the_fix_when_no_target_is_available():
     from rocke.helpers.tiling.analysis.geometry import _arch_wave
-    with pytest.raises(ValueError, match="record_build"):
+    # The message must name the WORKING call: `arch=` would be forwarded to the build fn, not declared.
+    with pytest.raises(ValueError, match="declared_arch=.*declared_wave_size="):
         _arch_wave(tr.RecordedPipeline())
+
+
+def test_declared_target_that_disagrees_with_the_recorded_mma_raises():
+    """A declared target is a claim about the kernel; a recorded TileMma that targets something else must
+    fail loud, or every bank/width/residency number would be derived for the wrong GPU."""
+    with pytest.raises(ValueError, match="record_build was told gfx942"):
+        tr.record_build(demo.build_interleaved_gemm, 64, 64, 64,      # its TileMma targets gfx90a
+                        declared_arch="gfx942", declared_wave_size=64)
+
+
+def test_declared_target_that_agrees_with_the_recorded_mma_is_accepted():
+    _result, pipe = tr.record_build(demo.build_interleaved_gemm, 64, 64, 64,
+                                    declared_arch="gfx90a", declared_wave_size=64)
+    assert (pipe.arch, pipe.wave_size, pipe.arch_declared) == ("gfx90a", 64, True)

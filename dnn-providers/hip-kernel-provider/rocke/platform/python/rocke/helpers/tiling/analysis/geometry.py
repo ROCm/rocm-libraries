@@ -91,13 +91,14 @@ def _lane_span(encoding: Any) -> int:
 
 def _arch_wave(pipeline: Any) -> tuple[str, int]:
     """The (arch, wave_size) DERIVED from the recording -- either DECLARED by the caller via
-    ``record_build(arch=, wave_size=)`` or captured from a recorded ``TileMma``. Fails loud if neither is
+    ``record_build(declared_arch=, declared_wave_size=)`` or captured from a recorded ``TileMma``. Fails loud if neither is
     present -- NO silent 'gfx90a'/64 fallback."""
     if pipeline.arch is None or pipeline.wave_size is None:
         raise ValueError(
             "pipeline has no arch/wave_size: no TileMma was recorded and none was declared. A kernel with "
             "no matrix instruction (reduction, scan, elementwise, LDS-combining epilogue) must pass the "
-            "target it already resolved: record_build(build_fn, ..., arch='gfxNNN', wave_size=N).")
+            "target it already resolved: record_build(build_fn, ..., declared_arch='gfxNNN', "
+            "declared_wave_size=N).")
     return pipeline.arch, pipeline.wave_size
 
 
