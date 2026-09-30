@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import asdict, dataclass, replace
+from types import SimpleNamespace
 from typing import Optional, Tuple
 
 from rocke.dispatch.core import (
@@ -21,14 +22,15 @@ from rocke.dispatch.core import (
     KernelId,
     PinRefused,
     make_kernel_id,
+    pin_to_spec,
 )
 from rocke.dispatch.tuning import (
     KnobSpace,
     gated,
     make_tuned_candidate,
     normalize_knobs,
+    sample_count,
     values,
-    waves_per_eu_sweep_values,
 )
 from rocke.dispatch.tuning.testing import TuningContractError, assert_tuning_contract
 
@@ -108,12 +110,14 @@ AXES = (
 
 @dataclass(frozen=True)
 class ToySpace(KnobSpace):
+    # The occupancy hint is swept outside the walk and shown in the id stem.
+    outer_knob = "waves_per_eu"
+
     def axes(self, base):
         return AXES
 
-    def build(self, base, knobs, waves_per_eu):
-        extra = {} if waves_per_eu is None else {"waves_per_eu": int(waves_per_eu)}
-        return replace(base, **knobs, **extra)
+    def build(self, base, knobs):
+        return replace(base, **knobs)
 
     def inert(self, base, kernel):
         if (
@@ -132,11 +136,18 @@ class ToySpace(KnobSpace):
         # Everything the knobs are a delta against, minus the problem (m).
         return {k: v for k, v in asdict(base).items() if k != "m"}
 
-    def default_waves(self, base):
+    def outer_default(self, base):
         return base.waves_per_eu
 
-    def waves(self, base, level):
-        return waves_per_eu_sweep_values(base.waves_per_eu, level)
+    def outer_values(self, base, level):
+        tried = (2, 4) if level == "production" else (1, 2, 3, 4)
+        return (base.waves_per_eu,) + tuple(v for v in tried if v != base.waves_per_eu)
+
+    def stem(self, kernel):
+        return f"{self.variant_id}_wpe{kernel.waves_per_eu}"
+
+    def stem_prefix(self):
+        return f"{self.variant_id}_wpe"
 
     def wrap(self, base, kernel, knobs, key, tid):
         return ToyTunedSpec(
@@ -273,6 +284,34 @@ class TestStalePins(unittest.TestCase):
         with self.assertRaisesRegex(TypeError, "JSON scalar"):
             ToyRequest(m=8, tuning_knobs={"unroll": [2]})
 
+    def test_the_opt_in_refusal_names_both_selectors(self):
+        candidate = _registry().get("toy_gfx950_tile128")
+        ok, why = candidate.admits(ToyRequest(m=1024, spec_id="gfx950_tile128"))
+        self.assertFalse(ok)
+        self.assertIn("algorithm='toy_tuned'", why)
+
+
+class TestPinToSpec(unittest.TestCase):
+    def test_an_untuned_spec_clears_a_stale_pin(self):
+        candidate = _registry().get("toy_gfx950_tile64")
+        stale = ToyRequest(m=8, tuning_id="foo@bar", tuning_knobs={"unroll": 2})
+        pinned = pin_to_spec(stale, candidate, SimpleNamespace(tuning_id=""))
+        self.assertEqual((pinned.tuning_id, pinned.tuning_knobs), ("auto", ()))
+
+    def test_knobs_that_do_not_normalize_raise(self):
+        candidate = _registry().get("toy_gfx950_tile64")
+        bad = SimpleNamespace(tuning_id="tile64_wpe2@k", knobs=(("unroll", [2]),))
+        with self.assertRaises(TypeError):
+            pin_to_spec(ToyRequest(m=8), candidate, bad)
+
+
+class TestSampleCount(unittest.TestCase):
+    def test_a_negative_sample_is_refused(self):
+        self.assertEqual(sample_count("full", 0), 0)
+        self.assertEqual(sample_count("production", 8), 0)
+        with self.assertRaisesRegex(ValueError, ">= 0"):
+            sample_count("full", -1)
+
 
 class _LenientSpace(ToySpace):
     """A space whose walk emits non-canonical points: its axis declares the
@@ -284,7 +323,7 @@ class _LenientSpace(ToySpace):
 
     def is_valid(self, base, knobs):
         try:
-            self.build(base, {**self.fixed(base), **knobs}, None)
+            self.build(base, {**self.fixed(base), **knobs})
         except ValueError:
             return False
         return True
@@ -305,6 +344,44 @@ class TestFullWalk(unittest.TestCase):
         self.assertEqual(len(ids), len(set(ids)))
         default_id = space.canonicalize(base, {})[0].tuning_id
         self.assertEqual(ids.count(default_id), 1)
+
+
+@dataclass(frozen=True)
+class _NoOuterSpace(ToySpace):
+    """The same space with no outer knob and the default stem."""
+
+    outer_knob = None
+
+    def stem(self, kernel):
+        return KnobSpace.stem(self, kernel)
+
+    def stem_prefix(self):
+        return KnobSpace.stem_prefix(self)
+
+
+class TestOuterKnob(unittest.TestCase):
+    def test_the_outer_knob_is_optional(self):
+        candidate = _registry(_NoOuterSpace).get("toy_gfx950_tile64")
+        assert_tuning_contract(candidate, [ToyRequest(m=1024)])
+        req = ToyRequest(m=1024, algorithm="toy_tuned", spec_id="gfx950_tile64")
+        spec = candidate.select_spec(req)
+        self.assertEqual(spec.tuning_id, f"tile64@{spec.config_key}")
+        ok, why = candidate.admits(replace(req, tuning_knobs={"waves_per_eu": 4}))
+        self.assertFalse(ok)
+        self.assertIn("not tunable", why)
+
+    def test_equal_outer_values_of_another_type_are_one_config(self):
+        candidate = _registry().get("toy_gfx950_tile64")
+        req = ToyRequest(m=1024, algorithm="toy_tuned", spec_id="gfx950_tile64")
+        by_int = candidate.select_spec(replace(req, tuning_knobs={"waves_per_eu": 4}))
+        by_float = candidate.select_spec(
+            replace(req, tuning_knobs={"waves_per_eu": 4.0})
+        )
+        self.assertEqual(by_int.tuning_id, by_float.tuning_id)
+        self.assertEqual(by_int.tuning_id, f"tile64_wpe4@{by_int.config_key}")
+        ok, why = candidate.admits(replace(req, tuning_knobs={"waves_per_eu": "4"}))
+        self.assertFalse(ok)
+        self.assertIn("takes int", why)
 
 
 class _IgnoresKnobs(ToySpace):

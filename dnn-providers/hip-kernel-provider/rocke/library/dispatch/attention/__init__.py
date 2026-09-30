@@ -322,8 +322,9 @@ def dispatch_attention_all(
 ) -> Tuple[DispatchResult, ...]:
     """Every eligible attention kernel for ``req``, including opt-in variants.
 
-    Uses :func:`registered_attention_combos` so dense candidates keep their
-    standalone dense spec. Production :func:`dispatch_attention` is unchanged.
+    Uses :func:`registered_attention_combos`, so every result carries an
+    executable ``AttentionTuningSpec``. Production :func:`dispatch_attention`
+    is unchanged.
     """
     return tuple(
         iter_dispatch_attention_all(

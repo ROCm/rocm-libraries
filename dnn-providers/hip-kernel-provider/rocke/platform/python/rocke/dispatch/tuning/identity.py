@@ -3,7 +3,8 @@
 """Config identity of tuned specs.
 
 A tuned spec is one registered variant plus a canonical knob dict: the kernel
-fields set away from the variant's default spec (``waves_per_eu`` included).
+fields set away from the variant's default spec (the space's outer knob
+included).
 ``config_key`` hashes an explicit, versioned payload over exactly that -- the
 family ABI, arch, path, variant id, knobs -- plus a fingerprint of the
 defaults the knobs are relative to. Problem fields and runtime specializations
@@ -16,16 +17,17 @@ kernel dataclass default) the same knobs would silently build a different
 kernel. With the defaults in the key, the recomputed key no longer matches the
 stored one and the pin is refused instead.
 
-``tuning_id`` is ``{variant_id}_wpe{N}@{config_key}``. The stem is display
-only: pins are matched on the ``config_key`` suffix (:func:`key_of`), never on
-the stem. Bump :data:`TUNING_ID_VERSION` whenever the payload or the
-canonical-knob rules change.
+``tuning_id`` is ``{stem}@{config_key}``, the stem being the family's display
+name for the spec (``KnobSpace.stem``; the variant id by default). Pins are
+matched on the ``config_key`` suffix (:func:`key_of`), never on the stem.
+Bump :data:`TUNING_ID_VERSION` whenever the payload or the canonical-knob
+rules change.
 """
 
 from __future__ import annotations
 
 from dataclasses import MISSING
-from typing import Callable, Iterable, Mapping, Optional, Union
+from typing import Callable, Iterable, Mapping, Union
 
 from ..core import stable_json_hash
 from .axes import Knobs
@@ -105,21 +107,14 @@ def config_key(
     )
 
 
-def tuning_id(variant_id: str, waves_per_eu: Optional[int], key: str) -> str:
-    wpe = "none" if waves_per_eu is None else int(waves_per_eu)
-    return f"{variant_id}_wpe{wpe}@{key}"
+def tuning_id(stem: str, key: str) -> str:
+    return f"{stem}@{key}"
 
 
 def key_of(wanted: str) -> str:
     """The ``config_key`` a ``tuning_id`` carries -- the part pins are matched
     on. An id without one is its own key (it will match nothing)."""
     return wanted.rsplit("@", 1)[-1]
-
-
-def names_variant(wanted: str, variant_id: str) -> bool:
-    """Cheap reject before a space walk: an id always starts with its variant's
-    ``{variant_id}_wpe`` stem (the variant id is identity, the WPE is not)."""
-    return wanted.split("@", 1)[0].startswith(f"{variant_id}_wpe")
 
 
 def drop_base_equal(

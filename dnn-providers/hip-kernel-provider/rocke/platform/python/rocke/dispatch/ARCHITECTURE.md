@@ -1419,7 +1419,7 @@ warps and backend; its space states the attention rules as `KnobSpace` hooks:
 ```python
 # library/dispatch/attention/unified_rules.py
 @dataclass(frozen=True)
-class UnifiedSpace(KnobSpace):
+class UnifiedSpace(WavesPerEuSpace):            # outer knob: waves_per_eu
     variant: AttentionGeometryVariant = None
     default_from_full = True
 
@@ -1432,8 +1432,10 @@ class UnifiedSpace(KnobSpace):
     def refuse(self, base, knobs):              # never build known-wrong knobs
         ...
 
-    def build(self, base, knobs, waves_per_eu):  # base is the request's problem
-        return UnifiedKernels(_explicit_2d_spec(base, self.variant, knobs, waves_per_eu))
+    def build(self, base, knobs):               # base is the request's problem
+        knobs = dict(knobs)
+        wpe = knobs.pop("waves_per_eu", None)
+        return UnifiedKernels(_explicit_2d_spec(base, self.variant, knobs, wpe))
 
     def production(self, base, axes, is_valid):  # the curated stacks
         return _production_knob_sets(self.variant)
@@ -2088,7 +2090,7 @@ behavior of section 11.1 without writing it:
 | Module | Provides |
 |---|---|
 | `tuning.axes` | `KnobAxis` and `flag` / `values` / `gated` / `choices` to declare axes |
-| `tuning.walk` | sweep levels, the pruned depth-first walk, the sampler, `waves_per_eu` values |
+| `tuning.walk` | sweep levels, the pruned depth-first walk, the sampler |
 | `tuning.identity` | `config_key`, `tuning_id`, `TUNING_ID_VERSION` |
 | `tuning.space` | `KnobSpace`: canonicalize, default, stream, sample, find |
 | `tuning.candidate` | `make_tuned_candidate`, `resolve_pinned`, `explicitly_pinned` |
@@ -2111,11 +2113,12 @@ tests/dispatch/<family>/test_tuning_contract.py
 
 **The space.** Subclass `KnobSpace` (a frozen dataclass carrying `abi`,
 `arch`, `path`, `variant_id`, `candidate_name`) and implement three methods:
-`axes(base)`, `build(base, knobs, waves_per_eu)` (raise `ValueError` /
-`TypeError` / `NotImplementedError` to refuse), and `wrap(base, kernel, knobs,
-key, tid)`. `base` is whatever one request gives the variant to build from --
-a default kernel spec, or a problem description. Then override only the hooks
-the kernel needs:
+`axes(base)`, `build(base, knobs)` (raise `ValueError` / `TypeError` /
+`NotImplementedError` to refuse), and `wrap(base, kernel, knobs, key, tid)`.
+`base` is whatever one request gives the variant to build from -- a default
+kernel spec, or a problem description. The space knows no kernel field by
+name: anything family-specific is a hook. Override only the ones the kernel
+needs:
 
 | Hook | Default | Override when |
 |---|---|---|
@@ -2128,7 +2131,8 @@ the kernel needs:
 | `defaults(base, kernel)` | `{}` | always, in practice: the problem-independent defaults the knobs are a delta against (fingerprinted into `config_key`) |
 | `known_knobs(base)` | the in-scope axes | axes are scoped per problem; out-of-scope knobs are then dropped instead of refused |
 | `recorded(base)` | none | `base` resolves a field per problem (work size, dtype) |
-| `default_waves` / `waves` | none / 2-4 | `waves_per_eu` has a per-spec default |
+| `outer_knob`, `outer_values(base, level)`, `outer_default(base)` | none | one field is cheap to sweep on top of every knob set (attention: `waves_per_eu`, in `attention/waves.py`) |
+| `stem(kernel)`, `stem_prefix()` | `variant_id` / `"{variant_id}@"` | the id should show more than the variant (attention: `_wpe{N}`) |
 | `production(base, axes, is_valid)` | every knob on its own | curated stacks |
 | `is_valid(base, knobs)` | canonical and valid | the walk should prune differently |
 | `accept_default(spec)`, `default_from_full` | any / production only | some legal specs should not be `auto` |
@@ -2136,8 +2140,10 @@ the kernel needs:
 **Rules the hooks encode.** A knob that compiles to the default is *dropped*;
 one that is illegal is *refused* with a reason. Never refuse an inert knob --
 a pin that travels across shapes would then fail where the knob happens to be
-inert. `inert` and `base_value` must not read `waves_per_eu`: streams check a
-knob set once and only rebuild it per WPE value. A field the base resolves per
+inert. `inert` and `base_value` must not read the `outer_knob`: streams check
+a knob set once and only rebuild it per outer value. Knob values are coerced
+to the type their axis declares (the outer knob to the type of its values),
+so `True` and `1` name one configuration. A field the base resolves per
 problem must be `recorded`, or its `config_key` stops being portable.
 `defaults` must return the same values for every problem (the kit's
 portability check catches a problem field leaking in), and must cover every

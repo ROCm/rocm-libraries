@@ -15,7 +15,6 @@ from itertools import islice
 from typing import Iterable, Mapping, Optional, Sequence, Tuple
 
 from ..core import KernelCandidate, pin_to_spec, spec_identity
-from .identity import names_variant
 from .spec import TunableRequest, TunedSpec
 from .walk import sweep_level
 
@@ -60,7 +59,7 @@ def _check_spec(candidate, spec):
         _fail(candidate, f"{type(spec).__name__} does not satisfy TunedSpec")
     if not spec.tuning_id.endswith(f"@{spec.config_key}"):
         _fail(candidate, f"{spec.tuning_id!r} does not end in its config_key")
-    if not names_variant(spec.tuning_id, spec.variant_id):
+    if not spec.tuning_id.startswith(spec.variant_id):
         _fail(
             candidate, f"{spec.tuning_id!r} does not name variant {spec.variant_id!r}"
         )
@@ -143,7 +142,7 @@ def assert_tuning_contract(
                 != spec
             ):
                 _fail(candidate, f"knobs alone do not replay {spec.tuning_id!r}")
-            restemmed = f"{spec.variant_id}_wpe0@{spec.config_key}"
+            restemmed = f"{spec.variant_id}_restemmed@{spec.config_key}"
             if (
                 _select(
                     candidate,

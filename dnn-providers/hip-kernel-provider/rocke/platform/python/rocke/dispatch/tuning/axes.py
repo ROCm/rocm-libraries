@@ -9,6 +9,7 @@ prerequisites-first with enabler axes leading (see :mod:`.walk`).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Mapping, Sequence, Tuple
 
 Knobs = Tuple[Tuple[str, object], ...]
@@ -83,6 +84,19 @@ def knob_requirements(axes: Tuple[KnobAxis, ...]) -> Mapping[str, str]:
             for name, _value in choice[1:]:
                 requires.setdefault(name, gate)
     return requires
+
+
+@lru_cache(maxsize=None)
+def knob_types(axes: Tuple[KnobAxis, ...]) -> Mapping[str, type]:
+    """``{knob: type}`` for every knob whose non-``None`` choices on ``axes``
+    share one type."""
+    seen: dict[str, set] = {}
+    for axis in axes:
+        for choice in axis.choices:
+            for name, value in choice:
+                if value is not None:
+                    seen.setdefault(name, set()).add(type(value))
+    return {name: next(iter(ts)) for name, ts in seen.items() if len(ts) == 1}
 
 
 def axis_knob_names(axes: Tuple[KnobAxis, ...]) -> frozenset:

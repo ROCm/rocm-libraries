@@ -11,9 +11,12 @@ gfx950 wide-LDS-DMA path are captured explicitly by ``AttentionDenseSpec``.
 
 Usage:
     python attention_dense_prefill.py                 # parity + bench, default shapes
-    python attention_dense_prefill.py --bn 128        # sweep block_n
+    python attention_dense_prefill.py --bn 128        # sweep block_n (direct spec)
     python attention_dense_prefill.py --exact-shape --sq 8192 --hq 32 --dtype fp16 \\
         --persistent --json-out result.json
+
+``--exact-shape`` resolves a registered dispatch variant, whose tile fixes
+``block_n``; ``--bn`` must match it there.
 """
 from __future__ import annotations
 
@@ -120,12 +123,36 @@ def _dense_tile(shape: dict[str, Any]) -> str:
     )
 
 
+def _auto_wide_lds_dma(shape: dict[str, Any], tile: str) -> bool:
+    """The shipped wide-DMA choice for a shape that does not set one."""
+    geometry = DENSE_TILE_GEOMETRIES[tile]
+    sq = int(shape["seqlen_q"])
+    sk = int(shape.get("seqlen_kv", sq))
+    ragged = sq == sk and (
+        sq % int(geometry["block_m"]) != 0 or sk % int(geometry["block_n"]) != 0
+    )
+    return (
+        bool(shape.get("persistent", False))
+        and int(shape["head_size"]) == 128
+        and str(shape.get("dtype", "fp16")) in ("fp16", "bf16")
+        and bool(shape.get("causal", True))
+        and int(shape.get("sliding_window", 0)) == 0
+        and not bool(shape.get("use_sinks", False))
+        and not ragged
+    )
+
+
 def _dense_spec_id(shape: dict[str, Any]) -> str:
-    """The gfx950 dense variant ``spec_id`` the shape's geometry names."""
+    """The gfx950 dense variant ``spec_id`` the shape's geometry names. A
+    shape without ``wide_lds_dma`` gets the shipped choice."""
+    tile = _dense_tile(shape)
     persistent = bool(shape.get("persistent", False))
-    wide = bool(shape.get("wide_lds_dma", False))
+    if "wide_lds_dma" in shape:
+        wide = bool(shape["wide_lds_dma"])
+    else:
+        wide = _auto_wide_lds_dma(shape, tile)
     kind = "persist" if persistent else "grid"
-    return f"gfx950_dense_{kind}{'_widedma' if wide else ''}_{_dense_tile(shape)}"
+    return f"gfx950_dense_{kind}{'_widedma' if wide else ''}_{tile}"
 
 
 def make_spec_from_shape(shape: dict[str, Any]) -> Gfx950AttentionDenseSpec:
@@ -134,7 +161,16 @@ def make_spec_from_shape(shape: dict[str, Any]) -> Gfx950AttentionDenseSpec:
     Tile, persist, and wide DMA pick the variant (``spec_id``); every other
     field in the shape is a knob of that variant, applied through
     :func:`dispatch.attention.tuning_spec_with_knobs` so the kernel validates it.
+    The tile fixes ``block_n``, so a shape may only restate it.
     """
+    tile = _dense_tile(shape)
+    tile_block_n = int(DENSE_TILE_GEOMETRIES[tile]["block_n"])
+    if "block_n" in shape and int(shape["block_n"]) != tile_block_n:
+        raise ValueError(
+            f"block_n={shape['block_n']} is not the gfx950 {tile!r} tile's "
+            f"block_n={tile_block_n}; registered dense variants fix block_n "
+            "(drop --bn, or run without --exact-shape to build the spec directly)"
+        )
     req = AttentionRequest(
         batch=int(shape.get("batch", 1)),
         nhead_q=int(shape["num_query_heads"]),
@@ -150,7 +186,6 @@ def make_spec_from_shape(shape: dict[str, Any]) -> Gfx950AttentionDenseSpec:
         use_sinks=bool(shape.get("use_sinks", False)),
     )
     coercers = {
-        "block_n": int,
         "lds_v_row_pad": int,
         "waves_per_eu": int,
         "interleave": bool,

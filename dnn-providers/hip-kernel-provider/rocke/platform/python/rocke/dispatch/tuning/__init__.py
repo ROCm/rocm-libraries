@@ -24,6 +24,7 @@ from .axes import (
     flag,
     gated,
     knob_requirements,
+    knob_types,
     sorted_items,
     values,
 )
@@ -40,24 +41,19 @@ from .identity import (
 from .space import BUILD_ERRORS, KnobSpace, Verdict
 from .spec import TunableRequest, TunedSpec
 from .walk import (
-    FULL_WAVES,
-    PRODUCTION_WAVES,
     SWEEP_LEVELS,
     configure_sweep,
     current_sweep_level,
     iter_at_level,
     sample_count,
     sweep_level,
-    waves_per_eu_sweep_values,
 )
 
 __all__ = [
     "BUILD_ERRORS",
-    "FULL_WAVES",
     "KnobAxis",
     "KnobSpace",
     "Knobs",
-    "PRODUCTION_WAVES",
     "SWEEP_LEVELS",
     "TUNING_ID_VERSION",
     "TunableRequest",
@@ -76,6 +72,7 @@ __all__ = [
     "key_of",
     "knob_items",
     "knob_requirements",
+    "knob_types",
     "make_tuned_candidate",
     "normalize_knobs",
     "resolve_pinned",
@@ -84,5 +81,4 @@ __all__ = [
     "sweep_level",
     "tuning_id",
     "values",
-    "waves_per_eu_sweep_values",
 ]

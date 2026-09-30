@@ -171,11 +171,14 @@ A tuned candidate is one registered **variant** (a geometry) plus a **knob
 space** its configurations are drawn from. Its specs carry:
 
 ```text
-tuning_id  = "{variant_id}_wpe{N}@{config_key}"
+tuning_id  = "{stem}@{config_key}"   # stem: the family's display name
 config_key = hash(TUNING_ID_VERSION, ABI, arch, path, variant_id, knobs,
                   fingerprint(the variant's defaults))
 knobs      = the canonical knob dict: fields set away from the default spec
 ```
+
+The stem defaults to the variant id; attention shows the occupancy hint too
+(`{variant_id}_wpe{N}`). Pins match on `config_key` only.
 
 `config_key` covers that explicit list, not the spec's fields, so it is the
 same on every problem the variant admits; `identity()` / `spec_hash` name the
