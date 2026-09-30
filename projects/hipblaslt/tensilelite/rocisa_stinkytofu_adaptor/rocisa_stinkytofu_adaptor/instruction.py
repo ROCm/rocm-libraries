@@ -5048,6 +5048,36 @@ def _wmma_matrix_fmts(it: Any, m: int, n: int, k: int, has_wmma_v3: bool):
     return ("", "")
 
 
+# cbsz/blgp input-permute modifiers for the f8f6f4-family MFMA (rocisa
+# ``mfma.hpp`` getArgStr, ``HasMFMA_f8f6f4`` branch). Only reached on MI/MFMA
+# hardware; gfx1250 WMMA uses matrix_*_fmt via :func:`_wmma_matrix_fmts`.
+_MFMA_CBSZ_BLGP: Dict[Any, str] = {}
+
+
+def _mfma_cbsz_blgp(it: Any) -> str:
+    if not _MFMA_CBSZ_BLGP:
+        _MFMA_CBSZ_BLGP.update({
+            InstType.INST_F8: " cbsz:0 blgp:0",
+            InstType.INST_BF8: " cbsz:1 blgp:1",
+            InstType.INST_F8_BF8: " cbsz:0 blgp:1",
+            InstType.INST_BF8_F8: " cbsz:1 blgp:0",
+            InstType.INST_F6: " cbsz:2 blgp:2",
+            InstType.INST_BF6: " cbsz:3 blgp:3",
+            InstType.INST_F4: " cbsz:4 blgp:4",
+            InstType.INST_F8_F6: " cbsz:0 blgp:2",
+            InstType.INST_F6_F8: " cbsz:2 blgp:0",
+            InstType.INST_F8_F4: " cbsz:0 blgp:4",
+            InstType.INST_F4_F8: " cbsz:4 blgp:0",
+            InstType.INST_F6_B6: " cbsz:2 blgp:3",
+            InstType.INST_B6_F6: " cbsz:3 blgp:2",
+            InstType.INST_F6_F4: " cbsz:2 blgp:4",
+            InstType.INST_F4_F6: " cbsz:4 blgp:2",
+            InstType.INST_B6_F4: " cbsz:3 blgp:4",
+            InstType.INST_F4_B6: " cbsz:4 blgp:3",
+        })
+    return _MFMA_CBSZ_BLGP.get(it, "")
+
+
 class MFMAInstruction(Instruction):
     """``v_mfma_*`` shim (rocisa ``MFMAInstruction``)."""
 
@@ -5110,6 +5140,65 @@ class MFMAInstruction(Instruction):
 
         return (f"v_{instruction_name}_{_inst_type_to_str(self.accType)}_{variant_str}"
                 f"{instruction_step}{type_str}{mfma_1k}")
+
+    def getArgStr(self) -> str:
+        """Port of rocisa ``MFMAInstruction::getArgStr`` (mfma.hpp:281-520).
+
+        Note: unlike the native path this does NOT apply ``setMsb`` (the
+        gfx1250 VGPR-MSB workaround for VGPR indices >= 256); on the stinkytofu
+        left path that is handled by ``InsertVgprMsbPass``, and it is not
+        triggered for the low-VGPR kernels exercised by the codegen unit tests.
+        """
+        from .base import getAsmCaps
+        caps = getAsmCaps()
+        m = self.variant[0] if len(self.variant) > 0 else 0
+        n = self.variant[1] if len(self.variant) > 1 else 0
+        k = self.variant[2] if len(self.variant) > 2 else 0
+        has_wmma_v3 = bool(caps.get("HasWMMA_V3", 0))
+
+        neg_str = ""
+        if self.neg:
+            neg_str = " neg_lo:[1,1,1]" if bool(caps.get("HasWMMA_V1", 0)) else " neg_lo:[1,1]"
+
+        input_permute_str = ""
+        scale_str = ""
+        if bool(caps.get("HasMFMA_f8f6f4", 0)):
+            input_permute_str = _mfma_cbsz_blgp(self.instType)
+        elif bool(caps.get("HasWMMA_f8f6f4", 0)):
+            fa, fb = _wmma_matrix_fmts(self.instType, m, n, k, has_wmma_v3)
+            if fa and fb:
+                input_permute_str = f" matrix_a_fmt:{fa} matrix_b_fmt:{fb}"
+            # forceScaledWMMA(): gfx1250 low-precision WMMA appends ", 0, 0"
+            # zero-scale operands (rocisa gates this inside the HasWMMA_f8f6f4
+            # branch).
+            try:
+                from . import rocIsa  # noqa: WPS433
+                isa = tuple(rocIsa.getInstance().getKernel().isa)
+            except Exception:  # noqa: BLE001
+                isa = ()
+            type_str = _wmma_type_convert(self.instType, m, n, k, has_wmma_v3)
+            is_wmma = not bool(caps.get("HasMFMA", 0))
+            if is_wmma and isa == (12, 5, 0) and type_str in ("f8f6f4", "f4"):
+                scale_str = ", 0, 0"
+
+        reuse_str = ""
+        if self.reuseA:
+            reuse_str += " matrix_a_reuse"
+        if self.reuseB:
+            reuse_str += " matrix_b_reuse"
+
+        # rocisa: ``!acc2.has_value() ? std::to_string(acc2_imm) : acc2``.
+        if self.acc2 is None:
+            acc2_str = str(self.acc2_imm if self.acc2_imm is not None else 0)
+        else:
+            acc2_str = _input_to_str(self.acc2)
+
+        return (_input_to_str(self.acc) + ", " + _input_to_str(self.a) + ", "
+                + _input_to_str(self.b) + ", " + acc2_str
+                + scale_str + neg_str + input_permute_str + reuse_str)
+
+    def toString(self) -> str:
+        return self.formatWithComment(self.preStr() + " " + self.getArgStr())
 
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
