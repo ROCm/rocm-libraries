@@ -86,7 +86,7 @@ adaptation token, not a general owning executable object.
 | Component | Current input, output and connection |
 | --- | --- |
 | One-solution builder | One recipe and target produce a source bundle through `Tensile.SingleSolution --source-only` and the existing TensileLite generators and validators: the main kernel assembly, the helper HIP source and its headers, and the one-solution library entry. It builds no code objects in this mode. |
-| Ranked recipe selector | Supplied candidates and problem facts produce validated recipes or rejection reasons. `Tensile.JitGemm` calls the builder without running a model, and publishes the first `requested_solutions` accepted candidates (default 1) that `exclude_kernel_names` does not name. |
+| Ranked recipe selector | Supplied candidates and problem facts produce validated recipes or rejection reasons. `Tensile.JitGemm` calls the builder without running a model, and publishes the first `requested_solutions` accepted candidates (default 1) that `exclude_kernel_names` does not name, each with a different kernel. It compares the kernel names that the published library uses. |
 | Jit | `hipblaslt-jit-component.{hpp,cpp}`. For one request and device target, `Jit::generate` runs the predictor when the backend consumes a prediction, asks the backend for solutions in a private scratch directory, builds each solution's code objects, checks support, and loads the supported ones as process-local bundles. With a solution store, it publishes them instead and loads them only when publishing fails; `getLibraryAlgos` configures the JIT solution library as the store. Each failure records its stage (configure, predict, generate, build, support, load or publish), and `getJitAlgo` reports the first one. The scratch directory is removed on success and kept after a failure that left files in it. |
 | TensileLite backend | `hipblaslt-jit-tensilelite.cpp`. It writes the `Tensile.JitGemm` request from the prediction, or passes an explicit recipe through, runs the generator with `--source-only`, and returns each published bundle's library entry, main kernel assembly and helper source. It builds and loads nothing. |
 | Origami predictor | `hipblaslt-jit-origami-predictor.cpp` expands the tuning knowledge's candidate seeds across the target's matrix instructions, ranks them with Origami, and emits the `origami.gemm.dp.v1` modeled contract (workgroup mapping, stagger and launch outputs) that the TensileLite backend forwards to `Tensile.JitGemm`. Jit runs it only when no explicit recipe is configured. |
@@ -390,7 +390,9 @@ result is still short, JIT continues:
    cache key.
 2. If that is still short, Jit generates the rest: Origami ranks candidates,
    TensileLite generates them, comgr builds them, and the library publishes
-   them. Every kernel that the query has already returned is excluded.
+   them. Every kernel that the query has already returned is excluded by name,
+   and a ranked candidate that would repeat an accepted kernel is skipped, so
+   selection moves on until each new result is a different kernel.
 
 In forced mode, these two steps are the whole query. Each JIT result passes the
 same support and workspace checks as a `getAllSolutions` result and is appended
@@ -419,6 +421,7 @@ A generator or build failure names its kept log:
 
 ```text
 hipblaslt error: JIT configure failed for GEMM M=256 N=128 K=512 batch=1 opA=OP_N opB=OP_N A=R_16F B=R_16F C=R_16F D=R_16F compute=COMPUTE_32F epilogue=EPILOGUE_DEFAULT: Python not found at /nonexistent; set HIPBLASLT_JIT_PYTHON
+hipblaslt error: JIT predict failed for GEMM M=256 N=128 K=0 ... EPILOGUE_DEFAULT: JIT GEMM prediction: No Origami ranking: no finite positive-latency candidates for this request
 hipblaslt error: JIT generate failed for GEMM M=256 N=128 K=512 ... EPILOGUE_DEFAULT: TensileLite generator: Provider exited with code 1; see /tmp/hipblaslt-jit-hG2kQx/tensilelite.log
 hipblaslt warning: JIT returned 1 of 2 requested solutions for GEMM M=256 N=128 K=512 ... EPILOGUE_DEFAULT: Origami ranked 72 parameter candidates; the first 2 candidates accepted by TensileLite were compiled
 ```
@@ -426,9 +429,12 @@ hipblaslt warning: JIT returned 1 of 2 requested solutions for GEMM M=256 N=128 
 Once generation falls short for a problem, later queries for it in the same
 process look it up in the library but do not generate again. Queries for the
 same problem and workspace limit in one process generate one at a time, so the
-second one finds what the first published; separate processes coordinate
-through the library lock. An empty output (M=0 or N=0) gets no JIT result.
-Grouped GEMM is not supported and reports an error.
+second one finds what the first published. Separate processes can generate the
+same solutions at once; they publish under the library lock, which keeps one
+entry and one index per solution, so every process returns the same indices.
+An empty output (M=0 or N=0) gets no JIT result. A problem that Origami cannot
+rank, such as K=0, reports a predict failure. Grouped GEMM is not supported and
+reports an error.
 
 #### Tool paths and scratch files
 
@@ -453,7 +459,14 @@ after a failure, whose report names the log inside it.
 
 The [JIT test guide](clients/tests/jit/README.md) describes the test binaries
 and the shared driver, `.github/scripts/test_hipblaslt_jit.py`, which runs them
-on a GPU of the requested architecture. The
+on a GPU of the requested architecture. Its heuristic routes cover each mode,
+reuse of the library by later processes and by `getAlgosFromIndex` with JIT
+off, distinct kernels when several solutions are requested, filling after a
+device library's pre-tuned solutions, the same query from several threads and
+processes at once, a problem the backend cannot rank, and failure reports.
+The `code-object-gfx1250` and `jit-gemm-gfx1250` routes run compile-only for
+gfx1250 on any host; the second generates heuristic solutions with
+`Tensile.JitGemm` and builds them with comgr. The
 [benchmark guide](clients/bench/README.jit.md) describes the prediction and
 benchmark checks.
 
@@ -702,7 +715,7 @@ each step advances.
 | 3. comgr code-object builder | Done | hipBLASLt builds one code object per solution through comgr, adapted from rocRoller's `InProcessAssembler`, linking the main kernel assembly and the helper HIP source together. With `--source-only`, TensileLite emits only assembly, helper source and metadata, and `Tensile.JitGemm` can publish several ranked bundles. hipBLASLt disables the comgr cache when `HIPBLASLT_JIT` is `1` or `2`. | Backend interface |
 | 4. JIT solution library | Done | One standard lazy TensileLite library per cache key under `HIPBLASLT_JIT_LIBRARY_PATH` or a private per-user default, with exact-size entries merged under a file lock by atomic rename, loaded as a second master library that reloads when other processes publish, with reserved solution indices from 2^30 to `INT32_MAX`. `jit::getLibraryAlgos` looks solutions up and publishes them; step 5 connects the heuristic queries to it. | JIT solution library (cache) |
 | 5. Heuristic integration | Done | `HIPBLASLT_JIT` modes 0, 1 and 2 in `hipblasLtMatmulAlgoGetHeuristic`, `GemmInstance::algoGetHeuristic` and `hipblasLtMatmul` without an algorithm, with the fallback order and failure rules above and every JIT failure reported on stderr. The tool-path defaults are compiled into the library, a JIT-off build warns once when it sees `HIPBLASLT_JIT`, and `hipblaslt-bench --jit-gemm` is removed. The shared driver checks each mode, reuse of the library by a second process, failure reports and the JIT-off warning. | JustInTime library type; backend interface |
-| 6. Validation sweep | Planned | Rerun the shared JIT driver and add heuristic, cache and mode coverage. | Overall JIT validation |
+| 6. Validation sweep | Done | The shared driver's heuristic routes cover each mode, a published index resolved with JIT off, distinct kernels when several solutions are requested, filling after a device library's pre-tuned solutions, a problem the backend cannot rank, and threads and processes that query the same problem at once. The gfx1250 routes generate ranked heuristic solutions and build their code objects without a gfx1250 device. | Overall JIT validation |
 
 The following work sits outside the six steps and remains future:
 

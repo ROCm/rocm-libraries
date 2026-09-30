@@ -17,10 +17,10 @@ roadmap.
 
 The notes cite source locations as `file:line`. Line numbers locate the named
 functions approximately; search for the named symbol when they drift. The timing
-plans describe the current build pipeline, in which Python launches the
-assembler, linker and helper compiler. Roadmap step 3 moves that work into
-hipBLASLt through AMD comgr, so re-derive the compile-stage boundaries when
-timing work begins.
+plans place the compile stages in Python, where TensileLite's full build launches
+the assembler, linker and helper compiler. JIT generation runs TensileLite with
+`--source-only` and builds code objects in hipBLASLt through AMD comgr, so
+re-derive the compile-stage boundaries for JIT when timing work begins.
 
 These notes are design material. KFA convergence and the timing features are
 not implemented; the [roadmap](../JIT.md#roadmap) records implementation status.

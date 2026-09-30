@@ -173,7 +173,10 @@ passes the recipe to `Tensile.SingleSolution`. Knobs the model does not predict
 keep TensileLite defaults and derivation. Both run with `--source-only` and the
 code-object version of the Jit request. When Jit asks for more than one
 solution, the request adds `requested_solutions`, and `Tensile.JitGemm`
-publishes one bundle per accepted candidate as `bundle-<rank>`. The backend
+publishes one bundle per accepted candidate as `bundle-<rank>`, each with a
+different kernel. The kernels that Jit excludes become `exclude_kernel_names`,
+which `Tensile.JitGemm` compares with the kernel names of the published
+library, so ranked selection moves on to the next kernel the caller lacks. The backend
 returns each bundle's one-solution library entry, main kernel assembly and
 helper source, and builds and loads nothing; the comgr builder builds one code
 object per solution, and the Tensile loader checks support and loads it.

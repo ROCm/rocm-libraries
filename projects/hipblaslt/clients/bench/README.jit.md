@@ -49,7 +49,8 @@ HIPBLASLT_JIT=2 HIPBLASLT_JIT_LIBRARY_PATH=/path/to/jit-library \
 ```
 
 `HIPBLASLT_JIT=1` benchmarks the pre-tuned solutions first and uses JIT only
-for the part of `--requested_solution` that they leave unfilled. Datatype
+for the part of `--requested_solution` that they leave unfilled, with kernels
+that the pre-tuned solutions do not already use. Datatype
 options keep their usual defaults and meaning. The `--api_method` option chooses
 how hipBLASLt prepares and executes the algorithms:
 
@@ -59,7 +60,8 @@ how hipBLASLt prepares and executes the algorithms:
 | `mix` | C descriptors passed to the C++ extension `Gemm`, followed by its heuristic query, initialization and execution |
 | `cpp` | C++ extension problem setup, heuristic query, initialization, and execution |
 
-`--requested_solution N` returns up to N generated solutions. `--algo_method all`
+`--requested_solution N` returns up to N generated solutions, each with a
+different kernel. `--algo_method all`
 and `--algo_method index` list or select pre-tuned solutions and do not
 generate. Grouped GEMM is not supported: its heuristic query reports an error
 and returns no solutions.
@@ -128,7 +130,9 @@ its runtime predicates.
 
 Published solutions stay in the JIT solution library, so a later run of the same
 problem with the same library, tools and device reuses them without generating.
-`--print_kernel_info` prints the kernel name. Generation runs in a new
+hipBLASLt never deletes them; to generate again, delete the library directory
+while no process uses it, as the [JIT guide](../../JIT.md#persistent-solution-library)
+describes. `--print_kernel_info` prints the kernel name. Generation runs in a new
 directory under the system temporary directory, which hipBLASLt removes after
 success and keeps after a failure; the failure report names the generator log
 inside it. To keep the recipe, prediction and bundles of a successful

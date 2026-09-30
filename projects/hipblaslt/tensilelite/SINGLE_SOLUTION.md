@@ -215,7 +215,13 @@ The module builds the first candidate accepted by solution validation and the
 static size/stride predicates. The optional `requested_solutions` (default 1,
 at most the candidate count) asks for that many accepted candidates in ranked
 order, and the optional `exclude_kernel_names` skips candidates whose kernel
-name it lists. `--source-only` applies as for `Tensile.SingleSolution`. The
+name it lists. Both compare the kernel name that the published library gives
+the solution, so a caller excludes the kernels its earlier results hold by
+passing their names. A candidate whose kernel repeats one already accepted for
+the same request is skipped with the reason `Same kernel as candidate <id>`:
+candidates that differ only in fields the kernel name does not encode, such as
+the matrix instruction's K, build the same kernel.
+`--source-only` applies as for `Tensile.SingleSolution`. The
 shared predicate definitions also control
 early rejection for vector widths, buffer offsets and workgroup counts. Checks
 requiring workspace, scalar values or device state remain with the host runtime,
