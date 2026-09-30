@@ -1967,7 +1967,7 @@ def _enable_gfx942_sink_prefill_tuned(
     """
     return (
         arch == "gfx942"
-        and problem.dtype in ("bf16", "fp16")
+        and problem.dtype == "bf16"
         and not problem.use_fp8
         and problem.head_size == 64
         and problem.block_size == 16

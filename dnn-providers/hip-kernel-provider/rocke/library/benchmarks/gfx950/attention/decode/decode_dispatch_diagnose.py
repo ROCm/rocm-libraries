@@ -66,7 +66,7 @@ def dump_shape(label, req):
         f"num_cus={p.num_cus} target_ctas={p._effective_target_ctas} "
         f"num_2d_prgms={n2d} use_2d_kernel={want_2d}"
     )
-    _arch = req.arch or "gfx950"
+    _arch = req.arch
     print(
         f"num_segments={_num_segments(p, _arch)} graph_replay={_enable_3d_graph_replay(p, _arch)}"
     )
