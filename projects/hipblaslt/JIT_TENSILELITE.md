@@ -7,8 +7,8 @@ components around this backend and the [roadmap](JIT.md#roadmap).
 
 TensileLite is the live JIT backend. This page describes its current direct
 entry point, which compiles one explicit YAML (YAML Ain't Markup Language)
-recipe, its role behind the Jit backend interface, and the changes planned for
-it.
+recipe, its role behind the Jit backend interface, and how heuristic queries
+use it.
 
 **Status:** the direct entry point below is internal.
 `hipblaslt-jit-tensilelite.hpp` is in `library/src/amd_detail/`; it is not

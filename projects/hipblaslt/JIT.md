@@ -13,8 +13,8 @@ This page is the single JIT guide and carries the roadmap. It has three parts:
 - [Current behavior](#current-behavior) describes what the code implements
   today. "Implemented" means present in the source, not released or approved
   as product naming.
-- [Target design](#target-design) is the approved plan of record. The code does
-  not implement it yet, apart from the roadmap steps marked Done.
+- [Target design](#target-design) is the approved plan of record. The six
+  roadmap steps implement it; the work listed after the roadmap remains future.
 - [Roadmap](#roadmap) lists the implementation steps between the two, with the
   status of each.
 
@@ -58,11 +58,15 @@ return an algorithm for the existing C/C++ GEMM execution APIs.
 | Direct TensileLite | `library/src/amd_detail/hipblaslt-jit-tensilelite.hpp` | `hipblaslt_ext::experimental::jit::tensilelite::getGemmAlgo` compiles one required, explicit YAML (YAML Ain't Markup Language) recipe and returns a `hipblasLtMatmulHeuristicResult_t`. The `hipblaslt-jit-direct-gemm-test` binary exercises it. See the [TensileLite backend guide](JIT_TENSILELITE.md). |
 | Generic request/backend/solution | `library/src/amd_detail/hipblaslt-jit.hpp` | `jit::tensilelite::createBackend` returns a `Backend` handle that owns a Jit configured with the TensileLite backend. `jit::makeGemmRequest` captures existing GEMM descriptors and host scalars, `jit::getJitAlgo` compiles on the selected device and returns an owned `Solution`, and `jit::getGemmAlgo` adapts it to the algorithm accepted by `hipblasLtMatmul` and `Gemm`. The `hipblaslt-jit-generic-gemm-test` binary exercises it. `jit::getLibraryAlgos` instead returns solution indices from the [JIT solution library](#persistent-solution-library), generating and publishing the solutions it lacks; `hipblaslt_ext::getAlgosFromIndex` turns them into algorithms. |
 
-Both headers are internal: they are not installed and `hipblaslt-ext.hpp` does
-not include them. The six functions keep
-`HIPBLASLT_EXPORT`, so `libhipblaslt.so` still exports them for the JIT test
-binaries, which link against the shared library. No installed header declares
-them, and they are not a supported API.
+Both headers are internal, as are `hipblaslt-jit-mock.hpp` and
+`hipblaslt-jit-gemm-internal.hpp`: they are not installed and
+`hipblaslt-ext.hpp` does not include them. `libhipblaslt.so` exports seven
+functions and one type from them with `HIPBLASLT_EXPORT` for the JIT test
+binaries, which link against the shared library: `jit::makeGemmRequest`,
+`jit::getJitAlgo`, `jit::getGemmAlgo`, `jit::getLibraryAlgos`,
+`jit::tensilelite::createBackend`, `jit::tensilelite::getGemmAlgo`,
+`jit::mock::createBackend`, and the `jit::detail::GemmRequest` request type.
+No installed header declares them, and they are not a supported API.
 
 For these entry points, Python, compiler, recipe and output paths belong to the
 TensileLite backend's `tensilelite::Options`; heuristic queries use the
@@ -338,8 +342,10 @@ not looked up, a process searches the directories for its device whose key
 matches everything except the backend, so a later process can run the solution
 without configuring the backend that generated it.
 
-**Indices.** JIT solutions use solution indices from 2^30 to `INT32_MAX`, which
-prebuilt libraries do not use. `allocator.dat` holds the next index, so
+**Indices.** JIT solutions use solution indices from 2^30 to `INT32_MAX`.
+Prebuilt libraries stay below that range: `TensileCreateLibrary` stops with an
+error when a library's solution indices would reach 2^30. `allocator.dat` holds
+the next index, so
 indices stay unique across every key directory under a root and are never
 reused while the root exists. Publication fails once the range is exhausted.
 `tensile_host.cpp` routes reserved indices to the JIT solution library, with its
@@ -564,11 +570,12 @@ generators must carry for a shared consumer.
 ### Predictor and TuningKnowledge
 
 The Predictor produces ranked candidates for Jit. Its inputs are Origami and
-TuningKnowledge. The current C++ predictor already ranks synthetic candidates
-with Origami and emits the `origami.gemm.dp.v1` modeled contract; step 2 places
-it behind a Predictor interface. TuningKnowledge supplies the TensileLite
-defaults used today for unmodeled knobs. Replacing those defaults with stored
-tuning data is later work, listed under [future work](#roadmap).
+TuningKnowledge. The C++ Origami predictor behind the Predictor interface
+(`hipblaslt-jit-origami-predictor.cpp`) ranks synthetic candidates with Origami
+and emits the `origami.gemm.dp.v1` modeled contract. TuningKnowledge supplies
+the TensileLite defaults used today for unmodeled knobs. Replacing those
+defaults with stored tuning data is later work, listed under
+[future work](#roadmap).
 
 ### Code-object construction with comgr
 
@@ -622,7 +629,8 @@ as described under [persistent solution library](#persistent-solution-library):
 - **Indices:** cached solutions use real solution indices from a reserved index
   range. Tests may continue to use process-local JIT tokens.
 - **Cache key:** each library records the gfx target and its target features,
-  the backend identifier and version, the comgr version, the compiler
+  the backend identifier and version, the comgr version, the code-object
+  version, the ROCm path that the builder passes to comgr, the compiler
   environment settings that affect output, and the library schema version. A
   library whose key does not match the running process is ignored. hipBLASLt
   never deletes cache entries automatically.
@@ -687,11 +695,12 @@ The explicit JIT entry points are not part of the public API; roadmap step 1,
 which is Done, implements this part of the design:
 
 - `getJitAlgo`, `getLibraryAlgos`, `makeGemmRequest`, both `getGemmAlgo`
-  functions (generic and TensileLite direct) and `createBackend` are not in the
-  public or extension API.
-- `hipblaslt-jit.hpp` and `hipblaslt-jit-tensilelite.hpp` are not installed or
-  included from `hipblaslt-ext.hpp`. They are internal headers under
-  `library/src/amd_detail/` used by the JIT tests. The functions stay exported
+  functions (generic and TensileLite direct) and both `createBackend` functions
+  (TensileLite and mock) are not in the public or extension API.
+- `hipblaslt-jit.hpp`, `hipblaslt-jit-tensilelite.hpp`, `hipblaslt-jit-mock.hpp`
+  and `hipblaslt-jit-gemm-internal.hpp` are not installed or included from
+  `hipblaslt-ext.hpp`. They are internal headers under `library/src/amd_detail/`
+  used by the JIT tests. The functions and the `GemmRequest` type stay exported
   from the shared library only so those tests can link; see
   [Entry points](#entry-points).
 - The `hipblaslt-jit-direct-gemm-test` and `hipblaslt-jit-generic-gemm-test`

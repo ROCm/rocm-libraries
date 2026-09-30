@@ -2,7 +2,7 @@
 
 This source guide is for TensileLite contributors and hipBLASLt integration
 developers. Its ownership and publication scope follow the
-[JIT roadmap](../JIT.md#roadmap). The builder supplies the generation
+[JIT guide](../JIT.md). The builder supplies the generation
 step used by hipBLASLt's TensileLite JIT backend; it does not make ordinary
 matmul calls compile code.
 
@@ -17,8 +17,10 @@ performance.
 The YAML supplies an exact recipe using the existing problem and parameter
 schema. `SingleSolution` uses TensileLite's full target and solution validators.
 
-The [JIT roadmap](../JIT.md#roadmap) explains how this builder connects to
-ranked selection, a generic JIT API, and application execution.
+[Select a recipe for a GEMM problem](#select-a-recipe-for-a-gemm-problem)
+covers ranked selection. [hipBLASLt provider integration](#hipblaslt-provider-integration)
+and the [JIT guide](../JIT.md#heuristic-integration) cover how hipBLASLt builds,
+publishes and runs the results.
 
 ## Python and command-line use
 

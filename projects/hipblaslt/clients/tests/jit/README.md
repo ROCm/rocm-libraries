@@ -200,7 +200,8 @@ temporary and cache directories under the output directory, and an empty
 directly. `--out` names a fresh results directory, and either `--target`
 selects a compile-only run for that target ID or `--gpu` also loads and runs
 the results on device 0, which must match the target. `--ffm` runs the GPU part
-on the simulator that `HSA_MODEL_TOPOLOGY` and `HSA_MODEL_LIB` select.
+on the simulator that `HSA_MODEL_TOPOLOGY` and `HSA_MODEL_LIB` select. Simulator
+runs are manual: neither the shared driver nor CI runs `--ffm`.
 `--bundle` adds the checks for a TensileLite source bundle, or for a full-build
 bundle kept with `--keep-build-tmp`, whose code objects are then compared with
 the comgr-built ones. `--expect-comgr-cache present|absent` adds the comgr cache
