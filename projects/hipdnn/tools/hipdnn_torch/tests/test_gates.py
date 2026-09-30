@@ -15,6 +15,7 @@ gelu/silu ``_mode`` map) -- with fake tensors and a fake ``state``, so they run 
 on any box (no bootstrap, no GPU, no provider ``.so``).
 """
 
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -279,8 +280,12 @@ def test_torch_backend_found_in_either_sdk_wheel_layout(tmp_path, monkeypatch, s
 def test_torch_backend_missing_raises_naming_both_layouts(tmp_path, monkeypatch):
     monkeypatch.delenv("HIPDNN_TORCH_BACKEND_GLOB", raising=False)
     torch = _fake_site(tmp_path, None)
-    with pytest.raises(BootstrapError, match="_rocm_sdk_libraries_\\*"):
+    with pytest.raises(BootstrapError) as excinfo:
         _torch_backend_path(torch)
+    message = str(excinfo.value)
+    for sdk_dir in ("_rocm_sdk_libraries", "_rocm_sdk_libraries_*"):
+        expected = os.path.join(str(tmp_path), sdk_dir, "lib", "libhipdnn_backend.so")
+        assert repr(expected) in message
 
 
 def test_torch_backend_override_wins(tmp_path, monkeypatch):
