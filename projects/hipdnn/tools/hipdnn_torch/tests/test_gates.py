@@ -24,7 +24,7 @@ from hipdnn_torch.conv import Conv2dFpropOverride, _ntuple, _resolve_pads
 from hipdnn_torch.layernorm import LayerNormOverride
 from hipdnn_torch.linear import LinearOverride
 from hipdnn_torch.rmsnorm import RmsNormOverride, _scale_view
-from hipdnn_torch.sdpa import SdpaOverride
+from hipdnn_torch.sdpa import SdpaOverride, _output_layout
 
 
 class _FakeDtype:
@@ -249,3 +249,42 @@ def test_silu_mode():
     swish = object()
     ov.state.hipdnn = SimpleNamespace(PointwiseMode=SimpleNamespace(SWISH_FWD=swish))
     assert ov._mode() is swish
+
+
+# --------------------------------------------------------------------------- #
+# sdpa._output_layout -- O takes Q's dimension order                          #
+# --------------------------------------------------------------------------- #
+def _layout_strides(alloc_dims, inverse):
+    """Strides of ``empty(alloc_dims).permute(inverse)``, without torch."""
+    alloc_strides = _contig_strides(alloc_dims)
+    return tuple(alloc_strides[i] for i in inverse)
+
+
+def test_output_layout_contiguous_bhsd_query_stays_contiguous():
+    q_shape = (2, 8, 128, 64)
+    alloc_dims, inverse = _output_layout(q_shape, _contig_strides(q_shape), 64)
+    assert alloc_dims == [2, 8, 128, 64]
+    assert _layout_strides(alloc_dims, inverse) == (65536, 8192, 64, 1)
+
+
+def test_output_layout_bshd_view_query_gives_bshd_output():
+    # [B,S,H,D] storage viewed as [B,H,S,D], the usual packed-QKV permutation.
+    q_shape, q_stride = (2, 8, 128, 64), (65536, 64, 512, 1)
+    alloc_dims, inverse = _output_layout(q_shape, q_stride, 64)
+    assert alloc_dims == [2, 128, 8, 64]
+    assert _layout_strides(alloc_dims, inverse) == q_stride
+
+
+def test_output_layout_uses_value_head_dim():
+    q_shape, q_stride = (2, 8, 128, 64), (65536, 64, 512, 1)
+    alloc_dims, inverse = _output_layout(q_shape, q_stride, 128)
+    assert alloc_dims == [2, 128, 8, 128]
+    assert _layout_strides(alloc_dims, inverse) == (131072, 128, 1024, 1)
+
+
+def test_output_layout_unit_batch_ties_keep_logical_order():
+    # B=1 contiguous: B and H share a stride; the tie must not reorder them.
+    q_shape = (1, 1, 128, 64)
+    alloc_dims, inverse = _output_layout(q_shape, _contig_strides(q_shape), 64)
+    assert alloc_dims == [1, 1, 128, 64]
+    assert inverse == [0, 1, 2, 3]

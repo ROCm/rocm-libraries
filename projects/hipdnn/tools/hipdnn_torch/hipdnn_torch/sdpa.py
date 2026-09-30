@@ -11,9 +11,12 @@ of a packed QKV buffer, never contiguous BHSD) -- and submits it. It imposes no
 layout (no ``.contiguous()``), pre-judges nothing about which shapes an engine can
 serve, and makes no structural correctness check (rank, GQA head counts, D
 agreement): hipDNN's ``check_support`` / ``execute`` decides, and a shape no loaded
-engine claims falls back to native and is counted. The output is allocated
-contiguous with Q's ``[B, Hq, Sq, Dv]`` shape (native's output contract) and its
-actual strides are fed to the graph.
+engine claims falls back to native and is counted. The output has Q's
+``[B, Hq, Sq, Dv]`` shape and Q's dimension order (a BSHD view in gives a BSHD view
+out, contiguous BHSD in gives contiguous BHSD out), and its actual strides are fed
+to the graph. Native PyTorch has no single output layout to match: on ROCm torch 2.15
+the math backend returns contiguous BHSD, flash follows Q, and memory-efficient
+returns BSHD.
 
 Every torch SDPA parameter is translated into the graph:
 
@@ -40,6 +43,21 @@ import math
 from .base import NotApplicable, OpOverride
 
 _Q_UID, _K_UID, _V_UID, _O_UID, _BIAS_UID = 1, 2, 3, 4, 5
+
+
+def _output_layout(q_shape, q_stride, dv):
+    """Dims to allocate contiguously, and the permutation that turns that
+    allocation into a ``[*q_shape[:-1], dv]`` output ordered like Q in memory.
+
+    Dims are sorted outermost-first by Q's stride; ties keep index order, so a
+    contiguous Q maps to a contiguous output. Pure shape/stride math, so the gates
+    tests can check it without torch.
+    """
+    shape = (*q_shape[:-1], dv)
+    order = sorted(range(len(shape)), key=lambda i: (-q_stride[i], i))
+    alloc_dims = [shape[i] for i in order]
+    inverse = [order.index(i) for i in range(len(order))]
+    return alloc_dims, inverse
 
 
 class SdpaOverride(OpOverride):
@@ -182,12 +200,16 @@ class SdpaOverride(OpOverride):
                     bias.dtype,
                 )
 
-            # Output mirrors native's contract: contiguous, Q's batch/heads/seq with
-            # V's head dim (Dv). We own it, so its strides are known.
+            # Output takes Q's dimension order with V's head dim (Dv). We own it,
+            # so its strides are known. See the module docstring for why this does
+            # not copy any one native backend's layout.
             dv = int(value.shape[-1])
-            o = torch.empty(
-                (*query.shape[:-1], dv), dtype=query.dtype, device=query.device
+            alloc_dims, inverse = _output_layout(
+                tuple(query.shape), tuple(query.stride()), dv
             )
+            o = torch.empty(
+                alloc_dims, dtype=query.dtype, device=query.device
+            ).permute(inverse)
 
             entry = self._cached_graph(
                 (
