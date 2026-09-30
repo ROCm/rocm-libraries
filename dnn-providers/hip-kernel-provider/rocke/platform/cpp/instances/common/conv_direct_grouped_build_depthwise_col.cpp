@@ -96,8 +96,9 @@ static rocke_value_t*
     return rocke_b_select(ctx->b, cond, byte_off, ctx->oob_sentinel);
 }
 
-/* Python `load_elem`: one element, widened to f32.  f32 goes through the
- * dtype-generic tile.buffer_load with no convert. */
+/* Python `load_elem`: one element of A or B, widened to f32.  Dispatched on DT
+ * rather than routed through the generic buffer_load so the f16 path emits
+ * exactly the ops it did before this kernel grew a dtype knob. */
 static rocke_value_t*
     dwcol_load_elem(rocke_dconv_dwcol_ctx_t* ctx, rocke_value_t* rsrc, rocke_value_t* byte_off)
 {
@@ -106,11 +107,7 @@ static rocke_value_t*
     {
         return rocke_b_cast_to_f32(b, rocke_b_buffer_load_f16(b, rsrc, byte_off, ctx->c0));
     }
-    if(strcmp(ctx->DT->name, "bf16") == 0)
-    {
-        return rocke_b_cast_to_f32(b, rocke_b_buffer_load_bf16(b, rsrc, byte_off, ctx->c0));
-    }
-    return rocke_b_buffer_load(b, rsrc, byte_off, ctx->c0, rocke_f32());
+    return rocke_b_cast_to_f32(b, rocke_b_buffer_load_bf16(b, rsrc, byte_off, ctx->c0));
 }
 
 /* Python `store_elem`: narrow the f32 accumulator back to the tensor dtype. */
@@ -124,13 +121,9 @@ static void dwcol_store_elem(rocke_dconv_dwcol_ctx_t* ctx,
     {
         rocke_b_buffer_store_f16(b, rsrc, byte_off, ctx->c0, rocke_b_trunc_f32_to_f16(b, acc));
     }
-    else if(strcmp(ctx->DT->name, "bf16") == 0)
-    {
-        rocke_b_buffer_store_bf16(b, rsrc, byte_off, ctx->c0, rocke_b_trunc_f32_to_bf16(b, acc));
-    }
     else
     {
-        rocke_b_buffer_store_f32(b, rsrc, byte_off, ctx->c0, acc);
+        rocke_b_buffer_store_bf16(b, rsrc, byte_off, ctx->c0, rocke_b_trunc_f32_to_bf16(b, acc));
     }
 }
 
@@ -185,8 +178,9 @@ bool rocke_dconv_dwcol_prologue(rocke_dconv_dwcol_ctx_t* ctx)
         }
         return false;
     }
-    /* Python: ELEM_BYTES = {"f16": 2, "bf16": 2, "f32": 4}[DT.name] */
-    ctx->ELEM_BYTES = (strcmp(ctx->DT->name, "f32") == 0) ? 4 : 2;
+    /* Python: ELEM_BYTES = 2 -- the validator has already restricted DT to
+     * f16/bf16, both 2 bytes wide. */
+    ctx->ELEM_BYTES = 2;
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", ctx->THREADS);
 

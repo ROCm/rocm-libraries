@@ -73,10 +73,14 @@ _REJECTIONS = [
     ("cpg_not_1", dict(cpg=4), ["cpg=4"], _ARCH),
     ("kpg_not_1", dict(kpg=4), ["kpg=4"], _ARCH),
     # --- element type ------------------------------------------------------
-    # fp8/int8 are real dtypes the rest of the stack handles, so "not
-    # implemented here" has to be said out loud rather than inferred.
+    # fp8/int8/fp32 are all real dtypes the rest of the stack handles, so "not
+    # implemented here" has to be said out loud rather than inferred.  fp32 in
+    # particular resolves through dtype_to_ir and would otherwise look accepted:
+    # this kernel takes the same fp16/bf16 pair as its preload and spatial
+    # siblings, and the allow-list is what holds that line.
     ("dtype_fp8", dict(dtype="fp8"), ["'fp8'"], _ARCH),
     ("dtype_int8", dict(dtype="int8"), ["'int8'"], _ARCH),
+    ("dtype_fp32", dict(dtype="fp32"), ["'fp32'"], _ARCH),
     ("dtype_empty", dict(dtype=""), ["''"], _ARCH),
     ("dtype_none", dict(dtype=None), ["None"], _ARCH),
     # --- block geometry ----------------------------------------------------
@@ -190,7 +194,7 @@ def test_col_rejection_reasons_are_distinct():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("dtype", ["fp16", "bf16", "fp32"])
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("stride", [1, 2, 3])
 def test_col_spec_accepted_across_dtype_and_stride(dtype, stride):
     spec = _spec(dtype=dtype, stride=stride)
@@ -207,20 +211,21 @@ def test_col_kernel_names_separate_dtype_and_stride():
     """The cache key must distinguish variants that emit different code."""
     names = {
         (dt, s): _spec(dtype=dt, stride=s).kernel_name()
-        for dt in ("fp16", "bf16", "fp32")
+        for dt in ("fp16", "bf16")
         for s in (1, 2, 3)
     }
     assert len(set(names.values())) == len(names), names
 
 
-def test_col_dtype_aliases_resolve():
+@pytest.mark.parametrize("alias", ["float16", "half", "f16", "bfloat16"])
+def test_col_dtype_aliases_resolve(alias):
     """Allow-list membership is tested on the resolved IR type, not the string.
 
-    ``"float32"`` is a ``dtype_to_ir`` alias for ``"fp32"``; accepting it keeps
-    this kernel consistent with the rest of the conv stack, which takes torch
-    dtype names straight through.
+    Each of these is a ``dtype_to_ir`` alias for fp16 or bf16; accepting them
+    keeps this kernel consistent with the rest of the conv stack, which takes
+    torch dtype names straight through.
     """
-    ok, reason = is_valid_depthwise_col_spec(_spec(dtype="float32"), _ARCH)
+    ok, reason = is_valid_depthwise_col_spec(_spec(dtype=alias), _ARCH)
     assert ok, reason
 
 

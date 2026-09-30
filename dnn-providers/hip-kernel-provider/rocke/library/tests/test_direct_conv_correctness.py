@@ -233,14 +233,13 @@ _COL_SHAPES: List[_Shape] = [
 ]
 
 
-# Dtype sweep.  The first three are the same geometry at all three dtypes, so a
-# failure isolates to the element type; the rest pair a non-fp16 dtype with a
-# stride/tail case, since the load/store width and the tap pruning are
-# independent code paths that both have to be right at once.
+# Dtype sweep.  The first two are the same geometry at both dtypes, so a failure
+# isolates to the element type; the rest pair a dtype with a stride/tail/wide-KW
+# case, since the load/store width and the tap pruning are independent code paths
+# that both have to be right at once.
 _COL_DTYPE_SHAPES: List[_Shape] = [
     _Shape("coldt_fp16", N=2, H=14, W=14, groups=64, cpg=1, block_w=2, dtype="fp16"),
     _Shape("coldt_bf16", N=2, H=14, W=14, groups=64, cpg=1, block_w=2, dtype="bf16"),
-    _Shape("coldt_fp32", N=2, H=14, W=14, groups=64, cpg=1, block_w=2, dtype="fp32"),
     _Shape(
         "coldt_bf16_s2_k5",
         N=1,
@@ -256,7 +255,7 @@ _COL_DTYPE_SHAPES: List[_Shape] = [
         dtype="bf16",
     ),
     _Shape(
-        "coldt_fp32_s3_chtail",
+        "coldt_bf16_s3_chtail",
         N=1,
         H=28,
         W=28,
@@ -264,19 +263,17 @@ _COL_DTYPE_SHAPES: List[_Shape] = [
         cpg=1,
         stride=3,
         block_w=4,
-        dtype="fp32",
+        dtype="bf16",
     ),
-    _Shape("coldt_fp32_k3x31", N=1, H=16, W=40, groups=64, cpg=1, KW=31, dtype="fp32"),
+    _Shape("coldt_fp16_k3x31", N=1, H=16, W=40, groups=64, cpg=1, KW=31, dtype="fp16"),
 ]
 
 
 # fp16 and bf16 round the *output* to 10/7 mantissa bits, so the meaningful
-# bound there is on the ref_scale-normalised max-abs error.  bf16 carries 3
-# fewer mantissa bits than fp16, so it gets the same looser bound the rest of
-# this suite already uses for it (_TOL_BF16) rather than borrowing fp16's.
-# fp32 stores the result exactly and the only divergence left is f32
-# reassociation, so 5e-2 would not be a check at all.
-_COL_TOL = {"fp16": _TOL, "bf16": _TOL_BF16, "fp32": 1e-4}
+# bound is on the ref_scale-normalised max-abs error.  bf16 carries 3 fewer
+# mantissa bits than fp16, so it gets the same looser bound the rest of this
+# suite already uses for it (_TOL_BF16) rather than borrowing fp16's.
+_COL_TOL = {"fp16": _TOL, "bf16": _TOL_BF16}
 
 
 # ---------------------------------------------------------------------------
@@ -674,7 +671,7 @@ def _run_depthwise_spatial_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
 def _torch_dtype(name: str):
     import torch
 
-    return {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[name]
+    return {"fp16": torch.float16, "bf16": torch.bfloat16}[name]
 
 
 def _run_depthwise_device(
@@ -772,7 +769,7 @@ def _run_depthwise_col_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one column-streamed depthwise kernel.
 
     Uses ``DirectDepthwiseColSpec`` (cpg = kpg = 1), which supports stride >= 1
-    and fp16/bf16/fp32.
+    and fp16/bf16.
 
     Modelled on ``_run_depthwise_spatial_one``, not on ``_run_depthwise_one``:
     the latter allocates ``D`` as ``(N, H, W, K)`` and grids on ``ceil(W/block_w)``,

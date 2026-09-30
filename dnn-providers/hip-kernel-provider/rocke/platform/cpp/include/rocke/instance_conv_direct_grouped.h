@@ -364,7 +364,7 @@ typedef struct rocke_direct_depthwise_col_spec
     int block_w; /* default 1  */
     int block_waves; /* default 1  */
     int wave_size; /* default 64 */
-    const char* dtype; /* default "fp16"; one of fp16 / bf16 / fp32 */
+    const char* dtype; /* default "fp16"; one of fp16 / bf16 */
     /* Python's Optional[int] max_live_f32.
      * 0  = sentinel for Python None: use the arch VGPR budget as-is.
      * >0 = tighten via min(max_live_f32, arch_budget).
@@ -386,7 +386,7 @@ int rocke_direct_depthwise_col_resolve_max_live_f32(const rocke_direct_depthwise
  * is elided from the emitted IR entirely (not merely made constant-true). */
 bool rocke_direct_depthwise_col_ch_tile_exact(const rocke_direct_depthwise_col_spec_t* spec);
 bool rocke_direct_depthwise_col_w_tile_exact(const rocke_direct_depthwise_col_spec_t* spec);
-/* dtype_tag() -> the IR scalar name ("f16"/"bf16"/"f32") when the dtype string
+/* dtype_tag() -> the IR scalar name ("f16"/"bf16") when the dtype string
  * resolves, else the string with non-alphanumerics replaced by '_'. */
 rocke_status_t rocke_direct_depthwise_col_dtype_tag(const rocke_direct_depthwise_col_spec_t* spec,
                                                     char* out,
@@ -697,9 +697,7 @@ rocke_kernel_def_t* rocke_build_direct_conv_wgrad_new(rocke_ir_builder_t* b,
  *    ptr A:{dtype}, ptr B:{dtype}, ptr D:{dtype}, scalar A_bytes:i32,
  *    B_bytes:i32, D_bytes:i32.
  *  The depthwise_col kernel keeps that shape, but its three pointer element
- *  types follow spec->dtype ("fp16" / "bf16" / "fp32"). The fp32 case is
- *  outside the range rocke_direct_conv_signature_for_dtype accepts, so it is
- *  not covered by the helpers below.
+ *  types follow spec->dtype ("fp16" / "bf16") rather than problem.dtype.
  * ===================================================================== */
 
 /* Writes the 6 manifest entries into out[] (capacity out_cap) and sets

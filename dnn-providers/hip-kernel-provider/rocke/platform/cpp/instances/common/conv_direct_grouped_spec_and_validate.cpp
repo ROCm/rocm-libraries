@@ -1750,18 +1750,16 @@ bool rocke_direct_depthwise_col_is_valid_spec(const rocke_direct_depthwise_col_s
         rocke_dconv__set_unknown_arch_reason(reason, reason_cap, arch);
         return false;
     }
-    /* dtype allow-list: fp16 / bf16 / fp32 (aliases resolved by dtype_to_ir). */
+    /* dtype allow-list: fp16 / bf16 (aliases resolved by dtype_to_ir). */
     dt = (spec->dtype != NULL) ? rocke_fuse_dtype_to_ir_str(spec->dtype) : NULL;
-    if(dt == NULL
-       || !(strcmp(dt->name, "f16") == 0 || strcmp(dt->name, "bf16") == 0
-            || strcmp(dt->name, "f32") == 0))
+    if(dt == NULL || !(strcmp(dt->name, "f16") == 0 || strcmp(dt->name, "bf16") == 0))
     {
         if(reason && reason_cap > 0)
         {
             rocke_dconv_col__dtype_repr(spec->dtype, dtype_repr, sizeof(dtype_repr));
             snprintf(reason,
                      reason_cap,
-                     "dtype %s is not supported; expected one of fp16, bf16, fp32",
+                     "dtype %s is not supported; expected fp16 or bf16",
                      dtype_repr);
         }
         return false;

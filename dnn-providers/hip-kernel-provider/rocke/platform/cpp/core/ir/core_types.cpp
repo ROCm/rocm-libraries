@@ -561,7 +561,6 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.buffer_store_vN_bf16",
     "tile.buffer_store_f32",
     "tile.buffer_store_vN_f32",
-    "tile.buffer_load",
 
     /* tile.* mma */
     "tile.mma",
@@ -808,7 +807,6 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* buffer_store_vN_bf16       */ false,
     /* buffer_store_f32           */ false,
     /* buffer_store_vN_f32        */ false,
-    /* buffer_load                */ false,
 
     /* tile.* mma */
     /* tile.mma                 */ false,

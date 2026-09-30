@@ -491,15 +491,10 @@ def _run_depthwise_sweep(
     _wave_size = DirectDepthwiseSpatialSpec(problem=p).wave_size
     _use_spatial = p.groups < _wave_size
 
-    # Only the column-streamed variant carries a dtype knob; the preload and
-    # spatial specs are fp16-only, so a non-fp16 run sweeps the col variant alone
-    # rather than silently feeding them tensors of the wrong width.
-    _torch_dtype = {
-        "fp16": torch.float16,
-        "bf16": torch.bfloat16,
-        "fp32": torch.float32,
-    }[dtype]
-    _col_only = dtype != "fp16"
+    # All three variants take fp16 and bf16 -- preload and spatial off
+    # problem.dtype, col off DirectDepthwiseColSpec.dtype -- so every dtype
+    # sweeps the full bake-off rather than a subset of the variants.
+    _torch_dtype = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
 
     torch.manual_seed(42)
     A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype).uniform_(-1.0, 1.0)
@@ -516,9 +511,7 @@ def _run_depthwise_sweep(
         ("col", bw, bwv)
         for bw, bwv in itertools.product(_DW_COL_BLOCK_W, _DW_BLOCK_WAVES)
     ]
-    if _col_only:
-        combos = _col_combos
-    elif _use_spatial:
+    if _use_spatial:
         combos = [("spatial", None, bw) for bw in _DW_BLOCK_WAVES]
     else:
         combos = [
@@ -1880,17 +1873,6 @@ def main() -> int:
     conv.add_argument("--pW", type=int, default=1, help="horizontal padding")
     conv.add_argument("--dH", type=int, default=1, help="vertical dilation")
     conv.add_argument("--dW", type=int, default=1, help="horizontal dilation")
-    conv.add_argument(
-        "--dtype",
-        choices=("fp16", "bf16", "fp32"),
-        default="fp16",
-        help=(
-            "element type for A/B/D (default: fp16). Ignored with --miopen-cmd / "
-            "--miopen-file, where the dtype comes from the driver keyword. Only "
-            "the column-streamed depthwise variant honours this; the preload and "
-            "spatial variants are fp16-only and are skipped otherwise."
-        ),
-    )
     conv.add_argument(
         "--groups",
         "-g",

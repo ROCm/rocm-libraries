@@ -581,8 +581,8 @@ static int make_cfg(int idx,
         *arch = "gfx950";
         return 0;
     case 34:
-        /* col stride=3 fp32: exercises the (y - r) % stride tap pruning and the
-         * f32 load/store forms; ch guard elided, w guard live. */
+        /* col stride=3: exercises the (y - r) % stride tap pruning at a stride
+         * no other case reaches; ch guard elided, w guard live. */
         p.N = 1;
         p.H = 16;
         p.W = 16;
@@ -594,7 +594,7 @@ static int make_cfg(int idx,
         sdwc->problem = p;
         sdwc->block_w = 4;
         sdwc->block_waves = 1;
-        sdwc->dtype = "fp32";
+        sdwc->dtype = "bf16";
         *kind = KIND_DWCOL;
         *arch = "gfx950";
         return 0;
@@ -633,7 +633,7 @@ static int make_cfg(int idx,
         sdwc->problem = p;
         sdwc->block_w = 2;
         sdwc->block_waves = 1;
-        sdwc->dtype = "fp32";
+        sdwc->dtype = "fp16";
         *kind = KIND_DWCOL;
         *arch = "gfx950";
         return 0;
@@ -686,7 +686,7 @@ static int make_cfg(int idx,
         sdwc->problem = p;
         sdwc->block_w = 1;
         sdwc->block_waves = 2;
-        sdwc->dtype = "fp32";
+        sdwc->dtype = "bf16";
         *kind = KIND_DWCOL;
         *arch = "gfx950";
         return 0;

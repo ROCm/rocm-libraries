@@ -3035,8 +3035,24 @@ def cases():
     )
 
     # --- column-streamed depthwise (DirectDepthwiseColSpec) ---
-    # Mirrors library parity emit indices 12-19.  Both gfx950 and gfx942 are covered.
-    # Enforces the repo #1 invariant (byte-identity) for this kernel family.
+    # Mirrors library parity emit indices 32-40.  Both gfx950 and gfx942 are covered.
+    #
+    # Those emit indices pin the two engines against each other; these hashes do
+    # the other half of the job.  Byte-identity says the engines *agree*, while a
+    # recorded hash says the emission has not *moved*: a change that edits both
+    # engines in lockstep keeps the parity gate GREEN and still lands here, which
+    # is what makes a refactor meant to be behaviour-preserving shown to be so
+    # rather than argued to be.
+    #
+    # The stride-1 fp16 cases carry the extra weight.  The stride generalization
+    # (n_iters / tap-pruning / accumulator-index formulas parameterized by
+    # p.stride) claims to reduce to the original expressions at stride == 1;
+    # these hashes are what turns that claim into a check.
+    #
+    # Each case pins one axis the emitter branches on: the static tap grid
+    # (KH, PAD, stride), the two *_tile_exact guard elisions, the accumulator
+    # band width (block_w), the channel tiling (block_waves), and the element
+    # type.  Review the IR diff before re-blessing any of them.
     add(
         "conv_direct",
         "conv_direct/gfx950/dw_col_s1_fp16",
@@ -3114,7 +3130,7 @@ def cases():
             stride=1,
             block_w=2,
             block_waves=1,
-            dtype="fp32",
+            dtype="fp16",
         ),
     )
     add(
@@ -3154,7 +3170,74 @@ def cases():
             stride=1,
             block_w=1,
             block_waves=2,
-            dtype="fp32",
+            dtype="bf16",
+        ),
+    )
+    # stride=3: the only case above stride 2, so the (y - r) % stride tap
+    # pruning is pinned at a stride where more than one tap is dropped.
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/dw_col_s3_k5_bw3",
+        "gfx950",
+        build_direct_depthwise_col(
+            "irhash_dwcol_950_s3_k5",
+            "gfx950",
+            N=1,
+            H=12,
+            W=12,
+            groups=64,
+            KH=5,
+            KW=5,
+            PAD=2,
+            stride=3,
+            block_w=3,
+            block_waves=1,
+            dtype="bf16",
+        ),
+    )
+    # PAD > (KH-1)/2: padded-input overhang, where n_iters = (Ho-1)*stride + KH
+    # runs past H.  Unreachable at the PAD/KH pairs the cases above use.
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/dw_col_s2_pad2_ovh",
+        "gfx950",
+        build_direct_depthwise_col(
+            "irhash_dwcol_950_pad2_ovh",
+            "gfx950",
+            N=1,
+            H=12,
+            W=12,
+            groups=64,
+            KH=3,
+            KW=3,
+            PAD=2,
+            stride=2,
+            block_w=2,
+            block_waves=1,
+            dtype="fp16",
+        ),
+    )
+    # KW >> KH: the regime the column-streamed variant exists for -- KW rides
+    # the runtime loop, so only KH weights are live regardless of how wide the
+    # filter gets.  dw_col_k31 has KH == KW and so cannot show that separation.
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/dw_col_k3x31",
+        "gfx950",
+        build_direct_depthwise_col(
+            "irhash_dwcol_950_k3x31",
+            "gfx950",
+            N=1,
+            H=16,
+            W=32,
+            groups=64,
+            KH=3,
+            KW=31,
+            PAD=1,
+            stride=1,
+            block_w=1,
+            block_waves=1,
+            dtype="fp16",
         ),
     )
     # gfx942 target -- exercises the arch-specific VGPR budget path

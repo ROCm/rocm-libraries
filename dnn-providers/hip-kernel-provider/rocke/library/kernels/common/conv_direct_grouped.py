@@ -5878,8 +5878,8 @@ class DirectDepthwiseColSpec:
         """Accumulator band + one filter column, per lane.
 
         Dtype-invariant: A/B are widened to f32 on load and the accumulator is
-        f32 for every supported element type, so fp16, bf16 and fp32 all hold
-        the same number of live f32 values.
+        f32 for every supported element type, so fp16 and bf16 both hold the
+        same number of live f32 values.
         """
         return self.problem.Ho * self.block_w + self.problem.KH
 
@@ -5965,9 +5965,10 @@ class DirectDepthwiseColSpec:
             )
 
 
-#: Element types ``build_direct_depthwise_col`` can emit.  Accumulation is f32
-#: for all of them, so this only selects the A/B load and the D store width.
-_DW_COL_DTYPES = ("f16", "bf16", "f32")
+#: Element types ``build_direct_depthwise_col`` can emit -- the same pair the
+#: preload and spatial depthwise variants take.  Accumulation is f32 for both,
+#: so this only selects the A/B load and the D store form.
+_DW_COL_DTYPES = ("f16", "bf16")
 
 
 def is_valid_depthwise_col_spec(
@@ -5997,10 +5998,7 @@ def is_valid_depthwise_col_spec(
     except ValueError:
         dt = None
     if dt not in _DW_COL_DTYPES:
-        return False, (
-            f"dtype {spec.dtype!r} is not supported; expected one of "
-            f"fp16, bf16, fp32"
-        )
+        return False, f"dtype {spec.dtype!r} is not supported; expected fp16 or bf16"
 
     p = spec.problem
     if p.cpg != 1 or p.kpg != 1:
@@ -6107,9 +6105,9 @@ def build_direct_depthwise_col(
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
     # A, B and D share one element type; only the accumulator is pinned to f32.
-    # The validator has already restricted DT to f16/bf16/f32.
+    # The validator has already restricted DT to f16/bf16, both 2 bytes wide.
     DT = dtype_to_ir(spec.dtype)
-    ELEM_BYTES = {"f16": 2, "bf16": 2, "f32": 4}[DT.name]
+    ELEM_BYTES = 2
 
     A = b.param("A", PtrType(DT, "global"), noalias=True, readonly=True, align=16)
     Bp = b.param("B", PtrType(DT, "global"), noalias=True, readonly=True, align=16)
@@ -6137,19 +6135,14 @@ def build_direct_depthwise_col(
         """
         if DT.name == "f16":
             return b.cast_to_f32(b.buffer_load_f16(rsrc, byte_off, c0))
-        if DT.name == "bf16":
-            return b.cast_to_f32(b.buffer_load_bf16(rsrc, byte_off, c0))
-        # f32 loads need no widening; cast_to_f32 passes it straight through.
-        return b.buffer_load(rsrc, byte_off, c0, F32)
+        return b.cast_to_f32(b.buffer_load_bf16(rsrc, byte_off, c0))
 
     def store_elem(rsrc: Value, byte_off: Value, acc: Value) -> None:
         """Narrow an f32 accumulator to DT and store it."""
         if DT.name == "f16":
             b.buffer_store_f16(rsrc, byte_off, c0, b.trunc_f32_to_f16(acc))
-        elif DT.name == "bf16":
-            b.buffer_store_bf16(rsrc, byte_off, c0, b.trunc_f32_to_bf16(acc))
         else:
-            b.buffer_store_f32(rsrc, byte_off, c0, acc)
+            b.buffer_store_bf16(rsrc, byte_off, c0, b.trunc_f32_to_bf16(acc))
 
     tid = b.thread_id_x()
     wave_id = b.div(tid, c_wave)

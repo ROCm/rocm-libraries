@@ -465,14 +465,14 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 34:
-        # col stride=3 fp32: exercises the (y - r) % stride tap pruning and the
-        # f32 load/store forms; ch guard elided, w guard live.
+        # col stride=3: exercises the (y - r) % stride tap pruning at a stride
+        # no other case reaches; ch guard elided, w guard live.
         p = DirectConvProblem(
             N=1, H=16, W=16, groups=64, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=3
         )
         return (
             "dwcol",
-            DirectDepthwiseColSpec(problem=p, block_w=4, block_waves=1, dtype="fp32"),
+            DirectDepthwiseColSpec(problem=p, block_w=4, block_waves=1, dtype="bf16"),
             "gfx950",
         )
     if idx == 35:
@@ -493,7 +493,7 @@ def _spec(idx: int):
         )
         return (
             "dwcol",
-            DirectDepthwiseColSpec(problem=p, block_w=2, block_waves=1, dtype="fp32"),
+            DirectDepthwiseColSpec(problem=p, block_w=2, block_waves=1, dtype="fp16"),
             "gfx950",
         )
     if idx == 37:
@@ -523,7 +523,7 @@ def _spec(idx: int):
         )
         return (
             "dwcol",
-            DirectDepthwiseColSpec(problem=p, block_w=1, block_waves=2, dtype="fp32"),
+            DirectDepthwiseColSpec(problem=p, block_w=1, block_waves=2, dtype="bf16"),
             "gfx950",
         )
     if idx == 40:
