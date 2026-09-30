@@ -387,8 +387,9 @@ class TestCliEndToEnd:
 # these against every git-tracked bundle the repository carries -- no pack, no
 # hipcc, no GPU. Two roots are wired and both read: `examples/descriptors` is the
 # documented sample tree, and the engine root is what a consumer loads. The engine
-# root ships no bundle today, so its parametrizations skip; authoring one closes
-# that with no change here, since the roots are globbed.
+# root ships `rocKE/gfx950_attention_dense/` today; a producer subtree it does not carry
+# (such as `hip/`) skips with a named reason. New bundles need no change here, since the
+# roots are globbed.
 _PACKAGING = Path(__file__).resolve().parent.parent
 _EXAMPLES = [
     _PACKAGING / "examples" / "descriptors",

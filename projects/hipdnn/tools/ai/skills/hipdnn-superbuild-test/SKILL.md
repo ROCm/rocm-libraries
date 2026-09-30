@@ -63,8 +63,10 @@ Infer options from the user request:
    `hip-kernel-provider`. A helper's first provider-prefixed command need not be the
    requested engine's registration; inspect the actual installed CTest entry before
    executing it. Replace `<your-bundle-ctest-target>` with the name your own
-   registration creates. The gfx942 dense names here are illustrative — the production
-   descriptor root ships no bundle, so
+   registration creates. The gfx942 dense names here are illustrative: the production
+   descriptor root ships only the gfx950 dense attention bundle (registered as
+   `hip_kernel_provider_gfx950_attention_dense_gpu_ref_integration_tests` on gfx950
+   builds with SDPA enabled), so
    `hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests` is registered
    in no checkout and copying it verbatim fails the second command under
    `--no-tests=error`:
