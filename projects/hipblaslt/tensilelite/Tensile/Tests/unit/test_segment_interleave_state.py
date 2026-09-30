@@ -75,8 +75,20 @@ def test_resolved_1ldsbuffer_forceon_conflict_still_rejects():
 def test_unrelated_disqualifier_rejects_even_with_unresolved_buffer():
     # A disqualifier that fires before the 1LDSBuffer short-circuit rejects (does not defer).
     from Tensile.Tests.unit.test_segment_interleave import _vw8_state
-    assert _resolve_lsi(_vw8_state(**{"UseSubtileImpl": 1, "1LDSBuffer": -1,
+    assert _resolve_lsi(_vw8_state(**{"LocalSplitU": 2, "1LDSBuffer": -1,
                                       "LDSSegmentInterleave": 1})) == (0, True)
+
+
+def test_subtile_resolves_only_when_forced():
+    from Tensile.Tests.unit.test_segment_interleave import _vw8_state
+    assert _resolve_lsi(_vw8_state(UseSubtileImpl=1, LDSSegmentInterleave=1)) == (1, False)
+    assert _resolve_lsi(_vw8_state(**{"UseSubtileImpl": 1, "1LDSBuffer": -1,
+                                      "LDSSegmentInterleave": 1})) == (1, False)
+    assert _resolve_lsi(_vw8_state(UseSubtileImpl=1)) == (0, False)
+    assert _resolve_lsi(_vw8_state(UseSubtileImpl=1, MIWaveGroup=[4, 1], MIWaveTile=[4, 8],
+                                   LDSSegmentInterleave=1)) == (0, True)
+    assert _resolve_lsi(_vw8_state(UseSubtileImpl=1, TDMSplit=1,
+                                   LDSSegmentInterleave=1)) == (0, True)
 
 def test_bcontig_resolves_to_1():
     # bcontig (unsplittable B) applies and resolves to 1, like split.

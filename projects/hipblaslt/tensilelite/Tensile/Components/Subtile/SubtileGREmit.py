@@ -1191,8 +1191,10 @@ def _commitSubtileLdsTracking(mod, tc, waveOffsetSgprIdx, ldsTotalSize):
 def _emitSubtileDataLdsTracking(writer, tc, mt, du, bpe, numWaves, wavelen,
                                 ldsConstOffset, padIntervalBytes, padAmountBytes):
   mod = Module(f"TDM LDS tracking {tc}")
-  with writer.allocTmpSgpr(1) as tmpSgprRes:
+  compStride = writer.ldsSegCompStride
+  with writer.allocTmpSgpr(2 if compStride else 1) as tmpSgprRes:
     waveOffsetSgprIdx = tmpSgprRes.idx
+    compSgprIdx = tmpSgprRes.idx + 1
     mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
     mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)), sgpr(waveOffsetSgprIdx),
             "wId=fTid // wavelen"))
@@ -1200,7 +1202,24 @@ def _emitSubtileDataLdsTracking(writer, tc, mt, du, bpe, numWaves, wavelen,
     # matching the cooperative full-wave global split in
     # tdmGlobalOffsetSubtile. The union over all waves covers the whole
     # mt-row tile (identity map global-row r -> LDS-row r).
-    if padIntervalBytes != 0 and padAmountBytes != 0:
+    if compStride:
+      # Segment interleave: the tile's two halves (waves [0, n/2) and [n/2, n)) start
+      # compStride apart so each half lands in its own LDS segment.
+      wavesPerComp = numWaves // 2
+      perWaveBytes = round(mt // numWaves * du * bpe)
+      if padIntervalBytes != 0 and padAmountBytes != 0:
+        perWaveBytes += perWaveBytes // padIntervalBytes * padAmountBytes
+      mod.add(SLShiftRightB32(sgpr(compSgprIdx), int(log2(wavesPerComp)), sgpr(waveOffsetSgprIdx),
+              f"compId = wId // {wavesPerComp}"))
+      mod.add(SMulI32(sgpr(compSgprIdx), sgpr(compSgprIdx), compStride,
+              f"compOffset = compId * {compStride}"))
+      mod.add(SAndB32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), wavesPerComp - 1,
+              "wId within component"))
+      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), perWaveBytes,
+              f"woffset = wIdInComp * {perWaveBytes}"))
+      mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(compSgprIdx),
+              "woffset += compOffset"))
+    elif padIntervalBytes != 0 and padAmountBytes != 0:
       tileBytes = round(mt // numWaves * du * bpe)
       padBytes = tileBytes // padIntervalBytes * padAmountBytes
       mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tileBytes + padBytes,

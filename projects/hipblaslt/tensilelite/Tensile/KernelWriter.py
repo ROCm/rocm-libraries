@@ -52,7 +52,8 @@ from .Components.CustomSchedule import customMainLoopSchedule
 from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
-from .Components.Subtile.SubtileLREmit import emitWmma32x16AccRowFixup
+from .Components.Subtile.SubtileLREmit import emitWmma32x16AccRowFixup, subtileTdmLdsSpanBytes
+from .SolutionStructs.segment_interleave import SEG as LDS_SEGMENT_BYTES
 from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, dcpLdsSide
 from .Components.DecouplePGR import tdmWaveIssueOrder, decoupledThickGateRelaxation, dcpThickGateFromTokenPasses, dcpThickGateUncoveredSites, dcpIsFillLabel, DCP_TENSORCNT_RE, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS
 from .Components.TDMFuse import tdmWavePartition
@@ -410,6 +411,7 @@ class StateValues:
   ldsStartOffsetMXSA: int                = -1
   ldsStartOffsetMXSB: int                = -1
   ldsTotalSize: int                      = 0
+  ldsSegCompStride: int                  = 0
 
   dtvKIntervalA: int                     = 1
   dtvKIntervalB: int                     = 1
@@ -7633,6 +7635,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
       sizeA = int(((numASubtiles * aTileInfo.subtileSize + padA + readSize-1) // readSize) * readSize)
       sizeB = int(((numBSubtiles * bTileInfo.subtileSize + padB + readSize-1) // readSize) * readSize)
       self.ldsStartOffsetB = sizeA
+      self.ldsSegCompStride = 0
+      if kernel.get("LDSSegmentInterleave") == 1:
+        # [A0][B0] and [A1][B1] each start on a 64 KiB LDS segment. Wave bit 0 picks both the
+        # LDS read port and the A half, so the two ports never read A from the same segment.
+        compA = subtileTdmLdsSpanBytes(kernel, aTileInfo, "A", 2)
+        compB = subtileTdmLdsSpanBytes(kernel, bTileInfo, "B", 2)
+        self.ldsSegCompStride = -(-(compA + compB) // LDS_SEGMENT_BYTES) * LDS_SEGMENT_BYTES
+        self.ldsStartOffsetB = compA
+        sizeA = self.ldsSegCompStride + compA + compB
+        sizeB = 0
       sizeMXSA = 0
       sizeMXSB = 0
       if kernel["ProblemType"].get("MXBlockA", 0) > 0 and kernel["ProblemType"].get("MXBlockB", 0) > 0:
@@ -7647,6 +7659,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.ldsStartOffsetMXSB = sizeA + sizeB + sizeMXSA
 
       self.ldsTotalSize = sizeA + sizeB + sizeMXSA + sizeMXSB
+      if self.ldsSegCompStride:
+        # Keep the second LDS buffer's components segment-aligned too.
+        self.ldsTotalSize = -(-self.ldsTotalSize // LDS_SEGMENT_BYTES) * LDS_SEGMENT_BYTES
 
       kernel["LdsNumBytes"] = max(1, int(self.ldsTotalSize * kernel["NumLdsBlk"]))
       if kernel["LdsNumBytes"] > self.states.archCaps["DeviceLDS"]:

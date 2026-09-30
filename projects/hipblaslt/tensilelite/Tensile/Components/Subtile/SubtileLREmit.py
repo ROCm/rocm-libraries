@@ -429,6 +429,16 @@ def _computeLROffset(module, tileInfo, colOffset, rowOffset, swizzled):
     module.add(VLShiftLeftB32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), shiftHex=hex(loadWidth.bit_length()-1), src=vgpr(tileInfo.sharedVgprLROffset[vgprId]), comment="%s: colOffset*loadWidth"%tc))
     module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src1=vgpr(rowOffset), comment="%s: row + col"%tc))
 
+def subtileTdmLdsSpanBytes(kernel, tileInfo, tc, numParts):
+  """LDS bytes for 1/numParts of the TDM tile along its free dim, TDM block padding included."""
+  mt = kernel["MacroTile0"] if tc == 'A' else kernel["MacroTile1"]
+  logicalBytes = int(mt // numParts) * int(kernel["DepthU"] * tileInfo.bpe)
+  padAmount = int(getattr(tileInfo, "ldsRowPadBytes", 0))
+  padInterval = int(getattr(tileInfo, "ldsBlockSizePerPadBytes", 0))
+  padBytes = (logicalBytes // padInterval) * padAmount if padInterval else 0
+  return logicalBytes + padBytes
+
+
 def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
   """Apply wave-based partition offset to LR offsets.
 
@@ -452,9 +462,6 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
     if numWavesThisAxis <= 1:
       return  # this tensor's axis is not split
     wavesize = kernel["WavefrontSize"]
-    du = kernel["DepthU"]
-    mt = kernel["MacroTile0"] if tc == 'A' else kernel["MacroTile1"]
-    bpe = tileInfo.bpe
     waveId = writer.vgprPool.checkOut(1)
     module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="waveId"))
     # Decompose to axis component
@@ -463,11 +470,12 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
     elif tc == 'B' and wgM > 1:
       module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wgM.bit_length()-1), src=vgpr(waveId), comment="waveIdN = waveId / %d" % wgM))
     # LDS offset per axis wave uses the same block-padding rule as TDM.
-    logicalBytes = int(mt // numWavesThisAxis) * int(du * bpe)
-    padAmount = int(getattr(tileInfo, "ldsRowPadBytes", 0))
-    padInterval = int(getattr(tileInfo, "ldsBlockSizePerPadBytes", 0))
-    padBytes = (logicalBytes // padInterval) * padAmount if padInterval else 0
-    ldsPerWave = logicalBytes + padBytes
+    if writer.ldsSegCompStride:
+      # Segment interleave: each axis wave's half sits in its own 64 KiB segment.
+      assert numWavesThisAxis == 2, "segment interleave needs 2 waves on the %s axis" % tc
+      ldsPerWave = writer.ldsSegCompStride
+    else:
+      ldsPerWave = subtileTdmLdsSpanBytes(kernel, tileInfo, tc, numWavesThisAxis)
     tmpSgpr = writer.sgprPool.checkOut(1)
     module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(ldsPerWave), comment="LDS bytes per wave for %s" % tc))
     module.add(VMulLOU32(dst=vgpr(waveId), src1=vgpr(waveId), src0=sgpr(tmpSgpr), comment="waveOffset"))

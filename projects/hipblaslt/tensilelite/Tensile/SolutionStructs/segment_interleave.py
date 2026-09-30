@@ -39,6 +39,10 @@ layout.
 
 Every layout is either tight (no extra LDS) or aligned (padded to a segment boundary, which uses more
 LDS and needs PrefetchGlobalRead=2).
+
+UseSubtileImpl ([2,2], no TDMSplit, LDSSegmentInterleave=1 only): the subtile KernelWriter path
+places [A0][B0] and [A1][B1] each at the start of its own 64 KiB segment (aligned). The oracle only
+gates it; the layout itself is computed by the subtile LDS allocator.
 """
 
 # gfx1250 LDS segment size (5 x 64 KiB segments).
@@ -242,6 +246,19 @@ def _evaluate_asymmetric(state):
                           % (activeTC, base // SEG, (base + pre) // SEG)}
 
 
+def _evaluate_subtile(state, mode):
+    # Subtile TDM lays each operand out as two halves along its free dim, one per axis wave
+    # ([2,2]: A half = wave bit 0 = read port, B half = wave bit 1). KernelWriter places
+    # [A0][B0] and [A1][B1] on consecutive 64 KiB segments; offsets here are not consumed.
+    # Always the aligned layout (LDS grows), so only an explicit request enables it.
+    if mode != 1:                                              return _no("subtile: aligned layout needs LDSSegmentInterleave=1")
+    if list(state["MIWaveGroup"]) != [2, 2]:                   return _no("subtile: MIWaveGroup must be [2,2]")
+    if state.get("TDMSplit"):                                  return _no("subtile: TDMSplit")
+    return {"applicable": True, "aligned": False, "offsets": {"subtile": True},
+            "blockSpan": 0, "reason": "subtile-aligned",
+            "segmentMap": "SUBTILE-ALIGNED seg0={A0,B0} seg1={A1,B1}"}
+
+
 def evaluate(state):
     pt = state["ProblemType"]
     # Tri-state knob: -1 = auto (default), 0 = force baseline, 1 = force on where applicable.
@@ -264,9 +281,6 @@ def evaluate(state):
     if state["NumWaves"] // 2 != 2:                             return _no("numComp!=2")
     if pt.get("Sparse"):
         return _no("sparse")
-    # Subtile uses a separate codegen body; the emit path these offsets target runs only for
-    # non-subtile kernels.
-    if state.get("UseSubtileImpl"):                            return _no("subtile")
     # Needs double-buffering; 1LDSBuffer==1 breaks the assumed layout. Unresolved -1 is rejected too
     # (Solution.py resolves it later, then re-evaluates).
     if state.get("1LDSBuffer", 0) != 0:                         return _no("needs 1LDSBuffer==0")
@@ -274,6 +288,8 @@ def evaluate(state):
     # fp8/fp4 cover mxf8/mxf4; MX scales are relocated as a trailing block (see _mx_scale_bases).
     if not (_dt.isBFloat16() or _dt.isHalf() or _dt.is8bitFloat() or _dt.isFloat4()):
         return _no("bf16/fp16/fp8/fp4 only")
+    if state.get("UseSubtileImpl"):
+        return _evaluate_subtile(state, mode)
 
     # [4,1]/[1,4]: exactly one MIWaveGroup dim is 1 -> one active + one shared tensor.
     wgM, wgN = state["MIWaveGroup"][0], state["MIWaveGroup"][1]

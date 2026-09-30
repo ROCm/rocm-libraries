@@ -146,6 +146,7 @@ def _create_writer_gfx1250(kernel):
     numASubtiles = tiA.globalSubtileGrid[0] * tiA.globalSubtileGrid[1]
     writer.ldsStartOffsetA = 0
     writer.ldsStartOffsetB = int(((numASubtiles * tiA.subtileSize + readSize - 1) // readSize) * readSize)
+    writer.ldsSegCompStride = 0
 
     return writer, tiA, tiB
 
@@ -427,6 +428,7 @@ def _create_writer_gfx1250_mx(kernel):
     writer.ldsStartOffsetMXSA = 8192
     writer.ldsStartOffsetMXSB = 9216
     writer.ldsTotalSize = 16384
+    writer.ldsSegCompStride = 0
 
     from contextlib import contextmanager
     from rocisa.code import Module as _Module
