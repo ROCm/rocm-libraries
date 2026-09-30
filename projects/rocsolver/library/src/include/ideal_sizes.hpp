@@ -128,7 +128,7 @@
 /*! \brief Determines the size of the block reflector that is applied at each step when
     generating a matrix Q with orthonormal columns with the blocked algorithm (ORGQR/UNGQR or ORGQL/UNGQL). */
 #ifndef xxGQx_BLOCKSIZE
-#define xxGQx_BLOCKSIZE 64
+#define xxGQx_BLOCKSIZE 128
 #endif
 
 /*! \brief Determines the size at which rocSOLVER switches from
