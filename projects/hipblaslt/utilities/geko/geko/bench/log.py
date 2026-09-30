@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Sequence, List, Tuple, Optional
 
 from geko.constants import LOG_FIELDS, GEMM_LOG_FIELDS, GEMM_FIELDS
+from geko.bench.utils import ensure_scale_columns
 from geko import bench
 from geko.bench.utils import update_lib_source
 from geko.utils import parse_devices
@@ -116,6 +117,8 @@ def parse(log_file: str | Path, as_df: bool = False, fmt: str = None) -> pd.Data
         df = pd.read_csv(log_file)
 
     df.rename({"m": "M", "n": "N", "k": "K"}, axis=1, inplace=True)
+
+    ensure_scale_columns(df)
 
     if not all(fld in df.columns for fld in GEMM_LOG_FIELDS):
         raise ValueError(f"Log must have all fields: {GEMM_LOG_FIELDS}")
@@ -335,6 +338,8 @@ def update(
             row["initialization"] = "trig_float"
 
         row["compute_type"] = update_compute_type(row["compute_type"])
+        row.setdefault("scaleA", 0)
+        row.setdefault("scaleB", 0)
         if "scale_type" not in row:
             row["scale_type"] = row["compute_type"].lstrip("c_").lstrip("x")
 
