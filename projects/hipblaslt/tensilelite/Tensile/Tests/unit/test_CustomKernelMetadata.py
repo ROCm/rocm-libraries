@@ -1091,11 +1091,11 @@ def test_parse_tensile_yaml_skips_non_dict_and_nameless_entries(tmp_path):
 
 @pytest.mark.parametrize(
     "name,rows,maxK",
-    [("wvSpltK_hf_m1", 1, None), ("wvSpltK_hf_m2", 2, 16385), ("wvSpltK_hf_m4", 4, 8193)],
+    [("wvSpltK_hf_m1", 1, None), ("wvSpltK_hf_m2", 2, 16385)],
 )
 def test_wvspltk_shipped_family_predicates(name, rows, maxK):
-    """Each skinny-GEMM kernel pins its own M, and the M>=2 kernels also bound K:
-    they read A only from LDS, which holds M*K <= 32768 halves."""
+    """m1 and m2 pin their own M, and m2 also bounds K: it reads A only from
+    LDS, which holds M*K <= 32768 halves."""
     ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
     valid, msg = validateCustomKernelMetadata(name, ck_root)
     assert valid, msg
@@ -1116,31 +1116,42 @@ def test_wvspltk_shipped_family_predicates(name, rows, maxK):
     assert config["AssertStrideBEqual"] == {0: 1}
 
 
-def test_wvspltk_hf_m1_shipped_config():
-    """The rocBLAS M=1 GEMV kernel must stay loadable with the CU-count interface."""
+_UNIT_STRIDE_KEYS = (
+    "AssertStrideAEqual",
+    "AssertStrideBEqual",
+    "AssertStrideCEqual",
+    "AssertStrideDEqual",
+)
+
+
+def test_wvspltk_hf_m4_serves_every_m_up_to_four():
+    """m4 reads M and the leading dimensions as kernargs, so it serves M <= 4 and
+    only unit strides are predicated. K is bounded for the full tile: A is read
+    only from LDS, which holds M*K <= 32768 halves."""
     ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
-    valid, msg = validateCustomKernelMetadata("wvSpltK_hf_m1", ck_root)
+    valid, msg = validateCustomKernelMetadata("wvSpltK_hf_m4", ck_root)
     assert valid, msg
 
-    config = getCustomKernelConfig("wvSpltK_hf_m1", {}, ck_root)
-    ck = config["CustomKernel"]
-    assert ck["grid"] == ["ComputeUnits", "One", "One"]
-    assert ck["threads"] == [64, 16, 1]
-    # M == 1 and batch == 1; the kernel takes no batch strides.
-    assert config["AssertSizeEqual"] == {0: 1, 2: 1}
-    # N > 8; the tail fixup underflows below one wave tile.
+    config = getCustomKernelConfig("wvSpltK_hf_m4", {}, ck_root)
+    assert config["AssertSizeEqual"] == {2: 1}
+    assert config["AssertSizeLessThan"] == {0: 5, 3: 8193}
+    assert (config["AssertSizeLessThan"][0] - 1) * (config["AssertSizeLessThan"][3] - 1) == 32768
     assert config["AssertSizeGreaterThan"] == {1: 8}
-    assert config["AssertSummationElementMultiple"] == 8
-    assert config["StaggerU"] == 0
-    # C is read (beta term) and D is written, so out-of-place calls are correct.
-    assert [a["semantic"] for a in ck["args"]] == [
+    for key in _UNIT_STRIDE_KEYS:
+        assert config[key] == {0: 1}, key
+    assert [a["semantic"] for a in config["CustomKernel"]["args"]] == [
         "SizeSum",
         "SizeFree1",
         "AddressB",
         "AddressA",
+        "ComputeUnits",
+        "SizeFree0",
+        "StrideB0",
+        "StrideA0",
         "AddressC",
         "AddressD",
         "Alpha",
         "Beta",
-        "ComputeUnits",
+        "StrideC0",
+        "StrideD0",
     ]

@@ -30,7 +30,7 @@
 //
 // Specialized to the TRANSA=true instantiation, which is the one rocBLAS uses
 // for the NN small-M path and the only layout hipBLASLt NN produces: A is
-// column-major M x K (lda == M) and D is column-major M x N (ldd == M).
+// column-major M x K and D is column-major M x N.
 //
 // Differences from the rocBLAS original:
 //   * Column tile retuned from YTILE=7 / UNRL=1 to YTILE=3 / UNRL=2. rocBLAS
@@ -43,14 +43,19 @@
 //     matches the launch grid on MI300 / MI350.
 //   * C and D are separate pointers; hipBLASLt also dispatches out-of-place.
 //   * beta is a runtime value rather than a template parameter.
+//   * M is a kernarg. Tile rows past it read the last real row of A and are
+//     never stored, so this kernel serves every M <= 4, including M=3.
+//   * Leading dimensions are kernargs. With a runtime M, lda == ldc == ldd == M
+//     is no longer a constant a stride predicate can pin.
 //   * A is read only from LDS. The original's global-memory fallback indexes A
 //     as row-major, which is wrong for this layout; rocBLAS never reached it
 //     because its host path requires M*K <= 32768. That bound is a predicate in
-//     custom.config (K <= 8192 at M=4), so the fallback is unreachable here too
-//     and is dropped rather than left as a trap.
+//     custom.config (K <= 8192 for every M <= 4), so the fallback is unreachable
+//     here too and is dropped rather than left as a trap.
 //
 // Regenerate assembly:
 //   hipcc -S --cuda-device-only --offload-arch=gfx942 -O3 \
+//     -mllvm -amdgpu-kernarg-preload-count=14 \
 //     -o wvSpltK_hf_m4.s wvSpltK_hf_m4.cpp
 // Keep .amdgcn_target / .amdhsa_code_object_version (Tensile retargets).
 
@@ -72,15 +77,37 @@ using half8 = __attribute__((__vector_size__(4 * sizeof(float)))) float;
 #define UNRL 2
 #define M 4
 
+// Transpose column-major A into LDS so the readback is bank-conflict free and
+// each m row is contiguous: s[m * K + k] = A[k * lda + m]. Walking A in memory
+// order keeps each wave's loads on consecutive addresses when lda == MR; a
+// compile-time MR turns the index split into shifts.
+template <int MR>
+__device__ __forceinline__ void stageA(__half* s, const __half* A, const int K, const int lda)
+{
+    for(uint32_t t = threadIdx.y * THRDS + threadIdx.x; t < K * MR; t += THRDS * WvPrGrp)
+    {
+        const uint32_t k = t / MR;
+        const uint32_t m = t % MR;
+        s[m * K + k]     = A[(size_t)k * lda + m];
+    }
+}
+
+// Everything the staging and the K loop read comes first, so the preloaded
+// kernarg SGPRs cover it and only the epilogue's arguments are fetched.
 extern "C" __global__ void wvSpltK_hf_m4(const int    K,
                                          const int    N,
                                          const __half* B,
                                          const __half* __restrict__ A,
+                                         const int    cuCount,
+                                         const int    Mrt,
+                                         const int    ldb,
+                                         const int    lda,
                                          const __half* C,
                                          __half*      D,
                                          const float  alpha,
                                          const float  beta,
-                                         const int    cuCount)
+                                         const int    ldc,
+                                         const int    ldd)
 {
     union bigType
     {
@@ -93,7 +120,8 @@ extern "C" __global__ void wvSpltK_hf_m4(const int    K,
     };
 
     // 64 KB static LDS: one WG / CU, activation matrix A staged for the WG
-    // lifetime. Requires K*M <= 32*1024 halves, which custom.config predicates.
+    // lifetime. Requires K*M <= 32*1024 halves; custom.config bounds K <= 8192,
+    // which covers every M <= 4.
     __shared__ __half s[1024 * 32];
 
     uint32_t commitColumn[YTILE];
@@ -110,17 +138,26 @@ extern "C" __global__ void wvSpltK_hf_m4(const int    K,
         n = startColumn;
     }
 
-    // Transpose column-major A into LDS so the readback is bank-conflict free
-    // and each m row is contiguous: s[m * K + k] = A[k * M + m].
-    for(uint32_t k = 0; k < min(K * M, 32 * 1024); k += THRDS * WvPrGrp)
+    switch(Mrt)
     {
-        uint32_t k_in = k + (threadIdx.y * THRDS + threadIdx.x);
-        if(k_in >= min(K * M, 32 * 1024))
-            break;
-        uint32_t k_ot = (k_in / M) + (k_in % M) * K;
-        s[k_ot]       = A[k_in];
+    case 1:
+        stageA<1>(s, A, K, lda);
+        break;
+    case 2:
+        stageA<2>(s, A, K, lda);
+        break;
+    case 3:
+        stageA<3>(s, A, K, lda);
+        break;
+    default:
+        stageA<4>(s, A, K, lda);
+        break;
     }
     __syncthreads();
+
+    uint32_t row[M];
+    for(int m = 0; m < M; m++)
+        row[m] = min(m, Mrt - 1);
 
     float sum[M][YTILE];
 
@@ -147,10 +184,10 @@ extern "C" __global__ void wvSpltK_hf_m4(const int    K,
                 if(k_ >= K)
                     break;
 
-                const __half* B_ = &B[(n + 0) * K + k_];
-                bigB0[k2].h8     = (loadnt((half8*)(&B_[0 * K])));
-                bigB1[k2].h8     = (loadnt((half8*)(&B_[1 * K])));
-                bigB2[k2].h8     = (loadnt((half8*)(&B_[2 * K])));
+                const __half* B_ = &B[(n + 0) * ldb + k_];
+                bigB0[k2].h8     = (loadnt((half8*)(&B_[(size_t)0 * ldb])));
+                bigB1[k2].h8     = (loadnt((half8*)(&B_[(size_t)1 * ldb])));
+                bigB2[k2].h8     = (loadnt((half8*)(&B_[(size_t)2 * ldb])));
             }
 
 #pragma unroll
@@ -162,7 +199,7 @@ extern "C" __global__ void wvSpltK_hf_m4(const int    K,
                     break;
 
                 for(int m = 0; m < M; m++)
-                    bigA[m][k2] = *((const bigType*)(&(s[k_ + K * m])));
+                    bigA[m][k2] = *((const bigType*)(&(s[k_ + K * row[m]])));
             }
 
 #pragma unroll
@@ -220,20 +257,26 @@ extern "C" __global__ void wvSpltK_hf_m4(const int    K,
 
         if(threadIdx.x == 63)
         {
+            // Column-major D: D[n * ldd + m].
+            __half*       Dn = &D[n * ldd];
+            const __half* Cn = &C[n * ldc];
+#pragma unroll
             for(int m = 0; m < M; m++)
             {
-                for(int i = 0; i < YTILE; i++)
+                if(m < Mrt)
                 {
-                    if(commitColumn[i])
+#pragma unroll
+                    for(int i = 0; i < YTILE; i++)
                     {
-                        // Column-major D with ldd == M.
-                        if(beta == 0)
-                            D[(n + i) * M + m]
-                                = static_cast<__half>(sum[m][i] * alpha);
-                        else
-                            D[(n + i) * M + m] = static_cast<__half>(
-                                sum[m][i] * alpha
-                                + __half2float(C[(n + i) * M + m]) * beta);
+                        if(commitColumn[i])
+                        {
+                            if(beta == 0)
+                                Dn[(size_t)i * ldd + m] = static_cast<__half>(sum[m][i] * alpha);
+                            else
+                                Dn[(size_t)i * ldd + m] = static_cast<__half>(
+                                    sum[m][i] * alpha
+                                    + __half2float(Cn[(size_t)i * ldc + m]) * beta);
+                        }
                     }
                 }
             }

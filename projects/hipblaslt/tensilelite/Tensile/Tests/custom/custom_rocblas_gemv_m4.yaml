@@ -42,11 +42,16 @@ BenchmarkProblems:
                     { type: int32, semantic: SizeFree1 },
                     { type: address, semantic: AddressB },
                     { type: address, semantic: AddressA },
+                    { type: int32, semantic: ComputeUnits },
+                    { type: int32, semantic: SizeFree0 },
+                    { type: int32, semantic: StrideB0 },
+                    { type: int32, semantic: StrideA0 },
                     { type: address, semantic: AddressC },
                     { type: address, semantic: AddressD },
                     { type: float32, semantic: Alpha },
                     { type: float32, semantic: Beta },
-                    { type: int32, semantic: ComputeUnits } ]
+                    { type: int32, semantic: StrideC0 },
+                    { type: int32, semantic: StrideD0 } ]
             macrotile: [64, 16, 8]
             threads: [64, 16, 1]
             grid: [ComputeUnits, One, One]
@@ -56,27 +61,26 @@ BenchmarkProblems:
           - [16, 16, 16, 1, 1, 4, 1, 4, 4]
         - StaggerU: [0]
         - AssertSummationElementMultiple: [8]
-        # M == 4 and batch == 1: the kernel has no batch stride arguments, so a
+        # batch == 1: the kernel has no batch stride arguments, so a
         # strided-batched problem would leave every batch past the first unwritten.
-        - AssertSizeEqual: [{0: 4, 2: 1}]
-        # N > 8: with fewer columns than the wave tile (7 here) the tail fixup
+        - AssertSizeEqual: [{2: 1}]
+        # N > 8: with fewer columns than the wave tile (3 here) the tail fixup
         # underflows.
         - AssertSizeGreaterThan: [{1: 8}]
-        # K <= 8192, i.e. M*K <= 32768 halves: A is only read from LDS, so the
-        # whole activation matrix has to fit the 64 KB staging buffer.
-        - AssertSizeLessThan: [{3: 8193}]
-        # Packed layout: the kernel indexes A, C and D with no stride argument,
-        # so index 0 (unit stride) and index 1 (leading dimension) are fixed.
-        # lda == ldc == ldd == M == 4 here. ldb == K is the one constraint left
-        # undeclared: a stride cannot be compared against a runtime size.
-        - AssertStrideAEqual: [{0: 1, 1: 4}]
+        # M <= 4: M is a kernarg and tile rows past it are never stored.
+        # K <= 8192, i.e. M*K <= 32768 halves for every M <= 4: A is only read
+        # from LDS, so the whole activation matrix has to fit the 64 KB buffer.
+        - AssertSizeLessThan: [{0: 5, 3: 8193}]
+        # Unit stride along the contiguous dimension of each tensor; the leading
+        # dimensions are kernargs.
+        - AssertStrideAEqual: [{0: 1}]
         - AssertStrideBEqual: [{0: 1}]
-        - AssertStrideCEqual: [{0: 1, 1: 4}]
-        - AssertStrideDEqual: [{0: 1, 1: 4}]
+        - AssertStrideCEqual: [{0: 1}]
+        - AssertStrideDEqual: [{0: 1}]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          # Packed NN M=4, K%8==0, N>8, K<=8192.
+          # NN M<=4, K%8==0, N>8, K<=8192.
           - Exact: [4, 32, 1, 64]
           - Exact: [4, 256, 1, 128]
           - Exact: [4, 1024, 1, 256]
@@ -84,6 +88,13 @@ BenchmarkProblems:
           - Exact: [4, 8192, 1, 1024]
           - Exact: [4, 8192, 1, 4096]
           - Exact: [4, 13312, 1, 8192]
+          - Exact: [1, 4096, 1, 4096]
+          - Exact: [2, 1024, 1, 256]
+          - Exact: [3, 257, 1, 520]
+          - Exact: [3, 13312, 1, 8192]
+          # Padded leading dimensions: [M, N, batch, K, ldd, ldc, lda, ldb].
+          - Exact: [3, 4096, 1, 4096, 5, 6, 7, 4104]
+          - Exact: [4, 2624, 1, 6144, 8, 8, 8, 6152]
 
 LibraryLogic:
     ScheduleName: "aquavanjaram"
