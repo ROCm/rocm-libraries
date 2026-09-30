@@ -354,8 +354,8 @@
 
 /*! \brief Maximum number of thread-blocks that chase the bulges of a chunk of the
     multishift QR sweeps of HSEQR (when the reflections are accumulated). The
-    multiplications by the reflections are distributed among them, with two grid
-    barriers per step of the chase. At most a quarter of the compute units, and one
+    multiplications by the reflections are distributed among them, with one grid
+    barrier per step of the chase. At most a quarter of the compute units, and one
     thread-block per 4 bulges, are used. */
 #ifndef HSEQR_CHASE_GROUPS
 #define HSEQR_CHASE_GROUPS 16

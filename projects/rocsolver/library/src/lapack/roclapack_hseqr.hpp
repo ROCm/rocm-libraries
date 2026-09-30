@@ -1057,6 +1057,9 @@ rocblas_status hseqr_multishift(rocblas_handle handle,
                         dim3(BS2, BS2), 0, stream, mw, I(3), (const T*)h(r0, r0), ldh, Wwin, ldw);
                 }
                 T* Hc = Wwin - (r0 - 1) - size_t(r0 - 1) * ldw;
+                // (the counter of the grid barriers starts at 0 in each launch)
+                if(ngroups > 1)
+                    HIP_CHECK(hipMemsetAsync(dbar, 0, sizeof(unsigned), stream));
                 ROCSOLVER_LAUNCH_KERNEL((laqr5_chunk_kernel<HSEQR_CHASE_BLOCKSIZE, T>),
                                         dim3(ngroups > 1 ? ngroups : 1), dim3(HSEQR_CHASE_BLOCKSIZE),
                                         0, stream, wantt, wantz, accum, n, ktop, kbot, nbmps, incol,

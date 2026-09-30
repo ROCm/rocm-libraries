@@ -718,36 +718,37 @@ __device__ void hqr_laqr1(const int nn, const T* H, const I ldh, const T s1, con
 
 /** LAQR5_GRID_BARRIER synchronizes the G thread-blocks of a grid (all of them resident),
     and makes the global memory writes of each one visible to the others. bar points to
-    two counters (arrivals and generation); the arrivals counter must be 0 initially, and
-    it is 0 again after each barrier. **/
+    an arrivals counter, which must be 0 when the kernel starts (bar[1] is unused): it
+    grows by G per barrier, and each thread-block waits until it reaches the next multiple
+    of G. Each thread-block releases its writes
+    (a release fence) before it arrives, and acquires those of the others (an acquire fence,
+    which only invalidates the non-coherent cached data) after the last one arrives: a
+    full fence would also write back the L2 cache (on gfx94x, of its XCD), which is slow
+    when it holds many modified lines (for example of the matrix products on the side
+    stream). **/
 __device__ inline void laqr5_grid_barrier(unsigned* bar, const unsigned G)
 {
     // (on gfx94x each XCD has its own L2 cache: every wavefront waits for its global memory
     // writes to reach it before the thread-block arrives, so that the write-back of the L2
-    // by the fence of thread 0 includes them; a barrier of the thread-block alone does not
-    // wait for them)
+    // by the release fence of thread 0 includes them; a barrier of the thread-block alone
+    // does not wait for them)
 #if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__)
     __builtin_amdgcn_s_waitcnt(0x0F70); // vmcnt(0)
 #endif
     __syncthreads();
     if(hipThreadIdx_x == 0)
     {
-        unsigned* cnt = bar;
-        unsigned* gen = bar + 1;
-        const unsigned g0 = __hip_atomic_load(gen, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-        __threadfence();
-        if(atomicAdd(cnt, 1u) == G - 1)
-        {
-            __hip_atomic_store(cnt, 0u, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-            __threadfence();
-            atomicAdd(gen, 1u);
-        }
-        else
-        {
-            while(__hip_atomic_load(gen, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT) == g0)
-                __builtin_amdgcn_s_sleep(1);
-        }
-        __threadfence();
+        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
+#if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__)
+        // (the arrival must follow the completion of the write-back of the release fence;
+        // the compiler does not always wait for it before the atomic)
+        __builtin_amdgcn_s_waitcnt(0x0F70); // vmcnt(0)
+#endif
+        const unsigned old = __hip_atomic_fetch_add(bar, 1u, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        const unsigned target = old - old % G + G;
+        while(int(__hip_atomic_load(bar, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT) - target) < 0)
+            __builtin_amdgcn_s_sleep(1);
+        __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
     }
     __syncthreads();
 }
