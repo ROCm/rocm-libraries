@@ -163,19 +163,34 @@ rocsparse_status rocsparse::check_matrix_csr_core(rocsparse_handle       handle,
     RETURN_IF_HIP_ERROR(
         rocsparse_hipMemsetAsync(d_data_status, 0, sizeof(rocsparse_data_status), handle->stream));
 
-    // check_row_ptr_array and shift_offsets_kernel grid-stride, so their grids
-    // are clamped like the main validation kernel's: an oversized launch is
-    // rejected without a failed status, and the rows it would have checked are
-    // then silently accepted.
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        (rocsparse::check_row_ptr_array<256>),
-        dim3(rocsparse::get_grid_size_x(handle, (static_cast<int64_t>(m) - 1) / 256 + 1, 256)),
-        dim3(256),
-        0,
-        handle->stream,
-        m,
-        csr_row_ptr,
-        d_data_status);
+    // check_row_ptr_array and shift_offsets_kernel clamp their grids like the
+    // main validation kernel: an oversized launch is rejected without a failed
+    // status, and the rows it would have checked are then silently accepted.
+    // As there, the grid-stride variant runs exactly when the clamp binds.
+    const int64_t  row_ptr_natural_blocks = (static_cast<int64_t>(m) - 1) / 256 + 1;
+    const uint32_t row_ptr_blocks = rocsparse::get_grid_size_x(handle, row_ptr_natural_blocks, 256);
+    if(row_ptr_blocks < row_ptr_natural_blocks)
+    {
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::check_row_ptr_array<256, true>),
+                                           dim3(row_ptr_blocks),
+                                           dim3(256),
+                                           0,
+                                           handle->stream,
+                                           m,
+                                           csr_row_ptr,
+                                           d_data_status);
+    }
+    else
+    {
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::check_row_ptr_array<256, false>),
+                                           dim3(row_ptr_blocks),
+                                           dim3(256),
+                                           0,
+                                           handle->stream,
+                                           m,
+                                           csr_row_ptr,
+                                           d_data_status);
+    }
 
     RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(data_status,
                                                  d_data_status,
@@ -212,15 +227,30 @@ rocsparse_status rocsparse::check_matrix_csr_core(rocsparse_handle       handle,
         tmp_cols2 = reinterpret_cast<J*>(ptr);
         ptr += ((sizeof(J) * nnz - 1) / 256 + 1) * 256;
 
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::shift_offsets_kernel<512>),
-            dim3(rocsparse::get_grid_size_x(handle, static_cast<int64_t>(m) / 512 + 1, 512)),
-            dim3(512),
-            0,
-            handle->stream,
-            m + 1,
-            csr_row_ptr,
-            tmp_offsets);
+        const int64_t  shift_natural_blocks = static_cast<int64_t>(m) / 512 + 1;
+        const uint32_t shift_blocks = rocsparse::get_grid_size_x(handle, shift_natural_blocks, 512);
+        if(shift_blocks < shift_natural_blocks)
+        {
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::shift_offsets_kernel<512, true>),
+                                               dim3(shift_blocks),
+                                               dim3(512),
+                                               0,
+                                               handle->stream,
+                                               m + 1,
+                                               csr_row_ptr,
+                                               tmp_offsets);
+        }
+        else
+        {
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::shift_offsets_kernel<512, false>),
+                                               dim3(shift_blocks),
+                                               dim3(512),
+                                               0,
+                                               handle->stream,
+                                               m + 1,
+                                               csr_row_ptr,
+                                               tmp_offsets);
+        }
 
         // rocprim buffer
         void* tmp_rocprim = reinterpret_cast<void*>(ptr);
