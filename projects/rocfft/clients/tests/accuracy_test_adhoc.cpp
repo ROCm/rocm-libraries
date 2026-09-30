@@ -711,11 +711,12 @@ const auto adhoc_64_bit_idx_twiddle_large_slow_tokens = {
     "complex_forward_len_2147483659_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_2147483659_odist_2147483659_ioffset_0_0_ooffset_0_0",
     // clang-format on
 };
-INSTANTIATE_TEST_SUITE_P(adhoc_64_bit_idx_twiddle_large_slow,
-                         accuracy_test,
-                         ::testing::ValuesIn(param_generator_token(
-                             0.3 * test_prob, adhoc_64_bit_idx_twiddle_large_slow_tokens)),
-                         accuracy_test::TestName);
+INSTANTIATE_TEST_SUITE_P(
+    adhoc_64_bit_idx_twiddle_large_slow,
+    accuracy_test,
+    ::testing::ValuesIn(param_generator_token(test_prob* very_large_prob_factor,
+                                              adhoc_64_bit_idx_twiddle_large_slow_tokens)),
+    accuracy_test::TestName);
 
 inline auto param_even_real_odd_base_index()
 {
