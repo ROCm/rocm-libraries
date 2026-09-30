@@ -987,6 +987,29 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelReductionReservesPartialsWorkspace)
     EXPECT_NE(line.find("NA (work-queues not used)"), std::string::npos);
 }
 
+TEST(StreamKLaunchSummaryTest, GeneratedKernelNameKeepsOrigamiReduction)
+{
+    AnalyticalEnv       env;
+    ContractionSolution solution;
+    initStreamKSolution(solution, 3);
+    env.device.skDynamicGrid = static_cast<int>(origami::grid_selection_t::k_split_aware);
+
+    // This shape selects parallel reduction on the 256-CU analytical device.
+    auto problem = makeGemmProblem(256, 4096, 4096);
+    ASSERT_EQ(solution.getSKReduction(problem, env.device), origami::reduction_t::parallel);
+
+    solution.customKernel.name      = "generated_streamk";
+    solution.customKernel.generated = true;
+    EXPECT_EQ(solution.getSKReduction(problem, env.device), origami::reduction_t::parallel);
+
+    solution.customKernel.generated = false;
+    EXPECT_EQ(solution.getSKReduction(problem, env.device), origami::reduction_t::tree);
+
+    solution.customKernel.generated             = true;
+    solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+    EXPECT_EQ(solution.getSKReduction(problem, env.device), origami::reduction_t::none);
+}
+
 // ---------------------------------------------------------------------------
 // The batched parallel-reduction scenario, which is what separates the two
 // sizings. getNumTiles() folds the batch count into its result for every
