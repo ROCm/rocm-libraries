@@ -22,6 +22,8 @@
 #
 ################################################################################
 
+import math
+
 from rocisa.code import Module, Label
 from rocisa.container import sgpr, vgpr, ContinuousRegister
 from rocisa.instruction import SMovB32, SMovB64, SNop, VAddU32, VAndB32, VMovB32, VLShiftLeftB32, VLShiftRightB32

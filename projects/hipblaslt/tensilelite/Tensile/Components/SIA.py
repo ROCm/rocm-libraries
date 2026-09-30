@@ -20,13 +20,13 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from rocisa import countInstruction, countGlobalRead, countLocalWrite, \
+from rocisa import countInstruction, countGlobalRead, countLocalWrite, countType, \
                    countDSStoreB192, countDSStoreB128, countVMovB32
 from rocisa.base import Item
 from rocisa.code import Module, TextBlock
 from rocisa.container import DSModifiers, HolderContainer, replaceHolder
 
-from rocisa.instruction import SWaitCnt, SWaitAlu, DSStoreB128, DSStoreB64, DSStoreB32, TensorLoadToLds
+from rocisa.instruction import SWaitCnt, SWaitAlu, DSStoreB192, DSStoreB128, DSStoreB64, DSStoreB32, TensorLoadToLds
 
 from ..Common import roundUp, print2
 from ..Component import SIA
@@ -390,6 +390,9 @@ def getLocalWriteMFMAStart(writer, kernel, tensorParametersA, tensorParametersB,
                         calculateLatencyLeft((writer.states.numReadsPerIterMXSB//kernel["InnerUnroll"] - writer.states.numReadsPerUnrollMXSB) * doReadMXSB, tensorParametersB["MX"]["localReadInstruction"].blockWidth, tensorParametersB["MX"]["localReadInstruction"].issueLatency)
                     # ds_read[B][1:]
                     calculateLatencyLeft((writer.states.numReadsPerIterB//kernel["InnerUnroll"] - writer.states.numReadsPerUnrollB) * doReadB, tensorParametersB["localReadInstruction"].blockWidth, tensorParametersB["localReadInstruction"].issueLatency)
+                    # ds_read[MXSB][1:]
+                    if kernel["ProblemType"]["MXBlockB"]:
+                        calculateLatencyLeft((writer.states.numReadsPerIterMXSB//kernel["InnerUnroll"]  - writer.states.numReadsPerUnrollMXSB) * doReadMXSB, tensorParametersB["MX"]["localReadInstruction"].blockWidth, tensorParametersB["MX"]["localReadInstruction"].issueLatency)
             lwStartMfmaIndex = numMfmaForCurrentLoopLR
         else:
             lwStartMfmaIndex = numMfmaPerIter * (kernel["LoopIters"] - 1 - writer.states.numItersPLR) + writer.states.numMfmaForLR
@@ -1065,6 +1068,7 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                 if gapIndex == itemsLWToSchedIndex:
                     if item:
                         writesPerItem = countLocalWrite(item)
+                        decWait = 1 + countType(item, DSStoreB192)
                         if kernel["ProblemType"]["Sparse"] and not writesPerItem:
                             writesPerItem = item.name.startswith("MetadataWrite") and countVMovB32(item)
                         if writesPerItem:

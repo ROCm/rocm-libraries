@@ -184,6 +184,9 @@ class TestOverflowStillRejectsTheKernel:
             vgprPool=SimpleNamespace(size=lambda: vgprs),
             sgprPool=SimpleNamespace(size=lambda: 0),
             states=SimpleNamespace(overflowedResources=0,
+                                   # The guard now sits alongside the PLSIN fused
+                                   # store check; off here, as for any non-MXF4 kernel.
+                                   postLoopStoreInNll=False,
                                    regCaps={"MaxVgpr": maxVgpr, "MaxSgpr": 102}),
         )
 

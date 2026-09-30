@@ -39,7 +39,7 @@ import pytest
 from Tensile.KernelWriterAssembly import KernelWriterAssembly  # noqa: F401
 
 from rocisa.code import Module
-from rocisa.container import vgpr
+from rocisa.container import sgpr, vgpr
 from rocisa.instruction import (
     SAndB32,
     SBitcmp1B32,
@@ -105,11 +105,21 @@ class _Pool:
 def _writer(inVgprs):
     """Minimal stand-in for KernelWriterAssembly for StreamK helper codegen."""
     pool = _Pool()
+
+    def readback(kernel, dst, name):
+        module = Module("readback %s" % name)
+        if inVgprs:
+            module.add(VReadfirstlaneB32(dst=sgpr(dst), src=vgpr(_SK_CONST_VGPRS[name])))
+        return module
+
     return SimpleNamespace(
         # gfx1250 hands back a scratch index; everyone else the named SGPR.
         acquireStreamKConstSgpr=lambda k, name: pool.checkOut(1, name) if inVgprs else name,
         releaseStreamKConstSgpr=lambda x: pool.checkIn(x) if isinstance(x, int) else None,
-        isStreamKConstantsToVgprEnabled=lambda k: inVgprs,
+        # `name` asks whether that one constant is parked; the real writer parks a
+        # subset, but this fixture is all-or-nothing, matching what it exercises.
+        isStreamKConstantsToVgprEnabled=lambda k, name=None: inVgprs,
+        readbackStreamKConst=readback,
         labels=SimpleNamespace(
             getNameInc=lambda n, c=itertools.count(): "%s_%d" % (n, next(c))),
         sgprPool=pool,

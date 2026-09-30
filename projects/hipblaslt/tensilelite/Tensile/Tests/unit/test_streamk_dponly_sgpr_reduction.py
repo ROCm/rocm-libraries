@@ -129,8 +129,12 @@ class _SKWriter:
     def releaseStreamKConstSgpr(self, nameOrIdx):
         pass
 
-    def isStreamKConstantsToVgprEnabled(self, kernel):
+    # `name` asks whether that one constant is parked; nothing is parked here.
+    def isStreamKConstantsToVgprEnabled(self, kernel, name=None):
         return False
+
+    def readbackStreamKConst(self, kernel, dst, name):
+        return Module("readback %s" % name)
 
     def cmpNamedArgTypeEq(self, module, value, comment=""):
         kw_module.KernelWriter.cmpNamedArgTypeEq(self, module, value, comment)
