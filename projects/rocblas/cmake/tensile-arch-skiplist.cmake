@@ -23,31 +23,19 @@
 # Filter GPU offload targets so they are not passed into Tensile, while leaving
 # GPU_TARGETS unchanged for rocBLAS library compilation (--offload-arch).
 #
-# A skiplist entry matches an exact target or that target with a ':' feature
-# ID suffix (for example gfx1250 matches gfx1250:xnack+).
+# Only the part before the first ':' is compared on both sides, so every
+# target-ID feature variant of an entry is skipped (for example gfx90a and
+# gfx90a:xnack+ both skip gfx90a, gfx90a:xnack+ and gfx90a:xnack-).
 
 function(rocblas_tensile_arch_is_skipped arch_ skiplist_list_name_ out_var_)
   set(_hit FALSE)
+  string(REGEX REPLACE ":.*$" "" _arch_base "${arch_}")
   foreach(_pat IN LISTS ${skiplist_list_name_})
     string(STRIP "${_pat}" _pat)
-    if(_pat STREQUAL "")
-      continue()
-    endif()
-    if(arch_ STREQUAL _pat)
+    string(REGEX REPLACE ":.*$" "" _pat_base "${_pat}")
+    if(NOT _pat_base STREQUAL "" AND _arch_base STREQUAL _pat_base)
       set(_hit TRUE)
       break()
-    endif()
-    string(LENGTH "${_pat}" _pat_len)
-    string(SUBSTRING "${arch_}" 0 ${_pat_len} _prefix)
-    if(_prefix STREQUAL _pat)
-      string(LENGTH "${arch_}" _arch_len)
-      if(_arch_len GREATER _pat_len)
-        string(SUBSTRING "${arch_}" ${_pat_len} 1 _sep)
-        if(_sep STREQUAL ":")
-          set(_hit TRUE)
-          break()
-        endif()
-      endif()
     endif()
   endforeach()
   set(${out_var_} ${_hit} PARENT_SCOPE)
