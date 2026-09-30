@@ -1632,6 +1632,15 @@ void rocke_b_flat_prefetch(rocke_ir_builder_t* b, rocke_value_t* ptr, int cachep
     rocke_i_op0(b, ROCKE_OP_TILE_FLAT_PREFETCH, &ptr, 1, &attrs);
 }
 
+void rocke_b_cluster_barrier(rocke_ir_builder_t* b)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_i_op0(b, ROCKE_OP_TILE_CLUSTER_BARRIER, NULL, 0, &attrs);
+}
+
 void rocke_b_s_setprio(rocke_ir_builder_t* b, int level)
 {
     rocke_attr_map_t attrs;

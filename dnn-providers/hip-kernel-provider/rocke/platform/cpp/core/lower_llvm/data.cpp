@@ -425,6 +425,19 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
      "declare void @llvm.amdgcn.s.buffer.prefetch.data(ptr addrspace(8), i32 immarg, i32)"},
     {"global.prefetch", "declare void @llvm.amdgcn.global.prefetch(ptr addrspace(1), i32 immarg)"},
     {"flat.prefetch", "declare void @llvm.amdgcn.flat.prefetch(ptr, i32 immarg)"},
+    /* gfx1250 workgroup clusters (llvm23). */
+    {"cluster.id.x", "declare i32 @llvm.amdgcn.cluster.id.x()"},
+    {"cluster.id.y", "declare i32 @llvm.amdgcn.cluster.id.y()"},
+    {"cluster.id.z", "declare i32 @llvm.amdgcn.cluster.id.z()"},
+    {"cluster.workgroup.id.x", "declare i32 @llvm.amdgcn.cluster.workgroup.id.x()"},
+    {"cluster.workgroup.id.y", "declare i32 @llvm.amdgcn.cluster.workgroup.id.y()"},
+    {"cluster.workgroup.id.z", "declare i32 @llvm.amdgcn.cluster.workgroup.id.z()"},
+    {"cluster.workgroup.max.id.x", "declare i32 @llvm.amdgcn.cluster.workgroup.max.id.x()"},
+    {"cluster.workgroup.max.id.y", "declare i32 @llvm.amdgcn.cluster.workgroup.max.id.y()"},
+    {"cluster.workgroup.max.id.z", "declare i32 @llvm.amdgcn.cluster.workgroup.max.id.z()"},
+    {"cluster.workgroup.flat.id", "declare i32 @llvm.amdgcn.cluster.workgroup.flat.id()"},
+    {"cluster.workgroup.max.flat.id", "declare i32 @llvm.amdgcn.cluster.workgroup.max.flat.id()"},
+    {"s.cluster.barrier", "declare void @llvm.amdgcn.s.cluster.barrier()"},
 };
 
 const int ROCKE_LL_INTRINSIC_DECLS_COUNT

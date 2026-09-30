@@ -103,6 +103,15 @@ word3 placeholder; it is a hint, so a wrong word3 loses the prefetch rather
 than the result, but `isa_features/data_prefetch_verify.py` is the check that
 confirms the functional run on a device.
 
+**Workgroup-cluster ops are compile-verified only.** The five `gpu.cluster_*`
+reads and `tile.cluster_barrier` lower identically in both engines and
+`isa_features/cluster_ids_verify.py` pins their ISA, but ROCKE cannot yet launch
+with a cluster shape, so no device run confirms the values or the barrier.
+A normal launch is defined as a 1x1x1 cluster (ids 0, max ids 0,
+`cluster_size` 1); that too is unconfirmed until the launch path lands. Only the
+combined `s.cluster.barrier` is exposed; split cluster arrive/wait on barrier
+id -3 is deferred, because only one wave per workgroup may signal it.
+
 ---
 
 ## 3. Helpers — buffer-view, epilogue staging dtypes, schedule assertion

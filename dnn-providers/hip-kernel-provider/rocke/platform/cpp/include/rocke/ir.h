@@ -265,6 +265,11 @@ typedef enum rocke_opcode
     /* gpu.* */
     ROCKE_OP_GPU_THREAD_ID,
     ROCKE_OP_GPU_BLOCK_ID,
+    ROCKE_OP_GPU_CLUSTER_ID,
+    ROCKE_OP_GPU_CLUSTER_WORKGROUP_ID,
+    ROCKE_OP_GPU_CLUSTER_WORKGROUP_MAX_ID,
+    ROCKE_OP_GPU_CLUSTER_WORKGROUP_FLAT_ID,
+    ROCKE_OP_GPU_CLUSTER_WORKGROUP_MAX_FLAT_ID,
 
     /* memref.* */
     ROCKE_OP_MEMREF_GLOBAL_LOAD,
@@ -404,6 +409,7 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_S_BUFFER_PREFETCH_DATA,
     ROCKE_OP_TILE_GLOBAL_PREFETCH,
     ROCKE_OP_TILE_FLAT_PREFETCH,
+    ROCKE_OP_TILE_CLUSTER_BARRIER,
     ROCKE_OP_TILE_S_SETPRIO,
     ROCKE_OP_TILE_IGLP_OPT,
     ROCKE_OP_TILE_SCHED_BARRIER,
@@ -812,6 +818,16 @@ rocke_value_t* rocke_b_thread_id_x(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_x(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_y(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_z(rocke_ir_builder_t* b);
+
+/* gfx1250 workgroup clusters. `axis` is "x", "y" or "z". Without a cluster
+ * launch every id and max id inside the cluster reads 0 and the cluster id
+ * equals the workgroup id. cluster_size composes max_id + 1. */
+rocke_value_t* rocke_b_cluster_id(rocke_ir_builder_t* b, const char* axis);
+rocke_value_t* rocke_b_cluster_workgroup_id(rocke_ir_builder_t* b, const char* axis);
+rocke_value_t* rocke_b_cluster_workgroup_max_id(rocke_ir_builder_t* b, const char* axis);
+rocke_value_t* rocke_b_cluster_workgroup_flat_id(rocke_ir_builder_t* b);
+rocke_value_t* rocke_b_cluster_workgroup_max_flat_id(rocke_ir_builder_t* b);
+rocke_value_t* rocke_b_cluster_size(rocke_ir_builder_t* b, const char* axis);
 
 /* ----- global memory ----- */
 rocke_value_t* rocke_b_smem_alloc(rocke_ir_builder_t* b,
@@ -1394,6 +1410,9 @@ void rocke_b_s_buffer_prefetch_data(rocke_ir_builder_t* b,
                                     int offset);
 void rocke_b_global_prefetch(rocke_ir_builder_t* b, rocke_value_t* ptr, int cachepolicy);
 void rocke_b_flat_prefetch(rocke_ir_builder_t* b, rocke_value_t* ptr, int cachepolicy);
+/* gfx1250 cluster barrier: cluster-scope release fence, s.cluster.barrier,
+ * cluster-scope acquire fence. */
+void rocke_b_cluster_barrier(rocke_ir_builder_t* b);
 void rocke_b_s_setprio(rocke_ir_builder_t* b, int level);
 void rocke_b_iglp_opt(rocke_ir_builder_t* b, int level);
 void rocke_b_sched_barrier(rocke_ir_builder_t* b, int mask);

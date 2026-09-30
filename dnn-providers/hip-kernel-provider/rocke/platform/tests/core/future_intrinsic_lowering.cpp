@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <string>
 
 #include "rocke/arch_target.h"
@@ -1022,6 +1023,257 @@ void case_gfx1250_data_prefetch_lowerer_rechecks()
     }
 }
 
+/* ---- gfx1250 workgroup clusters ---- */
+
+/* Mirrors _build_all in test_gfx1250_cluster.py: every read on every axis,
+ * stored so the pure reads stay live, then one cluster barrier. */
+void build_gfx1250_cluster(rocke_ir_builder_t* b)
+{
+    rocke_value_t* out = global_ptr_param(b, "out", rocke_i32());
+    static const char* const axes[] = {"x", "y", "z"};
+    int slot = 0;
+    const auto store = [&](rocke_value_t* v) {
+        rocke_b_global_store(b, out, rocke_b_const_i32(b, slot++), v, 4);
+    };
+    for(const char* axis : axes)
+    {
+        store(rocke_b_cluster_id(b, axis));
+        store(rocke_b_cluster_workgroup_id(b, axis));
+        store(rocke_b_cluster_workgroup_max_id(b, axis));
+    }
+    store(rocke_b_cluster_workgroup_flat_id(b));
+    store(rocke_b_cluster_workgroup_max_flat_id(b));
+    rocke_b_cluster_barrier(b);
+}
+
+void case_gfx1250_cluster()
+{
+    const std::string ir = lower_one(
+        "gfx1250_cluster", build_gfx1250_cluster, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23);
+
+    static const char* const stems[]
+        = {"cluster.id", "cluster.workgroup.id", "cluster.workgroup.max.id"};
+    static const char* const axes[] = {"x", "y", "z"};
+    for(const char* stem : stems)
+    {
+        for(const char* axis : axes)
+        {
+            char call[128];
+            char decl[128];
+            snprintf(call, sizeof(call), " = call i32 @llvm.amdgcn.%s.%s()", stem, axis);
+            snprintf(decl, sizeof(decl), "declare i32 @llvm.amdgcn.%s.%s()", stem, axis);
+            expect_count(ir, call, 1, __LINE__);
+            expect_count(ir, decl, 1, __LINE__);
+        }
+    }
+    EXPECT_IR_COUNT(ir, " = call i32 @llvm.amdgcn.cluster.workgroup.flat.id()", 1);
+    EXPECT_IR_COUNT(ir, " = call i32 @llvm.amdgcn.cluster.workgroup.max.flat.id()", 1);
+    EXPECT_IR_COUNT(ir, "declare i32 @llvm.amdgcn.cluster.workgroup.flat.id()", 1);
+    EXPECT_IR_COUNT(ir, "declare i32 @llvm.amdgcn.cluster.workgroup.max.flat.id()", 1);
+    EXPECT_IR_COUNT(ir, "declare void @llvm.amdgcn.s.cluster.barrier()", 1);
+    /* The fences bracket the barrier with nothing in between. */
+    EXPECT_IR(ir,
+              "  fence syncscope(\"cluster\") release\n"
+              "  call void @llvm.amdgcn.s.cluster.barrier()\n"
+              "  fence syncscope(\"cluster\") acquire\n");
+    /* The cluster barrier is not the workgroup split barrier. */
+    EXPECT_NO_IR(ir, "@llvm.amdgcn.s.barrier.signal");
+    EXPECT_NO_IR(ir, "@llvm.amdgcn.s.barrier.wait");
+}
+
+void case_gfx1250_cluster_size()
+{
+    const std::string ir = lower_one(
+        "cluster_size",
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* out = global_ptr_param(b, "out", rocke_i32());
+            rocke_b_global_store(
+                b, out, rocke_b_const_i32(b, 0), rocke_b_cluster_size(b, "y"), 4);
+        },
+        "gfx1250",
+        ROCKE_LLVM_FLAVOR_LLVM23);
+    EXPECT_IR_COUNT(ir, " = call i32 @llvm.amdgcn.cluster.workgroup.max.id.y()", 1);
+    EXPECT_IR(ir, " = add nsw i32 %cwmax");
+    EXPECT_NO_IR(ir, "@llvm.amdgcn.cluster.id.");
+    EXPECT_NO_IR(ir, "@llvm.amdgcn.s.cluster.barrier");
+}
+
+/* Each op is gfx1250 + llvm23 only; the message names the op that tripped. */
+void case_gfx1250_cluster_gated()
+{
+    struct Gate
+    {
+        const char* name;
+        void (*emit)(rocke_ir_builder_t*, rocke_value_t*);
+    };
+    static const Gate gates[] = {
+        {"cluster_id",
+         [](rocke_ir_builder_t* b, rocke_value_t* o) {
+             rocke_b_global_store(b, o, rocke_b_const_i32(b, 0), rocke_b_cluster_id(b, "x"), 4);
+         }},
+        {"cluster_workgroup_id",
+         [](rocke_ir_builder_t* b, rocke_value_t* o) {
+             rocke_b_global_store(
+                 b, o, rocke_b_const_i32(b, 0), rocke_b_cluster_workgroup_id(b, "y"), 4);
+         }},
+        {"cluster_workgroup_max_id",
+         [](rocke_ir_builder_t* b, rocke_value_t* o) {
+             rocke_b_global_store(
+                 b, o, rocke_b_const_i32(b, 0), rocke_b_cluster_workgroup_max_id(b, "z"), 4);
+         }},
+        {"cluster_workgroup_flat_id",
+         [](rocke_ir_builder_t* b, rocke_value_t* o) {
+             rocke_b_global_store(
+                 b, o, rocke_b_const_i32(b, 0), rocke_b_cluster_workgroup_flat_id(b), 4);
+         }},
+        {"cluster_workgroup_max_flat_id",
+         [](rocke_ir_builder_t* b, rocke_value_t* o) {
+             rocke_b_global_store(
+                 b, o, rocke_b_const_i32(b, 0), rocke_b_cluster_workgroup_max_flat_id(b), 4);
+         }},
+        {"cluster_barrier",
+         [](rocke_ir_builder_t* b, rocke_value_t*) { rocke_b_cluster_barrier(b); }},
+    };
+    for(const Gate& g : gates)
+    {
+        const auto build
+            = [&g](rocke_ir_builder_t* b) { g.emit(b, global_ptr_param(b, "out", rocke_i32())); };
+        const struct
+        {
+            const char* arch;
+            rocke_llvm_flavor_t flavor;
+            const char* suffix;
+        } bad[] = {
+            {"gfx950", ROCKE_LLVM_FLAVOR_LLVM22, " requires gfx1250"},
+            {"gfx1201", ROCKE_LLVM_FLAVOR_LLVM23, " requires gfx1250"},
+            {"gfx1250", ROCKE_LLVM_FLAVOR_LLVM22, " requires LLVM flavor llvm23"},
+        };
+        for(const auto& t : bad)
+        {
+            std::string err;
+            const rocke_status_t st = lower_expect_error("gate", build, t.arch, t.flavor, &err);
+            const std::string want = std::string(g.name) + t.suffix;
+            if(st != ROCKE_ERR_VALUE || err.find(want) == std::string::npos)
+            {
+                char msg[ROCKE_ERR_MSG_CAP + 128];
+                snprintf(msg,
+                         sizeof(msg),
+                         "%s on %s: status %d, err \"%s\"",
+                         g.name,
+                         t.arch,
+                         (int)st,
+                         err.c_str());
+                fail(msg, __LINE__);
+            }
+        }
+    }
+}
+
+/* Builder axis validation; the text matches the Python builder. */
+void case_gfx1250_cluster_builder_rejects()
+{
+    struct Reject
+    {
+        const char* want;
+        rocke_value_t* (*emit)(rocke_ir_builder_t*);
+    };
+    static const Reject rejects[] = {
+        {"cluster_id axis must be x, y, or z, got 'w'",
+         [](rocke_ir_builder_t* b) { return rocke_b_cluster_id(b, "w"); }},
+        {"cluster_workgroup_id axis must be x, y, or z, got 'X'",
+         [](rocke_ir_builder_t* b) { return rocke_b_cluster_workgroup_id(b, "X"); }},
+        {"cluster_workgroup_max_id axis must be x, y, or z, got ''",
+         [](rocke_ir_builder_t* b) { return rocke_b_cluster_workgroup_max_id(b, ""); }},
+        {"cluster_workgroup_max_id axis must be x, y, or z, got 'xy'",
+         [](rocke_ir_builder_t* b) { return rocke_b_cluster_size(b, "xy"); }},
+    };
+    for(const Reject& r : rejects)
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "bad");
+        bool rejected = false;
+        std::string err;
+        try
+        {
+            rocke_value_t* v = r.emit(&b);
+            rejected = v == nullptr && rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE;
+            const char* msg = rocke_ir_builder_error(&b);
+            err = msg ? msg : "";
+        }
+        catch(const std::exception& e)
+        {
+            /* Builder errors surface as ckc::ValueError inside the library. */
+            rejected = true;
+            err = e.what();
+        }
+        if(!rejected || err.find(r.want) == std::string::npos)
+        {
+            char msg[ROCKE_ERR_MSG_CAP + 128];
+            snprintf(msg, sizeof(msg), "want \"%s\", err \"%s\"", r.want, err.c_str());
+            fail(msg, __LINE__);
+        }
+        rocke_ir_builder_free(&b);
+    }
+}
+
+/* Serialized IR reaches the lowerer without the builder's axis check. */
+void case_gfx1250_cluster_lowerer_rechecks()
+{
+    std::string err;
+    const rocke_status_t st = lower_expect_error(
+        "recheck",
+        [](rocke_ir_builder_t* b) {
+            rocke_attr_map_t attrs;
+            rocke_attr_map_init(&attrs);
+            rocke_attr_set_str(b, &attrs, "axis", "w");
+            const rocke_type_t* i32 = rocke_i32();
+            rocke_op_t* op = rocke_b_op(b,
+                                        ROCKE_OP_GPU_CLUSTER_WORKGROUP_ID,
+                                        nullptr,
+                                        0,
+                                        &i32,
+                                        1,
+                                        &attrs,
+                                        nullptr,
+                                        0,
+                                        "cwid",
+                                        nullptr);
+            rocke_b_global_store(b,
+                                 global_ptr_param(b, "out", rocke_i32()),
+                                 rocke_b_const_i32(b, 0),
+                                 rocke_op_result(b, op),
+                                 4);
+        },
+        "gfx1250",
+        ROCKE_LLVM_FLAVOR_LLVM23,
+        &err);
+    const char* want = "cluster_workgroup_id axis must be x, y, or z, got 'w'";
+    if(st != ROCKE_ERR_VALUE || err.find(want) == std::string::npos)
+    {
+        char msg[ROCKE_ERR_MSG_CAP + 128];
+        snprintf(msg, sizeof(msg), "want \"%s\", status %d, err \"%s\"", want, (int)st, err.c_str());
+        fail(msg, __LINE__);
+    }
+}
+
+/* The reads are pure (DCE/CSE-able); the barrier is not. Must match Python
+ * PURE_OP_NAMES. */
+void case_gfx1250_cluster_purity()
+{
+    static const rocke_opcode_t pure[] = {
+        ROCKE_OP_GPU_CLUSTER_ID,
+        ROCKE_OP_GPU_CLUSTER_WORKGROUP_ID,
+        ROCKE_OP_GPU_CLUSTER_WORKGROUP_MAX_ID,
+        ROCKE_OP_GPU_CLUSTER_WORKGROUP_FLAT_ID,
+        ROCKE_OP_GPU_CLUSTER_WORKGROUP_MAX_FLAT_ID,
+    };
+    for(rocke_opcode_t op : pure)
+        if(!rocke_opcode_is_pure(op))
+            fail(rocke_opcode_name(op), __LINE__);
+    if(rocke_opcode_is_pure(ROCKE_OP_TILE_CLUSTER_BARRIER))
+        fail("tile.cluster_barrier must not be pure", __LINE__);
+}
+
 /* ---- async buffer / global -> LDS ---- */
 void case_buffer_load_lds_async()
 {
@@ -1204,6 +1456,12 @@ void case_opcode_names_are_aligned()
         {ROCKE_OP_TILE_S_BUFFER_PREFETCH_DATA, "tile.s_buffer_prefetch_data"},
         {ROCKE_OP_TILE_GLOBAL_PREFETCH, "tile.global_prefetch"},
         {ROCKE_OP_TILE_FLAT_PREFETCH, "tile.flat_prefetch"},
+        {ROCKE_OP_TILE_CLUSTER_BARRIER, "tile.cluster_barrier"},
+        {ROCKE_OP_GPU_CLUSTER_ID, "gpu.cluster_id"},
+        {ROCKE_OP_GPU_CLUSTER_WORKGROUP_ID, "gpu.cluster_workgroup_id"},
+        {ROCKE_OP_GPU_CLUSTER_WORKGROUP_MAX_ID, "gpu.cluster_workgroup_max_id"},
+        {ROCKE_OP_GPU_CLUSTER_WORKGROUP_FLAT_ID, "gpu.cluster_workgroup_flat_id"},
+        {ROCKE_OP_GPU_CLUSTER_WORKGROUP_MAX_FLAT_ID, "gpu.cluster_workgroup_max_flat_id"},
         {ROCKE_OP_TILE_BUFFER_LOAD_LDS_ASYNC, "tile.buffer_load_lds_async"},
         {ROCKE_OP_TILE_GLOBAL_LOAD_ASYNC_TO_LDS, "tile.global_load_async_to_lds"},
         {ROCKE_OP_TILE_GLOBAL_STORE_ASYNC_FROM_LDS, "tile.global_store_async_from_lds"},
@@ -1326,6 +1584,12 @@ const TestCase k_cases[] = {
     {"gfx1250_data_prefetch_gated", case_gfx1250_data_prefetch_gated},
     {"gfx1250_data_prefetch_builder_rejects", case_gfx1250_data_prefetch_builder_rejects},
     {"gfx1250_data_prefetch_lowerer_rechecks", case_gfx1250_data_prefetch_lowerer_rechecks},
+    {"gfx1250_cluster", case_gfx1250_cluster},
+    {"gfx1250_cluster_size", case_gfx1250_cluster_size},
+    {"gfx1250_cluster_gated", case_gfx1250_cluster_gated},
+    {"gfx1250_cluster_builder_rejects", case_gfx1250_cluster_builder_rejects},
+    {"gfx1250_cluster_lowerer_rechecks", case_gfx1250_cluster_lowerer_rechecks},
+    {"gfx1250_cluster_purity", case_gfx1250_cluster_purity},
     {"buffer_load_lds_async", case_buffer_load_lds_async},
     {"global_load_async_to_lds_b8", case_global_load_async_to_lds_b8},
     {"hip_zext_uses_unsigned_source_cast", case_hip_zext_uses_unsigned_source_cast},

@@ -1395,6 +1395,85 @@ static void _op_tile_flat_prefetch(rocke_lower_t* L, const rocke_op_t* op)
                    (long long)cp);
 }
 
+/* ----- gfx1250 workgroup clusters (Python _lower_cluster_read .. _op_tile_cluster_barrier) ----- */
+
+/* `stem` is the intrinsic name after `llvm.amdgcn.`; per-axis intrinsics pass
+ * with_axis and get `.<axis>` appended (axis attr, default x). */
+static void ll_lower_cluster_read(rocke_lower_t* L,
+                                  const rocke_op_t* op,
+                                  const char* short_name,
+                                  const char* stem,
+                                  bool with_axis)
+{
+    const rocke_value_t* res = ll_result(op);
+    char key[64];
+    if(!rocke_ll_live(L) || !res)
+        return;
+    ll_require_gfx1250_llvm23(L, short_name);
+    if(op->num_operands != 0)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s takes no operands", short_name);
+    if(with_axis)
+    {
+        const char* axis = rocke_attr_get_str(&op->attrs, "axis");
+        if(axis == NULL)
+            axis = "x";
+        if(strcmp(axis, "x") != 0 && strcmp(axis, "y") != 0 && strcmp(axis, "z") != 0)
+            rocke_ll_fail(L,
+                          ROCKE_ERR_VALUE,
+                          "%s axis must be x, y, or z, got '%s'",
+                          short_name,
+                          axis);
+        snprintf(key, sizeof key, "%s.%s", stem, axis);
+    }
+    else
+    {
+        snprintf(key, sizeof key, "%s", stem);
+    }
+    rocke_ll_need(L, key);
+    rocke_ll_emitf(L, "  %s = call i32 @llvm.amdgcn.%s()", res->name, key);
+}
+
+static void _op_gpu_cluster_id(rocke_lower_t* L, const rocke_op_t* op)
+{
+    ll_lower_cluster_read(L, op, "cluster_id", "cluster.id", true);
+}
+
+static void _op_gpu_cluster_workgroup_id(rocke_lower_t* L, const rocke_op_t* op)
+{
+    ll_lower_cluster_read(L, op, "cluster_workgroup_id", "cluster.workgroup.id", true);
+}
+
+static void _op_gpu_cluster_workgroup_max_id(rocke_lower_t* L, const rocke_op_t* op)
+{
+    ll_lower_cluster_read(L, op, "cluster_workgroup_max_id", "cluster.workgroup.max.id", true);
+}
+
+static void _op_gpu_cluster_workgroup_flat_id(rocke_lower_t* L, const rocke_op_t* op)
+{
+    ll_lower_cluster_read(L, op, "cluster_workgroup_flat_id", "cluster.workgroup.flat.id", false);
+}
+
+static void _op_gpu_cluster_workgroup_max_flat_id(rocke_lower_t* L, const rocke_op_t* op)
+{
+    ll_lower_cluster_read(
+        L, op, "cluster_workgroup_max_flat_id", "cluster.workgroup.max.flat.id", false);
+}
+
+/* Release/acquire at cluster scope around the LLVM cluster barrier. The
+ * intrinsic expands to a workgroup barrier followed by one signal per
+ * workgroup on the cluster barrier; waves never signal it directly. */
+static void _op_tile_cluster_barrier(rocke_lower_t* L, const rocke_op_t* op)
+{
+    (void)op;
+    if(!rocke_ll_live(L))
+        return;
+    ll_require_gfx1250_llvm23(L, "cluster_barrier");
+    rocke_ll_need(L, "s.cluster.barrier");
+    rocke_ll_emit(L, "  fence syncscope(\"cluster\") release");
+    rocke_ll_emit(L, "  call void @llvm.amdgcn.s.cluster.barrier()");
+    rocke_ll_emit(L, "  fence syncscope(\"cluster\") acquire");
+}
+
 /* Python _op_tile_iglp_opt. */
 static void _op_tile_iglp_opt(rocke_lower_t* L, const rocke_op_t* op)
 {
@@ -2336,6 +2415,13 @@ void rocke_ll_register_vector(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_S_BUFFER_PREFETCH_DATA, _op_tile_s_buffer_prefetch_data);
     rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_PREFETCH, _op_tile_global_prefetch);
     rocke_ll_set_handler(ROCKE_OP_TILE_FLAT_PREFETCH, _op_tile_flat_prefetch);
+    rocke_ll_set_handler(ROCKE_OP_GPU_CLUSTER_ID, _op_gpu_cluster_id);
+    rocke_ll_set_handler(ROCKE_OP_GPU_CLUSTER_WORKGROUP_ID, _op_gpu_cluster_workgroup_id);
+    rocke_ll_set_handler(ROCKE_OP_GPU_CLUSTER_WORKGROUP_MAX_ID, _op_gpu_cluster_workgroup_max_id);
+    rocke_ll_set_handler(ROCKE_OP_GPU_CLUSTER_WORKGROUP_FLAT_ID, _op_gpu_cluster_workgroup_flat_id);
+    rocke_ll_set_handler(ROCKE_OP_GPU_CLUSTER_WORKGROUP_MAX_FLAT_ID,
+                         _op_gpu_cluster_workgroup_max_flat_id);
+    rocke_ll_set_handler(ROCKE_OP_TILE_CLUSTER_BARRIER, _op_tile_cluster_barrier);
     rocke_ll_set_handler(ROCKE_OP_TILE_S_SETPRIO, _op_tile_s_setprio);
     rocke_ll_set_handler(ROCKE_OP_TILE_IGLP_OPT, _op_tile_iglp_opt);
     rocke_ll_set_handler(ROCKE_OP_TILE_SCHED_BARRIER, _op_tile_sched_barrier);

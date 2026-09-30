@@ -323,6 +323,31 @@ def build_data_prefetch(b: IRBuilder) -> None:
 CONFIGS.append((build_data_prefetch, "gfx1250"))
 
 
+def build_cluster(b: IRBuilder) -> None:
+    """Every cluster read on every axis, stored so the pure reads stay live,
+    then cluster_size and one cluster barrier."""
+    out = b.param("out", PtrType(I32, "global"))
+    tid = b.thread_id_x()
+    for axis in ("x", "y", "z"):
+        cid = b.cluster_id(axis)
+        b.global_store(out, tid, cid)
+        cwid = b.cluster_workgroup_id(axis)
+        b.global_store(out, tid, cwid)
+        cwmax = b.cluster_workgroup_max_id(axis)
+        b.global_store(out, tid, cwmax)
+    flat = b.cluster_workgroup_flat_id()
+    b.global_store(out, tid, flat)
+    max_flat = b.cluster_workgroup_max_flat_id()
+    b.global_store(out, tid, max_flat)
+    size = b.cluster_size("y")
+    b.global_store(out, tid, size)
+    b.cluster_barrier()
+    b.ret()
+
+
+CONFIGS.append((build_cluster, "gfx1250"))
+
+
 def _spec(idx: int):
     """Config selector: the (builder, arch) pair the shared driver expects."""
     if not 0 <= idx < len(CONFIGS):

@@ -17,6 +17,7 @@ python -m rocke.examples.gfx1250.isa_features.async_store_verify
 python -m rocke.examples.gfx1250.isa_features.global_transpose_verify
 python -m rocke.examples.gfx1250.isa_features.tdm_verify
 python -m rocke.examples.gfx1250.isa_features.data_prefetch_verify
+python -m rocke.examples.gfx1250.isa_features.cluster_ids_verify
 ```
 
 Each file can also be run directly with the same `PYTHONPATH`. Use `--arch
@@ -62,6 +63,15 @@ check. It is resolved from `LLVM_OBJDUMP`, then `$ROCM_PATH/llvm/bin`, then
   buffer resource, `global_prefetch_b8`, and `flat_prefetch_b8` before an exact
   i32 copy/transform. Prefetch is a hint, so the check is that results are
   unchanged.
+- `cluster_ids_verify.py`: mandatory LLVM/ISA checks for every workgroup-cluster
+  read and the cluster barrier. The per-axis ids lower to `ttmp9`/`ttmp7` and
+  4-bit `ttmp6` field extracts, the flat id to `s_getreg_b32` of
+  `HW_REG_IB_STS2`, and `cluster_barrier` to the workgroup barrier followed by
+  a first-wave `s_barrier_signal -3` and `s_barrier_wait -3` (disassembled as
+  `0xfffd`), bracketed by the
+  cluster-scope release (`s_wait_storecnt`) and acquire (`global_inv
+  scope:SCOPE_SE`). Functional execution is intentionally skipped until ROCKE
+  can launch with a cluster shape.
 
 `--compile-only` additionally skips the four otherwise-safe functional checks.
 An intentional functional skip is reported as `SKIP` and does not hide a failed

@@ -407,6 +407,32 @@ static void build_data_prefetch(rocke_ir_builder_t* b)
     rocke_b_ret(b);
 }
 
+/* Every cluster read on every axis, stored so the pure reads stay live, then
+ * cluster_size and one cluster barrier. */
+static void build_cluster(rocke_ir_builder_t* b)
+{
+    static const char* const axes[] = {"x", "y", "z"};
+    rocke_value_t* out = rocke_b_param(b, "out", rocke_ptr_type(b, rocke_i32(), "global"), NULL);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    for(int i = 0; i < 3; ++i)
+    {
+        rocke_value_t* cid = rocke_b_cluster_id(b, axes[i]);
+        rocke_b_global_store(b, out, tid, cid, 1);
+        rocke_value_t* cwid = rocke_b_cluster_workgroup_id(b, axes[i]);
+        rocke_b_global_store(b, out, tid, cwid, 1);
+        rocke_value_t* cwmax = rocke_b_cluster_workgroup_max_id(b, axes[i]);
+        rocke_b_global_store(b, out, tid, cwmax, 1);
+    }
+    rocke_value_t* flat = rocke_b_cluster_workgroup_flat_id(b);
+    rocke_b_global_store(b, out, tid, flat, 1);
+    rocke_value_t* max_flat = rocke_b_cluster_workgroup_max_flat_id(b);
+    rocke_b_global_store(b, out, tid, max_flat, 1);
+    rocke_value_t* size = rocke_b_cluster_size(b, "y");
+    rocke_b_global_store(b, out, tid, size, 1);
+    rocke_b_cluster_barrier(b);
+    rocke_b_ret(b);
+}
+
 typedef void (*build_fn_t)(rocke_ir_builder_t*);
 
 typedef struct config
@@ -446,6 +472,7 @@ static const config_t CONFIGS[] = {
     {build_scale_coordinates_k32, "gfx1250"},
     {build_scale_coordinates_k16, "gfx1250"},
     {build_data_prefetch, "gfx1250"},
+    {build_cluster, "gfx1250"},
 };
 
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));

@@ -486,6 +486,11 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     /* gpu.* */
     "gpu.thread_id",
     "gpu.block_id",
+    "gpu.cluster_id",
+    "gpu.cluster_workgroup_id",
+    "gpu.cluster_workgroup_max_id",
+    "gpu.cluster_workgroup_flat_id",
+    "gpu.cluster_workgroup_max_flat_id",
 
     /* memref.* */
     "memref.global_load",
@@ -625,6 +630,7 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.s_buffer_prefetch_data",
     "tile.global_prefetch",
     "tile.flat_prefetch",
+    "tile.cluster_barrier",
     "tile.s_setprio",
     "tile.iglp_opt",
     "tile.sched_barrier",
@@ -737,6 +743,11 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* gpu.* */
     /* gpu.thread_id */ true,
     /* gpu.block_id  */ true,
+    /* gpu.cluster_id                    */ true,
+    /* gpu.cluster_workgroup_id          */ true,
+    /* gpu.cluster_workgroup_max_id      */ true,
+    /* gpu.cluster_workgroup_flat_id     */ true,
+    /* gpu.cluster_workgroup_max_flat_id */ true,
 
     /* memref.* (all effectful) */
     /* global_load                  */ false,
@@ -876,6 +887,7 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* s_buffer_prefetch_data */ false,
     /* global_prefetch      */ false,
     /* flat_prefetch        */ false,
+    /* cluster_barrier      */ false,
     /* s_setprio            */ false,
     /* iglp_opt             */ false,
     /* sched_barrier        */ false,
