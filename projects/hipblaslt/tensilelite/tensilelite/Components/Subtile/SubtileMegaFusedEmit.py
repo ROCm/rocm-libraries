@@ -1368,7 +1368,7 @@ class SubtileMegaFusedEmitter:
         sgprPool = self.writer.sgprPool
         partialSrd = sgprPool.checkOutAligned(4, 4, tag="mf_partialSrd", preventOverflow=False)
         self._buildBufferSrd(module, partialSrd, "PartialBuf", "partialBuf")
-        module.add(self._reduceFree0())
+        module.add(self._reduceCrossWaveFree0())
         globalAddr = self.writer.vgprPool.checkOut(1, tag="mf_globalAddr")
         module.add(self._writePartialsFree0(
             self.partials, partialSrd, self.laneId, self.savedExec, self.laneMaskSgpr,
@@ -1828,15 +1828,14 @@ class SubtileMegaFusedEmitter:
         module.addComment1("MF end _emitInteriorTailBranch.")
 
 
-    def _emitTeardown(self, module, gammaBank) -> None:
-        """End stream context, drain stores, free residual scratch and gamma bank."""
-        module.addComment1("MF begin _emitTeardown: drain stores, free residual scratch and gamma bank.")
+    def _emitTeardown(self, module) -> None:
+        """End stream context and drain stores; still fences the cross-wave LDS+barrier phase that follows."""
+        module.addComment1("MF begin _emitTeardown: drain stores, free residual scratch.")
         if self.useMxfp8:
             self._endStreamContext()
         # One vscnt=0 drains both MXScale stores (from _subColStoreGroup) and ResidualOut stores.
         module.add(SWaitCnt(vscnt=0, comment="drain MXScale and ResidualOut stores."))
         self._endResidualScratch(module)
-        self.writer.vgprPool.checkIn(gammaBank)
         module.addComment1("MF end _emitTeardown.")
 
 
@@ -1864,7 +1863,15 @@ class SubtileMegaFusedEmitter:
             mBaseV, globalLoadsCum, issuedThroughUnit, tileStarts, pfd, pathInterior)
         self._emitInteriorTailBranch(module, emitBodyFn)
         self._freeRing(resRing, accBank, blkAmax, mBaseV, pfd)
-        self._emitTeardown(module, gammaBank)
+        # Free gamma before the butterfly to cap VGPR high-water (stack-LIFO: after _freeRing).
+        # Gamma is fully consumed by the fused body at this point.
+        self.writer.vgprPool.checkIn(gammaBank)
+        # Intra-wave ds_bpermute butterfly BEFORE the store drain; overlaps in-flight stores
+        # (its internal dscnt=0 wait does not drain vector stores).
+        module.add(self._reduceRowGroupFree0())
+        # vscnt=0 store drain; still fences the cross-wave LDS+barrier phase that follows.
+        self._emitTeardown(module)
+        # Cross-wave reduce (fenced by the drain above) + partialBuf write.
         module.add(self._reduceAndWriteRms())
         self._freeSharedRegs()
         module.addComment0("MF end emit.")
@@ -2353,20 +2360,28 @@ class SubtileMegaFusedEmitter:
         return srcRegs
 
 
-    def _reduceFree0(self) -> Module:
-        # Row-group butterfly per array, then one fused cross-wave pass so the amax
-        # and Σx² reductions share barriers instead of paying them per array.
-        module = Module("PartialRMS reduceFree0")
-        module.addComment0("MF begin _reduceFree0: row-group butterfly then optional cross-wave reduction.")
+    def _reduceRowGroupFree0(self) -> Module:
+        # Intra-wave row-group butterfly only; uses ds_bpermute (cross-lane datapath),
+        # touches no LDS memory and issues no s_barrier, so it is safe to run before
+        # the store drain.
+        module = Module("PartialRMS reduceRowGroupFree0")
+        module.addComment0("MF begin _reduceRowGroupFree0: intra-wave row-group butterfly (no LDS memory, no barrier).")
         # TODO(perf): fuse the Σx² and amax row-group butterflies to share the
         # partner-address computation and dscnt wait. Deferred for simplicity.
         module.add(self._rowGroupReduceFree0(self.partials))
-        if self.wg_m <= 1:
-            module.addComment0("MF end _reduceFree0.")
-            return module
-        reduceArrays = [(self.partials, VAddF32, "+")]
-        module.add(self._crossWaveReduceFree0(reduceArrays))
-        module.addComment0("MF end _reduceFree0.")
+        module.addComment0("MF end _reduceRowGroupFree0.")
+        return module
+
+
+    def _reduceCrossWaveFree0(self) -> Module:
+        # Cross-wave LDS reduction; must run after the store drain because it uses
+        # s_barrier + real DSStore/DSLoad, which cannot safely race in-flight stores.
+        module = Module("PartialRMS reduceCrossWaveFree0")
+        module.addComment0("MF begin _reduceCrossWaveFree0: cross-wave LDS reduction (fenced, wg_m > 1 only).")
+        if self.wg_m > 1:
+            reduceArrays = [(self.partials, VAddF32, "+")]
+            module.add(self._crossWaveReduceFree0(reduceArrays))
+        module.addComment0("MF end _reduceCrossWaveFree0.")
         return module
 
 
