@@ -508,7 +508,7 @@ try
         bool have_funcptr_callbacks
             = info_internal.get_load_cb_fns() || info_internal.get_store_cb_fns();
         bool have_jit_callbacks = plan->desc.loadOps.has_spirv() || plan->desc.storeOps.has_spirv();
-        bool have_multigpu_plan = !plan->desc.has_undistributed_io_on_current_location();
+        bool have_multigpu_plan = !plan->desc.inFields.empty() || !plan->desc.outFields.empty();
         if(have_funcptr_callbacks && (have_jit_callbacks || have_multigpu_plan))
         {
             return rocfft_status_invalid_arg_value;
