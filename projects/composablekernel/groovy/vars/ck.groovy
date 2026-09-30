@@ -872,7 +872,7 @@ def cmake_build(Map conf=[:]){
         if (runAllUnitTests) {
             build_cmd = conf.get(
                 "build_cmd",
-                "${build_envs} ninja -j${nt} ${config_targets}"
+                "${build_envs} ninja -j${nt} install check"
             )
         } else {
             // Smart-build enabled: skip full build and execute_cmd (client examples)
