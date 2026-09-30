@@ -94,7 +94,7 @@ class GeneratedTileKernelInstance : public KernelInstance
         if(require_k && !pad_k && problem.K % k_grain != 0)
             return false;
 
-        return true;
+        return vector_widths_divide(key_, problem.M, problem.N, problem.K);
     }
 
     std::string get_name() const override { return name_; }

@@ -34,6 +34,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
+from gemm_utils import _codegen_common  # noqa: E402
 from batched_gemm_utils import (  # noqa: E402
     BatchedGemmKernelConfig,
     BatchedGemmProblem,
@@ -108,10 +109,19 @@ def _make_fp16_config(gfx_arch: str) -> BatchedGemmKernelConfig:
     )
 
 
-def test_batched_fp16(gfx_arch: str) -> tuple[str, str]:
-    # Small multi-batch problem; K=128 gives 4 tile-K iterations (128/32).
-    batch, M, N, K = 3, 128, 128, 128
+# (batch, M, N, K). K=128 gives 4 tile-K iterations (128/32). K=257 is not a
+# multiple of the native 8-wide fp16 A/B loads, so no native kernel accepts it;
+# it runs on the narrowed fixed-width (_vec) kernel instead.
+CASES = [(3, 128, 128, 128), (3, 128, 128, 257)]
+
+
+def test_batched_fp16(gfx_arch: str, batch: int, M: int, N: int, K: int) -> tuple[str, str]:
     cfg = _make_fp16_config(gfx_arch)
+    need = _codegen_common().gemm_problem_vector_sizes(M, N, K, "rcr", "fp16", "fp16", "fp16")
+    if need != cfg.effective_vector_sizes:
+        cfg, reason = cfg.with_vector_sizes(need)
+        if reason:
+            return FAIL, f"batched/fp16 K={K}: vector widths rejected: {reason}"
 
     so_paths = setup_multiple_batched_gemm_dispatchers([cfg], verbose=False)
     if not so_paths or so_paths[0] is None:
@@ -147,7 +157,7 @@ def test_batched_fp16(gfx_arch: str) -> tuple[str, str]:
     if result.time_ms <= 0.0:
         return FAIL, f"batched/fp16: time_ms={result.time_ms:.4f} not positive"
 
-    return PASS, (f"batched/fp16: max_rel_err={mre:.4e}, "
+    return PASS, (f"batched/fp16 vec{cfg.effective_vector_sizes}: max_rel_err={mre:.4e}, "
                   f"time_ms={result.time_ms:.3f}, batch={batch} MNK={M}/{N}/{K}")
 
 
@@ -169,15 +179,19 @@ def main() -> int:
     gfx = args.gfx or _resolve_arch(None)
     log.info("Running batched GEMM GPU correctness on %s", gfx)
 
-    try:
-        status, detail = test_batched_fp16(gfx)
-    except Exception as exc:  # noqa: BLE001
-        status, detail = FAIL, f"batched/fp16: exception: {exc}"
+    results = []
+    for case in CASES:
+        try:
+            results.append(test_batched_fp16(gfx, *case))
+        except Exception as exc:  # noqa: BLE001
+            results.append((FAIL, f"batched/fp16 {case}: exception: {exc}"))
 
     print("\n=== Summary ===")
-    print(f"  [{status:4s}] {detail}")
-    print(f"\n{1 if status == PASS else 0}/1 passed")
-    return 0 if status == PASS else 1
+    for status, detail in results:
+        print(f"  [{status:4s}] {detail}")
+    n_pass = sum(status == PASS for status, _ in results)
+    print(f"\n{n_pass}/{len(results)} passed")
+    return 0 if n_pass == len(results) else 1
 
 
 if __name__ == "__main__":

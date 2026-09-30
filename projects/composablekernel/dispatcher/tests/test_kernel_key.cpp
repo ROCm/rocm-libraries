@@ -148,6 +148,27 @@ TEST(KernelKeyTest, EncodeIdentifierWithVectorSizes)
     EXPECT_NE(key, native);
 }
 
+TEST(KernelKeyTest, VectorWidthsDivide)
+{
+    // fp16 rcr: contiguous extents are A->K, B->K, C->N.
+    KernelKey native            = make_test_key(256, 256, 32, "gfx950");
+    KernelKey vec               = native;
+    vec.algorithm.vector_size_a = 1;
+    vec.algorithm.vector_size_b = 1;
+    vec.algorithm.vector_size_c = 8;
+
+    // Aligned problem: both run.
+    EXPECT_TRUE(vector_widths_divide(native, 512, 512, 512));
+    EXPECT_TRUE(vector_widths_divide(vec, 512, 512, 512));
+    // K=257: native 8-wide A/B loads cannot run, the vec1_1_8 kernel can.
+    EXPECT_FALSE(vector_widths_divide(native, 512, 512, 257));
+    EXPECT_TRUE(vector_widths_divide(vec, 512, 512, 257));
+    // N=129 misaligns C, which vec1_1_8 still stores 8 wide.
+    EXPECT_FALSE(vector_widths_divide(vec, 512, 129, 257));
+    // M does not gate rcr at all.
+    EXPECT_TRUE(vector_widths_divide(native, 257, 512, 512));
+}
+
 TEST(KernelKeyTest, EncodeIdentifierWithSparsity)
 {
     KernelKey key;

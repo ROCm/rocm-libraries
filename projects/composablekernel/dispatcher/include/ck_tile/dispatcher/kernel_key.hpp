@@ -523,5 +523,45 @@ inline std::string KernelKey::encode_identifier() const
     return oss.str();
 }
 
+/// Elements per 16-byte native global vector for dtype (1 when not byte-sized).
+inline std::int64_t native_vector_elems(DataType dtype)
+{
+    switch(dtype)
+    {
+    case DataType::FP16:
+    case DataType::BF16: return 8;
+    case DataType::FP32:
+    case DataType::INT32: return 4;
+    case DataType::FP64: return 2;
+    case DataType::FP8:
+    case DataType::BF8:
+    case DataType::INT8: return 16;
+    default: return 1;
+    }
+}
+
+/// Whether every contiguous A/B/C extent is a multiple of the kernel's global
+/// vector width. This is the IsSupportedArgument check that kPadM/N/K do not
+/// relax, so a registry gating on it falls through to a narrower kernel instead
+/// of throwing at launch. Fixed-width keys use their own widths; native keys use
+/// the 16-byte width the codegen derives from the tile.
+inline bool
+vector_widths_divide(const KernelKey& key, std::int64_t M, std::int64_t N, std::int64_t K)
+{
+    const auto& sig  = key.signature;
+    const auto& alg  = key.algorithm;
+    const bool fixed = alg.vector_size_a || alg.vector_size_b || alg.vector_size_c;
+    const auto width = [&](std::uint8_t v, DataType d) {
+        return fixed ? std::int64_t{v} : native_vector_elems(d);
+    };
+    const auto is_row        = [](LayoutTag l) { return l == LayoutTag::RowMajor; };
+    const std::int64_t ext_a = is_row(sig.layout_a) ? K : M;
+    const std::int64_t ext_b = is_row(sig.layout_b) ? N : K;
+    const std::int64_t ext_c = is_row(sig.layout_c) ? N : M;
+    return ext_a % width(alg.vector_size_a, sig.dtype_a) == 0 &&
+           ext_b % width(alg.vector_size_b, sig.dtype_b) == 0 &&
+           ext_c % width(alg.vector_size_c, sig.dtype_c) == 0;
+}
+
 } // namespace dispatcher
 } // namespace ck_tile
