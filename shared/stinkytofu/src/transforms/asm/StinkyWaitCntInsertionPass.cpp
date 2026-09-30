@@ -202,6 +202,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             comment += ")";
         }
         wait.addModifier<CommentData>(CommentData{comment});
+        wait.addModifier<WaitProvenanceData>(WaitProvenanceData{comment});
     }
 
     void removePHIs(PassContext& passCtx, const std::vector<BasicBlock*>& rpo) {

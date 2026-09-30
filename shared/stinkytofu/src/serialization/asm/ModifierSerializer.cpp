@@ -116,6 +116,16 @@ std::string vectorToString(const std::vector<int>& vec) {
     return result;
 }
 
+std::string quoteString(const std::string& text) {
+    std::string result = "\"";
+    for (char c : text) {
+        if (c == '\\' || c == '"') result += '\\';
+        result += c;
+    }
+    result += '"';
+    return result;
+}
+
 std::string stringVectorToBracketForm(const std::vector<std::string>& vec) {
     std::string result = "[";
     for (size_t i = 0; i < vec.size(); ++i) {
@@ -508,6 +518,12 @@ bool serializeVisit(const LdsRingData& mod, std::ostream& os) {
     return true;
 }
 
+// WaitProvenanceData
+bool serializeVisit(const WaitProvenanceData& mod, std::ostream& os) {
+    os << ", mod.wait_provenance = { text = " << quoteString(mod.text) << " }";
+    return true;
+}
+
 // LabelData
 bool serializeVisit(const LabelData& mod, std::ostream& os) {
     os << ", mod.label = { label = \"" << mod.label << "\""
@@ -536,7 +552,7 @@ bool ModifierSerializer::serialize(const Modifier& mod, std::ostream& os) {
                           VOP3Modifiers, VOP3PModifiers, True16Modifiers, EXEC, VCC, SWaitCntData,
                           SWaitTensorCntData, SWaitAsyncCntData, SWaitStoreCntData, SDelayAluData,
                           SWaitAluData, MFMAModifiers, MatrixFmtModifiers, MemTokenData,
-                          LdsRingData, LabelData, CallTargetData>(mod, os);
+                          LdsRingData, WaitProvenanceData, LabelData, CallTargetData>(mod, os);
 }
 
 /*
@@ -690,6 +706,8 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
             advances.push_back({flatAdvances[i], flatAdvances[i + 1]});
         }
         inst->addModifier(LdsRingData(std::move(accesses), std::move(advances)));
+    } else if (attrKey == "mod.wait_provenance") {
+        inst->addModifier(WaitProvenanceData(getStr(fields, "text", "")));
     } else if (attrKey == "mod.label") {
         inst->addModifier(LabelData(getStr(fields, "label", ""),
                                     static_cast<uint16_t>(getInt(fields, "alignment", 1))));

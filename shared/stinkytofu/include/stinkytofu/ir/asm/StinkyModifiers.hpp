@@ -309,6 +309,7 @@ struct Modifier {
         LABEL_NAME,
         MFMA_DATA,
         COMMENT,
+        WAIT_PROVENANCE,
         MATRIX_FMT,
         MEM_TOKEN,
         LDS_RING,
@@ -1078,6 +1079,18 @@ struct CommentData : public TypedModifier<CommentData> {
     CommentData(const std::string& comment) : TypedModifier<CommentData>(), comment(comment) {}
 
     std::string comment;
+};
+
+/// Serialized diagnostic explaining which dynamic operations a generated wait
+/// retires. Kept separate from MemTokenData because it is path/frame aware and
+/// is not dependency metadata for later optimization passes.
+struct WaitProvenanceData : public TypedModifier<WaitProvenanceData> {
+    static constexpr Modifier::Type Type = Modifier::Type::WAIT_PROVENANCE;
+
+    explicit WaitProvenanceData(std::string text = {})
+        : TypedModifier<WaitProvenanceData>(), text(std::move(text)) {}
+
+    std::string text;
 };
 
 struct MemTokenData : public TypedModifier<MemTokenData> {

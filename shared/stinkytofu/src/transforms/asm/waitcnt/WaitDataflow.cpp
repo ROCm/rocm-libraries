@@ -223,6 +223,12 @@ int positiveModulo(int value, int modulus) {
     return result < 0 ? result + modulus : result;
 }
 
+bool hasRingKind(const LdsRingData* ring, LdsRingAccessKind kind) {
+    if (ring == nullptr) return false;
+    return std::any_of(ring->accesses.begin(), ring->accesses.end(),
+                       [kind](const LdsRingAccess& access) { return access.kind == kind; });
+}
+
 bool ringAliases(const QueuedOp& producer, size_t producerIndex, const LdsRingAccess& consumer) {
     if (producer.op == nullptr) return false;
     const auto* ring = producer.op->getModifier<LdsRingData>();
@@ -864,6 +870,13 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         if (required[c] == WaitCountSpec::kUnused || w < required[c]) required[c] = w;
     };
     const auto* anchorRing = inst->getModifier<LdsRingData>();
+    const bool frameAwareTensorAnchor =
+        hasRingKind(anchorRing, LdsRingAccessKind::Publish) ||
+        hasRingKind(anchorRing, LdsRingAccessKind::Protect) ||
+        hasRingKind(anchorRing, LdsRingAccessKind::Read);
+    const bool frameAwareDsAnchor =
+        hasRingKind(anchorRing, LdsRingAccessKind::Protect) ||
+        hasRingKind(anchorRing, LdsRingAccessKind::Write);
 
     // For each src dep on counter `c` that appears in some per-pred
     // queue, contribute its (countFrom - 1) wait via tightenRequired.
@@ -874,6 +887,7 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
 
         if (isPhi(*src)) {
             for (int c = 0; c < CK_Count; ++c) {
+                if (c == CK_Tensor && frameAwareTensorAnchor) continue;
                 if (!rawNeedsWait[c](*inst)) continue;
                 std::unordered_set<StinkyInstruction*> seen;
                 int w = phiCurrentQueueWait(src, static_cast<CounterKind>(c), state, seen);
@@ -884,6 +898,7 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
 
         CounterKind c = classifyMemOp(*src);
         if (c == CK_Count) continue;
+        if (c == CK_Tensor && frameAwareTensorAnchor) continue;
         // No same-pipeline filter here: an SSA RAW edge (e.g. ds_store
         // consuming ds_load's vreg output) needs the wait even though
         // both live on the same hardware FIFO. Same-pipeline only
@@ -910,6 +925,7 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
     auto scanRingDeps = [&](CounterKind c, LdsRingAccessKind anchorKind,
                             LdsRingAccessKind producerKind) {
         if (anchorRing == nullptr) return;
+        if (!hasRingKind(anchorRing, anchorKind)) return;
         for (const auto& q : state.queues[c]) {
             if (q.ringSaturated) {
                 tightenRequired(c, 0);
@@ -922,7 +938,12 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
                     const QueuedOp& queued = q.ops[idx];
                     if (queued.op == inst || queued.op == nullptr) continue;
                     const auto* producerRing = queued.op->getModifier<LdsRingData>();
-                    if (producerRing == nullptr) continue;
+                    if (producerRing == nullptr) {
+                        // A partially annotated rotating ring cannot prove this
+                        // producer disjoint from the anchor.
+                        tightenRequired(c, 0);
+                        continue;
+                    }
                     for (size_t accessIdx = 0; accessIdx < producerRing->accesses.size();
                          ++accessIdx) {
                         if (producerRing->accesses[accessIdx].kind != producerKind) continue;
@@ -974,11 +995,12 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         }
     };
 
-    if (isLdsWriterAnchor(*inst)) {
+    if (isLdsWriterAnchor(*inst) && !frameAwareDsAnchor) {
         const auto* tk = inst->getModifier<MemTokenData>();
         if (tk != nullptr) scanDsAntiDeps(*inst, tk->tokens, /*barrierMode=*/false);
     }
-    if (isBarrier(*inst)) {
+    if (isBarrier(*inst) &&
+        !hasRingKind(anchorRing, LdsRingAccessKind::Protect)) {
         const auto* tk = inst->getModifier<MemTokenData>();
         if (tk != nullptr) scanDsAntiDeps(*inst, tk->tokens, /*barrierMode=*/true);
     }

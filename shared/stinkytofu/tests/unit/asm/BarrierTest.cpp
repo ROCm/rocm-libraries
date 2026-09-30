@@ -141,6 +141,8 @@ class BarrierTest : public ::testing::Test {
 TEST_F(BarrierTest, LegalizeBarrier_Gfx1250_ExpandsToSignalAndWait) {
     StinkyInstruction* barrier = createSBarrier();
     ASSERT_NE(barrier, nullptr);
+    barrier->addModifier<LdsRingData>(LdsRingData{
+        {{0, 0, 3, 2, LdsRingAccessKind::Protect}}, {}});
 
     // Before legalization: exactly one s_barrier in the block.
     EXPECT_EQ(countByMnemonic("s_barrier"), 1);
@@ -172,6 +174,10 @@ TEST_F(BarrierTest, LegalizeBarrier_Gfx1250_ExpandsToSignalAndWait) {
         << "Second legalized instruction should be s_barrier_wait";
     EXPECT_TRUE(isSplitBarrierAllWave(*result.last))
         << "s_barrier_wait should carry -1 (all-wave) operand";
+    ASSERT_NE(result.first->getModifier<LdsRingData>(), nullptr);
+    ASSERT_NE(result.last->getModifier<LdsRingData>(), nullptr);
+    EXPECT_EQ(result.first->getModifier<LdsRingData>()->accesses,
+              result.last->getModifier<LdsRingData>()->accesses);
 }
 
 // Three independent memory-token groups are emitted into one block.
