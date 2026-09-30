@@ -13,6 +13,16 @@ import signal
 import subprocess
 import sys
 
+HEURISTIC_ROUTES = (
+    "fallback-c",
+    "fallback-cpp",
+    "forced",
+    "cache-hit",
+    "null-algo",
+    "report",
+    "partial-fill",
+)
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -47,6 +57,7 @@ def main():
             "splitk-api",
             "bundle-failures",
             "helper-failures",
+            *(f"heuristic-{route}" for route in HEURISTIC_ROUTES),
             "disabled-api",
         ),
         help="Run only the selected regression routes (default: all)",
@@ -61,8 +72,9 @@ def main():
     api_test = build / "clients/staging/hipblaslt-jit-api-test"
     env = dict(os.environ)
     for key in tuple(env):
-        if key.startswith(("HIPBLASLT_JIT_", "TENSILE_STREAMK_")):
+        if key.startswith(("HIPBLASLT_JIT", "TENSILE_STREAMK_", "AMD_COMGR_")):
             env.pop(key)
+    env["XDG_CACHE_HOME"] = str(output / "xdg")
     env["PYTHONPATH"] = os.pathsep.join(
         map(str, (build / "tensilelite/rocisa", build / "tensilelite", tensile))
     )
@@ -364,6 +376,24 @@ def main():
             )
         )
 
+    heuristic_script = source / "projects/hipblaslt/clients/tests/jit/test_heuristic.py"
+    heuristic_test = staging / "hipblaslt-jit-heuristic-test"
+    for route in HEURISTIC_ROUTES:
+        commands.append(
+            (
+                f"heuristic-{route}",
+                [
+                    sys.executable,
+                    str(heuristic_script),
+                    str(heuristic_test),
+                    route,
+                    str(output / f"heuristic-{route}"),
+                ],
+                {},
+                900,
+            )
+        )
+
     bench_script = source / "projects/hipblaslt/clients/bench/test_jit_gemm.py"
     commands.append(
         (
@@ -446,6 +476,7 @@ def main():
                     "8",
                     "--target",
                     "hipblaslt-jit-disabled-test",
+                    "hipblaslt-jit-heuristic-test",
                     "hipblaslt-bench",
                 ],
                 env=env,
@@ -477,6 +508,20 @@ def main():
                         "--output",
                         str(output / "disabled-bench"),
                         "--feature-off",
+                    ],
+                    env=env,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    timeout=120,
+                ).returncode
+            if status == 0:
+                status = subprocess.run(
+                    [
+                        sys.executable,
+                        str(heuristic_script),
+                        str(heuristic_test),
+                        "jit-off",
+                        str(output / "disabled-heuristic"),
                     ],
                     env=env,
                     stdout=log,
