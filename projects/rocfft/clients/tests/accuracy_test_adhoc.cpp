@@ -692,9 +692,8 @@ const auto adhoc_64_bit_idx_twiddle_large_tokens = {
     "complex_forward_len_8388617_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_8388617_odist_8388617_ioffset_0_0_ooffset_0_0",
     // twl 4
     "complex_forward_len_25165813_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_25165813_odist_25165813_ioffset_0_0_ooffset_0_0",
-    // twl 4 / twl 5 boundary: large1D 4294967294 vs 4294967318, either side of 2^32
+    // twl 4 / twl 5 boundary: large1D 4294967294 left side of 2^32
     "complex_forward_len_2147483647_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_2147483647_odist_2147483647_ioffset_0_0_ooffset_0_0", // ~176GiB VRAM
-    "complex_forward_len_2147483659_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_2147483659_odist_2147483659_ioffset_0_0_ooffset_0_0", // ~320GiB VRAM
     // clang-format on
 };
 INSTANTIATE_TEST_SUITE_P(
@@ -702,6 +701,21 @@ INSTANTIATE_TEST_SUITE_P(
     accuracy_test,
     ::testing::ValuesIn(param_generator_token(test_prob, adhoc_64_bit_idx_twiddle_large_tokens)),
     accuracy_test::TestName);
+
+// ~320 GiB.  The host-side reference is set up before the VRAM check can
+// skip it, so this costs real time even on machines that can't run it.
+// Sample it instead of running it every time.
+const auto adhoc_64_bit_idx_twiddle_large_slow_tokens = {
+    // clang-format off
+    // twl 5 boundary: large1D 4294967294 right side of 2^32
+    "complex_forward_len_2147483659_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_2147483659_odist_2147483659_ioffset_0_0_ooffset_0_0",
+    // clang-format on
+};
+INSTANTIATE_TEST_SUITE_P(adhoc_64_bit_idx_twiddle_large_slow,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_generator_token(
+                             0.1 * test_prob, adhoc_64_bit_idx_twiddle_large_slow_tokens)),
+                         accuracy_test::TestName);
 
 inline auto param_even_real_odd_base_index()
 {
