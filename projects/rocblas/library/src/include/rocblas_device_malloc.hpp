@@ -38,6 +38,7 @@
 // C++ device memory allocation API. It is unlikely to change very often.
 
 #include "rocblas/rocblas.h"
+#include <cstdio>
 #include <new>
 #include <type_traits>
 
@@ -88,7 +89,15 @@ public:
     rocblas_device_malloc& operator=(rocblas_device_malloc&& other)
     {
         if(dm_ptr && dm_ptr != other.dm_ptr)
-            rocblas_device_malloc_free(dm_ptr);
+        {
+            rocblas_status status_ = rocblas_device_malloc_free(dm_ptr);
+            if(status_ != rocblas_status_success)
+                fprintf(stderr,
+                        "rocblas error: '%s' at %s:%d\n",
+                        rocblas_status_to_string(status_),
+                        __FILE__,
+                        __LINE__);
+        }
         handle = other.handle;
         dm_ptr = other.dm_ptr;
         other.dm_ptr = nullptr;
@@ -137,7 +146,15 @@ public:
     ~rocblas_device_malloc()
     {
         if(dm_ptr)
-            rocblas_device_malloc_free(dm_ptr);
+        {
+            rocblas_status status_ = rocblas_device_malloc_free(dm_ptr);
+            if(status_ != rocblas_status_success)
+                fprintf(stderr,
+                        "rocblas error: '%s' at %s:%d\n",
+                        rocblas_status_to_string(status_),
+                        __FILE__,
+                        __LINE__);
+        }
     }
 
     // Copying and assigning to rocblas_device_malloc are deleted
@@ -150,7 +167,8 @@ public:
 template <
     typename... Ss,
     std::enable_if_t<sizeof...(Ss) && rocblas_conjunction<std::is_convertible<Ss, size_t>...>{},
-                     int> = 0>
+                     int>
+    = 0>
 inline rocblas_status rocblas_set_optimal_device_memory_size(rocblas_handle handle, Ss... sizes)
 {
     return rocblas_set_optimal_device_memory_size_impl(handle, sizeof...(sizes), size_t(sizes)...);

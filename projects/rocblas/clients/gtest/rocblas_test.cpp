@@ -131,7 +131,7 @@ void launch_test_on_streams(std::function<void()> test, size_t numStreams, size_
             if(numStreams)
                 t_set_stream_callback.reset(
                     new std::function<void(rocblas_handle)>([=](rocblas_handle handle) {
-                        rocblas_set_stream(handle, g_stream_pool[i][j]);
+                        CHECK_ROCBLAS_ERROR(rocblas_set_stream(handle, g_stream_pool[i][j]));
                     }));
             catch_signals_and_exceptions_as_failures(test, true);
         }

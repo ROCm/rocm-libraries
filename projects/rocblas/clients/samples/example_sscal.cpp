@@ -30,13 +30,48 @@
 #include <iostream>
 #include <vector>
 
+#ifndef CHECK_HIP_ERROR
+#define CHECK_HIP_ERROR(expr)                         \
+    do                                                \
+    {                                                 \
+        hipError_t error_ = (expr);                   \
+        if(error_ != hipSuccess)                      \
+        {                                             \
+            fprintf(stderr,                           \
+                    "hip error: '%s'(%d) at %s:%d\n", \
+                    hipGetErrorString(error_),        \
+                    error_,                           \
+                    __FILE__,                         \
+                    __LINE__);                        \
+            exit(EXIT_FAILURE);                       \
+        }                                             \
+    } while(0)
+#endif
+
+#ifndef CHECK_ROCBLAS_ERROR
+#define CHECK_ROCBLAS_ERROR(expr)                         \
+    do                                                    \
+    {                                                     \
+        rocblas_status status_ = (expr);                  \
+        if(status_ != rocblas_status_success)             \
+        {                                                 \
+            fprintf(stderr,                               \
+                    "rocBLAS error: '%s'(%d) at %s:%d\n", \
+                    rocblas_status_to_string(status_),    \
+                    status_,                              \
+                    __FILE__,                             \
+                    __LINE__);                            \
+            exit(EXIT_FAILURE);                           \
+        }                                                 \
+    } while(0)
+#endif
+
 /* ============================================================================================ */
 
 int main()
 {
-    rocblas_int    N      = 10240;
-    rocblas_status status = rocblas_status_success;
-    float          alpha  = 10.0;
+    rocblas_int N     = 10240;
+    float       alpha = 10.0;
 
     // Naming: dX is in GPU (device) memory. hK is in CPU (host) memory, plz follow this practice
     std::vector<float> hx(N);
@@ -46,10 +81,10 @@ int main()
     double gpu_time_used;
 
     rocblas_handle handle;
-    rocblas_create_handle(&handle);
+    CHECK_ROCBLAS_ERROR(rocblas_create_handle(&handle));
 
     // allocate memory on device
-    hipMalloc(&dx, N * sizeof(float));
+    CHECK_HIP_ERROR(hipMalloc(&dx, N * sizeof(float)));
 
     // Initial Data on CPU
     srand(1);
@@ -58,7 +93,7 @@ int main()
     // copy vector is easy in STL; hz = hx: save a copy in hz which will be output of CPU BLAS
     hz = hx;
 
-    hipMemcpy(dx, hx.data(), sizeof(float) * N, hipMemcpyHostToDevice);
+    CHECK_HIP_ERROR(hipMemcpy(dx, hx.data(), sizeof(float) * N, hipMemcpyHostToDevice));
 
     printf("N        rocblas(us)     \n");
 
@@ -68,16 +103,12 @@ int main()
          ROCBLAS  C interface
     =================================================================== */
 
-    status = rocblas_sscal(handle, N, &alpha, dx, 1);
-    if(status != rocblas_status_success)
-    {
-        return status;
-    }
+    CHECK_ROCBLAS_ERROR(rocblas_sscal(handle, N, &alpha, dx, 1));
 
     gpu_time_used = get_time_us_sync_device() - gpu_time_used;
 
     // copy output from device to CPU
-    hipMemcpy(hx.data(), dx, sizeof(float) * N, hipMemcpyDeviceToHost);
+    CHECK_HIP_ERROR(hipMemcpy(hx.data(), dx, sizeof(float) * N, hipMemcpyDeviceToHost));
 
     // verify rocblas_scal result
     bool error_in_element = false;
@@ -102,7 +133,7 @@ int main()
         printf("SSCAL TEST PASSES\n");
     }
 
-    hipFree(dx);
-    rocblas_destroy_handle(handle);
+    CHECK_HIP_ERROR(hipFree(dx));
+    CHECK_ROCBLAS_ERROR(rocblas_destroy_handle(handle));
     return rocblas_status_success;
 }

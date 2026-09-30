@@ -78,10 +78,24 @@ void rocblas_client_shutdown() {}
 
 void get_version_string(std::string& str)
 {
-    size_t size;
-    rocblas_get_version_string_size(&size);
+    size_t         size   = 0;
+    rocblas_status status = rocblas_get_version_string_size(&size);
+    if(status != rocblas_status_success || size == 0)
+    {
+        rocblas_cerr << "rocblas error: '" << rocblas_status_to_string(status)
+                     << "' getting version string size at " << __FILE__ << ":" << __LINE__
+                     << std::endl;
+        str.clear();
+        return;
+    }
     str.resize(size - 1, '\0');
-    rocblas_get_version_string((char*)str.data(), size);
+    status = rocblas_get_version_string((char*)str.data(), size);
+    if(status != rocblas_status_success)
+    {
+        rocblas_cerr << "rocblas error: '" << rocblas_status_to_string(status)
+                     << "' getting version string at " << __FILE__ << ":" << __LINE__ << std::endl;
+        str.clear();
+    }
 }
 
 void print_rocblas_version_string()
@@ -137,11 +151,24 @@ void print_rocblas_client_commit_hashes()
     rocblas_cout << "hipBLASLt: N/A, as rocBLAS was built without hipBLASLt" << std::endl;
 #endif
 
-    size_t size;
-    rocblas_get_commit_hash_string_size(&size);
+    size_t         size   = 0;
+    rocblas_status status = rocblas_get_commit_hash_string_size(&size);
+    if(status != rocblas_status_success || size == 0)
+    {
+        rocblas_cerr << "rocblas error: '" << rocblas_status_to_string(status)
+                     << "' getting commit hash size at " << __FILE__ << ":" << __LINE__
+                     << std::endl;
+        return;
+    }
 
     std::string hash(size - 1, '\0');
-    rocblas_get_commit_hash_string((char*)hash.data(), size);
+    status = rocblas_get_commit_hash_string((char*)hash.data(), size);
+    if(status != rocblas_status_success)
+    {
+        rocblas_cerr << "rocblas error: '" << rocblas_status_to_string(status)
+                     << "' getting commit hash at " << __FILE__ << ":" << __LINE__ << std::endl;
+        return;
+    }
 
     if(strcmp(rocblas_tensile_commit_hash[0], hash.data()))
     {
@@ -534,7 +561,7 @@ rocblas_local_handle::~rocblas_local_handle()
         setenv("ROCBLAS_USE_HIPBLASLT", m_hipblaslt_saved_status.c_str(), true);
     }
 
-    rocblas_destroy_handle(m_handle);
+    PRINT_IF_ROCBLAS_ERROR(rocblas_destroy_handle(m_handle));
 
     if(m_stream_order_env_set)
     {

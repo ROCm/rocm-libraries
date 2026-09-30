@@ -30,6 +30,7 @@
 #include <cstdio>
 #include <iomanip>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -71,9 +72,7 @@
 
 #undef stdout
 #undef stderr
-#pragma GCC poison cout cerr clog stdout stderr gets puts putchar fputs fprintf printf sprintf    \
-    vfprintf vprintf vsprintf perror strerror strtok gmtime ctime asctime localtime tmpnam putenv \
-        clearenv fcloseall ecvt fcvt sleep abort strsignal
+#pragma GCC poison cout cerr clog stdout stderr gets puts putchar fputs fprintf printf sprintf vfprintf vprintf vsprintf perror strerror strtok gmtime ctime asctime localtime tmpnam putenv clearenv fcloseall ecvt fcvt sleep abort strsignal
 #else
 // Suppress warnings about hipMalloc(), hipFree() except in rocblas-test and rocblas-bench
 #undef hipMalloc
@@ -131,10 +130,10 @@ public:
 
     ~rocblas_local_handle();
 
-    rocblas_local_handle(const rocblas_local_handle&) = delete;
-    rocblas_local_handle(rocblas_local_handle&&)      = delete;
+    rocblas_local_handle(const rocblas_local_handle&)            = delete;
+    rocblas_local_handle(rocblas_local_handle&&)                 = delete;
     rocblas_local_handle& operator=(const rocblas_local_handle&) = delete;
-    rocblas_local_handle& operator=(rocblas_local_handle&&) = delete;
+    rocblas_local_handle& operator=(rocblas_local_handle&&)      = delete;
 
     // Allow rocblas_local_handle to be used anywhere rocblas_handle is expected
     operator rocblas_handle&()
@@ -151,8 +150,12 @@ public:
         if(arg.alpha_beta_stride && arg.pointer_mode_device)
         {
             // for now no GEMM applicability so c/d stride used
-            rocblas_set_batch_alpha_stride(m_handle, arg.stride_c);
-            rocblas_set_batch_beta_stride(m_handle, arg.stride_d);
+            rocblas_status status = rocblas_set_batch_alpha_stride(m_handle, arg.stride_c);
+            if(status != rocblas_status_success)
+                throw std::runtime_error(rocblas_status_to_string(status));
+            status = rocblas_set_batch_beta_stride(m_handle, arg.stride_d);
+            if(status != rocblas_status_success)
+                throw std::runtime_error(rocblas_status_to_string(status));
         }
 #if HIP_VERSION >= 50500000
         arg.graph_test ? rocblas_stream_begin_capture() : NOOP;
@@ -166,8 +169,12 @@ public:
 #endif
         if(arg.alpha_beta_stride && arg.pointer_mode_device)
         {
-            rocblas_set_batch_alpha_stride(m_handle, 0);
-            rocblas_set_batch_beta_stride(m_handle, 0);
+            rocblas_status status = rocblas_set_batch_alpha_stride(m_handle, 0);
+            if(status != rocblas_status_success)
+                throw std::runtime_error(rocblas_status_to_string(status));
+            status = rocblas_set_batch_beta_stride(m_handle, 0);
+            if(status != rocblas_status_success)
+                throw std::runtime_error(rocblas_status_to_string(status));
         }
     }
 };

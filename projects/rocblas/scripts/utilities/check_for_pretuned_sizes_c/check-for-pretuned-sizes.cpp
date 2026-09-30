@@ -256,8 +256,20 @@ int main(int argc, char* argv[])
     }
 
     rocblas_initialize();
-    rocblas_handle handle;
-    rocblas_create_handle(&handle);
+    rocblas_handle handle = nullptr;
+    rocblas_status status = rocblas_create_handle(&handle);
+    if(status != rocblas_status_success)
+    {
+        std::cerr << "rocblas_create_handle failed: " << rocblas_status_to_string(status)
+                  << std::endl;
+        return 1;
+    }
+    auto destroy_handle = [&]() {
+        rocblas_status destroy_status = rocblas_destroy_handle(handle);
+        if(destroy_status != rocblas_status_success)
+            std::cerr << "rocblas_destroy_handle failed: "
+                      << rocblas_status_to_string(destroy_status) << std::endl;
+    };
 
     std::fstream f{argv[1]};      //Load log file
 
@@ -273,9 +285,16 @@ int main(int argc, char* argv[])
 
                 // The solution fitness query is initialized to std::numeric_limits<double>::lowest()
                 double fitness;
-                rocblas_set_solution_fitness_query(handle, &fitness);
+                status = rocblas_set_solution_fitness_query(handle, &fitness);
+                if(status != rocblas_status_success)
+                {
+                    std::cerr << "rocblas_set_solution_fitness_query failed: "
+                              << rocblas_status_to_string(status) << std::endl;
+                    destroy_handle();
+                    return 1;
+                }
                 std::cout << "m - " << arg.M << " n - " << arg.N << " k - " << arg.K << std::endl;
-                rocblas_gemm_ex(
+                status = rocblas_gemm_ex(
                     handle,
                     arg.transA,
                     arg.transB,
@@ -301,6 +320,13 @@ int main(int argc, char* argv[])
                     0, // solution_index
                     0 // flags
                 );
+                if(status != rocblas_status_success)
+                {
+                    std::cerr << "rocblas_gemm_ex failed: " << rocblas_status_to_string(status)
+                              << " " << buffer << std::endl;
+                    destroy_handle();
+                    return 1;
+                }
 
                if(!fitness)
                {
@@ -312,7 +338,14 @@ int main(int argc, char* argv[])
                }
 
                // We reset the solution fitness query to nullptr to avoid a dangling pointer
-               rocblas_set_solution_fitness_query(handle, nullptr);
+               status = rocblas_set_solution_fitness_query(handle, nullptr);
+               if(status != rocblas_status_success)
+               {
+                   std::cerr << "rocblas_set_solution_fitness_query reset failed: "
+                             << rocblas_status_to_string(status) << std::endl;
+                   destroy_handle();
+                   return 1;
+               }
             }
         }
 
@@ -321,4 +354,5 @@ int main(int argc, char* argv[])
     }
 
     f.close();
+    destroy_handle();
 }

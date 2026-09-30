@@ -60,8 +60,8 @@ namespace
                 if(layer_mode & rocblas_layer_mode_log_trace)
                 {
                     rocblas_internal_ostream alphass, betass;
-                    (void)rocblas_internal_log_trace_alpha_beta_ex(
-                        alpha_type, alpha, nullptr, alphass, betass);
+                    PRINT_IF_ROCBLAS_ERROR((rocblas_internal_log_trace_alpha_beta_ex(
+                        alpha_type, alpha, nullptr, alphass, betass)));
 
                     logger.log_trace(handle,
                                      ROCBLAS_API_STR(rocblas_scal_ex),
@@ -77,8 +77,8 @@ namespace
                 if(layer_mode & rocblas_layer_mode_log_bench)
                 {
                     std::string alphas, betas;
-                    (void)rocblas_internal_log_bench_alpha_beta_ex(
-                        alpha_type, alpha, nullptr, alphas, betas);
+                    PRINT_IF_ROCBLAS_ERROR((rocblas_internal_log_bench_alpha_beta_ex(
+                        alpha_type, alpha, nullptr, alphas, betas)));
                     logger.log_bench(handle,
                                      ROCBLAS_API_BENCH " -f scal_ex",
                                      "-n",

@@ -516,8 +516,15 @@ namespace
         // set batch mode
         tensileProblem.setStridedBatched(prob.strided_batch);
 
-        rocblas_performance_metric metric;
-        rocblas_get_performance_metric(prob.handle, &metric);
+        rocblas_performance_metric metric = rocblas_default_performance_metric;
+        rocblas_status metric_status      = rocblas_get_performance_metric(prob.handle, &metric);
+        if(metric_status != rocblas_status_success)
+        {
+            rocblas_cerr << "rocblas error: '" << rocblas_status_to_string(metric_status)
+                         << "':" << metric_status << " at " << __FILE__ << ":" << __LINE__
+                         << std::endl;
+            metric = rocblas_default_performance_metric;
+        }
         //If flag is set use CUEfficiency performance metric
         if(prob.flags & rocblas_gemm_flags_use_cu_efficiency)
             tensileProblem.setPerformanceMetric(Tensile::PerformanceMetric::CUEfficiency);
@@ -753,11 +760,20 @@ namespace
 
                 if(layer_mode & (rocblas_layer_mode_log_trace | rocblas_layer_mode_log_internal))
                 {
-                    char buf[256];
-                    rocblas_get_version_string(buf, 256);
-
-                    // logs trace differently to rocblas_cerr as no handle here
-                    rocblas_cerr << "rocBLAS initialize,version," << buf << std::endl;
+                    char           buf[256]   = {};
+                    rocblas_status ver_status = rocblas_get_version_string(buf, sizeof(buf));
+                    if(ver_status != rocblas_status_success)
+                    {
+                        rocblas_cerr << "rocblas error: '" << rocblas_status_to_string(ver_status)
+                                     << "':" << ver_status << " at " << __FILE__ << ":" << __LINE__
+                                     << std::endl;
+                        rocblas_cerr << "rocBLAS initialize,version,unavailable" << std::endl;
+                    }
+                    else
+                    {
+                        // logs trace differently to rocblas_cerr as no handle here
+                        rocblas_cerr << "rocBLAS initialize,version," << buf << std::endl;
+                    }
                 }
             }
 
@@ -1503,8 +1519,8 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
             = hipblaslt_backend ? "rocblas_gemm_hipblaslt_backend" : "rocblas_gemm_tensile_backend";
 
         rocblas_internal_ostream alphass, betass;
-        (void)rocblas_internal_log_trace_alpha_beta_ex(
-            rocblas_datatype_from_type<Tc>, prob.alpha, prob.beta, alphass, betass);
+        PRINT_IF_ROCBLAS_ERROR((rocblas_internal_log_trace_alpha_beta_ex(
+            rocblas_datatype_from_type<Tc>, prob.alpha, prob.beta, alphass, betass)));
 
         rocblas_internal_logger logger;
         logger.log_trace(prob.handle,

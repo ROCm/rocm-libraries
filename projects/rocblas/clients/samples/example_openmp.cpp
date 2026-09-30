@@ -53,6 +53,42 @@
 #include <iostream>
 #include <vector>
 
+#ifndef CHECK_HIP_ERROR
+#define CHECK_HIP_ERROR(error)                    \
+    if(error != hipSuccess)                       \
+    {                                             \
+        fprintf(stderr,                           \
+                "Hip error: '%s'(%d) at %s:%d\n", \
+                hipGetErrorString(error),         \
+                error,                            \
+                __FILE__,                         \
+                __LINE__);                        \
+        exit(EXIT_FAILURE);                       \
+    }
+#endif
+
+#ifndef CHECK_ROCBLAS_ERROR
+#define CHECK_ROCBLAS_ERROR(error)                              \
+    if(error != rocblas_status_success)                         \
+    {                                                           \
+        fprintf(stderr, "rocBLAS error: ");                     \
+        if(error == rocblas_status_invalid_handle)              \
+            fprintf(stderr, "rocblas_status_invalid_handle");   \
+        if(error == rocblas_status_not_implemented)             \
+            fprintf(stderr, " rocblas_status_not_implemented"); \
+        if(error == rocblas_status_invalid_pointer)             \
+            fprintf(stderr, "rocblas_status_invalid_pointer");  \
+        if(error == rocblas_status_invalid_size)                \
+            fprintf(stderr, "rocblas_status_invalid_size");     \
+        if(error == rocblas_status_memory_error)                \
+            fprintf(stderr, "rocblas_status_memory_error");     \
+        if(error == rocblas_status_internal_error)              \
+            fprintf(stderr, "rocblas_status_internal_error");   \
+        fprintf(stderr, "\n");                                  \
+        exit(EXIT_FAILURE);                                     \
+    }
+#endif
+
 #define NUM_THREADS 4
 
 /* ============================================================================================ */
@@ -79,13 +115,13 @@ int main()
     // Create handle/stream have overhead
     for(int i = 0; i < NUM_THREADS; i++)
     {
-        rocblas_create_handle(&handles[i]);
-        hipStreamCreate(&streams[i]);
+        CHECK_ROCBLAS_ERROR(rocblas_create_handle(&handles[i]));
+        CHECK_HIP_ERROR(hipStreamCreate(&streams[i]));
     }
 
     // allocate memory on device
-    hipMalloc(&dx, N * NUM_THREADS * sizeof(float));
-    hipMalloc(&dy, N * NUM_THREADS * sizeof(float));
+    CHECK_HIP_ERROR(hipMalloc(&dx, N * NUM_THREADS * sizeof(float)));
+    CHECK_HIP_ERROR(hipMalloc(&dy, N * NUM_THREADS * sizeof(float)));
 
     // Initial Data on CPU
     srand(1);
@@ -95,7 +131,8 @@ int main()
     // copy vector is easy in STL; hz = hx: save a copy in hz which will be output of CPU BLAS
     hz = hx;
 
-    hipMemcpy(dx, hx.data(), sizeof(float) * N * NUM_THREADS, hipMemcpyHostToDevice);
+    CHECK_HIP_ERROR(
+        hipMemcpy(dx, hx.data(), sizeof(float) * N * NUM_THREADS, hipMemcpyHostToDevice));
 
 // 1st parallel rocblas routine call : scal x
 // spawn openmp threads
@@ -106,15 +143,15 @@ int main()
 
         thread_id = omp_get_thread_num(); // thread_id from 0,...,NUM_THREADS-1
         // associate each handle with a stream
-        rocblas_set_stream(handles[thread_id], streams[thread_id]);
+        CHECK_ROCBLAS_ERROR(rocblas_set_stream(handles[thread_id], streams[thread_id]));
 
         /* =====================================================================
              ROCBLAS  template interface
         =================================================================== */
-        rocblas_sscal(handles[thread_id], N, &alpha, dx + thread_id * N, 1);
+        CHECK_ROCBLAS_ERROR(rocblas_sscal(handles[thread_id], N, &alpha, dx + thread_id * N, 1));
 
         // Blocks until all stream has completed all operations.
-        hipStreamSynchronize(streams[thread_id]);
+        CHECK_HIP_ERROR(hipStreamSynchronize(streams[thread_id]));
     }
 
 // 2nd parallel rocblas routine call : copy x to y
@@ -126,19 +163,21 @@ int main()
 
         thread_id = omp_get_thread_num(); // thread_id from 0,...,NUM_THREADS-1
         // associate each handle with a stream
-        rocblas_set_stream(handles[thread_id], streams[thread_id]);
+        CHECK_ROCBLAS_ERROR(rocblas_set_stream(handles[thread_id], streams[thread_id]));
 
         /* =====================================================================
              ROCBLAS  template interface
         =================================================================== */
-        rocblas_scopy(handles[thread_id], N, dx + thread_id * N, 1, dy + thread_id * N, 1);
+        CHECK_ROCBLAS_ERROR(
+            rocblas_scopy(handles[thread_id], N, dx + thread_id * N, 1, dy + thread_id * N, 1));
 
         // Blocks until all stream has completed all operations.
-        hipStreamSynchronize(streams[thread_id]);
+        CHECK_HIP_ERROR(hipStreamSynchronize(streams[thread_id]));
     }
 
     // copy output from device to CPU
-    hipMemcpy(hx.data(), dy, sizeof(float) * N * NUM_THREADS, hipMemcpyDeviceToHost);
+    CHECK_HIP_ERROR(
+        hipMemcpy(hx.data(), dy, sizeof(float) * N * NUM_THREADS, hipMemcpyDeviceToHost));
 
     //verify rocblas_scal result
     for(int i = 0; i < N * NUM_THREADS; i++)
@@ -152,14 +191,14 @@ int main()
 
     printf("DONE\n");
 
-    hipFree(dx);
-    hipFree(dy);
+    CHECK_HIP_ERROR(hipFree(dx));
+    CHECK_HIP_ERROR(hipFree(dy));
 
     // Destroy handle/streams
     for(int i = 0; i < NUM_THREADS; i++)
     {
-        rocblas_destroy_handle(handles[i]);
-        hipStreamDestroy(streams[i]);
+        CHECK_ROCBLAS_ERROR(rocblas_destroy_handle(handles[i]));
+        CHECK_HIP_ERROR(hipStreamDestroy(streams[i]));
     }
 
     return 0;
