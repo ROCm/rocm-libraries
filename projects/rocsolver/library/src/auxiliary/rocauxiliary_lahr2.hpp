@@ -159,6 +159,22 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
 // compared with their number; the partial sums are stored in the workspace P (m-by-nsplit
 // per matrix), and lahr2_computeY_sum_kernel adds them (in a fixed order, so that the result
 // is deterministic), subtracts A2 * x2 and scales by t.
+/** LAHR2_LOAD_NT loads an entry with non-temporal loads (the entries of the trailing matrix
+    are read once per column product, so they need not stay in the caches; this lets the
+    product read memory a few percent faster). **/
+template <typename T>
+__device__ __forceinline__ T lahr2_load_nt(const T* p)
+{
+    if constexpr(rocblas_is_complex<T>)
+    {
+        using S = decltype(std::real(T{}));
+        const S* q = reinterpret_cast<const S*>(p);
+        return T(__builtin_nontemporal_load(q), __builtin_nontemporal_load(q + 1));
+    }
+    else
+        return __builtin_nontemporal_load(p);
+}
+
 template <rocblas_int DIM_X, rocblas_int DIM_Y, typename T, typename U>
 ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
     lahr2_computeY_part_kernel(const rocblas_int mm,
@@ -193,7 +209,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
     T ac = 0;
     if(i < m)
         for(int j = j0 + tidc; j < j1; j += DIM_Y)
-            ac += A1[i + j * size_t(lda)] * x1[j];
+            ac += lahr2_load_nt(A1 + i + j * size_t(lda)) * x1[j];
     acs[tidr + tidc * DIM_X] = ac;
     __syncthreads();
 
