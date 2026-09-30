@@ -59,6 +59,7 @@ from validation import (  # noqa: E402
     MAX_HDIM_NON_FWD_QR,
     SUPPORTED_HDIMS,
     WIDE_HDIM_GEMM1_WARP_K,
+    arch_supports_wide_hdim,
     is_wide_hdim,
     VALID_BK0,
     VALID_BM0,
@@ -1369,6 +1370,9 @@ def tile_compatible(
 
     bm0, bn0, bk0 = tile[0], tile[1], tile[2]
 
+    # hdim > 256 kernels exist for gfx9 (CDNA) targets only
+    if is_wide_hdim(hdim, hdim_v) and not arch_supports_wide_hdim(arch):
+        return False
     if not check_gfx9_tile_constraints(
         dtype, hdim, hdim_v, pipeline_tag, bm0, bn0, bk0
     ):
@@ -1740,16 +1744,17 @@ def _build_fwd_kernel_config(
     )
 
 
-def _supported_hdims(dtype, restrict_hdims=None, family="fwd"):
-    """SUPPORTED_HDIMS for a dtype, narrowed to what `family` can compile.
+def _supported_hdims(dtype, restrict_hdims=None, family="fwd", arch=None):
+    """SUPPORTED_HDIMS for a dtype, narrowed to what `family` on `arch` can compile.
 
     Head dims above MAX_HDIM_NON_FWD_QR exist only in the fwd family's qr
     pipeline (block_fmha_pipeline_qr_ks_vs.hpp); every other pipeline
     static-asserts hdim <= 256, so splitkv/pagedkv/appendkv/batch_prefill/bwd
-    never enumerate them.
+    never enumerate them. They are also shipped for gfx9 (CDNA) targets only,
+    so when `arch` is given and lacks supports_wide_hdim they are dropped too.
     """
     hdims = SUPPORTED_HDIMS.get(dtype, [])
-    if family != "fwd":
+    if family != "fwd" or (arch is not None and not arch_supports_wide_hdim(arch)):
         hdims = [hv for hv in hdims if max(hv) <= MAX_HDIM_NON_FWD_QR]
     if restrict_hdims is not None:
         hdims = [hv for hv in hdims if hv in restrict_hdims]
@@ -1775,7 +1780,7 @@ def _expand_fwd(
         block_per_cu_values = [-1]
     configs = []
     for dtype in dtypes:
-        hdims = _supported_hdims(dtype, restrict_hdims, family="fwd")
+        hdims = _supported_hdims(dtype, restrict_hdims, family="fwd", arch=arch)
         for hq, hv in hdims:
             pipeline_specs = get_pipelines_for_config(arch, dtype, hq, hv, receipt)
             _tile_cache: Dict[str, List[FmhaTileConfig]] = {}
@@ -1883,7 +1888,7 @@ def _expand_fwd_exhaustive(
 
     configs: List[FmhaKernelConfig] = []
     for dtype in dtypes:
-        hdims = _supported_hdims(dtype, restrict_hdims, family="fwd")
+        hdims = _supported_hdims(dtype, restrict_hdims, family="fwd", arch=arch)
         for hq, hv in hdims:
             for pipeline in pipelines:
                 tiles = generate_fwd_tiles(
@@ -1943,7 +1948,7 @@ def _expand_splitkv_exhaustive(
 
     configs: List[FmhaKernelConfig] = []
     for dtype in dtypes:
-        hdims = _supported_hdims(dtype, restrict_hdims, family="fwd_splitkv")
+        hdims = _supported_hdims(dtype, restrict_hdims, family="fwd_splitkv", arch=arch)
         for hq, hv in hdims:
             tiles = generate_splitkv_tiles(arch, dtype, hq, hv, apply_constraints=False)
             for tc in tiles:
@@ -2008,7 +2013,7 @@ def _expand_pagedkv_exhaustive(
 
     configs: List[FmhaKernelConfig] = []
     for dtype in dtypes:
-        hdims = _supported_hdims(dtype, restrict_hdims, family="fwd_pagedkv")
+        hdims = _supported_hdims(dtype, restrict_hdims, family="fwd_pagedkv", arch=arch)
         for hq, hv in hdims:
             tiles = generate_pagedkv_tiles(arch, dtype, hq, hv, apply_constraints=False)
             for tc in tiles:
@@ -2100,7 +2105,9 @@ def _expand_bwd_exhaustive(
                     )
 
         # dq_dk_dv — exhaustive tiles
-        hdims = _supported_hdims(dtype, restrict_hdims, family="bwd_dq_dk_dv")
+        hdims = _supported_hdims(
+            dtype, restrict_hdims, family="bwd_dq_dk_dv", arch=arch
+        )
         for hq, hv in hdims:
             tiles = generate_bwd_tiles(arch, dtype, hq, hv, apply_constraints=False)
             for tc in tiles:
@@ -2171,7 +2178,7 @@ def _expand_splitkv(
 ):
     configs = []
     for dtype in dtypes:
-        hdims = _supported_hdims(dtype, restrict_hdims, family="fwd_splitkv")
+        hdims = _supported_hdims(dtype, restrict_hdims, family="fwd_splitkv", arch=arch)
         for hq, hv in hdims:
             tiles = generate_splitkv_tiles(arch, dtype, hq, hv)
             sk_specs = get_splitkv_pipelines(dtype, hq, receipt)
@@ -2289,7 +2296,7 @@ def _expand_pagedkv(
 ):
     configs = []
     for dtype in dtypes:
-        hdims = _supported_hdims(dtype, restrict_hdims, family="fwd_pagedkv")
+        hdims = _supported_hdims(dtype, restrict_hdims, family="fwd_pagedkv", arch=arch)
         for hq, hv in hdims:
             tiles = generate_pagedkv_tiles(arch, dtype, hq, hv)
             pk_specs = get_pagedkv_pipelines(dtype, hq, receipt)
@@ -2354,7 +2361,9 @@ def _expand_appendkv(arch, dtypes, receipt, restrict_hdims=None):
     configs = []
     for dtype in dtypes:
         ak_specs = get_appendkv_pipelines(dtype, 0, receipt)
-        hdims = _supported_hdims(dtype, restrict_hdims, family="fwd_appendkv")
+        hdims = _supported_hdims(
+            dtype, restrict_hdims, family="fwd_appendkv", arch=arch
+        )
         for hq, hv in hdims:
             for spec in ak_specs:
                 configs.append(
@@ -2397,7 +2406,9 @@ def _expand_batch_prefill(
         return 32
 
     for dtype in dtypes:
-        hdims = _supported_hdims(dtype, restrict_hdims, family="batch_prefill")
+        hdims = _supported_hdims(
+            dtype, restrict_hdims, family="batch_prefill", arch=arch
+        )
         for hq, hv in hdims:
             tiles = generate_splitkv_tiles(arch, dtype, hq, hv)
             bp_specs = get_batch_prefill_pipelines(dtype, hq, receipt)

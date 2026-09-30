@@ -1468,6 +1468,8 @@ class KernelComponentFactoryGfx12(CompatibilityRuleFactory):
                 (128, 128) : [FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)],
                 (192, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
                 (256, 256) : [FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
+                # No (512, 512) entry on purpose: the wide-hdim qr path is validated on
+                # gfx9 only (KernelComponentFactoryGfx9), so hdim 512 is not built for gfx12.
             }  # fmt: skip
         elif dtype in cls._DT_FP8_FP8BF16:
             return {

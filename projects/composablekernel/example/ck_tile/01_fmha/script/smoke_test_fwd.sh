@@ -14,6 +14,14 @@ if [ -z "$GPU_arch" ] ; then
     GPU_arch=$(rocminfo | grep -E 'Name:\s+gfx' | head -n1 | awk '{print $2}')
 fi
 
+# hdim 512 (qr pipeline) kernels are only generated for gfx9 (CDNA) targets; on any
+# other target the example exits non-zero with "not supported yet", which run_exe
+# would record as a failure.
+case "$GPU_arch" in
+    gfx9*) FP16_BF16_HDIMS="32 64 128 256 512" ;;
+    *)     FP16_BF16_HDIMS="32 64 128 256" ;;
+esac
+
 export CK_WARMUP=0
 export CK_REPEAT=1
 
@@ -78,7 +86,7 @@ run_fp16_bf16_tests() {
     for prec in "fp16" "bf16" ; do
     for mode in 1 0 ; do
     for perm in 0 1 ; do
-    for hdim in 32 64 128 256 512 ; do
+    for hdim in $FP16_BF16_HDIMS ; do
     for lse in 0 1 ; do
     for bias in "n" "e" "a" ; do
     for p_drop in 0.0 0.2 ; do

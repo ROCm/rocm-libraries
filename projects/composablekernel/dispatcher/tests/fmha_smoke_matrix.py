@@ -11,7 +11,7 @@ from the CK Tile 01_fmha example, for automated parity testing.
 """
 
 from dataclasses import dataclass
-from typing import List, Set, Tuple
+from typing import List, Optional, Set, Tuple
 
 
 @dataclass
@@ -51,14 +51,32 @@ class TestCase:
         return self.hdim_v if self.hdim_v > 0 else self.hdim_q
 
 
-def generate_fwd_fp16_bf16_matrix() -> List[TestCase]:
-    """Generate the run_fp16_bf16_tests matrix from smoke_test_fwd.sh."""
+FWD_FP16_BF16_HDIMS = [32, 64, 128, 256]
+# hdim 512 (qr pipeline) kernels are only generated for gfx9 (CDNA) targets, see
+# KernelComponentFactoryGfx9 in example/ck_tile/01_fmha/codegen/ops/fmha_fwd.py.
+FWD_FP16_BF16_WIDE_HDIMS = [512]
+
+
+def fwd_fp16_bf16_hdims(arch: Optional[str] = None) -> List[int]:
+    """hdims swept by run_fp16_bf16_tests; 512 only on gfx9 (or when arch is None)."""
+    if arch is None or arch.startswith("gfx9"):
+        return FWD_FP16_BF16_HDIMS + FWD_FP16_BF16_WIDE_HDIMS
+    return list(FWD_FP16_BF16_HDIMS)
+
+
+def generate_fwd_fp16_bf16_matrix(arch: Optional[str] = None) -> List[TestCase]:
+    """Generate the run_fp16_bf16_tests matrix from smoke_test_fwd.sh.
+
+    `arch` mirrors the script's GPU_arch gate: hdim 512 (qr pipeline) kernels are
+    only generated for gfx9 (CDNA) targets, so it is left out for anything else.
+    None keeps the full matrix.
+    """
     cases = []
     idx = 0
     for prec in ["fp16", "bf16"]:
         for mode in [1, 0]:
             for perm in [0, 1]:
-                for hdim in [32, 64, 128, 256, 512]:
+                for hdim in fwd_fp16_bf16_hdims(arch):
                     for lse in [0, 1]:
                         for bias in ["n", "e", "a"]:
                             for p_drop in [0.0, 0.2]:

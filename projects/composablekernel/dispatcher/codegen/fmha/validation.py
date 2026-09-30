@@ -169,6 +169,17 @@ def is_wide_hdim(hdim_q: int, hdim_v: int) -> bool:
     return max(hdim_q, hdim_v) > MAX_HDIM_NON_FWD_QR
 
 
+def arch_supports_wide_hdim(arch: str, arch_specs: Optional[dict] = None) -> bool:
+    """True when `arch` ships the wide-hdim (> MAX_HDIM_NON_FWD_QR) qr kernels.
+
+    Mirrors the example codegen (example/ck_tile/01_fmha/codegen/ops/fmha_fwd.py):
+    only the gfx9 (CDNA) factories carry hdim 512 tiles, gfx11/gfx12 do not.
+    Driven by architectures.<arch>.supports_wide_hdim in fmha_arch_specs.json.
+    """
+    architectures = (arch_specs or {}).get("architectures", ARCH_METADATA)
+    return bool(architectures.get(arch, {}).get("supports_wide_hdim", False))
+
+
 # =============================================================================
 # 3. Tile constraints
 # =============================================================================
@@ -282,10 +293,12 @@ def tile_passes_all_constraints(
     elem_size = ELEMENT_SIZES.get(dtype, 2)
     lds_limit = LDS_LIMITS.get(pipeline, 65536)
 
-    # Wide hdim: only qr compiles, and it static-asserts bm0 / num_warps <= 16 because
-    # the Q tile and the f32 O accumulator (bm0 x hdim each) are held in registers
+    # Wide hdim: gfx9 only, and only qr compiles; it static-asserts bm0 / num_warps <= 16
+    # since the Q tile and the f32 O accumulator (bm0 x hdim each) live in registers
     # (block_fmha_pipeline_qr_ks_vs.hpp). num_warps = bm0 / wm0 in this generator.
     if is_wide_hdim(hdim_q, hdim_v):
+        if not arch_supports_wide_hdim(arch):
+            return False
         if pipeline != "qr":
             return False
         num_warps = bm0 // wm0 if wm0 > 0 else 0
@@ -860,11 +873,17 @@ def validate_config(
                 "hdim (192,128) with bias/dropout has limited tile support"
             )
 
-    # Wide hdim (> 256): only block_fmha_pipeline_qr_ks_vs.hpp accepts it, and only when
-    # bm0 / num_warps <= 16 (Q tile and f32 O accumulator are register resident).
+    # Wide hdim (> 256): shipped for gfx9 (CDNA) targets only, where only
+    # block_fmha_pipeline_qr_ks_vs.hpp accepts it, and only when bm0 / num_warps <= 16
+    # (Q tile and f32 O accumulator are register resident).
     max_hdim_non_fwd_qr = global_rules.get("max_hdim_non_fwd_qr", MAX_HDIM_NON_FWD_QR)
     if max(hdim_q, hdim_v) > max_hdim_non_fwd_qr:
-        if family != "fwd" or pipeline != "qr":
+        if not arch_info.get("supports_wide_hdim", False):
+            result.add_error(
+                f"hdim > {max_hdim_non_fwd_qr} is not supported on {arch} "
+                "(supports_wide_hdim is false in arch specs; gfx9 targets only)"
+            )
+        elif family != "fwd" or pipeline != "qr":
             result.add_error(
                 f"hdim > {max_hdim_non_fwd_qr} is only supported by the fwd family's "
                 f"qr pipeline (got family={family}, pipeline={pipeline})"

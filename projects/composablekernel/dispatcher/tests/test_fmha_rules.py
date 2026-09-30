@@ -265,6 +265,35 @@ class TestWideHdim(unittest.TestCase):
             [],
         )
 
+    def test_hdim512_valid_on_gfx9_targets(self):
+        for arch in ("gfx90a", "gfx942", "gfx950"):
+            cfg = _hdim512_config()
+            cfg["arch"] = arch
+            r = validate_config(cfg, SPECS)
+            self.assertTrue(r.valid, f"{arch}: {r.errors}")
+
+    def test_hdim512_rejected_on_rdna_targets(self):
+        # Only the gfx9 factories ship hdim 512 tiles; gfx11/gfx12 must not enumerate it
+        for arch in ("gfx1100", "gfx1201"):
+            cfg = _hdim512_config()
+            cfg["arch"] = arch
+            r = validate_config(cfg, SPECS)
+            self.assertFalse(r.valid, arch)
+            self.assertTrue(
+                any(f"not supported on {arch}" in e for e in r.errors), r.errors
+            )
+
+    @unittest.skipUnless(HAVE_INSTANCE_GEN, "fmha.instance_gen needs numpy")
+    def test_tile_engine_skips_hdim512_on_rdna_targets(self):
+        self.assertIn((512, 512), _supported_hdims("fp16", family="fwd", arch="gfx942"))
+        for arch in ("gfx1100", "gfx1201"):
+            self.assertNotIn(
+                (512, 512), _supported_hdims("fp16", family="fwd", arch=arch)
+            )
+            self.assertEqual(
+                generate_fwd_tiles(arch, "fp16", 512, 512, pipeline="qr"), []
+            )
+
 
 class TestMaskDistinction(unittest.TestCase):
     """Verify that top_left and bottom_right are distinct after fix."""
