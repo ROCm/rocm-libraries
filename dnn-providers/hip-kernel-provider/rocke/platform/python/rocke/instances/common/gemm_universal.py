@@ -608,6 +608,13 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             f"spec wave_size {spec.wave_size} != {arch} wave_size {target.wave_size}"
         )
 
+    # TDM emits ``tensor_load_to_lds`` / ``s_wait_tensorcnt``, which exist only
+    # on targets with the mover. Gate it here, ahead of the per-family checks,
+    # so an MFMA target cannot admit the knob and hand the lowerer an opcode it
+    # has no instruction for.
+    if spec.trait.tdm and not target.memory.has_tdm:
+        return False, f"tdm requires the Tensor Data Mover, which {arch} lacks"
+
     # WMMA coverage is intentionally narrower than the full CDNA MFMA matrix:
     # gfx11/gfx12 RDNA supports the 16x16x16 atom and gfx1250 supports the
     # gfx1250-class 16x16x32 atom, both through the simple ``mem`` pipeline.
@@ -667,8 +674,6 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             # LDS row stride costs nothing (see the _lds_pad comment below).
             # (``lds_swizzle`` is rejected for the whole family above.)
         if spec.trait.tdm:
-            if arch != "gfx1250":
-                return False, f"WMMA path does not support tdm on {arch}"
             if spec.trait.direct_to_lds:
                 return False, "tdm and direct_to_lds are alternative load paths"
             # pad_m/pad_n/pad_k are not consulted: OOB is handled by clipping

@@ -304,6 +304,67 @@ class TestGfx1250Gemm(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("only meaningful with tdm", why)
 
+    def test_tdm_rejected_off_gfx1250(self):
+        """No target without the mover may admit ``tdm``, whatever its MMA family.
+
+        The gate used to sit inside the WMMA branch only, so an MFMA spec with
+        ``tdm=True`` validated and the builder emitted ``tensor_load_to_lds``
+        for gfx942/gfx950. The build must now fail before any IR is emitted.
+        """
+        from rocke.instances.common.gemm_universal import (
+            DataSpec,
+            TileSpec,
+            TraitSpec,
+            UniversalGemmSpec,
+            build_universal_gemm,
+            is_valid_spec,
+        )
+
+        def spec(warp_tile, wave_size):
+            return UniversalGemmSpec(
+                name="non_gfx1250_tdm",
+                tile=TileSpec(
+                    tile_m=128,
+                    tile_n=128,
+                    tile_k=32,
+                    warp_m=2,
+                    warp_n=2,
+                    warp_k=1,
+                    warp_tile_m=warp_tile[0],
+                    warp_tile_n=warp_tile[1],
+                    warp_tile_k=warp_tile[2],
+                ),
+                trait=TraitSpec(
+                    pipeline="mem",
+                    scheduler="intrawave",
+                    epilogue="default",
+                    tdm=True,
+                    lds_k_pad=8,
+                ),
+                data=DataSpec(dtype_a="bf16", dtype_b="bf16", dtype_c="bf16"),
+                wave_size=wave_size,
+            )
+
+        for arch, candidate in (
+            ("gfx950", spec((16, 16, 16), 64)),
+            ("gfx942", spec((32, 32, 8), 64)),
+            ("gfx1151", spec((16, 16, 16), 32)),
+        ):
+            with self.subTest(arch):
+                # Control: the same spec without tdm is admitted, so the
+                # rejection below is attributable to tdm alone.
+                ok, why = is_valid_spec(
+                    replace(candidate, trait=replace(candidate.trait, tdm=False)),
+                    arch=arch,
+                )
+                self.assertTrue(ok, why)
+
+                ok, why = is_valid_spec(candidate, arch=arch)
+                self.assertFalse(ok)
+                self.assertIn("Tensor Data Mover", why)
+                with self.assertRaisesRegex(ValueError, "Tensor Data Mover"):
+                    build_universal_gemm(candidate, arch=arch)
+
     def test_wmma_tdm_lowers_to_tensor_load_to_lds(self):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
         from rocke.instances.common.gemm_universal import build_universal_gemm
