@@ -26,11 +26,9 @@
 #ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
-// hip_float8.hpp declares (unused) hip_bfloat16 conversion members that need this type
-// name available under offline compilation; HIPRTC's preamble provides it for free.
 #include <hip/hip_bfloat16.h>
-#endif
 #include <hip/hip_bf16.h>
+#endif
 
 #define MIOPEN_ENABLE_F8_DEVICE_CODE 1
 #include "hip_float8.hpp"
@@ -138,8 +136,13 @@ extern "C" __global__ void check_numerics_bf16(const void* __restrict__ C_d,
                                                CheckNumericsResult* __restrict__ abnormal,
                                                bool computeStats)
 {
+#if defined(MIOPEN_HIP_RUNTIME_COMPILE) && !defined(_HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BF16_H_)
+    check_numerics<hip_bfloat16, float>(
+        reinterpret_cast<const hip_bfloat16*>(C_d), sz, abnormal, computeStats);
+#else
     check_numerics<__hip_bfloat16, float>(
         reinterpret_cast<const __hip_bfloat16*>(C_d), sz, abnormal, computeStats);
+#endif
 }
 
 extern "C" __global__ void check_numerics_fp8(const void* __restrict__ C_d,

@@ -5,6 +5,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
+### Resolved Issues
+* [HIPRTC] Fixed BF16 numerics checks and `ConvDepthwiseFwd3D` compilation without HIP development headers, using the BF16 type provided by the HIPRTC preamble.
+* [HIPRTC] Fixed the smallest normal BF16 value in the runtime kernel numeric limits.
+
 ### Added
 * [Conv] Added gfx950 depthwise backward-weights (fp16/bf16) and gfx1250 depthwise
   kernels to the `ConvHipConv` solver (hipconv v0.3.1).
