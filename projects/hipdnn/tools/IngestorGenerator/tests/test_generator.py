@@ -398,7 +398,7 @@ class TestAllowListedKeys:
         "engine",
         "dispatch",
         "kernelDescriptors",
-        # An extension key the loader warns about and ignores
+        # The packager's extension key the loader ignores without a warning
         # (DescriptorLoader.hpp isExtensionKey), carrying the pack's one
         # specialization_contract.
         "provenance",

@@ -2903,23 +2903,33 @@ TEST(TestDescriptorLoader, RejectsAMisspelledOptionalKey)
 /// reader for -- what the build-time packager stamps onto its output -- and still load,
 /// as long as they announce themselves. `provenance` is the packager's one unprefixed
 /// block; anything else has to wear the `x-`/`_` prefix.
+///
+/// Prefixed keys warn. `provenance` does not: the packager stamps it on every packed KDP
+/// and every kernel entry, so a warning per occurrence (841 on the shipped gfx950 bundle)
+/// would bury every real diagnostic in hipdnn_validate_descriptors' report.
 TEST(TestDescriptorLoader, LoadsADescriptorCarryingTrackingFields)
 {
     auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("tracking_fields"));
     auto documents = makeSetDocuments('1', "test:tracked");
     auto& engine = documentOfType(documents, ".ued.json");
     engine["provenance"] = {{"origin_kind", "hip"}};
     engine["x-build-id"] = "abc123";
     engine["_internal"] = 7;
+    auto& pack = documentOfType(documents, ".kdp.json");
+    pack["provenance"] = {{"origin_kind", "hip"}};
+    for(auto& kernel : pack.at("kernelDescriptors"))
+    {
+        kernel["provenance"] = {{"origin_kind", "hip"}};
+    }
     writeDocuments(dir.path(), documents);
 
     const auto sets = loadFrom(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:tracked");
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "extension key 'provenance'"));
+    EXPECT_FALSE(recorder.hasLogContaining("'provenance'")) << recorder.getRecordedLogsAsString();
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "extension key 'x-build-id'"));
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "extension key '_internal'"));
 }
