@@ -237,6 +237,10 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   else:
     requiredParametersTemp.discard("TDMFuse")
 
+  # Same for the 32-bit GL2 prefetch increment.
+  if not state.get("PrefetchGL2Inc64Bit", False):
+    requiredParametersTemp.discard("PrefetchGL2Inc64Bit")
+
   for key in sorted(requiredParametersTemp):
     if key not in state or key == "CustomKernel":
       continue

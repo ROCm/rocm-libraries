@@ -6870,6 +6870,8 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "with PrefetchLocalRead %u LoopIters %u LocalReadVectorWidthB %u, not enough LoopIters to prefetch %ux%u iterations, " \
           % (state["PrefetchLocalRead"],state["LoopIters"],state["LocalReadVectorWidthB"], state["PrefetchLocalRead"] , wlrMultiple) )
 
+    if state["PrefetchGL2"] == 0:
+      state["PrefetchGL2Inc64Bit"] = False
     if state["PrefetchGL2"] > 0:
       if not isaInfoMap[isa].asmCaps["HasGlobalPrefetch"]:
         reject(state, printRejectionReason, "ISA %s does not support global prefetch" % isa)
