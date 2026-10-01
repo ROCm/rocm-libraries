@@ -422,6 +422,7 @@ class Stub:
     def __init__(self, **binds):
         for name in ("isTdmWaveSeparated", "tdmFusePaired",
                      "tdmSeparateABDescriptors", "tdmSetupIncrementWaveSeparated",
+                     "tdmDescriptorSetOwner", "tdmLastIterDisableSgprs",
                      "_dcpTokenSide", "_dcpCurrentToken", "_dcpTdmIssueTokens"):
             fn = getattr(KernelWriterAssembly, name, None)
             if fn is not None:
@@ -445,6 +446,41 @@ def test_wave_separation_still_gates_the_writer():
     divergent = _ksOwner(enableTDMA=False, PrefetchGlobalReadA=1,
                          PrefetchGlobalReadB=2)
     assert DP.decoupledThickGateRelaxation(divergent) is None
+
+
+def _disabledOwners(writer, state):
+    names = writer.tdmLastIterDisableSgprs(state)
+    return names, {writer.tdmDescriptorSetOwner(state, n[len("tdm"):-len("Group0+0")])
+                   for n in names}
+
+
+@pytest.mark.parametrize("name", sorted(TF.TDM_GROUPS))
+@pytest.mark.parametrize("mxB", [32, 0])
+def test_last_iter_disable_reaches_every_descriptor_set(monkeypatch, name, mxB):
+    monkeypatch.setattr(TF, "tdmGrouping", lambda _ks: TF.TDM_GROUPS[name])
+    writer = Stub()
+    state = _ksOwner(ProblemType={"MXBlockA": 32, "MXBlockB": mxB})
+    live = [tc for tc in TDM_TENSORS if TF.tdmMemberIsLive(state, tc)]
+    names, owners = _disabledOwners(writer, state)
+    assert owners == {writer.tdmDescriptorSetOwner(state, tc) for tc in live}
+    assert len(names) == len(set(names))
+
+
+@pytest.mark.parametrize("name, expected", [
+    ("MX_AB", ["tdmAGroup0+0", "tdmMXSAGroup0+0"]),
+    ("B_MX", ["tdmAGroup0+0", "tdmMXSAGroup0+0"]),
+    ("paired", ["tdmAGroup0+0", "tdmMXSAGroup0+0", "tdmBGroup0+0"]),
+    ("A_MX", ["tdmAGroup0+0", "tdmMXSAGroup0+0", "tdmBGroup0+0"]),
+])
+def test_last_iter_disable_names_per_grouping(monkeypatch, name, expected):
+    monkeypatch.setattr(TF, "tdmGrouping", lambda _ks: TF.TDM_GROUPS[name])
+    assert Stub().tdmLastIterDisableSgprs(_ksOwner()) == expected
+
+
+@pytest.mark.parametrize("over", [dict(enableTDMB=False), dict(UseSubtileImpl=True)])
+def test_last_iter_disable_without_wave_separated_sets(monkeypatch, over):
+    monkeypatch.setattr(TF, "tdmGrouping", lambda _ks: TF.TDM_GROUPS["paired"])
+    assert Stub().tdmLastIterDisableSgprs(_ksOwner(**over)) == ["tdmAGroup0+0", "tdmMXSAGroup0+0"]
 
 
 def _tokenWriter():
