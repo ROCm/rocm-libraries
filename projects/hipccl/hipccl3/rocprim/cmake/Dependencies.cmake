@@ -91,7 +91,19 @@ if(BUILD_TEST)
   #        mode targets. Otherwise if MODULE or CONFIG succeeded, then it prints the result to the
   #        console via a non-QUIET find_package call and if CONFIG succeeded, creates ALIAS targets
   #        with the MODULE IMPORTED names.
-  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
+  # NOTE(hipccl3): EXTERNAL_DEPS_FORCE_DOWNLOAD is honoured here in addition to
+  # rocPRIM's own DEPENDENCIES_FORCE_DOWNLOAD. hipCUB and rocThrust renamed this
+  # option to EXTERNAL_DEPS_FORCE_DOWNLOAD (see their CHANGELOGs) to separate
+  # "force download of external test deps like GTest" from "force download of
+  # rocm-cmake"; rocPRIM still uses the single older name for both. That was
+  # invisible while the three projects configured separately, but in the unified
+  # build they share one configure, so a user passing either name would
+  # otherwise get it applied to some components and silently ignored by others.
+  # Accepting both here makes EXTERNAL_DEPS_FORCE_DOWNLOAD mean the same thing
+  # across all three without breaking existing DEPENDENCIES_FORCE_DOWNLOAD
+  # callers. rocPRIM's rocm-cmake lookup further down is deliberately left on
+  # DEPENDENCIES_FORCE_DOWNLOAD alone, matching hipCUB and rocThrust.
+  if(NOT DEPENDENCIES_FORCE_DOWNLOAD AND NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
     if(WIN32)
       # Older versions of gtest on Windows does not support printing of 128-bit values,
       # Causing compilation errors.
@@ -104,7 +116,7 @@ if(BUILD_TEST)
     option(BUILD_GTEST "Builds the googletest subproject" ON)
     option(BUILD_GMOCK "Builds the googlemock subproject" OFF)
     option(INSTALL_GTEST "Enable installation of googletest." OFF)
-    if(EXISTS /usr/src/googletest AND NOT DEPENDENCIES_FORCE_DOWNLOAD)
+    if(EXISTS /usr/src/googletest AND NOT DEPENDENCIES_FORCE_DOWNLOAD AND NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
       FetchContent_Declare(
         googletest
         SOURCE_DIR /usr/src/googletest

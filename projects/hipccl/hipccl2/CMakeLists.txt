@@ -179,6 +179,38 @@ set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT and BSD and ASL 2.0")
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}")
 
+# --- Supersession of the standalone component packages ---
+#
+# TODO(hipccl): confirm whether this block is actually needed, and delete it
+# if not - it is currently believed to be inert. See hipccl3's root
+# CMakeLists.txt for the full rationale and status; this mirrors it.
+#
+# In short: where hipCCL is packaged under a *flat* <prefix>, it ships
+# <prefix>/lib/cmake/{rocprim,hipcub,rocthrust}/ (each component's own
+# rocm_export_targets() output, which must keep shipping so
+# hipccl-config.cmake can delegate to find_package(<component> CONFIG)) and,
+# when HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS is ON, the compatibility
+# symlinks at <prefix>/include/{rocprim,hipcub,thrust} - paths that
+# standalone rocprim-dev/hipcub-dev/rocthrust-dev packages also own.
+# Conflicts forces those to be removed explicitly rather than allowing a
+# half-migrated install. Unversioned, because the retirement is one-way.
+#
+# Status (2026-09-30): TheRock's own packages built from this branch do not
+# carry this metadata and install under a version-scoped prefix
+# (/opt/rocm/core-<ver>), where no such collision arises. This is therefore
+# expected to matter only if a flat-prefix packaging path is also shipped.
+#
+# Both naming layers are listed; the amdrocm-ccl-* entries are the weakest
+# (that bundle is version-scoped and never shipped, so the conflict could be
+# a false positive) and are the first to drop if this is trimmed.
+set(HIPCCL_SUPERSEDED_DEB_PACKAGES "rocprim-dev, hipcub-dev, rocthrust-dev, amdrocm-ccl-dev")
+set(HIPCCL_SUPERSEDED_RPM_PACKAGES "rocprim-devel, hipcub-devel, rocthrust-devel, amdrocm-ccl-devel")
+
+set(CPACK_DEBIAN_PACKAGE_CONFLICTS "${HIPCCL_SUPERSEDED_DEB_PACKAGES}")
+set(CPACK_DEBIAN_DEVEL_PACKAGE_CONFLICTS "${HIPCCL_SUPERSEDED_DEB_PACKAGES}")
+set(CPACK_RPM_PACKAGE_CONFLICTS "${HIPCCL_SUPERSEDED_RPM_PACKAGES}")
+set(CPACK_RPM_DEVEL_PACKAGE_CONFLICTS "${HIPCCL_SUPERSEDED_RPM_PACKAGES}")
+
 rocm_create_package(
     NAME hipccl
     DESCRIPTION "hipCCL: unified rocPRIM, hipCUB, and rocThrust package (legacy layout)"
