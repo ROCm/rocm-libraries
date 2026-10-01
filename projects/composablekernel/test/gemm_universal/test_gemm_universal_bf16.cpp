@@ -100,7 +100,7 @@ int main(int argc, char** argv)
     else
     {
         std::cout << "Usage of " << argv[0] << std::endl;
-        std::cout << "Arg1,2: param_mask instance_index(-1 means all)" << std::endl;
+        std::cout << "Arg1,2: param_mask supported_instance_index(-1 means all)" << std::endl;
     }
     return RUN_ALL_TESTS();
 }

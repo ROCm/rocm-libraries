@@ -7,6 +7,7 @@
 #include <numeric>
 
 #include "profiler/profile_gemm_universal_impl.hpp"
+#include "profiler/profiler_arg_utils.hpp"
 #include "profiler_operation_registry.hpp"
 
 enum struct GemmMatrixLayout
@@ -36,7 +37,12 @@ enum struct GemmDataType
 
 int profile_gemm_universal(int argc, char* argv[])
 {
-    if(argc != 15 && argc != 18)
+    ck::index_t instance_index = -1;
+    bool list_instances        = false;
+    bool raw_invocation        = false;
+    ck::profiler::parse_named_args(argc, argv, instance_index, list_instances, &raw_invocation);
+    const int positional_argc = argc - ck::profiler::count_named_args(argc, argv, true);
+    if(positional_argc != 15 && positional_argc != 18)
     {
         printf("arg1: tensor operation (" OP_NAME ": " OP_DESC ")\n");
         printf("arg2: data type (0: fp32; 1: fp16; 2: bf16; 3: int8; 4: f8@f16; 5: f16@f8; 6: "
@@ -56,6 +62,9 @@ int profile_gemm_universal(int argc, char* argv[])
         printf("arg15: number of warm-up cycles (default 1)\n");
         printf("arg16: number of iterations (default 10)\n");
         printf("arg17: memory for rotating buffer (default 0, size in MB)\n");
+        printf("--instance <id>: select an instance from this problem's supported list\n");
+        printf("--list-instances: list supported instances without launching\n");
+        printf("--raw-invocation: time 50 complete untimed invocations with hot input reuse\n");
         exit(1);
     }
 
@@ -93,7 +102,7 @@ int profile_gemm_universal(int argc, char* argv[])
     int n_warmup      = 1;
     int n_iter        = 10;
     uint64_t rotating = 0;
-    if(argc == 18)
+    if(positional_argc == 18)
     {
         n_warmup = std::stoi(argv[15]);
         n_iter   = std::stoi(argv[16]);
@@ -155,7 +164,10 @@ int profile_gemm_universal(int argc, char* argv[])
             KBatch,
             n_warmup,
             n_iter,
-            rotating);
+            rotating,
+            instance_index,
+            list_instances,
+            raw_invocation);
 
         return pass ? 0 : 1;
     };

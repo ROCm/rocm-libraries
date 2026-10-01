@@ -648,6 +648,13 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
 #endif
     }
 
+    __host__ __device__ static auto MakeEGridDescriptor_M_N(index_t M,
+                                                           index_t N,
+                                                           index_t StrideE)
+    {
+        return MakeDEGridDescriptor_M_N<ELayout>(M, M, N, N, StrideE);
+    }
+
     static constexpr auto MakeDsGridPointer()
     {
         return generate_tuple(

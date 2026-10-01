@@ -69,7 +69,8 @@ class TestGemmUniversal : public testing::Test
                    const int StrideC,
                    int kbatch   = 1,
                    int n_warmup = 1,
-                   int n_iter   = 10)
+                   int n_iter   = 10,
+                   bool raw_invocation = false)
     {
         bool pass = ck::profiler::profile_gemm_universal_impl<ADataType,
                                                               BDataType,
@@ -92,7 +93,9 @@ class TestGemmUniversal : public testing::Test
                                                                        n_warmup,
                                                                        n_iter,
                                                                        0,
-                                                                       instance_index);
+                                                                       instance_index,
+                                                                       false,
+                                                                       raw_invocation);
         EXPECT_TRUE(pass);
     }
 };

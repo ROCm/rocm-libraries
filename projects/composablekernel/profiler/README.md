@@ -104,6 +104,23 @@ latency. This mode builds CK candidates, not a MIOpen plugin.
 ./bin/ckProfiler gemm_universal 1 0 1 1 0 1 4096 4096 4096 4096 4096 4096 1 1 10 0
 ```
 
+`gemm_universal` also accepts `--list-instances`, `--instance N`, and `--raw-invocation`
+after the positional arguments. IDs enumerate supported instance/split configurations for the
+same problem and split policy, not registered factory rows. A positive split value requests one
+split; a nonpositive value enumerates the existing split list. A selected ID with no supported
+configuration returns failure.
+
+```bash
+./bin/ckProfiler gemm_universal 1 1 0 1 0 0 128 128 256 256 256 128 1 --list-instances
+./bin/ckProfiler gemm_universal 1 1 0 1 0 0 128 128 256 256 256 128 1 --instance 0 --raw-invocation
+```
+
+Raw timing uses the same 50 complete, independently synchronized hot-reuse invocations described
+above, including invoker-owned split-output clearing. With positional time `0`, it suppresses
+legacy `Perf:` and best-performance output. The optional warm-up/iteration/rotating-buffer
+positionals still control legacy timing; they do not change the raw repeat count or hot-reuse policy.
+
+
 ## Profile GEMM kernels
 ```bash
 #arg1: tensor operation (gemm=GEMM)

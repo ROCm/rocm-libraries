@@ -312,6 +312,14 @@ struct DeviceGemm_Xdl_CShuffleV3 : public DeviceGemmV2<ALayout,
             index_t K_split = (arg.K + k_grain - 1) / k_grain * KPerBlock;
 
             const bool has_main_k_block_loop = GridwiseGemm::CalculateHasMainKBlockLoop(K_split);
+            const std::size_t output_bytes =
+                arg.KBatch > 1
+                    ? static_cast<std::size_t>(
+                          GridwiseGemm::MakeCGridDescriptor_M_N(
+                              arg.M, arg.M, arg.N, arg.N, arg.StrideC)
+                              .GetElementSpaceSize()) *
+                          sizeof(CDataType)
+                    : 0;
 
             const auto Run = [&](const auto& kernel) {
                 if(stream_config.flush_cache)
@@ -341,7 +349,7 @@ struct DeviceGemm_Xdl_CShuffleV3 : public DeviceGemmV2<ALayout,
                         if(arg_.KBatch > 1)
                             hipGetErrorString(hipMemsetAsync(arg_.p_c_grid,
                                                              0,
-                                                             arg_.M * arg_.N * sizeof(CDataType),
+                                                             output_bytes,
                                                              stream_config.stream_id_));
                     };
 
@@ -359,7 +367,7 @@ struct DeviceGemm_Xdl_CShuffleV3 : public DeviceGemmV2<ALayout,
                     if(arg.KBatch > 1)
                         hipGetErrorString(hipMemsetAsync(arg.p_c_grid,
                                                          0,
-                                                         arg.M * arg.N * sizeof(CDataType),
+                                                         output_bytes,
                                                          stream_config.stream_id_));
 
                     ave_time = launch_and_time_kernel(

@@ -20,6 +20,7 @@
 #include "ck/library/utility/host_tensor_generator.hpp"
 #include "ck/library/utility/literals.hpp"
 #include "ck/library/reference_tensor_operation/cpu/reference_gemm.hpp"
+#include "profiler/raw_invocation.hpp"
 
 namespace ck {
 namespace profiler {
@@ -46,7 +47,9 @@ bool profile_gemm_universal_impl(int do_verification,
                                  int n_warmup,
                                  int n_iter,
                                  uint64_t rotating  = 0,
-                                 int instance_index = -1)
+                                 int instance_index = -1,
+                                 bool list_instances = false,
+                                 bool raw_invocation = false)
 {
     bool pass = true;
 
@@ -155,15 +158,12 @@ bool profile_gemm_universal_impl(int do_verification,
     float best_tflops     = 0;
     float best_gb_per_sec = 0;
     float best_kbatch     = 0;
+    int supported_instances = 0;
+    int executed_instances  = 0;
 
     // profile device GEMM instances
     for(size_t l = 0; l < op_ptrs.size(); l++)
     {
-        if((instance_index != -1) && (instance_index != static_cast<int>(l)))
-        {
-            // skip test if instance_index is specified
-            continue;
-        }
         auto& op_ptr        = op_ptrs[l];
         const int KPerBlock = op_ptr->GetKPerBlock();
 
@@ -276,12 +276,37 @@ bool profile_gemm_universal_impl(int do_verification,
 
             if(op_ptr->IsSupportedArgument(argument_ptr.get()))
             {
+                const int supported_index = supported_instances++;
+                const std::string op_name = op_ptr->GetTypeString();
+                if(list_instances)
+                {
+                    std::cout << "[" << supported_index << "] " << op_name
+                              << ", requested_split=" << KBatch
+                              << ", effective_split=" << kbatch_curr << std::endl;
+                    continue;
+                }
+                if(instance_index != -1 && instance_index != supported_index)
+                    continue;
+                ++executed_instances;
 
                 // re-init C to zero before profiling next kernel
                 c_device_buf.SetZero();
 
-                invoker_ptr->Run(argument_ptr.get(),
-                                 StreamConfig{nullptr, false, 0, n_warmup, n_iter});
+                if(raw_invocation)
+                {
+                    const float raw_ms = measure_raw_invocation(
+                        *invoker_ptr, argument_ptr.get(), nullptr, kRawInvocationRepeats);
+                    std::cout << "Raw invocation: " << raw_ms << " ms, instance "
+                              << supported_index << ", requested_split=" << KBatch
+                              << ", effective_split=" << kbatch_curr
+                              << ", policy=hot-reuse, repeats=" << kRawInvocationRepeats
+                              << ", " << op_name << std::endl;
+                }
+                else
+                {
+                    invoker_ptr->Run(argument_ptr.get(),
+                                     StreamConfig{nullptr, false, 0, n_warmup, n_iter});
+                }
 
                 if(do_verification)
                 {
@@ -319,7 +344,8 @@ bool profile_gemm_universal_impl(int do_verification,
                     }
                 }
 
-                std::string op_name                    = op_ptr->GetTypeString();
+                if(raw_invocation && !time_kernel)
+                    continue;
                 std::optional<std::string> op_obj_name = op_ptr->GetObjectName();
 
                 float ave_time = invoker_ptr->Run(argument_ptr.get(),
@@ -370,6 +396,12 @@ bool profile_gemm_universal_impl(int do_verification,
         }
     }
 
+    if(list_instances)
+        return supported_instances > 0;
+    if(raw_invocation && !time_kernel)
+        return pass && executed_instances > 0;
+    if(instance_index != -1 && executed_instances == 0)
+        return false;
     if constexpr(is_same<CDataType, float>::value)
     {
         std::cout << "Best Perf for datatype = f32";

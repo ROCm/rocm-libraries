@@ -99,6 +99,18 @@ TYPED_TEST_SUITE(TestGemmUniversal_FP16_MK_NK, KernelTypes_MK_NK);
 TYPED_TEST_SUITE(TestGemmUniversal_FP16_KM_NK, KernelTypes_KM_NK);
 TYPED_TEST_SUITE(TestGemmUniversal_FP16_KM_KN, KernelTypes_KM_KN);
 
+class TestGemmUniversalStridedSplitFp16
+    : public ck::test::TestGemmUniversal<std::tuple<Row, Col, F16, F16, F16, F16>>
+{
+};
+
+TEST_F(TestGemmUniversalStridedSplitFp16, RepeatedInvocationsOverwritePaddedRows)
+{
+    if(ck::is_gfx11_supported())
+        GTEST_SKIP() << "FP16 split-K atomics are not supported on gfx11";
+    this->RunSingle(128, 128, 512, 512, 512, 256, 2, 1, 1, true);
+}
+
 #include "test_gemm_universal_ut_cases_fp16.inc"
 int main(int argc, char** argv)
 {
@@ -112,7 +124,7 @@ int main(int argc, char** argv)
     else
     {
         std::cout << "Usage of " << argv[0] << std::endl;
-        std::cout << "Arg1,2: param_mask instance_index(-1 means all)" << std::endl;
+        std::cout << "Arg1,2: param_mask supported_instance_index(-1 means all)" << std::endl;
     }
     return RUN_ALL_TESTS();
 }

@@ -10,6 +10,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Added split-1-only scalar direct-output FP16/BF16 grouped backward-weight instances for odd per-group channels on gfx1250.
 * Added a profiler mode linking only MIOpen-facing 2D/3D channels-last grouped convolution candidates and explicit backward-weight competitors.
 * Added opt-in raw complete-invocation timing and unique candidate numbering to the grouped-convolution profiler.
+* Added supported-instance selection, listing, and raw complete-invocation timing to the universal GEMM profiler.
 * Added block-diagonal group packing (`GroupsPerWmma`) to the WMMA-v3 grouped forward operation for 2D channels-last convolutions with few channels per group. Packed instances require a workspace and identify themselves with a `GroupsPerWmma` suffix in their type string; other type strings are unchanged.
 * Added a gfx1250 FP16 packed-weight grouped forward instance for four input and output channels per group.
 * Added a gfx1250 BF16 group-local depthwise backward-weight candidate for packed 2D channels-last 3x3 convolutions with at least 128 groups and reductions no longer than `min(G, 512)`.
@@ -26,7 +27,9 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Applied gfx1250 BF16 large-tile compiler flags consistently to single-target `GPU_ARCHS` library builds.
 * Fixed grouped-convolution profiler `--instance` selection to index supported instances, and removed the duplicated first forward candidate.
 * Rejected unsupported FP8/BF8 K=16 WMMA and K=32 MFMA warp-GEMM tiles at compile time on gfx1250 instead of producing zero results.
-* Fixed the WMMA backward-weight interface regression fixture to run on gfx12 with an FP16 reduction tile supported by gfx1250.
+* Fixed the WMMA backward-weight interface regression fixture to run on gfx12 while preserving its supported reduction tile.
+* Fixed repeated split-K universal GEMM invocations to clear the complete strided output span.
+* Fixed regular-launch TDM WMMA test coverage on gfx1250 A0 without enabling unsupported multicast cluster launches.
 
 ## Composable Kernel 1.3.0 for ROCm 10.1.0
 
