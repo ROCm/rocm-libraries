@@ -37,24 +37,40 @@ cmake --build build/gfx1250-miopen-profiler --target ckProfiler -j 24
 ```
 
 Only `grouped_conv_fwd`, `grouped_conv_bwd_data`, and `grouped_conv_bwd_weight` are available in
-this build. `--list-instances` numbers each supported candidate configuration once; `--instance N`
+this build.
+
+## Grouped convolution candidate selection and raw timing
+
+`--list-instances` numbers each supported candidate configuration once; `--instance N`
 selects that number for the same shape and split policy (not a stable factory index). The initial
 `found ... instances` count is registered factory ops, `Total: ... valid instances` counts supported
 configurations (including separate backward split choices), and `valids` counts executed selections.
-Listing checks support without launching candidate kernels. The first forward candidate is no
-longer listed or executed twice; timed invocations still get a warm-up before measurement.
+Listing checks support without launching candidate kernels.
+
+These flags work on any supported GPU architecture, independently of
+`CK_PROFILER_MIOPEN_LAYOUTS_ONLY`. For example, list FP16 2D NHWGC forward candidates, then run
+candidate 0 with complete-invocation timing:
+
+```bash
+# Controls: dtype layout index verify init log time; shape: dimensions G N K C,
+# filter sizes, input sizes, strides, dilations, left pads, right pads.
+./bin/ckProfiler grouped_conv_fwd 1 1 0 0 1 0 0 \
+  2 1 1 64 64 3 3 8 8 1 1 1 1 1 1 1 1 --list-instances
+./bin/ckProfiler grouped_conv_fwd 1 1 0 0 1 0 0 \
+  2 1 1 64 64 3 3 8 8 1 1 1 1 1 1 1 1 --instance 0 --raw-invocation
+```
 
 Use `--raw-invocation` after the positional arguments to print a `Raw invocation: <ms> ms`
 record per executed candidate, with its list ID, exact op type, requested/effective split,
-`policy=hot-reuse`, and `repeats=50`. For example, append `--instance 0 --raw-invocation` to the
-convolution command below; backward-weight split `-1` means auto-select and `all` enumerates
-individual requested splits. Backward-data split `0` enumerates eligible split values. An
-`effective_split=unknown` on backward weight means that op does not expose its resolved split in
-its argument, not that it used split 1. For forward convolution both split values are 1.
+`policy=hot-reuse`, and the actual repeat count (50 by default). Backward-weight split `-1`
+means auto-select and `all` enumerates individual requested splits. Backward-data split `0`
+enumerates eligible split values. An `effective_split=unknown` on backward weight means that op
+does not expose its resolved split in its argument, not that it used split 1. For forward
+convolution both split values are 1.
 
 Each raw interval records HIP events on the invocation's stream immediately before and after a
 **complete** `Invoker::Run` with its internal timing and cache flushing disabled. A separate warm-up
-invocation is drained first; 50 independently synchronized intervals include each invocation's
+invocation is drained first; each independently synchronized interval includes the invocation's
 clears, packing and casts. Raw timing uses hot buffer reuse, no artificial flush and no fixed
 offset correction. The positional time flag is unchanged: `1` still prints the original `Perf:`
 legacy kernel/cache-flush measurement (which may time stages separately or apply a cache

@@ -9,6 +9,8 @@
 namespace ck {
 namespace profiler {
 
+inline constexpr int kRawInvocationRepeats = 50;
+
 // The events bracket one complete, untimed invocation (including any clears,
 // packing, or conversion that the invoker enqueues). The workspace and inputs
 // must already have been prepared by the caller. No cache flushing or correction
@@ -17,7 +19,7 @@ template <typename Invoker, typename Argument>
 float measure_raw_invocation(Invoker& invoker,
                              Argument* argument,
                              hipStream_t stream = nullptr,
-                             int repeats        = 50)
+                             int repeats        = kRawInvocationRepeats)
 {
     const StreamConfig config{stream, false, 0, 0, 1, false};
 

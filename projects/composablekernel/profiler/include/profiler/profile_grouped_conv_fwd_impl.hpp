@@ -312,7 +312,6 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
     bool dummy_run_executed = false;
 
     auto run_impl = [&](auto& op_ptr, auto& argument_ptr) {
-        // workspace_sz will be equal to 0 for other layout than NGCHW
         const std::size_t workspace_sz = op_ptr->GetWorkSpaceSize(argument_ptr.get());
         DeviceMem workspace_dev(0);
         if(workspace_sz)
@@ -329,8 +328,6 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
             if(list_instances)
             {
                 std::cout << "[" << (num_kernel - 1) << "] " << op_ptr->GetTypeString();
-                if(raw_invocation)
-                    std::cout << " (requested_split=1, effective_split=1)";
                 std::cout << std::endl;
                 return;
             }
@@ -392,11 +389,11 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
             }
             if(raw_invocation)
             {
-                const float raw_ms = measure_raw_invocation(*invoker_ptr, argument_ptr.get());
-                std::cout
-                    << "Raw invocation: " << raw_ms << " ms, instance " << (num_kernel - 1)
-                    << ", requested_split=1, effective_split=1, policy=hot-reuse, repeats=50, "
-                    << op_name << std::endl;
+                const float raw_ms = measure_raw_invocation(
+                    *invoker_ptr, argument_ptr.get(), nullptr, kRawInvocationRepeats);
+                std::cout << "Raw invocation: " << raw_ms << " ms, instance " << (num_kernel - 1)
+                          << ", requested_split=1, effective_split=1, policy=hot-reuse, repeats="
+                          << kRawInvocationRepeats << ", " << op_name << std::endl;
             }
 
             // Synchronize before verification to ensure kernel has completed
@@ -480,7 +477,7 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
 
     for(size_t i = 0; i < op_ptrs.size(); i++)
     {
-        // --instance selects the Nth supported factory entry, not its raw factory index.
+        // --instance selects the Nth supported configuration from --list-instances.
         // Unsupported entries do not consume list indices or run invocations.
         auto& op_ptr      = op_ptrs[i];
         auto argument_ptr = op_ptr->MakeArgumentPointer(in_device_buf.GetDeviceBuffer(),

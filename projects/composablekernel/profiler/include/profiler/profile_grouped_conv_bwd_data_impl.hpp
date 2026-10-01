@@ -384,11 +384,13 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
             }
             if(raw_invocation)
             {
-                const float raw_ms = measure_raw_invocation(*invoker_ptr, argument_ptr.get());
+                const float raw_ms = measure_raw_invocation(
+                    *invoker_ptr, argument_ptr.get(), nullptr, kRawInvocationRepeats);
                 std::cout << "Raw invocation: " << raw_ms << " ms, instance " << (num_kernel - 1)
                           << ", requested_split=" << split_k
                           << ", effective_split=" << split_k_for_run
-                          << ", policy=hot-reuse, repeats=50, " << op_name << std::endl;
+                          << ", policy=hot-reuse, repeats=" << kRawInvocationRepeats << ", "
+                          << op_name << std::endl;
             }
 
             // Synchronize before verification to ensure kernel has completed
@@ -550,10 +552,8 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
 
     for(size_t i = 0; i < op_ptrs.size(); i++)
     {
-        // NOTE: instance_index (when set) selects the Nth *supported* instance (matching
-        // --list-instances' "[N] ..." numbering and run_impl's num_kernel-based current_is_target
-        // check), not a raw index into op_ptrs -- see profile_grouped_conv_fwd_impl.hpp for the
-        // full rationale. Do not skip by raw i here.
+        // --instance selects the Nth supported configuration from --list-instances.
+        // Unsupported entries do not consume list indices or run invocations.
         auto& op_ptr = op_ptrs[i];
 
         for(std::size_t split_k_id = 0; split_k_id < split_k_list.size(); split_k_id++)

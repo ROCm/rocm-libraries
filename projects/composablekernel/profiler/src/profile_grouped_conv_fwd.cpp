@@ -125,9 +125,13 @@ bool print_fwd_instances(ConvDataType data_type, ConvLayout layout, ck::index_t 
     using F32  = float;
     using F16  = ck::half_t;
     using BF16 = ck::bhalf_t;
+#if defined(CK_ENABLE_FP8) && !defined(CK_PROFILER_MIOPEN_LAYOUTS_ONLY)
+    using F8 = ck::f8_t;
+#endif
+#if defined(CK_ENABLE_BF8) && !defined(CK_PROFILER_MIOPEN_LAYOUTS_ONLY)
+    using BF8 = ck::bf8_t;
+#endif
 #ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
-    using F8   = ck::f8_t;
-    using BF8  = ck::bf8_t;
     using TF32 = ck::tf32_t;
     using INT8 = int8_t;
 #endif
@@ -355,11 +359,14 @@ bool print_fwd_instances(ConvDataType data_type, ConvLayout layout, ck::index_t 
             return print_available_instances(
                 I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, INT8{}, INT8{}, INT8{}, INT8{}, INT8{});
         }
+#ifdef CK_ENABLE_FP8
         else if(data_type == ConvDataType::F8_F8_F8)
         {
             return print_available_instances(
                 I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, F8{}, F8{}, F8{}, F8{}, F8{});
         }
+#endif
+#if defined(CK_ENABLE_FP8) && defined(CK_ENABLE_BF8)
         else if(data_type == ConvDataType::BF8_BF8_F8)
         {
             return print_available_instances(
@@ -375,6 +382,7 @@ bool print_fwd_instances(ConvDataType data_type, ConvLayout layout, ck::index_t 
             return print_available_instances(
                 I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, BF8{}, F8{}, F8{}, BF8{}, F8{});
         }
+#endif
         else if(data_type == ConvDataType::F32_F32_F32_TF32)
         {
             return print_available_instances(
