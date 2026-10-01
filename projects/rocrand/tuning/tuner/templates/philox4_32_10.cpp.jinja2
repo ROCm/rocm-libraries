@@ -1,0 +1,12 @@
+{% extends "common/base.cpp.jinja2" %}
+
+{% block backend_include %}  
+    #include "rng/philox4x32_10.hpp"
+{% endblock %}
+
+{% block generator_define %}
+    template<class ConfigProvider>
+    using generator_template
+        = rocrand_impl::host::philox4x32_10_generator_template<rocrand_impl::system::device_system,
+                                                           ConfigProvider>;
+{% endblock %}
