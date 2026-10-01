@@ -76,6 +76,34 @@ TYPED_TEST(TEST_CKTILE_GGEMM_TDM_SUITE_NAME, KTail)
     this->RunOnDevice(Ms, Ns, Ks, group_count);
 }
 
+// MakeKargs drops zero-sized groups but retains negative K. Reject a negative K in any group
+// before querying the device, without allocating tensors or launching invalid TDM loads.
+TYPED_TEST(TEST_CKTILE_GGEMM_TDM_SUITE_NAME, NegativeKRejected)
+{
+    constexpr ck_tile::index_t M = 256;
+    constexpr ck_tile::index_t N = 256;
+    constexpr ck_tile::index_t K = 512;
+    constexpr ck_tile::index_t stride_A =
+        std::is_same_v<typename TestFixture::ALayout, ck_tile::tensor_layout::gemm::RowMajor> ? K
+                                                                                              : M;
+    constexpr ck_tile::index_t stride_B =
+        std::is_same_v<typename TestFixture::BLayout, ck_tile::tensor_layout::gemm::RowMajor> ? N
+                                                                                              : K;
+
+    const typename TestFixture::grouped_gemm_kargs valid_desc{
+        nullptr, nullptr, {}, nullptr, 1, M, N, K, stride_A, stride_B, {}, N};
+    for(const ck_tile::index_t invalid_k : {-1, -TestFixture::ActiveKernelParam::K_Tile})
+    {
+        for(std::size_t group = 0; group < 3; ++group)
+        {
+            SCOPED_TRACE(::testing::Message() << "group=" << group << ", K=" << invalid_k);
+            std::vector<typename TestFixture::grouped_gemm_kargs> gemm_descs(3, valid_desc);
+            gemm_descs[group].K = invalid_k;
+            EXPECT_FALSE(this->IsTdmArgumentSupported(gemm_descs));
+        }
+    }
+}
+
 // TdmEpilogue has no atomic path, so split-K must be rejected on the host. The same
 // descriptors with k_batch = 1 must be accepted on a gfx125 device, so the rejection is
 // attributable to k_batch. IsSupportedArgument checks k_batch before querying the device.

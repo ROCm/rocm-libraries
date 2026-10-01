@@ -325,8 +325,8 @@ struct GroupedGemmKernel
         if constexpr(kTupleOnlyPipeline)
         {
             // Base::IsSupportedArgument returns true unconditionally for TDM pipelines, so the
-            // TDM-specific constraints are checked here. The k_batch check runs first: it needs
-            // no device query, so split-K rejection is deterministic on any host.
+            // TDM-specific constraints are checked here before querying the device, so invalid
+            // arguments are rejected deterministically on any host.
             for(const auto& karg : kargs)
             {
                 if(karg.group_karg.k_batch != 1)
@@ -334,6 +334,14 @@ struct GroupedGemmKernel
                     if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                     {
                         CK_TILE_ERROR("TDM grouped GEMM does not support split-K (k_batch != 1)!");
+                    }
+                    return false;
+                }
+                if(karg.group_karg.K <= 0)
+                {
+                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                    {
+                        CK_TILE_ERROR("TDM grouped GEMM requires K > 0!");
                     }
                     return false;
                 }
