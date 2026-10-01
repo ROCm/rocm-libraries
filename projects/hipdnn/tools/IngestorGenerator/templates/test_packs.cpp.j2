@@ -87,10 +87,18 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
 /// The runtime source kind every kernel must declare at the loader. A packaged bundle
 /// is lowered to a kpack archive first, so the authored builder kind is not what
 /// arrives.
+{# The provider's clang-format (ColumnLimit 100) joins these two statements whenever
+   they fit on one line, so emit that form directly: the file is copied verbatim. #}
+{% set source_kind = {'embedded_source': 'EMBEDDED_SOURCE',
+                      'kpack': 'KPACK',
+                      'hsaco_file': 'HSACO_FILE'}[emitted.source_kind] %}
+{% set kind_line = 'constexpr ingestor::KernelSourceKind EXPECTED_SOURCE_KIND = ingestor::KernelSourceKind::' ~ source_kind ~ ';' %}
+{% if kind_line | length <= 100 %}
+{{ kind_line }}
+{% else %}
 constexpr ingestor::KernelSourceKind EXPECTED_SOURCE_KIND
-    = ingestor::KernelSourceKind::{{ {'embedded_source': 'EMBEDDED_SOURCE',
-                                      'kpack': 'KPACK',
-                                      'hsaco_file': 'HSACO_FILE'}[emitted.source_kind] }};
+    = ingestor::KernelSourceKind::{{ source_kind }};
+{% endif %}
 
 /// A pack or kernel naming no architecture inherits/wildcards; one that names
 /// architectures must name the requested one, or this is the wrong shard.
@@ -195,8 +203,14 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, EveryKernelDeclaresTheEmittedRu
 
 TEST_F(Test{{ config.engine.pascal_name }}Packs, DeclaresTheConfiguredSdkVersion)
 {
+{% set sdk_version = 'hipdnn_data_sdk::utilities::Version{std::string("' ~ (emitted.sdk_version | cpp_escape) ~ '")}' %}
+{% set sdk_line = '    EXPECT_EQ(_set->engine.sdkVersion, ' ~ sdk_version ~ ');' %}
+{% if sdk_line | length <= 100 %}
+{{ sdk_line }}
+{% else %}
     EXPECT_EQ(_set->engine.sdkVersion,
-              hipdnn_data_sdk::utilities::Version{std::string("{{ emitted.sdk_version | cpp_escape }}")});
+              {{ sdk_version }});
+{% endif %}
 }
 
 TEST_F(Test{{ config.engine.pascal_name }}Packs, ExposesTheConfiguredKnobs)
