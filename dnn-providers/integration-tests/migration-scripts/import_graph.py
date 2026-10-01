@@ -22,13 +22,21 @@ Metadata: the ``<stem>.meta.json`` sidecar that ``--capture-bundles`` writes
 beside each graph is the metadata base, exactly as in ``place_bundles.py``, so
 the captured seed and input fill specs carry over with no flags. ``--meta`` and
 ``--seed`` override it, with a warning naming both values whenever an override
-contradicts the sidecar. An unreadable sidecar warns and the import proceeds
-without it. ``--strict`` turns both warnings into a non-zero exit.
+contradicts the sidecar or the ``reference_source`` derived from it. ``--meta``
+values parse as JSON when they can, so ``seed=42`` is the number 42. An
+unreadable or malformed sidecar (e.g. an ``inputs`` key that is not a UID) warns
+and the import proceeds without it. ``--strict`` turns both warnings into a
+non-zero exit.
+
+Tier: unless ``--tier`` is given, the tier comes from the sidecar's suite
+prefix via ``TIER_MAP`` (``Full/...`` -> ``full/``), as in ``place_bundles.py``;
+with no sidecar it defaults to ``quick``. A ``--tier`` that contradicts the
+sidecar warns like any other override.
 
 Usage::
 
     import_graph.py --graph case.json --bundle-dir integration-test-bundles/ \\
-        [--tier quick] [--meta reference_source="..."] [--dry-run] [--strict] [--force]
+        [--tier TIER] [--meta reference_source="..."] [--dry-run] [--strict] [--force]
 """
 
 import argparse
@@ -41,6 +49,7 @@ from pathlib import Path
 from bundle_utils import (
     TENSOR_ALWAYS,
     TENSOR_IF_VARIES,
+    TIER_MAP,
     TOP_LEVEL_IF_VARIES,
     _case_hash,
     assign_case_ids,
@@ -262,7 +271,35 @@ def _read_sidecar(graph_path: Path):
         return path, None, str(e)
     if not isinstance(meta, dict):
         return path, None, f"expected a JSON object, got {type(meta).__name__}"
+    if "inputs" in meta:
+        err = _inputs_error(meta["inputs"])
+        if err is not None:
+            return path, None, err
     return path, meta, None
+
+
+def _inputs_error(inputs):
+    """Why ``inputs`` can't be remapped (a UID-keyed object), or None if it can."""
+    if not isinstance(inputs, dict):
+        return f"inputs: expected a JSON object, got {type(inputs).__name__}"
+    for k in inputs:
+        try:
+            int(k)
+        except ValueError:
+            return f"inputs: key {k!r} is not a tensor UID"
+    return None
+
+
+def _parse_meta_value(v: str):
+    """A ``--meta`` value as JSON when it parses (``42``, ``true``), else the string.
+
+    Without this, ``--meta seed=42`` would store ``"42"``: a false conflict with
+    a captured ``42`` and a seed that never dedups against an existing case.
+    """
+    try:
+        return json.loads(v)
+    except json.JSONDecodeError:
+        return v
 
 
 def _capture_reference_source(graph_path: Path, sidecar: dict):
@@ -283,6 +320,17 @@ def _capture_reference_source(graph_path: Path, sidecar: dict):
     return f"c++ integration suite: {suite}.{case_dir.name}"
 
 
+def _capture_tier(sidecar):
+    """The tier place_bundles would pick: TIER_MAP of the suite's prefix.
+
+    None when there is no sidecar suite to derive it from.
+    """
+    suite = sidecar.get("operation") if sidecar is not None else None
+    if not isinstance(suite, str) or not suite:
+        return None
+    return TIER_MAP.get(Path(suite).parts[0], "quick")
+
+
 # --------------------------------------------------------------------------
 # Main
 # --------------------------------------------------------------------------
@@ -298,12 +346,18 @@ def main() -> int:
     ap.add_argument(
         "--bundle-dir", type=Path, required=True, help="root of the bundle tree"
     )
-    ap.add_argument("--tier", default="quick", help="tier folder (default: quick)")
+    ap.add_argument(
+        "--tier",
+        default=None,
+        help="tier folder (default: from the sidecar's suite prefix, else quick;"
+        " contradicting the sidecar warns, or errors under --strict)",
+    )
     ap.add_argument(
         "--meta",
         action="append",
         default=[],
-        help="key=value metadata pairs (repeatable); override the sidecar",
+        help="key=value metadata pairs (repeatable); override the sidecar."
+        " Values parse as JSON when they can (seed=42 is a number)",
     )
     ap.add_argument(
         "--seed",
@@ -337,12 +391,18 @@ def main() -> int:
         print(f"  {level}: bad sidecar {sidecar_path}: {sidecar_err}", file=sys.stderr)
         if args.strict:
             return 1
-    meta = dict(sidecar) if sidecar is not None else {}
-    meta.setdefault("format_version", 1)
+    # What the capture recorded, including the reference_source derived from
+    # it: overrides are checked against this, not just the raw sidecar keys.
+    captured = dict(sidecar) if sidecar is not None else {}
     if sidecar is not None:
         ref = _capture_reference_source(args.graph, sidecar)
         if ref is not None:
-            meta["reference_source"] = ref
+            captured["reference_source"] = ref
+    meta = dict(captured)
+    meta.setdefault("format_version", 1)
+    captured_tier = _capture_tier(sidecar)
+    if args.tier is None:
+        args.tier = captured_tier or "quick"
 
     # Explicit CLI values win. Overriding a value the capture recorded is
     # allowed but never silent: the sidecar is what the C++ test actually ran.
@@ -350,14 +410,11 @@ def main() -> int:
     for kv in args.meta:
         if "=" in kv:
             k, v = kv.split("=", 1)
+            v = _parse_meta_value(v)
             if k == "inputs":
-                try:
-                    v = json.loads(v)
-                except (json.JSONDecodeError, TypeError) as e:
-                    print(
-                        f"import_graph: --meta inputs must be a JSON object: {e}",
-                        file=sys.stderr,
-                    )
+                err = _inputs_error(v)
+                if err is not None:
+                    print(f"import_graph: --meta {err}", file=sys.stderr)
                     return 1
             overrides.append((f"--meta {k}", k, v))
             meta[k] = v
@@ -366,10 +423,14 @@ def main() -> int:
         meta["seed"] = args.seed
 
     conflicts = [
-        (flag, sidecar[k], v)
+        (flag, captured[k], v)
         for flag, k, v in overrides
-        if sidecar is not None and k in sidecar and canon(sidecar[k]) != canon(v)
+        if k in captured and canon(captured[k]) != canon(v)
     ]
+    # The tier is not metadata, but it picks the CI lane: --tier quick on a
+    # Full/ capture would silently move the case to the smoke lane.
+    if captured_tier is not None and args.tier != captured_tier:
+        conflicts.append(("--tier", captured_tier, args.tier))
     for flag, captured, supplied in conflicts:
         level = "ERROR" if args.strict else "WARN"
         print(

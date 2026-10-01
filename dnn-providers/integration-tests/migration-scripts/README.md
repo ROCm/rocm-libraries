@@ -81,10 +81,18 @@ graph and uses it as the case metadata — seed, explicit `inputs` fill specs,
 and a `reference_source` of `c++ integration suite: <Suite>.<Case>` — exactly
 as `place_bundles.py` would, so no `--seed`/`--meta` flags are needed. Explicit
 `--seed`/`--meta` values still override the sidecar, but an override that
-contradicts it prints a `WARN` naming both values and the sidecar path. An
-unreadable sidecar also warns, and the import continues without it. With
-`--strict`, either warning fails the import. A graph with no sidecar (e.g.
-hand-written) gets only `format_version` plus whatever the flags supply.
+contradicts it (or the `reference_source` derived from it) prints a `WARN`
+naming both values and the sidecar path. `--meta` values parse as JSON when
+they can, so `--meta seed=42` is the number 42. An unreadable or malformed
+sidecar (e.g. an `inputs` key that is not a UID) also warns, and the import
+continues without it. With
+`--strict`, either warning fails the import. The sidecar's suite prefix
+also picks the tier folder, as in `place_bundles.py` (`Smoke/` → `quick/`,
+`Full/` → `full/`, `Standard/` → `standard/`, `Comprehensive/` →
+`comprehensive/`, anything else → `quick/`); `--tier` overrides it, with the
+same `WARN` (or `--strict` failure) when the two disagree. A graph
+with no sidecar (e.g. hand-written) gets only `format_version` plus whatever
+the flags supply, and lands in `quick/` unless `--tier` says otherwise.
 
 Use the full pipeline below instead when migrating many tests/suites at
 once and you want the Hop C/D byte- and behavior-level proof that nothing
@@ -173,10 +181,10 @@ python3 migration-scripts/import_graph.py \
 
 Dedup-aware placement. Default: skip exact duplicates (same graph, seed, and
 inputs; an absent seed only matches another absent seed). `--force` appends
-regardless. Metadata is read from the graph's `.meta.json` sidecar (see the
-note under the quick path above). `--strict` (CI mode) exits non-zero on a
-duplicate, an unreadable sidecar, or a `--seed`/`--meta` value that
-contradicts the sidecar.
+regardless. Metadata and the tier are read from the graph's `.meta.json`
+sidecar (see the note under the quick path above). `--strict` (CI mode) exits
+non-zero on a duplicate, an unreadable sidecar, or a `--seed`/`--meta` value
+that contradicts the sidecar.
 
 ## Searching and Running Bundles
 
