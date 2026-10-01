@@ -754,16 +754,15 @@ def gemm_lockstep_vector_bytes(
     structural mismatch. One knob serves both tensors, hence the min.
 
     gfx1250 reads a column-major A / row-major B (8/16-bit) from LDS with
-    ``ds_load_tr*_b128``, which needs the full 16-byte pack, so such an operand
-    does not lower the knob; 16 bytes (the default) if neither does.
+    ``ds_load_tr*_b128``, which needs the full 16-byte pack. The knob is shared,
+    so if either operand is transpose-loaded it stays at 16 bytes even when the
+    other operand is narrowed (lowering it breaks the transpose read).
     """
     tr_load = normalize_gfx_arch(gpu_target) == GFX1250_ARCH
-    widths = [
-        v * _VEC_ELEMENT_BYTES[d]
-        for v, d, transposed in ((vec[0], dtype_a, layout[0] == "c"), (vec[1], dtype_b, layout[1] == "r"))
-        if not (tr_load and transposed and _VEC_ELEMENT_BYTES[d] <= 2)
-    ]
-    return min(widths, default=16)
+    operands = ((vec[0], dtype_a, layout[0] == "c"), (vec[1], dtype_b, layout[1] == "r"))
+    if tr_load and any(t and _VEC_ELEMENT_BYTES[d] <= 2 for _, d, t in operands):
+        return 16
+    return min(v * _VEC_ELEMENT_BYTES[d] for v, d, _ in operands)
 
 
 def gemm_vector_size_sweep(vec: Sequence[int], dtype_a: str, dtype_b: str, dtype_c: str) -> List[Tuple[int, int, int]]:
