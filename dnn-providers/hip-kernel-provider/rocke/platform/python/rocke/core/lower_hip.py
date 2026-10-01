@@ -504,9 +504,10 @@ class _Lowerer:
         nontemporal = _nontemporal(op)
         if align < byte_count or byte_count & (byte_count - 1):
             if nontemporal:
-                raise ValueError(
-                    "global_load_vN: nontemporal needs a naturally aligned "
-                    "power-of-two payload in the HIP backend"
+                raise NotImplementedError(
+                    "global_load_vN: the HIP backend does not yet lower "
+                    "nontemporal on the memcpy path (under-aligned or "
+                    "non-power-of-two payload)"
                 )
             # Non-power-of-two vector objects include padding. Copy only the
             # payload, using only the alignment guaranteed by the IR.

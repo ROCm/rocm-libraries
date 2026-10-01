@@ -6,8 +6,10 @@
  *
  * With no arguments it self-checks: a flagged op lowers to
  * __builtin_nontemporal_load / __builtin_nontemporal_store, an unflagged one
- * does not, the unaligned memcpy load path rejects the flag (and still lowers
- * without it), and a non-bool attr is rejected rather than coerced.
+ * does not, the unaligned memcpy load path does not yet lower the flag
+ * (ROCKE_ERR_NOTIMPL; it still lowers without it), a non-bool attr is rejected
+ * rather than coerced, and the io helpers (load_vec, load_vec_as_f32,
+ * store_vec) forward the flag to the op they emit.
  *
  * With `--hip <case> <arch>` it prints the lowered HIP source of one copy
  * kernel built exactly like tests/core/test_nontemporal_lowering.py's
@@ -18,6 +20,7 @@
 #include <cstring>
 #include <string>
 
+#include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/strbuf.h"
@@ -138,6 +141,47 @@ bool has(const std::string& s, const char* needle)
     return s.find(needle) != std::string::npos;
 }
 
+int count(const std::string& s, const char* needle)
+{
+    int k = 0;
+    for(size_t at = s.find(needle); at != std::string::npos; at = s.find(needle, at + 1))
+        ++k;
+    return k;
+}
+
+/* load_vec -> store_vec, plus a load_vec_as_f32 whose lanes are stored back,
+ * each helper flagged by its own bit of `nt` (1 load_vec, 2 load_vec_as_f32,
+ * 4 store_vec). Returns the lowered HIP source, or "" on failure. */
+std::string lower_io_helpers(const char* arch, int nt)
+{
+    std::string hip;
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "nt_io") != ROCKE_OK)
+        return hip;
+    rocke_value_t* src = copy_param(&b, "S", rocke_bf16(), true);
+    rocke_value_t* dst = copy_param(&b, "D", rocke_bf16(), false);
+    rocke_value_t* acc = copy_param(&b, "A", rocke_f32(), false);
+    rocke_value_t* off = rocke_b_mul(&b, rocke_b_thread_id_x(&b), rocke_b_const_i32(&b, 8));
+    rocke_value_t* v = rocke_b_load_vec(&b, src, off, "bf16", 8, nt & 1);
+    rocke_value_t* f[8] = {};
+    if(rocke_b_load_vec_as_f32(&b, src, off, "bf16", 8, (nt >> 1) & 1, f))
+        rocke_b_global_store(&b, acc, off, f[7], 0);
+    rocke_b_store_vec(&b, dst, off, v, 8, (nt >> 2) & 1);
+    rocke_b_ret(&b);
+    if(rocke_ir_builder_ok(&b))
+    {
+        rocke_strbuf_t out;
+        rocke_strbuf_init(&out, 0);
+        rocke_lower_hip_opts_t opts{};
+        opts.arch = arch;
+        if(rocke_lower_kernel_to_hip(&b, rocke_ir_builder_kernel(&b), &opts, &out) == ROCKE_OK)
+            hip.assign(rocke_strbuf_cstr(&out));
+        rocke_strbuf_free(&out);
+    }
+    rocke_ir_builder_free(&b);
+    return hip;
+}
+
 void self_check(const char* arch)
 {
     std::string hip;
@@ -166,10 +210,10 @@ void self_check(const char* arch)
     if(has(hip, "__builtin_nontemporal"))
         fail("unflagged ops must not use the nontemporal builtins", arch, __LINE__);
 
-    /* The memcpy path has no nontemporal form: the flag is rejected there, and
+    /* The HIP memcpy path does not yet lower nontemporal (NOTIMPL), and
      * the same kernel without it still lowers through memcpy. */
-    if(lower(*find_case("memcpy_nt"), arch, BadAttr::none, nullptr) != ROCKE_ERR_VALUE)
-        fail("nontemporal on the memcpy load path must be ROCKE_ERR_VALUE", arch, __LINE__);
+    if(lower(*find_case("memcpy_nt"), arch, BadAttr::none, nullptr) != ROCKE_ERR_NOTIMPL)
+        fail("nontemporal on the memcpy load path must be ROCKE_ERR_NOTIMPL", arch, __LINE__);
     hip.clear();
     if(lower(*find_case("memcpy_plain"), arch, BadAttr::none, &hip) != ROCKE_OK
        || !has(hip, "__builtin_memcpy("))
@@ -179,6 +223,18 @@ void self_check(const char* arch)
         fail("a non-bool nontemporal attr on the load must be ROCKE_ERR_VALUE", arch, __LINE__);
     if(lower(*find_case("store"), arch, BadAttr::store, nullptr) != ROCKE_ERR_VALUE)
         fail("a non-bool nontemporal attr on the store must be ROCKE_ERR_VALUE", arch, __LINE__);
+
+    /* Each io helper forwards the flag to exactly the op it emits. */
+    for(int nt = 0; nt < 8; ++nt)
+    {
+        hip = lower_io_helpers(arch, nt);
+        if(hip.empty())
+            fail("io-helper kernel failed to lower", arch, __LINE__);
+        if(count(hip, "__builtin_nontemporal_load(") != (nt & 1) + ((nt >> 1) & 1))
+            fail("load_vec / load_vec_as_f32 did not forward nontemporal", arch, __LINE__);
+        if(has(hip, "__builtin_nontemporal_store(") != bool(nt & 4))
+            fail("store_vec did not forward nontemporal", arch, __LINE__);
+    }
 }
 
 } // namespace

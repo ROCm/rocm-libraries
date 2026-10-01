@@ -132,6 +132,42 @@ def test_non_bool_attr_is_rejected_by_both_engines(which, monkeypatch):
         _lower_llvm_via_backend(kernel, arch="gfx950", backend="cpp", spec=None)
 
 
+@pytest.mark.parametrize("value", [1, 0, "yes", None])
+@pytest.mark.parametrize("which", ["load", "store"])
+def test_builder_rejects_non_bool_flag(which, value):
+    b = IRBuilder("nt_bad")
+    p = b.param("P", PtrType(BF16, "global"))
+    off = b.thread_id_x()
+    v = b.global_load_vN(p, off, BF16, 8)
+    with pytest.raises(TypeError, match="nontemporal must be a bool"):
+        if which == "load":
+            b.global_load_vN(p, off, BF16, 8, nontemporal=value)
+        else:
+            b.global_store_vN(p, off, v, 8, nontemporal=value)
+
+
+@pytest.mark.parametrize("nt", range(8))
+def test_io_helpers_forward_the_flag(nt):
+    # One bit per helper: 1 load_vec, 2 load_vec_as_f32, 4 store_vec. The C++
+    # twins run the same matrix in rocke_nontemporal_hip's self-check.
+    from rocke.helpers.io import load_vec, load_vec_as_f32, store_vec
+
+    b = IRBuilder("nt_io")
+    src = b.param("S", PtrType(BF16, "global"))
+    dst = b.param("D", PtrType(BF16, "global"))
+    off = b.thread_id_x()
+    v = load_vec(b, src, off, dtype="bf16", n=8, nontemporal=bool(nt & 1))
+    load_vec_as_f32(b, src, off, dtype="bf16", n=8, nontemporal=bool(nt & 2))
+    store_vec(b, dst, off, v, n=8, nontemporal=bool(nt & 4))
+    b.ret()
+    flags = [
+        op.attrs.get("nontemporal")
+        for op in b.kernel.body.ops
+        if op.name in _OP.values()
+    ]
+    assert flags == [True if nt & bit else None for bit in (1, 2, 4)]
+
+
 def test_hip_backend_uses_nontemporal_builtins():
     src = lower_kernel_to_hip(_copy_kernel(load_nt=True, store_nt=True), arch="gfx950")
     assert "__builtin_nontemporal_load(reinterpret_cast<const " in src
@@ -143,9 +179,10 @@ def test_hip_backend_uses_nontemporal_builtins():
 
 
 def test_hip_backend_rejects_nontemporal_on_the_memcpy_path():
-    # align 2 < 16-byte payload takes the memcpy path, which has no nt form.
+    # align 2 < 16-byte payload takes the memcpy path, which the HIP backend
+    # does not yet lower with the flag (the LLVM path does).
     kernel = _copy_kernel(load_nt=True, store_nt=False, elem=F16, n=8, align=2)
-    with pytest.raises(ValueError, match="nontemporal needs a naturally aligned"):
+    with pytest.raises(NotImplementedError, match="does not yet lower nontemporal"):
         lower_kernel_to_hip(kernel, arch="gfx950")
     # Without the flag the same kernel still lowers through memcpy, so the
     # rejection above is the flag's, not the alignment's.

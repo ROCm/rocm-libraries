@@ -571,9 +571,10 @@ static rocke_status_t _op_memref_global_load_vN(rocke_h_lowerer_t* lw, const roc
     {
         if(nontemporal)
             return rocke_h_fail(lw,
-                                ROCKE_ERR_VALUE,
-                                "global_load_vN: nontemporal needs a naturally aligned "
-                                "power-of-two payload in the HIP backend");
+                                ROCKE_ERR_NOTIMPL,
+                                "global_load_vN: the HIP backend does not yet lower "
+                                "nontemporal on the memcpy path (under-aligned or "
+                                "non-power-of-two payload)");
         /* Copy only the payload, not vector padding, with the IR's alignment. */
         rocke_h_emitf(
             lw,

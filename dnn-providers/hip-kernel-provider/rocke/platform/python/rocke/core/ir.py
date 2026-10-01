@@ -1629,6 +1629,8 @@ class IRBuilder:
                 align or (elem_bytes if n * elem_bytes == 12 else n * elem_bytes)
             ),
         }
+        if not isinstance(nontemporal, bool):
+            raise TypeError(f"nontemporal must be a bool, got {nontemporal!r}")
         if nontemporal:
             attrs["nontemporal"] = True
         return self._op(
@@ -4238,6 +4240,8 @@ class IRBuilder:
             "vec": n,
             "align": int(align or (n * elem_bytes)),
         }
+        if not isinstance(nontemporal, bool):
+            raise TypeError(f"nontemporal must be a bool, got {nontemporal!r}")
         if nontemporal:
             attrs["nontemporal"] = True
         self._op("memref.global_store_vN", [ptr, idx, value], attrs=attrs)
