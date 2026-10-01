@@ -66,9 +66,19 @@ def resolve_but_raise(request):
     """A dispatcher that fails operationally once the per-shape loop calls it.
 
     The message names the request it was handed, so a test can tell "the factory
-    ran and threw" apart from "the factory was never reached".
+    ran and threw" apart from "the factory was never reached". Not a ValueError:
+    that is the dispatcher's shape-refusal path, which is a decline.
     """
-    raise ValueError(f"dispatcher exploded on seqlen_q {request.seqlen_q}")
+    raise RuntimeError(f"dispatcher exploded on seqlen_q {request.seqlen_q}")
+
+
+def resolve_refusing(request):
+    """A spec factory that refuses one shape the way rocKE specs do: ValueError
+    from construction, which the dispatcher's own candidate reports as a
+    decline."""
+    if request.head_size == 192:
+        raise ValueError(f"head_size must be 64 or 128, got {request.head_size}")
+    return resolve(request)
 
 
 def supports(spec, arch=None):
@@ -104,7 +114,8 @@ def parity(tmp_path, monkeypatch):
     profile_path = tmp_path / "profile.json"
     profile_path.write_text(json.dumps(profile))
 
-    def argv(shapes: list, *extra: str) -> list:
+    def argv(shapes: list, *extra: str, **profile_overrides) -> list:
+        profile_path.write_text(json.dumps({**profile, **profile_overrides}))
         shapes_path = tmp_path / "shapes.json"
         shapes_path.write_text(json.dumps(shapes))
         return [
@@ -180,10 +191,9 @@ class TestConstructionFailureAbortsRatherThanBuckets:
         )
 
     def test_a_dispatcher_that_raises_also_exits_2(self, parity, capsys, monkeypatch):
-        """The factory is inside the same try as the request constructor, so a
-        dispatcher that raises is operational, never a decline. The dispatcher's own
-        message is asserted so an exit 2 raised while resolving the symbol does not
-        pass."""
+        """A non-ValueError from the factory is operational, never a decline. The
+        dispatcher's own message is asserted so an exit 2 raised while resolving the
+        symbol does not pass."""
         shapes = [{"seqlen_q": 256}]
         argv = parity(shapes)
         real_resolve_shapes = dispatch_parity.resolve_shapes
@@ -213,6 +223,79 @@ class TestConstructionFailureAbortsRatherThanBuckets:
         verdict."""
         assert dispatch_parity.main(parity([{"seqlen_q": 777}])) == 1
         assert "no shape resolved" in capsys.readouterr().err
+
+
+class TestASpecFactoryRefusalIsADecline:
+    """rocKE specs refuse unsupported shapes by raising ValueError, and the
+    dispatcher's own candidate `support()` reports that as a decline. One such
+    shape in a real corpus must not abort the whole run."""
+
+    _REFUSING = {
+        "dispatch": {"module": "stub_provider", "function": "resolve_refusing"}
+    }
+
+    def test_a_refused_shape_is_reported_and_the_rest_resolves(self, parity, capsys):
+        shapes = [{"seqlen_q": 256}, {"seqlen_q": 256, "head_size": 192}]
+        argv = parity(shapes, "--report-gaps", **self._REFUSING)
+        assert dispatch_parity.main(argv) == 0, capsys.readouterr().err
+        out = capsys.readouterr().out
+        assert "servable          1" in out
+        assert "refused           1" in out
+        assert "[refused]" in out
+        assert "head_size must be 64 or 128, got 192" in out
+
+    def test_a_corpus_of_only_refusals_exits_1_not_2(self, parity, capsys):
+        """Every shape refused is a corpus nothing serves, not an operational
+        failure."""
+        argv = parity([{"seqlen_q": 256, "head_size": 192}], **self._REFUSING)
+        assert dispatch_parity.main(argv) == 1
+        assert "no shape resolved" in capsys.readouterr().err
+
+
+class TestGraphFeaturesOutsideTheContractAreNotServed:
+    """A mined graph's varlen/layout features have no request field, so the
+    dispatcher's yes for the bare request does not make the graph servable."""
+
+    def test_a_bound_feature_the_contract_does_not_admit_is_out_of_contract(
+        self, parity, capsys
+    ):
+        shapes = [
+            {"seqlen_q": 256, "_graph_features": {"layouts": ["BSHD"], "features": []}},
+            {
+                "seqlen_q": 256,
+                "_graph_features": {
+                    "layouts": ["BSHD"],
+                    "features": ["seq_len_kv", "seq_len_q"],
+                },
+            },
+        ]
+        assert dispatch_parity.main(parity(shapes, "--report-gaps")) == 0
+        out = capsys.readouterr().out
+        assert "servable          1" in out
+        assert "out of contract   1" in out
+        assert "[out_of_contract]" in out and "seq_len_kv, seq_len_q" in out
+
+    def test_a_layout_outside_the_contract_is_out_of_contract(self, parity, capsys):
+        shapes = [
+            {"seqlen_q": 256, "_graph_features": {"layouts": ["BHSD"], "features": []}},
+            {
+                "seqlen_q": 512,
+                "_graph_features": {"layouts": ["BHSD", "BSHD"], "features": []},
+            },
+        ]
+        argv = parity(shapes, "--report-gaps", graph_contract={"layouts": ["BSHD"]})
+        assert dispatch_parity.main(argv) == 0
+        out = capsys.readouterr().out
+        assert "servable          1" in out, "a single-head tensor is also BSHD"
+        assert "operand layout BHSD is not in graph_contract.layouts" in out
+
+    def test_a_contract_feature_admits_the_graph(self, parity, capsys):
+        shapes = [
+            {"seqlen_q": 256, "_graph_features": {"layouts": [], "features": ["x"]}}
+        ]
+        argv = parity(shapes, graph_contract={"features": ["x"]})
+        assert dispatch_parity.main(argv) == 0
+        assert "servable          1" in capsys.readouterr().out
 
 
 #: The relative root the shipped profile names. Spelled out so the decoy below can
@@ -440,3 +523,88 @@ class TestTheShippedProfilePinsTheDispatchArmItsCatalogWasBuiltFrom:
             monkeypatch, dense_persistent="auto"
         )
         assert spec.persistent is True, spec
+
+
+def _real_dispatcher_or_skip(monkeypatch) -> dict:
+    """The shipped gfx950 profile, bound, or a skip when rocKE cannot import."""
+    import importlib
+
+    profile = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    dispatch_parity._bind_provider(profile["provider_root"])
+    try:
+        importlib.import_module(profile["dispatch"]["module"])
+    except ImportError as exc:
+        pytest.skip(f"the rocKE library cannot be imported here ({exc})")
+    return profile
+
+
+_D128 = dict(nhead_q=8, nhead_k=8, hdim_q=128, hdim_v=128, dtype="bf16", mask_type=1)
+
+
+class TestTheRealDispatcherBoundary:
+    """On the shipped gfx950 profile: the spec's own ValueError refusal is a decline
+    (what `_make_gfx950_attention_dense_candidate().support` returns), and the
+    runtime-shape fields collapse onto the canonical B1/Sq512/Skv512 entry."""
+
+    def _run(self, monkeypatch, tmp_path, shapes, *extra):
+        _real_dispatcher_or_skip(monkeypatch)
+        path = tmp_path / "shapes.json"
+        path.write_text(json.dumps(shapes))
+        argv = ["--profile", str(_SHIPPED_PROFILE), "--shapes", str(path), *extra]
+        return dispatch_parity.main(argv)
+
+    def test_head_size_192_is_a_refusal_not_an_abort(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        shapes = [
+            {**_D128, "batch": 1, "seqlen_q": 512, "seqlen_k": 512},
+            {
+                **_D128,
+                "batch": 1,
+                "seqlen_q": 512,
+                "seqlen_k": 512,
+                "hdim_q": 192,
+                "hdim_v": 192,
+            },
+        ]
+        assert self._run(monkeypatch, tmp_path, shapes, "--report-gaps") == 0
+        out = capsys.readouterr().out
+        assert "[refused]" in out and "head_size must be 64 or 128, got 192" in out
+
+    _RUNTIME_ONLY = [
+        {**_D128, "batch": 1, "seqlen_q": 512, "seqlen_k": 512},
+        {**_D128, "batch": 2, "seqlen_q": 1024, "seqlen_k": 1024},
+        {**_D128, "batch": 4, "seqlen_q": 4096, "seqlen_k": 4096},
+        # Ragged self-attention bakes its length: kept at its own values.
+        {**_D128, "batch": 1, "seqlen_q": 300, "seqlen_k": 300},
+    ]
+
+    def test_shapes_differing_only_in_runtime_fields_are_one_entry(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        out = tmp_path / "config.yaml"
+        rc = self._run(monkeypatch, tmp_path, self._RUNTIME_ONLY, "--out", str(out))
+        assert rc == 0
+        printed = capsys.readouterr().out
+        assert "2 kernels for 4 servable shapes" in printed, printed
+        assert "spec bakes its shape" in printed
+
+        profile = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))
+        catalog, _ = dispatch_parity.canonicalise(
+            dispatch_parity.resolve_shapes(self._RUNTIME_ONLY, profile), profile
+        )
+        kernels = dispatch_parity.build_config(catalog, profile)["packs"][0]["kernels"]
+        shapes = sorted(
+            (k["metadata"]["batch"], k["metadata"]["seqlen_q"], k["metadata"]["ragged"])
+            for k in kernels
+        )
+        assert shapes == [(1, 300, 1), (1, 512, 0)], shapes
+
+    def test_per_shape_keeps_one_kernel_per_shape(self, monkeypatch, tmp_path, capsys):
+        out = tmp_path / "config.yaml"
+        rc = self._run(
+            monkeypatch, tmp_path, self._RUNTIME_ONLY, "--out", str(out), "--per-shape"
+        )
+        assert rc == 0
+        assert "4 kernels for 4 servable shapes" in capsys.readouterr().out

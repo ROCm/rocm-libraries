@@ -6,17 +6,23 @@ the ``supports_*`` predicate answer what is legal, the dispatcher answers what
 the library ships. Calling the factory applies rules the dispatcher derives
 from the request (``persistent = work >= num_persistent``).
 
-Emits one variant per servable shape, at the dispatcher's resolved spec, as a
-generator config ready for ``generate.py``. Not a cross-product: one spec per
-shape.
+Emits one variant per distinct servable spec, as a generator config ready for
+``generate.py``. Not a cross-product. When the profile maps
+``runtime_param_fields`` to canonical values, each spec is built at those
+values for the fields the spec itself reads at runtime, so shapes differing
+only in batch/seqlen share one catalog entry (``--per-shape`` keeps one kernel
+per shape at its own values).
 
     dispatch_parity.py --profile <profile.yaml> --shapes <corpus.json> \\
                        --out configs/<slug>_A.yaml
 
 A request-construction failure means the corpus and the request class disagree
 about what a shape is, so it aborts (``ParityError``, ``FAIL`` on stderr, exit
-2). A decline -- the eligibility predicate returning false with a reason -- is
-a per-shape outcome, counted and printed by ``--report-gaps``.
+2), as does any non-ValueError exception from the spec factory. Per-shape
+outcomes, counted and printed by ``--report-gaps``: a decline (the eligibility
+predicate returning false with a reason), a refusal (the spec factory raising
+ValueError, which the dispatcher's own candidate ``support()`` turns into a
+decline) and a graph outside the profile's ``graph_contract``.
 
 This tool does not sweep. ``--report-knobs`` partitions the spec fields into
 those that vary across dispatch decisions and those the library ships (see
@@ -150,8 +156,11 @@ class Resolution:
     shape: dict
     spec: object | None = None
     reason: str | None = None
-    #: "constructed" (spec built and predicate accepted) or "declined"
-    #: (the predicate returned a validated false result).
+    #: "constructed" (spec built and predicate accepted), "declined" (the
+    #: predicate returned a validated false result), "refused" (the spec
+    #: factory raised ValueError, which the dispatcher's own candidate turns
+    #: into a decline) or "out_of_contract" (the graph needs a feature the
+    #: request cannot carry, see `contract_refusal`).
     kind: str = "constructed"
 
 
@@ -169,8 +178,59 @@ def _required(decl: dict, scope: str, *keys: str) -> list:
     return [decl[k] for k in keys]
 
 
+def contract_refusal(shape: dict, profile: dict) -> str | None:
+    """Why the graph behind `shape` is outside the profile's graph contract, or
+    None. Only graph-corpus shapes carry `_graph_features` (see mine_shapes).
+
+    The request class has no field for varlen, paging, dropout or layout, so
+    the dispatcher's answer for such a graph is about a different problem.
+    `graph_contract.features` lists the bound features the engine admits
+    (default none) and `graph_contract.layouts` the operand layouts (default
+    unchecked).
+    """
+    features = shape.get("_graph_features")
+    if features is None:
+        return None
+    contract = profile.get("graph_contract") or {}
+    if not isinstance(contract, dict) or any(
+        not isinstance(contract.get(k, []), list) for k in ("features", "layouts")
+    ):
+        raise ParityError(
+            "graph_contract must be a mapping with optional 'features' and "
+            "'layouts' lists"
+        )
+    unsupported = [
+        f
+        for f in features.get("features") or []
+        if f not in contract.get("features", [])
+    ]
+    if unsupported:
+        return (
+            f"graph binds {', '.join(unsupported)}, which the request cannot carry "
+            f"and the profile's graph_contract.features does not admit"
+        )
+    layouts = contract.get("layouts")
+    if layouts:
+        have = features.get("layouts")
+        if have is None:
+            return f"graph tensors carry no strides; graph_contract needs {layouts}"
+        if not set(have) & set(layouts):
+            return (
+                f"operand layout {'/'.join(have) or 'strided'} is not in "
+                f"graph_contract.layouts {layouts}"
+            )
+    return None
+
+
 def resolve_shapes(shapes: list[dict], profile: dict) -> list[Resolution]:
-    """Ask the dispatcher for every shape; API errors are operational failures."""
+    """Ask the dispatcher for every shape; API errors are operational failures.
+
+    The boundary mirrors the dispatcher's own candidate `support()`
+    (dispatch/attention/gfx942.py and gfx950.py): a request the request class
+    cannot construct is operational, the spec factory raising ValueError is
+    that shape's decline (rocKE specs refuse unsupported shapes in
+    `__post_init__`), and any other exception from the factory is operational.
+    """
     dispatch = profile.get("dispatch") or {}
     request_decl = profile.get("request") or {}
     predicate_decl = profile.get("predicate") or {}
@@ -198,7 +258,17 @@ def resolve_shapes(shapes: list[dict], profile: dict) -> list[Resolution]:
             fields["arch"] = arch
         try:
             request = request_cls(**fields)
+        except Exception as exc:
+            raise ParityError(f"request/spec construction failed: {exc}") from exc
+        outside = contract_refusal(shape, profile)
+        if outside:
+            out.append(Resolution(shape, reason=outside, kind="out_of_contract"))
+            continue
+        try:
             spec = factory(request)
+        except ValueError as exc:
+            out.append(Resolution(shape, reason=str(exc), kind="refused"))
+            continue
         except Exception as exc:
             raise ParityError(f"request/spec construction failed: {exc}") from exc
         if predicate is not None:
@@ -210,6 +280,83 @@ def resolve_shapes(shapes: list[dict], profile: dict) -> list[Resolution]:
                 continue
         out.append(Resolution(shape, spec=spec))
     return out
+
+
+def _canonical_values(profile: dict) -> dict:
+    """The profile's `runtime_param_fields` mapping: spec field -> the value a
+    catalog entry is built at. The list form names the fields without values,
+    so it cannot say what to canonicalise to."""
+    declared = profile.get("runtime_param_fields")
+    if not declared:
+        return {}
+    if not isinstance(declared, dict) or any(
+        type(v) is not int for v in declared.values()
+    ):
+        raise ParityError(
+            "runtime_param_fields must map each spec field to its canonical "
+            "integer value (e.g. {batch: 1, seqlen_q: 512, seqlen_kv: 512}) for "
+            "dispatch_parity to canonicalise; pass --per-shape to keep one "
+            "kernel per shape at its own values instead."
+        )
+    return declared
+
+
+def canonicalise(
+    resolutions: list[Resolution], profile: dict
+) -> tuple[list[Resolution], list[str]]:
+    """Rebuild each served spec at the profile's canonical runtime values.
+
+    Only fields that BOTH the profile maps AND the spec itself lists in its
+    `runtime_param_fields` are replaced: the spec decides per mode (persistent,
+    ragged, windowed and moving-diagonal specs bake the shape and declare
+    none), so those keep their real values. A canonical spec the spec class or
+    the predicate refuses also keeps its real values. Applicability is never
+    re-asked here; it was answered at the real shape.
+
+    Returns the catalog resolutions and one note per spec kept per-shape.
+    """
+    canonical = _canonical_values(profile)
+    if not canonical:
+        return resolutions, []
+    predicate_decl = profile.get("predicate") or {}
+    predicate = (
+        _import(*_required(predicate_decl, "predicate", "module", "function"))
+        if predicate_decl
+        else None
+    )
+    arch = profile.get("arch")
+    out, kept = [], []
+    for resolution in resolutions:
+        spec = resolution.spec
+        if spec is None:
+            out.append(resolution)
+            continue
+        runtime = set(getattr(spec, "runtime_param_fields", ()) or ())
+        fields = {f: v for f, v in canonical.items() if f in runtime}
+        if not fields:
+            kept.append(f"{resolution.shape}: spec bakes its shape (no runtime fields)")
+            out.append(resolution)
+            continue
+        try:
+            rebuilt = dataclasses.replace(spec, **fields)
+        except ValueError as exc:
+            kept.append(f"{resolution.shape}: canonical values refused: {exc}")
+            out.append(resolution)
+            continue
+        if not set(fields) <= set(getattr(rebuilt, "runtime_param_fields", ())):
+            kept.append(f"{resolution.shape}: canonical spec bakes {sorted(fields)}")
+            out.append(resolution)
+            continue
+        if predicate is not None:
+            ok, why = _predicate_result(
+                predicate, rebuilt, **({"arch": arch} if arch else {})
+            )
+            if not ok:
+                kept.append(f"{resolution.shape}: canonical spec declined: {why}")
+                out.append(resolution)
+                continue
+        out.append(dataclasses.replace(resolution, spec=rebuilt))
+    return out, kept
 
 
 def knob_partition(resolutions: list[Resolution]) -> tuple[list[str], list[str]]:
@@ -372,6 +519,10 @@ def build_config(
                 f"wrong, or the field is not a build-time knob of this kernel."
             )
     kernels = []
+    # Shapes that resolve to one identical spec (always the case for shapes
+    # differing only in canonicalised runtime fields) are one compiled kernel,
+    # so one catalog entry.
+    emitted: set = set()
     for index, resolution in enumerate(resolutions):
         if resolution.spec is None:
             continue
@@ -379,6 +530,10 @@ def build_config(
             f.name: getattr(resolution.spec, f.name)
             for f in dataclasses.fields(resolution.spec)
         }
+        identity = repr(sorted(spec.items()))
+        if identity in emitted:
+            continue
+        emitted.add(identity)
         metadata = {}
         for name in metadata_fields:
             if name in resolvers and spec.get(name) is None:
@@ -504,7 +659,17 @@ def main(argv=None) -> int:
         "--report-gaps",
         action="store_true",
         help="Print every shape the dispatcher would not serve, with "
-        "its reason and which layer refused.",
+        "its reason and which layer refused: [declined] the predicate, [refused] "
+        "the spec factory (ValueError, the dispatcher's own decline), "
+        "[out_of_contract] a graph feature the request cannot carry.",
+    )
+    parser.add_argument(
+        "--per-shape",
+        action="store_true",
+        help="Emit one kernel per servable shape at its own batch/seqlen. By "
+        "default, when the profile maps runtime_param_fields to canonical values, "
+        "every spec field the spec itself reads at runtime is set to its "
+        "canonical value and identical specs collapse into one catalog entry.",
     )
     parser.add_argument(
         "--knobs",
@@ -527,19 +692,52 @@ def main(argv=None) -> int:
         return 2
 
     served = [r for r in resolutions if r.spec is not None]
-    declined = [r for r in resolutions if r.kind == "declined"]
+    unserved = [r for r in resolutions if r.spec is None]
+    count_of = {
+        kind: sum(r.kind == kind for r in unserved)
+        for kind in ("declined", "refused", "out_of_contract")
+    }
 
     print("dispatcher parity")
     print(f"  shapes in         {len(resolutions)}")
     print(f"  servable          {len(served)}")
-    print(f"  declined          {len(declined)}  (predicate said no)")
+    print(f"  declined          {count_of['declined']}  (predicate said no)")
+    print(
+        f"  refused           {count_of['refused']}  (spec factory raised "
+        f"ValueError: the dispatcher's decline)"
+    )
+    print(
+        f"  out of contract   {count_of['out_of_contract']}  (graph feature the "
+        f"request cannot carry)"
+    )
 
     if args.report_gaps:
-        for resolution in declined:
+        for resolution in unserved:
             print(f"    [{resolution.kind}] {resolution.shape} -- {resolution.reason}")
 
+    if not served:
+        print(
+            "\nFAIL: no shape resolved; there is nothing to generate.", file=sys.stderr
+        )
+        return 1
+
+    catalog = resolutions
+    if not args.per_shape and (args.out or args.report_knobs):
+        try:
+            catalog, kept = canonicalise(resolutions, profile)
+        except ParityError as exc:
+            print(f"FAIL: {exc}", file=sys.stderr)
+            return 2
+        if catalog is not resolutions:
+            print(
+                f"  canonical runtime values {_canonical_values(profile)}; "
+                f"{len(kept)} servable spec(s) kept at their own values"
+            )
+            for note in kept:
+                print(f"    [per-shape] {note}")
+
     if args.report_knobs:
-        varies, constant = knob_partition(resolutions)
+        varies, constant = knob_partition(catalog)
         print("\n  VARIES across dispatch decisions -- the tuning surface:")
         print(f"    {', '.join(varies) or '(none)'}")
         print("\n  CONSTANT -- shipped values, NOT tuning axes:")
@@ -549,12 +747,6 @@ def main(argv=None) -> int:
             "  configuration rocKE would never resolve to."
         )
 
-    if not served:
-        print(
-            "\nFAIL: no shape resolved; there is nothing to generate.", file=sys.stderr
-        )
-        return 1
-
     if args.out:
         try:
             knobs = json.loads(args.knobs) if args.knobs else {}
@@ -563,7 +755,7 @@ def main(argv=None) -> int:
                     f"--knobs must be a JSON mapping of knob name to a list of "
                     f"values, got {type(knobs).__name__}."
                 )
-            config = build_config(resolutions, profile, knobs)
+            config = build_config(catalog, profile, knobs)
             # Emit the compact form; build_config stays the source of truth and
             # `_compact` refuses anything that does not re-expand
             # kernel-for-kernel. The knob axes are exactly --knobs, since the
@@ -581,8 +773,8 @@ def main(argv=None) -> int:
             arms = math.prod(len(v) for v in knobs.values())
             print(
                 f"\n  wrote {args.out}: {count} kernels "
-                f"= {len(served)} servable shapes x {arms} surviving knob "
-                f"combination(s) ({', '.join(sorted(knobs))})"
+                f"= {count // arms} catalog entries ({len(served)} servable shapes) "
+                f"x {arms} surviving knob combination(s) ({', '.join(sorted(knobs))})"
             )
             # The cap the runbook states, enforced where the number is known:
             # past the low thousands the pack time, the archive and the catalog
@@ -595,12 +787,14 @@ def main(argv=None) -> int:
                     file=sys.stderr,
                 )
         else:
-            print(f"\n  wrote {args.out}: {count} kernels, one per servable shape")
+            print(
+                f"\n  wrote {args.out}: {count} kernels for {len(served)} servable "
+                f"shapes"
+            )
             if count != len(served):
                 print(
-                    f"  NOTE: {len(served)} shapes resolved but {count} kernels "
-                    f"emitted -- distinct shapes sharing one resolved spec are one "
-                    f"variant."
+                    f"  NOTE: distinct shapes sharing one resolved spec are one "
+                    f"variant ({len(served) - count} merged)."
                 )
 
     return 0

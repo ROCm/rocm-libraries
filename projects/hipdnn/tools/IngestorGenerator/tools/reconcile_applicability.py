@@ -35,7 +35,9 @@ from dispatch_parity import (  # noqa: E402
 )
 
 
-def reference_serves(shapes: list[dict], profile: dict) -> dict:
+def reference_serves(
+    shapes: list[dict], profile: dict, skip: set[int] | None = None
+) -> dict:
     """For each shape: does the reference kernel FAMILY serve it, and which candidate?
 
     Request construction and reference API failures are operational errors; only a
@@ -110,6 +112,10 @@ def reference_serves(shapes: list[dict], profile: dict) -> dict:
 
     out = {}
     for index, shape in enumerate(shapes):
+        # A graph outside the profile's contract has no request the reference
+        # could be asked about honestly (see dispatch_parity.contract_refusal).
+        if skip is not None and index in skip:
+            continue
         fields = {
             **defaults,
             **{k: v for k, v in shape.items() if not k.startswith("_")},
@@ -197,15 +203,22 @@ def main(argv=None) -> int:
         profile = _load_profile(args.profile)
         _bind_provider(profile.get("provider_root"))
         shapes = json.loads(Path(args.shapes).read_text())
-        if (
-            not isinstance(shapes, list)
-            or not shapes
-            or any(not isinstance(s, dict) for s in shapes)
-        ):
-            raise ParityError(
-                "--shapes must contain a nonempty list of request mappings"
+        if not isinstance(shapes, list) or any(not isinstance(s, dict) for s in shapes):
+            raise ParityError("--shapes must contain a list of request mappings")
+        if not shapes:
+            # A source with nothing mined (every graph excluded, say) is an
+            # accounted-for empty comparison, not a failed one.
+            print(
+                f"WARNING: {args.shapes} holds no shapes; nothing to reconcile.",
+                file=sys.stderr,
             )
-        graph_owners = {}
+            print("applicability reconciliation: 0 shapes")
+            return 0
+        # Runtime --declines keys: the shape index, a graph name, or the graph's
+        # provenance path. A merged multi-source corpus may reuse one graph name
+        # in several sources; such a name is only an error if a --declines key
+        # actually uses it, and the path disambiguates it.
+        owners: dict = {}
         shape_names = []
         for index, shape in enumerate(shapes):
             provenance = shape.get("_provenance") or {}
@@ -214,18 +227,22 @@ def main(argv=None) -> int:
                 not isinstance(p, dict) for p in occurrences
             ):
                 raise ParityError("provenance occurrences must be a list of mappings")
-            names = {p["graph"] for p in occurrences if p.get("graph")}
+            names = {
+                str(p[key])
+                for p in occurrences
+                for key in ("graph", "path")
+                if p.get(key)
+            }
             for name in names:
-                if (
-                    not isinstance(name, str)
-                    or (name in graph_owners and graph_owners[name] != index)
-                    or (name.isdigit() and int(name) != index)
-                ):
-                    raise ParityError("ambiguous graph name in shape corpus")
-                graph_owners[name] = index
+                owners.setdefault(name, set()).add(index)
+                if name.isdigit() and int(name) != index:
+                    # Would collide with that index's own key.
+                    owners[name].add(int(name))
             shape_names.append(names)
+        ambiguous = {name: idx for name, idx in owners.items() if len(idx) > 1}
         ours = resolve_shapes(shapes, profile)
-        theirs = reference_serves(shapes, profile)
+        outside = {i for i, r in enumerate(ours) if r.kind == "out_of_contract"}
+        theirs = reference_serves(shapes, profile, skip=outside)
     # Every failure above is operational -- the comparison did not happen -- so
     # it exits 2 whatever it was raised as; an enumerated exception list would
     # let an unexpected type escape as exit 1, an unreconciled-decline result.
@@ -254,8 +271,19 @@ def main(argv=None) -> int:
         ):
             print("FAIL: every decline must carry a nonempty reason", file=sys.stderr)
             return 2
+        used = sorted(set(declines) & set(ambiguous))
+        if used:
+            print(
+                f"FAIL: --declines key(s) {', '.join(used[:8])} name graphs in more "
+                f"than one shape of this merged corpus (shape indices "
+                f"{[sorted(ambiguous[k]) for k in used[:8]]}). Key them by the "
+                f"graph's provenance path or the shape index instead.",
+                file=sys.stderr,
+            )
+            return 2
 
     both_serve, both_decline, only_reference, only_ours = [], [], [], []
+    out_of_contract = []
     matched_keys = set()
     for index, resolution in enumerate(ours):
         we_serve = resolution.spec is not None
@@ -269,6 +297,9 @@ def main(argv=None) -> int:
                     matched_keys.add(candidate_key)
                     runtime_reasons.append(declines[candidate_key])
                     we_serve = False
+        if index in outside:
+            out_of_contract.append((index, resolution.reason))
+            continue
         they_serve, why = theirs[index]
         if we_serve and they_serve:
             both_serve.append(index)
@@ -316,6 +347,11 @@ def main(argv=None) -> int:
     print(f"  ONLY THE REFERENCE      {len(only_reference)}")
     if only_ours:
         print(f"  only this integration   {len(only_ours)}")
+    if out_of_contract:
+        print(
+            f"  outside graph contract  {len(out_of_contract)}  (not compared: the "
+            f"request cannot carry the graph's features)"
+        )
 
     # The signature of a misconfigured scope, and both conditions are required:
     # a corpus where nothing is served can be legitimate, so an empty serve
@@ -346,6 +382,15 @@ def main(argv=None) -> int:
             print(f"    [{index}] {why[:96]}")
         if len(both_decline) > 10:
             print(f"    ... and {len(both_decline) - 10} more")
+
+    if out_of_contract:
+        print(
+            "\n  Outside the graph contract (this engine's graph_match declines them):"
+        )
+        for index, why in out_of_contract[:10]:
+            print(f"    [{index}] {why[:96]}")
+        if len(out_of_contract) > 10:
+            print(f"    ... and {len(out_of_contract) - 10} more")
 
     if only_ours:
         print(

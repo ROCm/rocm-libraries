@@ -79,6 +79,9 @@ class Candidate:
         capability block forbids."""
         if self._opt_in and getattr(req, "algorithm", None) != self.algorithm:
             return False, f"{self.algorithm} is opt-in"
+        if int(req.seqlen_q) == 300:
+            # The candidate's support() catching kernel_spec's ValueError.
+            return False, "seqlen_q must be a multiple of block_m=256, got 300"
         if int(req.seqlen_q) < self._min:
             return False, f"seqlen_q must be at least {self._min}"
         return True, ""
@@ -101,7 +104,10 @@ def candidates():
 
 
 def kernel_spec(req):
-    """Construct a spec; support is decided by the explicit predicate."""
+    """Construct a spec; support is decided by the explicit predicate. Like rocKE
+    specs, construction refuses a shape it cannot build with ValueError."""
+    if int(req.seqlen_q) == 300:
+        raise ValueError("seqlen_q must be a multiple of block_m=256, got 300")
     return Spec(batch=int(req.batch), seqlen_q=int(req.seqlen_q),
                 head_size=int(req.head_size))
 
@@ -676,9 +682,6 @@ def test_a_broken_candidate_registry_is_operational_under_every_flag(
     "raised",
     [
         pytest.param(
-            "ValueError('seqlen_q must be a multiple of 256')", id="ValueError"
-        ),
-        pytest.param(
             "TypeError('spec factory got an unexpected field')", id="TypeError"
         ),
         pytest.param("KeyError('block_n')", id="KeyError"),
@@ -687,8 +690,10 @@ def test_a_broken_candidate_registry_is_operational_under_every_flag(
 def test_a_failing_spec_factory_is_operational_under_every_flag(
     env, tmp_path, flags, raised
 ):
-    """A factory that RAISES has failed to answer, not declined. The ValueError row
-    matters most: a validation error reads exactly like a support decision."""
+    """A factory that RAISES anything but ValueError has failed to answer, not
+    declined. ValueError is the dispatcher's own shape-refusal path (its
+    candidate `support()` returns it as a decline), so it is reconciled like any
+    decline: see TestARealCorpusReconcilesInOneRun."""
     (tmp_path / "rocke" / "library" / "badfab.py").write_text(
         "import stublib\n"
         f"def kernel_spec(req): raise {raised}\n"
@@ -750,3 +755,85 @@ def test_a_broken_reference_translator_is_operational_under_every_flag(
     result = env.run(path, env.shapes(_LONG), *flags)
     assert result.returncode == 2, result.stdout + result.stderr
     assert expected_absent not in result.stdout
+
+
+_RAGGED = {"batch": 1, "seqlen_q": 300, "head_size": 128}
+
+
+def _named(shape: dict, graph: str, path: str) -> dict:
+    provenance = {"source": "graphs", "graph": graph, "path": path}
+    return {**shape, "_provenance": provenance, "_provenance_occurrences": [provenance]}
+
+
+class TestARealCorpusReconcilesInOneRun:
+    """942:S2-7: a factory refusal aborted the run, a merged multi-source corpus
+    was refused for reusing a graph name, and an empty source was an error."""
+
+    def test_a_spec_factory_refusal_is_a_decline_both_sides_share(self, env):
+        result = env.run(env.profile(), env.shapes(_LONG, _RAGGED))
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "both serve              1" in result.stdout
+        assert "both decline            1" in result.stdout
+        assert "multiple of block_m=256, got 300" in result.stdout
+
+    def test_a_graph_name_reused_across_sources_is_not_an_error(self, env):
+        shapes = env.shapes(
+            _named(_LONG, "gqa_case", "corpus/aiter/gqa_case.json"),
+            _named({**_LONG, "batch": 2}, "gqa_case", "corpus/aotriton/gqa_case.json"),
+        )
+        result = env.run(env.profile(), shapes)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "both serve              2" in result.stdout
+
+    def test_a_declines_key_on_a_reused_name_is_refused_but_its_path_works(
+        self, env, tmp_path
+    ):
+        shapes = env.shapes(
+            _named(_LONG, "gqa_case", "corpus/aiter/gqa_case.json"),
+            _named({**_LONG, "batch": 2}, "gqa_case", "corpus/aotriton/gqa_case.json"),
+        )
+        declines = tmp_path / "declines.json"
+        declines.write_text(json.dumps({"gqa_case": "no match"}))
+        result = env.run(env.profile(), shapes, "--declines", str(declines))
+        assert result.returncode == 2
+        assert "provenance path" in result.stderr
+
+        declines.write_text(json.dumps({"corpus/aiter/gqa_case.json": "no match"}))
+        result = env.run(env.profile(), shapes, "--declines", str(declines))
+        assert "ONLY THE REFERENCE      1" in result.stdout, result.stderr
+
+    def test_an_empty_source_warns_and_exits_0(self, env):
+        result = env.run(env.profile(), env.shapes())
+        assert result.returncode == 0, result.stderr
+        assert "WARNING" in result.stderr and "no shapes" in result.stderr
+
+    def test_a_graph_outside_the_contract_is_not_compared(self, env):
+        varlen = {
+            **_LONG,
+            "_graph_features": {"layouts": ["BSHD"], "features": ["seq_len_q"]},
+        }
+        result = env.run(env.profile(), env.shapes(_LONG, varlen))
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "both serve              1" in result.stdout
+        assert "outside graph contract  1" in result.stdout
+
+    def test_a_refusal_the_reference_does_not_share_is_unreconciled(
+        self, env, tmp_path
+    ):
+        """Treating ValueError as a decline does not hide a wrong refusal: when the
+        reference serves the shape, it is an unreconciled decline (exit 1)."""
+        (tmp_path / "rocke" / "library" / "badfab.py").write_text(
+            "import stublib\n"
+            "def kernel_spec(req): raise ValueError('seqlen_q must be a multiple of 8192')\n"
+        )
+        path = env.profile()
+        path.write_text(
+            path.read_text().replace(
+                "dispatch: {module: stublib, function: kernel_spec}",
+                "dispatch: {module: badfab, function: kernel_spec}",
+            )
+        )
+        result = env.run(path, env.shapes(_LONG))
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "ONLY THE REFERENCE      1" in result.stdout
+        assert "seqlen_q must be a multiple of 8192" in result.stdout

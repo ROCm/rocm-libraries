@@ -204,14 +204,26 @@ sweep:
       Moves with block_m; same tile constraints as block_m. BN256 is legal
       only with block_m=256 at D=64.
 
-# Fields the aligned kernel reads only from kernel arguments: every entry is
-# built at the canonical B1/Sq512/Skv512 and reused for any runtime shape its
-# tile divides. Documentation only: no generator tool reads this block, and
-# the rocKE spec's own runtime_param_fields decides per mode.
+# Fields the aligned kernel reads only from kernel arguments, mapped to the
+# canonical value every catalog entry is built at (B1/Sq512/Skv512); one entry
+# is reused for any runtime shape its tile divides. dispatch_parity sets each
+# field the resolved spec's OWN runtime_param_fields lists to this value and
+# collapses identical specs into one entry (--per-shape turns this off). The
+# spec decides per mode: ragged, windowed and persistent specs declare none,
+# so they keep their real values.
 runtime_param_fields:
-  - batch
-  - seqlen_q
-  - seqlen_kv
+  batch: 1
+  seqlen_q: 512
+  seqlen_kv: 512
+
+# Graph features the engine's graph_match admits beyond the request fields
+# (Gfx950AttentionDenseNative.cpp): dense BSHD operands only, and none of the
+# optional bindings (varlen seq_len, paging, attn_mask, dropout, sinks, fp8
+# scales, stats). dispatch_parity reports a mined graph outside this as
+# [out_of_contract] instead of asking the dispatcher about the bare request.
+graph_contract:
+  layouts: [BSHD]
+  features: []
 
 graph_match:
   shape: shared_shape
