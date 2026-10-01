@@ -55,6 +55,18 @@ except Exception as e:  # pragma: no cover - optional for CK-only runs
     _AITER_IMPORT_ERROR = e
 
 
+# The one architecture this harness targets.
+#
+# It lives under `builders/gfx950/`, takes no `--arch` flag, and every selector
+# it calls is a gfx950 cohort gate, so the target is fixed by construction. The
+# selectors still take `arch` as an explicit argument -- a gate named for a
+# cohort must verify the request is actually for that cohort, or a gfx942
+# problem would match a gfx950-named gate -- but there is no reason for THIS
+# file to spell the answer out six times. Name it once; the call sites then read
+# as "the arch this harness is for" rather than as a repeated literal.
+_ARCH = "gfx950"
+
+
 # ---------------------------------------------------------------------------
 # Path forcing
 #
@@ -1461,8 +1473,8 @@ def _run_rocke(
         # run_unified_attention_torch dispatcher overhead). --no-interleave
         # (applied in main via a scoped patch of _tiled_spec_from_problem) makes
         # this lane measure both the interleave fast path and the "32x32 base".
-        if _d256_gfx950_fast(problem, "gfx950"):
-            spec = _tiled_spec_from_problem(problem, "gfx950")
+        if _d256_gfx950_fast(problem, _ARCH):
+            spec = _tiled_spec_from_problem(problem, _ARCH)
             if kq_swizzle:
                 spec = _with_kq_xor_swizzle(spec)
                 print(
@@ -1478,7 +1490,7 @@ def _run_rocke(
                     "correct: numerics preserved)"
                 )
             kernel = build_unified_attention_2d_tiled(spec)
-            if _select_2d_compile_backend(problem, "gfx950") == "hipcc":
+            if _select_2d_compile_backend(problem, _ARCH) == "hipcc":
                 from rocke.helpers.compile import compile_kernel_via_hipcc
 
                 artifact = compile_kernel_via_hipcc(kernel)
@@ -1495,7 +1507,7 @@ def _run_rocke(
             if probe_occupancy:
                 from builders.common.occupancy_probe import print_occupancy
 
-                print_occupancy(artifact.hsaco, spec.num_warps, arch="gfx950")
+                print_occupancy(artifact.hsaco, spec.num_warps, arch=_ARCH)
             vals = _attn_values(
                 problem=problem,
                 q=q,
@@ -1548,9 +1560,9 @@ def _run_rocke(
         if not ok:
             raise NotImplementedError(reason)
 
-        spec = _tiled_spec_from_problem(problem, "gfx950")
+        spec = _tiled_spec_from_problem(problem, _ARCH)
         kernel = build_unified_attention_2d_tiled(spec)
-        if _select_2d_compile_backend(problem, "gfx950") == "hipcc":
+        if _select_2d_compile_backend(problem, _ARCH) == "hipcc":
             from rocke.helpers.compile import compile_kernel_via_hipcc
 
             artifact = compile_kernel_via_hipcc(kernel)
