@@ -41,10 +41,6 @@ void add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_large_til
                                        Empty_Tuple,
                                        NHWGC,
                                        ConvBwdDataFilter1x1Stride1Pad0>{});
-#if defined(CK_USE_GFX1250)
-    add_device_operation_instances(
-        instances, device_grouped_conv2d_bwd_data_wmma_v3_bf16_a_vector2_instances{});
-#endif
 }
 
 } // namespace instance

@@ -4,7 +4,6 @@
 #pragma once
 
 #include "ck/ck.hpp"
-#include "ck/host_utility/device_prop.hpp"
 #include "ck/tensor_operation/gpu/device/tensor_layout.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_data_multiple_d_wmma_cshuffle_v3.hpp"
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
@@ -155,80 +154,6 @@ using device_grouped_conv_bwd_data_wmma_v3_bf16_large_tiles_instances = std::tup
 // clang-format on
 #endif
     >;
-
-#if defined(CK_USE_GFX1250)
-// The large-tiles row with block128/M128/N128/K32 and scalar A access remains the
-// fallback for odd K. Admit its A-vector2 counterpart only for the 2D pointwise path.
-// All kernel parameters are identical to the scalar parent except A's source
-// vector width. Keep this experiment split1 even though the parent also admits
-// paired-atomic split2/4 on gfx1250.
-using DeviceGroupedConv2dBwdDataWmmaV3Bf16AVector2Parent =
-    DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<2,
-                                                      NHWGK,
-                                                      GKYXC,
-                                                      Empty_Tuple,
-                                                      NHWGC,
-                                                      BF16,
-                                                      BF16,
-                                                      F32,
-                                                      BF16,
-                                                      Empty_Tuple,
-                                                      BF16,
-                                                      PassThrough,
-                                                      PassThrough,
-                                                      PassThrough,
-                                                      ConvBwdDataFilter1x1Stride1Pad0,
-                                                      true,
-                                                      true,
-                                                      128,
-                                                      128,
-                                                      128,
-                                                      32,
-                                                      8,
-                                                      8,
-                                                      16,
-                                                      16,
-                                                      8,
-                                                      2,
-                                                      S<4, 32, 1>,
-                                                      S<1, 0, 2>,
-                                                      S<1, 0, 2>,
-                                                      2,
-                                                      2,
-                                                      8,
-                                                      1,
-                                                      S<4, 32, 1>,
-                                                      S<0, 2, 1>,
-                                                      S<0, 2, 1>,
-                                                      1,
-                                                      4,
-                                                      8,
-                                                      1,
-                                                      1,
-                                                      1,
-                                                      S<1, 16, 1, 8>,
-                                                      S<8, 8, 8>>;
-
-struct DeviceGroupedConv2dBwdDataWmmaV3Bf16AVector2
-    : DeviceGroupedConv2dBwdDataWmmaV3Bf16AVector2Parent
-{
-    using Parent = DeviceGroupedConv2dBwdDataWmmaV3Bf16AVector2Parent;
-
-    static bool IsSupportedArgument(const typename Parent::Argument& arg)
-    {
-        return ck::is_gfx125_supported() && arg.k_batch_ == 1 && Parent::IsSupportedArgument(arg);
-    }
-
-    bool IsSupportedArgument(const BaseArgument* p_arg) override
-    {
-        const auto* arg = dynamic_cast<const typename Parent::Argument*>(p_arg);
-        return arg != nullptr && IsSupportedArgument(*arg);
-    }
-};
-
-using device_grouped_conv2d_bwd_data_wmma_v3_bf16_a_vector2_instances =
-    std::tuple<DeviceGroupedConv2dBwdDataWmmaV3Bf16AVector2>;
-#endif
 
 } // namespace instance
 } // namespace device

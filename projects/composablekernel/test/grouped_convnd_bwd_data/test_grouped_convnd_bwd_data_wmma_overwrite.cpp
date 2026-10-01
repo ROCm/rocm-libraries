@@ -14,10 +14,13 @@
 #include "ck/host_utility/device_prop.hpp"
 #include "ck/library/reference_tensor_operation/cpu/reference_conv_bwd_data.hpp"
 #include "ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_data.hpp"
+#include "ck/library/utility/algorithm.hpp"
 #include "ck/library/utility/convolution_host_tensor_descriptor_helper.hpp"
 #include "ck/library/utility/convolution_parameter.hpp"
 #include "ck/library/utility/device_memory.hpp"
 #include "ck/library/utility/host_tensor.hpp"
+
+#include "wmma_bwd_data_test_common.hpp"
 
 namespace {
 
@@ -307,6 +310,105 @@ void Run2d()
                                   true);
 }
 
+template <ck::index_t NDimSpatial, typename DataType>
+void CheckSplitKRejections(const ck::utils::conv::ConvParam& param)
+{
+    using Selection = ck::test::WmmaBwdDataSplitKInstance<DataType, NDimSpatial>;
+    using Op        = typename Selection::type;
+    static_assert(Op::IsSplitKSupported);
+    static_assert(Op::IsGfx125SplitKCandidate == (NDimSpatial == 2));
+    const auto out_desc = ck::utils::conv::make_output_host_tensor_descriptor_g_n_k_wos_packed<
+        typename Selection::OutLayout>(param);
+    const auto wei_desc = ck::utils::conv::make_weight_host_tensor_descriptor_g_k_c_xs_packed<
+        typename Selection::WeiLayout>(param);
+    const auto in_desc = ck::utils::conv::make_input_host_tensor_descriptor_g_n_c_wis_packed<
+        typename Selection::InLayout>(param);
+
+    ck::DeviceMem out_device(sizeof(DataType) * out_desc.GetElementSpaceSize());
+    ck::DeviceMem wei_device(sizeof(DataType) * wei_desc.GetElementSpaceSize());
+    ck::DeviceMem in_device(sizeof(DataType) * (in_desc.GetElementSpaceSize() + 1));
+
+    std::array<ck::index_t, NDimSpatial + 3> out_lengths{}, out_strides{};
+    std::array<ck::index_t, NDimSpatial + 3> wei_lengths{}, wei_strides{};
+    std::array<ck::index_t, NDimSpatial + 3> in_lengths{}, in_strides{};
+    std::array<ck::index_t, NDimSpatial> filter_strides{}, filter_dilations{};
+    std::array<ck::index_t, NDimSpatial> left_pads{}, right_pads{};
+    const auto copy = [](const auto& from, auto& to) { ck::ranges::copy(from, to.begin()); };
+    copy(out_desc.GetLengths(), out_lengths);
+    copy(out_desc.GetStrides(), out_strides);
+    copy(wei_desc.GetLengths(), wei_lengths);
+    copy(wei_desc.GetStrides(), wei_strides);
+    copy(in_desc.GetLengths(), in_lengths);
+    copy(in_desc.GetStrides(), in_strides);
+    copy(param.conv_filter_strides_, filter_strides);
+    copy(param.conv_filter_dilations_, filter_dilations);
+    copy(param.input_left_pads_, left_pads);
+    copy(param.input_right_pads_, right_pads);
+
+    Op op;
+    auto* input         = static_cast<DataType*>(in_device.GetDeviceBuffer());
+    const auto make_arg = [&](ck::index_t split, DataType* p_e, const auto& e_strides) {
+        return op.MakeArgument(out_device.GetDeviceBuffer(),
+                               wei_device.GetDeviceBuffer(),
+                               {},
+                               p_e,
+                               out_lengths,
+                               out_strides,
+                               wei_lengths,
+                               wei_strides,
+                               {},
+                               {},
+                               in_lengths,
+                               e_strides,
+                               filter_strides,
+                               filter_dilations,
+                               left_pads,
+                               right_pads,
+                               PassThrough{},
+                               PassThrough{},
+                               PassThrough{},
+                               split);
+    };
+    ASSERT_TRUE(op.IsSupportedArgument(make_arg(1, input, in_strides)));
+    for(const ck::index_t split : {2, 4})
+    {
+        auto aligned = make_arg(split, input, in_strides);
+        if constexpr(NDimSpatial == 2)
+        {
+            // Establish a supported candidate before varying only the new split-K constraints.
+            ASSERT_TRUE(Op::IsGfx125SplitKArgument(aligned));
+            ASSERT_TRUE(op.IsSupportedArgument(aligned));
+
+            auto misaligned = make_arg(split, input + 1, in_strides);
+            EXPECT_FALSE(Op::IsGfx125SplitKArgument(misaligned));
+            EXPECT_FALSE(op.IsSupportedArgument(misaligned)) << "misaligned E, split=" << split;
+
+            auto padded_strides = in_strides;
+            // Pad each pixel by an even number of elements, preserving dword alignment.
+            padded_strides[4] += 8;
+            padded_strides[3] = padded_strides[4] * in_lengths[4];
+            padded_strides[1] = padded_strides[3] * in_lengths[3];
+            auto padded       = make_arg(split, input, padded_strides);
+            EXPECT_FALSE(Op::IsGfx125SplitKArgument(padded));
+            EXPECT_FALSE(op.IsSupportedArgument(padded)) << "padded E, split=" << split;
+        }
+        else
+        {
+            EXPECT_FALSE(Op::IsGfx125SplitKArgument(aligned));
+            EXPECT_FALSE(op.IsSupportedArgument(aligned)) << "3D, split=" << split;
+        }
+    }
+    if constexpr(NDimSpatial == 2)
+    {
+        for(const ck::index_t split : {3, 8})
+        {
+            auto arg = make_arg(split, input, in_strides);
+            EXPECT_FALSE(Op::IsGfx125SplitKArgument(arg));
+            EXPECT_FALSE(op.IsSupportedArgument(arg)) << "unsupported split=" << split;
+        }
+    }
+}
+
 template <typename DataType>
 void RunPairedSplit2d()
 {
@@ -321,6 +423,10 @@ void RunPairedSplit2d()
     // The scalar split-1 fallback exists at odd C, but no paired split-K store may accept it.
     CheckDirtyOutput<2, DataType>(
         {2, 2, 2, 128, 15, {1, 1}, {3, 5}, {1, 1}, {1, 1}, {0, 0}, {0, 0}}, false, 2, true);
+
+    CheckSplitKRejections<2, DataType>(aligned);
+    CheckSplitKRejections<3, DataType>(
+        {3, 2, 2, 128, 16, {1, 1, 1}, {2, 3, 5}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}});
 }
 
 template <typename DataType>
@@ -355,39 +461,6 @@ TEST(TestGroupedConvndBwdDataWmmaOverwrite, Bf16)
 #ifdef CK_ENABLE_BF16
     Run2d<ck::bhalf_t>();
     Run3d<ck::bhalf_t>();
-#else
-    GTEST_SKIP() << "BF16 instances are disabled";
-#endif
-}
-
-TEST(TestGroupedConvndBwdDataWmmaOverwrite, Bf16PointwiseAVector2RegisteredOnce)
-{
-    if(!ck::is_gfx125_supported())
-    {
-        GTEST_SKIP() << "This regression is specific to gfx1250";
-    }
-#ifdef CK_ENABLE_BF16
-    using DeviceOp       = ck::tensor_operation::device::DeviceGroupedConvBwdDataMultipleD<2,
-                                                                                           NHWGK,
-                                                                                           GKYXC,
-                                                                                           ck::Tuple<>,
-                                                                                           NHWGC,
-                                                                                           ck::bhalf_t,
-                                                                                           ck::bhalf_t,
-                                                                                           ck::Tuple<>,
-                                                                                           ck::bhalf_t,
-                                                                                           PassThrough,
-                                                                                           PassThrough,
-                                                                                           PassThrough>;
-    const auto instances = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOp>::GetInstances();
-    const std::string name = "DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<128, "
-                             "128, 128, 32, 8, 8, Filter1x1Stride1Pad0, "
-                             "16, 16, 8, 2, 2, 4, 1, 1>";
-    EXPECT_EQ(std::count_if(instances.begin(),
-                            instances.end(),
-                            [&](const auto& op) { return op->GetTypeString() == name; }),
-              1);
 #else
     GTEST_SKIP() << "BF16 instances are disabled";
 #endif
