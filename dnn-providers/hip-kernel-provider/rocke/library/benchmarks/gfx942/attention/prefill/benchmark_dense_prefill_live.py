@@ -78,6 +78,7 @@ from kernels.gfx942.attention_dense import (  # noqa: E402
     AttentionDenseSpec,
     attention_dense_block,
     attention_dense_grid,
+    attention_dense_runtime_args,
     attention_dense_signature,
     build_attention_dense,
     gfx942_kernel_name,
@@ -145,7 +146,9 @@ _LAUNCHER_CACHE: dict = {}
 
 
 def _dense_launcher(spec: AttentionDenseSpec) -> KernelLauncher:
-    # batch-unique (the kernel bakes batch into the buffer extents)
+    # The name is unique per binary: on the runtime-shape path it omits the shape
+    # and head counts (one binary serves them all, read from kernargs); on the
+    # persistent / SWA paths it still bakes the shape, as the binary does.
     key = gfx942_kernel_name(spec)
     lch = _LAUNCHER_CACHE.get(key)
     if lch is not None:
@@ -200,13 +203,9 @@ def bench_dense(spec: AttentionDenseSpec, *, warmup: int, iters: int, seed: int)
         stream=stream,
     )
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": scale}
-    if spec.runtime_shape:
-        # Mirrors the three i32 params attention_dense_signature declares after
-        # scale on the runtime-shape path; omitting them under-fills the kernarg
-        # buffer for a kernel that reads them.
-        vals["batch"] = int(spec.batch)
-        vals["seqlen_q"] = int(spec.seqlen_q)
-        vals["seqlen_kv"] = int(spec.seqlen_kv)
+    # The runtime i32 shape params attention_dense_signature declares after scale
+    # (empty on the baked paths); omitting them under-fills the kernarg buffer.
+    vals.update(attention_dense_runtime_args(spec))
 
     def call():
         lch(vals, config=cfg)

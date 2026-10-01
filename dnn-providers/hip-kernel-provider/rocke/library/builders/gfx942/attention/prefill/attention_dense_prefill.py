@@ -79,6 +79,7 @@ from kernels.gfx942.attention_dense import (  # noqa: E402
     Gfx942AttentionDenseSpec,
     attention_dense_block,
     attention_dense_grid,
+    attention_dense_runtime_args,
     attention_dense_signature,
     build_attention_dense,
     gfx942_kernel_name,
@@ -356,13 +357,9 @@ def run(
     stream = torch.cuda.current_stream().cuda_stream
     cfg = _launch_config(spec, stream)
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": scale}
-    if spec.runtime_shape:
-        # Mirrors the three i32 params attention_dense_signature declares after
-        # scale on the runtime-shape path; omitting them under-fills the kernarg
-        # buffer for a kernel that reads them.
-        vals["batch"] = int(spec.batch)
-        vals["seqlen_q"] = int(spec.seqlen_q)
-        vals["seqlen_kv"] = int(spec.seqlen_kv)
+    # The runtime i32 shape params attention_dense_signature declares after scale
+    # (empty on the baked paths); omitting them under-fills the kernarg buffer.
+    vals.update(attention_dense_runtime_args(spec))
 
     def call():
         launcher(vals, config=cfg)

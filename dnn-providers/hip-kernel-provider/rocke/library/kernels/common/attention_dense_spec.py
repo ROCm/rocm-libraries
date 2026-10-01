@@ -266,7 +266,8 @@ class AttentionDenseSpec:
         spec.kernel_name()`` then fires on the second one served from that slot.
         ``Gfx942AttentionDenseSpec`` is the live example: it appends ``_b{batch}``
         (batch sized its buffer-resource extents), so declaring ``batch`` here
-        obliged it to drop that token in the same change.
+        obliged it to drop that token in the same change -- and declaring the
+        head counts obliged it to drop ``hq``/``kv`` (via ``_head_name_parts``).
 
         Deriving the name FROM this tuple would make the two correct by
         construction. It does not today, which is the blocker for AOT packaging
@@ -283,6 +284,11 @@ class AttentionDenseSpec:
         overrides this to drop sq/sk from the symbol name."""
         return (f"sq{self.seqlen_q}", f"sk{self.seqlen_kv}")
 
+    def _head_name_parts(self) -> tuple[str, ...]:
+        """Name tokens for the baked head counts. A subclass whose kernel takes
+        the head counts as runtime params overrides this to drop hq/kv."""
+        return (f"hq{self.num_query_heads}", f"kv{self.num_kv_heads}")
+
     def _algorithm_name_parts(self) -> tuple[str, ...]:
         return ("lazyrs",) if self.lazy_rescale else ()
 
@@ -293,8 +299,7 @@ class AttentionDenseSpec:
         parts = [
             "rocke_attention_dense",
             f"d{self.head_size}",
-            f"hq{self.num_query_heads}",
-            f"kv{self.num_kv_heads}",
+            *self._head_name_parts(),
             f"bn{self.block_n}",
             self.dtype,
         ]

@@ -278,6 +278,8 @@ _SPEC_PERTURBATIONS = {
     # base, which pins 4096 to get a legal P4 grid -- hence 2048 as the live candidate.
     "seqlen_q": (4096, 2048),
     "seqlen_kv": (4096, 2048),
+    # Same story for the head counts: the default grid reads both from kernel params,
+    # so only the persistent base sees these move the body.
     "num_query_heads": (32, 8),
     "num_kv_heads": (8, 2),
     "head_size": (64, 128),
@@ -519,6 +521,34 @@ def test_build_bakes_batch_into_the_emitted_symbol():
     assert build_attention_dense(_baked_spec(batch=4), arch="gfx942").name != (
         build_attention_dense(_baked_spec(batch=1), arch="gfx942").name
     )
+
+
+# (Hq, Hkv): GQA 16, non-pow2 GQA 5 and 7, MHA.
+_HEAD_CONFIGS = ((128, 8), (40, 8), (28, 4), (32, 32))
+
+
+def test_kernel_name_is_head_unique_where_heads_are_baked():
+    """On the baked (persistent) grid the head counts size the strides and buffer
+    extents, so they must reach the symbol -- and the IR must actually move with
+    them, or the runtime-grid test below would pass vacuously."""
+    specs = [
+        _baked_spec(num_query_heads=hq, num_kv_heads=hkv) for hq, hkv in _HEAD_CONFIGS
+    ]
+    names = {gfx942_kernel_name(s) for s in specs}
+    assert len(names) == len(specs), f"heads must disambiguate the name, got {names}"
+    assert len({_ir_body_sha(s) for s in specs}) == len(specs)
+    assert "_hq40_kv8_" in gfx942_kernel_name(specs[1])
+
+
+def test_kernel_name_drops_heads_on_the_runtime_shape_grid():
+    """The other direction: the default grid reads both head counts from kernel
+    params, so every head config is ONE name and ONE body, with no hq/kv token."""
+    specs = [_spec(num_query_heads=hq, num_kv_heads=hkv) for hq, hkv in _HEAD_CONFIGS]
+    assert all(s.runtime_shape for s in specs)
+    names = {gfx942_kernel_name(s) for s in specs}
+    assert len(names) == 1, f"runtime-shape head configs split the name: {names}"
+    assert not re.search(r"_(hq|kv)\d+", names.pop())
+    assert len({_ir_body_sha(s) for s in specs}) == 1
 
 
 # --------------------------------------------------------------------------- #
