@@ -56,4 +56,16 @@ struct HipRtcTypeName<int32_t>
     static constexpr const char* VALUE = "int";
 };
 
+template <>
+struct HipRtcTypeName<hipdnn_data_sdk::types::fp8_e5m2>
+{
+    static constexpr const char* VALUE = "hipdnn_gpu_ref::types::fp8_e5m2";
+};
+
+template <>
+struct HipRtcTypeName<hipdnn_data_sdk::types::fp8_e4m3>
+{
+    static constexpr const char* VALUE = "hipdnn_gpu_ref::types::fp8_e4m3";
+};
+
 } // namespace hipdnn_gpu_ref::detail
