@@ -44,7 +44,7 @@ if ! command -v cmake >/dev/null || ! command -v ninja >/dev/null; then
     export PATH="$PATH:$(python3 -m site --user-base)/bin"
 fi
 python3 -m pip install --quiet --break-system-packages "zstandard>=0.20.0" msgpack \
-    lightgbm pandas "scikit-learn>=1.3.0" flatbuffers numpy pyarrow 2>&1 | tail -1
+    lightgbm pandas "scikit-learn>=1.3.0" flatbuffers numpy pyarrow pytest 2>&1 | tail -1
 for c in git cmake ninja hipcc python3; do
     printf '%-8s ' "$c"; command -v "$c" >/dev/null && "$c" --version 2>&1 | head -1 || echo MISSING
 done

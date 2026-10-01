@@ -55,7 +55,7 @@ apt-get update -qq 2>&1 | tail -1
 apt-get install -y -qq git cmake ninja-build python3.12-venv python3-dev 2>&1 | tail -2
 export PIP_CACHE_DIR=/tmp/pipcache
 python3 -m pip install --quiet --break-system-packages "zstandard>=0.20.0" msgpack \
-    lightgbm pandas "scikit-learn>=1.3.0" pyarrow flatbuffers numpy 2>&1 | tail -1
+    lightgbm pandas "scikit-learn>=1.3.0" pyarrow flatbuffers numpy pytest 2>&1 | tail -1
 
 step "source: $BRANCH${UHD_COMMIT:+ @ $UHD_COMMIT}"
 rm -rf /tmp/uhd; mkdir -p /tmp/uhd "$OUT"
