@@ -15,6 +15,7 @@
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
+#include "rocke/tdm.h"
 #include "rocke/verify.h"
 
 /* Every builder call below is its own statement, and the statement order
@@ -291,6 +292,61 @@ static void build_tensor_transfers(rocke_ir_builder_t* b)
     rocke_b_ret(b);
 }
 
+/* A full rank-2 TDM descriptor fed by global_addr_of; runtime_pitch switches
+ * word 5 between a folded constant and a readfirstlane'd IR value. */
+static void tdm_descriptor(rocke_ir_builder_t* b, bool runtime_pitch)
+{
+    rocke_param_opts_t o;
+    const int shape[] = {64, 48};
+    rocke_tdm_descriptor_2d_args_t args;
+    rocke_value_t* groups[5];
+
+    memset(&o, 0, sizeof(o));
+    o.noalias = true;
+    o.noalias_set = true;
+    o.readonly = true;
+    o.readonly_set = true;
+    o.align = 16;
+    o.align_set = true;
+    rocke_value_t* a_ptr = rocke_b_param(b, "A", rocke_ptr_type(b, rocke_bf16(), "global"), &o);
+    rocke_value_t* k_dim = rocke_b_param(b, "K", rocke_i32(), NULL);
+    rocke_value_t* smem = rocke_b_smem_alloc(b, rocke_bf16(), shape, 2, "tile");
+    rocke_value_t* zero = rocke_b_const_i32(b, 0);
+    rocke_value_t* gaddr = rocke_b_global_addr_of(b, a_ptr, zero);
+    rocke_value_t* lds = rocke_b_smem_addr_of(b, smem);
+    rocke_value_t* rows = rocke_b_const_i32(b, 64);
+
+    memset(&args, 0, sizeof(args));
+    args.global_addr = gaddr;
+    args.lds_addr = lds;
+    args.elem_bytes = 2;
+    args.tensor_dim0 = k_dim;
+    args.tensor_dim1 = rows;
+    args.tile_dim0 = 32;
+    args.tile_dim1 = 64;
+    args.dim0_stride_value = runtime_pitch ? k_dim : NULL;
+    args.dim0_stride = 4096;
+    args.dim1_stride = 1;
+    args.pad_enable = 1;
+    args.pad_interval = 3;
+    args.pad_amount = 7;
+    if(rocke_tdm_build_descriptor_2d(b, &args, groups) != ROCKE_OK)
+        return;
+    rocke_b_tensor_load_to_lds(b, groups[0], groups[1], groups[2], groups[3], groups[4], 0);
+    rocke_b_s_wait_tensorcnt(b, 0);
+    rocke_b_ret(b);
+}
+
+static void build_tdm_descriptor_const_pitch(rocke_ir_builder_t* b)
+{
+    tdm_descriptor(b, false);
+}
+
+static void build_tdm_descriptor_runtime_pitch(rocke_ir_builder_t* b)
+{
+    tdm_descriptor(b, true);
+}
+
 typedef void (*build_fn_t)(rocke_ir_builder_t*);
 
 typedef struct config
@@ -323,6 +379,8 @@ static const config_t CONFIGS[] = {
     {build_global_tr16_bf16, "gfx1250"},
     {build_global_tr16_i16, "gfx1250"},
     {build_tensor_transfers, "gfx1250"},
+    {build_tdm_descriptor_const_pitch, "gfx1250"},
+    {build_tdm_descriptor_runtime_pitch, "gfx1250"},
 };
 
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));

@@ -20,6 +20,7 @@
 #
 # arch is per-config (see _spec), llvm_flavor = AUTO, matching the C side.
 from rocke.core.ir import BF16, F16, F32, I16, I32, I64, IRBuilder, KernelDef, PtrType
+from rocke.core.tdm import build_tdm_descriptor_2d
 
 from _emit_common import run_emit
 
@@ -188,6 +189,45 @@ def build_tensor_transfers(b: IRBuilder) -> None:
     b.ret()
 
 
+def _tdm_descriptor(runtime_pitch: bool):
+    """A full rank-2 TDM descriptor fed by ``global_addr_of``.
+
+    The descriptor words are mostly a fixed op sequence of shifts, masks and
+    readfirstlanes, so this pins that sequence and the ``global_addr_of``
+    lowering. ``runtime_pitch`` switches word 5 between a folded constant and
+    a readfirstlane'd IR value, the one structural branch in the builder.
+    """
+
+    def build(b: IRBuilder) -> None:
+        a_ptr = b.param("A", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
+        k_dim = b.param("K", I32)
+        smem = b.smem_alloc(BF16, [64, 48], name_hint="tile")
+        zero = b.const_i32(0)
+        gaddr = b.global_addr_of(a_ptr, zero)
+        lds = b.smem_addr_of(smem)
+        rows = b.const_i32(64)
+        groups = build_tdm_descriptor_2d(
+            b,
+            global_addr=gaddr,
+            lds_addr=lds,
+            elem_bytes=2,
+            tensor_dim0=k_dim,
+            tensor_dim1=rows,
+            tile_dim0=32,
+            tile_dim1=64,
+            dim0_stride=k_dim if runtime_pitch else 4096,
+            dim1_stride=1,
+            pad_enable=1,
+            pad_interval=3,
+            pad_amount=7,
+        )
+        b.tensor_load_to_lds(*groups, cachepolicy=0)
+        b.s_wait_tensorcnt(0)
+        b.ret()
+
+    return build
+
+
 # (builder, arch). Each gfx1250 config that tests a *choice* of encoding is
 # followed by its gfx950 twin, so the pair pins both branches.
 CONFIGS = [
@@ -211,6 +251,8 @@ CONFIGS = [
     (_global_tr16(BF16), "gfx1250"),
     (_global_tr16(I16), "gfx1250"),
     (build_tensor_transfers, "gfx1250"),
+    (_tdm_descriptor(False), "gfx1250"),
+    (_tdm_descriptor(True), "gfx1250"),
 ]
 
 

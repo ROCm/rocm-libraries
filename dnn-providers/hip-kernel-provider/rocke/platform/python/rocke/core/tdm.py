@@ -286,12 +286,13 @@ def build_tdm_descriptor_2d(
 ):
     """Emit the five descriptor groups for a rank-2 non-gather TDM load.
 
-    ``global_addr`` (i64), ``lds_addr`` (i64), the two ``tensor_dim`` extents
-    and ``dim1_stride`` may be IR values; everything else is a compile-time
-    constant folded into the static word pattern. A runtime ``dim1_stride``
-    still has to fit the 16-bit field, so the caller must bound the leading
-    dimension by :data:`TDM_MAX_DIM1_STRIDE`. Returns ``(d0, d1, d2, d3, d4)``
-    ready for :meth:`IRBuilder.tensor_load_to_lds`.
+    ``global_addr`` (i64), ``lds_addr`` (i64) and the two ``tensor_dim``
+    extents are IR values. ``dim0_stride`` (the row pitch) may be an int or an
+    i32 IR value; a runtime pitch fills only the low 32 bits of its 48-bit
+    slot. Everything else, ``dim1_stride`` included, is a compile-time
+    constant folded into the static word pattern; ``dim1_stride`` must not
+    exceed :data:`TDM_MAX_DIM1_STRIDE`. Returns ``(d0, d1, d2, d3, d4)`` ready
+    for :meth:`IRBuilder.tensor_load_to_lds`.
     """
     from rocke.core.ir import I32
 
