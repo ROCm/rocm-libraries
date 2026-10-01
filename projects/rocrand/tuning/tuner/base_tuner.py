@@ -263,7 +263,7 @@ class BaseTuner(ABC):
 
         targets = [
             self.existing_config[k]["arch_name"]
-            for k in self.existing_config 
+            for k in self.existing_config
             if self.existing_config[k]["arch_name"] == target_arch
         ]
         target = None

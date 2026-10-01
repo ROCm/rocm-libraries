@@ -209,7 +209,7 @@ extern "C" float {{algo_name}}_wrapper(
     
     double total = 0.0;
     for(double x : bps)
-        total += (1000.0 * primbench::GiB) / x;    
+        total += (1000.0 * primbench::GiB) / x;
     return total / static_cast<double>(bps.size());
     {% endblock %}
 

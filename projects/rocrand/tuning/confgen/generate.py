@@ -13,8 +13,7 @@ import jinja2
 
 log = logging.getLogger("confgen.generate")
 
-def make_config(
-    type_data: dict[str, ty.Any]):
+def make_config(type_data: dict[str, ty.Any]):
     import_keys = ["arch_name", "tune_params_keys", "tune_params"]
     out = {k: type_data[k] for k in import_keys if k in type_data}
     return out
@@ -133,7 +132,7 @@ def main():
 
                 merged_targets = {
                     target_hash : make_config(target)
-                      for target_hash, target in existing_data.items()
+                    for target_hash, target in existing_data.items()
                 }
 
                 for target_hash, config in targets.items():

@@ -15,10 +15,10 @@ def parse_lines(lines: list[str]):
             INSIDE_BLOCK = True
         if "get_blocks" in line:
             INSIDE_BLOCK = False
-            INSIDE_GRID = True 
+            INSIDE_GRID = True
 
         if "target_arch::" in line:
-            arch = (line.split()[1].split(":")[-2])
+            arch = line.split()[1].split(":")[-2]
             if arch not in config:
                 config[arch] = {"arch_name": arch, "engine": engine_name}
             if INSIDE_BLOCK:
