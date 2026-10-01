@@ -1279,6 +1279,8 @@ def _run_two_stage_ts(spec, arch, rt, dY_t, X_t):
             problem=spec.problem,
             dtype_d=spec.data.dtype_d,
             groups=p.groups,
+            # Must match Stage 1 or the fold covers the wrong slab count.
+            ws_replicas=spec.ws_replicas,
         )
         s2_grid = wgrad_reduce_grid(s2_spec)
         s2_block = (s2_spec.block_size, 1, 1)
@@ -1306,7 +1308,6 @@ def _run_two_stage_ts(spec, arch, rt, dY_t, X_t):
             "dw_ptr": dW_dev,
             "wg_M": spec.wg_M,
             "wg_N": spec.wg_N,
-            "split_k": spec.split_k,
             "ws_bytes": ws_nbytes,
             "dw_bytes": dW_t.nbytes,
             "groups": p.groups,
@@ -1572,11 +1573,27 @@ class TestConvWgradTwoStage(unittest.TestCase):
                     self._check(shape, dtype, "mem", split_k=-1, seed=3)
 
     # ------------------------------------------------------------------
-    # Determinism guarantee
+    # Run-to-run stability (NOT a determinism guarantee)
     # ------------------------------------------------------------------
 
     def test_is_deterministic(self):
-        """Two consecutive runs on identical inputs produce bit-exact output."""
+        """Two consecutive runs on identical inputs produce bit-exact output.
+
+        This is an empirical stability check on the *two-stage* spec, not a
+        determinism guarantee for it. Stage 1 f32-atomic-adds a group's
+        K-slices into shared replica slabs, so the summation order is
+        scheduler-dependent and f32 addition is not associative -- Stage 2's
+        ordered fold over the replicas does not recover determinism for partial
+        sums that were already reordered.
+
+        This is not a loss of determinism for the family: a wgrad at
+        ``split_k <= 1`` is still bit-exact, and that is what
+        ``rocke_wgrad_conv_spec_is_deterministic`` reports true for. It reports
+        false for every ``split_k > 1`` spec, two-stage included, and that is
+        the answer a host should act on. What this test catches is a *change*
+        in behaviour for a fixed launch geometry, which is worth a signal even
+        though a failure here is not by itself a correctness bug.
+        """
         import torch
 
         spec = _make_two_stage_spec(self.ARCH)
@@ -1898,13 +1915,10 @@ class TestWgradValidatorAgreement(unittest.TestCase):
             self.fail(f"is_valid_wgrad_spec said valid but validate() raised: {raised}")
         return ok, why
 
-    def test_force_deterministic_accepted_by_both(self):
-        # force_deterministic is promoted to two_stage by the builder, so the
-        # workspace-store epilogue applies and 'default' is legal for 16-bit dW.
-        # validate() used to miss the promotion and demand cshuffle.
-        ok, why = self._agree(
-            self._spec(split_k=4, force_deterministic=True, epilogue="default")
-        )
+    def test_two_stage_accepted_by_both(self):
+        # two_stage uses the f32 scratch-atomic epilogue, so 'default' is legal
+        # for a 16-bit dW. validate() used to demand cshuffle here.
+        ok, why = self._agree(self._spec(split_k=4, two_stage=True, epilogue="default"))
         self.assertTrue(ok, why)
 
     def test_plain_atomic_still_requires_cshuffle(self):
@@ -1912,13 +1926,12 @@ class TestWgradValidatorAgreement(unittest.TestCase):
         ok, _ = self._agree(self._spec(split_k=4, epilogue="default"))
         self.assertFalse(ok, "split_k atomic + 16-bit dW + default must be rejected")
 
-    def test_force_deterministic_does_not_exempt_runtime_degree(self):
-        # split_k == 0 is the runtime-degree atomic encoding and can never be
-        # promoted to two-stage, so it still needs cshuffle.
-        ok, _ = self._agree(
-            self._spec(split_k=0, force_deterministic=True, epilogue="default")
-        )
-        self.assertFalse(ok, "split_k=0 is atomic regardless of force_deterministic")
+    def test_two_stage_does_not_exempt_runtime_degree(self):
+        # split_k == 0 is the runtime-degree atomic encoding; the builder's
+        # `is_two_stage = split_k > 1 and two_stage` never reaches the scratch
+        # epilogue there, so it still needs cshuffle.
+        ok, _ = self._agree(self._spec(split_k=0, two_stage=True, epilogue="default"))
+        self.assertFalse(ok, "split_k=0 is atomic regardless of two_stage")
 
     def test_two_stage_with_split_k_1_rejected_by_predicate(self):
         # validate() and the C++ both reject this; the public predicate used to
