@@ -68,7 +68,7 @@ namespace
 
                     const auto unordered = std::adjacent_find(
                         indices.begin(), indices.end(), std::greater_equal<int>());
-                    EXPECT_EQ(unordered, indices.end())
+                    EXPECT_TRUE(unordered == indices.end())
                         << "opA=" << opA << " opB=" << opB << " abType=" << t.ab
                         << ": solution index " << *unordered << " at position "
                         << (unordered - indices.begin()) << " is not below the next one";
