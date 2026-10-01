@@ -5,7 +5,7 @@
 # in KernelWriter / ClientWriter / KernelWriterAssembly / Assembler (codegen +
 # GPU), which is out of scope for this effort. This suite pins the pure cache
 # helper layer (_cacheDataMatches / _computeCacheKey / _readCacheIfValid /
-# _loadCacheIfMatches / _loadLegacyCacheIfMatches / _resetCacheDir). The build/
+# _loadCacheIfMatches / _resetCacheDir). The build/
 # run path (writeBenchmarkFiles, _benchmarkProblemType, _generate*Solutions,
 # main) is documented resistance — see target.md.
 ################################################################################
@@ -60,15 +60,31 @@ def test_cache_data_matches_false():
 # ---------------------------------------------------------------------------
 def test_compute_cache_key_deterministic_and_len():
     step = _step()
-    k1 = M._computeCacheKey(step)
-    k2 = M._computeCacheKey(step)
+    k1 = M._computeCacheKey(step, ["gfx942"])
+    k2 = M._computeCacheKey(step, ["gfx942"])
     assert k1 == k2
     assert len(k1) == M._CACHE_KEY_LEN
     assert all(c in "0123456789abcdef" for c in k1)
 
 
 def test_compute_cache_key_changes_with_params():
-    assert M._computeCacheKey(_step()) != M._computeCacheKey(_step(constantParams={"a": 2}))
+    assert M._computeCacheKey(_step(), ["gfx942"]) != M._computeCacheKey(
+        _step(constantParams={"a": 2}), ["gfx942"]
+    )
+
+
+def test_compute_cache_key_changes_with_architecture():
+    """The cached code objects are built for these targets, so a key that ignores
+    them lets one architecture's build be handed to another's."""
+    step = _step()
+    assert M._computeCacheKey(step, ["gfx942"]) != M._computeCacheKey(step, ["gfx90a"])
+
+
+def test_compute_cache_key_ignores_architecture_order():
+    step = _step()
+    assert M._computeCacheKey(step, ["gfx942", "gfx90a"]) == M._computeCacheKey(
+        step, ["gfx90a", "gfx942"]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +135,7 @@ def test_read_cache_mismatch_returns_none(tmp_path, monkeypatch, capsys):
 
 
 # ---------------------------------------------------------------------------
-# _loadCacheIfMatches / _loadLegacyCacheIfMatches
+# _loadCacheIfMatches
 # ---------------------------------------------------------------------------
 def test_load_cache_if_matches(tmp_path, monkeypatch):
     step = _step()
@@ -127,16 +143,6 @@ def test_load_cache_if_matches(tmp_path, monkeypatch):
     monkeypatch.setattr(M.LibraryIO, "read", lambda p: _cache_dict(step, ["z.co"]))
     assert M._loadCacheIfMatches(str(tmp_path), step) == {
         "CodeObjectFiles": ["z.co"],
-        "LibraryFile": "lib.dat",
-    }
-
-
-def test_load_legacy_cache_if_matches(tmp_path, monkeypatch):
-    step = _step()
-    (tmp_path / "cache.yaml").write_text("x")
-    monkeypatch.setattr(M.LibraryIO, "read", lambda p: _cache_dict(step, ["legacy.co"]))
-    assert M._loadLegacyCacheIfMatches(str(tmp_path), step) == {
-        "CodeObjectFiles": ["legacy.co"],
         "LibraryFile": "lib.dat",
     }
 

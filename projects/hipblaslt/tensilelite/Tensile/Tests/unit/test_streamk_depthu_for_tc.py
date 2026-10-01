@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: MIT
 """Unit tests for StreamK._depthUForTc MX scale format gating.
 
-HostPreSwizzle / InMemorySwizzle pair KernelWriter's <<5 StridesMXS scaling with
-a *32 on _DepthUMXS* so StreamKLocalStart offsets stay in data-K units.
-NoSwizzle keeps canonical scale strides; applying *32 there over-
-advances scale SRDs for any nonzero StreamKLocalStart.
+HostPreSwizzle / InMemorySwizzle pair KernelWriter's swizzle group-span
+StridesMXS rewrite with a *32 on _DepthUMXS* so StreamKLocalStart offsets
+stay in data-K units. NoSwizzle keeps canonical scale strides; applying
+*32 there over-advances scale SRDs for any nonzero StreamKLocalStart.
 """
 
 import pytest
