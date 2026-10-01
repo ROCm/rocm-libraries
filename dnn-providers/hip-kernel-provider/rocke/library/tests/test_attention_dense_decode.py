@@ -339,7 +339,7 @@ def test_runtime_persist_decode_matches_the_launched_baked_decode(
                 Hq, Hkv, B, S, name, causal, window, interleave=interleave
             )
         except ValueError:
-            continue  # not legal for this launch
+            continue  # not legal for this launch (e.g. hq_minor_swz, odd NQB)
         built = built or launched
         nqb = S // launched.block_m
         work = nqb * Hq * B

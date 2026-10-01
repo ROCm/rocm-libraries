@@ -376,6 +376,15 @@ _PERSIST_DECODES = sorted(
 )
 
 
+def _decode_kw(decode: str) -> dict:
+    """Pin ``decode``; hq_minor_swz also needs num_persistent divisible by the XCD
+    count (the base's 228 is not)."""
+    kw = dict(persist_decode=decode)
+    if decode == "hq_minor_swz":
+        kw["num_persistent"] = 224
+    return kw
+
+
 def _persistent_spec(**kw) -> Gfx942AttentionDenseSpec:
     """The persistent injectivity base, with overrides.
 
@@ -589,7 +598,7 @@ def test_persistent_grid_shares_one_kernel_across_batches(decode):
     The decode is pinned: ``"auto"`` would flip order with batch, which is a
     separate identity (:func:`test_auto_persist_decode_keys_on_the_resolved_order`).
     """
-    specs = [_persistent_spec(batch=b, persist_decode=decode) for b in (1, 2, 4, 8)]
+    specs = [_persistent_spec(batch=b, **_decode_kw(decode)) for b in (1, 2, 4, 8)]
     assert all(s.runtime_shape for s in specs)
     names = {gfx942_kernel_name(s) for s in specs}
     assert len(names) == 1, f"persistent batches split the name: {names}"
@@ -637,10 +646,17 @@ def test_persistent_grid_shares_one_kernel_across_head_configs(decode):
     kernarg values, fast-division pairs included. That the IR probe can see baked
     head counts is the gfx950 control
     (:func:`test_ir_body_probe_detects_a_baked_shape_on_the_gfx950_control`), so the
-    single-body assertion here is not vacuous."""
-    specs = [
-        _persistent_spec(num_query_heads=hq, num_kv_heads=hkv, persist_decode=decode)
+    single-body assertion here is not vacuous. hq_minor_swz needs Hq divisible by
+    the XCD count, so it skips the configs that are not."""
+    configs = [
+        (hq, hkv)
         for hq, hkv in _HEAD_CONFIGS
+        if decode != "hq_minor_swz" or hq % 8 == 0
+    ]
+    assert len(configs) >= 3
+    specs = [
+        _persistent_spec(num_query_heads=hq, num_kv_heads=hkv, **_decode_kw(decode))
+        for hq, hkv in configs
     ]
     for s in specs:
         ok, why = supports_attention_dense(s, arch="gfx942")
@@ -1974,8 +1990,7 @@ def test_persistent_builds_for_both_decodes(dtype, d, decode):
         head_size=d,
         dtype=dtype,
         persistent=True,
-        num_persistent=228,
-        persist_decode=decode,
+        **{"num_persistent": 228, **_decode_kw(decode)},
     )
     ok, why = supports_attention_dense(spec, arch="gfx942")
     assert ok, why
@@ -2022,6 +2037,7 @@ def test_persistent_and_default_share_one_inner_body():
 _EXPECTED_FASTDIV_DIVISORS = {
     "bt_hkv_minor": ("batch", "num_query_heads"),
     "hkv_major": ("batch", "gqa", "nqb"),
+    "hq_minor_swz": ("nqb", "num_query_heads", "gqa"),
     "qb_major": ("batch", "num_query_heads", "gqa"),
 }
 
@@ -2045,17 +2061,19 @@ def test_persistent_kernarg_abi_carries_the_fastdiv_pairs(decode):
     packed as its two's-complement i32), and -- through the host model of the
     in-kernel divide -- exact for dividends up to just under the 2**30 bound. Non-pow2
     divisors throughout (B=3, NQB=13, Hq=40, gqa=5), so the magic is not the trivial
-    pow2 one.
+    pow2 one; hq_minor_swz pairs query blocks under causal masking, so it takes
+    NQB=14.
     """
     from rocke.helpers.transforms import calculate_magic_numbers
 
+    nqb = 14 if decode == "hq_minor_swz" else 13
     spec = _persistent_spec(
         batch=3,
-        seqlen_q=13 * _BLOCK_M,
+        seqlen_q=nqb * _BLOCK_M,
         seqlen_kv=4096,
         num_query_heads=40,
         num_kv_heads=8,
-        persist_decode=decode,
+        **_decode_kw(decode),
     )
     assert supports_attention_dense(spec, arch="gfx942")[0]
     divisors = _EXPECTED_FASTDIV_DIVISORS[decode]
@@ -2072,7 +2090,7 @@ def test_persistent_kernarg_abi_carries_the_fastdiv_pairs(decode):
 
     args = attention_dense_runtime_args(spec)
     assert tuple(args) == spec.runtime_kernarg_fields
-    value = {"batch": 3, "num_query_heads": 40, "gqa": 5, "nqb": 13}
+    value = {"batch": 3, "num_query_heads": 40, "gqa": 5, "nqb": nqb}
     for d in divisors:
         magic, shift = calculate_magic_numbers(value[d])
         assert -(1 << 31) <= args[f"{d}_magic"] < (1 << 31), "magic must fit an i32"

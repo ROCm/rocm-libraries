@@ -465,6 +465,7 @@ class TestGfx942DensePersistentRuntimeShape(unittest.TestCase):
     _DIVISORS = {
         "bt_hkv_minor": ("batch", "num_query_heads"),
         "hkv_major": ("batch", "gqa", "nqb"),
+        "hq_minor_swz": ("nqb", "num_query_heads", "gqa"),
         "qb_major": ("batch", "num_query_heads", "gqa"),
     }
 

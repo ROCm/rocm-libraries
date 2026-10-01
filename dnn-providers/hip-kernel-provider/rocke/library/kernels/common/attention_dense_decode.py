@@ -12,7 +12,10 @@ builders call the same class.
 
 The shape reaches a decode through :class:`DecodeShape`: each extent is either
 baked (emitted as a constant at its use) or a runtime value from the kernel's
-params, so one decode body serves both.
+params, so one decode body serves both, and a shape-dependent choice (causal
+balancing under a window, the pair fold) is a compile-time branch when baked and
+a ``select`` on a CTA-uniform flag when runtime, so one binary serves every shape
+of a runtime-shape kernel.
 
 The classes read spec attributes and the shape, and emit through the IR builder
 ``b``.
@@ -132,6 +135,22 @@ class DecodeShape:
         """Whether the decodes balance causal work (longest-first, fold, pair
         fold): under causal masking. A bool, fixed at compile time."""
         return bool(self.spec.causal)
+
+    def pair_fold(self, NP: int):
+        """Whether the pair fold applies: balancing, even NQB and more than one
+        round of work (``W > NP``). A bool or an i1, as :meth:`balance`."""
+        bal = self.balance()
+        if bal is False:
+            return False
+        nqb = self.static("nqb")
+        if nqb is not None and not self.runtime("w"):
+            return bal is True and nqb % 2 == 0 and self._baked("w") > NP
+        b = self.b
+        flag = b.land(
+            b.cmp_eq(b.land(self.val("nqb"), b.const_i32(1)), b.const_i32(0)),
+            b.cmp_lt(b.const_i32(NP), self.val("w")),
+        )
+        return flag if bal is True else b.land(flag, bal)
 
     def branch(self, flag, then, other):
         """``then()`` if ``flag`` else ``other()``: only the taken side is
@@ -279,6 +298,49 @@ def emit_fold(b, blk, shape: DecodeShape):
     return b.select(b.cmp_lt(blk, half), blk, qb_hi)
 
 
+def emit_pair_unit(b, wi, shape: DecodeShape, NP: int):
+    """``(unit, half)`` for ``wi < W`` (``W`` even): unit ``u`` holds items
+    ``2u, 2u+1``, and one CTA runs both halves on consecutive grid-stride steps.
+    In the last round, CTAs that still get two items get both halves of a unit.
+
+    Branch-free: every case is emitted and selected, each correction a no-op where
+    it does not apply (no whole double rounds, no tail, no paired tail); the only
+    divisors are NP, 2*NP and 2."""
+    c = b.const_i32
+    W = shape.val("w")
+    # Items before the last round: whole double rounds of 2*NP items.
+    rounds_end = b.mul(b.div(W, c(2 * NP)), c(2 * NP))
+    re_half = b.lshr(rounds_end, c(1))
+    paired_tail = b.sub(b.sub(W, rounds_end), c(NP))  # may be <= 0
+    pt = b.smax(paired_tail, c(0))
+    j = b.div(wi, c(NP))
+    unit = b.add(b.sub(wi, b.mul(j, c(NP))), b.mul(b.div(j, c(2)), c(NP)))
+    half = b.mod(j, c(2))
+    # Last round: CTAs below `paired_tail` still get both halves of a unit.
+    r = b.sub(wi, rounds_end)
+    s = b.sub(r, pt)
+    unit_t = b.add(b.add(re_half, pt), b.div(s, c(2)))
+    half_t = b.mod(s, c(2))
+    lo = b.cmp_lt(r, paired_tail)  # never when paired_tail <= 0
+    hi = b.cmp_lt(c(NP - 1), r)  # never when paired_tail <= 0 (tail <= NP)
+    unit_t = b.select(
+        lo,
+        b.add(re_half, r),
+        b.select(hi, b.add(b.sub(re_half, c(NP)), r), unit_t),
+    )
+    half_t = b.select(lo, c(0), b.select(hi, c(1), half_t))
+    in_rounds = b.cmp_lt(wi, rounds_end)
+    return b.select(in_rounds, unit, unit_t), b.select(in_rounds, half, half_t)
+
+
+def emit_pair_block(b, p, half, shape: DecodeShape):
+    """Query block of fold pair ``p``: ``p`` for the first half, ``NQB-1-p`` for
+    the second, so every unit costs the same under causal masking."""
+    first = b.cmp_lt(half, b.const_i32(1))
+    last = b.sub(shape.val("nqb"), b.const_i32(1))
+    return b.select(first, p, b.sub(last, p))
+
+
 class PersistDecode:
     """Grid-stride work index ``wi`` -> work item, for the persistent grid.
 
@@ -381,6 +443,64 @@ class PersistBtHkvMinor(PersistDecode):
             shape.balance(), lambda: emit_fold(b, blk, shape), lambda: blk
         )
         return Decoded(qb, hq, bt, hkv)
+
+
+class PersistHqMinorSwz(PersistDecode):
+    """Swizzled Head-first on the persistent grid: XCD ``a`` (``wi % M``, needs
+    ``M | NP``) owns head band ``a``. Under causal masking one CTA runs both blocks of a fold pair ``{p, NQB-1-p}`` on consecutive steps, so per-CTA cost
+    is balanced however NP and NQB divide; the unit's XCD is ``wi % M``. Per XCD,
+    fastest first: pair, head in band, batch. With ``W <= NP`` the plain decode
+    is emitted.
+
+    Odd NQB is not supported. It worked when tried: also pair the middle blocks
+    of two consecutive (head, batch) of the band into one unit (with
+    ``NQB = 2P+1`` it costs ``2·(P+1) = NQB+1``, as a fold pair), and run the
+    per-XCD leftover middle (odd heads x batch per band) as single items at the
+    end of the work index (``wi >= W - M``, XCD ``wi % M``)."""
+
+    name = "hq_minor_swz"
+    tag = "hqminswz"
+    fastdiv_divisors = ("nqb", "num_query_heads", "gqa")
+
+    def check(self, spec):
+        M = spec.chiplet_num_xcds
+        if spec.num_query_heads % M != 0 or spec.num_persistent % M != 0:
+            return (
+                f"{self.name} needs num_query_heads and num_persistent divisible by {M}"
+            )
+        if spec.causal and _spec_nqb(spec) % 2 != 0:
+            return (
+                f"{self.name} needs an even number of query blocks under causal "
+                "masking"
+            )
+        return None
+
+    def emit_decode(self, b, spec, wi, shape):
+        M, NP = spec.chiplet_num_xcds, spec.num_persistent
+
+        def paired():
+            unit, half = emit_pair_unit(b, wi, shape, NP)
+            a = b.mod(unit, b.const_i32(M))
+            rest = b.div(unit, b.const_i32(M))
+            p = shape.mod(rest, "nqb", 2)
+            hb = shape.div(rest, "nqb", 2)
+            return a, hb, emit_pair_block(b, p, half, shape)
+
+        def plain():
+            a = b.mod(wi, b.const_i32(M))
+            rest = b.div(wi, b.const_i32(M))
+            qb = shape.mod(rest, "nqb")  # if balancing: W <= NP, one item per CTA
+            hb = shape.div(rest, "nqb")
+            return a, hb, qb
+
+        a, hb, qb = shape.branch(shape.pair_fold(NP), paired, plain)
+        # Head band of Hq/M heads per XCD: hb // (Hq/M) == (M*hb) // Hq.
+        hq = b.add(
+            b.mul(a, shape.val("num_query_heads", M)),
+            shape.mod(hb, "num_query_heads", M),
+        )
+        bt = shape.div(hb, "num_query_heads", M)
+        return Decoded(qb, hq, bt)
 
 
 def _aligned_causal_error(spec, name: str):
@@ -486,6 +606,7 @@ PERSIST_DECODES = _registry(
     PersistQbMajor,
     PersistHkvMajor,
     PersistBtHkvMinor,
+    PersistHqMinorSwz,
     PersistGqaPair,
     PersistGqaPair2Phase,
 )

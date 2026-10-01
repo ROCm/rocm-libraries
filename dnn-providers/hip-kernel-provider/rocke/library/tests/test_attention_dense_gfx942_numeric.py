@@ -630,24 +630,44 @@ _PERSIST_CONFIGS = (
     (2, 1024, 15, 5),
 )
 
-# (dtype, persist_decode, interleave, sliding_window). Both decode orders pinned
-# explicitly: "auto" resolves per shape, which would split the set across two keys.
-# interleave only changes the qb_major body, so it rides that order alone.
+# hq_minor_swz needs Hq divisible by the XCD count and an even NQB under causal
+# masking, so it gets its own set, straddling NP the same way:
+#   W=80 < NP; W=320 and W=608 (pair fold, even NQB); MHA W=384; W=1536, W % NP = 16
+_SWZ_CONFIGS = (
+    (1, 512, 40, 8),
+    (2, 1024, 40, 8),
+    (2, 1536, 32, 32),
+    (19, 512, 16, 4),
+    (3, 2048, 64, 8),
+)
+
+# (dtype, persist_decode, interleave, sliding_window, configs). Every decode order
+# pinned explicitly: "auto" resolves per shape, which would split the set across
+# keys. interleave only changes the qb_major body, so it rides that order alone.
 _PERSIST_ONE_BINARY = [
-    pytest.param("fp16", "hkv_major", False, 0, id="hkv_major"),
-    pytest.param("fp16", "qb_major", False, 0, id="qb_major"),
-    pytest.param("fp16", "qb_major", True, 0, id="qb_major-interleave"),
-    pytest.param("fp16", "bt_hkv_minor", False, 0, id="bt_hkv_minor"),
-    pytest.param("bf16", "hkv_major", False, 128, id="hkv_major-swa128"),
-    pytest.param("bf16", "qb_major", False, 128, id="qb_major-swa128"),
+    pytest.param("fp16", "hkv_major", False, 0, _PERSIST_CONFIGS, id="hkv_major"),
+    pytest.param("fp16", "qb_major", False, 0, _PERSIST_CONFIGS, id="qb_major"),
+    pytest.param(
+        "fp16", "qb_major", True, 0, _PERSIST_CONFIGS, id="qb_major-interleave"
+    ),
+    pytest.param("fp16", "bt_hkv_minor", False, 0, _PERSIST_CONFIGS, id="bt_hkv_minor"),
+    pytest.param("fp16", "hq_minor_swz", False, 0, _SWZ_CONFIGS, id="hq_minor_swz"),
+    pytest.param(
+        "bf16", "hkv_major", False, 128, _PERSIST_CONFIGS, id="hkv_major-swa128"
+    ),
+    pytest.param(
+        "bf16", "qb_major", False, 128, _PERSIST_CONFIGS, id="qb_major-swa128"
+    ),
 ]
 
 
 @requires_gfx942_gpu
 @pytest.mark.gpu
-@pytest.mark.parametrize("dtype,persist_decode,interleave,window", _PERSIST_ONE_BINARY)
+@pytest.mark.parametrize(
+    "dtype,persist_decode,interleave,window,configs", _PERSIST_ONE_BINARY
+)
 def test_one_persistent_binary_serves_every_shape_and_head_config(
-    dtype, persist_decode, interleave, window
+    dtype, persist_decode, interleave, window, configs
 ):
     """The persistent-grid twin of the one-binary tests above.
 
@@ -689,7 +709,7 @@ def test_one_persistent_binary_serves_every_shape_and_head_config(
             ),
             interleave=interleave,
         )
-        for b, s, hq, hkv in _PERSIST_CONFIGS
+        for b, s, hq, hkv in configs
     ]
 
     # Preconditions: persistent, on the runtime path, the pinned order, one key --
@@ -706,13 +726,13 @@ def test_one_persistent_binary_serves_every_shape_and_head_config(
     keys = [attention_dense_cache_key(s, arch="gfx942") for s in specs]
     assert (
         len(set(keys)) == 1
-    ), f"persistent configs {_PERSIST_CONFIGS} did not share a cache key"
+    ), f"persistent configs {configs} did not share a cache key"
 
     _DENSE_LAUNCHER_CACHE.pop(keys[0], None)
     before = set(_DENSE_LAUNCHER_CACHE)
 
     launchers = []
-    for (B, S, hq, hkv), spec in zip(_PERSIST_CONFIGS, specs):
+    for (B, S, hq, hkv), spec in zip(configs, specs):
         torch.manual_seed(0)
         q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
         k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
@@ -749,7 +769,7 @@ def test_one_persistent_binary_serves_every_shape_and_head_config(
         "longer keyed by attention_dense_cache_key and this test is blind"
     )
     assert all(lau is launchers[0] for lau in launchers), (
-        f"persistent configs {_PERSIST_CONFIGS} share a cache key but were served "
+        f"persistent configs {configs} share a cache key but were served "
         "by DIFFERENT launcher objects -- the persistent kernel recompiled per config"
     )
     assert set(_DENSE_LAUNCHER_CACHE) - before == {keys[0]}, (
