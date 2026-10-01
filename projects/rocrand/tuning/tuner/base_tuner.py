@@ -34,6 +34,8 @@ import warnings
 from dataclasses import dataclass
 import confgen.parse
 import pathlib
+import re
+import subprocess
 
 """
 The following base class is used when implementing the tuning for new algorithms
@@ -87,8 +89,7 @@ ROCm HIP Python Wrapper: https://rocm.docs.amd.com/projects/hip-python/en/latest
 """
 Inclusive range for params tuning, edit these to adjust tuning grid range.
 """
-BLOCK_SIZES = [32, 64, 128, 256, 512, 1024, 2048]
-GRID_SIZES = [32, 64, 128, 256, 512, 1024]
+BLOCK_SIZES = [32, 64, 128, 256, 512, 1024]
 
 @dataclass
 class TunerArgs:
@@ -185,11 +186,33 @@ class BaseTuner(ABC):
         )
         defaults.update_with_kwargs(**args)
         cls(defaults).tune()
+
+    def _get_grid_sizes(self) -> str:
+        rocminfo_out = subprocess.check_output('rocminfo', encoding='utf-8')
+        match = re.search(r'^\s*Name:\s*gfx\d+.*?^\s*Compute Unit:\s*(\d+)',
+                        rocminfo_out, flags=re.MULTILINE | re.DOTALL)
+        if not match:
+            raise Exception('Could not find Compute Unit info in rocminfo output')
+        num_compute_units = int(match.group(1))
+        compute_unit_multipliers = [4, 5, 8, 10, 16, 32]
+        min_grid_size = 128
+        max_grid_size = 4096
+
+        grid_sizes = [128, 256, 512, 1024, 2048]
+        for cu_mul in compute_unit_multipliers:
+            new_grid_size = cu_mul * num_compute_units
+            if new_grid_size >= min_grid_size and new_grid_size <= max_grid_size:
+                grid_sizes.append(new_grid_size)
+        grid_sizes = list(set(grid_sizes))  # Unique
+        grid_sizes.sort()
+        return grid_sizes
     
     def _get_tune_params(self) -> OrderedDict:
         params = OrderedDict()
-        params["block_size_x"] = BLOCK_SIZES
-        params["grid_size"] = GRID_SIZES
+
+        params["block_size_x"] = BLOCK_SIZES    
+        params["grid_size"] = self._get_grid_sizes()
+
         return params
 
     def _get_restrictions(self) -> Callable[[dict], bool] | List[str]:
