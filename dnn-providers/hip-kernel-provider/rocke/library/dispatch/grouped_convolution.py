@@ -932,6 +932,23 @@ def _pick_group_merge(req: ConvGroupedRequest, tile_m: int, tile_n: int) -> int:
         # A degenerate shape is _request_errors' business, not this function's;
         # fall back to the caps that need no geometry.
         m = 0
+    return fwd_group_merge_for_geometry(groups, m, tile_m, tile_n)
+
+
+def fwd_group_merge_for_geometry(
+    groups: int, m: int, tile_m: int, tile_n: int
+) -> int:
+    """:func:`_pick_group_merge` with the request unwrapped to plain integers.
+
+    Split out so the sweep benchmark can centre its merge-degree window on the
+    *same* policy dispatch will apply, without constructing a
+    ``ConvGroupedRequest`` it does not otherwise need. Keeping one implementation
+    matters more than the indirection costs: the benchmark prunes the degree axis
+    around this pick, so a second copy drifting from this one would silently
+    sweep a window that no longer brackets what ships.
+
+    ``m <= 0`` means "geometry unknown" and drops the occupancy cap only.
+    """
     caps = [tile_n, _FWD_MERGE_MAX]
     if m > 0:
         m_tiles = -(-m // max(int(tile_m), 1))

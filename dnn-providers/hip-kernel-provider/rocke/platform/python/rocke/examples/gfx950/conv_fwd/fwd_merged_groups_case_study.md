@@ -23,6 +23,7 @@ approved access-controlled record.
 - [Finding 1: the win is on the A load, not the C store](#finding-1-the-win-is-on-the-a-load-not-the-c-store)
 - [Finding 2: the best degree is shape-dependent, and a flat cap is harmful](#finding-2-the-best-degree-is-shape-dependent-and-a-flat-cap-is-harmful)
 - [Finding 3: the diagonal belongs on the B load](#finding-3-the-diagonal-belongs-on-the-b-load)
+- [Finding 4: the sweep can be pruned without losing the optimum](#finding-4-the-sweep-can-be-pruned-without-losing-the-optimum)
 - [Correctness gate](#correctness-gate)
 - [Results](#results)
 - [Caveats](#caveats)
@@ -243,6 +244,112 @@ Two emitter details that are easy to get wrong:
   identical expressions: wgrad's history records that two copies of one gate is
   exactly how a dispatcher came to hand the builder specs the builder rejected.
 
+## Finding 4: the sweep can be pruned without losing the optimum
+
+Adding merged combinations grew the forward depthwise sweep from 8,880
+combinations to 34,530, which is what users feel as "merged group convolutions
+take a long time to compile". The cost is sweep *volume*, not per-kernel cost: a
+merged kernel is cheaper through comgr than an unmerged one at the same tile,
+because the diagonal collapses the B tile. Nothing is to be gained by making
+individual kernels cheaper; the question is how many to build.
+
+This section is qualitative by design. The measured evidence behind every claim
+in it lives in the approved access-controlled record, not here.
+
+Two observations make most of that volume redundant.
+
+**The degree axis is already answered.** `_pick_group_merge` (Finding 2) exists
+precisely to deduce the right `Gm` from shape geometry, and it recovers most of
+each shape's measured optimum on the depthwise corpus. Sweeping all six degrees
+to rediscover a number the dispatcher will compute analytically anyway is the
+single largest redundancy. But pruning to exactly the picked degree would make
+the sweep unable to contradict the policy it is supposed to validate — so the
+sweep keeps a **±1 window** over the *admissible* degrees, bracketing the pick
+rather than assuming it. `--group-merge-window RADIUS` controls the radius.
+
+The window must be over admissible degrees, not over `_FWD_MERGE_DEGREES` slots.
+`groups=72` caps at 8 and admits only `(8, 4, 2)`; a raw-tuple window around 8
+would name 32 and 16, which the sweep then drops, collapsing the bracket to one
+entry — the opposite of what the window is for.
+
+**The unmerged leg is a control, not a search.** It is swept to establish the
+baseline each merged configuration is measured against, and a baseline does not
+need every tile. `--unmerged-frac FRAC` samples it; the default keeps 10%.
+
+Both flags restore today's exhaustive behaviour exactly — `--group-merge-window
+-1 --unmerged-frac 1.0` reproduces the 34,530-combination pool with all six
+degrees present.
+
+### Validating the window out of sample
+
+Scoring the window on the corpus it was tuned against would be circular, so the
+window was scored on **12 synthesised held-out depthwise shapes** that appear
+nowhere in the corpus, chosen to populate each of the three regimes the policy
+can land in — ceiling-bound (`_FWD_MERGE_MAX`), divisor-bound (group counts with
+poor 2-adic valuation), and occupancy-bound (small `M`). Each was swept across
+the **full** degree axis and the **full** unmerged leg, and both the full and the
+pruned answer were then computed offline from those same measured rows, so no
+kernel is timed twice and the comparison isolates the pruning.
+
+The metric is `pruned / full`: how much slower is the kernel the pruned sweep
+ships. The obvious alternative — realised gain fraction,
+`(pruned - base) / (full - base)` — is not sufficient on its own, and the gap is
+not academic. On a shape whose exhaustive winner is the *unmerged* leg,
+`full == base`, so realised gain is 1.0 by construction no matter how badly the
+unmerged sampling hurt: the metric is blind to the only loss that shape can
+suffer. Exactly one of the 12 held-out shapes is that shape, which is why both
+are computed and `pruned / full` is the one that decides.
+
+Scored across the held-out shapes and 64 sampling seeds each, at the shipped
+settings (radius 1, 10% unmerged), the conclusions are:
+
+- The pruned sweep's winner is **indistinguishable from the exhaustive sweep's**
+  on these shapes — the shortfall is far inside the tolerance that would make it
+  worth sweeping the extra degrees.
+- The ±1 bracket is **load-bearing, not decoration**: at radius 0 the worst
+  held-out shape degrades enough to be visible to a user. Trusting the policy's
+  pick outright is the one version of this change that would not be safe.
+- Radius 2 is indistinguishable from radius 1, so the extra degrees buy nothing.
+- Sampling the unmerged leg is nearly free, which is what "it is a control, not a
+  search" predicts.
+
+### Cost
+
+Compared back to back on one device at `--sample 1.0`, the pruned defaults cut
+the forward depthwise sweep from 34,530 combinations to 14,208, and cut sweep
+wall time by substantially more than that cardinality ratio alone — the
+combinations the pruning keeps skew merged, and merged kernels are the cheap
+ones.
+
+The pruned pool is a strict subset of the exhaustive pool — verified directly,
+10,464 compiled configurations of 25,376, every one present in both arms.
+
+### Why that A/B does not measure performance
+
+The back-to-back comparison above is a **compile-time** measurement only; its two
+`Best:` lines are not comparable and no perf claim rests on them. Across the
+10,464 configurations common to both arms, the same kernel timed in two different
+runs varies enough that a meaningful share of identical configurations disagree
+between arms. These depthwise shapes are short-running, and at the default timed
+iteration count the max-order-statistic over tens of thousands of candidates is
+dominated by that noise. Reading a winner out of it would be reading noise as
+signal — which is why the question above is answered offline from one set of
+measured rows rather than from two runs.
+
+### Keeping the copy honest
+
+The benchmark deliberately does **not** import the dispatcher — the sweep is the
+ground truth the policy is tuned against, so importing the policy into the sweep
+would make the measurement depend on the thing being measured. The cost is a
+hand-copied `_fwd_merge_pick`, and the mirror is what makes that copy safe:
+`fwd_group_merge_for_geometry` was extracted from `_pick_group_merge` as a pure
+refactor (no emission change), and
+[`library/tests/test_fwd_merge_window.py`](../../../../../../library/tests/test_fwd_merge_window.py)
+asserts the two agree across 10,725 `(groups, M, tile_m, tile_n)` points plus the
+three shared constants. A change to `_FWD_MERGE_MAX` / `_FWD_MERGE_MIN_CTAS` /
+`_FWD_MERGE_DEGREES` that is not mirrored fails there, rather than silently
+producing a sweep that brackets the wrong degree.
+
 ## Correctness gate
 
 Every measured arm in the results below passed an on-silicon numeric check in
@@ -382,6 +489,18 @@ untouched. That is the designed fallback, not a failure to improve.
   one. A sampled sweep can miss a shape's true optimum in either arm; the
   sampling is identical for both arms, so the ratio is the defensible quantity
   and the per-arm bests are not.
+- **Pruning the sweep by the dispatch policy is mildly circular**, and the ±1
+  window mitigates that without removing it. A degree the policy is wrong about
+  by more than one admissible step is outside the bracket and the pruned sweep
+  cannot report it. The held-out validation in Finding 4 is what bounds the
+  residual risk — it was designed for this specific question and found no loss at
+  radius 1 — but it bounds it on 12 shapes, not on all shapes. `--group-merge-window -1`
+  exists so that any shape suspected of being that case can be re-swept exhaustively.
+- Finding 4's compile-time A/B is a **wall-time** measurement. Its per-arm `Best:`
+  configurations are not comparable: run-to-run timing noise on these
+  short-running kernels moves a meaningful share of identical configurations.
+  The conclusion there comes from scoring both policies offline against one set
+  of measured rows, never from comparing two runs.
 - `async_dma`, pointwise (`Y == X == 1`), and `wave_size != 64` are explicitly
   **not** supported under merge and are rejected by the gate. Pointwise is the
   notable one — it is where merging should be most attractive, and it is
@@ -417,6 +536,24 @@ python3 library/benchmarks/common/benchmark_implicit_gemm_conv.py \
 `--verify` gates **every** timed configuration, not just the first; the
 `--help` string is misleading on this point, the call site in the per-config
 loop is authoritative.
+
+Since Finding 4 the command above sweeps the **pruned** space. To reproduce the
+pre-pruning pool — 34,530 combinations, all six degrees, full unmerged leg — pin
+both axes explicitly:
+
+```bash
+    --group-merge-window -1 --unmerged-frac 1.0
+```
+
+Pin them for any measurement whose purpose is to *evaluate* the degree policy;
+leaving them at their defaults would score the policy against itself. Everything
+in Findings 1–3 predates the flags and corresponds to `-1 / 1.0`.
+
+The mirror test is CPU-only and needs no device:
+
+```bash
+python3 -m pytest library/tests/test_fwd_merge_window.py -q
+```
 
 Correctness and gate:
 
@@ -454,3 +591,6 @@ ROCKE_LLVM_FLAVOR=llvm22 python3 tools/check_byte_identity.py
 | Merge + pointwise (`Y == X == 1`) | **Defer** | The flat fast path builds `valid` from scratch with no slot for the diagonal. Highest-value follow-up: this is where merging should pay most |
 | Merge + WMMA / `wave_size != 64` | **Defer** | Separate fragment mapping; gated off rather than guessed |
 | Widening dispatch's forward tile selection | **Defer** | Pre-existing and independent of merging, but it is what stands between the dispatch path and the sweep result |
+| `--group-merge-window` default of 1 | **Keep** | Substantially cheaper sweeps for an out-of-sample shortfall small enough not to matter. Radius 0 is visibly worse on one held-out shape; radius 2 is indistinguishable from radius 1 |
+| `--unmerged-frac` default of 0.10 | **Keep** | The unmerged leg is the baseline control, not a search; sampling it is nearly free out of sample |
+| Both pruning axes flag-gated rather than hardcoded | **Keep** | A sweep pruned by the dispatch policy cannot be used to evaluate that policy. `-1 / 1.0` restores the exhaustive pool exactly, and is the required setting for any future degree-policy work |

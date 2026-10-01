@@ -93,6 +93,80 @@ _SPLIT_K_AUTO = (128, 64, 32, 16, 8, 4, 2, 1)
 _GROUP_MERGE_SWEEP = (2, 4, 8, 16, 32, 64)
 
 
+# Mirrors dispatch.grouped_convolution._FWD_MERGE_{DEGREES,MAX,MIN_CTAS} and the
+# body of fwd_group_merge_for_geometry -- this file is a standalone sweep driver
+# that deliberately does not import the dispatcher (see _MAX_GRID_DIM_Z above),
+# and that separation matters more here than anywhere else in the file: the sweep
+# is the ground truth the dispatch policy is *tuned against*, so importing the
+# policy into it would make the measurement depend on the thing being measured.
+#
+# The copy is kept honest by test_fwd_merge_window.py, which imports both and
+# asserts they agree over the whole (groups, M, tile) grid the sweep can reach.
+_FWD_MERGE_DEGREES_MIRROR = (64, 32, 16, 8, 4, 2)
+_FWD_MERGE_MAX_MIRROR = 32
+_FWD_MERGE_MIN_CTAS_MIRROR = 512
+
+
+def _fwd_merge_pick(groups: int, m: int, tile_m: int, tile_n: int) -> int:
+    """Local mirror of the dispatch-side merge-degree policy. See note above."""
+    caps = [tile_n, _FWD_MERGE_MAX_MIRROR]
+    if m > 0:
+        m_tiles = -(-m // max(int(tile_m), 1))
+        caps.append(max(1, (m_tiles * groups) // _FWD_MERGE_MIN_CTAS_MIRROR))
+    cap = min(caps)
+    for gm in _FWD_MERGE_DEGREES_MIRROR:
+        if gm <= cap and groups % gm == 0:
+            return gm
+    return 1
+
+
+def _group_merge_window(
+    groups: int, m: int, tile_m: int, tile_n: int, radius: int
+) -> tuple:
+    """Merge degrees worth sweeping for one tile geometry.
+
+    The full degree axis is a free cross-product: six degrees multiply the whole
+    tile/warp/pipeline/epilogue grid, and on a depthwise fwd shape that is what
+    takes the sweep from ~8.9k combos to ~34.5k. But the degree is not a free
+    variable at *dispatch* time -- the policy chooses it analytically from
+    (groups, M, tile) -- so the sweep only has to confirm that pick and its
+    immediate neighbours, not rediscover the whole curve.
+
+    So: centre a window of ``2 * radius + 1`` degrees on what dispatch would pick
+    for this geometry. ``radius = 0`` sweeps the pick alone; the default 1 brackets
+    it on both sides, which is what lets the sweep still *disagree* with the policy
+    (it can report that a neighbour won) rather than merely ratifying it.
+
+    The window is taken over the degrees admissible for this geometry, not over
+    ``_FWD_MERGE_DEGREES`` positions: ``G = 72`` admits only 2/4/8, and a window
+    indexed on the raw list would spend two of its three slots on 16 and 32, which
+    the gate rejects anyway. Clipping at both ends keeps the width at
+    ``2 * radius + 1`` whenever that many degrees are admissible at all.
+
+    Returns descending degrees, matching ``_FWD_MERGE_DEGREES`` order. Empty when
+    no degree is admissible -- the shape then sweeps unmerged only, which is what
+    the emitter gate would force regardless.
+    """
+    admissible = [
+        gm
+        for gm in sorted(_GROUP_MERGE_SWEEP, reverse=True)
+        if groups % gm == 0 and gm <= tile_n
+    ]
+    if not admissible:
+        return ()
+    pick = _fwd_merge_pick(groups, m, tile_m, tile_n)
+    if pick <= 1:
+        # No degree survives the policy's caps (occupancy, typically). The gate
+        # still admits some, and the sweep is where a wrong cap should show up,
+        # so fall back to the smallest admissible degrees rather than nothing.
+        idx = len(admissible) - 1
+    else:
+        idx = admissible.index(pick) if pick in admissible else len(admissible) - 1
+    width = 2 * radius + 1
+    lo = max(0, min(idx - radius, len(admissible) - width))
+    return tuple(admissible[lo : lo + width])
+
+
 # ---------------------------------------------------------------------------
 # Result record
 # ---------------------------------------------------------------------------
@@ -834,6 +908,38 @@ def main() -> int:
         type=int,
         default=0,
         help="RNG seed used by --sample (default: 0)",
+    )
+    parser.add_argument(
+        "--group-merge-window",
+        type=int,
+        default=1,
+        dest="group_merge_window",
+        metavar="RADIUS",
+        help=(
+            "depthwise fwd only: sweep only the merge degrees within RADIUS of "
+            "the degree dispatch would pick for each tile geometry, instead of "
+            "all of %(sweep)s. RADIUS=0 sweeps the pick alone, 1 (default) "
+            "brackets it on both sides so the sweep can still report that a "
+            "neighbour beat the pick, -1 restores the exhaustive degree axis. "
+            "The degree is chosen analytically at dispatch time, so sweeping it "
+            "as a free cross-product multiplies the whole tile/warp/pipeline "
+            "grid to confirm a curve that is never searched in production."
+        ).replace("%(sweep)s", str(list(_GROUP_MERGE_SWEEP))),
+    )
+    parser.add_argument(
+        "--unmerged-frac",
+        type=float,
+        default=0.10,
+        dest="unmerged_frac",
+        metavar="FRAC",
+        help=(
+            "depthwise fwd only: fraction of the unmerged (Gm=1) combos to keep "
+            "(default: 0.10). On depthwise the unmerged leg is a baseline rather "
+            "than a candidate -- a merged degree wins on nearly every shape in "
+            "the corpus -- and it is also the slowest leg to compile, so keeping "
+            "all of it spends much of the sweep on a ratio nothing ships. "
+            "Use 1.0 to restore the exhaustive baseline. Seeded by --seed."
+        ),
     )
     parser.add_argument(
         "--verify",
@@ -2139,6 +2245,41 @@ def _run_sweep(
     # groups onto GemmN and GemmK so both regain a Gm-wide run.
     _depthwise = p.cpg == 1 and p.kpg == 1 and p.groups > 1
     if _depthwise:
+        # The unmerged leg is a *baseline* here, not a candidate: across the
+        # depthwise corpus a merged degree wins on all but one shape. It is also
+        # the expensive leg to compile -- scalar activation loads make an
+        # unmerged kernel markedly slower through comgr than a merged one -- so
+        # sweeping it exhaustively spends much of the budget pinning down a
+        # ratio nothing ships. Sample it by default; --unmerged-frac 1.0
+        # restores the exhaustive baseline.
+        if args.unmerged_frac < 1.0:
+            _n_unmerged = len(combos)
+            combos = _sample_combos(
+                combos, args.unmerged_frac, args.seed + case_idx
+            )
+            print(
+                f"  depthwise: sampling {len(combos)}/{_n_unmerged} unmerged "
+                f"(Gm=1) combos — on depthwise this leg is the baseline, not a "
+                f"candidate. --unmerged-frac 1.0 restores all of it.",
+                flush=True,
+            )
+
+        # Merge degree swept per tile geometry rather than as a free
+        # cross-product. See _group_merge_window; --group-merge-window -1
+        # restores the exhaustive degree axis.
+        _full_degrees = args.group_merge_window < 0
+        _all_degrees = tuple(sorted(_GROUP_MERGE_SWEEP, reverse=True))
+        _windows = {
+            (_tm, _tn): (
+                _all_degrees
+                if _full_degrees
+                else _group_merge_window(
+                    p.groups, p.M, _tm, _tn, args.group_merge_window
+                )
+            )
+            for _tm in _tile_mn
+            for _tn in _tile_mn
+        }
         _gm_combos = [
             FwdCombo(*c, _gm)
             for c in itertools.product(
@@ -2152,7 +2293,7 @@ def _run_sweep(
                 _EPILOGUES,
             )
             if c[3] * c[5] <= c[0] and c[4] * c[5] <= c[1]
-            for _gm in _GROUP_MERGE_SWEEP
+            for _gm in _windows[(c[0], c[1])]
             # Mirrors fwd_group_merge_available so the pool is not spun up for
             # combos the gate rejects anyway. ``Gm <= tile_n`` because the merged
             # GEMM-N extent *is* Gm; a larger degree would put group columns
@@ -2160,12 +2301,17 @@ def _run_sweep(
             # ``default`` epilogue is dropped rather than filtered late: merging
             # takes the store vector past 1, which is_valid_spec answers with
             # "default epilogue is not supported with vector size c".
+            # Redundant against _group_merge_window's own filter, kept because
+            # the --group-merge-window -1 path bypasses that filter entirely.
             if p.groups % _gm == 0 and _gm <= c[1] and c[7] != "default"
         ]
         combos = combos + _gm_combos
+        _swept_degrees = sorted({_gm for _w in _windows.values() for _gm in _w})
         print(
             f"  depthwise: +{len(_gm_combos)} group-merged combos "
-            f"(Gm in {_GROUP_MERGE_SWEEP}) swept alongside the unmerged ones. "
+            f"(Gm in {_swept_degrees or [1]}"
+            f"{'' if _full_degrees else ', windowed per tile on the dispatch pick'}"
+            f") swept alongside the unmerged ones. "
             f"Merging divides the grid by Gm and multiplies GemmK by it, so "
             f"MFMA issue is unchanged and the redundant MACs land in lanes that "
             f"were idle.",
