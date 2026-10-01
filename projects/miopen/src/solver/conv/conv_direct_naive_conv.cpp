@@ -394,7 +394,7 @@ constexpr size_t NAIVE_MAC_PER_1K_LANE_CYCLES = 3;
 // TdrDelay is 2 s, so 1 s leaves 2x margin. The ceiling exists only to keep an
 // outlandish env value from overflowing the multiply below.
 constexpr size_t NAIVE_CONV_DEFAULT_BUDGET_MS = 1000;
-constexpr size_t NAIVE_CONV_MAX_BUDGET_MS     = 60 * 1000;
+constexpr size_t NAIVE_CONV_MAX_BUDGET_MS     = static_cast<size_t>(60) * 1000;
 
 // Limit used when the device cannot report the capabilities the model needs. This is
 // the fixed pre-device-aware default; it is conservative for every current part.
