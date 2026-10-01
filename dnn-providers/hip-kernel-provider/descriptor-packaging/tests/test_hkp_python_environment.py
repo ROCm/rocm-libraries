@@ -164,6 +164,9 @@ class _Environment:
         self.write_wheels()
         (self.source / "consumer.py").write_text(CONSUMER, encoding="utf-8")
         (self.source / "authored").mkdir()
+        self.loose = self.source / "loose" / "model.bin"
+        self.loose.parent.mkdir()
+        self.loose.write_text("model-one", encoding="utf-8")
         (self.source / "kpack with spaces" / "rocm_kpack").mkdir(parents=True)
         # Include and call production functions, not a copy of their commands.
         (self.source / "CMakeLists.txt").write_text(
@@ -184,7 +187,8 @@ foreach(label first second)
         ROCM_KPACK_DIR "${{CMAKE_CURRENT_SOURCE_DIR}}/kpack with spaces"
         ROCKE_INTERP "${{interp}}" ROCKE_READY "${{ready}}"
         ROCKE_PYTHON_DIR "${{python_dir}}" ROCKE_WHEEL_STAMP "${{wheel_stamp}}"
-        ROCKE_COMGR_LIB "${{HIPKERNELPROVIDER_ROCKE_COMGR_LIB}}" PACK_JOBS 2)
+        ROCKE_COMGR_LIB "${{HIPKERNELPROVIDER_ROCKE_COMGR_LIB}}" PACK_JOBS 2
+        STAGE_FILES "${{CMAKE_CURRENT_SOURCE_DIR}}/loose/model.bin" "gfx942/model.bin")
 endforeach()
 """,
             encoding="utf-8",
@@ -258,10 +262,12 @@ endforeach()
             (self.build_dir / name / "imports.json").read_text(encoding="utf-8")
         )
 
-    def advance_file_clock(self):
+    def advance_file_clock(self, *outputs):
         # Observe a later filesystem tick instead of guessing a sleep duration or
         # aging readiness behind unrelated inputs (which would force a rebuild).
-        newest = max(self.ready.stat().st_mtime_ns, self.digest.stat().st_mtime_ns)
+        newest = max(
+            path.stat().st_mtime_ns for path in (self.ready, self.digest, *outputs)
+        )
         clock = self.root / "filesystem-clock"
         deadline = time.monotonic() + 10
         while True:
@@ -470,3 +476,29 @@ def test_failed_refresh_clears_readiness_and_recovers(failure, build_environment
     env.build()
     _assert_wheels(env, "repaired")
     assert "removed_module" not in env.consumer()["modules"]
+
+
+def test_staged_files_survive_a_repack_and_follow_their_source(build_environment):
+    """A pack wipes OUT_ROOT; files staged into it must come back with every pack."""
+    env = build_environment()
+    authored = env.source / "authored" / "descriptor.json"
+    authored.write_text("one", encoding="utf-8")
+    env.configure()
+    env.build()
+    packed = env.build_dir / "first" / "imports.json"
+    staged = env.build_dir / "first" / "gfx942" / "model.bin"
+    assert staged.read_text(encoding="utf-8") == "model-one"
+
+    # An edit to the authored root alone repacks, and the repack wipes the tree.
+    before = packed.stat().st_mtime_ns
+    env.advance_file_clock(packed, staged)
+    authored.write_text("two", encoding="utf-8")
+    env.build()
+    assert packed.stat().st_mtime_ns != before
+    assert staged.read_text(encoding="utf-8") == "model-one"
+
+    # An edit to the staged source alone reaches the tree.
+    env.advance_file_clock(packed, staged)
+    env.loose.write_text("model-two", encoding="utf-8")
+    env.build()
+    assert staged.read_text(encoding="utf-8") == "model-two"

@@ -164,12 +164,91 @@ function(hkp_diagnose_no_arches what required source_var rejected)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# _hkp_resolve_stage_files(<out_sources> <out_commands> <out_manifest> <name> <out_root>
+#                          [<src> <dest>]...)
+#   Resolve hkp_wire_pack_target's STAGE_FILES pairs into the pack command's inputs
+#   (<out_sources>), the COMMAND steps that create the destination directories and copy
+#   each file (<out_commands>), and one "<src> -> <dest>" line per pair for the input
+#   manifest (<out_manifest>). Each <dest> is relative to <out_root>. Resolved at
+#   configure time so a malformed list fails the configure rather than shipping a tree
+#   with a file missing or written outside <out_root>.
+# ---------------------------------------------------------------------------
+function(_hkp_resolve_stage_files out_sources out_commands out_manifest name out_root)
+    set(_pairs ${ARGN})
+    list(LENGTH _pairs _stage_len)
+    math(EXPR _stage_odd "${_stage_len} % 2")
+    if(_stage_odd)
+        message(FATAL_ERROR
+            "hkp: root '${name}' has an odd STAGE_FILES list (${_pairs}); "
+            "it takes <src> <dest> pairs.")
+    endif()
+    set(_sources "")
+    set(_dirs "")
+    set(_copies "")
+    set(_manifest "")
+    while(_pairs)
+        list(POP_FRONT _pairs _src _rel)
+        cmake_path(NORMAL_PATH _rel OUTPUT_VARIABLE _norm)
+        cmake_path(HAS_ROOT_PATH _norm _rooted)
+        if(_rooted OR _norm STREQUAL "" OR _norm STREQUAL ".." OR _norm MATCHES "^\\.\\./")
+            message(FATAL_ERROR
+                "hkp: root '${name}' stages '${_src}' to '${_rel}', "
+                "which is not a path inside OUT_ROOT (${out_root}).")
+        endif()
+        set(_dest "${out_root}/${_norm}")
+        get_filename_component(_dir "${_dest}" DIRECTORY)
+        list(APPEND _sources "${_src}")
+        list(APPEND _dirs "${_dir}")
+        list(APPEND _copies COMMAND "${CMAKE_COMMAND}" -E copy "${_src}" "${_dest}")
+        list(APPEND _manifest "${_src} -> ${_norm}")
+    endwhile()
+    set(_commands "")
+    if(_dirs)
+        list(REMOVE_DUPLICATES _dirs)
+        set(_commands COMMAND "${CMAKE_COMMAND}" -E make_directory ${_dirs})
+    endif()
+    list(APPEND _commands ${_copies})
+    set(${out_sources} "${_sources}" PARENT_SCOPE)
+    set(${out_commands} "${_commands}" PARENT_SCOPE)
+    set(${out_manifest} "${_manifest}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_write_input_manifest(<out_var> <name> [<entry>]...)
+#   Write root <name>'s sorted input set to a manifest file and return its path.
+#
+#   A pack edge's globbed inputs cover an added or edited file but not a REMOVED one: a
+#   shorter DEPENDS list makes no input newer and changes no command, so the edge would
+#   stay clean, the wipe would never fire, and the staged copy of a deleted descriptor
+#   would survive an incremental build.
+#
+#   This manifest puts the input SET into the edge. Its content changes when a path
+#   leaves either glob, or a STAGE_FILES pair is dropped or retargeted, which makes it
+#   newer than the stamp and forces the pack. file(CONFIGURE) rewrites only when the
+#   content differs, so an unchanged tree does not repack on every configure. It lives
+#   in the binary dir rather than under the output root because the pack command wipes
+#   that tree -- a dependency deleted by the command it guards would make every build
+#   repack. @ONLY because the body is paths, not a template.
+# ---------------------------------------------------------------------------
+function(_hkp_write_input_manifest out_var name)
+    set(_manifest "${CMAKE_CURRENT_BINARY_DIR}/hkp-${name}-inputs.txt")
+    set(_paths ${ARGN})
+    list(SORT _paths)
+    string(REPLACE ";" "\n" _body "${_paths}")
+    # cmake-lint: disable=E1126
+    #   cmake-lint carries no form spec for file(CONFIGURE) and reports it as an
+    #   invalid discriminator. It is valid CMake from 3.18; the floor here is 3.25.
+    file(CONFIGURE OUTPUT "${_manifest}" CONTENT "${_body}\n" @ONLY)
+    set(${out_var} "${_manifest}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_wire_pack_target(NAME <label> SOURCE_ROOT <dir>
 #               ARCHES <list> [REJECTED <list>] HIPCC <path>
 #               ROCM_KPACK_DIR <dir> OUT_ROOT <dir>
 #               ROCKE_INTERP <path> ROCKE_READY <path> ROCKE_PYTHON_DIR <dir>
 #               ROCKE_WHEEL_STAMP <path> [ROCKE_COMGR_LIB <path>]
-#               [PACK_JOBS <n>])
+#               [PACK_JOBS <n>] [STAGE_FILES <src> <dest> [<src> <dest>...]])
 #   Wire the compile -> prune -> pack DAG for ONE authored source root.
 #
 #   The root is walked recursively. Each descriptor's authored
@@ -183,6 +262,16 @@ endfunction()
 #   Installation is not wired here -- a root delivers into arch_content/ or
 #   test_arch_content/ in the build tree, and those two trees are installed
 #   wholesale by hip-kernel-provider/CMakeLists.txt.
+#
+#   STAGE_FILES delivers files the packer does not produce into OUT_ROOT: each
+#   <src> is copied to OUT_ROOT/<dest>, <dest> being relative to OUT_ROOT. They
+#   cannot be staged by a rule of their own, because the pack wipes OUT_ROOT: such
+#   a copy holds no edge to the pack, so a pack rerun by an edit to anything else
+#   it reads deletes the copy and nothing restores it. The copies are steps of the
+#   pack command instead, after the packer writes and before the stamp, and each
+#   <src> is an input of it -- so every pack restages them, an edit to one repacks,
+#   and the stamp vouches for them with the rest of the tree. <dest> must not name
+#   a path the packer writes, and may neither be rooted nor climb out of OUT_ROOT.
 #
 #   A source root that is not a directory, or a missing output root, is a
 #   configure error: each one makes the pack step write nothing, and a consumer
@@ -228,7 +317,7 @@ function(hkp_wire_pack_target)
     set(_one NAME SOURCE_ROOT ARCHES REJECTED HIPCC ROCM_KPACK_DIR
         OUT_ROOT ROCKE_INTERP ROCKE_READY ROCKE_PYTHON_DIR ROCKE_COMGR_LIB
         ROCKE_WHEEL_STAMP PACK_JOBS)
-    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "")
+    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "STAGE_FILES")
 
     if(NOT IS_DIRECTORY "${ARG_SOURCE_ROOT}")
         message(FATAL_ERROR
@@ -244,6 +333,9 @@ function(hkp_wire_pack_target)
         hkp_diagnose_no_arches("source root '${ARG_NAME}'" FALSE ""
                                "${ARG_REJECTED}")
     endif()
+
+    _hkp_resolve_stage_files(_stage_sources _stage_commands _stage_manifest
+                             "${ARG_NAME}" "${ARG_OUT_ROOT}" ${ARG_STAGE_FILES})
 
     set(_inter_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-intermediate")
     # Inside the output root, so the stamp shares the fate of the tree it vouches for.
@@ -302,27 +394,8 @@ function(hkp_wire_pack_target)
          "${HKP_PYTHON_ROOT}/hkp_pack/*.py"
          "${ARG_ROCM_KPACK_DIR}/rocm_kpack/*.py")
 
-    # The globs above carry each input as its own edge, which covers an added or
-    # edited file but not a REMOVED one: a shorter DEPENDS list makes no input
-    # newer and changes no command, so the edge would stay clean, the wipe below
-    # would never fire, and the staged copy of a deleted descriptor would survive
-    # an incremental build.
-    #
-    # This manifest puts the input SET into the edge. Its content changes when a
-    # path leaves either glob, which makes it newer than the stamp and forces the
-    # pack. file(CONFIGURE) rewrites only when the content differs, so an
-    # unchanged tree does not repack on every configure. It lives in the binary
-    # dir rather than under ARG_OUT_ROOT because the pack command wipes that tree
-    # -- a dependency deleted by the command it guards would make every build
-    # repack. @ONLY because the body is paths, not a template.
-    set(_input_manifest "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-inputs.txt")
-    set(_manifest_paths ${_source_inputs} ${_tool_sources})
-    list(SORT _manifest_paths)
-    string(REPLACE ";" "\n" _manifest_body "${_manifest_paths}")
-    # cmake-lint: disable=E1126
-    #   cmake-lint carries no form spec for file(CONFIGURE) and reports it as an
-    #   invalid discriminator. It is valid CMake from 3.18; the floor here is 3.25.
-    file(CONFIGURE OUTPUT "${_input_manifest}" CONTENT "${_manifest_body}\n" @ONLY)
+    _hkp_write_input_manifest(_input_manifest "${ARG_NAME}"
+                              ${_source_inputs} ${_tool_sources} ${_stage_manifest})
 
     hkp_require_kpack_runtime("${_interp}" "the ${_interp_what}")
 
@@ -354,6 +427,9 @@ function(hkp_wire_pack_target)
     # nothing never creates it and `touch` does not create parents. Such a root holds
     # the stamp alone, and installs as an empty directory: the install rules exclude the
     # stamp file, not the directory it sits in.
+    #
+    # STAGE_FILES copies land between the packer and the stamp, so a pack that fails
+    # before them leaves no stamp, and a stamp never vouches for a tree missing them.
     add_custom_command(
         OUTPUT "${_stamp}"
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${ARG_OUT_ROOT}"
@@ -368,10 +444,11 @@ function(hkp_wire_pack_target)
                 --source-label "${ARG_NAME}"
                 ${_wheel_stamp_arg}
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${ARG_OUT_ROOT}"
+        ${_stage_commands}
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}
                 "${_input_manifest}"
-                ${_interp_dep} ${_wheel_dep}
+                ${_interp_dep} ${_wheel_dep} ${_stage_sources}
         COMMENT "hkp: packing root '${ARG_NAME}' for ${ARG_ARCHES}"
         VERBATIM)
 
@@ -1508,6 +1585,11 @@ endfunction()
 #   declares an architecture this build packs for; a named root in the same state is the
 #   packer's hard failure. Root set but not a directory = fatal. The tests are wired
 #   regardless.
+#
+#   HIPKERNELPROVIDER_PRODUCT_STAGE_FILES, set by the caller, is the product pack's
+#   STAGE_FILES list: content outside the production source root that must ship in the
+#   production tree. A dormant product pack stages nothing, so the caller delivers that
+#   content itself then.
 # ---------------------------------------------------------------------------
 function(hkp_add_packaging)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -1552,7 +1634,8 @@ function(hkp_add_packaging)
             HIPCC "${HKP_HIPCC}"
             ROCM_KPACK_DIR "${_rocm_kpack_dir}"
             OUT_ROOT "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}"
-            ${_rocke_args})
+            ${_rocke_args}
+            STAGE_FILES ${HIPKERNELPROVIDER_PRODUCT_STAGE_FILES})
     else()
         # Every dormant reason passes through here, so none can reach a message(STATUS)
         # while leaving 'product' looking misspelled to hkp_register_census_tests().
