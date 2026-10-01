@@ -182,18 +182,31 @@ def _rocm_sdk_dll(stem: str) -> Optional[str]:
 
 
 def _torch_rocm_version() -> Optional[tuple]:
-    """``(major, minor)`` of the ROCm that torch was built against, or None.
+    """``(major, minor)`` ROCm **release** torch runs on, or None.
 
-    Read off ``torch.version.hip`` (e.g. ``'6.3.42134-a9a80e791'``). Only
-    consults a torch that is *already* imported -- never imports it.
+    Compared against :func:`_newest_rocm_root_version`, a release, so this must
+    be one too:
+
+    - TheRock wheels: ``rocm_sdk.__version__`` (e.g. ``'10.1.0a20260822'``),
+      imported by ``import torch``. Their ``torch.version.hip`` is the *HIP*
+      version (``'7.16.26332'`` on ROCm 10.1), a different scheme, so it is not
+      used there.
+    - Older wheels: ``torch.version.hip`` (e.g. ``'6.3.42134-a9a80e791'``),
+      where the HIP version is the ROCm release.
+
+    Only consults modules that are *already* imported -- never imports them.
     """
     torch_mod = sys.modules.get("torch")
     if torch_mod is None:
         return None
-    hip = getattr(getattr(torch_mod, "version", None), "hip", None)
-    if not hip:
+    sdk_version = getattr(sys.modules.get("rocm_sdk"), "__version__", None)
+    if sdk_version:
+        version = sdk_version
+    else:
+        version = getattr(getattr(torch_mod, "version", None), "hip", None)
+    if not version:
         return None
-    nums = re.findall(r"\d+", str(hip))
+    nums = re.findall(r"\d+", str(version))
     if len(nums) < 2:
         return None
     return (int(nums[0]), int(nums[1]))
@@ -218,7 +231,7 @@ def _rocm_version_from_libdir(libdir: str) -> Optional[tuple]:
     - A packaged ROCm keeps its runtime under a versioned *component* subdir,
       ``/opt/rocm-7.2.0/core-7.13/lib``. ``core-7.13`` is a component version,
       not a release: taking the parent of ``lib`` would yield ``(7, 13)`` and
-      compare it against ``torch.version.hip``, which reports the release. A
+      compare it against :func:`_torch_rocm_version`, which reports the release. A
       torch on ROCm 7.10 would then look *older* than a 7.2 install, because
       ``(7, 10) < (7, 13)`` -- and comgr would be demoted backwards.
 

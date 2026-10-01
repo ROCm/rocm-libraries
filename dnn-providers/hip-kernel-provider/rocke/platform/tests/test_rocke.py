@@ -6792,6 +6792,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
         torch_stub.version = types.SimpleNamespace(hip="7.10.0-abc123")
 
         with mock.patch.dict(sys.modules, {"torch": torch_stub}):
+            sys.modules.pop("rocm_sdk", None)  # older-wheel case: no TheRock SDK
             with mock.patch.object(
                 rc, "_rocm_root_libdirs", return_value=["/opt/rocm-7.2.0/core-7.13/lib"]
             ):
@@ -6810,6 +6811,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
         torch_stub.version = types.SimpleNamespace(hip="7.0.51831-a1b2c3")
 
         with mock.patch.dict(sys.modules, {"torch": torch_stub}):
+            sys.modules.pop("rocm_sdk", None)  # older-wheel case: no TheRock SDK
             with mock.patch.object(
                 rc, "_rocm_root_libdirs", return_value=["/opt/rocm/lib"]
             ):
@@ -6818,6 +6820,35 @@ class TestLibDiscoveryOrder(unittest.TestCase):
                 ):
                     self.assertEqual(rc._newest_rocm_root_version(), (7, 2))
                     self.assertTrue(rc._torch_comgr_is_stale())
+
+    def test_therock_torch_compares_its_rocm_release_not_its_hip_version(self):
+        import sys
+        import types
+        from unittest import mock
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # TheRock torch reports the HIP version in torch.version.hip (7.17 on ROCm
+        # 10.2) and its ROCm release in rocm_sdk.__version__. Read as a release,
+        # 7.17 is older than any /opt/rocm-10.x, so the wheel's comgr was always
+        # demoted, even beside the same release.
+        torch_stub = types.ModuleType("torch")
+        torch_stub.version = types.SimpleNamespace(hip="7.17.26384-0000000")
+        sdk_stub = types.ModuleType("rocm_sdk")
+
+        with mock.patch.dict(
+            sys.modules, {"torch": torch_stub, "rocm_sdk": sdk_stub}
+        ), mock.patch.object(
+            rc, "_rocm_root_libdirs", return_value=["/opt/rocm/lib"]
+        ), mock.patch.object(
+            rc.os.path, "realpath", return_value="/opt/rocm-10.2.0/lib"
+        ):
+            sdk_stub.__version__ = "10.2.0a20261001"
+            self.assertEqual(rc._torch_rocm_version(), (10, 2))
+            self.assertFalse(rc._torch_comgr_is_stale())
+            # An older release beside it is still stale: the check compares.
+            sdk_stub.__version__ = "10.1.0a20260822"
+            self.assertTrue(rc._torch_comgr_is_stale())
 
 
 # ---------------------------------------------------------------------
