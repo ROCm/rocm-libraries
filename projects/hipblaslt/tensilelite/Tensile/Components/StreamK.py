@@ -24,7 +24,7 @@ from ..ExecutionPolicy import isPersistent, isPersistentDataParallel, hasStaticA
 from rocisa.enum import CacheScope
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, replaceHolder, EXEC, VOP3PModifiers, ContinuousRegister
-from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, SBitcmp1B32, SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, VReadfirstlaneB32, VCvtBF16toFP32, BufferLoadB32, BufferStoreB32, SLongBranch, SLongBranchPositive
+from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SBarrier, SBitcmp1B32, SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, SWaitCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, VReadfirstlaneB32, VCvtBF16toFP32, BufferLoadB32, BufferStoreB32, SLongBranch, SLongBranchPositive
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, vectorStaticMultiply, BranchIfNotZero, scalarUInt24DivideAndRemainder, scalarUInt32DivideAndRemainder
 
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
@@ -33,6 +33,9 @@ from ..Common import IsaVersion, print2, ceilDivide, log2
 from ..Component import Component
 from .TileProcessingStrategy import TileProcessingStrategy, TileWork
 from .WorkAssignment import QueuePartition, StaticPartition
+from .MemoryOrdering import (DeviceMemoryOrderingDefault,
+                             DeviceMemoryOrderingGfx9Xcd,
+                             DeviceMemoryOrderingDevScopeFences)
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
 import abc
@@ -130,8 +133,9 @@ class StreamKMemoryOrdering(Component):
     Selection is driven by `HasInvWbDevFences` (gfx1250) and
     `HasXCDSplitL2` (gfx950). The XNACK-replay drain in
     `preVolatileVmem` is gated separately on `RequiresXCntForVolatileVMEM`
-    and lives on the abstract base so a future arch needing only one of
-    the two can be supported by adding a single capability flag.
+    or `EnableXnackReplay`. Fence and drain methods forward to the shared
+    DeviceMemoryOrdering component; flag access and protocol placement
+    remain here.
     """
     def __call__(self):
         assert(0)
@@ -143,41 +147,20 @@ class StreamKMemoryOrdering(Component):
         """
         return True
 
-    @staticmethod
-    def _hasXcdSplitL2(writer) -> bool:
-        """True on gfx950 (XCD-split L2).
-
-        Prefers the `HasXCDSplitL2` arch cap. If rocisa is older and the cap is
-        missing, fall back to ISA so kernel gen still takes the coherent path.
-        """
-        if writer.states.archCaps.get("HasXCDSplitL2"):
-            return True
-        ver = getattr(writer.states, "version", None)
-        if ver is None:
-            return False
-        return tuple(ver)[:3] in ((9, 5, 0),)
-
     def preVolatileVmem(self, writer, comment="") -> Module:
-        """Drain in-flight VMEM (XNACK-replay) before a volatile/atomic VMEM op.
+        """Drain replay before a volatile StreamK flag access."""
+        return Component.DeviceMemoryOrdering.find(writer).preVolatileVmem(
+            writer, comment=comment)
 
-        Required on arches with `RequiresXCntForVolatileVMEM` or
-        `EnableXnackReplay`. No-op elsewhere.
-        """
-        module = Module("StreamK pre-volatile VMEM drain")
-        if writer.states.archCaps["RequiresXCntForVolatileVMEM"] or \
-                writer.states.archCaps["EnableXnackReplay"]:
-            module.add(SWaitXCnt(xcnt=0, comment=comment))
-        return module
-
-    @abc.abstractmethod
     def releaseFence(self, writer) -> Module:
-        """Memory fence ordering prior partial-tile stores before the flag store."""
-        pass
+        """Order workspace stores before publishing a StreamK flag."""
+        return Component.DeviceMemoryOrdering.find(writer).releaseFence(
+            writer)
 
-    @abc.abstractmethod
     def acquireFence(self, writer) -> Module:
-        """Memory fence after observing the flag and before reading partials."""
-        pass
+        """Prepare dependent reads in the StreamK handshake."""
+        return Component.DeviceMemoryOrdering.find(writer).acquireFence(
+            writer)
 
     @abc.abstractmethod
     def readFlag(self, writer, dst, soffset) -> Module:
@@ -196,22 +179,11 @@ class StreamKMemoryOrderingDefault(StreamKMemoryOrdering):
     Used on every arch that does not require explicit cross-L2 fences
     and does not split L2 across XCDs (see StreamKMemoryOrderingGfx9Xcd).
     """
-    archCaps = {"HasInvWbDevFences": False, "HasXCDSplitL2": False}
+    archCaps = DeviceMemoryOrderingDefault.archCaps
 
     @classmethod
     def matches(cls, writer, debug=False):
-        caps = writer.states.archCaps
-        if caps.get("HasInvWbDevFences", False):
-            return False
-        return not cls._hasXcdSplitL2(writer)
-
-    def releaseFence(self, writer) -> Module:
-        module = Module("StreamK release fence (default)")
-        module.add(SWaitCnt(vscnt=0, comment="wait for data store"))
-        return module
-
-    def acquireFence(self, writer) -> Module:
-        return Module("StreamK acquire fence (default, no-op)")
+        return DeviceMemoryOrderingDefault.matches(writer, debug)
 
     def readFlag(self, writer, dst, soffset) -> Module:
         module = Module("StreamK read flag (SMEM)")
@@ -234,29 +206,14 @@ class StreamKMemoryOrderingGfx9Xcd(StreamKMemoryOrdering):
     Do not emit global_wb/global_inv here: those instructions are illegal on
     gfx9. Coherent workspace loads are handled separately in readInput('WS').
     """
-    archCaps = {"HasInvWbDevFences": False, "HasXCDSplitL2": True}
+    archCaps = DeviceMemoryOrderingGfx9Xcd.archCaps
 
     @classmethod
     def matches(cls, writer, debug=False):
-        caps = writer.states.archCaps
-        if caps.get("HasInvWbDevFences", False):
-            return False
-        return cls._hasXcdSplitL2(writer)
+        return DeviceMemoryOrderingGfx9Xcd.matches(writer, debug)
 
     def useSmemFlags(self) -> bool:
         return False
-
-    def releaseFence(self, writer) -> Module:
-        module = Module("StreamK release fence (gfx9 XCD)")
-        module.add(SWaitCnt(vlcnt=0, vscnt=0,
-            comment="release: wait for partials stores before flag"))
-        return module
-
-    def acquireFence(self, writer) -> Module:
-        module = Module("StreamK acquire fence (gfx9 XCD)")
-        module.add(SWaitCnt(vlcnt=0, vscnt=0,
-            comment="acquire: drain before reading partials"))
-        return module
 
     def readFlag(self, writer, dst, soffset) -> Module:
         streamk = Component.TileProcessingStrategy.find(writer)
@@ -282,28 +239,7 @@ class StreamKMemoryOrderingDevScopeFences(StreamKMemoryOrdering):
     Selected on arches whose L2 is partitioned across CUs/XCDs and whose
     SMEM is not coherent with the VMEM flag write (e.g. gfx1250).
     """
-    archCaps = {"HasInvWbDevFences": True}
-
-    def releaseFence(self, writer) -> Module:
-        module = Module("StreamK release fence (dev-scope)")
-        module.add(SWaitCnt(vlcnt=0,
-            comment="release: drain in-flight loads before global_wb"))
-        module.add(SWaitCnt(vscnt=0, comment="wait for data store"))
-        module.add(GlobalWb(scope=CacheScope.SCOPE_DEV,
-            comment="release: writeback partials to L2-coherent point"))
-        module.add(SWaitCnt(vlcnt=0, vscnt=0,
-            comment="release: wait for global_wb"))
-        return module
-
-    def acquireFence(self, writer) -> Module:
-        # Drop stale dev-scope cache lines so the next dependent read (the flag
-        # word in getFlagValue, or the partials after the flag is observed) is
-        # re-fetched from the L2-coherent point.
-        module = Module("StreamK acquire fence (dev-scope)")
-        module.add(GlobalInv(scope=CacheScope.SCOPE_DEV,
-            comment="acquire: invalidate before dependent dev-scope read"))
-        module.add(SWaitCnt(vlcnt=0, comment="acquire: wait for global_inv"))
-        return module
+    archCaps = DeviceMemoryOrderingDevScopeFences.archCaps
 
     def readFlag(self, writer, dst, soffset) -> Module:
         streamk = Component.TileProcessingStrategy.find(writer)

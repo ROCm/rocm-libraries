@@ -6,7 +6,7 @@
 from dataclasses import dataclass
 from rocisa.code import Module, Label
 from rocisa.container import sgpr, vgpr, SMEMModifiers, GLOBALModifiers, EXEC, ContinuousRegister, DSModifiers, MemTokenData
-from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, SCBranchSCC1, SBranch, SAddCU32, SAddU32, SAndB32, SBitcmp1B32, SBarrier, SCBranchSCC0, SCMovB32, SCSelectB32, SCmpGeU32, SCmpLtU32, SLShiftLeftB32, SLShiftRightB32, VLShiftLeftB32, SMovB64, SMulI32, SNop, SSubU32, SXorB32, SWaitAlu, SWaitCnt, SWaitXCnt, VSubU32, VCmpXEqU32, GlobalAtomicIncU32Saddr, SLongBranchNegative, SAtomicInc, DSLoadB32, DSStoreB32
+from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, SCBranchSCC1, SBranch, SAddCU32, SAddU32, SAndB32, SBitcmp1B32, SBarrier, SCBranchSCC0, SCMovB32, SCSelectB32, SCmpGeU32, SCmpLtU32, SLShiftLeftB32, SLShiftRightB32, VLShiftLeftB32, SMovB64, SMulI32, SNop, SSubU32, SXorB32, SWaitAlu, SWaitCnt, VSubU32, VCmpXEqU32, GlobalAtomicIncU32Saddr, SLongBranchNegative, SAtomicInc, DSLoadB32, DSStoreB32
 import abc
 from ..Component import Component
 from ..Common import log2, clusterEnabled, persistentSpatialCluster
@@ -517,16 +517,9 @@ class WorkAssignment(Component):
 
 
     def preVolatileVmem(self, writer, comment="") -> Module:
-        """Drain in-flight VMEM (XNACK-replay) before a volatile/atomic VMEM op.
-
-        Required on arches with `RequiresXCntForVolatileVMEM` or
-        `EnableXnackReplay`. No-op elsewhere.
-        """
-        module = Module("Work queue pre-volatile VMEM drain")
-        if writer.states.archCaps["RequiresXCntForVolatileVMEM"] or \
-                writer.states.archCaps["EnableXnackReplay"]:
-            module.add(SWaitXCnt(xcnt=0, comment=comment))
-        return module
+        """Drain replay before a volatile/atomic work-queue access."""
+        return Component.DeviceMemoryOrdering.find(writer).preVolatileVmem(
+            writer, comment=comment)
 
 
     def fetchAndBroadcast(self, writer, kernel, preventOverflow=True, uniqueLabels=False):

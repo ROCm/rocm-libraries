@@ -48,6 +48,7 @@ __all__ = [
     "SumUnroll",
     "GSU",
     "TileProcessingStrategy",
+    "MemoryOrdering",
     "StreamK",
     "WorkAssignment",
     "PersistentLoop",

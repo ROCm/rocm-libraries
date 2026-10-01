@@ -17,6 +17,7 @@ from Tensile.Common import IsaVersion
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.DataType import DataType
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
+from Tensile.Component import Component
 from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
@@ -97,8 +98,14 @@ def test_amax_interwave_masks_match_wave_size(target):
         assert "s[sgprTmp+2:sgprTmp+2+1]" in assembly
 
 
-def test_amax_publication_uses_target_atomic_fences_and_srd(target):
+def test_amax_publication_uses_target_atomic_fences_and_srd(target, monkeypatch):
     writer, kernel = target
+
+    def unexpected_scheduling_lookup(*args, **kwargs):
+        pytest.fail("amax publication must not select a scheduling/protocol component")
+
+    monkeypatch.setattr(Component.StreamKMemoryOrdering, "find", unexpected_scheduling_lookup)
+    monkeypatch.setattr(Component.WorkAssignment, "find", unexpected_scheduling_lookup)
     assembly = str(KernelWriterAssembly.amax_output_result(writer, kernel))
     partial_store = (
         assembly.index("drain before amax partial store")
