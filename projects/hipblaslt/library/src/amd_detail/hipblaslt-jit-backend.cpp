@@ -137,6 +137,27 @@ namespace hipblaslt_jit
 
     namespace
     {
+        thread_local LookupOnly* innermostLookupOnly = nullptr;
+    }
+
+    LookupOnly::LookupOnly() noexcept
+        : m_outer(innermostLookupOnly)
+    {
+        innermostLookupOnly = this;
+    }
+
+    LookupOnly::~LookupOnly()
+    {
+        innermostLookupOnly = m_outer;
+    }
+
+    LookupOnly* LookupOnly::active() noexcept
+    {
+        return innermostLookupOnly;
+    }
+
+    namespace
+    {
         struct Generation
         {
             std::mutex mutex;
@@ -200,6 +221,12 @@ namespace hipblaslt_jit
             }
             if(fill.indices.size() >= count)
                 return fill;
+            if(auto* lookupOnly = LookupOnly::active())
+            {
+                lookupOnly->skipped = true;
+                fill.skipped        = true;
+                return fill;
+            }
 
             auto& generating = generation(generationKey(request, target, workspaceLimit));
             std::lock_guard<std::mutex> lock(generating.mutex);

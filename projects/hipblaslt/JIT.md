@@ -468,11 +468,28 @@ An empty output (M=0 or N=0) gets no JIT result. A problem that Origami cannot
 rank, such as K=0, reports a predict failure. Grouped GEMM is not supported and
 reports an error.
 
-Behavior when a heuristic query, or `hipblasLtMatmul` without an algorithm,
-would generate during HIP stream capture is not specified. Generate before
-capture: run the query first and pass the returned algorithm to
-`hipblasLtMatmul` inside the capture, or warm the JIT solution library by
-running the same queries beforehand, in this process or an earlier one.
+**Stream capture.** `hipblasLtMatmul` without an algorithm checks its stream
+with `hipStreamIsCapturing`; the null and legacy streams never capture. While
+the stream captures, in any capture mode, JIT only looks up solutions already
+published to the JIT solution library: it starts no generator, comgr build or
+publication, and the other sources keep their order. A published solution
+whose code object the process has not loaded yet is loaded during the capture,
+as pre-tuned code objects are; HIP allows module loads in every capture mode,
+and the capture stays valid. When nothing is found the call returns
+`HIPBLAS_STATUS_INTERNAL_ERROR`, as outside a capture, and reports one line:
+
+```text
+hipblaslt error: JIT generation skipped during stream capture for GEMM M=256 N=128 K=576 ... EPILOGUE_DEFAULT
+```
+
+When a pre-tuned solution is found instead, the skipped generation goes only to
+the info log.
+
+What a heuristic query does during HIP stream capture is not yet defined; the
+queries take no stream. Generate before capture: run the query first and pass
+the returned algorithm to `hipblasLtMatmul` inside the capture, or warm the JIT
+solution library by running the same queries beforehand, in this process or an
+earlier one.
 
 #### Tool paths and scratch files
 

@@ -3341,6 +3341,21 @@ namespace
         return false;
 #endif
     }
+
+#ifdef HIPBLASLT_ENABLE_JIT
+    // The legacy stream never captures, and querying it while another stream
+    // captures fails and leaves that error for the caller's hipGetLastError.
+    bool isCapturing(hipStream_t stream)
+    {
+        if(stream == nullptr || stream == hipStreamLegacy)
+            return false;
+        hipStreamCaptureStatus status = hipStreamCaptureStatusNone;
+        return hipStreamIsCapturing(stream, &status) == hipSuccess
+               && status != hipStreamCaptureStatusNone;
+    }
+
+    std::string describeJitProblem(const RocblasltContractionProblem& prob);
+#endif
 }
 
 TensileLite::ProblemOverride
@@ -3643,6 +3658,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         rocblaslt_matmul_heuristic_result selected;
         if(algo == nullptr && hipblaslt_jit::mode() != hipblaslt_jit::Mode::Off)
         {
+            std::optional<hipblaslt_jit::LookupOnly> lookupOnly;
+            if(isCapturing(prob.stream))
+                lookupOnly.emplace();
             int count = 0;
             if(hipblaslt_jit::mode() == hipblaslt_jit::Mode::Fallback)
                 getBestSolutions(prob, handle, gemmData, 1, &selected, &count, prob.workspaceSize);
@@ -3651,6 +3669,15 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 auto jitProb = prob;
                 jitHeuristicFill(
                     handle, jitProb, gemmData, 1, prob.workspaceSize, &selected, &count);
+            }
+            if(lookupOnly && lookupOnly->skipped)
+            {
+                const auto message
+                    = "generation skipped during stream capture for " + describeJitProblem(prob);
+                if(count == 0)
+                    hipblaslt_jit::report(hipblaslt_jit::Severity::Error, message);
+                else
+                    log_info(__func__, "JIT " + message);
             }
             if(count == 0)
                 return rocblaslt_status_not_implemented;
@@ -6128,7 +6155,7 @@ namespace
             hipblaslt_jit::report(severity, hipblaslt_jit::describe(failure, problem));
         if(fill.repeated)
             log_info(__func__, "JIT generation already fell short for", problem);
-        else if(added.size() < needed && fill.failures.empty())
+        else if(added.size() < needed && fill.failures.empty() && !fill.skipped)
             hipblaslt_jit::report(hipblaslt_jit::Severity::Warning,
                                   "returned " + std::to_string(added.size()) + " of "
                                       + std::to_string(needed) + " requested solutions for "
