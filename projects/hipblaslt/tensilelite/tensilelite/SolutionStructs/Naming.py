@@ -250,6 +250,10 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     else:
       requiredParametersTemp.discard("TDMFuse")
 
+    # Same for the 32-bit GL2 prefetch increment.
+    if not state.get("PrefetchGL2Inc64Bit", False):
+      requiredParametersTemp.discard("PrefetchGL2Inc64Bit")
+
     # LDSSegmentBRotate=0 is the default layout; naming it would rename every kernel.
     if state.get("LDSSegmentBRotate", 0):
       requiredParametersTemp.add("LDSSegmentBRotate")

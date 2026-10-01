@@ -99,7 +99,7 @@ import struct
 import tempfile
 import types
 from bisect import bisect_right
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import ceil
 from types import SimpleNamespace
 
@@ -216,6 +216,7 @@ class GL2Config:
     user_args: bool = False   # SupportUserArgs: a batched kernel that may run with ArgType == 3
     arg_type: int = 0         # runtime ArgType; low 8 bits = named domain, bits 8+ = TDM wave id
     sizes_sum_zero: bool = False  # K == 0 (SizesSum = 0): the pointer-array dereference is skipped
+    inc64: bool = False       # PrefetchGL2Inc64Bit: 64-bit (sgpr pair) addr increment.
 
     @property
     def lc(self):
@@ -582,6 +583,18 @@ CONFIGS = [
               user_args=True, arg_type=3, gsu=2, gsuc=True, k_iters=7),
 ]
 
+# ---- PrefetchGL2Inc64Bit: the same footprints with a 64-bit increment, covering
+# every consumer of it -- setIncrement on each layout (TLU, non-TLU, MX, sparse
+# metadata), the GSU chunk offset and stride widening (both chunk layouts),
+# skipPGR on PGR 1 / >1 and the guard, and incrementAddr. ----
+_INC64_CONFIGS = {
+    "ab_fp8_mixed_layout", "abmx_fp8", "a_sparse_tlu_mlayout1",
+    "gsu4_interleaved", "gsu4_contiguous_rem", "gsu2_mx_cluster",
+    "pgr1_nl2", "pgr3_ntlu", "pgr2_guard_taken",
+}
+CONFIGS += [replace(c, name=f"{c.name}_inc64", inc64=True)
+            for c in CONFIGS if c.name in _INC64_CONFIGS]
+
 
 def batch_stride_elems(spec, cfg):
     """Per-tensor batch stride in *elements* (the programmed Stride{tc}K). Arbitrary
@@ -667,6 +680,7 @@ def _make_kernel(cfg):
         "PrefetchGlobalRead": cfg.pgr,
         "WavefrontSize": WAVESIZE,
         "PrefetchGL2": cfg.pgl,
+        "PrefetchGL2Inc64Bit": cfg.inc64,
         "GlobalSplitU": cfg.gsu,
     }
     if m_spec is not None:
@@ -786,7 +800,9 @@ def build_kernel(cfg):
         w.sgprs["GSUSumIdx"] = w.sgprPool.checkOut(2, "GSUSumIdx", preventOverflow=False)
     for t in cfg.tensors:
         w.sgprs[f"Address{t.tc}"] = w.sgprPool.checkOutAligned(2, 2, f"Address{t.tc}", preventOverflow=False)
-        w.sgprs[f"GL2PrefetchInc{t.tc}"] = w.sgprPool.checkOut(1, f"GL2PrefetchInc{t.tc}", preventOverflow=False)
+        n_inc = 2 if cfg.inc64 else 1
+        w.sgprs[f"GL2PrefetchInc{t.tc}"] = w.sgprPool.checkOutAligned(
+            n_inc, n_inc, f"GL2PrefetchInc{t.tc}", preventOverflow=False)
         if cfg.batched:    # batch stride Stride{tc}K (index 2 -> 'K')
             w.sgprs[f"Stride{t.tc}K"] = w.sgprPool.checkOut(1, f"Stride{t.tc}K", preventOverflow=False)
 
