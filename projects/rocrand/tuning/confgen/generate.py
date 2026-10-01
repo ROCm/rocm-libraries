@@ -131,7 +131,7 @@ def main():
                 existing_data = config_parser.parse_lines(file.readlines())
 
                 merged_targets = {
-                    target_hash : make_config(target)
+                    target_hash: make_config(target)
                     for target_hash, target in existing_data.items()
                 }
 
