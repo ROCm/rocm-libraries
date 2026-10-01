@@ -48,7 +48,7 @@ _vu = _import_validation_utils()
 
 # Must match BATCHED_SUPPORTED_DTYPES/LAYOUTS in dispatcher batched_gemm_utils.py
 # (not imported here: that module pulls numpy/ctypes into CMake codegen).
-BATCHED_GEMM_SUPPORTED_DTYPES = ("fp16", "bf16", "fp32")
+BATCHED_GEMM_SUPPORTED_DTYPES = ("fp16", "bf16", "fp32", "fp8", "bf8")
 BATCHED_GEMM_SUPPORTED_LAYOUTS = ("rcr", "rrr", "crr", "ccr")
 
 # BatchedGemmKernel advances the B pointer of each batch by batch_stride_B plus

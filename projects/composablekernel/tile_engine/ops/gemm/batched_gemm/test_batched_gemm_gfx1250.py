@@ -236,9 +236,9 @@ class TestGfx1250Configs(unittest.TestCase):
             tc = json.load(f)["tile_config"]
         self.assertEqual(tc["warp_tile_m"]["values"], [16])
         self.assertEqual(tc["warp_tile_n"]["values"], [16])
-        # k=32 serves fp16/bf16 (16x16x32), k=4 serves fp32 (16x16x4); the
-        # builder keeps only the WMMA tile of the requested datatype.
-        self.assertEqual(tc["warp_tile_k"]["values"], [4, 32])
+        # k=32 serves fp16/bf16 (16x16x32), k=4 fp32 (16x16x4), k=64 fp8/bf8
+        # (16x16x64); the builder keeps only the WMMA tile of the requested datatype.
+        self.assertEqual(tc["warp_tile_k"]["values"], [4, 32, 64])
 
     def test_schema_matches_ci(self):
         with open(_FULL_CONFIG) as f:
@@ -315,7 +315,7 @@ class TestOtherArchesUnaffected(unittest.TestCase):
 
 
 class TestDtypeLayoutCoverage(unittest.TestCase):
-    """fp16/bf16/fp32 x rcr/rrr/crr/ccr, each dtype on its own warp tiles."""
+    """fp16/bf16/fp32/fp8/bf8 x rcr/rrr/crr/ccr, each dtype on its own warp tiles."""
 
     def test_op_warp_tile_allowed(self):
         self.assertTrue(vu.op_warp_tile_allowed("gfx1250", "fp32", [16, 16, 4]))
@@ -327,7 +327,7 @@ class TestDtypeLayoutCoverage(unittest.TestCase):
         self.assertTrue(vu.op_warp_tile_allowed("gfx942", "fp16", [16, 16, 4]))
 
     def test_gfx1250_every_dtype_layout_keeps_its_wmma_tile(self):
-        for dtype, wmma in (("fp16", 32), ("bf16", 32), ("fp32", 4)):
+        for dtype, wmma in (("fp16", 32), ("bf16", 32), ("fp32", 4), ("fp8", 64), ("bf8", 64)):
             for layout in ("rcr", "rrr", "crr", "ccr"):
                 with self.subTest(dtype=dtype, layout=layout):
                     tiles = _warp_tiles(_kernels(_CI_CONFIG, "gfx1250", dtype, layout))
@@ -357,6 +357,15 @@ class TestDtypeLayoutCoverage(unittest.TestCase):
         ):
             self.assertIn(line, code)
 
+
+    def test_fp8_bf8_headers_accumulate_into_half(self):
+        for dtype, a_type in (("fp8", "ck_tile::fp8_t"), ("bf8", "ck_tile::bf8_t")):
+            with self.subTest(dtype=dtype), tempfile.TemporaryDirectory() as tmp:
+                b = _builder(tmp, _CI_CONFIG, dtype=dtype, layout="rcr")
+                k = b._get_sampled_kernel_list()[0]
+                _, code = b._generate_kernel_instance(k["tile_config"], k["trait_combo"])
+                self.assertIn(f"using ADataType = {a_type};", code)
+                self.assertIn("using CDataType = ck_tile::fp16_t;", code)
 
 class TestCMake(unittest.TestCase):
     def test_cmake_gfx1250_branch(self):

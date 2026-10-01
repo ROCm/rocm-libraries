@@ -107,11 +107,17 @@ _C_SIZEOF: Dict[str, int] = {"fp16": 2, "bf16": 2, "fp32": 4, "int32": 4}
 
 # Batched GEMM dtype/layout set shared with the Old-TE batched_gemm instance
 # builder (--datatype/--layout choices) and the full benchmark CLI.
-BATCHED_SUPPORTED_DTYPES: Tuple[str, ...] = ("fp16", "bf16", "fp32")
+BATCHED_SUPPORTED_DTYPES: Tuple[str, ...] = ("fp16", "bf16", "fp32", "fp8", "bf8")
 BATCHED_SUPPORTED_LAYOUTS: Tuple[str, ...] = ("rcr", "rrr", "crr", "ccr")
 # Default --verify relative tolerance (max|got-ref| / max|ref| against an fp32
 # reference on the unquantized inputs), sized to each dtype's input rounding.
-BATCHED_VERIFY_TOL: Dict[str, float] = {"fp16": 2e-2, "bf16": 5e-2, "fp32": 1e-3}
+BATCHED_VERIFY_TOL: Dict[str, float] = {
+    "fp16": 2e-2,
+    "bf16": 5e-2,
+    "fp32": 1e-3,
+    "fp8": 6e-2,
+    "bf8": 1.2e-1,
+}
 
 
 def _get_arch() -> str:

@@ -282,7 +282,7 @@ class TestBatchedDtypeLayoutGate(unittest.TestCase):
     """
 
     def test_supported_set(self):
-        self.assertEqual(BATCHED_SUPPORTED_DTYPES, ("fp16", "bf16", "fp32"))
+        self.assertEqual(BATCHED_SUPPORTED_DTYPES, ("fp16", "bf16", "fp32", "fp8", "bf8"))
         self.assertEqual(BATCHED_SUPPORTED_LAYOUTS, ("rcr", "rrr", "crr", "ccr"))
 
     def test_matches_old_te_builder_choices(self):
@@ -302,7 +302,7 @@ class TestBatchedDtypeLayoutGate(unittest.TestCase):
         self.assertEqual(set(BATCHED_VERIFY_TOL), set(BATCHED_SUPPORTED_DTYPES))
 
     def test_rejects_unsupported_dtype(self):
-        for dtype in ("fp8", "bf8", "int8"):
+        for dtype in ("int8", "fp64"):
             with self.assertRaises(ValueError, msg=dtype):
                 expand_sweep("/nonexistent/config.json", arch="gfx942", dtype=dtype)
 
@@ -485,10 +485,10 @@ class TestGfx1250Enablement(unittest.TestCase):
         cfg_path = _CONFIG_DIR / "default_ci_config_gfx1250.json"
         self.assertTrue(cfg_path.is_file(), cfg_path)
         tc = json.loads(cfg_path.read_text())["tile_config"]
-        # WMMA warp tiles on gfx1250: 16x16x32 for fp16/bf16, 16x16x4 for fp32.
+        # WMMA warp tiles on gfx1250: 16x16x32 for fp16/bf16, 16x16x4 for fp32, 16x16x64 for fp8/bf8.
         self.assertEqual(tc["warp_tile_m"]["values"], [16])
         self.assertEqual(tc["warp_tile_n"]["values"], [16])
-        self.assertEqual(tc["warp_tile_k"]["values"], [4, 32])
+        self.assertEqual(tc["warp_tile_k"]["values"], [4, 32, 64])
 
     def test_gfx1250_sweep_keeps_only_the_dtype_wmma_tile(self):
         cfg_path = str(_CONFIG_DIR / "default_ci_config_gfx1250.json")
@@ -505,7 +505,13 @@ class TestGfx1250Enablement(unittest.TestCase):
         from codegen_common import TileConfig
         from unified_gemm_codegen import UnifiedGemmCodegen
 
-        for dtype, wmma, other in (("fp16", 32, 4), ("bf16", 32, 4), ("fp32", 4, 32)):
+        for dtype, wmma, other in (
+            ("fp16", 32, 4),
+            ("bf16", 32, 4),
+            ("fp32", 4, 32),
+            ("fp8", 64, 32),
+            ("bf8", 64, 32),
+        ):
             with tempfile.TemporaryDirectory() as tmp:
                 gen = UnifiedGemmCodegen(tmp, dtype, "rcr", "gfx1250")
                 if gen.arch_filter is None:
