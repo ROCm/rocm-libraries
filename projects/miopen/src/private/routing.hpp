@@ -13,8 +13,7 @@
 // process-global state.
 //
 // Compiled only into the public wrapper library; never installed.
-#ifndef MIOPEN_PRIVATE_ROUTING_HPP
-#define MIOPEN_PRIVATE_ROUTING_HPP
+#pragma once
 
 #include <cstddef>
 #include <iosfwd>
@@ -242,5 +241,3 @@ Route DispatchFromStub(const char* entryPoint, const char* enclosingFunction);
 // Requires a `forward_to_hipdnn(const char*)` returning the enclosing function's
 // return type to be in scope; wrapper.cpp defines it.
 #define MIOPEN_WRAPPER_DISPATCH(fn) MIOPEN_WRAPPER_FORWARD(fn, forward_to_hipdnn(#fn))
-
-#endif // MIOPEN_PRIVATE_ROUTING_HPP

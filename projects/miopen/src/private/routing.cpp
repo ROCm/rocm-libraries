@@ -5,7 +5,7 @@
 
 #include "routing.hpp"
 
-#include "hipdnn_forward.hpp"
+#include "hipdnn_graph.hpp"
 
 #include <algorithm>
 #include <array>

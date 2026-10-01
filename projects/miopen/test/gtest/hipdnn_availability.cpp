@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 //
 // Unit tests for the availability decision behind
-// src/private/hipdnn_forward.hpp's IsAvailable(). The seam only exists when
+// src/private/hipdnn_graph.hpp's IsAvailable(). The seam only exists when
 // MIOPEN_ENABLE_HIPDNN_WRAPPER is ON, so this file compiles to zero tests
 // otherwise. No hipDNN install and no GPU are needed.
 //
@@ -14,7 +14,7 @@
 
 #ifdef MIOPEN_ENABLE_HIPDNN_WRAPPER
 
-#include "../../src/private/hipdnn_forward.hpp"
+#include "../../src/private/hipdnn_graph.hpp"
 
 #include <ostream>
 #include <string>

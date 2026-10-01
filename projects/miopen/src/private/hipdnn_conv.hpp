@@ -1,10 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// The hipDNN side of the wrapper's dispatch seam. src/private/wrapper.cpp calls
-// one of these when routing.hpp resolves an entry point to Route::Hipdnn; each
-// takes exactly the public entry point's argument list and returns exactly what
-// the public entry point would.
+// The hipDNN side of the wrapper's dispatch seam for convolutions. wrapper.cpp
+// calls one of these when routing.hpp resolves an entry point to Route::Hipdnn;
+// each takes exactly the public entry point's argument list and returns exactly
+// what the public entry point would.
 //
 // These functions never touch MIOpen internals. Everything they need about a
 // descriptor is read back through the public getters declared in miopen_impl.h,
@@ -12,8 +12,7 @@
 // libMIOpen_private.so.
 //
 // Compiled only into the public wrapper library; never installed.
-#ifndef MIOPEN_PRIVATE_HIPDNN_FORWARD_HPP
-#define MIOPEN_PRIVATE_HIPDNN_FORWARD_HPP
+#pragma once
 
 #include <miopen/miopen.h>
 
@@ -22,51 +21,6 @@
 namespace miopen {
 namespace wrapper {
 namespace hipdnn {
-
-// What the probe found. Missing covers both "no backend library" and "the
-// frontend refused the one it found", because a refused backend reports itself
-// exactly the way an absent one does.
-enum class BackendState
-{
-    Usable,
-    Missing,
-    MajorVersionMismatch,
-    HandleCreationFailed,
-};
-
-// The decision behind IsAvailable(), taking its inputs as arguments so it can be
-// exercised without a hipDNN install. `reportedMajor` is negative when no
-// backend loaded; `expectedMajor` is the one this MIOpen was built against.
-BackendState ClassifyBackend(int reportedMajor, int expectedMajor);
-
-// One clause of English for a state, as it appears after "hipDNN forwarding is
-// unavailable: " on stderr.
-const char* DescribeBackendState(BackendState state);
-
-// Loads the backend and classifies it. The first call does the work and the
-// answer is cached for the process; anything other than Usable also prints one
-// line to stderr saying so.
-BackendState ProbeBackendState();
-
-// True when hipDNN can serve a forwarded call. Probes on first use, so a process
-// that forwards nothing should never reach it.
-bool IsAvailable();
-
-// Drops whatever hipDNN state was created for this MIOpen handle. Called from
-// the miopenDestroy stub on both routes, because a handle can be destroyed after
-// MIOPEN_DISABLE_HIPDNN_FOR took its entry points back off the hipDNN path.
-// Like miopenDestroy, it must not run while another call is using the handle:
-// calls use the handle's state without holding the map lock.
-void ReleaseHandle(miopenHandle_t handle);
-
-// Replacement text for miopenGetErrorString when the last forwarded call on this
-// thread failed with `status`, or null when it did not. The result has
-// thread-local storage duration, matching what miopenGetErrorString promises its
-// callers.
-//
-// This exists so a forwarded failure is distinguishable from the same status
-// raised by MIOpen itself, without adding a public symbol to do it.
-const char* PrefixedErrorString(miopenStatus_t status, const char* nativeMessage);
 
 // The forwarded convolution entry points. If hipDNN cannot express a problem,
 // the call fails instead of running through MIOpen, so a caller can tell that
@@ -140,5 +94,3 @@ miopenStatus_t ConvolutionBiasActivationForward(miopenHandle_t handle,
 } // namespace hipdnn
 } // namespace wrapper
 } // namespace miopen
-
-#endif // MIOPEN_PRIVATE_HIPDNN_FORWARD_HPP

@@ -927,7 +927,10 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
         # applied to them. An installed hipDNN arrives as -isystem and does not.
         set_target_properties(hipdnn_frontend_dynamic PROPERTIES SYSTEM TRUE)
     endif()
-    target_sources(MIOpen PRIVATE ${PROJECT_SOURCE_DIR}/src/private/hipdnn_forward.cpp)
+    target_sources(MIOpen PRIVATE
+        ${PROJECT_SOURCE_DIR}/src/private/hipdnn_conv.cpp
+        ${PROJECT_SOURCE_DIR}/src/private/hipdnn_graph.cpp
+        ${PROJECT_SOURCE_DIR}/src/private/hipdnn_types.cpp)
     target_link_libraries(MIOpen PRIVATE hipdnn_frontend_dynamic)
 
     # Deliberately excludes src/include: the wrapper must see only the public

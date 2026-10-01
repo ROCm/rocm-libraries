@@ -36,7 +36,8 @@
 
 #include <miopen/miopen.h>
 
-#include "hipdnn_forward.hpp"
+#include "hipdnn_conv.hpp"
+#include "hipdnn_graph.hpp"
 #include "miopen_impl.h"
 #include "routing.hpp"
 

@@ -350,17 +350,18 @@ target_link_libraries(miopen_gtest_common PRIVATE GTest::gtest GTest::gmock MIOp
 # path, and adding src/private here would expose miopen_private_rename.h to every
 # test-common source.
 #
-# hipdnn_forward.cpp comes along because routing.cpp asks it whether hipDNN is
-# available before reporting a route. The test binary's copy only ever answers
-# that question -- the forwarding the shim tests exercise happens inside
-# libMIOpen.so, against its own copy.
+# hipdnn_graph.cpp (with the hipdnn_types.cpp it uses) comes along because
+# routing.cpp asks it whether hipDNN is available before reporting a route. The
+# test binary's copy only ever answers that question -- the forwarding the shim
+# tests exercise happens inside libMIOpen.so, against its own copy.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
   if(NOT TARGET hipdnn_frontend_dynamic)
     find_package(hipdnn_frontend REQUIRED)
   endif()
   target_sources(miopen_gtest_common PRIVATE
     ${PROJECT_SOURCE_DIR}/src/private/routing.cpp
-    ${PROJECT_SOURCE_DIR}/src/private/hipdnn_forward.cpp)
+    ${PROJECT_SOURCE_DIR}/src/private/hipdnn_graph.cpp
+    ${PROJECT_SOURCE_DIR}/src/private/hipdnn_types.cpp)
   target_link_libraries(miopen_gtest_common PRIVATE hipdnn_frontend_dynamic)
 endif()
 if(WIN32)

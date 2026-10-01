@@ -5,8 +5,7 @@
 // thread-safe; callers hold their own lock.
 //
 // Compiled only into the public wrapper library; never installed.
-#ifndef MIOPEN_PRIVATE_LRU_CACHE_HPP
-#define MIOPEN_PRIVATE_LRU_CACHE_HPP
+#pragma once
 
 #include <cstddef>
 #include <functional>
@@ -78,5 +77,3 @@ private:
 
 } // namespace wrapper
 } // namespace miopen
-
-#endif // MIOPEN_PRIVATE_LRU_CACHE_HPP
