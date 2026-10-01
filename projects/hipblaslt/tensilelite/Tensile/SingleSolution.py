@@ -188,7 +188,7 @@ def _target(architecture, globalsConfig):
     from Tensile.Common.Architectures import (
         architectureMap,
         baseArchName,
-        gfxToCompilerTarget,
+        compilerTargetOf,
         gfxToIsa,
     )
 
@@ -214,7 +214,7 @@ def _target(architecture, globalsConfig):
     features = suffix.split(":")[1:]
     if len({feature[:-1] for feature in features}) != len(features):
         raise SingleSolutionConfigError("GPU target contains duplicate or contradictory features")
-    return isa, gfxToCompilerTarget(base) + suffix
+    return isa, compilerTargetOf(base) + suffix
 
 
 def _sourceRevision():

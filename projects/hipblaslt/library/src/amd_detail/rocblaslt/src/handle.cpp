@@ -79,12 +79,8 @@ _rocblaslt_handle::_rocblaslt_handle()
     // Reports an invalid or ignored HIPBLASLT_JIT when the first handle is created.
     static_cast<void>(hipblaslt_jit::mode());
 
-#if HIP_VERSION >= 307
     // ASIC revision
     asic_rev = properties.asicRevision;
-#else
-    asic_rev = 0;
-#endif
 
 #ifdef HIPBLASLT_USE_ROCROLLER
     rocroller_create_handle(&rocroller_handle);

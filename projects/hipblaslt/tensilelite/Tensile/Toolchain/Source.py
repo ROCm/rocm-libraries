@@ -27,9 +27,10 @@ import shutil
 
 from pathlib import Path
 from timeit import default_timer as timer
-from typing import Dict, List, Optional, Union, NamedTuple
+from typing import List, Union, NamedTuple
 
 from ..Common import print1, ensurePath
+from ..Common.Architectures import baseArchName, compilerTargetOf
 from ..Common.TimingInstrumentation import timing_context
 
 from .Component import Compiler, Bundler
@@ -108,7 +109,6 @@ def buildSourceCodeObjectFiles(
         includeDir: Union[Path, str],
         kernelPath: Union[Path, str],
         cmdlineArchs: List[str],
-        outputArchNames: Optional[Dict[str, str]]=None,
         useCache: bool=True,
     ) -> List[str]:
     """Compiles a HIP source code file into a code object file.
@@ -116,21 +116,18 @@ def buildSourceCodeObjectFiles(
     Args:
         toolchain: The source toolchain.
         destRoot: The library/ root directory. Per-arch outputs are written to
-            destRoot/<base-arch>/; target features (xnack+/xnack-) are stripped
-            from the directory path and survive only in the filename suffix.
+            destRoot/<arch>/, named for the target the bundler reports back;
+            target features (xnack+/xnack-) are stripped from the directory path
+            and survive only in the filename suffix.
         tmpObjDir: The directory where HIP source object files are created.
         includeDir: The include directory path.
         kernelPath: The path to the kernel source file.
-        outputArchNames: base arch -> output subtree; a stepping routes into
-            destRoot/<stepping>/ keeping the compiler-target filename. Identity
-            for ordinary.
         useCache: reuse previously built helper objects when enabled.
 
     Returns:
         List of paths to the created code objects.
     """
     start = timer()
-    outArchNames = outputArchNames or {}
     cache = HelperKernelCache() if useCache else None
 
     with timing_context("python_kernel_build_src_co.setup"):
@@ -146,7 +143,7 @@ def buildSourceCodeObjectFiles(
     # On a hit we skip compilation/unbundling entirely and return early.
     # The cache restore routes each file to its per-base subdir under destRoot.
     with timing_context("python_kernel_build_src_co.cache_check"):
-        hit, coPaths = cache.restore(kernelPath, includeDir, cmdlineArchs, compiler, destRoot, outArchNames) if cache else (False, [])
+        hit, coPaths = cache.restore(kernelPath, includeDir, cmdlineArchs, compiler, destRoot) if cache else (False, [])
     if hit:
         stop = timer()
         print1(f"buildSourceCodeObjectFile time (s): {(stop-start):3.2f}  [cache hit]")
@@ -156,6 +153,8 @@ def buildSourceCodeObjectFiles(
     with timing_context("python_kernel_build_src_co.compile"):
         compiler(str(includeDir), cmdlineArchs, str(kernelPath), objPath)
 
+    # The bundler names the compiler target; an alias writes under its own name.
+    outDirs = {compilerTargetOf(baseArchName(a)): baseArchName(a) for a in cmdlineArchs}
     with timing_context("python_kernel_build_src_co.unbundle"):
         for target in bundler.targets(objPath):
           match = re.search("gfx.*$", target)
@@ -165,7 +164,7 @@ def buildSourceCodeObjectFiles(
             if not coPathRaw: continue
             bundler(target, objPath, str(coPathRaw))
 
-            destDir = Path(ensurePath(destRoot / outArchNames.get(baseArch, baseArch)))
+            destDir = Path(ensurePath(destRoot / outDirs.get(baseArch, baseArch)))
             coPath = str(destDir / coPathRaw.stem)
             coPathsRaw.append(coPathRaw)
             coPaths.append(coPath)
@@ -178,7 +177,7 @@ def buildSourceCodeObjectFiles(
     # builds with the same inputs can skip recompilation.
     with timing_context("python_kernel_build_src_co.cache_populate"):
         if cache:
-            cache.store(coPaths, outArchNames)
+            cache.store(coPaths)
 
     stop = timer()
     print1(f"buildSourceCodeObjectFile time (s): {(stop-start):3.2f}")

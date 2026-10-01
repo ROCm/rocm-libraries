@@ -25,14 +25,14 @@ from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, GLOB
   SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr
 from rocisa.enum import CvtType, HighBitSel, RoundType, SaturateCastType, SelectBit, CacheScope
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
-  GlobalLoadB32, SLoadB128, \
+  BufferAtomicPkAddBF16, GlobalLoadB32, GlobalStoreB32, SLoadB128, \
   BufferAtomicCmpswapB64, BufferStoreB16, BufferStoreB32, BufferStoreB64, BufferStoreB128, \
   DSBPermuteB32, FlatAtomicCmpswapB32, \
   SAddCU32, SAddU32, SAddU64, SAndB32, \
   SAndB64, SAtomicDec, SAtomicInc, SBarrier, SBfmB32, SBfmB64, SBranch, SCBranchExecNZ, SCBranchExecZ, \
   SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpGtU32, SCmpKGtU32, SCSelectB32, SCmpEQI32, SCmpEQU32, SCmpGtI32, SCmpLeI32, SCmpLeU32, SMinU32, SEndpgm, \
   SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLShiftRightB64, SMovB32, SMovB64, SMulHIU32, SMulI32, \
-  SNop, SOrB32, SOrB64, SOrSaveExecB32, SOrSaveExecB64, SSleep, SSubI32, SSubU32, \
+  SNop, SOrB32, SOrB64, SOrSaveExecB32, SOrSaveExecB64, SSleep, SStoreB128, SSubI32, SSubU32, \
   SSwapPCB64, SWaitCnt, SWaitAlu, VAShiftRightI32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, \
   VAddI32, VAddPKF16, VAddPKF32, VAddU32, VBfeI32, VCmpEQU32, VCmpGEI32, VCmpGtU32, \
   VCmpNeU32, VCmpNeU64, VCndMaskB32, VCvtBF8toF32, VCvtF16toF32, VCvtF32toF16, VCvtF32toI32, \
@@ -572,9 +572,10 @@ class GlobalWriteBatchWriter:
         waitLoadCnt += self.gateLoadIssued[elementIdx]
         waitLoadCntStrList.append("%d (load Gate)"%self.gateLoadIssued[elementIdx])
       # Calculate local loads
-      # UseSubtileImpl with bias/SAV: skip bias/SAV LDS loads from interleaved
-      # waitcnt and rely on the batch-start barrier for LDS synchronization.
-      subtileBarrierDrains = self.kernel.get("UseSubtileImpl") and \
+      # Only multi-DU drains bias/SAV before _emitAdd. Single-DU emits that
+      # drain after the consumers, so keep its LDS loads in the ordinary
+      # per-element wait accounting.
+      subtileBarrierDrains = isSubtileMultiDU(self.kernel) and self.kernel.get("UseSubtileImpl") and \
         (self.parentWriter.states.useBias != DataDirection.NONE or \
          self.kernel["ProblemType"].get("UseScaleAlphaVec", 0))
       if self.parentWriter.states.useBias == DataDirection.READ and not subtileBarrierDrains:
@@ -1260,7 +1261,8 @@ class GlobalWriteBatchWriter:
       if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
         module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'TD', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, tmpInrSgpr, addrCalc.addrGSUSyncVgprs, self.addrD, 0))
       self._epilogScratchFree(tmpInrSgpr)
-      if self.atomic and (not self.parentWriter.states.useAtomicAdd):
+      if self.atomic and (not self.parentWriter.states.useAtomicAdd) \
+         and (not self.parentWriter.states.useAtomicPkAddBF16):
         # load c into data+1 because of CAS structure
         # TODO - Fix for double here, would need bigger load
         # FIXME
@@ -1526,7 +1528,9 @@ class GlobalWriteBatchWriter:
   def _emitAdd(self, module: Module):
     if self.atomic:
       del self.tmpVgpr # catch bugs
-      if self.parentWriter.states.useAtomicAdd:
+      if self.parentWriter.states.useAtomicPkAddBF16:
+        self._emitAtomicPkAddBF16(module)
+      elif self.parentWriter.states.useAtomicAdd:
         self._emitAtomicAdd(module)
       else:
         self._emitCasAdd(module)
@@ -3338,6 +3342,13 @@ class GlobalWriteBatchWriter:
     module.add(SCBranchVCCNZ(labelName=drainPollLabel.getLabelName(),
                              comment="some peer incomplete -> spin (poll again)"))
 
+    # Still one lane per slot, and vPollOff still holds lane j's byte offset.
+    module.add(VMovB32(dst=vgpr(vPollVal), src=0, comment="fused-A2A: zero for the flag clear"))
+    module.add(GlobalStoreB32(
+      vaddr=vgpr(vPollOff), src=vgpr(vPollVal), saddr=sgpr(drainFlagBase, 2),
+      modifier=GLOBALModifiers(glc=True, slc=True, scope=CacheScope.SCOPE_NONE, isStore=True),
+      comment="clear self flag[lane] (system scope, sc0 sc1)"))
+
     # Back to a single lane so the whole single-writer region has one EXEC width;
     # afterLabel then restores full EXEC for the vector code that follows.
     module.add(self.getEdgeMovInstType()(EXEC(), 1, "fused-A2A: back to lane 0 after the DRAIN poll"))
@@ -3362,6 +3373,13 @@ class GlobalWriteBatchWriter:
     module.add(SCBranchVCCNZ(labelName=sendPollLabel.getLabelName(),
                              comment="some queue incomplete -> spin (poll again)"))
 
+    module.add(VMovB32(dst=vgpr(vPollVal), src=0, comment="fused-A2A: zero for the outbound clear"))
+    module.add(GlobalStoreB32(
+      vaddr=vgpr(vPollOff), src=vgpr(vPollVal), saddr=sgpr(drainFlagBase, 2),
+      modifier=GLOBALModifiers(offset=FUSED_A2A_OUTBOUND_OFFSET, glc=True, slc=True,
+                               scope=CacheScope.SCOPE_NONE, isStore=True),
+      comment="clear the outbound counter (system scope, sc0 sc1)"))
+
     module.add(skipSendLabel)
     module.add(skipDrainLabel)
     kw.sgprPool.checkIn(c3WSgpr)
@@ -3379,6 +3397,21 @@ class GlobalWriteBatchWriter:
     kw.sgprPool.checkIn(counterPtrSgpr)
     kw.sgprPool.checkIn(targetSgpr)
     kw.sgprPool.checkIn(myRankSgpr)
+
+    cursorZeroSgpr = kw.sgprPool.checkOutAligned(
+        4, 4, tag="fusedA2A_cursorZero", preventOverflow=False)
+    for i in range(4):
+        module.add(SMovB32(dst=sgpr(cursorZeroSgpr + i), src=0,
+                           comment="fused-A2A: zero pattern for the cursor region"))
+    for off in range(0, FUSED_A2A_COUNTER2_OFFSET, 16):
+        module.add(SStoreB128(src=sgpr(cursorZeroSgpr, 4),
+                              base=sgpr("FusedCounterPtr", 2),
+                              soffset=hex(off),
+                              smem=SMEMModifiers(glc=True),
+                              comment="fused-A2A: clear SDMA cursors [%d:%d)"
+                                      % (off, off + 16)))
+    kw.sgprPool.checkIn(cursorZeroSgpr)
+
     # Restore full EXEC for the CLS look-ahead after the handshake (emit():
     # emitCoord1Advance issues a vector VAddCOU32 on coord1).  It sits AFTER
     # afterLabel because the counter3 tally branches there with EXEC already
@@ -3936,6 +3969,55 @@ class GlobalWriteBatchWriter:
     if self.edge:
       module.add(self.getEdgeMovInstType()(EXEC(), -1, "full mask -> exec"))
 
+  def _emitAtomicPkAddBF16(self, module: Module):
+    # One instruction accumulates atomicW==2 neighbouring free0 elements as a
+    # single packed dword. Solution derivation enforces AF0EM>=2, so a pair
+    # never straddles the end of a column into the next one.
+    assert self.atomicW == 2 and self.gwvw == self.atomicW
+
+    # Pack first, with exec still full: the atomic loop below leaves exec
+    # holding the previous element's mask.
+    module.addComment1("convert accumulators to packed bf16 pairs")
+    for elementIdx in range(len(self.batchElements)):
+      sumIdx     = self.ss.elementSumIdx[elementIdx]
+      packTmpS01 = self._epilogScratchSgpr(self.laneSGPRC)
+      # Packs in place: the pair at sumIdx/sumIdx+1 becomes one dword at sumIdx.
+      module.add(self.packdata(self.gwvw, sumIdx, sumIdx, bf16CVTVgprStruct=self.cvtVgprStruct,
+                               tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+",
+                               prefixOffset=self.parentWriter.states.c.startVgprValu))
+      self._epilogScratchFree(packTmpS01)
+
+    # The GSU slices accumulating into one D element run on different CUs, so on
+    # architectures whose default atomic scope is CU-local the add has to be
+    # widened to device scope or those slices never observe each other.
+    atomicScope = CacheScope.SCOPE_DEV \
+      if self.parentWriter.states.archCaps["DefaultScopeIsCULocal"] else CacheScope.SCOPE_NONE
+
+    module.addComment1("issue packed bf16 atomic writes")
+    for elementIdx in range(len(self.batchElements)):
+      addrCalc = self.ss.elementAddr[elementIdx]
+      mask     = self.ss.elementMask[elementIdx]
+
+      # apply in-bounds exec mask
+      if self.edge:
+        module.add(self.getEdgeMovInstType()(EXEC(), sgpr(mask, self.laneSGPRC), "sgprs -> exec (before atomic)"))
+
+      newSumIdx = self.ss.elementSumIdx[elementIdx] - self.parentWriter.states.c.startVgprValu
+      if self.parentWriter.do["GlobalWrite"]:
+        if self.kernel["BufferStore"]:
+          # No glc/temporal hint: we never read back the pre-add value.
+          module.add(BufferAtomicPkAddBF16(vgpr("ValuC+%u"%newSumIdx), \
+                       vgpr(addrCalc.addrDVgpr,1), \
+                       sgpr("SrdD", 4), \
+                       0,
+                       MUBUFModifiers(offen=True, offset12=addrCalc.globalOffset, scope=atomicScope),
+                       "attempt write"))
+        else:
+          pass # TODO:
+
+    if self.edge:
+      module.add(self.getEdgeMovInstType()(EXEC(), -1, "full mask -> exec"))
+
   def _emitCasAdd(self, module: Module):
     # TODO for atomic GWVW:
     #  - Use vi to compute addresses, sumIdx.
@@ -4174,6 +4256,10 @@ class GlobalWriteBatchWriter:
       # all kinds of code relies on this assumption:
       if self.atomicW > self.gwvw:
         return False
+
+      if self.parentWriter.states.useAtomicPkAddBF16:
+        # A packed atomic always consumes an exact element pair.
+        return self.atomicW == 2 and self.gwvw == self.atomicW
 
       if (self.kernel["ProblemType"]["DataType"].isHalf() or self.kernel["ProblemType"]["DataType"].isBFloat16()) \
         and not self.kernel["_GlobalAccumulation"]:

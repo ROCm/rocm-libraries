@@ -323,7 +323,7 @@ def test_legacy_writer_still_tolerates_assembly_failure_and_builds_helpers(tmp_p
     monkeypatch.setattr(
         Run, "buildSourceCodeObjectFiles", lambda *a: called.append("build helpers")
     )
-    monkeypatch.setattr(Run, "buildAssemblyCodeObjectFiles", lambda *a: [])
+    monkeypatch.setattr(Run, "buildAssemblyCodeObjectFiles", lambda *a, **k: [])
     with pytest.raises(
         SS.SingleSolutionBuildError, match="exactly one solution and main code object"
     ):

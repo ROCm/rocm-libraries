@@ -27,13 +27,13 @@ from typing import Dict
 from .Activation import ActivationType
 from . import Hardware
 from . import Properties
-from Tensile.Common import state, state_key_ordering, IsaInfo
-from Tensile.Common.Architectures import gfxToIsa
-from Tensile.Common.DataType import DataType
-from Tensile.Common.GlobalParameters import internalParameters
-from Tensile.SolutionStructs import Solution as OriginalSolution
-from Tensile.SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
-from Tensile.Toolchain.Component import Assembler
+from .Common import state, state_key_ordering, IsaInfo
+from .Common.Architectures import gfxToIsa
+from .Common.DataType import DataType
+from .Common.GlobalParameters import internalParameters
+from .SolutionStructs import Solution as OriginalSolution
+from .SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
+from .Toolchain.Component import Assembler
 from math import ceil
 
 MIN_K_FOR_GSU = 32
@@ -437,20 +437,6 @@ class ProblemType:
             if self.mxBlockB:
                 predicates.append(ProblemPredicate("DataTypeMXSB", value=self.mxTypeB))
         return predicates
-
-def extractDimPredicate(cls, key, value, predicateName):
-    """
-    Extract the predicate for AssertStrideEqual*
-    Value is a dictionary
-    """
-    predicates = []
-    for pos,val in value.items():
-        if val != -1:
-            predicates.append(cls(predicateName, index=pos, value=val))
-    if len(predicates) == 1:
-        return predicates[0]
-    elif len(predicates) > 1:
-        return cls.And(predicates)
 
 class TaskPredicate(Properties.Predicate):
     @classmethod
