@@ -1078,8 +1078,17 @@ public:
 
         const auto& io_dist_blue = io == io_data_label::INPUT ? iDistBlue : oDistBlue;
 
+        // The INV_CHIRP_MUL CC load and FWD_CHIRP_MUL RC store add lengthBlue to the index
+        // in-kernel, to skip the chirp's FFT stored first in the Bluestein buffer.
+        const bool offset_by_length_blue
+            = (io == io_data_label::INPUT && fuseBlue == BFT_INV_CHIRP_MUL
+               && scheme == CS_KERNEL_STOCKHAM_BLOCK_CC)
+              || (io == io_data_label::OUTPUT && fuseBlue == BFT_FWD_CHIRP_MUL
+                  && scheme == CS_KERNEL_STOCKHAM_BLOCK_RC);
+
         return std::max(ptrdiff,
-                        compute_ptrdiff(io_length, io_stride_blue, batch, io_dist_blue) - 1);
+                        compute_ptrdiff(io_length, io_stride_blue, batch, io_dist_blue) - 1
+                            + (offset_by_length_blue ? lengthBlue : 0));
     };
 
     // Max stride or dist packed into the kernel argument buffer for a given
