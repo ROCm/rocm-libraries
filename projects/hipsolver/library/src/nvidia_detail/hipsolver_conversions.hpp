@@ -60,6 +60,10 @@ cusolverEigRange_t hip2cuda_erange(hipsolverEigRange_t eig);
 
 hipsolverEigRange_t cuda2hip_erange(cusolverEigRange_t eig);
 
+cusolverEigComp_t hip2cuda_evect_comp(hipsolverEigComp_t eig);
+
+hipsolverEigComp_t cuda2hip_evect_comp(cusolverEigComp_t eig);
+
 cusolverAlgMode_t hip2cuda_algmode(hipsolverAlgMode_t mode);
 
 hipsolverAlgMode_t cuda2hip_algmode(cusolverAlgMode_t mode);

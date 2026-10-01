@@ -197,6 +197,36 @@ hipsolverEigRange_t rocblas2hip_erange(rocblas_erange_ range)
     }
 }
 
+rocblas_evect_ hip2rocblas_evect_comp(hipsolverEigComp_t eig)
+{
+    switch(eig)
+    {
+    case HIPSOLVER_EIG_COMP_N:
+        return rocblas_evect_none;
+    case HIPSOLVER_EIG_COMP_I:
+        return rocblas_evect_tridiagonal;
+    case HIPSOLVER_EIG_COMP_V:
+        return rocblas_evect_original;
+    default:
+        throw HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+}
+
+hipsolverEigComp_t rocblas2hip_evect_comp(rocblas_evect_ eig)
+{
+    switch(eig)
+    {
+    case rocblas_evect_none:
+        return HIPSOLVER_EIG_COMP_N;
+    case rocblas_evect_tridiagonal:
+        return HIPSOLVER_EIG_COMP_I;
+    case rocblas_evect_original:
+        return HIPSOLVER_EIG_COMP_V;
+    default:
+        throw HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+}
+
 rocblas_storev_ hip2rocblas_side2storev(hipsolverSideMode_t side)
 {
     switch(side)

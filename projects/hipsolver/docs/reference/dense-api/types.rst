@@ -51,6 +51,10 @@ hipsolverEigRange_t
 --------------------
 See :ref:`hipsolverEigRange_t <eigrange_t>`.
 
+hipsolverEigComp_t
+--------------------
+See :ref:`hipsolverEigComp_t <eigcomp_t>`.
+
 hipsolverDeterministicMode_t
 -----------------------------
 See :ref:`hipsolverDeterministicMode_t <deterministicMode_t>`.

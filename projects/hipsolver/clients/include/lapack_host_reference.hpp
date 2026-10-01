@@ -273,6 +273,21 @@ void cpu_syev_heev(hipsolverEigMode_t  evect,
                    int*                info);
 
 template <typename T, typename S>
+void cpu_stedc(hipsolverEigComp_t compz,
+               int                n,
+               S*                 D,
+               S*                 E,
+               T*                 C,
+               int                ldc,
+               T*                 work,
+               int                lwork,
+               S*                 rwork,
+               int                lrwork,
+               int*               iwork,
+               int                liwork,
+               int*               info);
+
+template <typename T, typename S>
 void cpu_syevd_heevd(hipsolverEigMode_t  evect,
                      hipsolverFillMode_t uplo,
                      int                 n,

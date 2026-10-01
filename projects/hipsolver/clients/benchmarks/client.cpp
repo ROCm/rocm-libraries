@@ -449,6 +449,7 @@ try
         ("jobz",
          value<char>()->default_value('N'),
             "N = none, V = compute eigenvectors/singular vectors of the matrix,\n"
+            "                           I = compute eigenvectors of the tridiagonal matrix.\n"
             "                           Indicates how the eigenvectors/singular vectors are to be calculated and stored.\n"
             "                           ")
 

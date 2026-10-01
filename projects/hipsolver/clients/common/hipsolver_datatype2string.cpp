@@ -110,6 +110,21 @@ char hipsolver2char_erange(hipsolverEigRange_t value)
     }
 }
 
+char hipsolver2char_evect_comp(hipsolverEigComp_t value)
+{
+    switch(value)
+    {
+    case HIPSOLVER_EIG_COMP_N:
+        return 'N';
+    case HIPSOLVER_EIG_COMP_I:
+        return 'I';
+    case HIPSOLVER_EIG_COMP_V:
+        return 'V';
+    default:
+        throw std::invalid_argument("Invalid enum");
+    }
+}
+
 char hipsolver2char_direct(hipsolverDirectMode_t value)
 {
     switch(value)
@@ -244,6 +259,24 @@ hipsolverEigRange_t char2hipsolver_erange(char value)
         return HIPSOLVER_EIG_RANGE_V;
     case 'I':
         return HIPSOLVER_EIG_RANGE_I;
+    default:
+        throw std::invalid_argument("Invalid character");
+    }
+}
+
+hipsolverEigComp_t char2hipsolver_evect_comp(char value)
+{
+    switch(value)
+    {
+    case 'n':
+    case 'N':
+        return HIPSOLVER_EIG_COMP_N;
+    case 'i':
+    case 'I':
+        return HIPSOLVER_EIG_COMP_I;
+    case 'v':
+    case 'V':
+        return HIPSOLVER_EIG_COMP_V;
     default:
         throw std::invalid_argument("Invalid character");
     }
