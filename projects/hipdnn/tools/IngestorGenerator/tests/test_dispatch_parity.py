@@ -505,7 +505,9 @@ class TestTheShippedProfilePinsTheDispatchArmItsCatalogWasBuiltFrom:
             "mask_type": 1,
             **overrides,
         }
-        return factory(request_cls(**fields))
+        result = factory(request_cls(**fields))
+        attribute = dispatch.get("spec_attribute")
+        return getattr(result, attribute) if attribute else result
 
     def test_the_real_dispatcher_resolves_the_arm_the_catalog_ships(self, monkeypatch):
         """Checking the YAML value is only half of it: this is what the dispatcher does
@@ -556,6 +558,25 @@ class TestTheRealDispatcherBoundary:
         path.write_text(json.dumps(shapes))
         argv = ["--profile", str(_SHIPPED_PROFILE), "--shapes", str(path), *extra]
         return dispatch_parity.main(argv)
+
+    def test_a_shape_only_the_bm128_variant_serves_is_servable(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        """Sq=128 does not divide the auto variant's block_m=256, but the bm128
+        sibling variant serves it and the catalog ships bm128 tiles. Asking only
+        the auto variant's factory reported it as a gap the engine does not have."""
+        shapes = [
+            {**_D128, "batch": 1, "seqlen_q": 128, "seqlen_k": 256, "mask_type": 0}
+        ]
+        out = tmp_path / "config.yaml"
+        rc = self._run(monkeypatch, tmp_path, shapes, "--out", str(out))
+        printed = capsys.readouterr()
+        assert rc == 0, printed.err
+        assert "servable          1" in printed.out
+
+        profile = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))
+        [resolution] = dispatch_parity.resolve_shapes(shapes, profile)
+        assert resolution.spec.block_m == 128, resolution.spec
 
     def test_head_size_192_is_a_refusal_not_an_abort(
         self, monkeypatch, tmp_path, capsys

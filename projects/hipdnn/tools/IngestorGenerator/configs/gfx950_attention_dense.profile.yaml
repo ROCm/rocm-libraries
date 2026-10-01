@@ -20,9 +20,15 @@ reference_candidates:
 source: kernels/gfx950/attention_dense.py
 builder: build_attention_dense
 
+# The library's full dispatcher, not the per-arch factory: dense_spec_for_request
+# pins the auto variant (256/64 tile) and refuses e.g. Sq=128, which the
+# bm128 sibling variant serves and the catalog ships bm128 tiles for. The
+# ranker returns the auto variant whenever it admits the request, so every
+# other shape resolves to the same spec as before.
 dispatch:
-  module: dispatch.attention.gfx950
-  function: dense_spec_for_request
+  module: dispatch.attention
+  function: dispatch_attention
+  spec_attribute: spec
 
 request:
   module: dispatch.attention.common

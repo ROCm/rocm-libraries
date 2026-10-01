@@ -229,13 +229,22 @@ def resolve_shapes(shapes: list[dict], profile: dict) -> list[Resolution]:
     (dispatch/attention/gfx942.py and gfx950.py): a request the request class
     cannot construct is operational, the spec factory raising ValueError is
     that shape's decline (rocKE specs refuse unsupported shapes in
-    `__post_init__`), and any other exception from the factory is operational.
+    `__post_init__`; the registry's `select` raises it when no candidate
+    admits the request), and any other exception from the factory is
+    operational.
+
+    `dispatch.function` may be a spec factory or the library's full dispatcher;
+    for the latter, `dispatch.spec_attribute` names the attribute of its result
+    that holds the selected spec (``dispatch_attention(req).spec``). The full
+    dispatcher is the faithful answer: a per-arch factory pinned to one variant
+    refuses shapes a sibling variant of the same kernel serves.
     """
     dispatch = profile.get("dispatch") or {}
     request_decl = profile.get("request") or {}
     predicate_decl = profile.get("predicate") or {}
 
     factory = _import(*_required(dispatch, "dispatch", "module", "function"))
+    spec_attribute = dispatch.get("spec_attribute")
     request_cls = _import(*_required(request_decl, "request", "module", "class"))
     predicate = (
         _import(*_required(predicate_decl, "predicate", "module", "function"))
@@ -271,6 +280,14 @@ def resolve_shapes(shapes: list[dict], profile: dict) -> list[Resolution]:
             continue
         except Exception as exc:
             raise ParityError(f"request/spec construction failed: {exc}") from exc
+        if spec_attribute:
+            try:
+                spec = getattr(spec, spec_attribute)
+            except AttributeError as exc:
+                raise ParityError(
+                    f"dispatch.spec_attribute {spec_attribute!r}: the dispatcher "
+                    f"result has no such attribute ({exc})"
+                ) from exc
         if predicate is not None:
             supported, why = _predicate_result(
                 predicate, spec, **({"arch": arch} if arch else {})
