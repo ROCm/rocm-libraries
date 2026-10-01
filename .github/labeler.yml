@@ -46,7 +46,12 @@
 
 "project: hipcub":
 - changed-files:
+  - any-glob-to-any-file: 'projects/hipccl/**/*'
+
+"project: hipcub":
+- changed-files:
   - any-glob-to-any-file: 'projects/hipcub/**/*'
+  - any-glob-to-any-file: 'projects/hipccl/hipccl3/hipcub/**/*'
 
 "project: hipdnn":
 - changed-files:
@@ -106,6 +111,7 @@
 "project: rocprim":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocprim/**/*'
+  - any-glob-to-any-file: 'projects/hipccl/hipccl3/rocprim/**/*'
 
 "project: rocrand":
 - changed-files:
@@ -122,6 +128,7 @@
 "project: rocthrust":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocthrust/**/*'
+  - any-glob-to-any-file: 'projects/hipccl/hipccl3/rocthrust/**/*'
 
 "project: rpp":
 - changed-files:
