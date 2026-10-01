@@ -37,63 +37,82 @@ fallback/default engine-selection path.
 Impact: plan choice and performance may differ from cuDNN for the same requested
 heuristic mode.
 
-## Numerical-note filters
+## Note filters
 
-hipDNN does not currently expose per-plan numerical-note metadata. The shim
-therefore triages numerical-note filters by whether dropping the filter can change
-correctness.
+hipDNN exposes no per-plan numerical-note metadata and reports only its own
+behavior notes. The shim therefore triages each note by what ignoring the
+request could do. The tables below are the canonical triage; the shim's
+`note_triage.h` switches and their table test follow them.
 
-| Note | `select_numeric_notes` | `deselect_numeric_notes` |
-|---|---|---|
-| `NOT_SET` | no-op | no-op |
-| `NONDETERMINISTIC` | warn and ignore | error |
-| `REDUCED_PRECISION_REDUCTION` | warn and ignore | error |
-| `TENSOR_CORE` | warn and ignore | warn and ignore |
-| `DOWN_CONVERT_INPUTS` | warn and ignore | warn and ignore |
-| `FFT` | warn and ignore | warn and ignore |
-| `WINOGRAD` | warn and ignore | warn and ignore |
-| `WINOGRAD_TILE_4x4` | warn and ignore | warn and ignore |
-| `WINOGRAD_TILE_6x6` | warn and ignore | warn and ignore |
-| `WINOGRAD_TILE_13x13` | warn and ignore | warn and ignore |
-| `STRICT_NAN_PROP` | warn and ignore | warn and ignore |
+| Action | Effect |
+|---|---|
+| `no-op` | accepted silently |
+| `warn` | logged as a warning on every call, otherwise ignored |
+| `map` | honored by filtering applicable engines; logged at info |
+| `error` | records `GRAPH_NOT_SUPPORTED`, returned by the next `validate()`, plan creation, support check, or plan build |
 
-`deselect_numeric_notes({NONDETERMINISTIC})` is treated as a request for a
-deterministic plan. `deselect_numeric_notes({REDUCED_PRECISION_REDUCTION})` is
-treated as a request for full-precision reduction. The shim cannot guarantee
-either without backend metadata, so it records an error rather than silently
-returning an unfiltered plan.
+### Numerical notes
 
-## Behavior-note filters
+| Note | `select_numeric_notes` | `deselect_numeric_notes` | Why |
+|---|---|---|---|
+| `NOT_SET` | no-op | no-op | placeholder |
+| `TENSOR_CORE` | warn | warn | performance only |
+| `DOWN_CONVERT_INPUTS` | warn | error | excluding it is a precision guarantee the shim cannot check |
+| `REDUCED_PRECISION_REDUCTION` | warn | error | excluding it is a precision guarantee the shim cannot check |
+| `FFT` | warn | warn | algorithm class |
+| `NONDETERMINISTIC` | warn | map | deselect keeps only engines that claim determinism (see [Determinism](#determinism)) |
+| `WINOGRAD`, `WINOGRAD_TILE_4x4`, `WINOGRAD_TILE_6x6`, `WINOGRAD_TILE_13x13` | warn | warn | algorithm class |
+| `STRICT_NAN_PROP` | error | warn | selecting it is a NaN-propagation guarantee the shim cannot check; excluding it only relaxes |
+| out-of-range value | error | error | unclassifiable |
 
-hipDNN exposes some per-engine behavior notes, but not cuDNN's CUDA-specific
-behavior notes. The shim stores known hipDNN behavior-note filters and applies
-them after native plan creation by querying applicable engine behavior metadata.
+Deselecting an out-of-range value is an error here but a no-op upstream:
+without numerical metadata the shim cannot show the exclusion is vacuous.
 
-cuDNN-only behavior notes (below) are never emitted by hipDNN engines. The shim
-triages them by whether ignoring the filter can violate the caller's request:
+### Behavior notes
 
-- `deselect_behavior_notes({<cuDNN-only note>})` asks to *exclude* engines that
-  report the note. No hipDNN engine reports it, so nothing is excluded — the
-  filter is a safe no-op. The shim logs a warning and continues.
-- `select_behavior_notes({<cuDNN-only note>})` asks to *require* the note. No
-  hipDNN engine can satisfy it, so the request is unsatisfiable. The shim records
-  `GRAPH_NOT_SUPPORTED` rather than returning a plan that silently ignores the
-  requirement.
+Notes hipDNN engines report (`isKnownBehaviorNote`) map for both select and
+deselect: the shim filters applicable engines by their reported behavior notes.
+Any other value, including cuDNN's CUDA-specific notes, errors on select (no
+hipDNN engine can satisfy it) and warns on deselect (it excludes nothing).
 
-The cuDNN-only behavior notes handled this way:
+| Note | `select_behavior_notes` | `deselect_behavior_notes` | Why |
+|---|---|---|---|
+| `NOT_SET` | no-op | no-op | placeholder |
+| `RUNTIME_COMPILATION` | map | map | hipDNN note |
+| `REQUIRES_FILTER_INT8x32_REORDER` | error | warn | cuDNN only |
+| `REQUIRES_BIAS_INT8x32_REORDER` | error | warn | cuDNN only |
+| `SUPPORTS_CUDA_GRAPH_NATIVE_API` | error | warn | cuDNN only; `populate_cuda_graph` is unsupported, and this is not stream capture (`SUPPORTS_GRAPH_CAPTURE`) |
+| `CUBLASLT_DEPENDENCY` | error | warn | cuDNN only; not equivalent to `EXTERNAL_LIBRARY_DEPENDENCY` |
+| `REQUIRES_LAYOUT_TRANSFORM` | map | map | hipDNN note |
+| `SUPPORTS_GRAPH_CAPTURE` | map | map | hipDNN note |
+| `EXTERNAL_LIBRARY_DEPENDENCY` | map | map | hipDNN note |
+| `SUPPORTS_EXECUTION_PLAN_SERIALIZATION` | map | map | hipDNN note |
+| out-of-range value | error | warn | reported by no hipDNN engine |
 
-- `REQUIRES_FILTER_INT8x32_REORDER`
-- `REQUIRES_BIAS_INT8x32_REORDER`
-- `SUPPORTS_CUDA_GRAPH_NATIVE_API`
-- `CUBLASLT_DEPENDENCY`
+### Determinism
 
-For behavior notes hipDNN *does* expose, both filters apply after native plan
-creation. If known behavior-note filters remove every applicable hipDNN engine,
-plan creation returns `GRAPH_NOT_SUPPORTED`.
+`deselect_numeric_notes({NONDETERMINISTIC})` keeps only engines that positively
+claim deterministic results. hipDNN engines declare no numerical notes, so a
+missing claim proves nothing. Until engine metadata carries the claim, the shim
+keeps its own allowlist, today `MIOPEN_ENGINE_DETERMINISTIC`.
 
-When a filter bars only some engines, the shim narrows the candidate set the way
-cuDNN does: `build_plans(HEURISTICS_CHOICE)` retargets onto the top-ranked
+## Engine filtering
+
+`deselect_engines`, the behavior-note filters, and the determinism filter are
+applied to the applicable engines after native plan creation. A filter set after
+plans were created takes effect at the next support check or plan build,
+including for plans already created.
+
+When the filters bar only some engines, the shim narrows the candidate set the
+way cuDNN does: `build_plans(HEURISTICS_CHOICE)` retargets onto the top-ranked
 surviving plan rather than failing because the top-ranked one was barred.
+
+If no created plan survives the filters, the next plan creation
+(`create_execution_plans`, `create_execution_plan`), support check
+(`check_support()`), or plan build (`build_plans()`, `build_plan_at_index()`)
+returns `GRAPH_NOT_SUPPORTED`; upstream returns
+`GRAPH_EXECUTION_PLAN_CREATION_FAILED` from `check_support()`. This includes
+`deselect_engines` alone barring every applicable engine.
 
 ## Engine IDs
 
@@ -161,9 +180,9 @@ autotune, and current-plan behavior-note APIs where native hipDNN exposes an
 equivalent.
 
 `get_behavior_notes_for_plan_at_index` is best-effort. Native hipDNN exposes plan
-name by index but not engine ID by index, so the shim resolves registered engine
-names back to IDs. Unknown engine names fail rather than fabricating behavior
-notes.
+name by index but not engine ID by index, so the shim resolves the plan name back
+to an ID: built-in engine names by hash, and every other engine (including plugin
+engines) through the `0x`-prefixed hexadecimal ID native reports for it.
 
 `warmup` is implemented as `execute_plan_at_index(..., 0)`.
 

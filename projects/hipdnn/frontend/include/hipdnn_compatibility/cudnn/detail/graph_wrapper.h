@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -24,9 +23,11 @@
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/sdpa_attributes.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
+#include <hipdnn_compatibility/cudnn/detail/engine_filters.h>
 #include <hipdnn_compatibility/cudnn/detail/error_recorder.h>
 #include <hipdnn_compatibility/cudnn/detail/knob_wrapper.h>
 #include <hipdnn_compatibility/cudnn/detail/node_wrappers/unsupported_nodes.h>
+#include <hipdnn_compatibility/cudnn/detail/note_triage.h>
 #include <hipdnn_frontend/Graph.hpp>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::graph
@@ -161,6 +162,7 @@ public:
 
         HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH();
 
+        CHECK_CUDNN_FRONTEND_ERROR(applyPendingFiltersForCreatedPlans());
         return _graph->check_support();
     }
 
@@ -212,16 +214,16 @@ public:
         // plan, so a filter that bars the top-ranked engine fails the build
         // outright. cuDNN instead narrows the candidate set, so retarget onto the
         // top-ranked survivor first.
-        if(policy == BuildPlanPolicy_t::HEURISTICS_CHOICE)
+        int64_t activeEngineId = -1;
+        if(policy == BuildPlanPolicy_t::HEURISTICS_CHOICE && !_shimBarredEngineIds.empty()
+           && _graph->get_execution_plan_engine_id(activeEngineId).is_good()
+           && isShimBarred(activeEngineId))
         {
             int64_t survivingIndex = -1;
-            CHECK_CUDNN_FRONTEND_ERROR(findPlanIndexIfActiveBarred(survivingIndex));
-            if(survivingIndex >= 0)
-            {
-                CHECK_CUDNN_FRONTEND_ERROR(_graph->build_plan_at_index(survivingIndex));
-                _stage = Stage::PlansBuilt;
-                return {};
-            }
+            CHECK_CUDNN_FRONTEND_ERROR(findTopSurvivingPlanIndex(survivingIndex));
+            CHECK_CUDNN_FRONTEND_ERROR(_graph->build_plan_at_index(survivingIndex));
+            _stage = Stage::PlansBuilt;
+            return {};
         }
 
         auto err = _graph->build_plans(policy);
@@ -420,14 +422,7 @@ public:
 
         std::string planName;
         CHECK_CUDNN_FRONTEND_ERROR(_graph->get_plan_name_at_index(index, planName));
-        if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(planName))
-        {
-            return {error_code_t::INVALID_VALUE,
-                    "Cannot resolve engine id for plan '" + planName
-                        + "'; per-plan behavior-note query is unsupported for unknown engines"};
-        }
-
-        const int64_t engineId = hipdnn_data_sdk::utilities::engineNameToId(planName);
+        const int64_t engineId = hipdnn_data_sdk::utilities::engineNameOrIdToId(planName);
         return _graph->get_behavior_notes_for_engine(engineId, notes);
     }
 
@@ -561,19 +556,16 @@ public:
 
     // --- Plan-selection note filters ---------------------------------------
     //
-    // Inline triage: advisory filters warn-and-ignore, while exclusions that
-    // request a numerical guarantee hipDNN cannot prove record an error.
+    // Per-note dispositions live in detail/note_triage.h.
 
     Graph& select_numeric_notes(const std::vector<NumericalNote_t>& notes)
     {
         for(const auto note : notes)
         {
-            if(note != NumericalNote_t::NOT_SET)
-            {
-                HIPDNN_FE_LOG_WARN("[cudnn_frontend] Ignoring select_numeric_notes("
-                                   << hipdnn_frontend::to_string(note)
-                                   << "); hipDNN exposes no per-plan numerical-note metadata.");
-            }
+            applyNote("select_numeric_notes",
+                      note,
+                      cudnn_frontend::detail::triageSelect(note),
+                      [](NumericalNote_t) { return false; });
         }
         return *this;
     }
@@ -582,25 +574,17 @@ public:
     {
         for(const auto note : notes)
         {
-            if(note == NumericalNote_t::NOT_SET)
-            {
-                continue;
-            }
-
-            if(note == NumericalNote_t::NONDETERMINISTIC
-               || note == NumericalNote_t::REDUCED_PRECISION_REDUCTION)
-            {
-                recordError(error_code_t::GRAPH_NOT_SUPPORTED,
-                            std::string{"deselect_numeric_notes("}
-                                + hipdnn_frontend::to_string(note)
-                                + ") requests a guarantee this shim cannot enforce; refusing to "
-                                  "run rather than return a plan the caller excluded");
-                continue;
-            }
-
-            HIPDNN_FE_LOG_WARN("[cudnn_frontend] Ignoring deselect_numeric_notes("
-                               << hipdnn_frontend::to_string(note)
-                               << "); hipDNN exposes no per-plan numerical-note metadata.");
+            applyNote("deselect_numeric_notes",
+                      note,
+                      cudnn_frontend::detail::triageDeselect(note),
+                      [this](NumericalNote_t mapped) {
+                          if(mapped != NumericalNote_t::NONDETERMINISTIC)
+                          {
+                              return false;
+                          }
+                          _requireDeterministic = true;
+                          return true;
+                      });
         }
         return *this;
     }
@@ -609,26 +593,13 @@ public:
     {
         for(const auto note : notes)
         {
-            if(note == BehaviorNote_t::NOT_SET)
-            {
-                continue;
-            }
-            if(hipdnn_frontend::isKnownBehaviorNote(note))
-            {
-                _selectedBehaviorNotes.push_back(note);
-                HIPDNN_FE_LOG_WARN("[cudnn_frontend] select_behavior_notes("
-                                   << hipdnn_frontend::to_string(note)
-                                   << ") will filter hipDNN engines by behavior metadata.");
-            }
-            else
-            {
-                // Selecting a note no hipDNN engine can emit is unsatisfiable:
-                // record an error rather than return a plan that ignores the
-                // request. Deselecting the same note is a safe no-op (below).
-                recordError(error_code_t::GRAPH_NOT_SUPPORTED,
-                            "select_behavior_notes requested a behavior note that no hipDNN "
-                            "engine reports; the request cannot be satisfied");
-            }
+            applyNote("select_behavior_notes",
+                      note,
+                      cudnn_frontend::detail::triageSelect(note),
+                      [this](BehaviorNote_t mapped) {
+                          _selectedBehaviorNotes.push_back(mapped);
+                          return true;
+                      });
         }
         return *this;
     }
@@ -637,23 +608,13 @@ public:
     {
         for(const auto note : notes)
         {
-            if(note == BehaviorNote_t::NOT_SET)
-            {
-                continue;
-            }
-            if(hipdnn_frontend::isKnownBehaviorNote(note))
-            {
-                _deselectedBehaviorNotes.push_back(note);
-                HIPDNN_FE_LOG_WARN("[cudnn_frontend] deselect_behavior_notes("
-                                   << hipdnn_frontend::to_string(note)
-                                   << ") will filter hipDNN engines by behavior metadata.");
-            }
-            else
-            {
-                HIPDNN_FE_LOG_WARN("[cudnn_frontend] Ignoring deselect_behavior_notes("
-                                   << hipdnn_frontend::to_string(note)
-                                   << "); hipDNN engines do not report this cuDNN behavior note.");
-            }
+            applyNote("deselect_behavior_notes",
+                      note,
+                      cudnn_frontend::detail::triageDeselect(note),
+                      [this](BehaviorNote_t mapped) {
+                          _deselectedBehaviorNotes.push_back(mapped);
+                          return true;
+                      });
         }
         return *this;
     }
@@ -1575,6 +1536,7 @@ private:
     std::vector<int64_t> _engineIndexToNativeEngineId;
     std::vector<BehaviorNote_t> _selectedBehaviorNotes;
     std::vector<BehaviorNote_t> _deselectedBehaviorNotes;
+    bool _requireDeterministic = false;
     std::unordered_set<int64_t> _shimBarredEngineIds;
 
     Mode _mode = Mode::Empty;
@@ -1630,6 +1592,8 @@ private:
         return {};
     }
 
+    // Filters set after plan creation take effect here, on the next
+    // check_support(), build_plans() or build_plan_at_index().
     error_t applyPendingFiltersForCreatedPlans()
     {
         if(!stageAtLeast(Stage::PlansCreated))
@@ -1655,7 +1619,7 @@ private:
             _graph->deselect_engines(_barredEngineNames);
             for(const auto& name : _barredEngineNames)
             {
-                _shimBarredEngineIds.insert(hipdnn_data_sdk::utilities::engineNameToId(name));
+                _shimBarredEngineIds.insert(hipdnn_data_sdk::utilities::engineNameOrIdToId(name));
             }
         }
         if(!_barredEngineIndices.empty())
@@ -1666,13 +1630,22 @@ private:
             _graph->deselect_engines(nativeEngineIds);
             _shimBarredEngineIds.insert(nativeEngineIds.begin(), nativeEngineIds.end());
         }
+        CHECK_CUDNN_FRONTEND_ERROR(applyEngineMetadataFilters(modes));
 
-        return applyBehaviorNoteFilters(modes);
+        if(_shimBarredEngineIds.empty() || _graph->get_execution_plan_count() == 0)
+        {
+            return {};
+        }
+        int64_t survivingIndex = -1;
+        return findTopSurvivingPlanIndex(survivingIndex);
     }
 
-    error_t applyBehaviorNoteFilters(const std::vector<HeurMode_t>& modes)
+    // Behavior-note and determinism filters bar engines by per-engine metadata.
+    error_t applyEngineMetadataFilters(const std::vector<HeurMode_t>& modes)
     {
-        if(_selectedBehaviorNotes.empty() && _deselectedBehaviorNotes.empty())
+        const bool filterBehavior
+            = !_selectedBehaviorNotes.empty() || !_deselectedBehaviorNotes.empty();
+        if(!filterBehavior && !_requireDeterministic)
         {
             return {};
         }
@@ -1680,29 +1653,33 @@ private:
 
         std::vector<int64_t> engineIds;
         CHECK_CUDNN_FRONTEND_ERROR(_graph->get_ranked_engine_ids(engineIds, modes));
-        if(engineIds.empty())
-        {
-            return {};
-        }
 
         std::vector<int64_t> enginesToBar;
         enginesToBar.reserve(engineIds.size());
         for(const auto engineId : engineIds)
         {
-            std::vector<BehaviorNote_t> engineNotes;
-            CHECK_CUDNN_FRONTEND_ERROR(
-                _graph->get_behavior_notes_for_engine(engineId, engineNotes));
-            if(!behaviorNotesMatch(engineNotes))
+            if(isShimBarred(engineId))
+            {
+                continue;
+            }
+            if(_requireDeterministic && !cudnn_frontend::detail::isDeterminismClaimed(engineId))
             {
                 enginesToBar.push_back(engineId);
+                continue;
+            }
+            if(filterBehavior)
+            {
+                std::vector<BehaviorNote_t> engineNotes;
+                CHECK_CUDNN_FRONTEND_ERROR(
+                    _graph->get_behavior_notes_for_engine(engineId, engineNotes));
+                if(!cudnn_frontend::detail::behaviorNotesMatch(
+                       _selectedBehaviorNotes, _deselectedBehaviorNotes, engineNotes))
+                {
+                    enginesToBar.push_back(engineId);
+                }
             }
         }
 
-        if(enginesToBar.size() == engineIds.size())
-        {
-            return {error_code_t::GRAPH_NOT_SUPPORTED,
-                    "Behavior-note filters removed every applicable hipDNN engine"};
-        }
         if(!enginesToBar.empty())
         {
             _graph->deselect_engines(enginesToBar);
@@ -1711,70 +1688,95 @@ private:
         return {};
     }
 
-    // Report the top-ranked plan that survives this shim's own engine filters, or
-    // -1 when the active plan already survives and native can build it directly.
-    // Plan order is not guaranteed to match ranked-engine order, so each plan's
-    // engine is resolved through its own name.
-    error_t findPlanIndexIfActiveBarred(int64_t& survivingIndex)
+    bool isShimBarred(int64_t engineId) const
     {
-        survivingIndex = -1;
-        if(_shimBarredEngineIds.empty())
-        {
-            return {};
-        }
+        return _shimBarredEngineIds.count(engineId) != 0;
+    }
 
-        int64_t activeEngineId = -1;
-        if(_graph->get_execution_plan_engine_id(activeEngineId).is_bad()
-           || _shimBarredEngineIds.count(activeEngineId) == 0)
-        {
-            return {};
-        }
-
+    // Survival is judged against everything this shim barred, so an engine
+    // excluded by deselect_engines cannot count as a survivor of a metadata
+    // filter. Plan order is not guaranteed to match ranked-engine order, so each
+    // plan's engine is resolved through its own name.
+    error_t findTopSurvivingPlanIndex(int64_t& index) const
+    {
         const int64_t planCount = _graph->get_execution_plan_count();
-        for(int64_t index = 0; index < planCount; ++index)
+        for(index = 0; index < planCount; ++index)
         {
             std::string planName;
             if(_graph->get_plan_name_at_index(index, planName).is_bad())
             {
                 continue;
             }
-            // An engine whose name does not resolve cannot be matched against the
-            // barred set. Treat it as a survivor: only ids this shim explicitly
-            // barred are known to be excluded, and native re-checks its own filter
-            // before building.
-            if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(planName)
-               || _shimBarredEngineIds.count(hipdnn_data_sdk::utilities::engineNameToId(planName))
-                      == 0)
+            // Plugin engines come back as their hex id rather than a registered
+            // name; engineNameOrIdToId resolves both forms.
+            if(!isShimBarred(hipdnn_data_sdk::utilities::engineNameOrIdToId(planName)))
             {
-                survivingIndex = index;
                 return {};
             }
         }
 
+        index = -1;
         return {error_code_t::GRAPH_NOT_SUPPORTED,
-                "Engine filters removed every applicable hipDNN execution plan"};
+                "No created hipDNN execution plan survives the plan filters ("
+                    + activePlanFilterNames() + ")"};
     }
 
-    bool behaviorNotesMatch(const std::vector<BehaviorNote_t>& engineNotes) const
+    std::string activePlanFilterNames() const
     {
-        for(const auto required : _selectedBehaviorNotes)
-        {
-            if(required != BehaviorNote_t::NOT_SET
-               && std::find(engineNotes.begin(), engineNotes.end(), required) == engineNotes.end())
+        std::string names;
+        const auto append = [&names](const char* name) {
+            if(!names.empty())
             {
-                return false;
+                names += ", ";
             }
-        }
-        for(const auto excluded : _deselectedBehaviorNotes)
+            names += name;
+        };
+        if(!_barredEngineNames.empty() || !_barredEngineIndices.empty())
         {
-            if(excluded != BehaviorNote_t::NOT_SET
-               && std::find(engineNotes.begin(), engineNotes.end(), excluded) != engineNotes.end())
-            {
-                return false;
-            }
+            append("deselect_engines");
         }
-        return true;
+        if(!_selectedBehaviorNotes.empty() || !_deselectedBehaviorNotes.empty())
+        {
+            append("behavior notes");
+        }
+        if(_requireDeterministic)
+        {
+            append("deselect_numeric_notes(NONDETERMINISTIC)");
+        }
+        return names;
     }
+
+    // onMap returns false when this setter cannot honor the mapped note; that fails closed.
+    template <typename Note, typename OnMap>
+    void applyNote(const char* method,
+                   Note note,
+                   cudnn_frontend::detail::NoteAction action,
+                   OnMap&& onMap)
+    {
+        switch(action)
+        {
+        case cudnn_frontend::detail::NoteAction::NO_OP:
+            return;
+        case cudnn_frontend::detail::NoteAction::WARN:
+            HIPDNN_FE_LOG_WARN("[cudnn_frontend] "
+                               << cudnn_frontend::detail::noteMessage(method, note, action));
+            return;
+        case cudnn_frontend::detail::NoteAction::MAP:
+            if(std::forward<OnMap>(onMap)(note))
+            {
+                CUDNN_FE_LOG_LABEL(cudnn_frontend::detail::noteMessage(method, note, action));
+                return;
+            }
+            break;
+        case cudnn_frontend::detail::NoteAction::RECORD_ERROR:
+        default: // unknown actions fail closed
+            break;
+        }
+        recordError(error_code_t::GRAPH_NOT_SUPPORTED,
+                    cudnn_frontend::detail::noteMessage(
+                        method, note, cudnn_frontend::detail::NoteAction::RECORD_ERROR));
+    }
+
     template <typename T>
     std::shared_ptr<Tensor_attributes> scalarTensor(const T& scalar, ScalarType scalarType)
     {
@@ -1867,6 +1869,8 @@ private:
         _engineIndexToNativeEngineId.clear();
         _selectedBehaviorNotes.clear();
         _deselectedBehaviorNotes.clear();
+        _requireDeterministic = false;
+        _shimBarredEngineIds.clear();
         _recordedError.reset();
         _mode = Mode::Empty;
         _stage = Stage::Described;
