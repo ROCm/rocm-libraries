@@ -293,8 +293,8 @@ hipBLASLt with `--clients`.
 
 You can find more information at the following links:
 
-* [hipblaslt-test](clients/gtest/README.md)
-* [hipblaslt-bench](clients/benchmarks/README.md)
+* [hipblaslt-test](clients/tests/README.md)
+* [hipblaslt-bench](clients/bench/README.md)
 
 For the full testing strategy (what gates a pull request, what does not, and why), see
 [TESTING.md](TESTING.md); TensileLite's own testing strategy is documented separately in
