@@ -57,9 +57,7 @@ class Tuner(BaseTuner):
     def _get_value_type_name(self):
         return ""
 
-    def _get_restrictions(
-        self, key_type: str, val_type: Optional[str] = None
-    ) -> Callable[[dict], bool]:
+    def _get_restrictions(self, types):
 
         def validate(params):
             return True

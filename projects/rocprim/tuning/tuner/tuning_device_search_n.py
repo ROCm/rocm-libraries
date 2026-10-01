@@ -51,7 +51,7 @@ class Tuner(BaseTuner):
         params['threshold'] = THRESHOLD
         return params
 
-    def _get_restrictions(self, types: Dict[str, Any]) -> Callable[[dict], bool]:
+    def _get_restrictions(self, types):
         def validate(params):
             return True
 
