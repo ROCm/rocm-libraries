@@ -312,8 +312,8 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
             ROCSOLVER_LAUNCH_KERNEL(reset_batch_info<T>, dim3(1, batch_count), dim3(1, 1), 0,
                                     stream, C, strideC, n, 1);
         }
-        ROCSOLVER_LAUNCH_KERNEL(stedcx_case1_kernel, dim3(1, 1, bcblocks), dim3(1), 0, stream, erange,
-                                vl, vu, D, strideD, nev, W, strideW, batch_count);
+        ROCSOLVER_LAUNCH_KERNEL(stedcx_case1_kernel, dim3(1, 1, bcblocks), dim3(1), 0, stream,
+                                erange, vl, vu, D, strideD, nev, W, strideW, batch_count);
     }
     if(n <= 1)
         return rocblas_status_success;

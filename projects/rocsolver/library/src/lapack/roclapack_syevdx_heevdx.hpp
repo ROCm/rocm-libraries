@@ -294,7 +294,7 @@ rocblas_status rocsolver_syevdx_heevdx_template(rocblas_handle handle,
         // **** Use D&C approach ****
         // always produce vectors of the tridiagonal form
         bool with_vectors = (evect == rocblas_evect_original);
-        rocblas_evect evect2 = with_vectors ? rocblas_evect_tridiagonal : rocblas_evect_none; 
+        rocblas_evect evect2 = with_vectors ? rocblas_evect_tridiagonal : rocblas_evect_none;
 
         rocsolver_stedcx_template<BATCHED, STRIDED, T>(
             handle, evect2, erange, n, vl, vu, il, iu, D, stride, E, stride, nev, W, strideW, Z,
