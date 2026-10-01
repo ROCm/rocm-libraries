@@ -228,6 +228,13 @@ read backward kernels, and a backward kernel cannot move a forward throughput nu
 `UHD_COMMIT=<sha>` pins `bakeoff.sbatch` to an older build when you do need to reproduce
 against one.
 
+An `ASM_SDPA_ENGINE` retrain keeps the declared id (`L1_MODEL_IDS`), and the build already
+stages the shipped model under that id, so the job's promote refuses the new one as "already
+installed with different content" (one UUID names one model) and `generate` leaves it in the
+kept `preserved-.uhd-generate-*/model/`. Replacing the model is a file swap in the source
+tree: copy `model.bin` over `descriptors/predict_engine/<arch>/asm_sdpa_engine_tflops.bin` and
+the UHD over its `.uhd.json`, pointing `tree_data.artifact` at the shipped file name.
+
 ## 5. Which engine answers at all
 
 `engine_matrix.sbatch` is the cheap first check: it lists the engines a build registers and
