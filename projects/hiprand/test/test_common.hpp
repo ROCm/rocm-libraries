@@ -41,14 +41,6 @@
 
 #define HIPRAND_CHECK(state) ASSERT_EQ(state, HIPRAND_STATUS_SUCCESS)
 
-#define HIP_CHECK_NON_VOID(condition)         \
-{                                    \
-    hipError_t error = condition;    \
-    if(error != hipSuccess){         \
-        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-        exit(error); \
-    } \
-}
 
 #ifdef _MSC_VER
 inline bool use_hmm()
@@ -90,7 +82,6 @@ hipError_t hipMallocHelper(T** devPtr, size_t size)
     {
         return hipMalloc((void**)devPtr, size);
     }
-    return hipSuccess;
 }
 
 #endif // TEST_COMMON_HPP_
