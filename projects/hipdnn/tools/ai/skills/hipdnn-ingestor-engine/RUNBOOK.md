@@ -30,11 +30,25 @@ Replace `<your-bundle-engine-id>` with your bundle's engine ID; it is consumed v
 as `--expect-engine` below. A gfx942 dense attention bundle would spell it
 `hipkernel:Gfx942AttentionDense`; this tree ships no such engine.
 
-Follow the **Setup** section of `$GEN/README.md`. Authoring and mining imports need the
-profile's rocKE library environment; production packaging uses its own selected
-compiler/wheel interpreter. Full artifact checking also needs `rocm_kpack` and its
-dependencies (`zstandard`, `msgpack`) importable from `$PY`; `--kpack-python-dir`
-supplies an import root, not missing dependencies.
+Follow the **Setup** section of `$GEN/README.md`; its venv holds only PyYAML, Jinja2 and
+pytest. Authoring, mining, parity and knob tools also import the rocKE library
+(`kernels`, `builders`, `dispatch`, which need `numpy`), so editable-install both rocKE
+roots into the same venv, `platform` first, as `$PROVIDER/rocke/BUILDING.md` *Manual
+setup* describes. Do not build a second venv for them:
+
+```bash
+"$PY" -m pip install --config-settings editable_mode=compat -e "$PROVIDER/rocke/platform"
+"$PY" -m pip install --config-settings editable_mode=compat --no-deps \
+  -e "$PROVIDER/rocke/library"
+"$PY" -c "import yaml, jinja2, numpy, rocke, kernels, builders, dispatch"
+```
+
+Without it the builder check fails with `RockeIntrospectionError: module not importable
+... No module named 'kernels'`. After a rocKE-enabled build, `$BUILD/rocke-pyenv/bin/python`
+already imports rocKE and numpy but has no Jinja2, so it cannot run `generate.py`.
+Production packaging uses its own selected compiler/wheel interpreter. Full artifact
+checking also needs `rocm_kpack` and its dependencies (`zstandard`, `msgpack`) importable
+from `$PY`; `--kpack-python-dir` supplies an import root, not missing dependencies.
 
 Verify every path on the actual execution host. Host-local backing paths and symlink
 targets are not automatically visible on a different host, even when the link itself
@@ -45,6 +59,22 @@ Record commands and source/artifact, machine and device identities, plus allocat
 identity when applicable. Follow a configured local evidence policy when one exists;
 otherwise retain logs, manifests and outcomes in a user-selected per-run evidence
 directory outside product source.
+
+The agent host (where the agent reads these pages) and the execution host (where it
+builds and runs) may differ, for example an agent on a laptop driving a GPU node over
+ssh. `install-skills.py` copies into the home directory of the host it runs on, so run
+it where the agent reads skills, from any checkout of `projects/hipdnn/tools/ai`, or pass
+`--target` with that agent's skills directory. A skills-only checkout is enough there:
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse --branch develop \
+  https://github.com/ROCm/rocm-libraries.git rocm-libraries-skills
+git -C rocm-libraries-skills sparse-checkout set projects/hipdnn/tools/ai
+```
+
+Every command on these pages still runs on the execution host against `$REPO`, the
+checkout being built; the agent-host copy is for reading only and must match `$REPO`'s
+revision.
 
 ## 1. Entry and early feasibility
 
@@ -81,6 +111,11 @@ layout, geometry/workspace and ABI evidence. Direct-load engines take these fact
 HIP source without inventing a profile. Reuse unchanged extension contracts; reopen any
 topology or feature the addition changes.
 
+External graph corpora come from `ROCm/dnn-benchmarking`: its `Workloads/` tree holds
+only DVC pointers (`*.tar.gz.dvc`) to an anonymous-read S3 remote. Fetch and unpack the
+corpora you need on the execution host; [workloads.md](workloads.md) *Fetching the
+external corpora* has the commands and the read-only `/var/tmp` fix.
+
 Inventory owner-published results, owner benchmark shapes and external graphs per
 [workloads.md](workloads.md). `$SHAPES` is a JSON list of semantic requests; the
 benchmark consumes actual graph JSON under `$CORPUS_DIR/<corpus>`. For the attention
@@ -109,6 +144,19 @@ For rocKE, resolve the provisional baseline through its actual dispatcher:
 The second command is **offline applicability**, not runtime coverage or numerics. Scope
 reference candidates to the kernel family/algorithm and required opt-in selector. API
 failures are operational errors, never unsupported-shape evidence.
+
+**Canonical runtime-shape entries.** When the kernel reads batch and sequence lengths
+as kernel arguments (the spec's `runtime_param_fields`), one compiled entry serves every
+runtime value its tile divides, so the catalog needs one entry per semantic key and tile,
+not one per corpus shape. Declare the canonical values in the profile as a mapping, for
+example `runtime_param_fields: {batch: 1, seqlen_q: 512, seqlen_kv: 512}` as in
+`configs/gfx950_attention_dense.profile.yaml`. `dispatch_parity.py` then replaces, in
+each served spec, the fields that both the profile maps and the spec's own
+`runtime_param_fields` returns, and collapses identical specs into one entry; specs
+whose mode bakes those fields (persistent, ragged, sliding-window, varlen) keep their
+real values. `--per-shape` keeps one entry per servable shape at its real values.
+Applicability and `--report-gaps` always use the real shape values. Review the
+canonicalized entry count against the distinct servable semantic keys.
 
 Present the feature/shape boundary, per-source coverage and exclusions, architecture,
 engine identity, knobs and provisional baseline for approval. A legal cross-product is
@@ -171,6 +219,25 @@ Apply fragments to their actual consumers, preserving unrelated entries:
 **Descriptors need no CMake edit.** The packer walks a source root recursively and no
 descriptor is named in CMake, so installing one is dropping files under the right root.
 A `cmake_descriptor_files.txt` fragment states that fact; it is not a list to paste.
+
+**A new packaged engine shipped from `descriptors/`** with its own device tests needs
+further sites that no generator fragment emits. `hipkernel:Gfx950AttentionDense`
+(PR #12311) added each one; mirror its lines with your engine's names, and gate every
+registration on the same availability predicate so a build that does not ship the
+engine for an arch registers nothing for it, rather than a target whose engine never
+appears:
+
+| Site | Consumer (the gfx950 instance) | Purpose |
+|---|---|---|
+| `<engine>KpackModuleCache()` declaration | `$PROVIDER/src/engines/kernel_ingestor_engine/IngestorKernelCode.hpp` (`gfx950AttentionDenseKpackModuleCache`) | The per-pack kpack module cache the native file defines and its `reset<Engine>ModuleCache` clears; one cache per pack |
+| Availability predicate `hkp_<engine>_available(<out>)` | `$PROVIDER/descriptor-packaging/cmake/HkpPackaging.cmake` (`hkp_gfx950_attention_dense_available`) | TRUE only when the `product` pack is wired, the arch is in its list and its root declares the engine for that arch |
+| Census call gated on the predicate, `PACK_NAME product ARCHES <arch>` | `$PROVIDER/src/tests/CMakeLists.txt` | The census row above, for a shipped bundle |
+| Device test source in `hip_kernel_provider_integration_tests` | `$PROVIDER/src/integration_tests/CMakeLists.txt` (`IntegrationGpuGfx950AttentionDenseKnobs.cpp`) | Explicit-selection cases: forced knobs, exact kernel ID, CPU reference; see stage 5 |
+| `add_external_integration_test_target(TARGET_NAME hip_kernel_provider_<engine>_gpu_ref_integration_tests … ENGINE_NAME … REFERENCE_EXECUTOR gpu GTEST_FILTER …)` in the arch's census shard (`hkp_reserve_census_shard`) | `$PROVIDER/src/integration_tests/CMakeLists.txt` | The engine-pinned bundle run stage 5 executes |
+| `<provider>-<engine>-external-integration-check` with `TEST_CONFIG` and `TEST_CATEGORIES_YAML`, in the same shard | `$PROVIDER/src/CMakeLists.txt` | The engine-pinned tiered suites |
+| Categories YAML variable, its `EXISTS` check and list entry | `$PROVIDER/CMakeLists.txt` | Feeds the YAML categorization; any listed file missing drops the whole provider to legacy CTest labels |
+| New files `hipkernel_<Engine>_test_categories_integration.yaml` and `config/hipkernel_<Engine>.toml` | `$PROVIDER/` | Tier patterns and the per-engine test config |
+| Bundles plus `.support.json` claims naming the engine and arch | `dnn-providers/integration-tests/integration-test-bundles/{quick,standard}/<Op>/…` | Without matching bundles the engine-pinned target selects zero cases |
 
 Census registration is one `hkp_register_census_tests()` call per packed target, in
 `$PROVIDER/src/tests/CMakeLists.txt` beside `hkp_verify_embedded_sources()`, after the
@@ -302,6 +369,15 @@ The component selection must include the provider. The `hipdnn-providers` preset
 **not** build hip-kernel-provider; the presets that do are `hipdnn-providers-all`,
 `hip-kernel-provider`, `hipdnn-dev-all` and `miopen-hipdnn-dev-all`.
 
+On Linux `ENABLE_CLANG_TIDY` defaults ON in hipDNN and every provider, and runs
+clang-tidy on each C++ compile of the targets that call `clang_tidy_check()`. For local
+iteration you may configure with `-DENABLE_CLANG_TIDY=OFF` (configure then warns that CI
+requires passing clang-tidy checks); before a PR, run the `hipdnn-tidy` skill over the
+changed files. Build time depends heavily on the node: a full tidy-on
+`hip-kernel-provider` superbuild took 11 min on an 88-core MI355X node, while a
+tidy-off build on an MI300A node was still under one third done after 25 min. Record
+the build wall time with the build log.
+
 **`HIPKERNELPROVIDER_ENABLE_ROCKE=ON` is unconditional.** The provider's top-level
 `CMakeLists.txt` raises `FATAL_ERROR` whenever `HIPDNN_ENABLE_KERNEL_INGESTOR` is ON and
 it is OFF, inspecting no `kernel_source.kind`, no production root and no descriptor, so
@@ -423,8 +499,9 @@ census is a direct native obligation with no Python launcher and no XML guard. S
 count decides eligibility, not the authored dialect: `TestPointwisePacks` is censused
 although `unit/pointwise/` is `embedded_source`.
 
-For each declared suite and each eligible arch — the pack target's recorded list,
-narrowed by `ARCHES` when given — CMake registers **four** tests. The census entry is
+For each declared suite and each eligible arch (the pack target's recorded list,
+narrowed by `ARCHES` when given), CMake registers **five** tests, or four when the call
+has no `EXPECTED_CASES` pin. The census entry is
 `hip-kernel-provider-hkp-census-<arch>-<suite>`, which invokes
 
 ```text
@@ -435,9 +512,12 @@ with `HIPDNN_TEST_CENSUS_SUITE` set to that suite, `HIPDNN_TEST_EXPECTED_ARCH` t
 arch — taken from the wired arch list, never from a detected device or the descriptors —
 and `HIPDNN_DESCRIPTOR_DIR` to that pack target's own `OUT_ROOT` shard for the arch,
 never a shared stage tree; labelled `unit_test;hip-kernel-provider;host` plus the tier
-labels `HKP_PACK_CTEST_CATEGORIES_YAML` assigns, which the installed twin carries too. The other
-three append `-control-unvisited`, `-control-absent-root` and
-`-control-unregistered-case`, the last only where a pin exists. Each control breaks one
+labels `HKP_PACK_CTEST_CATEGORIES_YAML` assigns, which the installed twin carries too. The
+controls append `-control-unvisited`, `-control-absent-root`,
+`-control-unexpected-stamp` and `-control-unregistered-case`, the last only where a pin
+exists (`_hkp_add_census_entry` in `descriptor-packaging/cmake/HkpPackaging.cmake`).
+`-control-unexpected-stamp` runs the entry with an expected arch no shard can carry and
+passes on the stamp comparison's refusal. Each control breaks one
 precondition deliberately and passes on the census's own refusal wording rather than on
 exit status, so a red control means that refusal stopped happening. Run the whole
 family.
@@ -558,12 +638,37 @@ Use nontrivial inputs for quick feature breadth and bounded standard numerical d
 Exercise required declines separately; another winning engine must not hide them. NaN or
 unwritten output is a failure, not a tolerance adjustment.
 
+These device tests grade at hipDNN's own test tolerance, which differs from the stage 7
+benchmark's; [workloads.md](workloads.md) *Correctness tolerances* says which one
+governs where and how to report a miss.
+
 Extensions must select the addition explicitly. The disposable pointwise example adds
 HALF/block_size=256 to ADD, preserves MUL/SUB and changes ADD's expected census from
 three to four. Select HALF/256 on logical dims `{1,1,1,1}`, check the actual
 `hipkernel:Pointwise` plan and arithmetic, and retain old ADD/MUL/SUB and required
 multi-element/two-node declines. Its source computes one element, so neither a
 default-FLOAT pass nor this smoke proves arbitrary-size coverage.
+
+**Where an extension's explicit selection runs.** The engine-pinned bundle target
+(`hip_kernel_provider_<engine>_gpu_ref_integration_tests`) runs only the bundles its
+`GTEST_FILTER` matches, so it exercises an added variant only if a bundle at that shape
+exists. Put the explicit-selection cases (forced knobs, exact kernel ID, independent
+reference) in the engine's own device test in `hip_kernel_provider_integration_tests`,
+for `hipkernel:Gfx950AttentionDense` that is
+`$PROVIDER/src/integration_tests/kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp`,
+or add bundles with `.support.json` claims so the pinned target selects them. That
+binary's CTest entry is the shared `hip_kernel_provider_integration_tests_quick_suite`,
+which runs every engine's cases, and `discover_test_targets.py` lists neither. Run the
+engine's cases directly from the installed CTest root and count them:
+
+```bash
+cd "$CTEST_ROOT" && "$INSTALL/bin/hip_kernel_provider_integration_tests" \
+  --gtest_filter='Quick/IntegrationGpuGfx950AttentionDenseKnob*'
+```
+
+Require the new cases by name in the output with zero failed and zero skipped, and the
+same command on the baseline installation as the before count. A failure elsewhere in the
+shared quick suite does not excuse or replace this count.
 
 **Gate:** intended-engine dispatch, capable-reference numerics and complete case
 accounting on `$ARCH`.
@@ -615,9 +720,18 @@ knob value lists, **not a filename**:
 ```
 
 Repeat **stages 3–5** with the final config and a new empty generation destination.
-Neither an isolation arm nor an old install certifies the regenerated shipping set. An
-explicitly untuned extension may retain its approved baseline selection but still needs
-final installed artifact and corpus proof.
+Neither an isolation arm nor an old install certifies the regenerated shipping set.
+
+**Explicitly untuned extension.** When the stage 2 approval records that the addition
+ships without tuning, or `--plan` shows no knob value outside the set the approved
+config already ships (for example every legal tile is already in the catalog), there is
+no arm to isolate. Record that `--plan` output and the approval, keep the approved
+baseline config as `$FINAL_CONFIG`, and use the stage 4 installation as the final one
+when its catalog digest still matches; otherwise repeat stages 3 to 5. It still needs
+the stage 7 corpus proof. To show what the shipped selection leaves on the table,
+measure the cold heuristic against `dnn-benchmark --autotune` (fresh `--cache-dir` per
+phase, the cohort rules in [workloads.md](workloads.md)) and report the gap and the
+winning kernels as a finding; it is not a gate.
 
 **Gate:** justified selection and revalidated final installation.
 
