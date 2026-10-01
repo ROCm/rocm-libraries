@@ -27,11 +27,12 @@
 //
 // Test-only helper shared by the large-grid unit tests (AISPARSE-699/700).
 //
-// The launches hardened by those tickets clamp grid.x against
-// handle->properties.maxGridSize[0] and grid-stride over whatever the clamp
-// drops. Reaching that clamp for real needs a count in the 1e11 range, so the
-// tests shrink the limit instead and run a small problem through the same code
-// path. This is the AISPARSE-702 idiom.
+// The launches hardened by those tickets clamp grid.x with
+// rocsparse::get_grid_size_x, to min(maxGridSize[0], (2^32 - 1) / blockDim.x)
+// blocks, and grid-stride over whatever the clamp drops. For a 256-thread block
+// that clamp is 16,777,215 blocks. The tests shrink maxGridSize[0] for speed
+// rather than allocate a problem that large, and run a small problem through
+// the same code path. This is the AISPARSE-702 idiom.
 //
 // A new header rather than an addition to unit_test_utils.hpp: that file is
 // shared with the sibling unit-test branches, and a new leaf file cannot
