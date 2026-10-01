@@ -277,8 +277,8 @@ Gate: dense FMHA fwd + scalar unified 2D pass numeric verify on gfx1250.
 **Phase 3 (beat gfx950 + roofline)**
 
 - **C6.** gfx1250-optimized 2D tiles: larger LDS tiles (320 KB), wider WMMA-K
-  (16x16x32) if available, async/TDM K/V staging, register-P fast path (mirror
-  `attention_tiled_2d_fastkv_regp.py`), FP8 KV prefill.
+  (16x16x32) if available, async/TDM K/V staging, register-P fast path, FP8 KV
+  prefill.
 
 ### Leg D — Examples & Verification
 

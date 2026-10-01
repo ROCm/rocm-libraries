@@ -194,8 +194,8 @@ class Kernel:
     from that module's conventions. The fields exist because the surveys in this
     directory legitimately do not fit those conventions: ``attention_dense``
     gates through ``supports_*`` with a dozen keyword arguments rather than a
-    spec, ``fastkv_regp`` builds its spec from another kernel's spec, and the
-    examples ``qk_block`` and ``export_mha`` have no spec dataclass at all.
+    spec, and the examples ``qk_block`` and ``export_mha`` have no spec
+    dataclass at all.
     Rather than let each survey re-grow the record-and-roll plumbing around
     those differences, each one describes itself here once."""
 

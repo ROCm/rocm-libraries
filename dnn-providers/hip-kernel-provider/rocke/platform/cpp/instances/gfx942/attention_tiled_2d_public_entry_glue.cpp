@@ -644,9 +644,7 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_tiled_scalar_new(
     });
 }
 
-/* Public wrapper over the static spec.kernel_name() port, so the fastKV
- * register-P build can derive the wrapped spec's base name and append its
- * "_fastkv_regp" suffix (Python _FastKvRegisterPProxy.kernel_name). */
+/* Public wrapper over the static spec.kernel_name() port. */
 rocke_status_t rocke_attention_tiled_2d_spec_kernel_name(
     const rocke_attention_tiled_2d_spec_t* spec, char* out, size_t out_cap)
 {

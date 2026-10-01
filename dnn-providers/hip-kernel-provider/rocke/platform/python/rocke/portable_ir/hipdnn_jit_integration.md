@@ -852,7 +852,7 @@ the answer can be had without paying for a failed replay.
 ### 3.3b What it does on the real families
 
 `drivers/derive_guards.py` runs the whole thing against the gfx950 attention
-families and their own gates. All five derive a guard that agrees with the gate
+families and their own gates. All four derive a guard that agrees with the gate
 on every sampled point:
 
 | Family | Axes | Method | Oracle |
@@ -861,7 +861,6 @@ on every sampled point:
 | `attention_tiled_2d` | head_size, block_size | factored | 256/256, 0, 0 |
 | `attention_tiled_3d` | head_size, block_size | factored | 256/256, 0, 0 |
 | `attention_reduce` | head_size | factored (stride) | 16/16, 0, 0 |
-| `fastkv_regp` | head_size, block_size | factored | 256/256, 0, 0 |
 
 The grouped-query axes are the interesting case, and the one that drove the
 pooled measurement in step 1. On `attention_tiled_2d` over

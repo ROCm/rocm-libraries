@@ -9,7 +9,6 @@ Production tiled matrix-core, paged-KV decode:
 - `library/kernels/common/attention_unified.py`
 - `library/kernels/gfx950/attention_tiled_2d.py`, `library/kernels/gfx942/attention_tiled_2d.py`, `library/kernels/gfx1250/attention_tiled_2d.py`
 - `library/kernels/gfx950/attention_tiled_3d.py`, `library/kernels/gfx942/attention_tiled_3d.py`, `library/kernels/gfx1250/attention_tiled_3d.py`
-- `library/kernels/gfx950/attention_tiled_2d_fastkv_regp.py` -- fast paged-KV + register-resident P (gfx950)
 - `library/kernels/gfx950/attention_dense.py` -- dense (non-paged) flash prefill
 - `library/kernels/common/fmha_mfma.py` (unified MFMA/WMMA forward, MFMA on CDNA / WMMA on RDNA)
 - `platform/python/rocke/helpers/attention.py`

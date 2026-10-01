@@ -613,7 +613,7 @@ Arch enters three ways (`core/arch` SSOT `arch_specs.json`, `core/isa` backends,
   changes the tiling structurally, emit **one recipe per arch-family**
   (CDNA-MFMA vs RDNA-WMMA, plus gfx950's wide atoms) — i.e. ~2-3 families, **not**
   one per gfx.
-- **Genuinely divergent builders** (`gfx1151/wmma_*`, `gfx950 fastkv_regp`,
+- **Genuinely divergent builders** (`gfx1151/wmma_*`,
   gfx942-vs-gfx950 tiled attention): separate recordings anyway; record+roll each
   independently.
 

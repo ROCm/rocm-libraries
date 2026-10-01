@@ -866,9 +866,8 @@ PYTHONPATH="python:${AITER_PATH}" python \
 ## File map
 
 The RocKE `unified_attention` kernels themselves live in `rocke.instances`
-(`gfx950/attention_tiled_2d.py`, `gfx950/attention_tiled_3d.py`,
-`gfx950/attention_tiled_2d_fastkv_regp.py`, and the dispatcher
-`common/attention_unified.py`). The spec-builder
+(`gfx950/attention_tiled_2d.py`, `gfx950/attention_tiled_3d.py`, and the
+dispatcher `common/attention_unified.py`). The spec-builder
 (`builders/common/attention_spec_builder.py`) and its knob reference live in
 [`builders/common/README.md`](../../common/README.md). This folder holds the
 parity + benchmark harnesses and their captured data.
@@ -881,7 +880,6 @@ parity + benchmark harnesses and their captured data.
 | `parity_unified_attention.py` | the canonical parity + benchmark harness: builds AITER paged-KV inputs, runs Triton and RocKE in `auto`/`2d`/`3d` lanes on one shared HIP-event timer/stream, compares both to `ref_paged_attn`, emits the three apples-to-apples tables. Scenario sets: `default` (13 = 11 d128/d256 reference + 2 bf16 d64/b32 combo), `creative` (21, exploratory sweep), `fmha` (26, CK Tile testing-matrix subset), `all` (default + creative) |
 | `benchmark_prefill2d_live.py` | the authoritative prefill-2D workbench: runs **live** Triton (forced 2D) vs a sweep of RocKE 2D kernel variants (`prod`/`combo`/`fallback`/…) on the same stream, checks every variant against the Triton output, reports the best correct variant per shape and per bucket (sw/no-sw, bf16/fp8). Default `--cap-blocks 65536` (production-representative HBM-bound regime) |
 | `benchmark_prefill2d_traces.py` | runs the RocKE 2D combo policy over traced AITER prefill shapes and joins against a pre-profiled Triton CSV by `shape_signature` (the CSV-join workflow; writes `prefill2d_bf16_triton_ckdsl_perf.csv`) |
-| `benchmark_prefill2d_fastkv_regp.py` | benchmarks the experimental `attention_tiled_2d_fastkv_regp` kernel (fast paged-KV + register-resident P) against the R4 / combo 2D baselines; `--smart-dispatch-policy latest` reproduces the measured-best per-shape host policy |
 | `_d128_cktile_bakeoff.py` | per-shape, same-session A/B of RocKE production `unified_attention` vs CK Tile `tile_example_fmha_fwd` (subprocess) and Triton, over a d128/d256 GQA-8 cohort; reports `cktile_ms / rocke_ms` (>1 = RocKE faster) — requires a built `tile_example_fmha_fwd` binary |
 | `_profile_one.py` | standalone single-shape launcher for `rocprofv3` profiling of the production-dispatched 2D combo kernel (d64/b32/GQA-8/sinks); args `<sw> <num_seqs> <iters>` |
 | `prefill2d_bf16_triton_ckdsl_perf.csv` | captured bf16 prefill-2D cohort (142 deduped shapes; geomean **1.108x** vs Triton-2D at `cap_blocks=65536`, 105/142 wins) |

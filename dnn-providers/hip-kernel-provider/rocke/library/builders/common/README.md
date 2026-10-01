@@ -112,8 +112,7 @@ softcap / alibi / qq-bias / fp8-KV path.
 uses VGPR-form MFMA for the PV accumulators, avoiding the AGPR↔VGPR copy
 traffic that arises when the online-softmax alpha scaling touches the
 accumulator.  Not wired into the production selector (opt-in spec flag, default
-OFF); used in `attention_tiled_2d_fastkv_regp` and the ck83 Fix-A residency
-experiments on gfx942.
+OFF); used in the ck83 Fix-A residency experiments on gfx942.
 
 **`use_v_double_buffer`** — Pre-fetches the next V tile while the current PV
 MFMA is in flight.  Gfx950 spec only (gfx942 spec does not declare this field).
