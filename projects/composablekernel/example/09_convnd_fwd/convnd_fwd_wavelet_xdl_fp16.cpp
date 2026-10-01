@@ -41,14 +41,14 @@ using DeviceGroupedConvNDFwdInstance =
         ConvSpec,    // ConvForwardSpecialization
         256,         // TileLoadThreadGroupSize
         256,         // TileMathThreadGroupSize
-        128,         // MPerBlock
-        64,          // NPerBlock
+        256,         // MPerBlock
+        128,         // NPerBlock
         64,          // KPerBlock
         8,           // K1
-        32,          // MPerXdl
-        32,          // NPerXdl
-        1,           // MXdlPerWave
-        2,           // NXdlPerWave
+        16,          // MPerXdl
+        16,          // NPerXdl
+        4,           // MXdlPerWave
+        8,           // NXdlPerWave
         S<8, 32, 1>, // ABlockTransferThreadClusterLengths_AK0_M_AK1
         S<1, 0, 2>,  // ABlockTransferThreadClusterArrangeOrder
         S<1, 0, 2>,  // ABlockTransferSrcAccessOrder
@@ -64,9 +64,13 @@ using DeviceGroupedConvNDFwdInstance =
         8,           // BBlockTransferDstScalarPerVector_BK1
         1,           // BBlockLdsExtraN
         1,
-        1,
+        4,
         S<1, 32, 1, 8>,
-        4>;
+        8,
+        InDataType,
+        InDataType,
+        1,
+        true>;
 
 #include "run_convnd_fwd_example.inc"
 
