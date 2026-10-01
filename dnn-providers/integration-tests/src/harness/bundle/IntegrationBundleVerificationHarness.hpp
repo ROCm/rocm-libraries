@@ -207,6 +207,9 @@ public:
         raiseComplaints(
             {claims.complaint,
              shallowPassComplaint(outcome, bundleRequiredDepth(), _bundlePath.string())});
+        // Before the disposition, which returns: a pass must say what it was compared
+        // against, or "auto" landing on a reference is indistinguishable from a skip.
+        _deps.reporter->recordVerifier(_bundlePath.string(), outcome.verifier);
         reportOutcome(outcome);
     }
 
@@ -377,29 +380,39 @@ private:
 
     // Golden data is loaded on the host, so under --validator auto it is compared there.
     VerificationOutcome compareAgainstGolden(OutputTensors& engineOutputs);
-    VerificationOutcome
-        compareOutputs(OutputTensors& engineOutputs, OutputTensors& expected, ValidationSite site);
+    VerificationOutcome compareOutputs(OutputTensors& engineOutputs,
+                                       OutputTensors& expected,
+                                       ValidationSite site,
+                                       Verifier verifier);
 
     // Resolves tolerances, runs bundle::compareOutputs() at `site` — or wherever
     // policy.validator overrides it to — and turns each mismatch it returns into one
     // failure. The comparison itself owns no gtest state.
     VerificationOutcome compareAgainst(OutputTensors& engineOutputs,
                                        const ExpectedTensorLookup& expectedFor,
-                                       ValidationSite site);
+                                       ValidationSite site,
+                                       Verifier verifier);
 
     // VERIFIED either way: the oracle ran and the outputs were examined. A mismatch
     // carries no message because compareAgainst() has already put one failure per
     // drifted tensor on the record — the only place in this harness where that is
     // true, and so the only caller of alreadyReportedFailure().
-    static VerificationOutcome comparisonOutcome(bool allMatched)
+    static VerificationOutcome comparisonOutcome(bool allMatched, Verifier verifier)
     {
-        return allMatched ? VerificationOutcome::passed(VerificationDepth::VERIFIED)
-                          : VerificationOutcome::alreadyReportedFailure(VerificationDepth::VERIFIED,
-                                                                        FailureOrigin::COMPARISON);
+        auto outcome = allMatched ? VerificationOutcome::passed(VerificationDepth::VERIFIED)
+                                  : VerificationOutcome::alreadyReportedFailure(
+                                        VerificationDepth::VERIFIED, FailureOrigin::COMPARISON);
+        outcome.verifier = verifier;
+        return outcome;
     }
 
     void recordRefError(const std::string& reason);
     static std::string refLabel(ReferenceExecutorType type);
+    static Verifier verifierFor(ReferenceExecutorType type)
+    {
+        return type == ReferenceExecutorType::GPU ? Verifier::GPU_REFERENCE
+                                                  : Verifier::CPU_REFERENCE;
+    }
 
     HarnessDependencies _deps;
     std::optional<LoadedEngine> _engineUnderTest;

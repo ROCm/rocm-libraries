@@ -28,6 +28,7 @@
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/BundleRegistration.hpp"
 #include "harness/bundle/HarnessPolicy.hpp"
+#include "harness/bundle/IVerificationReporter.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/ProductionPolicy.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
@@ -632,6 +633,17 @@ int main(int argc, char** argv) noexcept
                       << std::setprecision(1) << pct << "%)\n"
                       << "Skipped: " << skip << "\n"
                       << "Failed:  " << failed << "\n";
+
+            // Which oracle graded each test body that ran: auto mode falls through
+            // golden -> GPU reference -> CPU reference, and a pass alone does not say
+            // where it landed.
+            const auto& verifiers = hipdnn_integration_tests::bundle::verifierTally();
+            if(verifiers.total() > 0)
+            {
+                std::cerr << "Verified by: golden " << verifiers.golden << ", gpu_ref "
+                          << verifiers.gpuReference << ", cpu_ref " << verifiers.cpuReference
+                          << ", none " << verifiers.none << "\n";
+            }
         }
 
         // Generate support matrix if requested

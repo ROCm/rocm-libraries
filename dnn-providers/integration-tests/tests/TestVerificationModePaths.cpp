@@ -39,12 +39,14 @@ protected:
     std::optional<hipdnn_test_sdk::utilities::ScopedDirectory> _scopedDir;
     std::filesystem::path _tempDir;
     testing_support::HarnessMocks _mocks;
+    std::vector<Verifier> _verifiers;
 
     void SetUp() override
     {
         testing_support::ensureTestConfigInitialized();
         _scopedDir.emplace(claimScratchDirectory("vmode"));
         _tempDir = _scopedDir->path();
+        testing_support::captureVerifiers(_mocks.reporter, _verifiers);
     }
 
     std::shared_ptr<IntegrationTestBundle> loadBundle(const std::string& name,
@@ -147,6 +149,7 @@ TEST_F(TestVerificationModePathsFixture, AutoWithGoldenUsesGoldenAndPasses)
 
     EXPECT_FALSE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::GOLDEN));
 }
 
 TEST_F(TestVerificationModePathsFixture, AutoWithGoldenMismatchFails)
@@ -159,6 +162,8 @@ TEST_F(TestVerificationModePathsFixture, AutoWithGoldenMismatchFails)
                  &results);
 
     EXPECT_TRUE(testing_support::anyFailed(results));
+    // A mismatch still names the oracle it lost against.
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::GOLDEN));
 }
 
 TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefSucceedsPasses)
@@ -180,6 +185,7 @@ TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefSucceedsPasses)
 
     EXPECT_FALSE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::GPU_REFERENCE));
 }
 
 TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefMissFallsThroughToCpu)
@@ -206,6 +212,7 @@ TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefMissFallsThroughToCpu)
 
     EXPECT_FALSE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::CPU_REFERENCE));
 }
 
 TEST_F(TestVerificationModePathsFixture, AutoNoGoldenBothRefsMissSkips)
@@ -220,6 +227,8 @@ TEST_F(TestVerificationModePathsFixture, AutoNoGoldenBothRefsMissSkips)
 
     EXPECT_TRUE(testing_support::anySkipped(results));
     EXPECT_FALSE(testing_support::anyFailed(results));
+    // A skip compared nothing and must not be reported as any oracle.
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::NONE));
 }
 
 // The other GPU miss form: a real runtime error, not a capability miss. AUTO
@@ -244,6 +253,7 @@ TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefRuntimeErrorFallsThrough
     ASSERT_EQ(refErrors.size(), 1U);
     EXPECT_THAT(refErrors.front(), ::testing::HasSubstr("GPU reference errored"));
     EXPECT_THAT(refErrors.front(), ::testing::HasSubstr("stub: GPU ref crashed"));
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::CPU_REFERENCE));
 }
 
 // ── GOLDEN mode ─────────────────────────────────────────────────────────────
@@ -260,6 +270,7 @@ TEST_F(TestVerificationModePathsFixture, GoldenModeWithDataPasses)
 
     EXPECT_FALSE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::GOLDEN));
 }
 
 // An explicit mode is a demand for a specific oracle, not a preference. Skipping
@@ -277,6 +288,7 @@ TEST_F(TestVerificationModePathsFixture, GoldenModeWithoutDataFails)
 
     EXPECT_TRUE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::NONE));
 }
 
 // A live reference is available here and would have produced an answer, but the
@@ -321,6 +333,9 @@ TEST_F(TestVerificationModePathsFixture, DeviceModeRefSucceedsPasses)
 
     EXPECT_FALSE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
+    // The bundle carries golden data, so this also shows an explicit mode is not
+    // reported as the golden data it bypassed.
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::GPU_REFERENCE));
 }
 
 TEST_F(TestVerificationModePathsFixture, DeviceModeCapabilityMissSkips)
@@ -357,6 +372,7 @@ TEST_F(TestVerificationModePathsFixture, CpuModeRefSucceedsPasses)
 
     EXPECT_FALSE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::CPU_REFERENCE));
 }
 
 TEST_F(TestVerificationModePathsFixture, CpuModeCapabilityMissSkips)

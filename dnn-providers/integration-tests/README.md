@@ -228,6 +228,20 @@ is chosen with `--verification-mode` (or `HIPDNN_TEST_VERIFICATION_MODE`):
 specific oracle, so `golden` on a bundle with no golden data is a failure, not a
 skip — `dvc pull` the op, or use `auto`.
 
+Each test body that reaches an outcome prints the oracle that graded it, between its
+`[ RUN ]` and result lines, and the coverage summary totals them:
+
+```
+[ VERIFIER ] gpu_ref: .../quick/SdpaFwd/bshd/fp16/hd64_nomask_mqa/Small.json
+...
+Verified by: golden 0, gpu_ref 9, cpu_ref 0, none 3
+```
+
+`golden`, `gpu_ref` and `cpu_ref` name what the outputs were compared against,
+whether the comparison passed or failed. `none` means nothing was compared: a skip
+(the engine declined, or no reference could run the op), a failure before the
+comparison, or a bundle whose `enforcement_level` stops short of comparing.
+
 Golden data is optional in the other modes: `--verification-mode gpu` (or `cpu`)
 runs the bundle graphs without any DVC pull. Bundle registration is on by default;
 pass `--no-bundles` (or `HIPDNN_TEST_ALLOW_BUNDLES=0`) to leave only the C++ tests

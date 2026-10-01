@@ -3,14 +3,57 @@
 
 #pragma once
 
+#include <cstddef>
+#include <iostream>
 #include <string>
 
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
+#include "harness/bundle/VerificationOutcome.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
+
+/// How many test bodies each oracle graded this run, for the coverage summary.
+struct VerifierTally
+{
+    size_t golden = 0;
+    size_t gpuReference = 0;
+    size_t cpuReference = 0;
+    size_t none = 0;
+
+    void add(Verifier verifier)
+    {
+        switch(verifier)
+        {
+        case Verifier::GOLDEN:
+            ++golden;
+            return;
+        case Verifier::GPU_REFERENCE:
+            ++gpuReference;
+            return;
+        case Verifier::CPU_REFERENCE:
+            ++cpuReference;
+            return;
+        case Verifier::NONE:
+        default:
+            ++none;
+            return;
+        }
+    }
+
+    size_t total() const
+    {
+        return golden + gpuReference + cpuReference + none;
+    }
+};
+
+inline VerifierTally& verifierTally()
+{
+    static VerifierTally s_tally;
+    return s_tally;
+}
 
 /// Where a test body's findings go once they are decided.
 ///
@@ -50,6 +93,10 @@ public:
     virtual void recordVerdict(const SupportResult& record) = 0;
     virtual void recordUnverifiable(const std::string& bundlePath, const std::string& reason) = 0;
     virtual void recordReferenceError(const std::string& bundlePath, const std::string& reason) = 0;
+
+    /// The oracle that graded this test body's outputs, NONE when nothing was
+    /// compared. Called once per body that reached an outcome.
+    virtual void recordVerifier(const std::string& bundlePath, Verifier verifier) = 0;
 };
 
 /// The production sinks: the run's coverage counters, verdict table, and
@@ -97,6 +144,12 @@ public:
     void recordReferenceError(const std::string& bundlePath, const std::string& reason) override
     {
         UnverifiableBundleReport::get().record(bundlePath, reason, UnverifiableSeverity::REF_ERROR);
+    }
+
+    void recordVerifier(const std::string& bundlePath, Verifier verifier) override
+    {
+        verifierTally().add(verifier);
+        std::cout << "[ VERIFIER ] " << toString(verifier) << ": " << bundlePath << std::endl;
     }
 };
 
