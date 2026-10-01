@@ -43,7 +43,6 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import replace
 from pathlib import Path
 
 _THIS_DIR = Path(__file__).resolve().parent
@@ -361,7 +360,10 @@ def main():
         "--kernel-timeout", type=int, default=30, help="Per-kernel timeout (s)"
     )
     parser.add_argument(
-        "--max-kernels", type=int, default=0, help="Limit to first N kernels (0=all)"
+        "--max-kernels",
+        type=int,
+        default=0,
+        help="Limit to first N kernels plus their vector-width variants (0=all)",
     )
     parser.add_argument(
         "--verify",
@@ -463,13 +465,7 @@ def main():
         )
     vfb.report_rejects()
 
-    if args.max_kernels > 0:
-        # Count base tiles, not their vector-width variants.
-        def base(c):
-            return replace(c, pad_m=False, pad_n=False, pad_k=False).with_vector_sizes((0, 0, 0))[0].name
-
-        keep = set(list(dict.fromkeys(map(base, all_configs)))[: args.max_kernels])
-        all_configs = [c for c in all_configs if base(c) in keep]
+    all_configs = vfb.limit_base_kernels(all_configs, args.max_kernels)
 
     print(f"  Expanded configs: {len(all_configs)}")
     print(f"  Build workers: {args.workers}")

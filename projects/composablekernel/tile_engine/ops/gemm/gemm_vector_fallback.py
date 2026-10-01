@@ -10,6 +10,8 @@ how many (tile, width) combinations were rejected or failed to compile, and
 pairs every problem only with the kernels whose widths divide its own.
 """
 
+import itertools
+
 from codegen_common import (
     CommonTypeMappings,
     VECTOR_SIZE_VARIANTS,
@@ -56,6 +58,19 @@ class VectorFallback:
                 vector_sizes=sorted({(0, 0, 0), *sweep}), rejects=self.rejects
             )
             print(f"  Vector-width fallback triples: {self.expand_kwargs['vector_sizes']}")
+
+    @staticmethod
+    def limit_base_kernels(configs, max_kernels):
+        """First ``max_kernels`` native kernels, each with its fixed-width variants.
+
+        expand_sweep emits every native config right before its fixed-width
+        variants, so --max-kernels counts tiles and a small limit still keeps the
+        kernels misaligned problems need; without the fallback it is a plain slice.
+        """
+        if max_kernels <= 0:
+            return configs
+        n_native = itertools.accumulate(not any(c.vector_sizes) for c in configs)
+        return [c for c, n in zip(configs, n_native) if n <= max_kernels]
 
     def report_rejects(self):
         for reason, n in sorted(self.rejects.items()):

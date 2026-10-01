@@ -283,7 +283,10 @@ def main():
         "--kernel-timeout", type=int, default=30, help="Per-kernel timeout (s)"
     )
     parser.add_argument(
-        "--max-kernels", type=int, default=0, help="Limit to first N kernels (0=all)"
+        "--max-kernels",
+        type=int,
+        default=0,
+        help="Limit to first N kernels plus their vector-width variants (0=all)",
     )
     parser.add_argument(
         "--verify",
@@ -331,8 +334,7 @@ def main():
         )
     vfb.report_rejects()
 
-    if args.max_kernels > 0:
-        all_configs = all_configs[: args.max_kernels]
+    all_configs = vfb.limit_base_kernels(all_configs, args.max_kernels)
 
     print(f"  Expanded configs: {len(all_configs)}")
     print(f"  Build workers: {args.workers}")

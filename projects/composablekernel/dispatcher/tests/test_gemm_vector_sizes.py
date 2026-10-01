@@ -28,6 +28,7 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 DISPATCHER_DIR = SCRIPT_DIR.parent
 sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
 sys.path.insert(0, str(DISPATCHER_DIR / "python"))
+sys.path.append(str(DISPATCHER_DIR.parent / "tile_engine" / "ops" / "gemm"))
 
 from codegen_common import (  # noqa: E402
     TileConfig,
@@ -47,6 +48,7 @@ from unified_gemm_codegen import (  # noqa: E402
     TraitConfig,
 )
 from gemm_utils import GemmKernelConfig  # noqa: E402
+from gemm_vector_fallback import VectorFallback  # noqa: E402
 
 TILE = dict(tile=(256, 256, 64), waves=(2, 2, 1), warp_tile=(32, 32, 16))
 
@@ -296,6 +298,28 @@ class TestExpandSweep(unittest.TestCase):
         # The CI config also sweeps the default epilogue, which cannot take fixed widths.
         self.assertTrue(any("epilogue default" in r for r in rejects))
         self.assertEqual(len({c.name for c in cfgs}), len(cfgs))
+
+    def test_max_kernels_keeps_fixed_width_variants(self):
+        from gemm_utils import expand_sweep
+
+        cfg = (
+            DISPATCHER_DIR.parent / "tile_engine" / "ops" / "gemm" / "configs"
+            / "default_ci_config.json"
+        )
+        cfgs = expand_sweep(
+            str(cfg), "gfx950", dtype="bf16", layout="rcr", variant="standard",
+            vector_sizes=[(0, 0, 0), (1, 1, 8)],
+        )
+        limit = VectorFallback.limit_base_kernels
+        # One tile keeps its fixed-width variant, else K-misaligned problems
+        # get no kernel under --max-kernels 1.
+        one = limit(cfgs, 1)
+        self.assertEqual(sum(not any(c.vector_sizes) for c in one), 1)
+        self.assertTrue(any(c.name.endswith("_vec1_1_8") for c in one))
+        # Native-only sweeps (fallback off) keep the plain slice.
+        native = [c for c in cfgs if not any(c.vector_sizes)]
+        self.assertEqual(limit(native, 2), native[:2])
+        self.assertEqual(limit(cfgs, 0), cfgs)
 
     def test_fixed_widths_force_padding(self):
         cfg = GemmKernelConfig(

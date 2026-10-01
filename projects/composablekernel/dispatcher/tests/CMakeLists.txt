@@ -792,6 +792,7 @@ set(TEST_SOURCES
     test_registry.cpp
     test_dispatcher.cpp
     test_tile_backend.cpp
+    test_generated_backend.cpp
     test_fmha_problem.cpp
     test_fmha_dispatcher.cpp
     test_fmha_registry.cpp
@@ -828,6 +829,12 @@ foreach(test_source ${TEST_SOURCES})
     add_test(NAME ${test_name} COMMAND ${test_name})
     set_tests_properties(${test_name} PROPERTIES LABELS "dispatcher;cpp;unit")
 endforeach()
+
+# Instantiates the GEMM backends, so the ck_tile headers need HIP compilation
+# (no GPU is touched at runtime).
+if(hip_FOUND)
+    target_link_libraries(test_generated_backend PRIVATE hip::device hip::host)
+endif()
 
 # Standalone integration tests (with their own main())
 set(STANDALONE_TESTS

@@ -57,11 +57,6 @@ class GeneratedKernelInstance : public KernelInstance
         constexpr bool pad_n = SelectedKernel::kPadN;
         constexpr bool pad_k = SelectedKernel::kPadK;
 
-        if(pad_m && pad_n && pad_k)
-        {
-            return true; // Padding enabled - supports any size
-        }
-
         // Check divisibility for dimensions without padding
         constexpr int tile_m = SelectedKernel::TileM;
         constexpr int tile_n = SelectedKernel::TileN;
@@ -74,7 +69,9 @@ class GeneratedKernelInstance : public KernelInstance
         if(!pad_k && problem.K % tile_k != 0)
             return false;
 
-        return true;
+        // Padding does not relax the global vector widths; gate on them so the
+        // registry falls through to a narrower kernel instead of failing at launch.
+        return vector_widths_divide(key_, problem.M, problem.N, problem.K);
     }
 
     std::string get_name() const override { return name_; }
