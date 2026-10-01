@@ -5594,7 +5594,19 @@ class Solution(collections.abc.Mapping):
     # reuse A's block size; calcLdsBlockSizePerPad("Metadata", ...) derives it
     # from Metadata's own dimensions instead (see calcMetadataLdsBlockSizePerPad).
     state["LdsBlockSizePerPadMetadata"] = calcLdsBlockSizePerPad("Metadata", 0)
-    checkLdsBlockSizePerPadForTDM(state["LdsBlockSizePerPadA"], state["LdsBlockSizePerPadB"], state["LdsBlockSizePerPadMXSA"], state["LdsBlockSizePerPadMXSB"], state["LdsBlockSizePerPadMetadata"])
+    # Re-derive LdsPad early to zero out LdsBlockSizePerPad{tc} when the pad
+    # resolves to 0 (mirrors the auto-LRVW path above), except A/B in TDM
+    # iterate-mode, where checkLdsBlockSizePerPadForTDM needs a non-zero pad
+    # block regardless of LdsPad.
+    tdmPadA, tdmPadB, tdmPadMetadata, tdmPadMXSA, tdmPadMXSB = calcLdsPad(isaInfoMap)
+    iterateA = state.get("_TDMIterateModeA", False) or isSubtileIterateMode(state, "A")
+    iterateB = state.get("_TDMIterateModeB", False) or isSubtileIterateMode(state, "B")
+    checkLdsBlockSizePerPadForTDM(
+      0 if (tdmPadA == 0 and not iterateA) else state["LdsBlockSizePerPadA"],
+      0 if (tdmPadB == 0 and not iterateB) else state["LdsBlockSizePerPadB"],
+      0 if tdmPadMXSA == 0 else state["LdsBlockSizePerPadMXSA"],
+      0 if tdmPadMXSB == 0 else state["LdsBlockSizePerPadMXSB"],
+      0 if tdmPadMetadata == 0 else state["LdsBlockSizePerPadMetadata"])
 
     if state["EnableMatrixInstruction"]:
       if state["LdsBlockSizePerPadA"] and not state["UseGeneralizedNLCOneA"]:
