@@ -557,7 +557,7 @@ std::vector<Solution> FindConvolution(const ExecutionContext& ctx,
 
 template <class FieldType>
 static inline void FillFindReturnParameters(const std::vector<Solution>& results,
-                                            FieldType miopenConvAlgoPerf_t::* field,
+                                            FieldType miopenConvAlgoPerf_t::*field,
                                             const char* log_start,
                                             int* const returned_algo_count,
                                             miopenConvAlgoPerf_t* perf_results)
@@ -939,10 +939,20 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
     {
         if(fallbackPathTaken != nullptr)
             *fallbackPathTaken = FallbackPath::AI;
-        // Queried per call, not cached in a function-local static: a static would keep the
-        // first device's arch for the process lifetime and mispredict on multi-arch hosts.
-        const auto arch = ctx.GetStream().GetDeviceName();
-        MIOPEN_LOG_I2("AI fallback: predicting for arch \"" << arch << "\"");
+        // NOTE: `arch` is a function-local static, initialized ONCE on the first
+        // call and reused for the process lifetime. On a multi-GPU / multi-arch
+        // host this can feed a stale arch to the predictor (e.g. the first conv
+        // ran on gfx1100, so a later gfx1201 conv is still predicted as gfx1100).
+        // Log both so a divergence between the cached arch and the live device is
+        // visible; a mismatch here is a prime suspect for per-SKU inconsistency.
+        const static std::string arch = ctx.GetStream().GetDeviceName();
+        const std::string live_arch   = ctx.GetStream().GetDeviceName();
+        if(arch != live_arch)
+            MIOPEN_LOG_I2("AI fallback: STALE cached arch \"" << arch << "\" != live device \""
+                                                              << live_arch
+                                                              << "\" (static-init aliasing)");
+        else
+            MIOPEN_LOG_I2("AI fallback: predicting for arch \"" << arch << "\"");
         std::vector<uint64_t> solvers;
         try
         {
