@@ -10,10 +10,9 @@ Drives the *real* `generate.py` -- the same entry point CMake invokes at
 configure time -- and inspects the `BlockFmhaBwdPipelineProblem` template
 arguments it emits.
 
-The decode pipeline used to be chosen by a global macro, which sent gfx950's
-decode tiles into a pipeline built on TDM, an instruction only gfx12 has. The
-selection is now carried per instance by the codegen, and these tests hold that
-contract:
+Decode pipeline selection is carried per instance by the codegen rather than by
+a global macro, so that gfx950's decode tiles do not land in a pipeline built on
+TDM, an instruction only gfx12 has. These tests hold that contract:
 
 1. Every gfx950 decode instance opts *out* of the TDM decode pipeline.
 2. Every gfx1250 decode instance opts *in*.
@@ -34,6 +33,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 # --------------------------------------------------------------------------- #
@@ -196,6 +196,44 @@ class TestFmhaBwdDecodeDispatchCodegen(unittest.TestCase):
                 ),
             )
             self.assertTrue(decode, msg=f"{name} lost its TDM decode flag")
+
+    def test_gfx1250_decode_dispatch_boundaries(self):
+        sys.path.insert(0, _FMHA_EX)
+        self.addCleanup(sys.path.remove, _FMHA_EX)
+        from codegen.ops.fmha_bwd import FmhaBwdApiTrait, KernelComponentFactoryGfx125
+
+        tiles = [
+            tile
+            for tile in KernelComponentFactoryGfx125.get_dq_dk_dv_tiles("fp16", "t")
+            if tile.tdm_decode
+        ]
+        self.assertTrue(tiles)
+        for tile in tiles:
+            for mode in ("batch", "group"):
+                trait = FmhaBwdApiTrait(
+                    KernelComponentFactoryGfx125.arch, 0, tile.F_bhdq, "fp16", mode,
+                    tile, "no", "no", "false", "dropout", "true", 0, 0,
+                    "false", "simplified", "t",
+                )
+                prefix = "max_" if mode == "group" else ""
+                expected = (
+                    f" && (t.{prefix}seqlen_q <= 32)"
+                    " && (t.batch * t.nhead_q >= 768)"
+                )
+                self.assertEqual(trait.max_seq_q_cond, expected)
+                expression = trait.max_seq_q_cond.removeprefix(" && ").replace("&&", "and")
+                for query_length, grid, matches in (
+                    (31, 768, True), (32, 768, True), (33, 768, False),
+                    (32, 767, False), (32, 769, True),
+                ):
+                    traits = SimpleNamespace(
+                        seqlen_q=query_length if mode == "batch" else query_length * grid,
+                        max_seqlen_q=query_length, batch=grid, nhead_q=1,
+                    )
+                    with self.subTest(head_dim=tile.F_bhdq, mode=mode,
+                                      query_length=query_length, grid=grid):
+                        self.assertEqual(eval(expression, {"__builtins__": {}}, {"t": traits}),
+                                         matches)
 
 
 if __name__ == "__main__":

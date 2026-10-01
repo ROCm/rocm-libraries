@@ -5,29 +5,9 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_pipeline_default_policy.hpp"
+#include "ck_tile/ops/fmha/pipeline/fmha_bwd_tdm_padding.hpp"
 
 namespace ck_tile {
-
-// Depth of the Q/dO/LSE/D software pipeline, in tiles. 2 reproduces the
-// ping-pong exactly; 3 leaves one tile in flight across every wait and 4 leaves
-// two. The hot loop is unrolled by this factor so the slot index is a
-// compile-time constant, and the wait count falls out of the depth as
-// kTdmPerTile * (slots - 2) -- see the derivation in the pipeline.
-//
-// Depth only pays paired with the static dQ stride in fmha_bwd_kernel.hpp:
-// that fold strips the address VALU which was covering the TDM transfer, and
-// the extra in-flight tile covers it instead. Neither wins alone.
-#ifndef CK_TILE_FMHA_BWD_QDO_SLOTS
-#define CK_TILE_FMHA_BWD_QDO_SLOTS 3
-#endif
-
-// Depth for masked instances, which do not benefit: the per-pixel mask VALU
-// already covers the transfer, their Q loop is half as long, and on the batch
-// path mirror tile pairing has doubled the body so any unroll lands on twice as
-// much code. 0 means "use the value above".
-#ifndef CK_TILE_FMHA_BWD_QDO_SLOTS_MASKED
-#define CK_TILE_FMHA_BWD_QDO_SLOTS_MASKED 2
-#endif
 
 // The dQ atomic is issued one whole 128 B cache line at a time.
 //
@@ -46,17 +26,21 @@ namespace ck_tile {
 // Policy for the bwd pipeline that moves its operands global->LDS with TDM and
 // reads them back with ds_load_tr.
 //
-// It still carries LDS descriptors for the dK and dV accumulators: each is
-// kN0*headdim floats, i.e. kN0*headdim/kBlockSize VGPRs per lane, which at
-// kN0=64, headdim=128 is 64 apiece -- enough to cost a wave of occupancy. Both
-// are register resident in the shipped configurations, with V evicted to LDS to
-// pay for them, so these descriptors serve the tiles that fall below the kM0
-// floor.
-//
-// Everything else is inherited unchanged; this policy adds the operand and
-// accumulator descriptors and re-does the smem budget.
+// Everything not listed here is inherited unchanged; this policy adds the
+// operand and dV accumulator descriptors and re-does the smem budget.
 struct BlockFmhaBwdPipelineTdmPolicy : BlockFmhaBwdPipelineDefaultPolicy
 {
+    // Depth of the Q/dO/LSE/D software pipeline, in tiles. 2 issues and waits
+    // inside one iteration; 3 leaves one tile in flight across every wait and 4
+    // leaves two. The hot loop is unrolled by this factor so the slot index is a
+    // compile-time constant, and the wait count is kTdmPerTile * (slots - 2).
+    // Each extra slot costs GetQDOSlotStride bytes of LDS.
+    static constexpr index_t kQDOSlotsDefault = 3;
+
+    // Masked instances keep the shallow ring: the per-pixel mask VALU already
+    // covers the transfer, and on the batch path mirror tile pairing has
+    // doubled the body the unroll would duplicate.
+    static constexpr index_t kQDOSlotsMasked = 2;
     // Padding, in floats, added to the leading dimension of each accumulator.
     //
     // The gemm C fragment hands lane L the values at rows m = j + 8*(L>>4)
@@ -93,18 +77,25 @@ struct BlockFmhaBwdPipelineTdmPolicy : BlockFmhaBwdPipelineDefaultPolicy
     // store_tile, keeps its XOR instead.
     static constexpr index_t kOperandLdsPad = 8;
 
+    // TDM encodes pad_amount as (dwords of padding - 1) and pad_interval as
+    // (log2 of the dwords written between pads - 1). One row is exactly one
+    // interval, so every row gets kOperandLdsPad elements appended. That must
+    // match the descriptor stride: TDM writes the box, the descriptor reads it,
+    // and nothing checks the two against each other.
+    template <typename T, index_t KPerBlock>
+    CK_TILE_HOST_DEVICE static constexpr auto GetOperandLdsPaddingConfig()
+    {
+        return detail::make_fmha_bwd_tdm_padding_config<T, KPerBlock, kOperandLdsPad>();
+    }
+
     // ---- K: one plain box, K^T read back by ds_load_tr ----------------------
     //
-    // K used to be materialised twice: once as-is for gemm_0, and once through
-    // shuffle_tile into a second LDS copy so gemm_4 could read K^T with a plain
-    // load_tile. gfx1250 has ds_load_tr16_b128, so the second copy and the
-    // shuffle are both unnecessary -- one box, read straight for gemm_0 and
-    // transposed for gemm_4.
+    // One box, read straight for gemm_0 and transposed by ds_load_tr for
+    // gemm_4, so no second LDS copy and no register shuffle.
     //
     // The box has to be plain: ds_load_tr reads a hardware-fixed physical
     // pattern, so a descriptor-level XOR has no opportunity to cancel the way it
-    // does on the per-element load_tile path. That is also exactly what TDM
-    // needs, so the two changes want the same layout.
+    // does on the per-element load_tile path. TDM needs the same plain layout.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeKLdsWriteBlockDescriptor()
     {
@@ -147,9 +138,8 @@ struct BlockFmhaBwdPipelineTdmPolicy : BlockFmhaBwdPipelineDefaultPolicy
     // it whole. Packed, warp w owns [32w, 32w+32) -- exactly one line -- and the
     // two wmma results it holds are the adjacent halves of it.
     //
-    // A, B and C all flip together inside the block gemm, so the only thing this
-    // costs is re-deriving the two operand descriptors below; the register
-    // counts are unchanged because NIterPerWarp is unchanged.
+    // A, B and C all flip together inside the block gemm, so only the two
+    // operand descriptors below have to be re-derived.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetSGradKTBlockGemm()
     {
@@ -303,8 +293,8 @@ struct BlockFmhaBwdPipelineTdmPolicy : BlockFmhaBwdPipelineDefaultPolicy
             bool_constant<true>{});
     }
 
-    // LSE/D are 1-D over seqlen_q and, after this change, reach LDS by TDM just
-    // like K/V/Q/dO.  The inherited MakeLSEDDramTileDistribution scatters kM0
+    // LSE/D are 1-D over seqlen_q and reach LDS by TDM just like K/V/Q/dO.
+    // The inherited MakeLSEDDramTileDistribution scatters kM0
     // across the lanes of a warp so load_tile can assemble a register tile; its
     // ys length is therefore kM0/warp_size = 2, which as a TDM box would be 8 B.
     // TDM builds no register tile and just needs the box walked in order, so
@@ -332,34 +322,8 @@ struct BlockFmhaBwdPipelineTdmPolicy : BlockFmhaBwdPipelineDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigK()
     {
-        // TDM encodes pad_amount as (dwords of padding - 1) and pad_interval as
-        // (log2 of the dwords written between pads - 1). One row is exactly one
-        // interval here, so each row gets kOperandLdsPad elements appended --
-        // matching the descriptor stride above. The two MUST agree: TDM writes
-        // the box, the descriptor reads it, and nothing checks them against
-        // each other.
-        using DT                         = typename Problem::KDataType;
-        constexpr index_t kKPerBlock     = Problem::BlockFmhaShape::kQKHeaddim;
-        constexpr index_t kBytesPerDword = 4;
-
-        constexpr auto log2_floor = [](index_t x) constexpr {
-            index_t r = 0;
-            while(x > 1)
-            {
-                x >>= 1;
-                r++;
-            }
-            return r;
-        };
-
-        constexpr index_t pad_dwords = kOperandLdsPad * sizeof(DT) / kBytesPerDword;
-        constexpr index_t row_dwords = kKPerBlock * sizeof(DT) / kBytesPerDword;
-        static_assert(pad_dwords * kBytesPerDword == kOperandLdsPad * sizeof(DT),
-                      "operand LDS pad must be a whole number of dwords");
-        static_assert(pad_dwords >= 1, "operand LDS pad must be at least one dword");
-
-        return make_tuple(
-            number<true>{}, number<pad_dwords - 1>{}, number<log2_floor(row_dwords) - 1>{});
+        return GetOperandLdsPaddingConfig<typename Problem::KDataType,
+                                          Problem::BlockFmhaShape::kQKHeaddim>();
     }
 
     // ---- dO: one plain box, dO^T read back by ds_load_tr --------------------
@@ -579,18 +543,13 @@ struct BlockFmhaBwdPipelineTdmPolicy : BlockFmhaBwdPipelineDefaultPolicy
 
     // ---- V staged into LDS by TDM -------------------------------------------
     //
-    // V used to go global -> registers (load_tile) -> LDS (store_tile). TDM
-    // writes global -> LDS directly, so the register round-trip disappears.
+    // TDM writes V global -> LDS directly, with no register round trip.
     //
-    // The inherited descriptor (MakeXLdsBlockDescriptor) carries an XOR swizzle.
-    // That is fine when store_tile writes it, because the reader shares the same
+    // The inherited descriptor (MakeXLdsBlockDescriptor) carries an XOR swizzle,
+    // which works when store_tile writes it because the reader shares the
     // descriptor and the two XORs cancel. TDM does not go through the descriptor
-    // at all -- it writes a single plain box -- so the reader's XOR would no
-    // longer cancel against anything. V therefore gets a plain row-major
-    // descriptor, which is also what the fwd TDM policy uses for V.
-    //
-    // Element space is unchanged (kN0 * kVHeaddim), so every smem size and
-    // offset computed from this descriptor stays put.
+    // -- it writes a single plain box -- so V gets a plain row-major descriptor
+    // instead, the same one the fwd TDM policy uses.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeVLdsWriteBlockDescriptor()
     {
@@ -633,40 +592,11 @@ struct BlockFmhaBwdPipelineTdmPolicy : BlockFmhaBwdPipelineDefaultPolicy
             bool_constant<true>{});                               // warp-level parallel only
     }
 
-    // TDM LDS padding for V: disabled, mirroring the fwd TDM policy. Enabling it
-    // on the writer alone would misalign the reader, which shares the descriptor
-    // above. Padding is bank-conflict avoidance, not correctness.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigV()
     {
-        // TDM encodes pad_amount as (dwords of padding - 1) and pad_interval as
-        // (log2 of the dwords written between pads - 1). One row is exactly one
-        // interval here, so each row gets kOperandLdsPad elements appended --
-        // matching the descriptor stride above. The two MUST agree: TDM writes
-        // the box, the descriptor reads it, and nothing checks them against
-        // each other.
-        using DT                         = typename Problem::VDataType;
-        constexpr index_t kKPerBlock     = Problem::BlockFmhaShape::kVHeaddim;
-        constexpr index_t kBytesPerDword = 4;
-
-        constexpr auto log2_floor = [](index_t x) constexpr {
-            index_t r = 0;
-            while(x > 1)
-            {
-                x >>= 1;
-                r++;
-            }
-            return r;
-        };
-
-        constexpr index_t pad_dwords = kOperandLdsPad * sizeof(DT) / kBytesPerDword;
-        constexpr index_t row_dwords = kKPerBlock * sizeof(DT) / kBytesPerDword;
-        static_assert(pad_dwords * kBytesPerDword == kOperandLdsPad * sizeof(DT),
-                      "operand LDS pad must be a whole number of dwords");
-        static_assert(pad_dwords >= 1, "operand LDS pad must be at least one dword");
-
-        return make_tuple(
-            number<true>{}, number<pad_dwords - 1>{}, number<log2_floor(row_dwords) - 1>{});
+        return GetOperandLdsPaddingConfig<typename Problem::VDataType,
+                                          Problem::BlockFmhaShape::kVHeaddim>();
     }
 
     // GetSmemSizeV lives in the base and would otherwise call the base's
@@ -679,19 +609,12 @@ struct BlockFmhaBwdPipelineTdmPolicy : BlockFmhaBwdPipelineDefaultPolicy
                sizeof(typename Problem::VDataType);
     }
 
-    // dK accumulator: [kN0, kQKHeaddim] fp32, row major with the pad above.
+    // The dV accumulator is kN0 x headdim and does not shrink with kM0, so below
+    // a kM0 floor the same work pays more LDS round trips than registers save.
+    // headdim 256 takes a lower floor because its only tile is kM0 32.
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeKGradAccLdsBlockDescriptor()
-    {
-        constexpr index_t kN0        = Problem::BlockFmhaShape::kN0;
-        constexpr index_t kQKHeaddim = Problem::BlockFmhaShape::kQKHeaddim;
-
-        return make_naive_tensor_descriptor(
-            make_tuple(number<kN0>{}, number<kQKHeaddim>{}),
-            make_tuple(number<kQKHeaddim + kAccLdsPad>{}, number<1>{}),
-            number<1>{},
-            number<1>{});
-    }
+    static constexpr bool kDVInReg =
+        Problem::BlockFmhaShape::kM0 >= (Problem::BlockFmhaShape::kVHeaddim >= 256 ? 32 : 64);
 
     // dV accumulator: [kN0, kVHeaddim] fp32.
     template <typename Problem>
@@ -708,17 +631,17 @@ struct BlockFmhaBwdPipelineTdmPolicy : BlockFmhaBwdPipelineDefaultPolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeKGradAcc()
-    {
-        return sizeof(typename Problem::AccDataType) *
-               MakeKGradAccLdsBlockDescriptor<Problem>().get_element_space_size();
-    }
-
-    template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeVGradAcc()
     {
-        return sizeof(typename Problem::AccDataType) *
-               MakeVGradAccLdsBlockDescriptor<Problem>().get_element_space_size();
+        if constexpr(kDVInReg<Problem>)
+        {
+            return 0;
+        }
+        else
+        {
+            return sizeof(typename Problem::AccDataType) *
+                   MakeVGradAccLdsBlockDescriptor<Problem>().get_element_space_size();
+        }
     }
 
     // Offset of the accumulator block inside the workgroup's smem.
@@ -744,9 +667,7 @@ struct BlockFmhaBwdPipelineTdmPolicy : BlockFmhaBwdPipelineDefaultPolicy
         constexpr index_t stage0_0 = GetSmemSizeK<Problem>() + GetSmemSizeKT<Problem>();
         constexpr index_t stage0_1 = GetSmemSizeV<Problem>();
         // Q^T and dO^T are read out of the Q and dO boxes, so this policy
-        // reports 0 for them and there is nothing to reserve. Taking the base's
-        // 16,384 each instead -- as this did originally -- reserved 32,768 B
-        // that the layout never addresses.
+        // reports 0 for them and there is nothing to reserve.
         constexpr index_t stage1 = GetSmemSizeQT<Problem>() + GetSmemSizeQ<Problem>() +
                                    GetSmemSizeOGradT<Problem>() + GetSmemSizeOGrad<Problem>() +
                                    Base::template GetSmemSizeLSE<Problem>() +
@@ -755,46 +676,31 @@ struct BlockFmhaBwdPipelineTdmPolicy : BlockFmhaBwdPipelineDefaultPolicy
                                        Base::template GetSmemSizeSGrad<Problem>());
 
         constexpr index_t total = max(stage0_0, stage0_1, stage1);
-        // The old assert compared against the base policy's total, which does
-        // not describe the layout actually built here; it passed for the wrong
-        // reason and would now fail for the wrong reason too. Check the thing
-        // that binds: every stage must fit in the region we hand out.
-        static_assert(total >= stage0_0 && total >= stage0_1 && total >= stage1,
-                      "staged region must cover every stage");
         return total;
-    }
-
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetKGradAccSmemOffset()
-    {
-        return GetSmemSizeStaged<Problem>();
     }
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetVGradAccSmemOffset()
     {
-        return GetSmemSizeStaged<Problem>() + GetSmemSizeKGradAcc<Problem>();
+        return GetSmemSizeStaged<Problem>();
     }
 
     // V gets its own region rather than aliasing K/KT.
     //
-    // In the staged layout V and K/KT share offset 0 and are separated only by
-    // time: V could not be written until K and KT had been read back out, which
-    // is why V used to be parked in registers first. That ordering constraint is
-    // fatal for TDM -- issuing the load late and waiting on TENSORcnt right
-    // afterwards exposes the whole global->LDS latency, and issuing it early
-    // lands the V box on top of K. Its own kN0*kVHeaddim*sizeof(V) bytes let
-    // the TDM issue sit at
-    // the top of the prologue and the TENSORcnt wait sit just before the first
-    // read, so the transfer overlaps the K staging that follows it.
+    // Sharing offset 0 with K/KT would separate them only by time: V could not
+    // be written until K and KT had been read back out. That ordering is fatal
+    // for TDM -- issuing the load late and waiting on TENSORcnt right afterwards
+    // exposes the whole global->LDS latency, and issuing it early lands the V
+    // box on top of K. Its own kN0*kVHeaddim*sizeof(V) bytes let the issue sit
+    // at the top of the prologue and the wait just before the first read, so the
+    // transfer overlaps the K staging that follows it.
     //
     // Cost at headdim 128 is 16 KiB on top of ~102 KiB, well inside the 320 KiB
     // a gfx1250 workgroup may take, and not enough to change occupancy.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetVSmemOffset()
     {
-        return GetSmemSizeStaged<Problem>() + GetSmemSizeKGradAcc<Problem>() +
-               GetSmemSizeVGradAcc<Problem>();
+        return GetSmemSizeStaged<Problem>() + GetSmemSizeVGradAcc<Problem>();
     }
 
     // Q and dO DRAM distributions for TDM: trivial tile-major, same reasoning as
@@ -839,67 +745,15 @@ struct BlockFmhaBwdPipelineTdmPolicy : BlockFmhaBwdPipelineDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigQ()
     {
-        // TDM encodes pad_amount as (dwords of padding - 1) and pad_interval as
-        // (log2 of the dwords written between pads - 1). One row is exactly one
-        // interval here, so each row gets kOperandLdsPad elements appended --
-        // matching the descriptor stride above. The two MUST agree: TDM writes
-        // the box, the descriptor reads it, and nothing checks them against
-        // each other.
-        using DT                         = typename Problem::QDataType;
-        constexpr index_t kKPerBlock     = Problem::BlockFmhaShape::kQKHeaddim;
-        constexpr index_t kBytesPerDword = 4;
-
-        constexpr auto log2_floor = [](index_t x) constexpr {
-            index_t r = 0;
-            while(x > 1)
-            {
-                x >>= 1;
-                r++;
-            }
-            return r;
-        };
-
-        constexpr index_t pad_dwords = kOperandLdsPad * sizeof(DT) / kBytesPerDword;
-        constexpr index_t row_dwords = kKPerBlock * sizeof(DT) / kBytesPerDword;
-        static_assert(pad_dwords * kBytesPerDword == kOperandLdsPad * sizeof(DT),
-                      "operand LDS pad must be a whole number of dwords");
-        static_assert(pad_dwords >= 1, "operand LDS pad must be at least one dword");
-
-        return make_tuple(
-            number<true>{}, number<pad_dwords - 1>{}, number<log2_floor(row_dwords) - 1>{});
+        return GetOperandLdsPaddingConfig<typename Problem::QDataType,
+                                          Problem::BlockFmhaShape::kQKHeaddim>();
     }
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigOGrad()
     {
-        // TDM encodes pad_amount as (dwords of padding - 1) and pad_interval as
-        // (log2 of the dwords written between pads - 1). One row is exactly one
-        // interval here, so each row gets kOperandLdsPad elements appended --
-        // matching the descriptor stride above. The two MUST agree: TDM writes
-        // the box, the descriptor reads it, and nothing checks them against
-        // each other.
-        using DT                         = typename Problem::OGradDataType;
-        constexpr index_t kKPerBlock     = Problem::BlockFmhaShape::kVHeaddim;
-        constexpr index_t kBytesPerDword = 4;
-
-        constexpr auto log2_floor = [](index_t x) constexpr {
-            index_t r = 0;
-            while(x > 1)
-            {
-                x >>= 1;
-                r++;
-            }
-            return r;
-        };
-
-        constexpr index_t pad_dwords = kOperandLdsPad * sizeof(DT) / kBytesPerDword;
-        constexpr index_t row_dwords = kKPerBlock * sizeof(DT) / kBytesPerDword;
-        static_assert(pad_dwords * kBytesPerDword == kOperandLdsPad * sizeof(DT),
-                      "operand LDS pad must be a whole number of dwords");
-        static_assert(pad_dwords >= 1, "operand LDS pad must be at least one dword");
-
-        return make_tuple(
-            number<true>{}, number<pad_dwords - 1>{}, number<log2_floor(row_dwords) - 1>{});
+        return GetOperandLdsPaddingConfig<typename Problem::OGradDataType,
+                                          Problem::BlockFmhaShape::kVHeaddim>();
     }
 
     // Double-buffering Q/dO is a trade, not a free win: causal already has the
@@ -914,13 +768,8 @@ struct BlockFmhaBwdPipelineTdmPolicy : BlockFmhaBwdPipelineDefaultPolicy
         return !(Problem::FmhaMask::IsMasking && Problem::FmhaDropout::IsStoreRandval);
     }
 
-    // How many Q/dO/LSE/D slots the pipeline rotates through.
-    //
-    // 2 is the ping-pong this file shipped with: a tile is issued and waited on
-    // inside the same iteration, so only one tile's worth of compute covers the
-    // transfer. 4 keeps two tiles in flight across the wait, which is what the
-    // aiter kernel does -- see the CK_TILE_FMHA_BWD_QDO_SLOTS comment in the
-    // pipeline. Each extra slot costs GetQDOSlotStride bytes of LDS.
+    // How many Q/dO/LSE/D slots the pipeline rotates through; see
+    // kQDOSlotsDefault above.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetQDOSlots()
     {
@@ -932,26 +781,20 @@ struct BlockFmhaBwdPipelineTdmPolicy : BlockFmhaBwdPipelineDefaultPolicy
         }
         else
         {
-            // Masked instances lose at every depth above 2, while unmasked
-            // ones with a long enough Q loop gain. Masking is the
-            // discriminator, not tile pairing: group causal does not pair and
-            // still loses.
-            if constexpr(Problem::FmhaMask::IsMasking && CK_TILE_FMHA_BWD_QDO_SLOTS_MASKED > 0)
+            if constexpr(Problem::FmhaMask::IsMasking)
             {
-                return CK_TILE_FMHA_BWD_QDO_SLOTS_MASKED;
+                return kQDOSlotsMasked;
             }
             else if constexpr(Problem::kQDOSlots != 0)
             {
-                // Per-instance override carried by the tile. The deep ring
-                // only pays while the Q loop is short enough that the unroll is
-                // amortised; past that it loses. seqlen_q is a runtime value,
-                // so the choice is made by dispatching to a separate instance
-                // rather than here.
+                // Per-instance override carried by the tile. seqlen_q is a
+                // runtime value, so the depth is chosen by dispatching to a
+                // separate instance rather than here.
                 return Problem::kQDOSlots;
             }
             else
             {
-                return CK_TILE_FMHA_BWD_QDO_SLOTS;
+                return kQDOSlotsDefault;
             }
         }
     }
@@ -970,44 +813,15 @@ struct BlockFmhaBwdPipelineTdmPolicy : BlockFmhaBwdPipelineDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetQDOSlotBase(index_t j)
     {
-        return GetSmemSizeStaged<Problem>() + GetSmemSizeKGradAcc<Problem>() +
-               GetSmemSizeVGradAcc<Problem>() + GetSmemSizeV<Problem>() +
-               (j - 1) * GetQDOSlotStride<Problem>();
-    }
-
-    // Base of the second Q/dO pair, used when the pipeline double-buffers them.
-    // Appended past everything else so the existing layout is byte-identical.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetQPrefetchSmemOffset()
-    {
-        return GetQDOSlotBase<Problem>(1);
-    }
-
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetOGradPrefetchSmemOffset()
-    {
-        return GetQPrefetchSmemOffset<Problem>() + GetSmemSizeQ<Problem>();
-    }
-
-    // LSE and D are 256 B each; a second pair is the cheapest way to retire the
-    // WAR barrier in front of the hot-loop TDM issues.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetLSEPrefetchSmemOffset()
-    {
-        return GetOGradPrefetchSmemOffset<Problem>() + GetSmemSizeOGrad<Problem>();
-    }
-
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetDPrefetchSmemOffset()
-    {
-        return GetLSEPrefetchSmemOffset<Problem>() + GetSmemSizeLSE<Problem>();
+        return GetSmemSizeStaged<Problem>() + GetSmemSizeVGradAcc<Problem>() +
+               GetSmemSizeV<Problem>() + (j - 1) * GetQDOSlotStride<Problem>();
     }
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
-        constexpr index_t single = GetSmemSizeStaged<Problem>() + GetSmemSizeKGradAcc<Problem>() +
-                                   GetSmemSizeVGradAcc<Problem>() + GetSmemSizeV<Problem>();
+        constexpr index_t single =
+            GetSmemSizeStaged<Problem>() + GetSmemSizeVGradAcc<Problem>() + GetSmemSizeV<Problem>();
         return single + (GetQDOSlots<Problem>() - 1) * GetQDOSlotStride<Problem>();
     }
 };

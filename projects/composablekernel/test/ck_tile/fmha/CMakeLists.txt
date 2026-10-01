@@ -105,6 +105,11 @@ add_custom_target(${TEST_NAME} DEPENDS ${TEST_NAME}_fwd ${TEST_NAME}_bwd)
 
 set(FMHA_QR_TDM_TEST_TARGETS)
 if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
+    add_gtest_executable(test_ck_tile_fmha_bwd_tdm_padding
+        test_fmha_bwd_tdm_padding.cpp
+        test_fmha_bwd_tdm_layout.cpp)
+    set_tests_properties(test_ck_tile_fmha_bwd_tdm_padding PROPERTIES
+        LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
     add_gtest_executable(test_ck_tile_fmha_qr_tdm_lds_padding
         test_qr_tdm_lds_padding.cpp)
     target_link_libraries(test_ck_tile_fmha_qr_tdm_lds_padding PRIVATE utility)
@@ -141,6 +146,7 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
 
     set(FMHA_QR_TDM_TEST_TARGETS
+        test_ck_tile_fmha_bwd_tdm_padding
         test_ck_tile_fmha_qr_tdm_lds_padding
         test_ck_tile_fmha_qr_tdm_progressive_k_lds
         test_ck_tile_fmha_qr_tdm_causal_mapping

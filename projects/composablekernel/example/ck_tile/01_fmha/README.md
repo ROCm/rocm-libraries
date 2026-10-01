@@ -293,13 +293,23 @@ narrower than what the kernel templates support. Combinations outside it print
 | `deterministic == f` | `-deterministic=1` has no instance |
 | `dpad == dvpad` | `-d` and `-d_v` must fall in the same padding class (both multiples of 8, or neither) |
 
-On gfx1250 the `dq_dk_dv` pipeline follows the tile the dispatcher picks, so `-d` selects the
-tile shape and the tile carries the pipeline with it:
+On gfx1250 the `dq_dk_dv` pipeline follows the tile the dispatcher picks, so `-d` and `-s`
+together select the tile and the tile carries the pipeline with it. Head dim buckets are
+tested in ascending order, and within a bucket the first matching row wins:
 
-| condition | pipeline |
-|---|---|
-| `seqlen_q <= 32` and `batch * nhead >= 768` | `TrLoadQRQTRDORTDM` (decode; `dQ` stays in registers) |
-| everything else | `TdmKRKTR` |
+| head dim | condition | tile | pipeline |
+|---|---|---|---|
+| `<= 32` | — | b64x128 | `TdmKRKTR` |
+| `(32, 64]` | `seqlen_q <= 32` and `batch * nhead >= 768` | b32x32 | `TrLoadQRQTRDOR` + TDM policy (decode; `dQ` stays in registers) |
+| `(32, 64]` | otherwise | b64x128 | `TdmKRKTR` |
+| `(64, 128]` | masked, `seqlen_q <= 32` and `batch * nhead >= 768` | b32x32 | `TrLoadQRQTRDOR` + TDM policy (decode) |
+| `(64, 128]` | `seqlen_q <= 32` | b32x64 | `TdmKRKTR` |
+| `(64, 128]` | otherwise | b64x128 | `TdmKRKTR` |
+| `(128, 256]` | — | b32x64 | `TdmKRKTR` |
+
+The decode rows additionally require `hdim % 8 == 0`. Head dims of 32 and below, and above
+128, have no decode tile, so a short `seqlen_q` there stays on `TdmKRKTR`. At head dim 128 the
+b64x128 tile runs a shallower Q/dO ring up to `seqlen_q` 2048 and the deeper one beyond it.
 
 `KRKTRVRIGLP`, `KRKTRVR` and `TrLoadKRKTRVR` are still compiled and still selected on other
 architectures.

@@ -1054,7 +1054,6 @@ class FmhaBwdApiPool:
                 F_dvpad=trait.dvpad,
                 F_deterministic=BOOL_MAP[trait.deterministic],
                 F_trload=BOOL_MAP[trait.tr_load],
-                F_maxq=trait.tile.max_seq_q,
                 F_tagq=trait.tile.seq_q_limit,
                 F_max_seq_q_cond=trait.max_seq_q_cond,
                 F_cond_extra=trait.extra_cond,

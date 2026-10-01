@@ -641,6 +641,8 @@ struct fmha_bwd_launcher
 
     ~fmha_bwd_launcher() = default;
 
+    ck_tile::index_t selected_max_seqlen_q() const { return selected_max_seqlen_q_; }
+
     // Stream-async workspace preparation. Zeroes the dq_acc region (if the kernel
     // accumulates) and launches a single-thread device kernel that writes the
     // nsplits[]/offsets[] metadata straight into the device workspace. Every op is
@@ -704,8 +706,9 @@ struct fmha_bwd_launcher
 
     private:
     fmha_bwd_traits traits_{};
-    size_t host_ws_size_    = 0;
-    bool needs_zero_dq_acc_ = false;
+    ck_tile::index_t selected_max_seqlen_q_ = 0;
+    size_t host_ws_size_                    = 0;
+    bool needs_zero_dq_acc_                 = false;
 
     // Function pointer (points to code segment, survives launcher destruction)
     PrepareWorkspaceDeviceFunc prepare_ws_dev_func_ = nullptr;
@@ -726,8 +729,9 @@ struct fmha_bwd_launcher
               typename Arch>
     void init(const fmha_bwd_traits& t)
     {
-        traits_ = t;
-        run     = [](fmha_bwd_args a, const ck_tile::stream_config& s) {
+        traits_                = t;
+        selected_max_seqlen_q_ = fmha_bwd_dq_dk_dv_maxq_<T1, Arch>();
+        run                    = [](fmha_bwd_args a, const ck_tile::stream_config& s) {
             return fmha_bwd_<T0, T1, T2, Arch>(s, a);
         };
         host_ws_size_         = fmha_bwd_dq_dk_dv_dq_ws_host_size_<T1, Arch>(t.batch);

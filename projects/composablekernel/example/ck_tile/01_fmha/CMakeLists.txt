@@ -191,14 +191,9 @@ else()
 endif()
 list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS -fgpu-flush-denormals-to-zero)
 
-# Post-RA scheduling is off library-wide (see the top-level CMakeLists, where it
-# was disabled in 2024 with no stated reason). Leaving it off costs real
-# performance on the gfx12 bwd kernel, so turn it back on there -- and only
-# there: no other CK operation, and no earlier architecture, was re-measured.
-#
-# Expert scheduling mode is deliberately not enabled. The bwd kernel measured
-# faster without it once causal mirror tile pairing was in, and since nothing
-# turns it on globally any more there is no longer anything to subtract.
+# Post-RA scheduling is off library-wide (see the top-level CMakeLists). The
+# gfx12 backward kernel wants it on, so enable it here and only here -- no other
+# CK operation and no other architecture is affected.
 if(CK_GFX12_ONLY_BUILD)
   check_cxx_compiler_flag("-mllvm -enable-post-misched=1" HAS_ENABLE_POST_MISCHED_ON)
   if(HAS_ENABLE_POST_MISCHED_ON)

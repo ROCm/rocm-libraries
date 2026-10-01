@@ -12,51 +12,18 @@
 
 namespace ck_tile {
 
-// Thresholds for kVNonResident (V in LDS rather than registers). V in registers
-// costs kN0 * kVHeaddim / kBlockSize VGPRs, so the headdim floor is what
-// separates d=128 (too expensive) from d=32/64; under a mask d=64 can afford it
-// too, hence the separate nomask floor. 0 disables a floor.
-#ifndef CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_M0
-#define CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_M0 64
-#endif
-#ifndef CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_HDIM
-#define CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_HDIM 128
-#endif
-#ifndef CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_HDIM_NOMASK
-#define CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_HDIM_NOMASK 64
-#endif
-
-// 0 = keep the hand-written scheduler prescriptions, 1 = drop them where the
-// loop body holds a single Q tile, 2 = drop them always. Mode 1 is retained
-// only so the single-vs-doubled-body comparison can be re-run.
-#ifndef CK_TILE_FMHA_BWD_SCHED_DROP_MODE
-#define CK_TILE_FMHA_BWD_SCHED_DROP_MODE 2
-#endif
-
-// kM0 floor for keeping dV in registers. The dV accumulator is kN0 x headdim
-// and does not shrink with kM0, so the smaller the tile the more dV LDS round
-// trips the same work does -- hence a floor rather than always-on.
+// Thresholds for evicting V to LDS (kVNonResident). V in registers costs
+// kN0 * kVHeaddim / kBlockSize VGPRs, so the headdim floor is what separates
+// headdim 128 from 32/64; under a mask headdim 64 can afford registers too,
+// hence the separate nomask floor.
 //
-// headdim 256 is the exception: its only tile is kM0 32, and under a mask that
-// instance spills hard with the accumulator in LDS. Keeping dV in registers
-// there costs VGPRs but cuts the spill slots, so the floor drops for it alone.
-// See kDVInRegMinM0 below.
-#ifndef CK_TILE_FMHA_BWD_DV_IN_REG_MIN_M0
-#define CK_TILE_FMHA_BWD_DV_IN_REG_MIN_M0 64
-#endif
-#ifndef CK_TILE_FMHA_BWD_DV_IN_REG_MIN_M0_HDIM256
-#define CK_TILE_FMHA_BWD_DV_IN_REG_MIN_M0_HDIM256 32
-#endif
-
 // Same algorithm as BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP, moved onto TDM for
 // the global->LDS transfers and ds_load_tr for the transposed reads.
 //
 // Each accumulator is kN0*headdim floats live across the whole Q loop, costing
-// kN0*headdim/kBlockSize VGPRs -- enough at headdim 128 to drop the kernel from
-// 2 waves/SIMD to 1. The pipeline originally parked both in LDS to buy that
-// occupancy back; both have since returned to registers, and what pays for them
-// is evicting V to LDS instead. dK is register resident unconditionally, dV
-// above the kM0 floor -- see kDVInReg / kVNonResident. Below that floor dV
+// kN0*headdim/kBlockSize VGPRs -- enough at headdim 128 to cost a wave of
+// occupancy. Both stay in registers and V is evicted to LDS to pay for them:
+// dK unconditionally, dV above a kM0 floor (kDVInReg). Below that floor dV
 // falls back to LDS, where each accumulation becomes load -> gemm -> store so
 // the register tile is live only around its own gemm.
 //
@@ -97,15 +64,14 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
 
     // dV in registers and V evicted to LDS are gated on kM0 separately, so
     // between the two floors dV is register resident while V still is too.
-    static constexpr index_t kDVInRegMinM0 =
-        (BlockFmhaShape::kVHeaddim >= 256 ? CK_TILE_FMHA_BWD_DV_IN_REG_MIN_M0_HDIM256
-                                          : CK_TILE_FMHA_BWD_DV_IN_REG_MIN_M0);
-    static constexpr bool kDVInReg = (kM0 >= kDVInRegMinM0);
+    static constexpr bool kDVInReg                         = Policy::template kDVInReg<Problem>;
+    static constexpr index_t kVNonResidentMinM0            = 64;
+    static constexpr index_t kVNonResidentMinHeaddim       = 128;
+    static constexpr index_t kVNonResidentMinHeaddimNoMask = 64;
     static constexpr bool kVNonResident =
-        (kM0 >= CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_M0) &&
-        (BlockFmhaShape::kVHeaddim >= CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_HDIM ||
-         (!FmhaMask::IsMasking &&
-          BlockFmhaShape::kVHeaddim >= CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_HDIM_NOMASK));
+        (kM0 >= kVNonResidentMinM0) &&
+        (BlockFmhaShape::kVHeaddim >= kVNonResidentMinHeaddim ||
+         (!FmhaMask::IsMasking && BlockFmhaShape::kVHeaddim >= kVNonResidentMinHeaddimNoMask));
     static constexpr index_t kN0        = BlockFmhaShape::kN0;
     static constexpr index_t kK0        = BlockFmhaShape::kK0;
     static constexpr index_t kK1        = BlockFmhaShape::kK1;
@@ -123,19 +89,6 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
     static constexpr bool kIsDeterministic = Problem::kIsDeterministic;
     static constexpr bool kUseTrLoad       = Problem::kUseTrLoad;
 
-    // Mirror tile pairing inlines two bodies into the function; the machine
-    // scheduler's clustering heuristics go the wrong way in a doubled region,
-    // so whether pairing fires -- not whether the instance is masked -- decides
-    // if the hand-written prescriptions are worth keeping.
-    //
-    // Mirrors kMaskTilePairing in fmha_bwd_kernel.hpp. Two of its terms
-    // simplify here: kUseQrQtrDorPipeline is false by construction in this
-    // pipeline, and with it false kUsePersistent reduces to kIsDeterministic.
-    static constexpr bool kBodyIsPaired = CK_TILE_FMHA_BWD_MASK_TILE_PAIRING &&
-                                          FmhaMask::IsMasking && !kIsGroupMode && !kIsDeterministic;
-    static constexpr bool kDropStagedSched =
-        (CK_TILE_FMHA_BWD_SCHED_DROP_MODE == 2) ||
-        (CK_TILE_FMHA_BWD_SCHED_DROP_MODE == 1 && !kBodyIsPaired);
     static_assert(!kUseTrLoad, "This pipeline does not use trload!");
 
     // last dimension vector length used to create tensor view(and decide buffer_load vector length)
@@ -281,31 +234,20 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
         constexpr auto gemm_3 = Policy::template GetSGradTQTBlockGemm<Problem>();
         constexpr auto gemm_4 = Policy::template GetSGradKTBlockGemm<Problem>();
 
-        // LDS fallbacks for the dV (and, below the kM0 floor, dK) accumulator.
-        // Reserved whether or not this instance keeps them in registers.
+        // LDS home for the dV accumulator, used only below the kM0 floor.
         //
-        // These sit after every staged region rather than inside the max() over
-        // phases, because they are live for the whole Q loop while K/V/Q/dO/dS
-        // each die at the end of their phase. Putting them last leaves all the
-        // existing staged offsets untouched.
+        // It sits after every staged region rather than inside the max() over
+        // phases, because it is live for the whole Q loop while K/V/Q/dO/dS each
+        // die at the end of their phase.
         //
-        // Both windows carry the gemm's own C distribution, so the tiles loaded
-        // from them can be fed straight back into gemm_1 / gemm_3 (which assert
-        // on that distribution) and handed to the epilogue unchanged.
-        auto dk_acc_lds = make_tensor_view<address_space_enum::lds>(
-            reinterpret_cast<AccDataType*>(static_cast<char*>(smem_ptr) +
-                                           Policy::template GetKGradAccSmemOffset<Problem>()),
-            Policy::template MakeKGradAccLdsBlockDescriptor<Problem>());
+        // The window carries gemm_1's own C distribution, so tiles loaded from
+        // it can be fed straight back into gemm_1 (which asserts on that
+        // distribution) and handed to the epilogue unchanged.
         auto dv_acc_lds = make_tensor_view<address_space_enum::lds>(
             reinterpret_cast<AccDataType*>(static_cast<char*>(smem_ptr) +
                                            Policy::template GetVGradAccSmemOffset<Problem>()),
             Policy::template MakeVGradAccLdsBlockDescriptor<Problem>());
 
-        [[maybe_unused]] auto dk_acc_lds_window =
-            make_tile_window(dk_acc_lds,
-                             make_tuple(number<kN0>{}, number<kQKHeaddim>{}),
-                             {0, 0},
-                             decltype(gemm_3.MakeCBlockTile())::get_tile_distribution());
         [[maybe_unused]] auto dv_acc_lds_window =
             make_tile_window(dv_acc_lds,
                              make_tuple(number<kN0>{}, number<kVHeaddim>{}),
@@ -366,7 +308,7 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                              Policy::template MakeVDramTileDistribution<Problem>());
 
         // V has a dedicated region past the staged/accumulator blocks -- see
-        // GetVSmemOffset. It used to alias K/KT at offset 0.
+        // GetVSmemOffset.
         VDataType* v_lds_ptr = static_cast<VDataType*>(static_cast<void*>(
             static_cast<char*>(smem_ptr) + Policy::template GetVSmemOffset<Problem>()));
 
@@ -383,21 +325,16 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                              Policy::template MakeVRegBlockDescriptor<Problem>());
 
         //------------------------------------------------------------------
-        // KT, read transposed straight out of the single K box
-        //
-        // There used to be a second LDS copy of K here, produced by shuffling
-        // k_block_tile in registers, purely so gemm_4 could read K^T with a
-        // plain load_tile. ds_load_tr16_b128 does that in hardware, so the
-        // shuffle, the staging tile and the copy are all gone; the window below
-        // points at the same box k_lds_write_window fills.
+        // K^T, read transposed by ds_load_tr straight out of the single K box:
+        // the window below points at the box k_lds_write_window fills.
         auto kt_lds_read_window =
             make_tile_window(k_lds_write_window.get_bottom_tensor_view(),
                              make_tuple(number<kN0>{}, number<kQKHeaddim>{}),
                              k_lds_write_window.get_window_origin(),
                              Policy::template MakeKTRegBlockDescriptor<Problem>());
 
-        // V is moved global->LDS by TDM, so it never lands in registers. pad is
-        // disabled by the policy; workgroup_mask stays 0 (no cluster multicast).
+        // V is moved global->LDS by TDM, so it never lands in registers.
+        // workgroup_mask stays 0 (no cluster multicast).
         TDMConfig tdm_config_v;
         TDMConfig tdm_config_k;
         TDMConfig tdm_config_q;
@@ -466,15 +403,12 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
 
         // ---- the Q/dO/LSE/D slot ring -----------------------------------
         //
-        // kQDOSlots tiles are resident in LDS at once. Slot 0 is the box the
-        // staged region already held; slots 1.. are appended past V, slot 1
-        // landing exactly where the old second Q/dO pair sat -- so kQDOSlots==2
-        // is the previous layout byte for byte.
+        // kQDOSlots tiles are resident in LDS at once. Slot 0 lives in the
+        // staged region; slots 1.. are appended past V.
         //
-        // Slot 0's four boxes are laid out dO, Q, LSE, D (that is the order the
-        // staged offsets were built in); the appended slots use Q, dO, LSE, D.
-        // Nothing depends on the order, only on the four offsets, so each box
-        // gets its own accessor rather than a single base plus a stride.
+        // Slot 0's four boxes are laid out dO, Q, LSE, D and the appended slots
+        // Q, dO, LSE, D. Nothing depends on the order, only on the four offsets,
+        // so each box gets its own accessor rather than a base plus a stride.
         constexpr index_t kQDOSlots = Policy::template GetQDOSlots<Problem>();
         static_assert(kQDOSlots >= 1 && kQDOSlots <= 4,
                       "the hot loop is unrolled by kQDOSlots; keep it small");
@@ -561,10 +495,7 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
 
         auto pt_reg_tensor = make_static_distributed_tensor<GemmDataType>(
             Policy::template MakePTRegSliceBlockDescriptor<Problem>());
-        // Q^T: read transposed out of the single Q box. The shuffle and the
-        // second LDS copy it fed are gone -- ds_load_tr16_b128 does the
-        // transpose in hardware. Q's shuffle ran once per Q-loop iteration, so
-        // this removes hot-loop work, unlike K's which was once per block.
+        // Q^T: read transposed by ds_load_tr out of the single Q box.
         auto qt_lds_read_windows = generate_tuple(
             [&](auto j) {
                 return make_tile_window(q_lds_windows.at(j).get_bottom_tensor_view(),
@@ -600,12 +531,7 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                     Policy::template MakeOGradRegSliceBlockDescriptor<Problem>());
             },
             number<kQDOSlots>{});
-        // dO^T: read transposed straight out of the single dO box.
-        //
-        // There used to be a second LDS copy here, produced by shuffling
-        // do_block_tile in registers, so gemm_1 could read dO^T with a plain
-        // load_tile. ds_load_tr16_b128 does that in hardware. Unlike K, dO is
-        // reloaded every Q iteration, so this shuffle was in the hot loop.
+        // dO^T: read transposed by ds_load_tr out of the single dO box.
         auto dot_lds_read_windows = generate_tuple(
             [&](auto j) {
                 return make_tile_window(
@@ -775,9 +701,8 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
          * Prefetch Q, LSE, dO, D
          */
         // Q and dO go global -> LDS by TDM, so nothing is prefetched into
-        // registers here. Their DRAM windows are advanced only after the
-        // transfer has been issued, because TDM reads at issue time whereas the
-        // old load_tile read before the advance.
+        // registers here. TDM reads the DRAM window at issue time, so the window
+        // is advanced only after the transfer has been issued.
         /*
          * Store prefetched data into LDS
          */
@@ -796,7 +721,7 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
         // At the wait, tiles up to i + kIssueAhead have been issued and tile
         // i + 1 must have landed, so kQDOSlots - 2 tiles may still be in flight
         // -- 4 transfers each (Q, dO, LSE, D). kQDOSlots == 2 gives a wait of 0,
-        // i.e. the full drain this loop used to do; 4 gives 8 and never drains.
+        // a full drain; 4 gives 8 and never drains.
         constexpr index_t kIssueAhead = kQDOSlots == 1 ? 1 : kQDOSlots - 1;
         constexpr index_t kTdmPerTile = 4;
         constexpr index_t kTdmWaitCnt = kQDOSlots >= 2 ? kTdmPerTile * (kQDOSlots - 2) : 0;
@@ -885,10 +810,9 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
             }
             else if constexpr(kQDOSlots == 2)
             {
-                // Two slots is what the loop always had, and a single ternary
-                // on two named windows is what it compiled to. A chain over
-                // three or four windows would make all of them addressable and
-                // put their descriptors back in scratch.
+                // Two slots select with a single ternary on two named
+                // windows. A chain over three or four would make all of them
+                // addressable and put their descriptors back in scratch.
                 return j == 0 ? tup.at(number<0>{}) : tup.at(number<1>{});
             }
             else
@@ -912,16 +836,11 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
         // body in the source:
         //
         //   depth >= 3 -- unrolled kQDOSlots times, each copy binding a
-        //     compile-time slot. This is the point of the unroll: a runtime
-        //     rotation costs address arithmetic per operand, and at 1024 VGPR
-        //     with spills already there is nowhere to put it (an earlier
-        //     three-deep Q experiment did exactly that and went 7 -> 384
-        //     spills).
-        //   depth <= 2 -- one copy, slot chosen by a running index, which is
-        //     what the ping-pong always did. Two slots do not need the unroll
-        //     and instances that keep depth 2 should not pay for it: mirror
-        //     tile pairing already doubles this body, and unrolling a doubled
-        //     body costs those instances 15-26%.
+        //     compile-time slot, so no runtime rotation and no per-operand
+        //     address arithmetic.
+        //   depth <= 2 -- one copy, slot chosen by a running index. Two slots
+        //     do not need the unroll, and mirror tile pairing has already
+        //     doubled this body.
         auto hot_loop_body = [&](auto kEdge,
                                  auto& q_rd_cur,
                                  auto& qt_rd_cur,
@@ -943,12 +862,6 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
             s_acc = gemm_0(q_reg_tensor, k_reg_tensor);
 
             auto dot_reg_tensor = load_tile_transpose(dot_rd_cur);
-
-            if constexpr(!kDropStagedSched)
-            {
-                HotLoopScheduler::template GemmStagedScheduler<0>();
-                __builtin_amdgcn_sched_barrier(0);
-            }
             // STAGE 2, Scale, Add bias, Mask, Softmax, Dropout
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
             {
@@ -1085,12 +998,10 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
             }
             dp_acc = gemm_2(do_reg_tensor, v_reg_tensor);
 
-            // This barrier existed so TDM could not overwrite an LDS box that
-            // some wave was still reading. With two or more slots the issue
-            // below targets slot kWr, which is slot kCur - 1: last read in the
-            // previous iteration, behind that iteration's block_sync_lds. Only
-            // the single-slot fallback still overwrites what this iteration is
-            // reading and still needs the drain here.
+            // Keeps TDM from overwriting an LDS box a wave is still reading.
+            // With two or more slots the issue below targets slot kWr == kCur-1,
+            // last read in the previous iteration and behind that iteration's
+            // block_sync_lds, so only the single-slot fallback needs the drain.
             if constexpr(kQDOSlots == 1)
             {
                 block_sync_lds();
@@ -1156,20 +1067,13 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
 
             block_sync_lds();
 
-            // Release tile i+1 only. kQDOSlots - 2 tiles stay in flight, which
-            // is the whole point of the depth: at kQDOSlots == 2 this is a full
-            // drain and the transfer has had one iteration's compute to hide
-            // behind; at 4 it has had three.
+            // Release tile i+1 only, leaving kQDOSlots - 2 tiles in flight:
+            // each transfer gets kQDOSlots - 1 iterations of compute to hide
+            // behind.
             s_wait_tensorcnt_barrier<kTdmWaitCnt>();
             auto ds_reg_tensor = load_tile_transpose(ds_lds_read_window);
             q_reg_tensor       = load_tile(q_rd_dst);
             lse                = load_tile(lse_rd_dst);
-
-            if constexpr(!kDropStagedSched)
-            {
-                HotLoopScheduler::template GemmStagedScheduler<3>();
-                __builtin_amdgcn_sched_barrier(0);
-            }
             // STAGE7 SGrad@K^T Gemm4
             auto dq_acc = QGradBlockTileType{};
             clear_tile(dq_acc);
@@ -1187,11 +1091,6 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
 
             do_reg_tensor = load_tile(do_rd_dst);
             d             = load_tile(d_rd_dst);
-
-            if constexpr(!kDropStagedSched)
-            {
-                HotLoopScheduler::template GemmStagedScheduler<4>();
-            }
 
             // QGrad Scale
             if constexpr(FmhaDropout::IsDropout)
@@ -1251,11 +1150,9 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
         }
         else
         {
-            // One copy, and the slot is a single bool select on two named
-            // windows -- character for character the binding the ping-pong
-            // always compiled to. kB is the other slot: 1 at depth 2, and 0 at
-            // depth 1, where both arms of every select name the same window and
-            // the select folds away.
+            // One copy, with the slot a single bool select on two named
+            // windows. kB is the other slot: 1 at depth 2, and 0 at depth 1,
+            // where both arms name the same window and the select folds away.
             constexpr index_t kB   = kQDOSlots - 1;
             constexpr bool kTwoBox = (kQDOSlots == 2);
             // false: read slot 0 and refill slot kB; true: the reverse.
@@ -1264,6 +1161,9 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
             // Every tile is treated as a possible edge tile, so the loop below
             // is one masked body over the whole Q range and mask.IsEdgeTile()
             // decides per tile whether the per-pixel check runs.
+            // Written through a mutable n_edge_tiles and min() rather than the
+            // equivalent ternary: the two produce the same value, but this form
+            // gives the masked kernel a measurably better register allocation.
             index_t n_edge_tiles = num_total_loop;
             const index_t n_edge_body =
                 min(n_edge_tiles, num_total_loop > 0 ? num_total_loop - 1 : 0);

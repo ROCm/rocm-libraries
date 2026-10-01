@@ -93,7 +93,7 @@ template <index_t kPadHeadDimQ_ /* paddding for hdim_q */,
           BlockAttentionBiasEnum BiasEnum_,
           bool kHasBiasGrad_,
           index_t kBlockPerCu_ = -1, /* overwrite occupancy if not -1 */
-          index_t kQDOSlots_   = 0 /* 0: use CK_TILE_FMHA_BWD_QDO_SLOTS */>
+          index_t kQDOSlots_   = 0 /* 0: policy default */>
 struct TileFmhaBwdTraits
 {
     static constexpr index_t kPadHeadDimQ = kPadHeadDimQ_;

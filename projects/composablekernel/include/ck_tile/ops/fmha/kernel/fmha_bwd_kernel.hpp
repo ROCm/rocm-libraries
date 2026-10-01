@@ -3,26 +3,6 @@
 
 #pragma once
 
-// These sit above the includes on purpose: the bwd pipelines read
-// CK_TILE_FMHA_BWD_MASK_TILE_PAIRING to form kBodyIsPaired, and they are pulled
-// in by the pipeline selector below. Defining it afterwards would leave the
-// pipeline with an undeclared identifier.
-#ifndef CK_TILE_FMHA_BWD_MASK_TILE_PAIRING
-#define CK_TILE_FMHA_BWD_MASK_TILE_PAIRING 1
-#endif
-
-#ifndef CK_TILE_FMHA_BWD_PAIRING_MIN_CU_DIV
-#define CK_TILE_FMHA_BWD_PAIRING_MIN_CU_DIV 2
-#endif
-
-#ifndef CK_TILE_FMHA_BWD_PAIRING_MAX_JOBS_PER_HEAD
-#define CK_TILE_FMHA_BWD_PAIRING_MAX_JOBS_PER_HEAD 160
-#endif
-
-#ifndef CK_TILE_FMHA_BWD_TDM_DKDV_STORE
-#define CK_TILE_FMHA_BWD_TDM_DKDV_STORE 1
-#endif
-
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/ops/epilogue/tdm_epilogue.hpp"
@@ -36,6 +16,27 @@
 #include <utility>
 #include <variant>
 #include <memory>
+
+// Pair a masked tile with its mirror so one workgroup covers both.
+#ifndef CK_TILE_FMHA_BWD_MASK_TILE_PAIRING
+#define CK_TILE_FMHA_BWD_MASK_TILE_PAIRING 1
+#endif
+
+// Pairing halves the grid, so it is only worth it while the paired grid still
+// fills the CUs: at least get_num_cus() / MIN_CU_DIV workgroups, and at most
+// MAX_JOBS_PER_HEAD kv tiles per head.
+#ifndef CK_TILE_FMHA_BWD_PAIRING_MIN_CU_DIV
+#define CK_TILE_FMHA_BWD_PAIRING_MIN_CU_DIV 2
+#endif
+
+#ifndef CK_TILE_FMHA_BWD_PAIRING_MAX_JOBS_PER_HEAD
+#define CK_TILE_FMHA_BWD_PAIRING_MAX_JOBS_PER_HEAD 160
+#endif
+
+// Write dK/dV out through LDS and a TDM store. Requires a target with TDM.
+#ifndef CK_TILE_FMHA_BWD_TDM_DKDV_STORE
+#define CK_TILE_FMHA_BWD_TDM_DKDV_STORE 1
+#endif
 
 // S[seqlen_q, seqlen_k] = Q[seqlen_q, hdim_q] @ K[seqlen_k, hdim_q]
 // S'[seqlen_q, seqlen_k] = S[seqlen_q, seqlen_k] * Scale[1]
@@ -1547,8 +1548,9 @@ struct FmhaBwdDQDKDVKernel
                     // below byte-identical to the always-paired form.
                     const index_t mirror =
                         (static_cast<index_t>(gridDim.x) < n_tiles) ? (n_tiles - 1 - x) : x;
-                    // archA's two-inlined-body form. Faster, but miscompiled
-                    // under expert scheduling mode when dropout is on.
+                    // Run the tile, then its mirror. The wait between them
+                    // retires the first body's outstanding LDS and TDM traffic
+                    // before the second reuses the same buffers.
                     run_(kargs, dim3(x, blockIdx.y, blockIdx.z), 0, 1);
                     if(mirror != x)
                     {

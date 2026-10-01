@@ -62,7 +62,7 @@ using FmhaBwdTestParam     = std::tuple<      //
     FmhaBwdDimsMaskParam,
     bool // deterministic
     >;
-void fmha_bwd_test(const FmhaBwdTestParam& param)
+void fmha_bwd_test(const FmhaBwdTestParam& param, bool require_instance = false)
 {
     auto [mode, hdims, perm, bias_str, use_dbias, p_drop, drop_misc, dims_mask, det] = param;
     auto [hdim_q, hdim_v]                                                            = hdims;
@@ -98,7 +98,7 @@ void fmha_bwd_test(const FmhaBwdTestParam& param)
         1,
         stream_config);
 
-    if(result == bwd_result::no_instance)
+    if(result == bwd_result::no_instance && !require_instance)
         GTEST_SKIP() << "No instance for current parameters";
     ASSERT_EQ(result, bwd_result::success);
 }
@@ -223,13 +223,66 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaBwd,
                                  Values(0.123f, 0.5f),              // p_drop
                                  Values(std::tuple{10, 123, false}, // seed/offset/prefs
                                         std::tuple{34534564645, 7876878876864, true}),
+                                 // The last two exercise short queries at low
+                                 // grid sizes; DecodeDropout below additionally
+                                 // clears the gfx1250 decode dispatch threshold.
                                  Values(std::tuple{2, 6, 2, 180, 512, "0"},
                                         std::tuple{3, 2, 2, 256, 128, "1"},
-                                        std::tuple{4, 2, 1, 100, 768, "2"}),
+                                        std::tuple{4, 2, 1, 100, 768, "2"},
+                                        std::tuple{2, 6, 2, 16, 512, "0"},
+                                        std::tuple{3, 2, 2, 32, 768, "2"}),
                                  Values(false) // deterministic
                                  ));
 
 TEST_P(Dropout, DataTypeConfig) { fmha_bwd_test(GetParam()); }
+
+class DecodeDropout : public TestWithParam<FmhaBwdTestParam>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaBwd,
+    DecodeDropout,
+    Combine(ModeValues,
+            Values(std::tuple{64, -1}),
+            Values(std::tuple{true, true}),
+            Values("n"),
+            Values(false),
+            Values(0.123f, 0.5f),
+            Values(std::tuple{10, 123, true}, std::tuple{34534564645, 7876878876864, true}),
+            Values(std::tuple{128, 6, 6, 16, 64, "0"}, std::tuple{128, 6, 6, 32, 96, "0"}),
+            Values(false)));
+
+TEST_P(DecodeDropout, DataTypeConfig)
+{
+    if constexpr(std::is_same_v<DataTypeConfig, FmhaBwdFp32>)
+        GTEST_SKIP() << "Decode dropout instances support fp16 and bf16";
+    const auto device_name = ck_tile::get_device_name();
+    if(device_name.compare(0, 6, "gfx950") != 0 && device_name.compare(0, 6, "gfx125") != 0)
+        GTEST_SKIP() << "Decode dropout coverage requires gfx950 or gfx1250";
+    const auto& [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str] = std::get<7>(GetParam());
+    const bool group            = std::get<0>(GetParam()) == mode_enum::group;
+    const std::string data_type = std::is_same_v<DataTypeConfig, FmhaBwdFp16> ? "fp16" : "bf16";
+    fmha_bwd_launcher launcher(fmha_bwd_traits{group ? batch * seqlen_q : seqlen_q,
+                                               group ? batch * seqlen_k : seqlen_k,
+                                               batch,
+                                               seqlen_q,
+                                               seqlen_k,
+                                               64,
+                                               64,
+                                               nhead,
+                                               nhead_k,
+                                               data_type,
+                                               group,
+                                               mask_enum::no_mask,
+                                               bias_enum::no_bias,
+                                               false,
+                                               true,
+                                               true,
+                                               false});
+    ASSERT_EQ(launcher.selected_max_seqlen_q(), 32);
+    fmha_bwd_test(GetParam(), true);
+}
 
 class Deterministic : public TestWithParam<FmhaBwdTestParam>
 {

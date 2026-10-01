@@ -5,6 +5,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common/tensor_layout.hpp"
+#include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_problem.hpp"
 #include "ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
@@ -2061,23 +2062,6 @@ struct BlockFmhaBwdPipelineDefaultPolicy
         template <index_t GemmStage>
         CK_TILE_DEVICE static constexpr void GemmStagedScheduler()
         {
-        }
-
-        CK_TILE_DEVICE static constexpr void GemmStagedScheduler0Tdm()
-        {
-            constexpr index_t VMEM_READ_INST = LSE_VMEM_READ + D_VMEM_READ;
-            constexpr index_t LDS_READ_INST  = OGradT_LDS_READ;
-            constexpr index_t MFMA_INST      = Gemm0MFMA;
-
-            constexpr index_t LDS_READ_PER_MFMA =
-                LDS_READ_INST / MFMA_INST > 0 ? LDS_READ_INST / MFMA_INST : 1;
-
-            __builtin_amdgcn_sched_group_barrier(0x020, VMEM_READ_INST, 0); // VMEM read
-            static_for<0, MFMA_INST, 1>{}([&](auto i) {
-                ignore = i;
-                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);                 // MFMA/WMMA
-                __builtin_amdgcn_sched_group_barrier(0x100, LDS_READ_PER_MFMA, 0); // DS read
-            });
         }
 
         template <>

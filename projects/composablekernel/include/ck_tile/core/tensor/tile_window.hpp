@@ -34,36 +34,44 @@ struct is_right_pad_transform<right_pad<L, R, S>> : std::true_type
 {
 };
 
+// Lengths of a tensor descriptor with right padding removed. TDM needs the
+// pre-pad extent: a padded length would let it pull real neighbouring memory
+// into the padding instead of reading zeros.
+//
+// Each top dimension is resolved to the transform that produces it, so the
+// result does not depend on the order transforms were composed in.
 template <typename TensorDesc>
 CK_TILE_HOST_DEVICE constexpr auto tdm_real_lengths(const TensorDesc& desc)
 {
-    const auto lengths      = desc.get_lengths();
-    const auto& transforms  = desc.get_transforms();
-    constexpr index_t kNDim = remove_cvref_t<decltype(lengths)>::size();
-    constexpr index_t kNT   = remove_cvref_t<decltype(transforms)>::size();
-    if constexpr(kNT >= kNDim)
-    {
-        return generate_tuple(
-            [&](auto idim) {
-                const auto& tf = transforms[number<kNT - kNDim + idim>{}];
+    const auto lengths     = desc.get_lengths();
+    const auto& transforms = desc.get_transforms();
+    using Desc             = remove_cvref_t<TensorDesc>;
+
+    return generate_tuple(
+        [&](auto idim) {
+            constexpr index_t idim_hidden = Desc::get_top_dimension_hidden_ids().at(idim);
+            constexpr auto found =
+                Desc::get_transform_and_its_upper_dimension(number<idim_hidden>{});
+            constexpr index_t itran = found[number<0>{}];
+
+            if constexpr(!found[number<2>{}])
+            {
+                return static_cast<index_t>(lengths[idim]);
+            }
+            else
+            {
+                const auto& tf = transforms[number<itran>{}];
                 if constexpr(is_right_pad_transform<remove_cvref_t<decltype(tf)>>::value)
                 {
-                    return (static_cast<index_t>(tf.get_upper_lengths()[number<0>{}]) ==
-                            static_cast<index_t>(lengths[idim]))
-                               ? static_cast<index_t>(tf.low_length_)
-                               : static_cast<index_t>(lengths[idim]);
+                    return static_cast<index_t>(tf.low_length_);
                 }
                 else
                 {
                     return static_cast<index_t>(lengths[idim]);
                 }
-            },
-            number<kNDim>{});
-    }
-    else
-    {
-        return lengths;
-    }
+            }
+        },
+        number<remove_cvref_t<decltype(lengths)>::size()>{});
 }
 
 } // namespace detail

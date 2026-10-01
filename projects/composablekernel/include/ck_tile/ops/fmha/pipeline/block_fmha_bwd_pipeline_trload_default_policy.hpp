@@ -230,6 +230,37 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
     // non-transposed load
     static constexpr index_t WarpAlignmentBytes = 128;
 
+    // ---- operand staging hooks ----------------------------------------------
+    //
+    // The decode pipeline drives its global->LDS transfers through these four,
+    // so the same pipeline serves both the async_load_tile path here and the TDM
+    // path in BlockFmhaBwdPipelineTrLoadTdmPolicy.
+    //
+    // kUsesTdm is also what tells the kernel whether the pipeline is buildable
+    // on a target without TDM.
+    static constexpr bool kUsesTdm = false;
+
+    // async_load_tile needs a contiguous LDS write, so the DRAM view is
+    // transformed into the shape that path expects.
+    template <typename T, typename TensorView>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeXDramStagingView(const TensorView& naive_view)
+    {
+        return TransformXDramTensorView<T>(naive_view);
+    }
+
+    template <typename T, index_t KPerBlock, typename LdsWindow, typename DramWindow>
+    CK_TILE_DEVICE static void LoadBlockToLds(LdsWindow&& lds_window, const DramWindow& dram_window)
+    {
+        async_load_tile(lds_window, dram_window);
+    }
+
+    // Retire the transfers issued since the last wait.
+    CK_TILE_DEVICE static void WaitBlockToLds() { s_waitcnt</*vmcnt=*/0>(); }
+
+    // Retire everything outstanding, including the plain loads and stores the
+    // pipeline issues around the staged ones.
+    CK_TILE_DEVICE static void WaitAllMem() { __builtin_amdgcn_s_waitcnt(0); }
+
     // As load_lds requires contiguous LDS write, we need to transform the distribution of DRAM for
     // reading
     template <typename T, typename TensorView>
