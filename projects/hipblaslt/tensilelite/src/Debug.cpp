@@ -314,6 +314,9 @@ namespace TensileLite
             if(end != sk5Force && *end == '\0' && val >= -1 && val <= 1)
                 m_streamK5ForceMode = static_cast<int>(val);
         }
+
+        const char* meshbasedLib = std::getenv("TENSILE_USE_MESHBASED");
+        m_meshbasedLib = meshbasedLib ? strtol(meshbasedLib, nullptr, 0) != 0 : false;
     }
 
 } // namespace TensileLite
