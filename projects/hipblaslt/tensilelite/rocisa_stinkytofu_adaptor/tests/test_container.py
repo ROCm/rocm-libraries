@@ -23,6 +23,8 @@ import pickle
 import sys
 import unittest
 
+from _adaptor_testcase import AdaptorTestCase
+
 # ---------------------------------------------------------------------------
 # Self-contained sys.path bootstrap (see test_register.py for rationale).
 # ---------------------------------------------------------------------------
@@ -68,7 +70,7 @@ from rocisa_stinkytofu_adaptor.enum import CacheScope, NonVolatile, SelectBit, T
 # ===========================================================================
 
 
-class TestRegNameConstruction(unittest.TestCase):
+class TestRegNameConstruction(AdaptorTestCase):
     def test_default_ctor_empty(self):
         rn = RegName()
         self.assertEqual(rn.name, "")
@@ -93,7 +95,7 @@ class TestRegNameConstruction(unittest.TestCase):
         self.assertEqual(rn.offsets, [1, 2, 3])
 
 
-class TestRegNameOffsets(unittest.TestCase):
+class TestRegNameOffsets(AdaptorTestCase):
     def test_getOffsets_returns_list(self):
         rn = RegName("V", [1, 2, 3])
         self.assertEqual(rn.getOffsets(), [1, 2, 3])
@@ -120,7 +122,7 @@ class TestRegNameOffsets(unittest.TestCase):
         self.assertEqual(RegName("V", [-2, 7]).getTotalOffsets(), 5)
 
 
-class TestRegNameTotalIdx(unittest.TestCase):
+class TestRegNameTotalIdx(AdaptorTestCase):
     """``getTotalIdx`` resolves ``name`` against ``rocIsa.getVgprIdx``."""
 
     def setUp(self):
@@ -151,7 +153,7 @@ class TestRegNameTotalIdx(unittest.TestCase):
         self.assertEqual(rn.getTotalIdx(), 200)
 
 
-class TestRegNameStringify(unittest.TestCase):
+class TestRegNameStringify(AdaptorTestCase):
     """``__str__`` -> ``"name+off1+off2+..."``."""
 
     def test_name_only(self):
@@ -167,7 +169,7 @@ class TestRegNameStringify(unittest.TestCase):
         self.assertEqual(str(RegName("X", [-5])), "X+-5")
 
 
-class TestRegNameEquality(unittest.TestCase):
+class TestRegNameEquality(AdaptorTestCase):
     def test_eq_same_name_and_offsets(self):
         self.assertEqual(RegName("A", [1, 2]), RegName("A", [1, 2]))
 
@@ -190,7 +192,7 @@ class TestRegNameEquality(unittest.TestCase):
         self.assertEqual(d[RegName("A", [1])], "first")
 
 
-class TestRegNameCopy(unittest.TestCase):
+class TestRegNameCopy(AdaptorTestCase):
     def test_deepcopy_independence(self):
         rn = RegName("A", [1, 2])
         clone = copy.deepcopy(rn)
@@ -206,7 +208,7 @@ class TestRegNameCopy(unittest.TestCase):
         self.assertEqual(clone.offsets, [99, 2])
 
 
-class TestRegNamePickle(unittest.TestCase):
+class TestRegNamePickle(AdaptorTestCase):
     def test_pickle_round_trip(self):
         rn = RegName("ValuA", [3, 4, 5])
         rt = pickle.loads(pickle.dumps(rn))
@@ -219,7 +221,7 @@ class TestRegNamePickle(unittest.TestCase):
 # ===========================================================================
 
 
-class TestRegisterContainerConstruction(unittest.TestCase):
+class TestRegisterContainerConstruction(AdaptorTestCase):
     def test_unnamed_default(self):
         rc = RegisterContainer("v", None, 0, 1)
         self.assertEqual(rc.regType, "v")
@@ -253,7 +255,7 @@ class TestRegisterContainerConstruction(unittest.TestCase):
         self.assertTrue(rc.isOff)
 
 
-class TestRegisterContainerSetters(unittest.TestCase):
+class TestRegisterContainerSetters(AdaptorTestCase):
     def test_setInlineAsm(self):
         rc = RegisterContainer("v", None, 0, 1)
         rc.setInlineAsm(True)
@@ -279,7 +281,7 @@ class TestRegisterContainerSetters(unittest.TestCase):
 # ===========================================================================
 
 
-class TestReplaceRegName(unittest.TestCase):
+class TestReplaceRegName(AdaptorTestCase):
     def test_no_regName_is_noop(self):
         rc = RegisterContainer("v", None, 5, 1)
         rc.replaceRegName("X", 9)
@@ -330,7 +332,7 @@ class TestReplaceRegName(unittest.TestCase):
 # ===========================================================================
 
 
-class TestRegNameAccessors(unittest.TestCase):
+class TestRegNameAccessors(AdaptorTestCase):
     def test_getRegNameWithType(self):
         rc = RegisterContainer("v", RegName("ValuA", [3]), 0, 1)
         # Bare ``name``, no offsets baked in.
@@ -346,7 +348,7 @@ class TestRegNameAccessors(unittest.TestCase):
         self.assertEqual(rc.getCompleteRegName(), "ValuA+3")
 
 
-class TestSplitRegContainer(unittest.TestCase):
+class TestSplitRegContainer(AdaptorTestCase):
     def test_unnamed_even_split(self):
         rc = RegisterContainer("v", None, 4, 2)
         r1, r2 = rc.splitRegContainer()
@@ -390,7 +392,7 @@ class TestSplitRegContainer(unittest.TestCase):
         self.assertTrue(r1.isMacro and r2.isMacro)
 
 
-class TestSetMsb(unittest.TestCase):
+class TestSetMsb(AdaptorTestCase):
     def setUp(self):
         rocIsa.getInstance()._vgpr_idx.clear()
 
@@ -419,7 +421,7 @@ class TestSetMsb(unittest.TestCase):
 # ===========================================================================
 
 
-class TestRegisterContainerEquality(unittest.TestCase):
+class TestRegisterContainerEquality(AdaptorTestCase):
     def test_eq_same_fields(self):
         a = RegisterContainer("v", RegName("X"), 5, 2)
         b = RegisterContainer("v", RegName("X"), 5, 2)
@@ -474,7 +476,7 @@ class TestRegisterContainerEquality(unittest.TestCase):
 # ===========================================================================
 
 
-class TestAliasing(unittest.TestCase):
+class TestAliasing(AdaptorTestCase):
     def test_sameRegBaseAddr_both_named_same(self):
         a = RegisterContainer("v", RegName("X"), 0, 1)
         b = RegisterContainer("v", RegName("X", [3]), 0, 1)
@@ -530,7 +532,7 @@ class TestAliasing(unittest.TestCase):
 # ===========================================================================
 
 
-class TestToString(unittest.TestCase):
+class TestToString(AdaptorTestCase):
     """The KernelWriter pipes ``str(rc)`` directly into the emitted asm.
 
     Byte-for-byte parity is a hard requirement -- any drift will break a
@@ -620,7 +622,7 @@ class TestToString(unittest.TestCase):
 # ===========================================================================
 
 
-class TestRegisterContainerCopy(unittest.TestCase):
+class TestRegisterContainerCopy(AdaptorTestCase):
     def test_deepcopy_independent_regName(self):
         rc = RegisterContainer("v", RegName("X", [1, 2]), 0, 1)
         clone = copy.deepcopy(rc)
@@ -677,7 +679,7 @@ except ImportError:
 
 
 @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built in this env")
-class TestToStinky(unittest.TestCase):
+class TestToStinky(AdaptorTestCase):
     """``to_stinky`` builds a fresh stinky.Register from the wrapper state.
 
     Symbolic name carries the ``<regType>gpr`` prefix; physical idx is
@@ -789,7 +791,7 @@ class TestToStinky(unittest.TestCase):
 # KernelWriterAssembly / Components).
 
 
-class TestKernelWriterScenarios(unittest.TestCase):
+class TestKernelWriterScenarios(AdaptorTestCase):
     def test_vgpr_factory_pattern(self):
         # Real factory: vgpr("ValuA", 1) -> str-form RegisterContainer.
         rc = vgpr("ValuA", 1)
@@ -844,7 +846,7 @@ class TestKernelWriterScenarios(unittest.TestCase):
 # ===========================================================================
 
 
-class TestHolderConstruction(unittest.TestCase):
+class TestHolderConstruction(AdaptorTestCase):
     def test_int_ctor(self):
         # ``Holder(int idx)`` sets ``name = None``.
         h = Holder(5)
@@ -906,7 +908,7 @@ class TestHolderConstruction(unittest.TestCase):
             Holder(1, 2)
 
 
-class TestHolderSemantics(unittest.TestCase):
+class TestHolderSemantics(AdaptorTestCase):
     def test_idx_mutable(self):
         # idx is a writable field.
         h = Holder(3)
@@ -980,7 +982,7 @@ class TestHolderSemantics(unittest.TestCase):
 # Subclass of RegisterContainer; resolution happens lazily via setRegNum().
 
 
-class TestHolderContainerConstruction(unittest.TestCase):
+class TestHolderContainerConstruction(AdaptorTestCase):
     def test_string_ctor_named(self):
         # String ctor: type=1, holderName=str, parent regName =
         # RegName(holderName) with offsets=[].
@@ -1038,7 +1040,7 @@ class TestHolderContainerConstruction(unittest.TestCase):
         self.assertIsInstance(hc, HolderContainer)
 
 
-class TestHolderContainerSetRegNum(unittest.TestCase):
+class TestHolderContainerSetRegNum(AdaptorTestCase):
     def test_numeric_resolution(self):
         # type 0 sets ``regIdx = holderIdx + num``; holderIdx is
         # preserved so setRegNum is idempotent on rerun.
@@ -1085,7 +1087,7 @@ class TestHolderContainerSetRegNum(unittest.TestCase):
         self.assertEqual(hc.regName.offsets, [2, 1])
 
 
-class TestHolderContainerGetCopiedRC(unittest.TestCase):
+class TestHolderContainerGetCopiedRC(AdaptorTestCase):
     def test_numeric_snapshot(self):
         # type 0 -> RC(regType, None, regIdx, regNum).
         hc = HolderContainer("v", 4, 2)
@@ -1128,7 +1130,7 @@ class TestHolderContainerGetCopiedRC(unittest.TestCase):
         self.assertEqual(str(rc), "v[vgprValuC+5:vgprValuC+5+1]")
 
 
-class TestHolderContainerSplit(unittest.TestCase):
+class TestHolderContainerSplit(AdaptorTestCase):
     def test_split_numeric(self):
         # Numeric branch: r2.holderIdx bumps by 1; both halves stay as
         # HolderContainer.
@@ -1165,7 +1167,7 @@ class TestHolderContainerSplit(unittest.TestCase):
         self.assertEqual(hc.regName.offsets, [])
 
 
-class TestHolderContainerCopy(unittest.TestCase):
+class TestHolderContainerCopy(AdaptorTestCase):
     def test_shallow_copy_independent(self):
         hc = HolderContainer("v", "ValuC", 2)
         hc.setRegNum(5)
@@ -1189,7 +1191,7 @@ class TestHolderContainerCopy(unittest.TestCase):
         self.assertIsInstance(copy.deepcopy(hc), HolderContainer)
 
 
-class TestHolderContainerPickle(unittest.TestCase):
+class TestHolderContainerPickle(AdaptorTestCase):
     def test_pickle_roundtrip_named(self):
         hc = HolderContainer("v", "ValuC", 2)
         hc.setRegNum(5)
@@ -1247,7 +1249,7 @@ class _MockSWaitCnt:
 _MockSWaitCnt.__name__ = "SWaitCnt"
 
 
-class TestReplaceHolderLeaf(unittest.TestCase):
+class TestReplaceHolderLeaf(AdaptorTestCase):
     def test_scalar_passthrough(self):
         # Unknown types are returned unchanged.
         self.assertEqual(replaceHolder(42, 5), 42)
@@ -1263,7 +1265,7 @@ class TestReplaceHolderLeaf(unittest.TestCase):
         self.assertEqual(hc.regIdx, 4)
 
 
-class TestReplaceHolderInstruction(unittest.TestCase):
+class TestReplaceHolderInstruction(AdaptorTestCase):
     def test_resolves_numeric_holder_in_params(self):
         # Instruction branch: walks getParams() and swaps each
         # HolderContainer for its resolved snapshot.
@@ -1306,7 +1308,7 @@ class TestReplaceHolderInstruction(unittest.TestCase):
         self.assertEqual(rc.regIdx, 5)
 
 
-class TestReplaceHolderModule(unittest.TestCase):
+class TestReplaceHolderModule(AdaptorTestCase):
     def test_recurses_into_module_items(self):
         # Module branch recurses into each child.
         hc = HolderContainer("v", 4, 1)
@@ -1338,7 +1340,7 @@ class TestReplaceHolderModule(unittest.TestCase):
         self.assertEqual(i2.getParams()[0].regIdx, 102)
 
 
-class TestReplaceHolderSWaitCnt(unittest.TestCase):
+class TestReplaceHolderSWaitCnt(AdaptorTestCase):
     def test_raises(self):
         # SWaitCnt branch raises explicitly (intentional gap).
         with self.assertRaises(RuntimeError):
@@ -1355,7 +1357,7 @@ class TestReplaceHolderSWaitCnt(unittest.TestCase):
 # acceptance matching the C++ signatures.
 
 
-class TestVgprFactory(unittest.TestCase):
+class TestVgprFactory(AdaptorTestCase):
     def test_int_arg_makes_numeric_register(self):
         rc = vgpr(5)
         self.assertIsInstance(rc, RegisterContainer)
@@ -1424,7 +1426,7 @@ class TestVgprFactory(unittest.TestCase):
         self.assertEqual(rc.regNum, 2)
 
 
-class TestSgprFactory(unittest.TestCase):
+class TestSgprFactory(AdaptorTestCase):
     def test_int_arg(self):
         rc = sgpr(2)
         self.assertEqual(rc.regType, "s")
@@ -1464,7 +1466,7 @@ class TestSgprFactory(unittest.TestCase):
         self.assertEqual(hc.holderIdx, 4)
 
 
-class TestAccvgprFactory(unittest.TestCase):
+class TestAccvgprFactory(AdaptorTestCase):
     def test_int_arg(self):
         rc = accvgpr(7)
         self.assertEqual(rc.regType, "acc")
@@ -1486,7 +1488,7 @@ class TestAccvgprFactory(unittest.TestCase):
             accvgpr("Acc", 1, isMacro=True)
 
 
-class TestMgprFactory(unittest.TestCase):
+class TestMgprFactory(AdaptorTestCase):
     def test_int_arg(self):
         rc = mgpr(0)
         self.assertEqual(rc.regType, "m")
@@ -1509,7 +1511,7 @@ class TestMgprFactory(unittest.TestCase):
             mgpr("Mdesc", 1, isMacro=True)
 
 
-class TestFactoryEquivalentToDirectConstruction(unittest.TestCase):
+class TestFactoryEquivalentToDirectConstruction(AdaptorTestCase):
     """Factories must produce containers indistinguishable from
     ``RegisterContainer(...)`` / ``HolderContainer(...)`` direct calls."""
 
@@ -1539,7 +1541,7 @@ class TestFactoryEquivalentToDirectConstruction(unittest.TestCase):
 # C++ binding either.
 
 
-class TestContinuousRegisterConstruction(unittest.TestCase):
+class TestContinuousRegisterConstruction(AdaptorTestCase):
     def test_positional_ctor(self):
         cr = ContinuousRegister(4, 2)
         self.assertEqual(cr.idx, 4)
@@ -1573,7 +1575,7 @@ class TestContinuousRegisterConstruction(unittest.TestCase):
             ContinuousRegister("a", 2)
 
 
-class TestContinuousRegisterReadOnly(unittest.TestCase):
+class TestContinuousRegisterReadOnly(AdaptorTestCase):
     def test_idx_is_read_only(self):
         cr = ContinuousRegister(4, 2)
         with self.assertRaises(AttributeError):
@@ -1590,7 +1592,7 @@ class TestContinuousRegisterReadOnly(unittest.TestCase):
             cr.something = 1  # type: ignore[attr-defined]
 
 
-class TestContinuousRegisterRepr(unittest.TestCase):
+class TestContinuousRegisterRepr(AdaptorTestCase):
     def test_repr_contains_fields(self):
         cr = ContinuousRegister(4, 2)
         r = repr(cr)
@@ -1599,7 +1601,7 @@ class TestContinuousRegisterRepr(unittest.TestCase):
         self.assertIn("ContinuousRegister", r)
 
 
-class TestContinuousRegisterCopyPickle(unittest.TestCase):
+class TestContinuousRegisterCopyPickle(AdaptorTestCase):
     def test_copy_returns_equal_state(self):
         cr = ContinuousRegister(4, 2)
         c = copy.copy(cr)
@@ -1625,7 +1627,7 @@ class TestContinuousRegisterCopyPickle(unittest.TestCase):
             c.idx = 0  # type: ignore[misc]
 
 
-class TestContinuousRegisterNoEqualityOrHash(unittest.TestCase):
+class TestContinuousRegisterNoEqualityOrHash(AdaptorTestCase):
     """Mirror rocisa C++: ContinuousRegister has no eq/hash binding."""
 
     def test_eq_is_identity(self):
@@ -1647,7 +1649,7 @@ class TestContinuousRegisterNoEqualityOrHash(unittest.TestCase):
 # ===========================================================================
 
 
-class _WavefrontTestCase(unittest.TestCase):
+class _WavefrontTestCase(AdaptorTestCase):
     """Pin ``rocIsa`` kernel wavefront for EXEC/VCC ``toString`` branches."""
 
     def setUp(self):
@@ -1662,7 +1664,7 @@ class _WavefrontTestCase(unittest.TestCase):
             rocIsa.getInstance()._kernel_info = info
 
 
-class TestContainerABC(unittest.TestCase):
+class TestContainerABC(AdaptorTestCase):
     def test_not_instantiable(self):
         with self.assertRaises(TypeError):
             Container()
@@ -1702,7 +1704,7 @@ class TestHWRegContainer(_WavefrontTestCase):
         self.assertEqual(str(pickle.loads(pickle.dumps(h))), str(h))
 
 
-class TestEXECLOEXECHI(unittest.TestCase):
+class TestEXECLOEXECHI(AdaptorTestCase):
     def test_exec_lo_hi_tokens(self):
         self.assertEqual(str(EXECLO()), "exec_lo")
         self.assertEqual(str(EXECHI()), "exec_hi")
@@ -1748,7 +1750,7 @@ class TestVCCWavefront(_WavefrontTestCase):
 # ===========================================================================
 
 
-class _Gfx1250CapsTestCase(unittest.TestCase):
+class _Gfx1250CapsTestCase(AdaptorTestCase):
     """Exercise modifier ``toString`` under gfx1250 caps from ``getHardwareCaps``."""
 
     def setUp(self):
@@ -1896,7 +1898,7 @@ class TestGlcSlcBitNames(_Gfx1250CapsTestCase):
         self.assertEqual(slc_bit_name_from_caps(caps), "slc")
 
 
-class TestMemTokenData(unittest.TestCase):
+class TestMemTokenData(AdaptorTestCase):
     def test_empty_tokens(self):
         self.assertEqual(str(MemTokenData()), "mem_token:")
         self.assertEqual(MemTokenData().toString(), "mem_token:")
