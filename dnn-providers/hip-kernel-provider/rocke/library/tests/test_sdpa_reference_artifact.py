@@ -106,3 +106,22 @@ def test_unpacked_payload_is_checked_against_the_lock(tmp_path):
     with pytest.raises(ValueError, match="payload"):
         unpack(archive, tmp_path / "output", lock)
     assert not (tmp_path / "output").exists()
+
+
+@pytest.mark.parametrize("suffix", [".npz", ".npy"])
+@pytest.mark.parametrize("location", ["payload", "."])
+def test_generated_bundle_cannot_reintroduce_tensor_files(tmp_path, suffix, location):
+    bundle, lock = _bundle(tmp_path)
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    manifest["schema"] = 2
+    name = "inputs" + suffix
+    (bundle / location / name).write_bytes(b"tensor")
+    if location == "payload":
+        manifest["files"][name] = hashlib.sha256(b"tensor").hexdigest()
+    encoded = json.dumps(manifest).encode()
+    (bundle / "manifest.json").write_bytes(encoded)
+    expected = json.loads(lock.read_text())
+    expected.update(schema=2, manifest_sha256=hashlib.sha256(encoded).hexdigest())
+    lock.write_text(json.dumps(expected))
+    with pytest.raises(ValueError, match="must not contain tensor files"):
+        pack(bundle, tmp_path / "bad.tar.gz", lock)

@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 from sdpa_reference.cli import load_bundle, verify_case
-from sdpa_reference.contract import decode, encode
+from sdpa_reference.contract import checked_inputs, decode, encode
 from sdpa_reference.architectures import ARCHITECTURES, get_architecture
 from sdpa_reference.session import reuse_workers
 
@@ -110,6 +110,8 @@ def test_sdpa_rejects_missing_gpu_launch(reference_bundle, monkeypatch, tmp_path
     case = target.CASES[0]
     entry = manifest["cases"][case.id]
     case_dir = bundle / "payload/cases" / case.id
+    input_file = tmp_path / "inputs.npz"
+    np.savez(input_file, **checked_inputs(case, entry["input_digests"]))
     monkeypatch.setattr(
         KernelLauncher, "__call__", lambda *args, **kwargs: SimpleNamespace(launches=0)
     )
@@ -120,7 +122,7 @@ def test_sdpa_rejects_missing_gpu_launch(reference_bundle, monkeypatch, tmp_path
                 "architecture": target.NAME,
                 "platform_root": str(Path(rocke.__file__).resolve().parent.parent),
                 "case": asdict(case),
-                "inputs": str(case_dir / "inputs.npz"),
+                "inputs": str(input_file),
                 "input_digests": entry["input_digests"],
                 "kernel": entry["kernel"],
                 "hsaco": str(case_dir / "kernel.hsaco"),

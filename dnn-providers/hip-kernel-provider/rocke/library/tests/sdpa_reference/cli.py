@@ -29,6 +29,8 @@ from .architectures import ARCHITECTURES, baseline_lock, get_architecture
 
 from .contract import (
     SCHEMA_VERSION,
+    INPUT_GENERATOR,
+    checked_inputs,
     Case,
     ErrorBudget,
     array_digest,
@@ -172,15 +174,16 @@ def qualify(
         case_dir = payload / "cases" / case.id
         case_dir.mkdir(parents=True)
         inputs = make_inputs(case)
-        np.savez(case_dir / "inputs.npz", **inputs)
         input_digests = {name: array_digest(array) for name, array in inputs.items()}
         with tempfile.TemporaryDirectory(prefix="rocke-sdpa-qualify-") as temporary:
+            input_file = Path(temporary) / "inputs.npz"
+            np.savez(input_file, **inputs)
             outputs, report = _worker(
                 {
                     "mode": "source",
                     "architecture": architecture,
                     "case": asdict(case),
-                    "inputs": str(case_dir / "inputs.npz"),
+                    "inputs": str(input_file),
                     "input_digests": input_digests,
                     "export": str(case_dir / "kernel.hsaco"),
                     "repetitions": repetitions,
@@ -216,6 +219,7 @@ def qualify(
         )
     manifest = {
         "schema": SCHEMA_VERSION,
+        "input_generation": INPUT_GENERATOR,
         "baseline_revision": metadata["revision"],
         "baseline_snapshot_sha256": file_digest(baseline / "snapshot.json"),
         "reference": {
@@ -224,7 +228,7 @@ def qualify(
             "python_version": sys.version.split()[0],
             "contract_sha256": file_digest(_PACKAGE / "contract.py"),
             "metric": "max-absolute-error",
-            "input_generator": "numpy-PCG64-seed-0-f32-normal; stored quantized bits",
+            "input_generator": "numpy-PCG64-seed-0-f32-normal; regenerated and digest-checked quantized bits",
         },
         "cases": entries,
         "files": payload_digests(payload),
@@ -245,7 +249,7 @@ def load_bundle(
     bundle: Path, lock_path: Path | None = None, *, architecture: str = "gfx942"
 ) -> dict:
     """Require the independently pinned manifest, payload, and exact case cohort."""
-    target = get_architecture(architecture)
+    get_architecture(architecture)
     lock = json.loads((lock_path or baseline_lock(architecture)).read_text())
     if lock["schema"] != SCHEMA_VERSION:
         raise ValueError("unsupported SDPA lock schema")
@@ -259,6 +263,17 @@ def load_bundle(
         raise ValueError("SDPA baseline identity mismatch")
     if payload_digests(bundle / "payload") != manifest["files"]:
         raise ValueError("SDPA bundle payload has missing, modified, or extra files")
+    if manifest.get("input_generation") != INPUT_GENERATOR:
+        raise ValueError("unsupported SDPA input generator contract")
+    if any(p.is_file() and p.suffix in (".npz", ".npy") for p in bundle.rglob("*")):
+        raise ValueError("generated-input SDPA bundles must not contain tensor files")
+    _validate_cases(manifest, architecture)
+    return manifest
+
+
+def _validate_cases(manifest: dict, architecture: str) -> None:
+    """Preserve the cohort and budgets across qualification and storage migration."""
+    target = get_architecture(architecture)
     if set(manifest["cases"]) != {case.id for case in target.CASES}:
         raise ValueError("SDPA bundle does not cover the complete enrolled cohort")
     for case in target.CASES:
@@ -274,7 +289,6 @@ def load_bundle(
             or entry["comparison_limit"] != budget.comparison_limit
         ):
             raise ValueError(f"SDPA tolerance or budget changed: {case.id}")
-    return manifest
 
 
 def _current_paths(current_root: Path | None) -> tuple[Path, Path]:
@@ -309,12 +323,14 @@ def verify_case(
     base = {
         "architecture": architecture,
         "case": asdict(case),
-        "inputs": str(case_dir / "inputs.npz"),
         "input_digests": entry["input_digests"],
         "repetitions": repetitions,
     }
     with tempfile.TemporaryDirectory(prefix="rocke-sdpa-verify-") as temporary:
         temporary = Path(temporary)
+        input_file = temporary / "inputs.npz"
+        np.savez(input_file, **checked_inputs(case, entry["input_digests"]))
+        base["inputs"] = str(input_file)
         old, old_report = _worker(
             dict(
                 base,
@@ -381,6 +397,14 @@ def main() -> None:
     qualification.add_argument("--baseline", required=True, type=Path)
     qualification.add_argument("--output", required=True, type=Path)
     qualification.add_argument("--repetitions", type=int, default=3)
+    migration = commands.add_parser(
+        "remove-stored-inputs",
+        help="migrate a locked v1 bundle without changing its kernels or corpus",
+    )
+    migration.add_argument("--arch", choices=ARCHITECTURES, default="gfx942")
+    migration.add_argument("--bundle", required=True, type=Path)
+    migration.add_argument("--lock", required=True, type=Path)
+    migration.add_argument("--output", required=True, type=Path)
     verification = commands.add_parser(
         "verify", help="run every required GPU comparison"
     )
@@ -395,6 +419,12 @@ def main() -> None:
     elif args.command == "qualify":
         qualify(
             args.baseline.resolve(), args.output.resolve(), args.repetitions, args.arch
+        )
+    elif args.command == "remove-stored-inputs":
+        from .migration import remove_stored_inputs
+
+        remove_stored_inputs(
+            args.bundle.resolve(), args.lock.resolve(), args.output.resolve(), args.arch
         )
     else:
         bundle = args.bundle.resolve()

@@ -34,6 +34,10 @@ def validate_bundle(bundle: Path, lock: Path) -> None:
         or manifest["baseline_revision"] != expected["baseline_revision"]
     ):
         raise ValueError("SDPA baseline identity mismatch")
+    if manifest["schema"] == 2 and any(
+        p.is_file() and p.suffix in (".npz", ".npy") for p in bundle.rglob("*")
+    ):
+        raise ValueError("generated-input SDPA bundles must not contain tensor files")
     payload = bundle / "payload"
     files = {
         p.relative_to(payload).as_posix(): _digest(p)

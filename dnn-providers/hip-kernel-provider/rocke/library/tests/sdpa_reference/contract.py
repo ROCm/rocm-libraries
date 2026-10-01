@@ -21,7 +21,13 @@ from pathlib import Path
 
 import numpy as np
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+INPUT_GENERATOR = {
+    "algorithm": "numpy-pcg64-normal-f32-v1",
+    "seed": 0,
+    "tensor_order": ["q", "k", "v"],
+    "quantization": "fp16-rne-or-bf16-rne",
+}
 
 
 @dataclass(frozen=True)
@@ -89,13 +95,29 @@ def decode(values: np.ndarray, dtype: str) -> np.ndarray:
 
 
 def make_inputs(case: Case) -> dict[str, np.ndarray]:
-    """Create a portable qualification corpus; the bundle stores the exact bits."""
+    """Regenerate the versioned corpus in Q/K/V order using a fresh PCG64 stream.
+
+    Keep this algorithm fixed. NumPy distribution implementation drift is
+    detected by the qualified per-tensor digests before GPU execution; a seed
+    alone is not treated as a cross-version reproducibility guarantee.
+    """
     rng = np.random.Generator(np.random.PCG64(0))
     kv_shape = (*case.shape[:2], case.kv_heads, case.head_dim)
     return {
         name: encode(rng.standard_normal(shape, dtype=np.float32), case.dtype)
         for name, shape in (("q", case.shape), ("k", kv_shape), ("v", kv_shape))
     }
+
+
+def checked_inputs(case: Case, digests: dict[str, str]) -> dict[str, np.ndarray]:
+    """Require generated input bytes to match the independently qualified corpus."""
+    arrays = make_inputs(case)
+    if {name: array_digest(array) for name, array in arrays.items()} != digests:
+        raise ValueError(
+            f"generated SDPA input digest mismatch: {case.id}; "
+            "the generator or NumPy implementation differs from qualification"
+        )
+    return arrays
 
 
 def independent_reference(case: Case, inputs: dict[str, np.ndarray]) -> np.ndarray:

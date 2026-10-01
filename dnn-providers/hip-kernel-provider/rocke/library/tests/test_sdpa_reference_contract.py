@@ -19,6 +19,10 @@ from sdpa_reference.architectures import ARCHITECTURES, baseline_lock, get_archi
 from sdpa_reference.architectures.gfx942 import CASES
 from sdpa_reference.cli import load_bundle, verify_case
 from sdpa_reference.contract import (
+    INPUT_GENERATOR,
+    SCHEMA_VERSION,
+    checked_inputs,
+    make_inputs,
     Case,
     ErrorBudget,
     array_digest,
@@ -135,9 +139,10 @@ def _bundle(tmp_path):
     payload.mkdir()
     (payload / "fixture").write_bytes(b"artifact fixture")
     manifest = {
-        "schema": 1,
+        "schema": SCHEMA_VERSION,
         "baseline_revision": "a" * 40,
         "files": payload_digests(payload),
+        "input_generation": INPUT_GENERATOR,
         "cases": {
             case.id: {
                 "case": asdict(case),
@@ -162,7 +167,7 @@ def _lock(tmp_path, manifest):
     write_json(
         tmp_path / "lock.json",
         {
-            "schema": 1,
+            "schema": manifest["schema"],
             "baseline_revision": "a" * 40,
             "manifest_sha256": file_digest(tmp_path / "manifest.json"),
         },
@@ -203,6 +208,9 @@ def test_unknown_old_output_cannot_inherit_a_qualified_bound(tmp_path, monkeypat
     from sdpa_reference import cli
 
     manifest = _bundle(tmp_path)
+    manifest["cases"][CASES[0].id]["input_digests"] = {
+        name: array_digest(a) for name, a in make_inputs(CASES[0]).items()
+    }
     calls = []
 
     def worker(request, **kwargs):
@@ -346,3 +354,173 @@ def test_bundle_cannot_be_used_for_a_different_architecture(tmp_path):
     _lock(tmp_path, manifest)
     with pytest.raises(ValueError, match="different architecture"):
         load_bundle(tmp_path, tmp_path / "lock.json", architecture="gfx942")
+
+
+def test_generated_input_mismatch_prevents_any_worker(tmp_path, monkeypatch):
+    from sdpa_reference import cli
+
+    manifest = _bundle(tmp_path)
+    calls = []
+    monkeypatch.setattr(cli, "_worker", lambda *args, **kwargs: calls.append(args))
+    with pytest.raises(ValueError, match="generated SDPA input digest mismatch"):
+        verify_case(CASES[0], bundle=tmp_path, manifest=manifest)
+    assert not calls
+
+
+def test_changed_generator_contract_is_rejected(tmp_path):
+    manifest = _bundle(tmp_path)
+    manifest["input_generation"] = dict(INPUT_GENERATOR, seed=1)
+    _lock(tmp_path, manifest)
+    with pytest.raises(ValueError, match="generator contract"):
+        load_bundle(tmp_path, tmp_path / "lock.json")
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_generated_inputs_are_temporary_and_shared_by_both_workers(
+    tmp_path, monkeypatch, fail
+):
+    from sdpa_reference import cli
+
+    manifest = _bundle(tmp_path)
+    case = CASES[0]
+    entry = manifest["cases"][case.id]
+    expected = make_inputs(case)
+    entry["input_digests"] = {name: array_digest(a) for name, a in expected.items()}
+    out = np.zeros(case.shape, dtype="<f2")
+    entry["output_digest"] = array_digest(out)
+    paths = []
+
+    def worker(request, **kwargs):
+        path = Path(request["inputs"])
+        assert not path.is_relative_to(tmp_path)
+        with np.load(path, allow_pickle=False) as stored:
+            assert {name: array_digest(stored[name]) for name in stored.files} == entry[
+                "input_digests"
+            ]
+        paths.append(path)
+        if fail:
+            raise RuntimeError("deliberate worker failure")
+        return [out], {
+            "device_target": entry["device_target"],
+            "launches": 1,
+            "torch_imported": False,
+        }
+
+    monkeypatch.setattr(cli, "_worker", worker)
+    if fail:
+        with pytest.raises(RuntimeError, match="deliberate worker failure"):
+            verify_case(
+                case,
+                bundle=tmp_path,
+                manifest=manifest,
+                current_root=tmp_path,
+                repetitions=1,
+            )
+        assert len(paths) == 1
+    else:
+        verify_case(
+            case,
+            bundle=tmp_path,
+            manifest=manifest,
+            current_root=tmp_path,
+            repetitions=1,
+        )
+        assert len(paths) == 2 and paths[0] == paths[1]
+    assert not paths[0].exists()
+    assert not list(tmp_path.rglob("*.npz"))
+
+
+@pytest.mark.parametrize("change", [None, "generated", "stored", "payload"])
+def test_storage_migration_preserves_evidence_and_rejects_changed_inputs(
+    tmp_path, monkeypatch, change
+):
+    from types import SimpleNamespace
+    from sdpa_reference import cli, migration
+
+    case = Case("fp16", 2, 4, 2, False, True, sequence_length=8)
+    target = SimpleNamespace(CASES=(case,))
+    monkeypatch.setattr(cli, "get_architecture", lambda arch: target)
+    monkeypatch.setattr(migration, "get_architecture", lambda arch: target)
+    bundle = tmp_path / "original"
+    directory = bundle / "payload/cases" / case.id
+    directory.mkdir(parents=True)
+    inputs = make_inputs(case)
+    digests = {name: array_digest(a) for name, a in inputs.items()}
+    if change == "stored":
+        inputs["q"].flat[0] += 1
+    np.savez(directory / "inputs.npz", **inputs)
+    (directory / "kernel.hsaco").write_bytes(b"unchanged kernel")
+    budget = ErrorBudget(case.tolerance, 0.001, case.margin)
+    entry = {
+        "case": asdict(case),
+        "input_digests": digests,
+        "device_target": "gfx942:sramecc+:xnack-",
+        "budget": asdict(budget),
+        "comparison_limit": budget.comparison_limit,
+        "output_digest": "unchanged output",
+        "reference_digest": "unchanged reference",
+        "compiler": {"llvm_flavor": "unchanged"},
+    }
+    manifest = {
+        "schema": 1,
+        "baseline_revision": "a" * 40,
+        "cases": {case.id: entry},
+        "files": payload_digests(bundle / "payload"),
+    }
+    _lock(bundle, manifest)
+    if change == "generated":
+        monkeypatch.setattr(
+            migration,
+            "checked_inputs",
+            lambda *args: {name: a + 1 for name, a in inputs.items()},
+        )
+    if change == "payload":
+        (directory / "inputs.npz").write_bytes(b"corrupt")
+    output = tmp_path / "migrated"
+    if change is not None:
+        with pytest.raises(
+            ValueError, match="digest mismatch|differs from generator|payload"
+        ):
+            migration.remove_stored_inputs(bundle, bundle / "lock.json", output)
+        assert not output.exists()
+        return
+    migration.remove_stored_inputs(bundle, bundle / "lock.json", output)
+    loaded = load_bundle(output, output / "qualification-lock.json")
+    assert loaded["cases"] == manifest["cases"]
+    assert loaded["storage_migration"]["source_manifest_sha256"] == file_digest(
+        bundle / "manifest.json"
+    )
+    assert (
+        output / "payload/cases" / case.id / "kernel.hsaco"
+    ).read_bytes() == b"unchanged kernel"
+    assert not list(output.rglob("*.npz"))
+    assert (directory / "inputs.npz").is_file()
+
+
+@pytest.mark.parametrize(
+    "dtype,digests",
+    [
+        (
+            "fp16",
+            {
+                "q": "4e6b5317919934be8a9be759a993227d32ce61bb6d8e6bc2143a4c43cc3f92b3",
+                "k": "6e43cc840eecfb9a676cfb287995f12a987029818926cceac0f314fe69da0a98",
+                "v": "b1ed43c87a483c5c64a275477883780b51f37640483068c89b929ed1bf7e2e04",
+            },
+        ),
+        (
+            "bf16",
+            {
+                "q": "21af38eaafd51c77969f1545295ba274c684991ec11f7105ae54166848480ba3",
+                "k": "55c94dfb4faaa66e9678982ad9c2436cf77d2d302e2675632820d30db047ac29",
+                "v": "9067bc6081e97cecee433c3369d2a52a3996fb1ab3a36a6dbc5083f76284d3fb",
+            },
+        ),
+    ],
+)
+def test_versioned_generator_preserves_stream_order_and_quantized_bits(dtype, digests):
+    case = Case(dtype, 2, 4, 2, False, True, sequence_length=2)
+    checked_inputs(case, digests)
+    # Other generator instances must not change the freshly seeded corpus.
+    np.random.default_rng(123).standard_normal(99)
+    checked_inputs(case, digests)

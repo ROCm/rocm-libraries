@@ -167,6 +167,47 @@ the strategy's biggest holes live (see
   ([§4.2](#42-does-the-platforms-output-stay-stable)) are both blind to a
   wrong-but-stable, wrong-but-agreeing kernel.
 
+### Reference input storage
+
+Schema-2 reference bundles contain compiled kernels, the frozen replay runtime,
+and qualification metadata, but no input or output tensor files. Tests regenerate
+Q, K, and V using the versioned `numpy-pcg64-normal-f32-v1` recipe: a fresh
+PCG64 stream seeded with zero, float32 normal samples in Q/K/V order, followed
+by the existing fp16 or round-to-nearest-even bf16 encoding. Each tensor's shape,
+dtype, and values must match its qualified digest before either GPU worker runs.
+A NumPy distribution implementation change that alters those bytes fails the test;
+a seed alone is not considered sufficient evidence of reproducibility.
+
+Generated inputs are passed to both isolated workers through a temporary `.npz`
+file, which is removed after the comparison, including on worker failure. This
+keeps the frozen baseline worker unchanged. Outputs remain temporary as before.
+Neither input nor output tensors are included in the DVC archive or installed
+reference bundle. Archive validation rejects `.npz` and `.npy` payloads for schema 2.
+
+The original schema-1 gfx942 bundle was migrated without changing its corpus or
+kernels. The migration checked every generated tensor against both the recorded
+digest and the stored tensor's dtype, shape, and bytes. All retained payload
+hashes, case records, output/reference digests, compiler provenance, and error
+budgets were preserved. `storage_migration` records the original manifest hash,
+comparison method, and NumPy version; `reference` retains the original
+qualification provenance. Only the storage schema and manifest lock changed.
+
+For another schema-1 bundle, use its trusted version-controlled lock to unpack
+it, then run this offline maintenance command from the rocKE root:
+
+```bash
+python library/tests/run_sdpa_reference.py remove-stored-inputs \
+  --arch gfx942 --bundle <original-bundle> --lock <schema-1-lock> \
+  --output <new-bundle>
+```
+
+The command refuses to migrate inputs that do not reproduce exactly. In that
+case, qualify a new corpus against the independent NumPy reference; do not
+carry forward old error budgets for different input bytes. After a successful
+migration, run verification on the target GPU with the new qualification lock,
+pack the bundle, and update the architecture's committed lock and DVC pointer.
+Upload the new archive with a scoped `dvc push` before pushing those Git changes.
+
 ### 3.2 Are the kernels fast?
 
 Performance is **non-functional** — it answers *"is it fast enough?"*, not *"is it
