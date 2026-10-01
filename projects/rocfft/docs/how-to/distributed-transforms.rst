@@ -35,10 +35,12 @@ fields.
 
    When the library is also built with ``ROCFFT_MPI_ENABLE=ON``, RCCL
    is used for the multi-process transpose as well, provided every MPI
-   rank in the plan communicator owns exactly one GPU. Otherwise rocFFT
-   falls back to MPI for that transpose. Set ``ROCFFT_RCCL_DISABLE=1``
-   to force the MPI path. MPI is still used to exchange brick metadata
-   and to bootstrap the RCCL communicator.
+   rank's bricks in the plan communicator use exactly one device.
+   GPUs that are visible on a rank but unused by those bricks are
+   ignored, and a rank may hold multiple bricks on that same device.
+   Otherwise rocFFT falls back to MPI for that transpose. Set
+   ``ROCFFT_RCCL_DISABLE=1`` to force the MPI path. MPI is still used
+   to exchange brick metadata and to bootstrap the RCCL communicator.
 
 Support for single-process multi-device transforms was introduced in
 ROCm 6.0 with rocFFT 1.0.25.
@@ -57,7 +59,8 @@ Additionally, rocFFT MPI support requires a GPU-aware MPI library
 that supports transferring data to and from HIP devices.
 
 If the library is also built with ``ROCFFT_RCCL_ENABLE=ON``, multi-process
-plans may use RCCL for the transpose when every rank has one GPU.
+plans may use RCCL for the transpose when every rank's bricks use exactly
+one device.
 
 Support for MPI transforms was introduced in ROCm 6.3 with rocFFT
 1.0.29.

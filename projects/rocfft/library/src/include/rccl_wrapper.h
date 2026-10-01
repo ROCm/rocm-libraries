@@ -73,8 +73,8 @@ private:
 // Single-process create(devices) is the special case where every
 // location has comm_rank 0. Multi-process create(mpi_comm, ...)
 // initializes only the caller's local locations; NCCL rank is the
-// index in the sorted world set (with one GPU per MPI rank that
-// equals the MPI rank).
+// index in the sorted world set (one device per MPI rank, matching
+// the MPI rank when each rank's bricks use a single device).
 //
 // Thread safety: create()/reset_all() are internally synchronized. A given
 // comm is NOT safe for concurrent use (per NCCL: only one thread may

@@ -409,8 +409,9 @@ struct rocfft_plan_t
 #ifdef ROCFFT_RCCL_ENABLE
     // RCCL communicator used by GlobalTransposeRCCL.  Populated for
     // single-process multi-GPU plans, and for multi-process plans when
-    // every MPI rank has exactly one device. Empty otherwise, in which
-    // case GlobalTransposeP2P / GlobalTransposeA2A handle the transpose.
+    // every MPI rank's bricks use exactly one device. Empty otherwise,
+    // in which case GlobalTransposeP2P / GlobalTransposeA2A handle the
+    // transpose.
     rocfft_rccl_comm_t rccl;
 #endif
 

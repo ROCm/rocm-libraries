@@ -3883,8 +3883,9 @@ void rocfft_plan_t::InitRCCLCommunicator() noexcept
         if(disabled)
             return;
 
-        // phase 1: every rank must own exactly one GPU. this allgather is
-        // the collective gate so no rank enters ncclCommInitRank alone.
+        // phase 1: every rank's bricks must use exactly one device
+        // (extra unused GPUs on the rank are ignored). this allgather
+        // is the collective gate so no rank enters ncclCommInitRank alone.
         int              local_n = static_cast<int>(local_devices.size());
         std::vector<int> all_n(static_cast<size_t>(local_comm_size));
         if(MPI_Allgather(&local_n, 1, MPI_INT, all_n.data(), 1, MPI_INT, comm) != MPI_SUCCESS)
