@@ -21,11 +21,11 @@ string(REGEX REPLACE ";" " " tensilelite_python_command "${HIPBLASLT_PYTHON_COMM
 if(DEFINED DEVELOP_MODE)
     include(ProcessorCount)
     ProcessorCount(NPROC)
-    set(CMAKE_BUILD_COMMAND "cmake --build ${PROJECT_BINARY_DIR} -j ${NPROC}")
+    set(CMAKE_BUILD_COMMAND "cmake --build ${TENSILELITE_OUTER_BINARY_DIR} -j ${NPROC}")
     foreach(BIN ${VALID_BINS})
         if(WIN32)
             set(SCRIPT_NAME ${BIN}.bat)
-            file(WRITE "${PROJECT_BINARY_DIR}/${SCRIPT_NAME}"
+            file(WRITE "${TENSILELITE_OUTER_BINARY_DIR}/${SCRIPT_NAME}"
                  "@echo off\n"
                  "${CMAKE_BUILD_COMMAND}\n"
                  "${tensiltelite_python_command} ${TENSILE_BIN_ROOT}/${BIN} %*\n"
@@ -33,7 +33,7 @@ if(DEFINED DEVELOP_MODE)
             )
         else()
             set(SCRIPT_NAME ${BIN}.sh)
-            file(WRITE "${PROJECT_BINARY_DIR}/${SCRIPT_NAME}"
+            file(WRITE "${TENSILELITE_OUTER_BINARY_DIR}/${SCRIPT_NAME}"
                  "#!/bin/bash\n"
                  "echo \"DEPRECATED: ${BIN}.sh will be removed in a future release.\" >&2\n"
                  "echo \"Run directly: ${TENSILE_BIN_ROOT}/${BIN} $@\" >&2\n"
@@ -46,10 +46,10 @@ if(DEFINED DEVELOP_MODE)
                  "    ${tensilelite_python_command} ${TENSILE_BIN_ROOT}/${BIN} \"$@\"\n"
                  "fi\n"
             )
-            execute_process(COMMAND chmod +x "${PROJECT_BINARY_DIR}/${BIN}.sh")
+            execute_process(COMMAND chmod +x "${TENSILELITE_OUTER_BINARY_DIR}/${BIN}.sh")
         endif()
     endforeach()
-    message(STATUS "Script created: ${PROJECT_BINARY_DIR}/${SCRIPT_NAME}. Please run the Tensile bin command as usual under the build folder.")
+    message(STATUS "Script created: ${TENSILELITE_OUTER_BINARY_DIR}/${SCRIPT_NAME}. Please run the Tensile bin command as usual under the build folder.")
 else()
     # Check if TENSILE_BIN is set
     function(set_tensile_bin BINS)
@@ -81,7 +81,7 @@ else()
         COMMAND ${tensilelite_python_command} ${TENSILE_BIN_ROOT}/${TENSILE_BIN} ${BIN_ARGS_LIST}
         COMMENT "Running Python script ${TENSILE_BIN} ${BIN_ARGS_LIST}"
         VERBATIM
-        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+        WORKING_DIRECTORY ${TENSILELITE_OUTER_BINARY_DIR}
     )
     add_dependencies(RunPythonScript rocisa)
 endif()

@@ -361,9 +361,9 @@ block()
         # TheRock computes install RPATHs relative to this target location.
         set_property(TARGET _rocisa PROPERTY THEROCK_INSTALL_RPATH_ORIGIN
             "${_rocisa_install_dir}")
-        install(TARGETS _rocisa DESTINATION "${_rocisa_install_dir}" COMPONENT devel)
+        install(TARGETS _rocisa DESTINATION "${_rocisa_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py"
-            DESTINATION "${_rocisa_install_dir}" COMPONENT devel)
+            DESTINATION "${_rocisa_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
     endif()
 
     # Example plugin — the target only exists when stinkytofu is configured with

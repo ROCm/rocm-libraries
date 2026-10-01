@@ -269,38 +269,8 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
     endif()
 endif()
 
-if(NOT HIPBLASLT_ENABLE_YAML)
-    # See: https://github.com/msgpack/msgpack-c/wiki/Q%26A#how-to-support-both-msgpack-c-c-version-5x-and-6x-
-    # Prefer 6.x (msgpack-cxx)
-    find_package(msgpack-cxx CONFIG)
-    if(msgpack-cxx_FOUND)
-        message(STATUS "Found msgpack-cxx (>=6.x)")
-        set(hipblaslt_msgpack_target "msgpack-cxx")
-    else()
-        # TODO: set minimum version required for *-cxx library
-        find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
-        set(hipblaslt_msgpack_target "msgpackc-cxx")
-        message(STATUS "Found msgpack (<=5.x)")
-    endif()
-endif()
-
-if(ROCM_LIBS_SUPERBUILD)
-    if(NOT TARGET roc::origami)
-        message(FATAL_ERROR "The ROCm libraries superbuild must provide the roc::origami target before configuring hipBLASLt.")
-    endif()
-elseif(HIPBLASLT_ENABLE_THEROCK)
-    find_package(origami CONFIG REQUIRED)
-else()
-    block(SCOPE_FOR VARIABLES)
-        set(ORIGAMI_BUILD_SHARED_LIBS OFF)
-        set(ORIGAMI_ENABLE_FETCH ON)
-        set(ORIGAMI_BUILD_TESTING OFF)
-        set(ORIGAMI_ENABLE_PYTHON OFF)
-        set(BUILD_TESTING OFF)
-        set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
-        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" "${CMAKE_CURRENT_BINARY_DIR}/origami")
-    endblock()
-endif()
+include("${CMAKE_CURRENT_SOURCE_DIR}/tensilelite/cmake/tensilelite_dependencies.cmake")
+set(hipblaslt_msgpack_target "${tensilelite_msgpack_target}")
 
 add_library(hipblaslt-headers INTERFACE)
 add_library(hipblaslt::headers ALIAS hipblaslt-headers)
@@ -510,14 +480,6 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
 endif()
 
-if(TENSILELITE_ENABLE_HOST)
-    install(
-        FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt_codegen.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipblaslt"
-        COMPONENT devel
-    )
-endif()
-
 set(_hipblaslt_export_targets)
 set(_hipblaslt_export_depends PACKAGE hip)
 
@@ -525,44 +487,23 @@ if(HIPBLASLT_ENABLE_HOST)
     list(APPEND _hipblaslt_export_targets roc::hipblaslt)
     list(APPEND _hipblaslt_export_depends PACKAGE ${hipblas_target})
 endif()
-if(TENSILELITE_ENABLE_HOST)
-    list(APPEND _hipblaslt_export_targets roc::tensilelite-host)
-endif()
 
 if(_hipblaslt_export_targets)
     block(SCOPE_FOR VARIABLES)
         set(_hipblaslt_static_depends)
 
-        if(TARGET tensilelite-host)
-            get_target_property(_tensilelite_host_type tensilelite-host TYPE)
-        endif()
         if(TARGET hipblaslt)
             get_target_property(_hipblaslt_target_type hipblaslt TYPE)
         endif()
 
-        if(_tensilelite_host_type STREQUAL "STATIC_LIBRARY")
-            list(APPEND _hipblaslt_static_depends PACKAGE ZLIB)
-        endif()
-
-        if(HIPBLASLT_ENABLE_YAML)
-            if(_tensilelite_host_type STREQUAL "STATIC_LIBRARY")
-                list(APPEND _hipblaslt_static_depends PACKAGE LLVM)
-            endif()
-        elseif(_tensilelite_host_type STREQUAL "STATIC_LIBRARY"
-               OR _hipblaslt_target_type STREQUAL "STATIC_LIBRARY")
+        if(NOT HIPBLASLT_ENABLE_YAML
+           AND _hipblaslt_target_type STREQUAL "STATIC_LIBRARY")
             if(hipblaslt_msgpack_target STREQUAL "msgpack-cxx")
                 list(APPEND _hipblaslt_static_depends PACKAGE msgpack-cxx CONFIG)
             else()
                 list(APPEND _hipblaslt_static_depends
                     PACKAGE msgpackc-cxx CONFIG NAMES msgpackc-cxx msgpack)
             endif()
-        endif()
-
-        # rocm_export_targets emits STATIC_DEPENDS only when the canonical
-        # variable is OFF. Scope that choice to config generation so a mixed
-        # shared hipBLASLt/static TensileLite export remains discoverable.
-        if(_hipblaslt_static_depends)
-            set(BUILD_SHARED_LIBS OFF)
         endif()
 
         rocm_export_targets(
@@ -907,34 +848,37 @@ if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
     rocm_package_setup_client_component(samples)
 endif()
 
-# libtensilelite-host.so ships as its own package (tensilelite-host) instead of
-# inside hipblaslt's runtime component, so hipSPARSELt can depend on the one
-# ~6.5 MB shared library without pulling hipblaslt's ~1.6 GB of Tensile kernel
-# binaries. See AIHPBLAS-4434.
-#
 # Guard on the target TYPE rather than BUILD_SHARED_LIBS: at this scope
 # BUILD_SHARED_LIBS holds HIPBLASLT_BUILD_SHARED_LIBS, which describes
 # libhipblaslt, not tensilelite-host. The two are set independently
 # (TENSILELITE_BUILD_SHARED_LIBS vs HIPBLASLT_BUILD_SHARED_LIBS), so only the
 # target's own TYPE says whether there is a .so to package.
+set(_tensilelite_host_type "")
 if(TARGET tensilelite-host)
     get_target_property(_tensilelite_host_type tensilelite-host TYPE)
+endif()
+if(_tensilelite_host_type STREQUAL "STATIC_LIBRARY")
+    set(_tensilelite_devel_package tensilelite-host-static)
+else()
+    set(_tensilelite_devel_package tensilelite-host)
+endif()
+rocm_get_patch_version(_tensilelite_patch_version)
+set(_tensilelite_package_version "${TENSILELITE_PROJECT_VERSION}")
+if(ENABLE_ASAN_PACKAGING)
+    set(_tensilelite_runtime_package tensilelite-host-asan)
+else()
+    set(_tensilelite_runtime_package tensilelite-host)
+endif()
+if(_tensilelite_patch_version)
+    string(APPEND _tensilelite_package_version ".${_tensilelite_patch_version}")
+endif()
+if(TARGET tensilelite-host)
+    rocm_package_add_deb_dependencies(COMPONENT devel
+        DEPENDS "${_tensilelite_devel_package}-dev >= ${_tensilelite_package_version}")
+    rocm_package_add_rpm_dependencies(COMPONENT devel
+        DEPENDS "${_tensilelite_devel_package}-devel >= ${_tensilelite_package_version}")
+
     if(_tensilelite_host_type STREQUAL "SHARED_LIBRARY")
-        rocm_package_setup_component(tensilelite
-            LIBRARY_NAME tensilelite
-            PACKAGE_NAME host
-        )
-
-        # rocm-cmake's packaging defaults set CPACK_RPM_PACKAGE_AUTOREQPROV to
-        # Off for every ROCm library, so no package currently Provides or
-        # Requires a soname. Re-enable rpmbuild's ELF scanning for this one
-        # component: tensilelite-host then Provides
-        # libtensilelite-host.so.1()(64bit), derived from the binary rather
-        # than hand-written, so the capability tracks SOVERSION automatically.
-        # This is scoped to the component and does not change any other
-        # package's dependency surface.
-        set(CPACK_RPM_TENSILELITE_PACKAGE_AUTOREQPROV "ON")
-
         # CPack uses CPACK_RPM_<COMPONENT>_PACKAGE_REQUIRES *instead of* the
         # global CPACK_RPM_PACKAGE_REQUIRES when the component-scoped variable
         # is defined (CPackRPM.cmake:1098-1106). Defining a runtime-scoped
@@ -977,17 +921,27 @@ if(TARGET tensilelite-host)
             endif()
         endif()
 
-        # Debian gets no soname dependency here, so name the package. No
-        # version constraint: tensilelite-host is versioned with hipBLASLt only
-        # until it has a version of its own, and an exact pin would record that
-        # coupling in package metadata. The SOVERSION is the ABI contract.
         rocm_package_add_deb_dependencies(COMPONENT runtime
-            DEPENDS "tensilelite-host")
+            DEPENDS "${_tensilelite_runtime_package} >= ${_tensilelite_package_version}")
     endif()
-    unset(_tensilelite_host_type)
 endif()
+unset(_tensilelite_devel_package)
+unset(_tensilelite_host_type)
+unset(_tensilelite_package_version)
+unset(_tensilelite_runtime_package)
+unset(_tensilelite_patch_version)
 
 if(ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
+    if(TARGET tensilelite-host)
+        file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-cpack.cmake"
+            "set(_tensilelite_package_dir \"\${CPACK_PACKAGE_DIRECTORY}/_CPack_Packages/tensilelite/\${CPACK_GENERATOR}\")\n"
+            "file(REMOVE_RECURSE \"\${_tensilelite_package_dir}\")\n"
+            "execute_process(COMMAND \"${CMAKE_CPACK_COMMAND}\" --config \"${CMAKE_CURRENT_BINARY_DIR}/tensilelite/CPackConfig.cmake\" -G \"\${CPACK_GENERATOR}\" -B \"\${_tensilelite_package_dir}\" COMMAND_ERROR_IS_FATAL ANY)\n"
+            "file(GLOB _tensilelite_package_files LIST_DIRECTORIES false \"\${_tensilelite_package_dir}/*\")\n"
+            "file(COPY \${_tensilelite_package_files} DESTINATION \"\${CPACK_PACKAGE_DIRECTORY}\")\n"
+        )
+        list(APPEND CPACK_POST_BUILD_SCRIPTS "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-cpack.cmake")
+    endif()
     set(HIPBLASLT_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
     rocm_create_package(
         NAME hipblaslt
