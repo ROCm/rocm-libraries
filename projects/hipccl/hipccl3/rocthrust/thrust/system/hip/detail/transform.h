@@ -52,6 +52,9 @@
 #  include _THRUST_STD_INCLUDE(__iterator/incrementable_traits.h)
 #  include _THRUST_STD_INCLUDE(cstdint)
 
+// rocprim include
+#  include <rocprim/rocprim.hpp>
+
 THRUST_NAMESPACE_BEGIN
 
 namespace hip_rocprim
@@ -245,6 +248,59 @@ OutputIt THRUST_HOST_DEVICE inline binary(
   return result + num_items;
 }
 
+THRUST_EXEC_CHECK_DISABLE
+template <class Derived, class Offset, class... InputIts, class OutputIt, class TransformOp>
+OutputIt THRUST_HOST_DEVICE hip_transform_many(
+  execution_policy<Derived>& policy,
+  rocprim::tuple<InputIts...> firsts,
+  OutputIt result,
+  Offset num_items,
+  TransformOp transform_op)
+{
+  if (num_items == 0)
+  {
+    return result;
+  }
+
+  hipStream_t stream = hip_rocprim::stream(policy);
+  bool debug_sync    = THRUST_HIP_DEBUG_SYNC_FLAG;
+
+  hip_rocprim::throw_on_error(
+    rocprim::transform(firsts, result, static_cast<size_t>(num_items), transform_op, stream, debug_sync),
+    "transform: failed on 1st call");
+
+  hipError_t status = hip_rocprim::synchronize_optional(policy);
+  throw_on_error(status, "transform: failed to synchronize");
+
+  return result + num_items;
+}
+
+// Necessary because when using libhipcxx thrust::tuple will not be rocprim::tuple but hip::std::tuple,
+// and that'll mess up rocPRIM's overload resolution
+template <typename... Ts, std::size_t... Is>
+THRUST_HOST_DEVICE auto
+convert_to_rocprim_tuple(thrust::tuple<Ts...> t, std::index_sequence<Is...>) -> rocprim::tuple<Ts...>
+{
+  return rocprim::tuple<Ts...>{thrust::get<Is>(t)...};
+}
+
+// unwrap zip_iterator and zip_function into their underlying iterators so transform can optimize them
+template <class Derived, class Offset, class... InputIts, class OutputIt, class TransformOp>
+OutputIt THRUST_HOST_DEVICE hip_transform_many(
+  execution_policy<Derived>& policy,
+  rocprim::tuple<zip_iterator<thrust::tuple<InputIts...>>> firsts,
+  OutputIt result,
+  Offset num_items,
+  thrust::zip_function<TransformOp> transform_op)
+{
+  return hip_transform_many(
+    policy,
+    convert_to_rocprim_tuple(get<0>(firsts).get_iterator_tuple(), std::index_sequence_for<InputIts...>{}),
+    result,
+    num_items,
+    transform_op.underlying_function());
+}
+
 } // namespace __transform
 
 //  one input data stream
@@ -253,15 +309,36 @@ template <typename Derived, typename InputIt, typename OutputIt, typename Transf
 THRUST_HIP_FUNCTION OutputIt
 transform(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, TransformOp transform_op)
 {
-  return __transform::unary(
-    policy,
-    first,
-    result,
-    _THRUST_STD::distance(first, last),
-    __transform::no_stencil_tag{},
-    transform_op,
-    __transform::always_true_predicate{});
-}
+  // struct workaround is required for HIP-clang
+  struct workaround
+  {
+    THRUST_HOST static OutputIt
+    par(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, TransformOp transform_op)
+    {
+      using size_type      = thrust::detail::it_difference_t<InputIt>;
+      const auto num_items = static_cast<size_type>(_THRUST_STD::distance(first, last));
+      return __transform::hip_transform_many(policy, rocprim::make_tuple(first), result, num_items, transform_op);
+    }
+#  if defined(__HIP_DEVICE_COMPILE__)
+    THRUST_DEVICE static OutputIt
+    seq(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, TransformOp transform_op)
+    {
+      while (first != last)
+      {
+        *result = transform_op(raw_reference_cast(*first));
+        ++first;
+        ++result;
+      }
+      return result;
+    }
+#  endif
+  };
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(policy, first, last, result, transform_op);
+#  else
+  return workaround::seq(policy, first, last, result, transform_op);
+#  endif
+} // func transform
 
 template <typename Derived, typename InputIt, typename OutputIt, typename TransformOp>
 THRUST_HIP_FUNCTION OutputIt transform_n(
@@ -271,88 +348,47 @@ THRUST_HIP_FUNCTION OutputIt transform_n(
   OutputIt result,
   TransformOp transform_op)
 {
-  return __transform::unary(
-    policy, first, result, num_items, __transform::no_stencil_tag{}, transform_op, __transform::always_true_predicate{});
-}
-
-template <typename Derived, typename InputIt, typename OutputIt, typename TransformOp, typename Predicate>
-THRUST_HIP_FUNCTION OutputIt transform_if(
-  execution_policy<Derived>& policy,
-  InputIt first,
-  InputIt last,
-  OutputIt result,
-  TransformOp transform_op,
-  Predicate predicate)
-{
-  return __transform::unary(
-    policy, first, result, _THRUST_STD::distance(first, last), __transform::no_stencil_tag{}, transform_op, predicate);
-}
-
-template <typename Derived, typename InputIt, typename OutputIt, typename TransformOp, typename Predicate>
-THRUST_HIP_FUNCTION OutputIt transform_if_n(
-  execution_policy<Derived>& policy,
-  InputIt first,
-  _THRUST_STD::iter_difference_t<InputIt> count,
-  OutputIt result,
-  TransformOp transform_op,
-  Predicate predicate)
-{
-  return __transform::unary(policy, first, result, count, __transform::no_stencil_tag{}, transform_op, predicate);
-}
-
-//  one input data stream + stencil
-
-template <class Derived, class InputIt, class OutputIt, class StencilInputIt, class TransformOp, class Predicate>
-THRUST_HIP_FUNCTION OutputIt transform_if(
-  execution_policy<Derived>& policy,
-  InputIt first,
-  InputIt last,
-  StencilInputIt stencil,
-  OutputIt result,
-  TransformOp transform_op,
-  Predicate predicate)
-{
-  return __transform::unary(policy, first, result, _THRUST_STD::distance(first, last), stencil, transform_op, predicate);
-}
-
-template <typename Derived,
-          typename InputIt,
-          typename StencilInputIt,
-          typename OutputIt,
-          typename TransformOp,
-          typename Predicate>
-THRUST_HIP_FUNCTION OutputIt transform_if_n(
-  execution_policy<Derived>& policy,
-  InputIt first,
-  _THRUST_STD::iter_difference_t<InputIt> num_items,
-  StencilInputIt stencil,
-  OutputIt result,
-  TransformOp transform_op,
-  Predicate predicate)
-{
-  return __transform::unary(policy, first, result, num_items, stencil, transform_op, predicate);
-}
-
-// two input data streams
-
-template <typename Derived, typename InputIt1, typename InputIt2, typename OutputIt, typename BinaryTransformOp>
-THRUST_HIP_FUNCTION OutputIt transform(
-  execution_policy<Derived>& policy,
-  InputIt1 first1,
-  InputIt1 last1,
-  InputIt2 first2,
-  OutputIt result,
-  BinaryTransformOp transform_op)
-{
-  return __transform::binary(
-    policy,
-    first1,
-    first2,
-    result,
-    _THRUST_STD::distance(first1, last1),
-    __transform::no_stencil_tag{},
-    transform_op,
-    __transform::always_true_predicate{});
+  // struct workaround is required for HIP-clang
+  struct workaround
+  {
+    THRUST_HOST static OutputIt
+    par(execution_policy<Derived>& policy,
+        InputIt1 first1,
+        InputIt1 last1,
+        InputIt2 first2,
+        OutputIt result,
+        TransformOp transform_op)
+    {
+      using size_type      = thrust::detail::it_difference_t<InputIt1>;
+      const auto num_items = static_cast<size_type>(_THRUST_STD::distance(first1, last1));
+      return __transform::hip_transform_many(
+        policy, rocprim::make_tuple(first1, first2), result, num_items, transform_op);
+    }
+#  if defined(__HIP_DEVICE_COMPILE__)
+    THRUST_DEVICE static OutputIt
+    seq(execution_policy<Derived>& policy,
+        InputIt1 first1,
+        InputIt1 last1,
+        InputIt2 first2,
+        OutputIt result,
+        TransformOp transform_op)
+    {
+      while (first1 != last1)
+      {
+        *result = transform_op(raw_reference_cast(*first1), raw_reference_cast(*first2));
+        ++first1;
+        ++first2;
+        ++result;
+      }
+      return result;
+    }
+#  endif
+  };
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(policy, first1, last1, first2, result, transform_op);
+#  else
+  return workaround::seq(policy, first1, last1, first2, result, transform_op);
+#  endif
 }
 
 template <typename Derived, typename InputIt1, typename InputIt2, typename OutputIt, typename BinaryTransformOp>
