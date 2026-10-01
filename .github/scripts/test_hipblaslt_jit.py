@@ -24,6 +24,7 @@ HEURISTIC_ROUTES = (
     "null-algo",
     "report",
     "partial-fill",
+    "provider-order",
 )
 
 

@@ -3,9 +3,10 @@
 
 // Queries hipblasLtMatmulAlgoGetHeuristic and GemmInstance::algoGetHeuristic for
 // one FP16 GEMM, prints each query as a JSON line, and runs and checks every
-// returned algorithm. --from-index resolves algorithm indices instead, and
-// --threads with --barrier issues the same queries from several threads that
-// start together, also across processes. Uses only the public API, so it builds
+// returned algorithm. --from-index resolves algorithm indices instead, --tuned
+// reports hipblaslt_ext::matmulIsTuned, and --threads with --barrier issues the
+// same queries from several threads that start together, also across
+// processes. Uses only the public API, so it builds
 // with and without HIPBLASLT_ENABLE_JIT; test_heuristic.py checks what
 // HIPBLASLT_JIT should return.
 #include <algorithm>
@@ -51,6 +52,7 @@ namespace
         size_t           workspace = 32 << 20;
         bool             nullAlgo  = false;
         bool             run       = true;
+        bool             tuned     = false;
         std::vector<int> fromIndex;
         int              threads = 1;
         std::string      barrier;
@@ -341,6 +343,8 @@ namespace
                 s.nullAlgo = true;
             else if(arg == "--no-run")
                 s.run = false;
+            else if(arg == "--tuned")
+                s.tuned = true;
             else if(arg == "--from-index")
                 s.fromIndex = parseIndices(value());
             else if(arg == "--threads")
@@ -373,6 +377,18 @@ namespace
             }
             if(!s.fromIndex.empty())
                 queryIndices(problem, handle);
+            if(s.tuned)
+            {
+                const auto tuned = hipblaslt_ext::matmulIsTuned(problem.handle,
+                                                                problem.desc,
+                                                                problem.aLayout,
+                                                                problem.bLayout,
+                                                                problem.cLayout,
+                                                                problem.dLayout);
+                std::lock_guard<std::mutex> lock(outputMutex);
+                std::cout << "{\"api\":\"tuned\",\"thread\":" << thread << ",\"handle\":" << handle
+                          << ",\"tuned\":" << tuned << "}" << std::endl;
+            }
             if(s.nullAlgo)
             {
                 problem.reset();

@@ -23,6 +23,9 @@ import msgpack
 JIT_INDEX = 1 << 30
 INVALID_VALUE = 3
 IGNORED = "is ignored: hipBLASLt was built without HIPBLASLT_ENABLE_JIT"
+DEFAULT_SIZE = (256, 128, 512)
+# Sizes the FP16 NN Equality logic tunes; the default size has no Equality hit.
+EQUALITY_SIZES = ((1024, 4096, 20), (2048, 128, 16), (864, 512, 432), (128, 5120, 1024))
 
 
 def require(condition, message):
@@ -89,6 +92,37 @@ def queries(records, api):
     return [record for record in records if record["api"] == api]
 
 
+def size_args(size):
+    m, n, k = size
+    return ["--m", str(m), "--n", str(n), "--k", str(k)]
+
+
+def trap_python(output):
+    """A Python wrapper that records its arguments and fails when the trap is set.
+
+    The tool paths are part of the cache key, so every process of a route that
+    shares a JIT library runs this wrapper.
+    """
+    python = output / "python"
+    python.write_text(
+        "#!/bin/sh\n"
+        'if [ -n "$HIPBLASLT_JIT_TEST_TRAP" ]; then\n'
+        '    echo "$@" > "$HIPBLASLT_JIT_TEST_TRAP"\n'
+        "    exit 1\n"
+        "fi\n"
+        f'exec "{sys.executable}" "$@"\n'
+    )
+    python.chmod(0o700)
+    return python, output / "trap.txt"
+
+
+def picked(stderr):
+    """The solution index of the last hipblasLtMatmul, from its bench log line."""
+    found = re.findall(r"--solution_index (\d+)", stderr)
+    require(found, "No hipblasLtMatmul was logged")
+    return int(found[-1])
+
+
 def check_jit_results(stderr, records, apis, requested):
     for api in apis:
         found = queries(records, api)
@@ -144,19 +178,7 @@ def forced(run, output):
 
 
 def cache_hit(run, output):
-    # The tool paths are part of the cache key, so both processes use this
-    # wrapper; the second one fails if it generates.
-    python = output / "python"
-    python.write_text(
-        "#!/bin/sh\n"
-        'if [ -n "$HIPBLASLT_JIT_TEST_TRAP" ]; then\n'
-        '    echo "$@" > "$HIPBLASLT_JIT_TEST_TRAP"\n'
-        "    exit 1\n"
-        "fi\n"
-        f'exec "{sys.executable}" "$@"\n'
-    )
-    python.chmod(0o700)
-    trap = output / "trap.txt"
+    python, trap = trap_python(output)
     stderr, first = run(
         "publish",
         ["--api", "c", "--requested", "1"],
@@ -411,34 +433,208 @@ def partial_fill(run, output):
     if any(record["count"] >= probe for record in pretuned.values()):
         print(f"SKIP heuristic-partial-fill: the device library fills {probe} requests")
         return
+    python, trap = trap_python(output)
+    stderr, records = run(
+        "publish",
+        ["--api", "c", "--requested", "1", "--no-run"],
+        HIPBLASLT_JIT="2",
+        HIPBLASLT_JIT_PYTHON=str(python),
+    )
+    (published,) = queries(records, "c")
+    require(published["count"] == 1, f"The JIT library was not seeded: {published}")
+    (jit_index,), (jit_kernel,) = published["indices"], published["kernels"]
     for api, record in pretuned.items():
-        count = record["count"]
         stderr, records = run(
             f"fill-{api}",
-            ["--api", api, "--requested", str(count + 1), "--no-run"],
+            ["--api", api, "--requested", str(record["count"] + 1), "--no-run"],
             drop,
             HIPBLASLT_JIT="1",
+            HIPBLASLT_JIT_PYTHON=str(python),
+            HIPBLASLT_JIT_TEST_TRAP=str(trap),
         )
         (filled,) = queries(records, api)
         require(filled["status"] == 0, f"{api} fill failed: {filled}")
+        require(trap.exists(), f"{api} fill did not try to generate what was missing")
+        trap.unlink()
+        require(
+            reports(stderr, "warning") and not reports(stderr, "error"),
+            f"{api} shortfall was not reported as a warning",
+        )
+        require(
+            filled["indices"].count(jit_index) == 1
+            and filled["kernels"].count(jit_kernel) == 1,
+            f"{api} fill did not return the JIT solution once",
+        )
+        rest = [index for index in filled["indices"] if index != jit_index]
+        others = [
+            index
+            for index, kernel in zip(record["indices"], record["kernels"])
+            if kernel != jit_kernel
+        ]
         # The pre-tuned library can order tied solutions differently in each process.
         require(
-            sorted(filled["indices"][:count]) == sorted(record["indices"]),
-            f"{api} fill changed the pre-tuned results",
+            sorted(rest) == sorted(others),
+            f"{api} fill did not complete with the other pre-tuned solutions",
+        )
+    print(
+        "PASS heuristic-partial-fill: the pre-tuned results complete what JIT leaves,"
+        " without repeating its kernel"
+    )
+
+
+def provider_order(run, output):
+    drop = ("HIPBLASLT_TENSILE_LIBPATH",)
+
+    def baseline(size):
+        name = "mode-0-" + "x".join(map(str, size))
+        args = ["--api", "both", "--requested", "8", "--no-run", "--tuned"]
+        _, records = run(name, args + size_args(size), drop)
+        (tuned,) = queries(records, "tuned")
+        found = {api: queries(records, api)[0] for api in ("c", "cpp")}
+        complete = all(
+            record["status"] == 0 and record["count"] == 8 for record in found.values()
+        )
+        return tuned["tuned"] == 1, complete, found
+
+    equality = None
+    for size in EQUALITY_SIZES:
+        tuned, complete, base_equality = baseline(size)
+        if tuned and complete:
+            equality = size
+            break
+    tuned, complete, base_other = baseline(DEFAULT_SIZE)
+    if equality is None or tuned or not complete:
+        print(
+            "SKIP heuristic-provider-order: the device library lacks an Equality size"
+            " or a size without one"
+        )
+        return
+    python, trap = trap_python(output)
+    jit = dict(HIPBLASLT_JIT="1", HIPBLASLT_JIT_PYTHON=str(python))
+    trapped = dict(jit, HIPBLASLT_JIT_TEST_TRAP=str(trap))
+    library = output / "lib"
+    cases = (
+        ("equality", size_args(equality), 3, base_equality),
+        ("other", size_args(DEFAULT_SIZE), 2, base_other),
+    )
+
+    stderr, records = run(
+        "equality-fills",
+        ["--api", "both", "--requested", "1", "--no-run", "--null-algo"]
+        + size_args(equality),
+        drop,
+        HIPBLASLT_LOG_MASK="32",
+        **trapped,
+    )
+    for api in ("c", "cpp"):
+        (record,) = queries(records, api)
+        require(
+            record["indices"] == base_equality[api]["indices"][:1],
+            f"{api} did not return the mode 0 result: {record['indices']}",
+        )
+    require(queries(records, "null-algo")[0]["status"] == 0, "Null algorithm failed")
+    require(
+        picked(stderr) == base_equality["c"]["indices"][0],
+        "The null algorithm did not pick the Equality solution",
+    )
+    require(
+        not trap.exists() and not entries(library) and not reports(stderr),
+        "JIT was consulted although the Equality results fill the request",
+    )
+
+    first = {}
+    for name, args, requested, base in cases:
+        stderr, records = run(
+            f"publish-{name}",
+            ["--api", "both", "--requested", str(requested)] + args,
+            drop,
+            **jit,
+        )
+        require(not reports(stderr), f"{name}: a JIT problem was reported")
+        first[name] = {api: queries(records, api)[0] for api in ("c", "cpp")}
+        for api, record in first[name].items():
+            label = {"c": "C", "cpp": "C++"}[api]
+            require(
+                record["status"] == 0 and record["count"] == requested,
+                f"{name}: {api} returned {record}",
+            )
+            require(
+                all(f"{label} result {i} PASS" in stderr for i in range(requested)),
+                f"{name}: {label} results were not checked",
+            )
+            indices = record["indices"]
+            pretuned = sum(index < JIT_INDEX for index in indices)
+            require(
+                all(index >= JIT_INDEX for index in indices[pretuned:])
+                and indices[:pretuned] == base[api]["indices"][:pretuned]
+                and (pretuned > 0) == (name == "equality")
+                and pretuned < requested,
+                f"{name}: {api} did not return the Equality results, then JIT: {indices}",
+            )
+        require(
+            first[name]["c"]["indices"] == first[name]["cpp"]["indices"],
+            f"{name}: the C and C++ queries disagree",
+        )
+
+    for name, args, requested, base in cases:
+        stderr, records = run(
+            f"reuse-{name}",
+            ["--api", "both", "--requested", str(requested), "--no-run", "--null-algo"]
+            + args,
+            drop,
+            HIPBLASLT_LOG_MASK="32",
+            **trapped,
+        )
+        for api in ("c", "cpp"):
+            (record,) = queries(records, api)
+            require(
+                record["indices"] == first[name][api]["indices"]
+                and record["kernels"] == first[name][api]["kernels"],
+                f"{name}: {api} differs in a second process: {record['indices']}",
+            )
+        require(queries(records, "null-algo")[0]["status"] == 0, "Null algorithm failed")
+        choice = picked(stderr)
+        require(
+            choice == first[name]["c"]["indices"][0]
+            and (choice >= JIT_INDEX) == (name == "other"),
+            f"{name}: the null algorithm picked {choice}",
         )
         require(
-            all(index >= JIT_INDEX for index in filled["indices"][count:]),
-            f"{api} fill added a pre-tuned solution",
+            not trap.exists() and not reports(stderr),
+            f"{name}: the second process generated or reported a JIT problem",
         )
+
+    for name, args, requested, base in cases:
+        stderr, records = run(
+            f"short-{name}",
+            ["--api", "both", "--requested", str(requested + 2), "--no-run"] + args,
+            drop,
+            **trapped,
+        )
+        require(trap.exists(), f"{name}: JIT did not try to generate what was missing")
+        trap.unlink()
         require(
-            filled["count"] == count + 1,
-            f"{api} fill returned {filled['count']} of {count + 1}",
+            reports(stderr, "warning") and not reports(stderr, "error"),
+            f"{name}: the shortfall was not reported as a warning",
         )
-        require(
-            filled["kernels"][count] not in filled["kernels"][:count],
-            f"{api} fill repeated a pre-tuned kernel: {filled['kernels'][count]}",
-        )
-    print("PASS heuristic-partial-fill: a new JIT kernel follows the pre-tuned results")
+        for api in ("c", "cpp"):
+            (record,) = queries(records, api)
+            known = first[name][api]
+            kernels = set(known["kernels"])
+            others = [
+                index
+                for index, kernel in zip(base[api]["indices"], base[api]["kernels"])
+                if index not in known["indices"] and kernel not in kernels
+            ]
+            expected = known["indices"] + others[:2]
+            require(
+                record["indices"] == expected,
+                f"{name}: {api} returned {record['indices']}, expected {expected}",
+            )
+    print(
+        "PASS heuristic-provider-order: Equality results, then JIT, then the other"
+        " providers; the null algorithm picks the same way"
+    )
 
 
 def jit_off(run, output):
@@ -466,6 +662,7 @@ ROUTES = {
     "null-algo": null_algo,
     "report": report,
     "partial-fill": partial_fill,
+    "provider-order": provider_order,
     "jit-off": jit_off,
 }
 
