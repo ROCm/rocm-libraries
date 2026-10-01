@@ -21,6 +21,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/ulp_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/algo_errors_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/gemm_pointer_check_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/provider_rows_gtest.cpp
 )
 
 if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION)
