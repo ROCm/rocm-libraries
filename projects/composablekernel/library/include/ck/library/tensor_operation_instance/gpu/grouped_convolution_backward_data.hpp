@@ -8,6 +8,7 @@
 #include "ck/tensor_operation/gpu/device/device_grouped_conv_bwd_data_multiple_d.hpp"
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
 
+#include "ck/host_utility/device_prop.hpp"
 #include "ck/library/tensor_operation_instance/device_operation_instance_factory.hpp"
 
 #ifdef CK_USE_XDL
@@ -157,8 +158,11 @@ struct DeviceOperationInstanceFactory<
                     add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_bf16_instances(
                         op_ptrs);
 #ifdef CK_USE_GFX1250
-                    add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_bf16_gfx1250_instances(
-                        op_ptrs);
+                    if(ck::is_gfx1250_supported())
+                    {
+                        add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_bf16_gfx1250_instances(
+                            op_ptrs);
+                    }
 #endif
                     add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_bf16_large_tensors_instances(
                         op_ptrs);
@@ -480,8 +484,11 @@ struct DeviceOperationInstanceFactory<
                     add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_instances(
                         op_ptrs);
 #ifdef CK_USE_GFX1250
-                    add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_large_tiles_instances(
-                        op_ptrs);
+                    if(ck::is_gfx1250_supported())
+                    {
+                        add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_gfx1250_large_tiles_instances(
+                            op_ptrs);
+                    }
 #endif
                     add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_16_16_instances(
                         op_ptrs);

@@ -1489,7 +1489,7 @@ def runBuildInstancesOnly(String compiler) {
             cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
                 -DCMAKE_CXX_COMPILER="${compiler}" \
                 -DCMAKE_HIP_COMPILER="${compiler}" \
-                -DGPU_ARCHS="gfx908;gfx90a;gfx942;gfx950;gfx10-3-generic;gfx11-generic;gfx12-generic" \
+                -DGPU_ARCHS="gfx908;gfx90a;gfx942;gfx950;gfx10-3-generic;gfx11-generic;gfx12-generic;gfx1250" \
                 -D CMAKE_BUILD_TYPE=Release .. && ninja -j${nthreads()}"""
     )
 }

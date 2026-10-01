@@ -139,6 +139,10 @@
 #cmakedefine CK_USE_NATIVE_MX_SUPPORT @CK_USE_NATIVE_MX_SUPPORT@
 #endif
 
+#ifndef CK_USE_GFX1250
+#cmakedefine CK_USE_GFX1250 @CK_USE_GFX1250@
+#endif
+
 // clang-format on
 
 #endif // CK_CONFIG_H_IN

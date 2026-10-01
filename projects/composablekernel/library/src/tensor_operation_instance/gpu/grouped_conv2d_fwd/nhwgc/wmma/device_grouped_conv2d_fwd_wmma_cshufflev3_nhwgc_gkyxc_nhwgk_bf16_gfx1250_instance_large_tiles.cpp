@@ -8,7 +8,7 @@ namespace ck {
 namespace tensor_operation {
 namespace device {
 namespace instance {
-void add_device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_bf16_instances_large_tiles(
+void add_device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_bf16_gfx1250_instances_large_tiles(
     std::vector<std::unique_ptr<DeviceGroupedConvFwdMultipleABD<2,
                                                                 NHWGC,
                                                                 GKYXC,
@@ -24,39 +24,41 @@ void add_device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_bf16_instan
 {
     add_device_operation_instances(
         instances,
-        device_grouped_conv_fwd_wmma_cshufflev3_bf16_gfx1250_instances_large_tiles<2,
-                                                                           NHWGC,
-                                                                           GKYXC,
-                                                                           Empty_Tuple,
-                                                                           NHWGK,
-                                                                           ConvFwdDefault>{});
+        device_grouped_conv_fwd_wmma_cshufflev3_bf16_gfx1250_instances_large_tiles<
+            2,
+            NHWGC,
+            GKYXC,
+            Empty_Tuple,
+            NHWGK,
+            ConvFwdDefault>{});
 
     add_device_operation_instances(
         instances,
         device_grouped_conv_fwd_wmma_cshufflev3_bf16_gfx1250_instances_large_tiles<2,
-                                                                           NHWGC,
-                                                                           GKYXC,
-                                                                           Empty_Tuple,
-                                                                           NHWGK,
-                                                                           ConvFwd1x1P0>{});
+                                                                                   NHWGC,
+                                                                                   GKYXC,
+                                                                                   Empty_Tuple,
+                                                                                   NHWGK,
+                                                                                   ConvFwd1x1P0>{});
+
+    add_device_operation_instances(
+        instances,
+        device_grouped_conv_fwd_wmma_cshufflev3_bf16_gfx1250_instances_large_tiles<
+            2,
+            NHWGC,
+            GKYXC,
+            Empty_Tuple,
+            NHWGK,
+            ConvFwd1x1S1P0>{});
 
     add_device_operation_instances(
         instances,
         device_grouped_conv_fwd_wmma_cshufflev3_bf16_gfx1250_instances_large_tiles<2,
-                                                                           NHWGC,
-                                                                           GKYXC,
-                                                                           Empty_Tuple,
-                                                                           NHWGK,
-                                                                           ConvFwd1x1S1P0>{});
-
-    add_device_operation_instances(
-        instances,
-        device_grouped_conv_fwd_wmma_cshufflev3_bf16_gfx1250_instances_large_tiles<2,
-                                                                           NHWGC,
-                                                                           GKYXC,
-                                                                           Empty_Tuple,
-                                                                           NHWGK,
-                                                                           ConvFwdOddC>{});
+                                                                                   NHWGC,
+                                                                                   GKYXC,
+                                                                                   Empty_Tuple,
+                                                                                   NHWGK,
+                                                                                   ConvFwdOddC>{});
 }
 
 } // namespace instance

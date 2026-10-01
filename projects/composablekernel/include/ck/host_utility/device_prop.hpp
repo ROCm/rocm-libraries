@@ -77,6 +77,13 @@ inline bool is_gfx12_supported()
            ck::get_device_name() == "gfx1250";
 }
 
+// gfx1250 only. Instances built exclusively for gfx1250 (320 KB LDS, wave32) live in
+// *_gfx1250*.cpp translation units that CMake restricts to --offload-arch=gfx1250*, so a
+// build whose target list also contains, say, gfx1200 carries no code object for them.
+// Factories must consult this before registering such instances, otherwise the launch
+// fails with hipErrorNoBinaryForGpu instead of simply not offering the instance.
+inline bool is_gfx1250_supported() { return ck::get_device_name() == "gfx1250"; }
+
 inline bool is_gfx11_supported()
 {
     return ck::get_device_name() == "gfx1100" || ck::get_device_name() == "gfx1101" ||

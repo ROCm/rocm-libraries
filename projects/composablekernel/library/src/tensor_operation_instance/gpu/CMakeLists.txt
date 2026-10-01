@@ -119,7 +119,7 @@ function(add_instance_library INSTANCE_NAME)
         # Do not build gfx1250-exclusive instances unless gfx1250 is on the target list.
         # These instances are tuned for the 320 KB LDS of gfx1250; their tiles exceed the
         # 64 KB LDS budget of every other WMMA target.
-        if(NOT INST_TARGETS MATCHES "gfx1250" AND source_name MATCHES "_gfx1250")
+        if(NOT INST_TARGETS MATCHES "gfx1250" AND source MATCHES "(^|[_/])gfx1250")
             message(DEBUG "removing gfx1250-only instance ${source} ")
             list(REMOVE_ITEM ARGN "${source}")
         endif()
@@ -191,7 +191,7 @@ function(add_instance_library INSTANCE_NAME)
             # gfx1250-exclusive instances must never be offloaded to another architecture.
             # Their LDS footprint (up to 197104 B) is legal only on the 320 KB LDS of
             # gfx1250; emitting them for a 64 KB target is a hard ld.lld failure.
-            if(source_name MATCHES "_gfx1250")
+            if(source MATCHES "(^|[_/])gfx1250")
                 list(FILTER INST_TARGETS INCLUDE REGEX "gfx1250")
             endif()
             set(offload_targets)

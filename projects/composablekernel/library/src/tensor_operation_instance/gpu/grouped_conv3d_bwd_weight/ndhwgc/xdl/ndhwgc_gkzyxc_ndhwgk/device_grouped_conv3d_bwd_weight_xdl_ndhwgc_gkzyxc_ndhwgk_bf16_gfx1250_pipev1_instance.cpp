@@ -10,7 +10,7 @@ namespace device {
 namespace instance {
 
 // Compilation parameters for in[n, hi, wi, g, c] * wei[g, k, y, x, c] = out[n, ho, wo, g, k]
-void add_device_grouped_conv3d_bwd_weight_xdl_ndhwgc_gkzyxc_ndhwgk_bf16_pipev1_instances(
+void add_device_grouped_conv3d_bwd_weight_xdl_ndhwgc_gkzyxc_ndhwgk_bf16_gfx1250_pipev1_instances(
     std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<3,
                                                            NDHWGC,
                                                            GKZYXC,
@@ -25,7 +25,7 @@ void add_device_grouped_conv3d_bwd_weight_xdl_ndhwgc_gkzyxc_ndhwgk_bf16_pipev1_i
     // 1. Default
     add_device_operation_instances(
         instances,
-        device_grouped_conv_bwd_weight_v3_xdl_c_shuffle_bf16_large_k_instances<
+        device_grouped_conv_bwd_weight_v3_xdl_c_shuffle_bf16_large_k_gfx1250_instances<
             3,
             NDHWGC,
             GKZYXC,
@@ -36,7 +36,7 @@ void add_device_grouped_conv3d_bwd_weight_xdl_ndhwgc_gkzyxc_ndhwgk_bf16_pipev1_i
     // 2. Filter1x1Stride1Pad0
     add_device_operation_instances(
         instances,
-        device_grouped_conv_bwd_weight_v3_xdl_c_shuffle_bf16_large_k_instances<
+        device_grouped_conv_bwd_weight_v3_xdl_c_shuffle_bf16_large_k_gfx1250_instances<
             3,
             NDHWGC,
             GKZYXC,

@@ -9,7 +9,7 @@ namespace tensor_operation {
 namespace device {
 namespace instance {
 
-void add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_large_tiles_instances(
+void add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_gfx1250_large_tiles_instances(
     std::vector<std::unique_ptr<DeviceGroupedConvBwdDataMultipleD<2,
                                                                   NHWGK,
                                                                   GKYXC,
@@ -26,21 +26,23 @@ void add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_large_til
     // 1. Default
     add_device_operation_instances(
         instances,
-        device_grouped_conv_bwd_data_wmma_v3_bf16_gfx1250_large_tiles_instances<2,
-                                                                        NHWGK,
-                                                                        GKYXC,
-                                                                        Empty_Tuple,
-                                                                        NHWGC,
-                                                                        ConvBwdDataDefault>{});
+        device_grouped_conv_bwd_data_wmma_v3_bf16_gfx1250_large_tiles_instances<
+            2,
+            NHWGK,
+            GKYXC,
+            Empty_Tuple,
+            NHWGC,
+            ConvBwdDataDefault>{});
     // 2. Filter1x1Stride1Pad0
-    add_device_operation_instances(instances,
-                                   device_grouped_conv_bwd_data_wmma_v3_bf16_gfx1250_large_tiles_instances<
-                                       2,
-                                       NHWGK,
-                                       GKYXC,
-                                       Empty_Tuple,
-                                       NHWGC,
-                                       ConvBwdDataFilter1x1Stride1Pad0>{});
+    add_device_operation_instances(
+        instances,
+        device_grouped_conv_bwd_data_wmma_v3_bf16_gfx1250_large_tiles_instances<
+            2,
+            NHWGK,
+            GKYXC,
+            Empty_Tuple,
+            NHWGC,
+            ConvBwdDataFilter1x1Stride1Pad0>{});
 }
 
 } // namespace instance
