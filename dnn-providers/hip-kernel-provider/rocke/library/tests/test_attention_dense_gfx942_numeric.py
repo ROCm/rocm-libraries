@@ -434,6 +434,87 @@ def test_dense_swa_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, sliding_w
 
 @requires_gfx942_gpu
 @pytest.mark.gpu
+def test_one_sliding_window_binary_serves_every_shape_and_head_config():
+    """The sliding-window twin of :func:`test_one_binary_serves_every_head_config`.
+
+    Non-persistent SWA is on the runtime-shape path: the window stays baked, while
+    batch, both seqlens and both head counts are kernel params. Varying all of them
+    at once under one window must reuse one launcher, and the band must still be
+    right at every config -- a prune or mask that kept a baked shape term would pass
+    the first config compiled and fail the rest.
+    """
+    import torch
+    import torch.nn.functional as F
+
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+    from kernels.gfx942.attention_dense import _DENSE_LAUNCHER_CACHE
+
+    dtype, d, window = "bf16", 128, 128
+    tol = 4e-2
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    scale = 1.0 / math.sqrt(d)
+
+    # (batch, seqlen, Hq, Hkv): GQA 16, non-pow2 GQA 5 and 7, MHA.
+    configs = ((1, 512, 128, 8), (2, 1024, 40, 8), (1, 2048, 28, 4), (4, 512, 32, 32))
+    specs = [
+        _as_gfx942_spec(
+            _spec(dtype, d, hq, hkv, False, batch=b, sq=s, sliding_window=window)
+        )
+        for b, s, hq, hkv in configs
+    ]
+
+    assert all(s.runtime_shape for s in specs), "an SWA config left the runtime path"
+    keys = [attention_dense_cache_key(s, arch="gfx942") for s in specs]
+    assert len(set(keys)) == 1, f"SWA configs {configs} did not share a cache key"
+
+    _DENSE_LAUNCHER_CACHE.pop(keys[0], None)
+    before = set(_DENSE_LAUNCHER_CACHE)
+
+    launchers = []
+    for (B, S, hq, hkv), spec in zip(configs, specs):
+        torch.manual_seed(0)
+        q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
+        k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+        v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+        out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+        torch.cuda.synchronize()
+        launchers.append(_launcher_for(spec))
+
+        qi = torch.arange(S, device="cuda").view(-1, 1)
+        ki = torch.arange(S, device="cuda").view(1, -1)
+        keep = (ki <= qi) & (ki > qi - window)
+        rep = hq // hkv
+        ref = F.scaled_dot_product_attention(
+            q.transpose(1, 2).float(),
+            k.transpose(1, 2).float().repeat_interleave(rep, dim=1),
+            v.transpose(1, 2).float().repeat_interleave(rep, dim=1),
+            attn_mask=keep,
+            scale=scale,
+        ).transpose(1, 2)
+        max_abs = (ref - out.float()).abs().max().item()
+        assert max_abs < tol, (
+            f"swa{window} B={B} S={S} Hq={hq} Hkv={hkv}: "
+            f"max_abs={max_abs:.3e} >= {tol}"
+        )
+
+    assert launchers[0] is not None, (
+        "no launcher cached after a successful run; _DENSE_LAUNCHER_CACHE is no "
+        "longer keyed by attention_dense_cache_key and this test is blind"
+    )
+    assert all(lau is launchers[0] for lau in launchers), (
+        f"SWA configs {configs} share a cache key but were served by DIFFERENT "
+        "launcher objects -- the runtime-shape SWA kernel recompiled per config"
+    )
+    assert set(_DENSE_LAUNCHER_CACHE) - before == {keys[0]}, (
+        "four SWA configs on the runtime path added more than one cache entry: "
+        f"{sorted(set(_DENSE_LAUNCHER_CACHE) - before)}"
+    )
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
 @pytest.mark.parametrize("block_n", [32])
 def test_dense_fp16_d128_numeric_correct_at_non_shipped_tile_width(block_n):
     """fp16-D128 stays numerically correct at a tile width dispatch never emits

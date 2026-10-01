@@ -464,10 +464,12 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         compiled kernel serves every shape and those fields drop out of the cache key.
         This is what collapses the AOT batch x seqlen x heads instance explosion.
 
-        On gfx942 the live exclusions are sliding-window -- which bakes the k-tile
-        trip count (``n_ktiles``), so it keeps per-shape identity -- and
-        ``persistent``, whose work decode divides by the baked head counts. Neither
-        declares shape params at all. ``ragged``/``varlen``/``paged`` never reach the builder
+        On gfx942 the one live exclusion is ``persistent``, whose work decode divides
+        by the baked shape and head counts; it declares no shape params at all.
+        Sliding-window is on the runtime path: its KV-loop prune reads only the query
+        block, the window and the runtime trip count, and its zero-trip guard in
+        :func:`supports_attention_dense` runs per launch, ahead of the cache lookup.
+        ``ragged``/``varlen``/``paged`` never reach the builder
         (:func:`supports_attention_dense` rejects them) but stay in the predicate,
         identical to the gfx950 twin, so a later admit lands already excluded.
 
@@ -477,13 +479,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         way: a policy that reads a shape field would make two shapes share a cache
         key AND a kernel name while lowering to different IR, which neither the
         name assert nor this predicate can catch."""
-        return not (
-            self.persistent
-            or self.ragged
-            or self.varlen
-            or self.paged
-            or self.sliding_window > 0
-        )
+        return not (self.persistent or self.ragged or self.varlen or self.paged)
 
     @property
     def runtime_param_fields(self) -> tuple[str, ...]:
@@ -1226,14 +1222,13 @@ def _build_attention_dense_single_buffer(
     # order -- attention_dense_signature and attention_dense_runtime_args read the
     # same tuple, so the kernarg order cannot skew between kernel and launcher.
     #
-    # Gated on ``spec.runtime_shape``, which excludes persistent and sliding-window:
-    # the persistent body's work-item space W = NQB*Hq*B is a host-visible Python int
-    # feeding the grid-stride bound and the b.mod/b.div work decode, so the shape
-    # cannot become a param there without that bound following it (out of scope --
-    # runtime operands would turn those strength-reduced divides into real integer
-    # division inside the grid-stride loop, a perf question needing a benchmark).
-    # Keeping the baked paths' declaration empty is also what holds their IR -- and
-    # the persist / SWA golden cases -- byte-identical.
+    # Gated on ``spec.runtime_shape``, which excludes persistent: its work-item space
+    # W = NQB*Hq*B is a host-visible Python int feeding the grid-stride bound and the
+    # b.mod/b.div work decode, so the shape cannot become a param there without that
+    # bound following it (out of scope -- runtime operands would turn those
+    # strength-reduced divides into real integer division inside the grid-stride
+    # loop, a perf question needing a benchmark). Keeping the persistent declaration
+    # empty is also what holds its IR -- and the persist golden cases -- byte-identical.
     if spec.runtime_shape:
         rt = {f: b.param(f, I32) for f in spec.runtime_param_fields}
         batch_p, seqlen_q_p, seqlen_kv_p = rt["batch"], rt["seqlen_q"], rt["seqlen_kv"]
@@ -1249,7 +1244,7 @@ def _build_attention_dense_single_buffer(
 
     # The baked branch emits each stride constant in place, at its use: the IR
     # builder is side-effecting, so sharing one const node would renumber every SSA
-    # value after it and move the persist / SWA goldens.
+    # value after it and move the persist goldens.
     def _stride_q():
         return stride_q_p if spec.runtime_shape else b.const_i32(stride_q_tok)
 
@@ -1356,7 +1351,7 @@ def _build_attention_dense_single_buffer(
     # kernel serves every (seqlen, head count), and a baked bound would silently drop
     # valid reads for a larger one (buffer loads past num_records return 0 with no
     # fault). The baked branch keeps const_i32(B*Skv*...) verbatim -- the persistent
-    # and SWA paths' IR must not move.
+    # path's IR must not move.
     _kv_elem_bytes = Hkv * D * 2
     if spec.runtime_shape:
         kv_bytes = b.mul(b.mul(b.mul(batch_p, seqlen_kv_p), hkv_p), b.const_i32(D * 2))
@@ -2038,11 +2033,11 @@ def run_attention_dense_torch(
 
     Mirrors ``kernels.gfx950.attention_dense.run_attention_dense_torch`` and keys
     the launcher cache by ``attention_dense_cache_key``. On the runtime-shape path
-    (``spec.runtime_shape``: neither persistent nor sliding-window) batch, seqlen_q,
+    (``spec.runtime_shape``: not persistent; sliding-window included) batch, seqlen_q,
     seqlen_kv and both head counts are kernel params and drop out of that key, so
     one compiled binary serves every shape; every other IR-live field still
-    participates without relying on manual name tokens. The persistent and SWA paths
-    keep their fully-baked per-shape identity.
+    participates without relying on manual name tokens. The persistent path keeps
+    its fully-baked per-shape identity.
 
     varlen / ragged are rejected by :func:`supports_attention_dense` on gfx942, so the
     ABI is always the 5-arg (q, k, v, o, scale) form; passing ``cu_seqlens_*`` is a

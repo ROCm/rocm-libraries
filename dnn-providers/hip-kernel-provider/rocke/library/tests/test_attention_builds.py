@@ -2932,9 +2932,9 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
     spec.kernel_name()`` in ``run_attention_dense_torch`` trips on the second
     shape served from the cache. The name assertion below covers that.
 
-    The baked-shape control below uses ``persistent`` to leave the runtime path;
-    ``sliding_window`` is the other off-path spec on gfx942 now that
-    ``supports_attention_dense`` admits it.
+    The baked-shape control below uses ``persistent``, the one spec off the
+    runtime path on gfx942. ``sliding_window`` is on it: the window stays a baked
+    config value (``swa{W}`` in the name, a cache-key field), the shape does not.
     """
 
     # fp16 is arbitrary here -- every dtype takes the same runtime-shape cut now
@@ -3093,10 +3093,9 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
 
         Without it, a builder that ignored batch/seqlen_q/seqlen_kv entirely --
         emitting one kernel that is wrong everywhere -- would satisfy the guard
-        above vacuously. ``persistent`` and ``sliding_window`` are the two specs
-        off the runtime path on gfx942 (``runtime_shape`` excludes both); this
-        control uses ``persistent``. ``ragged``/``varlen``/``paged`` are rejected
-        by ``supports_attention_dense`` and never reach the builder.
+        above vacuously. ``persistent`` is the one spec off the runtime path on
+        gfx942. ``ragged``/``varlen``/``paged`` are rejected by
+        ``supports_attention_dense`` and never reach the builder.
         """
         from dataclasses import replace
         from kernels.common.attention_dense_spec import attention_dense_cache_key
@@ -3131,6 +3130,56 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
             "ignoring shape on a path that bakes it, so the guard test above "
             "would pass vacuously",
         )
+
+    def test_sliding_window_shapes_share_one_key_ir_and_name(self):
+        """Sliding-window rides the runtime path: one binary per window, every shape.
+
+        Its KV-loop prune reads only the query block, the window and the runtime
+        trip count, so no shape term reaches the body. The window itself is a
+        compile-time constant (start_tile = qb*n_per - SW/BN) and must still split
+        the key, the IR and the ``swa{W}`` name token -- otherwise one cache slot
+        would serve one window's prune to every other window.
+        """
+        from dataclasses import replace
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx942.attention_dense import supports_attention_dense
+
+        def artifact(spec):
+            ok, why = supports_attention_dense(spec, arch="gfx942")
+            self.assertTrue(ok, f"test setup error: spec out of scope: {why}")
+            self.assertTrue(spec.runtime_shape)
+            self.assertEqual(spec.runtime_param_fields, self._RUNTIME_FIELDS)
+            return (
+                attention_dense_cache_key(spec, arch="gfx942"),
+                self._ir_sha(spec),
+                spec.kernel_name(),
+            )
+
+        by_window = {}
+        for window in (128, 256):
+            base = self._spec(**self._BASE_KWARGS, sliding_window=window)
+            arts = set()
+            for bt, sq, sk in self._SHAPES:
+                with self.subTest(window=window, shape=(bt, sq, sk)):
+                    arts.add(
+                        artifact(replace(base, batch=bt, seqlen_q=sq, seqlen_kv=sk))
+                    )
+            self.assertEqual(
+                len(arts),
+                1,
+                f"swa{window}: runtime-shape specs did not collapse to one "
+                f"(key, IR, name): {len(arts)} distinct",
+            )
+            (by_window[window],) = arts
+            self.assertIn(f"_swa{window}", by_window[window][2])
+
+        for i, part in enumerate(("cache key", "IR", "kernel name")):
+            self.assertNotEqual(
+                by_window[128][i],
+                by_window[256][i],
+                f"sliding windows 128 and 256 share one {part}; the window is "
+                "baked into the prune and must split identity",
+            )
 
     def test_bf16_d128_default_is_on_the_runtime_path(self):
         """bf16 D128 at the exp2_fast tri-state default is one binary per shape.
@@ -3316,7 +3365,7 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
     # exceed nqb*Hq*B for the smallest head config under test.
     _BAKED_VARIANTS = {
         "persistent": dict(persistent=True, num_persistent=64),
-        "sliding_window": dict(sliding_window=128),
+        "persistent_swa": dict(persistent=True, num_persistent=64, sliding_window=128),
     }
 
     @staticmethod
@@ -3443,6 +3492,26 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
         from dataclasses import replace
 
         base = self._spec(**self._BASE_KWARGS)
+        shapes = ((1, 512, 512), (8, 2048, 2048), (64, 4096, 8192), (2, 1024, 1024))
+        self._assert_one_artifact(
+            [
+                replace(
+                    base,
+                    batch=bt,
+                    seqlen_q=sq,
+                    seqlen_kv=sk,
+                    num_query_heads=hq,
+                    num_kv_heads=hkv,
+                )
+                for (bt, sq, sk), (hq, hkv) in zip(shapes, self._HEADS)
+            ]
+        )
+
+    def test_sliding_window_heads_and_shape_share_one_artifact(self):
+        """Non-persistent sliding-window takes runtime heads and shape too."""
+        from dataclasses import replace
+
+        base = self._spec(**self._BASE_KWARGS, sliding_window=128)
         shapes = ((1, 512, 512), (8, 2048, 2048), (64, 4096, 8192), (2, 1024, 1024))
         self._assert_one_artifact(
             [
