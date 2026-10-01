@@ -8,6 +8,10 @@
 /.azuredevops/                                      @ROCm/external-ci
 /.github/                                           @ROCm/rocm-libraries-reviewers
 
+# Team specific CI ownership
+/.github/workflows/*hipdnn*.yml                     @ROCm/hipdnn-core
+/.github/workflows/*miopen*.yml                     @ROCm/miopen-reviewers
+
 # Project-specific ownership
 /dnn-providers/miopen-provider/                     @ROCm/dnn-providers-core
 /dnn-providers/hipblaslt-provider/                  @ROCm/dnn-providers-core
@@ -178,8 +182,7 @@
 /projects/hipsparselt/docs/                         @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
 /projects/hipsparselt/library/include/              @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
 
-/projects/miopen/**/*.md                            @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
-/projects/miopen/**/*.rst                           @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
+/projects/miopen/CHANGELOG.md                       @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
 /projects/miopen/**/.readthedocs.yaml               @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
 /projects/miopen/docs/                              @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
 

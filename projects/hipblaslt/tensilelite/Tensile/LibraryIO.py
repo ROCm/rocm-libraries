@@ -549,7 +549,8 @@ def parseLibraryLogicFile(
         printSolutionRejectionReason: bool,
         printIndexAssignmentInfo: bool,
         isaInfoMap: Dict[str, IsaInfo],
-        lazyLibraryLoading: bool
+        lazyLibraryLoading: bool,
+        archRenames: Optional[Dict[str, str]] = None,
     ):
     """Wrapper function to read and parse a library logic file."""
     return parseLibraryLogicData(
@@ -560,7 +561,8 @@ def parseLibraryLogicFile(
                printSolutionRejectionReason,
                printIndexAssignmentInfo,
                isaInfoMap,
-               lazyLibraryLoading
+               lazyLibraryLoading,
+               archRenames,
            )
 
 
@@ -597,6 +599,8 @@ def prepareLibraryLogicDict(data: dict[str, Any]) -> None:
         data["Library"]["indexOrder"] = data["IndexOrder"]
         data["Library"]["table"] = data["ExactLogic"]
         data["Library"]["distance"] = libraryType
+        if data.get("UseKdTree", False):
+            data["Library"]["useKdTree"] = True
 
 
 def reorderSolutionsParams(data: Dict[str, Any]) -> None:
@@ -670,9 +674,14 @@ def parseLibraryLogicData(
         printSolutionRejectionReason: bool,
         printIndexAssignmentInfo: bool,
         isaInfoMap: Dict[str, IsaInfo],
-        lazyLibraryLoading: bool
+        lazyLibraryLoading: bool,
+        archRenames: Optional[Dict[str, str]] = None,
     ):
-    """Parses the data of a library logic file."""
+    """Parses the data of a library logic file.
+
+    ``archRenames`` maps a declared ArchitectureName to the name the library is
+    keyed and its files are named by, for a build alias (see ARCH_BUILD_ALIASES).
+    """
     # Reset the type mismatch collector at the start to capture all type
     # mismatches from both ProblemType and Solution constructors
     resetTypeMismatchCollector()
@@ -682,6 +691,8 @@ def parseLibraryLogicData(
     elif isinstance(data, dict):
         prepareLibraryLogicDict(data)
 
+    if archRenames:
+        data["ArchitectureName"] = archRenames.get(data["ArchitectureName"], data["ArchitectureName"])
     if "CUCount" not in data:
         data["CUCount"] = None
     if 'MacDataTypeA' not in data["ProblemType"]: #it will either be set as d['MacDataType'] or a specified input
@@ -828,7 +839,11 @@ def parseLibraryLogicList(data, srcFile="?"):
 
     if isinstance(data[2], dict):
         rv["ArchitectureName"] = data[2]["Architecture"]
-        rv["CUCount"] = data[2]["CUCount"]
+        rv["CUCount"] = data[2].get("CUCount")
+        # Optional, and carried only when declared, so a file written before this
+        # key existed parses to exactly the dict it did before.
+        if data[2].get("UseKdTree", False):
+            rv["UseKdTree"] = True
     else:
         rv["ArchitectureName"] = data[2]
         rv["CUCount"] = None
@@ -871,6 +886,8 @@ def parseLibraryLogicList(data, srcFile="?"):
         rv["Library"]["indexOrder"] = data[6]
         rv["Library"]["table"] = data[7]
         rv["Library"]["distance"] = libraryType
+        if rv.get("UseKdTree"):
+            rv["Library"]["useKdTree"] = True
 
     return rv
 
@@ -883,8 +900,16 @@ def rawLibraryLogic(data):
 
         architectureName = data.get("ArchitectureName")
         cuCount = data.get("CUCount")
-        if cuCount is not None:
-            architectureName = {"Architecture": architectureName, "CUCount": cuCount}
+        useKdTree = data.get("UseKdTree", False)
+        if cuCount is not None or useKdTree:
+            architectureName = {"Architecture": architectureName}
+            # Each key is emitted only when set, so unaffected files round-trip
+            # byte-identically and a table that is not CU-scoped can still
+            # declare UseKdTree without inventing a null CUCount.
+            if cuCount is not None:
+                architectureName["CUCount"] = cuCount
+            if useKdTree:
+                architectureName["UseKdTree"] = True
 
         deviceNames = data.get("DeviceNames")
         problemTypeState = data.get("ProblemType")

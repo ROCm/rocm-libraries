@@ -37,6 +37,8 @@
 #include <origami/hardware.hpp>
 #include <origami/streamk.hpp>
 
+#include "../../../library/src/amd_detail/rocblaslt/src/include/rocblaslt_arch_revision.hpp"
+
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -169,6 +171,15 @@ namespace
             // that never appear in the library filename.
             const std::string arch      = gpuArchName();
             const std::string processor = arch.substr(0, arch.find(':'));
+            // The subtree the runtime loads, which for an A0 part reporting
+            // gfx1250 is not the one named for processor.
+            hipDeviceProp_t props{};
+            int             device = 0;
+            const int       rev    = hipGetDevice(&device) == hipSuccess
+                                    && hipGetDeviceProperties(&props, device) == hipSuccess
+                                ? props.asicRevision
+                                : -1;
+            const std::string libArch = rocblaslt_revisioned_arch_name(processor, rev);
 
             std::string tried;
             for(const auto& root : libraryRootCandidates())
@@ -176,7 +187,7 @@ namespace
                 // Always the logical single-extension name: the loader resolves
                 // the shipped ".dat.zlib" by appending the suffix itself.
                 const std::filesystem::path logical
-                    = root / processor / ("TensileLibrary_lazy_" + processor + ".dat");
+                    = root / libArch / ("TensileLibrary_lazy_" + processor + ".dat");
                 tried += (tried.empty() ? "" : ", ") + logical.string();
 
                 if(!std::filesystem::exists(logical)
@@ -1444,6 +1455,87 @@ namespace
         EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware))
             << "a generated kernel takes StaggerU from the packed argument, so the clamp "
                "reaches it and a declared StaggerU must not refuse it";
+    }
+
+    TEST(RowUniformityStreamKRejection_pre_checkin, UsoKeepsStaggerOnlyWhenMappingIsAlready1)
+    {
+        const auto hardware                    = probeHardware();
+        auto       solution                    = probeSolution();
+        solution->sizeMapping.streamK          = 0;
+        solution->internalArgsSupport.staggerU = true;
+        solution->sizeMapping.staggerUMapping  = 1;
+        solution->sizeMapping.staggerU         = 16;
+        auto problem                           = probeProblem();
+        {
+            const int32_t autoWGM
+                = std::get<0>(solution->calculateAutoWGM(problem, &hardware, /*skgrid=*/0));
+            const auto [mapping, stagger, shift]
+                = solution->calculateAutoStaggerU(problem, &hardware, 0, autoWGM);
+            EXPECT_EQ(mapping, 1u);
+            EXPECT_EQ(stagger, 16u);
+            EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware));
+        }
+
+        auto remap = probeSolution();
+        remap->sizeMapping.streamK            = 0;
+        remap->internalArgsSupport.staggerU   = true;
+        remap->sizeMapping.staggerUMapping    = 0;
+        remap->sizeMapping.staggerU           = 16;
+        {
+            const int32_t autoWGM
+                = std::get<0>(remap->calculateAutoWGM(problem, &hardware, /*skgrid=*/0));
+            const auto [mapping, stagger, shift]
+                = remap->calculateAutoStaggerU(problem, &hardware, 0, autoWGM);
+            EXPECT_EQ(mapping, 0u);
+            EXPECT_EQ(stagger, 0u);
+            EXPECT_TRUE(remap->uniformSummationOrderSupported(problem, hardware))
+                << "mapping 0 is zeroed, and remains row-uniform";
+        }
+    }
+
+    TEST(RowUniformityStreamKRejection_pre_checkin, StreamKWithoutPerTileDisablesStagger)
+    {
+        const auto hardware                             = probeHardware();
+        auto       solution                             = probeSolution();
+        auto       problem                              = probeProblem();
+        solution->internalArgsSupport.perTileExtraIters = false;
+        solution->sizeMapping.staggerUMapping           = 1;
+        solution->sizeMapping.staggerU                  = 16;
+
+        const size_t  grid    = solution->getSKGrid(problem,
+                                                hardware,
+                                                problem.getNumTiles(solution->sizeMapping, 1),
+                                                solution->getSKReduction(problem, hardware));
+        const int32_t autoWGM = std::get<0>(solution->calculateAutoWGM(problem, &hardware, grid));
+        const auto [mapping, stagger, shift]
+            = solution->calculateAutoStaggerU(problem, &hardware, grid, autoWGM);
+
+        EXPECT_EQ(mapping, 0u);
+        EXPECT_EQ(stagger, 0u);
+        EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware))
+            << "StreamK remains enabled, staggeru gets disabled";
+    }
+
+    TEST(RowUniformityStreamKRejection_pre_checkin, StreamKWithPerTileKeepsMapping1Stagger)
+    {
+        const auto hardware                             = probeHardware();
+        auto       solution                             = probeSolution();
+        auto       problem                              = probeProblem();
+        solution->internalArgsSupport.perTileExtraIters = true;
+        solution->sizeMapping.staggerUMapping           = 1;
+        solution->sizeMapping.staggerU                  = 16;
+
+        const size_t  grid    = solution->getSKGrid(problem,
+                                                hardware,
+                                                problem.getNumTiles(solution->sizeMapping, 1),
+                                                solution->getSKReduction(problem, hardware));
+        const int32_t autoWGM = std::get<0>(solution->calculateAutoWGM(problem, &hardware, grid));
+        const auto [mapping, stagger, shift]
+            = solution->calculateAutoStaggerU(problem, &hardware, grid, autoWGM);
+
+        EXPECT_EQ(mapping, 1u);
+        EXPECT_EQ(stagger, 16u);
+        EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware));
     }
 
     // The other half of the same rule: frozen hand-written assembly can bake a
