@@ -55,12 +55,10 @@ class Tuner(BaseTuner):
     def _get_value_type_name(self):
         return ""
 
-    def _get_restrictions(
-        self, key_type: str, val_type: Optional[str] = None
-    ) -> Callable[[dict], bool]:
+    def _get_restrictions(self, types):
         # using OffsetCountPairT = ::rocprim::tuple<unsigned int, unsigned int>; sizeof(OffsetCountPairT)
         offset_size = 8
-        key_size = TYPE_CONFIGS[key_type].size
+        key_size = TYPE_CONFIGS[types['key_type']].size
         max_shared_memory = 65536
         #static constexpr unsigned int min_items_per_thread_exponent = 3u;
         min_ipt_exp = 3

@@ -17,6 +17,9 @@
     using key_type = {{ key_type }};
 {% endblock %}
 
+{% block benchmark_type %}
+{% endblock %}
+
 {% block benchmark_queue %}
     executor.queue<device_run_length_encode_benchmark<key_type, 10, config>>();
     executor.queue<device_run_length_encode_benchmark<key_type, 1000, config>>();

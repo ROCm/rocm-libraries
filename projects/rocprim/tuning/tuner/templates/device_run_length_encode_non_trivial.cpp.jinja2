@@ -13,10 +13,10 @@
     >
 {%- endblock %}
 
-{% block benchmark_type %}
-    using benchmark_type = device_non_trivial_runs_benchmark<key_type, 0, config>;
-{% endblock %}
-
 {% block type_definitions %}
     using key_type = {{ key_type }};
+{% endblock %}
+
+{% block benchmark_type %}
+    using benchmark_type = device_non_trivial_runs_benchmark<key_type, 0, config>;
 {% endblock %}
