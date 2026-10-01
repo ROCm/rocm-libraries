@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <set>
 #include <string>
@@ -63,6 +64,17 @@ constexpr int64_t HEADS = 4;
 constexpr int64_t SEQ = 256;
 constexpr int64_t HEAD_SIZE = 128;
 constexpr float SCALE = 0.08838834764831843F;
+
+/// The bound token prepare() reads the softmax scale from, as an IEEE-754 bit pattern.
+constexpr std::string_view SCALE_BITS_TOKEN = "gfx950_attention_dense.scale_bits";
+
+int64_t ieee754Bits(float value)
+{
+    int32_t bits = 0;
+    static_assert(sizeof(bits) == sizeof(value), "float must be 32-bit to round-trip");
+    std::memcpy(&bits, &value, sizeof(value));
+    return bits;
+}
 
 DeviceProperties testDeviceProperties()
 {
@@ -1436,11 +1448,32 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesUnsupportedDataType)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesMissingAttentionScale)
+TEST(TestGfx950AttentionDenseGraphMatch, AbsentAttentionScaleBindsOneOverSqrtHeadSize)
 {
-    GraphSpec spec;
-    spec.attnScaleValue = std::nullopt;
-    EXPECT_FALSE(matchGraph(spec).has_value());
+    // hipDNN's SDPA contract: no attn_scale_value and no scale tensor means 1/sqrt(D).
+    // The CPU reference and the ASM SDPA / HipFlash2 engines apply it, so declining
+    // here would only under-serve, and serving any other value would be wrong.
+    for(const int64_t headSize : {int64_t{64}, int64_t{128}})
+    {
+        SCOPED_TRACE(headSize);
+        GraphSpec spec;
+        spec.headSize = headSize;
+        spec.headSizeV = headSize;
+        spec.attnScaleValue = std::nullopt;
+        const auto bound = matchGraph(spec);
+        ASSERT_TRUE(bound.has_value());
+        EXPECT_EQ(
+            hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, SCALE_BITS_TOKEN).value_or(-1),
+            ieee754Bits(1.0F / std::sqrt(static_cast<float>(headSize))));
+    }
+
+    // An explicit scale still wins over the default.
+    GraphSpec explicitScale;
+    explicitScale.attnScaleValue = 0.5F;
+    const auto bound = matchGraph(explicitScale);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, SCALE_BITS_TOKEN).value_or(-1),
+              ieee754Bits(0.5F));
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBothDeprecatedCausalBooleans)

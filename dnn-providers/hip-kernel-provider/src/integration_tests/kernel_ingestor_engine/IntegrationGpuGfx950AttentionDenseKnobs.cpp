@@ -104,6 +104,8 @@ struct GraphShape
     int64_t batch;
     int64_t seqQ;
     int64_t seqKv;
+    /// Leaves attn_scale_value unset, so the engine must apply hipDNN's 1/sqrt(D) default.
+    bool omitScale = false;
 };
 
 struct Tile
@@ -154,12 +156,18 @@ constexpr GraphShape makeShape(DataType dataType,
                                int64_t seqQ,
                                int64_t seqKv)
 {
-    return {dataType, headSize, queryHeads, kvHeads, mask, mmaCoreMode, batch, seqQ, seqKv};
+    return {dataType, headSize, queryHeads, kvHeads, mask, mmaCoreMode, batch, seqQ, seqKv, false};
 }
 
-/// Thirteen forced (tile, head size) pairs, then four cold cases. Within them: bounds on
-/// both corners and both deprecated flags, fp16 and bf16, MHA, GQA and MQA, and four
-/// forced cases with B > 1 and Sq != Skv.
+GraphShape withoutScale(GraphShape shape)
+{
+    shape.omitScale = true;
+    return shape;
+}
+
+/// Thirteen forced (tile, head size) pairs, then four cold cases, then two forced cases
+/// with no attn_scale_value. Within them: bounds on both corners and both deprecated
+/// flags, fp16 and bf16, MHA, GQA and MQA, and four forced cases with B > 1 and Sq != Skv.
 std::vector<KnobCase> knobCases()
 {
     constexpr auto FP16 = DataType::HALF;
@@ -240,6 +248,17 @@ std::vector<KnobCase> knobCases()
          makeShape(BF16, 128, 9, 9, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 2, 256, 256),
          COLD,
          Tile{256, 64}},
+        // No attn_scale_value: the CPU reference applies 1/sqrt(D), so a kernel launched
+        // with any other scale fails the comparison.
+        {"D64_Bm256Bn64_NoScale",
+         withoutScale(
+             makeShape(BF16, 64, 10, 10, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 1, 256, 256)),
+         FORCED,
+         Tile{256, 64}},
+        {"D128_Bm256Bn64_NoScale",
+         withoutScale(makeShape(FP16, 128, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256)),
+         FORCED,
+         Tile{256, 64}},
     };
 }
 
@@ -284,9 +303,10 @@ struct SdpaGraph
     std::shared_ptr<TensorAttributes> output;
 };
 
-/// A single SDPA-forward node with BSHD Q/K/V/O and an explicit softmax scale, the
-/// shape the engine's graph_match accepts. O is laid out explicitly: the frontend's
-/// default for an unset output is packed BHSD, which the engine declines.
+/// A single SDPA-forward node with BSHD Q/K/V/O and the softmax scale 1/sqrt(D), set
+/// explicitly unless the shape omits it. This is the shape the engine's graph_match
+/// accepts. O is laid out explicitly: the frontend's default for an unset output is
+/// packed BHSD, which the engine declines.
 SdpaGraph buildSdpaGraph(const std::string& name, const GraphShape& shape)
 {
     auto graph = std::make_shared<Graph>();
@@ -304,7 +324,10 @@ SdpaGraph buildSdpaGraph(const std::string& name, const GraphShape& shape)
 
     SdpaAttributes attributes;
     attributes.set_name(name);
-    attributes.set_attn_scale(1.0f / std::sqrt(static_cast<float>(shape.headSize)));
+    if(!shape.omitScale)
+    {
+        attributes.set_attn_scale(1.0f / std::sqrt(static_cast<float>(shape.headSize)));
+    }
     switch(shape.mask)
     {
     case Mask::NO_MASK:

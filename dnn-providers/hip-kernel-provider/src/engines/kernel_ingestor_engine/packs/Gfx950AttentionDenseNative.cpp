@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -543,12 +544,13 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
         return std::nullopt;
     }
 
-    // The softmax scale is a REQUIRED launch argument with no default.
-    if(!attributes.attn_scale_value().has_value())
-    {
-        return std::nullopt;
-    }
-    const float scale = attributes.attn_scale_value().value();
+    // The softmax scale is an f32 launch argument. An absent attn_scale_value means
+    // 1/sqrt(head_size), hipDNN's SDPA contract: the CPU reference
+    // (test_sdk cpu_graph_executor/detail/SdpaFwdPlan.hpp) and the ASM SDPA and HipFlash2
+    // engines (SdpaFwdPlanBuilder.cpp, HipFlash2FwdPlan.cpp) all apply that default. It
+    // is resolved here, once, and prepare() launches with the bound value.
+    const float scale = attributes.attn_scale_value().value_or(
+        1.0F / std::sqrt(static_cast<float>(problem.headSize)));
 
     BoundTokens bound;
     bound[std::string(Q_TOKEN)] = attributes.q_tensor_uid();
