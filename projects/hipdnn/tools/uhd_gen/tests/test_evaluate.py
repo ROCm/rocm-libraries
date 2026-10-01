@@ -920,6 +920,42 @@ def test_an_uncalibrated_score_is_declined_rather_than_measured_meaninglessly():
     ), "§11.2 calibration is implemented; it must not still be listed as a gap"
 
 
+def _negative_time_problem():
+    """Measured [1, 2]; the model predicts a time of -0.2 for the faster and 1.0 for the slower."""
+    corpus = make_corpus([
+        {"benchmark": "g1", "kernel": "k1", "avgTimeMs": 1.0},
+        {"benchmark": "g1", "kernel": "k2", "avgTimeMs": 2.0},
+    ])
+    predictions = {"k1": -0.2, "k2": 1.0}
+    return corpus, lambda frame: np.array([predictions[kernel] for kernel in frame["kernel"]])
+
+
+def test_a_score_the_runtime_discards_ranks_last_and_is_not_calibrated():
+    """The runtime discards a non-positive recovered score of a physical metric and ranks
+    that candidate last, so it runs the 2.0 kernel: regret 1.0. Ranking the -0.2 as the
+    smallest time reported a perfect pick the engine never makes."""
+    corpus, scorer = _negative_time_problem()
+    report = evaluate_all(corpus, scorer, target="avgTimeMs", objective="min",
+                          score_declaration={"metric": "time", "calibrated": True,
+                                             "transform": "log1p"}).report
+
+    assert report["metrics"]["top1_regret"]["max"] == pytest.approx(1.0)
+    calibration = report["metrics"]["calibration"]
+    assert calibration["excluded_runtime_discarded_predictions"] == 1
+    # Only the admitted 1.0-against-2.0 pair is calibrated: a 50% under-prediction.
+    assert calibration["all_candidates"]["signed_relative_bias"] == pytest.approx(-0.5)
+
+
+def test_a_metric_less_identity_score_may_be_signed():
+    """An ordering key with no metric and no log/sqrt transform is not a physical quantity,
+    so the runtime ranks a negative score like any other: the -0.2 is the pick."""
+    corpus, scorer = _negative_time_problem()
+    report = evaluate_all(corpus, scorer, target="avgTimeMs", objective="min",
+                          score_declaration={"transform": "identity"}).report
+
+    assert report["metrics"]["top1_regret"]["max"] == pytest.approx(0.0)
+
+
 def _trained(keys=None, trained_on="training.json"):
     from types import SimpleNamespace
 

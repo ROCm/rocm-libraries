@@ -376,3 +376,54 @@ def test_a_generated_encoding_survives_train_then_score(tmp_path, evaluator):
     )
     assert np.all(np.isfinite(scores))
     assert scores[0] > scores[1], "the faster pipeline did not score higher"
+
+
+def _two_group_time_model(directory: Path, group_zero: float, group_one: float) -> Path:
+    """A grouped `time` ranker whose layer 1 scores group 0 and group 1 as the raw values given.
+
+    Built from dumped ensembles rather than by training, so the layer-1 values are exact:
+    one split on `kernel.group` at 0.5. Each group's layer 2 is a constant.
+    """
+    from uhd_gen.lgbm_to_flatbuffer import build_gbdt_model
+
+    def constant(leaf: float) -> dict:
+        return {"max_feature_idx": 1, "tree_info": [{"tree_structure": {"leaf_value": leaf}}]}
+
+    layer_one = {"max_feature_idx": 1, "tree_info": [{"tree_structure": {
+        "split_feature": 1, "threshold": 0.5, "decision_type": "<=", "default_left": True,
+        "left_child": {"leaf_value": group_zero}, "right_child": {"leaf_value": group_one}}}]}
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "model.bin").write_bytes(build_gbdt_model(
+        layer_one, "sha256:grouped_admission", group_by_feature_index=1,
+        groups=[(0.0, constant(1.0)), (1.0, constant(1.0))]))
+    (directory / "train_manifest.json").write_text(
+        json.dumps({"features": FEATURES, "target": "avgTimeMs", "objective": "min",
+                    "group_by_feature": "kernel.group"}), encoding="utf-8")
+    (directory / "heuristic.uhd.json").write_text(json.dumps({
+        "objective": "min", "tree_data": {"artifact": "model.bin"},
+        "score": {"metric": "time", "calibrated": True, "transform": "log1p"},
+        "features_signature": [f"${name}" for name in FEATURES]}), encoding="utf-8")
+    return directory
+
+
+@pytest.mark.parametrize("group_zero, group_one, rows, survivor", [
+    # A negative recovered time is discarded by the runtime, so it cannot choose a group,
+    # even though it is the best raw score under `min`.
+    (-0.5, 0.5, (0.0, 1.0), 1.0),
+    # An exact tie goes to the smaller group value whatever order the rows arrive in.
+    (0.5, 0.5, (1.0, 0.0), 0.0),
+    # Nothing admissible: no group is chosen and every candidate falls to declared order.
+    (-0.5, -0.5, (0.0, 1.0), None),
+])
+def test_layer_one_chooses_a_group_only_from_scores_the_runtime_admits(tmp_path, group_zero, group_one,
+                                                                       rows, survivor):
+    """TreeDataAdapter::scoreBatch's group decision: only a row naming a group whose layer-1
+    score is admissible (finite, and positive for a physical score) may choose; the best in
+    the objective's direction wins, exact ties to the smaller group value."""
+    bundle = load_model(_two_group_time_model(tmp_path / "model", group_zero, group_one))
+    frame = pd.DataFrame([{"q.size": 4.0, "kernel.group": group} for group in rows])
+    scores = bundle.scorer(frame)
+    if survivor is None:
+        assert np.isneginf(scores).all()
+    else:
+        assert frame.loc[np.isfinite(scores), "kernel.group"].tolist() == [survivor]

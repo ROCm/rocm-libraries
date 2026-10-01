@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 pd = pytest.importorskip("pandas")
-from uhd_gen.generate import _catalog_label, collect_graph
+from uhd_gen.generate import _catalog_label, collect_graph, feature_recipe, withheld_kernel_fields
 from uhd_gen.provenance import snapshot_provenance
 
 
@@ -292,8 +292,11 @@ def _immediate_bench(monkeypatch, provenance, *, flops=True, declared=None, brok
             raise ValueError("hipdnn_bench failed (-11): segmentation fault")
         # A `time` request lets the engine's time ranker pick a faster kernel.
         average = (1.0 + graph["size"] / 10) * (0.8 if metric == "time" else 1.0)
+        # As EnginePredictor/GenericEngine emit it: the selector revision, plus the descriptor
+        # set a descriptor-backed engine loaded from.
         binding = {"engine": engine, "role": "predict_engine", "arch": "gfx942", "metric": metric,
-                   "selector_revision": "provider-1", "trained_against": provenance}
+                   "selector_revision": "provider-1",
+                   "trained_against": {"selector_revision": "provider-1", **provenance}}
         if declared and metric in declared:
             binding["uhd_id"] = declared[metric]
         features = {"graph.nodes[0].dy.dims[0]": graph["size"] + 1, "device.cu_count": 120}
@@ -458,3 +461,40 @@ def test_a_manifest_listing_a_missing_graph_is_refused(tmp_path):
     (root / "graphs" / "conv_1.json").unlink()
     with pytest.raises(ValueError, match="conv_1.json"):
         discover_graphs([str(root)])
+
+
+#: The gfx950 attention shape: the collection UED exposed every KMD field, the shipping UED
+#: one knob, and the matcher binds `causal` from the graph.
+_KMD_FIELDS = ["block_m", "causal", "ragged"]
+_SHIPPING_KNOBS = ["block_m"]
+
+
+def _attention_frame():
+    return pd.DataFrame({
+        "kernel.block_m": [64, 128, 64, 128], "kernel.causal": [1, 1, 0, 0],
+        "kernel.ragged": [0, 1, 0, 1], "gfx950_attention_dense.causal": [1, 1, 0, 0],
+        "graph.flops": [1e12, 1e12, 2e12, 2e12], "device.cu_count": [256] * 4})
+
+
+def test_generation_offers_kernel_features_only_for_the_shipping_knobs():
+    """The runtime admits a ranker only if each `$kernel.*` axis is a knob of the UED that
+    ships it; the collection UED exposes every KMD field, and proposing from it is how the
+    gfx950 rankers came to read `$kernel.causal` and were never used. A graph-bound field is
+    still learned from -- through its problem-side twin."""
+    frame = _attention_frame()
+    signature, _ = feature_recipe(frame, set(frame.columns), None, _KMD_FIELDS, _SHIPPING_KNOBS, [])
+
+    assert "$kernel.block_m" in signature and "$gfx950_attention_dense.causal" in signature
+    assert not {"$kernel.causal", "$kernel.ragged"} & set(signature)
+    assert [(entry["field"], entry["reason"], entry.get("read_instead"))
+            for entry in withheld_kernel_fields(_KMD_FIELDS, _SHIPPING_KNOBS, set(frame.columns))] == [
+        ("causal", "graph_bound", "gfx950_attention_dense.causal"),
+        ("ragged", "not_a_shipping_knob", None)]
+
+
+@pytest.mark.parametrize("authored", [["$kernel.causal", "$graph.flops"],
+                                      [{"ceil_div": ["$graph.flops", "$kernel.ragged[0]"]}]])
+def test_an_authored_recipe_reading_an_unexposed_kernel_field_is_refused_before_training(authored):
+    frame = _attention_frame()
+    with pytest.raises(ValueError, match="does not expose as knobs"):
+        feature_recipe(frame, set(frame.columns), authored, _KMD_FIELDS, _SHIPPING_KNOBS, [])

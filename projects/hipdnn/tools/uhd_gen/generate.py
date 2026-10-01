@@ -21,7 +21,8 @@ from . import addressing
 from .catalog import DeterministicCatalogError, candidate_density
 from .coverage import device_field_coverage, enforce_device_coverage, propose_features
 from .evaluate import problem_keys, resolve_grouping, split_problems
-from .features import build_features_signature, signature_references
+from .features import build_features_signature, require_admissible_kernel_axes, signature_references
+from .knobs import graph_bound_twins
 from .provenance import ROLES, descriptor_id, snapshot_provenance
 from .immediate import LABEL_STATISTIC, ROLE, normalize_row, normalize_corpus, training_binding, validate_signature
 from .ranking_metrics import DEFAULT_RANKING_METRIC, RANKING_METRICS, ranking_metric
@@ -442,6 +443,59 @@ def _declared_uhd_id(binding: dict, metric: str, requested: str | None) -> str |
     return requested
 
 
+def withheld_kernel_fields(kmd_fields: list[str], knobs: list[str], published) -> list[dict]:
+    """The KMD fields generation never offers as `$kernel.*` features, each with why.
+
+    The collection UED exposes every KMD field (RFC 0019 §13.2) so every catalog entry is
+    reachable while timing; the model, though, ships under the AUTHORED UED, and the runtime
+    admits it only if each `$kernel.*` axis is one of that UED's knobs. A field the matcher
+    binds from the graph is no loss: its value is on the problem side under the twin column
+    named here, which is where the model reads it.
+    """
+    twins = graph_bound_twins(published)
+    withheld = []
+    for field in kmd_fields:
+        if field in knobs:
+            continue
+        if field in twins:
+            withheld.append({"field": field, "reason": "graph_bound", "read_instead": twins[field],
+                             "detail": "the matcher binds it from the graph, so the problem column "
+                                       "carries the same value"})
+        else:
+            withheld.append({"field": field, "reason": "not_a_shipping_knob",
+                             "detail": "the shipping UED does not expose it, so the runtime would "
+                                       "refuse a model ranking on it"})
+    return withheld
+
+
+def feature_recipe(train_frame: pd.DataFrame, published: set[str], authored: list | None,
+                   kmd_fields: list[str] | None, knobs: list[str],
+                   pairs: list[tuple[str, str]]) -> tuple[list, list]:
+    """(signature, omitted proposals): the authored recipe, or one proposed from the corpus.
+
+    `kmd_fields` is None for an engine-level run, which reads no kernel fields at all. For a
+    catalog run the proposal offers `$kernel.*` only for the shipping UED's knobs, and an
+    authored recipe reading any other kernel field is refused here, before training spends
+    hours on a model the runtime would not use.
+    """
+    omitted = []
+    if authored is not None:
+        signature = authored
+    else:
+        offered = {"kernel." + field for field in kmd_fields or () if field in knobs}
+        scalar_columns = [name for name in sorted(published)
+                          if train_frame[name].notna().all()
+                          and train_frame[name].map(lambda value: isinstance(value, (str, int, float, bool))).all()]
+        legal_kernel_fields = {name for name in scalar_columns if name.split("[", 1)[0] in offered}
+        signature, omitted = propose_features(train_frame[scalar_columns], legal_kernel_fields, pairs)
+    if not isinstance(signature, list) or not signature:
+        raise ValueError("the feature recipe must be a nonempty canonical array")
+    if kmd_fields is not None:
+        require_admissible_kernel_axes(signature, knobs, kmd_fields, "the feature recipe")
+    return signature, omitted
+
+
+
 def run_generate(args: argparse.Namespace) -> int:
     from .__main__ import main
     from .promote import PromoteError, build_plan, run_promote, add_promote_arguments
@@ -477,13 +531,16 @@ def run_generate(args: argparse.Namespace) -> int:
             if not tree.is_dir():
                 raise ValueError("--descriptor-tree must be an existing descriptor root (it may be empty)")
             provenance, ued, exposed = None, {}, {}
-            kernel_fields = set()
+            kmd_fields, knobs = None, []
             ordinals = {}
         else:
             provenance = snapshot_provenance(tree, args.engine, args.arch)
             ued_path, ued = _descriptor(tree, ".ued.json", provenance["ued"]["id"])
             _, kmd = _descriptor(tree, ".kmd.json", provenance["kmd"]["id"])
-            kernel_fields = {"kernel." + field["name"] for field in kmd["fields"]}
+            kmd_fields = [field["name"] for field in kmd["fields"]]
+            knobs = ued.get("knobs", [])
+            if not isinstance(knobs, list) or any(not isinstance(knob, str) for knob in knobs):
+                raise ValueError("the shipping UED's knobs must be an array of strings")
             ordinals = {}
         output.parent.mkdir(parents=True, exist_ok=True)
         stage = Path(tempfile.mkdtemp(prefix=".uhd-generate-", dir=output.parent))
@@ -671,20 +728,14 @@ def run_generate(args: argparse.Namespace) -> int:
             if len(parts) != 2:
                 raise ValueError("--dim-tile requires DIMENSION=KERNEL_FIELD")
             pairs.append(tuple(part.removeprefix("$") for part in parts))
-        omitted = []
         if args.feature_signature:
-            signature = json.loads(Path(args.feature_signature).read_text(encoding="utf-8"))
+            authored = json.loads(Path(args.feature_signature).read_text(encoding="utf-8"))
         elif args.features:
-            signature = build_features_signature(args.features)
+            authored = build_features_signature(args.features)
         else:
-            scalar_columns = [name for name in sorted(published)
-                              if train_frame[name].notna().all()
-                              and train_frame[name].map(lambda value: isinstance(value, (str, int, float, bool))).all()]
-            legal_kernel_fields = {name for name in scalar_columns
-                                   if name.split("[", 1)[0] in kernel_fields}
-            signature, omitted = propose_features(train_frame[scalar_columns], legal_kernel_fields, pairs)
-        if not isinstance(signature, list) or not signature:
-            raise ValueError("the feature recipe must be a nonempty canonical array")
+            authored = None
+        signature, omitted = feature_recipe(train_frame, published, authored, kmd_fields, knobs, pairs)
+        withheld = withheld_kernel_fields(kmd_fields or [], knobs, published)
         if immediate:
             # Leakage only; whether every entry evaluates on each graph's published features
             # is the shared evaluator's answer, which training asks once the encoding exists.
@@ -766,6 +817,9 @@ def run_generate(args: argparse.Namespace) -> int:
             # the --max-graph-failures budget; their staged copies stay under graphs/.
             "failed_graphs": failed_graphs, "max_graph_failures": args.max_graph_failures,
             "commands": commands, "features_signature": signature, "omitted_proposals": omitted,
+            # KMD fields never offered as `$kernel.*` features, and why: the runtime admits only
+            # the shipping UED's knobs, and a graph-bound field is read from its problem twin.
+            "withheld_kernel_fields": withheld,
             # One entry per UHD emitted: its metric (null for a metric-less ranker), where it
             # was trained, and the exact commands that trained and evaluated it.
             "models": models,

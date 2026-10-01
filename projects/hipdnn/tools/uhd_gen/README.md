@@ -237,6 +237,9 @@ It validates everything before writing anything, and refuses rather than half-su
   `tree_data`, the declared digest, the `HGBM` file identifier, a structural decode, and
   the artifact's `features_hash` matching the descriptor's; for any other artifact, the
   declared digest. A `predict_engine` model must not be a grouped (two-layer) artifact.
+  The descriptor's `features_hash` is recomputed from its `features_signature` and
+  `categorical_encoding` through the feature evaluator, as the loader does, rather than
+  compared with another stored copy.
   When the descriptor declares no digest, `promote` writes the artifact's (bare hex
   SHA-256, as the runtime compares it) into the installed copy, so the runtime's model
   identity follows the bytes installed rather than a UUID that outlives a weight change;
@@ -252,6 +255,14 @@ It validates everything before writing anything, and refuses rather than half-su
   *other*-arch packs own are ignored (a model collected over gfx942 and gfx950 packs is
   valid on each), and one no pack of the engine owns any more is refused. This is the rule
   the runtime loader applies.
+- every `$kernel.*` axis the signature reads (by base name: `$kernel.tile[0]` reads
+  `tile`) must be a field of the engine's KMD **and** a knob of its UED as installed,
+  after any `--remove-knob`. The runtime drops any other model and ranks by priority, then
+  id (RFC 0019 §6.3 check 2). Problem-side facts such as dtype, head counts or causal
+  come from the graph's own columns, never `$kernel.*`;
+- a `predict_engine` model for a descriptor-backed engine must record
+  `trained_against.selector_revision`, which the runtime compares with the engine's
+  current selector revision. Every binding `hipdnn_bench` records carries it.
 
 ## `evaluate`: regret against the best kernel that was measured
 
@@ -273,6 +284,14 @@ RMSE on `log1p(target)` is what `train` reports, and it can improve while the mo
   oracle's zero. The model's regret is not interpretable alone: §11.4 wants to know
   whether it beats the ordering it replaces. It also warns when it does not, in
   aggregate (MUST 2) or in any one regime (MUST 3).
+
+The model's pick is the one the engine would make: a candidate is rankable only when its
+recovered score is finite and, for a physical score (a declared `score.metric`, or a
+`log`/`log1p`/`sqrt` transform), positive. Anything else the runtime discards, so it
+ranks last in declared order here too, and calibration leaves it out and counts it as
+`excluded_runtime_discarded_predictions`. This is the only regret `uhd_gen` reports:
+`train` has no out-of-fold estimate, because one fitted unlike the exported model
+describes a model nobody ships.
 
 It writes `eval_report.json` — the artifact §10.4 names — into `--model-dir`.
 
@@ -614,6 +633,15 @@ the engine would never read. `generation_manifest.json` (`uhd_gen.generation/2`)
 a `models` entry per UHD with its metric, id, directory, corpus and the exact
 train/evaluate commands.
 
+A catalog ranker is fitted only on axes the **shipping** UED admits. Collection exposes
+every KMD field so every catalog entry is reachable, but `generate` offers `$kernel.*`
+features only for the shipping UED's knobs. A field the matcher binds from the graph
+(dtype, head counts, causal, ...) is read from its problem-side twin column instead.
+`generation_manifest.json`'s `withheld_kernel_fields` lists every KMD field that was not
+offered, with the reason (`graph_bound` and the column to read instead, or
+`not_a_shipping_knob`). An authored `--feature-signature`/`--features` that reads any other
+kernel field is refused before training.
+
 `--graphs` takes both serialized forms: hand-written or exported `*.json`, and the
 binary FlatBuffers `hipdnn_corpus_gen` writes as `graphs/<operation>_<n>.fb`, so a
 generated corpus composes with `generate` directly. A `hipdnn_corpus_gen` root (or its
@@ -678,8 +706,10 @@ explicitly requested `--metric tflops` without a work count fails instead.
 the effective count the runtime computed for the graph it just ran. A corpus that was
 collected as CSV and published by `uhd_gen.dataset` instead carries `tflops` and `gbs`
 derived from the `<root>.flops` and `<root>.bytes` that same engine logged beside the
-problem, and the row's own `minTimeMs`. Both paths take the count from the engine and
-differ only in which of its outputs they read.
+problem, and the row's own `avgTimeMs` -- the statistic a calibrated label is defined on,
+in both paths. Both take the count from the engine and differ only in which of its
+outputs they read. `--resolve-duplicates` keys a problem on its shape, graph and device
+together, so one shape measured on two boards stays two problems.
 
 ### Engine-level immediate predictions
 

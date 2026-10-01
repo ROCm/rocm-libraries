@@ -47,7 +47,11 @@ def enforce_device_coverage(signature: list, coverage: dict) -> None:
 
 
 def propose_features(df, kernel_fields: set[str], dim_tile_pairs: list[tuple[str, str]]) -> tuple[list, list]:
-    """Published problem/device values and KMD fields, plus author-declared geometry."""
+    """Published problem/device values and the offered kernel fields, plus author-declared geometry.
+
+    `kernel_fields` is what the caller may read through `$kernel.*` -- for generation, the
+    shipping UED's knobs -- so a dim-to-tile pair must name one of them too.
+    """
     coverage = device_field_coverage(df)
     signature = ["$" + name for name in df.columns
                  if name.startswith("device.") or name in kernel_fields]
@@ -57,7 +61,8 @@ def propose_features(df, kernel_fields: set[str], dim_tile_pairs: list[tuple[str
     omitted = []
     for dimension, tile in dim_tile_pairs:
         if dimension not in df.columns or tile not in kernel_fields or tile not in df.columns:
-            raise ValueError(f"dim-to-tile pair {dimension}={tile} must name a published dimension and KMD field")
+            raise ValueError(f"dim-to-tile pair {dimension}={tile} must name a published dimension and "
+                             "an offered kernel field (a knob of the shipping UED)")
         grid = {"ceil_div": ["$" + dimension, "$" + tile]}
         signature.extend([grid, {"%": ["$" + dimension, "$" + tile]}])
         if "device.cu_count" in df.columns:

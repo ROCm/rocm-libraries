@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import functools
 import hashlib
 import json
 import uuid
@@ -12,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from uhd_gen.features import evaluator_feature_semantics_revision
+from uhd_gen.features import compute_features_hash, evaluator_feature_semantics_revision, resolve_feature_evaluator
 from uhd_gen.lgbm_to_flatbuffer import build_gbdt_model
 from uhd_gen.promote import PromoteError, _apply, add_promote_arguments, build_plan, parse_uhd_ids, run_promote
 from uhd_gen.provenance import snapshot_provenance
@@ -22,7 +23,8 @@ KMD = "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f"
 OLD = "727e5401-3b99-49ff-a2fc-68fd4eedbb54"
 NEW = "cf37fa30-32dc-4a21-a008-68ef5e0d30a6"
 OTHER = "edc1d5b4-6f12-4a40-a749-403966474bc9"
-FEATURES_HASH = "sha256:" + "0" * 16
+KERNEL_SIGNATURE = ("$kernel.block_size",)
+OPAQUE_SIGNATURE = ("$graph.work",)
 
 # Promoting a feature-reading model asks the shared evaluator for the build's feature
 # semantics revision (FeatureSemantics.hpp), exactly as training and evaluation already
@@ -30,11 +32,19 @@ FEATURES_HASH = "sha256:" + "0" * 16
 pytestmark = pytest.mark.usefixtures("evaluator")
 
 
-def _weights(leaf=1.0, *, grouped=False, features_hash=FEATURES_HASH):
+@functools.cache
+def _hash(signature=KERNEL_SIGNATURE, encoding=None):
+    """The digest the loader recomputes, which is the only one promote now accepts."""
+    return compute_features_hash(list(signature), json.loads(encoding) if encoding else None,
+                                 resolve_feature_evaluator())
+
+
+def _weights(leaf=1.0, *, grouped=False, signature=KERNEL_SIGNATURE, features_hash=None):
     """A `tree_data` artifact the runtime would load: promote verifies what it installs."""
     ensemble = {"tree_info": [{"tree_structure": {"leaf_value": leaf}}], "max_feature_idx": 0,
                 "objective": "regression"}
-    return build_gbdt_model(ensemble, features_hash, group_by_feature_index=0 if grouped else -1,
+    return build_gbdt_model(ensemble, features_hash or _hash(tuple(signature)),
+                            group_by_feature_index=0 if grouped else -1,
                             groups=[(0.0, ensemble)] if grouped else None)
 
 
@@ -53,7 +63,8 @@ def _tree(root):
            "metadata": KMD, "knobs": ["block_size", "tile_m"],
            "sort_kernel_catalog": {"gfx942": OLD, "gfx950": OTHER, "default": OTHER},
            "predict_engine": {"gfx942": OTHER}})
-    _write(root / "metadata.kmd.json", {"version": "1.0", "id": KMD, "fields": []})
+    _write(root / "metadata.kmd.json", {"version": "1.0", "id": KMD, "fields": [
+        {"name": "block_size", "type": "int"}, {"name": "tile_m", "type": "int"}]})
     # The incumbent gfx942 ranker is installed: promotion reads a bound UHD's metric to
     # decide whether the incoming one replaces it.
     _installed(root / "old.uhd.json", OLD)
@@ -69,11 +80,12 @@ def _installed(path, identity, score=None):
     return _write(path, doc)
 
 
-def _model(root, tree, *, identity=NEW, artifact="model.bin", provenance=None, metric=None):
+def _model(root, tree, *, identity=NEW, artifact="model.bin", provenance=None, metric=None,
+           signature=KERNEL_SIGNATURE):
     provenance = provenance if provenance is not None else snapshot_provenance(tree, arch="gfx942")
     doc = {"version": "1.0", "id": identity, "name": "model", "adapter": "tree_data",
-           "objective": "max", "features_signature": ["$kernel.block_size"],
-           "features_hash": "sha256:" + "0" * 16, "trained_against": provenance,
+           "objective": "max", "features_signature": list(signature),
+           "features_hash": _hash(tuple(signature)), "trained_against": provenance,
            "tree_data": {"artifact": artifact}}
     if metric is not None:
         doc.update(objective={"tflops": "max", "time": "min"}[metric],
@@ -82,7 +94,7 @@ def _model(root, tree, *, identity=NEW, artifact="model.bin", provenance=None, m
     _write(root / "train_manifest.json", {"training_arches": ["gfx942"], "trained_against": provenance})
     payload = root / artifact
     payload.parent.mkdir(parents=True, exist_ok=True)
-    payload.write_bytes(_weights())
+    payload.write_bytes(_weights(signature=signature))
     return root
 
 
@@ -146,14 +158,19 @@ def test_default_filenames_preserve_other_model_bindings(tmp_path, binding):
     else:
         role = "predict_engine"
     provenance = snapshot_provenance(tree, engine=engine, arch=arch)
-    second = _model(tmp_path / "second", tree, identity=OTHER, provenance=provenance)
+    signature = KERNEL_SIGNATURE
+    if binding == "role":
+        # An engine-level model records the selector revision it was measured under, as
+        # every bench binding does, and reads only the graph.
+        provenance["selector_revision"] = "provider-1"
+        signature = ("$graph.flops",)
+    second = _model(tmp_path / "second", tree, identity=OTHER, provenance=provenance, signature=signature)
     document = _read(second / "heuristic.uhd.json")
     if binding == "role":
-        document.update(features_signature=["$graph.flops"],
-                        score={"metric": "tflops", "calibrated": True, "transform": "identity"})
+        document.update(score={"metric": "tflops", "calibrated": True, "transform": "identity"})
     _write(second / "heuristic.uhd.json", document)
     _write(second / "train_manifest.json", {"training_arches": [arch], "trained_against": provenance})
-    (second / "model.bin").write_bytes(_weights(2.0))
+    (second / "model.bin").write_bytes(_weights(2.0, signature=signature))
     second_plan = build_plan(second, tree, engine=engine, role=role, arch=arch)
     _apply(second_plan)
 
@@ -166,12 +183,13 @@ def test_default_filenames_preserve_other_model_bindings(tmp_path, binding):
     }
     [selected] = _read(second_plan.ued_path)[role][arch]
     path, document = installed[selected]
-    assert (path.parent / document["tree_data"]["artifact"]).read_bytes() == _weights(2.0)
+    assert (path.parent / document["tree_data"]["artifact"]).read_bytes() == _weights(2.0, signature=signature)
 
-    (second / "model.bin").write_bytes(_weights(3.0))
+    (second / "model.bin").write_bytes(_weights(3.0, signature=signature))
     _apply(build_plan(second, tree, engine=engine, role=role, arch=arch))
     assert first_artifact.read_bytes() == _weights(1.0)
-    assert (path.parent / document["tree_data"]["artifact"]).read_bytes() == _weights(3.0)
+    assert (path.parent / document["tree_data"]["artifact"]).read_bytes() == _weights(3.0, signature=signature)
+
 
 def test_dry_run_makes_no_writes(tmp_path):
     tree = _tree(tmp_path / "tree")
@@ -550,8 +568,8 @@ def _opaque_model(root, *, identity=NEW, revision="aiter-fwd-1", declared=NEW):
     """
     provenance = {"selector_revision": revision}
     doc = {"version": "1.0", "id": identity, "name": "model", "adapter": "tree_data",
-           "objective": "max", "features_signature": ["$graph.work"],
-           "features_hash": FEATURES_HASH, "trained_against": provenance,
+           "objective": "max", "features_signature": list(OPAQUE_SIGNATURE),
+           "features_hash": _hash(OPAQUE_SIGNATURE), "trained_against": provenance,
            "score": {"metric": "tflops", "calibrated": True, "transform": "identity"},
            "tree_data": {"artifact": "model.bin"}}
     _write(root / "heuristic.uhd.json", doc)
@@ -561,7 +579,7 @@ def _opaque_model(root, *, identity=NEW, revision="aiter-fwd-1", declared=NEW):
     _write(root / "train_manifest.json",
            {"training_arches": ["gfx950"], "trained_against": provenance,
             "role": "predict_engine", "binding": binding})
-    (root / "model.bin").write_bytes(_weights())
+    (root / "model.bin").write_bytes(_weights(signature=OPAQUE_SIGNATURE))
     return root
 
 
@@ -582,7 +600,7 @@ def test_a_model_for_an_engine_with_no_ued_installs_without_touching_a_role_map(
     assert _read(tree / "engine.ued.json") == before, "no role map may change"
     installed = tree / "heuristics" / "ASM_SDPA_ENGINE" / "predict_engine" / "gfx950" / "tflops"
     assert _read(installed / "heuristic.uhd.json")["id"] == NEW
-    assert (installed / "model.bin").read_bytes() == _weights()
+    assert (installed / "model.bin").read_bytes() == _weights(signature=OPAQUE_SIGNATURE)
 
 
 def test_an_opaque_model_cannot_take_an_identity_already_installed(tmp_path):
@@ -872,12 +890,120 @@ def test_a_grouped_artifact_is_refused_for_engine_prediction_only(tmp_path):
     engine-level meaning; as a catalog ranker it is the two-layer model it was built as."""
     tree = _tree(tmp_path / "tree")
     model = _opaque_model(tmp_path / "opaque")
-    (model / "model.bin").write_bytes(_weights(grouped=True))
+    (model / "model.bin").write_bytes(_weights(grouped=True, signature=OPAQUE_SIGNATURE))
     with pytest.raises(PromoteError, match="grouped"):
         build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine", arch="gfx950")
     catalog = _model(tmp_path / "catalog", tree)
     (catalog / "model.bin").write_bytes(_weights(grouped=True))
     build_plan(catalog, tree)
+
+
+#: The gfx950 attention-dense engine as shipped when its rankers were found unloadable: a
+#: UED exposing two knobs over a KMD whose other fields its matcher binds from the graph.
+ATTENTION_UED = "4b3a0123-578f-4e9c-a965-b010a18ff107"
+ATTENTION_KMD = "589bc6c6-d94e-4400-95d7-3e517f9b6b67"
+ATTENTION_FIELDS = ("dtype", "head_size", "num_query_heads", "num_kv_heads", "causal", "ragged",
+                    "sliding_window", "batch", "seqlen_q", "seqlen_kv", "block_m", "block_n")
+#: Every `$kernel.*` axis the shipped gfx950 rankers (tflops and time alike) read, plus two of
+#: their graph columns -- one of them the problem-side twin of `$kernel.causal`.
+SHIPPED_RANKER_SIGNATURE = ("$kernel.block_m", "$kernel.block_n", "$kernel.causal", "$kernel.dtype",
+                            "$kernel.head_size", "$kernel.num_kv_heads", "$kernel.num_query_heads",
+                            "$gfx950_attention_dense.causal", "$graph.flops")
+SHIPPED_ENCODING = json.dumps({"$kernel.dtype": {"BF16": 0, "FP16": 1}})
+
+
+def _attention_tree(root):
+    _write(root / "gfx950_attention_dense.ued.json", {
+        "version": "1.0", "id": ATTENTION_UED, "name": "hipkernel:Gfx950AttentionDense",
+        "metadata": ATTENTION_KMD, "knobs": ["block_m", "block_n"]})
+    _write(root / "gfx950_attention_dense.kmd.json", {
+        "version": "1.0", "id": ATTENTION_KMD, "name": "Gfx950AttentionDense variant fields",
+        "fields": [{"name": name, "type": "string" if name == "dtype" else "int"}
+                   for name in ATTENTION_FIELDS]})
+    return root
+
+
+def _attention_ranker(root, tree, metric, signature, encoding=None):
+    provenance = snapshot_provenance(tree, arch="gfx950")
+    doc = {"version": "1.0", "id": NEW, "name": "ranker", "adapter": "tree_data",
+           "objective": {"tflops": "max", "time": "min"}[metric],
+           "score": {"metric": metric, "calibrated": True, "transform": "log1p"},
+           "features_signature": list(signature), "features_hash": _hash(signature, encoding),
+           "trained_against": provenance, "tree_data": {"artifact": "model.bin"}}
+    if encoding:
+        doc["categorical_encoding"] = json.loads(encoding)
+    _write(root / "heuristic.uhd.json", doc)
+    _write(root / "train_manifest.json", {"training_arches": ["gfx950"], "trained_against": provenance})
+    (root / "model.bin").write_bytes(_weights(features_hash=_hash(signature, encoding)))
+    return root
+
+
+@pytest.mark.parametrize("metric", ["tflops", "time"])
+def test_the_shipped_gfx950_rankers_signature_is_refused_for_reading_unexposed_kernel_fields(tmp_path, metric):
+    """RFC 0019 §6.3 check 2: the runtime drops a model whose `$kernel.*` axes are not knobs
+    of its UED, and ranks by declared order. Promote accepted exactly that model -- generation
+    fitted it on the collection UED, which exposes every KMD field -- so the shipped rankers
+    installed cleanly and were never used. The same model reading the graph's twin columns
+    and only the shipped knobs installs."""
+    tree = _attention_tree(tmp_path / "tree")
+    shipped = _attention_ranker(tmp_path / "shipped", tree, metric, SHIPPED_RANKER_SIGNATURE, SHIPPED_ENCODING)
+    before = _files(tmp_path)
+    with pytest.raises(PromoteError) as refusal:
+        build_plan(shipped, tree, arch="gfx950")
+    assert "[causal, dtype, head_size, num_kv_heads, num_query_heads]" in str(refusal.value)
+    assert "[block_m, block_n]" in str(refusal.value)
+    assert _files(tmp_path) == before
+
+    admissible = tuple(entry for entry in SHIPPED_RANKER_SIGNATURE
+                       if not entry.startswith("$kernel.") or entry in ("$kernel.block_m", "$kernel.block_n"))
+    build_plan(_attention_ranker(tmp_path / "admissible", tree, metric, admissible), tree, arch="gfx950")
+
+
+def test_a_kernel_axis_the_kmd_does_not_declare_is_refused_even_when_it_is_a_knob(tmp_path):
+    tree = _tree(tmp_path / "tree")
+    ued = _read(tree / "engine.ued.json")
+    ued["knobs"].append("waves")
+    _write(tree / "engine.ued.json", ued)
+    with pytest.raises(PromoteError, match=r"\[waves\], which the KMD does not declare"):
+        build_plan(_model(tmp_path / "model", tree, signature=("$kernel.waves",)), tree)
+
+
+def test_a_features_hash_that_is_not_its_signatures_digest_is_refused(tmp_path):
+    """The loader recomputes the digest from the signature and drops the model on a mismatch.
+    Comparing the artifact's stored copy with the descriptor's proves only that one run
+    stamped both: a signature edited after training kept both stale copies in agreement."""
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    stale = _read(model / "heuristic.uhd.json")
+    stale["features_signature"] = ["$kernel.tile_m"]
+    _write(model / "heuristic.uhd.json", stale)
+    before = _files(tmp_path)
+    with pytest.raises(PromoteError, match=rf"{_hash()} is not the digest .*{_hash(('$kernel.tile_m',))}"):
+        build_plan(model, tree)
+    assert _files(tmp_path) == before
+
+
+def test_an_engine_level_model_for_a_descriptor_engine_must_record_its_selector_revision(tmp_path):
+    """The runtime holds a descriptor-backed engine's L1 model to the selector revision it
+    was measured under and reports UNAVAILABLE without one, so installing it ships a model
+    the engine never scores."""
+    tree = _tree(tmp_path / "tree")
+    ued = _read(tree / "engine.ued.json")
+    ued.pop("predict_engine")
+    _write(tree / "engine.ued.json", ued)
+
+    def l1(root, provenance):
+        model = _model(root, tree, provenance=provenance, signature=("$graph.flops",))
+        document = _read(model / "heuristic.uhd.json")
+        document["score"] = {"metric": "tflops", "calibrated": True, "transform": "identity"}
+        _write(model / "heuristic.uhd.json", document)
+        return model
+
+    provenance = snapshot_provenance(tree, arch="gfx942")
+    with pytest.raises(PromoteError, match="selector_revision"):
+        build_plan(l1(tmp_path / "bare", provenance), tree, role="predict_engine")
+    build_plan(l1(tmp_path / "recorded", {**provenance, "selector_revision": "provider-1"}), tree,
+               role="predict_engine")
 
 
 def test_uhd_id_names_the_model_being_promoted_and_never_renames_it(tmp_path):

@@ -29,10 +29,13 @@ PROVENANCE = {"ued": {"id": UED, "revision": "1.0"},
 
 def measurement(*, engine=7, graph="graph", elapsed=2.0, robust=2.5, metric="tflops"):
     name = f"provider:engine{engine}"
+    selector = "provider-1/immediate-2/library-3"
+    # trained_against as GenericEngine emits it: the selector revision beside the descriptor
+    # set the engine loaded from.
     return {"engine_id": engine, "engine_name": name, "graph_id": graph, "device_id": "board",
             "arch": "gfx942", "binding": {"engine": name, "role": ROLE, "arch": "gfx942",
-            "metric": metric, "selector_revision": "provider-1/immediate-2/library-3",
-            "trained_against": copy.deepcopy(PROVENANCE)},
+            "metric": metric, "selector_revision": selector,
+            "trained_against": {**copy.deepcopy(PROVENANCE), "selector_revision": selector}},
             "features": {"graph.flops": 2e12, "graph.nodes": 1, "device.cu_count": 120},
             # RFC 0019.13 §11.2 (:2003) pins a calibrated score to `avgTimeMs`, so that
             # is the label. `robustMeanMs` rides along as §8.5's informational statistic

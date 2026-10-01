@@ -45,6 +45,7 @@ __all__ = [
     "ValueAblation",
     "add_knob_arguments",
     "analyse_knobs",
+    "graph_bound_twins",
     "knob_columns",
     "run_knobs",
 ]
@@ -72,6 +73,18 @@ def knob_columns(df: pd.DataFrame) -> list[str]:
         for c in df.columns
         if c.startswith(_KERNEL_PREFIX) and c not in _NOT_KNOBS and not c.endswith(".uid")
     ]
+
+
+def graph_bound_twins(columns) -> dict[str, str]:
+    """Short name -> the problem column carrying it, for a field the matcher binds.
+
+    A problem column named `seqlen_q` beside `kernel.seqlen_q` means the matcher bound the
+    kernel's value to the graph's. Matched on the short name, since the two sides do not
+    share a root: a knob is `kernel.seqlen_q` while its twin is `attention_dense.seqlen_q`.
+    """
+    return {column.split(".", 1)[1]: column
+            for column in columns
+            if "." in column and not column.startswith(_RESERVED_PREFIXES)}
 
 
 @dataclass
@@ -198,13 +211,8 @@ def analyse_knobs(
     #     the choice. That is a decision the author can revisit: build both and re-sweep
     #     to find out whether it matters, or drop it from the KMD as unearned.
     #
-    # Matched on the short name, since the two sides do not share a root: a knob is
-    # `kernel.seqlen_q` while its twin is `attention_dense.seqlen_q`.
-    graph_bound = {
-        column.split(".", 1)[1]: column
-        for column in usable.columns
-        if "." in column and not column.startswith(_RESERVED_PREFIXES)
-    }
+    # Matched on the short name (`graph_bound_twins`), since the two sides do not share a root.
+    graph_bound = graph_bound_twins(usable.columns)
     within = usable.groupby(group, dropna=False)
     knobs = []
     for name in knob_columns(usable):

@@ -370,7 +370,10 @@ def resolve_duplicates(frame: pd.DataFrame, latest_column: str, best_column: str
     coverage. Per problem, one occasion also means a problem's candidates were all measured
     against each other, which is what makes their times comparable at all.
     """
-    query = _query_columns(frame)
+    # The full problem identity -- shape, graph and device -- not the shape alone: the same
+    # shape on two boards (or two graphs sharing one) is two problems, and keyed on the shape
+    # the newer board's occasion deleted the other board's rows and mixed the two candidate sets.
+    query = _problem_key_columns(frame)
     if not query:
         return frame
 
@@ -399,11 +402,15 @@ def build_dataset(frame: pd.DataFrame) -> pd.DataFrame:
     _validate(frame)
     frame = _mark_incomplete_where_errored(frame)
 
+    # Derived from `avgTimeMs`, the statistic every calibrated label is defined on (RFC 0019
+    # §13.4, `ranking_metrics`): a min-derived rate names a different winner whenever one
+    # kernel's best run is fast and its typical run is not, and a model trained on it claims
+    # a calibration it does not have.
     query = _query_columns(frame)
     metrics = [
         derive_metrics(
             {_short_name(c): row[c] for c in query},
-            None if pd.isna(row["minTimeMs"]) else float(row["minTimeMs"]),
+            None if pd.isna(row["avgTimeMs"]) else float(row["avgTimeMs"]),
         )
         for _, row in frame.iterrows()
     ]
@@ -446,8 +453,9 @@ def main(argv: list[str] | None = None) -> int:
              "a re-measured problem is rejected as two merged collections.",
     )
     parser.add_argument(
-        "--best-column", default="minTimeMs", dest="best_column",
-        help="the column a repeat is resolved by, smallest kept (default: minTimeMs)",
+        "--best-column", default="avgTimeMs", dest="best_column",
+        help="the column a repeat is resolved by, smallest kept (default: avgTimeMs, the "
+             "statistic the published rates are derived from)",
     )
     args = parser.parse_args(argv)
 

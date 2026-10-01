@@ -378,6 +378,31 @@ def split_problems(
 # --------------------------------------------------------------------------------------
 
 
+#: Transforms whose inverse is a physical, strictly positive quantity whatever the metric.
+_PHYSICAL_TRANSFORMS = frozenset({"log", "log1p", "sqrt"})
+
+
+def score_is_physical(score_declaration: dict | None) -> bool:
+    """Whether the runtime holds this score to `> 0` (`scoreFromRaw`, UhdKernelHeuristic.hpp).
+
+    A declared metric is a physical quantity (a time, a throughput) that cannot be zero or
+    negative, and so is the inverse of a log/log1p/sqrt transform. A metric-less ranker with
+    an identity or exp transform is an ordering key, which may legitimately be signed.
+    """
+    declaration = score_declaration or {}
+    return bool(declaration.get("metric")) or declaration.get("transform") in _PHYSICAL_TRANSFORMS
+
+
+def rankable_scores(recovered: np.ndarray, physical: bool) -> np.ndarray:
+    """The runtime's score admission: finite, and positive when the score is physical.
+
+    Anything else the engine discards and ranks last, in declared order, so an offline
+    evaluator that ranked it would report a pick the engine never makes.
+    """
+    finite = np.isfinite(recovered)
+    return finite & (recovered > 0) if physical else finite
+
+
 def regret_of(picked: float, oracle: float, objective: str) -> float:
     """§11.2's top-1 regret: the fractional shortfall of `picked` against `oracle`."""
     if objective == "min":
@@ -599,6 +624,9 @@ def evaluate_corpus(
     calibration_measured: list[float] = []
     calibration_picked_predicted: list[float] = []
     calibration_picked_measured: list[float] = []
+    # Finite scores the runtime discards as non-positive; reported beside calibration.
+    discarded_predictions = 0
+    physical = score_is_physical(score_declaration)
     # Grouped by hand rather than through `Series.groupby`: the keys here are tuples,
     # and pandas treats a tuple key as a multi-column selector in several places. This
     # keeps the key exactly as it was built and the row index exactly as it was read.
@@ -643,13 +671,14 @@ def evaluate_corpus(
         # Rank in the objective's direction. `argsort` is stable, so predicted ties
         # keep corpus order rather than depending on the sort implementation.
         #
-        # An infinite score is "unusable", not broken: a grouped model returns -inf for every
-        # candidate outside the group layer 1 chose, which is the value `rankScored` already
-        # treats as unrankable. Forcing it last explicitly rather than letting its sign do the
-        # work -- under `min`, -inf is the smallest value and would otherwise be *picked*,
-        # turning a rejected candidate into the winner. If nothing is usable the stable sort
-        # leaves corpus order, which is §5 step 7's degraded ranking.
-        rankable = np.isfinite(predictions)
+        # Admission is the runtime's (`rankable_scores`): an unrankable candidate ranks last.
+        # Forced last explicitly rather than by its sign: under `min` a negative time (or a
+        # grouped model's -inf for a candidate outside the group layer 1 chose) is the
+        # smallest value and would otherwise be *picked*. Unrankable candidates keep corpus
+        # order among themselves, so if nothing is rankable the pick is §5 step 7's declared
+        # order -- what the engine runs.
+        rankable = rankable_scores(predictions, physical)
+        discarded_predictions += int(np.count_nonzero(np.isfinite(predictions) & ~rankable))
         ranking_key = -predictions if objective == "max" else predictions
         ranking_key = np.where(rankable, ranking_key, np.inf)
         order = np.argsort(ranking_key, kind="stable")
@@ -668,7 +697,9 @@ def evaluate_corpus(
         # A declined candidate is a decision, not a prediction: a grouped model returns -inf
         # for everything outside the group it chose, and counting those as predicted values
         # would report an arbitrarily large calibration error for the design working as
-        # intended. Only what the model actually scored is calibrated.
+        # intended. A non-positive score is discarded by the runtime before any consumer sees
+        # it, so it is not a value anything is arbitrated on either; it is counted instead.
+        # Only what the runtime actually uses is calibrated.
         calibration_predicted.extend(predictions[rankable].tolist())
         calibration_measured.extend(measured[rankable].tolist())
         if rankable[picked_position]:
@@ -746,6 +777,7 @@ def evaluate_corpus(
         calibration_measured,
         calibration_picked_predicted,
         calibration_picked_measured,
+        discarded_predictions,
     )
     # The report is not a gate (§11.4: "These metrics do not gate emission"), but a
     # systematic bias is the one failure a ranking report cannot show, so it is said out
@@ -812,6 +844,7 @@ def _calibration_block(
     measured: list[float],
     picked_predicted: list[float],
     picked_measured: list[float],
+    discarded_predictions: int,
 ) -> dict[str, Any]:
     """RFC 0019.13 §11.2's calibration metrics, or why they were not computed.
 
@@ -842,6 +875,7 @@ def _calibration_block(
         return {
             "status": "UNAVAILABLE",
             "detail": "No problem produced a scored candidate, so there is nothing to compare.",
+            "excluded_runtime_discarded_predictions": discarded_predictions,
         }
 
     predicted_array = np.asarray(predicted, dtype=float)
@@ -873,6 +907,9 @@ def _calibration_block(
             else None
         ),
         "excluded_non_positive_rows": int((~usable).sum()),
+        # Scores the runtime discards (non-positive for a physical score): never consumed,
+        # so not calibrated, but counted -- many of them is a model extrapolating badly.
+        "excluded_runtime_discarded_predictions": discarded_predictions,
     }
     label = RANKING_METRICS[metric].label if metric in RANKING_METRICS else None
     if label != target:
@@ -1269,6 +1306,7 @@ def _flatbuffer_scorer(
     model_hash: str | None = None,
     objective: str | None = None,
     score_transform: str = "log1p",
+    physical: bool,
 ) -> Scorer:
     """Score with the artifact that actually ships.
 
@@ -1350,31 +1388,42 @@ def _flatbuffer_scorer(
             total += leaf[node]
         return total
 
+    def recover(raw: np.ndarray) -> np.ndarray:
+        return np.expm1(raw) if score_transform == "log1p" else raw
+
     def score(frame: pd.DataFrame) -> np.ndarray:
         matrix = build_feature_matrix(frame, features, categorical_encoding,
                                       signature=signature, feature_evaluator=feature_evaluator)
         every = np.arange(len(frame))
         layer_one = ensemble(trees, matrix, every)
         if group_slot < 0 or not groups:
-            return np.expm1(layer_one) if score_transform == "log1p" else layer_one
+            return recover(layer_one)
 
         # `evaluate_corpus` calls a scorer with one problem's candidates, which is the batch
         # TreeDataAdapter::scoreBatch is handed, so the group decision is made over exactly
         # this frame. Choosing one group across several problems would let one problem's
-        # winner blank out another's candidates. The best layer-1 score is the smallest one
-        # under `min`: taking the largest picked the slowest group of a time model.
-        best_row = np.argmin(layer_one) if objective == "min" else np.argmax(layer_one)
-        chosen = matrix[int(best_row), group_slot]
-        inside = np.flatnonzero(matrix[:, group_slot] == chosen)
+        # winner blank out another's candidates.
+        #
+        # The decision is the adapter's: only a row that names a group and whose layer-1
+        # score the runtime would admit (`rankable_scores`) may choose; the best raw score in
+        # the objective's direction wins -- the smallest under `min`, since taking the largest
+        # picked the slowest group of a time model -- and an exact tie goes to the smaller
+        # group value, so the choice does not depend on row order. With no such row nothing
+        # is chosen and every candidate is unusable: declared order.
+        group_values = matrix[:, group_slot]
+        eligible = ~np.isnan(group_values) & rankable_scores(recover(layer_one), physical)
         raw = np.full(len(frame), -np.inf, dtype=np.float64)
+        if not eligible.any():
+            return raw
+        best = layer_one[eligible].min() if objective == "min" else layer_one[eligible].max()
+        chosen = group_values[eligible & (layer_one == best)].min()
+        inside = np.flatnonzero(group_values == chosen)
         # A group layer 1 picked but layer 2 does not describe is ranked by layer 1, matching
         # the adapter: a partially trained artifact degrades rather than refusing its own pick.
         within = groups.get(float(chosen))
         raw[inside] = ensemble(within, matrix, inside) if within else layer_one[inside]
 
-        if score_transform != "log1p":
-            return raw
-        scores = np.expm1(raw)
+        scores = recover(raw)
         # expm1(-inf) is -1.0, a finite value that would outrank a genuinely negative score.
         # Restoring -inf keeps a rejected group unusable, which is what `rankScored` expects.
         scores[raw == -np.inf] = -np.inf
@@ -1507,7 +1556,8 @@ def load_model(model_dir: Path, model_file: Path | None = None, *, feature_evalu
             scorer = _flatbuffer_scorer(candidate, features, categorical_encoding,
                                         signature=signature, feature_evaluator=feature_evaluator,
                                         expected_hash=expected_hash, model_hash=model_hash,
-                                        objective=objective, score_transform=transform)
+                                        objective=objective, score_transform=transform,
+                                        physical=score_is_physical(descriptor.get("score")))
 
     return ModelBundle(
         scorer=scorer, features=list(features),

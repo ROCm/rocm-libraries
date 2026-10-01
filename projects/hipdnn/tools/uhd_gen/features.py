@@ -61,6 +61,49 @@ def signature_references(signature: list) -> list[str]:
     return references
 
 
+_KERNEL_REFERENCE = "$kernel."
+
+
+def kernel_axes(signature: list) -> set[str]:
+    """The KMD fields a signature reads through `$kernel.*`, by base name.
+
+    `$kernel.tile[0]` reads the field `tile`, and a reference nested in a computed entry
+    counts as much as a bare one. These are the axes RFC 0019 §6.3 check 2 admits a model
+    on, so generation's proposal, its check of an authored recipe and promotion's install
+    gate all read them here rather than each deciding what a signature "uses".
+    """
+    return {reference[len(_KERNEL_REFERENCE):].split("[", 1)[0]
+            for reference in signature_references(signature)
+            if reference.startswith(_KERNEL_REFERENCE)}
+
+
+def require_admissible_kernel_axes(signature: list, knobs, kmd_fields, where: str) -> None:
+    """Refuse a signature the runtime would refuse to rank with (RFC 0019 §6.3 check 2).
+
+    `UhdKernelHeuristic` admits a model only when every `$kernel.*` axis is a field of the
+    engine's KMD AND a knob of the UED that binds it; otherwise it logs, drops the model and
+    ranks by priority, then id. The UED meant is the SHIPPING one -- generation collects
+    against a UED exposing every KMD field, and a model fitted there reads axes the shipped
+    engine never lets a caller vary. A field the matcher binds from the graph (dtype, head
+    counts, causal...) is a fact about the problem: the model reads it from the graph's own
+    column, which carries the same value, never from `$kernel.*`.
+    """
+    axes = kernel_axes(signature)
+    undeclared = sorted(axes - set(kmd_fields))
+    unexposed = sorted(axes - set(knobs))
+    problems = []
+    if undeclared:
+        problems.append(f"reads [{', '.join(undeclared)}], which the KMD does not declare as fields")
+    if unexposed:
+        problems.append(f"ranks on [{', '.join(unexposed)}], which the UED does not expose as knobs "
+                        f"[{', '.join(sorted(knobs)) or '<none>'}]")
+    if problems:
+        raise ValueError(
+            f"{where} {'; and '.join(problems)}. The runtime refuses such a model and ranks by "
+            "priority, then id (RFC 0019 §6.3 check 2). Read problem-side facts from the graph's "
+            "own column, not $kernel.*")
+
+
 def _validate_numeric_literals(node) -> None:
     if isinstance(node, bool):
         return

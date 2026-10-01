@@ -75,7 +75,7 @@ from .features import (
 from .lgbm_to_flatbuffer import convert
 from .promote import add_promote_arguments, run_promote
 from .ranking_metrics import DEFAULT_RANKING_METRIC, RANKING_METRICS, ranking_metric
-from .train_uhd import build_feature_matrix, evaluate_regret, train_model
+from .train_uhd import build_feature_matrix, train_model
 
 logging.basicConfig(
     level=logging.INFO,
@@ -302,18 +302,6 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
-        "--report-regret",
-        nargs="+",
-        default=None,
-        dest="report_regret",
-        metavar="COL",
-        help=(
-            "Columns identifying one problem (e.g. benchmark device). Reports "
-            "out-of-fold top-1 regret of the ranking the model induces, which is what "
-            "RFC 0019.13 §11 asks for and what CV RMSE cannot answer."
-        ),
-    )
-    parser.add_argument(
         "--output-dir",
         required=True,
         dest="output_dir",
@@ -458,8 +446,6 @@ def _run_train(args: argparse.Namespace) -> int:
         # Settled, and captured below, before data preparation or fitting, never stamped later.
         _resolve_score(args, immediate)
         if immediate:
-            if args.report_regret:
-                raise ValueError("L1 evaluation compares immediate engines, not within-engine candidate regret")
             if args.group_by_feature:
                 # The runtime scores an engine-level model's root ensemble only, and one group
                 # chosen across unrelated graphs has no per-row meaning: until an L1 contract
@@ -760,14 +746,6 @@ def _run_train(args: argparse.Namespace) -> int:
                                    value, str(error).split(chr(10))[0][:90])
             logger.info("Trained %d group model(s) on %s",
                         len(group_models), args.group_by_feature)
-
-        metrics = None
-        if args.report_regret:
-            metrics = evaluate_regret(
-                df, names, args.target, args.report_regret,
-                num_boost_round=args.num_boost_round, categorical_encoding=categorical_encoding,
-                feature_matrix=matrix, objective=args.objective,
-            )
     except (OSError, TypeError, ValueError, KeyError) as error:
         logger.error("%s", error)
         return 1
@@ -848,8 +826,6 @@ def _run_train(args: argparse.Namespace) -> int:
         # evaluation can prove its slice held out from content rather than from a path.
         manifest["training_problem_keys"] = sorted(set(problem_keys(df, resolve_grouping(df))))
     (output_dir / "train_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    if metrics is not None:
-        (output_dir / "regret.json").write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
     print(f"UHD generated: {descriptor_path}\nModel: {fb_path}\nFeatures hash: {features_hash}")
     print(f"Install: python -m uhd_gen promote --model-dir {output_dir} --descriptor-tree <TREE> --role {args.role} --arch {args.arch or '<ARCH>'}")
     return 0

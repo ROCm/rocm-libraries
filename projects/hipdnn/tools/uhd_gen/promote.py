@@ -15,7 +15,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .artifact import artifact_digest, is_grouped_tree, verify_tree_artifact
-from .features import evaluator_feature_semantics_revision
+from .features import (
+    compute_features_hash, evaluator_feature_semantics_revision, kernel_axes,
+    require_admissible_kernel_axes,
+)
 from .provenance import (
     ROLES, ProvenanceError, compare_provenance, descriptor_id, foreign_matcher_ids,
     load_descriptor_tree, provenance_for_engine, require_feature_semantics, revision,
@@ -411,8 +414,30 @@ def _build_plan(model_dir, descriptor_tree, engine, role, arch, remove_knobs, co
         # (FeatureSemantics.hpp), silently leaving the engine on its fallback; installing
         # one would ship a model nobody scores. Only a feature-reading model, as there.
         require_feature_semantics(provenance, evaluator_feature_semantics_revision(feature_evaluator))
+        # The loader recomputes the digest from the signature and the categorical codes and
+        # drops the model on a mismatch (UhdKernelHeuristic.hpp, EnginePredictor.hpp). The
+        # artifact's own copy agreeing with the descriptor's proves only that both were
+        # stamped by one run -- not that the signature beside them is the one they describe.
+        computed = compute_features_hash(descriptor["features_signature"],
+                                         descriptor.get("categorical_encoding"), feature_evaluator)
+        if computed != descriptor["features_hash"]:
+            raise PromoteError(
+                f"{descriptor_path}: features_hash {descriptor['features_hash']} is not the digest of "
+                f"its features_signature and categorical_encoding ({computed}); the engine would "
+                "refuse it. Retrain rather than editing the signature by hand")
     if role == ROLE:
         validate_model(descriptor)
+        if "ued" in provenance and "selector_revision" not in provenance:
+            # An engine-level estimate is compared ACROSS engines, so the runtime holds a
+            # descriptor-backed engine's model to the selector revision it was measured under,
+            # exactly as it holds an opaque engine's: absent, the engine reports UNAVAILABLE.
+            # Every binding the bench records carries the revision, so absence means the
+            # model did not come from a collection by this pipeline.
+            raise PromoteError(
+                f"{descriptor_path}: an engine-level model for a descriptor-backed engine must "
+                "record trained_against.selector_revision, which the runtime compares with the "
+                "engine's current one; this model records none. Retrain from a corpus collected "
+                "with uhd_gen generate")
     artifact_path, artifact_key = _artifact_path(descriptor, descriptor_path, model_dir)
     digest = _verify_artifact(descriptor, artifact_path, role)
     installed_descriptor = copy.deepcopy(descriptor)
@@ -481,12 +506,22 @@ def _build_plan(model_dir, descriptor_tree, engine, role, arch, remove_knobs, co
         if unknown:
             raise PromoteError(f"cannot remove unauthored knobs: {sorted(unknown)}")
         plan.dropped_knobs = sorted(set(remove_knobs))
-        still_used = set(plan.dropped_knobs) & _kernel_references(descriptor.get("features_signature", []))
-        if still_used:
-            raise PromoteError(f"incoming model still consumes removed knobs: {sorted(still_used)}")
         major, _ = revision(ued.get("revision", "1.0"), "UED")
         ued["revision"] = f"{major + 1}.0"
         ued["knobs"] = [knob for knob in exposed if knob not in plan.dropped_knobs]
+    if descriptor.get("features_signature"):
+        # RFC 0019 §6.3 check 2 against the UED as it will be installed, i.e. after any
+        # --remove-knob: a model the runtime would refuse to rank with is not installed.
+        knobs = ued.get("knobs", [])
+        if not isinstance(knobs, list) or any(not isinstance(item, str) for item in knobs):
+            raise PromoteError("UED knobs must be an array of strings")
+        kmd = index["kmd"].get(descriptor_id(ued.get("metadata"), f"{engine_name} metadata"))
+        if kmd is None:
+            raise PromoteError(f"{engine_name} names KMD {ued.get('metadata')}, which the tree does not contain")
+        kmd_fields = [item.get("name") for item in kmd[1].get("fields", []) if isinstance(item, dict)]
+        removal = " once --remove-knob is applied" if remove_knobs else ""
+        require_admissible_kernel_axes(descriptor["features_signature"], knobs, kmd_fields,
+                                       f"model {identity}{removal}")
 
     actual = provenance_for_engine(index, ued, arch)
     if actual is not None and "trained_against" in descriptor:
@@ -563,7 +598,7 @@ def _build_plan(model_dir, descriptor_tree, engine, role, arch, remove_knobs, co
                                        foreign_matchers=foreign_matcher_ids(index, ued, other_arch))
                 except ProvenanceError as error:
                     raise PromoteError(f"knob removal would invalidate {other_role}/{other_arch}: {error}") from error
-            if set(plan.dropped_knobs) & _kernel_references(model.get("features_signature", [])):
+            if set(plan.dropped_knobs) & kernel_axes(model.get("features_signature", [])):
                 raise PromoteError(f"knob removal would affect {other_role}/{other_arch}")
     ued.setdefault(role, {})[arch] = bound
     plan.write_descriptor = descriptor_changes
@@ -744,15 +779,6 @@ def _artifact_path(descriptor, descriptor_path, model_dir):
 def _contained(path, root, what):
     if not path.resolve().is_relative_to(root.resolve()):
         raise PromoteError(f"{what} escapes root {root}: {path}")
-
-
-def _kernel_references(value):
-    if isinstance(value, str):
-        return {value[len("$kernel."):]} if value.startswith("$kernel.") else set()
-    if isinstance(value, (dict, list, tuple)):
-        children = value.values() if isinstance(value, dict) else value
-        return set().union(*(_kernel_references(item) for item in children))
-    return set()
 
 
 def _find_descriptor(model_dir):

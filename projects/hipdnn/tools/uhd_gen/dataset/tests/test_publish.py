@@ -44,9 +44,21 @@ def test_metrics_are_added_and_collection_bookkeeping_is_dropped():
     out = build_dataset(frame)
 
     assert "tflops" in out.columns and "gbs" in out.columns
-    assert out["tflops"].iloc[0] == pytest.approx(2 * 1024**3 / 1e-3 / 1e12)
+    assert out["tflops"].iloc[0] == pytest.approx(2 * 1024**3 / 1.1e-3 / 1e12)
     # shard_id distinguishes CSV parts during the gather and means nothing once merged.
     assert "shard_id" not in out.columns
+
+
+def test_the_published_rate_names_the_winner_the_calibrated_label_names():
+    """Rates come from `avgTimeMs`, the statistic a calibrated label is defined on.
+
+    A has the faster best run (1.0 vs 1.5 ms) and the slower typical one (2.0 vs 1.6 ms). A
+    min-derived rate made A the winner, so a model trained on the published `tflops` learned
+    the opposite of what generate's own avg-derived label teaches.
+    """
+    out = build_dataset(rows(minTimeMs=[1.0, 1.5], avgTimeMs=[2.0, 1.6]))
+    assert out.loc[out["tflops"].idxmax(), "kernel.tile_m"] == 128
+    assert out["tflops"].tolist() == pytest.approx([2 * 1024**3 / t / 1e9 for t in (2.0, 1.6)])
 
 
 def test_absent_optional_columns_take_their_defaults():
@@ -121,7 +133,7 @@ def test_the_problem_namespace_is_the_operations_own_name():
     out = build_dataset(frame)
 
     assert "matmul.M" in out.columns and not any(c.startswith("q.") for c in out.columns)
-    assert out["tflops"].iloc[0] == pytest.approx(2 * 1024**3 / 1e-3 / 1e12)
+    assert out["tflops"].iloc[0] == pytest.approx(2 * 1024**3 / 1.1e-3 / 1e12)
 
 
 def test_shards_concatenate_and_round_trip_through_parquet(tmp_path):
@@ -320,6 +332,27 @@ def test_resolution_settles_what_validation_would_otherwise_reject():
     build_dataset(resolve_duplicates(frame, "date_run", "minTimeMs"))
 
 
+def test_resolution_keeps_each_boards_problem_apart():
+    """One shape measured on two boards is two problems, each with its own newest occasion.
+
+    Keyed on the shape alone, February's board-B sweep deleted board A's January rows, and on
+    one occasion the two boards' candidates merged into one problem.
+    """
+    frame = pd.DataFrame({
+        "benchmark": ["g0"] * 4, "device": ["boardA", "boardA", "boardB", "boardB"],
+        "q.M": [1024] * 4, "q.N": [1024] * 4, "q.K": [1024] * 4, "q.dtype": ["fp32"] * 4,
+        "kernel.tile_m": [64, 128, 64, 128], "device.cu_count": [256, 256, 304, 304],
+        "minTimeMs": [1.0, 2.0, 3.0, 0.5], "avgTimeMs": [1.1, 2.1, 3.1, 0.6],
+        "stddevMs": [0.01] * 4, "iters": [10] * 4, "error": [""] * 4,
+        "date_run": ["2026-01-01", "2026-01-01", "2026-02-01", "2026-02-01"],
+    })
+
+    for dated in (frame, frame.assign(date_run="2026-01-01")):
+        out = resolve_duplicates(dated, "date_run", "avgTimeMs")
+        assert sorted(zip(out["device"], out["kernel.tile_m"])) == [
+            ("boardA", 64), ("boardA", 128), ("boardB", 64), ("boardB", 128)]
+
+
 def test_scoping_gives_each_group_its_own_positions():
     """A shared position means different things when the schema varies by kernel.
 
@@ -476,7 +509,7 @@ def test_a_collected_sdpa_corpus_imports_and_is_given_its_metrics(tmp_path):
 
     scale = 4 * 2 * 16 * 128
     assert out["tflops"].iloc[0] == pytest.approx(
-        scale * (1024 * 1024 - 1024 * 1023 / 2) / 1e-3 / 1e12)
+        scale * (1024 * 1024 - 1024 * 1023 / 2) / 1.1e-3 / 1e12)
     # One query against 4096 keys is a full row of the mask, not half of it.
-    assert out["tflops"].iloc[1] == pytest.approx(scale * 1 * 4096 / 5e-4 / 1e12)
+    assert out["tflops"].iloc[1] == pytest.approx(scale * 1 * 4096 / 5.5e-4 / 1e12)
     assert out["gbs"].notna().all()
