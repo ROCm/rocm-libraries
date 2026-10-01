@@ -1415,11 +1415,9 @@ def mainLoop(writer, kernel):
   #
   # On at 4 M tiles per partition -- a 2x4 grid on MT256x256 -- for the tiles
   # block scheduling is scoped to, and off everywhere else, so a geometry it has
-  # not been measured on keeps its shipped schedule. TENSILE_PLSIN_TAIL_PARTM
-  # overrides it; 0 restores the N-only split. 2 (a 4x4 grid) does not assemble:
-  # vgpr tile assignment stops converging.
-  _defaultPartM = "4" if plsinStagingEligible(kernel) else "0"
-  tailPartitionSizeM = int(plsinDebugEnv("TENSILE_PLSIN_TAIL_PARTM", _defaultPartM)) \
+  # not been measured on keeps its shipped schedule. 2 (a 4x4 grid) does not
+  # assemble: vgpr tile assignment stops converging.
+  tailPartitionSizeM = (4 if plsinStagingEligible(kernel) else 0) \
       if tailOwnTiles else 0
   # Only split M when it divides evenly. An uneven split -- M=6 against a size of
   # 4 gives [4,2] -- is worse than not splitting at all: _plsinStagedStoreCount

@@ -3309,7 +3309,7 @@ class LogicalScheduler:
         # geometry whose arm has not been traced keeps both barriers.
         if not plsinStagingEligible(k):
             return False
-        return plsinDebugEnv("TENSILE_PLSIN_TAIL_DROP_LAST_SYNC", "1") != "0"
+        return True
 
     def build_tail_merged(self) -> Optional[EmittedSchedule]:
         """Schedule the last two DepthU as one body, four k-subiterations deep.
@@ -5461,11 +5461,6 @@ class LogicalScheduler:
         # it writes because D is reached through the SrdD cursor.
         if not self.config.blockSched or not absRowAddr:
             return None, units
-        # On by default: the blockSched gate above already holds this to the
-        # tiles the placement was measured on. TENSILE_PLSIN_DRAIN_EARLY=0
-        # restores the deferred route, which hands stage p to partition p+1.
-        if plsinDebugEnv("TENSILE_PLSIN_DRAIN_EARLY", "1") == "0":
-            return None, units
         flat = list(partModule.flatitems())
         mfmaPos = [i for i, inst in enumerate(flat)
                    if isinstance(inst, (MFMAInstruction, MXMFMAInstruction))]
@@ -5474,15 +5469,14 @@ class LogicalScheduler:
         readyAfter = self._plsinDrainReadyBars(flat, mfmaPos, units)
         if readyAfter is None:
             return None, units
-        # Keep this many MFMAs behind a unit for it to be worth placing here, and
-        # this many between two units so they do not re-bunch into one exposed run.
-        reserve = max(1, int(plsinDebugEnv("TENSILE_PLSIN_DRAIN_EARLY_RESERVE", "2")))
+        # Keep this many MFMAs behind a unit for it to be worth placing here.
+        reserve = 2
         # The bars already space the units: a unit's accumulators are finalized by
         # a different MFMA than its neighbour's, so placing each one straight at its
         # bar spreads them without any pacing term. Adding a stride on top only
         # holds units back past the point they became legal, which is the delay this
-        # is removing -- so the default is no extra spacing.
-        spacing = max(1, int(plsinDebugEnv("TENSILE_PLSIN_DRAIN_EARLY_SPACING", "1")))
+        # is removing -- so there is no extra spacing.
+        spacing = 1
         woven = Module(f"{label}_earlydrain")
         placed, idx, sinceLast = [], 0, 0
         for i, inst in enumerate(flat):
@@ -6283,19 +6277,19 @@ class LogicalScheduler:
             # barrier, and _tailEntryInflightBound derives it. The knob
             # overrides it; see FINDINGS F22 for the sweep behind the bound.
             from rocisa.instruction import SWaitCnt, SBarrier
-                self._tail_uid_sync_slot = self._tailUidSyncSlot(nll_ft_3d)
-                # Split entry: give the in-flight half its own wait and barrier at
-                # the first read that touches it, so the entry wait only has to
-                # cover the resident half. That turns the entry vmcnt(0) the
-                # profile charges 354 cycles per wave into a vmcnt(18) charged 28,
-                # and the second wait it pays for costs 73 -- tail vmcnt stall
-                # falls from 91.7k cycles to 42.4k. Throughput is unchanged
-                # (1.001x geomean over 11 shapes): the arm is MFMA-bound, so the
-                # recovered cycles land back on the critical path. A bounded wait
-                # is the correct shape for a half the barrier already covers.
-                splitWait = self._tail_uid_sync_slot is not None
-                entryVmcnt = (self._tailEntryResidentBound() if splitWait
-                              else self._tailEntryInflightBound())
+            self._tail_uid_sync_slot = self._tailUidSyncSlot(nll_ft_3d)
+            # Split entry: give the in-flight half its own wait and barrier at
+            # the first read that touches it, so the entry wait only has to
+            # cover the resident half. That turns the entry vmcnt(0) the
+            # profile charges 354 cycles per wave into a vmcnt(18) charged 28,
+            # and the second wait it pays for costs 73 -- tail vmcnt stall
+            # falls from 91.7k cycles to 42.4k. Throughput is unchanged
+            # (1.001x geomean over 11 shapes): the arm is MFMA-bound, so the
+            # recovered cycles land back on the critical path. A bounded wait
+            # is the correct shape for a half the barrier already covers.
+            splitWait = self._tail_uid_sync_slot is not None
+            entryVmcnt = (self._tailEntryResidentBound() if splitWait
+                          else self._tailEntryInflightBound())
             # Collected rather than emitted: this is the four-deep body's entry
             # sequence, so it belongs behind the fused guard with the body it
             # serves. The plain arm keeps the baseline pair's own sync.
