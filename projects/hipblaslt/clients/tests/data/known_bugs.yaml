@@ -31,6 +31,12 @@ Known bugs:
   # REMOVE this entry once the output-store path is fixed so the case re-activates
   # as an enforced bit-exact regression gate.
 
+  # ROCM-32062: the client CPU reference (cast_mul in cblas_interface.cpp) applies
+  # scaleAlpha_vector to the wrong rows of A when lda exceeds A's row count, so
+  # unit_check fails a correct GPU result. Host-side, so every platform is affected
+  # and no platform is listed. REMOVE this entry in the PR that fixes ROCM-32062;
+  # the test then becomes its regression gate. Review by 2026-11-01.
+  - { name: matmul_fast_check_epilogue_padded_lda_ROCM32062, function: matmul }
   # ROCM-27082: gfx950 MXFP4 subtile scaleAlphaVec TN cases fail the norm/accuracy
   # check on asymmetric (M!=N) tiles. Square tiles (128x128, 192x192) still pass and
   # remain covered. Suspected TensileLite codegen regression; remove once root-caused.

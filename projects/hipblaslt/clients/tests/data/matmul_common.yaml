@@ -119,6 +119,37 @@ Definitions:
   - &size_t_stagger_incs_overflow
     - { M: 2048, N: 1, K: 32, lda: 67108864, ldb: 32, ldc: 2048, ldd: 2048 }
 
+  ###########################################################################
+  # fast_check shapes (see clients/common/include/fast_check.hpp).
+  ###########################################################################
+
+  # Small shapes for comparing fast_check with unit_check on the same result. Every
+  # leading dimension is padded, and K stays at or below 256 so unit_check's 16-bit
+  # integer_exact limit still allows both checks.
+  - &fast_check_crosscheck_sizes
+    - { M: 131, N: 67, K: 200, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
+    - { M: 1031, N: 517, K: 256, lda: 1040, ldb: 1033, ldc: 1031, ldd: 1100 }
+
+  # No dimension is a multiple of any common macro-tile size (16 through 256), so
+  # every kernel runs partial tiles in M, N and K. A host reference GEMM for the
+  # first shape costs about 1.1e12 multiply-adds; fast_check costs about 3e8.
+  - &fast_check_large_sizes
+    - { M: 16385, N: 16383, K: 4097 }
+    - { M: 8191, N: 8193, K: 8195 }
+
+  # The same M and N for 16-bit outputs, with K small enough that almost every
+  # result stays below 256, the largest integer range bf16 holds exactly; the few
+  # larger results are checked one at a time.
+  - &fast_check_large_16bit_sizes
+    - { M: 16385, N: 16383, K: 129 }
+    - { M: 8191, N: 8193, K: 257 }
+
+  # The output element index crosses 2^32: (N-1)*ldd = 2048*2097155 = 4,294,973,440,
+  # above 2^32 = 4,294,967,296. C and D each hold 4.3e9 elements. lda and ldb cover
+  # both transposes.
+  - &fast_check_output_index_2_32
+    - { M: 1000, N: 2049, K: 64, lda: 1000, ldb: 2049, ldc: 2097155, ldd: 2097155 }
+
 
   - &deepbench_sizes
     - { M: 192, N: 64, K: 784 }
