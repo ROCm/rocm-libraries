@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -88,7 +89,113 @@ std::vector<hipdnn_bench::ValidationOutcome>
     return check.verdicts();
 }
 
+/// A graph with one input X (uid 1, FLOAT) and one result Y (uid 2, @p outputType): Y = X * X.
+hipdnn_bench::VariantPackPlan inputAndOutputPlan(hipdnn_frontend::DataType outputType)
+{
+    using hipdnn_frontend::graph::TensorAttributes;
+    hipdnn_frontend::graph::Graph graph;
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1).set_name("X").set_dim({2}).set_stride({1}).set_data_type(
+        hipdnn_frontend::DataType::FLOAT);
+    hipdnn_frontend::graph::PointwiseAttributes square;
+    square.set_mode(hipdnn_frontend::PointwiseMode::MUL);
+    auto y = graph.pointwise(x, x, square);
+    y->set_uid(2).set_name("Y").set_dim({2}).set_stride({1}).set_data_type(outputType);
+    y->set_output(true);
+    return hipdnn_bench::planVariantPack(graph);
+}
+
+/// What the tool reads back after a candidate ran, given what device memory then holds for
+/// every uid -- the selection is the tool's own (crossCheckedOutputs), not this test's.
+hipdnn_bench::CandidateOutput captured(const hipdnn_bench::VariantPackPlan& plan,
+                                       const std::map<int64_t, std::vector<uint8_t>>& memory,
+                                       std::map<int64_t, hipdnn_bench::TensorDescription>& tensors)
+{
+    hipdnn_bench::CandidateOutput candidate;
+    candidate.executed = true;
+    for(const auto& tensor : hipdnn_bench::crossCheckedOutputs(plan))
+    {
+        tensors[tensor.uid] = {tensor.name, tensor.dataType};
+        candidate.images[tensor.uid] = memory.at(tensor.uid);
+    }
+    return candidate;
+}
+
+std::vector<uint8_t> floatBytes(const std::vector<float>& values)
+{
+    std::vector<uint8_t> bytes(values.size() * sizeof(float));
+    std::memcpy(bytes.data(), values.data(), bytes.size());
+    return bytes;
+}
+
 } // namespace
+
+TEST(TestNumericalValidation, IdenticalInputsAreNotAgreementAboutUndecodableOutputs)
+{
+    // Every candidate is handed the same filled inputs, so an input compares equal across the
+    // catalog whatever the kernels computed. Counted as output, it made two candidates with
+    // different FP8 results -- nothing the gate can decode -- come back AGREED.
+    const auto plan = inputAndOutputPlan(hipdnn_frontend::DataType::FP8_E4M3);
+    ASSERT_TRUE(plan.error.empty()) << plan.error;
+    const auto input = floatBytes({1.0F, 2.0F});
+
+    std::map<int64_t, hipdnn_bench::TensorDescription> declared;
+    hipdnn_bench::CatalogCrossCheck check(declared);
+    check.add(captured(plan, {{1, input}, {2, {0x01, 0x02}}}, declared));
+    check.add(captured(plan, {{1, input}, {2, {0x40, 0x50}}}, declared));
+    const auto verdicts = check.verdicts();
+
+    for(const auto& verdict : verdicts)
+    {
+        EXPECT_EQ(verdict.verdict, NumericalVerdict::UNKNOWN) << verdict.reason;
+        EXPECT_NE(verdict.reason.find("no_comparable_output"), std::string::npos);
+    }
+}
+
+TEST(TestNumericalValidation, NonZeroInputsDoNotMakeAnUntouchedOutputEvidence)
+{
+    // The inputs are filled, the output buffers are not. A catalog that wrote nothing leaves
+    // every Y at zero; counting the filled X as output made that set look touched, and the
+    // degenerate-reference guard never fired.
+    const auto plan = inputAndOutputPlan(hipdnn_frontend::DataType::FLOAT);
+    ASSERT_TRUE(plan.error.empty()) << plan.error;
+    const std::map<int64_t, std::vector<uint8_t>> memory{{1, floatBytes({1.0F, 2.0F})},
+                                                         {2, floatBytes({0.0F, 0.0F})}};
+
+    std::map<int64_t, hipdnn_bench::TensorDescription> declared;
+    hipdnn_bench::CatalogCrossCheck check(declared);
+    check.add(captured(plan, memory, declared));
+    check.add(captured(plan, memory, declared));
+    check.add(captured(plan, memory, declared));
+
+    for(const auto& verdict : check.verdicts())
+    {
+        EXPECT_EQ(verdict.verdict, NumericalVerdict::UNKNOWN) << verdict.reason;
+        EXPECT_NE(verdict.reason.find("degenerate_reference"), std::string::npos);
+    }
+}
+
+TEST(TestNumericalValidation, APluralityIsNotAgreement)
+{
+    // {1, 1, 2, 3}: the largest cohort is unique but holds two of four. Half the catalog
+    // computed something else, so the cohort is not the catalog's answer and its timings are
+    // not known-correct labels.
+    const auto verdicts
+        = crossCheck({ran({1.0F}), ran({1.0F}), ran({2.0F}), ran({3.0F})}, tensors());
+
+    for(const auto& verdict : verdicts)
+    {
+        EXPECT_EQ(verdict.verdict, NumericalVerdict::DISAGREED) << verdict.reason;
+        EXPECT_NE(verdict.reason.find("disputed_output"), std::string::npos);
+    }
+
+    // One more vote for the cohort makes it three of five: a strict majority, which decides.
+    const auto decided
+        = crossCheck({ran({1.0F}), ran({1.0F}), ran({2.0F}), ran({3.0F}), ran({1.0F})}, tensors());
+    EXPECT_EQ(decided[0].verdict, NumericalVerdict::AGREED);
+    EXPECT_EQ(decided[2].verdict, NumericalVerdict::DISAGREED);
+    EXPECT_NE(decided[2].reason.find("output_mismatch"), std::string::npos);
+}
 
 TEST(TestNumericalValidation, WrongKernelIsMarkedInvalidAndNamedInTheReason)
 {

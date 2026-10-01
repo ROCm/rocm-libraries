@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <sstream>
@@ -78,7 +79,7 @@ struct CandidateOutput
     /// directions in the dataset so the model learns the failure surface.
     std::string failure;
 
-    /// Host image of every non-virtual tensor, keyed by uid.
+    /// Host image of every tensor crossCheckedOutputs() selects, keyed by uid.
     std::map<int64_t, std::vector<uint8_t>> images;
 };
 
@@ -88,6 +89,23 @@ struct TensorDescription
     std::string name;
     hipdnn_frontend::DataType dataType = hipdnn_frontend::DataType::NOT_SET;
 };
+
+/// @brief The tensors a candidate's capture holds and the cross-check judges: the
+///        non-virtual tensors some node of the graph writes.
+///
+/// Outputs only. Every candidate of a problem is handed the same input bytes, so an input
+/// agrees across the catalog whatever the kernels did; counted as output it turns
+/// "nothing comparable" into a comparison and "every output untouched" into a non-zero
+/// image, which is exactly how an FP8-only or write-nothing catalog came back AGREED.
+inline std::vector<TensorRequirement> crossCheckedOutputs(const VariantPackPlan& plan)
+{
+    std::vector<TensorRequirement> outputs;
+    std::copy_if(plan.tensors.begin(),
+                 plan.tensors.end(),
+                 std::back_inserter(outputs),
+                 [](const TensorRequirement& tensor) { return tensor.produced; });
+    return outputs;
+}
 
 /// CSV spelling of @p verdict. Three words rather than a boolean, so the column cannot be
 /// read back as one and quietly collapse UNKNOWN into one of the other two.
@@ -613,13 +631,16 @@ inline size_t comparableTensors(const CandidateOutput& candidate,
 /// Candidates are partitioned into cohorts that left identical output. The rule is majority,
 /// not first-one-wins: if the catalog's first candidate is the broken one, taking it as truth
 /// would invert the verdicts and mark every correct kernel invalid. A strict majority cohort
-/// is the reference and its members are AGREED; every candidate outside it is DISAGREED.
+/// -- more than half of the cross-checked candidates -- is the reference and its members are
+/// AGREED; every candidate outside it is DISAGREED.
 ///
-/// An even split is DISAGREED for everyone in the dispute, which is the deliberate choice
-/// here. At least one of those candidates is computing the wrong answer, and §13.2 says the
-/// timing of a candidate that is not known correct is not a label. Reporting it as UNKNOWN
-/// would let the wrong-but-fast one through, which is the case the section is about. §13.2
-/// also names the remedy: the marker is cleared in the matcher or the kernel, not here.
+/// Without a strict majority -- an even split, or a largest cohort that is only a plurality,
+/// such as 2 of {1, 1, 2, 3} -- every cross-checked candidate is DISAGREED, which is the
+/// deliberate choice here. The catalog has not agreed on an answer, at least one of those
+/// candidates is computing the wrong one, and §13.2 says the timing of a candidate that is
+/// not known correct is not a label. Reporting it as UNKNOWN would let the wrong-but-fast one
+/// through, which is the case the section is about. §13.2 also names the remedy: the marker
+/// is cleared in the matcher or the kernel, not here.
 ///
 /// **Streaming, because the batch form did not fit in host memory.** Comparison happens as
 /// each candidate arrives, and only a cohort's founder keeps its image; a candidate that
@@ -705,12 +726,6 @@ public:
                 largest = cohort;
             }
         }
-        // Counted after `largest` is final: a running tally would miss an earlier cohort that
-        // the eventual winner only matched in size, and report a split as decided.
-        const size_t tied = static_cast<size_t>(
-            std::count_if(_cohorts.begin(), _cohorts.end(), [&](const Cohort& cohort) {
-                return cohort.members.size() == _cohorts[largest].members.size();
-            }));
 
         if(_crossChecked < 2)
         {
@@ -735,7 +750,9 @@ public:
             return outcomes;
         }
 
-        const bool decided = tied == 1;
+        // A strict majority, written so it cannot overflow. It is necessarily unique: two
+        // cohorts of more than half each would hold more candidates than were checked.
+        const bool decided = _cohorts[largest].members.size() > _crossChecked / 2;
         const CandidateOutput& reference = _cohorts[decided ? largest : 0].founder;
         for(size_t cohort = 0; cohort < _cohorts.size(); ++cohort)
         {
