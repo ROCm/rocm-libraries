@@ -47,6 +47,8 @@ protected:
 
     std::optional<hipdnn_test_sdk::utilities::ScopedDirectory> _scopedDir;
     std::filesystem::path _tempDir;
+    // One load pass's sweep cache, as loadDiscoveredBundles() shares one.
+    SweepManifestCache _sweeps;
 
     void SetUp() override
     {
@@ -577,16 +579,16 @@ TEST_F(TestBundleDiscoveryFixture, PullingGoldenDataNeverSilentlyDropsABundle)
     auto beforePull = loadIntegrationTestBundle(dir / "pullme.json");
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(beforePull));
     EXPECT_FALSE(std::get<IntegrationTestBundle>(beforePull).hasGoldenOutputs);
-    EXPECT_TRUE(
-        std::holds_alternative<detail::LoadedBundle>(detail::classifyBundle(discovered.front())));
+    EXPECT_TRUE(std::holds_alternative<detail::LoadedBundle>(
+        detail::classifyBundle(discovered.front(), _sweeps)));
 
     writeGoldenOutputBlob(dir, "pullme"); // post-`dvc pull` state
 
     auto afterPull = loadIntegrationTestBundle(dir / "pullme.json");
     ASSERT_TRUE(std::holds_alternative<LoadError>(afterPull));
     EXPECT_EQ(std::get<LoadError>(afterPull), LoadError::UNVALIDATABLE_GOLDEN_DATA);
-    EXPECT_TRUE(
-        std::holds_alternative<detail::FailedLoad>(detail::classifyBundle(discovered.front())));
+    EXPECT_TRUE(std::holds_alternative<detail::FailedLoad>(
+        detail::classifyBundle(discovered.front(), _sweeps)));
 }
 
 TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingBinIsGraphOnly)
@@ -655,6 +657,61 @@ TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseWithoutGoldenIsGraphOnly
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
     const auto& bundle = std::get<IntegrationTestBundle>(result);
     EXPECT_FALSE(bundle.tensors.has_value());
+}
+
+// Every case of a sweep shares one sweep.json, and a load pass must parse it once
+// rather than once per case: re-parsing it per case cost 5.9 GB of JSON over the
+// checked-in sweeps, and over half an hour before the first test ran on an MI300A
+// host. Shown by breaking the manifest after the first case loads. The second case
+// still loads through the pass's cache; a fresh load sees the broken file, which
+// is the control that the file really is broken.
+TEST_F(TestBundleDiscoveryFixture, SweepCasesInOneLoadPassParseTheManifestOnce)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(
+        sweepDir,
+        {{"case_a_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}},
+         {"case_b_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 2u);
+
+    SweepManifestCache sweeps;
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(
+        loadIntegrationTestBundle(discovered[0], sweeps)));
+
+    std::ofstream(sweepDir / "sweep.json", std::ios::trunc) << "{ not json";
+
+    EXPECT_TRUE(std::holds_alternative<IntegrationTestBundle>(
+        loadIntegrationTestBundle(discovered[1], sweeps)));
+
+    const auto fresh = loadIntegrationTestBundle(discovered[1]);
+    ASSERT_TRUE(std::holds_alternative<LoadError>(fresh));
+    EXPECT_EQ(std::get<LoadError>(fresh), LoadError::MALFORMED_JSON);
+}
+
+// The cache holds one sweep at a time. Moving to the next sweep must read that
+// sweep's manifest, or its cases would be looked up in the previous sweep's and
+// come back INVALID_SWEEP_CASE.
+TEST_F(TestBundleDiscoveryFixture, SweepManifestCacheFollowsTheSweepBeingLoaded)
+{
+    createTemplateSweep(
+        _tempDir / "quick" / "BatchnormFwdInference" / "First",
+        {{"first_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+    createTemplateSweep(
+        _tempDir / "quick" / "BatchnormFwdInference" / "Second",
+        {{"second_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 2u);
+
+    SweepManifestCache sweeps;
+    for(const auto& bundle : {discovered[0], discovered[1], discovered[0]})
+    {
+        EXPECT_TRUE(std::holds_alternative<IntegrationTestBundle>(
+            loadIntegrationTestBundle(bundle, sweeps)))
+            << bundle.diagnosticPath();
+    }
 }
 
 TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseMissingGoldenPathIsError)
@@ -949,7 +1006,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsLoadedBundleForGoodBundl
     const auto discovered = discoverBundles(_tempDir);
     ASSERT_EQ(discovered.size(), 1u);
 
-    auto outcome = detail::classifyBundle(discovered.front());
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
     ASSERT_TRUE(std::holds_alternative<detail::LoadedBundle>(outcome));
     auto& loaded = std::get<detail::LoadedBundle>(outcome);
     EXPECT_EQ(loaded.suiteName, discovered.front().suiteName);
@@ -971,7 +1028,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleSetsLocatorForSweepCase)
     const auto discovered = discoverBundles(_tempDir);
     ASSERT_EQ(discovered.size(), 1u);
 
-    auto outcome = detail::classifyBundle(discovered.front());
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
     ASSERT_TRUE(std::holds_alternative<detail::LoadedBundle>(outcome));
     auto& loaded = std::get<detail::LoadedBundle>(outcome);
 
@@ -1009,7 +1066,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsFailedLoadForRuntimePass
     const auto discovered = discoverBundles(_tempDir);
     ASSERT_EQ(discovered.size(), 1u);
 
-    auto outcome = detail::classifyBundle(discovered.front());
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
     ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
     auto& failed = std::get<detail::FailedLoad>(outcome);
     EXPECT_EQ(failed.suiteName, discovered.front().suiteName);
@@ -1038,7 +1095,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsSkippedLoadForOrdinaryIn
     const auto discovered = discoverBundles(_tempDir);
     ASSERT_EQ(discovered.size(), 1u);
 
-    auto outcome = detail::classifyBundle(discovered.front());
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
     ASSERT_TRUE(std::holds_alternative<detail::SkippedLoad>(outcome));
     auto& skipped = std::get<detail::SkippedLoad>(outcome);
     EXPECT_NE(skipped.message.find(discovered.front().diagnosticPath().string()),
@@ -1059,7 +1116,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsFailedLoadForUnvalidatab
     const auto discovered = discoverBundles(_tempDir);
     ASSERT_EQ(discovered.size(), 1u);
 
-    auto outcome = detail::classifyBundle(discovered.front());
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
     ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
     auto& failed = std::get<detail::FailedLoad>(outcome);
     EXPECT_EQ(failed.suiteName, discovered.front().suiteName);
@@ -1100,8 +1157,10 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleIsolatesFailureAmongMultipleDis
     ASSERT_NE(goodBundle, nullptr);
     ASSERT_NE(badBundle, nullptr);
 
-    EXPECT_TRUE(std::holds_alternative<detail::LoadedBundle>(detail::classifyBundle(*goodBundle)));
-    EXPECT_TRUE(std::holds_alternative<detail::FailedLoad>(detail::classifyBundle(*badBundle)));
+    EXPECT_TRUE(
+        std::holds_alternative<detail::LoadedBundle>(detail::classifyBundle(*goodBundle, _sweeps)));
+    EXPECT_TRUE(
+        std::holds_alternative<detail::FailedLoad>(detail::classifyBundle(*badBundle, _sweeps)));
 }
 
 // Closes the loop between "classifyBundle() decided this bundle failed" and

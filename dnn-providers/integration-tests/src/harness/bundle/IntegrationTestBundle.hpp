@@ -717,6 +717,70 @@ inline std::optional<std::filesystem::path>
 
 } // namespace detail
 
+// The parsed graph.template.json and sweep.json of one template sweep, with its
+// cases indexed by id, for loading that sweep's cases one after another.
+//
+// Every case of a sweep shares both files, and one sweep.json can carry hundreds
+// of cases. Parsing them again for each case made a load pass cost cases x
+// manifest size: about 5.9 GB of JSON for the 10,732 checked-in sweep cases,
+// before --gtest_filter could narrow anything. discoverBundles() emits a sweep's
+// cases back to back, so holding only the most recently used sweep parses each
+// manifest once and keeps at most one in memory.
+class SweepManifestCache
+{
+public:
+    struct Manifest
+    {
+        std::optional<nlohmann::json> templateJson;
+        std::optional<nlohmann::json> sweepJson;
+
+        // First case per id, the same one detail::findSweepCase() would return.
+        // Points into sweepJson.
+        std::unordered_map<std::string, const nlohmann::json*> casesById;
+
+        const nlohmann::json* findCase(const std::string& caseId) const
+        {
+            const auto it = casesById.find(caseId);
+            return it != casesById.end() ? it->second : nullptr;
+        }
+    };
+
+    // The manifest for `discovered`, which must be a template-sweep case. Valid
+    // until the next call.
+    const Manifest& get(const DiscoveredBundle& discovered)
+    {
+        if(_manifest.has_value() && _sweepPath == discovered.jsonPath
+           && _templatePath == discovered.sweep->templatePath)
+        {
+            return *_manifest;
+        }
+
+        _sweepPath = discovered.jsonPath;
+        _templatePath = discovered.sweep->templatePath;
+        auto& manifest = _manifest.emplace();
+        manifest.templateJson = detail::parseJsonFile(_templatePath);
+        manifest.sweepJson = detail::parseJsonFile(_sweepPath);
+
+        if(manifest.sweepJson.has_value() && manifest.sweepJson->contains("cases")
+           && manifest.sweepJson->at("cases").is_array())
+        {
+            for(const auto& caseJson : manifest.sweepJson->at("cases"))
+            {
+                if(caseJson.is_object() && caseJson.contains("id") && caseJson.at("id").is_string())
+                {
+                    manifest.casesById.emplace(caseJson.at("id").get<std::string>(), &caseJson);
+                }
+            }
+        }
+        return manifest;
+    }
+
+private:
+    std::filesystem::path _sweepPath;
+    std::filesystem::path _templatePath;
+    std::optional<Manifest> _manifest;
+};
+
 // Load a direct bundle from its graph .json path, classifying the outcome.
 //
 // This deliberately does NOT call test_sdk's loadGraphAndTensors(), whose
@@ -798,29 +862,30 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
 
 // Load either a direct bundle or one logical template-sweep case.
 //
-// Sweep cases parse graph.template.json plus sweep.json, locate the discovered
-// case id, expand `${case...}` placeholders, load inline metadata, and resolve an
-// optional golden directory. Sweep authoring errors are reported as
+// Sweep cases take graph.template.json plus sweep.json from `sweeps`, locate the
+// discovered case id, expand `${case...}` placeholders, load inline metadata, and
+// resolve an optional golden directory. Sweep authoring errors are reported as
 // INVALID_SWEEP_CASE; an expanded graph that still fails schema conversion is
 // INVALID_GRAPH_SCHEMA. As with the direct-bundle overload, a
 // RuntimePassByValueInvariantError from buildGraphBuffer() is the one
 // exception that propagates uncaught rather than being folded into
 // INVALID_GRAPH_SCHEMA.
-inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
+inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
+                                            SweepManifestCache& sweeps)
 {
     if(!discovered.isTemplateSweepCase())
     {
         return loadIntegrationTestBundle(discovered.jsonPath);
     }
 
-    const auto templateJson = detail::parseJsonFile(discovered.sweep->templatePath);
-    const auto sweepJson = detail::parseJsonFile(discovered.jsonPath);
-    if(!templateJson.has_value() || !sweepJson.has_value())
+    const auto& manifest = sweeps.get(discovered);
+    const auto& templateJson = manifest.templateJson;
+    if(!templateJson.has_value() || !manifest.sweepJson.has_value())
     {
         return LoadError::MALFORMED_JSON;
     }
 
-    const auto* caseJson = detail::findSweepCase(*sweepJson, discovered.sweep->caseId);
+    const auto* caseJson = manifest.findCase(discovered.sweep->caseId);
     if(caseJson == nullptr)
     {
         return LoadError::INVALID_SWEEP_CASE;
@@ -906,6 +971,14 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
     }
 
     return bundle;
+}
+
+// Loads one bundle on its own. A pass over many sweep cases should share one
+// SweepManifestCache instead, so each manifest is parsed once.
+inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
+{
+    SweepManifestCache sweeps;
+    return loadIntegrationTestBundle(discovered, sweeps);
 }
 
 } // namespace hipdnn_integration_tests::bundle
