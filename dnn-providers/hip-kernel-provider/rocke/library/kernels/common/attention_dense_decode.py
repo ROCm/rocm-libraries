@@ -175,6 +175,53 @@ def emit_fold(b, blk, nqb: int):
     return b.select(b.cmp_lt(blk, b.const_i32(half)), blk, qb_hi)
 
 
+def emit_pair_unit(b, wi, W: int, NP: int):
+    """``(unit, half)`` for ``wi < W`` (``W`` even): unit ``u`` holds items
+    ``2u, 2u+1``, and one CTA runs both halves on consecutive grid-stride steps.
+    In the last round, CTAs that still get two items get both halves of a unit."""
+    # Items before the last round: whole double rounds of 2*NP items.
+    rounds_end = (W // (2 * NP)) * (2 * NP)
+    unit = half = None
+    if rounds_end > 0:
+        j = b.div(wi, b.const_i32(NP))
+        unit = b.add(
+            b.sub(wi, b.mul(j, b.const_i32(NP))),
+            b.mul(b.div(j, b.const_i32(2)), b.const_i32(NP)),
+        )
+        half = b.mod(j, b.const_i32(2))
+    if rounds_end < W:
+        # Last round: CTAs below `paired_tail` still get both halves of a unit.
+        paired_tail = W - rounds_end - NP
+        r = b.sub(wi, b.const_i32(rounds_end))
+        s = b.sub(r, b.const_i32(max(paired_tail, 0)))
+        unit_t = b.add(
+            b.const_i32(rounds_end // 2 + max(paired_tail, 0)), b.div(s, b.const_i32(2))
+        )
+        half_t = b.mod(s, b.const_i32(2))
+        if paired_tail > 0:
+            lo = b.cmp_lt(r, b.const_i32(paired_tail))
+            hi = b.cmp_lt(b.const_i32(NP - 1), r)
+            unit_t = b.select(
+                lo,
+                b.add(b.const_i32(rounds_end // 2), r),
+                b.select(hi, b.add(b.const_i32(rounds_end // 2 - NP), r), unit_t),
+            )
+            half_t = b.select(lo, b.const_i32(0), b.select(hi, b.const_i32(1), half_t))
+        if rounds_end > 0:
+            in_rounds = b.cmp_lt(wi, b.const_i32(rounds_end))
+            unit = b.select(in_rounds, unit, unit_t)
+            half = b.select(in_rounds, half, half_t)
+        else:
+            unit, half = unit_t, half_t
+    return unit, half
+
+
+def emit_pair_block(b, p, half, nqb: int):
+    """Query block of fold pair ``p``: ``p`` for the first half, ``NQB-1-p`` for
+    the second, so every unit costs the same under causal masking."""
+    return b.select(b.cmp_lt(half, b.const_i32(1)), p, b.sub(b.const_i32(nqb - 1), p))
+
+
 class PersistDecode:
     """Grid-stride work index ``wi`` -> work item, for the persistent grid.
 
@@ -258,6 +305,57 @@ class PersistBtHkvMinor(PersistDecode):
         hq = b.add(b.mul(hkv, b.const_i32(gqa)), hql)
         qb = emit_fold(b, blk, nqb) if spec.causal else blk
         return Decoded(qb, hq, bt, hkv)
+
+
+class PersistHqMinorSwz(PersistDecode):
+    """Swizzled Head-first on the persistent grid: XCD ``a`` (``wi % M``, needs
+    ``M | NP``) owns head band ``a``. Under causal masking one CTA runs both
+    blocks of a fold pair ``{p, NQB-1-p}`` on consecutive steps, so per-CTA cost
+    is balanced however NP and NQB divide; the unit's XCD is ``wi % M``. Per XCD,
+    fastest first: pair, head in band, batch. With ``W <= NP`` the plain decode
+    is emitted.
+
+    Odd NQB is not supported. It worked when tried: also pair the middle blocks
+    of two consecutive (head, batch) of the band into one unit (with
+    ``NQB = 2P+1`` it costs ``2·(P+1) = NQB+1``, as a fold pair), and run the
+    per-XCD leftover middle (odd heads x batch per band) as single items at the
+    end of the work index (``wi >= W - M``, XCD ``wi % M``)."""
+
+    name = "hq_minor_swz"
+    tag = "hqminswz"
+
+    def check(self, spec):
+        M = spec.chiplet_num_xcds
+        if spec.num_query_heads % M or spec.num_persistent % M:
+            return (
+                f"{self.name} needs num_query_heads and num_persistent divisible by {M}"
+            )
+        if spec.causal and _spec_nqb(spec) % 2:
+            return (
+                f"{self.name} needs an even number of query blocks under causal masking"
+            )
+        return None
+
+    def emit_decode(self, b, spec, wi, seqlen_q):
+        nqb = _baked_nqb(spec, seqlen_q)
+        M, NP = spec.chiplet_num_xcds, spec.num_persistent
+        hpm = spec.num_query_heads // M
+        W = nqb * spec.num_query_heads * spec.batch
+        if not spec.causal or W <= NP:
+            a = b.mod(wi, b.const_i32(M))
+            rest = b.div(wi, b.const_i32(M))
+            qb = b.mod(rest, b.const_i32(nqb))  # at most one item per CTA when causal
+            hb = b.div(rest, b.const_i32(nqb))
+        else:
+            unit, half = emit_pair_unit(b, wi, W, NP)
+            a = b.mod(unit, b.const_i32(M))
+            rest = b.div(unit, b.const_i32(M))
+            p = b.mod(rest, b.const_i32(nqb // 2))
+            hb = b.div(rest, b.const_i32(nqb // 2))
+            qb = emit_pair_block(b, p, half, nqb)
+        hq = b.add(b.mul(a, b.const_i32(hpm)), b.mod(hb, b.const_i32(hpm)))
+        bt = b.div(hb, b.const_i32(hpm))
+        return Decoded(qb, hq, bt)
 
 
 def _aligned_causal_error(spec, name: str):
@@ -363,6 +461,7 @@ PERSIST_DECODES = _registry(
     PersistQbMajor,
     PersistHkvMajor,
     PersistBtHkvMinor,
+    PersistHqMinorSwz,
     PersistGqaPair,
     PersistGqaPair2Phase,
 )

@@ -24,6 +24,7 @@ from kernels.common.attention_dense_decode import (
     NonpersistQbMinor,
     PersistBtHkvMinor,
     PersistHkvMajor,
+    PersistHqMinorSwz,
     PersistQbMajor,
 )
 
@@ -41,7 +42,18 @@ DEFAULT_DENSE_TILE_GEOMETRY = DENSE_TILE_GEOMETRIES["default"]
 
 # persist_decode values every arch supports; arches may add more.
 COMMON_PERSIST_DECODES = frozenset(
-    {"auto", *(d.name for d in (PersistQbMajor, PersistHkvMajor, PersistBtHkvMinor))}
+    {
+        "auto",
+        *(
+            d.name
+            for d in (
+                PersistQbMajor,
+                PersistHkvMajor,
+                PersistBtHkvMinor,
+                PersistHqMinorSwz,
+            )
+        ),
+    }
 )
 
 # Signed 32-bit ceiling for tensor extents. See ``check_dense_spec_preflight``
