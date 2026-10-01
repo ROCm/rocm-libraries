@@ -710,17 +710,18 @@ def _validate_descriptor(document: dict, path: Path) -> None:
         elif score.get("calibrated") is True:
             raise PromoteError(f"{path}: a calibrated score must name its metric")
     body = document[adapter]
-    allowed = ({"order"} if adapter == "static_order" else {"symbol"} if adapter == "native"
+    # static_order has no parameters: it ranks by UKD priority, then descriptor id. Declared
+    # criteria are refused, as UhdParser refuses them, rather than installed and ignored.
+    if adapter == "static_order" and "order" in body:
+        raise PromoteError(f"{path}: static_order.order is not supported: declared ordering criteria are "
+                           "not implemented; static_order ranks by priority, then descriptor id")
+    allowed = (set() if adapter == "static_order" else {"symbol"} if adapter == "native"
                else {"library", "symbol", "hash", "config"} if adapter == "custom_library"
                else {"artifact", "hash"})
     if set(body) - allowed:
         raise PromoteError(f"{path}: unknown {adapter} body fields")
     if "hash" in body and (not isinstance(body["hash"], str) or not body["hash"]):
         raise PromoteError(f"{path}: model hash must be a nonempty string")
-    if adapter == "static_order" and "order" in body and (
-        not isinstance(body["order"], list) or any(not isinstance(item, str) for item in body["order"])
-    ):
-        raise PromoteError(f"{path}: static_order.order must be an array of strings")
     if adapter == "custom_library" and "config" in body and not isinstance(body["config"], dict):
         raise PromoteError(f"{path}: custom_library.config must be an object")
 

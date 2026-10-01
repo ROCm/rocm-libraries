@@ -79,11 +79,6 @@ public:
     /// @returns Score from table if bucket match found, -infinity (declined) otherwise.
     double score(const std::vector<double>& features) const override;
 
-    UhdAdapterType type() const override
-    {
-        return UhdAdapterType::TABLE;
-    }
-
     size_t expectedFeatureCount() const override
     {
         return _numFeatures;
@@ -94,16 +89,6 @@ public:
         return _featuresHash;
     }
 
-    std::string getModelVersion() const override
-    {
-        return _modelVersion;
-    }
-
-    std::vector<std::string> getTrainingArches() const override
-    {
-        return _trainingArches;
-    }
-
     bool isTrainedForArch(const std::string& arch) const override;
 
 private:
@@ -111,8 +96,7 @@ private:
                  const hipdnn_flatbuffers_sdk::data_objects::TableModel* model,
                  std::string featuresHash,
                  size_t numFeatures,
-                 std::vector<std::string> trainingArches,
-                 std::string modelVersion);
+                 std::vector<std::string> trainingArches);
 
     /// Quantize a feature value into a bucket index using the feature's boundaries.
     /// @param value Feature value to bucket.
@@ -130,7 +114,6 @@ private:
     std::string _featuresHash;
     size_t _numFeatures;
     std::vector<std::string> _trainingArches;
-    std::string _modelVersion;
 
     /// Precomputed lookup table: bucket_key -> score.
     /// Built during construction from the model's entries.
@@ -261,35 +244,25 @@ inline std::unique_ptr<TableAdapter>
         }
     }
 
-    // Extract model version
-    const std::string modelVersion
-        = model->model_version() != nullptr ? model->model_version()->str() : "";
-
     // Copy buffer to owned storage
     std::vector<uint8_t> ownedBuffer(buffer, buffer + size);
 
     // Evaluate GetTableModel BEFORE moving ownedBuffer
     const fb::TableModel* modelPtr = fb::GetTableModel(ownedBuffer.data());
-    return std::unique_ptr<TableAdapter>(new TableAdapter(std::move(ownedBuffer),
-                                                          modelPtr,
-                                                          modelHash,
-                                                          numFeatures,
-                                                          std::move(trainingArches),
-                                                          modelVersion));
+    return std::unique_ptr<TableAdapter>(new TableAdapter(
+        std::move(ownedBuffer), modelPtr, modelHash, numFeatures, std::move(trainingArches)));
 }
 
 inline TableAdapter::TableAdapter(std::vector<uint8_t> ownedBuffer,
                                   const fb::TableModel* model,
                                   std::string featuresHash,
                                   size_t numFeatures,
-                                  std::vector<std::string> trainingArches,
-                                  std::string modelVersion)
+                                  std::vector<std::string> trainingArches)
     : _ownedBuffer(std::move(ownedBuffer))
     , _model(model)
     , _featuresHash(std::move(featuresHash))
     , _numFeatures(numFeatures)
     , _trainingArches(std::move(trainingArches))
-    , _modelVersion(std::move(modelVersion))
 {
     // Build the lookup table from the model's entries
     if(_model->entries() != nullptr)

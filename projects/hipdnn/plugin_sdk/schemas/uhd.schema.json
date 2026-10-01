@@ -88,10 +88,10 @@
       }
     },
     "static_order": {
+      "description": "No parameters: static_order ranks by UKD priority, then descriptor id. Declared ordering criteria (`order`) are not implemented and are refused.",
       "type": "object",
       "additionalProperties": false,
-      "patternProperties": {"^(x-|_)": {}},
-      "properties": {"order": {"type": "array", "items": {"type": "string"}}}
+      "patternProperties": {"^(x-|_)": {}}
     },
     "native": {
       "type": "object",

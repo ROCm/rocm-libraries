@@ -88,7 +88,6 @@ TEST(TestNativeAdapter, ResolvesAndScoresFeatureRow)
     auto adapter = NativeAdapter::resolve(SUM_SYMBOL, 3, "sha256:abc");
     ASSERT_NE(adapter, nullptr);
 
-    EXPECT_EQ(adapter->type(), UhdAdapterType::NATIVE);
     EXPECT_EQ(adapter->expectedFeatureCount(), 3U);
     EXPECT_EQ(adapter->getFeaturesHash(), "sha256:abc");
     EXPECT_DOUBLE_EQ(adapter->score({1.0, 2.0, 3.0}), 6.0);

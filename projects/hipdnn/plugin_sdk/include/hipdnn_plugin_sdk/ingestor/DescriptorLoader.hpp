@@ -694,7 +694,6 @@ inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
     heuristic.modelArtifactPath = config.modelArtifactPath;
     heuristic.modelHash = config.modelHash;
     heuristic.customLibrarySymbol = config.customLibrarySymbol;
-    heuristic.staticOrderFields = config.staticOrderFields;
     heuristic.trainedAgainstJson = config.trainedAgainst;
     if(config.trainedAgainst.is_object())
     {

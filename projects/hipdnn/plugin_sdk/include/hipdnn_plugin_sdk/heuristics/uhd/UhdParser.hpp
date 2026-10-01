@@ -514,15 +514,16 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
     const auto& body = root.at(result.adapterType);
     if(result.adapterType == "static_order")
     {
-        keys(body, {"order"}, where);
+        // static_order has no parameters: it ranks by UKD priority, then descriptor id
+        // (detail::declaredOrder). Declared criteria would be accepted and silently ignored,
+        // so a body naming them is refused rather than ranked by something it did not ask for.
         if(body.contains("order"))
         {
-            result.staticOrderFields = body.at("order").get<std::vector<std::string>>();
-            if(result.staticOrderFields.empty())
-            {
-                result.staticOrderFields = {"priority", "id"};
-            }
+            fail("static_order.order is not supported in " + where
+                 + ": declared ordering criteria are not implemented; static_order ranks by "
+                   "priority, then descriptor id");
         }
+        keys(body, {}, where);
     }
     else if(result.adapterType == "native")
     {

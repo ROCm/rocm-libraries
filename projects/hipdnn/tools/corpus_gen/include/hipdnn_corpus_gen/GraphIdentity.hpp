@@ -24,9 +24,9 @@
 /// A graph written without an id is not rejected: `GraphDescriptor::finalize` mints a UUID v4
 /// for it at load. That is the failure worth naming, because it is silent -- every run and
 /// every machine measures the same corpus under different identities, and nothing reports an
-/// error. Deriving the id from the graph's own bytes is what makes `tools/CLAUDE.md` Step 1's
-/// promise ("`benchmark` ids are content-derived, so rows join across runs and machines") true
-/// for the graphs this tool writes, as it already is for the ones `uhd_gen` mints ids for.
+/// error. Deriving the id from the graph's own bytes makes `benchmark` ids content-derived, so
+/// rows join across runs and machines for the graphs this tool writes, as they already do for
+/// the ones `uhd_gen` mints ids for.
 namespace hipdnn_corpus_gen
 {
 
@@ -42,7 +42,7 @@ namespace fb = hipdnn_flatbuffers_sdk::data_objects;
 /// digest gives by construction. Nothing cross-checks these against `generate.py`'s; that path
 /// declines to mint for binary graphs (`generate.py:385-390`).
 inline hipdnn_flatbuffers_sdk::utilities::UuidBytes graphIdentityBytes(const uint8_t* data,
-                                                                      size_t size)
+                                                                       size_t size)
 {
     const auto digest = hipdnn_plugin_sdk::uhd::sha256(data, size);
 
@@ -108,8 +108,8 @@ inline IdentifiedGraph stampGraphIdentity(const std::vector<uint8_t>& bytes,
     builder.Finish(fb::CreateGraph(builder, object.get()));
 
     const auto identity = graphIdentityBytes(builder.GetBufferPointer(), builder.GetSize());
-    object->id = std::make_unique<fb::Uuid>(
-        hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(identity));
+    object->id
+        = std::make_unique<fb::Uuid>(hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(identity));
 
     builder.Clear();
     builder.Finish(fb::CreateGraph(builder, object.get()));

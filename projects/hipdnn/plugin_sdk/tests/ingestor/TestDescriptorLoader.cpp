@@ -927,6 +927,32 @@ TEST(TestDescriptorLoader, RejectsAUhdScoreCarryingUnits)
         << recorder.getRecordedLogsAsString();
 }
 
+/// static_order has no parameters: it always ranks by UKD priority, then descriptor id. A body
+/// declaring `order` asked for criteria nothing implements, so it is refused where it was
+/// authored rather than loaded and ranked by something other than what it says.
+TEST(TestDescriptorLoader, RejectsAStaticOrderBodyDeclaringCriteria)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("static_order_order"));
+    auto documents = makeSetDocuments('1', "test:static_order");
+    auto& uhd = documentOfType(documents, ".uhd.json");
+    uhd["adapter"] = "static_order";
+    uhd.erase("native");
+    uhd.erase("objective");
+    uhd["static_order"] = {{"order", nlohmann::json::array({"id", "priority"})}};
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadDescriptorCatalog(dir.path()).heuristics.empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "static_order.order is not supported"))
+        << recorder.getRecordedLogsAsString();
+
+    // The control: the same UHD with an empty body loads, so the refusal is about `order`.
+    uhd["static_order"] = nlohmann::json::object();
+    writeDocuments(dir.path(), documents);
+    EXPECT_EQ(loadDescriptorCatalog(dir.path()).heuristics.size(), 1u);
+}
+
 TEST(TestDescriptorLoader, MissingArchitectureModelFallsBackWithoutUsingTheDefaultModel)
 {
     const ScopedSymbols symbols;

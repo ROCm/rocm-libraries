@@ -80,11 +80,6 @@ public:
         return _groupFeatureIndex;
     }
 
-    UhdAdapterType type() const override
-    {
-        return UhdAdapterType::TREE_DATA;
-    }
-
     size_t expectedFeatureCount() const override
     {
         return _numFeatures;
@@ -101,22 +96,8 @@ public:
         return _roots.size();
     }
 
-    /// Get the model version string (RFC 0019 §13: model provenance).
-    /// Empty if not set in the model.
-    std::string getModelVersion() const override
-    {
-        return _modelVersion;
-    }
-
-    /// Get the list of GPU architectures the model was trained on.
-    /// Empty if not set in the model.
-    /// RFC 0019 §9.2: used for out-of-distribution detection.
-    std::vector<std::string> getTrainingArches() const override
-    {
-        return _trainingArches;
-    }
-
-    /// Check if the given architecture was seen during training.
+    /// Check if the given architecture was seen during training (RFC 0019 §9.2: out-of-
+    /// distribution detection).
     /// Matches the bare target, ignoring runtime feature suffixes. An empty list is unrestricted.
     bool isTrainedForArch(const std::string& arch) const override;
 
@@ -147,7 +128,6 @@ private:
                     size_t numFeatures,
                     double baseScore,
                     std::vector<std::string> trainingArches,
-                    std::string modelVersion,
                     bool lowerIsBetter);
 
     /// Prepare one ensemble. Takes the tree vector rather than the model so that a group's
@@ -189,9 +169,8 @@ private:
     /// than hands back, so it is the one place the adapter has to know.
     bool _lowerIsBetter;
 
-    // RFC 0019 §9.2, §13: Model provenance for out-of-distribution detection
+    // RFC 0019 §9.2: training arches for out-of-distribution detection.
     std::vector<std::string> _trainingArches;
-    std::string _modelVersion;
 };
 
 namespace fb = hipdnn_flatbuffers_sdk::data_objects;
@@ -361,10 +340,6 @@ inline std::unique_ptr<TreeDataAdapter>
         }
     }
 
-    // Extract model version (RFC 0019 §13)
-    const std::string modelVersion
-        = model->model_version() != nullptr ? model->model_version()->str() : "";
-
     return std::unique_ptr<TreeDataAdapter>(new TreeDataAdapter(std::move(nodes),
                                                                 std::move(roots),
                                                                 std::move(groups),
@@ -373,7 +348,6 @@ inline std::unique_ptr<TreeDataAdapter>
                                                                 numFeatures,
                                                                 baseScore,
                                                                 std::move(trainingArches),
-                                                                modelVersion,
                                                                 objective == "min"));
 }
 
@@ -385,7 +359,6 @@ inline TreeDataAdapter::TreeDataAdapter(std::vector<Node> nodes,
                                         size_t numFeatures,
                                         double baseScore,
                                         std::vector<std::string> trainingArches,
-                                        std::string modelVersion,
                                         bool lowerIsBetter)
     : _nodes(std::move(nodes))
     , _roots(std::move(roots))
@@ -396,7 +369,6 @@ inline TreeDataAdapter::TreeDataAdapter(std::vector<Node> nodes,
     , _baseScore(baseScore)
     , _lowerIsBetter(lowerIsBetter)
     , _trainingArches(std::move(trainingArches))
-    , _modelVersion(std::move(modelVersion))
 {
 }
 

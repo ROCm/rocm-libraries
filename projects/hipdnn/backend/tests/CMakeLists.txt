@@ -269,13 +269,6 @@ install(TARGETS ${TEST_NO_API_VERSION_PLUGIN_NAME} LIBRARY DESTINATION ${HIPDNN_
         RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
 )
 
-# The RFC 0019 UHD tests used to be listed here. They moved to plugin_sdk/tests/ingestor/uhd
-# with the code they cover -- every one of them included only plugin SDK headers, so a plugin
-# SDK change was breaking a backend test target and the plugin SDK's own suite looked as though
-# it did not test its own UHD modules. hipdnn_test_scorer_lib moved with TestCustomLibraryAdapter,
-# which is its only consumer.
-
-
 # A real, loadable engine plugin used by TestEnginePluginResourceManager.cpp, and
 # the only consumer of EnginePluginImpl.inl inside the main build; see
 # plugins/codegen_fixture/CodegenFixturePlugin.hpp for what it pins.

@@ -232,11 +232,6 @@ public:
         return scorer(features.data(), features.size());
     }
 
-    UhdAdapterType type() const override
-    {
-        return UhdAdapterType::CUSTOM_LIBRARY;
-    }
-
     size_t expectedFeatureCount() const override
     {
         return _numFeatures;

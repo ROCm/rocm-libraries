@@ -51,7 +51,6 @@ TEST_F(TestCustomLibraryAdapter, LoadAndScoreLinear)
     const auto libPath = getTestScorerLibPath();
     auto adapter = CustomLibraryAdapter::load(libPath, "test_linear_scorer", 3, TEST_HASH);
     ASSERT_NE(adapter, nullptr);
-    EXPECT_EQ(adapter->type(), UhdAdapterType::CUSTOM_LIBRARY);
     EXPECT_EQ(adapter->expectedFeatureCount(), 3U);
     EXPECT_EQ(adapter->getFeaturesHash(), TEST_HASH);
 

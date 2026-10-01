@@ -645,10 +645,13 @@ def _validate_uhd(desc, source_root):
                     f"'{expected}', got {doc.get('objective')!r}")
     body = doc[adapter]
     if adapter == "static_order":
-        _known_keys(body, ("order",), f"{where}.{adapter}")
-        if "order" in body and (not isinstance(body["order"], list)
-                                or any(not isinstance(item, str) for item in body["order"])):
-            raise HkpPackError(f"{where}.static_order.order must be an array of strings")
+        # No parameters: static_order ranks by UKD priority, then descriptor id. Declared
+        # criteria are refused, as UhdParser refuses them, rather than packed and ignored.
+        if isinstance(body, dict) and "order" in body:
+            raise HkpPackError(
+                f"{where}.static_order.order is not supported: declared ordering criteria are "
+                "not implemented; static_order ranks by priority, then descriptor id")
+        _known_keys(body, (), f"{where}.{adapter}")
         return
     if adapter == "native":
         _known_keys(body, ("symbol",), f"{where}.{adapter}")

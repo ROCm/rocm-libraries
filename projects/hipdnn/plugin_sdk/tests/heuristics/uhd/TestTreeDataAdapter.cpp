@@ -30,7 +30,6 @@
 #include <vector>
 
 using hipdnn_plugin_sdk::uhd::TreeDataAdapter;
-using hipdnn_plugin_sdk::uhd::UhdAdapterType;
 
 namespace
 {
@@ -574,22 +573,6 @@ TEST_F(TestTreeDataAdapter, ScoreWithEmptyFeatureVector)
     EXPECT_DOUBLE_EQ(score, 5.0);
 }
 
-TEST_F(TestTreeDataAdapter, ValidatesFeatureCount)
-{
-    auto buffer = GbdtModelBuilder()
-                      .setNumFeatures(3)
-                      .setFeaturesHash(TEST_HASH)
-                      .addTree(makeLeafTree(1.0))
-                      .build();
-
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
-    ASSERT_NE(adapter, nullptr);
-
-    EXPECT_TRUE(adapter->validateFeatureCount(3));
-    EXPECT_FALSE(adapter->validateFeatureCount(2));
-    EXPECT_FALSE(adapter->validateFeatureCount(4));
-}
-
 TEST_F(TestTreeDataAdapter, BatchScoring)
 {
     auto buffer = GbdtModelBuilder()
@@ -658,37 +641,7 @@ TEST_F(TestTreeDataAdapter, WorksWithFeatureExtractor)
     EXPECT_DOUBLE_EQ(adapter->score({64.0, 1.0}), 1.0);
 }
 
-// ========== RFC 0019 §9.2: Training arches and model version ==========
-
-TEST_F(TestTreeDataAdapter, ReturnsEmptyTrainingArchesByDefault)
-{
-    auto buffer = GbdtModelBuilder()
-                      .setNumFeatures(1)
-                      .setFeaturesHash(TEST_HASH)
-                      .addTree(makeLeafTree(1.0))
-                      .build();
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
-    ASSERT_NE(adapter, nullptr);
-
-    EXPECT_TRUE(adapter->getTrainingArches().empty());
-}
-
-TEST_F(TestTreeDataAdapter, ReturnsTrainingArchesWhenSet)
-{
-    auto buffer = GbdtModelBuilder()
-                      .setNumFeatures(1)
-                      .setFeaturesHash(TEST_HASH)
-                      .setTrainingArches({"gfx942", "gfx1100"})
-                      .addTree(makeLeafTree(1.0))
-                      .build();
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
-    ASSERT_NE(adapter, nullptr);
-
-    auto arches = adapter->getTrainingArches();
-    ASSERT_EQ(arches.size(), 2u);
-    EXPECT_EQ(arches[0], "gfx942");
-    EXPECT_EQ(arches[1], "gfx1100");
-}
+// ========== RFC 0019 §9.2: Training arches ==========
 
 TEST_F(TestTreeDataAdapter, IsTrainedForArchReturnsTrueWhenNoArches)
 {
@@ -736,33 +689,6 @@ TEST_F(TestTreeDataAdapter, IsTrainedForArchReturnsFalseWhenArchNotInList)
     EXPECT_FALSE(adapter->isTrainedForArch("gfx950"));
     EXPECT_FALSE(adapter->isTrainedForArch("gfx900"));
     EXPECT_FALSE(adapter->isTrainedForArch("gfx9420:sramecc+:xnack-"));
-}
-
-TEST_F(TestTreeDataAdapter, ReturnsEmptyModelVersionByDefault)
-{
-    auto buffer = GbdtModelBuilder()
-                      .setNumFeatures(1)
-                      .setFeaturesHash(TEST_HASH)
-                      .addTree(makeLeafTree(1.0))
-                      .build();
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
-    ASSERT_NE(adapter, nullptr);
-
-    EXPECT_TRUE(adapter->getModelVersion().empty());
-}
-
-TEST_F(TestTreeDataAdapter, ReturnsModelVersionWhenSet)
-{
-    auto buffer = GbdtModelBuilder()
-                      .setNumFeatures(1)
-                      .setFeaturesHash(TEST_HASH)
-                      .setModelVersion("1.2.3")
-                      .addTree(makeLeafTree(1.0))
-                      .build();
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
-    ASSERT_NE(adapter, nullptr);
-
-    EXPECT_EQ(adapter->getModelVersion(), "1.2.3");
 }
 
 // ========== Realistic Multi-Tree Ensemble Test ==========
@@ -857,7 +783,6 @@ TEST_F(TestTreeDataAdapter, RealisticGbdtEnsembleScoring)
     ASSERT_NE(adapter, nullptr);
     EXPECT_EQ(adapter->expectedFeatureCount(), 5u);
     EXPECT_EQ(adapter->treeCount(), 3u);
-    EXPECT_EQ(adapter->getModelVersion(), "1.0.0");
     EXPECT_TRUE(adapter->isTrainedForArch("gfx942"));
 
     // Test case 1: Small problem (M=256), small tile (tile_m=32), low CU count (cu_count=40)

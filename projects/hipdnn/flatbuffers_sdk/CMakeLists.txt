@@ -178,14 +178,14 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         OUTPUT_NAMESPACE hipdnn_flatbuffers_sdk
     )
 
-    # Python bindings for the two schemas uhd_gen writes. Generated into the tool's
+    # Python bindings for the one schema uhd_gen writes. Generated into the tool's
     # own `_generated/` rather than a shared location: uhd_gen is pip-installable, so
     # a sibling top-level package would not travel with the wheel, and prepending its
     # own copy to sys.path is what keeps a stale install from shadowing the bindings
-    # that match these schemas (see uhd_gen/__init__.py).
+    # that match this schema (see uhd_gen/__init__.py).
     #
-    # Only these two. Every other schema is consumed exclusively from C++, and
-    # generating Python for all 38 would ship a package nothing imports.
+    # Only this one. Every other schema is consumed exclusively from C++, and
+    # generating Python for all of them would ship a package nothing imports.
     hipdnn_generate_flatbuffer_python(
         NAME uhd_gen
         TARGET hipdnn_flatbuffers_sdk

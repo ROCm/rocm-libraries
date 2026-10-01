@@ -408,6 +408,34 @@ def test_schema_admits_the_extension_namespaces_the_loader_ignores():
     assert not validator.is_valid(stray_nested)
 
 
+def _static_order_uhd(body: dict) -> dict:
+    doc = _native_uhd()
+    doc["adapter"] = "static_order"
+    del doc["native"]
+    doc["static_order"] = body
+    return doc
+
+
+def test_packaging_refuses_static_order_criteria(tmp_path):
+    """static_order ranks by UKD priority, then descriptor id, and takes no parameters. A
+    declared `order` names criteria nothing implements; UhdParser refuses it, so the packer
+    does too rather than ship a descriptor the runtime drops.
+    """
+    root = tmp_path / "src"
+    _write_json(root / "order.uhd.json", _static_order_uhd({}))
+    load_flat_input(root, log=lambda *_: None)
+    _write_json(root / "order.uhd.json", _static_order_uhd({"order": ["priority", "id"]}))
+    with pytest.raises(HkpPackError, match="static_order.order is not supported"):
+        load_flat_input(root, log=lambda *_: None)
+
+
+def test_schema_refuses_static_order_criteria():
+    validator = _canonical_uhd_validator()
+    empty = _static_order_uhd({"x-note": "extension keys stay legal"})
+    assert validator.is_valid(empty), [error.message for error in validator.iter_errors(empty)]
+    assert not validator.is_valid(_static_order_uhd({"order": ["priority", "id"]}))
+
+
 def test_schema_ties_the_objective_to_the_score_metric():
     """RFC 0019 §4.4: the registered metric fixes the direction -- `tflops` is maximized,
     `time` minimized -- and `objective` must restate it, calibrated or not. A score with no

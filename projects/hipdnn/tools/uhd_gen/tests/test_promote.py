@@ -432,6 +432,20 @@ def test_a_score_must_name_a_registered_metric_in_its_own_direction(tmp_path, sc
         build_plan(model, tree)
 
 
+def test_a_static_order_declaring_criteria_is_refused_before_any_write(tmp_path):
+    """static_order ranks by UKD priority, then descriptor id, and takes no parameters; the
+    runtime refuses a body declaring `order`, so promote must not install one."""
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    _write(model / "heuristic.uhd.json", {"version": "1.0", "id": NEW, "name": "model",
+                                           "adapter": "static_order",
+                                           "static_order": {"order": ["priority", "id"]}})
+    before = _files(tmp_path)
+    with pytest.raises(PromoteError, match="static_order.order is not supported"):
+        build_plan(model, tree)
+    assert _files(tmp_path) == before
+
+
 @pytest.mark.parametrize("payload", ["missing.bin", "../outside.bin", "metadata.kmd.json"])
 def test_invalid_artifact_destination_or_source_never_writes(tmp_path, payload):
     tree = _tree(tmp_path / "tree")

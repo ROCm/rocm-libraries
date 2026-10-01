@@ -218,8 +218,6 @@ struct HeuristicDescriptor
     std::string modelHash;
     /// CUSTOM_LIBRARY: the scorer function's symbol name inside the `.so`.
     std::string customLibrarySymbol;
-    /// STATIC_ORDER: ordering criteria, e.g. {"priority", "id"}.
-    std::vector<std::string> staticOrderFields;
 
     /// Directory of the `.uhd.json` that declared this descriptor. @ref modelArtifactPath
     /// resolves against it, so a descriptor set relocates as a unit.

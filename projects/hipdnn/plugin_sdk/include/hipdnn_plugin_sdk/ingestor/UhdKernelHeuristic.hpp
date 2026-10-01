@@ -451,7 +451,6 @@ public:
         config.scoreMetric = descriptor.score.metric;
         config.scoreCalibrated = descriptor.score.calibrated;
         config.scoreTransform = descriptor.score.transform;
-        config.staticOrderFields = descriptor.staticOrderFields;
         config.nativeSymbol = descriptor.nativeSymbol;
         config.customLibrarySymbol = descriptor.customLibrarySymbol;
         config.modelHash = descriptor.modelHash;
@@ -1037,10 +1036,9 @@ private:
     /// and whether the model or a fallback decided -- plus the model provenance that says
     /// which model produced them.
     ///
-    /// Logged rather than returned. The removed backend implementation kept an in-memory trace
-    /// map with a retrieval path that had no public API, so nothing outside its own test could
-    /// read it; a log line is what an operator can actually see, and §12 exists so selection is
-    /// inspectable rather than queryable.
+    /// Logged rather than returned: the heuristic plugin ABI has no trace-retrieval entry
+    /// point, so a log line is what an operator can actually see, and §12 exists so selection
+    /// is inspectable rather than queryable.
     ///
     /// At INFO because it is per-graph and verbose: a build ranking thousands of graphs should
     /// not pay for it by default, and §12's error-level requirements are the contract
