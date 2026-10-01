@@ -236,5 +236,53 @@ TEST_F(TestHipFlash2FwdPlanBuilder, RejectsShortSequenceDecodeLength)
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
+// -- requestsCausal: the kernel's causal flag ----------------------------------
+
+struct MaskSpec
+{
+    bool causalMask = false;
+    flatbuffers::Optional<int64_t> rightBound = flatbuffers::nullopt;
+};
+
+flatbuffers::FlatBufferBuilder sdpaAttributesWith(const MaskSpec& spec)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    flatbuffers::FlatBufferBuilder fbb;
+    SdpaAttributesBuilder attributes(fbb);
+    attributes.add_causal_mask(spec.causalMask);
+    if(spec.rightBound.has_value())
+    {
+        attributes.add_right_bound(*spec.rightBound);
+    }
+    attributes.add_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
+    fbb.Finish(attributes.Finish());
+    return fbb;
+}
+
+bool requestsCausalFor(const MaskSpec& spec)
+{
+    const auto fbb = sdpaAttributesWith(spec);
+    return HipFlash2FwdPlanBuilder::requestsCausal(
+        *flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>(
+            fbb.GetBufferPointer()));
+}
+
+// isApplicable accepts right_bound 0 with top-left alignment as TOP_LEFT_CAUSAL, so
+// the plan must mask it. Reading only causal_mask ran it unmasked.
+TEST(TestHipFlash2RequestsCausal, BoundsSpelledTopLeftCausalSetsCausal)
+{
+    EXPECT_TRUE(requestsCausalFor({/*causalMask=*/false, /*rightBound=*/0}));
+}
+
+TEST(TestHipFlash2RequestsCausal, DeprecatedCausalMaskSetsCausal)
+{
+    EXPECT_TRUE(requestsCausalFor({/*causalMask=*/true, /*rightBound=*/flatbuffers::nullopt}));
+}
+
+TEST(TestHipFlash2RequestsCausal, UnmaskedGraphDoesNotSetCausal)
+{
+    EXPECT_FALSE(requestsCausalFor({/*causalMask=*/false, /*rightBound=*/flatbuffers::nullopt}));
+}
+
 } // namespace
 } // namespace hip_flash2_engine

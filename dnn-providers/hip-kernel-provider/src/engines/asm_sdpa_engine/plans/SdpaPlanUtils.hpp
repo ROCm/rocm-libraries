@@ -55,17 +55,30 @@ enum class MaskType : int
     SLIDING_WINDOW = 3
 };
 
-// Classify the mask requested by an SDPA (forward or backward) attribute set.
+// The mask an SDPA (forward or backward) attribute set asks for: its kind plus
+// the band it describes in the left_bound / right_bound / alignment convention
+// (-1 = unbounded). `left`, `right` and `topLeft` are what a SLIDING_WINDOW
+// kernel needs; for the other kinds they restate the mask.
+struct ResolvedMask
+{
+    MaskType type = MaskType::NO_MASK;
+    int64_t left = -1;
+    int64_t right = -1;
+    bool topLeft = true;
+};
+
+// Resolve the mask requested by an SDPA (forward or backward) attribute set.
 //
 // Two sources can describe the mask: the modern left_bound / right_bound /
 // diagonal_alignment trio, and the deprecated causal_mask /
-// causal_mask_bottom_right booleans. When a deprecated boolean is set it takes
-// precedence and the modern trio is ignored; otherwise the trio is
-// authoritative. The two deprecated booleans are mutually exclusive, so setting
-// both throws HipdnnPluginException(INVALID_VALUE).
-//
-// Guaranteeing the two parameter sets agree belongs in the hipDNN frontend; this
-// helper only resolves which source wins for dispatch.
+// causal_mask_bottom_right booleans. A deprecated boolean fixes the diagonal
+// (right bound 0) and its alignment, overriding right_bound and
+// diagonal_alignment, but it keeps a real left_bound: causal_mask plus
+// left_bound is a causal sliding window, the way cuDNN's set_causal_mask(true)
+// plus set_sliding_window_length(n) spells one. This matches the CPU and GPU
+// SDPA references (extractDiagonalBandParams). Without a deprecated boolean
+// the trio is authoritative. The two deprecated booleans are mutually
+// exclusive, so setting both throws HipdnnPluginException(INVALID_VALUE).
 //
 // Absence-awareness: the generated flatbuffer accessors expose the causal_mask*
 // fields as plain bool defaulting to false, with no has_*() accessor.
@@ -76,7 +89,7 @@ enum class MaskType : int
 // specified trio (e.g. only right_bound = 0) still derives a mask rather than
 // silently falling back to NO_MASK.
 template <typename SdpaAttrsT>
-MaskType getMaskType(const SdpaAttrsT& attrs)
+ResolvedMask resolveMask(const SdpaAttrsT& attrs)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -92,33 +105,39 @@ MaskType getMaskType(const SdpaAttrsT& attrs)
             "but both are set");
     }
 
-    // Deprecated booleans take precedence: when either is set, defer to it and
-    // ignore the modern bounds trio.
-    if(causalDeprecated)
+    ResolvedMask mask;
+    mask.left = attrs.left_bound().has_value() ? attrs.left_bound().value() : -1;
+    if(causalDeprecated || bottomRightDeprecated)
     {
-        return MaskType::TOP_LEFT_CAUSAL;
+        mask.right = 0;
+        mask.topLeft = causalDeprecated;
     }
-    if(bottomRightDeprecated)
+    else
     {
-        return MaskType::BOTTOM_RIGHT_CAUSAL;
+        mask.right = attrs.right_bound().has_value() ? attrs.right_bound().value() : -1;
+        mask.topLeft = attrs.diagonal_alignment() != DiagonalAlignment::BOTTOM_RIGHT;
     }
 
-    // No deprecated boolean set: the modern bounds trio is authoritative. An
-    // unset bound means unbounded, represented here as -1, so a partially
-    // specified trio still resolves to the mask it describes.
-    const int64_t left = attrs.left_bound().has_value() ? attrs.left_bound().value() : -1;
-    const int64_t right = attrs.right_bound().has_value() ? attrs.right_bound().value() : -1;
-    if(left == -1 && right == -1) // both unbounded
+    if(mask.left == -1 && mask.right == -1) // both unbounded
     {
-        return MaskType::NO_MASK;
+        mask.type = MaskType::NO_MASK;
     }
-    if(left == -1 && right == 0) // causal: attend up to the diagonal
+    else if(mask.left == -1 && mask.right == 0) // causal: attend up to the diagonal
     {
-        return attrs.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT
-                   ? MaskType::BOTTOM_RIGHT_CAUSAL
-                   : MaskType::TOP_LEFT_CAUSAL;
+        mask.type = mask.topLeft ? MaskType::TOP_LEFT_CAUSAL : MaskType::BOTTOM_RIGHT_CAUSAL;
     }
-    return MaskType::SLIDING_WINDOW; // anything else is a sliding window
+    else
+    {
+        mask.type = MaskType::SLIDING_WINDOW; // anything else is a sliding window
+    }
+    return mask;
+}
+
+// The kind of mask resolveMask() derives; see there for the precedence rules.
+template <typename SdpaAttrsT>
+MaskType getMaskType(const SdpaAttrsT& attrs)
+{
+    return resolveMask(attrs).type;
 }
 
 // =============================================================================

@@ -959,7 +959,8 @@ void SdpaBwdPlanBuilder::buildPlan(
             "(isApplicable should have rejected)");
     }
     const auto& dataTypeId = *dataTypeIdOpt;
-    auto maskType = plan_utils::getMaskType(sdpaAttrs);
+    const auto resolvedMask = plan_utils::resolveMask(sdpaAttrs);
+    const auto maskType = resolvedMask.type;
     auto batchMode = getBatchMode(sdpaAttrs);
     const int bf16CvtValue = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
                                                     : static_cast<int>(getRoundingMode(sdpaAttrs));
@@ -1173,15 +1174,12 @@ void SdpaBwdPlanBuilder::buildPlan(
     params.maskOrdinal = static_cast<int32_t>(maskType);
     if(maskType == MaskType::SLIDING_WINDOW)
     {
-        params.windowLeft = sdpaAttrs.left_bound().has_value()
-                                ? static_cast<int32_t>(sdpaAttrs.left_bound().value())
-                                : -1;
-        params.windowRight = sdpaAttrs.right_bound().has_value()
-                                 ? static_cast<int32_t>(sdpaAttrs.right_bound().value())
-                                 : -1;
-        params.topLeftAlignment
-            = sdpaAttrs.diagonal_alignment()
-              != hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+        // Resolved bounds, not the raw attributes: a deprecated causal boolean
+        // plus left_bound is a window whose right bound and alignment come from
+        // the boolean, not from right_bound / diagonal_alignment.
+        params.windowLeft = static_cast<int32_t>(resolvedMask.left);
+        params.windowRight = static_cast<int32_t>(resolvedMask.right);
+        params.topLeftAlignment = resolvedMask.topLeft;
     }
 
     if(postKernel)

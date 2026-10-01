@@ -355,7 +355,7 @@ Flash2FwdParams HipFlash2FwdPlanBuilder::extractParams(const Handle& /*handle*/,
         p.attnScale = attrs.attn_scale_value().value();
     }
 
-    p.causal = attrs.causal_mask();
+    p.causal = requestsCausal(attrs);
 
     p.qStrideBatch = q->strides()->Get(0);
     p.qStrideHead = q->strides()->Get(1);
@@ -371,6 +371,14 @@ Flash2FwdParams HipFlash2FwdPlanBuilder::extractParams(const Handle& /*handle*/,
     p.oStrideSeq = o->strides()->Get(2);
 
     return p;
+}
+
+bool HipFlash2FwdPlanBuilder::requestsCausal(const data_objects::SdpaAttributes& attrs)
+{
+    // The same classification isApplicable gates on, so a causal mask spelled with
+    // the bounds trio is masked too.
+    return asm_sdpa_engine::plan_utils::getMaskType(attrs)
+           == asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL;
 }
 
 } // namespace hip_flash2_engine
