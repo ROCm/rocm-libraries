@@ -132,6 +132,10 @@ struct PassFeatureConfig {
         /// CDNA5ReadyQueue paths that enforce it (see
         /// ReadyQueue::clusterBarrierEnabled).
         bool clusterBarrier = false;
+        /// Mirrors ModuleOptions::LockDsReadOrder. Defaults on: every ds_load
+        /// in a scheduling region is chained into dsReadPriority order. Set
+        /// false to leave a ready lower-priority ds_load free to issue first.
+        bool lockDsReadOrder = true;
     };
 
     LoopConfig loopConfig;

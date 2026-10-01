@@ -397,6 +397,11 @@ globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 # splits, and how many s_nop cycles were wasted.
 globalParameters["StinkyTofuEnableRemarks"] = False
 
+# StinkyTofu per-pass wall time (stderr).  After each kernel's pipeline finishes,
+# report self time, inclusive total, and run count for every pass that ran, so a
+# slow kernel generation can be attributed to individual passes.
+globalParameters["StinkyTofuTimePasses"] = False
+
 # Directory for StinkyTofu per-kernel instruction-cost output files (empty = disabled).
 # When set, each kernel's StinkyTofu module writes its cost file here via
 # StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).
@@ -844,6 +849,7 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "Experimental",       # --experimental logic-dir toggle in ParseArguments
     "EnableGemmA2AFusion", # --enable-gemm-a2a-fusion toggle in ParseArguments
     "GenSolTable",        # --gen-sol-table toggle in ParseArguments
+    "BuildGfx1250v0",     # --gfx1250v0 toggle in ParseArguments
     # Keys with a sanctioned opt-out from the strict gate:
     #   - Live but read via DebugConfig (makeDebugConfig in
     #     Tensile/Common/Types.py) directly from the raw config dict

@@ -2056,6 +2056,9 @@ inline std::deque<std::string>& registeredEngineNames()
  * already-registered engine holds, and a state manager built from it constructs without
  * throwing, so an engine this returns is one the provider can advertise and then serve.
  *
+ * A summary line reports how many sets survived and how many validation dropped. The line
+ * is an error if validation drops a set.
+ *
  * @warning Native symbols must already be registered when this is called; a set naming an
  *          unregistered symbol is dropped.
  */
@@ -2064,6 +2067,7 @@ inline std::vector<DescriptorSet>
     loadValidatedDescriptorSets(const std::vector<std::filesystem::path>& roots)
 {
     std::vector<DescriptorSet> validated;
+    size_t dropped = 0;
 
     for(auto& set : resolveDescriptorSets(loadDescriptorCatalog(roots)))
     {
@@ -2149,6 +2153,7 @@ inline std::vector<DescriptorSet>
         }
         if(!resolvable)
         {
+            ++dropped;
             continue;
         }
 
@@ -2167,6 +2172,7 @@ inline std::vector<DescriptorSet>
             HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
                                     << set.engine.name << "' does not validate: " << error.what()
                                     << "; dropping it");
+            ++dropped;
             continue;
         }
 
@@ -2198,9 +2204,19 @@ inline std::vector<DescriptorSet>
     {
         from += (from.empty() ? "" : ", ") + root.string();
     }
-    HIPDNN_PLUGIN_LOG_INFO("descriptor loader: " << validated.size()
-                                                 << " descriptor-backed engine(s) loaded from "
-                                                 << from);
+    if(dropped == 0)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("descriptor loader: "
+                               << validated.size() << " descriptor-backed engine(s) loaded from "
+                               << from << "; " << dropped << " dropped during validation");
+    }
+    else
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: "
+                                << dropped << " descriptor set(s) dropped during validation; "
+                                << validated.size() << " descriptor-backed engine(s) loaded from "
+                                << from);
+    }
     return validated;
 }
 

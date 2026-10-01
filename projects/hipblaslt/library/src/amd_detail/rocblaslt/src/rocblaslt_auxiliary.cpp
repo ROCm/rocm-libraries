@@ -44,8 +44,8 @@
 #include "UserDrivenTuningParser.hpp"
 #include "definitions.h"
 #include "handle.h"
-#include "rocblaslt_arch_revision.hpp"
 #include "rocblaslt.h"
+#include "rocblaslt_fused_a2a_validate.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocroller_host.hpp"
 #include "tensile_host.hpp"
@@ -531,6 +531,13 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
         setTo1(matmul_descr->compute_type, (void*)problem.alpha_owned.data(), &alphaTmp);
         problem.alpha = alphaTmp;
     }
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    problem.fused_epilogue      = matmul_descr->fused_epilogue;
+    problem.fused_a2a_world     = handle ? handle->device_comm_world : 0;
+    problem.fused_a2a_rank      = handle ? handle->device_comm_rank : 0;
+    problem.fused_a2a_peer_flag = handle ? handle->device_comm_peer_flags : nullptr;
+#endif
 
     return problem;
 }
@@ -2273,6 +2280,24 @@ rocblaslt_status
         auto prob = construct_rocblaslt_problem(
             handle, matmul_desc, matA, matB, matC, matD, &alpha, &beta, pref->max_workspace_bytes);
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        if(auto gate = validate_fused_a2a(handle, prob); gate != rocblaslt_status_success)
+        {
+            if(dummy_bias_address)
+                matmul_desc->bias = nullptr;
+            return gate;
+        }
+
+        // No match, not an error: the heuristic reports zero algos.
+        if(fused_a2a_lacks_sdma_queues(prob))
+        {
+            if(dummy_bias_address)
+                matmul_desc->bias = nullptr;
+            *returnAlgoCount = 0;
+            return rocblaslt_status_success;
+        }
+#endif
+
         OverrideSingleton& override         = OverrideSingleton::getInstance();
         bool               override_success = false;
         if(override.env_mode)
@@ -2686,19 +2711,6 @@ std::string rocblaslt_internal_get_arch_name()
     hipDeviceProp_t deviceProperties;
     static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
     return ArchName{}(deviceProperties);
-}
-
-// The GEMM library subtree the current device loads; folds in asicRevision, the
-// only signal telling the gfx1250 revisions apart (see rocblaslt_arch_revision.hpp).
-std::string rocblaslt_internal_get_library_arch_name()
-{
-    int deviceId = 0;
-    static_cast<void>(hipGetDevice(&deviceId));
-    // Zero-init: a failed query leaves the arch name empty, so no subtree matches.
-    hipDeviceProp_t deviceProperties{};
-    static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-    const int asicRevision = deviceProperties.asicRevision;
-    return rocblaslt_revisioned_arch_name(ArchName{}(deviceProperties), asicRevision);
 }
 
 bool rocblaslt_internal_test_path(const std::string& path)

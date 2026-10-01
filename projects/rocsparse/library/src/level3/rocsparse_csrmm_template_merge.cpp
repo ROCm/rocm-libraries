@@ -30,6 +30,7 @@
 #include "rocsparse_common.h"
 #include "rocsparse_common.hpp"
 #include "rocsparse_csrmm.hpp"
+#include "rocsparse_grid.hpp"
 
 namespace rocsparse
 {
@@ -122,7 +123,7 @@ namespace rocsparse
 
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrmmnn_merge_compute_coords<1, ITEM_PER_THREAD>),
-                dim3(block_count, get_batch_grid_size<int64_t>(num_coord_sets)),
+                dim3(block_count, get_grid_size_y<int64_t>(handle, num_coord_sets)),
                 dim3(1),
                 0,
                 handle->stream,
@@ -150,7 +151,7 @@ namespace rocsparse
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                   \
         (rocsparse::csrmmnn_merge_path_kernel<CSRMMNN_DIM, WF_SIZE, ITEM_PER_THREAD, T>), \
         dim3((block_count - 1) / (CSRMMNN_DIM / WF_SIZE) + 1,                             \
-             get_batch_grid_size<J>(batch_count_C)),                                      \
+             get_grid_size_y<J>(handle, batch_count_C)),                                  \
         dim3(CSRMMNN_DIM),                                                                \
         0,                                                                                \
         handle->stream,                                                                   \
@@ -260,7 +261,7 @@ namespace rocsparse
 #define LAUNCH_CSRMMNT_MERGE_MAIN_KERNEL(WF_SIZE, ITEM_PER_THREAD, LOOPS)                \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                  \
         (rocsparse::csrmmnt_merge_path_main_kernel<WF_SIZE, ITEM_PER_THREAD, LOOPS, T>), \
-        dim3(block_count, get_batch_grid_size<J>(batch_count_C)),                        \
+        dim3(block_count, get_grid_size_y<J>(handle, batch_count_C)),                    \
         dim3(WF_SIZE),                                                                   \
         0,                                                                               \
         handle->stream,                                                                  \
@@ -297,7 +298,7 @@ namespace rocsparse
         (rocsparse::                                                                         \
              csrmmnt_merge_path_remainder_kernel<CSRMMNT_DIM, WF_SIZE, ITEM_PER_THREAD, T>), \
         dim3((block_count - 1) / (CSRMMNT_DIM / WF_SIZE) + 1,                                \
-             get_batch_grid_size<J>(batch_count_C)),                                         \
+             get_grid_size_y<J>(handle, batch_count_C)),                                     \
         dim3(CSRMMNT_DIM),                                                                   \
         0,                                                                                   \
         handle->stream,                                                                      \
