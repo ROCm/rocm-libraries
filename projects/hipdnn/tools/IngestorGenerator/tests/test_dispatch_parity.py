@@ -710,3 +710,105 @@ class TestTheGraphContractAppliesToEverySource:
         assert sink.kind == "out_of_contract", sink
         assert "sink_token" in sink.reason
         assert control.spec is not None, "the sinkless twin is still served"
+
+
+#: A builder whose policy-owned field follows the tile, as gfx942's v_row_pad
+#: follows block_n, and whose spec refuses a tile that does not divide the length.
+_KNOB_STUB = """
+import dataclasses
+
+
+@dataclasses.dataclass(frozen=True)
+class Spec:
+    seqlen_q: int
+    head_size: int
+    block_n: int = 64
+    v_row_pad: object = None
+
+    def __post_init__(self):
+        if self.seqlen_q % self.block_n:
+            raise ValueError(f"seqlen_q must be a multiple of block_n={self.block_n}")
+
+    def resolved_v_row_pad(self):
+        return v_row_pad(self.block_n)
+
+
+def v_row_pad(block_n):
+    return 32 if block_n == 32 else 0
+
+
+def supports(spec, arch=None):
+    return True, ""
+"""
+
+
+class TestKnobPinsComeBeforeWhatDependsOnThem:
+    """942:S6-16: `--knobs` pinned the tile after the policy-owned metadata was
+    resolved at the dispatcher's tile, so the catalog said v_row_pad 0 where the
+    block_n=32 binary is built with 32, and packing refused it. 942:S6-9: an
+    approved tile SET could only be written as a cross-product."""
+
+    @staticmethod
+    def _build(tmp_path, monkeypatch, knobs):
+        (tmp_path / "knob_stub.py").write_text(_KNOB_STUB)
+        monkeypatch.syspath_prepend(str(tmp_path))
+        monkeypatch.delitem(sys.modules, "knob_stub", raising=False)
+        import knob_stub
+
+        fields = ["seqlen_q", "head_size", "block_n", "v_row_pad"]
+        profile = {
+            "slug": "stub",
+            "arch": "gfxstub",
+            "source": "stub.py",
+            "builder": "build_stub",
+            "engine": {"name": "stub:Engine"},
+            "kmd_fields": [],
+            "metadata_fields": fields,
+            "predicate": {"module": "knob_stub", "function": "supports"},
+            "arch_spec": {"module": "knob_stub", "class": "Spec"},
+            "policies": {
+                "v_row_pad": {
+                    "module": "knob_stub",
+                    "function": "v_row_pad",
+                    "args": ["block_n"],
+                }
+            },
+            "specialization": {
+                "metadata_fields": fields,
+                "matcher_only_fields": [],
+                "bindings": {
+                    **{f: {"field": f} for f in fields[:3]},
+                    "v_row_pad": {"method": "resolved_v_row_pad"},
+                },
+            },
+        }
+        served = [
+            dispatch_parity.Resolution(
+                {"seqlen_q": 512}, spec=knob_stub.Spec(seqlen_q=512, head_size=128)
+            )
+        ]
+        config = dispatch_parity.build_config(served, profile, knobs)
+        return [k["metadata"] for k in config["packs"][0]["kernels"]]
+
+    def test_policy_metadata_is_resolved_at_the_pinned_tile(
+        self, tmp_path, monkeypatch
+    ):
+        [metadata] = self._build(tmp_path, monkeypatch, {"block_n": [32]})
+        assert metadata["block_n"] == 32
+        assert metadata["v_row_pad"] == 32, "resolved at the dispatcher's block_n=64"
+
+    def test_an_explicit_combination_list_emits_exactly_those(
+        self, tmp_path, monkeypatch
+    ):
+        rows = self._build(tmp_path, monkeypatch, [{"block_n": 64}, {"block_n": 32}])
+        assert sorted((m["block_n"], m["v_row_pad"]) for m in rows) == [
+            (32, 32),
+            (64, 0),
+        ]
+
+    def test_a_combination_the_builder_refuses_is_dropped_and_reported(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        rows = self._build(tmp_path, monkeypatch, {"block_n": [64, 48]})
+        assert [m["block_n"] for m in rows] == [64]
+        assert "multiple of block_n=48" in capsys.readouterr().err

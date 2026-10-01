@@ -38,7 +38,6 @@ import hashlib
 import inspect
 import itertools
 import json
-import math
 import os
 import re
 import sys
@@ -505,6 +504,59 @@ def _specialization(profile: dict) -> dict:
     return copy.deepcopy(declaration)
 
 
+def _knob_combos(knobs) -> list[dict]:
+    """The knob combinations to emit per shape. A mapping of value lists is
+    crossed (`{"block_m": [256, 128], "block_n": [64, 32]}` is four tiles); a
+    list of mappings names the combinations exactly (`[{"block_m": 256,
+    "block_n": 64}, {"block_m": 128, "block_n": 32}]` is two), since an approved
+    tile set is rarely a cross-product. No knobs is the single empty
+    combination: the parity set."""
+    if not knobs:
+        return [{}]
+    if isinstance(knobs, dict):
+        for knob, values in knobs.items():
+            if not isinstance(values, list) or not values:
+                raise ParityError(
+                    f"--knobs entry '{knob}' must be a non-empty list of values, got "
+                    f"{values!r}. An empty list's cross-product is empty, which would "
+                    f"silently emit ZERO kernels instead of failing here."
+                )
+        names = sorted(knobs)
+        return [
+            dict(zip(names, combo))
+            for combo in itertools.product(*[knobs[k] for k in names])
+        ]
+    if isinstance(knobs, list) and all(
+        isinstance(combo, dict) and combo for combo in knobs
+    ):
+        return [dict(combo) for combo in knobs]
+    raise ParityError(
+        "--knobs must be a mapping of knob name to a list of values (crossed), or "
+        "a list of non-empty mappings (one per combination to emit)."
+    )
+
+
+def _refuses(spec: dict, arch_cls, predicate, profile: dict) -> str | None:
+    """Why the builder or the predicate refuses `spec`, a pinned variant, or
+    None. The builder's spec class validates the combination (a tile must
+    divide the canonical lengths, fit LDS), and the predicate is asked about the
+    final spec, as knob_sweep does for an arm."""
+    built = spec
+    if arch_cls is not None:
+        try:
+            built = arch_cls(**spec)
+        except Exception as exc:  # the builder's own refusal, per combination
+            return f"{type(exc).__name__}: {exc}"
+    if predicate is not None and arch_cls is not None:
+        arch = profile.get("arch")
+        ok, why = _predicate_result(
+            predicate, built, **({"arch": arch} if arch else {})
+        )
+        if not ok:
+            return f"unsupported: {why}"
+    return None
+
+
 def build_config(
     resolutions: list[Resolution], profile: dict, knobs: dict | None = None
 ) -> dict:
@@ -541,20 +593,14 @@ def build_config(
             arch_field_names.add(field.name)
             if field.default is not dataclasses.MISSING:
                 arch_defaults[field.name] = field.default
-    knobs = knobs or {}
-    for knob, values in knobs.items():
+    combos = _knob_combos(knobs)
+    for knob in sorted({k for combo in combos for k in combo}):
         if knob not in metadata_fields:
             raise ParityError(
                 f"--knobs names '{knob}', which this profile's metadata_fields does "
                 f"not declare. An undeclared metadata field drops the WHOLE pack at "
                 f"resolveDescriptorSets(), so crossing on one would emit a package "
                 f"that cannot load. Declared: {', '.join(metadata_fields) or '(none)'}."
-            )
-        if not isinstance(values, list) or not values:
-            raise ParityError(
-                f"--knobs entry '{knob}' must be a non-empty list of values, got "
-                f"{values!r}. An empty list's cross-product is empty, which would "
-                f"silently emit ZERO kernels instead of failing here."
             )
         # A knob the builder's spec does not accept can only be written to
         # metadata, which makes both arms name the same binary under two
@@ -569,22 +615,17 @@ def build_config(
                 f"kernel and the sweep would measure nothing. Either the name is "
                 f"wrong, or the field is not a build-time knob of this kernel."
             )
-    kernels = []
-    # Shapes that resolve to one identical spec (always the case for shapes
-    # differing only in canonicalised runtime fields) are one compiled kernel,
-    # so one catalog entry.
-    emitted: set = set()
-    for resolution in resolutions:
-        if resolution.spec is None:
-            continue
-        spec = {
-            f.name: getattr(resolution.spec, f.name)
-            for f in dataclasses.fields(resolution.spec)
-        }
-        identity = repr(sorted(spec.items()))
-        if identity in emitted:
-            continue
-        emitted.add(identity)
+    predicate_decl = profile.get("predicate") or {}
+    predicate = (
+        _import(*_required(predicate_decl, "predicate", "module", "function"))
+        if predicate_decl and any(combos)
+        else None
+    )
+
+    def resolve_metadata(spec: dict) -> dict:
+        """The catalog key of `spec`, with policy-owned fields resolved by the
+        kernel's own policy AT THIS SPEC's values: a pinned tile changes what
+        the policy answers (gfx942 v_row_pad follows block_n)."""
         metadata = {}
         for name in metadata_fields:
             if name in resolvers and spec.get(name) is None:
@@ -610,25 +651,48 @@ def build_config(
                 if isinstance(mapping, dict):
                     value = mapping.get(value, value)
             metadata[name] = value
-        # The shipping cross-product: dispatcher-resolved shapes crossed with
-        # the knobs that earned a slot. Not a pack `axes:` block, since axes
+        return metadata
+
+    dropped: dict = {}
+    kernels = []
+    # Shapes that resolve to one identical spec (always the case for shapes
+    # differing only in canonicalised runtime fields) are one compiled kernel,
+    # so one catalog entry.
+    emitted: set = set()
+    for resolution in resolutions:
+        if resolution.spec is None:
+            continue
+        spec = {
+            f.name: getattr(resolution.spec, f.name)
+            for f in dataclasses.fields(resolution.spec)
+        }
+        identity = repr(sorted(spec.items()))
+        if identity in emitted:
+            continue
+        emitted.add(identity)
+        # The shipping set: dispatcher-resolved shapes crossed with the knob
+        # combinations that earned a slot. Not a pack `axes:` block, since axes
         # cross one kernel_template and here every shape carries its own spec.
-        # Knobs absent from --knobs keep their policy-resolved value; with no
-        # --knobs this is a single empty combination, the parity set.
-        axis_names = sorted(knobs)
-        for combo in itertools.product(*[knobs[k] for k in axis_names]):
-            pinned = dict(zip(axis_names, combo))
-            variant_metadata = dict(metadata)
-            variant_spec = dict(spec)
-            for knob, value in pinned.items():
-                variant_metadata[knob] = (
-                    int(value) if isinstance(value, bool) else value
+        # Knobs absent from a combination keep their policy-resolved value;
+        # with no --knobs this is a single empty combination, the parity set.
+        for pinned in combos:
+            # Pins first, then everything that depends on them: the metadata
+            # the policy resolves, and the builder's own validation. Resolving
+            # at the dispatcher's tile and pinning afterwards wrote a catalog
+            # key the compiled binary contradicts (942:S6-16).
+            # Written into the spec, not only the metadata: the spec is what the
+            # builder compiles, and an arch-private knob is absent from the
+            # shared spec, so a `knob in variant_spec` guard would skip exactly
+            # the knobs worth sweeping.
+            variant_spec = {**spec, **pinned}
+            if pinned:
+                why = _refuses(
+                    variant_spec, arch_cls if arch_decl else None, predicate, profile
                 )
-                # Write it into the spec, not only the metadata: the spec is
-                # what the builder compiles, and an arch-private knob is absent
-                # from the shared spec, so a `knob in variant_spec` guard would
-                # skip exactly the knobs worth sweeping.
-                variant_spec[knob] = value
+                if why:
+                    dropped[why] = dropped.get(why, 0) + 1
+                    continue
+            variant_metadata = resolve_metadata(variant_spec)
             name = _kernel_name(slug, variant_spec, variant_metadata, metadata_fields)
             kernels.append(
                 {
@@ -642,6 +706,17 @@ def build_config(
                     "metadata": variant_metadata,
                 }
             )
+    if dropped:
+        # A combination the builder or predicate refuses for a shape is not
+        # emitted: it would fail at pack time, or ship a kernel the engine
+        # declines. Reported, since the shipped set is then narrower.
+        print(
+            f"  WARNING: {sum(dropped.values())} knob variant(s) not emitted; the "
+            f"builder or predicate refuses them:",
+            file=sys.stderr,
+        )
+        for why, count in sorted(dropped.items(), key=lambda kv: -kv[1]):
+            print(f"    {count:4d} x {why}", file=sys.stderr)
     # Kernels the name fields cannot tell apart get a digest of their spec, and
     # the list is ordered by name, so neither names nor descriptor order depend
     # on the order of the shape corpus.
@@ -743,10 +818,13 @@ def main(argv=None) -> int:
     )
     parser.add_argument(
         "--knobs",
-        help="JSON mapping of knob name to the list of values that SURVIVED the "
-        "sweep, e.g. '{\"use_exp2_fast\": [0, 1]}'. The dispatcher-resolved set is "
-        "crossed with it to build the shipping package (RUNBOOK §6). Omit it and "
-        "you get the parity set: one kernel per servable shape.",
+        help="The knobs that SURVIVED the sweep (RUNBOOK §6), as JSON: a mapping of "
+        "knob name to a list of values, crossed (e.g. '{\"use_exp2_fast\": [0, 1]}'), "
+        "or a list of mappings naming each combination to emit (e.g. "
+        '\'[{"block_m": 256, "block_n": 64}, {"block_m": 128, "block_n": 32}]\'). '
+        "Pinned values are applied before policy-owned metadata is resolved and the "
+        "builder validates each combination. Omit it and you get the parity set: "
+        "one kernel per servable shape.",
     )
     args = parser.parse_args(argv)
 
@@ -820,17 +898,14 @@ def main(argv=None) -> int:
     if args.out:
         try:
             knobs = json.loads(args.knobs) if args.knobs else {}
-            if not isinstance(knobs, dict):
-                raise ParityError(
-                    f"--knobs must be a JSON mapping of knob name to a list of "
-                    f"values, got {type(knobs).__name__}."
-                )
+            combos = _knob_combos(knobs)
+            knob_names = sorted({k for combo in combos for k in combo})
             config = build_config(catalog, profile, knobs)
             # Emit the compact form; build_config stays the source of truth and
             # `_compact` refuses anything that does not re-expand
-            # kernel-for-kernel. The knob axes are exactly --knobs, since the
-            # dispatcher returns one spec per shape.
-            text = _compact(config, sorted(knobs), profile)
+            # kernel-for-kernel. The knob axes are exactly the pinned knobs,
+            # since the dispatcher returns one spec per shape.
+            text = _compact(config, knob_names, profile)
         except json.JSONDecodeError as exc:
             print(f"FAIL: --knobs is not valid JSON: {exc}", file=sys.stderr)
             return 2
@@ -839,12 +914,11 @@ def main(argv=None) -> int:
             return 2
         Path(args.out).write_text(text)
         count = len(config["packs"][0]["kernels"])
-        if knobs:
-            arms = math.prod(len(v) for v in knobs.values())
+        if knob_names:
+            arms = len(combos)
             print(
-                f"\n  wrote {args.out}: {count} kernels "
-                f"= {count // arms} catalog entries ({len(served)} servable shapes) "
-                f"x {arms} surviving knob combination(s) ({', '.join(sorted(knobs))})"
+                f"\n  wrote {args.out}: {count} kernels for {len(served)} servable "
+                f"shapes x {arms} knob combination(s) ({', '.join(knob_names)})"
             )
             # The cap the runbook states, enforced where the number is known:
             # past the low thousands the pack time, the archive and the catalog
