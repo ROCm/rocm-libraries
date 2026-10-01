@@ -106,8 +106,11 @@ jobs:
       baseline_repository: "ROCm/rocm-libraries"
       baseline_release_type: "ci"
       amdgpu_families: "gfx94X-dcgpu"
-      projects_to_test: >-
-        hipblas,hipdnn
+      # Alias expanding to every measurable rocm-libraries project in TheRock's
+      # coverage allowlist (configure_coverage_ci.py). Tracks the registry, so
+      # newly onboarded projects are picked up automatically and the ones whose
+      # instrumented build is blocked/unsupported stay excluded without edits here.
+      projects_to_test: "rocm_libraries_all"
       test_type: "standard"
       # Cross-repo call: pin the reusable workflow's own repo/ref so its
       # checkout finds TheRock scripts (defaults to the caller otherwise).
