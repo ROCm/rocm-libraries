@@ -6641,6 +6641,90 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             self.assertIsNone(result)
             self.assertNotIn("torch", sys.modules)
 
+    def _fake_torch_site(self, tmp):
+        """A site-packages holding a torch package and TheRock's
+        ``_rocm_sdk_core`` wheel layout: HIP and comgr under
+        ``_rocm_sdk_core/lib`` with only their SONAMEs, nothing in torch/lib."""
+        import os
+        import types
+
+        site = os.path.join(tmp, "site-packages")
+        os.makedirs(os.path.join(site, "torch", "lib"))
+        core_lib = os.path.join(site, "_rocm_sdk_core", "lib")
+        os.makedirs(core_lib)
+        open(os.path.join(site, "_rocm_sdk_core", "__init__.py"), "w").close()
+        for name in ("libamdhip64.so.7", "libamd_comgr.so.3", "libhiprtc.so.7"):
+            open(os.path.join(core_lib, name), "w").close()
+        torch_stub = types.ModuleType("torch")
+        torch_stub.__file__ = os.path.join(site, "torch", "__init__.py")
+        return site, core_lib, torch_stub
+
+    def test_torch_lib_resolves_into_the_rocm_sdk_core_wheel(self):
+        import importlib
+        import os
+        import sys
+        import tempfile
+        from unittest import mock
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # TheRock torch preloads _rocm_sdk_core/lib/libamdhip64.so.7. Looking only
+        # in torch/lib missed it, so rocke loaded /opt/rocm's HIP as a second
+        # runtime and hipModuleGetFunction failed with hipError(500).
+        with tempfile.TemporaryDirectory() as tmp:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            with mock.patch.dict(sys.modules, {"torch": torch_stub}), mock.patch.object(
+                sys, "path", [site] + sys.path
+            ), mock.patch.object(rc, "_IS_WINDOWS", False), mock.patch.object(
+                rc, "_PROC_MAPS", os.path.join(tmp, "no-maps")
+            ), mock.patch.dict(
+                os.environ
+            ):
+                sys.modules.pop("_rocm_sdk_core", None)
+                importlib.invalidate_caches()
+                os.environ.pop("ROCKE_HIP_LIB", None)
+                hip = os.path.join(core_lib, "libamdhip64.so.7")
+                self.assertEqual(rc._torch_bundled_lib("amdhip64"), hip)
+                self.assertEqual(
+                    rc._torch_bundled_lib("amd_comgr"),
+                    os.path.join(core_lib, "libamd_comgr.so.3"),
+                )
+                paths = rc._candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])
+                self.assertEqual(paths[0], hip)
+                # The explicit override still outranks it.
+                os.environ["ROCKE_HIP_LIB"] = "/custom/libamdhip64.so"
+                paths = rc._candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])
+                self.assertEqual(paths[:2], ["/custom/libamdhip64.so", hip])
+
+    def test_torch_lib_prefers_the_copy_already_mapped(self):
+        import os
+        import sys
+        import tempfile
+        from unittest import mock
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # Whatever layout torch's HIP came from, the mapped copy is the instance
+        # torch is using; it wins over every on-disk guess. Near-miss names
+        # (libhiprtc, libamdhip64_dbg) must not match.
+        with tempfile.TemporaryDirectory() as tmp:
+            site, _, torch_stub = self._fake_torch_site(tmp)
+            open(os.path.join(site, "torch", "lib", "libamdhip64.so"), "w").close()
+            mapped = "/opt/vendor dir/lib/libamdhip64.so.7.16.60100"
+            maps = os.path.join(tmp, "maps")
+            with open(maps, "w") as fh:
+                fh.write(
+                    "7f00-7f01 r-xp 00000000 08:01 11 /opt/x/lib/libamdhip64_dbg.so.7\n"
+                    "7f01-7f02 r-xp 00000000 08:01 12 /opt/x/lib/libhiprtc.so.7\n"
+                    "7f02-7f03 rw-p 00000000 00:00 0\n"
+                    f"7f03-7f04 r-xp 00000000 08:01 13 {mapped}\n"
+                )
+            with mock.patch.dict(sys.modules, {"torch": torch_stub}), mock.patch.object(
+                rc, "_IS_WINDOWS", False
+            ), mock.patch.object(rc, "_PROC_MAPS", maps):
+                self.assertEqual(rc._torch_bundled_lib("amdhip64"), mapped)
+                self.assertIsNone(rc._mapped_lib("amd_comgr"))
+
     def test_rocm_version_parsed_from_versioned_libdir(self):
         from rocke.runtime.runtime_coexistence import _rocm_version_from_libdir
 

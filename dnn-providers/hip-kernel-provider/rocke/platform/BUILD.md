@@ -108,8 +108,9 @@ runtime resolves them WITHOUT importing torch
 `_rocm_root_libdirs`), in priority order:
 
 1. explicit full-path override env var: `ROCKE_COMGR_LIB`, `ROCKE_HIP_LIB`;
-2. torch-bundled `<torch>/lib/lib*.so` — only if torch is already imported (the
-   resolver never imports torch to obtain it);
+2. the lib torch uses, only if torch is already imported (the resolver never
+   imports torch to obtain it): the copy already mapped into the process, else
+   `<torch>/lib/lib*.so`, else TheRock's `_rocm_sdk_core/lib/lib*.so*`;
 3. a real ROCm install discovered without torch: `$ROCM_PATH` / `$ROCM_HOME` ->
    `<root>/lib`, then globbed `/opt/rocm*/core-*/lib` and `/opt/rocm*/lib`,
    newest version first (a packaged ROCm 7.2 keeps the runtime under a versioned
