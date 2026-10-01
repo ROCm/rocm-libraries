@@ -350,12 +350,13 @@ struct BatchedContractionKernel
         if constexpr(kIsTdmPipeline)
         {
             // TdmEpilogue always overwrites E, so split-K accumulation is not possible, and the
-            // TDM pipelines only exist on gfx125x.
-            if(kargs.k_batch != 1 || !ck_tile::is_gfx125_supported())
+            // TDM pipelines require at least one K tile and only exist on gfx125x.
+            if(kargs.k_batch != 1 || kargs.K_total <= 0 || !ck_tile::is_gfx125_supported())
             {
                 if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                 {
-                    CK_TILE_ERROR("TDM batched contraction requires k_batch == 1 and gfx125x!");
+                    CK_TILE_ERROR(
+                        "TDM batched contraction requires k_batch == 1, K > 0 and gfx125x!");
                 }
                 return false;
             }

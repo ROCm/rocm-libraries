@@ -440,16 +440,36 @@ TYPED_TEST(TestCkTileBatchedContractionTdm, NonPackedARowPitch)
     this->template Run<1, 2, 2, 2>(c);
 }
 
-// Split-K is rejected: TdmEpilogue overwrites E.
+// Exactly one split is required: TdmEpilogue overwrites E.
 TYPED_TEST(TestCkTileBatchedContractionTdm, RejectSplitK)
 {
     using Kernel = typename TestFixture::template Kernel<1, 2, 2, 2>;
     ContractionCase c{{2}, {4, 32}, {2, 64}, {2, 64}};
-    c.k_batch       = 2;
+    for(ck_tile::index_t k_batch : {0, -1, 2})
+    {
+        SCOPED_TRACE(k_batch);
+        c.k_batch = k_batch;
+        const auto args =
+            make_host_args<typename TestFixture::DataType, TestFixture::Pipe, 1, 2, 2, 2>(
+                c, nullptr, nullptr, nullptr);
+        const auto kargs = Kernel::MakeKernelArgs(args);
+        EXPECT_FALSE(Kernel::IsSupportedArguments(kargs));
+    }
+}
+
+TYPED_TEST(TestCkTileBatchedContractionTdm, RejectNonPositiveK)
+{
+    using Kernel = typename TestFixture::template Kernel<1, 2, 2, 2>;
+    ContractionCase c{{2}, {4, 32}, {2, 64}, {2, 64}};
     const auto args = make_host_args<typename TestFixture::DataType, TestFixture::Pipe, 1, 2, 2, 2>(
         c, nullptr, nullptr, nullptr);
-    const auto kargs = Kernel::MakeKernelArgs(args);
-    EXPECT_FALSE(Kernel::IsSupportedArguments(kargs));
+    auto kargs = Kernel::MakeKernelArgs(args);
+    for(ck_tile::index_t K : {0, -1})
+    {
+        SCOPED_TRACE(K);
+        kargs.K_total = K;
+        EXPECT_FALSE(Kernel::IsSupportedArguments(kargs));
+    }
 }
 
 // A stride inside the M group that breaks affine collapsibility must be rejected on the host.

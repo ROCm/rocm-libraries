@@ -210,12 +210,14 @@ struct GemmKernelMultiD
         if constexpr(kTupleOnlyPipeline)
         {
             // The universal check returns early for TDM pipelines; the D tensor layouts are
-            // checked at compile time by TdmMultiDEpilogue.
-            if(!ck_tile::is_gfx125_supported())
+            // checked at compile time by TdmMultiDEpilogue. TDM requires a single split and
+            // at least one K tile.
+            if(kargs.k_batch != 1 || kargs.K <= 0 || !ck_tile::is_gfx125_supported())
             {
                 if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                 {
-                    CK_TILE_ERROR("MultiD GEMM with a TDM pipeline requires gfx1250!");
+                    CK_TILE_ERROR("MultiD GEMM with a TDM pipeline requires k_batch == 1, K > 0 "
+                                  "and gfx1250!");
                 }
                 return false;
             }

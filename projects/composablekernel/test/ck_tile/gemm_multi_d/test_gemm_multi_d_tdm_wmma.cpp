@@ -140,9 +140,21 @@ TYPED_TEST(TestCkTileGemmMultiD, TestCkTileGemmMultiDTdm_KBatch1Supported)
     EXPECT_TRUE(this->IsTdmSupported(256, 256, 256, 1));
 }
 
-// Regression guard: split-K stays rejected for the TDM kernel (the TDM store always overwrites
-// E). This relies on the pre-existing multi-D k_batch > 1 rejection.
-TYPED_TEST(TestCkTileGemmMultiD, TestCkTileGemmMultiDTdm_KBatch2NotSupported_RegressionGuard)
+// TDM requires exactly one split: its store overwrites E and cannot accumulate split-K.
+TYPED_TEST(TestCkTileGemmMultiD, TestCkTileGemmMultiDTdm_InvalidKBatchNotSupported)
 {
-    EXPECT_FALSE(this->IsTdmSupported(256, 256, 256, 2));
+    for(int k_batch : {0, -1, 2})
+    {
+        SCOPED_TRACE(k_batch);
+        EXPECT_FALSE(this->IsTdmSupported(256, 256, 256, k_batch));
+    }
+}
+
+TYPED_TEST(TestCkTileGemmMultiD, TestCkTileGemmMultiDTdm_NonPositiveKNotSupported)
+{
+    for(int K : {0, -1})
+    {
+        SCOPED_TRACE(K);
+        EXPECT_FALSE(this->IsTdmSupported(256, 256, K, 1));
+    }
 }
