@@ -12,11 +12,12 @@ Capability-selected (``HasTDM`` + ``TDMInst == 3``), like ``TensorDataMoverLoad`
 from ..Component import ClusterLoad
 from ..Common import clusterEnabled, persistent2DCluster, persistentSpatialCluster, \
     persistentMulticast
+from ..Common.GlobalParameters import globalParameters
 from typing import Mapping
 from rocisa.code import Module, Label
 from rocisa.container import sgpr
 from rocisa.instruction import SLShiftLeftB32, SMulI32, SBitcmp1B32, SCBranchSCC1, SBranch, \
-    SMovB32, SAndB32
+    SMovB32, SAndB32, SOrB32
 
 
 class ClusterLoadTDM(ClusterLoad):
@@ -153,6 +154,8 @@ class ClusterLoadTDM(ClusterLoad):
             # dst = (maskConst [& reducedBits]) << shiftReg. When reducedBits is present
             # the constant is first ANDed to the WGs that really exist in this cluster;
             # otherwise it degenerates to the original single shift of the immediate.
+            # TDMMulticastEarlyTimeout then ORs in bit 21, which the descriptor attach
+            # carries into group1 dword0 with the mask.
             if reducedBits is not None:
                 mod.add(SMovB32(dst=sgpr(dst), src=hex(maskConst), comment=comment))
                 mod.add(SAndB32(dst=sgpr(dst), src0=sgpr(dst), src1=sgpr(reducedBits),
@@ -162,6 +165,9 @@ class ClusterLoadTDM(ClusterLoad):
             else:
                 mod.add(SLShiftLeftB32(dst=sgpr(dst), shiftHex=sgpr(shiftReg), src=hex(maskConst),
                                        comment=comment))
+            if globalParameters.get("TDMMulticastEarlyTimeout", 0):
+                mod.add(SOrB32(dst=sgpr(dst), src0=sgpr(dst), src1=hex(1 << 21),
+                               comment="TDM multicast early timeout (group1 dword0 bit 21)"))
 
         if kernel["enableTDMMetadata"]:
             if kernel["ProblemType"]["Sparse"] == 1:

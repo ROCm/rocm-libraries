@@ -539,11 +539,12 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
     }
 
     // Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
-    void runPass(int rule3SignalLeadCycles = 100) {
+    void runPass(int rule3SignalLeadCycles = 100, int rule3Mode = 0, int producerDrain = -1,
+                 bool streamKMulticast = false, int pgrValue = 1) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
-        auto pass = createInsertClusterBarrierPass(
-            /*streamKMulticast=*/false, /*pgrValue=*/1, rule3SignalLeadCycles);
+        auto pass = createInsertClusterBarrierPass(streamKMulticast, pgrValue,
+                                                   rule3SignalLeadCycles, rule3Mode, producerDrain);
         if (testDumpEnabled()) {
             std::cerr << "\n=== INPUT (before InsertClusterBarrierPass):" << blockListing(*bb)
                       << "\n";
@@ -562,6 +563,23 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         createWMMA(40, 16, 8);
         appendHandshake(/*loadS0=*/48, /*loadS1=*/52);
         createWMMA(56, 24, 32);
+    }
+
+    // A loop whose trigger guards two adjacent loads, the group a producer drain
+    // has to cover as a whole. Returns the last load of the group; \p after is
+    // set to the instruction that follows it.
+    StinkyInstruction* buildTwoLoadGroupLoop(StinkyInstruction*& after) {
+        appendGsu1Preheader();
+        openLoop();
+        createWMMA(24, 0, 8);
+        createBarrierSignal(kWorkgroupBarrierId);
+        createBarrierWait(kWorkgroupBarrierId);
+        createTensorLoadInBlock(bb, arch, /*src0Reg=*/0, /*src1Reg=*/4);
+        StinkyInstruction* lastLoad = createTensorLoadInBlock(bb, arch, /*src0Reg=*/8,
+                                                              /*src1Reg=*/12);
+        after = createWMMA(32, 8, 16);
+        closeLoop();
+        return lastLoad;
     }
 
     void expectNoClusterPhaseOverlap(int expectedSignals) {
@@ -946,6 +964,191 @@ TEST_F(InsertClusterBarrierPassTest, HoistedClusterWaitStaysIdempotent) {
     const auto afterFirst = clusterBarrierCounts();
     runPass();
     EXPECT_EQ(clusterBarrierCounts(), afterFirst) << "re-running the pass must be a no-op";
+}
+
+// Mode 1 swaps the two places: the signal goes where mode 0 waits, above the
+// drains parked on the trigger, and the wait drops below the protect barrier,
+// still above the refill load.
+//
+//     s_cmp_eq_u32 s[sgprWaveIdx], 0 ... s_barrier_signal -3 ...
+//     s_wait_tensorcnt 0
+//     s_barrier_signal -1
+//     s_barrier_wait -1
+//     s_barrier_wait -3
+//     tensor_load_to_lds
+TEST_F(InsertClusterBarrierPassTest, Rule3Mode1SignalsAboveTheDrainsAndWaitsBelowTheBarrier) {
+    appendGsu1Preheader();
+    openLoop();
+    createWMMA(24, 0, 8);
+    StinkyInstruction* drain = createWaitTensorCnt(0);
+    StinkyInstruction* trigger = createBarrierSignal(kWorkgroupBarrierId);
+    StinkyInstruction* protectWait = createBarrierWait(kWorkgroupBarrierId);
+    StinkyInstruction* load = createTensorLoadInBlock(bb, arch, /*src0Reg=*/0, /*src1Reg=*/4);
+    closeLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/1);
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    EXPECT_NE(findClusterSignalBetween(indexOf(loopHead), indexOf(drain)), nullptr)
+        << "the signal takes the spot mode 0 waits at:" << blockListing(*bb);
+    EXPECT_EQ(realInstBefore(trigger), drain)
+        << "nothing lands between the drain and its trigger:" << blockListing(*bb);
+    StinkyInstruction* clusterWait = firstRealInstAfter(protectWait);
+    ASSERT_NE(clusterWait, nullptr) << blockListing(*bb);
+    EXPECT_TRUE(isClusterBarrierWithLiteral(*clusterWait, /*wantSignal=*/false))
+        << "the wait sits right below the protect barrier:" << blockListing(*bb);
+    EXPECT_EQ(firstRealInstAfter(clusterWait), load)
+        << "and right above the refill load:" << blockListing(*bb);
+}
+
+// Mode 2 is the strict order: the signal and then the wait both come after the
+// protect barrier, so no workgroup refills a slot before every workgroup in the
+// cluster has finished reading it.
+TEST_F(InsertClusterBarrierPassTest, Rule3Mode2HandshakesBetweenTheBarrierAndTheRefill) {
+    appendGsu1Preheader();
+    openLoop();
+    StinkyInstruction* wmma = createWMMA(24, 0, 8);
+    StinkyInstruction* drain = createWaitTensorCnt(0);
+    StinkyInstruction* trigger = createBarrierSignal(kWorkgroupBarrierId);
+    StinkyInstruction* protectWait = createBarrierWait(kWorkgroupBarrierId);
+    StinkyInstruction* load = createTensorLoadInBlock(bb, arch, /*src0Reg=*/0, /*src1Reg=*/4);
+    closeLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/2);
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    EXPECT_EQ(findClusterSignalBetween(indexOf(loopHead), indexOf(trigger)), nullptr)
+        << "no part of the handshake stays above the barrier:" << blockListing(*bb);
+    EXPECT_EQ(realInstBefore(drain), wmma) << blockListing(*bb);
+    EXPECT_EQ(realInstBefore(trigger), drain) << blockListing(*bb);
+    StinkyInstruction* cmp = firstRealInstAfter(protectWait);
+    ASSERT_NE(cmp, nullptr) << blockListing(*bb);
+    EXPECT_TRUE(isClusterWaveCmp(*cmp))
+        << "the signal block opens right below the barrier:" << blockListing(*bb);
+    StinkyInstruction* signal = findClusterSignalBetween(indexOf(protectWait), indexOf(load));
+    ASSERT_NE(signal, nullptr) << blockListing(*bb);
+    StinkyInstruction* clusterWait = realInstBefore(load);
+    ASSERT_NE(clusterWait, nullptr) << blockListing(*bb);
+    EXPECT_TRUE(isClusterBarrierWithLiteral(*clusterWait, /*wantSignal=*/false))
+        << "the wait follows the signal, right above the refill load:" << blockListing(*bb);
+    EXPECT_LT(indexOf(signal), indexOf(clusterWait)) << blockListing(*bb);
+}
+
+// Mode 2's signal block writes SCC below the barrier, where a range opened above
+// the barrier can still be live. The block sinks to the first spot where SCC is
+// dead, still above the refill load.
+TEST_F(InsertClusterBarrierPassTest, Rule3Mode2SinksBelowALiveSccRange) {
+    appendGsu1Preheader();
+    openLoop();
+    createWMMA(24, 0, 8);
+    createSCmpWritingScc(/*srcSgpr=*/80);
+    createBarrierSignal(kWorkgroupBarrierId);
+    StinkyInstruction* protectWait = createBarrierWait(kWorkgroupBarrierId);
+    StinkyInstruction* reader = createSCselectReadingScc(/*destSgpr=*/81, /*srcSgpr=*/82);
+    StinkyInstruction* load = createTensorLoadInBlock(bb, arch, /*src0Reg=*/0, /*src1Reg=*/4);
+    closeLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/2);
+
+    EXPECT_EQ(firstRealInstAfter(protectWait), reader)
+        << "the SCC reader keeps the value it was given:" << blockListing(*bb);
+    StinkyInstruction* cmp = firstRealInstAfter(reader);
+    ASSERT_NE(cmp, nullptr) << blockListing(*bb);
+    EXPECT_TRUE(isClusterWaveCmp(*cmp)) << blockListing(*bb);
+    StinkyInstruction* clusterWait = realInstBefore(load);
+    ASSERT_NE(clusterWait, nullptr) << blockListing(*bb);
+    EXPECT_TRUE(isClusterBarrierWithLiteral(*clusterWait, /*wantSignal=*/false))
+        << blockListing(*bb);
+}
+
+// A block takes mode 1 or 2 for all of its triggers or for none. Here SCC is live
+// from above the barrier through the refill load, so no spot below the barrier
+// can take the signal block, and the block keeps mode 0's handshake.
+TEST_F(InsertClusterBarrierPassTest, Rule3Mode2KeepsMode0WhenSccIsLiveThroughTheRefill) {
+    appendGsu1Preheader();
+    openLoop();
+    createWMMA(24, 0, 8);
+    createSCmpWritingScc(/*srcSgpr=*/80);
+    StinkyInstruction* trigger = createBarrierSignal(kWorkgroupBarrierId);
+    StinkyInstruction* protectWait = createBarrierWait(kWorkgroupBarrierId);
+    StinkyInstruction* load = createTensorLoadInBlock(bb, arch, /*src0Reg=*/0, /*src1Reg=*/4);
+    createSCselectReadingScc(/*destSgpr=*/81, /*srcSgpr=*/82);
+    closeLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/2);
+
+    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(trigger))
+        << "mode 0 waits right above the trigger:" << blockListing(*bb);
+    EXPECT_EQ(firstRealInstAfter(protectWait), load)
+        << "nothing of mode 2 lands below the barrier:" << blockListing(*bb);
+}
+
+// Neither mode 1 nor mode 2 leaves a cluster wait right above the trigger, which
+// is how mode 0 recognises its own handshake, so re-running them has to be a
+// no-op by other means.
+TEST_F(InsertClusterBarrierPassTest, Rule3Mode1StaysIdempotent) {
+    appendGsu1Preheader();
+    openLoop();
+    buildTwoHandshakeBody();
+    closeLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/1);
+    const auto afterFirst = clusterBarrierCounts();
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/1);
+    EXPECT_EQ(clusterBarrierCounts(), afterFirst)
+        << "re-running mode 1 must be a no-op:" << blockListing(*bb);
+}
+
+TEST_F(InsertClusterBarrierPassTest, Rule3Mode2StaysIdempotent) {
+    appendGsu1Preheader();
+    openLoop();
+    buildTwoHandshakeBody();
+    closeLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/2);
+    const auto afterFirst = clusterBarrierCounts();
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/2);
+    EXPECT_EQ(clusterBarrierCounts(), afterFirst)
+        << "re-running mode 2 must be a no-op:" << blockListing(*bb);
+}
+
+// The producer drain follows StreamK multicast at PGR >= 2 unless producerDrain
+// says otherwise, and lands after the whole run of adjacent loads.
+TEST_F(InsertClusterBarrierPassTest, ProducerDrainFollowsStreamKMulticastByDefault) {
+    StinkyInstruction* after = nullptr;
+    StinkyInstruction* lastLoad = buildTwoLoadGroupLoop(after);
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/0, /*producerDrain=*/-1,
+            /*streamKMulticast=*/true, /*pgrValue=*/2);
+
+    StinkyInstruction* drain = firstRealInstAfter(lastLoad);
+    ASSERT_NE(drain, nullptr) << blockListing(*bb);
+    EXPECT_EQ(drain->getUnifiedOpcode(), GFX::s_wait_tensorcnt) << blockListing(*bb);
+    EXPECT_EQ(firstRealInstAfter(drain), after) << blockListing(*bb);
+}
+
+TEST_F(InsertClusterBarrierPassTest, ProducerDrainZeroSuppressesTheStreamKDrain) {
+    StinkyInstruction* after = nullptr;
+    StinkyInstruction* lastLoad = buildTwoLoadGroupLoop(after);
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/0, /*producerDrain=*/0,
+            /*streamKMulticast=*/true, /*pgrValue=*/2);
+
+    EXPECT_EQ(firstRealInstAfter(lastLoad), after) << blockListing(*bb);
+}
+
+TEST_F(InsertClusterBarrierPassTest, ProducerDrainOneDrainsWithoutStreamKMulticast) {
+    StinkyInstruction* after = nullptr;
+    StinkyInstruction* lastLoad = buildTwoLoadGroupLoop(after);
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/0, /*producerDrain=*/1);
+
+    StinkyInstruction* drain = firstRealInstAfter(lastLoad);
+    ASSERT_NE(drain, nullptr) << blockListing(*bb);
+    EXPECT_EQ(drain->getUnifiedOpcode(), GFX::s_wait_tensorcnt) << blockListing(*bb);
+    EXPECT_EQ(firstRealInstAfter(drain), after) << blockListing(*bb);
 }
 
 // A call ends the climb whatever the hop budget says. It is the one boundary

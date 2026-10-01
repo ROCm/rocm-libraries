@@ -410,6 +410,28 @@ globalParameters["StinkyTofuCostOutputDir"] = ""
 
 globalParameters["DisableSTWaitCnt"] = True
 
+# Cluster-barrier experiment knobs for StinkyTofu's InsertClusterBarrierPass. They
+# are not solution parameters, so kernel names do not change: run one variant per
+# Tensile invocation, each with its own output directory. The defaults keep
+# today's handshakes.
+#   StinkyTofuClusterBarrierRule3SignalLeadCycles: how far ahead of its wait the
+#     Rule 3 signal is targeted, in estimated cycles; -1 lets StinkyTofu choose.
+#   StinkyTofuClusterBarrierRule3Mode: 0 = signal ahead of the protect barrier and
+#     wait above it; 1 = signal above it, wait right after it; 2 = signal and wait
+#     both right after it. All three stay above the refill tensor load.
+#   StinkyTofuClusterProducerDrain: s_wait_tensorcnt 0 after each in-loop cluster
+#     tensor-load group; -1 = auto, 0 = never, 1 = always. Auto drains only for
+#     StreamK multicast with PGR >= 2, and TensileLite no longer passes
+#     StreamKMulticast (#12817, e69ccbe3), so -1 never drains; 1 forces the drain.
+globalParameters["StinkyTofuClusterBarrierRule3SignalLeadCycles"] = -1
+globalParameters["StinkyTofuClusterBarrierRule3Mode"] = 0
+globalParameters["StinkyTofuClusterProducerDrain"] = -1
+
+# 1 sets the TDM multicast early-timeout bit (descriptor group1 dword0 bit 21) in
+# every multicast mask; 0 leaves it clear. Experiment only, like the
+# cluster-barrier knobs above.
+globalParameters["TDMMulticastEarlyTimeout"] = 0
+
 # Internal plumbing for the --cpu-only CLI switch (see Tensile.py addCommonArguments).
 # When True, the benchmark flow runs GPU-less: ISA is spoofed, the GPU clock-frequency
 # probe is skipped, and the client device-launch is stubbed with a synthetic results CSV.

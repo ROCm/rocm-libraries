@@ -307,6 +307,57 @@ class TestComputeMasks:
         assert "s_lshl_b32 s[sgprMulticastMaskMetadata], 0x3, s64" in src
 
 
+# --- TDMMulticastEarlyTimeout ----------------------------------------------
+
+@pytest.fixture
+def _early_timeout(monkeypatch):
+    from Tensile.Common.GlobalParameters import globalParameters
+    monkeypatch.setitem(globalParameters, "TDMMulticastEarlyTimeout", 1)
+
+
+def _earlyTimeoutOr(mask):
+    return f"s_or_b32 s[sgpr{mask}], s[sgpr{mask}], 0x200000"
+
+
+class TestEarlyTimeout:
+    def test_off_by_default(self):
+        mod = _c().computeMasks(_StubWriter(), _kernel(clusterDim=(2, 2)),
+                                sgprWgX=61, sgprWgY=62, sgprNWgX=63, sTmp=60)
+        assert "0x200000" not in str(mod)
+
+    @pytest.mark.usefixtures("_early_timeout")
+    def test_combined_mask_gets_bit21_on_both_parities(self):
+        mod = _c().computeMasks(_StubWriter(), _kernel(clusterDim=(2, 2)),
+                                sgprWgX=61, sgprWgY=62, sgprNWgX=63, sTmp=60)
+        src = str(mod)
+        orLine = _earlyTimeoutOr("MulticastMask")
+        assert src.count(orLine) == 2
+        # Each OR follows the shift that produced its parity's mask.
+        assert (src.index("s_lshl_b32 s[sgprMulticastMask], 0x5, s61") < src.index(orLine)
+                < src.index("s_lshl_b32 s[sgprMulticastMask], 0x3, s62") < src.rindex(orLine))
+
+    @pytest.mark.usefixtures("_early_timeout")
+    def test_split_masks_get_bit21(self):
+        mod = _c().computeMasks(_StubWriter(), _kernel(clusterDim=(2, 2), useSubtile=True),
+                                sgprWgX=61, sgprWgY=62, sgprNWgX=63, sTmp=60)
+        src = str(mod)
+        assert src.count(_earlyTimeoutOr("MulticastMaskA")) == 1
+        assert src.count(_earlyTimeoutOr("MulticastMaskB")) == 1
+
+    @pytest.mark.usefixtures("_early_timeout")
+    def test_metadata_mask_gets_bit21(self):
+        mod = _c().computeMasks(
+            _StubWriter(), _kernel(clusterDim=(2, 2), sparse=1, tdmMeta=True),
+            sgprWgX=61, sgprWgY=62, sgprNWgX=63, sTmp=60)
+        assert _earlyTimeoutOr("MulticastMaskMetadata") in str(mod)
+
+    @pytest.mark.usefixtures("_early_timeout")
+    def test_noop_when_multicast_off(self):
+        mod = _c().computeMasks(_StubWriter(), _kernel(multicast=False),
+                                sgprWgX=61, sgprWgY=62, sgprNWgX=63, sTmp=60)
+        assert str(mod).strip() == ""
+
+
 # --- applyToDescriptor emitted asm -----------------------------------------
 
 class TestApplyToDescriptor:

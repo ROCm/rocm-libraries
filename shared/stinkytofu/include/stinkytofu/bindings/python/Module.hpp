@@ -118,6 +118,9 @@
 // SchedulingKnobHeuristics before DAG scheduling / cluster-barrier
 // insertion (user value wins; degenerate main-loop IR falls back to today's
 // static HW/CDNA5/Rule3 defaults). See SchedulingKnobHeuristics.hpp.
+// ClusterBarrierRule3Mode and ClusterProducerDrain are not scheduling knobs:
+// Gfx1250Backend passes them to InsertClusterBarrierPass as given, and their
+// defaults keep today's handshakes.
 #define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                          \
     X(LockDsReadOrder, bool, true)                                    \
     X(DsReadThrottleTransitionFactor, double, 1.0)                    \
@@ -125,7 +128,9 @@
     X(DsReadThrottleLatency, int, -1)                                 \
     X(DsReadPerCap, int, -1)                                          \
     X(DsReadPerWmma, int, -1) /* deprecated alias for DsReadPerCap */ \
-    X(ClusterBarrierRule3SignalLeadCycles, int, -1)
+    X(ClusterBarrierRule3SignalLeadCycles, int, -1)                   \
+    X(ClusterBarrierRule3Mode, int, 0)                                \
+    X(ClusterProducerDrain, int, -1)
 
 namespace stinkytofu {
 /**

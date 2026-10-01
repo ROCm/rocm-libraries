@@ -60,7 +60,15 @@ class Pass;
 /// tensor drain for StreamK cluster multicast at PrefetchGlobalRead >= 2.
 /// \p rule3SignalLeadCycles controls how far ahead of its wait the Rule 3
 /// signal is targeted; 0 co-locates them.
+/// \p rule3Mode places the Rule 3 handshake around its trigger, the protect
+/// workgroup barrier: 0 = signal ahead by the lead, wait above the trigger;
+/// 1 = signal where mode 0 waits, wait right after the trigger's
+/// `s_barrier_wait -1`; 2 = signal then wait, both after that wait. Modes 1
+/// and 2 stay above the refill tensor load. Any other value reads as 0.
+/// \p producerDrain overrides when that drain is planted: -1 = the StreamK
+/// condition above, 0 = never, 1 = after every Rule 3 tensor-load group.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(
-    bool streamKMulticast = false, int pgrValue = 1, int rule3SignalLeadCycles = 100);
+    bool streamKMulticast = false, int pgrValue = 1, int rule3SignalLeadCycles = 100,
+    int rule3Mode = 0, int producerDrain = -1);
 
 }  // namespace stinkytofu

@@ -7162,6 +7162,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                # Cluster-barrier handshake insertion in Gfx1250Backend
                                # (kernel-scope at every OptLevel when set).
                                "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
+                               # InsertClusterBarrierPass placement experiments; the
+                               # defaults keep today's handshakes.
+                               "ClusterBarrierRule3SignalLeadCycles": int(
+                                   globalParameters.get("StinkyTofuClusterBarrierRule3SignalLeadCycles", -1)),
+                               "ClusterBarrierRule3Mode": int(
+                                   globalParameters.get("StinkyTofuClusterBarrierRule3Mode", 0)),
+                               "ClusterProducerDrain": int(
+                                   globalParameters.get("StinkyTofuClusterProducerDrain", -1)),
                                # TDMLoadWaveSyncPass (Gfx1250Backend): insert a barrier
                                # between an urgent and a deferrable tensor_load group.
                                # Off by default.

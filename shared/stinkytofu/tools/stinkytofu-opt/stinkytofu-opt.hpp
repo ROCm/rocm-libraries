@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include <charconv>
 #include <cstdlib>
 #include <functional>
 #include <optional>
@@ -132,6 +133,19 @@ inline std::vector<std::string> passArgValues(const std::vector<std::string>& ar
         }
     }
     return values;
+}
+
+// Helper: integer value of `key=value` in `args`, `defaultValue` when absent,
+// or nullopt when the value is not an integer.
+inline std::optional<int> passArgInt(const std::vector<std::string>& args, const char* key,
+                                     int defaultValue) {
+    const std::string value = passArgValue(args, key);
+    if (value.empty()) return defaultValue;
+    int parsed = 0;
+    const char* last = value.data() + value.size();
+    const auto [end, ec] = std::from_chars(value.data(), last, parsed);
+    if (ec != std::errc{} || end != last) return std::nullopt;
+    return parsed;
 }
 
 // Helper: parse a class list like "vs", "v", or "s" into a RegClassSet. Used for
@@ -399,7 +413,18 @@ const std::vector<PassInfo> availablePasses = {
     {"PrefetchBridgeSubstitutionPass",
      [](const auto&) { return createPrefetchBridgeSubstitutionPass(); }},
     {"LongBranchLoweringPass", [](const auto&) { return createLongBranchLoweringPass(); }},
-    {"InsertClusterBarrierPass", [](const auto&) { return createInsertClusterBarrierPass(); }},
+    // InsertClusterBarrierPass accepts: streamKMulticast, pgr=<n>,
+    // lead=<cycles>, rule3Mode=<0|1|2>, producerDrain=<-1|0|1>
+    {"InsertClusterBarrierPass",
+     [](const std::vector<std::string>& args) -> std::unique_ptr<Pass> {
+         const std::optional<int> pgr = passArgInt(args, "pgr", 1);
+         const std::optional<int> lead = passArgInt(args, "lead", 100);
+         const std::optional<int> rule3Mode = passArgInt(args, "rule3Mode", 0);
+         const std::optional<int> producerDrain = passArgInt(args, "producerDrain", -1);
+         if (!pgr || !lead || !rule3Mode || !producerDrain) return nullptr;
+         return createInsertClusterBarrierPass(hasPassArg(args, "streamKMulticast"), *pgr, *lead,
+                                               *rule3Mode, *producerDrain);
+     }},
     {"TDMLoadWaveSyncPass", [](const auto&) { return createTDMLoadWaveSyncPass(); }},
     {"RemoveWaitAluPass", [](const auto&) { return createRemoveWaitAluPass(); }},
     {"InsertWaitAluPass",

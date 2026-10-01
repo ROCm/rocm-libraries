@@ -6,8 +6,16 @@ covering the main and tail loops.
 The pass is created via:
 
 ```cpp
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass();
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(
+    bool streamKMulticast = false, int pgrValue = 1, int rule3SignalLeadCycles = 100,
+    int rule3Mode = 0, int producerDrain = -1);
 ```
+
+Gfx1250Backend fills these from the module options `StreamKMulticast`,
+`PrefetchGlobalRead`, `ClusterBarrierRule3SignalLeadCycles` (resolved through
+SchedulingKnobHeuristics), `ClusterBarrierRule3Mode` and `ClusterProducerDrain`.
+stinkytofu-opt takes them as `--InsertClusterBarrierPass=streamKMulticast,pgr=2,lead=200,rule3Mode=2,producerDrain=0`.
+See [Placement modes](#placement-modes) and [Producer drain](#producer-drain).
 
 ## Overview
 
@@ -206,6 +214,44 @@ cluster wait into or out of a live SCC range.
     s_barrier_wait -1
     tensor_load_to_lds ...
 ```
+
+### Placement modes
+
+`ClusterBarrierRule3Mode` moves the handshake around its trigger, the workgroup
+barrier that protects the slot the refill load writes. Every mode keeps the
+signal and the wait in the trigger's segment and above that load.
+
+| Mode | Signal | Wait |
+|---|---|---|
+| 0 (default) | the signal anchor above, at the lead | above the trigger's drains |
+| 1 | above the trigger's drains, where mode 0 waits | right after the trigger's `s_barrier_wait -1` |
+| 2 | right after the trigger's `s_barrier_wait -1`, sunk below any live SCC range | right after the signal |
+
+Mode 1 overlaps the cluster barrier with the workgroup barrier. Mode 2 puts every
+workgroup's last read of the slot before any workgroup's refill of it, whichever
+workgroups a multicast load writes, and pays the whole cluster barrier latency on
+every trip.
+
+A block takes mode 1 or 2 for all of its triggers or for none. When a trigger's
+`s_barrier_wait -1` does not come before its load, or SCC is live where the signal
+block would go (mode 1: above the drains; mode 2: anywhere from that wait down to
+the load), the whole block keeps mode 0 and the pass emits a `Rule3ModeFallback`
+remark. The decision is per block because the signal climb stops at the other
+handshakes' waits by their triggers, which is where those waits are only when the
+whole block is placed by mode 0.
+
+Modes 1 and 2 leave no cluster wait right above the trigger, so a trigger with a
+cluster barrier between it and its load counts as already handled. This keeps a
+re-run a no-op.
+
+### Producer drain
+
+With `streamKMulticast` and `pgrValue >= 2`, the pass plants `s_wait_tensorcnt 0`
+right after each Rule 3 tensor-load group (the whole run of adjacent loads), so the
+cooperative load retires before the back edge. `ClusterProducerDrain` overrides the
+condition: -1 keeps it, 0 never drains, 1 drains after every Rule 3 group.
+TensileLite no longer passes the `StreamKMulticast` module option (#12817,
+e69ccbe3), so on TensileLite kernels -1 (auto) never drains and 1 forces the drain.
 
 ---
 
