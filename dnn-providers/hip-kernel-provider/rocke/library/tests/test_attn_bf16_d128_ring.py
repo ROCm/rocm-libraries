@@ -129,7 +129,7 @@ def test_d128_launch_meta_matches_spec(gfx942, dtype, hq, hk):
     au._2D_LAUNCH_META.clear()
     p = _problem(dtype, hq=hq, hk=hk)
     spec = au._tiled_spec_from_problem(p, "gfx942")
-    meta = au._get_2d_launch_meta(p, au._tiled_cache_key(p, "gfx942"))
+    meta = au._get_2d_launch_meta(p, au._tiled_cache_key(p, "gfx942"), arch="gfx942")
     assert meta.block[0] == 64 * spec.num_warps
 
 

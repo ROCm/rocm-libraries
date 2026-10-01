@@ -143,7 +143,7 @@ class TestGfx1250TiledAttention2D(unittest.TestCase):
             self.assertEqual(spec.num_warps, 1)
             self.assertEqual(spec.block_q, 2)
             meta = au._get_2d_launch_meta(
-                problem, au._tiled_cache_key(problem, "gfx1250")
+                problem, au._tiled_cache_key(problem, "gfx1250"), arch="gfx1250"
             )
             self.assertEqual(meta.block, (32, 1, 1))
             self.assertEqual(meta.grid, (8, 6, 1))
@@ -531,7 +531,7 @@ class TestGfx1250Qwen3AttentionRouting(unittest.TestCase):
                         problem, "gfx1250"
                     )
                     self.assertTrue(ok, f"{kv_storage} kv{shape.kv_len}: {why}")
-                    (_SegSpec, ReduceSpec, build_seg, build_red, _) = au._tiled_3d_impl(
+                    _SegSpec, ReduceSpec, build_seg, build_red, _ = au._tiled_3d_impl(
                         "gfx1250"
                     )
                     seg_spec = au._tiled_3d_spec_from_problem(problem, "gfx1250")

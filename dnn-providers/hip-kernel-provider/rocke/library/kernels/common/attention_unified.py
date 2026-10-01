@@ -597,9 +597,16 @@ _ATTN_TILED_CACHE: Dict[Tuple, bytes] = {}
 _ATTN_3D_TILED_CACHE: Dict[Tuple, Tuple[bytes, str, bytes, str]] = {}
 
 
-def _cache_key(problem: UnifiedAttentionProblem) -> Tuple:
+def _cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
+    """Scalar-fallback launcher-cache key.
+
+    ``arch`` sits at index 1 like every other key family in this module, so
+    ``_assert_cache_key_arch`` can check key-vs-compile agreement uniformly and
+    two arches can never alias to one cached kernel.
+    """
     return (
         "scalar",
+        arch,
         problem.total_q,
         problem.num_seqs,
         problem.num_query_heads,
@@ -1430,6 +1437,29 @@ def _kv_storage_dtype(problem: UnifiedAttentionProblem) -> Optional[str]:
     same plumbing can later add bf8e5m2 or other low-precision K/V.
     """
     return "fp8e4m3" if problem.use_fp8 else None
+
+
+def _assert_cache_key_arch(cache_key: Tuple, arch: str, who: str) -> None:
+    """Assert ``cache_key`` was built for ``arch``.
+
+    Every launcher-cache key this module uses carries its arch at index 1:
+    ``("tiled", arch, ...)``, ``("tiled3d", arch, ...)``, ``("scalar", arch,
+    ...)``, and the dispatcher's ``("explicit", spec.arch, ...)``
+    (:meth:`dispatch.attention.common.AttentionTuningSpec.cache_key`).
+
+    Compile/grid helpers take ``arch`` explicitly instead of re-resolving the
+    device, so that a key built for one arch can never be served a kernel
+    compiled for another -- the failure arai713 and AnaghaRaoAMD both flagged.
+    This checks the two agree. It is a cheap equality on a cache-miss path, and
+    a mismatch is a programming error in this module, not a user input error.
+    """
+    key_arch = cache_key[1] if len(cache_key) > 1 else None
+    if key_arch != arch:
+        raise AssertionError(
+            f"{who}: cache key was built for arch {key_arch!r} but the caller "
+            f"passed {arch!r}. The key and the compiled kernel must come from "
+            f"one arch authority; pass the same arch used to build the key."
+        )
 
 
 def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
@@ -3201,6 +3231,11 @@ def _tiled_3d_spec_from_problem(
 def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
     base = (
         "tiled3d",
+        # Index 1 is the arch, matching every other key family here (see
+        # _assert_cache_key_arch). Previously absent: two arches built in one
+        # process aliased to a single cached pipeline, and _get_3d_pipeline had
+        # no way to check the key against the arch it compiles for.
+        arch,
         problem.num_seqs,
         problem.num_query_heads,
         problem.num_kv_heads,
@@ -3521,7 +3556,7 @@ def _run_3d_tiled(
     # only remaining per-call cost is packing args and issuing two
     # ``hipModuleLaunchKernel`` calls on the caller's stream.
     prepared = _get_3d_pipeline(
-        problem, cache_key, num_segments, tuning_spec=tuning_spec
+        problem, cache_key, num_segments, arch=_launch_arch, tuning_spec=tuning_spec
     )
     segm_output, segm_max, segm_expsum = prepared.workspace(
         problem, num_segments, q.device
@@ -3876,7 +3911,7 @@ def _run_2d_graphed(
     import torch
 
     key = _tiled_cache_key(problem, _launch_arch_2dg)
-    launcher = _get_2d_launcher(problem, key)
+    launcher = _get_2d_launcher(problem, key, arch=_launch_arch_2dg)
     vals = _attn_values(
         problem=problem,
         q=q,
@@ -3899,7 +3934,7 @@ def _run_2d_graphed(
         v_scale=v_scale,
         out_scale=out_scale,
     )
-    meta = _get_2d_launch_meta(problem, key)
+    meta = _get_2d_launch_meta(problem, key, arch=_launch_arch_2dg)
     cfg = LaunchConfig(grid=meta.grid, block=meta.block, stream=int(stream))
 
     def _do():
@@ -4012,13 +4047,19 @@ def _get_3d_pipeline(
     cache_key: Tuple,
     num_segments: int,
     *,
+    arch: str,
     tuning_spec=None,
 ) -> _Attention3DPrepared:
+    """Compile+cache the (segment, reduce) pair for ``cache_key``.
+
+    ``arch`` is required and must be the arch ``cache_key`` was built with; see
+    :func:`_assert_cache_key_arch` for why it is passed rather than re-resolved.
+    """
+    _assert_cache_key_arch(cache_key, arch, "_get_3d_pipeline")
     prepared_key = cache_key + ("total_q", int(problem.total_q))
     if prepared_key in _3D_PIPELINES:
         return _3D_PIPELINES[prepared_key]
     if cache_key not in _ATTN_3D_TILED_CACHE:
-        arch = _resolve_attention_arch()
         if tuning_spec is not None:
             seg_kernel, red_kernel = tuning_spec.build(arch)
         else:
@@ -4194,12 +4235,20 @@ def _get_2d_launcher(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
     *,
+    arch: str,
     tuning_spec=None,
 ) -> KernelLauncher:
+    """Compile+cache the 2D tiled kernel for ``cache_key``.
+
+    ``arch`` is required and must be the arch ``cache_key`` was built with; see
+    :func:`_assert_cache_key_arch`. Re-resolving the device here is what let the
+    grid (derived from the key's arch in :func:`_get_2d_launch_meta`) disagree
+    with the kernel.
+    """
+    _assert_cache_key_arch(cache_key, arch, "_get_2d_launcher")
     if cache_key in _2D_LAUNCHERS:
         return _2D_LAUNCHERS[cache_key]
     if cache_key not in _ATTN_TILED_CACHE:
-        arch = _resolve_attention_arch()
         if tuning_spec is not None:
             kernel = tuning_spec.build(arch)
             backend = tuning_spec.compile_backend
@@ -4294,14 +4343,20 @@ def _get_2d_launch_meta(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
     *,
+    arch: str,
     tuning_spec=None,
 ) -> _Attention2DLaunchMeta:
+    """Grid/block for the kernel cached under ``cache_key``.
+
+    ``arch`` is required and checked against the key, so the grid derivation and
+    :func:`_get_2d_launcher`'s compile read one authority. This used to pull the
+    arch out of ``cache_key[1]`` while the launcher re-resolved the device --
+    agreement by coincidence, which is the whole failure mode.
+    """
+    _assert_cache_key_arch(cache_key, arch, "_get_2d_launch_meta")
     meta_key = cache_key + ("total_q", int(problem.total_q))
     if meta_key in _2D_LAUNCH_META:
         return _2D_LAUNCH_META[meta_key]
-    # Extract arch from the cache key (position [1]) so the grid derivation
-    # always agrees with the kernel that was compiled -- no second device query.
-    arch = cache_key[1]
     if tuning_spec is not None:
         meta = _Attention2DLaunchMeta(
             grid=tuning_spec.launch_grid(problem), block=tuning_spec.launch_block()
@@ -4362,11 +4417,19 @@ def _get_2d_launch_meta(
 def _get_scalar_launcher(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
+    *,
+    arch: str,
 ) -> KernelLauncher:
+    """Compile+cache the arch-neutral scalar fallback for ``cache_key``.
+
+    ``arch`` is required for the same reason as the tiled launchers: one
+    authority per call chain. The emitted IR happens to be arch-neutral, but the
+    compile target is not, and the key is now arch-qualified.
+    """
+    _assert_cache_key_arch(cache_key, arch, "_get_scalar_launcher")
     if cache_key in _SCALAR_LAUNCHERS:
         return _SCALAR_LAUNCHERS[cache_key]
     if cache_key not in _ATTN_CACHE:
-        arch = _resolve_attention_arch()
         spec = UnifiedAttention2DSpec(problem=problem)
         artifact = compile_kernel(
             build_unified_attention_2d(spec, arch=arch),
@@ -4586,7 +4649,9 @@ def run_unified_attention_torch(
                 if tuning_spec is not None
                 else _tiled_cache_key(problem, _launch_arch)
             )
-            launcher = _get_2d_launcher(problem, key, tuning_spec=tuning_spec)
+            launcher = _get_2d_launcher(
+                problem, key, arch=_launch_arch, tuning_spec=tuning_spec
+            )
             vals = _attn_values(
                 problem=problem,
                 q=q,
@@ -4612,7 +4677,9 @@ def run_unified_attention_torch(
             # The dispatcher must launch with the same BLOCK_Q/threads the
             # kernel was built for. Cache that fixed metadata per kernel key so
             # repeated same-shape calls avoid selector math on the hot path.
-            meta = _get_2d_launch_meta(problem, key, tuning_spec=tuning_spec)
+            meta = _get_2d_launch_meta(
+                problem, key, arch=_launch_arch, tuning_spec=tuning_spec
+            )
             return launcher(
                 vals,
                 config=LaunchConfig(
@@ -4630,8 +4697,8 @@ def run_unified_attention_torch(
     ok, reason = supports_native_unified_attention(problem, _launch_arch)
     if not ok:
         raise NotImplementedError(reason)
-    key = _cache_key(problem)
-    launcher = _get_scalar_launcher(problem, key)
+    key = _cache_key(problem, _launch_arch)
+    launcher = _get_scalar_launcher(problem, key, arch=_launch_arch)
     vals = _attn_values(
         problem=problem,
         q=q,
