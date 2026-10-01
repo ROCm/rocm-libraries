@@ -15,6 +15,7 @@
 ################################################################################
 
 import ctypes
+import functools
 import os
 import re
 import shutil
@@ -47,6 +48,7 @@ from rocisa.container import vgpr, sgpr
 from rocisa.instruction import SLoadB32, SLoadB64, SLoadB128, SMovB32, SMovB64, SWaitCnt, SBarrier, VLShiftLeftB32, VMovB32
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType
+from Tensile.Common.RegisterPool import allocTmpGpr
 from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16, AB_B8
 from Tensile.Components.Subtile.SubtileGREmit import graTileAssignment, globalReadDTLInitCommonSgpr, globalReadDoSubtile
 from Tensile.Components.Subtile.SubtileLREmit import lraTileAssignment, localReadDoSubtile
@@ -215,6 +217,18 @@ def compute_lds_start_offset_b(tileInfoA):
     return int(((numASubtiles * tileInfoA.subtileSize + readSize - 1) // readSize) * readSize)
 
 
+def _allocTmpSgpr(writer, num, alignment=None, tag=None):
+    """The real KernelWriterAssembly.allocTmpSgpr, minus the overflow listener.
+
+    Emitters that need a scratch sgpr take it through this context manager, so
+    the mock has to offer it or the emit stops at the first `with`.  There is no
+    states.overflowedResources here to record a soft overflow into, so an
+    overrun raises -- which is what a test wants anyway.
+    """
+    return allocTmpGpr(writer.sgprPool, num, writer.states.regCaps["MaxSgpr"],
+                       alignment, tag)
+
+
 def create_writer(cfg, mi_wave_group=None, geometry=None, inst_k=32, bpe=2,
                   geometry_b=None):
     """Create a minimal mock writer with register pools, kernel dict, and TileInfo.
@@ -272,7 +286,10 @@ def create_writer(cfg, mi_wave_group=None, geometry=None, inst_k=32, bpe=2,
         regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
         archCaps={"LDSBankCount": 64, "LDSBankWidth": 4},
         subtileLdsSwizzle=True,
+        # Width of an exec-mask operand; the column-scatter pad mask is one.
+        laneSGPRCount=1 if kernel["WavefrontSize"] == 32 else 2,
     )
+    writer.allocTmpSgpr = functools.partial(_allocTmpSgpr, writer)
     # LDS layout: A subtiles followed by B subtiles, aligned to readSize
     writer.ldsStartOffsetA = 0
     writer.ldsStartOffsetB = compute_lds_start_offset_b(tileInfoA)
