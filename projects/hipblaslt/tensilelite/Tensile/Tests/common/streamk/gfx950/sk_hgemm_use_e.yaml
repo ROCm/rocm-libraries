@@ -1,0 +1,110 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict]
+
+GlobalParameters:
+  Architecture: gfx950
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  KernelTime: False
+  NumWarmups: 0
+  NumBenchmarks: 1
+  SyncsPerBenchmark: 0
+  EnqueuesPerSync: 1
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  DataInitTypeE: 21
+  MaxWorkspaceSize: 134217728
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  # Bias + activation, pre-activation values written to E
+  -
+    - OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      Activation: True
+      ActivationType: hipblaslt_all
+      UseE: True
+      DataTypeE: h
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 4, 4, 2, 2]
+        - DepthU: [64]
+        - 1LDSBuffer: [1]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [False, True]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid, DynamicWorkQueue, Hybrid]
+        - StreamKFixupTreeReduction: [0, 1]
+        - ActivationFuncCall: [False, True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 512]
+          - Exact: [129, 97, 1, 1030]
+          - Exact: [1031, 1031, 1, 4103]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: Relu]
+          - [Enum: Gelu]
+
+  # Gradient: E is read back for the activation derivative
+  -
+    - OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseBias: 0
+      Activation: True
+      ActivationType: hipblaslt_all
+      Gradient: True
+      UseE: True
+      DataTypeE: h
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 4, 4, 2, 2]
+        - DepthU: [64]
+        - 1LDSBuffer: [1]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [False, True]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 512]
+          - Exact: [1031, 1031, 1, 4103]
+        - ActivationArgs:
+          - [Enum: Dgelu]

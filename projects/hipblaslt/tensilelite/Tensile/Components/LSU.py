@@ -29,6 +29,7 @@ from rocisa.functions import vectorStaticDivide
 from copy import deepcopy
 from ..Common import log2, ceilDivide, DataDirection
 from ..Component import Component
+from ..ExecutionPolicy import isPersistent
 from ..KernelWriterModules import *
 from ..AsmStoreState import StoreState, VectorDataTypes
 #import abc
@@ -450,7 +451,7 @@ class LSUOn(LSU):
                     strideD1 = "StrideD%s" % (writer.states.indexChars[packedC1[0]])
                     module.add(VMulLOU32(dst=vgpr(writer.vgprs.cinRowPtr), src0=vgpr(writer.vgprs.coord1InMT), src1=sgpr(strideC1), comment=" offset 1"))
                     module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(writer.vgprs.coord1InMT), src1=sgpr(strideD1), comment=" offset 1"))
-                    if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+                    if kernel["ProblemType"]["UseE"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or isPersistent(kernel)):
                             module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrE), src=vgpr(writer.vgprs.coord1InMT), comment=" save offset 1 for E"))
                     if writer.vgprs.coutRowPtrGate != -1:
                             module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrGate), src=vgpr(writer.vgprs.coord1InMT), comment=" save offset 1 for Gate"))
