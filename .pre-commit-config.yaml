@@ -164,6 +164,18 @@ repos:
         files: ^projects/miopen/test/gtest/.*\.cpp$
         pass_filenames: false
 
+      # Only the lines a change adds are checked (git diff against the
+      # pre-commit from/to refs in CI, against HEAD otherwise), so the
+      # existing absolute imports do not fail unrelated edits. A package root
+      # with no files in the change simply does not trigger the hook, so this
+      # keeps working while the Tensile -> tensilelite move is in flight.
+      - id: tensilelite-no-absolute-imports
+        name: TensileLite - no new absolute Tensile/tensilelite imports
+        entry: python projects/hipblaslt/tensilelite/scripts/check_no_absolute_imports.py
+        language: python
+        files: ^projects/hipblaslt/tensilelite/(Tensile|tensilelite)/.*\.py$
+        exclude: ^projects/hipblaslt/tensilelite/(Tensile|tensilelite)/Tests/
+
       - id: miopen-public-private-headers
         name: MIOpen public/private header consistency
         entry: python projects/miopen/script/check_public_abi.py check-headers
