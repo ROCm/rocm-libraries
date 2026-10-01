@@ -1096,11 +1096,11 @@ namespace hipblaslt_ext
      *  @param[out]
      *  heuristicResults The algorithm heuristic vector.
      *
-     *  \retval HIPBLAS_STATUS_SUCCESS           If the query was successful. Verifies that
-     * returnedAlgoCount > 0 to determine the status of the
-     * results. \retval HIPBLAS_STATUS_NOT_SUPPORTED     If no heuristic function is
+     *  \retval HIPBLAS_STATUS_SUCCESS           If the query was successful.
+     * heuristicResults is empty when no solution is found.
+     * \retval HIPBLAS_STATUS_NOT_SUPPORTED     If no heuristic function is
      * available for the current configuration. \retval HIPBLAS_STATUS_INVALID_VALUE If
-     * no solution is found.
+     * the solution library could not be loaded.
      */
     HIPBLASLT_EXPORT
     hipblasStatus_t getAllAlgos(hipblasLtHandle_t                              handle,
