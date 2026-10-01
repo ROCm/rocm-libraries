@@ -1,41 +1,19 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Gate the generated intrinsic arch-domain artifacts against drift.
+"""Validate generated intrinsic availability artifacts and generator failures.
 
-``tools/gen_arch_domain.py`` measures, per LLVM flavor, which intrinsic
-declarations actually link for which gfx target, and commits the answer as
-``python/rocke/core/arch/data/intrinsic_arch_domain.<flavor>.json``. A generated
-artifact that is not gated drifts from its generator, and a stale availability
-table is worse than none because it is trusted.
+Structural tests compare committed keys, targets, statuses, and provenance
+with the current source. Missing keys fail for the resolved flavor; other
+flavors report a skipped subtest. Stale keys fail for every flavor.
 
-Two gates, because they fail for different reasons and are available in
-different places:
+Regeneration checks the selected compiler's flavor against its committed
+column. A compiler build banner may differ when measurements and probe
+configuration agree. Missing toolchains or unmatched flavors are skipped.
+Failure-path tests verify that invalid measurements preserve existing output.
 
-* **Structure** runs everywhere — no LLVM, no GPU, no built C++ engine. It reads
-  the committed JSON and checks it against the decl table it claims to describe.
-  This is the gate that catches the realistic drift: someone adds, renames or
-  removes an intrinsic key and the artifact silently stops covering it. The
-  artifact would still be internally consistent, still parse, and still look
-  authoritative, while saying nothing about the new key.
-
-* **Regeneration** re-probes the toolchain and asserts the committed column for
-  *this host's* flavor comes back byte-identical. It is the only check that can
-  catch a wrong measurement rather than a missing one. A full sweep is ~150 keys
-  x 7 targets and finishes in seconds, so it is a test rather than a nightly.
-
-A host can only ever measure its own LLVM, so a flavor with no matching
-toolchain is skipped, never failed — "we did not get an answer" must not be
-recorded as "the answer is no". Same reason the artifact distinguishes
-``arch_absent`` (the target genuinely cannot lower it) from ``target_unsupported``,
-``toolchain_crash`` and ``toolchain_timeout`` (no data).
-
-This file is a **source-tree** gate and is excluded from the installed test
-tree by `CMakeLists.txt`. It has to be: it imports the generator out of
-`tools/`, which is not installed, and an uninstallable import in an installed
-test is not one skipped test but a collection error that takes the whole
-pytest session down with it. The exclusion is the contract; keep the two in
-step if this file is ever renamed.
+This source-tree test imports tools/gen_arch_domain.py and is excluded from
+installed pytest by CMakeLists.txt. Artifact paths resolve through the package.
 """
 
 from __future__ import annotations
@@ -574,6 +552,169 @@ for line in open(src):
         rc = self._run(tools, out)
         self.assertEqual(rc, 1)
         self.assertFalse(out.exists(), "committed our own defect as a measurement")
+
+
+class GeneratorFailureTest(unittest.TestCase):
+    """Failed measurements must preserve an existing artifact."""
+
+    def _run(
+        self,
+        decl: str,
+        *options: str,
+        name_result: tuple[bool | None, str] | None = (True, "llvm.probe.retry"),
+        explicit_output: bool = True,
+    ) -> tuple[int, str, str]:
+        from contextlib import ExitStack, redirect_stdout
+        from io import StringIO
+        from unittest import mock
+
+        import check_ir_validity as V
+
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        out = root / "column.json"
+        out.write_text("existing artifact\n")
+        log = StringIO()
+        with ExitStack() as stack, redirect_stdout(log):
+            stack.enter_context(
+                mock.patch.object(V, "_llvm_tool", side_effect=lambda n: n)
+            )
+            stack.enter_context(
+                mock.patch.object(G, "clang_identity", return_value="stub clang")
+            )
+            stack.enter_context(
+                mock.patch.object(G, "_decl_table", return_value={"retry": decl})
+            )
+            stack.enter_context(mock.patch.object(G, "default_out", return_value=out))
+            if name_result is not None:
+                stack.enter_context(
+                    mock.patch.object(G, "_name_exists", return_value=name_result)
+                )
+            argv = [str(_TOOL), "--jobs", "1", *options]
+            if explicit_output:
+                argv += ["--out", str(out)]
+            stack.enter_context(mock.patch.object(sys, "argv", argv))
+            rc = G.main()
+        return rc, out.read_text(), log.getvalue()
+
+    def test_failed_name_checks_preserve_the_artifact(self):
+        from unittest import mock
+
+        decl = "declare float @llvm.fabs.f32(float)"
+        for failure in (1, -9, OSError("cannot execute opt")):
+            with self.subTest(failure=failure):
+                kwargs = (
+                    {"side_effect": failure}
+                    if isinstance(failure, OSError)
+                    else {
+                        "return_value": subprocess.CompletedProcess(
+                            [], failure, "", "opt failed"
+                        )
+                    }
+                )
+                with mock.patch.object(
+                    G.subprocess, "run", **kwargs
+                ), mock.patch.object(G, "_probe") as probe:
+                    rc, text, log = self._run(decl, name_result=None)
+                self.assertEqual(rc, 1)
+                self.assertEqual(text, "existing artifact\n")
+                self.assertIn("retry", log)
+                self.assertIn(
+                    (
+                        "cannot execute opt"
+                        if isinstance(failure, OSError)
+                        else "opt failed"
+                    ),
+                    log,
+                )
+                probe.assert_not_called()
+
+    def test_successful_nonrecognition_records_name_absent(self):
+        from unittest import mock
+
+        decl = "declare i32 @llvm.probe.unknown(i32)"
+        with mock.patch.object(
+            G.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess([], 0, decl + "\n", ""),
+        ), mock.patch.object(G, "_probe") as probe:
+            rc, text, _ = self._run(decl, name_result=None)
+        self.assertEqual(rc, 0)
+        self.assertTrue(
+            all(
+                c["status"] == G.STATUS_NAME_ABSENT
+                for c in json.loads(text)["keys"]["retry"].values()
+            )
+        )
+        probe.assert_not_called()
+
+    def test_unresolved_operand_retries_preserve_the_artifact(self):
+        from unittest import mock
+
+        for operands in ("i32", "i32 immarg", "i32, i32 immarg"):
+            with self.subTest(operands=operands):
+
+                def probe(clang, path, arch, out):
+                    if ".lit" in path.name or ".imm" in path.name:
+                        return (
+                            G.STATUS_PROBE_ERROR,
+                            "immarg operand has non-immediate parameter",
+                        )
+                    return (
+                        G.STATUS_ARCH_ABSENT,
+                        "Do not know how to expand this operator's operand",
+                    )
+
+                with mock.patch.object(G, "_probe", side_effect=probe):
+                    rc, text, log = self._run(
+                        f"declare i32 @llvm.probe.retry({operands})", "--arch", "gfx942"
+                    )
+                self.assertEqual(rc, 1)
+                self.assertEqual(text, "existing artifact\n")
+                self.assertIn("immarg operand has non-immediate parameter", log)
+
+    def test_operand_retries_keep_conclusive_results(self):
+        from unittest import mock
+
+        for status in (G.STATUS_OK, G.STATUS_ARCH_ABSENT):
+            with self.subTest(status=status):
+
+                def probe(clang, path, arch, out):
+                    if ".lit" in path.name or ".imm" in path.name:
+                        return status, (
+                            "Cannot select" if status == G.STATUS_ARCH_ABSENT else ""
+                        )
+                    return (
+                        G.STATUS_ARCH_ABSENT,
+                        "Do not know how to expand this operator's operand",
+                    )
+
+                with mock.patch.object(G, "_probe", side_effect=probe):
+                    rc, text, _ = self._run(
+                        "declare i32 @llvm.probe.retry(i32, i32 immarg)",
+                        "--arch",
+                        "gfx942",
+                    )
+                self.assertEqual(rc, 0)
+                self.assertEqual(
+                    json.loads(text)["keys"]["retry"]["gfx942"]["status"], status
+                )
+
+    def test_filtered_runs_require_an_explicit_output(self):
+        from unittest import mock
+
+        for options in (("--only", "retry"), ("--arch", "gfx942")):
+            with self.subTest(options=options), mock.patch.object(
+                G, "_probe", return_value=(G.STATUS_OK, "")
+            ) as probe:
+                rc, text, _ = self._run(
+                    "declare i32 @llvm.probe.retry(i32)",
+                    *options,
+                    explicit_output=False,
+                )
+                self.assertEqual(rc, 1)
+                self.assertEqual(text, "existing artifact\n")
+                probe.assert_not_called()
 
 
 class ValidityGateTest(unittest.TestCase):
