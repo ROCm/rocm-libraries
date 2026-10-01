@@ -62,6 +62,11 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
                         help="Author-declared dimension-to-tile pair used to propose ceil_div/remainder features")
     parser.add_argument("--feature-evaluator", help="Shared hipdnn_uhd_features executable")
     parser.add_argument("--eval-fraction", type=float, default=0.2)
+    parser.add_argument("--recall", action="store_true",
+                        help="The engine's shape space is closed -- it serves only the shapes it was "
+                             "compiled for (a pack-bound engine) -- so no unseen shape can reach the "
+                             "model. Train on every shape and report accuracy over all of them as "
+                             "recall, instead of holding --eval-fraction of them out of the model")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--num-boost-round", type=int, default=500)
     parser.add_argument("--early-stopping", type=int, default=50)
@@ -730,8 +735,9 @@ def run_generate(args: argparse.Namespace) -> int:
             raise ValueError("--output-dir must not exist; generation never overwrites a previous run")
         if tree == output or tree in output.parents:
             raise ValueError("--output-dir must be outside the shipping descriptor tree")
-        if not 0 < args.eval_fraction < 1:
-            raise ValueError("generate requires a true problem holdout: 0 < --eval-fraction < 1")
+        if not args.recall and not 0 < args.eval_fraction < 1:
+            raise ValueError("generate requires a true problem holdout: 0 < --eval-fraction < 1 "
+                             "(or --recall for an engine whose shape space is closed)")
         if args.shard and not args.collect_only:
             raise ValueError("--shard slices a collection; it needs --collect-only")
         if args.collect_only and args.collection:
@@ -855,9 +861,16 @@ def run_generate(args: argparse.Namespace) -> int:
         grouping = resolve_grouping(frames[sources[0]])
         train_frames = {}
         for source in sources:
-            split = split_problems(problem_keys(frames[source], grouping), args.eval_fraction, args.seed)
             candidates = usable[source]
-            train_frames[source] = candidates[~problem_keys(candidates, grouping).isin(split.eval_problems)]
+            if args.recall:
+                # Every shape the engine can ever be asked about is in the corpus: holding some
+                # out would ship a model that has not seen shapes it will certainly meet.
+                train_frames[source] = candidates
+            else:
+                split = split_problems(problem_keys(frames[source], grouping), args.eval_fraction,
+                                       args.seed)
+                train_frames[source] = candidates[
+                    ~problem_keys(candidates, grouping).isin(split.eval_problems)]
             if len(set(problem_keys(train_frames[source], grouping))) < 5:
                 raise ValueError("generation needs at least five training graph/device groups plus held-out problems")
         # The first source proposes and checks the one feature recipe every metric shares.
@@ -928,8 +941,11 @@ def run_generate(args: argparse.Namespace) -> int:
                 train_args.extend(["--feature-evaluator", args.feature_evaluator])
             if main(train_args):
                 raise ValueError(f"training {requested} failed; no generated model was published")
+            # Recall scores every shape, all of them trained on: the question is how well the
+            # model reproduces the space it will serve, not how it extrapolates.
             eval_args = ["evaluate", "--input", str(corpora[source]), "--model-dir", str(model_dir),
-                         "--eval-fraction", str(args.eval_fraction), "--seed", str(args.seed), "--include-per-problem"]
+                         "--eval-fraction", "1.0" if args.recall else str(args.eval_fraction),
+                         "--seed", str(args.seed), "--include-per-problem"]
             if args.feature_evaluator:
                 eval_args.extend(["--feature-evaluator", args.feature_evaluator])
             if main(eval_args):
@@ -951,7 +967,8 @@ def run_generate(args: argparse.Namespace) -> int:
                                  else "held-out corpus has no evaluable candidate ranking")
             evaluated_keys = {tuple(key) for key in report["split"]["eval_problem_keys"]}
             training_keys = set(problem_keys(source_train, grouping))
-            if training_keys & evaluated_keys:
+            # A held-out score must be held out; a recall score is by definition over trained shapes.
+            if not args.recall and training_keys & evaluated_keys:
                 raise ValueError("evaluation includes a problem seen during training")
             report["holdout_integrity"] = {"status": "held_out", "detail": "Verified disjoint graph/device identities in recorded training and evaluation slices"}
             _write_json(report_path, report)
@@ -975,7 +992,10 @@ def run_generate(args: argparse.Namespace) -> int:
             # on every problem and one fitted on four of them, and the metrics beside it
             # report only the second without saying so.
             "catalog_density": density.as_dict() if density else None,
-            "seed": args.seed, "eval_fraction": args.eval_fraction,
+            "seed": args.seed, "eval_fraction": None if args.recall else args.eval_fraction,
+            # "recall": trained on every shape and scored on all of them (a closed shape
+            # space); "holdout": scored on shapes the model never saw.
+            "evaluation": "recall" if args.recall else "holdout",
             "shipping_knobs": shipping_knobs, "collection_knobs": collection_knobs,
             # What each knob's pinned integer addressed, as the engine reported it on the
             # candidates this corpus enumerated. Recorded for reading, not for use: the

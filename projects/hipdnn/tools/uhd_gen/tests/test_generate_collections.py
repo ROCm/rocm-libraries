@@ -276,3 +276,22 @@ def test_a_malformed_shard_is_refused(world, caplog, shard, message):
                  "--descriptor-tree", str(world["tree"]), "--engine-id", "7", "--role",
                  "predict_engine", "--output-dir", str(world["root"] / "bad")]) == 1
     assert message in caplog.text
+
+
+def test_a_closed_shape_space_trains_on_every_shape_and_reports_recall(world, evaluator):
+    """A pack-bound engine meets no shape outside its pack: holding some out of the model
+    would only ship it blind to shapes it will certainly be asked about."""
+    collection = _collect(world, "col")
+    held, _ = _train(world, "held", evaluator, collections=[collection])
+    assert held == 0
+    code, output = _train(world, "recall", evaluator, collections=[collection], extra=["--recall"])
+    assert code == 0
+    trained = json.loads((output / "train.json").read_text(encoding="utf-8"))
+    corpus = json.loads((output / "corpus.json").read_text(encoding="utf-8"))
+    assert {r["benchmark"] for r in trained} == {r["benchmark"] for r in corpus}
+    held_out = json.loads((world["root"] / "held" / "train.json").read_text(encoding="utf-8"))
+    assert len(held_out) < len(trained), "the default still holds a slice out"
+    manifest = json.loads((output / "generation_manifest.json").read_text(encoding="utf-8"))
+    assert (manifest["evaluation"], manifest["eval_fraction"]) == ("recall", None)
+    report = json.loads((output / "model" / "eval_report.json").read_text(encoding="utf-8"))
+    assert report["metrics"]["problems_scored"] == GRAPHS, "recall scores every shape"
