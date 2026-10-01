@@ -189,6 +189,14 @@ PLUGIN_DIR=$(dirname "$(find "$BUILD" \( -name "libhip_kernel_provider*.so" -o -
 TREE_ROOT=$(find "$BUILD" -type d -name kpack -path "*/arch_content/*/$ARCH/kpack" \
     -not -path "*/test_arch_content/*" | head -1)
 TREE_ROOT=${TREE_ROOT%/kpack}
+if [ -z "$TREE_ROOT" ] && [ -n "${ID_ARGS[*]:-}" ]; then
+    # An engine with declared UHD ids and no descriptor pack (ASM_SDPA_ENGINE) has no kpack
+    # tree when production packaging is dormant for this arch -- the shipped pack declares
+    # gfx950 only, so a gfx942 build packs nothing. Its models are staged loose into the
+    # provider's production tree, which the loader walks either way.
+    TREE_ROOT=$(find "$BUILD" -type d -path "*/engines/arch_content/hip-kernel-provider" \
+        -not -path "*/test_arch_content/*" | head -1)
+fi
 if [ -z "$TREE_ROOT" ] && [[ "+$PROVIDERS+" != *"+hip-kernel-provider+"* ]]; then
     # MIOpen alone ships no descriptors: its L1 models are installed into (and read from)
     # a root of their own.
@@ -330,10 +338,15 @@ step "VERIFY - the runtime admits what was installed"
 # Offline evaluation scores a model the runtime may still refuse (an axis the UED does not
 # expose, a stale selector revision): it then ranks by declared order and nothing here would
 # say so. Ask the built loader and the engine itself, with logging on, before trusting any
-# number above.
+# number above. The validator covers descriptor-backed engines only; an engine binding its
+# models by declared id (ASM_SDPA_ENGINE) is checked through its prediction below. Its staged
+# shipped model carries the same id as the one just promoted, so until the new model replaces
+# the shipped file the loader reports the pair as a conflict -- read the reason, not just the
+# status.
 VALIDATE=$(find "$BUILD" -name hipdnn_validate_descriptors -type f -perm -u+x | head -1)
 {
-    if [ -n "$VALIDATE" ] && [ -n "$(find "$TREE_ROOT" -name '*.ued.json' -print -quit)" ]; then
+    if [ -n "$VALIDATE" ] && [ -z "${ID_ARGS[*]:-}" ] \
+       && [ -n "$(find "$TREE_ROOT" -name '*.ued.json' -print -quit)" ]; then
         "$VALIDATE" "$TREE_ROOT" --expect-engine "$ENGINE"
         echo "validate_descriptors rc=$?"
     fi
@@ -345,7 +358,7 @@ VALIDATE=$(find "$BUILD" -name hipdnn_validate_descriptors -type f -perm -u+x | 
         echo "predict-engine $metric rc=$?"
     done
 } > "$OUT/verify.log" 2>&1
-grep -E "rc=|\"status\"|VIOLATION|is not used|does not expose|refus|UNAVAILABLE" "$OUT/verify.log" \
+grep -E "rc=|\"status\"|\"reason\"|VIOLATION|is not used|does not expose|refus|disabled|not deployed|UNAVAILABLE" "$OUT/verify.log" \
     | cut -c1-300 | head -40
 
 step "KEEP"
