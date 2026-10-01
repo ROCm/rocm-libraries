@@ -698,10 +698,8 @@ constexpr double ell2csr_gbyte_count(rocsparse_int M, rocsparse_int csr_nnz, roc
 }
 
 template <typename T>
-constexpr double csr2hyb_gbyte_count(rocsparse_int M,
-                                     rocsparse_int nnz,
-                                     rocsparse_int ell_nnz,
-                                     rocsparse_int coo_nnz)
+constexpr double
+    csr2hyb_gbyte_count(rocsparse_int M, rocsparse_int nnz, int64_t ell_nnz, rocsparse_int coo_nnz)
 {
     return ((M + 1.0 + ell_nnz + 2.0 * coo_nnz) * sizeof(rocsparse_int)
             + (nnz + ell_nnz + coo_nnz) * sizeof(T))
@@ -711,7 +709,7 @@ constexpr double csr2hyb_gbyte_count(rocsparse_int M,
 template <typename T>
 constexpr double hyb2csr_gbyte_count(rocsparse_int M,
                                      rocsparse_int csr_nnz,
-                                     rocsparse_int ell_nnz,
+                                     int64_t       ell_nnz,
                                      rocsparse_int coo_nnz)
 {
     return ((M + 1.0 + csr_nnz + ell_nnz + 2.0 * coo_nnz) * sizeof(rocsparse_int)
@@ -921,7 +919,7 @@ constexpr double check_matrix_ell_gbyte_count(I ell_nnz)
 }
 
 template <typename T, typename I>
-constexpr double check_matrix_hyb_gbyte_count(I ell_nnz, I coo_nnz)
+constexpr double check_matrix_hyb_gbyte_count(int64_t ell_nnz, I coo_nnz)
 {
     return (sizeof(I) * (ell_nnz + 2.0 * coo_nnz) + sizeof(T) * (ell_nnz + coo_nnz)) / 1e9;
 }
