@@ -440,19 +440,75 @@ def _called_name(func):
     return None
 
 
+# Functions that answer "what arch is this box?". An arch argument that is a
+# call to one of these supplies an arch, so the signature guard is satisfied --
+# and yet the call site is exactly the host dependency this PR removes. Spelling
+# them out is what turns that guard from "no TypeError" into "no device read".
+_LIVE_ARCH_PROBES = frozenset(
+    {
+        "_resolve_attention_arch",
+        "get_device_arch",
+    }
+)
+
+# Returned when ``*args``/``**kwargs`` forwarding makes the arch argument
+# undecidable from the AST alone. Counts as supplied: this guard reports only
+# what it can prove.
+_UNDECIDABLE = object()
+
+
+def _arch_argument(call, positional_index):
+    """The AST node passed as ``arch``, ``None`` if absent, or ``_UNDECIDABLE``."""
+    if any(keyword.arg is None for keyword in call.keywords):
+        return _UNDECIDABLE
+    if any(isinstance(arg, ast.Starred) for arg in call.args):
+        return _UNDECIDABLE
+    for keyword in call.keywords:
+        if keyword.arg == "arch":
+            return keyword.value
+    if positional_index is not None and len(call.args) > positional_index:
+        return call.args[positional_index]
+    return None
+
+
+def _is_live_device_probe(node) -> bool:
+    """Whether ``node`` is a call to something that reads the running device."""
+    return isinstance(node, ast.Call) and _called_name(node.func) in _LIVE_ARCH_PROBES
+
+
 def _supplies_arch(call, positional_index):
     """Whether ``call`` can be shown to pass ``arch``.
 
-    ``*args`` / ``**kwargs`` forwarding is undecidable here, so it counts as
-    supplied -- this guard reports only what it can prove.
+    Thin wrapper over :func:`_arch_argument`, kept because "did it pass one?"
+    and "what did it pass?" are two different questions and the sweep asks both.
     """
-    if any(keyword.arg is None for keyword in call.keywords):
-        return True
-    if any(isinstance(arg, ast.Starred) for arg in call.args):
-        return True
-    if any(keyword.arg == "arch" for keyword in call.keywords):
-        return True
-    return positional_index is not None and len(call.args) > positional_index
+    return _arch_argument(call, positional_index) is not None
+
+
+def _live_arch_call_owners(tree):
+    """``(top_level_function_name, lineno)`` for every live-arch probe call.
+
+    Attribution is to the OUTERMOST enclosing function, so a closure defined
+    inside a launch entry point (the graph-replay ``_do()`` bodies, for one)
+    counts as part of that entry point rather than as an unnamed escapee.
+    Module-level calls are reported with owner ``None`` and never allow-listed.
+
+    A probe's own body is skipped: ``_resolve_attention_arch`` calling
+    ``get_device_arch`` is its implementation, not a leak out of one.
+    """
+    found = []
+
+    def visit(node, owner):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            owner = owner or node.name
+        if isinstance(node, ast.Call) and _called_name(node.func) in _LIVE_ARCH_PROBES:
+            if owner not in _LIVE_ARCH_PROBES:
+                found.append((owner, node.lineno))
+        for child in ast.iter_child_nodes(node):
+            visit(child, owner)
+
+    visit(tree, None)
+    return found
 
 
 class TestEveryGateCallSiteSuppliesArch(unittest.TestCase):
@@ -474,7 +530,15 @@ class TestEveryGateCallSiteSuppliesArch(unittest.TestCase):
     """
 
     def _sweep(self, gates):
-        misses, unparseable = [], []
+        """Return ``(missing_arch, probed_arch, unparseable)``.
+
+        ``missing_arch`` is a call that would raise ``TypeError``.
+        ``probed_arch`` is a call that satisfies the signature by handing the
+        gate a freshly-read device arch -- ``_select_2d_tile_size(problem,
+        _resolve_attention_arch())``. That passes a signature check and defeats
+        the entire point, so it is swept for separately.
+        """
+        missing, probed, unparseable = [], [], []
         for path in sorted(_LIBRARY_ROOT.rglob("*.py")):
             if "__pycache__" in path.parts:
                 continue
@@ -487,12 +551,18 @@ class TestEveryGateCallSiteSuppliesArch(unittest.TestCase):
                 if not isinstance(node, ast.Call):
                     continue
                 name = _called_name(node.func)
-                if name in gates and not _supplies_arch(node, gates[name]):
-                    misses.append(
-                        f"{path.relative_to(_LIBRARY_ROOT)}:{node.lineno} "
-                        f"{name}() -- no arch"
+                if name not in gates:
+                    continue
+                where = f"{path.relative_to(_LIBRARY_ROOT)}:{node.lineno} {name}()"
+                supplied = _arch_argument(node, gates[name])
+                if supplied is None:
+                    missing.append(f"{where} -- no arch")
+                elif supplied is not _UNDECIDABLE and _is_live_device_probe(supplied):
+                    probed.append(
+                        f"{where} -- arch={_called_name(supplied.func)}() "
+                        "(reads the running device)"
                     )
-        return misses, unparseable
+        return missing, probed, unparseable
 
     def test_gate_set_is_populated(self):
         """A vacuous sweep passes for free, so pin that the gates were found."""
@@ -518,15 +588,104 @@ class TestEveryGateCallSiteSuppliesArch(unittest.TestCase):
 
     def test_no_call_site_omits_a_required_arch(self):
         required, _ = _gate_signatures()
-        misses, unparseable = self._sweep(required)
+        missing, _probed, unparseable = self._sweep(required)
         self.assertEqual(
             unparseable, [], f"unparseable sources under {_LIBRARY_ROOT.name}/"
         )
         self.assertEqual(
-            misses,
+            missing,
             [],
             "these call sites raise TypeError the moment they are reached -- the "
-            "gate requires an arch and none is passed:\n  " + "\n  ".join(misses),
+            "gate requires an arch and none is passed:\n  " + "\n  ".join(missing),
+        )
+
+    def test_no_call_site_satisfies_a_gate_with_a_live_device_read(self):
+        """The signature guard is not the host-independence guard.
+
+        ``_select_2d_tile_size(problem, _resolve_attention_arch())`` passes
+        ``test_no_call_site_omits_a_required_arch`` and re-introduces exactly
+        the dependency this PR removes. Requiring the parameter only proves the
+        parameter exists; this proves the value did not come from the box.
+        """
+        required, _ = _gate_signatures()
+        _missing, probed, _unparseable = self._sweep(required)
+        self.assertEqual(
+            probed,
+            [],
+            "these call sites satisfy the arch parameter by reading the running "
+            "device, which is the dependency the parameter exists to remove. "
+            "Thread the caller's arch through instead:\n  " + "\n  ".join(probed),
+        )
+
+
+# Top-level functions of ``attention_unified`` allowed to ask the box what it
+# is. All three are launch entry points: they are about to compile and launch on
+# the local device, so the local device IS the authority there. Everything below
+# them receives that answer as an argument.
+#
+# This is a RATCHET, like _ARCH_IS_OPTIONAL. Removing a name is fine; adding one
+# means a new code path reads hardware, and that needs to be argued for in
+# review rather than absorbed by editing this set.
+_LIVE_ARCH_CALLERS_ALLOWED = frozenset(
+    {
+        "run_unified_attention_torch",  # the public launch entry
+        "_run_3d_tiled",  # split-KV decode launch
+        "_run_2d_graphed",  # 2D graph-replay launch
+    }
+)
+
+
+class TestLiveArchReadsAreConfinedToTheLaunchPath(unittest.TestCase):
+    """Every ``_resolve_attention_arch()`` call sits in an allow-listed launcher.
+
+    The call-site sweep above is per-gate: it can only see functions it knows
+    the signature of. This one is per-*call*, so a device read introduced
+    anywhere in ``attention_unified`` -- in a new helper, a new selector, a
+    refactored cache lookup -- fails here immediately, without waiting for a
+    behavioural test to happen to route through it.
+
+    Together the two directions close the loop: selection-path functions must be
+    given an arch, and the module may only produce one in a launcher.
+    """
+
+    def _owners(self):
+        tree = ast.parse(_GATE_MODULE.read_text(encoding="utf-8"), str(_GATE_MODULE))
+        return _live_arch_call_owners(tree)
+
+    def test_sweep_finds_the_launch_path_reads(self):
+        """Guard the guard: a sweep that finds nothing would pass vacuously."""
+        owners = self._owners()
+        self.assertGreater(
+            len(owners),
+            0,
+            "found no _resolve_attention_arch() calls at all in "
+            f"{_GATE_MODULE.name} -- either the probe names in _LIVE_ARCH_PROBES "
+            "drifted, or the launch path stopped resolving an arch",
+        )
+
+    def test_no_live_arch_read_outside_the_allow_list(self):
+        strays = sorted(
+            f"{_GATE_MODULE.name}:{lineno} in {owner or '<module level>'}"
+            for owner, lineno in self._owners()
+            if owner not in _LIVE_ARCH_CALLERS_ALLOWED
+        )
+        self.assertEqual(
+            strays,
+            [],
+            "these read the live device outside the launch path. Selection and "
+            "geometry must take the arch as an argument; only a function that is "
+            "about to compile-and-launch on this box may ask what this box is:\n  "
+            + "\n  ".join(strays),
+        )
+
+    def test_allow_list_has_no_dead_entries(self):
+        """A name that no longer reads the device should leave the allow-list."""
+        actual = {owner for owner, _ in self._owners()}
+        self.assertEqual(
+            set(_LIVE_ARCH_CALLERS_ALLOWED) - actual,
+            set(),
+            "allow-listed functions that no longer call _resolve_attention_arch(). "
+            "Drop them -- a stale entry silently re-permits a future device read",
         )
 
 
