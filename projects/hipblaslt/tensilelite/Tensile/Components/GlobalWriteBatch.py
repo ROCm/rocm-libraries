@@ -685,9 +685,11 @@ class GlobalWriteBatchWriter:
       subtileBarrierDrains = self.kernel.get("UseSubtileImpl") and \
         (self.parentWriter.states.useBias != DataDirection.NONE or \
          self.kernel["ProblemType"].get("UseScaleAlphaVec", 0))
-      # Only multi-DU drains bias/SAV before _emitAdd. Single-DU emits that drain
-      # after the consumers, so its LDS loads stay in the per-element accounting.
-      needsCrossWaveBarrier = subtileBarrierDrains and isSubtileMultiDU(self.kernel)
+      # Single-DU emits its drain after the consumers, so its LDS loads stay in
+      # the per-element accounting. Only the MXF4 path takes that route: every
+      # other kernel keeps the batch-start barrier and the accounting it implies.
+      needsCrossWaveBarrier = subtileBarrierDrains and \
+        (isSubtileMultiDU(self.kernel) or not isMxf4SubtilePath(self.kernel))
       if self.parentWriter.states.useBias == DataDirection.READ and not needsCrossWaveBarrier \
           and not self.parentWriter._plsinFusedSkipBias(self.kernel):
         waitLocalLoadCnt += self.biasLoadIssued[elementIdx]
