@@ -120,9 +120,10 @@ jobs:
       GTEST_FILTER: ${{ github.event.inputs.gtest_filter || '' }}
       CTEST_LABEL: "^quick$"
       BUILD_RUNS_ON: ${{ needs.gate.outputs.build_runs_on }}
-      # develop on 2026-10-01, which contains the VM dispatch-overhead fix
-      # (ROCm/rocm-systems#12515, merge bbd1525f37). One-shot pin, not a floating branch.
-      ROCM_SYSTEMS_REF: 2108a66b00f593f2a39e8b7a885a16c7e8a9b175
+      # develop on 2026-10-01, after the VM dispatch-overhead fix
+      # (ROCm/rocm-systems#12515, merge bbd1525f37) and the lane-read fix
+      # (ROCm/rocm-systems#12618, merge 15d2613e87). One-shot pin, not a floating branch.
+      ROCM_SYSTEMS_REF: 7e7420053ea9c896034a073eb53c0e71f7a19de0
     steps:
       - name: Install build tools
         run: |
