@@ -5503,8 +5503,25 @@ def is_valid_depthwise_spec(
 # is emitted instead of fully unrolling; see _use_unroll below.  Note that
 # build_direct_depthwise multiplies by BLOCK_W (each thread covers multiple
 # output W positions) while build_direct_depthwise_spatial does not (each
-# thread owns exactly one W position).
-_DW_UNROLL_THRESH = 20_000
+# thread owns exactly one W position).  Both readers are forward builders --
+# depthwise dgrad goes through build_direct_depthwise_dgrad_streaming, which
+# does not consult this knob and is unaffected by the value below.
+#
+# Set to 0 — the cost is always >= 1, so the comparison never holds and the
+# loop path is always taken.  The Python-level unroll emits the whole nest into
+# a single basic block, which on the wider configs runs to six figures of
+# instructions, and LLVM opt+codegen scales superlinearly in the size of one
+# block: past the old threshold the cost per emitted IR line keeps climbing
+# instead of flattening, so the widest BLOCK_W dominate build time out of all
+# proportion to their share of the corpus.  Taking the runtime loop everywhere
+# trades a small, bounded regression on this variant's best-per-shape time for
+# a large reduction in build time, and the col variant recovers most of that
+# regression on the shapes where it matters.
+# Keeping the knob rather than deleting the unroll path so the tradeoff stays
+# one edit away; the C++ engine hardcodes the same 0 in
+# instances/common/conv_direct_grouped_build_depthwise{,_spatial}.cpp and must
+# be changed with it.
+_DW_UNROLL_THRESH = 0
 
 
 def build_direct_depthwise(

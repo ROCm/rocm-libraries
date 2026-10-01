@@ -274,7 +274,11 @@ void rocke_dconv_dw_load_weights(rocke_dconv_dw_ctx_t* ctx)
  *  stores when p_flush_val % c_stride_dw == 0 and ho_row < Ho.
  *  ch_in_range guards loads and stores for partial channel tiles.
  *
- *  Unroll threshold: n_iters * BLOCK_W * KH * KW <= 20000.
+ *  Unroll threshold: n_iters * BLOCK_W * KH * KW <= 0, i.e. never — the cost
+ *  is always >= 1.  The static unroll emits a single basic block and LLVM
+ *  codegen scales superlinearly in block size, so the widest BLOCK_W dominate
+ *  build time; see _DW_UNROLL_THRESH in the Python source for the reasoning.
+ *  Change both engines together.
  *  When above the threshold, uses a scf_for_iter group loop over
  *  n_groups = ceil(n_iters / KH) groups of KH iterations each.
  * ===================================================================== */
@@ -286,7 +290,7 @@ rocke_kernel_def_t* rocke_dconv_dw_stream_h_loop(rocke_dconv_dw_ctx_t* ctx)
     int KW = p->KW;
     int BLOCK_W = ctx->BLOCK_W;
     int n_iters = ctx->n_iters;
-    int _use_unroll = ((long)n_iters * BLOCK_W * KH * KW) <= 20000;
+    int _use_unroll = ((long)n_iters * BLOCK_W * KH * KW) <= 0;
 
     if(_use_unroll)
     {
