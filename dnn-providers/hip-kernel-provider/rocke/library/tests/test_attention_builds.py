@@ -141,6 +141,59 @@ _KERNEL_RESOURCE_BUDGETS = {
     },
 }
 
+# Kernels that fit with no spill on the toolchain they were tuned with but spill on
+# a newer comgr. Unlike ``_KERNEL_RESOURCE_BUDGETS`` this is not an accepted trade:
+# the spill costs measured time, so the kernel does not pass on that toolchain. It
+# is reported as an expected failure that names the toolchain and the cost, while
+# every older toolchain keeps the strict 0 B budget. The entry is strict: it fails
+# if the spill grows past ``max_scratch_bytes`` or if a toolchain at or above
+# ``first_rocm`` stops spilling (the entry is then stale and must be removed).
+#
+# gfx950 fp16/bf16 D128 tiled-2d (shipped geometry): the ROCm 10.1 comgr
+# (TheRock 10.1.0a20260822, LLVM 23 0bace190) builds it at 254 VGPR, 0 B scratch.
+# The ROCm 10.2.0 comgr (hipDNN image 2026-09-26, LLVM 24 4f43f474) builds the same
+# IR at 256 VGPR with 21 spilled VGPRs (88 B). On MI355X the LLVM 24 binary is about
+# 10% slower (bf16 S=8192 causal: 1.649 ms vs 1.494 ms; S=2048: 0.194 vs 0.179 ms).
+_TOOLCHAIN_SPILL_REGRESSIONS = {
+    name: {
+        "first_rocm": (10, 2),
+        "max_scratch_bytes": 96,
+        "reason": "LLVM 24 (ROCm 10.2 comgr) spills 88 B on this kernel, about "
+        "10% slower than the 0 B LLVM 23 build",
+    }
+    for name in (
+        "rocke_uattn2d_tiled_d128_b64_t128_h32kv8_fp16_w4_mw32_mfma32_stqk_s1_mask1_hlpv_skipqreg_mlim_ksb_smxil1",
+        "rocke_uattn2d_tiled_d128_b64_t128_h32kv8_bf16_w4_mw32_mfma32_stqk_s1_mask1_hlpv_skipqreg_mlim_ksb_smxil1",
+    )
+}
+
+
+def _check_toolchain_spill_regression(kernel_name: str, scratch: int, arch: str):
+    """Apply ``_TOOLCHAIN_SPILL_REGRESSIONS`` to ``kernel_name``.
+
+    Returns without effect when no entry applies to the resolved comgr, so the
+    caller's strict budget decides. Otherwise xfails a spill within the recorded
+    bound and fails a larger one or a vanished one."""
+    entry = _TOOLCHAIN_SPILL_REGRESSIONS.get(kernel_name)
+    if entry is None:
+        return
+    from rocke.runtime.comgr import resolved_lib_path, resolved_lib_rocm_version
+
+    rocm = resolved_lib_rocm_version()
+    if rocm is None or rocm < entry["first_rocm"]:
+        return
+    toolchain = f"comgr ROCm {rocm[0]}.{rocm[1]} ({resolved_lib_path()})"
+    assert scratch > 0, (
+        f"{kernel_name} no longer spills on {arch} with {toolchain}; remove its "
+        f"_TOOLCHAIN_SPILL_REGRESSIONS entry"
+    )
+    assert scratch <= entry["max_scratch_bytes"], (
+        f"{kernel_name} spills {scratch} B on {arch} with {toolchain}, past the "
+        f"{entry['max_scratch_bytes']} B recorded for this toolchain regression"
+    )
+    pytest.xfail(f"{kernel_name} on {arch} with {toolchain}: {entry['reason']}")
+
+
 # Every kernel_name ``_assert_resources_fit`` is handed, so a budget whose key no
 # longer matches any built kernel (name drift from a re-tuned selector) becomes a
 # red test rather than a silently-orphaned entry -- see
@@ -208,6 +261,7 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
     scratch = res.scratch_bytes
     if scratch is not None:
         max_scratch = budgets.get("max_scratch_bytes", 0)
+        _check_toolchain_spill_regression(kernel_name, scratch, arch)
         assert scratch <= max_scratch, (
             f"{name} spills {scratch} B to scratch on {arch} (VGPR {res.vgpr_count}), "
             f"over its {max_scratch} B budget -- register over-subscription; kernel "
@@ -4052,15 +4106,16 @@ def test_every_declared_budget_was_exercised():
     """A budget key that matches no built kernel (name drift from a re-tuned
     selector -- these names carry tokens like wpe2 / persist256 / ksring that get
     re-tuned) would silently drop that kernel's occupancy floor. Turn it into a red
-    test: every ``_KERNEL_RESOURCE_BUDGETS`` key must have been handed to
-    ``_assert_resources_fit`` by some test in this run.
+    test: every ``_KERNEL_RESOURCE_BUDGETS`` and ``_TOOLCHAIN_SPILL_REGRESSIONS``
+    key must have been handed to ``_assert_resources_fit`` by some test in this run.
 
     Skips under a partial selection (``pytest -k``) that builds none of the
     budgeted kernels, so the check is meaningful on a full-file / CI run without
     false-failing an unrelated targeted run."""
     if not _SEEN_KERNEL_NAMES:
         pytest.skip("no budgeted kernels built in this selection")
-    orphaned = set(_KERNEL_RESOURCE_BUDGETS) - _SEEN_KERNEL_NAMES
+    declared = set(_KERNEL_RESOURCE_BUDGETS) | set(_TOOLCHAIN_SPILL_REGRESSIONS)
+    orphaned = declared - _SEEN_KERNEL_NAMES
     assert (
         not orphaned
     ), f"budget declared for kernels never built (name drift?): {sorted(orphaned)}"
