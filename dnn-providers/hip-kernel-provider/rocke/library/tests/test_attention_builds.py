@@ -2728,12 +2728,15 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
                     "symbol name carries shape on the runtime path",
                 )
 
-        # Sanity: the two waves_per_eu variants are otherwise indistinguishable,
-        # so the split above is attributable to waves_per_eu alone.
+        # Sanity: the two specs differ in waves_per_eu alone, so the split above
+        # is attributable to it. Compared as whole specs, not by kernel_name():
+        # since #12304 a non-default waves_per_eu adds a wpe{N} token to the
+        # symbol (the default 2 keeps the shipped name), so the names differ by
+        # design. test_gfx950_dense_wiring.py pins that naming contract.
         self.assertEqual(
-            specs[1].kernel_name(),
-            specs[2].kernel_name(),
-            "kernel_name() differed unexpectedly — test setup error",
+            replace(specs[1], waves_per_eu=2),
+            specs[2],
+            "specs differ in more than waves_per_eu; test setup error",
         )
 
     def test_waves_per_eu_cache_isolation_artifacts(self):
