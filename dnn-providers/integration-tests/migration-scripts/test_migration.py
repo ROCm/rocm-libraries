@@ -11,6 +11,7 @@ and 1 distinct. Verifies:
   3. verify_migration round-trip passes for all 3
   4. import_graph detects an exact duplicate (skip) and a new case (append)
   5. import_graph round-trip refusals name the mismatch and write nothing
+  6. import_graph takes metadata from the capture sidecar, as place_bundles does
 
 No C++ binary needed — everything is pure Python on synthetic data.
 
@@ -880,6 +881,388 @@ def test_import_new_template_failure_diagnostics():
         print("  PASS: import_new_template_failure_diagnostics")
 
 
+# --------------------------------------------------------------------------
+# Capture sidecar (.meta.json) handling in import_graph
+# --------------------------------------------------------------------------
+
+_SUITE = "Smoke/IntegrationGpuTernaryFp32"
+
+
+def _ternary_graph(uids, dims=(2, 3, 4, 5)):
+    """Named-tensor ternary op; uids = {name: uid}, out is virtual."""
+    strides = [1] * len(dims)
+    for i in range(len(dims) - 2, -1, -1):
+        strides[i] = strides[i + 1] * dims[i + 1]
+    return {
+        "nodes": [
+            {
+                "type": "TernaryAttributes",
+                "name": "",
+                "inputs": {
+                    "dy_tensor_uid": uids["dy"],
+                    "scale_tensor_uid": uids["scale"],
+                    "x_tensor_uid": uids["x"],
+                },
+                "outputs": {"out_tensor_uid": uids["out"]},
+            }
+        ],
+        "tensors": [
+            {
+                "uid": uids[nm],
+                "name": nm,
+                "dims": list(dims),
+                "strides": strides,
+                "data_type": "float",
+                "virtual": (nm == "out"),
+            }
+            for nm in ("x", "dy", "scale", "out")
+        ],
+        "io_data_type": "float",
+        "compute_data_type": "float",
+        "intermediate_data_type": "float",
+        "name": "",
+    }
+
+
+_UIDS0 = {"x": 1, "dy": 2, "scale": 3, "out": 4}
+_UIDS1 = {"x": 3, "dy": 4, "scale": 1, "out": 2}  # shuffled
+
+
+def _sidecar(case_name, uids=None, seed=None, specs=None):
+    """A sidecar shaped like the one --capture-bundles writes.
+
+    specs = {tensor name: fill spec}; keyed by that capture's own UIDs.
+    """
+    meta = {
+        "format_version": 1,
+        "operation": _SUITE,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+    }
+    if seed is not None:
+        meta["seed"] = seed
+    if specs is not None:
+        meta["inputs"] = {str(uids[nm]): spec for nm, spec in specs.items()}
+    meta["notes"] = f"Captured from C++ graph test {_SUITE}.{case_name}"
+    return meta
+
+
+def _capture(capture_dir, case_name, graph, sidecar):
+    """Write a Hop A capture; sidecar is a dict, raw text, or None (absent)."""
+    if isinstance(sidecar, dict):
+        _write_captured(capture_dir, _SUITE, case_name, graph, meta=sidecar)
+    else:
+        _write_captured(capture_dir, _SUITE, case_name, graph)
+        meta_path = capture_dir / _SUITE / case_name / f"{case_name}.meta.json"
+        if sidecar is None:
+            meta_path.unlink()
+        else:
+            meta_path.write_text(sidecar)
+    return capture_dir / _SUITE / case_name / f"{case_name}.json"
+
+
+def _import_capture(graph_path, bundle_dir, *extra):
+    return run(
+        [
+            sys.executable,
+            str(SCRIPT_DIR / "import_graph.py"),
+            "--graph",
+            str(graph_path),
+            "--bundle-dir",
+            str(bundle_dir),
+            *extra,
+        ],
+        check=False,
+    )
+
+
+def _cases(bundle_dir):
+    """All sweep cases under bundle_dir."""
+    out = []
+    for p in sorted(bundle_dir.rglob("sweep.json")):
+        with open(p) as f:
+            out.extend(json.load(f)["cases"])
+    return out
+
+
+def _only_metadata(bundle_dir):
+    cases = _cases(bundle_dir)
+    assert len(cases) == 1, f"expected 1 case, got {cases}"
+    return cases[0]["metadata"]
+
+
+def _inputs_by_name(bundle_dir, metadata):
+    """Re-key a case's inputs from canonical UIDs to tensor names."""
+    tpl_path = next(bundle_dir.rglob("graph.template.json"))
+    with open(tpl_path) as f:
+        uid_to_name = {t["uid"]: t["name"] for t in json.load(f)["tensors"]}
+    return {uid_to_name[int(u)]: s for u, s in metadata["inputs"].items()}
+
+
+def test_import_reads_sidecar():
+    """With the sidecar present, import records what place_bundles records.
+
+    No --meta/--seed: the seed, the explicit inputs entry, and every other
+    sidecar field come from the capture. x's range [0.5, 2.0] is deliberately
+    not the FREE[-1, 1] declaration default, so a dropped entry would show. The
+    two captures use shuffled UIDs, so inputs must be remapped with the graph.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        capture_dir = tmp / "captured"
+        specs = {
+            "x": {"kind": "free", "lo": 0.5, "hi": 2.0},
+            "scale": {"kind": "fixed", "value": 1.0},
+        }
+        paths = [
+            _capture(
+                capture_dir,
+                "case0",
+                _ternary_graph(_UIDS0),
+                _sidecar("case0", _UIDS0, seed=1234, specs=specs),
+            ),
+            _capture(
+                capture_dir,
+                "case1",
+                _ternary_graph(_UIDS1, dims=(4, 6, 8, 10)),
+                _sidecar("case1", _UIDS1, seed=99, specs=specs),
+            ),
+        ]
+
+        placed_dir = tmp / "placed"
+        r = run(
+            [
+                sys.executable,
+                str(SCRIPT_DIR / "place_bundles.py"),
+                "--capture-dir",
+                str(capture_dir),
+                "--output-dir",
+                str(placed_dir),
+            ]
+        )
+        assert r.returncode == 0, f"place_bundles failed: {r.stderr}"
+
+        imported_dir = tmp / "imported"
+        imported_dir.mkdir()
+        for p in paths:
+            r = _import_capture(p, imported_dir)
+            assert r.returncode == 0, f"import of {p} failed:\n{r.stderr}"
+            assert "WARN" not in r.stderr, f"clean sidecar must be quiet:\n{r.stderr}"
+
+        def by_source(cases):
+            return {c["metadata"]["reference_source"]: c["metadata"] for c in cases}
+
+        placed = by_source(_cases(placed_dir))
+        imported = by_source(_cases(imported_dir))
+        assert len(placed) == 2, f"place_bundles should sweep both: {placed}"
+        assert imported == placed, (
+            f"import metadata differs from place_bundles:\n"
+            f"  imported: {imported}\n  placed:   {placed}"
+        )
+        for ref, meta in imported.items():
+            assert meta["seed"] in (1234, 99), f"captured seed lost: {meta}"
+            assert (
+                _inputs_by_name(imported_dir, meta) == specs
+            ), f"inputs entry not preserved by name for {ref}: {meta['inputs']}"
+        print("  PASS: import_reads_sidecar")
+
+
+def test_import_cli_overrides_sidecar():
+    """--seed and --meta win over the sidecar; untouched sidecar fields stay."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        captured = {"x": {"kind": "free", "lo": 0.5, "hi": 2.0}}
+        supplied = {"x": {"kind": "free", "lo": -3.0, "hi": 3.0}}
+        graph_path = _capture(
+            tmp / "captured",
+            "case0",
+            _ternary_graph(_UIDS1),
+            _sidecar("case0", _UIDS1, seed=42, specs=captured),
+        )
+        inputs = {str(_UIDS1[nm]): s for nm, s in supplied.items()}
+        r = _import_capture(
+            graph_path,
+            bundle_dir,
+            "--seed",
+            "7",
+            "--meta",
+            "notes=hand-written",
+            "--meta",
+            f"inputs={json.dumps(inputs)}",
+        )
+        assert r.returncode == 0, f"import failed:\n{r.stderr}"
+        meta = _only_metadata(bundle_dir)
+        assert meta["seed"] == 7, meta
+        assert meta["notes"] == "hand-written", meta
+        assert _inputs_by_name(bundle_dir, meta) == supplied, meta
+        assert meta["generator"] == "capture-bundles", f"sidecar base lost: {meta}"
+        for flag in ("--seed", "--meta notes", "--meta inputs"):
+            assert (
+                f"WARN: {flag} " in r.stderr
+            ), f"no override warning for {flag}:\n{r.stderr}"
+        print("  PASS: import_cli_overrides_sidecar")
+
+
+def test_import_seed_override_warns():
+    """Overriding the captured seed warns with both values and the sidecar path.
+
+    Agreeing values, a sidecar without a seed, and no sidecar stay quiet;
+    --strict turns the override into a refusal that writes nothing.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        capture_dir = tmp / "captured"
+        graph_path = _capture(
+            capture_dir, "case0", _ternary_graph(_UIDS0), _sidecar("case0", seed=42)
+        )
+        sidecar_path = graph_path.with_suffix(".meta.json")
+
+        bundle_dir = tmp / "override"
+        bundle_dir.mkdir()
+        r = _import_capture(graph_path, bundle_dir, "--seed", "7")
+        assert r.returncode == 0, f"override must still import:\n{r.stderr}"
+        warn = [ln for ln in r.stderr.splitlines() if "WARN" in ln]
+        assert len(warn) == 1, f"expected one warning:\n{r.stderr}"
+        for part in ("--seed 7", "captured 42", str(sidecar_path)):
+            assert part in warn[0], f"warning lacks {part!r}: {warn[0]}"
+        assert _only_metadata(bundle_dir)["seed"] == 7, "override not applied"
+
+        quiet = {
+            "agree": (graph_path, ["--seed", "42"]),
+            "sidecar without seed": (
+                _capture(
+                    capture_dir, "case1", _ternary_graph(_UIDS0), _sidecar("case1")
+                ),
+                ["--seed", "7"],
+            ),
+            "no sidecar": (
+                _capture(capture_dir, "case2", _ternary_graph(_UIDS0), None),
+                ["--seed", "7"],
+            ),
+        }
+        for label, (path, extra) in quiet.items():
+            d = tmp / label.replace(" ", "_")
+            d.mkdir()
+            r = _import_capture(path, d, *extra)
+            assert r.returncode == 0, f"{label}: import failed:\n{r.stderr}"
+            assert "WARN" not in r.stderr, f"{label}: must be quiet:\n{r.stderr}"
+
+        strict_dir = tmp / "strict"
+        strict_dir.mkdir()
+        r = _import_capture(graph_path, strict_dir, "--seed", "7", "--strict")
+        assert r.returncode == 1, f"--strict override must fail:\n{r.stderr}"
+        assert "ERROR: --seed 7 overrides captured 42" in r.stderr, r.stderr
+        assert _inventory(strict_dir) == {}, "--strict refusal wrote files"
+        print("  PASS: import_seed_override_warns")
+
+
+def test_import_no_sidecar_unchanged():
+    """Without a sidecar, metadata is exactly what the CLI says, as before."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        graph = _ternary_graph(_UIDS0)
+        runs = {
+            "loose graph, no flags": (tmp / "loose", (), {"format_version": 1}),
+            "loose graph, flags": (
+                tmp / "loose_flags",
+                ("--seed", "5", "--meta", "notes=n"),
+                {"format_version": 1, "seed": 5, "notes": "n"},
+            ),
+        }
+        for label, (bundle_dir, extra, expected) in runs.items():
+            bundle_dir.mkdir()
+            r = _import(tmp, bundle_dir.name, graph, bundle_dir, *extra, check=False)
+            assert r.returncode == 0, f"{label}: import failed:\n{r.stderr}"
+            assert "WARN" not in r.stderr, f"{label}: must be quiet:\n{r.stderr}"
+            meta = _only_metadata(bundle_dir)
+            assert meta == expected, f"{label}: {meta} != {expected}"
+
+        # Capture layout but the sidecar is missing: no reference_source is
+        # invented, the metadata is still just the default.
+        bundle_dir = tmp / "capture_layout"
+        bundle_dir.mkdir()
+        path = _capture(tmp / "captured", "case0", graph, None)
+        r = _import_capture(path, bundle_dir)
+        assert r.returncode == 0 and "WARN" not in r.stderr, r.stderr
+        assert _only_metadata(bundle_dir) == {"format_version": 1}
+        print("  PASS: import_no_sidecar_unchanged")
+
+
+def test_import_malformed_sidecar_warns():
+    """An unreadable sidecar warns and the import proceeds without it.
+
+    Under --strict it is a refusal that writes nothing.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bad = {"truncated": '{"seed": 4', "not an object": "[1, 2]"}
+        for i, (label, text) in enumerate(bad.items()):
+            path = _capture(tmp / "captured", f"case{i}", _ternary_graph(_UIDS0), text)
+            sidecar_path = path.with_suffix(".meta.json")
+
+            bundle_dir = tmp / f"lenient{i}"
+            bundle_dir.mkdir()
+            r = _import_capture(path, bundle_dir, "--seed", "3")
+            assert r.returncode == 0, f"{label}: must not abort:\n{r.stderr}"
+            assert (
+                f"WARN: bad sidecar {sidecar_path}" in r.stderr
+            ), f"{label}: no warning:\n{r.stderr}"
+            meta = _only_metadata(bundle_dir)
+            assert meta == {"format_version": 1, "seed": 3}, f"{label}: {meta}"
+
+            strict_dir = tmp / f"strict{i}"
+            strict_dir.mkdir()
+            r = _import_capture(path, strict_dir, "--strict")
+            assert r.returncode == 1, f"{label}: --strict must fail:\n{r.stderr}"
+            assert f"ERROR: bad sidecar {sidecar_path}" in r.stderr, r.stderr
+            assert _inventory(strict_dir) == {}, f"{label}: --strict wrote files"
+        print("  PASS: import_malformed_sidecar_warns")
+
+
+def test_import_seed_only_difference_distinct_cases():
+    """Identical graphs that differ only by seed are distinct cases.
+
+    Covers both a second captured seed and an unknown (absent) seed: neither
+    may be treated as a duplicate of a case with an explicit seed.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        capture_dir = tmp / "captured"
+        graph = _ternary_graph(_UIDS0)
+        seed1 = _capture(capture_dir, "seed1", graph, _sidecar("seed1", seed=1))
+        seed2 = _capture(capture_dir, "seed2", graph, _sidecar("seed2", seed=2))
+
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        for p in (seed1, seed2):
+            r = _import_capture(p, bundle_dir)
+            assert r.returncode == 0, f"import of {p} failed:\n{r.stderr}"
+            assert (
+                "DUPLICATE" not in r.stderr
+            ), f"seed-only difference deduped:\n{r.stderr}"
+        cases = _cases(bundle_dir)
+        assert [c["metadata"]["seed"] for c in cases] == [1, 2], cases
+        assert len({c["id"] for c in cases}) == 2, f"ids collide: {cases}"
+
+        # Re-importing a captured seed is still a duplicate.
+        r = _import_capture(seed1, bundle_dir)
+        assert "DUPLICATE" in r.stderr, f"same seed must dedup:\n{r.stderr}"
+
+        # An unknown seed does not match an explicit one.
+        bundle_dir = tmp / "unknown"
+        bundle_dir.mkdir()
+        r = _import_capture(seed1, bundle_dir)
+        assert r.returncode == 0, r.stderr
+        r = _import(tmp, "no_seed", graph, bundle_dir, check=False)
+        assert r.returncode == 0, r.stderr
+        assert "DUPLICATE" not in r.stderr, f"unknown seed deduped:\n{r.stderr}"
+        cases = _cases(bundle_dir)
+        assert len(cases) == 2 and len({c["id"] for c in cases}) == 2, cases
+        print("  PASS: import_seed_only_difference_distinct_cases")
+
+
 def _write_sweep(bundle_dir, tier, operation, variant, cases):
     """Write a minimal sweep.json under <tier>/<operation>/<variant>/."""
     d = bundle_dir / tier / operation / variant
@@ -1023,6 +1406,12 @@ def main() -> int:
         test_import_canonical_only_difference,
         test_import_absent_vs_literal_marker,
         test_import_new_template_failure_diagnostics,
+        test_import_reads_sidecar,
+        test_import_cli_overrides_sidecar,
+        test_import_seed_override_warns,
+        test_import_no_sidecar_unchanged,
+        test_import_malformed_sidecar_warns,
+        test_import_seed_only_difference_distinct_cases,
         test_diff_coverage_suite_qualified_join,
     ]
 

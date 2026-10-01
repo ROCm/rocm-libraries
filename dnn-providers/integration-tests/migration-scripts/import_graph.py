@@ -18,6 +18,13 @@ Dup policy: default is skip-and-report (idempotent, safe to re-run).
   --force   appends even if an exact dup exists.
   --strict  turns an exact dup into a non-zero exit (for CI gates).
 
+Metadata: the ``<stem>.meta.json`` sidecar that ``--capture-bundles`` writes
+beside each graph is the metadata base, exactly as in ``place_bundles.py``, so
+the captured seed and input fill specs carry over with no flags. ``--meta`` and
+``--seed`` override it, with a warning naming both values whenever an override
+contradicts the sidecar. An unreadable sidecar warns and the import proceeds
+without it. ``--strict`` turns both warnings into a non-zero exit.
+
 Usage::
 
     import_graph.py --graph case.json --bundle-dir integration-test-bundles/ \\
@@ -234,6 +241,49 @@ def _extract_values(graph: dict, template: dict) -> dict:
 
 
 # --------------------------------------------------------------------------
+# Capture sidecar
+# --------------------------------------------------------------------------
+
+
+def _read_sidecar(graph_path: Path):
+    """Load the ``<stem>.meta.json`` that ``--capture-bundles`` writes beside a graph.
+
+    Returns ``(path, meta, error)``. ``meta`` is None when the sidecar is absent
+    (a hand-authored graph) or unusable, and ``error`` is set only in the
+    unusable case, saying why.
+    """
+    path = graph_path.with_suffix(".meta.json")
+    if not path.exists():
+        return path, None, None
+    try:
+        with open(path) as f:
+            meta = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        return path, None, str(e)
+    if not isinstance(meta, dict):
+        return path, None, f"expected a JSON object, got {type(meta).__name__}"
+    return path, meta, None
+
+
+def _capture_reference_source(graph_path: Path, sidecar: dict):
+    """The ``reference_source`` place_bundles records for this capture, or None.
+
+    Capture writes ``<dir>/<suite>/<case>/<case>.json`` and stores ``<suite>`` as
+    the sidecar's ``operation``; place_bundles names the case from both. When
+    the graph is not at that path, there is nothing to derive it from.
+    """
+    suite = sidecar.get("operation")
+    graph_path = graph_path.resolve()
+    case_dir = graph_path.parent
+    if not isinstance(suite, str) or not suite or graph_path.stem != case_dir.name:
+        return None
+    suite_parts = Path(suite).parts
+    if case_dir.parent.parts[-len(suite_parts) :] != suite_parts:
+        return None
+    return f"c++ integration suite: {suite}.{case_dir.name}"
+
+
+# --------------------------------------------------------------------------
 # Main
 # --------------------------------------------------------------------------
 
@@ -253,15 +303,22 @@ def main() -> int:
         "--meta",
         action="append",
         default=[],
-        help="key=value metadata pairs (repeatable)",
+        help="key=value metadata pairs (repeatable); override the sidecar",
     )
-    ap.add_argument("--seed", type=int, default=None, help="global seed for metadata")
+    ap.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="global seed for metadata; overrides the sidecar's",
+    )
     ap.add_argument("--dry-run", action="store_true", help="report without writing")
     ap.add_argument(
         "--force", action="store_true", help="append even if exact dup exists"
     )
     ap.add_argument(
-        "--strict", action="store_true", help="exit non-zero on exact dup (CI mode)"
+        "--strict",
+        action="store_true",
+        help="exit non-zero on exact dup, bad sidecar, or sidecar override (CI mode)",
     )
     args = ap.parse_args()
 
@@ -272,7 +329,24 @@ def main() -> int:
         print(f"import_graph: cannot read {args.graph}: {e}", file=sys.stderr)
         return 1
 
-    meta = {"format_version": 1}
+    # The capture sidecar is the metadata base, built the way place_bundles
+    # builds it, so both hops record the same seed and inputs for one capture.
+    sidecar_path, sidecar, sidecar_err = _read_sidecar(args.graph)
+    if sidecar_err is not None:
+        level = "ERROR" if args.strict else "WARN"
+        print(f"  {level}: bad sidecar {sidecar_path}: {sidecar_err}", file=sys.stderr)
+        if args.strict:
+            return 1
+    meta = dict(sidecar) if sidecar is not None else {}
+    meta.setdefault("format_version", 1)
+    if sidecar is not None:
+        ref = _capture_reference_source(args.graph, sidecar)
+        if ref is not None:
+            meta["reference_source"] = ref
+
+    # Explicit CLI values win. Overriding a value the capture recorded is
+    # allowed but never silent: the sidecar is what the C++ test actually ran.
+    overrides = []
     for kv in args.meta:
         if "=" in kv:
             k, v = kv.split("=", 1)
@@ -285,9 +359,26 @@ def main() -> int:
                         file=sys.stderr,
                     )
                     return 1
+            overrides.append((f"--meta {k}", k, v))
             meta[k] = v
     if args.seed is not None:
+        overrides.append(("--seed", "seed", args.seed))
         meta["seed"] = args.seed
+
+    conflicts = [
+        (flag, sidecar[k], v)
+        for flag, k, v in overrides
+        if sidecar is not None and k in sidecar and canon(sidecar[k]) != canon(v)
+    ]
+    for flag, captured, supplied in conflicts:
+        level = "ERROR" if args.strict else "WARN"
+        print(
+            f"  {level}: {flag} {canon(supplied)} overrides captured"
+            f" {canon(captured)} from {sidecar_path}",
+            file=sys.stderr,
+        )
+    if conflicts and args.strict:
+        return 1
 
     # Canonicalize UIDs by tensor name so an imported graph lines up with sweeps
     # built by place_bundles (which does the same). The C++ builder auto-assigns
@@ -313,9 +404,10 @@ def main() -> int:
             expanded = expand(template, case.get("values", {}))
             if canon(expanded) == graph_json:
                 existing_meta = case.get("metadata", {})
-                seed_match = meta.get("seed") is None or existing_meta.get(
-                    "seed"
-                ) == meta.get("seed")
+                # An unknown seed is not a wildcard: the case would run with the
+                # default seed, which differs from an existing case's explicit
+                # one. Two absent seeds do match (both fall back to the default).
+                seed_match = existing_meta.get("seed") == meta.get("seed")
                 inputs_match = canon(meta.get("inputs", {})) == canon(
                     existing_meta.get("inputs", {})
                 )

@@ -52,12 +52,10 @@ to migrate a whole suite in bulk with a byte- and behavior-level proof. For
     --gtest_filter='Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/*'
 
 # Step 2: Import — merge each captured graph into the bundle tree
-for graph in /tmp/captured/*/*/*.json; do
-    [[ "$graph" == *.meta.json ]] && continue
+find /tmp/captured -name '*.json' ! -name '*.meta.json' | while read -r graph; do
     python3 migration-scripts/import_graph.py \
         --graph "$graph" \
-        --bundle-dir dnn-providers/integration-tests/integration-test-bundles \
-        --meta reference_source="c++ integration suite: $(basename "$(dirname "$graph")")"
+        --bundle-dir dnn-providers/integration-tests/integration-test-bundles
 done
 ```
 
@@ -77,11 +75,16 @@ executor. Generate and commit golden tensors separately (a per-op generator
 script, see `integration-test-bundles/README.md`) only if you want the more
 sensitive golden-comparison mode for that case too.
 
-**Note:** `import_graph.py` does not read the `.meta.json` sidecar that
-`--capture-bundles` writes next to each graph — pass `--seed` and
-`--meta inputs=<json>` explicitly (copy the values out of the `.meta.json`)
-if you need the imported case's seed/input-range metadata to match the
-original C++ test exactly.
+**Metadata comes from the capture.** `import_graph.py` reads the
+`<CaseName>.meta.json` sidecar that `--capture-bundles` writes next to each
+graph and uses it as the case metadata — seed, explicit `inputs` fill specs,
+and a `reference_source` of `c++ integration suite: <Suite>.<Case>` — exactly
+as `place_bundles.py` would, so no `--seed`/`--meta` flags are needed. Explicit
+`--seed`/`--meta` values still override the sidecar, but an override that
+contradicts it prints a `WARN` naming both values and the sidecar path. An
+unreadable sidecar also warns, and the import continues without it. With
+`--strict`, either warning fails the import. A graph with no sidecar (e.g.
+hand-written) gets only `format_version` plus whatever the flags supply.
 
 Use the full pipeline below instead when migrating many tests/suites at
 once and you want the Hop C/D byte- and behavior-level proof that nothing
@@ -164,13 +167,16 @@ plus per-case byte-exact comparison of graph AND metadata (seed, inputs).
 
 ```bash
 python3 migration-scripts/import_graph.py \
-    --graph path/to/graph.json \
-    --bundle-dir integration-test-bundles/ \
-    --meta reference_source="c++ integration suite: Suite.Case"
+    --graph captured_bundles/Suite/Case/Case.json \
+    --bundle-dir integration-test-bundles/
 ```
 
-Dedup-aware placement. Default: skip exact duplicates. `--strict` exits
-non-zero on dup (CI mode). `--force` appends regardless.
+Dedup-aware placement. Default: skip exact duplicates (same graph, seed, and
+inputs; an absent seed only matches another absent seed). `--force` appends
+regardless. Metadata is read from the graph's `.meta.json` sidecar (see the
+note under the quick path above). `--strict` (CI mode) exits non-zero on a
+duplicate, an unreadable sidecar, or a `--seed`/`--meta` value that
+contradicts the sidecar.
 
 ## Searching and Running Bundles
 
