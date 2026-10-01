@@ -39,6 +39,7 @@ from codegen_common import (
     gfx1250_comp_async_8bit_warp_tile_k_rejected,  # noqa: F401 (re-exported)
     gfx1250_fp32_tile_reject_reason,
     gfx1250_pipeline_reject_reason,
+    normalize_gfx_arch,
 )
 
 # Import architecture filter for GPU-specific validation
@@ -1664,7 +1665,8 @@ class UnifiedGemmCodegen:
         self.d_layout = (
             layout[3] if len(layout) >= 4 else layout[2]
         )  # D layout (default = C layout)
-        self.gpu_target = gpu_target
+        # Bare target ("gfx1250:xnack-" -> "gfx1250") so the arch tables match.
+        self.gpu_target = normalize_gfx_arch(gpu_target)
         self.variants = variants or [GemmVariant.STANDARD]
         self.use_preselected = use_preselected
         self.kernel_set_name = kernel_set_name

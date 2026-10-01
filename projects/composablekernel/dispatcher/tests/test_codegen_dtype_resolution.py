@@ -77,7 +77,8 @@ def test_every_mapped_dtype_resolves_to_itself(dtype):
 
 @pytest.mark.skipif(not ugc.HAS_ARCH_FILTER, reason="arch_filter not importable")
 @pytest.mark.parametrize(
-    "gpu_target,listed", [("gfx942", True), ("gfx1250", True), ("gfx1201", False)]
+    "gpu_target,listed",
+    [("gfx942", True), ("gfx1250", True), ("gfx1250:xnack-", True), ("gfx1201", False)],
 )
 def test_fp32_needs_listed_warp_tiles(tmp_path, gpu_target, listed):
     # An arch whose table has no fp32 warp-tile entry must reject fp32 tiles

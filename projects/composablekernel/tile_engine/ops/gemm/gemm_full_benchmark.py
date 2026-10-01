@@ -100,9 +100,12 @@ CODEGEN_VARIANT = {
 }
 
 # Some variants only support a subset of dtypes/layouts. The preshuffle op
-# (tile_engine gemm_preshuffle) supports fp16/bf16/fp8/bf8 and rcr ONLY.
+# (tile_engine gemm_preshuffle) supports fp16/bf16/fp8/bf8 and rcr ONLY; the
+# multi_d / multi_abd bridge runners are fp16 only (gemm_utils rejects others).
 VARIANT_SUPPORTED_DTYPES = {
     "gemm_preshuffle": ("fp16", "bf16", "fp8", "bf8"),
+    "gemm_multi_d": ("fp16",),
+    "gemm_multi_abd": ("fp16",),
 }
 VARIANT_SUPPORTED_LAYOUTS = {
     "gemm_preshuffle": ("rcr",),

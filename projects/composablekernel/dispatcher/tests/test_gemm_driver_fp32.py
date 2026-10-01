@@ -50,6 +50,13 @@ def test_fp32_is_a_dtype_choice_but_not_for_preshuffle():
     assert "fp32" not in drv.VARIANT_SUPPORTED_DTYPES["gemm_preshuffle"]
 
 
+@pytest.mark.parametrize("variant", ["gemm_multi_d", "gemm_multi_abd"])
+def test_fp16_only_variants_reject_fp32(monkeypatch, capsys, variant):
+    rc, out, built = _main(monkeypatch, capsys, "--variant", variant, "--dtype", "fp32")
+    assert rc == 1 and not built
+    assert f"variant {variant} supports dtypes ('fp16',)" in out
+
+
 @pytest.mark.parametrize(
     "arch, dtype, expected",
     [
@@ -279,3 +286,17 @@ def test_runner_rejects_unknown_dtype():
             np.ones((8, 4), np.float32),
             GemmProblem(M=4, N=4, K=8),
         )
+
+
+def test_runner_rejects_int32_inputs_but_sizes_int8_c_as_int32():
+    # int32 is an output-only dtype: it must not pass the A/B allow-list.
+    with pytest.raises(ValueError, match="unsupported A/B dtype 'int32'"):
+        _runner("gemm_int32_rcr_compv3_cshuffle_intrawave").run(
+            np.ones((4, 8), np.float32),
+            np.ones((8, 4), np.float32),
+            GemmProblem(M=4, N=4, K=8),
+        )
+    r = _runner("gemm_int8_rcr_compv3_cshuffle_intrawave")
+    r.run(np.ones((4, 8), np.float32), np.ones((8, 4), np.float32), GemmProblem(M=4, N=4, K=8))
+    A_h, B_h, C_h = r.lib.bufs
+    assert (A_h.dtype, B_h.dtype, C_h.dtype) == (np.int8, np.int8, np.int32)

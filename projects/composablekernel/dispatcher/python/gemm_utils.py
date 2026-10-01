@@ -1186,13 +1186,15 @@ def _use_ocp_fp8():
 # int32, everything else stores in its own dtype.
 _OUTPUT_DTYPE = {"fp8": "fp16", "bf8": "fp16", "int8": "int32"}
 
-# Dtypes whose host buffers are plain numpy arrays (no bit-level encoding).
+# A/B dtypes whose host buffers are plain numpy arrays (no bit-level encoding).
 _NATIVE_NP = {
     "fp16": np.float16,
     "fp32": np.float32,
     "int8": np.int8,
-    "int32": np.int32,
 }
+# C host buffer dtypes. int32 is an accumulator/output type only (int8 GEMMs),
+# so it is kept out of the A/B allow-list above.
+_C_NP = {**_NATIVE_NP, "int32": np.int32, "bf16": np.uint16}
 
 
 def _output_dtype(dtype: str) -> str:
@@ -1291,7 +1293,6 @@ class GpuGemmRunner:
         # The C buffer's element size must equal sizeof(CDataType): fp8/bf8
         # accumulate into fp16, int8 into int32, otherwise the input dtype.
         out_dtype = _output_dtype(dtype)
-        _C_NP = {**_NATIVE_NP, "bf16": np.uint16}
         if out_dtype not in _C_NP:
             # A silent fp16 fallback would size the host C buffer wrong for an
             # unrecognized dtype (sizeof(CDataType) mismatch -> corrupt results
