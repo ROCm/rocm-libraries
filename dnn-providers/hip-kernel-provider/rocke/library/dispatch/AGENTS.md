@@ -154,6 +154,21 @@ Follow the `_make_d256_decode_candidate()` pattern in `generic.py`:
 4. **Register** it from that module's `register(registry)`. A new arch module
    also needs one line in `__init__.py` to join the assembly loop.
 
+   There are two registries, not one. Routing labels go on
+   `ATTENTION_ROUTE_REGISTRY`; anything with `build` and `bind_torch` also goes
+   on `ATTENTION_EXECUTION_REGISTRY`, which is what the sweeps walk. Route-only
+   registration leaves the candidate invisible to every bench. Set
+   `opt_in=True` on a sweep-only candidate so `algorithm="auto"` cannot select
+   it, and give it a `sweep_space` so the sweep expands its variants.
+
+   A new operator family (not a new attention candidate) also exposes the three
+   sweep entry points over its registry: `registered_<family>_combos`,
+   `<family>_sweep_space`, and `dispatch_<family>_all`, each short-circuiting on
+   request errors before delegating to `CandidateRegistry.combos` /
+   `sweep_space` / `dispatch_all`. Copy
+   `platform/python/rocke/dispatch/families/norm.py`. This is a
+   [Definition of Done](../../KERNEL_AUTHORING.md#a-new-kernel-family) item.
+
    Point `build` at the real builder if the candidate has one. The unified
    paths do not: they return an `AttentionSpec` naming a *path*, and no builder
    consumes that. A standalone kernel like `attention_gfx1250_wmma` returns its
@@ -163,7 +178,9 @@ Follow the `_make_d256_decode_candidate()` pattern in `generic.py`:
 5. **Add CPU-only dispatch tests** in
    `tests/dispatch/attention/test_<name>_wiring.py`. Cover: registration,
    spec_id, algorithm, priority ordering, rejection gates (wrong arch/dtype/
-   cohort/path), and routing for each target arch. Use `_PinnedArch` context
+   cohort/path), routing for each target arch, and sweep visibility — an
+   opt-in candidate shows up in `registered_attention_combos(req)` but not in
+   `dispatch_attention(req)` under `algorithm="auto"`. Use `_PinnedArch` context
    manager to avoid GPU dependency. Call `candidate.admits(req)`, not
    `candidate._supports(req)` — the latter skips the capability prefilter and is
    no longer a complete verdict, which is what the underscore is there to say.
