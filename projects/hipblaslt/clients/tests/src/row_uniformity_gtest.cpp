@@ -1257,9 +1257,10 @@ namespace
     {
         auto solution                            = std::make_shared<TensileLite::ContractionSolution>();
         solution->kernelName                     = "row_uniformity_probe_kernel";
-        solution->sizeMapping.streamK            = 3;
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
         solution->sizeMapping.streamKAtomic      = 0;
-        solution->sizeMapping.streamKForceDPOnly = 0;
+
         solution->sizeMapping.macroTile          = TensileLite::dim3(128, 128, 1);
         solution->sizeMapping.workGroupSize      = TensileLite::dim3(256, 1, 1);
         solution->sizeMapping.threadTile         = TensileLite::dim3(1, 1, 1);
@@ -1317,7 +1318,7 @@ namespace
         const size_t iters
             = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
         const auto split = TensileLite::streamKStaticSplit(
-            tiles, iters, grid, hardware.skFullTiles, solution->sizeMapping.streamKForceDPOnly != 0);
+            tiles, iters, grid, hardware.skFullTiles, solution->sizeMapping.isPersistentDataParallel());
         EXPECT_TRUE(
             TensileLite::streamKStaticSplitRowUniform(split,
                                                       tiles,
@@ -1407,7 +1408,8 @@ namespace
     {
         const auto hardware                  = probeHardware();
         auto       solution                  = probeSolution();
-        solution->sizeMapping.streamK       = 0;
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
+        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
         solution->sizeMapping.workGroupSize = TensileLite::dim3(256, 1, 16);
         solution->sizeMapping.LocalSplitU   = 1;
 
@@ -1439,7 +1441,8 @@ namespace
     {
         const auto hardware                    = probeHardware();
         auto       solution                    = probeSolution();
-        solution->sizeMapping.streamK          = 0;
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
+        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
         solution->internalArgsSupport.staggerU = false;
         solution->sizeMapping.staggerU         = 16;
         auto problem                           = probeProblem();
@@ -1461,7 +1464,7 @@ namespace
     {
         const auto hardware                    = probeHardware();
         auto       solution                    = probeSolution();
-        solution->sizeMapping.streamK          = 0;
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
         solution->internalArgsSupport.staggerU = true;
         solution->sizeMapping.staggerUMapping  = 1;
         solution->sizeMapping.staggerU         = 16;
@@ -1477,7 +1480,7 @@ namespace
         }
 
         auto remap = probeSolution();
-        remap->sizeMapping.streamK            = 0;
+        remap->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
         remap->internalArgsSupport.staggerU   = true;
         remap->sizeMapping.staggerUMapping    = 0;
         remap->sizeMapping.staggerU           = 16;
@@ -1554,7 +1557,8 @@ namespace
     {
         const auto hardware                    = probeHardware();
         auto       solution                    = probeSolution();
-        solution->sizeMapping.streamK          = 0;
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
+        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
         solution->internalArgsSupport.staggerU = false;
         solution->sizeMapping.staggerU         = 16;
         solution->customKernel.name            = "DummyCustomKernel";
@@ -1573,7 +1577,8 @@ namespace
     {
         const auto hardware                      = probeHardware();
         auto       solution                      = probeSolution();
-        solution->sizeMapping.streamK            = 0;
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
+        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
         solution->sizeMapping.adaptiveGemmGSUA   = 1;
         solution->sizeMapping.globalAccumulation = 0;
         solution->sizeMapping.globalSplitU       = 4;
@@ -1601,7 +1606,8 @@ namespace
     {
         const auto hardware           = probeHardware();
         auto       solution           = probeSolution();
-        solution->sizeMapping.streamK = 4;
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::DynamicWorkQueue;
         auto problem                  = probeProblem();
 
         ASSERT_EQ(hardware.skDynamicGrid, 0);
@@ -1631,7 +1637,8 @@ namespace
         auto hardware                 = probeHardware();
         hardware.skFixedGrid          = 4096;
         auto solution                 = probeSolution();
-        solution->sizeMapping.streamK = 4;
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::DynamicWorkQueue;
 
         auto problem = TensileLite::ContractionProblemGemm::GEMM(
             false, false, 1280, 1280, 1024, 1280, 1280, 1280, 0.0, false, 1);
@@ -1667,7 +1674,8 @@ namespace
     {
         const auto hardware           = probeHardware();
         auto       solution           = probeSolution();
-        solution->sizeMapping.streamK = 4;
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::DynamicWorkQueue;
         auto problemOn                = probeProblem();
         auto problemOff               = probeProblem();
         problemOff.setParams().setUniformSummationOrder(false);
@@ -1694,7 +1702,8 @@ namespace
     {
         const auto hardware           = probeHardware();
         auto       solution           = probeSolution();
-        solution->sizeMapping.streamK = 0;
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
+        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
         auto problem                  = probeProblem();
         problem.setGroupedGemm(true);
 
@@ -1858,16 +1867,16 @@ namespace
                                      const TensileLite::Hardware&               hardware)
     {
         StreamKResolution out;
-        if(solution.sizeMapping.streamK == 0)
+        if(!solution.sizeMapping.isPersistent())
             return out;
 
         out.streamK = true;
 
-        const bool effectiveDynamic = solution.sizeMapping.streamK == 5
+        const bool effectiveDynamic = solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::Hybrid
                                           ? solution.streamK5EffectiveDynamic(tensile, hardware)
                                           : false;
-        out.staticPacking           = solution.sizeMapping.streamK == 3
-                                      || (solution.sizeMapping.streamK == 5 && !effectiveDynamic);
+        out.staticPacking           = solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::StaticGrid
+                                      || (solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::Hybrid && !effectiveDynamic);
 
         const origami::reduction_t reduction
             = effectiveDynamic ? origami::reduction_t::tree
@@ -1888,7 +1897,7 @@ namespace
             out.itersPerTile,
             out.grid,
             amdgpu != nullptr ? amdgpu->skFullTiles : 1,
-            solution.sizeMapping.streamKForceDPOnly != 0);
+            solution.sizeMapping.isPersistentDataParallel());
         out.perTileExtraIters = solution.internalArgsSupport.perTileExtraIters;
         out.rowUniform        = TensileLite::streamKStaticSplitRowUniform(
             out.split,
@@ -2420,7 +2429,8 @@ namespace
         auto solution = uniformitySteeringSolution();
         // SK5 hybrid: the only mode whose sub-mode streamK5EffectiveDynamic()
         // resolves, and therefore the only one tile scheduling can steer.
-        solution->sizeMapping.streamK = 5;
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::Hybrid;
 
         auto device = uniformitySteeringDevice();
         // No override knobs: the grid must come from the CU-bounded analytical

@@ -8,7 +8,7 @@ atomic counters self-reset to 0 each launch only if every queue receives exactly
 ``tiles_q + W_q`` increments, which requires the value feeding ``% numQueues`` to
 densely cover ``[0, skGrid)``.  The queue index therefore must come from the RAW
 pre-remap launch WG rank (== physical XCD rank), NOT from the remapped
-``StreamKIdx`` (whose ``% numQueues`` is not count-preserving when the grid does
+``PersistentWorkGroupIndex`` (whose ``% numQueues`` is not count-preserving when the grid does
 not block evenly).
 
 Zero-SGPR carrier reuse: the raw rank is snapshotted into the ALREADY-allocated
@@ -17,7 +17,7 @@ window -- instead of a dedicated ``StreamKQueue`` SGPR, which overflowed the SGP
 file on tuned high-register SKXCC kernels.  The fix covers TWO disjoint remap
 regimes:
   * WorkGroupMappingXCC == -1 (dynamic auto-WGM), and
-  * StreamKXCCMapping != 0 with WorkGroupMappingXCC > 1 (SKXCC).
+  * PersistentXCCMapping != 0 with WorkGroupMappingXCC > 1 (SKXCC).
 
 Like the sibling StreamK codegen tests, they import rocisa instructions and
 inspect emitted modules rather than matching source text, and reason about the
@@ -27,7 +27,7 @@ gating assertions track the actual code.
 Invariants pinned (see per-test notes):
   * Both dynamic auto-WGM and SKXCC (WGMXCC>1) queue indices are
     ``StreamKTileIdx & (numQueues-1)`` -- a single mask of the raw-rank carrier,
-    never the post-remap StreamKIdx shifts.
+    never the post-remap PersistentWorkGroupIndex shifts.
   * Both SK4 and SK5 route their queue index through the shared ``_emitQueueIndex``.
   * The raw-rank snapshot ``s_mov_b32 StreamKTileIdx, WorkGroup0`` is emitted
     BEFORE the wgmXCC workgroup remap.
@@ -60,7 +60,7 @@ from Tensile.Components.StreamK import (
     StreamK,
     StreamKDynamic,
     StreamKHybrid,
-    streamKVariantClass,
+    StreamKTwoTileDPFirst,
 )
 
 
@@ -105,7 +105,7 @@ class _FakeWriter:
 def _kernel(streamk: int = 4, wgmXCC: int = -1, skxcc: int = 0,
             isa=(9, 4, 0)) -> dict:
     return {"ISA": isa, "StreamK": streamk, "WorkGroupMappingXCC": wgmXCC,
-            "StreamKXCCMapping": skxcc}
+            "PersistentXCCMapping": skxcc}
 
 
 def _flat(module: Module) -> list:
@@ -136,7 +136,7 @@ def _imm_in(inst, value: int) -> bool:
 def _emit_queue_index(streamk: int, wgmXCC: int, skxcc: int = 0,
                       workGroupIdFromTTM: bool = False, numXCD: int = 8) -> list:
     """Render the shared ``_emitQueueIndex`` for a StreamK variant."""
-    inst = streamKVariantClass(streamk)()
+    inst = {3: StreamKTwoTileDPFirst, 4: StreamKDynamic, 5: StreamKHybrid}[streamk]()
     writer = _FakeWriter(numXCD=numXCD, workGroupIdFromTTM=workGroupIdFromTTM)
     kernel = _kernel(streamk=streamk, wgmXCC=wgmXCC, skxcc=skxcc)
     sQueueIdx = writer.sgprPool.checkOut(1, "QueueIdx")
@@ -151,7 +151,7 @@ _CARRIER = "StreamKTileIdx"
 
 # ===========================================================================
 # 1. Raw-rank paths: the queue index is the reused carrier (StreamKTileIdx)
-#    masked % numQueues -- NOT the post-remap StreamKIdx shift derivation.
+#    masked % numQueues -- NOT the post-remap PersistentWorkGroupIndex shift derivation.
 #    Applies uniformly to SK4 (StreamKDynamic) and SK5 (StreamKHybrid), and to
 #    BOTH raw-rank regimes: dynamic auto-WGM (WGMXCC == -1) and SKXCC (WGMXCC>1).
 # ===========================================================================
@@ -168,7 +168,7 @@ class TestRawRankQueueIndex:
     def test_queue_index_masks_raw_rank_carrier(self, streamk, wgmXCC, skxcc):
         # For every raw-rank regime (dynamic auto-WGM and SKXCC with WGMXCC > 1),
         # the queue index must be a single mask of the raw-rank carrier, not the
-        # StreamKIdx shr/shl/sub derivation.
+        # PersistentWorkGroupIndex shr/shl/sub derivation.
         items = _emit_queue_index(streamk, wgmXCC=wgmXCC, skxcc=skxcc)
         ands = [i for i in items if isinstance(i, SAndB32)]
         assert len(ands) == 1, "raw-rank queue index must be a single mask op"
@@ -182,15 +182,15 @@ class TestRawRankQueueIndex:
     @pytest.mark.parametrize("wgmXCC,skxcc", RAW_REGIMES)
     def test_queue_index_does_not_use_post_remap_streamkidx(self, streamk, wgmXCC, skxcc):
         # On a raw-rank path the queue index must NOT come from the remapped
-        # StreamKIdx (StreamKIdx % numQueues), so neither StreamKIdx nor its
+        # PersistentWorkGroupIndex (PersistentWorkGroupIndex % numQueues), so neither PersistentWorkGroupIndex nor its
         # shift/shift/sub derivation may appear.
         items = _emit_queue_index(streamk, wgmXCC=wgmXCC, skxcc=skxcc)
-        assert not any(_refs_sgpr(i, "StreamKIdx") for i in items), (
-            "the raw-rank queue index must not reference the post-remap StreamKIdx"
+        assert not any(_refs_sgpr(i, "PersistentWorkGroupIndex") for i in items), (
+            "the raw-rank queue index must not reference the post-remap PersistentWorkGroupIndex"
         )
         assert not any(
             isinstance(i, (SLShiftRightB32, SLShiftLeftB32, SSubU32)) for i in items
-        ), "the raw-rank path must not emit the StreamKIdx shift/shift/sub derivation"
+        ), "the raw-rank path must not emit the PersistentWorkGroupIndex shift/shift/sub derivation"
 
     @pytest.mark.parametrize("streamk", [4, 5])
     @pytest.mark.parametrize("wgmXCC,skxcc", RAW_REGIMES)
@@ -205,11 +205,11 @@ class TestRawRankQueueIndex:
 
 # ===========================================================================
 # 2. Count-preserving else-branch: the fix is deliberately NOT applied when the
-#    remap is already count-preserving. The queue index stays the StreamKIdx
+#    remap is already count-preserving. The queue index stays the PersistentWorkGroupIndex
 #    shift derivation and never reads the carrier as a raw rank. Covers:
 #      * fixed non-SKXCC WGMXCC (== 1, or a tuned > 1 without SKXCC),
 #      * SKXCC with WGMXCC == 1 (already count-preserving),
-#      * gfx12 WorkGroupIdFromTTM (StreamKIdx already the raw id).
+#      * gfx12 WorkGroupIdFromTTM (PersistentWorkGroupIndex already the raw id).
 # ===========================================================================
 class TestCountPreservingFallback:
     @pytest.mark.parametrize("streamk", [4, 5])
@@ -223,8 +223,8 @@ class TestCountPreservingFallback:
     )
     def test_count_preserving_uses_streamkidx(self, streamk, wgmXCC, skxcc):
         items = _emit_queue_index(streamk, wgmXCC=wgmXCC, skxcc=skxcc)
-        assert any(_refs_sgpr(i, "StreamKIdx") for i in items), (
-            "count-preserving paths keep the StreamKIdx-derived queue index"
+        assert any(_refs_sgpr(i, "PersistentWorkGroupIndex") for i in items), (
+            "count-preserving paths keep the PersistentWorkGroupIndex-derived queue index"
         )
         assert any(isinstance(i, SSubU32) for i in items), (
             "count-preserving paths keep the shift/shift/sub derivation"
@@ -235,17 +235,17 @@ class TestCountPreservingFallback:
 
     @pytest.mark.parametrize("streamk", [4, 5])
     def test_gfx12_workgroupidfromttm_uses_streamkidx(self, streamk):
-        # On WorkGroupIdFromTTM targets StreamKIdx is already the raw id, so the
+        # On WorkGroupIdFromTTM targets PersistentWorkGroupIndex is already the raw id, so the
         # raw-rank snapshot is unnecessary and the carrier is not read as a rank.
         items = _emit_queue_index(streamk, wgmXCC=-1, workGroupIdFromTTM=True)
-        assert any(_refs_sgpr(i, "StreamKIdx") for i in items)
+        assert any(_refs_sgpr(i, "PersistentWorkGroupIndex") for i in items)
         assert not any(isinstance(i, SAndB32) for i in items)
 
 
 # ===========================================================================
 # 3. Scoping predicate: usesRawQueueRank / skUsesRawQueueRank are True only on
 #    the raw-rank regimes (NumXCD > 1, not WorkGroupIdFromTTM, StreamK in (4,5))
-#    for either WGMXCC == -1 or (StreamKXCCMapping != 0 and WGMXCC > 1).
+#    for either WGMXCC == -1 or (PersistentXCCMapping != 0 and WGMXCC > 1).
 # ===========================================================================
 class _FakeKW:
     """Minimal stand-in for the KernelWriter self used by skUsesRawQueueRank."""
@@ -294,7 +294,7 @@ class TestUsesRawQueueRankScoping:
         assert KernelWriter.skUsesRawQueueRank(
             _FakeKW(), _kernel(streamk=streamk, wgmXCC=8, skxcc=8)) is True
 
-    @pytest.mark.parametrize("streamk", [0, 1, 2, 3])
+    @pytest.mark.parametrize("streamk", [0, 3])
     def test_kw_predicate_false_for_non_dynamic_streamk(self, streamk):
         # Only the SK4/SK5 dynamic-queue variants use the raw-rank carrier.
         assert KernelWriter.skUsesRawQueueRank(
@@ -339,7 +339,7 @@ def _is_sk_raw_rank_guard(test) -> bool:
 
 # ===========================================================================
 # 4. Both dynamic fetch helpers route through the shared _emitQueueIndex,
-#    rather than each inlining its own StreamKIdx shift/shift/sub derivation.
+#    rather than each inlining its own PersistentWorkGroupIndex shift/shift/sub derivation.
 #    graWorkGroup must call the helper (PAP pop-once) and must not re-inline
 #    the queue pop.
 # ===========================================================================
