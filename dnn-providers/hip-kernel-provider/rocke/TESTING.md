@@ -128,6 +128,10 @@ the strategy's biggest holes live (see
   installs it under the existing provider `tests/**` artifact capture.
   Missing or corrupt data fails configuration. For builds that intentionally
   omit this GPU lane, use `-DROCKE_INSTALL_SDPA_REFERENCE=OFF`.
+  The `hipdnn-dev-all` superbuild preset sets this option to OFF because it runs
+  build-tree tests rather than the installed reference suite. To package the
+  references with that preset, fetch the bundle and explicitly pass
+  `-DROCKE_INSTALL_SDPA_REFERENCE=ON`.
   `-DROCKE_SDPA_REFERENCE_BUNDLE=<qualified-bundle>` remains an explicit local
   override for gfx942. Target-specific overrides use
   `-DROCKE_SDPA_REFERENCE_BUNDLE_gfx942=<qualified-bundle>`; runtime pytest overrides

@@ -151,6 +151,7 @@
             "description": "Build hipdnn, all providers (including some unsupported), integration tests, and samples",
             "inherits": ["default:release"],
             "cacheVariables": {
+                "ROCKE_INSTALL_SDPA_REFERENCE": "OFF",
                 "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests;miopen-provider;hipblaslt-provider;hip-kernel-provider;hipdnn-samples;hipdnn-python"
             }
         },
