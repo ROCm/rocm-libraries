@@ -5,10 +5,15 @@ if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12|amdgcnspirv")
     add_gtest_executable(test_ck_tile_reduce2d test_reduce2d.cpp)
     add_gtest_executable(test_ck_tile_multi_reduce2d_threadwise test_multi_reduce2d_threadwise.cpp)
     add_gtest_executable(test_ck_tile_multi_reduce2d_multiblock test_multi_reduce2d_multiblock.cpp)
+    # Exercise the gfx11 float-atomic path even on targets that default to buffer atomics.
+    add_gtest_executable(test_ck_tile_multi_reduce2d_multiblock_global test_multi_reduce2d_multiblock.cpp)
+    target_compile_definitions(test_ck_tile_multi_reduce2d_multiblock_global PRIVATE
+        CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT=0)
     if(result EQUAL 0)
         target_link_libraries(test_ck_tile_reduce2d PRIVATE utility)
         target_link_libraries(test_ck_tile_multi_reduce2d_threadwise PRIVATE utility)
         target_link_libraries(test_ck_tile_multi_reduce2d_multiblock PRIVATE utility)
+        target_link_libraries(test_ck_tile_multi_reduce2d_multiblock_global PRIVATE utility)
     endif()
 
     # Collect all test targets for umbrella label
@@ -16,6 +21,7 @@ if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12|amdgcnspirv")
         test_ck_tile_reduce2d
         test_ck_tile_multi_reduce2d_threadwise
         test_ck_tile_multi_reduce2d_multiblock
+        test_ck_tile_multi_reduce2d_multiblock_global
     )
 
     # Label all ck_tile reduce tests with CK_TILE_REDUCE_TESTS for selective execution
@@ -32,4 +38,3 @@ if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12|amdgcnspirv")
         COMMENT "Running all ck_tile reduce tests..."
     )
 endif()
-
