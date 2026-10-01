@@ -17,6 +17,7 @@ from uhd_gen.immediate import (
     normalize_corpus,
     normalize_row,
     prediction_scorer,
+    validate_model,
     validate_signature,
 )
 from uhd_gen.promote import _apply, build_plan
@@ -186,6 +187,69 @@ def test_cross_engine_labels_require_the_same_full_graph_work_count():
     second["features"]["graph.flops"] *= 2
     with pytest.raises(ValueError):
         normalize_corpus(pd.DataFrame([first, second]))
+
+
+def test_a_failed_correctness_verdict_survives_import_without_its_label():
+    """RFC 0019 §13.2: the row is kept with its verdict and reason, its timing is not.
+
+    Import used to return a row with neither field and the wrong pick's `avgTimeMs` as an
+    ordinary label, so nothing after it -- training, evaluation, promotion -- could tell.
+    """
+    wrong = measurement()
+    wrong.update(numerically_valid=False, validation="output_mismatch: wrong output")
+    row = normalize_row(wrong)
+    assert row["numerically_valid"] is False
+    assert row["validation"] == "output_mismatch: wrong output"
+    for label in ("avgTimeMs", "robustMeanMs", "stddevMs", "tflops"):
+        assert row[label] is None, label
+    # Read back as `corpus.json` is, the verdict and the absence both hold.
+    [again] = normalize_corpus(pd.DataFrame([row])).to_dict(orient="records")
+    assert (again["numerically_valid"], again["validation"]) == (
+        False,
+        row["validation"],
+    )
+    assert pd.isna(again["avgTimeMs"])
+
+    # Undecided is carried as undecided, measurement intact -- never promoted to True.
+    unknown = measurement(graph="other")
+    unknown.update(numerically_valid=None, validation="no_reference: one engine ran")
+    row = normalize_row(unknown)
+    assert row["numerically_valid"] is None and row["validation"].startswith("no_ref")
+    assert row["avgTimeMs"] == 2.0
+
+
+def test_a_pick_checked_wrong_is_not_the_oracle_of_selection_regret(evaluator):
+    """The wrong engine ran fastest; it is out of the held-out rows and the oracle, so the
+    valid engine is compared against nothing rather than charged regret against a wrong
+    answer."""
+    wrong, valid = measurement(elapsed=1), measurement(engine=8, elapsed=4)
+    wrong.update(numerically_valid=False, validation="output_mismatch: wrong output")
+    report = evaluate_immediate(
+        pd.DataFrame([wrong, valid]),
+        [bundle(wrong, 2000), bundle(valid, 500)],
+        eval_fraction=1,
+        seed=0,
+        include_per_problem=True,
+    )
+    assert report["metrics"]["prediction_coverage"]["rows"] == 1
+    [problem] = report["per_problem"]
+    assert (problem["engines"], problem["picked_engine"]) == (1, 8)
+    assert report["metrics"]["immediate_selection"]["problems_compared"] == 0
+
+
+@pytest.mark.parametrize("transform", [None, ""])
+def test_an_omitted_transform_is_the_runtimes_identity(evaluator, transform):
+    """`score_transform::SUPPORTED_TRANSFORMS` lists "" and `applyInverse` returns the raw
+    score for it, so the engine admits an L1 model that declares no transform."""
+    model = descriptor(measurement())
+    if transform is None:
+        del model["score"]["transform"]
+    else:
+        model["score"]["transform"] = transform
+    assert validate_model(model).name == "tflops"
+    model["score"]["transform"] = "sqrt"
+    with pytest.raises(ValueError, match="transform"):
+        validate_model(model)
 
 
 def test_single_engine_predictions_have_signed_errors_without_fake_ranking_regret(

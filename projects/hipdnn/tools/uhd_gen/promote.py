@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .artifact import artifact_digest, is_grouped_tree, verify_tree_artifact
+from .correctness import REASON, VERDICT, numerical_reason, numerical_verdict
 from .features import (
     compute_features_hash,
     evaluator_feature_semantics_revision,
@@ -257,11 +258,12 @@ def _correctness_gate(model_dir: Path, corpus: Path | None) -> list[str]:
         raise PromoteError(f"cannot read training corpus {path}: {error}") from error
     if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
         raise PromoteError(f"{path}: the corpus must be an array of measured rows")
-    invalid = [row for row in rows if row.get("numerically_valid") is False]
+    verdicts = [numerical_verdict(row.get(VERDICT)) for row in rows]
+    invalid = [row for row, verdict in zip(rows, verdicts) if verdict is False]
     if invalid:
         named = "\n".join(
             f"  {row.get('kernel', '<unnamed candidate>')} on {row.get('benchmark', '<unnamed problem>')}: "
-            f"{row.get('validation') or 'no reason recorded'}"
+            f"{numerical_reason(row.get(REASON)) or 'no reason recorded'}"
             for row in invalid[:5]
         )
         more = f"\n  ... and {len(invalid) - 5} more" if len(invalid) > 5 else ""
@@ -273,7 +275,7 @@ def _correctness_gate(model_dir: Path, corpus: Path | None) -> list[str]:
             "kernel is no longer applicable for those problems, or withdraw the UKD, then "
             "regenerate."
         )
-    unchecked = sum(1 for row in rows if row.get("numerically_valid") is None)
+    unchecked = verdicts.count(None)
     if unchecked:
         return [
             f"{unchecked} of {len(rows)} corpus row(s) carry no decided correctness "
@@ -304,8 +306,15 @@ def _opaque_plan(
     look for, and this writes the document carrying that UUID where the loader already
     scans. The identity is therefore load-bearing in a way it is not for a UED-owned role
     -- promote the wrong UUID and the engine reports no model rather than the wrong one,
-    which is why the id must be the one the provider declares for the model's metric, and
-    why a different model already installed under it is refused rather than overwritten.
+    which is why the id must be the one the provider declares for the model's metric.
+
+    The loader keys on the UUID, not on where the document lies, so an installed model
+    under that UUID is owned by what it is -- its metric and the architectures it was
+    trained for -- not by its path. One serving exactly this metric and only the
+    architectures this promotion targets is this slot's model wherever it was installed
+    (the shipped ASM models predate promote's layout), and is replaced in place. Any other
+    different model under the UUID is refused rather than overwritten: it serves a slot
+    this promotion does not own.
     """
     if remove_knobs:
         raise PromoteError(
@@ -375,17 +384,127 @@ def _opaque_plan(
         installed_descriptor[descriptor["adapter"]][artifact_key] = artifact_path.name
         if not _same_file(artifact_path, destination_artifact):
             plan.copies.append((artifact_path, destination_artifact))
+    incumbents = []
     for path in sorted(Path(descriptor_tree).rglob(f"*{UHD_SUFFIX}")):
-        if path.name == UHD_SUFFIX or _same_file(path, destination_descriptor):
+        if path.name == UHD_SUFFIX:
             continue
         installed = _load_json(path, "installed UHD")
-        if descriptor_id(installed.get("id"), str(path)) != identity:
-            continue
-        _require_same_model(
-            path, installed, installed_descriptor, artifact_path, artifact_key
+        if descriptor_id(installed.get("id"), str(path)) == identity:
+            incumbents.append((path, installed))
+    if len(incumbents) > 1:
+        raise PromoteError(
+            f"duplicate installed UHD identity {identity}: "
+            f"{', '.join(str(path) for path, _ in incumbents)}; the provider reads one "
+            "model per id"
         )
-        _reuse(plan, path)
+    for path, installed in incumbents:
+        if _same_file(path, destination_descriptor):
+            # Promote's own layout for this role, arch and metric: replaced as written.
+            continue
+        if _same_model(
+            path, installed, installed_descriptor, artifact_path, artifact_key
+        ):
+            _reuse(plan, path)
+            continue
+        incumbent_artifact, payload = _same_slot_artifact(
+            path,
+            installed,
+            descriptor["adapter"],
+            metric,
+            {arch} if arch != "default" else set(manifest.get("training_arches", [])),
+            descriptor_tree,
+        )
+        # The incumbent's document and artifact are overwritten where they lie, so the
+        # incoming document names the artifact by the incumbent's file name.
+        plan.destination_descriptor = path
+        installed_descriptor["tree_data"][artifact_key] = payload
+        plan.copies[:] = (
+            []
+            if _same_file(artifact_path, incumbent_artifact)
+            else [(artifact_path, incumbent_artifact)]
+        )
+        plan.warnings.append(
+            f"replacing {identity} in place at {path}: the installed model serves the "
+            f"same metric ({metric}) and architectures"
+        )
     return plan
+
+
+def _same_slot_artifact(
+    path: Path,
+    installed: dict,
+    adapter: str,
+    metric: str | None,
+    served: set,
+    descriptor_tree,
+) -> tuple[Path, str]:
+    """The incumbent's artifact and its name, once it is proven to be this slot's model.
+
+    An opaque engine's UUID is declared per architecture and metric, so the incumbent is
+    this slot's model when it estimates the same metric and its artifact records training
+    architectures that are all among the ones this promotion serves. Anything else -- a
+    model another architecture still scores with, a different metric, or a model whose
+    coverage cannot be read -- is a different binding of the id, and is refused.
+    """
+
+    def refuse(reason: str):
+        raise PromoteError(
+            f"UHD id {installed.get('id')} is already installed at {path} with different "
+            f"content, and {reason}; one UUID names one model under every arch key that "
+            "binds it (D2), so it is not replaced. Promote to the arch and metric that "
+            "model serves to replace it there"
+        )
+
+    if _score_metric(installed) != metric:
+        refuse(f"it estimates {_score_metric(installed) or 'no metric'}, not {metric}")
+    body = installed.get("tree_data")
+    payload = body.get("artifact") if isinstance(body, dict) else None
+    if (
+        adapter != "tree_data"
+        or installed.get("adapter") != "tree_data"
+        or not isinstance(payload, str)
+    ):
+        refuse(
+            "the installed and incoming models are not both tree_data models whose "
+            "training architectures can be read"
+        )
+    artifact = path.parent / payload
+    _contained(artifact, descriptor_tree, "installed artifact")
+    try:
+        data = verify_tree_artifact(artifact, None)
+    except (OSError, ValueError) as error:
+        refuse(f"its artifact cannot be read for its training architectures: {error}")
+    import uhd_gen  # noqa: F401  puts _generated/ on sys.path
+
+    from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModel
+
+    model = GbdtModel.GetRootAs(bytearray(data), 0)
+    trained = {
+        model.TrainingArches(index).decode("utf-8", "replace")
+        for index in range(model.TrainingArchesLength())
+    }
+    if not trained or not trained <= served:
+        refuse(
+            f"it was trained for {sorted(trained) or 'unrecorded architectures'}, "
+            f"which this promotion for {sorted(served) or 'no recorded architecture'} "
+            "does not cover"
+        )
+    for other in sorted(Path(descriptor_tree).rglob(f"*{UHD_SUFFIX}")):
+        if other.name == UHD_SUFFIX or _same_file(other, path):
+            continue
+        document = _load_json(other, "installed UHD")
+        kind = document.get("adapter")
+        other_body = document.get(kind) if isinstance(kind, str) else None
+        key = "library" if kind == "custom_library" else "artifact"
+        other_payload = other_body.get(key) if isinstance(other_body, dict) else None
+        if isinstance(other_payload, str) and _same_file(
+            other.parent / other_payload, artifact
+        ):
+            raise PromoteError(
+                f"artifact collision: {artifact} also belongs to {other} "
+                f"({document.get('id')})"
+            )
+    return artifact, payload
 
 
 def _requested_identity(uhd_ids: dict, metric: str | None) -> str | None:
@@ -402,20 +521,14 @@ def _requested_identity(uhd_ids: dict, metric: str | None) -> str | None:
     return uhd_ids[metric]
 
 
-def _require_same_model(
+def _same_model(
     path: Path,
     installed: dict,
     incoming: dict,
     artifact_path: Path | None,
     artifact_key: str | None,
-) -> None:
-    """Refuse unless the UHD at `path` is the incoming model: same document, same bytes.
-
-    D2: one UUID is one model, however many arch keys bind it. Re-promoting that model for
-    another arch binds the installed copy (idempotently); a DIFFERENT model under an id
-    that is already installed elsewhere would silently change what every other binding of
-    it scores with, so it is refused.
-    """
+) -> bool:
+    """Whether the UHD at `path` is the incoming model: same document, same bytes."""
     same = installed == incoming
     if artifact_path is not None:
         adapter = incoming["adapter"]
@@ -429,7 +542,24 @@ def _require_same_model(
             normalized[adapter][artifact_key] = incoming[adapter][artifact_key]
             normalized[adapter].setdefault("hash", artifact_digest(installed_artifact))
             same = data == artifact_path.read_bytes() and normalized == incoming
-    if not same:
+    return same
+
+
+def _require_same_model(
+    path: Path,
+    installed: dict,
+    incoming: dict,
+    artifact_path: Path | None,
+    artifact_key: str | None,
+) -> None:
+    """Refuse unless the UHD at `path` is the incoming model (`_same_model`).
+
+    D2: one UUID is one model, however many arch keys bind it. Re-promoting that model for
+    another arch binds the installed copy (idempotently); a DIFFERENT model under an id
+    that is already installed elsewhere would silently change what every other binding of
+    it scores with, so it is refused.
+    """
+    if not _same_model(path, installed, incoming, artifact_path, artifact_key):
         raise PromoteError(
             f"UHD id {installed.get('id')} is already installed at {path} with different "
             "content; one UUID names one model under every arch key that binds it (D2). "
@@ -468,7 +598,13 @@ def _verify_artifact(
                     f"actual {digest!r}"
                 )
             return digest
-        data = verify_tree_artifact(artifact_path, declared)
+        # The signature's slot count is what EnginePredictor and UhdKernelHeuristic hold
+        # the artifact's `num_features` to; a matching features_hash does not imply it.
+        data = verify_tree_artifact(
+            artifact_path,
+            declared,
+            feature_count=len(descriptor["features_signature"]),
+        )
     except ValueError as error:
         raise PromoteError(f"the engine would refuse this artifact: {error}") from error
     import uhd_gen  # noqa: F401  puts _generated/ on sys.path
@@ -1064,12 +1200,13 @@ def _validate_descriptor(document: dict, path: Path) -> None:
         raise PromoteError(f"{path}: unknown {adapter} body fields")
     if "hash" in body and (not isinstance(body["hash"], str) or not body["hash"]):
         raise PromoteError(f"{path}: model hash must be a nonempty string")
-    if (
-        adapter == "custom_library"
-        and "config" in body
-        and not isinstance(body["config"], dict)
-    ):
-        raise PromoteError(f"{path}: custom_library.config must be an object")
+    # UhdParser admits an omitted or empty configuration only: nothing consumes one yet,
+    # so a populated object is refused at load rather than silently ignored.
+    if adapter == "custom_library" and "config" in body and body["config"] != {}:
+        raise PromoteError(
+            f"{path}: custom_library configuration is not supported; omit config or "
+            "leave it an empty object"
+        )
 
 
 def _artifact_path(descriptor, descriptor_path, model_dir):

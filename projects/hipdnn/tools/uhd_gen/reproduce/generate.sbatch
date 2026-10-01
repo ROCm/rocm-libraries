@@ -339,10 +339,8 @@ step "VERIFY - the runtime admits what was installed"
 # expose, a stale selector revision): it then ranks by declared order and nothing here would
 # say so. Ask the built loader and the engine itself, with logging on, before trusting any
 # number above. The validator covers descriptor-backed engines only; an engine binding its
-# models by declared id (ASM_SDPA_ENGINE) is checked through its prediction below. Its staged
-# shipped model carries the same id as the one just promoted, so until the new model replaces
-# the shipped file the loader reports the pair as a conflict -- read the reason, not just the
-# status.
+# models by declared id (ASM_SDPA_ENGINE) is checked through its prediction below; promote
+# replaced its shipped model in place, so the prediction should name the new model.
 VALIDATE=$(find "$BUILD" -name hipdnn_validate_descriptors -type f -perm -u+x | head -1)
 {
     if [ -n "$VALIDATE" ] && [ -z "${ID_ARGS[*]:-}" ] \

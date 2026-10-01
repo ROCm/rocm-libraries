@@ -4,9 +4,11 @@
 
 `TreeDataAdapter::loadFromBuffer` refuses an artifact whose declared digest differs, whose
 file identifier is not `HGBM`, which the FlatBuffers verifier rejects, or whose trees fail
-`prepareTrees`. An offline evaluator or promote that decodes the same file with fewer
-checks reports numbers for -- or installs -- a model the engine will never use, and the
-engine's only trace of that is one log line before it silently ranks by static order.
+`prepareTrees`; the engine-level predictor and the kernel heuristic then refuse one whose
+feature count is not its signature's. An offline evaluator or promote that decodes the same
+file with fewer checks reports numbers for -- or installs -- a model the engine will never
+use, and the engine's only trace of that is one log line before it silently ranks by static
+order.
 """
 from __future__ import annotations
 
@@ -21,17 +23,224 @@ MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
 _MIN_ARTIFACT_BYTES = 4 + 4
 GBDT_MODEL_IDENTIFIER = b"HGBM"
 
-# What a malformed buffer raises from the generated Python accessors, which have no
-# verifier: an offset past the end, a vector length the buffer cannot hold, a string that is
-# not UTF-8. Each is the runtime verifier's refusal, reached a different way.
-_DECODE_ERRORS = (
-    struct.error,
-    IndexError,
-    ValueError,
-    TypeError,
-    UnicodeDecodeError,
-    OverflowError,
-)
+
+class _Unverifiable(ValueError):
+    """The FlatBuffers verifier's refusal, with the check that failed."""
+
+
+class _GbdtModelVerifier:
+    """`flatbuffers::Verifier` with its default options, running `VerifyGbdtModelBuffer`.
+
+    The generated Python accessors have no verifier: they read wherever an offset points
+    and only fail if Python happens to notice, so a string with no terminator, a vector
+    whose declared length overruns its neighbour or a misaligned scalar decodes happily
+    here and is refused by the engine. This is verifier.h and the generated `Verify`
+    methods of gbdt_model_generated.h, check for check and in the same order: every
+    offset, vtable, scalar field, vector, string terminator and nested table, with the
+    same alignment, depth and table-count limits. Positions are offsets into the buffer,
+    exactly as the C++ verifier computes them (`p - buf_`), so alignment is relative to
+    the buffer start there as here.
+    """
+
+    _MAX_DEPTH = 64
+    _MAX_TABLES = 1_000_000
+    #: FLATBUFFERS_MAX_BUFFER_SIZE: the largest soffset_t.
+    _MAX_SIZE = 0x7FFFFFFF
+    #: FLATBUFFERS_MIN_BUFFER_SIZE: root offset, vtable offset and two vtable fields.
+    _MIN_SIZE = 4 + 4 + 2 + 2
+
+    def __init__(self, data: bytes):
+        self._data = data
+        self._size = len(data)
+        self._depth = 0
+        self._tables = 0
+
+    @staticmethod
+    def _check(ok: bool, what: str) -> None:
+        if not ok:
+            raise _Unverifiable(what)
+
+    def _range(self, at: int, length: int, what: str) -> None:
+        # `Verify(elem, elem_len)`; positions here are never negative in C++ because they
+        # are size_t, so a negative one is the same out-of-range refusal.
+        self._check(
+            0 <= at and length < self._size and at <= self._size - length,
+            f"{what} at {at} (+{length}) lies outside the {self._size}-byte buffer",
+        )
+
+    def _scalar(self, at: int, width: int, what: str) -> None:
+        # `Verify<T>(elem)`: aligned to its own width, then in range.
+        self._check(at % width == 0, f"{what} at {at} is not {width}-byte aligned")
+        self._range(at, width, what)
+
+    def _u32(self, at: int) -> int:
+        return struct.unpack_from("<I", self._data, at)[0]
+
+    def _u16(self, at: int) -> int:
+        return struct.unpack_from("<H", self._data, at)[0]
+
+    def _offset(self, at: int, what: str) -> int:
+        """`VerifyOffset<uoffset_t>`: the position a verified uoffset at `at` points to."""
+        self._scalar(at, 4, what)
+        offset = self._u32(at)
+        self._check(offset != 0, f"{what} at {at} points to itself")
+        self._check(offset <= self._MAX_SIZE, f"{what} at {at} wraps around")
+        self._range(at + offset, 1, what)
+        return at + offset
+
+    def _table(self, at: int, what: str) -> int:
+        """`VerifyTableStart`: the verified vtable position of the table at `at`."""
+        self._scalar(at, 4, f"{what} vtable offset")
+        vtable = at - struct.unpack_from("<i", self._data, at)[0]
+        self._depth += 1
+        self._tables += 1
+        self._check(
+            self._depth <= self._MAX_DEPTH and self._tables <= self._MAX_TABLES,
+            f"{what} exceeds the verifier's depth or table-count limit",
+        )
+        self._scalar(vtable, 2, f"{what} vtable")
+        size = self._u16(vtable)
+        self._check(size % 2 == 0, f"{what} vtable size {size} is odd")
+        self._range(vtable, size, f"{what} vtable")
+        return vtable
+
+    def _field(self, at: int, vtable: int, field: int) -> int:
+        """`GetOptionalFieldOffset`: 0 when the field is absent."""
+        return self._u16(vtable + field) if field < self._u16(vtable) else 0
+
+    def _scalar_field(
+        self, at: int, vtable: int, field: int, width: int, what: str
+    ) -> None:
+        """`Table::VerifyField<T>(verifier, field, sizeof(T))`."""
+        offset = self._field(at, vtable, field)
+        if offset:
+            self._scalar(at + offset, width, what)
+
+    def _pointer_field(self, at: int, vtable: int, field: int, what: str):
+        """`Table::VerifyOffset` then the accessor: the referenced position, or None."""
+        offset = self._field(at, vtable, field)
+        return self._offset(at + offset, what) if offset else None
+
+    def _vector(self, at: int | None, element: int, what: str) -> int:
+        """`VerifyVectorOrString`: the verified element count (0 when absent)."""
+        if at is None:
+            return 0
+        self._scalar(at, 4, f"{what} length")
+        count = self._u32(at)
+        self._check(
+            count < self._MAX_SIZE // element, f"{what} length {count} overflows"
+        )
+        self._range(at, 4 + element * count, what)
+        return count
+
+    def _string(self, at: int | None, what: str) -> None:
+        """`VerifyString`: a verified byte vector followed by a NUL terminator."""
+        if at is None:
+            return
+        end = at + 4 + self._vector(at, 1, what)
+        self._range(end, 1, f"{what} terminator")
+        self._check(self._data[end] == 0, f"{what} is not NUL-terminated")
+
+    def _elements(self, at: int | None, count: int):
+        """`Vector<Offset<T>>::Get(i)` for each element: where it points (unverified)."""
+        for index in range(count):
+            slot = at + 4 + 4 * index
+            yield slot + self._u32(slot)
+
+    def _tree(self, at: int, what: str) -> None:
+        vtable = self._table(at, what)
+        for field, width, name in (
+            (4, 4, "feature_indices"),
+            (6, 8, "thresholds"),
+            (8, 4, "left_children"),
+            (10, 4, "right_children"),
+            (12, 8, "leaf_values"),
+            (14, 1, "default_left"),
+            (16, 1, "decision_lte"),
+        ):
+            where = f"{what}.{name}"
+            self._vector(self._pointer_field(at, vtable, field, where), width, where)
+        self._depth -= 1
+
+    def _trees(self, at: int, vtable: int, field: int, what: str) -> None:
+        trees = self._pointer_field(at, vtable, field, what)
+        count = self._vector(trees, 4, what)
+        for index, tree in enumerate(self._elements(trees, count)):
+            self._tree(tree, f"{what}[{index}]")
+
+    def _group(self, at: int, what: str) -> None:
+        vtable = self._table(at, what)
+        self._scalar_field(at, vtable, 4, 8, f"{what}.value")
+        self._trees(at, vtable, 6, f"{what}.trees")
+        self._depth -= 1
+
+    def _model(self, at: int) -> None:
+        vtable = self._table(at, "model")
+        self._trees(at, vtable, 4, "trees")
+        self._scalar_field(at, vtable, 6, 4, "num_features")
+        self._string(
+            self._pointer_field(at, vtable, 8, "features_hash"), "features_hash"
+        )
+        self._scalar_field(at, vtable, 10, 8, "base_score")
+        self._scalar_field(at, vtable, 12, 8, "learning_rate")
+        self._string(self._pointer_field(at, vtable, 14, "framework"), "framework")
+        self._string(
+            self._pointer_field(at, vtable, 16, "training_date"), "training_date"
+        )
+        self._scalar_field(at, vtable, 18, 8, "num_training_samples")
+        self._string(
+            self._pointer_field(at, vtable, 20, "training_objective"),
+            "training_objective",
+        )
+        arches = self._pointer_field(at, vtable, 22, "training_arches")
+        count = self._vector(arches, 4, "training_arches")
+        for index, arch in enumerate(self._elements(arches, count)):
+            self._string(arch, f"training_arches[{index}]")
+        self._string(
+            self._pointer_field(at, vtable, 24, "model_version"), "model_version"
+        )
+        self._scalar_field(at, vtable, 26, 4, "group_by_feature_index")
+        groups = self._pointer_field(at, vtable, 28, "groups")
+        count = self._vector(groups, 4, "groups")
+        for index, group in enumerate(self._elements(groups, count)):
+            self._group(group, f"groups[{index}]")
+        self._depth -= 1
+
+    def verify(self) -> None:
+        """`VerifyBufferFromStart<GbdtModel>("HGBM", 0)`, or _Unverifiable naming the check."""
+        self._check(
+            self._size >= self._MIN_SIZE,
+            f"{self._size} bytes is below the smallest FlatBuffer",
+        )
+        self._check(
+            self._data[4:8] == GBDT_MODEL_IDENTIFIER,
+            f"file identifier {bytes(self._data[4:8])!r} is not {GBDT_MODEL_IDENTIFIER!r}",
+        )
+        self._model(self._offset(0, "root offset"))
+
+
+def verify_gbdt_buffer(data: bytes) -> None:
+    """Raise ValueError unless `VerifyGbdtModelBuffer` would accept `data`."""
+    try:
+        _GbdtModelVerifier(data).verify()
+    except _Unverifiable as error:
+        raise ValueError(
+            f"the FlatBuffers verifier refuses the artifact: {error}"
+        ) from None
+
+
+def verify_feature_count(num_features: int, signature_length: int, where) -> None:
+    """The runtime's arity admission: the artifact consumes exactly the signature's slots.
+
+    EnginePredictor (`expectedFeatureCount() != featureCount()`) and UhdKernelHeuristic
+    both refuse the pair otherwise; a matching features_hash proves only that the contract
+    is the one trained against, not that the artifact reads that many columns.
+    """
+    if num_features != signature_length:
+        raise ValueError(
+            f"{where}: artifact num_features {num_features} differs from the "
+            f"{signature_length}-slot features_signature; the engine refuses the model"
+        )
 
 
 def artifact_digest(path: Path) -> str:
@@ -103,12 +312,15 @@ def _check_trees(trees, num_features: int, where: str) -> None:
             reject("cycle in child indices")
 
 
-def verify_tree_artifact(path: Path, declared_hash: str | None) -> bytes:
+def verify_tree_artifact(
+    path: Path, declared_hash: str | None, *, feature_count: int | None = None
+) -> bytes:
     """The bytes of a `tree_data` artifact the runtime would load, or ValueError saying why not.
 
     Same order as `TreeDataAdapter::loadFromBuffer`: size, declared digest, identifier,
     structure. The features-hash comparison is left to the caller, which holds the
-    descriptor's signature digest.
+    descriptor's signature digest. `feature_count`, when given, is the signature's slot
+    count, which the artifact's `num_features` must equal (`verify_feature_count`).
     """
     path = Path(path)
     data = path.read_bytes()
@@ -126,17 +338,17 @@ def verify_tree_artifact(path: Path, declared_hash: str | None) -> bytes:
         raise ValueError(
             f"{path}: file identifier {bytes(data[4:8])!r} is not {GBDT_MODEL_IDENTIFIER!r}"
         )
+    try:
+        verify_gbdt_buffer(data)
+    except ValueError as error:
+        raise ValueError(f"{path}: {error}") from None
 
     import uhd_gen  # noqa: F401  puts _generated/ on sys.path
 
     from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModelT
 
-    try:
-        model = GbdtModelT.InitFromPackedBuf(bytearray(data), 0)
-    except _DECODE_ERRORS as error:
-        raise ValueError(
-            f"{path}: artifact does not decode as a GbdtModel: {error}"
-        ) from error
+    # Verified, so every accessor below reads inside the buffer.
+    model = GbdtModelT.InitFromPackedBuf(bytearray(data), 0)
     if model.numFeatures < 0:
         raise ValueError(f"{path}: negative feature count")
     if not math.isfinite(model.baseScore):
@@ -152,6 +364,8 @@ def verify_tree_artifact(path: Path, declared_hash: str | None) -> bytes:
             if group is None:
                 raise ValueError(f"{path}: null group")
             _check_trees(group.trees, model.numFeatures, f"{path} group {index}")
+    if feature_count is not None:
+        verify_feature_count(model.numFeatures, feature_count, path)
     return data
 
 

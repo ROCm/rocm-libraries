@@ -229,11 +229,22 @@ read backward kernels, and a backward kernel cannot move a forward throughput nu
 against one.
 
 An `ASM_SDPA_ENGINE` retrain keeps the declared id (`L1_MODEL_IDS`), and the build already
-stages the shipped model under that id, so the job's promote refuses the new one as "already
-installed with different content" (one UUID names one model) and `generate` leaves it in the
-kept `preserved-.uhd-generate-*/model/`. Replacing the model is a file swap in the source
-tree: copy `model.bin` over `descriptors/predict_engine/<arch>/asm_sdpa_engine_tflops.bin` and
-the UHD over its `.uhd.json`, pointing `tree_data.artifact` at the shipped file name.
+stages the shipped model under that id. `promote` owns that model by its id, metric and
+training architectures, not by where it lies, so it replaces the shipped document and
+artifact in place (under their existing file names) rather than installing a second copy.
+To ship the retrain, promote the kept model into the source tree the same way:
+
+```bash
+cd projects/hipdnn/tools
+python -m uhd_gen promote --model-dir /exchange/out-950-aiter/l1/model \
+    --descriptor-tree ../../../dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/descriptors \
+    --engine ASM_SDPA_ENGINE --role predict_engine --arch gfx950 \
+    --feature-evaluator <build>/bin/hipdnn_uhd_features --dry-run   # then without --dry-run
+```
+
+The id comes from the collection's recorded `binding.uhd_id` (or `--uhd-id
+tflops=<L1_MODEL_IDS entry>`). It is refused, not overwritten, if the installed model
+under that id estimates another metric or was trained for another arch.
 
 ## 5. Which engine answers at all
 

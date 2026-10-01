@@ -54,17 +54,24 @@ def _hash(signature=KERNEL_SIGNATURE, encoding=None):
 
 
 def _weights(
-    leaf=1.0, *, grouped=False, signature=KERNEL_SIGNATURE, features_hash=None
+    leaf=1.0,
+    *,
+    grouped=False,
+    signature=KERNEL_SIGNATURE,
+    features_hash=None,
+    training_arches=None,
+    num_features=None,
 ):
     """A `tree_data` artifact the runtime would load: promote verifies what it installs."""
     ensemble = {
         "tree_info": [{"tree_structure": {"leaf_value": leaf}}],
-        "max_feature_idx": 0,
+        "max_feature_idx": (num_features or len(signature)) - 1,
         "objective": "regression",
     }
     return build_gbdt_model(
         ensemble,
         features_hash or _hash(tuple(signature)),
+        training_arches=training_arches,
         group_by_feature_index=0 if grouped else -1,
         groups=[(0.0, ensemble)] if grouped else None,
     )
@@ -892,6 +899,109 @@ def test_repromoting_an_identical_opaque_model_is_idempotent(tmp_path):
     assert _files(tree) == installed
 
 
+def _shipped_asm_model(tree, arches, metric="tflops"):
+    """A fixed-id model where the build ships it: beside the provider, not where promote
+    would put it, under the provider's own file names."""
+    directory = tree / "asm_sdpa_engine" / "descriptors" / "predict_engine" / "gfx950"
+    artifact = _weights(signature=OPAQUE_SIGNATURE, training_arches=arches)
+    directory.mkdir(parents=True)
+    (directory / "asm_sdpa_engine_tflops.bin").write_bytes(artifact)
+    _write(
+        directory / "asm_sdpa_engine_tflops.uhd.json",
+        {
+            "version": "1.0",
+            "id": NEW,
+            "name": "shipped",
+            "adapter": "tree_data",
+            "objective": {"tflops": "max", "time": "min"}[metric],
+            "features_signature": list(OPAQUE_SIGNATURE),
+            "features_hash": _hash(OPAQUE_SIGNATURE),
+            "trained_against": {"selector_revision": "aiter-fwd-1"},
+            "score": {"metric": metric, "calibrated": True, "transform": "identity"},
+            "tree_data": {
+                "artifact": "asm_sdpa_engine_tflops.bin",
+                "hash": hashlib.sha256(artifact).hexdigest(),
+            },
+        },
+    )
+    return directory
+
+
+def test_a_retrained_fixed_id_model_replaces_the_shipped_one_where_it_is_installed(
+    tmp_path,
+):
+    """The provider declares the UUID per arch and metric, so the model installed under it
+    -- for this metric, trained for this arch -- is this slot's model wherever it lies.
+    Promote replaces it in place rather than refusing it for not being at the path promote
+    would have chosen, which left a hand-copy as the only way to ship an ASM retrain."""
+    tree = _tree(tmp_path / "tree")
+    shipped = _shipped_asm_model(tree, ["gfx950"])
+    model = _opaque_model(tmp_path / "model")
+    retrained = _weights(2.0, signature=OPAQUE_SIGNATURE, training_arches=["gfx950"])
+    (model / "model.bin").write_bytes(retrained)
+
+    _apply(
+        build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine", arch="gfx950")
+    )
+
+    assert (shipped / "asm_sdpa_engine_tflops.bin").read_bytes() == retrained
+    installed = _read(shipped / "asm_sdpa_engine_tflops.uhd.json")
+    assert installed["tree_data"] == {
+        "artifact": "asm_sdpa_engine_tflops.bin",
+        "hash": hashlib.sha256(retrained).hexdigest(),
+    }
+    assert [path for path in tree.rglob("*.uhd.json") if _read(path)["id"] == NEW] == [
+        shipped / "asm_sdpa_engine_tflops.uhd.json"
+    ], "one document per declared id"
+
+
+@pytest.mark.parametrize(
+    "arches,metric",
+    [(["gfx942"], "tflops"), (["gfx942", "gfx950"], "tflops"), (["gfx950"], "time")],
+)
+def test_a_fixed_id_model_serving_another_slot_is_not_replaced(
+    tmp_path, arches, metric
+):
+    """In-place replacement is for this slot's model only: an installed model under the id
+    that another arch still scores with, or that estimates another metric, is refused.
+    """
+    tree = _tree(tmp_path / "tree")
+    _shipped_asm_model(tree, arches, metric)
+    model = _opaque_model(tmp_path / "model")
+    (model / "model.bin").write_bytes(
+        _weights(2.0, signature=OPAQUE_SIGNATURE, training_arches=["gfx950"])
+    )
+    before = _files(tmp_path)
+    with pytest.raises(PromoteError, match="already installed"):
+        build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine", arch="gfx950")
+    assert _files(tmp_path) == before
+
+
+@pytest.mark.parametrize("config", [{}, {"x": 1}])
+def test_a_custom_library_configuration_is_promoted_only_when_empty(tmp_path, config):
+    """UhdParser admits an omitted or empty `custom_library.config` and refuses any other,
+    before the library is loaded; promote must not install what the engine refuses."""
+    tree = _tree(tmp_path / "tree")
+    model = _opaque_model(tmp_path / "model")
+    doc = _read(model / "heuristic.uhd.json")
+    doc["adapter"] = "custom_library"
+    doc.pop("tree_data")
+    doc["custom_library"] = {
+        "library": "scorer.dll",
+        "symbol": "score",
+        "config": config,
+    }
+    _write(model / "heuristic.uhd.json", doc)
+    (model / "scorer.dll").write_bytes(b"MZ")
+    if config:
+        with pytest.raises(PromoteError, match="configuration is not supported"):
+            build_plan(
+                model, tree, "ASM_SDPA_ENGINE", role="predict_engine", arch="gfx950"
+            )
+    else:
+        build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine", arch="gfx950")
+
+
 def test_an_engine_with_no_catalog_cannot_be_given_a_catalog_ranker(tmp_path):
     """sort_kernel_catalog ranks an engine's own enumerated configurations. An engine that
     publishes none has nothing for that model to order, so the role is refused here rather
@@ -1053,6 +1163,20 @@ def test_an_explicit_corpus_outranks_the_sibling_default(tmp_path):
         build_plan(model, tree, corpus=archived)
 
 
+def test_a_failed_verdict_spelled_as_text_still_refuses_emission(tmp_path):
+    """Promotion reads the verdict with the reader every other entrance uses, so a corpus
+    that carries `numerically_valid` as CSV text is gated like one carrying a boolean,
+    rather than a known-wrong `"False"` passing as neither failed nor unchecked."""
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    _corpus(
+        tmp_path,
+        [_row("kernel-b", numerically_valid="False", validation="output_mismatch: Y")],
+    )
+    with pytest.raises(PromoteError, match="kernel-b"):
+        build_plan(model, tree)
+
+
 MATCH_A = "11be5fe7-02a7-4ec2-b79c-e849951f8c24"
 MATCH_B = "22be5fe7-02a7-4ec2-b79c-e849951f8c24"
 
@@ -1171,10 +1295,21 @@ def test_promote_writes_the_artifact_digest_the_trainer_left_out(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "defect", ["identifier", "declared_hash", "features_hash", "truncated"]
+    "defect",
+    [
+        "identifier",
+        "declared_hash",
+        "features_hash",
+        "truncated",
+        "unterminated_string",
+        "arity",
+    ],
 )
 def test_an_artifact_the_runtime_would_refuse_is_never_installed(tmp_path, defect):
-    """R8: promote applies TreeDataAdapter's load checks to the bytes it installs."""
+    """R8: promote applies TreeDataAdapter's load checks to the bytes it installs: the
+    FlatBuffers verifier's structure (here, a string with no NUL terminator, which every
+    accessor still decodes), and the model's arity against its signature, which
+    EnginePredictor and UhdKernelHeuristic compare whatever the features_hash says."""
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
     data = _weights()
@@ -1184,6 +1319,11 @@ def test_an_artifact_the_runtime_would_refuse_is_never_installed(tmp_path, defec
         data = _weights(features_hash="sha256:" + "1" * 16)
     elif defect == "truncated":
         data = data[:12]
+    elif defect == "unterminated_string":
+        end = data.index(_hash().encode()) + len(_hash())
+        data = data[:end] + b"!" + data[end + 1 :]
+    elif defect == "arity":
+        data = _weights(num_features=len(KERNEL_SIGNATURE) + 1)
     else:
         doc = _read(model / "heuristic.uhd.json")
         doc["tree_data"]["hash"] = hashlib.sha256(b"other bytes").hexdigest()
@@ -1292,7 +1432,9 @@ def _attention_ranker(root, tree, metric, signature, encoding=None):
         root / "train_manifest.json",
         {"training_arches": ["gfx950"], "trained_against": provenance},
     )
-    (root / "model.bin").write_bytes(_weights(features_hash=_hash(signature, encoding)))
+    (root / "model.bin").write_bytes(
+        _weights(signature=signature, features_hash=_hash(signature, encoding))
+    )
     return root
 
 

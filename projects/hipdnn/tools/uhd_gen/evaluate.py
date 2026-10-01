@@ -40,6 +40,7 @@ from typing import Any, Callable, Iterable, Sequence
 import numpy as np
 import pandas as pd
 
+from .correctness import known_wrong
 from .corpus_io import read_corpus_frame
 from .ranking_metrics import RANKING_METRICS
 
@@ -200,6 +201,7 @@ class Exclusions:
     """
 
     invalid_rows: int = 0
+    numerically_invalid_rows: int = 0
     missing_target_rows: int = 0
     problems_no_measured_candidate: int = 0
     problems_single_candidate: int = 0
@@ -225,14 +227,17 @@ class Exclusions:
     def as_dict(self) -> dict[str, Any]:
         return {
             "invalid_rows": self.invalid_rows,
+            "numerically_invalid_rows": self.numerically_invalid_rows,
             "missing_target_rows": self.missing_target_rows,
             "problems_no_measured_candidate": self.problems_no_measured_candidate,
             "problems_single_candidate": self.problems_single_candidate,
             "problems_non_positive_oracle": self.problems_non_positive_oracle,
             "policy": (
                 "Only rows that carry no usable measurement are dropped: is_valid=False "
-                "(a candidate that never ran has no time and cannot be the best) and "
-                "rows whose target is empty or non-numeric. Every measured candidate of "
+                "(a candidate that never ran has no time and cannot be the best), "
+                "numerically_valid=False (a candidate shown to compute the wrong answer "
+                "has no time for the right one, RFC 0019 §13.2) and rows whose target is "
+                "empty or non-numeric. Every measured candidate of "
                 "an evaluated problem stays in the oracle set, because dropping one "
                 "would corrupt the oracle (RFC 0019.13 §5.6.3). Problems left with one "
                 "measured candidate are excluded from the metrics rather than scored as "
@@ -594,6 +599,11 @@ def evaluate_corpus(
 
     exclusions = Exclusions()
     exclusions.invalid_rows = int((~valid).sum())
+    # A known-wrong row may still carry the timing of its wrong answer; the fastest wrong
+    # kernel would otherwise be the oracle every correct pick is charged against.
+    wrong = known_wrong(eval_df)
+    exclusions.numerically_invalid_rows = int((valid & wrong).sum())
+    valid = valid & ~wrong
     exclusions.missing_target_rows = int((valid & ~np.isfinite(values)).sum())
     usable = valid & np.isfinite(values)
 
@@ -1395,8 +1405,16 @@ def _flatbuffer_scorer(
     from .artifact import verify_tree_artifact
     from .train_uhd import build_feature_matrix
 
+    # The signature's slot count is the arity the runtime holds the artifact to.
     model = GbdtModelT.InitFromPackedBuf(
-        bytearray(verify_tree_artifact(artifact, model_hash)), 0
+        bytearray(
+            verify_tree_artifact(
+                artifact,
+                model_hash,
+                feature_count=len(signature) if signature else None,
+            )
+        ),
+        0,
     )
     if expected_hash is not None:
         stored_hash = (
@@ -1409,19 +1427,34 @@ def _flatbuffer_scorer(
                 "descriptor features_hash does not match the shipped model artifact"
             )
 
+    def routing(values, count: int, absent: bool) -> np.ndarray:
+        """A per-node flag vector as `prepareTrees` reads it: supplied entries, then `absent`."""
+        flags = np.full(count, absent, dtype=bool)
+        supplied = np.asarray([] if values is None else values, dtype=bool)[:count]
+        flags[: len(supplied)] = supplied
+        return flags
+
     def arrays_of(trees) -> list[tuple[np.ndarray, ...]]:
-        return [
-            (
-                np.asarray(tree.featureIndices, dtype=np.int64),
-                np.asarray(tree.thresholds, dtype=np.float64),
-                np.asarray(tree.leftChildren, dtype=np.int64),
-                np.asarray(tree.rightChildren, dtype=np.int64),
-                np.asarray(tree.leafValues, dtype=np.float64),
-                np.asarray(tree.defaultLeft, dtype=bool),
-                np.asarray(tree.decisionLte, dtype=bool),
+        # `default_left` and `decision_lte` are optional and may be shorter than the tree.
+        # TreeDataAdapter reads a missing or short `default_left` as false (go right); an
+        # absent or empty `decision_lte` as `<=` everywhere, but a nonempty short one as
+        # `<` past its end.
+        arrays = []
+        for tree in trees or []:
+            count = len(tree.leftChildren)
+            lte = tree.decisionLte
+            arrays.append(
+                (
+                    np.asarray(tree.featureIndices, dtype=np.int64),
+                    np.asarray(tree.thresholds, dtype=np.float64),
+                    np.asarray(tree.leftChildren, dtype=np.int64),
+                    np.asarray(tree.rightChildren, dtype=np.int64),
+                    np.asarray(tree.leafValues, dtype=np.float64),
+                    routing(tree.defaultLeft, count, False),
+                    routing(lte, count, lte is None or len(lte) == 0),
+                )
             )
-            for tree in trees or []
-        ]
+        return arrays
 
     trees = arrays_of(model.trees)
     base = float(model.baseScore)
@@ -1636,9 +1669,13 @@ def load_model(
                 evaluator_feature_semantics_revision(feature_evaluator),
             )
 
-    transform = descriptor.get("score", {}).get(
-        "transform", manifest.get("score_transform", "log1p")
-    )
+    if descriptor:
+        # The UHD is what the engine loads, and the engine reads an absent or empty
+        # `score.transform` as identity (ScoreTransform.hpp); a training manifest must not
+        # reinterpret the descriptor it was shipped with.
+        transform = (descriptor.get("score") or {}).get("transform") or "identity"
+    else:
+        transform = manifest.get("score_transform", "log1p")
     if transform not in ("identity", "log1p"):
         # The engine's transform vocabulary is wider (score_transform::isSupported);
         # what is missing here is this module's inverse, not the descriptor's validity.
@@ -2188,7 +2225,8 @@ def _print_summary(report: dict[str, Any], output_path: Path) -> None:
         print(f"  holdout integrity:  {integrity}")
     dropped = report["exclusions"]
     print(
-        "  excluded:           {invalid_rows} invalid row(s), {missing_target_rows} "
+        "  excluded:           {invalid_rows} invalid row(s), "
+        "{numerically_invalid_rows} numerically wrong row(s), {missing_target_rows} "
         "row(s) with no target, {problems_single_candidate} single-candidate "
         "problem(s), {problems_no_measured_candidate} problem(s) with nothing "
         "measured, {problems_non_positive_oracle} with a non-positive oracle".format(

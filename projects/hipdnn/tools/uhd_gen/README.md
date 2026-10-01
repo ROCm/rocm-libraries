@@ -227,16 +227,28 @@ An engine with no UED (MIOpen, AITER) reads only the UHD ids its provider declar
 metric. The id `promote` installs under must be that declaration: the one the collection
 recorded (`train_manifest.json`'s `binding.uhd_id`, which the engine's description
 reports), or `--uhd-id METRIC=UUID`. With neither, promotion is refused — a model under
-any other id is one the engine never reads.
+any other id is one the engine never reads. Because the loader keys on the id, not the
+path, a different model already installed under that id anywhere in the tree is
+**replaced where it lies** (document and artifact, under their existing file names) when
+it is this slot's model: a `tree_data` model of the same `score.metric` whose artifact's
+training architectures are all among those being promoted for (`--arch`, or the
+manifest's `training_arches` for `--arch default`). That is how a retrained ASM SDPA
+model replaces the one shipped beside the provider. An installed model under the id that
+serves another metric or architecture, or whose coverage cannot be read, is refused, and
+so is the id installed twice.
 
 It validates everything before writing anything, and refuses rather than half-succeed:
 
 - the descriptor must satisfy the canonical schema and its artifact must exist;
   missing or incompatible models otherwise leave runtime selection in fallback;
 - the artifact must pass the checks the runtime applies when it loads it: for
-  `tree_data`, the declared digest, the `HGBM` file identifier, a structural decode, and
-  the artifact's `features_hash` matching the descriptor's; for any other artifact, the
-  declared digest. A `predict_engine` model must not be a grouped (two-layer) artifact.
+  `tree_data`, the declared digest, the `HGBM` file identifier, the FlatBuffers
+  verifier's structural checks (every offset, vtable, vector, string terminator and nested
+  table, as `VerifyGbdtModelBuffer`), the artifact's `features_hash` matching the
+  descriptor's, and its `num_features` equal to the `features_signature` slot count; for
+  any other artifact, the declared digest. A `predict_engine` model must not be a grouped
+  (two-layer) artifact. A `custom_library` body's `config` must be omitted or empty, as
+  the runtime parser requires.
   The descriptor's `features_hash` is recomputed from its `features_signature` and
   `categorical_encoding` through the feature evaluator, as the loader does, rather than
   compared with another stored copy.
@@ -377,6 +389,7 @@ is counted in `exclusions`:
 | Excluded | Why |
 |----------|-----|
 | `is_valid=False` rows | A candidate that never ran has no time and cannot be the best. Its empty timing column would otherwise read as a zero and win every `min`. Only a collected CSV carries the flag. |
+| `numerically_valid=False` rows | A candidate checked wrong has no time for the right answer; a direct corpus may still carry its wrong answer's (fast) timing, which would otherwise become the oracle. Counted as `numerically_invalid_rows`; an undecided (null) verdict stays. |
 | Rows whose target is empty or non-numeric | Same reason, without the flag -- which is how a published dataset spells it, since §8.3 has no validity column and records the failure in `error` instead. |
 | Problems with one measured candidate | With nothing to choose between, a correct pick is not evidence; scoring it as regret 0 would dilute the mean. |
 | Problems whose oracle value is not positive | Both formulas divide by it, and under `max` the ratio's sense flips. |
@@ -529,11 +542,24 @@ measured. `uhd_gen.dataset` rewrites the one into the other and then drops `is_v
 `skip_reason` as collection bookkeeping, which is why the chain above composes: a sweep
 containing a failure is a normal sweep, not a corpus the importer refuses.
 
+**A candidate checked wrong is a failure too, with its verdict kept.** The bench's timing
+flag is independent of its correctness check, so a kernel that computed the wrong answer
+quickly arrives `is_valid` with a fast time. A row with `numerically_valid=False` is
+published with its timings and `tflops`/`gbs` null, its `validation` reason copied into
+`error` (or `numerically_valid=False` when it gave none), and its problem marked
+incomplete -- but unlike the collector's flag, `numerically_valid` and `validation` stay as
+columns, so evaluation and promotion see the same verdict generation recorded. A row
+`generate` already suppressed publishes the same way. Null is undecided, not wrong: it
+stays a measurement. Every entrance -- `generate`, `train`, `uhd_gen.dataset`,
+`import-immediate`, `evaluate`, `promote` -- reads the verdict through one helper,
+`uhd_gen/correctness.py`, so none of them can disagree about which rows it covers.
+
 `train` drops a row that carries no measurement in either spelling -- the flag, a
-non-empty `error`, or a target that is not a finite number -- and logs how many went by
-each. The failed rows stay in the dataset, because a candidate that could not run is
-information about feature space and §8.3 keeps it; they are excluded at the fit, exactly
-as `evaluate` excludes them from the oracle.
+non-empty `error`, or a target that is not a finite number -- and a row checked
+numerically wrong whatever it carries, and logs how many went by each. The failed rows
+stay in the dataset, because a candidate that could not run is information about feature
+space and §8.3 keeps it; they are excluded at the fit, exactly as `evaluate` excludes
+them from the oracle.
 
 **Identity columns are read as text on every route.** `benchmark`, `device`, `graph_id`
 and `device_id` name something; nothing computes with them. Left to inference a device
@@ -738,6 +764,20 @@ collects once per metric into `corpus_<metric>.json`. Every row's `binding.metri
 the metric it was described under; normalization refuses a row without one, and `train`
 and `evaluate` refuse rows whose metric (or selector revision) differs from the model's,
 naming both.
+
+An immediate row keeps its `numerically_valid` verdict and `validation` reason through
+import and readback. A pick checked wrong (`false`) keeps its row with every timing and
+derived label null, and `generate`, `train` and `evaluate` leave it out of the labels and
+the oracle; null -- what today's collector writes, since one engine's single pick has no
+reference to compare against -- is undecided and trains.
+
+The bench measures against `--descriptor-tree` and nothing else, for both roles: it is
+passed as `HIPDNN_DESCRIPTOR_DIR` (the replacement root; L2 passes its knob-expanded copy
+of it), and any inherited `HIPDNN_DESCRIPTOR_RUNTIME_DIR`/`HIPDNN_DESCRIPTOR_PATH` is
+cleared. Those add roots, and the loader keeps the first definition of an id, so an
+earlier root's selector would otherwise produce labels for a tree this run never
+installs into. The tree must therefore be a complete root the engine can load from (for a
+kpack-backed provider, the arch root that owns `kpack`), exactly as for L2.
 
 ```bash
 hipdnn_bench --graph graph.json --engine-name vendor:gemm \

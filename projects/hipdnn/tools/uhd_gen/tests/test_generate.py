@@ -393,12 +393,14 @@ def _immediate_bench(
     flops=True,
     declared=None,
     broken=(),
+    wrong=(),
     engine="provider:engine7",
 ):
     """A `--collect-immediate` stand-in; returns the metrics it was asked in, in order.
 
     `declared` maps metric -> the id the engine's description reports (binding.uhd_id);
-    graphs whose id is in `broken` make the bench fail the way a crashing one does.
+    graphs whose id is in `broken` make the bench fail the way a crashing one does, and
+    those in `wrong` come back with a failed correctness verdict.
     """
     requested = []
 
@@ -431,7 +433,7 @@ def _immediate_bench(
         }
         if flops:
             features["graph.flops"] = 2e9 * (graph["size"] + 1)
-        return {
+        response = {
             "engine_id": 7,
             "engine_name": engine,
             "graph_id": graph["id"],
@@ -448,6 +450,11 @@ def _immediate_bench(
             "selection_mode": "immediate",
             "timing_statistic": "robustMeanMs",
         }
+        if graph["id"] in wrong:
+            response.update(
+                numerically_valid=False, validation="output_mismatch: wrong output"
+            )
+        return response
 
     monkeypatch.setattr("uhd_gen.generate._run_json", bench)
     monkeypatch.setattr("uhd_gen.generate.shutil.which", lambda name: name)
@@ -692,6 +699,100 @@ def test_an_opaque_engine_is_never_trained_under_an_undeclared_id(
     )
     assert message in caplog.text
     assert len(calls) == 1
+
+
+def test_l1_generation_never_trains_on_picks_checked_wrong(
+    monkeypatch, tmp_path, evaluator, caplog
+):
+    """§13.2 at the L1 entrance: every immediate pick came back wrong, so there is no label
+    at all -- refused, with each row's verdict and reason kept in the preserved corpus.
+    Import used to erase the verdict and this run trained and evaluated on 13 rows."""
+    from uhd_gen.__main__ import main
+
+    tree = _ued_tree(tmp_path / "descriptors")
+    _immediate_bench(
+        monkeypatch,
+        snapshot_provenance(tree),
+        wrong={f"graph-{index}" for index in range(16)},
+    )
+    output = tmp_path / "out"
+    assert (
+        main(
+            _l1_args(
+                _graphs(tmp_path / "graphs"), tree, output, evaluator, "--no-promote"
+            )
+        )
+        == 1
+    )
+    assert "no successful valid timings" in caplog.text
+    assert not output.exists()
+    [stage] = tmp_path.glob(".uhd-generate-*")
+    corpus = json.loads((stage / "corpus.json").read_text(encoding="utf-8"))
+    assert len(corpus) == 16
+    assert all(
+        row["numerically_valid"] is False
+        and row["validation"] == "output_mismatch: wrong output"
+        and row["avgTimeMs"] is None
+        for row in corpus
+    )
+
+
+@pytest.mark.parametrize("role", ["predict_engine", "sort_kernel_catalog"])
+def test_the_measured_tree_is_the_only_descriptor_root_the_bench_sees(
+    monkeypatch, tmp_path, role
+):
+    """The loader keeps the FIRST definition of an id across roots, so an inherited
+    replacement or additive root ahead of the tree being generated against supplies its
+    own selector, and the labels describe a tree this run never installs into. Both roles
+    run with exactly one root: the given tree (L1) or its collection copy (L2)."""
+    from uhd_gen.__main__ import main
+
+    tree = _ued_tree(tmp_path / "descriptors")
+    kmd = tree / "metadata.kmd.json"
+    kmd.write_text(
+        json.dumps(
+            {"version": "1.0", "id": KMD, "fields": [{"name": "tile_m", "type": "int"}]}
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HIPDNN_DESCRIPTOR_DIR", str(tmp_path / "earlier"))
+    monkeypatch.setenv("HIPDNN_DESCRIPTOR_RUNTIME_DIR", str(tmp_path / "runtime"))
+    monkeypatch.setenv("HIPDNN_DESCRIPTOR_PATH", str(tmp_path / "additive"))
+    seen = []
+
+    def bench(command, environment, *args):
+        seen.append(dict(environment))
+        raise ValueError("stop after observing the child environment")
+
+    monkeypatch.setattr("uhd_gen.generate._run_json", bench)
+    monkeypatch.setattr("uhd_gen.generate.shutil.which", lambda name: name)
+    arguments = [
+        "generate",
+        "--graphs",
+        str(_graphs(tmp_path / "graphs", 1)),
+        "--descriptor-tree",
+        str(tree),
+        "--engine-id",
+        "7",
+        "--role",
+        role,
+        "--arch",
+        "gfx942",
+        "--output-dir",
+        str(tmp_path / "out"),
+    ]
+    assert main(arguments) == 1
+
+    [environment] = seen
+    assert "HIPDNN_DESCRIPTOR_PATH" not in environment
+    assert "HIPDNN_DESCRIPTOR_RUNTIME_DIR" not in environment
+    root = Path(environment["HIPDNN_DESCRIPTOR_DIR"])
+    if role == "predict_engine":
+        assert root == tree.resolve()
+    else:
+        assert root.name == "collection_descriptors" and root.parent.name.startswith(
+            ".uhd-generate-"
+        )
 
 
 def _corpus_root(root):

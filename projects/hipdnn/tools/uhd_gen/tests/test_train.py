@@ -207,3 +207,101 @@ def test_grouped_export_keys_each_group_by_the_code_the_feature_row_carries(
         ]
         == 2
     )
+
+
+def _manifest(output):
+    return json.loads((output / "train_manifest.json").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("suffix", [".json", ".csv", ".parquet"])
+def test_a_catalog_row_checked_numerically_wrong_never_trains(
+    tmp_path, evaluator, suffix
+):
+    """RFC 0019 §13.2, at the `train` entrance `generate` does not guard: a candidate
+    shown wrong is not a label whatever its timing says. The bench's timing flag is
+    independent of the verdict, so the wrong row arrives `is_valid` with the fastest time
+    in its problem -- exactly the row a ranker would learn to prefer. Null (undecided)
+    still trains: it is every corpus collected without a reference."""
+    pd = pytest.importorskip("pandas")
+    if suffix == ".parquet":
+        pytest.importorskip("pyarrow")
+    provenance = tmp_path / "provenance.json"
+    provenance.write_text(
+        json.dumps(
+            {
+                "ued": {"id": UED, "revision": "1.0"},
+                "kmd": {"id": KMD, "revision": "1.0"},
+                "umd": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    rows = [
+        {
+            "benchmark": f"p{problem}",
+            "device": "board",
+            "kernel": f"k{variant}",
+            "kernel.variant": variant,
+            "graph.size": problem + 1,
+            "is_valid": True,
+            "numerically_valid": None if problem % 2 else True,
+            "validation": "no_reference" if problem % 2 else "agrees_with_catalog",
+            "tflops": 20.0 + problem + variant,
+        }
+        for problem in range(10)
+        for variant in range(2)
+    ]
+    rows[0].update(
+        numerically_valid=False, validation="output_mismatch: tensor 'Y'", tflops=195.2
+    )
+    corpus = tmp_path / f"corpus{suffix}"
+    if suffix == ".json":
+        corpus.write_text(json.dumps(rows), encoding="utf-8")
+    elif suffix == ".csv":
+        pd.DataFrame(rows).to_csv(corpus, index=False)
+    else:
+        pd.DataFrame(rows).to_parquet(corpus, index=False)
+    output = tmp_path / "model"
+    assert (
+        main(
+            [
+                "train",
+                "--input",
+                str(corpus),
+                "--output-dir",
+                str(output),
+                "--provenance",
+                str(provenance),
+                "--features",
+                "kernel.variant",
+                "graph.size",
+                "--metric",
+                "tflops",
+                "--num-boost-round",
+                "2",
+                "--early-stopping",
+                "1",
+                "--feature-evaluator",
+                evaluator,
+            ]
+        )
+        == 0
+    )
+    assert _manifest(output)["num_samples"] == len(rows) - 1
+
+
+def test_an_immediate_pick_checked_numerically_wrong_never_trains(tmp_path, evaluator):
+    """The L1 half of the same gate: the verdict survives import and the row is excluded
+    from the labels, rather than import erasing the verdict and training on its time."""
+    corpus = _l1_corpus(tmp_path / "corpus.json")
+    rows = json.loads(corpus.read_text(encoding="utf-8"))
+    rows[0].update(numerically_valid=False, validation="output_mismatch: wrong output")
+    corpus.write_text(json.dumps(rows), encoding="utf-8")
+    output = tmp_path / "model"
+    assert (
+        _l1_train(
+            corpus, output, "--metric", "tflops", "--feature-evaluator", evaluator
+        )
+        == 0
+    )
+    assert _manifest(output)["num_samples"] == len(rows) - 1

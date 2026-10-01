@@ -19,6 +19,13 @@ import pandas as pd
 
 from . import addressing
 from .catalog import DeterministicCatalogError, candidate_density
+from .correctness import (
+    REASON,
+    VERDICT,
+    known_wrong,
+    numerical_verdict,
+    suppress_timings,
+)
 from .coverage import device_field_coverage, enforce_device_coverage, propose_features
 from .evaluate import problem_keys, resolve_grouping, split_problems
 from .features import (
@@ -389,16 +396,12 @@ def collect_graph(
         # the inverted oracle the section exists to prevent. `null` is the honest verdict
         # when the cross-check could decide nothing, and it is spelled differently from
         # `true` precisely so it cannot be mistaken for one.
-        if "numerically_valid" not in result or not isinstance(
-            result.get("validation"), str
-        ):
+        if VERDICT not in result or not isinstance(result.get(REASON), str):
             raise ValueError(
                 "timing response must carry a numerical-validation verdict "
                 "(RFC 0019 §13.2); this benchmark performed no correctness check"
             )
-        verdict = result["numerically_valid"]
-        if verdict not in (True, False, None):
-            raise ValueError("numerically_valid must be true, false or null")
+        verdict = numerical_verdict(result[VERDICT])
         elapsed = result.get("robust_time_ms")
         if result.get("succeeded") and (
             not isinstance(elapsed, (int, float))
@@ -420,8 +423,8 @@ def collect_graph(
             # "a measurement was obtained" and §8.1 plus `evaluate`'s exclusion counters
             # both read it that way; a row that ran and computed the wrong answer is a
             # different fact from a row that never ran, and §13.2 keeps both.
-            "numerically_valid": verdict,
-            "validation": result["validation"],
+            VERDICT: verdict,
+            REASON: result[REASON],
             "succeeded": result.get("succeeded"),
             "skip_reason": result.get("skip_reason"),
             "robustMeanMs": elapsed,
@@ -443,8 +446,7 @@ def collect_graph(
             # `evaluate` regret pass that reads the corpus back, and any later retrain. A
             # wrong-but-fast kernel holds the best time in its group, so leaving the number
             # in place and relying on each consumer to filter is how it becomes the label.
-            for column in ("robustMeanMs", "minTimeMs", "avgTimeMs", "stddevMs"):
-                row[column] = None
+            suppress_timings(row)
         for mapping in (
             first["problem_features"],
             first["device_features"],
@@ -781,9 +783,17 @@ def run_generate(args: argparse.Namespace) -> int:
             ordinals = {}
         output.parent.mkdir(parents=True, exist_ok=True)
         stage = Path(tempfile.mkdtemp(prefix=".uhd-generate-", dir=output.parent))
+        # The tree this run measures is the ONE root the bench loads from: DIR replaces the
+        # provider's installed tree, while RUNTIME_DIR and PATH only add roots beside it, and
+        # the loader keeps the FIRST definition of an id. Inherited additive roots are
+        # cleared for both roles, and the measured tree goes in as the replacement, so an
+        # earlier root's selector can never stand in for the one being generated against --
+        # an L1 label is a measurement of the selection this tree makes, nothing else's.
         environment = dict(os.environ)
+        environment.pop("HIPDNN_DESCRIPTOR_PATH", None)
+        environment.pop("HIPDNN_DESCRIPTOR_RUNTIME_DIR", None)
         if immediate:
-            environment["HIPDNN_DESCRIPTOR_PATH"] = str(tree)
+            environment["HIPDNN_DESCRIPTOR_DIR"] = str(tree)
         else:
             collection_tree = stage / "collection_descriptors"
             shutil.copytree(tree, collection_tree)
@@ -803,7 +813,6 @@ def run_generate(args: argparse.Namespace) -> int:
             _write_json(collection_tree / ued_path.relative_to(tree), exposed)
             _write_json(stage / "shipping_ued.json", ued)
             environment["HIPDNN_DESCRIPTOR_DIR"] = str(collection_tree)
-            environment.pop("HIPDNN_DESCRIPTOR_RUNTIME_DIR", None)
         # The catalog sweep times every candidate once, whatever the metric: one timing
         # run feeds every metric's label (RFC 0019 §13.4). An immediate run measures the
         # engine's own kernel choice, which follows the requested metric, so each metric
@@ -961,25 +970,22 @@ def run_generate(args: argparse.Namespace) -> int:
         # Three conditions, because they are three different facts about a candidate and
         # §13.2 keeps them apart: `succeeded` says the engine ran it, `is_valid` says a
         # measurement came back, and `numerically_valid is not False` says nothing showed
-        # the result to be wrong. The last one is the label gate -- a wrong-but-fast kernel
-        # holds the best time in its group, so admitting it trains the ranker to prefer it.
-        # `ne(False)` rather than `eq(True)`: an undecidable verdict is null, and null is
-        # the pre-existing state of every corpus collected before there was a reference to
-        # check against (Open Question 19). Gating on it would train on nothing at all.
-        # The row itself is not dropped -- it is already in `corpus.json`/`corpus.csv` above,
-        # with its measurement suppressed and its marker, which is what §13.2 asks for.
-        usable = {
-            source: (
-                frame.copy()
-                if immediate
-                else frame[
-                    frame["is_valid"]
-                    & frame["succeeded"].eq(True)
-                    & frame["numerically_valid"].ne(False)
-                ].copy()
-            )
-            for source, frame in frames.items()
-        }
+        # the result to be wrong. The last one is the label gate for both roles -- a
+        # wrong-but-fast kernel holds the best time in its group, so admitting it trains the
+        # ranker to prefer it, and an engine whose immediate pick computed the wrong answer
+        # must not teach the estimator its time. Not-False rather than True: an undecidable
+        # verdict is null, and null is the pre-existing state of every corpus collected
+        # before there was a reference to check against (Open Question 19). Gating on it
+        # would train on nothing at all. The row itself is not dropped -- it is already in
+        # `corpus.json`/`corpus.csv` above, with its measurement suppressed and its marker,
+        # which is what §13.2 asks for. An immediate row is always `is_valid`
+        # (`normalize_row`), so only the verdict gates it.
+        usable = {}
+        for source, frame in frames.items():
+            keep = ~known_wrong(frame)
+            if not immediate:
+                keep &= frame["is_valid"] & frame["succeeded"].eq(True)
+            usable[source] = frame[keep].copy()
         if any(candidates.empty for candidates in usable.values()):
             raise ValueError("the benchmark produced no successful valid timings")
         # Checked here, the first moment it is knowable, rather than at the

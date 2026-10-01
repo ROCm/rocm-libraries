@@ -10,6 +10,13 @@ from pathlib import Path
 
 import pandas as pd
 
+from .correctness import (
+    REASON,
+    VERDICT,
+    known_wrong,
+    numerical_reason,
+    numerical_verdict,
+)
 from .features import evaluate_feature_maps, signature_references
 from .corpus_io import read_corpus_frame
 from .provenance import compare_provenance, validate_provenance
@@ -58,10 +65,11 @@ _LEAKED_FIELDS = frozenset(
 LABEL_STATISTIC = "avgTimeMs"
 
 #: What a normalized L1 row is allowed to carry back in: the label, the §8.5 statistic
-#: kept beside it for information, the derived rate and the validity flag. Every other
-#: name in `_LEAKED_FIELDS` is candidate/search data an immediate measurement must not
-#: have. This exemption is for the ENVELOPE only -- `validate_signature` still rejects
-#: every `_LEAKED_FIELDS` name in a feature, so no L1 feature can read its own label.
+#: kept beside it for information, the derived rate, the validity flag and the §13.2
+#: correctness verdict with its reason. Every other name in `_LEAKED_FIELDS` is
+#: candidate/search data an immediate measurement must not have. This exemption is for
+#: the ENVELOPE only -- `validate_signature` still rejects every `_LEAKED_FIELDS` name in
+#: a feature, so no L1 feature can read its own label.
 _LABEL_FIELDS = frozenset({"tflops", "is_valid", "robustMeanMs", LABEL_STATISTIC})
 
 
@@ -291,29 +299,43 @@ def normalize_row(value: dict) -> dict:
             raise ValueError(
                 f"flattened feature {key} differs from the published feature map"
             )
-    # RFC 0019.13 §11.2 (:2003) and §10.6.2 (:1914-1916): the score this model declares
-    # `calibrated: true` MUST be trained on `avgTimeMs`. `robustMeanMs` stays on the row
-    # as the informational §8.5 statistic, never as the label.
-    average = _positive(
-        value.get(LABEL_STATISTIC, value.get("avg_time_ms")), LABEL_STATISTIC
-    )
-    elapsed = _positive(value.get("robustMeanMs"), "robustMeanMs")
-    spread = _optional_spread(value.get("stddevMs", value.get("stddev_ms")), "stddevMs")
-    iterations = _optional_count(value.get("iters", value.get("iterations")), "iters")
-    # Only a throughput label needs the logical work count. A `time` collection over graphs
-    # whose provider publishes no FLOP count (conv backward, today) is a complete label;
-    # a count that IS published must still be a real one.
-    tflops = None
-    if binding["metric"] == "tflops" or "graph.flops" in features:
-        flops = _positive(features.get("graph.flops"), "full-graph graph.flops")
-        tflops = flops / average / 1e9
-        _positive(tflops, "derived tflops")
-    if not _missing(value.get("tflops")):
-        supplied = _positive(value["tflops"], "tflops")
-        if tflops is None or not math.isclose(supplied, tflops, rel_tol=1e-10):
-            raise ValueError(
-                f"supplied tflops differs from graph.flops/({LABEL_STATISTIC}*1e9)"
-            )
+    # RFC 0019 §13.2: the correctness verdict and its reason ride on the row, tri-state,
+    # so evaluation and promotion see exactly what collection decided. A row checked wrong
+    # keeps its place -- the failure is a fact about this engine on this graph -- but loses
+    # every timing and derived label, the way `collect_graph` builds a failed candidate's
+    # row; training and evaluation then exclude it (`correctness.known_wrong`). Null stays
+    # null: the current collector cannot cross-check one engine's single pick, and that is
+    # unknown, not correct.
+    verdict = numerical_verdict(value.get(VERDICT))
+    reason = numerical_reason(value.get(REASON))
+    average = elapsed = spread = iterations = tflops = None
+    if verdict is not False:
+        # RFC 0019.13 §11.2 (:2003) and §10.6.2 (:1914-1916): the score this model
+        # declares `calibrated: true` MUST be trained on `avgTimeMs`. `robustMeanMs`
+        # stays on the row as the informational §8.5 statistic, never as the label.
+        average = _positive(
+            value.get(LABEL_STATISTIC, value.get("avg_time_ms")), LABEL_STATISTIC
+        )
+        elapsed = _positive(value.get("robustMeanMs"), "robustMeanMs")
+        spread = _optional_spread(
+            value.get("stddevMs", value.get("stddev_ms")), "stddevMs"
+        )
+        iterations = _optional_count(
+            value.get("iters", value.get("iterations")), "iters"
+        )
+        # Only a throughput label needs the logical work count. A `time` collection over
+        # graphs whose provider publishes no FLOP count (conv backward, today) is a
+        # complete label; a count that IS published must still be a real one.
+        if binding["metric"] == "tflops" or "graph.flops" in features:
+            flops = _positive(features.get("graph.flops"), "full-graph graph.flops")
+            tflops = flops / average / 1e9
+            _positive(tflops, "derived tflops")
+        if not _missing(value.get("tflops")):
+            supplied = _positive(value["tflops"], "tflops")
+            if tflops is None or not math.isclose(supplied, tflops, rel_tol=1e-10):
+                raise ValueError(
+                    f"supplied tflops differs from graph.flops/({LABEL_STATISTIC}*1e9)"
+                )
     return {
         "benchmark": graph,
         "device": device,
@@ -323,6 +345,8 @@ def normalize_row(value: dict) -> dict:
         "binding": json.dumps(binding, sort_keys=True),
         "features": json.dumps(features, sort_keys=True),
         "is_valid": True,
+        VERDICT: verdict,
+        REASON: reason,
         "selection_mode": "immediate",
         "timing_statistic": LABEL_STATISTIC,
         LABEL_STATISTIC: average,
@@ -422,17 +446,20 @@ def validate_model(descriptor: dict) -> RankingMetric:
             f"L1 prediction of {metric.name!r} requires objective={metric.objective}"
         )
     # The transform vocabulary belongs to `score_transform::isSupported` on the runtime
-    # side; this narrower pair is not a second opinion about it. `evaluate`'s scorers
+    # side; this narrower set is not a second opinion about it. `evaluate`'s scorers
     # implement the identity and log1p inverses only, so a descriptor declaring any
     # other supported transform is loadable by the engine and not scoreable here --
-    # a capability limit of this tool, reported where the scoring happens.
-    if score.get("calibrated") is not True or score.get("transform") not in (
+    # a capability limit of this tool, reported where the scoring happens. An omitted or
+    # empty transform is the runtime's identity (`SUPPORTED_TRANSFORMS` lists "", and
+    # `applyInverse` returns the raw score for it), so it is admitted as exactly that.
+    if score.get("calibrated") is not True or score.get("transform", "") not in (
+        "",
         "identity",
         "log1p",
     ):
         raise ValueError(
             "L1 prediction requires a calibrated score, and uhd_gen can only "
-            "score identity or log1p transforms"
+            "score identity (or omitted) or log1p transforms"
         )
     validate_provenance(descriptor.get("trained_against"))
     validate_signature(descriptor.get("features_signature", []))
@@ -602,7 +629,11 @@ def evaluate_immediate(
     grouping = resolve_grouping(frame)
     keys = problem_keys(frame, grouping)
     split = split_problems(keys, eval_fraction, seed)
-    held_out = frame[keys.isin(split.eval_problems)].copy()
+    # Split over every row, as training's split is, so the two agree on which problems are
+    # held out; then a row checked numerically wrong leaves both the scored rows and the
+    # oracle -- its measurement was suppressed at import, and a wrong answer is not a
+    # selection anyone should be measured against (RFC 0019 §13.2).
+    held_out = frame[keys.isin(split.eval_problems) & ~known_wrong(frame)].copy()
     by_engine = {}
     integrity = []
     metrics = set()

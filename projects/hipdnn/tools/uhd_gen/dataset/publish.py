@@ -32,6 +32,13 @@ from typing import Iterable
 
 import pandas as pd
 
+from ..correctness import (
+    DERIVED_LABELS,
+    REASON,
+    SUPPRESSED_TIMINGS,
+    VERDICT,
+    known_wrong,
+)
 from .metrics import derive_metrics
 from .config_features import ABSENT, expand, slots_used_by
 
@@ -237,6 +244,44 @@ def _translate_collector_failure(frame: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
+def _translate_numerical_failure(frame: pd.DataFrame) -> pd.DataFrame:
+    """A candidate checked wrong is published as the failure it is, verdict and reason kept.
+
+    RFC 0019 §13.2: "A timing is only a training label once the candidate is known
+    correct", and a candidate shown wrong "is written with its measurement suppressed and an
+    explicit invalid marker". The benchmark's timing flag is independent of that verdict --
+    a kernel that computed the wrong answer quickly still reports a fast, `is_valid` timing --
+    so without this the dataset carried its time and a derived rate as an ordinary label.
+
+    Spelled the way §8.3 spells every failure here: the timings go null (so `tflops`/`gbs`
+    derive to null too) and `error` carries the reason, which `_mark_incomplete_where_errored`
+    then reads like any other unmeasured candidate. Unlike the collector's flag, the verdict
+    and its reason are NOT bookkeeping: they stay as columns, so promotion and evaluation see
+    the same `numerically_valid=False` generation wrote. `generate` already suppressed the
+    timing of such a row; it gains its `error` here rather than being refused as "neither a
+    measurement nor an error".
+
+    Only an explicit False translates; null is unknown, and stays a measurement.
+    """
+    wrong = known_wrong(frame)
+    if not wrong.any():
+        return frame
+    for column in (*SUPPRESSED_TIMINGS, *DERIVED_LABELS):
+        if column in frame.columns:
+            frame[column] = frame[column].astype("float64").where(~wrong)
+    # The producer's own words when it gave any; the verdict itself when it did not, which
+    # is all the corpus knows. An error already recorded is never overwritten.
+    reason = (
+        frame[REASON].fillna("").astype(str).str.strip()
+        if REASON in frame.columns
+        else pd.Series("", index=frame.index)
+    )
+    reason = reason.where(reason.str.len() > 0, f"{VERDICT}=False")
+    blank = frame["error"].astype(str).str.strip().str.len() == 0
+    frame.loc[wrong & blank, "error"] = reason[wrong & blank]
+    return frame
+
+
 def _validate(frame: pd.DataFrame) -> None:
     """§8.3's checks, applied where they can finally be applied."""
     if not _query_columns(frame):
@@ -413,6 +458,7 @@ def build_dataset(frame: pd.DataFrame) -> pd.DataFrame:
     """Validates, derives the metrics, and drops what was only ever collection bookkeeping."""
     frame = _apply_defaults(frame.copy())
     frame = _translate_collector_failure(frame)
+    frame = _translate_numerical_failure(frame)
     _validate(frame)
     frame = _mark_incomplete_where_errored(frame)
 

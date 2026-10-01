@@ -289,9 +289,6 @@ def _strict_less_than_model(directory: Path) -> Path:
     model can exercise the other branch. A hand-written or foreign artifact can -- which is
     exactly what `TestTreeDataAdapter` and the rocKE model generator produce.
     """
-    import flatbuffers
-
-    from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModelT
     from hipdnn_flatbuffers_sdk.data_objects.GbdtTree import GbdtTreeT
 
     tree = GbdtTreeT()
@@ -305,6 +302,17 @@ def _strict_less_than_model(directory: Path) -> Path:
     tree.leafValues = [0.0, 1.0, 9.0]
     tree.defaultLeft = [True, True, True]
     tree.decisionLte = [False, False, False]
+    return _single_tree_model(directory, tree)
+
+
+def _single_tree_model(
+    directory: Path, tree, *, score: dict | None = None, manifest: dict | None = None
+) -> Path:
+    """A one-tree, one-feature (`q.size`) artifact written by hand, as a foreign producer
+    would, with the descriptor and training manifest beside it."""
+    import flatbuffers
+
+    from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModelT
 
     model = GbdtModelT()
     model.trees = [tree]
@@ -316,21 +324,25 @@ def _strict_less_than_model(directory: Path) -> Path:
     builder = flatbuffers.Builder(1024)
     builder.Finish(model.Pack(builder), file_identifier=b"HGBM")
 
+    objective = "min" if score else "max"
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "model.bin").write_bytes(bytes(builder.Output()))
     (directory / "train_manifest.json").write_text(
-        json.dumps({"features": ["q.size"], "target": "tflops", "objective": "max"}),
-        encoding="utf-8",
-    )
-    (directory / "heuristic.uhd.json").write_text(
         json.dumps(
-            {
-                "objective": "max",
-                "tree_data": {"artifact": "model.bin"},
-                "features_signature": ["$q.size"],
-            }
+            {"features": ["q.size"], "target": "tflops", "objective": objective}
+            | (manifest or {})
         ),
         encoding="utf-8",
+    )
+    descriptor = {
+        "objective": objective,
+        "tree_data": {"artifact": "model.bin"},
+        "features_signature": ["$q.size"],
+    }
+    if score is not None:
+        descriptor["score"] = score
+    (directory / "heuristic.uhd.json").write_text(
+        json.dumps(descriptor), encoding="utf-8"
     )
     return directory
 
@@ -351,14 +363,78 @@ def test_a_strict_less_than_split_routes_the_way_the_runtime_routes_it():
         pd.DataFrame([{"q.size": 5.0}, {"q.size": 10.0}, {"q.size": 15.0}])
     )
 
-    # Under `<`: 5 goes left (1.0), 10 and 15 go right (9.0). expm1 is monotonic, so the
-    # comparison holds on the returned values.
+    # Under `<`: 5 goes left (1.0), 10 and 15 go right (9.0). The descriptor declares no
+    # transform, which the runtime reads as identity, so the scores are the leaves.
     assert scores[0] < scores[1], "a value below the threshold took the wrong branch"
     assert scores[1] == pytest.approx(
         scores[2]
     ), "10 and 15 must share the right-hand leaf"
-    assert scores[0] == pytest.approx(np.expm1(1.0))
-    assert scores[1] == pytest.approx(np.expm1(9.0))
+    assert scores[0] == pytest.approx(1.0)
+    assert scores[1] == pytest.approx(9.0)
+
+
+def _routing_tree(nodes: int, default_left, decision_lte):
+    """`nodes` 3: a stump at 0. `nodes` 5: the same root, its right child splitting at 2."""
+    from hipdnn_flatbuffers_sdk.data_objects.GbdtTree import GbdtTreeT
+
+    tree = GbdtTreeT()
+    if nodes == 3:
+        tree.featureIndices = [0, -1, -1]
+        tree.thresholds = [0.0, 0.0, 0.0]
+        tree.leftChildren = [1, -1, -1]
+        tree.rightChildren = [2, -1, -1]
+        tree.leafValues = [0.0, 1.0, 9.0]
+    else:
+        tree.featureIndices = [0, -1, 0, -1, -1]
+        tree.thresholds = [0.0, 0.0, 2.0, 0.0, 0.0]
+        tree.leftChildren = [1, -1, 3, -1, -1]
+        tree.rightChildren = [2, -1, 4, -1, -1]
+        tree.leafValues = [0.0, 1.0, 0.0, 3.0, 9.0]
+    tree.defaultLeft = default_left
+    tree.decisionLte = decision_lte
+    return tree
+
+
+@pytest.mark.parametrize(
+    "nodes, default_left, decision_lte, expected",
+    [
+        # Both vectors omitted: `<=` everywhere.
+        (3, None, None, [1.0, 1.0, 9.0]),
+        # Shorter than the tree: the root's entries apply, and past them a nonempty
+        # `decision_lte` means `<`, so 2 is not below node 2's threshold of 2. Padding with
+        # `<=` would send it left, to 3.
+        (5, [True], [True], [1.0, 1.0, 9.0]),
+    ],
+)
+def test_optional_routing_vectors_take_the_runtimes_defaults(
+    tmp_path, nodes, default_left, decision_lte, expected
+):
+    """`default_left` and `decision_lte` are optional and may be short; TreeDataAdapter
+    loads such an artifact and fills them in. The scores are the runtime's for the same
+    bytes (x = -1, 0, 2), not an IndexError."""
+    bundle = load_model(
+        _single_tree_model(
+            tmp_path / "model", _routing_tree(nodes, default_left, decision_lte)
+        )
+    )
+    scores = bundle.scorer(pd.DataFrame({"q.size": [-1.0, 0.0, 2.0]}))
+    assert scores.tolist() == pytest.approx(expected)
+
+
+def test_a_descriptor_declaring_no_transform_is_scored_as_identity(tmp_path):
+    """The engine reads an absent `score.transform` as identity (ScoreTransform.hpp), so the
+    descriptor's raw scores are its estimates; a training manifest saying log1p must not
+    reinterpret the UHD that ships."""
+    bundle = load_model(
+        _single_tree_model(
+            tmp_path / "model",
+            _routing_tree(3, [False] * 3, [True] * 3),
+            score={"metric": "time", "calibrated": True},
+            manifest={"score_transform": "log1p", "target": "avgTimeMs"},
+        )
+    )
+    scores = bundle.scorer(pd.DataFrame({"q.size": [-1.0, 0.0, 2.0]}))
+    assert scores.tolist() == pytest.approx([1.0, 1.0, 9.0])
 
 
 def test_a_generated_encoding_survives_train_then_score(tmp_path, evaluator):

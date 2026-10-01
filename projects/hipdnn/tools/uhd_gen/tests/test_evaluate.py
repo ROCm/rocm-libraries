@@ -268,6 +268,29 @@ def test_an_invalid_row_carrying_a_stale_timing_is_still_excluded():
     assert result.report["exclusions"]["invalid_rows"] == 1
 
 
+def test_a_numerically_wrong_row_is_never_the_oracle():
+    """RFC 0019 §13.2: a candidate shown to compute the wrong answer has no timing for the
+    right one. A direct corpus can still carry the wrong answer's (fast) timing, which would
+    become the oracle and charge every correct pick a regret. An unchecked verdict stays.
+    """
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "checked", "minTimeMs": 2.0},
+            {"benchmark": "g1", "kernel": "unchecked", "minTimeMs": 3.0},
+            {"benchmark": "g1", "kernel": "wrong_but_fast", "minTimeMs": 0.5},
+        ]
+    )
+    # As CSV text, the way a direct corpus carries it.
+    df["numerically_valid"] = ["True", "", "False"]
+    result = evaluate_all(
+        df, oracle_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    )
+
+    assert result.problems[0].oracle_value == pytest.approx(2.0)
+    assert result.problems[0].candidates == 2
+    assert result.report["exclusions"]["numerically_invalid_rows"] == 1
+
+
 def test_single_candidate_problems_are_excluded_and_counted():
     """With nothing to choose between, a correct pick is not evidence of anything."""
     df = make_corpus(

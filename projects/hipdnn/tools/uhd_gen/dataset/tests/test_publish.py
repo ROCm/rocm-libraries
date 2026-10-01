@@ -567,6 +567,46 @@ def test_a_row_marked_failed_that_still_carries_a_timing_is_still_rejected():
         build_dataset(frame)
 
 
+@pytest.mark.parametrize(
+    "timing",
+    [
+        # What the bench writes: its timing flag is independent of the verdict, so a kernel
+        # that computed the wrong answer quickly still reports a fast time.
+        {"minTimeMs": [1.0, 0.011], "avgTimeMs": [1.1, 0.011], "stddevMs": [0.01, 0.0]},
+        # What `generate` writes: the timing already suppressed, no `error` column value.
+        {"minTimeMs": [1.0, None], "avgTimeMs": [1.1, None], "stddevMs": [0.01, None]},
+    ],
+    ids=["bench", "generated"],
+)
+def test_a_numerically_wrong_row_is_published_as_a_failure_with_its_verdict(
+    tmp_path, timing
+):
+    """RFC 0019 §13.2: a candidate shown wrong keeps its row and its marker, never its time.
+
+    Published through the real CSV read path, because that is where the verdict arrives as
+    text. Left alone, the wrong-but-fast row published a 195 TFLOPS label with an empty error.
+    """
+    path = tmp_path / "collected.csv"
+    rows(
+        **timing,
+        numerically_valid=[True, False],
+        validation=["agrees_with_catalog: 2 of 2", "output_mismatch: tensor 'Y'"],
+    ).to_csv(path, index=False)
+
+    out = build_dataset(load_csvs([path]))
+
+    good, wrong = out.iloc[0], out.iloc[1]
+    assert good["tflops"] > 0 and good["error"] == ""
+    for label in ("minTimeMs", "avgTimeMs", "stddevMs", "tflops", "gbs"):
+        assert pd.isna(wrong[label]), label
+    assert wrong["error"] == "output_mismatch: tensor 'Y'"
+    assert not wrong["numerically_valid"]
+    assert out["numerically_valid"].tolist() == [True, False]
+    assert wrong["validation"] == "output_mismatch: tensor 'Y'"
+    # Not a complete measurement of the problem's candidate space any more.
+    assert not out["problem_complete"].any()
+
+
 def test_a_numeric_looking_identity_is_read_as_a_name_not_a_number(tmp_path):
     """Nothing computes with a device id or a benchmark name. Inferred, `0123` becomes the
     integer 123, the published dataset's dtype then depends on which board was swept, and the

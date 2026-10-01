@@ -65,6 +65,7 @@ from .evaluate import (
     run_evaluate,
 )
 from .corpus_io import read_corpus_frame
+from .correctness import known_wrong
 from .coverage import device_field_coverage, enforce_device_coverage
 from .knobs import add_knob_arguments, run_knobs
 from .merge import add_merge_arguments, run_merge
@@ -526,6 +527,16 @@ def _run_train(args: argparse.Namespace) -> int:
                     "artifact has no engine-level (per-row) scoring contract"
                 )
             df, binding = training_binding(read_corpus(input_path), args.engine)
+            # RFC 0019 §13.2, exactly as `generate` gates its L1 labels: an immediate pick
+            # a correctness check showed wrong keeps its row in the corpus (normalize_row
+            # suppressed its timing) and is never a label. Null is unknown, not wrong.
+            wrong = known_wrong(df)
+            if wrong.any():
+                logger.info(
+                    "Dropped %d row(s) checked numerically wrong (numerically_valid=False)",
+                    int(wrong.sum()),
+                )
+                df = df[~wrong]
             # Every row, not the first: the selector that picked each measured kernel answered
             # in the binding's metric, so rows of another metric describe another selector.
             for index, row_binding in enumerate(df["binding"]):
@@ -625,6 +636,16 @@ def _run_train(args: argparse.Namespace) -> int:
             # (§5.6.3 and `Exclusions`), and training and evaluation must not disagree
             # about which rows exist.
             invalid = errored = unmeasured = 0
+            # RFC 0019 §13.2: a candidate shown to compute the wrong answer is never a
+            # label, whatever its timing says -- a wrong-but-fast kernel holds the best time
+            # in its group, so fitting it teaches the ranker to prefer it. The same gate
+            # `generate` applies (`correctness.known_wrong`): False is excluded, null
+            # (undecided) is kept, because null is every corpus collected without a
+            # reference. A published dataset also carries the failure as `error`; a
+            # collected CSV or a corpus JSON may still carry the timing.
+            wrong = known_wrong(df)
+            numerically_wrong = int(wrong.sum())
+            df = df[~wrong]
             if "is_valid" in df.columns:
                 keep = df["is_valid"].astype(str).str.strip().str.lower() == "true"
                 invalid = int((~keep).sum())
@@ -640,13 +661,16 @@ def _run_train(args: argparse.Namespace) -> int:
                 finite = np.isfinite(pd.to_numeric(df[args.target], errors="coerce"))
                 unmeasured = int((~finite).sum())
                 df = df[finite]
-            if invalid or errored or unmeasured:
-                # Counted apart because they are three different producer facts, and the
-                # one that fires says which end to look at: the collector's flag, the
-                # published dataset's error, or a target column that is neither.
+            if numerically_wrong or invalid or errored or unmeasured:
+                # Counted apart because they are four different producer facts, and the
+                # one that fires says which end to look at: the correctness check, the
+                # collector's flag, the published dataset's error, or a target column
+                # that is neither.
                 logger.info(
-                    "Dropped %d row(s) with is_valid=False, %d row(s) carrying a "
-                    "collection error, and %d row(s) whose %s is not a finite number",
+                    "Dropped %d row(s) checked numerically wrong, %d row(s) with "
+                    "is_valid=False, %d row(s) carrying a collection error, and %d "
+                    "row(s) whose %s is not a finite number",
+                    numerically_wrong,
                     invalid,
                     errored,
                     unmeasured,

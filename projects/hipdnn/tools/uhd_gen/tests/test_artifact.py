@@ -115,6 +115,52 @@ def test_a_tree_the_runtime_cannot_prepare_is_refused(tmp_path):
         verify_tree_artifact(cyclic, None)
 
 
+def test_a_buffer_the_flatbuffers_verifier_refuses_is_refused(tmp_path):
+    """`VerifyGbdtModelBuffer` runs before any accessor: a string whose NUL terminator is
+    gone still decodes through the generated Python accessors, and the runtime refuses it.
+    """
+    path = _artifact(tmp_path / "model.bin")
+    data = bytearray(path.read_bytes())
+    end = data.index(b"sha256:0123456789abcdef") + len("sha256:0123456789abcdef")
+    data[end] = ord("!")
+    path.write_bytes(bytes(data))
+    with pytest.raises(ValueError, match="NUL-terminated"):
+        verify_tree_artifact(path, None)
+    (tmp_path / "heuristic.uhd.json").write_text(
+        json.dumps(
+            {
+                "objective": "max",
+                "tree_data": {"artifact": "model.bin"},
+                "features_signature": ["$q.size", "$kernel.group"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="verifier"):
+        load_model(tmp_path)
+
+
+def test_an_artifact_whose_arity_is_not_its_signatures_is_refused(tmp_path):
+    """EnginePredictor and UhdKernelHeuristic refuse a model whose `num_features` differs
+    from its signature's slot count, whatever the features_hash says."""
+    path = _artifact(tmp_path / "model.bin")
+    assert verify_tree_artifact(path, None, feature_count=2) == path.read_bytes()
+    with pytest.raises(ValueError, match="num_features 2"):
+        verify_tree_artifact(path, None, feature_count=1)
+    (tmp_path / "heuristic.uhd.json").write_text(
+        json.dumps(
+            {
+                "objective": "max",
+                "tree_data": {"artifact": "model.bin"},
+                "features_signature": ["$q.size"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="num_features 2"):
+        load_model(tmp_path)
+
+
 def test_grouping_is_read_from_the_artifact(tmp_path):
     grouped = verify_tree_artifact(
         _artifact(tmp_path / "grouped.bin", grouped=True), None
