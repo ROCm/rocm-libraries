@@ -47,6 +47,8 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_input value)
     case rocsparse_sptrsm_input_scalar_datatype:
     case rocsparse_sptrsm_input_scalar_alpha:
     case rocsparse_sptrsm_input_analysis_policy:
+    case rocsparse_sptrsm_input_solve_mode:
+    case rocsparse_sptrsm_input_diagonal_modifier:
     {
         return false;
     }
@@ -87,6 +89,43 @@ try
         sptrsm_descr->set_alg(alg);
         return rocsparse_status_success;
     }
+
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+    case rocsparse_sptrsm_input_solve_mode:
+    {
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(rocsparse_solve_mode),
+                           rocsparse_status_invalid_size);
+        const rocsparse_solve_mode solve_mode
+            = *reinterpret_cast<const rocsparse_solve_mode*>(data);
+        ROCSPARSE_CHECKARG(3,
+                           data,
+                           (solve_mode != rocsparse_solve_mode_triangular
+                            && solve_mode != rocsparse_solve_mode_diagonal),
+                           rocsparse_status_invalid_value);
+        sptrsm_descr->set_solve_mode(solve_mode);
+        return rocsparse_status_success;
+    }
+
+    case rocsparse_sptrsm_input_diagonal_modifier:
+    {
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(rocsparse_diagonal_modifier),
+                           rocsparse_status_invalid_size);
+        const rocsparse_diagonal_modifier diagonal_modifier
+            = *reinterpret_cast<const rocsparse_diagonal_modifier*>(data);
+        ROCSPARSE_CHECKARG(3,
+                           data,
+                           (diagonal_modifier != rocsparse_diagonal_modifier_none
+                            && diagonal_modifier != rocsparse_diagonal_modifier_absolute),
+                           rocsparse_status_invalid_value);
+        sptrsm_descr->set_diagonal_modifier(diagonal_modifier);
+        return rocsparse_status_success;
+    }
+
+#endif
 
     case rocsparse_sptrsm_input_scalar_alpha:
     {

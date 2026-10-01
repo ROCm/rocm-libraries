@@ -61,7 +61,7 @@ rocsparse_status rocsparse::coosm_analysis(rocsparse_handle            handle,
         //
 
         RETURN_IF_ROCSPARSE_ERROR(sorted_coo2csr_info->calculate(
-            handle, A->nnz, A->row_data, A->row_type, A->descr->base));
+            handle, A->nnz, A->const_row_data, A->row_type, A->descr->base));
     }
 
     //

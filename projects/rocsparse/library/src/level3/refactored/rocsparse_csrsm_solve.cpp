@@ -361,18 +361,6 @@ rocsparse_status rocsparse::spmat_transpose_update_values(rocsparse_handle      
                                                                trm_info->get_transposed_perm(),
                                                                rocsparse_index_base_zero)));
 
-#if 0
-  if(conjugate)
-    {
-
-      RETURN_IF_ROCSPARSE_ERROR(rocsparse::conjugate_strided_batched(handle,
-								     target->batch_count,
-								     target->nnz,
-								     target->data_type,
-								     target->val_data,
-								     target->batch_stride));
-    }
-#endif
     return rocsparse_status_success;
 }
 
@@ -422,7 +410,6 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
     // It is assumed that B is transposed and has dimension nrhs x M
     //
     ROCSPARSE_ROUTINE_TRACE;
-
     RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR((A_load_conjugate && op_A != rocsparse_operation_none)
                                                ? rocsparse_status_internal_error
                                                : rocsparse_status_success,
