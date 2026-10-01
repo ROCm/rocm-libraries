@@ -102,7 +102,9 @@ if(NOT DEFINED ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
 endif()
 
 set(_ROCKE_SDPA_DEFAULT OFF)
-if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
+# Package references by default for provider artifact builds. The
+# rocm-libraries superbuild runs build-tree tests and does not fetch the bundle.
+if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR AND NOT ROCM_LIBS_SUPERBUILD)
   set(_ROCKE_SDPA_DEFAULT ON)
 endif()
 option(ROCKE_INSTALL_SDPA_REFERENCE
