@@ -311,7 +311,7 @@ __forceinline__ __device__ double fma(double a, double b, double c)
     template <typename fpVecType>                                                      \
     __forceinline__ __device__ fpVecType BASE(fpVecType x)                             \
     {                                                                                  \
-        constexpr auto VecSize = MappedVectorInfo<fpVecType>::size;                    \
+        constexpr auto VecSize = MappedVectorInfo<fpVecType>::SIZE;                    \
         if constexpr(VecSize == 4)                                                     \
         {                                                                              \
             fpVecType out;                                                             \
@@ -351,7 +351,7 @@ SINGLE_OPERAND_VEC_MATH(fabs);
     template <typename fpVecType>                                                      \
     __forceinline__ __device__ fpVecType BASE(fpVecType x, fpVecType y)                \
     {                                                                                  \
-        constexpr auto VecSize = MappedVectorInfo<fpVecType>::size;                    \
+        constexpr auto VecSize = MappedVectorInfo<fpVecType>::SIZE;                    \
         if constexpr(VecSize == 4)                                                     \
         {                                                                              \
             fpVecType out;                                                             \
@@ -402,7 +402,7 @@ __forceinline__ __device__ fpVecType max(fpVecType x, fpVecType y)
     template <typename fpVecType>                                                      \
     __forceinline__ __device__ fpVecType BASE(fpVecType x, fpVecType y, fpVecType z)   \
     {                                                                                  \
-        constexpr auto VecSize = MappedVectorInfo<fpVecType>::size;                    \
+        constexpr auto VecSize = MappedVectorInfo<fpVecType>::SIZE;                    \
         if constexpr(VecSize == 4)                                                     \
         {                                                                              \
             fpVecType out;                                                             \

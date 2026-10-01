@@ -78,8 +78,8 @@ __forceinline__ __device__ __host__ void accumulateMad8(T1& a, T2 const& b, T3 c
 template <typename TAccum, typename T>
 __forceinline__ __device__ __host__ void accumulateMad(TAccum& a, T const& b, T const& c)
 {
-    constexpr auto TACCUM_SIZE = MappedVectorInfo<TAccum>::size;
-    constexpr auto T_SIZE = MappedVectorInfo<T>::size;
+    constexpr auto TACCUM_SIZE = MappedVectorInfo<TAccum>::SIZE;
+    constexpr auto T_SIZE = MappedVectorInfo<T>::SIZE;
 
     if constexpr(T_SIZE == TACCUM_SIZE)
     {
@@ -106,8 +106,8 @@ __forceinline__ __device__ __host__ void accumulateMad(TAccum& a, T const& b, T 
 template <typename TAccum, typename T>
 __forceinline__ __device__ __host__ void accumulate(TAccum& a, T const& b)
 {
-    constexpr auto TACCUM_SIZE = MappedVectorInfo<TAccum>::size;
-    constexpr auto T_SIZE = MappedVectorInfo<T>::size;
+    constexpr auto TACCUM_SIZE = MappedVectorInfo<TAccum>::SIZE;
+    constexpr auto T_SIZE = MappedVectorInfo<T>::SIZE;
 
     if constexpr(TACCUM_SIZE == 1 && T_SIZE == 8)
     {
@@ -355,7 +355,7 @@ __forceinline__ __device__ void runningStash(const FpPrecType_C* __restrict prev
     // Variant 4 is not used any more. There used to be a special updater for that case deleted when
     // porting kernels to HIP.
     static_assert(hip_kernel_provider::batchnorm::config::VARIANT != 4,
-                  "running_stash is only compiled when HIP_PLUGIN_BN_VARIANT != 4.");
+                  "runningStash is only compiled when HIP_PLUGIN_BN_VARIANT != 4.");
 
     auto pvtRunMean = cast<FpAccumType_C>(prevRunningMean[channel]);
     auto pvtRunVariance = cast<FpAccumType_C>(prevRunningVariance[channel]);

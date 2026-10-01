@@ -96,7 +96,7 @@ __forceinline__ __host__ __device__ FpPrecVecType
                               FpPrecType const& alpha,
                               FpPrecType const& beta)
 {
-    auto constexpr SIZE = hip_kernel_provider::MappedVectorInfo<FpPrecVecType>::size;
+    auto constexpr SIZE = hip_kernel_provider::MappedVectorInfo<FpPrecVecType>::SIZE;
     if constexpr(SIZE == 4)
     {
         FpPrecVecType out;
@@ -436,12 +436,12 @@ struct BatchNormBwdSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                 hip_kernel_provider::batchnorm::accumulateMad(variance, read4, read4);
             }
 
-            if constexpr(rem4 > 0)
+            if constexpr(REM4 > 0)
             {
-                if(lid < rem4)
+                if(lid < REM4)
                 {
                     unsigned int index = getTensorIndex((lid << 2) + LESS4);
-                    if(index + read_size - 1 < hip_plugin_bn_config::nchw)
+                    if(index + READ_SIZE - 1 < hip_plugin_bn_config::NCHW)
                     {
                         read4 = cast<fp_prec_read_vec_type>(
                             *(reinterpret_cast<const fp_read_vec_type*>(xIn + index)));
@@ -453,17 +453,17 @@ struct BatchNormBwdSpatialImpl<1, FpType, FpPrecType, FpAccumType>
         }
         else
         {
-            for(unsigned int k = lid; k < less; k += hip_plugin_bn_config::launch_dim.grp0)
+            for(unsigned int k = lid; k < LESS; k += hip_plugin_bn_config::LAUNCH_DIM.GRP0)
             {
                 FpPrecType in = cast<FpPrecType>(xIn[getTensorIndex(k)]);
                 mean += in;
                 variance = fma(in, in, variance);
             }
-            if constexpr(rem > 0)
+            if constexpr(REM > 0)
             {
-                if(lid < rem)
+                if(lid < REM)
                 {
-                    unsigned int index = getTensorIndex(lid + less);
+                    unsigned int index = getTensorIndex(lid + LESS);
                     FpPrecType in
                         = (index < hip_plugin_bn_config::NCHW) ? cast<FpPrecType>(xIn[index]) : 0;
                     mean += in;
@@ -479,7 +479,7 @@ struct BatchNormBwdSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                                                            hip_plugin_bn_config::LDS_SIZE>(
             reinterpret_cast<FpAccumType&>(mean),
             reinterpret_cast<FpAccumType&>(variance),
-            static_cast<FpAccumType>(INHW),
+            static_cast<FpAccumType>(inhw),
             lid);
 
         // REDUCTION COMPLETE ---------------------------
@@ -697,7 +697,7 @@ struct BatchNormBwdSpatialImpl<3, FpType, FpPrecType, FpAccumType>
             for(int n = 0; n < hip_plugin_bn_config::N; n++)
             {
                 index = n * hip_plugin_bn_config::CHW + cidx + lid;
-                if constexpr(hip_plugin_bn_config::M < hip_plugin_bn_config::MAX_N)
+                if constexpr(hip_plugin_bn_config::N < hip_plugin_bn_config::MAX_N)
                 {
                     batchvalues[n] = cast<FpPrecType>(xIn[index]);
                     mean += batchvalues[n];
@@ -722,7 +722,7 @@ struct BatchNormBwdSpatialImpl<3, FpType, FpPrecType, FpAccumType>
                                                            hip_plugin_bn_config::LDS_SIZE>(
             reinterpret_cast<FpAccumType&>(mean),
             reinterpret_cast<FpAccumType&>(variance),
-            static_cast<FpAccumType>(INHW),
+            static_cast<FpAccumType>(inhw),
             lid);
 
         // REDUCTION COMPLETE -----------------------
@@ -832,8 +832,8 @@ struct BatchNormBwdSpatialImpl<3, FpType, FpPrecType, FpAccumType>
 #if(HIP_PLUGIN_BN_VARIANT != 2)
 
 extern "C" __global__ void
-    __launch_bounds__(hip_plugin_bn_config::launch_dim.grp0* hip_plugin_bn_config::launch_dim
-                          .grp1* hip_plugin_bn_config::launch_dim.grp2)
+    __launch_bounds__(hip_plugin_bn_config::LAUNCH_DIM.GRP0* hip_plugin_bn_config::LAUNCH_DIM
+                          .GRP1* hip_plugin_bn_config::LAUNCH_DIM.GRP2)
         batchNormBwdSpatial(const fp_type* __restrict xIn,
                             const fp_type* __restrict dyIn,
                             fp_type* __restrict dxOut,
@@ -859,7 +859,7 @@ extern "C" __global__ void
 
 #if(HIP_PLUGIN_BN_USESAVED == 0)
     BwdSpatialHIPImpl{}(
-        xIn, dy_in, dx_out, bnScale, bnBias, dscale, dbias, epsilon, INHW, alpha, beta);
+        xIn, dyIn, dxOut, bnScale, bnBias, dscale, dbias, epsilon, inhw, alpha, beta);
 #elif(HIP_PLUGIN_BN_USESAVED == 1)
     BwdSpatialHIPImpl{}(xIn,
                         dyIn,
@@ -880,8 +880,8 @@ extern "C" __global__ void
 
 extern "C" __global__ void
     __launch_bounds__(HIP_PLUGIN_BN_GRP0_FINAL* HIP_PLUGIN_BN_GRP1_FINAL* HIP_PLUGIN_BN_GRP2_FINAL)
-        BatchNormBwdSpatialFinalMeanVariance(fp_type* __restrict meanvarbuff,
-                                             fp_prec_type INHW,
+        batchNormBwdSpatialFinalMeanVariance(fp_type* __restrict meanvarbuff,
+                                             fp_prec_type inhw,
                                              double epsilon)
 {
     unsigned int xlid = threadIdx.x;
@@ -932,27 +932,27 @@ extern "C" __global__ void
         }
     }
 
-    if constexpr(!hip_plugin_bn_config::USE_AMDGCN || hip_plugin_bn_config::launch_dim.grp0 > 1
+    if constexpr(!hip_plugin_bn_config::USE_AMDGCN || hip_plugin_bn_config::LAUNCH_DIM.GRP0 > 1
                  || (hip_plugin_bn_config::LDS_GCN_SIZE == 1)
                  || hip_plugin_bn_config::VEC_SIZE_X > 1)
     {
         __shared__ fp_accum_c_type lcl_data[2 * HIP_PLUGIN_BN_GRP0_FINAL * HIP_PLUGIN_BN_GRP1_FINAL
                                             * HIP_PLUGIN_BN_GRP2_FINAL];
-        hip_kernel_provider::batchnorm::reduction::lds_reduce2_2d(mean,
-                                                                  variance,
-                                                                  toAccumCType(INHW),
-                                                                  lcl_data,
-                                                                  xgrp_sz,
-                                                                  xlid,
-                                                                  ylid + zlid * ygrp_sz,
-                                                                  ygrp_sz * zgrp_sz);
+        hip_kernel_provider::batchnorm::reduction::ldsReduce22d(mean,
+                                                                variance,
+                                                                toAccumCType(inhw),
+                                                                lcl_data,
+                                                                xgrp_sz,
+                                                                xlid,
+                                                                ylid + zlid * ygrp_sz,
+                                                                ygrp_sz * zgrp_sz);
     }
     else
     {
         constexpr auto grp_final_total
             = HIP_PLUGIN_BN_GRP0_FINAL * HIP_PLUGIN_BN_GRP1_FINAL * HIP_PLUGIN_BN_GRP2_FINAL;
         hip_kernel_provider::batchnorm::reduction::reduce2<fp_accum_c_type, grp_final_total>(
-            mean, variance, toAccumCType(INHW), ylid + zlid * ygrp_sz);
+            mean, variance, toAccumCType(inhw), ylid + zlid * ygrp_sz);
     }
 
     variance = hip_kernel_provider::fma(-mean, mean, variance);
@@ -963,8 +963,8 @@ extern "C" __global__ void
     {
         for(unsigned int yoffset = ylid; yoffset < HIP_PLUGIN_BN_NGRPS; yoffset += ygrp_sz)
         {
-            // Replicate mean and variance for all y groups because stash == dx_out and
-            // BatchNormBwdSpatialDX will read them and rewrite the buffer entirely.
+            // Replicate mean and variance for all y groups because stash == dxOut and
+            // batchNormBwdSpatialDX will read them and rewrite the buffer entirely.
             hip_kernel_provider::batchnorm::storeToStash(
                 mean,
                 reinterpret_cast<fp_c_type*>(meanvarbuff),
@@ -992,9 +992,9 @@ extern "C" __global__ void
 }
 
 extern "C" __global__ void
-    __launch_bounds__(hip_plugin_bn_config::launch_dim.grp0* hip_plugin_bn_config::launch_dim
-                          .grp1* hip_plugin_bn_config::launch_dim.grp2)
-        BatchNormBwdSpatialMeanVariance(const fp_type* __restrict in,
+    __launch_bounds__(hip_plugin_bn_config::LAUNCH_DIM.GRP0* hip_plugin_bn_config::LAUNCH_DIM
+                          .GRP1* hip_plugin_bn_config::LAUNCH_DIM.GRP2)
+        batchNormBwdSpatialMeanVariance(const fp_type* __restrict in,
                                         fp_type* __restrict meanvarbuff)
 {
 
@@ -1038,19 +1038,19 @@ extern "C" __global__ void
         }
     }
 
-    if constexpr(!hip_plugin_bn_config::USE_AMDGCN || hip_plugin_bn_config::launch_dim.grp0 > 1
+    if constexpr(!hip_plugin_bn_config::USE_AMDGCN || hip_plugin_bn_config::LAUNCH_DIM.GRP0 > 1
                  || (hip_plugin_bn_config::LDS_GCN_SIZE == 1)
                  || hip_plugin_bn_config::VEC_SIZE_X > 1)
     {
         __shared__ fp_accum_c_type lcl_data[2 * hip_plugin_bn_config::LDS_SIZE];
-        hip_kernel_provider::batchnorm::reduction::lds_reduce2_2d(mean,
-                                                                  variance,
-                                                                  toAccumCType(1.0),
-                                                                  lcl_data,
-                                                                  xgrp_sz,
-                                                                  xlid,
-                                                                  ylid + zlid * ygrp_sz,
-                                                                  ygrp_sz * zgrp_sz);
+        hip_kernel_provider::batchnorm::reduction::ldsReduce22d(mean,
+                                                                variance,
+                                                                toAccumCType(1.0),
+                                                                lcl_data,
+                                                                xgrp_sz,
+                                                                xlid,
+                                                                ylid + zlid * ygrp_sz,
+                                                                ygrp_sz * zgrp_sz);
     }
     else
     {
@@ -1087,10 +1087,10 @@ extern "C" __global__ void
 } // end spatial mean kernel
 
 extern "C" __global__ void
-    __launch_bounds__(hip_plugin_bn_config::launch_dim.grp0* hip_plugin_bn_config::launch_dim
-                          .grp1* hip_plugin_bn_config::launch_dim.grp2)
-        BatchNormBwdSpatialDScaleDBias(const fp_type* __restrict xIn,
-                                       const fp_type* __restrict dy_in,
+    __launch_bounds__(hip_plugin_bn_config::LAUNCH_DIM.GRP0* hip_plugin_bn_config::LAUNCH_DIM
+                          .GRP1* hip_plugin_bn_config::LAUNCH_DIM.GRP2)
+        batchNormBwdSpatialDScaleDBias(const fp_type* __restrict xIn,
+                                       const fp_type* __restrict dyIn,
                                        fp_type* __restrict buff,
                                        const fp_prec_type* __restrict bnScale,
                                        const fp_prec_type* __restrict bnBias,
@@ -1128,11 +1128,11 @@ extern "C" __global__ void
     fp_prec_c_type pscale = toPrecCType(0);
     fp_prec_c_type pbias = toPrecCType(0);
 
-    __shared__ fp_prec_c_type lmean[hip_plugin_bn_config::launch_dim.grp0];
-    __shared__ fp_prec_c_type livar[hip_plugin_bn_config::launch_dim.grp0];
+    __shared__ fp_prec_c_type lmean[hip_plugin_bn_config::LAUNCH_DIM.GRP0];
+    __shared__ fp_prec_c_type livar[hip_plugin_bn_config::LAUNCH_DIM.GRP0];
 #if(HIP_PLUGIN_BN_NRN_OP_ID > 0)
-    __shared__ fp_prec_c_type lcl_scale[hip_plugin_bn_config::launch_dim.grp0];
-    __shared__ fp_prec_c_type lcl_bias[hip_plugin_bn_config::launch_dim.grp0];
+    __shared__ fp_prec_c_type lcl_scale[hip_plugin_bn_config::LAUNCH_DIM.GRP0];
+    __shared__ fp_prec_c_type lcl_bias[hip_plugin_bn_config::LAUNCH_DIM.GRP0];
 #endif
 
     if(ylid == 0 && zlid == 0)
@@ -1187,7 +1187,7 @@ extern "C" __global__ void
         {
             unsigned int index = index_base + n * hip_plugin_bn_config::CHW;
             fp_prec_ls_type value1
-                = toPrecLsType(*reinterpret_cast<const fp_ls_type*>(dy_in + index));
+                = toPrecLsType(*reinterpret_cast<const fp_ls_type*>(dyIn + index));
             fp_prec_ls_type value2
                 = toPrecLsType(*reinterpret_cast<const fp_ls_type*>(xIn + index));
             fp_prec_ls_type xhat = (value2 - mean) * invVar;
@@ -1206,19 +1206,19 @@ extern "C" __global__ void
         }
     }
 
-    if constexpr(!hip_plugin_bn_config::USE_AMDGCN || hip_plugin_bn_config::launch_dim.grp0 > 1
+    if constexpr(!hip_plugin_bn_config::USE_AMDGCN || hip_plugin_bn_config::LAUNCH_DIM.GRP0 > 1
                  || (hip_plugin_bn_config::LDS_GCN_SIZE == 1)
                  || hip_plugin_bn_config::VEC_SIZE_X > 1)
     {
         __shared__ fp_accum_c_type lcl_data[2 * hip_plugin_bn_config::LDS_SIZE];
-        hip_kernel_provider::batchnorm::reduction::lds_reduce2_2d(dscale,
-                                                                  dbias,
-                                                                  toAccumCType(1.0),
-                                                                  lcl_data,
-                                                                  xgrp_sz,
-                                                                  xlid,
-                                                                  ylid + zlid * ygrp_sz,
-                                                                  ygrp_sz * zgrp_sz);
+        hip_kernel_provider::batchnorm::reduction::ldsReduce22d(dscale,
+                                                                dbias,
+                                                                toAccumCType(1.0),
+                                                                lcl_data,
+                                                                xgrp_sz,
+                                                                xlid,
+                                                                ylid + zlid * ygrp_sz,
+                                                                ygrp_sz * zgrp_sz);
     }
     else
     {
@@ -1257,7 +1257,7 @@ extern "C" __global__ void
 
 extern "C" __global__ void
     __launch_bounds__(HIP_PLUGIN_BN_GRP0_FINAL* HIP_PLUGIN_BN_GRP1_FINAL* HIP_PLUGIN_BN_GRP2_FINAL)
-        BatchNormBwdSpatialFinalDScaleDBias(const fp_type* __restrict buff,
+        batchNormBwdSpatialFinalDScaleDBias(const fp_type* __restrict buff,
                                             fp_prec_type* __restrict delta_scale,
                                             fp_prec_type* __restrict delta_bias)
 {
@@ -1309,20 +1309,20 @@ extern "C" __global__ void
         }
     }
 
-    if constexpr(!hip_plugin_bn_config::USE_AMDGCN || hip_plugin_bn_config::launch_dim.grp0 > 1
+    if constexpr(!hip_plugin_bn_config::USE_AMDGCN || hip_plugin_bn_config::LAUNCH_DIM.GRP0 > 1
                  || (hip_plugin_bn_config::LDS_GCN_SIZE == 1)
                  || hip_plugin_bn_config::VEC_SIZE_X > 1)
     {
         __shared__ fp_accum_c_type lcl_data[2 * HIP_PLUGIN_BN_GRP0_FINAL * HIP_PLUGIN_BN_GRP1_FINAL
                                             * HIP_PLUGIN_BN_GRP2_FINAL];
-        hip_kernel_provider::batchnorm::reduction::lds_reduce2_2d(dscale,
-                                                                  dbias,
-                                                                  toAccumCType(1.0),
-                                                                  lcl_data,
-                                                                  xgrp_sz,
-                                                                  xlid,
-                                                                  ylid + zlid * ygrp_sz,
-                                                                  ygrp_sz * zgrp_sz);
+        hip_kernel_provider::batchnorm::reduction::ldsReduce22d(dscale,
+                                                                dbias,
+                                                                toAccumCType(1.0),
+                                                                lcl_data,
+                                                                xgrp_sz,
+                                                                xlid,
+                                                                ylid + zlid * ygrp_sz,
+                                                                ygrp_sz * zgrp_sz);
     }
     else
     {
@@ -1340,11 +1340,11 @@ extern "C" __global__ void
 }
 
 extern "C" __global__ void
-    __launch_bounds__(hip_plugin_bn_config::launch_dim.grp0* hip_plugin_bn_config::launch_dim
-                          .grp1* hip_plugin_bn_config::launch_dim.grp2)
-        BatchNormBwdSpatialDX(const fp_type* __restrict xIn,
-                              const fp_type* __restrict dy_in,
-                              fp_type* __restrict dx_out,
+    __launch_bounds__(hip_plugin_bn_config::LAUNCH_DIM.GRP0* hip_plugin_bn_config::LAUNCH_DIM
+                          .GRP1* hip_plugin_bn_config::LAUNCH_DIM.GRP2)
+        batchNormBwdSpatialDX(const fp_type* __restrict xIn,
+                              const fp_type* __restrict dyIn,
+                              fp_type* __restrict dxOut,
                               const fp_prec_type* __restrict bnScale,
                               const fp_prec_type* __restrict bnBias,
                               const fp_prec_type* __restrict delta_scale,
@@ -1353,7 +1353,7 @@ extern "C" __global__ void
                               const fp_prec_type* __restrict savedMean,
                               const fp_prec_type* __restrict savedInvVariance,
 #endif
-                              fp_prec_type INHW,
+                              fp_prec_type inhw,
                               fp_prec_type alpha,
                               fp_prec_type beta)
 {
@@ -1376,13 +1376,13 @@ extern "C" __global__ void
     fp_prec_c_type pscale, dscale, dbias;
     fp_prec_c_type pbias = toPrecCType(0);
 
-    __shared__ fp_prec_c_type lscale[hip_plugin_bn_config::launch_dim.grp0];
-    __shared__ fp_prec_c_type ldscale[hip_plugin_bn_config::launch_dim.grp0];
-    __shared__ fp_prec_c_type ldbias[hip_plugin_bn_config::launch_dim.grp0];
-    __shared__ fp_prec_c_type lmean[hip_plugin_bn_config::launch_dim.grp0];
-    __shared__ fp_prec_c_type livar[hip_plugin_bn_config::launch_dim.grp0];
+    __shared__ fp_prec_c_type lscale[hip_plugin_bn_config::LAUNCH_DIM.GRP0];
+    __shared__ fp_prec_c_type ldscale[hip_plugin_bn_config::LAUNCH_DIM.GRP0];
+    __shared__ fp_prec_c_type ldbias[hip_plugin_bn_config::LAUNCH_DIM.GRP0];
+    __shared__ fp_prec_c_type lmean[hip_plugin_bn_config::LAUNCH_DIM.GRP0];
+    __shared__ fp_prec_c_type livar[hip_plugin_bn_config::LAUNCH_DIM.GRP0];
 #if(HIP_PLUGIN_BN_NRN_OP_ID > 0)
-    __shared__ fp_prec_c_type lbias[hip_plugin_bn_config::launch_dim.grp0];
+    __shared__ fp_prec_c_type lbias[hip_plugin_bn_config::LAUNCH_DIM.GRP0];
 #endif
 
     if(ylid == 0 && zlid == 0)
@@ -1397,7 +1397,7 @@ extern "C" __global__ void
         unsigned int zgrp_sz = blockDim.z;
 
         lmean[xlid] = hip_kernel_provider::batchnorm::loadFromStash<fp_prec_c_type>(
-            reinterpret_cast<const fp_c_type*>(dx_out),
+            reinterpret_cast<const fp_c_type*>(dxOut),
             0,
             zgrp_sz * zgrp_id * HIP_PLUGIN_BN_N_ELEMENTS,
             ygrp_sz * ygrp_id * hip_plugin_bn_config::VEC_SIZE_Y,
@@ -1407,7 +1407,7 @@ extern "C" __global__ void
             xlid,
             xstride);
         livar[xlid] = hip_kernel_provider::batchnorm::loadFromStash<fp_prec_c_type>(
-            reinterpret_cast<const fp_c_type*>(dx_out),
+            reinterpret_cast<const fp_c_type*>(dxOut),
             1,
             zgrp_sz * zgrp_id * HIP_PLUGIN_BN_N_ELEMENTS,
             ygrp_sz * ygrp_id * hip_plugin_bn_config::VEC_SIZE_Y,
@@ -1451,9 +1451,9 @@ extern "C" __global__ void
             fp_prec_ls_type x_i = toPrecLsType(*reinterpret_cast<const fp_ls_type*>(xIn + index));
             fp_prec_ls_type xhat = (x_i - mean) * invVar; // recalculating this again...
             fp_prec_ls_type value1
-                = toPrecLsType(*reinterpret_cast<const fp_ls_type*>(dy_in + index));
+                = toPrecLsType(*reinterpret_cast<const fp_ls_type*>(dyIn + index));
             value1 = hip_kernel_provider::batchnorm::bwdActivationOp<fp_prec_ls_type,
-                                                                     hip_plugin_config::neuron_op>(
+                                                                     hip_plugin_config::NEURON_OP>(
                 value1,
                 xhat,
                 toPrecLsType(pscale),
@@ -1461,7 +1461,7 @@ extern "C" __global__ void
                 toPrecLsType(alpha),
                 toPrecLsType(beta));
 
-            *reinterpret_cast<fp_ls_type*>(dx_out + index)
+            *reinterpret_cast<fp_ls_type*>(dxOut + index)
                 = toLsType(batchBwdNormalization(value1,
                                                  xhat,
                                                  toPrecLsType(dbias),
@@ -1469,7 +1469,7 @@ extern "C" __global__ void
                                                  toPrecLsType(pscale),
                                                  toPrecLsType(invVar),
                                                  toPrecLsType(hip_plugin_bn_config::NHW),
-                                                 toPrecLsType(INHW)));
+                                                 toPrecLsType(inhw)));
         }
     }
 }

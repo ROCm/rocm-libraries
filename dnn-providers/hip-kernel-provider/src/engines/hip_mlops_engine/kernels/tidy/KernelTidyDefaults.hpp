@@ -29,7 +29,7 @@
 #define HIP_PLUGIN_GFX103X 0
 #endif
 
-#ifndef HIP_PLUGIN_GFX110X 0
+#ifndef HIP_PLUGIN_GFX110X
 #define HIP_PLUGIN_GFX110X 0
 #endif
 

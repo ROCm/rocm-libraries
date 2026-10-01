@@ -125,7 +125,7 @@ __forceinline__ __device__ __host__ MappedVectorType broadcast(const T val)
     using VectorInfo = MappedVectorInfo<MappedVectorType>;
     MappedVectorType retval;
     auto* retvalPtr = reinterpret_cast<typename VectorInfo::UnderlyingType*>(&retval);
-    for(auto i = 0; i < VectorInfo::size; ++i)
+    for(auto i = 0; i < VectorInfo::SIZE; ++i)
     {
         retvalPtr[i] = detail::scalarcast<typename VectorInfo::UnderlyingType>(val);
     }

@@ -196,11 +196,11 @@ struct ProtoConfig
     // NOLINTBEGIN(readability-avoid-nested-conditional-operator)
     static constexpr fp_type MAX_VAL
         = INPUT_TYPE_STRATEGY == TypeStrategy::FP16 || INPUT_TYPE_STRATEGY == TypeStrategy::FPMIX
-              ? HalfMax::value
+              ? HalfMax::VALUE
               : (INPUT_TYPE_STRATEGY == TypeStrategy::FP32
-                     ? FltMax::value
+                     ? FltMax::VALUE
                      : Bf16Max::
-                           value); // According to the old FloatTypes mechanism (on which this is based), for mixed-precision cases the max value is defined as the max of the smaller type
+                           VALUE); // According to the old FloatTypes mechanism (on which this is based), for mixed-precision cases the max value is defined as the max of the smaller type
     // NOLINTEND(readability-avoid-nested-conditional-operator)
 
     static constexpr auto LAUNCH_DIM = LaunchDim{};
@@ -238,7 +238,7 @@ struct ProtoConfig
     static constexpr unsigned int VEC_SIZE_X
         = VECTORIZE && HipKernelConfig::LAYOUT_NHWC ? VEC_SIZE : 1;
     static constexpr unsigned int VEC_SIZE_Y
-        = VECTORIZE && !HipKernelConfig::layout_nhwc ? VEC_SIZE : 1;
+        = VECTORIZE && !HipKernelConfig::LAYOUT_NHWC ? VEC_SIZE : 1;
 
     using fp_prec_c_type =
         typename std::conditional<VECTORIZE && HipKernelConfig::LAYOUT_NHWC,

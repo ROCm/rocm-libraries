@@ -97,10 +97,10 @@ struct StaticUnrollImpl
     };
 
     template <class>
-    struct static_for_impl;
+    struct StaticForImpl;
 
     template <IndexType... Is>
-    struct static_for_impl<Sequence<Is...>>
+    struct StaticForImpl<Sequence<Is...>>
     {
         template <class F>
         __forceinline__ __host__ __device__ constexpr void operator()(F f) const
@@ -121,7 +121,7 @@ struct StaticUnrollImpl
         template <class F>
         __forceinline__ __host__ __device__ constexpr void operator()(F f) const
         {
-            static_for_impl<typename ArithmeticSequenceGen<NBegin, NEnd, Increment>::type>{}(f);
+            StaticForImpl<typename ArithmeticSequenceGen<NBegin, NEnd, Increment>::type>{}(f);
         }
     };
 };
@@ -150,7 +150,7 @@ struct StaticUnrollFull
     template <typename F>
     __forceinline__ __host__ __device__ constexpr StaticUnrollFull(F f)
     {
-        typename StaticUnrollImpl<ItemType>::template static_for<Start, ACTUAL_END, Stride>{}(f);
+        typename StaticUnrollImpl<ItemType>::template StaticFor<Start, ACTUAL_END, Stride>{}(f);
     }
 };
 

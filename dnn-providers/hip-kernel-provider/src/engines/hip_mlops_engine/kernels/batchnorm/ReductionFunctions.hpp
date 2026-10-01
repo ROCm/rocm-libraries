@@ -137,7 +137,7 @@ __forceinline__ __device__ void
                unsigned int lid)
 {
     const unsigned int ldsidx = lid >> 6;
-    dpp_interleaved_reduction(x, y);
+    dppInterleavedReduction(x, y);
     // Last thread
     if((lid % 64) == 63)
     {
