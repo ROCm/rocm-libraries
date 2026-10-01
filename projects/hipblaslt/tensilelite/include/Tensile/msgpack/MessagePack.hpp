@@ -338,6 +338,13 @@ namespace TensileLite
         template <>
         struct IOTraits<MessagePackInput>
         {
+            static bool hasKey(MessagePackInput& io, const char* key)
+            {
+                if(io.objectMap.empty())
+                    objectToMap(io.object, io.objectMap);
+                return io.objectMap.find(key) != io.objectMap.end();
+            }
+
             template <typename T>
             static void mapRequired(MessagePackInput& io, const char* key, T& obj)
             {
@@ -447,4 +454,3 @@ namespace TensileLite
         };
     }
 }
-

@@ -3478,34 +3478,34 @@
         },
         "gemm/gfx1250/mxfp8/wmma_scale/bf8e5m2": {
           "arch": "gfx1250",
-          "bytes": 89115,
+          "bytes": 35151,
           "family": "gemm",
           "kernel_name": "irhash_mxfp8_bf8e5m2_wmma_scale_block_scaled_bf8_bf8_M32N48K256_bk32_t16x16x128_wmma_scale",
-          "sha256": "5c0b9acba3b20ca0bf7f6fc2c8b2ad939a498267d306c548bf5f4561a673b630",
+          "sha256": "842cd78f69260d8e048f9571d4e3a4dfa890f8a176c47569715d64bdcea96373",
           "status": "ok"
         },
         "gemm/gfx1250/mxfp8/wmma_scale/fp8e4m3": {
           "arch": "gfx1250",
-          "bytes": 89115,
+          "bytes": 35151,
           "family": "gemm",
           "kernel_name": "irhash_mxfp8_fp8e4m3_wmma_scale_block_scaled_fp8_fp8_M32N48K256_bk32_t16x16x128_wmma_scale",
-          "sha256": "9548c73de51e3087ef296ac458ea408fce00faeee91f9c3a58efa55504c61417",
+          "sha256": "3887ae7b78e6a9827967b9a6b64309241942e274d3f9db2dfa145d608006538f",
           "status": "ok"
         },
         "gemm/gfx1250/mxfp8/wmma_scale16/bf8e5m2": {
           "arch": "gfx1250",
-          "bytes": 95709,
+          "bytes": 41713,
           "family": "gemm",
           "kernel_name": "irhash_mxfp8_bf8e5m2_wmma_scale16_block_scaled_bf8_bf8_M32N48K256_bk16_t16x16x128_wmma_scale16",
-          "sha256": "e6c8959ea48fb8f55dd2e82e372bf42d3c63a3320f055cae48b2822db95a4e85",
+          "sha256": "51ad5f432b9ec21f373107eaff95ca6c12d15c61c0c553ac5ddc10daf2b0b296",
           "status": "ok"
         },
         "gemm/gfx1250/mxfp8/wmma_scale16/fp8e4m3": {
           "arch": "gfx1250",
-          "bytes": 95709,
+          "bytes": 41713,
           "family": "gemm",
           "kernel_name": "irhash_mxfp8_fp8e4m3_wmma_scale16_block_scaled_fp8_fp8_M32N48K256_bk16_t16x16x128_wmma_scale16",
-          "sha256": "161762b28d7cca4b6ee08086a48d9be277f680b7f394ac6f07f40f99f9099d54",
+          "sha256": "b2b6bf13e0a6f89acedb76512addacb1fc3a5b52a6a8e8783acbd0eaef05eaf7",
           "status": "ok"
         },
         "gemm/gfx1250/t32x32x32": {

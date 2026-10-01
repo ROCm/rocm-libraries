@@ -1280,14 +1280,31 @@ template <typename Ti, typename To, typename Tc>
 bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
 {
 #ifdef BUILD_WITH_HIPBLASLT
-    if constexpr(sizeof(Ti) != 2 && !std::is_same<Ti, double>::value)
+    if(!prob.handle->isHipBLASLtForcedOn())
     {
-        if(!prob.handle->isHipBLASLtForcedOn())
+        int arch = rocblas_internal_get_arch(prob.handle);
+
+        // gfx950: hipBLASLt is used only for fp16/bf16/fp64
+        // TODO remove after all types are supported
+        if constexpr(sizeof(Ti) != 2 && !std::is_same<Ti, double>::value)
         {
-            // gfx950: hipBLASLt is used only for fp16/bf16/fp64
-            // TODO remove after all types are supported
-            if(rocblas_internal_get_arch(prob.handle) == 950)
+            if(arch == 950)
                 return false;
+        }
+
+        // gfx942: hipBLASLt is used only for DGEMM on the 228-CU MI300A
+        // TODO expand once more gfx942 configs are validated
+        if(arch == 942)
+        {
+            if constexpr(std::is_same<Ti, double>::value)
+            {
+                if(prob.handle->device_properties.multiProcessorCount != 228)
+                    return false;
+            }
+            else
+            {
+                return false;
+            }
         }
     }
 
