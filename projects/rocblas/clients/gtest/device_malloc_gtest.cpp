@@ -63,9 +63,31 @@ namespace
         // setter call commented out in favour of the environment, for the same reason.
         //
         // No graph capture happens: that is pre_test's doing and this test never calls it.
+        // Asserted on the argument rather than on the handle because the flag the branch
+        // actually reads, _rocblas_handle::stream_order_alloc, is private and has no
+        // getter. This at least fails loudly if the YAML line goes away, rather than
+        // letting the test drop back to the allocator branch and pass against an
+        // unfixed library.
         ASSERT_TRUE(arg.graph_test)
             << "this test needs a handle built with stream-order allocation; restore "
                "graph_test: true in device_malloc_gtest.yaml";
+
+        // Probed before the handle is built, because graph_test makes the constructor
+        // call hipMallocAsync and that throws where memory pools are unsupported. The
+        // throw escapes rocblas_create_handle as a status, rocblas_local_handle turns it
+        // into a std::runtime_error, and the harness reports "Received uncaught
+        // exception" -- which would read as this test finding a defect rather than as a
+        // device that does not offer the feature. The docs name this attribute as the
+        // way to ask; see docs/reference/memory-alloc.rst.
+        int device          = 0;
+        int pools_supported = 0;
+        CHECK_HIP_ERROR(hipGetDevice(&device));
+        CHECK_HIP_ERROR(hipDeviceGetAttribute(
+            &pools_supported, hipDeviceAttributeMemoryPoolsSupported, device));
+        if(!pools_supported)
+            GTEST_SKIP() << "device " << device
+                         << " does not support memory pools, so stream-order allocation "
+                            "-- the branch this covers -- cannot be exercised here";
 
         rocblas_local_handle handle{arg};
 
