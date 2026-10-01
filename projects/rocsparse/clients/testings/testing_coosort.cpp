@@ -276,8 +276,8 @@ void testing_coosort_extra(const Arguments& arg)
             rocsparse_int* perm = permute ? (rocsparse_int*)dperm : nullptr;
             if(by_row)
             {
-                CHECK_ROCSPARSE_ERROR(rocsparse_coosort_by_row(
-                    handle, m, n, nnz, drow, dcol, perm, (void*)dbuffer));
+                CHECK_ROCSPARSE_ERROR(
+                    rocsparse_coosort_by_row(handle, m, n, nnz, drow, dcol, perm, (void*)dbuffer));
             }
             else
             {
