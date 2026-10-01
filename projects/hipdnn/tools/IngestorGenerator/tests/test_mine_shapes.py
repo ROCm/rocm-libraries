@@ -430,6 +430,30 @@ class TestRocKeBenchTree:
         shapes = json.loads(out.read_text()) if out.exists() else []
         return result, shapes
 
+    def test_an_explicit_noncausal_record_is_mined_unmasked(self, tmp_path):
+        """`[-1, -1]` alone reads as causal; an explicit `causal: false` (the
+        emitted benchmark lists carry one) is a full request, not its causal twin."""
+        result, shapes = self._mine_bench(
+            tmp_path, self._record(causal=False), self._record(causal=True)
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert sorted(s["mask_type"] for s in shapes) == [0, 1]
+
+    def test_a_noncausal_record_with_a_window_is_refused(self, tmp_path):
+        result, _ = self._mine_bench(
+            tmp_path, self._record(causal=False, window_size=[127, 0])
+        )
+        assert result.returncode != 0
+        assert "non-causal record cannot carry window" in result.stdout + result.stderr
+
+    def test_a_varlen_record_is_skipped_and_counted(self, tmp_path):
+        result, shapes = self._mine_bench(
+            tmp_path, self._record(varlen=True, num_seqs=4), self._record()
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert len(shapes) == 1 and shapes[0]["batch"] == 1
+        assert "1 rocKE varlen record(s) skipped" in result.stdout
+
     def test_a_jsonl_trace_is_read_at_all(self, tmp_path):
         """A json.load reader gets 'Extra data' and silently mines nothing."""
         result, shapes = self._mine_bench(
@@ -725,3 +749,67 @@ class TestEveryRequestSemanticSurvivesMining:
         assert "1 duplicate shape(s) merged" in output
         suites = {p["suite"] for p in shapes[0]["_provenance_occurrences"]}
         assert suites == {"suite_a", "suite_b"}, "a merged duplicate lost its vote"
+
+
+_ROCKE_BENCHMARKS = (
+    Path(__file__).resolve().parents[5]
+    / "dnn-providers"
+    / "hip-kernel-provider"
+    / "rocke"
+    / "library"
+    / "benchmarks"
+)
+
+
+class TestTheOwnerDenseBenchmarksEmitMinableShapes:
+    """The dense prefill benchmarks keep their shape lists in Python. `--emit-shapes`
+    writes them in the trace schema this miner reads, without torch, so the owner's
+    benchmark population enters the corpus without hand transcription."""
+
+    def _emit_and_mine(self, tmp_path: Path, arch: str):
+        bench = (
+            _ROCKE_BENCHMARKS
+            / arch
+            / "attention/prefill/benchmark_dense_prefill_live.py"
+        )
+        tree = tmp_path / "bench"
+        tree.mkdir()
+        emitted = tree / "dense_prefill_live_shapes.json"
+        # torch is made unimportable: emitting must not need it.
+        emit = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import runpy, sys; sys.modules['torch'] = None; "
+                f"sys.argv = ['bench', '--emit-shapes', {str(emitted)!r}]; "
+                f"runpy.run_path({str(bench)!r}, run_name='__main__')",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if "ModuleNotFoundError" in emit.stderr and "torch" not in emit.stderr:
+            pytest.skip(
+                f"the rocKE library cannot be imported here: {emit.stderr[-300:]}"
+            )
+        assert emit.returncode == 0, emit.stdout + emit.stderr
+        out = tmp_path / "shapes.json"
+        mined = subprocess.run(
+            [sys.executable, str(_MINE), "--rocke-bench", str(tree), "--out", str(out)],
+            capture_output=True,
+            text=True,
+        )
+        assert mined.returncode == 0, mined.stdout + mined.stderr
+        return mined.stdout, json.loads(out.read_text())
+
+    def test_gfx942_emits_its_whole_shape_list_without_torch(self, tmp_path):
+        """21 distinct requests: the causal, MHA, GQA, full and windowed rows at the
+        default bf16 Hq128/Hkv8 D128; the persistent rows repeat causal shapes."""
+        output, shapes = self._emit_and_mine(tmp_path, "gfx942")
+        assert len(shapes) == 21, output
+        assert sum(s["mask_type"] == 0 for s in shapes) == 2, "the full-mode rows"
+        assert {s["sliding_window"] for s in shapes} == {0, 512, 1024, 2048}
+
+    def test_gfx950_emits_its_shapes_and_flags_the_packed_varlen_rows(self, tmp_path):
+        output, shapes = self._emit_and_mine(tmp_path, "gfx950")
+        assert len(shapes) == 15, output
+        assert "8 rocKE varlen record(s) skipped" in output
