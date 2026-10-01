@@ -13,7 +13,7 @@ Documentation for rocFFT is available at
 
 ### Added
 
-* Added further support for very large FFTs (length greater than 2^32) on gfx1250.
+* Added further support for very large FFTs (length greater than 2^32).
 
 ## rocFFT 1.0.40 for ROCm 10.1
 
