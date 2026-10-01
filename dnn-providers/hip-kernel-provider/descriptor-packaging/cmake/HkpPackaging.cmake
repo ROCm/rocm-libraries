@@ -1414,6 +1414,39 @@ function(hkp_product_offers_engine out_var engine)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# hkp_gfx950_conv_fwd_available(<out>)
+#   TRUE when this configuration actually ships the gfx950 forward-convolution bundle:
+#   the `product` pack target is wired, gfx950 is among the architectures it was wired
+#   for, and what that pack ships for gfx950 includes hipkernel:Gfx950ConvFwd. Same
+#   conjuncts, probe and fallback as hkp_gfx950_attention_dense_available() above.
+# ---------------------------------------------------------------------------
+function(hkp_gfx950_conv_fwd_available out_var)
+    set(${out_var} FALSE PARENT_SCOPE)
+
+    get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
+    if(NOT "product" IN_LIST _labels)
+        return()
+    endif()
+
+    get_property(_arches GLOBAL PROPERTY HKP_PACK_ARCHES_product)
+    if(NOT "gfx950" IN_LIST _arches)
+        return()
+    endif()
+
+    get_property(_probe_ok GLOBAL PROPERTY HKP_PACK_PROBE_OK_product)
+    if(NOT _probe_ok)
+        set(${out_var} "${HIPKERNELPROVIDER_ENABLE_ROCKE}" PARENT_SCOPE)
+        return()
+    endif()
+
+    get_property(_shipped GLOBAL PROPERTY HKP_PACK_SHIPPED_ENGINES_product)
+    _hkp_shipped_engines_for_arch(_engines "${_shipped}" gfx950)
+    if("hipkernel:Gfx950ConvFwd" IN_LIST _engines)
+        set(${out_var} TRUE PARENT_SCOPE)
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
 # _hkp_resolve_rocke_args(out_args out_comgr_lib)
 #   Resolve the rocKE toolchain once and return the keyword list every pack target is
 #   wired with, plus the comgr library the ctest entries forward. Called once for all

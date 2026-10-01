@@ -328,12 +328,22 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             PACK_NAME product
             ARCHES ${_hkp_rdna_wmma_attention_arches}
             SUITES TestGfx1151WmmaAttentionPacks
+    # Census for the gfx950 forward-convolution production pack; same shard, same
+    # predicate shape and the same ARCHES narrowing as the dense-attention call above.
+    hkp_gfx950_conv_fwd_available(_hkp_gfx950_conv_fwd)
+    if(_hkp_gfx950_conv_fwd)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx950
+            SUITES TestGfx950ConvFwdPacks
             EXPECTED_CASES
                 LoadsExactlyTheEmittedPacks
                 LoadsExactlyTheEmittedKernels
                 EveryLoadedDescriptorCoversTheRequestedArch
                 EveryKernelDeclaresTheEmittedRuntimeSourceKind
                 UnderstandsRuntimePassByValueScaleGraphs
+                DeclaresTheConfiguredSdkVersion
                 ExposesTheConfiguredKnobs
                 RanksThroughItsRegisteredScoreSymbol
                 CarriesNoGraphScopedMatcher
@@ -343,6 +353,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         message(STATUS
             "hkp: this configuration does not ship hipkernel:Gfx1151WmmaAttention for "
             "any RDNA arch, so its census is not registered.")
+            "hkp: this configuration does not ship hipkernel:Gfx950ConvFwd for "
+            "gfx950, so its census is not registered.")
     endif()
 endif()
 
