@@ -665,6 +665,9 @@ def _globalReadDoScaleNoSwizzle(tc, writer, kernel):
                  comment="scale%s[g%u].b%u canonical load" % (tc, gid, bi)))
 
     # Wait for the 4 loads of this group, then pack little-endian into one VGPR.
+    # Plain SWaitCnt (no adjustVmcnt): InstructionScheduler must leave vlcnt=0
+    # alone. Weakening it to vmcnt(N) via the WaitGR post-pass returns before
+    # these gathers complete and breaks NoSwizzle mainloop for itersPerTile>=3.
     module.add(SWaitCnt(vlcnt=0, comment="scale%s: wait gather loads group %u"% (tc, gid)))
     # packed = b0 | (b1<<8) | (b2<<16) | (b3<<24)
     module.add(VLShiftLeftB32(dst=vgpr(vBytes[1]), shiftHex=hex(8), src=vgpr(vBytes[1]),
