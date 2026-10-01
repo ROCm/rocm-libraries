@@ -105,7 +105,7 @@ def test_mixed_atoms_do_not_leak_to_other_targets(a, b):
         )
 
 
-@pytest.mark.parametrize("scales", [("e4m3", "e8m0", 32), ("e8m0", "e5m3", 16)])
+@pytest.mark.parametrize("scales", [("e4m3", "e8m0", 32), ("e5m3", "e8m0", 16)])
 def test_mixed_atoms_do_not_admit_other_scale_contracts(scales):
     assert (
         ArchTarget.from_gfx("gfx1250").mma.op_for_shape(

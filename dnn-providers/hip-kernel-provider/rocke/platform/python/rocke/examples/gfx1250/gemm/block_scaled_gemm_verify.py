@@ -4,7 +4,7 @@
 
 The default invocation keeps the K=64 FP8/BF8 WMMA + FP32-scale verifier.
 Native ``--matrix-path wmma_scale`` / ``wmma_scale16`` use independent FP8/BF8, FP6/BF6, or FP4 operands and
-E8M0 scales with K=32 / K=16 groups. Native fixtures cover K=128 or 256 and use
+encoded scales with K=32 / K=16 groups. Native fixtures cover K=128 or 256 and use
 bounded dyadic values, permitting exact comparison after output-type rounding.
 
 Run on visible HIP device 0 (must be gfx1250), for example::
@@ -123,6 +123,24 @@ def pack_fp4_codes(codes: np.ndarray) -> np.ndarray:
     return codes[:, 0::2] | (codes[:, 1::2] << 4)
 
 
+def decode_scale(encoded: np.ndarray, dtype: str) -> np.ndarray:
+    """Decode finite nonnegative scale fixtures, independently of lowering."""
+    if dtype in ("e8m0", "i8"):
+        return decode_e8m0(encoded)
+    if dtype not in ("e4m3", "e5m3"):
+        raise ValueError("scale dtype must be e8m0, e4m3, or e5m3")
+    maximum, bias = (126, 7) if dtype == "e4m3" else (254, 15)
+    if encoded.dtype != np.uint8 or np.any(encoded > maximum):
+        raise ValueError("expected finite nonnegative encoded scale bytes")
+    exponent = (encoded >> 3).astype(np.int32)
+    fraction = (encoded & 7).astype(np.float64) / 8
+    return np.where(
+        exponent == 0,
+        np.ldexp(fraction, 1 - bias),
+        np.ldexp(1 + fraction, exponent - bias),
+    )
+
+
 def reference_result(
     a: np.ndarray,
     b: np.ndarray,
@@ -134,6 +152,8 @@ def reference_result(
     dtype_a: str | None = None,
     dtype_b: str | None = None,
     dtype_c: str = "bf16",
+    scale_dtype_a: str = "e8m0",
+    scale_dtype_b: str = "e8m0",
 ) -> np.ndarray:
     """Expand scales onto logical A/B elements, multiply, then round the output.
 
@@ -141,6 +161,8 @@ def reference_result(
     scales 2**[-2,3]. At K<=256, even the sum of absolute products fits in
     2**22 units of 2**-8, so every FP32 partial sum is exact. Float64 host
     arithmetic and a single output-type rounding provide an independent oracle.
+    Alternative scale fixtures use the bounded dyadic values 0.5, 0.75, 1,
+    1.25, 1.5, and 1.75 with the same bounded matrix inputs.
     FP6 all-code fixtures isolate one K element, avoiding accumulation error.
     FP4 fixtures cover all E2M1 values (magnitude <=6), scales 2**[-2,1],
     and K<=256: absolute partial sums are below 2**22 units of 2**-6,
@@ -148,8 +170,8 @@ def reference_result(
     """
     output_dtype = _output_dtype(dtype_c)
 
-    sa = decode_e8m0(a_scale) if native else a_scale.astype(np.float64)
-    sb = decode_e8m0(b_scale) if native else b_scale.astype(np.float64)
+    sa = decode_scale(a_scale, scale_dtype_a) if native else a_scale.astype(np.float64)
+    sb = decode_scale(b_scale, scale_dtype_b) if native else b_scale.astype(np.float64)
 
     def matrix_values(data, dtype):
         if dtype in ("fp6", "fp6e2m3", "bf6", "fp6e3m2"):
@@ -209,13 +231,33 @@ def make_case_inputs(
             for d in (spec.dtype_a, spec.dtype_b)
         )
 
-        sa = rng.integers(
-            125, 129 if small else 131, size=(spec.M, groups), dtype=np.uint8
-        )
-        sb = rng.integers(
-            125, 129 if small else 131, size=(groups, spec.N), dtype=np.uint8
-        )
-        neutral_a = neutral_b = 127
+        da, db = spec.resolved_scale_dtypes()
+
+        def scales(dtype, shape):
+            if dtype in ("e8m0", "i8"):
+                return (
+                    rng.integers(
+                        125, 129 if small else 131, size=shape, dtype=np.uint8
+                    ),
+                    127,
+                )
+            bias = 7 if dtype == "e4m3" else 15
+            # Include non-power-of-two scales to distinguish these from E8M0.
+            codes = np.array(
+                [
+                    (bias - 1) * 8,
+                    (bias - 1) * 8 + 4,
+                    bias * 8,
+                    bias * 8 + 2,
+                    bias * 8 + 4,
+                    bias * 8 + 6,
+                ],
+                dtype=np.uint8,
+            )
+            return rng.choice(codes, size=shape), bias * 8
+
+        sa, neutral_a = scales(da, (spec.M, groups))
+        sb, neutral_b = scales(db, (groups, spec.N))
     else:
         sa = rng.uniform(0.5, 1.5, size=(spec.M, groups)).astype(np.float32)
         sb = rng.uniform(0.5, 1.5, size=(groups, spec.N)).astype(np.float32)
@@ -346,6 +388,7 @@ def run_cases(
         fn = module.get_function(art.kernel_name)
         for case in cases:
             inputs = make_case_inputs(spec, case)
+            da, db = spec.resolved_scale_dtypes()
             expected = reference_result(
                 *inputs,
                 spec.block_k,
@@ -353,10 +396,12 @@ def run_cases(
                 dtype_a=spec.dtype_a,
                 dtype_b=spec.dtype_b,
                 dtype_c=spec.dtype_c,
+                scale_dtype_a=da,
+                scale_dtype_b=db,
             )
             label = (
                 f"{spec.resolved_matrix_path()}/{spec.dtype_a}x{spec.dtype_b}/{compile_route}/{case} "
-                f"{spec.M}x{spec.N}x{spec.K} bk{spec.block_k}"
+                f"{spec.M}x{spec.N}x{spec.K} bk{spec.block_k} scales={da}/{db}"
             )
             got = _launch(rt, fn, spec, inputs)
             try:
