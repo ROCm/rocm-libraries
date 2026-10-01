@@ -5129,8 +5129,7 @@ namespace
         const std::shared_ptr<
             TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>& library,
         const std::shared_ptr<TensileLite::Hardware>&                                 hardware,
-        const int                                       workspaceBytes,
-        const size_t                                    maxWorkspaceBytes,
+        const size_t                                    workspaceBytes,
         const int                                       requestedAlgoCount,
         std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults)
     {
@@ -5171,7 +5170,7 @@ namespace
                          rocblaslt::RocGemmType::ROCBLASLT_GEMM,
                          gemmData,
                          requestedAlgoCount,
-                         maxWorkspaceBytes,
+                         workspaceBytes,
                          heuristicResults);
         keepOthers(handle,
                    heuristicResults.data() + jitFirst,
@@ -5960,13 +5959,11 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
 rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   rocblaslt::RocGemmType gemmType,
                                   std::shared_ptr<void>  gemmData,
-                                  const size_t           maxWorkspaceBytes,
+                                  const size_t           workspaceBytes,
                                   const int              requestedAlgoCount,
                                   std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults)
 {
     log_api(__func__, "Entering function");
-
-    const int workspaceBytes = static_cast<int>(maxWorkspaceBytes);
 
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                            library;
@@ -5983,7 +5980,6 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                          library,
                                          hardware,
                                          workspaceBytes,
-                                         maxWorkspaceBytes,
                                          requestedAlgoCount,
                                          heuristicResults);
 #endif
