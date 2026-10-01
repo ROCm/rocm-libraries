@@ -53,7 +53,7 @@ struct hash_input
     {
     }
 
-    ~hash_input() { }
+    ~hash_input() {}
 
     rocfft_precision    buf_precision;
     std::vector<size_t> buf_length;
@@ -73,7 +73,7 @@ struct hash_output
     {
     }
 
-    ~hash_output() { }
+    ~hash_output() {}
 
     bool operator==(const hash_output& rhs) const
     {
@@ -85,7 +85,8 @@ struct hash_output
 };
 
 // Fixed, platform-independent 64-bit mix (splitmix64 finalizer).
-// Unlike std::hash, the result is defined here and does not depend on compiler, standard library, or process.
+// Unlike std::hash, the result is defined here and does not depend on compiler,
+// standard library, or process.
 static inline uint64_t stable_hash(uint64_t z)
 {
     z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
