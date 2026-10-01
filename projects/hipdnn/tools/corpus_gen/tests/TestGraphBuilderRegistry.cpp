@@ -769,10 +769,11 @@ TEST(TestGraphBuilderRegistry, TheShippedSdpaMetadataBuildsGraphsTheEnginesAccep
     EXPECT_FLOAT_EQ(attributes->attn_scale_value().value(), 0.125F); // 1/sqrt(64)
 
     // (B, H, S, D) dims, token-major: [S*H*D, D, H*D, 1].
-    const std::map<std::string, std::vector<int64_t>> expected{{"q", {16 * 8 * 64, 64, 8 * 64, 1}},
-                                                               {"k", {32 * 2 * 64, 64, 2 * 64, 1}},
-                                                               {"v", {32 * 2 * 64, 64, 2 * 64, 1}},
-                                                               {"o", {16 * 8 * 64, 64, 8 * 64, 1}}};
+    const std::map<std::string, std::vector<int64_t>> expected{
+        {"q", {int64_t{16} * 8 * 64, 64, int64_t{8} * 64, 1}},
+        {"k", {int64_t{32} * 2 * 64, 64, int64_t{2} * 64, 1}},
+        {"v", {int64_t{32} * 2 * 64, 64, int64_t{2} * 64, 1}},
+        {"o", {int64_t{16} * 8 * 64, 64, int64_t{8} * 64, 1}}};
     size_t seen = 0;
     for(const auto* tensor : *graph->tensors())
     {

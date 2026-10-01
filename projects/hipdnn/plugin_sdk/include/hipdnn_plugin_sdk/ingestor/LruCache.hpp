@@ -113,7 +113,9 @@ public:
         const std::lock_guard<std::mutex> lock(_mutex);
 
         // References into the batch, which does not move while they live: the keys are
-        // compared, never stored.
+        // compared, never stored. equal_to<Key> unwraps the references; equal_to<> would
+        // compare the reference_wrappers themselves, which have no operator==.
+        // NOLINTNEXTLINE(modernize-use-transparent-functors) - must convert to const Key&
         std::unordered_set<std::reference_wrapper<const Key>, Hash, std::equal_to<Key>> seen;
         std::vector<Entry*> admitted;
         admitted.reserve(newestFirst.size());

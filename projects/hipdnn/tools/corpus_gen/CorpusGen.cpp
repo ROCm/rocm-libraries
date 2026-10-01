@@ -1128,9 +1128,8 @@ int runGenerator(const std::vector<std::string>& args)
         std::ofstream index(root / (result.operation + ".problems.csv"));
         bool wroteHeader = false;
 
-        for(size_t i = 0; i < chosen.size(); ++i)
+        for(const auto& entry : chosen)
         {
-            const auto& entry = chosen[i];
             const auto& graph = stamped.at(result.operation + "|"
                                            + hipdnn_corpus_gen::detail::describe(entry.point));
 
@@ -1200,7 +1199,7 @@ int runGenerator(const std::vector<std::string>& args)
         for(const auto& entry : selected.operations)
         {
             manifest.operations.push_back(entry.second.operation);
-            manifest.inputs.push_back(entry.first);
+            manifest.inputs.emplace_back(entry.first);
         }
         for(const auto& path : packPaths)
         {

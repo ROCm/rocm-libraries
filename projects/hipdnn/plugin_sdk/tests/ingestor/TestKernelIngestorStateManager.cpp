@@ -812,6 +812,7 @@ TEST(TestKernelIngestorStateManager, AColdPinnedCalibratedRankingAgreesWithAnUnp
     ASSERT_EQ(unpinned.size(), 3U);
 
     std::vector<std::string> pinnedOrder;
+    pinnedOrder.reserve(pinned.size());
     for(const auto& scored : pinned)
     {
         pinnedOrder.push_back(toString(scored.kernelId));

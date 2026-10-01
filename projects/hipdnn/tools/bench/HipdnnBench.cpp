@@ -53,6 +53,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -204,10 +205,18 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
                 throw std::invalid_argument("Engine prediction/description/collection modes "
                                             "are mutually exclusive");
             }
-            options.engineMode = arg == "--predict-engine" ? EngineMode::PREDICT
-                                 : arg == "--describe-engine-prediction"
-                                     ? EngineMode::DESCRIBE
-                                     : EngineMode::COLLECT_IMMEDIATE;
+            if(arg == "--predict-engine")
+            {
+                options.engineMode = EngineMode::PREDICT;
+            }
+            else if(arg == "--describe-engine-prediction")
+            {
+                options.engineMode = EngineMode::DESCRIBE;
+            }
+            else
+            {
+                options.engineMode = EngineMode::COLLECT_IMMEDIATE;
+            }
             options.json = true;
         }
         else if(arg == "--ranking-metric")
@@ -558,7 +567,7 @@ hipdnn_frontend::Error engineIdentity(hipdnnHandle_t handle,
 
     hipUUID uuid{};
     HIPDNN_CHECK_ERROR(hipError(hipDeviceGetUuid(&uuid, device), "Could not read device UUID"));
-    static constexpr char HEX[] = "0123456789abcdef";
+    static constexpr std::string_view HEX = "0123456789abcdef";
     std::string deviceId;
     deviceId.reserve(sizeof(uuid.bytes) * 2);
     for(const auto byte : uuid.bytes)
@@ -583,6 +592,20 @@ const char* predictionStatus(hipdnn_frontend::PredictionStatus status)
         return "unavailable";
     default:
         return "invalid";
+    }
+}
+
+/// The row's three-valued `numerically_valid`: true, false, or null when not cross-checkable.
+nlohmann::json numericallyValid(hipdnn_bench::NumericalVerdict verdict)
+{
+    switch(verdict)
+    {
+    case hipdnn_bench::NumericalVerdict::AGREED:
+        return true;
+    case hipdnn_bench::NumericalVerdict::DISAGREED:
+        return false;
+    default:
+        return nullptr;
     }
 }
 
@@ -1244,38 +1267,37 @@ int runBench(const std::vector<std::string>& args)
             }
             // Preserve existing is_valid semantics: measured, not numerical correctness.
             const bool timed = result.succeeded && result.iterationsRun > 0;
-            const std::string reason
-                = !result.succeeded
-                      ? "config_not_applicable: engine declined or failed to run this configuration"
-                  : result.iterationsRun == 0
-                      ? "not_timed: autotune reported success without running an iteration"
-                      : "";
+            std::string reason;
+            if(!result.succeeded)
+            {
+                reason = "config_not_applicable: engine declined or failed to run this "
+                         "configuration";
+            }
+            else if(result.iterationsRun == 0)
+            {
+                reason = "not_timed: autotune reported success without running an iteration";
+            }
             // Three-valued, and a separate field from `is_valid`. `is_valid` answers "did we
             // obtain a measurement", which uhd_gen and RFC 0019 §8.1 both depend on; folding a
             // correctness verdict into it would make an unmeasured row and an incorrect row
             // indistinguishable and break the coverage record §13.2 keeps deliberately.
             const auto& verdict = verdicts[index];
-            output["results"].push_back(
-                {{"candidate_id", candidate->id},
-                 {"knob_settings", knobJson(tuple)},
-                 {"kernel_features", candidate->kernelFeatures},
-                 {"rank", result.rank},
-                 {"succeeded", result.succeeded},
-                 {"is_valid", timed},
-                 {"numerically_valid",
-                  verdict.verdict == hipdnn_bench::NumericalVerdict::AGREED ? nlohmann::json(true)
-                  : verdict.verdict == hipdnn_bench::NumericalVerdict::DISAGREED
-                      ? nlohmann::json(false)
-                      : nlohmann::json(nullptr)},
-                 {"validation", verdict.reason},
-                 {"skip_reason", reason},
-                 {"min_time_ms", result.minTimeMs},
-                 {"avg_time_ms", result.avgTimeMs},
-                 {"robust_time_ms", result.robustTimeMs},
-                 {"stddev_ms", result.stddevMs},
-                 {"iterations", result.iterationsRun},
-                 {"converged", result.converged},
-                 {"workspace_bytes", result.workspaceSize}});
+            output["results"].push_back({{"candidate_id", candidate->id},
+                                         {"knob_settings", knobJson(tuple)},
+                                         {"kernel_features", candidate->kernelFeatures},
+                                         {"rank", result.rank},
+                                         {"succeeded", result.succeeded},
+                                         {"is_valid", timed},
+                                         {"numerically_valid", numericallyValid(verdict.verdict)},
+                                         {"validation", verdict.reason},
+                                         {"skip_reason", reason},
+                                         {"min_time_ms", result.minTimeMs},
+                                         {"avg_time_ms", result.avgTimeMs},
+                                         {"robust_time_ms", result.robustTimeMs},
+                                         {"stddev_ms", result.stddevMs},
+                                         {"iterations", result.iterationsRun},
+                                         {"converged", result.converged},
+                                         {"workspace_bytes", result.workspaceSize}});
         }
         std::cout << output.dump() << "\n";
         return results.empty() ? 2 : 0;

@@ -64,8 +64,9 @@ inline bool parseEngineCoverage(const nlohmann::json& document,
         }
         else if(coverage != "search")
         {
-            error = "engine '" + name + "' has coverage '" + coverage
-                    + "'; expected \"pack\" or \"search\"";
+            error = "engine '" + name + "' has coverage '";
+            error += coverage;
+            error += R"('; expected "pack" or "search")";
             return false;
         }
         entry.reason = body.value("reason", std::string());

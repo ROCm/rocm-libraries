@@ -391,7 +391,7 @@ inline bool encodeFillElement(hipdnn_frontend::DataType dataType, FillValue valu
 inline std::vector<uint8_t>
     inputFillImage(hipdnn_frontend::DataType dataType, size_t bytes, uint64_t seed, int64_t uid)
 {
-    const size_t width = static_cast<size_t>(elementBits(dataType) / 8);
+    const auto width = static_cast<size_t>(elementBits(dataType) / 8);
     if(width == 0 || bytes < width)
     {
         return {};

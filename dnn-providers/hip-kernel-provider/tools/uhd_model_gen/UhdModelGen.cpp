@@ -163,14 +163,14 @@ void writeUhd(const std::filesystem::path& path,
     std::ostringstream json;
     json << "{\n";
     json << "  \"version\": \"1.0\",\n";
-    json << "  \"id\": \"" << UHD_ID << "\",\n";
+    json << R"(  "id": ")" << UHD_ID << "\",\n";
     json << "  \"name\": \"pointwise model selector\",\n";
     json << "  \"adapter\": \"tree_data\",\n";
 
     json << "  \"features_signature\": " << nlohmann::json(SIGNATURE).dump() << ",\n";
     json << "  \"trained_against\": " << provenance.dump() << ",\n";
 
-    json << "  \"features_hash\": \"" << featuresHash << "\",\n";
+    json << R"(  "features_hash": ")" << featuresHash << "\",\n";
     json << "  \"objective\": \"max\",\n";
 
     // Not calibrated and no metric: 9.0 and 1.0 are ordering, not throughput, so this score
@@ -180,7 +180,7 @@ void writeUhd(const std::filesystem::path& path,
     json << "  \"score\": { \"calibrated\": false, \"transform\": \"identity\" },\n";
 
     // Relative: resolved against this file's own directory, wherever the pack is staged.
-    json << "  \"tree_data\": { \"artifact\": \"" << MODEL_FILE << "\" }\n";
+    json << R"(  "tree_data": { "artifact": ")" << MODEL_FILE << "\" }\n";
     json << "}\n";
 
     const auto text = json.str();

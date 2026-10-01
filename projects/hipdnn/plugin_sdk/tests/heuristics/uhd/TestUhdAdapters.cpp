@@ -139,7 +139,7 @@ TEST(TestIngestorUhdAdapters, TheFactoryRefusesACustomLibraryWhoseDeclaredHashIs
     UhdConfig config;
     config.adapterType = "custom_library";
     config.modelArtifactPath = testScorerLibrary();
-    config.customLibrarySymbol = "test_linear_scorer";
+    config.customLibrarySymbol = "testLinearScorer";
     config.featuresSignature = {"$kernel.tile_m", "$kernel.split_k", "$q.seqlen"};
     config.featuresHash = FEATURES_HASH;
 
@@ -153,7 +153,7 @@ TEST(TestIngestorUhdAdapters, TheFactoryRefusesACustomLibraryWhoseDeclaredHashIs
     config.modelHash = bytesHashOf(config.modelArtifactPath);
     const auto loaded = makeUhdAdapter(config);
     ASSERT_NE(loaded, nullptr);
-    EXPECT_DOUBLE_EQ(loaded->score({1.0, 2.0, 3.0}), 6.0) << "not test_linear_scorer";
+    EXPECT_DOUBLE_EQ(loaded->score({1.0, 2.0, 3.0}), 6.0) << "not testLinearScorer";
 
     // And a UHD declaring no digest still loads: §4.1 makes the artifact hash optional.
     config.modelHash.clear();

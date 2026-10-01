@@ -49,12 +49,12 @@ class TestCustomLibraryAdapter : public ::testing::Test
 TEST_F(TestCustomLibraryAdapter, LoadAndScoreLinear)
 {
     const auto libPath = getTestScorerLibPath();
-    auto adapter = CustomLibraryAdapter::load(libPath, "test_linear_scorer", 3, TEST_HASH);
+    auto adapter = CustomLibraryAdapter::load(libPath, "testLinearScorer", 3, TEST_HASH);
     ASSERT_NE(adapter, nullptr);
     EXPECT_EQ(adapter->expectedFeatureCount(), 3U);
     EXPECT_EQ(adapter->getFeaturesHash(), TEST_HASH);
 
-    // test_linear_scorer sums all features
+    // testLinearScorer sums all features
     EXPECT_DOUBLE_EQ(adapter->score({1.0, 2.0, 3.0}), 6.0);
     EXPECT_DOUBLE_EQ(adapter->score({0.0, 0.0, 0.0}), 0.0);
     EXPECT_DOUBLE_EQ(adapter->score({-1.0, 5.0, 2.0}), 6.0);
@@ -63,10 +63,10 @@ TEST_F(TestCustomLibraryAdapter, LoadAndScoreLinear)
 TEST_F(TestCustomLibraryAdapter, LoadAndScoreConstant)
 {
     const auto libPath = getTestScorerLibPath();
-    auto adapter = CustomLibraryAdapter::load(libPath, "test_constant_scorer", 2, TEST_HASH);
+    auto adapter = CustomLibraryAdapter::load(libPath, "testConstantScorer", 2, TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    // test_constant_scorer always returns 42.0
+    // testConstantScorer always returns 42.0
     EXPECT_DOUBLE_EQ(adapter->score({1.0, 2.0}), 42.0);
     EXPECT_DOUBLE_EQ(adapter->score({999.0, -100.0}), 42.0);
 }
@@ -74,10 +74,10 @@ TEST_F(TestCustomLibraryAdapter, LoadAndScoreConstant)
 TEST_F(TestCustomLibraryAdapter, LoadAndScoreProduct)
 {
     const auto libPath = getTestScorerLibPath();
-    auto adapter = CustomLibraryAdapter::load(libPath, "test_product_scorer", 2, TEST_HASH);
+    auto adapter = CustomLibraryAdapter::load(libPath, "testProductScorer", 2, TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    // test_product_scorer multiplies first two features
+    // testProductScorer multiplies first two features
     EXPECT_DOUBLE_EQ(adapter->score({3.0, 4.0}), 12.0);
     EXPECT_DOUBLE_EQ(adapter->score({0.0, 5.0}), 0.0);
     EXPECT_DOUBLE_EQ(adapter->score({-2.0, 3.0}), -6.0);
@@ -99,7 +99,7 @@ TEST_F(TestCustomLibraryAdapter, LoadFailsMissingSymbol)
 
 TEST_F(TestCustomLibraryAdapter, LoadFailsEmptyLibraryPath)
 {
-    auto adapter = CustomLibraryAdapter::load("", "test_linear_scorer", 2, TEST_HASH);
+    auto adapter = CustomLibraryAdapter::load("", "testLinearScorer", 2, TEST_HASH);
     EXPECT_EQ(adapter, nullptr);
 }
 
@@ -113,7 +113,7 @@ TEST_F(TestCustomLibraryAdapter, LoadFailsEmptySymbolName)
 TEST_F(TestCustomLibraryAdapter, ScoreThrowsOnFeatureCountMismatch)
 {
     const auto libPath = getTestScorerLibPath();
-    auto adapter = CustomLibraryAdapter::load(libPath, "test_linear_scorer", 3, TEST_HASH);
+    auto adapter = CustomLibraryAdapter::load(libPath, "testLinearScorer", 3, TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     // Adapter expects 3 features, provide 2 -> should throw
@@ -126,7 +126,7 @@ TEST_F(TestCustomLibraryAdapter, ScoreThrowsOnFeatureCountMismatch)
 TEST_F(TestCustomLibraryAdapter, ScoreBatch)
 {
     const auto libPath = getTestScorerLibPath();
-    auto adapter = CustomLibraryAdapter::load(libPath, "test_linear_scorer", 2, TEST_HASH);
+    auto adapter = CustomLibraryAdapter::load(libPath, "testLinearScorer", 2, TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<std::vector<double>> batch = {{1.0, 2.0}, {3.0, 4.0}, {0.0, 0.0}};
@@ -142,8 +142,8 @@ TEST_F(TestCustomLibraryAdapter, MultipleAdaptersFromSameLibrary)
     const auto libPath = getTestScorerLibPath();
 
     // Load two different symbols from the same library
-    auto adapter1 = CustomLibraryAdapter::load(libPath, "test_linear_scorer", 2, TEST_HASH);
-    auto adapter2 = CustomLibraryAdapter::load(libPath, "test_constant_scorer", 2, TEST_HASH);
+    auto adapter1 = CustomLibraryAdapter::load(libPath, "testLinearScorer", 2, TEST_HASH);
+    auto adapter2 = CustomLibraryAdapter::load(libPath, "testConstantScorer", 2, TEST_HASH);
 
     ASSERT_NE(adapter1, nullptr);
     ASSERT_NE(adapter2, nullptr);

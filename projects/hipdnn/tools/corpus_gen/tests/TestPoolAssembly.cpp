@@ -101,6 +101,7 @@ TEST(TestPoolAssembly, ATruncatedPoolKeepsItsRegimeMixRatherThanAnAlphabeticalPr
     // Proportional, not one row of each: the pool's own mix is what real models run, so a fifth
     // of the pool should look like the pool.
     std::vector<PoolEntry> pool;
+    pool.reserve(100);
     for(int64_t index = 0; index < 80; ++index)
     {
         pool.push_back(entryAt("model", index, "prefill_short_mha"));
@@ -135,6 +136,7 @@ TEST(TestPoolAssembly, ASpreadPoolKeepsEachRegimesInternalOrder)
     // inside a regime is the only ranking it carries, and shuffling it would silently pick
     // different members whenever the allocation changed.
     std::vector<PoolEntry> pool;
+    pool.reserve(6);
     for(int64_t index = 0; index < 6; ++index)
     {
         pool.push_back(entryAt("model", index, index % 2 == 0 ? "even" : "odd"));

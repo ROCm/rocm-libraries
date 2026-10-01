@@ -34,10 +34,10 @@ double firstFeature(const double* values, size_t count)
 
 std::filesystem::path uniqueDirectory()
 {
-    static std::atomic<size_t> counter{0};
-    static const auto session = std::chrono::steady_clock::now().time_since_epoch().count();
+    static std::atomic<size_t> s_counter{0};
+    static const auto s_session = std::chrono::steady_clock::now().time_since_epoch().count();
     return std::filesystem::temp_directory_path()
-           / ("engine_prediction_" + std::to_string(session) + "_" + std::to_string(counter++));
+           / ("engine_prediction_" + std::to_string(s_session) + "_" + std::to_string(s_counter++));
 }
 
 /// A UHD reaches an engine only through the UED role map the descriptor loader resolves
@@ -165,7 +165,7 @@ TEST_F(TestEnginePredictor, NativeCustomAndTreeRecoverTheSamePhysicalThroughput)
               std::filesystem::path(HIPDNN_TEST_PLUGIN_DIR)
               / hipdnn_data_sdk::utilities::getLibraryName("hipdnn_test_scorer_lib"))
               .string();
-    custom.customLibrarySymbol = "test_linear_scorer";
+    custom.customLibrarySymbol = "testLinearScorer";
     const auto customResult = predict(custom);
     ASSERT_EQ(customResult.status, PredictionStatus::AVAILABLE);
     EXPECT_NEAR(customResult.value, nativeResult.value, 1e-12);
@@ -200,7 +200,7 @@ TEST_F(TestEnginePredictor, ACustomLibraryWhoseDeclaredHashIsNotItsBytesYieldsNo
               std::filesystem::path(HIPDNN_TEST_PLUGIN_DIR)
               / hipdnn_data_sdk::utilities::getLibraryName("hipdnn_test_scorer_lib"))
               .string();
-    custom.customLibrarySymbol = "test_linear_scorer";
+    custom.customLibrarySymbol = "testLinearScorer";
     custom.modelHash = sha256(std::string("not this library"));
 
     const auto result = predict(custom);
@@ -582,7 +582,7 @@ TEST_F(TestEnginePredictor, ParserRejectsDuplicateKeysAndOversizedNesting)
     const auto path = _directory.path() / "duplicate.uhd.json";
     {
         std::ofstream file(path);
-        file << "{\"name\":\"first\",\"name\":\"second\"}";
+        file << R"({"name":"first","name":"second"})";
     }
     EXPECT_THROW(readUhdDocument(path), std::invalid_argument);
     {

@@ -28,7 +28,7 @@ namespace hipdnn_plugin_sdk::uhd
 {
 namespace parser_detail
 {
-inline constexpr size_t MAX_DOCUMENT_BYTES = 8 * 1024 * 1024;
+inline constexpr size_t MAX_DOCUMENT_BYTES = size_t{8} * 1024 * 1024;
 inline constexpr size_t MAX_DOCUMENT_NODES = 131072;
 inline constexpr size_t MAX_DOCUMENT_DEPTH = 2 * ExpressionSet::MAX_EXPRESSION_DEPTH + 8;
 
@@ -308,7 +308,7 @@ inline nlohmann::json readUhdDocument(const std::filesystem::path& path)
 /// 256 MiB bound, or unreadable.
 inline std::string artifactDigest(const std::filesystem::path& path)
 {
-    constexpr std::uintmax_t MAX_ARTIFACT_BYTES = 256 * 1024 * 1024;
+    constexpr std::uintmax_t MAX_ARTIFACT_BYTES = std::uintmax_t{256} * 1024 * 1024;
     std::error_code error;
     if(!std::filesystem::is_regular_file(path, error))
     {
@@ -390,9 +390,9 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
         result.featuresSignature = signature.get<std::vector<nlohmann::json>>();
         for(const auto& entry : result.featuresSignature)
         {
-            if(!(entry.is_string() && !entry.get_ref<const std::string&>().empty()
-                 && entry.get_ref<const std::string&>().front() == '$')
-               && !(entry.is_object() && entry.size() == 1))
+            if((!entry.is_string() || entry.get_ref<const std::string&>().empty()
+                || entry.get_ref<const std::string&>().front() != '$')
+               && (!entry.is_object() || entry.size() != 1))
             {
                 fail("features_signature requires references or inline expressions in " + where);
             }

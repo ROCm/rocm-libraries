@@ -2745,8 +2745,8 @@ std::optional<BoundTokens> bindEveryTokenShape(const MatchContext& context)
 /// The rows the live ranker hands its scorer, in catalog order.
 std::vector<std::vector<double>>& capturedRankerRows()
 {
-    static std::vector<std::vector<double>> rows;
-    return rows;
+    static std::vector<std::vector<double>> s_rows;
+    return s_rows;
 }
 
 double captureRankerRow(const double* features, size_t count)
@@ -2758,20 +2758,20 @@ double captureRankerRow(const double* features, size_t count)
 /// The sweep record's envelope: identity and measurement, never a feature.
 bool isSweepEnvelope(const std::string& key)
 {
-    static const std::set<std::string> ENVELOPE = {"event",
-                                                   "benchmark",
-                                                   "device",
-                                                   "kernel",
-                                                   "pack",
-                                                   "dispatch",
-                                                   "status",
-                                                   "reason",
-                                                   "min_ms",
-                                                   "avg_ms",
-                                                   "stddev_ms",
-                                                   "robust_mean_ms",
-                                                   "iters"};
-    return ENVELOPE.count(key) != 0;
+    static const std::set<std::string> s_envelope = {"event",
+                                                     "benchmark",
+                                                     "device",
+                                                     "kernel",
+                                                     "pack",
+                                                     "dispatch",
+                                                     "status",
+                                                     "reason",
+                                                     "min_ms",
+                                                     "avg_ms",
+                                                     "stddev_ms",
+                                                     "robust_mean_ms",
+                                                     "iters"};
+    return s_envelope.count(key) != 0;
 }
 
 TEST(TestIngestorCatalogFeatureParity, TheLiveRankerReadsWhatEnumerationAndTheSweepPublish)
@@ -2915,12 +2915,18 @@ TEST(TestIngestorCatalogFeatureParity, TheLiveRankerReadsWhatEnumerationAndTheSw
         for(size_t slot = 0; slot < names.size(); ++slot)
         {
             const auto& value = expected.at(names[slot]);
-            const double want
-                = value.is_string()
-                      ? static_cast<double>(
-                            encoding.at("$" + names[slot]).at(value.get<std::string>()))
-                  : value.is_boolean() ? (value.get<bool>() ? 1.0 : 0.0)
-                                       : value.get<double>();
+            const double want = [&] {
+                if(value.is_string())
+                {
+                    return static_cast<double>(
+                        encoding.at("$" + names[slot]).at(value.get<std::string>()));
+                }
+                if(value.is_boolean())
+                {
+                    return value.get<bool>() ? 1.0 : 0.0;
+                }
+                return value.get<double>();
+            }();
             EXPECT_DOUBLE_EQ(row[slot], want)
                 << "the ranker reads " << names[slot] << " differently";
         }

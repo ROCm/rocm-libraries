@@ -276,8 +276,9 @@ public:
     /// `scoreIsCalibrated()` flag read off the heuristic's own descriptor, and the two
     /// disagreed whenever the descriptor answering was not the one the running architecture
     /// ranks with.
-    virtual std::vector<ScoredKernel>
-        calibratedRanking(const Catalog&, const MatchContext&, std::string& /*modelId*/) const
+    virtual std::vector<ScoredKernel> calibratedRanking(const Catalog& /*catalog*/,
+                                                        const MatchContext& /*context*/,
+                                                        std::string& /*modelId*/) const
     {
         return {};
     }

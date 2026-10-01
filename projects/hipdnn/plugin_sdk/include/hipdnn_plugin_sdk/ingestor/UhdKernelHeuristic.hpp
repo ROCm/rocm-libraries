@@ -754,10 +754,10 @@ private:
     const HeuristicDescriptor*
         boundFor(const std::string& metric, const std::string& arch, std::string& key) const
     {
-        static const std::set<std::string> NONE_UNAVAILABLE;
+        static const std::set<std::string> s_noneUnavailable;
         const auto refusedIt = _unavailable.find(metric);
         const auto& refused
-            = refusedIt == _unavailable.end() ? NONE_UNAVAILABLE : refusedIt->second;
+            = refusedIt == _unavailable.end() ? s_noneUnavailable : refusedIt->second;
         for(const auto& unavailable : refused)
         {
             if(unavailable != "default" && archMatches(arch, unavailable, ArchMatchMode::PREFIX))

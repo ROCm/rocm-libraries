@@ -110,7 +110,7 @@ void bindRow(FeatureExtractionContext& context, const nlohmann::json& row)
 }
 }
 
-int main(int argc, char**)
+int main(int argc, char** /*argv*/)
 {
     try
     {
@@ -118,11 +118,11 @@ int main(int argc, char**)
         {
             throw JsonLogicError("Usage: hipdnn_uhd_features < request.json");
         }
-        constexpr size_t MAX_REQUEST_BYTES = 256 * 1024 * 1024;
+        constexpr size_t MAX_REQUEST_BYTES = size_t{256} * 1024 * 1024;
         std::string input;
         std::array<char, 65536> buffer{};
         while(std::cin.read(buffer.data(), static_cast<std::streamsize>(buffer.size()))
-              || std::cin.gcount())
+              || std::cin.gcount() > 0)
         {
             if(input.size() + static_cast<size_t>(std::cin.gcount()) > MAX_REQUEST_BYTES)
             {

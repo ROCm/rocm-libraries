@@ -219,7 +219,7 @@ inline DeviceProperties testDeviceProperties()
     properties.totalGlobalMem = 192ULL * 1024 * 1024 * 1024;
     properties.memoryBusWidth = 8192;
     properties.memoryClockRate = 2600000;
-    properties.sharedMemPerBlock = 64 * 1024;
+    properties.sharedMemPerBlock = size_t{64} * 1024;
     return properties;
 }
 

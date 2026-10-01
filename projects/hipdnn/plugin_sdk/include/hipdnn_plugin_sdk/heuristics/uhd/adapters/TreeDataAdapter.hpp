@@ -238,7 +238,8 @@ inline std::unique_ptr<TreeDataAdapter>
                                     const std::string& metric)
 {
     // Guard against null/empty buffer
-    if(buffer == nullptr || size < sizeof(flatbuffers::uoffset_t) + 4 || size > 256 * 1024 * 1024)
+    if(buffer == nullptr || size < sizeof(flatbuffers::uoffset_t) + 4
+       || size > size_t{256} * 1024 * 1024)
     {
         return nullptr;
     }

@@ -604,7 +604,7 @@ public:
         {
             if(it.key().rfind("device.", 0) == 0)
             {
-                device[it.key()] = std::move(it.value());
+                device.emplace(it.key(), std::move(it.value()));
                 it = problem.erase(it);
             }
             else
@@ -783,7 +783,7 @@ public:
             {
                 // Normal selection walks past candidates that cannot prepare. The
                 // prediction must refer to a candidate that can actually be built.
-                GenericPlan<THandle> prepared(
+                const GenericPlan<THandle> prepared(
                     _stateManager.getDispatchDetails(*selected), context, catalog.bound);
                 if(!valued)
                 {
@@ -847,6 +847,8 @@ public:
             }
             catch(const std::exception&)
             {
+                // This candidate cannot prepare; the walk moves on to the next one.
+                continue;
             }
         }
     }

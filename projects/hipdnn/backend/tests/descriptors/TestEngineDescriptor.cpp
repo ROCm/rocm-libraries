@@ -1025,11 +1025,13 @@ TEST_F(TestEngineDescriptor, CandidatePageForwardsPagingAndScopeAndIsEnumeratedO
         HIPDNN_ATTR_ENGINE_CANDIDATE_OFFSET_EXT, HIPDNN_TYPE_INT64, 1, &offset));
     ASSERT_NO_THROW(
         engine->setAttribute(HIPDNN_ATTR_ENGINE_CANDIDATE_LIMIT_EXT, HIPDNN_TYPE_INT64, 1, &limit));
-    ASSERT_NO_THROW(engine->setAttribute(
-        HIPDNN_ATTR_ENGINE_CANDIDATE_SCOPE_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &knobPtr));
+    ASSERT_NO_THROW(engine->setAttribute(HIPDNN_ATTR_ENGINE_CANDIDATE_SCOPE_EXT,
+                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                         1,
+                                         static_cast<const void*>(&knobPtr)));
     ASSERT_NO_THROW(engine->finalize());
 
-    const std::vector<uint8_t> page{0xAB, 0xCD, 0xEF};
+    std::vector<uint8_t> page{0xAB, 0xCD, 0xEF};
     EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
     EXPECT_CALL(*_mockHandle, getPluginResourceManager())
         .WillOnce(Return(_mockEnginePluginResourceManager));
@@ -1173,7 +1175,7 @@ TEST_F(TestEngineDescriptor, EnginePredictionCarriesTheEngineKindEvaluateFlagAnd
             EXPECT_FALSE(evaluateModel);
             const auto* config = fb::GetEngineConfig(engineConfig.ptr);
             EXPECT_EQ(config->engine_id(), ENGINE_ID);
-            EXPECT_TRUE(config->knobs() == nullptr || config->knobs()->size() == 0u);
+            EXPECT_TRUE(config->knobs() == nullptr || config->knobs()->empty());
             // RFC 0019 §11.4: the request names the metric the engine must answer in.
             EXPECT_EQ(config->ranking_metric()->string_view(), "time");
             fb::EnginePredictionT prediction;

@@ -2640,7 +2640,7 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionWithNoTreeInstalledResolvesNo
     EXPECT_TRUE(resolved.byMetric.empty());
     EXPECT_TRUE(resolved.refused.empty());
 
-    hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
+    const hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
     hipdnn_plugin_sdk::uhd::FeatureExtractionContext features;
     features.bind("graph.flops", std::log1p(42.0));
     const auto prediction = binding.predict(

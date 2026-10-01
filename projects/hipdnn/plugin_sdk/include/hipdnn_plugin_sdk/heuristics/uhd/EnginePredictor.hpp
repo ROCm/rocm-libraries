@@ -28,7 +28,7 @@ namespace prediction_detail
 {
 using PredictionStatus = hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
 inline constexpr const char* ENGINE_ROLE = "predict_engine";
-inline constexpr size_t MAX_ARTIFACT_BYTES = 256 * 1024 * 1024;
+inline constexpr size_t MAX_ARTIFACT_BYTES = size_t{256} * 1024 * 1024;
 
 struct Model
 {
@@ -399,7 +399,7 @@ public:
         }
         // Nothing outside this binding can attach a model to the engine, so an engine
         // with no bound model for this metric and architecture simply has none.
-        static const UhdConfig UNBOUND;
+        static const UhdConfig s_unbound;
         const bool evaluateModel = evaluate && refused == nullptr;
         std::shared_ptr<const prediction_detail::Model> compiled;
         if(evaluateModel && selected != nullptr)
@@ -413,7 +413,7 @@ public:
                                     arch,
                                     features,
                                     evaluateModel,
-                                    selected != nullptr ? *selected : UNBOUND,
+                                    selected != nullptr ? *selected : s_unbound,
                                     compiled);
         if(refused != nullptr)
         {

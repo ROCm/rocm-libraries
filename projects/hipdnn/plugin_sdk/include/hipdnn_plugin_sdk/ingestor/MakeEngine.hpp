@@ -156,9 +156,10 @@ inline std::string engineModelHash(const DescriptorSet& set)
     std::map<std::string, nlohmann::json> rankers;
     for(const auto& [metric, byArch] : set.heuristicsByMetric)
     {
+        const std::string metricPrefix = metric + "@";
         for(const auto& [arch, descriptor] : byArch)
         {
-            rankers.emplace(metric + "@" + arch, rankerIdentity(descriptor));
+            rankers.emplace(metricPrefix + arch, rankerIdentity(descriptor));
         }
     }
     if(set.heuristic)

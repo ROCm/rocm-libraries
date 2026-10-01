@@ -333,22 +333,20 @@ private:
         }
     }
 
-    static const std::vector<nlohmann::json>&
-        validateSignature(const std::vector<nlohmann::json>& signature)
+    static void validateSignature(const std::vector<nlohmann::json>& signature)
     {
         size_t visited = 0;
         for(const auto& entry : signature)
         {
             if(!entry.is_object()
-               && !(entry.is_string() && !entry.get_ref<const std::string&>().empty()
-                    && entry.get_ref<const std::string&>().front() == '$'))
+               && (!entry.is_string() || entry.get_ref<const std::string&>().empty()
+                   || entry.get_ref<const std::string&>().front() != '$'))
             {
                 throw JsonLogicError(
                     "Feature entry must be a bare reference or an inline expression object");
             }
             validateLiterals(entry, 0, visited);
         }
-        return signature;
     }
 
     std::string _signatureHash;

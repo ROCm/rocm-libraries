@@ -40,8 +40,8 @@ namespace hipdnn_corpus_gen
 /// it".
 inline const std::vector<std::string>& corpusSources()
 {
-    static const std::vector<std::string> sources{"model", "kernel", "sweep"};
-    return sources;
+    static const std::vector<std::string> s_sources{"model", "kernel", "sweep"};
+    return s_sources;
 }
 
 /// Default share of the corpus each source is allocated.
@@ -51,9 +51,9 @@ inline const std::vector<std::string>& corpusSources()
 /// back (see @ref allocate), so these are preferences, not quotas.
 inline const std::map<std::string, double>& defaultShares()
 {
-    static const std::map<std::string, double> shares{
+    static const std::map<std::string, double> s_shares{
         {"model", 0.15}, {"kernel", 0.60}, {"sweep", 0.25}};
-    return shares;
+    return s_shares;
 }
 
 /// Whether @p shares lets @p source into the corpus at all: a share above zero. A source the

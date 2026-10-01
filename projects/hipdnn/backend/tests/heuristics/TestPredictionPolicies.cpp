@@ -27,6 +27,7 @@
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <filesystem>
 #include <gtest/gtest.h>
@@ -93,7 +94,7 @@ protected:
             _plugin->createPolicyDescriptor(_handle.get(), policyNameToId(mode)),
             [this](auto descriptor) { _plugin->destroyPolicyDescriptor(descriptor); });
         _plugin->setEngineIds(_descriptor.get(), ids.data(), ids.size());
-        GraphT graph;
+        const GraphT graph{};
         flatbuffers::FlatBufferBuilder builder;
         builder.Finish(Graph::Pack(builder, &graph));
         const hipdnnPluginConstData_t bytes{builder.GetBufferPointer(), builder.GetSize()};
@@ -392,7 +393,7 @@ TEST_F(TestPredictionPolicies, MissingOrInvalidModelsDeclineAndInvalidatePreviou
 // File-scope: the C-ABI logging callback is a plain function pointer.
 std::vector<std::string>* gPredictionLogLines = nullptr;
 
-void capturePredictionLog(hipdnnSeverity_t, const char* message)
+void capturePredictionLog(hipdnnSeverity_t /*severity*/, const char* message)
 {
     if(gPredictionLogLines != nullptr && message != nullptr)
     {
@@ -494,21 +495,21 @@ TEST(TestPredictionPolicyBoundary, RejectsMalformedOrForeignConfigFromPlugin)
     auto functions = hipdnn_backend::heuristics::prediction::populateFunctionTable();
     functions.policyGetEngineConfig
         = [](hipdnnHeuristicPolicyDescriptor_t, int64_t, hipdnnPluginConstData_t* result) {
-              static const uint8_t malformed[] = {0, 0, 0, 0};
-              *result = {malformed, sizeof(malformed)};
+              static constexpr std::array<uint8_t, 4> MALFORMED = {0, 0, 0, 0};
+              *result = {MALFORMED.data(), MALFORMED.size()};
               return HIPDNN_PLUGIN_STATUS_SUCCESS;
           };
     auto malformedPlugin = HeuristicPlugin::createBuiltIn(functions, "malformed-config-test");
     EXPECT_THROW(malformedPlugin->getEngineConfig(nullptr, 1), hipdnn_backend::HipdnnException);
     functions.policyGetEngineConfig
         = [](hipdnnHeuristicPolicyDescriptor_t, int64_t, hipdnnPluginConstData_t* result) {
-              static thread_local flatbuffers::DetachedBuffer bytes;
+              static thread_local flatbuffers::DetachedBuffer s_bytes;
               flatbuffers::FlatBufferBuilder builder;
               EngineConfigT config;
               config.engine_id = 999;
               builder.Finish(EngineConfig::Pack(builder, &config));
-              bytes = builder.Release();
-              *result = {bytes.data(), bytes.size()};
+              s_bytes = builder.Release();
+              *result = {s_bytes.data(), s_bytes.size()};
               return HIPDNN_PLUGIN_STATUS_SUCCESS;
           };
     auto foreignPlugin = HeuristicPlugin::createBuiltIn(functions, "foreign-config-test");

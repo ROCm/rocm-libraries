@@ -687,7 +687,7 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
     {
         return invalid(error.what());
     }
-    constexpr size_t MAX_PREDICTION_BYTES = 16 * 1024 * 1024;
+    constexpr size_t MAX_PREDICTION_BYTES = size_t{16} * 1024 * 1024;
     if(data.ptr == nullptr || data.size == 0 || data.size > MAX_PREDICTION_BYTES)
     {
         return invalid("Empty or oversized prediction response");
@@ -733,7 +733,7 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
         // An engine estimate only ever comes from a UHD, so it names one. A configuration
         // answer may instead be a measured value (RFC 0019 §5 step 9), which names no UHD.
         if(kind == HIPDNN_ENGINE_PREDICTION_ENGINE
-           && (response->uhd_id() == nullptr || response->uhd_id()->size() == 0))
+           && (response->uhd_id() == nullptr || response->uhd_id()->empty()))
         {
             return invalid("Available engine prediction needs the UHD that evaluated it");
         }
@@ -748,7 +748,7 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
             return invalid("Engine-level prediction must not select a configuration");
         }
         if(selected != nullptr && selected->ranking_metric() != nullptr
-           && selected->ranking_metric()->size() != 0
+           && !selected->ranking_metric()->empty()
            && selected->ranking_metric()->string_view() != metric.name)
         {
             return invalid("Configuration prediction selected a configuration by another metric");

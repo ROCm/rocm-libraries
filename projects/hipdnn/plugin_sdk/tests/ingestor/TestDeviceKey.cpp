@@ -77,9 +77,9 @@ TEST(TestIngestorDeviceKey, TwoBoardsOfOneArchSharingCuCountStillGetDifferentKey
 TEST(TestIngestorDeviceKey, LdsSizeDiscriminates)
 {
     auto small = propertiesFor("gfx942");
-    small.sharedMemPerBlock = 64 * 1024;
+    small.sharedMemPerBlock = std::size_t{64} * 1024;
     auto large = propertiesFor("gfx942");
-    large.sharedMemPerBlock = 160 * 1024;
+    large.sharedMemPerBlock = std::size_t{160} * 1024;
 
     EXPECT_NE(DeviceKey{small}, DeviceKey{large});
 }
@@ -205,7 +205,7 @@ TEST(TestIngestorDeviceVocabulary, EveryNameIsBoundExactlyOnce)
     properties.totalGlobalMem = 192ULL * 1024 * 1024 * 1024;
     properties.memoryBusWidth = 8192;
     properties.memoryClockRate = 2600000;
-    properties.sharedMemPerBlock = 64 * 1024;
+    properties.sharedMemPerBlock = std::size_t{64} * 1024;
 
     std::set<std::string> names;
     for(const auto& entry : deviceFeatureValues(properties))

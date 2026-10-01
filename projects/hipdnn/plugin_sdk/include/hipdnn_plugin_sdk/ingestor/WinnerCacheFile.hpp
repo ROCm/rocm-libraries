@@ -142,6 +142,7 @@ inline std::string_view winnerCacheVersion()
 /// -Wmissing-field-initializers, which this build treats as an error.
 struct EngineIdentity
 {
+    // NOLINTBEGIN(readability-redundant-member-init) - the initializers are load-bearing, see above
     /// `EngineDescriptor::name`. Empty disables the on-disk cache entirely.
     std::string name = {};
 
@@ -173,6 +174,7 @@ struct EngineIdentity
     /// identity that does not exist. A native scorer or static order has no artifact and
     /// keeps its descriptor identity.
     bool contentIdentified = true;
+    // NOLINTEND(readability-redundant-member-init)
 };
 
 /// Where @p engine's shard for @p gcnArchName lives:

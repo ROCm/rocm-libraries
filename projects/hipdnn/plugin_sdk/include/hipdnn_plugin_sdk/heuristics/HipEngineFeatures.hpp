@@ -36,10 +36,10 @@ inline const hipDeviceProp_t& predictionDevice(hipStream_t stream)
                                         + std::to_string(status) + ", device "
                                         + std::to_string(device));
     }
-    static std::mutex mutex;
-    static std::map<int, hipDeviceProp_t> properties;
-    const std::lock_guard<std::mutex> lock(mutex);
-    if(const auto found = properties.find(device); found != properties.end())
+    static std::mutex s_mutex;
+    static std::map<int, hipDeviceProp_t> s_properties;
+    const std::lock_guard<std::mutex> lock(s_mutex);
+    if(const auto found = s_properties.find(device); found != s_properties.end())
     {
         return found->second;
     }
@@ -49,7 +49,7 @@ inline const hipDeviceProp_t& predictionDevice(hipStream_t stream)
         throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                     "Cannot query prediction device properties");
     }
-    return properties.emplace(device, queried).first->second;
+    return s_properties.emplace(device, queried).first->second;
 }
 
 } // namespace hipdnn_plugin_sdk::heuristics

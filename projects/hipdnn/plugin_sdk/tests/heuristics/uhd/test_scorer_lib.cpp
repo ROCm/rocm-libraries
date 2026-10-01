@@ -21,10 +21,10 @@
 extern "C" {
 
 /// Simple linear scorer: sum all features.
-SCORER_EXPORT double test_linear_scorer(const double* features, size_t num_features)
+SCORER_EXPORT double testLinearScorer(const double* features, size_t numFeatures)
 {
     double sum = 0.0;
-    for(size_t i = 0; i < num_features; ++i)
+    for(size_t i = 0; i < numFeatures; ++i)
     {
         sum += features[i];
     }
@@ -32,15 +32,15 @@ SCORER_EXPORT double test_linear_scorer(const double* features, size_t num_featu
 }
 
 /// Constant scorer: always returns 42.0.
-SCORER_EXPORT double test_constant_scorer(const double* /*features*/, size_t /*num_features*/)
+SCORER_EXPORT double testConstantScorer(const double* /*features*/, size_t /*numFeatures*/)
 {
     return 42.0;
 }
 
 /// Feature product scorer: multiply first two features.
-SCORER_EXPORT double test_product_scorer(const double* features, size_t num_features)
+SCORER_EXPORT double testProductScorer(const double* features, size_t numFeatures)
 {
-    if(num_features < 2)
+    if(numFeatures < 2)
     {
         return 0.0;
     }

@@ -196,11 +196,11 @@ inline Error
     }
     try
     {
-        if(source.binding_json() != nullptr && source.binding_json()->size() != 0)
+        if(source.binding_json() != nullptr && !source.binding_json()->empty())
         {
             decoded.binding = nlohmann::json::parse(source.binding_json()->str());
         }
-        if(source.features_json() != nullptr && source.features_json()->size() != 0)
+        if(source.features_json() != nullptr && !source.features_json()->empty())
         {
             decoded.features = nlohmann::json::parse(source.features_json()->str());
         }

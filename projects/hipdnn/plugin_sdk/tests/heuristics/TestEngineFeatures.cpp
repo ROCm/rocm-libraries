@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <array>
 #include <gtest/gtest.h>
 #include <optional>
 #include <string>
@@ -50,11 +51,11 @@ void addNode(GraphT& graph, TAttributes attributes, DataType compute = DataType:
 
 nlohmann::json features(const flatbuffers::FlatBufferBuilder& graphBuffer)
 {
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper(
         graphBuffer.GetBufferPointer(), graphBuffer.GetSize());
     flatbuffers::FlatBufferBuilder configBuffer;
     configBuffer.Finish(CreateEngineConfig(configBuffer, 1));
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
         configBuffer.GetBufferPointer(), configBuffer.GetSize());
     return hipdnn_plugin_sdk::heuristics::engineFeatures(wrapper, config, Device{}).toJson();
 }
@@ -81,7 +82,8 @@ GraphT matmulBroadcastGraph()
     return graph;
 }
 
-ConvolutionFwdAttributesT convolution(std::vector<int64_t> padding, std::vector<int64_t> stride)
+ConvolutionFwdAttributesT convolution(const std::vector<int64_t>& padding,
+                                      std::vector<int64_t> stride)
 {
     ConvolutionFwdAttributesT conv;
     conv.x_tensor_uid = 1;
@@ -781,7 +783,7 @@ std::string kind(const nlohmann::json& value)
 
 TEST(TestEngineFeatures, GenericOperandsKeepEveryPreviouslyPublishedFeature)
 {
-    const std::pair<const char*, GraphT (*)()> cases[] = {
+    const std::vector<std::pair<const char*, GraphT (*)()>> cases = {
         {GOLDEN_MATMUL_BROADCAST, matmulBroadcastGraph},
         {GOLDEN_CONV_FWD, convFwdGraph},
         {GOLDEN_CONV_FWD_GROUPED, groupedConvFwdGraph},
@@ -1130,7 +1132,7 @@ TEST(TestEngineFeatures, WorkModelKeepsEveryPreviouslyPublishedCount)
         GraphT (*make)();
         std::optional<double> flops;
     };
-    const Case cases[] = {
+    const std::vector<Case> cases = {
         {"matmul broadcast", matmulBroadcastGraph, 840.0},
         {"convolution", convFwdGraph, 86400.0},
         {"grouped convolution", groupedConvFwdGraph, 13824.0},
@@ -1194,7 +1196,7 @@ TEST(TestEngineFeatures, WorkModelKeepsEveryPreviouslyPublishedCount)
 
     // Every operand or flag SDPA refused before still refuses on its own.
     using Refusal = void (*)(SdpaAttributesT&);
-    const std::pair<const char*, Refusal> refusals[] = {
+    const std::vector<std::pair<const char*, Refusal>> refusals = {
         {"seq_len_q", [](SdpaAttributesT& op) { op.seq_len_q_tensor_uid = 5; }},
         {"seq_len_kv", [](SdpaAttributesT& op) { op.seq_len_kv_tensor_uid = 5; }},
         {"page_table_k", [](SdpaAttributesT& op) { op.page_table_k_tensor_uid = 5; }},
@@ -1235,7 +1237,7 @@ TEST(TestEngineFeatures, EveryCountableNodeTypeHasItsDeclaredWork)
         GraphT (*make)();
         double flops;
     };
-    const Case cases[] = {
+    const std::vector<Case> cases = {
         // 2 * dy.numel (384) * w.numel (864) / K (12).
         {[] {
              ConvolutionBwdAttributesT conv;
@@ -1471,7 +1473,7 @@ TEST(TestEngineFeatures, EveryCountableNodeTypeHasItsDeclaredWork)
 
 TEST(TestEngineFeatures, UnknownWorkIsAbsentNeverZero)
 {
-    const auto layernorm = [](std::vector<int64_t> dims) {
+    const auto layernorm = [](const std::vector<int64_t>& dims) {
         LayernormAttributesT norm;
         norm.x_tensor_uid = 1;
         norm.y_tensor_uid = 2;
@@ -1480,11 +1482,11 @@ TEST(TestEngineFeatures, UnknownWorkIsAbsentNeverZero)
     ResampleFwdAttributesT windowless;
     windowless.x_tensor_uid = 1;
     windowless.y_tensor_uid = 2;
-    const std::pair<const char*, GraphT> cases[] = {
+    const std::array<std::pair<const char*, GraphT>, 3> cases = {{
         {"empty extent", layernorm({0, 64})},
         {"negative extent", layernorm({-1, 64})},
         {"no window", single({{2, 8, 8, 8}, {2, 8, 4, 4}}, windowless)},
-    };
+    }};
     for(const auto& [name, graph] : cases)
     {
         SCOPED_TRACE(name);

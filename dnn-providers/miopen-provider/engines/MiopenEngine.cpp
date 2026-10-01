@@ -225,13 +225,17 @@ void bindDeclaredL1Models(hipdnn_plugin_sdk::uhd::EngineModelBinding& binding,
         {
             if(const auto& declared = declaredMetric.at(model.id); declared != metric)
             {
+                std::string reason = "model " + ingestor::toString(model.id);
+                reason += " is deployed under the id declared for metric '";
+                reason += declared;
+                reason += "' but its score.metric is '";
+                reason += metric;
+                reason += '\'';
                 binding.markUnusable(
                     metric,
                     arch,
                     hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::INVALID,
-                    "model " + ingestor::toString(model.id)
-                        + " is deployed under the id declared for metric '" + declared
-                        + "' but its score.metric is '" + metric + "'");
+                    reason);
                 continue;
             }
             binding.bind(metric, arch, ingestor::UhdKernelHeuristic::configFrom(model));

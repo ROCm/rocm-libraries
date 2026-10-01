@@ -71,10 +71,10 @@ void EngineConfigDescriptor::getAttribute(hipdnnBackendAttributeName_t attribute
     // A prediction configuration carries constraints only: it is deliberately never
     // finalized, so no engine metadata, catalog, or workspace query is performed. Its
     // ranking metric is plain stored input and is readable on the same terms.
-    THROW_IF_FALSE(isFinalized() || attributeName == HIPDNN_ATTR_ENGINECFG_PREDICTION_EXT
-                       || attributeName == HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT,
-                   HIPDNN_STATUS_NOT_INITIALIZED,
-                   "EngineConfigDescriptor::getAttribute() failed: Not finalized.");
+    THROW_IF_TRUE(!isFinalized() && attributeName != HIPDNN_ATTR_ENGINECFG_PREDICTION_EXT
+                      && attributeName != HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT,
+                  HIPDNN_STATUS_NOT_INITIALIZED,
+                  "EngineConfigDescriptor::getAttribute() failed: Not finalized.");
 
     switch(attributeName)
     {

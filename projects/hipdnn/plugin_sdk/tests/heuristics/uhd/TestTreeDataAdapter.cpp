@@ -24,9 +24,11 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/gbdt_model_generated.h>
 
+#include <array>
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <utility>
 #include <vector>
 
 using hipdnn_plugin_sdk::uhd::TreeDataAdapter;
@@ -1089,18 +1091,13 @@ TEST_F(TestTreeDataAdapter, OptionalFlagsPreserveComparisonAndMissingValueBehavi
     const std::vector<uint8_t> inclusive = {1};
     const std::vector<uint8_t> left = {1};
     const std::vector<uint8_t> right = {0};
+    // Each tree pairs one default_left flag set with one decision_lte flag set.
+    const std::array<std::pair<const std::vector<uint8_t>*, const std::vector<uint8_t>*>, 4> modes
+        = {{{nullptr, nullptr}, {&empty, &empty}, {&left, &strict}, {&right, &inclusive}}};
     double weight = 1.0;
-    for(int mode = 0; mode < 4; ++mode)
+    for(const auto& [defaults, decisions] : modes)
     {
         auto tree = makeBinarySplitTree(0, 5.0, weight, 2.0 * weight);
-        const auto* defaults = mode == 0   ? nullptr
-                               : mode == 1 ? &empty
-                               : mode == 2 ? &left
-                                           : &right;
-        const auto* decisions = mode == 0   ? nullptr
-                                : mode == 1 ? &empty
-                                : mode == 2 ? &strict
-                                            : &inclusive;
         trees.push_back(fb::CreateGbdtTreeDirect(builder,
                                                  &tree.featureIndices,
                                                  &tree.thresholds,

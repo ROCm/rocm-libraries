@@ -64,14 +64,14 @@ public:
     using IEngineConfig = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig;
 
     /// @throws std::invalid_argument if a knob names no field in the metadata schema.
-    GenericEngine(EngineDescriptor engine,
-                  std::unique_ptr<KernelIngestorStateManager<THandle>> stateManager,
-                  const IDeviceResolver<THandle>& deviceResolver,
-                  std::map<std::string, std::map<std::string, HeuristicDescriptor>> predictions
-                  = {},
-                  std::map<std::string, std::set<std::string>> unavailablePredictionArches = {},
-                  std::string selectorRevision = {},
-                  nlohmann::json provenance = nlohmann::json::object())
+    GenericEngine(
+        EngineDescriptor engine,
+        std::unique_ptr<KernelIngestorStateManager<THandle>> stateManager,
+        const IDeviceResolver<THandle>& deviceResolver,
+        const std::map<std::string, std::map<std::string, HeuristicDescriptor>>& predictions = {},
+        const std::map<std::string, std::set<std::string>>& unavailablePredictionArches = {},
+        std::string selectorRevision = {},
+        nlohmann::json provenance = nlohmann::json::object())
         : _engine(std::move(engine))
         , _stateManager(std::move(stateManager))
         , _id(hipdnn_data_sdk::utilities::engineNameToId(_engine.name))
