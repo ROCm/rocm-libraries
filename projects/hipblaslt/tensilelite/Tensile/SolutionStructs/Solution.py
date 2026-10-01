@@ -3516,6 +3516,19 @@ class Solution(collections.abc.Mapping):
       if state["TailloopInNll"] and state["UseCustomMainLoopSchedule"] == 1:
         reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 is incompatible with TailloopInNll=True")
         return
+      # reject CMS + per-tensor LDSTrInstA/B that diverges from the global
+      # LDSTrInst: hasCustomSchedule() only looks at the shared LDSTrInst
+      # value when picking a schedule, so A/B must match it (all layouts).
+      if (
+        state["UseCustomMainLoopSchedule"] == 1
+        and (state["LDSTrInstA"] != state["LDSTrInstB"]
+             or state["LDSTrInstA"] != state["LDSTrInst"])
+      ):
+        reject(state, printRejectionReason,
+               "UseCustomMainLoopSchedule=1 (CMS) requires LDSTrInstA, "
+               "LDSTrInstB, and LDSTrInst to all match (CMS schedule "
+               "selection uses a single shared LDSTrInst value)")
+        return
     # UseSubtileImpl has its own main loop scheduler; CMS is not compatible.
     if state["UseSubtileImpl"] and state["UseCustomMainLoopSchedule"] == 1:
         reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 is incompatible with UseSubtileImpl")
