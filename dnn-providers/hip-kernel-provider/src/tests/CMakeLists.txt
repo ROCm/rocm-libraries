@@ -279,6 +279,32 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "hkp: this configuration does not ship hipkernel:Gfx950AttentionDense for "
             "gfx950, so its census is not registered.")
     endif()
+
+    # Census for the gfx950 forward-convolution production pack; same shard, same
+    # predicate shape and the same ARCHES narrowing as the dense-attention call above.
+    hkp_gfx950_conv_fwd_available(_hkp_gfx950_conv_fwd)
+    if(_hkp_gfx950_conv_fwd)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx950
+            SUITES TestGfx950ConvFwdPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx950ConvFwd for "
+            "gfx950, so its census is not registered.")
+    endif()
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)
