@@ -170,6 +170,12 @@ set(rocsolver_lapack_source
   lapack/roclapack_sygst_hegst.cpp
   lapack/roclapack_sygst_hegst_batched.cpp
   lapack/roclapack_sygst_hegst_strided_batched.cpp
+  lapack/roclapack_gehd2.cpp
+  lapack/roclapack_gehd2_batched.cpp
+  lapack/roclapack_gehd2_strided_batched.cpp
+  lapack/roclapack_gehrd.cpp
+  lapack/roclapack_gehrd_batched.cpp
+  lapack/roclapack_gehrd_strided_batched.cpp
   #### Singular Value Decomposition ####
   ######################################
   #- classic
@@ -466,20 +472,6 @@ endif()
 # Ignore loop unrolling failures
 target_compile_options(rocsolver PRIVATE -Wno-pass-failed)
 
-# hipcc adds these options automatically. These options might have an effect
-# on performance, so add them when building with clang directly, just in case.
-if(USE_HIPCXX)
-  target_compile_options(rocsolver PRIVATE
-    "$<$<COMPILE_LANGUAGE:HIP>:SHELL:-mllvm -amdgpu-early-inline-all=true>"
-    "$<$<COMPILE_LANGUAGE:HIP>:SHELL:-mllvm -amdgpu-function-calls=false>"
-  )
-elseif(CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+.*")
-  target_compile_options(rocsolver PRIVATE
-    "SHELL:-mllvm -amdgpu-early-inline-all=true"
-    "SHELL:-mllvm -amdgpu-function-calls=false"
-  )
-endif()
-
 if(BUILD_OFFLOAD_COMPRESS)
   target_compile_options(rocsolver PRIVATE "--offload-compress")
 endif()
@@ -533,6 +525,9 @@ if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
 endif()
 if(ROCSOLVER_ENABLE_EIG_2STAGE)
   target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_EIG_2STAGE)
+endif()
+if(ROCSOLVER_ENABLE_HESSENBERG)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_HESSENBERG)
 endif()
 
 target_compile_definitions(rocsolver PRIVATE

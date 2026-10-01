@@ -30,7 +30,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from typing import Dict
 
-from Tensile import __version__
+from .. import __version__
 
 from .Architectures import isaToGfx
 from .Types import IsaVersion, IsaInfo
@@ -349,6 +349,7 @@ globalParameters["BuildIdKind"] = "sha1"
 globalParameters["AsmDebug"] = (
     False  # Set to True to keep debug information for compiled code objects
 )
+globalParameters["ValidateMetadata"] = False  # Set to True to validate custom.config metadata at build time
 
 globalParameters["UseEffLike"] = True  # Set to False to use winnerGFlops as the performance metric
 
@@ -396,6 +397,11 @@ globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 # splits, and how many s_nop cycles were wasted.
 globalParameters["StinkyTofuEnableRemarks"] = False
 
+# StinkyTofu per-pass wall time (stderr).  After each kernel's pipeline finishes,
+# report self time, inclusive total, and run count for every pass that ran, so a
+# slow kernel generation can be attributed to individual passes.
+globalParameters["StinkyTofuTimePasses"] = False
+
 # Directory for StinkyTofu per-kernel instruction-cost output files (empty = disabled).
 # When set, each kernel's StinkyTofu module writes its cost file here via
 # StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).
@@ -436,7 +442,8 @@ internalParameters = {
 
 # These parameters are used in ContractionSolutions for user arguments support.
 defaultInternalSupportParams = {
-    "KernArgsVersion": 2,
+    "PersistentLoopArgsVersion": 0,
+    "KernArgsVersion": 3,
     # Information about user input internal kernel argument support
     # Change this to False if the CustomKernel does not support.
     "SupportUserGSU": True,
@@ -444,9 +451,16 @@ defaultInternalSupportParams = {
     # but WGM is not.
     "SupportCustomWGM": True,
     "SupportCustomStaggerU": True,
-    # Kernel distributes Stream-K extra iters within each tile when
-    # skGrid % skTiles == 0. Default False so older/custom kernels do not
-    # claim the capability; newly generated StreamK 3 / SK5 set it True.
+    # Pure CAPABILITY, never policy: "this kernel's assembly contains BOTH
+    # Stream-K K-split mappings (the historical global 'first-E' mapping and the
+    # per-tile extra-iters mapping) and honors bit 29 of MagicShiftItersPerTile
+    # as the runtime selector, so the host may set that bit."
+    # It does NOT mean per-tile extra-iters is in use: whether the mapping is
+    # actually taken is decided at runtime by the host, which sets bit 29 iff
+    # this capability is true AND uniform summation order is requested.
+    # Default False so older/custom kernels -- whose asm has only one mapping
+    # and ignores bit 29 -- do not claim it; newly generated StreamK 3 / SK5
+    # set it True in Solution.py.
     "SupportStreamKPerTileExtraIters": False,
     # Use GG as G's backend
     "UseUniversalArgs": True,
@@ -550,6 +564,7 @@ defaultBenchmarkCommonParameters = [
     {"NonTemporal": [-1]},
     {"TemporalHint": [-1]},
     {"TemporalHintE": [0]},
+    {"TemporalHintGate": [0]},
     {"TemporalHintD": [0]},
     {"TemporalHintC": [0]},
     {"TemporalHintA": [0]},
@@ -560,6 +575,7 @@ defaultBenchmarkCommonParameters = [
     {"TemporalHintMetadata": [0]},
     {"NonVolatile": [-1]},
     {"NonVolatileE": [0]},
+    {"NonVolatileGate": [0]},
     {"NonVolatileD": [0]},
     {"NonVolatileC": [0]},
     {"NonVolatileA": [0]},
@@ -569,7 +585,7 @@ defaultBenchmarkCommonParameters = [
     {"NonVolatileWS": [0]},
     {"NonVolatileMetadata": [0]},
     {"PreloadKernArgs": [True]},
-    {"CustomKernelName": [""]},
+    # {"CustomKernel": [{"name": "", "args": [], "macrotile": [0,0,0], "threads": [0,0,0], "grid": [0,0,0]}]},
     {"NoReject": [False]},
     {"StoreRemapVectorWidth": [0]},
     {"SourceSwap": [False]},
@@ -579,11 +595,11 @@ defaultBenchmarkCommonParameters = [
     {"StoreSyncOpt": [0]},
     {"GroupLoadStore": [False]},
     {"MIArchVgpr": [False]},
-    {"StreamK": [0]},
-    {"StreamKForceDPOnly": [0]},
+    {"TileProcessingStrategy": ["None"]},
+    {"WorkAssignment": ["StaticGrid"]},
     {"StreamKAtomic": [0]},
-    {"StreamKWorkStealing": [0]},
-    {"StreamKXCCMapping": [0]},
+    {"WorkQueueStealing": [0]},
+    {"PersistentXCCMapping": [0]},
     {"StreamKFixupTreeReduction": [0]},
     {"DebugStreamK": [0]},
     {"DebugPersistentKernelLoopForever": [False]},
@@ -598,6 +614,7 @@ defaultBenchmarkCommonParameters = [
     {"WaveSplitK": [ False ]},
     {"MbskPrefetchMethod": [-1]},
     {"PrefetchAcrossPersistent": [0]},
+    {"ReuseAcrossPersistent": [0]},
     {"UseCustomMainLoopSchedule": [-1]},
     {"SpaceFillingAlgo": [[]]},
     {"SFCWGM": [[[1,1],[1,1]]]},
@@ -641,7 +658,6 @@ for paramDict in defaultBenchmarkCommonParameters:
     for key, value in paramDict.items():
         defaultSolution[key] = value[0]
 # other non-benchmark options for solutions
-
 
 
 defaultProblemSizes = [{"Range": [[2880], 0, 0]}]
@@ -831,7 +847,9 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "LogicFilter",        # logic-file glob, read by TensileCreateLibrary/Run.py
     "OutputPath",         # positional output dir arg in Tensile.py / RetuneLibrary
     "Experimental",       # --experimental logic-dir toggle in ParseArguments
+    "EnableGemmA2AFusion", # --enable-gemm-a2a-fusion toggle in ParseArguments
     "GenSolTable",        # --gen-sol-table toggle in ParseArguments
+    "BuildGfx1250v0",     # --gfx1250v0 toggle in ParseArguments
     # Keys with a sanctioned opt-out from the strict gate:
     #   - Live but read via DebugConfig (makeDebugConfig in
     #     Tensile/Common/Types.py) directly from the raw config dict

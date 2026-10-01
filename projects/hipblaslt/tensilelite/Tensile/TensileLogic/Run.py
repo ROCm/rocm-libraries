@@ -36,13 +36,13 @@ import rocisa
 from pathlib import Path
 from typing import FrozenSet, List, Dict, NamedTuple, Tuple
 
-from Tensile.Common import ParallelMap2, print1, print2, IsaVersion, IsaInfo, setVerbosity
-from Tensile.Common.Architectures import SUPPORTED_ISA
-from Tensile.Common.Capabilities import makeIsaInfoMap
-from Tensile.Common.GlobalParameters import assignGlobalParameters, defaultSolution
-from Tensile.CustomYamlLoader import load_logic_gfx_arch, archMatch
-from Tensile.LibraryIO import readYAML
-from Tensile.Toolchain.Validators import validateToolchain
+from ..Common import ParallelMap2, print1, print2, IsaVersion, IsaInfo, setVerbosity
+from ..Common.Architectures import SUPPORTED_ISA
+from ..Common.Capabilities import makeIsaInfoMap
+from ..Common.GlobalParameters import assignGlobalParameters, defaultSolution
+from ..CustomYamlLoader import load_logic_gfx_arch, archMatch
+from ..LibraryIO import readYAML
+from ..Toolchain.Validators import validateToolchain
 
 from .ParseArguments import parseArguments, BUNDLED_KNOWN_BUGS
 from .KnownBugs import (
@@ -58,7 +58,6 @@ from .ValidMatrixInstruction import _validateMatrixInstruction
 from .ValidWorkGroup import _validateWorkGroup
 from .ValidWorkGroupMappingXCC import _validateWorkGroupMappingXCC, reset_reported_failures
 from .HandleCustomKernel import handleCustomKernel, hasCustomKernel
-
 
 
 class Check(NamedTuple):
@@ -265,22 +264,15 @@ def main():
     reset_reported_failures()
     jobs, isaInfoMap, logicPath, files, check, args = _setup()
 
-    # Cross-file invariants (sibling DeviceNames, gfx1250v0-overlay
-    # consistency) run only when --check-all is given, and only over the
-    # already --architecture-filtered `files` -- the same scope the
-    # per-solution validators below use -- so a build for one architecture
-    # can't be failed by unrelated data in another. `files` excludes
-    # Experimental logic the same way _runChecks()'s own per-file loop does.
+    # Cross-file invariants (sibling DeviceNames) run only when --check-all is
+    # given, and only over the already --architecture-filtered `files` -- the
+    # same scope the per-solution validators below use -- so a build for one
+    # architecture can't be failed by unrelated data in another. `files`
+    # excludes Experimental logic the same way _runChecks()'s own per-file
+    # loop does.
     corpus_files = [f for f in files if "Experimental" not in f.parts]
     corpus_violations = (
-        check_corpus_invariants(
-            logicPath,
-            corpus_files,
-            args.Architecture.split(";"),
-            overlay_required=args.RequireGfx1250v0Overlay,
-        )
-        if check.All
-        else []
+        check_corpus_invariants(logicPath, corpus_files) if check.All else []
     )
     report_corpus_invariant_violations(corpus_violations)
     if corpus_violations:

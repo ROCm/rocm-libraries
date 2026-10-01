@@ -198,6 +198,36 @@ class FindMatchedSubtreesTest(unittest.TestCase):
         )
         self.assertEqual(result, ["projects/rocblas"])
 
+    def test_nested_subtree_wins_over_its_registered_parent(self):
+        # A registered nested subtree (e.g. projects/hipblaslt/tensilelite,
+        # from repos-config.json) must win over its 2-segment parent for files
+        # inside it -- longest-prefix match, not a fixed 2-segment truncation.
+        prefixes = {"projects/hipblaslt", "projects/hipblaslt/tensilelite"}
+        result = sut.find_matched_subtrees(
+            ["projects/hipblaslt/tensilelite/Tensile/KernelWriter.py"], prefixes
+        )
+        self.assertEqual(result, ["projects/hipblaslt/tensilelite"])
+
+    def test_parent_only_change_does_not_match_registered_nested_subtree(self):
+        prefixes = {"projects/hipblaslt", "projects/hipblaslt/tensilelite"}
+        result = sut.find_matched_subtrees(
+            ["projects/hipblaslt/library/src/Handle.cpp"], prefixes
+        )
+        self.assertEqual(result, ["projects/hipblaslt"])
+
+    def test_mixed_nested_and_parent_changes_match_both_independently(self):
+        prefixes = {"projects/hipblaslt", "projects/hipblaslt/tensilelite"}
+        result = sut.find_matched_subtrees(
+            [
+                "projects/hipblaslt/tensilelite/Tensile/KernelWriter.py",
+                "projects/hipblaslt/library/src/Handle.cpp",
+            ],
+            prefixes,
+        )
+        self.assertEqual(
+            result, ["projects/hipblaslt", "projects/hipblaslt/tensilelite"]
+        )
+
 
 # ---------------------------------------------------------------------------
 # output_subtrees
