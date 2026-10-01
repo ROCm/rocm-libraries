@@ -8,9 +8,14 @@ Tests:
 # hipMallocAsync failed. Nothing here varies with precision or size: the test asks for an
 # allocation no device can satisfy and checks the status rocblas_device_malloc_alloc
 # returns, so a single case is the whole of it.
+#
+# graph_test is what gets the handle built with stream-order allocation, which is the
+# branch carrying the discarded status. It does not run a graph capture here: that is
+# rocblas_local_handle::pre_test, which this test never calls.
 - name: device_malloc_count_alloc_failure
   category: quick
   function: device_malloc_count_alloc_failure
+  graph_test: true
   precision: *single_precision
 
 ...

@@ -50,13 +50,23 @@ namespace
         GTEST_SKIP() << "hipMallocAsync on the default stream needs HIP 5.3, and the branch "
                         "this covers is compiled out below it";
 #else
-        rocblas_local_handle handle{arg};
+        // graph_test is what makes rocblas_local_handle export ROCBLAS_STREAM_ORDER_ALLOC
+        // before rocblas_create_handle and restore it afterwards, and a handle built that
+        // way is the only one whose destructor matches its constructor. Calling
+        // set_stream_order_memory_allocation on an already-built handle would reach the
+        // same branch, but the handle allocated its workspace with hipMalloc and the
+        // destructor would then release it with hipFreeAsync; on any runtime where that
+        // returns an error the destructor calls rocblas_abort, which resets SIGABRT before
+        // aborting, so gtest could not turn it into a failed test and the whole
+        // rocblas-test binary would go down. rocblas_stream_begin_capture carries that same
+        // setter call commented out in favour of the environment, for the same reason.
+        //
+        // No graph capture happens: that is pre_test's doing and this test never calls it.
+        ASSERT_TRUE(arg.graph_test)
+            << "this test needs a handle built with stream-order allocation; restore "
+               "graph_test: true in device_malloc_gtest.yaml";
 
-        // Selected through the public setter rather than by exporting
-        // ROCBLAS_STREAM_ORDER_ALLOC. The variable is read once per handle at creation, so
-        // setting it here would depend on ordering against every other handle in the
-        // process, and restoring it would be this test's problem.
-        ((rocblas_handle)handle)->set_stream_order_memory_allocation(true);
+        rocblas_local_handle handle{arg};
 
         // The other half of the branch condition, and asserted rather than assumed: a
         // handle given a user workspace allocates from it instead, and that path sets the
