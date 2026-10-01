@@ -333,16 +333,17 @@ public:
                                         "left_bound=-1, right_bound=0 instead.");
         }
 
-        // Check deprecated attributes
+        // Check deprecated attributes. Each one fixes the alignment and the right bound
+        // (the diagonal) but not the left bound: a graph that also carries left_bound is
+        // a causal sliding window. Same rule as the CPU reference's
+        // extractDiagonalBandParams(), so the two references agree.
         if(nodeAttributes->causal_mask())
         {
-            leftBound = -1;
             rightBound = 0;
             isTopLeft = true;
         }
         if(nodeAttributes->causal_mask_bottom_right())
         {
-            leftBound = -1;
             rightBound = 0;
             isTopLeft = false;
         }

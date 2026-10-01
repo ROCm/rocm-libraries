@@ -722,6 +722,59 @@ TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskBottomRightMatchesExplicitBotto
            "leftBound=-1, rightBound=0, BOTTOM_RIGHT alignment.";
 }
 
+TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskWithLeftBoundIsSlidingWindow)
+{
+    // causal_mask=true plus left_bound=2 is a causal sliding window: what cuDNN's
+    // set_causal_mask(true).set_sliding_window_length(2) asks for. The deprecated
+    // flag fixes the diagonal (right bound 0, top-left) and must keep the left bound,
+    // so the output equals the explicit (leftBound=2, rightBound=0, TOP_LEFT) graph.
+    // Sq = Skv = 8, so rows 3..7 lose keys to the window and plain causal differs.
+    const std::vector<int64_t> dims = {1, 2, 8, 8};
+
+    const unsigned int seed = getGlobalTestSeed();
+    SdpaFwdTensorBundle<float> windowBundle(dims, dims, dims, seed);
+    SdpaFwdTensorBundle<float> explicitBundle(dims, dims, dims, seed);
+    SdpaFwdTensorBundle<float> causalBundle(dims, dims, dims, seed);
+
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        planBuilder;
+
+    auto run = [&planBuilder](SdpaFwdTensorBundle<float>& bundle,
+                              bool causalMask,
+                              std::optional<int64_t> leftBound,
+                              std::optional<int64_t> rightBound) {
+        auto graphTuple = buildSdpaFwdGraph(bundle,
+                                            DataType::FLOAT,
+                                            causalMask,
+                                            /*causalMaskBottomRight=*/false,
+                                            leftBound,
+                                            rightBound,
+                                            hipdnn_frontend::DiagonalAlignment::TOP_LEFT);
+        auto [bin, err] = std::get<0>(graphTuple)->to_binary();
+        ASSERT_TRUE(err.is_good()) << err.get_message();
+        const GraphWrapper wrapper(bin.data(), bin.size());
+        auto plan = planBuilder.buildNodePlan(wrapper, wrapper.getNode(0));
+        const auto* attrs = wrapper.getNode(0).attributes_as_SdpaAttributes();
+        std::unordered_map<int64_t, void*> vp;
+        vp[attrs->q_tensor_uid()] = bundle.qTensor.memory().hostData();
+        vp[attrs->k_tensor_uid()] = bundle.kTensor.memory().hostData();
+        vp[attrs->v_tensor_uid()] = bundle.vTensor.memory().hostData();
+        vp[attrs->o_tensor_uid()] = bundle.oTensor.memory().hostData();
+        plan->execute(vp);
+    };
+
+    run(windowBundle, /*causalMask=*/true, /*leftBound=*/2, /*rightBound=*/std::nullopt);
+    run(explicitBundle, /*causalMask=*/false, /*leftBound=*/2, /*rightBound=*/0);
+    run(causalBundle, /*causalMask=*/true, /*leftBound=*/std::nullopt, /*rightBound=*/std::nullopt);
+
+    const CpuFpReferenceValidation<float> exact(0.0f, 0.0f);
+    EXPECT_TRUE(exact.allClose(windowBundle.oTensor, explicitBundle.oTensor))
+        << "causal_mask=true with left_bound=2 should equal leftBound=2, rightBound=0, TOP_LEFT.";
+    // Control: the window must actually change the output, or the check above proves nothing.
+    EXPECT_FALSE(exact.allClose(windowBundle.oTensor, causalBundle.oTensor))
+        << "A left bound of 2 on Sq=Skv=8 should differ from plain causal attention.";
+}
+
 TEST(TestSdpaFwdPlanBuilder, IsApplicableFp8RequiresDescale)
 {
     // FP8 inputs require q/k/v descales (mirrors AITER's TORCH_CHECK). The dispatcher
