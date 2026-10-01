@@ -21,7 +21,7 @@ using generator_template
                                                              ConfigProvider>;
 {% endblock %}
 
-
+{% block disable_ull %}
 // Disable ULL
 template<typename T, template<class> class GeneratorTemplate>
 struct output_type_supported : std::true_type
@@ -34,6 +34,7 @@ struct output_type_supported : std::true_type
 
 DISABLE_ULL(generator_template);
 #undef DISABLE_ULL
+{% endblock %}
 
 // QUEUING TEMPLATE
 template<class T, distribution Dist, template<class> class GeneratorTemplate, class ConfigProvider>
