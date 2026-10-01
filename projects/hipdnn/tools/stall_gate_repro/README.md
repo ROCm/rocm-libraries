@@ -5,14 +5,23 @@ Tracks issue #12863.
 
 ## What it does
 
-The program times these workloads, 50 samples each:
+Each output row is 50 samples (after 3 warmups) of one workload, mode, and delay.
 
-- An empty span (START then STOP).
-- A spin kernel of 0 to 1000 µs. The kernel times itself with `wall_clock64()`.
-- `hipMemsetAsync` of 4 KiB to 128 MiB.
+Workloads:
 
-Each workload runs unstalled and stalled. Each runs with no host delay and with a
-200 µs host delay after START.
+- `empty`: START then STOP, no work.
+- `spin Nus`: one single-thread kernel that spins for N µs and times itself with
+  `wall_clock64()`. Each N (0, 2, 5, 10, 20, 50, 100, 200, 1000) is a separate row.
+- `memset N`: one `hipMemsetAsync` of 4 KiB to 128 MiB.
+
+Modes (`mode` column):
+
+- `unstalled`: START, work, STOP.
+- `stalled`: `arm()`, START, work, STOP, `release()`. The GPU runs nothing until the
+  release, so host time between START and the launch is excluded.
+
+Delay (`delay` column): `0`, or a 200 µs host busy-wait after START. It stands in
+for hipDNN host code. The output has one block per delay.
 
 The spin kernel is the oracle. The event span contains the whole kernel, so a
 correct event time is never shorter than the kernel's own time.
@@ -59,15 +68,16 @@ You need a ROCm or HIP SDK install with `hipcc`, and a git checkout of this bran
 
 ## Read the output
 
-All times are in µs. `delta = event - device` exists only for spin rows.
+All times are in µs.
 
 | Column | Meaning |
 |---|---|
-| `ev_min`, `ev_med`, `ev_max` | Event elapsed time |
-| `dev_med` | Kernel self-timed duration |
-| `d_med`, `d_min` | Event minus kernel time |
+| `ev_min`, `ev_med`, `ev_max` | Min, median, max of the event elapsed time |
+| `dev_med` | Median kernel self-timed duration (spin rows only) |
+| `d_med`, `d_min` | Median and min of event minus kernel time, per sample (spin rows only) |
 | `neg` | Samples with a negative event time |
 | `viol` | Samples where the event time is shorter than the kernel time |
+| `declined=N timedOut=N` | Printed only when nonzero: N stalled samples ran unstalled, or the watchdog released them |
 
 How to judge the result:
 
