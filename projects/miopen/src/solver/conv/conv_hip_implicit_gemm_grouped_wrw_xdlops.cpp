@@ -320,23 +320,22 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::DefaultKernelFromList(
     if(is_gfx11 || is_gfx12)
         ranked_p = &ranked_gemm_grp_wrw_navi;
 
-    const auto& loader          = CkImplLibLoader::Get(dev_name);
-    const bool is_deterministic = problem.GetConv().attribute.deterministic;
+    const auto& loader = CkImplLibLoader::Get(dev_name);
 
-    for(const auto& [kernel_str, requested_split_k] : *ranked_p)
+    for(const auto& ranked : *ranked_p)
     {
+        const auto& kernel_str = std::get<0>(ranked);
         const auto it = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_str);
         if(it == valid_kernels.end())
             continue;
 
-        const int candidate_split_k = is_deterministic ? 1 : requested_split_k;
-        const auto candidate_id     = kernel_str + "+" + std::to_string(candidate_split_k);
+        const auto candidate_id = kernel_str + "+1";
         if(!loader.IsArgsSupported(
                CKSolverType::GrpConvWrw, problem, candidate_id, problem.GetInDataType(), use_tf32))
             continue;
 
         index     = it - valid_kernels.begin();
-        split_k   = candidate_split_k;
+        split_k   = 1;
         kernel_id = candidate_id;
         return;
     }

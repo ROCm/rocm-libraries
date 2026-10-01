@@ -151,36 +151,34 @@ TEST_P(CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDeterministicApplicabilit
     this->RunTest(miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops{});
 };
 
-TEST(GPU_GroupWrwRankedSelection_FP16, ValidatesRequestedSplitAndPreservesFallback)
+TEST(GPU_GroupWrwRankedSelection_FP16, ValidatesSplitOneAndPreservesFallback)
 {
     miopen::Handle handle;
     miopen::ExecutionContext ctx(&handle);
-    const auto& loader = miopen::solver::CkImplLibLoader::Get(handle.GetDeviceName());
-    ASSERT_TRUE(loader.IsLoaded()) << "Grouped-convolution CK plugin is unavailable";
-
-    // Probe one non-unit hint from each existing ranking. These IDs are exact CK type names;
-    // an absent instance must not be substituted with another kernel.
     const auto& arch = handle.GetDeviceName();
     std::string type;
-    int requested_split = 0;
     if(arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0)
     {
-        type            = "DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmMultipleD_Wmma_"
-                          "CShuffleV3<MNKPadding, CRR> BlkSize: 256, BlkTile: 128x32x128, WaveTile: "
-                          "16x16, WaveMap: 1x2, VmemReadVec: 1x1, BlkGemmPipelineScheduler: Intrawave, "
-                          "BlkGemmPipelineVersion: v1, BlkGemmPipelinePrefetchStages: 1>";
-        requested_split = 32;
+        type = "DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmMultipleD_Wmma_"
+               "CShuffleV3<MNKPadding, CRR> BlkSize: 256, BlkTile: 128x32x128, WaveTile: "
+               "16x16, WaveMap: 1x2, VmemReadVec: 1x1, BlkGemmPipelineScheduler: Intrawave, "
+               "BlkGemmPipelineVersion: v1, BlkGemmPipelinePrefetchStages: 1>";
     }
     else if(arch.rfind("gfx9", 0) == 0)
     {
-        type            = "DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmXdlUniversal<"
-                          "Default, CRR> BlkSize: 128, BlkTile: 64x16x64, WaveTile: 16x16, WaveMap: "
-                          "2x1, VmemReadVec: 8x2, BlkGemmPipelineScheduler: Interwave, "
-                          "BlkGemmPipelineVersion: v2, BlkGemmPipelinePrefetchStages: 2>";
-        requested_split = 4;
+        type = "DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmXdlUniversal<"
+               "MNKPadding, CRR> BlkSize: 128, BlkTile: 16x32x64, WaveTile: 16x16, WaveMap: "
+               "1x1, VmemReadVec: 1x4, BlkGemmPipelineScheduler: Intrawave, "
+               "BlkGemmPipelineVersion: v1, BlkGemmPipelinePrefetchStages: 1>";
     }
     else
         GTEST_SKIP() << "No grouped WRW ranking for this architecture";
+
+    const auto& loader = miopen::solver::CkImplLibLoader::Get(arch);
+    if(!loader.IsLoaded())
+        GTEST_SKIP() << "Grouped-convolution CK plugin is unavailable";
+
+    // These ranked kernels have non-unit tuning hints. Defaults still validate split one.
 
     group_conv::GroupConvTestConfig<2u> conv{1, 1, 64, 96, {8, 8}, {1, 1}, {0, 0}, {1, 1}, {1, 1}};
     const auto x_desc = miopen::TensorDescriptor(miopenHalf, miopenTensorNHWC, conv.GetInput());
@@ -200,18 +198,21 @@ TEST(GPU_GroupWrwRankedSelection_FP16, ValidatesRequestedSplitAndPreservesFallba
 
     using Config = miopen::solver::conv::PerformanceConfigHipImplicitGemmGroupWrwXdlops;
     Config config;
-    config.valid_kernels    = {type};
-    config.kernel_id        = type + "+1";
-    const auto requested_id = type + "+" + std::to_string(requested_split);
-    const bool supported    = loader.IsArgsSupported(
-        miopen::solver::CKSolverType::GrpConvWrw, problem, requested_id, miopenHalf, false);
+    config.valid_kernels  = {type};
+    config.split_k        = 7;
+    config.kernel_id      = type + "+7";
+    const auto default_id = type + "+1";
+    const bool supported  = loader.IsArgsSupported(
+        miopen::solver::CKSolverType::GrpConvWrw, problem, default_id, miopenHalf, false);
     config.DefaultKernelFromList(ctx, problem);
-    EXPECT_EQ(config.split_k, supported ? requested_split : 1);
-    EXPECT_EQ(config.kernel_id, supported ? requested_id : type + "+1");
+    EXPECT_EQ(config.split_k, supported ? 1 : 7);
+    EXPECT_EQ(config.kernel_id, supported ? default_id : type + "+7");
 
-    // Determinism overrides the hint, but still requires CK support for the exact ID.
+    // Deterministic problems also validate split one without adopting a ranked tuning hint.
     conv_desc.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, 1);
     problem = make_problem();
+    config.split_k   = 1;
+    config.kernel_id = default_id;
     config.DefaultKernelFromList(ctx, problem);
     EXPECT_EQ(config.split_k, 1);
     EXPECT_EQ(config.kernel_id, type + "+1");

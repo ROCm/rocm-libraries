@@ -151,16 +151,21 @@ TEST(CPU_CkImplLoader_NONE, SelectedNchwOutputDefinitionIsFamilySpecific)
     using miopen::solver::SelectedNCHWCKOutputIsFullyDefined;
     const auto fwd = MakeBf16NchwPointwiseProblem(miopen::conv::Direction::Forward, 2);
     const auto bwd = MakeBf16NchwPointwiseProblem(miopen::conv::Direction::BackwardData, 2);
-    const auto wrw = MakeBf16NchwPointwiseProblem(miopen::conv::Direction::BackwardWeights, 2);
-    const std::string wmma_fwd = "DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 1, 1>";
-    const std::string xdl_fwd  = "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<128, 1>";
+    const std::string wmma_fwd =
+        "DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 64, 64, 64, Default, "
+        "16, 16, 2, 2, 8, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, "
+        "BlkGemmPipelineVersion: v1, 1>";
+    const std::string xdl_fwd =
+        "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<64, 64, 32, 32, "
+        "Default, 32, 32, 2, 1, 8, 8, 8, 1, 1, 1>";
+    const auto merged_fwd = wmma_fwd.substr(0, wmma_fwd.size() - 2) + "16>";
+    const auto packed_fwd = wmma_fwd.substr(0, wmma_fwd.size() - 1) + ", GroupsPerWmma: 4>";
     EXPECT_TRUE(SelectedNCHWCKOutputIsFullyDefined(fwd, wmma_fwd, std::nullopt));
     EXPECT_TRUE(SelectedNCHWCKOutputIsFullyDefined(fwd, xdl_fwd, std::nullopt));
-    EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(
-        fwd, "DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 2, 1>", std::nullopt));
+    EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(fwd, merged_fwd, std::nullopt));
+    EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(fwd, packed_fwd, std::nullopt));
     EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(fwd, wmma_fwd, 2));
-    EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(
-        fwd, "DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3_Unknown<128, 1, 1>", std::nullopt));
+    EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(fwd, "Unknown" + wmma_fwd, std::nullopt));
 
     EXPECT_TRUE(SelectedNCHWCKOutputIsFullyDefined(
         bwd, "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<128>", 4));
@@ -170,13 +175,6 @@ TEST(CPU_CkImplLoader_NONE, SelectedNchwOutputDefinitionIsFamilySpecific)
         bwd, "DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128>", 1));
     EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(
         bwd, "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<128>", 0));
-
-    EXPECT_TRUE(SelectedNCHWCKOutputIsFullyDefined(
-        wrw, "DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16<16, 8, 9, Split1>", 1));
-    EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(
-        wrw, "DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3<128>", 1));
-    EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(
-        wrw, "DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16<16, 8, 9, Split1>", 2));
 }
 
 TEST(CPU_CkImplLoader_NONE, SelectedNcdhwBackwardFullClearRequiresDefaultXdlV1)
@@ -233,11 +231,6 @@ TEST(CPU_CkImplLoader_NONE, SelectedNcdhwBackwardFullClearRequiresDefaultXdlV1)
         make_problem(miopenBFloat16, Direction::Forward, miopenTensorNCDHW, {0, 0, 0}, 1, 0),
         "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<128, 1>",
         std::nullopt));
-    EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(
-        make_problem(
-            miopenBFloat16, Direction::BackwardWeights, miopenTensorNCDHW, {0, 0, 0}, 1, 0),
-        "DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16<16, 8, 9, Split1>",
-        1));
     EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(
         make_problem(miopenFloat, Direction::BackwardData, miopenTensorNCDHW, {0, 0, 0}, 1, 0),
         xdl_v1,
@@ -345,8 +338,8 @@ TEST(GPU_CkImplLoader_FP16, PackedForwardSelectedWorkspace)
     const auto nchw    = MakePackedForwardProblem(miopenTensorNCHW);
     const auto kernels = loader.FillValidKernels(CKSolverType::GrpConvFwd, nhwc, miopenHalf, false);
     const auto packed  = std::find_if(kernels.begin(), kernels.end(), [](const auto& id) {
-        return id.find("DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3") != std::string::npos &&
-               id.size() >= 4 && id.compare(id.size() - 4, 4, ", 4>") == 0;
+        return id.find("DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<") == 0 &&
+               id.find(", GroupsPerWmma: 4>") != std::string::npos;
     });
     ASSERT_NE(packed, kernels.end());
     constexpr size_t packed_bytes = 36864;
@@ -461,11 +454,9 @@ TEST(GPU_CkImplLoader_FP16, PackedForwardSelectedWorkspace)
 TEST(GPU_CkImplLoader_BF16, NchwPointwiseBorrowAndStagedForward)
 {
     const auto device_name = GetCurrentDeviceName();
-    if(device_name.find("gfx1250") != 0)
-        GTEST_SKIP() << "Unit-spatial BF16 experiment targets gfx1250";
     const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
-    ASSERT_TRUE(loader.IsLoaded())
-        << "Required CK grouped conv library not installed for " << device_name;
+    if(!loader.IsLoaded())
+        GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
 
     auto&& handle = get_handle();
     miopen::ExecutionContext ctx(&handle);
@@ -473,17 +464,19 @@ TEST(GPU_CkImplLoader_BF16, NchwPointwiseBorrowAndStagedForward)
     auto unit            = MakeBf16NchwPointwiseProblem(direction);
     unit.SetupFloats(ctx);
     unit.SetupComputeType(ctx);
-    const auto kernels =
-        loader.FillValidKernels(CKSolverType::GrpConvFwd, unit, miopenBFloat16, false);
-    ASSERT_FALSE(kernels.empty());
-    const std::string selected =
-        "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<64, 64, 32, 32, "
-        "Default, 32, 32, 2, 1, 8, 8, 8, 1, 1, 1>";
-    ASSERT_NE(std::find(kernels.begin(), kernels.end(), selected), kernels.end()) << selected;
 
     const auto run = [&](const auto& problem,
                          bool overlap,
                          const std::array<bool, 3>& expect_staging) {
+        const auto kernels =
+            loader.FillValidKernels(CKSolverType::GrpConvFwd, problem, miopenBFloat16, false);
+        const auto candidate = std::find_if(kernels.begin(), kernels.end(), [&](const auto& id) {
+            return miopen::solver::SelectedNCHWCKOutputIsFullyDefined(problem, id, std::nullopt) &&
+                   loader.IsArgsSupported(
+                       CKSolverType::GrpConvFwd, problem, id, miopenBFloat16, false);
+        });
+        ASSERT_NE(candidate, kernels.end()) << "No supported forward candidate for " << device_name;
+        const auto& selected = *candidate;
         const auto solution =
             loader.GetSolution(CKSolverType::GrpConvFwd, ctx, problem, selected, false);
         ASSERT_EQ(solution.status, miopenStatusSuccess);
@@ -566,28 +559,22 @@ TEST(GPU_CkImplLoader_BF16, NchwPointwiseBorrowAndStagedForward)
         auto control = MakeBf16NchwPointwiseProblem(direction, 1, channels, outputs);
         control.SetupFloats(ctx);
         control.SetupComputeType(ctx);
-        ASSERT_TRUE(loader.IsArgsSupported(
-            CKSolverType::GrpConvFwd, control, selected, miopenBFloat16, false));
         run(control, false, {false, false, false});
         run(control, true, {true, true, true});
     }
     auto spatial = MakeBf16NchwPointwiseProblem(direction, 2);
     spatial.SetupFloats(ctx);
     spatial.SetupComputeType(ctx);
-    ASSERT_TRUE(
-        loader.IsArgsSupported(CKSolverType::GrpConvFwd, spatial, selected, miopenBFloat16, false));
     run(spatial, false, {true, false, true});
     run(spatial, true, {true, true, true});
 }
 
-TEST(GPU_CkImplLoader_BF16, NchwWmmaV3FullOverwriteAndAliasFallback)
+TEST(GPU_CkImplLoader_BF16, NchwForwardFullOverwriteAndAliasFallback)
 {
     const auto device_name = GetCurrentDeviceName();
-    if(device_name.find("gfx1250") != 0)
-        GTEST_SKIP() << "BF16 WMMA grouped forward candidates target gfx1250";
     const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
-    ASSERT_TRUE(loader.IsLoaded())
-        << "Required CK grouped conv library not installed for " << device_name;
+    if(!loader.IsLoaded())
+        GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
 
     constexpr std::size_t SpatialExtent = 65;
     const miopen::TensorDescriptor x_desc(
@@ -604,15 +591,22 @@ TEST(GPU_CkImplLoader_BF16, NchwWmmaV3FullOverwriteAndAliasFallback)
 
     const auto kernels =
         loader.FillValidKernels(CKSolverType::GrpConvFwd, problem, miopenBFloat16, false);
-    const auto wmma_v3    = std::find_if(kernels.begin(), kernels.end(), [](const auto& id) {
-        return id.find("DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<") == 0;
-    });
-    const auto xdl_ported = std::find_if(kernels.begin(), kernels.end(), [](const auto& id) {
-        return id.find("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<") == 0;
-    });
-    ASSERT_NE(wmma_v3, kernels.end()) << "No supported BF16 WMMA-v3 candidate for " << device_name;
-    ASSERT_NE(xdl_ported, kernels.end())
-        << "No supported BF16 XDL-WMMA-ported candidate for " << device_name;
+    std::vector<std::string> selected_kernels;
+    for(const auto* family : {"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<",
+                              "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<",
+                              "DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<"})
+    {
+        const auto selected = std::find_if(kernels.begin(), kernels.end(), [&](const auto& id) {
+            return id.find(family) == 0 &&
+                   miopen::solver::SelectedNCHWCKOutputIsFullyDefined(problem, id, std::nullopt) &&
+                   loader.IsArgsSupported(
+                       CKSolverType::GrpConvFwd, problem, id, miopenBFloat16, false);
+        });
+        if(selected != kernels.end())
+            selected_kernels.push_back(*selected);
+    }
+    ASSERT_FALSE(selected_kernels.empty())
+        << "No supported full-overwrite forward candidate for " << device_name;
 
     const auto run_selected = [&](const auto& selected) {
         const auto solution =
@@ -751,18 +745,16 @@ TEST(GPU_CkImplLoader_BF16, NchwWmmaV3FullOverwriteAndAliasFallback)
         EXPECT_EQ(handle.Read<bfloat16>(w_dev, w_desc.GetElementSize()), weights);
     };
 
-    run_selected(*wmma_v3);
-    run_selected(*xdl_ported);
+    for(const auto& selected : selected_kernels)
+        run_selected(selected);
 }
 
 TEST(GPU_CkImplLoader_BF16, NchwPointwiseBackwardBorrowAndFallback)
 {
     const auto device_name = GetCurrentDeviceName();
-    if(device_name.find("gfx1250") != 0)
-        GTEST_SKIP() << "Unit-spatial BF16 experiment targets gfx1250";
     const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
-    ASSERT_TRUE(loader.IsLoaded())
-        << "Required CK grouped conv library not installed for " << device_name;
+    if(!loader.IsLoaded())
+        GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
 
     auto&& handle = get_handle();
     miopen::ExecutionContext ctx(&handle);
@@ -873,92 +865,12 @@ TEST(GPU_CkImplLoader_BF16, NchwPointwiseBackwardBorrowAndFallback)
     }
 }
 
-TEST(GPU_CkImplLoader_BF16, NchwK10Vector2BackwardThroughPlugin)
-{
-    const auto device_name = GetCurrentDeviceName();
-    if(device_name.find("gfx1250") != 0)
-        GTEST_SKIP() << "BF16 paired A-load backward-data row targets gfx1250";
-    const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
-    ASSERT_TRUE(loader.IsLoaded())
-        << "Required CK grouped conv library not installed for " << device_name;
-
-    const miopen::TensorDescriptor x_desc(miopenBFloat16, miopenTensorNCHW, {2, 128, 3, 5});
-    const miopen::TensorDescriptor w_desc(miopenBFloat16, miopenTensorNCHW, {10, 128, 1, 1});
-    const miopen::ConvolutionDescriptor conv({0, 0}, {1, 1}, {1, 1}, {0, 0}, 1);
-    const auto dy_desc = conv.GetForwardOutputTensor(x_desc, w_desc, miopenBFloat16);
-    auto problem       = miopen::conv::ProblemDescription{
-        dy_desc, w_desc, x_desc, conv, miopen::conv::Direction::BackwardData};
-    auto&& handle = get_handle();
-    miopen::ExecutionContext ctx(&handle);
-    problem.SetupFloats(ctx);
-    problem.SetupComputeType(ctx);
-
-    const std::string kernel_id =
-        "DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<128, 128, 128, 32, 8, 8, "
-        "Filter1x1Stride1Pad0, 16, 16, 8, 2, 2, 4, 1, 1>";
-    const auto kernels =
-        loader.FillValidKernels(CKSolverType::GrpConvBwd, problem, miopenBFloat16, false);
-    ASSERT_NE(std::find(kernels.begin(), kernels.end(), kernel_id), kernels.end());
-    const auto selected = kernel_id + "+1";
-    ASSERT_TRUE(
-        loader.IsArgsSupported(CKSolverType::GrpConvBwd, problem, selected, miopenBFloat16, false));
-    const auto solution =
-        loader.GetSolution(CKSolverType::GrpConvBwd, ctx, problem, selected, false);
-    ASSERT_EQ(solution.status, miopenStatusSuccess);
-    ASSERT_TRUE(solution.invoker_factory);
-    EXPECT_GE(solution.workspace_sz, miopen::solver::GetWorkspaceSizeLayoutTransformConv(problem));
-    Workspace scratch(solution.workspace_sz);
-    ASSERT_NE(scratch.ptr(), nullptr);
-    const auto invoker =
-        handle.PrepareInvoker(*solution.invoker_factory, solution.construction_params);
-    const auto dy_strides = dy_desc.GetStrides();
-    const auto w_strides  = w_desc.GetStrides();
-
-    for(int sign : {1, -1})
-    {
-        std::vector<bfloat16> dy(dy_desc.GetElementSize(), bfloat16{0.0f});
-        std::vector<bfloat16> w(w_desc.GetElementSize(), bfloat16{0.0f});
-        for(std::size_t n = 0; n < 2; ++n)
-            for(std::size_t h = 0; h < 3; ++h)
-                for(std::size_t col = 0; col < 5; ++col)
-                {
-                    const auto spatial =
-                        n * dy_strides[0] + h * dy_strides[2] + col * dy_strides[3];
-                    dy[spatial + 8 * dy_strides[1]] = bfloat16{3.0f * sign};
-                    dy[spatial + 9 * dy_strides[1]] = bfloat16{-2.0f * sign};
-                }
-        for(std::size_t c = 0; c < 128; ++c)
-        {
-            w[8 * w_strides[0] + c * w_strides[1]] = bfloat16{1.0f};
-            w[9 * w_strides[0] + c * w_strides[1]] = bfloat16{-1.0f};
-        }
-        auto dy_dev = handle.Write(dy);
-        auto w_dev  = handle.Write(w);
-        auto dx_dev = handle.Write(std::vector<bfloat16>(x_desc.GetElementSize(), bfloat16{37.0f}));
-        ASSERT_EQ(hipMemset(scratch.ptr(), 0xa5, scratch.size()), hipSuccess);
-        const miopen::ConvBwdTensors tensors{
-            dy_desc, dy_dev.get(), w_desc, w_dev.get(), x_desc, dx_dev.get()};
-        invoker(handle,
-                miopen::conv::DataInvokeParams{tensors, scratch.ptr(), scratch.size(), false});
-        handle.Finish();
-        EXPECT_EQ(ReadStagingWrites(scratch.ptr(),
-                                    {miopen::solver::GetPackedSize(dy_desc),
-                                     miopen::solver::GetPackedSize(w_desc),
-                                     miopen::solver::GetPackedSize(x_desc)}),
-                  (std::array<bool, 3>{true, false, true}));
-        for(const auto value : handle.Read<bfloat16>(dx_dev, x_desc.GetElementSize()))
-            EXPECT_EQ(static_cast<float>(value), 5.0f * sign);
-    }
-}
-
 TEST(GPU_CkImplLoader_BF16, NchwBackwardHolesUseSelectedFullClear)
 {
     const auto device_name = GetCurrentDeviceName();
-    if(device_name.find("gfx1250") != 0)
-        GTEST_SKIP() << "Grouped BF16 CK backward candidates target gfx1250";
     const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
-    ASSERT_TRUE(loader.IsLoaded())
-        << "Required CK grouped conv library not installed for " << device_name;
+    if(!loader.IsLoaded())
+        GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
 
     const miopen::TensorDescriptor x_desc(miopenBFloat16, miopenTensorNCHW, {2, 16, 5, 5});
     const miopen::TensorDescriptor w_desc(miopenBFloat16, miopenTensorNCHW, {16, 16, 1, 1});

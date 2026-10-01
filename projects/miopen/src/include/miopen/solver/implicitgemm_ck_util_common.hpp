@@ -532,7 +532,7 @@ inline bool SelectedNCHWCKOutputIsFullyDefined(const miopen::conv::ProblemDescri
         // M/N coordinate, including partial tiles. Exclude both merge modes.
         return !split_k &&
                ((starts_with("DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<") &&
-                 ends_with(", 1, 1>")) ||
+                 ends_with(", 1>")) ||
                 ((starts_with("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<") ||
                   starts_with("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<")) &&
                  ends_with(", 1>")));
@@ -547,17 +547,6 @@ inline bool SelectedNCHWCKOutputIsFullyDefined(const miopen::conv::ProblemDescri
                 starts_with("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3<") ||
                 starts_with("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3_WmmaPorted<") ||
                 starts_with("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<"));
-    }
-    if(problem.GetDirection() == miopen::conv::Direction::BackwardWeights)
-    {
-        // Both depthwise row-strip finalizers Set every packed weight exactly
-        // once after reducing all partials. Other direct/two-stage WRW mappings
-        // have not established a complete selected-argument proof here.
-        return split_k && *split_k == 1 && problem.IsBfp16() &&
-               (selected_id ==
-                    "DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16<16, 8, 9, Split1>" ||
-                selected_id == "DeviceGroupedConvBwdWeightDepthwiseRowStripBf16<12, 128, 11, 16, "
-                               "Fy2, Split1>");
     }
     return false;
 }

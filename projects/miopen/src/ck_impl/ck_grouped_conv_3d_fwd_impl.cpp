@@ -349,6 +349,9 @@ struct CKArgs
     bool IsSupportedBy(const ConvPtr& conv_ptr) const
     {
         auto arg_ptr = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f);
+        auto workspace_size = conv_ptr->GetWorkSpaceSize(arg_ptr.get());
+        if(workspace_size > 0)
+            conv_ptr->SetWorkSpacePointer(arg_ptr.get(), &workspace_size);
         return conv_ptr->IsSupportedArgument(arg_ptr.get());
     }
 

@@ -1073,8 +1073,8 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
         problem.GetAlphaBetaCase() == DEFAULT && problem.GetAlpha().GetAsFloat() == 1.0f &&
         problem.GetBeta().GetAsFloat() == 0.0f;
 
-    // Only gfx1250 has measured 3D output-copy elision; other devices retain
-    // their existing staging even when the selected CK invoker defines E.
+    // The 3D output-copy optimization is restricted to gfx1250; other devices
+    // retain staging even when the selected CK invoker defines E.
     const bool selected_output_complete =
         (!problem.IsDirectionForward() || PlainFwdSetOutput) &&
         (!problem.Is3d() || ctx.GetStream().GetDeviceName() == "gfx1250") &&
@@ -1266,6 +1266,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
         };
     };
 #else
+    (void)ctx;
     (void)problem;
     (void)kernel_id;
     (void)input1_op;
@@ -1416,7 +1417,6 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                                      std::decay_t<decltype(*sh_conv_ptr2)>,
                                      CKArgsType,
                                      CastType>(sh_conv_ptr2, ck_args2, data_ctx, split_k2);
-                (void)ck_ws_size2;
                 if constexpr(NativeForwardWorkspace)
                 {
                     const auto actual_size = sh_conv_ptr2->GetWorkSpaceSize(argument_ptr.get());

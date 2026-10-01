@@ -8,8 +8,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ### Changed
 * [Conv] Provision selected CK grouped-forward packed-weight scratch for native NHWC and transformed NCHW layouts, rejecting missing or undersized workspace. The internal CK plugin interface is version 6; rebuild the loader and plugin together.
 * [Conv] Exposed a bounded gfx1250 BF16 group-local depthwise CK backward-weights candidate for packed 2D channels-last short-reduction problems; selected BF16 plugin execution requires the usual WRW alpha/beta workspace contract.
-* [Conv] Elided four grouped-CK NCHW staging transposes for packed BF16 2D G1 unit-spatial pointwise invocations when the caller tensors and reserved workspace are disjoint; overlapping or nonqualifying calls retain the original staging path and workspace size.
+* [Conv] Borrowed individual FP16/BF16 grouped-CK NCHW/NCDHW operands when their packed layout transpose is an identity and aligned caller tensors and reserved workspace have disjoint spans; aliases, nondefault scalars and nonqualifying operands retain staging and the original workspace reservation.
 * [Conv] Omitted the redundant old-output layout copy on gfx1250 for selected, fully initialized 3D FP16/BF16 grouped CK backward-data XDL-v1 invocations; other devices, kernels, aliases and nondefault scalars retain staged behavior and CK's required output clear.
+* [Conv] Omitted the redundant old-output layout copy for selected, fully initialized 2D FP16/BF16 grouped CK forward and backward-data invocations with disjoint tensors and workspace and default scalars; unsupported kernel families and aliases retain staged behavior.
+* [Conv] Validate ranked grouped CK backward-weights defaults against CK argument support at split-K 1, preserving the untuned split-1 default independently of ranked tuning hints.
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
