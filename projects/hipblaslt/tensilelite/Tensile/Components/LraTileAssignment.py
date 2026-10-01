@@ -92,6 +92,9 @@ class LraTileAssignmentVALU(LraTileAssignment):
                         "1. M offset: mOffset = mIdx * mStride(%u)" % strideTile))
                 else:
                     module.add(vectorStaticDivideAndRemainder(qReg, rReg, dividendReg, divisor, tmpVgprRes))
+                    if umlds:
+                        module.add(vectorStaticMultiply(vgpr(rReg), vgpr(rReg), strideTile, tmpSgprInfo, \
+                        "1. M offset: mOffset = mIdx * mStride(%u)" % strideTile))
 
                 # release and return resource
                 tP["gpr"]["lro"] = rReg
@@ -107,7 +110,7 @@ class LraTileAssignmentVALU(LraTileAssignment):
                 # generate instruction
                 module.add(vectorStaticDivideAndRemainder(qReg, rReg, dividendReg, divisor, tmpVgprRes))
 
-                if kernel["UseDotInstruction"]:
+                if kernel["UseDotInstruction"] or umlds:
                     # tile offset
                     module.add(vectorStaticMultiply(vgpr(rReg), vgpr(rReg), strideTile, tmpSgprInfo, \
                     "1. N offset: nOffset = nIdx * nStride(%u)" % strideTile))

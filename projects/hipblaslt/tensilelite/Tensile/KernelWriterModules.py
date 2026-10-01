@@ -137,6 +137,12 @@ def wait(states, kernel, tPA, tPB, skipGlobalRead, skipLocalWrite, \
 ##############################################################################
 def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False, memoryToken=None):
     imod = Module("syncThreads")
+    # f64c+TDM (VALU): the async tensor_load_to_lds retires on tensorcnt (not lgkmcnt) and,
+    # unlike the matrix path, no per-site memToken is plumbed on the VALU path, so drain the
+    # TDM DMA at every LW->LR sync before the barrier gates the LDS read.
+    f64cTdmDrain = (kernel["enableTDMA"] and kernel["enableTDMB"]
+                    and not kernel["EnableMatrixInstruction"]
+                    and kernel["ProblemType"]["DataType"].isDoubleComplex())
     if kernel["NumThreads"] > kernel["WavefrontSize"]:
         if asmCaps["SeparateVscnt"]:
             imod.add(SWaitCnt(dscnt=0, comment="extra navi wait"))
@@ -147,6 +153,8 @@ def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False, 
         elif archCaps["Waitcnt0Disabled"]:
             imod.add(SWaitCnt(dscnt=0, vlcnt=0, vscnt=0, comment="force waitcnt0"))
 
+        if f64cTdmDrain:
+            imod.add(SWaitTensorcnt(tensorcnt=0, comment="f64c TDM drain before sync " + comment))
         _barrier = SBarrier(comment=comment)
         if memoryToken is not None:
             _barrier.setMemToken(MemTokenData(memoryToken))
