@@ -477,6 +477,51 @@ def capture(run, output):
     )
 
 
+def capture_query(run, output):
+    for mode in ("1", "2"):
+        for capture_mode in ("global", "thread-local", "relaxed"):
+            for api, label in (("c", "C"), ("cpp", "C++")):
+                name = f"mode-{mode}-{capture_mode}-{api}"
+                library = output / f"lib-{name}"
+                stderr, records = run(
+                    name,
+                    ["--api", api, "--requested", "1", "--capture", capture_mode],
+                    HIPBLASLT_JIT=mode,
+                    HIPBLASLT_JIT_LIBRARY_PATH=str(library),
+                )
+                (record,) = queries(records, api)
+                require(
+                    record["status"] == 0
+                    and record["count"] == 1
+                    and record["indices"][0] >= JIT_INDEX,
+                    f"{name}: the query did not return a JIT solution: {record}",
+                )
+                require(
+                    len(entries(library)) == 1,
+                    f"{name}: the query did not generate and publish its solution",
+                )
+                require(
+                    record["capture"] == "active"
+                    and record["ended"] == 0
+                    and record["launch"] == 0
+                    and record["nodes"] > 0,
+                    f"{name}: the capture did not stay valid: {record}",
+                )
+                require(
+                    all(
+                        f"Captured {label} result 0, replay {replay} PASS" in stderr
+                        for replay in (0, 1)
+                    ),
+                    f"{name}: the graph replays were not checked",
+                )
+                require(not reports(stderr), f"{name}: a JIT problem was reported")
+    print(
+        "PASS heuristic-capture-query: during stream capture, both heuristic queries"
+        " generate and publish, the capture stays valid, and the captured launch"
+        " replays"
+    )
+
+
 def report(run, output):
     for mode, status in (("1", INVALID_VALUE), ("2", 0)):
         for cause, python, phrase in (
@@ -802,6 +847,7 @@ ROUTES = {
     "concurrent": concurrent,
     "null-algo": null_algo,
     "capture": capture,
+    "capture-query": capture_query,
     "report": report,
     "partial-fill": partial_fill,
     "override": tuning_override,

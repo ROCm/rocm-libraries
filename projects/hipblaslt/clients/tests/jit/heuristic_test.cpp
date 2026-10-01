@@ -5,10 +5,10 @@
 // one FP16 GEMM, prints each query as a JSON line, and runs and checks every
 // returned algorithm. --from-index resolves algorithm indices instead, --tuned
 // reports hipblaslt_ext::matmulIsTuned, --git-revision reports
-// hipblasLtGetGitRevision, --capture runs --null-algo inside a HIP stream
-// capture and replays the graph, and --threads with --barrier issues the
-// same queries from several threads that start together, also across
-// processes. Uses only the public API, so it builds
+// hipblasLtGetGitRevision, --capture runs each query and the launch of its first
+// result, and --null-algo, inside HIP stream captures and replays the graphs,
+// and --threads with --barrier issues the same queries from several threads that
+// start together, also across processes. Uses only the public API, so it builds
 // with and without HIPBLASLT_ENABLE_JIT; test_heuristic.py checks what
 // HIPBLASLT_JIT should return.
 #include <algorithm>
@@ -23,6 +23,7 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <iostream>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -192,12 +193,72 @@ namespace
         }
     };
 
+    // A capture of the GEMM stream in the mode --capture names. end() returns the
+    // capture status before it ended, the end result and the captured node count
+    // as JSON fields; replay() then replays the graph twice and checks D each time.
+    class Capture
+    {
+    public:
+        explicit Capture(Problem& p)
+            : p(p)
+        {
+            const auto mode = p.s.capture == "global"         ? hipStreamCaptureModeGlobal
+                              : p.s.capture == "thread-local" ? hipStreamCaptureModeThreadLocal
+                                                              : hipStreamCaptureModeRelaxed;
+            check(hipStreamBeginCapture(p.stream, mode), "Begin capture");
+        }
+        ~Capture()
+        {
+            if(graph)
+                static_cast<void>(hipGraphDestroy(graph));
+        }
+        Capture(const Capture&)            = delete;
+        Capture& operator=(const Capture&) = delete;
+
+        std::string end()
+        {
+            hipStreamCaptureStatus capture = hipStreamCaptureStatusNone;
+            check(hipStreamIsCapturing(p.stream, &capture), "Query capture");
+            ended        = hipStreamEndCapture(p.stream, &graph);
+            size_t nodes = 0;
+            if(graph)
+                check(hipGraphGetNodes(graph, nullptr, &nodes), "Count graph nodes");
+            std::ostringstream fields;
+            fields << ",\"capture\":\""
+                   << (capture == hipStreamCaptureStatusActive        ? "active"
+                       : capture == hipStreamCaptureStatusInvalidated ? "invalidated"
+                                                                      : "none")
+                   << "\",\"ended\":" << ended << ",\"nodes\":" << nodes;
+            return fields.str();
+        }
+        void replay(const std::string& label)
+        {
+            if(ended != hipSuccess)
+                return;
+            hipGraphExec_t exec = nullptr;
+            check(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0), "Instantiate graph");
+            for(int replay = 0; replay < 2; ++replay)
+            {
+                p.reset();
+                check(hipGraphLaunch(exec, p.stream), "Launch graph");
+                p.verify(label + ", replay " + std::to_string(replay));
+            }
+            static_cast<void>(hipGraphExecDestroy(exec));
+        }
+
+    private:
+        Problem&   p;
+        hipGraph_t graph = nullptr;
+        hipError_t ended = hipErrorUnknown;
+    };
+
     void print(Problem&                                       p,
                const char*                                    api,
                int                                            handle,
                int                                            query,
                hipblasStatus_t                                status,
-               std::vector<hipblasLtMatmulHeuristicResult_t>& results)
+               std::vector<hipblasLtMatmulHeuristicResult_t>& results,
+               const std::string&                             fields = "")
     {
         std::ostringstream indices, workspaces, kernels;
         for(size_t i = 0; i < results.size(); ++i)
@@ -212,28 +273,45 @@ namespace
                   << ",\"handle\":" << handle << ",\"query\":" << query
                   << ",\"status\":" << status << ",\"count\":" << results.size()
                   << ",\"indices\":[" << indices.str() << "],\"workspace\":["
-                  << workspaces.str() << "],\"kernels\":[" << kernels.str() << "]}"
-                  << std::endl;
+                  << workspaces.str() << "],\"kernels\":[" << kernels.str() << "]" << fields
+                  << "}" << std::endl;
+    }
+
+    // The status of launching the first result inside the capture, or -1 when
+    // nothing was launched, as a JSON field after the capture's own fields.
+    std::string launched(Capture& capture, int status)
+    {
+        return capture.end() + ",\"launch\":" + std::to_string(status);
     }
 
     void queryC(Problem& p, int handle, int query)
     {
         std::vector<hipblasLtMatmulHeuristicResult_t> results(p.s.requested);
-        int                                           count  = -1;
-        const auto                                    status = hipblasLtMatmulAlgoGetHeuristic(
-            p.handle,
-            p.desc,
-            p.aLayout,
-            p.bLayout,
-            p.cLayout,
-            p.dLayout,
-            p.pref,
-            p.s.requested,
-            results.data(),
-            &count);
+        int                                           count = -1;
+        std::optional<Capture>                        capture;
+        if(!p.s.capture.empty())
+            capture.emplace(p);
+        const auto status = hipblasLtMatmulAlgoGetHeuristic(p.handle,
+                                                            p.desc,
+                                                            p.aLayout,
+                                                            p.bLayout,
+                                                            p.cLayout,
+                                                            p.dLayout,
+                                                            p.pref,
+                                                            p.s.requested,
+                                                            results.data(),
+                                                            &count);
         if(count < 0 || count > p.s.requested)
             throw std::runtime_error("C heuristic returned count " + std::to_string(count));
         results.resize(count);
+        if(capture)
+        {
+            const int launch = count && p.s.run ? p.matmul(&results[0].algo) : -1;
+            print(p, "c", handle, query, status, results, launched(*capture, launch));
+            if(launch == HIPBLAS_STATUS_SUCCESS)
+                capture->replay("Captured C result 0");
+            return;
+        }
         print(p, "c", handle, query, status, results);
         for(int i = 0; p.s.run && i < count; ++i)
         {
@@ -261,7 +339,24 @@ namespace
         hipblaslt_ext::GemmPreference pref;
         pref.setMaxWorkspaceBytes(p.s.workspace);
         std::vector<hipblasLtMatmulHeuristicResult_t> results;
+        std::optional<Capture>                        capture;
+        if(!p.s.capture.empty())
+            capture.emplace(p);
         const auto status = gemm.algoGetHeuristic(p.s.requested, pref, results);
+        if(capture)
+        {
+            int launch = -1;
+            if(!results.empty() && p.s.run)
+            {
+                launch = gemm.initialize(results[0].algo, p.workspace, true, p.stream);
+                if(launch == HIPBLAS_STATUS_SUCCESS)
+                    launch = gemm.run(p.stream);
+            }
+            print(p, "cpp", handle, query, status, results, launched(*capture, launch));
+            if(launch == HIPBLAS_STATUS_SUCCESS)
+                capture->replay("Captured C++ result 0");
+            return;
+        }
         print(p, "cpp", handle, query, status, results);
         for(size_t i = 0; p.s.run && i < results.size(); ++i)
         {
@@ -288,47 +383,20 @@ namespace
         }
     }
 
-    // hipblasLtMatmul without an algorithm inside a capture of the GEMM stream.
-    // Prints the capture status after the call and the captured node count, then
-    // replays the graph twice and checks D each time when the call succeeded.
+    // hipblasLtMatmul without an algorithm inside a capture of the GEMM stream,
+    // replayed when the call succeeded.
     void capturedNullAlgo(Problem& p, int thread, int handle)
     {
-        const auto mode = p.s.capture == "global"         ? hipStreamCaptureModeGlobal
-                          : p.s.capture == "thread-local" ? hipStreamCaptureModeThreadLocal
-                                                          : hipStreamCaptureModeRelaxed;
-        check(hipStreamBeginCapture(p.stream, mode), "Begin capture");
-        const auto             status  = p.matmul(nullptr);
-        hipStreamCaptureStatus capture = hipStreamCaptureStatusNone;
-        check(hipStreamIsCapturing(p.stream, &capture), "Query capture");
-        hipGraph_t graph = nullptr;
-        const auto ended = hipStreamEndCapture(p.stream, &graph);
-        size_t     nodes = 0;
-        if(graph)
-            check(hipGraphGetNodes(graph, nullptr, &nodes), "Count graph nodes");
+        Capture    capture(p);
+        const auto status = p.matmul(nullptr);
+        const auto fields = capture.end();
         {
             std::lock_guard<std::mutex> lock(outputMutex);
             std::cout << "{\"api\":\"null-algo\",\"thread\":" << thread << ",\"handle\":" << handle
-                      << ",\"status\":" << status << ",\"capture\":\""
-                      << (capture == hipStreamCaptureStatusActive        ? "active"
-                          : capture == hipStreamCaptureStatusInvalidated ? "invalidated"
-                                                                         : "none")
-                      << "\",\"ended\":" << ended << ",\"nodes\":" << nodes << "}" << std::endl;
+                      << ",\"status\":" << status << fields << "}" << std::endl;
         }
-        if(status == HIPBLAS_STATUS_SUCCESS && ended == hipSuccess)
-        {
-            hipGraphExec_t exec = nullptr;
-            check(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0), "Instantiate graph");
-            for(int replay = 0; replay < 2; ++replay)
-            {
-                p.reset();
-                check(hipGraphLaunch(exec, p.stream), "Launch graph");
-                p.verify("Captured hipblasLtMatmul without an algorithm, replay "
-                         + std::to_string(replay));
-            }
-            static_cast<void>(hipGraphExecDestroy(exec));
-        }
-        if(graph)
-            static_cast<void>(hipGraphDestroy(graph));
+        if(status == HIPBLAS_STATUS_SUCCESS)
+            capture.replay("Captured hipblasLtMatmul without an algorithm");
     }
 
     // Claims a ready-N file in dir, then waits for dir/go, so the threads of
@@ -408,10 +476,8 @@ namespace
         if((s.api != "c" && s.api != "cpp" && s.api != "both" && s.api != "none")
            || s.requested < 1 || s.m < 1 || s.n < 1 || s.k < 0 || s.handles < 1
            || s.queries < 1 || s.threads < 1
-           || (!s.capture.empty()
-               && (!s.nullAlgo
-                   || (s.capture != "global" && s.capture != "thread-local"
-                       && s.capture != "relaxed"))))
+           || (!s.capture.empty() && s.capture != "global" && s.capture != "thread-local"
+               && s.capture != "relaxed"))
             throw std::invalid_argument("Invalid arguments");
         return s;
     }

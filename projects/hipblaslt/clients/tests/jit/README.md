@@ -96,6 +96,7 @@ to replay, publish or rebuild it.
 | `heuristic-concurrent` | In modes 1 and 2, four processes of four threads each start the same query through a file barrier: every query returns the same two distinct solutions with checked numerics and no JIT report, and the library holds exactly those two entries with the allocator just past them |
 | `heuristic-null-algo` | `hipblasLtMatmul` without an algorithm runs a JIT solution with checked numerics in modes 1 and 2, and does not use JIT in mode 0 |
 | `heuristic-capture` | With one solution published in mode 2, `hipblasLtMatmul` without an algorithm inside a global, thread-local and relaxed capture of its stream, in modes 1 and 2, whose generator fails if it runs: for the published size the capture stays active and the instantiated graph replays twice with checked numerics; for an unpublished size the call returns the status it returns outside a capture when generation fails, the graph is empty, the capture stays active, and exactly one `hipblaslt error: JIT generation skipped during stream capture` line names the problem; nothing is published. With the build's device library, when mode 0 runs the unpublished size, mode 1 captures and replays a pre-tuned solution without a JIT report |
+| `heuristic-capture-query` | In modes 1 and 2, with a fresh JIT library, the C and the C++ heuristic query each run inside a global, thread-local and relaxed capture of the GEMM stream, followed in the capture by a launch of the returned algorithm: the query returns one JIT solution and publishes it, the capture stays active, and the instantiated graph replays twice with checked numerics, with no JIT report |
 | `heuristic-report` | In modes 1 and 2, a missing Python and a failing generator each print exactly one `hipblaslt error: JIT` line across two handles, two queries and both APIs; the queries return no results with the status the mode defines, and the generator log named in the report is kept |
 | `heuristic-partial-fill` | With the build's device library and one solution published in mode 2, a request for one more than the pre-tuned count in mode 1 whose generator fails if it runs returns that JIT solution once and every pre-tuned solution whose kernel differs from it, and reports the shortfall as a warning. It first queries 4096 solutions without JIT, and prints SKIP when that query fails or returns none (the build has no device library for the problem) or when it returns all 4096 (the device library leaves no shortfall) |
 | `heuristic-override` | With two solutions published in mode 2, a `HIPBLASLT_TUNING_OVERRIDE_FILE` whose first line names the library's git revision and whose entry names one of them: requests for three in mode 1 return that solution first and the other JIT solution second through both queries, with checked numerics and no kernel repeated, for either solution named |
@@ -185,9 +186,11 @@ and then runs every returned algorithm and compares the output with a CPU
 reference. `--api c|cpp|both|none`, `--requested`, `--m`, `--n`, `--k`,
 `--handles`, `--queries` and `--workspace` shape the queries, `--null-algo`
 also checks `hipblasLtMatmul` without an algorithm,
-`--capture global|thread-local|relaxed` makes that call inside a capture of its
-stream in that mode, prints the capture status after the call and the captured
-node count, and replays the graph twice with checked numerics,
+`--capture global|thread-local|relaxed` runs that call, and each query followed
+by a launch of its first result, inside its own capture of the GEMM stream in
+that mode, prints the capture status before the capture ends, the captured node
+count and, for a query, the launch status, and replays the graph twice with
+checked numerics,
 `--from-index i,j,...` resolves indices through
 `hipblaslt_ext::getAlgosFromIndex` and runs them,
 `--tuned` prints whether `hipblaslt_ext::matmulIsTuned` finds an Equality
