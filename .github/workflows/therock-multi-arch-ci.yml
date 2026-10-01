@@ -167,13 +167,14 @@ jobs:
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
-      # Copy all stages except math-libs and ml-libs from TheRock baseline
-      # rocm-libraries only affects math-libs and ml-libs source sets
+      # Rebuild stages affected by rocm-libraries and reuse the remaining stages.
       # RPP owns cv-libs, so rebuild that stage when projects/rpp changes.
       # Note: compiler-runtime excluded due to hardcoded CMake paths (fftw3, etc.)
+      # Rebuild runtime-tests with compiler-runtime: baseline HIP tests can have
+      # stale API expectations and feature settings for the rebuilt runtime.
       # Copy prebuilt stages only when the resolved reuse policy provides a
       # baseline run ID. Otherwise, leave this empty for a full stage build.
-      prebuilt_stages: ${{ needs.ci-env.outputs.baseline-run-id != '' && (inputs.prebuilt_stages || (contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/rpp,') && 'runtime-tests,comm-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg' || 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg')) || '' }}
+      prebuilt_stages: ${{ needs.ci-env.outputs.baseline-run-id != '' && (inputs.prebuilt_stages || (contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/rpp,') && 'comm-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg' || 'comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg')) || '' }}
       # Use the baseline selected by the artifact reuse policy above.
       baseline_run_id: ${{ needs.ci-env.outputs.baseline-run-id }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
