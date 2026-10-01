@@ -675,3 +675,35 @@ class TestEmittedNamesDoNotDependOnShapeOrder:
             "gfx950_attention_dense_dtBF16_hs128_nqh8_nkh8_ca1_ra0_sw0_ba1_sq512_sk512"
             "_bm256_bn64"
         )
+
+
+class TestTheGraphContractAppliesToEverySource:
+    """The gfx950 engine's graph_match declines sinks, so no catalog entry may carry
+    use_sinks=true, even though the gfx950 kernel and dispatcher serve sinks. A
+    rocKE trace states sinks as a request field, with no `_graph_features`, and
+    used to reach the catalog as a second kernel under the same catalog key."""
+
+    _TRACE = (
+        Path(__file__).resolve().parents[5]
+        / "dnn-providers/hip-kernel-provider/rocke/library/benchmarks/gfx950"
+        / "attention/prefill/gpt_oss_sink_prefill_shapes.json"
+    )
+
+    def test_a_real_sink_prefill_trace_is_out_of_contract(self, monkeypatch, tmp_path):
+        import mine_shapes
+
+        profile = _real_dispatcher_or_skip(monkeypatch)
+        record = json.loads(self._TRACE.read_text().splitlines()[0])
+        assert record["variant"] == "full_sink_prefill_s512" and record["has_sinks"]
+        tree = tmp_path / "bench"
+        tree.mkdir()
+        (tree / "sink_shapes.json").write_text(json.dumps(record) + "\n")
+        [shape] = mine_shapes.from_rocke_bench(tree, "bf16")
+        assert shape["use_sinks"] is True
+
+        sink, control = dispatch_parity.resolve_shapes(
+            [shape, {**shape, "use_sinks": False}], profile
+        )
+        assert sink.kind == "out_of_contract", sink
+        assert "sink_token" in sink.reason
+        assert control.spec is not None, "the sinkless twin is still served"

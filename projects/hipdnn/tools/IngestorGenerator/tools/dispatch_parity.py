@@ -181,17 +181,24 @@ def _required(decl: dict, scope: str, *keys: str) -> list:
 
 
 def contract_refusal(shape: dict, profile: dict) -> str | None:
-    """Why the graph behind `shape` is outside the profile's graph contract, or
-    None. Only graph-corpus shapes carry `_graph_features` (see mine_shapes).
+    """Why the request or graph behind `shape` is outside the profile's graph
+    contract, or None.
 
     The request class has no field for varlen, paging, dropout or layout, so
-    the dispatcher's answer for such a graph is about a different problem.
-    `graph_contract.features` lists the bound features the engine admits
-    (default none) and `graph_contract.layouts` the operand layouts (default
-    unchecked).
+    the dispatcher's answer for such a graph is about a different problem; only
+    graph-corpus shapes carry those, in `_graph_features` (see mine_shapes).
+    Sinks are different: the request carries them as `use_sinks`, from every
+    source, and a kernel may support them while the engine's graph_match does
+    not. So a shape asking for sinks binds the `sink_token` feature whatever
+    its source. `graph_contract.features` lists the bound features the engine
+    admits (default none) and `graph_contract.layouts` the operand layouts
+    (default unchecked; checked for graph shapes only).
     """
     features = shape.get("_graph_features")
-    if features is None:
+    bound = list((features or {}).get("features") or [])
+    if shape.get("use_sinks") and "sink_token" not in bound:
+        bound.append("sink_token")
+    if features is None and not bound:
         return None
     contract = profile.get("graph_contract") or {}
     if not isinstance(contract, dict) or any(
@@ -201,16 +208,14 @@ def contract_refusal(shape: dict, profile: dict) -> str | None:
             "graph_contract must be a mapping with optional 'features' and "
             "'layouts' lists"
         )
-    unsupported = [
-        f
-        for f in features.get("features") or []
-        if f not in contract.get("features", [])
-    ]
+    unsupported = [f for f in bound if f not in contract.get("features", [])]
     if unsupported:
         return (
-            f"graph binds {', '.join(unsupported)}, which the request cannot carry "
-            f"and the profile's graph_contract.features does not admit"
+            f"request binds {', '.join(unsupported)}, which the profile's "
+            f"graph_contract.features does not admit (the engine declines it)"
         )
+    if features is None:
+        return None
     layouts = contract.get("layouts")
     if layouts:
         have = features.get("layouts")
