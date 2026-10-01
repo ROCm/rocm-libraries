@@ -349,14 +349,23 @@ def attention_dense_cache_key(spec: AttentionDenseSpec, *, arch: str) -> tuple:
     (``Gfx942AttentionDenseSpec`` is not ``Gfx950AttentionDenseSpec``) without
     stringly-typing it; if a stable on-disk identity is ever needed, that wants
     ``__qualname__`` or a digest instead.
+
+    On the persistent grid ``persist_decode`` is keyed by its resolved order:
+    ``"auto"`` resolves from the shape, and the order picks the work-decode body,
+    so once the shape leaves the key the raw ``"auto"`` would let two shapes that
+    resolve differently share one slot.
     """
     if not arch:
         raise ValueError("attention dense cache identity requires an explicit arch")
     skip = frozenset(spec.runtime_param_fields)
+
+    def _value(name: str):
+        if name == "persist_decode" and spec.persistent:
+            return spec.resolved_persist_decode
+        return getattr(spec, name)
+
     rest = tuple(
-        (f.name, getattr(spec, f.name))
-        for f in _dataclass_fields(spec)
-        if f.name not in skip
+        (f.name, _value(f.name)) for f in _dataclass_fields(spec) if f.name not in skip
     )
     return (arch, type(spec), rest)
 

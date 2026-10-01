@@ -36,17 +36,21 @@ import re
 
 import pytest
 
+from kernels.common.attention_dense_spec import attention_dense_cache_key
 from kernels.gfx942.attention_dense import (
     AttentionDenseSpec,
     Gfx942AttentionDenseSpec,
     attention_dense_block,
     attention_dense_grid,
+    attention_dense_runtime_args,
+    attention_dense_signature,
     build_attention_dense,
     gfx942_kernel_name,
     run_attention_dense_torch,
     supports_attention_dense,
     _BLOCK_M,
     _DEFAULT_LDS_ROW_PAD,
+    _FASTDIV_DIVIDEND_LIMIT,
     _k_group_pad_active,
     _k_group_stride,
     _use_exp2_fast,
@@ -144,7 +148,7 @@ def test_bottom_right_field_is_keyword_only_without_shifting_concrete_signatures
         assert positionals == shared_positionals + suffix, spec_type.__name__
 
 
-def _lower(kd) -> str:
+def _lower(kd, arch: str = "gfx942") -> str:
     """Lower a built ``KernelDef`` to LLVM IR text. CPU-only -- no comgr, no GPU."""
     from rocke.core.lower_llvm import (
         _lower_kernel_to_llvm_python,
@@ -152,11 +156,11 @@ def _lower(kd) -> str:
     )
 
     return _lower_kernel_to_llvm_python(
-        kd, arch="gfx942", llvm_flavor=_resolve_llvm_flavor()
+        kd, arch=arch, llvm_flavor=_resolve_llvm_flavor()
     )
 
 
-def _ir_body_sha(spec) -> str:
+def _ir_body_sha(spec, *, arch: str = "gfx942", build=build_attention_dense) -> str:
     """SHA of the lowered IR with the kernel SYMBOL normalised out.
 
     The symbol appears in the ``define``, in the ``@smem_pool.<name>`` global and in
@@ -165,9 +169,13 @@ def _ir_body_sha(spec) -> str:
     vacuous -- it would only ever be observing the name change it is trying to
     justify. Same idiom as the out-of-tree ``ir_body_probe`` that proved the P0->gfx942
     identifier rename codegen-neutral.
+
+    ``arch`` / ``build`` exist only for the gfx950 positive control
+    (:func:`test_ir_body_probe_detects_a_baked_shape_on_the_gfx950_control`); every
+    gfx942 assertion uses the defaults.
     """
-    kd = build_attention_dense(spec, arch="gfx942")
-    body = _lower(kd).replace(kd.name, "KERNEL")
+    kd = build(spec, arch=arch)
+    body = _lower(kd, arch).replace(kd.name, "KERNEL")
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
@@ -271,15 +279,14 @@ _NAME_ONLY_SPEC_FIELDS = frozenset({"lazy_rescale"})
 # base is skipped rather than asserted on; listing several per field keeps coverage
 # when one base rejects one of them (e.g. use_cfvst=True is legal only at fp16 D128).
 _SPEC_PERTURBATIONS = {
+    # The shape fields (batch, both seqlens, both head counts) are _RUNTIME_PARAM_FIELDS
+    # on BOTH grids: every perturbation must move only the kernarg values, never the
+    # body, name or cache key (see test_kernel_name_covers_every_baked_parameter).
+    # Two values each so every base, the persistent one included, sees a live change:
+    # 4096 is a no-op against the persistent base (which pins 4096) -- hence 2048.
     "batch": (2, 4),
-    # Two values each, and the persistent base is the one that exercises them: on the
-    # default grid the shape is read from kernel params (``runtime_shape``), so no
-    # seqlen perturbation moves the body there. 4096 is a no-op against the persistent
-    # base, which pins 4096 to get a legal P4 grid -- hence 2048 as the live candidate.
     "seqlen_q": (4096, 2048),
     "seqlen_kv": (4096, 2048),
-    # Same story for the head counts: the default grid reads both from kernel params,
-    # so only the persistent base sees these move the body.
     "num_query_heads": (32, 8),
     "num_kv_heads": (8, 2),
     "head_size": (64, 128),
@@ -330,7 +337,8 @@ _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
 # so every structurally distinct arm of the builder is a base: cfvst on (fp16 D128),
 # cfvst off at D128 (bf16, exp2_fast), both D64 dtypes (packed 2-rows-per-DMA + the
 # K row-group pad + the wpe=4 tune), and the P4 persistent grid -- without which
-# num_persistent / interleave / persist_decode are inert and their coverage vacuous.
+# num_persistent / interleave / persist_decode are inert and their coverage vacuous,
+# and the runtime-shape claim would be checked on the default grid only.
 # The iglp base is what makes iglp_mode (read only under iglp=True) reachable.
 _INJECTIVITY_BASES = {
     "d128_fp16_cfvst": dict(head_size=128, dtype="fp16"),
@@ -350,14 +358,20 @@ _INJECTIVITY_BASES = {
 }
 
 
-def _baked_spec(**kw) -> Gfx942AttentionDenseSpec:
-    """A spec whose emitted body still BAKES the problem shape.
+# The shape fields the gfx942 body reads only from kernel params. Reflected off the
+# spec rather than restated, so the injectivity test follows the kernel's own ABI.
+_RUNTIME_PARAM_FIELDS = frozenset(_spec().runtime_param_fields)
 
-    The default grid is ``runtime_shape``: batch and both seqlens are read from
-    kernel params, so one binary serves every shape and those fields are absent
-    from the symbol by design. The persistent grid is the remaining sub-mode that
-    bakes them -- it is therefore where the "shape is in the name" properties are
-    still meaningful, and where a name collision would be a real stale-binary bug.
+
+def _persistent_spec(**kw) -> Gfx942AttentionDenseSpec:
+    """The persistent injectivity base, with overrides.
+
+    Persistent used to be the one gfx942 sub-mode that baked the shape and head
+    counts; it now reads them from kernel params like the default grid, and only
+    ``num_persistent`` and the RESOLVED decode order stay baked. Callers that sweep
+    the shape pin ``persist_decode`` so ``"auto"`` cannot flip the order mid-sweep --
+    the auto case has its own test
+    (:func:`test_auto_persist_decode_keys_on_the_resolved_order`).
     """
     return _spec(**{**_INJECTIVITY_BASES["persistent_d128_fp16"], **kw})
 
@@ -421,17 +435,36 @@ def test_kernel_name_covers_every_baked_parameter(field):
     The IR is compared with the symbol normalised out (:func:`_ir_body_sha`) --
     otherwise the name change alone would make the IR differ and the implication
     would hold vacuously.
+
+    The shape fields (:data:`_RUNTIME_PARAM_FIELDS`) are held to the STRONGER,
+    two-way property on every base, persistent included: the perturbation moves the
+    kernarg values (``attention_dense_runtime_args``) and nothing else -- body, name
+    and cache key all stay put. The one sanctioned exception is a persistent
+    ``persist_decode="auto"`` base whose resolved order flips with the shape; that
+    must move the name and key together, which the one-way property already checks.
+    That the IR probe CAN see a baked shape is proven by the gfx950 positive control
+    (:func:`test_ir_body_probe_detects_a_baked_shape_on_the_gfx950_control`).
     """
     candidates = _PERTURBATIONS[field]
+    runtime_field = field in _RUNTIME_PARAM_FIELDS
     tried = 0
     ir_moved = 0
     violations = []
+    runtime_violations = []
+    runtime_tried = 0
+    runtime_tried_persistent = 0
     for base_id, base_kw in _INJECTIVITY_BASES.items():
         base_spec = _spec(**base_kw)
         ok, why = supports_attention_dense(base_spec, arch="gfx942")
         assert ok, f"base {base_id} must be in scope: {why}"
+        assert set(base_spec.runtime_param_fields) == _RUNTIME_PARAM_FIELDS, (
+            f"base {base_id} declares runtime fields "
+            f"{base_spec.runtime_param_fields}, expected {sorted(_RUNTIME_PARAM_FIELDS)}"
+        )
         base_name = gfx942_kernel_name(base_spec)
         base_sha = _ir_body_sha(base_spec)
+        base_key = attention_dense_cache_key(base_spec, arch="gfx942")
+        base_args = attention_dense_runtime_args(base_spec)
         current = getattr(base_spec, field)
         for value in candidates:
             if value == current:
@@ -450,6 +483,31 @@ def test_kernel_name_covers_every_baked_parameter(field):
                 ir_moved += 1
                 if alt_name == base_name:
                     violations.append(f"{base_id}: {field}={value!r}")
+            decode_flipped = alt_spec.persistent and (
+                alt_spec.resolved_persist_decode != base_spec.resolved_persist_decode
+            )
+            if runtime_field and not decode_flipped:
+                runtime_tried += 1
+                runtime_tried_persistent += int(alt_spec.persistent)
+                moved = [
+                    what
+                    for what, same in (
+                        ("IR body", alt_sha == base_sha),
+                        ("kernel name", alt_name == base_name),
+                        (
+                            "cache key",
+                            attention_dense_cache_key(alt_spec, arch="gfx942")
+                            == base_key,
+                        ),
+                        (
+                            "NOT the kernarg values",
+                            attention_dense_runtime_args(alt_spec) != base_args,
+                        ),
+                    )
+                    if not same
+                ]
+                if moved:
+                    runtime_violations.append(f"{base_id}: {field}={value!r} {moved}")
     assert not violations, (
         f"{field} changes the emitted IR but NOT the kernel name at "
         f"{violations} -- two distinct binaries would share one _DENSE_LAUNCHER_CACHE "
@@ -472,6 +530,19 @@ def test_kernel_name_covers_every_baked_parameter(field):
         f"supports_attention_dense at ANY base, so the injectivity property was not "
         f"exercised for this field at all. Add a legal second value."
     )
+    if runtime_field:
+        assert not runtime_violations, (
+            f"{field} is a runtime kernel param, but a perturbation moved "
+            f"{runtime_violations} -- the body is baking it again (one binary no "
+            f"longer serves every shape) or the kernarg no longer carries it"
+        )
+        # Anti-vacuity: the two-way property must have run, and on BOTH grids.
+        assert runtime_tried and runtime_tried_persistent, (
+            f"{field}: the runtime-param property was exercised {runtime_tried} "
+            f"time(s), {runtime_tried_persistent} on the persistent base -- "
+            f"strengthen the candidates"
+        )
+        return
     # ... and that it actually reaches codegen somewhere, unless it is a documented
     # name-only field. A field that never moves IR anywhere is either dead in this
     # builder (say so here) or the perturbations are too weak to reach it.
@@ -489,19 +560,30 @@ def test_kernel_name_covers_every_baked_parameter(field):
     )
 
 
-def test_kernel_name_is_batch_unique_where_batch_is_baked():
-    """On the baked (persistent) grid, batch must reach the symbol.
+@pytest.mark.parametrize("decode", ["qb_major", "hkv_major"])
+def test_persistent_grid_shares_one_kernel_across_batches(decode):
+    """The persistent grid reads batch from a kernel param too: every batch is ONE
+    name, ONE body and ONE cache key, with no ``_b{N}`` token.
 
-    This is the collision that once shipped: the body indexed with a baked batch
-    while the name omitted it, so the second launch was served the first config's
-    HSACO out of ``_DENSE_LAUNCHER_CACHE`` and read out of bounds. Asserted only
-    where batch is genuinely baked -- on the default grid it is a kernel param and
-    its absence from the name is correct, not a collision (see
-    :func:`test_kernel_name_drops_batch_on_the_runtime_shape_grid`).
+    This was the collision that once shipped -- a body indexing with a baked batch
+    while the name omitted it served the first config's HSACO for the second and read
+    out of bounds. With batch a kernarg on both grids the safe state is the opposite
+    one, and it must hold byte-for-byte or the body is baking batch again; the batch
+    still has to reach the launch, so the kernarg values must differ per batch. That
+    the IR probe can see a baked batch at all is the gfx950 control
+    (:func:`test_ir_body_probe_detects_a_baked_shape_on_the_gfx950_control`).
+
+    The decode is pinned: ``"auto"`` would flip order with batch, which is a
+    separate identity (:func:`test_auto_persist_decode_keys_on_the_resolved_order`).
     """
-    names = {gfx942_kernel_name(_baked_spec(batch=b)) for b in (1, 2, 4, 8)}
-    assert len(names) == 4, f"batch must disambiguate the kernel name, got {names}"
-    assert "_b4_" in gfx942_kernel_name(_baked_spec(batch=4))
+    specs = [_persistent_spec(batch=b, persist_decode=decode) for b in (1, 2, 4, 8)]
+    assert all(s.runtime_shape for s in specs)
+    names = {gfx942_kernel_name(s) for s in specs}
+    assert len(names) == 1, f"persistent batches split the name: {names}"
+    assert not re.search(r"_b\d+", names.pop())
+    assert len({attention_dense_cache_key(s, arch="gfx942") for s in specs}) == 1
+    assert len({_ir_body_sha(s) for s in specs}) == 1
+    assert [attention_dense_runtime_args(s)["batch"] for s in specs] == [1, 2, 4, 8]
 
 
 def test_kernel_name_drops_batch_on_the_runtime_shape_grid():
@@ -517,27 +599,48 @@ def test_kernel_name_drops_batch_on_the_runtime_shape_grid():
     assert _ir_body_sha(lo) == _ir_body_sha(hi)
 
 
-def test_build_bakes_batch_into_the_emitted_symbol():
-    assert build_attention_dense(_baked_spec(batch=4), arch="gfx942").name != (
-        build_attention_dense(_baked_spec(batch=1), arch="gfx942").name
-    )
+@pytest.mark.parametrize(
+    "make", [_spec, _persistent_spec], ids=["default_grid", "persistent_grid"]
+)
+def test_build_emits_one_symbol_across_batches(make):
+    """The BUILT symbol (not just ``gfx942_kernel_name``) is batch-free on both grids,
+    so the name the launcher cache asserts against cannot split per batch."""
+    lo = build_attention_dense(make(batch=1), arch="gfx942")
+    hi = build_attention_dense(make(batch=4), arch="gfx942")
+    assert lo.name == hi.name == gfx942_kernel_name(make(batch=4))
 
 
 # (Hq, Hkv): GQA 16, non-pow2 GQA 5 and 7, MHA.
 _HEAD_CONFIGS = ((128, 8), (40, 8), (28, 4), (32, 32))
 
 
-def test_kernel_name_is_head_unique_where_heads_are_baked():
-    """On the baked (persistent) grid the head counts size the strides and buffer
-    extents, so they must reach the symbol -- and the IR must actually move with
-    them, or the runtime-grid test below would pass vacuously."""
+@pytest.mark.parametrize("decode", ["qb_major", "hkv_major"])
+def test_persistent_grid_shares_one_kernel_across_head_configs(decode):
+    """The persistent work decode divides by the runtime head counts (through the
+    fast-division kernargs), so every head config -- pow2 and non-pow2 GQA, MHA --
+    is ONE name, ONE body and ONE cache key per decode order, with no hq/kv token.
+
+    The head counts still have to reach the launch: each config gets distinct
+    kernarg values, ``gqa`` magic/shift included. That the IR probe can see baked
+    head counts is the gfx950 control
+    (:func:`test_ir_body_probe_detects_a_baked_shape_on_the_gfx950_control`), so the
+    single-body assertion here is not vacuous."""
     specs = [
-        _baked_spec(num_query_heads=hq, num_kv_heads=hkv) for hq, hkv in _HEAD_CONFIGS
+        _persistent_spec(num_query_heads=hq, num_kv_heads=hkv, persist_decode=decode)
+        for hq, hkv in _HEAD_CONFIGS
     ]
+    for s in specs:
+        ok, why = supports_attention_dense(s, arch="gfx942")
+        assert ok, why
     names = {gfx942_kernel_name(s) for s in specs}
-    assert len(names) == len(specs), f"heads must disambiguate the name, got {names}"
-    assert len({_ir_body_sha(s) for s in specs}) == len(specs)
-    assert "_hq40_kv8_" in gfx942_kernel_name(specs[1])
+    assert len(names) == 1, f"persistent head configs split the name: {names}"
+    assert not re.search(r"_(hq|kv)\d+", names.pop())
+    assert len({attention_dense_cache_key(s, arch="gfx942") for s in specs}) == 1
+    assert len({_ir_body_sha(s) for s in specs}) == 1
+    # Every config has a distinct gqa (16, 5, 7, 1), so its fast-division pair must
+    # differ too; the exact values are pinned by the kernarg-ABI test below.
+    args = [attention_dense_runtime_args(s) for s in specs]
+    assert len({(a["gqa_magic"], a["gqa_shift"]) for a in args}) == len(specs)
 
 
 def test_kernel_name_drops_heads_on_the_runtime_shape_grid():
@@ -549,6 +652,56 @@ def test_kernel_name_drops_heads_on_the_runtime_shape_grid():
     assert len(names) == 1, f"runtime-shape head configs split the name: {names}"
     assert not re.search(r"_(hq|kv)\d+", names.pop())
     assert len({_ir_body_sha(s) for s in specs}) == 1
+
+
+def test_ir_body_probe_detects_a_baked_shape_on_the_gfx950_control():
+    """Positive control for every "one body across shapes" assertion above.
+
+    gfx942 no longer bakes the shape anywhere, so no gfx942 spec can show that
+    :func:`_ir_body_sha` would SEE a baked batch / seqlen / head count -- a probe
+    that normalised them away would make all those assertions pass vacuously. The
+    gfx950 persistent grid still bakes the whole shape (``runtime_param_fields`` is
+    empty there), so the same probe, lowered the same way, must move on each of the
+    gfx942 runtime fields. If gfx950 persistent goes runtime-shape too, this control
+    has to move to whichever builder still bakes.
+    """
+    from kernels.gfx950.attention_dense import (
+        Gfx950AttentionDenseSpec,
+        build_attention_dense as build_gfx950,
+    )
+
+    base = Gfx950AttentionDenseSpec(
+        batch=1,
+        seqlen_q=4096,
+        seqlen_kv=4096,
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        causal=True,
+        dtype="fp16",
+        block_n=64,
+        persistent=True,
+        num_persistent=256,
+        persist_decode="qb_major",  # pinned: auto would flip with the shape
+    )
+    assert (
+        base.runtime_param_fields == ()
+    ), "the gfx950 persistent control no longer bakes the shape -- move the control"
+    control = dict(
+        batch=4, seqlen_q=2048, seqlen_kv=2048, num_query_heads=40, num_kv_heads=4
+    )
+    assert set(control) == _RUNTIME_PARAM_FIELDS
+
+    def sha(spec):
+        return _ir_body_sha(spec, arch="gfx950", build=build_gfx950)
+
+    base_sha = sha(base)
+    unmoved = [
+        f
+        for f, v in control.items()
+        if sha(dataclasses.replace(base, **{f: v})) == base_sha
+    ]
+    assert not unmoved, f"the IR probe did not see baked {unmoved} on gfx950"
 
 
 # --------------------------------------------------------------------------- #
@@ -1352,18 +1505,16 @@ def test_build_bakes_the_tuned_waves_per_eu_attribute():
     kernel = build_attention_dense(spec, arch="gfx942")
     assert kernel.attrs.get("waves_per_eu") == 4
     # Anchored on the full suffix, not a bare "_wpe4" (which "_wpe14" would also
-    # match). The batch token is present only OFF the runtime-shape path: there
-    # batch is a kernel param, sizes nothing baked, and keeping it in the symbol
-    # would give two specs sharing ONE cache key two different names. Asserted
-    # both ways so this stays a name-identity check rather than drifting into an
-    # unintended assertion about which path the spec is on.
-    assert spec.runtime_shape
-    assert gfx942_kernel_name(spec).endswith("_gfx942_wpe4")
-    assert "_b1" not in gfx942_kernel_name(spec)
-
-    baked = dataclasses.replace(spec, persistent=True, num_persistent=64)
-    assert not baked.runtime_shape
-    assert gfx942_kernel_name(baked).endswith("_gfx942_b1_wpe4")
+    # match). Both grids are on the runtime-shape path, so neither carries a batch
+    # token: batch is a kernel param, sizes nothing baked, and keeping it in the
+    # symbol would give two specs sharing ONE cache key two different names. The
+    # persistent arm is asserted separately so the suffix check covers the grid
+    # whose name carries extra (persist/decode) tokens ahead of it.
+    for grid in (spec, dataclasses.replace(spec, persistent=True, num_persistent=64)):
+        assert grid.runtime_shape
+        assert build_attention_dense(grid, arch="gfx942").attrs["waves_per_eu"] == 4
+        assert gfx942_kernel_name(grid).endswith("_gfx942_wpe4")
+        assert not re.search(r"_b\d+", gfx942_kernel_name(grid))
 
 
 def test_dispatch_applies_gfx942_waves_per_eu_and_leaves_gfx950_alone():
@@ -1807,6 +1958,140 @@ def test_persistent_and_default_share_one_inner_body():
         )
     # persistent has exactly one MORE scf.for (the outer grid-stride loop).
     assert npp.count("scf.for") == nd.count("scf.for") + 1
+
+
+# The divisors each resolved persistent decode order divides by in the grid-stride
+# loop, in kernarg order. Restated (not imported) on purpose: this IS the ABI.
+_EXPECTED_FASTDIV_DIVISORS = {
+    "hkv_major": ("batch", "gqa", "nqb"),
+    "qb_major": ("batch", "num_query_heads", "gqa"),
+}
+
+
+def _fastdiv(n: int, magic_i32: int, shift: int) -> int:
+    """Host model of the kernel's decode divide: ``(umulhi(n, magic) + n) >> shift``,
+    with the magic read back from its two's-complement i32 kernarg as unsigned."""
+    return (((n * (magic_i32 & 0xFFFFFFFF)) >> 32) + n) >> shift
+
+
+@pytest.mark.parametrize("decode", ["qb_major", "hkv_major"])
+def test_persistent_kernarg_abi_carries_the_fastdiv_pairs(decode):
+    """The persistent kernarg ABI is the five shape params, then one
+    ``<divisor>_magic`` / ``<divisor>_shift`` i32 pair per divisor of the RESOLVED
+    decode order -- in the signature, in the built kernel's params and in the
+    runtime args, all in one order. A skew mis-binds kernargs and corrupts results on
+    GPU only.
+
+    The values are checked two ways: equal to
+    :func:`rocke.helpers.transforms.calculate_magic_numbers` for the divisor (magic
+    packed as its two's-complement i32), and -- through the host model of the
+    in-kernel divide -- exact for dividends up to just under the 2**30 bound. Non-pow2
+    divisors throughout (B=3, NQB=13, Hq=40, gqa=5), so the magic is not the trivial
+    pow2 one.
+    """
+    from rocke.helpers.transforms import calculate_magic_numbers
+
+    spec = _persistent_spec(
+        batch=3,
+        seqlen_q=13 * _BLOCK_M,
+        seqlen_kv=4096,
+        num_query_heads=40,
+        num_kv_heads=8,
+        persist_decode=decode,
+    )
+    assert supports_attention_dense(spec, arch="gfx942")[0]
+    divisors = _EXPECTED_FASTDIV_DIVISORS[decode]
+    assert spec.fastdiv_divisors == divisors
+    pairs = tuple(f"{d}_{p}" for d in divisors for p in ("magic", "shift"))
+    assert spec.runtime_kernarg_fields == spec.runtime_param_fields + pairs
+
+    head = ("q_ptr", "k_ptr", "v_ptr", "o_ptr", "scale")
+    sig = attention_dense_signature(spec)
+    assert tuple(p["name"] for p in sig) == head + spec.runtime_kernarg_fields
+    assert all(p["type"] == "i32" for p in sig[len(head) :])
+    kd = build_attention_dense(spec, arch="gfx942")
+    assert tuple(p.name for p in kd.params) == head + spec.runtime_kernarg_fields
+
+    args = attention_dense_runtime_args(spec)
+    assert tuple(args) == spec.runtime_kernarg_fields
+    value = {"batch": 3, "num_query_heads": 40, "gqa": 5, "nqb": 13}
+    for d in divisors:
+        magic, shift = calculate_magic_numbers(value[d])
+        assert -(1 << 31) <= args[f"{d}_magic"] < (1 << 31), "magic must fit an i32"
+        assert args[f"{d}_magic"] & 0xFFFFFFFF == magic
+        assert args[f"{d}_shift"] == shift
+        top = _FASTDIV_DIVIDEND_LIMIT - 1
+        for n in (*range(0, 4 * value[d] + 3), top - value[d], top - 1, top):
+            assert _fastdiv(n, args[f"{d}_magic"], shift) == n // value[d], (d, n)
+
+
+def test_non_persistent_kernarg_abi_has_no_fastdiv_pairs():
+    """The default grid divides once per CTA, so its ABI is exactly the shape
+    params -- a stray fast-division pair there would shift nothing in the body but
+    would be a kernarg the launcher fills and the kernel never declared."""
+    spec = _spec(head_size=128, dtype="fp16")
+    assert spec.fastdiv_divisors == ()
+    assert spec.runtime_kernarg_fields == spec.runtime_param_fields
+    assert tuple(attention_dense_runtime_args(spec)) == spec.runtime_param_fields
+
+
+def test_auto_persist_decode_keys_on_the_resolved_order():
+    """With the shape out of the cache key, ``persist_decode="auto"`` must be keyed
+    by the order it RESOLVES to -- the order picks the work-decode body, so keying on
+    the raw ``"auto"`` would let two shapes that resolve differently share one slot
+    and serve one decode's binary for the other.
+
+    gqa=4, NQB=16, NP=228: per-kv-head work 64*B crosses 2*NP between B=4 and B=8.
+    Same-order shapes share key, name and body; cross-order shapes differ in all
+    three; and an ``"auto"`` that resolves to an order is the SAME kernel as that
+    order spelled explicitly.
+    """
+    by_batch = {
+        b: _persistent_spec(batch=b, persist_decode="auto") for b in (1, 2, 8, 16)
+    }
+    order = {b: s.resolved_persist_decode for b, s in by_batch.items()}
+    assert order == {1: "qb_major", 2: "qb_major", 8: "hkv_major", 16: "hkv_major"}
+
+    def ident(spec):
+        return (
+            attention_dense_cache_key(spec, arch="gfx942"),
+            gfx942_kernel_name(spec),
+            _ir_body_sha(spec),
+        )
+
+    ids = {b: ident(s) for b, s in by_batch.items()}
+    assert ids[1] == ids[2]
+    assert ids[8] == ids[16]
+    lo, hi = ids[1], ids[8]
+    assert all(a != b for a, b in zip(lo, hi)), "key, name and body must all split"
+    assert "hkvmaj" in hi[1] and "hkvmaj" not in lo[1]
+    for b, resolved in ((1, "qb_major"), (8, "hkv_major")):
+        explicit = dataclasses.replace(by_batch[b], persist_decode=resolved)
+        assert ident(explicit) == ids[b]
+    # The fast-division ABI follows the resolved order as well.
+    assert by_batch[1].fastdiv_divisors == _EXPECTED_FASTDIV_DIVISORS["qb_major"]
+    assert by_batch[8].fastdiv_divisors == _EXPECTED_FASTDIV_DIVISORS["hkv_major"]
+
+
+def test_persistent_runtime_args_reject_work_past_the_fastdiv_bound():
+    """The in-kernel fast division is exact only for dividends below 2**30, and every
+    decode dividend is below W = NQB*Hq*B. Past the bound the quotient is silently
+    wrong, so ``attention_dense_runtime_args`` must raise rather than hand the kernel
+    a work-item count it decodes incorrectly. Boundary pinned on both sides; the
+    default grid has no fast division and so no such bound."""
+    assert _FASTDIV_DIVIDEND_LIMIT == 1 << 30
+    per_batch = (4096 // _BLOCK_M) * 32  # NQB * Hq of the persistent base
+    at_limit = _FASTDIV_DIVIDEND_LIMIT // per_batch
+    assert at_limit * per_batch == _FASTDIV_DIVIDEND_LIMIT
+    for decode in ("qb_major", "hkv_major"):
+        under = _persistent_spec(batch=at_limit - 1, persist_decode=decode)
+        assert attention_dense_runtime_args(under)["batch"] == at_limit - 1
+        with pytest.raises(ValueError, match=r"2\*\*30"):
+            attention_dense_runtime_args(
+                _persistent_spec(batch=at_limit, persist_decode=decode)
+            )
+    default = dataclasses.replace(_persistent_spec(batch=at_limit), persistent=False)
+    assert attention_dense_runtime_args(default)["batch"] == at_limit
 
 
 def test_dispatch_persistent_auto_turns_on_for_large_sq_only():

@@ -146,16 +146,17 @@ _LAUNCHER_CACHE: dict = {}
 
 
 def _dense_launcher(spec: AttentionDenseSpec) -> KernelLauncher:
-    # The name is unique per binary: on the runtime-shape path it omits the shape
-    # and head counts (one binary serves them all, read from kernargs); on the
-    # persistent path it still bakes the shape, as the binary does.
+    # The name is unique per binary and omits the shape and head counts: one binary
+    # serves them all, read from kernargs. That makes supports a per-shape check, so
+    # it runs before the cache lookup -- a hit for one shape says nothing about
+    # another (e.g. the sliding-window zero-trip guard).
+    ok, why = supports_attention_dense(spec, arch=_ARCH)
+    if not ok:
+        raise ValueError(f"unsupported spec: {why}")
     key = gfx942_kernel_name(spec)
     lch = _LAUNCHER_CACHE.get(key)
     if lch is not None:
         return lch
-    ok, why = supports_attention_dense(spec, arch=_ARCH)
-    if not ok:
-        raise ValueError(f"unsupported spec: {why}")
     art = compile_kernel(
         build_attention_dense(spec, arch=_ARCH),
         arch=_ARCH,
