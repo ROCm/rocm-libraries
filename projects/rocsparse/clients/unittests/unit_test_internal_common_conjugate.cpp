@@ -137,3 +137,66 @@ TEST_F(ConjugateUnclamped, matches_host)
     check_conjugate<rocsparse_float_complex>(handle);
     check_conjugate_strided_batched<rocsparse_double_complex>(handle);
 }
+
+namespace
+{
+    template <typename T>
+    void check_conjugate_real_is_noop(rocsparse_handle handle)
+    {
+        constexpr int64_t batch_count = 3;
+        constexpr int64_t stride      = LENGTH + 11;
+
+        std::vector<T> h_in(stride * batch_count);
+        for(int64_t i = 0; i < stride * batch_count; ++i)
+        {
+            h_in[i] = static_cast<T>(i % 97) - static_cast<T>(48.5);
+        }
+        device_vector<T> d{h_in};
+        ASSERT_TRUE(d.ptr);
+
+        // Under capture nothing executes; a launch would show up as a graph node.
+        hipStream_t stream;
+        ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+        ASSERT_EQ(rocsparse_set_stream(handle, stream), rocsparse_status_success);
+        ASSERT_EQ(hipStreamBeginCapture(stream, hipStreamCaptureModeRelaxed), hipSuccess);
+
+        const rocsparse_status status_single  = rocsparse::conjugate(handle, LENGTH, d.ptr);
+        const rocsparse_status status_batched = rocsparse::conjugate_strided_batched(
+            handle, batch_count, LENGTH, rocsparse::get_datatype<T>(), d.ptr, stride);
+
+        hipGraph_t graph = nullptr;
+        ASSERT_EQ(hipStreamEndCapture(stream, &graph), hipSuccess);
+        size_t num_nodes = 0;
+        ASSERT_EQ(hipGraphGetNodes(graph, nullptr, &num_nodes), hipSuccess);
+        ASSERT_EQ(hipGraphDestroy(graph), hipSuccess);
+        ASSERT_EQ(rocsparse_set_stream(handle, nullptr), rocsparse_status_success);
+        ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
+
+        EXPECT_EQ(status_single, rocsparse_status_success);
+        EXPECT_EQ(status_batched, rocsparse_status_success);
+        EXPECT_EQ(num_nodes, size_t(0));
+
+        const std::vector<T> h_out = to_host(d);
+        for(int64_t i = 0; i < stride * batch_count; ++i)
+        {
+            ASSERT_EQ(h_out[i], h_in[i]) << "element " << i;
+        }
+    }
+}
+
+class ConjugateReal : public HandleTest
+{
+};
+
+TEST_F(ConjugateReal, is_noop_without_kernel_launch)
+{
+    check_conjugate_real_is_noop<float>(handle);
+    check_conjugate_real_is_noop<double>(handle);
+}
+
+TEST_F(ConjugateReal, unsupported_datatype_is_invalid_value)
+{
+    int32_t dummy = 0;
+    EXPECT_EQ(rocsparse::conjugate(handle, 1, rocsparse_datatype_i32_r, &dummy),
+              rocsparse_status_invalid_value);
+}

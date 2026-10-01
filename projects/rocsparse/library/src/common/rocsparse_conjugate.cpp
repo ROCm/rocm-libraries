@@ -120,14 +120,6 @@ namespace rocsparse
     {
         switch(datatype)
         {
-        case rocsparse_datatype_f32_r:
-        {
-            return conjugate_strided_batched_kernel_launch<float>;
-        }
-        case rocsparse_datatype_f64_r:
-        {
-            return conjugate_strided_batched_kernel_launch<double>;
-        }
         case rocsparse_datatype_f32_c:
         {
             return conjugate_strided_batched_kernel_launch<rocsparse_float_complex>;
@@ -152,6 +144,12 @@ rocsparse_status rocsparse::conjugate_strided_batched(rocsparse_handle   handle,
                                                       void*              array,
                                                       int64_t            array_stride)
 {
+    // Conjugation is the identity for real types.
+    if(datatype == rocsparse_datatype_f32_r || datatype == rocsparse_datatype_f64_r)
+    {
+        return rocsparse_status_success;
+    }
+
     auto launch_kernel = rocsparse::find_conjugate_strided_batched_kernel_launch(datatype);
     if(launch_kernel == nullptr)
     {
