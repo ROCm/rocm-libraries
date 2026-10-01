@@ -182,31 +182,30 @@ namespace rocsparse
 
         // The launch grid is clamped to the device's maximum grid size, so iterate with a
         // grid-stride loop to cover every element that needs scaling.
-        const int64_t stride = static_cast<int64_t>(WG_SIZE) * hipGridDim_x;
-        for(int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * WG_SIZE + hipThreadIdx_x;
-            gid < required_threads;
-            gid += stride)
+        const int64_t gid    = static_cast<int64_t>(hipBlockIdx_x) * WG_SIZE + hipThreadIdx_x;
+        const int64_t stride = static_cast<int64_t>(hipGridDim_x) * WG_SIZE;
+        for(int64_t idx = gid; idx < required_threads; idx += stride)
         {
-            if(gid < first_row)
+            if(idx < first_row)
             {
                 if(beta == static_cast<T>(0))
                 {
-                    y[gid] = static_cast<Y>(0);
+                    y[idx] = static_cast<Y>(0);
                 }
                 else
                 {
-                    y[gid] *= beta;
+                    y[idx] *= beta;
                 }
             }
             else
             {
                 if(beta == static_cast<T>(0))
                 {
-                    y[last_row + (gid - first_row)] = static_cast<Y>(0);
+                    y[last_row + (idx - first_row)] = static_cast<Y>(0);
                 }
                 else
                 {
-                    y[last_row + (gid - first_row)] *= beta;
+                    y[last_row + (idx - first_row)] *= beta;
                 }
             }
         }
@@ -1082,9 +1081,9 @@ namespace rocsparse
         if constexpr(GRID_STRIDE)
         {
             // This kernel uses no block-wide barriers, so divergent iteration counts are safe.
-            const int64_t warps_per_grid = static_cast<int64_t>(BLOCKSIZE / WF_SIZE) * hipGridDim_x;
-            for(int64_t gid = static_cast<int64_t>(BLOCKSIZE / WF_SIZE) * bid + wid; gid < count;
-                gid += warps_per_grid)
+            const int64_t gwid   = static_cast<int64_t>(bid) * (BLOCKSIZE / WF_SIZE) + wid;
+            const int64_t stride = static_cast<int64_t>(hipGridDim_x) * (BLOCKSIZE / WF_SIZE);
+            for(int64_t gid = gwid; gid < count; gid += stride)
             {
                 process_row(gid);
             }
