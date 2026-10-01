@@ -30,7 +30,7 @@ struct RTCKernelChirp : public RTCKernel
     static std::shared_future<std::unique_ptr<RTCKernel>>
         generate(const std::string& gpu_arch, const size_t& N, rocfft_precision precision);
 
-    static inline KIntType itype(const std::string& gpu_arch, const size_t& N)
+    static inline KIntType itype(const size_t& N)
     {
         return N > static_cast<size_t>(UINT32_MAX) ? KIntType::U64 : KIntType::U32;
     }
