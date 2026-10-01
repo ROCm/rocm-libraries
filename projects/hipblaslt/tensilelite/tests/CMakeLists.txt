@@ -28,7 +28,6 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInit_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExactLogicLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitor_test.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/DebugInstanceProbe.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/RunGEMMKernelTest.hpp"
@@ -44,7 +43,6 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultComparison_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceMXFastPath_test.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/SingletonIdentity_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SolutionValidation_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/StreamKLaunchSummary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorDescriptor_test.cpp"
@@ -89,11 +87,6 @@ if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
 endif()
 
 target_link_libraries(tensilelite-tests PUBLIC GTest::gtest)
-
-target_compile_definitions(tensilelite-tests
-    PRIVATE
-        $<$<STREQUAL:$<TARGET_PROPERTY:tensilelite-host,TYPE>,SHARED_LIBRARY>:TENSILELITE_HOST_IS_SHARED>
-)
 
 if(HIPBLASLT_ENABLE_YAML)
     target_link_libraries(tensilelite-tests PRIVATE LLVMObjectYAML)

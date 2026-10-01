@@ -314,11 +314,4 @@ namespace TensileLite
         }
     }
 
-    TENSILELITEHOST_EXPORT const void* debugInstanceAddress();
-
-    const void* debugInstanceAddress()
-    {
-        return &Debug::Instance();
-    }
-
 } // namespace TensileLite
