@@ -152,12 +152,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # the binary is running instead of reaching back into the tree that configured it -- an
     # installed run would otherwise find nothing, enumerate nothing, and pass.
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
-        # The staged tree TestShippedDescriptorSets walks. It was HIPDNN_DESCRIPTOR_BUILD_DIR
-        # before descriptor packaging replaced the staging variables, and that tree held the
-        # descriptors this branch shipped -- which develop moved under test_descriptors/ and
-        # left the production root dormant by default. The unit root is the one this binary
-        # stages, so pointing anywhere else makes every case here vacuous, which is the exact
-        # failure the first test in that file exists to catch.
+        # The unit root, the first tree TestShippedDescriptorSets validates. The unit root is
+        # the one this binary stages, so pointing anywhere else makes every case there
+        # vacuous, which is the exact failure the first test in that file exists to catch.
+        # The production tree it also validates is defined below, where this build packs one.
         HIPDNN_TEST_DESCRIPTOR_DIR="${HIPKERNELPROVIDER_UNIT_BUILD_DIR}"
         HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
         HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}"
@@ -218,21 +216,27 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         endif()
     endforeach()
 
-    # The census binary additionally reads the production shard, which is wired only
-    # where a production root holds descriptors this build packs for. Absent, there is
-    # nothing to depend on and no entry is registered against it either.
+    # The production shard, wired only where a production root holds descriptors this
+    # build packs for. The census binary reads its shard, and TestShippedDescriptorSets in
+    # the ordinary binary validates the tree whole, through the same binary-relative offset
+    # the integration binary loads it by. Absent, there is nothing to depend on, no census
+    # entry is registered against it, and that suite's production instance skips.
     if(TARGET hkp_packaging_product)
         add_dependencies(hip_kernel_provider_census_tests hkp_packaging_product)
+        add_dependencies(hip_kernel_provider_tests hkp_packaging_product)
+        target_compile_definitions(hip_kernel_provider_tests PRIVATE
+            HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
     endif()
 
-    # The parent of the unit descriptor sets, and the only root this binary reads.
+    # The parent of the unit descriptor sets, the only root whose embedded sources this
+    # binary carries.
     # A walk of a parent reaches every subtree staged under it, so a further pack
     # there comes under the check with no edit here.
     hkp_verify_embedded_sources(
         TARGET hip_kernel_provider_tests
         STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_UNIT_BUILD_DIR}
-        # pointwise_model is packed into this root too. Its kernel is the same embedded
-        # PointwiseAdd.cpp the unit set uses, which is why it is staged here rather than
+        # pointwise_model is packed into this root too. Its kernel is the embedded
+        # PointwiseModelAdd.cpp registered above, which is why it is staged here rather than
         # beside the integration descriptors: an embedded_source descriptor needs a binary
         # that carries the source, and only this one does.
         PACK_NAMES unit unit_shared ${HIPKERNELPROVIDER_POINTWISE_MODEL_SET}

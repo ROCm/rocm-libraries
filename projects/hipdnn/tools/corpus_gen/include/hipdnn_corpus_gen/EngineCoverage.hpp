@@ -13,10 +13,10 @@
 ///
 /// An engine answers "do you serve this graph" and nothing wider: no query returns the set of
 /// graphs it serves, and a natively-coded matcher does not declare which fields it compares.
-/// For an engine whose kernels bake every shape field in -- `hipkernel:Gfx942AttentionDense`,
-/// whose matcher demands equality on all of them -- that set is exactly its pack, and searching
-/// for more can only rediscover pack shapes. Until an engine can state that itself, it is
-/// recorded here, with the reason, and generation skips the search for it.
+/// For an engine whose kernels bake every shape field in, and whose matcher demands equality on
+/// all of them, that set is exactly its pack, and searching for more can only rediscover pack
+/// shapes. Until an engine can state that itself, it is recorded in operations/engines.json,
+/// with the reason, and generation skips the search for it.
 namespace hipdnn_corpus_gen
 {
 
