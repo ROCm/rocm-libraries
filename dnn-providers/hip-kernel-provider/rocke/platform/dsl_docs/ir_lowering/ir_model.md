@@ -172,8 +172,10 @@ global_load_fp8e4m3(ptr, idx, align=1)
 masked_global_load(ptr, idx, mask, other, dtype, align=1)   # clamps false-lane idx to 0
 global_store(ptr, idx, value, align=1)
 global_load_vN_f16(ptr, idx, n)        # n in {2,4,8}; aligned by default
-global_load_vN(ptr, idx, dtype, n)     # f16 or bf16; n in {2,4,8}
-global_store_vN(...)                   # vector stores
+global_load_vN(ptr, idx, dtype, n, nontemporal=False)   # f16 or bf16; n in {2,4,8}
+global_store_vN(ptr, idx, value, n, nontemporal=False)  # vector stores
+# nontemporal=True: streaming access; LLVM `!nontemporal` -> `nt` bit on the
+# global load/store (HIP backend: __builtin_nontemporal_load/store).
 global_atomic_add_f32(ptr, idx, value) # used by split-K paths
 ```
 

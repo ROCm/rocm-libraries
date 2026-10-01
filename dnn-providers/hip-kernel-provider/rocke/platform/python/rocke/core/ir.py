@@ -1569,6 +1569,7 @@ class IRBuilder:
         n: int,
         *,
         align: Optional[int] = None,
+        nontemporal: bool = False,
     ) -> Value:
         """Vectorised global load of N consecutive values.
 
@@ -1580,6 +1581,10 @@ class IRBuilder:
         Default alignment is the payload size for power-of-two loads, and
         element alignment for 12-byte loads. An explicit alignment is a caller
         guarantee about the address after adding idx.
+
+        ``nontemporal=True`` marks the load as streaming (LLVM
+        ``!nontemporal``; the AMDGPU ``nt`` cache-policy bit). The attr is
+        recorded only when set, so default loads are unchanged.
         """
         if dtype.name in ("f16", "bf16", "i16"):
             elem_bytes = 2
@@ -1604,17 +1609,20 @@ class IRBuilder:
                 "global_load_vN supports f16/bf16/i16/f32/i32/fp8e4m3/bf8e5m2/i8, "
                 f"got {dtype.name}"
             )
+        attrs = {
+            "elem_type": dtype.name,
+            "vec": n,
+            "align": int(
+                align or (elem_bytes if n * elem_bytes == 12 else n * elem_bytes)
+            ),
+        }
+        if nontemporal:
+            attrs["nontemporal"] = True
         return self._op(
             "memref.global_load_vN",
             [ptr, idx],
             [VectorType(dtype, n)],
-            attrs={
-                "elem_type": dtype.name,
-                "vec": n,
-                "align": int(
-                    align or (elem_bytes if n * elem_bytes == 12 else n * elem_bytes)
-                ),
-            },
+            attrs=attrs,
             result_name_hint=f"gv{n}",
         ).result
 
@@ -4175,6 +4183,7 @@ class IRBuilder:
         n: int,
         *,
         align: Optional[int] = None,
+        nontemporal: bool = False,
     ) -> None:
         """Vectorised global store of N consecutive elements.
 
@@ -4183,6 +4192,9 @@ class IRBuilder:
         (4-byte), ``i8`` / ``fp8e4m3`` / ``bf8e5m2`` (1-byte). Lowers to
         a single ``store <N x elem>`` and AMDGPU coalesces into one
         ``global_store_dwordxN`` transaction.
+
+        ``nontemporal=True`` marks the store as streaming (LLVM
+        ``!nontemporal``); the attr is recorded only when set.
         """
         if n not in (1, 2, 4, 8, 16):
             raise ValueError(f"global_store_vN n must be 1, 2, 4, 8, or 16 (got {n})")
@@ -4206,15 +4218,14 @@ class IRBuilder:
                 "global_store_vN supports f16/bf16/i16/f32/i32/i8/fp8e4m3/bf8e5m2, "
                 f"got {elem_name}"
             )
-        self._op(
-            "memref.global_store_vN",
-            [ptr, idx, value],
-            attrs={
-                "elem_type": elem_name,
-                "vec": n,
-                "align": int(align or (n * elem_bytes)),
-            },
-        )
+        attrs = {
+            "elem_type": elem_name,
+            "vec": n,
+            "align": int(align or (n * elem_bytes)),
+        }
+        if nontemporal:
+            attrs["nontemporal"] = True
+        self._op("memref.global_store_vN", [ptr, idx, value], attrs=attrs)
 
     # ----- atomics (for split-K) -----
 

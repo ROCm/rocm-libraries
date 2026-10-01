@@ -301,6 +301,25 @@ static void op_memref_global_atomic_add_pk_f16(rocke_lower_t* L, const rocke_op_
                    rocke_ll_operand(L, val));
 }
 
+/* Python _Lowerer._nontemporal_md: ", !nontemporal !5" when the op carries
+ * nontemporal=True, "" when the attr is absent/false. A non-bool attr is
+ * rejected rather than coerced. */
+static const char* ll_nontemporal_md(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_attr_value_t* v = rocke_attr_get(&op->attrs, "nontemporal");
+    if(!v)
+        return "";
+    if(v->kind != ROCKE_ATTR_BOOL)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s: nontemporal attr must be a bool",
+                      rocke_opcode_name(op->opcode));
+    if(!v->u.b)
+        return "";
+    L->needs_nontemporal_md = true;
+    return ", !nontemporal !5";
+}
+
 static void op_memref_global_load_vN(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* ptr = op->operands[0];
@@ -319,12 +338,13 @@ static void op_memref_global_load_vN(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, idx));
     align = ll_attr_int(op, "align", vec * 2);
     rocke_ll_emitf(L,
-                   "  %s = load <%lld x %s>, ptr addrspace(1) %s, align %lld",
+                   "  %s = load <%lld x %s>, ptr addrspace(1) %s, align %lld%s",
                    ll_res(op),
                    (long long)vec,
                    elem_ty,
                    gep,
-                   (long long)align);
+                   (long long)align,
+                   ll_nontemporal_md(L, op));
 }
 
 static void op_memref_global_store_vN(rocke_lower_t* L, const rocke_op_t* op)
@@ -347,11 +367,12 @@ static void op_memref_global_store_vN(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, ptr),
                    rocke_ll_operand(L, idx));
     rocke_ll_emitf(L,
-                   "  store %s %s, ptr addrspace(1) %s, align %lld",
+                   "  store %s %s, ptr addrspace(1) %s, align %lld%s",
                    ty,
                    rocke_ll_operand(L, val),
                    gep,
-                   (long long)align);
+                   (long long)align,
+                   ll_nontemporal_md(L, op));
 }
 
 static void op_memref_cooperative_global_store(rocke_lower_t* L, const rocke_op_t* op)

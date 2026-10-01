@@ -189,6 +189,14 @@ _VEC_PREFIX = {
 }
 
 
+def _nontemporal(op: Op) -> bool:
+    """The op's ``nontemporal`` attr; absent means False, non-bool is rejected."""
+    nt = op.attrs.get("nontemporal", False)
+    if not isinstance(nt, bool):
+        raise ValueError(f"{op.name}: nontemporal attr must be a bool, got {nt!r}")
+    return nt
+
+
 def _vec_prefix(elem_name: str, op_desc: str) -> str:
     """Vector prefix for a vector load/store ``elem_type``. Validate rather than
     silently falling back to f16, which would reinterpret the bits of another
@@ -493,7 +501,13 @@ class _Lowerer:
             raise ValueError(
                 "global_load_vN: alignment must be a positive power of two"
             )
+        nontemporal = _nontemporal(op)
         if align < byte_count or byte_count & (byte_count - 1):
+            if nontemporal:
+                raise ValueError(
+                    "global_load_vN: nontemporal needs a naturally aligned "
+                    "power-of-two payload in the HIP backend"
+                )
             # Non-power-of-two vector objects include padding. Copy only the
             # payload, using only the alignment guaranteed by the IR.
             self._emit(
@@ -503,10 +517,13 @@ class _Lowerer:
                 f"{byte_count});"
             )
             return
-        self._emit(
-            f"{prefix}{vec} {_name(op.result)} = "
-            f"*reinterpret_cast<const {prefix}{vec}*>({_name(ptr)} + {_name(idx)});"
-        )
+        src = f"reinterpret_cast<const {prefix}{vec}*>({_name(ptr)} + {_name(idx)})"
+        if nontemporal:
+            self._emit(
+                f"{prefix}{vec} {_name(op.result)} = __builtin_nontemporal_load({src});"
+            )
+            return
+        self._emit(f"{prefix}{vec} {_name(op.result)} = *{src};")
 
     def _op_tile_smem_store_vN(self, op: Op) -> None:
         smem = op.operands[0]
@@ -1817,10 +1834,11 @@ class _Lowerer:
         n = int(op.attrs["vec"])
         elem_name = op.attrs.get("elem_type", "f16")
         prefix = _vec_prefix(elem_name, "global_store_vN")
-        self._emit(
-            f"*reinterpret_cast<{prefix}{n}*>({_name(ptr)} + {_name(idx)}) = "
-            f"{_name(val)};"
-        )
+        dst = f"reinterpret_cast<{prefix}{n}*>({_name(ptr)} + {_name(idx)})"
+        if _nontemporal(op):
+            self._emit(f"__builtin_nontemporal_store({_name(val)}, {dst});")
+            return
+        self._emit(f"*{dst} = {_name(val)};")
 
     def _op_memref_global_atomic_add_f32(self, op: Op) -> None:
         ptr, idx, val = op.operands

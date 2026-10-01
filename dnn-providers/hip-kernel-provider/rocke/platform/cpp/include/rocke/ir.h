@@ -892,6 +892,16 @@ rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
                                       const rocke_type_t* dtype,
                                       int n,
                                       int align /* <=0 => default */);
+/* Like rocke_b_global_load_vN but nontemporal != 0 records the
+ * `nontemporal=True` attr (Python keyword; lowered to `!nontemporal`). The
+ * plain rocke_b_global_load_vN forwards here with nontemporal=0. */
+rocke_value_t* rocke_b_global_load_vN_ex(rocke_ir_builder_t* b,
+                                         rocke_value_t* ptr,
+                                         rocke_value_t* idx,
+                                         const rocke_type_t* dtype,
+                                         int n,
+                                         int align,
+                                         int nontemporal);
 rocke_value_t* rocke_b_global_load_vN_f16(
     rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, int n, int align);
 
@@ -1345,6 +1355,15 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
                              rocke_value_t* value,
                              int n,
                              int align /* <=0 => default */);
+/* Like rocke_b_global_store_vN but nontemporal != 0 records the
+ * `nontemporal=True` attr. The plain form forwards here with 0. */
+void rocke_b_global_store_vN_ex(rocke_ir_builder_t* b,
+                                rocke_value_t* ptr,
+                                rocke_value_t* idx,
+                                rocke_value_t* value,
+                                int n,
+                                int align,
+                                int nontemporal);
 void rocke_b_global_store_vN_f16(rocke_ir_builder_t* b,
                                  rocke_value_t* ptr,
                                  rocke_value_t* idx,

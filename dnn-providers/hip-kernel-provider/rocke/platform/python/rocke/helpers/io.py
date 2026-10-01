@@ -86,24 +86,36 @@ def load_scalar_as_f32(b: IRBuilder, ptr: Value, idx: Value, *, dtype: str) -> V
     return b.cast_to_f32(load_scalar(b, ptr, idx, dtype=dtype))
 
 
-def load_vec(b: IRBuilder, ptr: Value, idx: Value, *, dtype: str, n: int) -> Value:
+def load_vec(
+    b: IRBuilder,
+    ptr: Value,
+    idx: Value,
+    *,
+    dtype: str,
+    n: int,
+    nontemporal: bool = False,
+) -> Value:
     """Vectorised global load of ``n`` consecutive elements.
 
     Supports ``n in {2, 4, 8}`` for f16/bf16; ``n=1`` is rejected
     because the IR distinguishes scalar vs vector loads and the n=1
     case would silently lose vectorisation. Use :func:`load_scalar`
-    when a scalar is what you want.
+    when a scalar is what you want. ``nontemporal`` is forwarded to
+    :meth:`IRBuilder.global_load_vN`.
     """
     if n not in (2, 4, 8):
         raise ValueError(f"load_vec n must be 2/4/8 (got {n}); use load_scalar for n=1")
-    ty = io_ir_type(dtype)
-    if dtype in ("f16", "fp16"):
-        return b.global_load_vN_f16(ptr, idx, n)
-    return b.global_load_vN(ptr, idx, ty, n)
+    return b.global_load_vN(ptr, idx, io_ir_type(dtype), n, nontemporal=nontemporal)
 
 
 def load_vec_as_f32(
-    b: IRBuilder, ptr: Value, idx: Value, *, dtype: str, n: int
+    b: IRBuilder,
+    ptr: Value,
+    idx: Value,
+    *,
+    dtype: str,
+    n: int,
+    nontemporal: bool = False,
 ) -> list[Value]:
     """Vectorised load + per-lane f32 promotion.
 
@@ -111,7 +123,7 @@ def load_vec_as_f32(
     of the loaded vector. This is the canonical "ingest into f32 compute
     registers" pattern used by every norm/reduce kernel.
     """
-    v = load_vec(b, ptr, idx, dtype=dtype, n=n)
+    v = load_vec(b, ptr, idx, dtype=dtype, n=n, nontemporal=nontemporal)
     return [b.cast_to_f32(b.vec_extract(v, i)) for i in range(n)]
 
 
@@ -187,16 +199,25 @@ def store_scalar_from_f32(
     b.global_store(ptr, idx, b.cast_f32_to(value_f32, target))
 
 
-def store_vec(b: IRBuilder, ptr: Value, idx: Value, value: Value, *, n: int) -> None:
+def store_vec(
+    b: IRBuilder,
+    ptr: Value,
+    idx: Value,
+    value: Value,
+    *,
+    n: int,
+    nontemporal: bool = False,
+) -> None:
     """Vectorised global store. ``value`` must already be a ``<n x T>``
     vector in the target dtype (use :func:`pack_f32_to` to assemble
-    one from a list of f32 scalars).
+    one from a list of f32 scalars). ``nontemporal`` is forwarded to
+    :meth:`IRBuilder.global_store_vN`.
     """
     if n not in (2, 4, 8):
         raise ValueError(
             f"store_vec n must be 2/4/8 (got {n}); use store_scalar for n=1"
         )
-    b.global_store_vN(ptr, idx, value, n)
+    b.global_store_vN(ptr, idx, value, n, nontemporal=nontemporal)
 
 
 def pack_f32_to(b: IRBuilder, scalars_f32: list[Value], *, dtype: str) -> Value:

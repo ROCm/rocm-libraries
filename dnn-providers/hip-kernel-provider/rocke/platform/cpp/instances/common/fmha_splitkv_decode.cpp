@@ -254,7 +254,7 @@ static void rocke_splitkv_store_lane_slice_f32_packed(rocke_ir_builder_t* b,
     if(rocke_splitkv_ept_in_vec_widths(ept))
     {
         rocke_value_t* packed = rocke_b_pack_f32_to(b, values_f32, ept, dtype);
-        rocke_b_store_vec(b, ptr, rocke_b_add(b, row_base, lane_d_base), packed, ept);
+        rocke_b_store_vec(b, ptr, rocke_b_add(b, row_base, lane_d_base), packed, ept, 0);
         return;
     }
     {

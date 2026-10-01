@@ -212,6 +212,17 @@ rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
                                       int n,
                                       int align)
 {
+    return rocke_b_global_load_vN_ex(b, ptr, idx, dtype, n, align, 0);
+}
+
+rocke_value_t* rocke_b_global_load_vN_ex(rocke_ir_builder_t* b,
+                                         rocke_value_t* ptr,
+                                         rocke_value_t* idx,
+                                         const rocke_type_t* dtype,
+                                         int n,
+                                         int align,
+                                         int nontemporal)
+{
     rocke_value_t* ops[2];
     rocke_attr_map_t a;
     const rocke_type_t* vt;
@@ -267,6 +278,9 @@ rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
         &a,
         "align",
         (int64_t)(align > 0 ? align : (n * elem_bytes == 12 ? elem_bytes : n * elem_bytes)));
+    /* Python records the attr only when set, keeping default IR unchanged. */
+    if(nontemporal)
+        rocke_attr_set_bool(b, &a, "nontemporal", true);
     {
         char hint[16];
         /* result_name_hint = "gv{n}" */
@@ -308,6 +322,17 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
                              rocke_value_t* value,
                              int n,
                              int align)
+{
+    rocke_b_global_store_vN_ex(b, ptr, idx, value, n, align, 0);
+}
+
+void rocke_b_global_store_vN_ex(rocke_ir_builder_t* b,
+                                rocke_value_t* ptr,
+                                rocke_value_t* idx,
+                                rocke_value_t* value,
+                                int n,
+                                int align,
+                                int nontemporal)
 {
     rocke_value_t* ops[3];
     rocke_attr_map_t a;
@@ -370,6 +395,8 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
     rocke_attr_set_str(b, &a, "elem_type", en);
     rocke_attr_set_int(b, &a, "vec", (int64_t)n);
     rocke_attr_set_int(b, &a, "align", (int64_t)(align > 0 ? align : n * elem_bytes));
+    if(nontemporal)
+        rocke_attr_set_bool(b, &a, "nontemporal", true);
     (void)rocke_i_op0(b, ROCKE_OP_MEMREF_GLOBAL_STORE_VN, ops, 3, &a);
 }
 

@@ -103,24 +103,26 @@ rocke_value_t* rocke_b_load_scalar_as_f32(rocke_ir_builder_t* b,
 
 /* C99 port of rocke.helpers.io.load_vec:
  *
- *     def load_vec(b, ptr, idx, *, dtype, n) -> Value:
+ *     def load_vec(b, ptr, idx, *, dtype, n, nontemporal=False) -> Value:
  *         if n not in (2, 4, 8): raise ValueError(...)
- *         ty = io_ir_type(dtype)
- *         if dtype in ("f16", "fp16"): return b.global_load_vN_f16(ptr, idx, n)
- *         return b.global_load_vN(ptr, idx, ty, n)
+ *         return b.global_load_vN(ptr, idx, io_ir_type(dtype), n,
+ *                                 nontemporal=nontemporal)
  *
- * Vectorised global load of `n` consecutive elements (n in {2,4,8}). The Python
- * helper always resolves io_ir_type(dtype) first (so an unsupported dtype
- * raises before the n check is reached on the f16/bf16 paths) -- but the n check
- * comes first in the Python, so this port checks n first as well to keep the
- * raised-error identity. Returns NULL on bad n / bad dtype / errored builder. */
-rocke_value_t* rocke_b_load_vec(
-    rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, const char* dtype, int n);
+ * Vectorised global load of `n` consecutive elements (n in {2,4,8}). The n
+ * check comes first in the Python, so this port checks n first as well to keep
+ * the raised-error identity. `nontemporal` != 0 marks the load streaming.
+ * Returns NULL on bad n / bad dtype / errored builder. */
+rocke_value_t* rocke_b_load_vec(rocke_ir_builder_t* b,
+                                rocke_value_t* ptr,
+                                rocke_value_t* idx,
+                                const char* dtype,
+                                int n,
+                                int nontemporal);
 
 /* C99 port of rocke.helpers.io.load_vec_as_f32:
  *
- *     def load_vec_as_f32(b, ptr, idx, *, dtype, n) -> list[Value]:
- *         v = load_vec(b, ptr, idx, dtype=dtype, n=n)
+ *     def load_vec_as_f32(b, ptr, idx, *, dtype, n, nontemporal=False):
+ *         v = load_vec(b, ptr, idx, dtype=dtype, n=n, nontemporal=nontemporal)
  *         return [b.cast_to_f32(b.vec_extract(v, i)) for i in range(n)]
  *
  * Vectorised load + per-lane f32 promotion. Writes `n` scalar f32 Values into
@@ -132,6 +134,7 @@ int rocke_b_load_vec_as_f32(rocke_ir_builder_t* b,
                             rocke_value_t* idx,
                             const char* dtype,
                             int n,
+                            int nontemporal,
                             rocke_value_t** out);
 
 /* C99 port of rocke.helpers.io.load_lane_slice_f32:
@@ -160,16 +163,20 @@ int rocke_b_load_lane_slice_f32(rocke_ir_builder_t* b,
 
 /* C99 port of rocke.helpers.io.store_vec:
  *
- *     def store_vec(b, ptr, idx, value, *, n) -> None:
+ *     def store_vec(b, ptr, idx, value, *, n, nontemporal=False) -> None:
  *         if n not in (2, 4, 8): raise ValueError(...)
- *         b.global_store_vN(ptr, idx, value, n)
+ *         b.global_store_vN(ptr, idx, value, n, nontemporal=nontemporal)
  *
  * Vectorised global store. `value` must already be a <n x T> vector in the
  * target dtype. The Python helper passes no align kwarg -> align defaults;
  * this port passes 0 to match global_store_vN's default. No-op on bad n /
  * errored builder. */
-void rocke_b_store_vec(
-    rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, rocke_value_t* value, int n);
+void rocke_b_store_vec(rocke_ir_builder_t* b,
+                       rocke_value_t* ptr,
+                       rocke_value_t* idx,
+                       rocke_value_t* value,
+                       int n,
+                       int nontemporal);
 
 /* C99 port of rocke.helpers.io.pack_f32_to:
  *
