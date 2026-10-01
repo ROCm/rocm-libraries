@@ -103,6 +103,36 @@ def test_malformed_fixture_is_rejected(validator, name, marker):
     )
 
 
+# Each binds one model the way the runtime role admits or refuses it. The engine always
+# loads -- a refused model degrades its role, not the engine -- so the verdict lives in
+# the run's exit status and the bound model's own check.
+ROLE_FIXTURES = [
+    # A kernel ranker may keep declared order.
+    ("l2_static_order", "sort_kernel_catalog", True),
+    # An L1 estimate is a calibrated value; static_order has none to give.
+    ("l1_static_order", "predict_engine", False),
+    # A signature-less native L1 scorer resolves through the UHD scorer registry, not
+    # the kernel comparator registry a signature-less ranker uses.
+    ("l1_native", "predict_engine", True),
+]
+
+
+@pytest.mark.parametrize(
+    "name,role,admitted", ROLE_FIXTURES, ids=[n for n, _, _ in ROLE_FIXTURES]
+)
+def test_role_bound_model_is_admitted_as_its_runtime_role_admits_it(
+    validator, name, role, admitted
+):
+    result, payload = _run_validator(validator, FIXTURE_ROOT / name)
+
+    assert FIXTURE_ENGINE in payload["engines"]
+    checks = [check for check in payload["model_checks"] if check["role"] == role]
+    assert len(checks) == 1, payload["model_checks"]
+    assert checks[0]["success"] is admitted, checks[0]
+    assert payload["success"] is admitted
+    assert (result.returncode == 0) is admitted, result.stdout + result.stderr
+
+
 def test_scale_add_round_trip_validates_clean(
     validator, generator, scale_add_config, tmp_path
 ):
