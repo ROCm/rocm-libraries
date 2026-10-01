@@ -1291,10 +1291,11 @@ s_mov_b32 s[sgprSrdScaleA+3], Srd127_96            // scaleA: set bits 127_96 in
 
 /* global read addresses: block-scale A zero-point srd */
 s_mul_i32 s16, s[sgprWorkGroup0], 64               // scaleZeroA: workgroup row origin
-s_lshr_b32 s16, s16, 1                             // scaleZeroA: 2 rows per byte
+s_lshr_b32 s16, s16, 1                             // scaleZeroA: aligned row origin to bytes
 s_mul_i32 s16, s16, s[sgprStrideScaleA]            // scaleZeroA: * kGroups
-s_add_u32 s17, s[sgprSizeI], 1                     // scaleZeroA: SizeI + 1
-s_lshr_b32 s17, s17, 1                             // scaleZeroA: ceil(SizeI/2) row pairs
+s_add_u32 s17, s[sgprSizeI], 7 // ZP: round rows to eight
+s_lshr_b32 s17, s17, 3
+s_lshl_b32 s17, s17, 2 // ZP: words to bytes
 s_mul_i32 s17, s17, s[sgprStrideScaleA]            // scaleZeroA: total bytes
 s_sub_u32 s[sgprSrdScaleZeroA+2], s17, s16         // scaleZeroA: buffer limit from the workgroup origin
 s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprAddressScaleZeroA+0], s16 // scaleZeroA: SRD base lo
@@ -1404,12 +1405,12 @@ v_lshrrev_b32 v22, 6, v20                          // scaleA: kGroup = k/64
 v_mul_lo_u32 v[vgprGlobalReadOffsetScaleA+0], s[sgprStrideScaleA], v6 // scaleA: row * StrideScaleA
 v_add_nc_u32 v[vgprGlobalReadOffsetScaleA+0], v22, v[vgprGlobalReadOffsetScaleA+0] // scaleA: + kGroup
 v_lshlrev_b32 v[vgprGlobalReadOffsetScaleA+0], 1, v[vgprGlobalReadOffsetScaleA+0] // scaleA: elements -> bytes
-v_lshrrev_b32 v[vgprGlobalReadOffsetScaleZeroA+0], 1, v6 // scaleZeroA: row / 2
-v_mul_lo_u32 v[vgprGlobalReadOffsetScaleZeroA+0], s[sgprStrideScaleA], v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: (row/2) * kGroups
-v_add_nc_u32 v[vgprGlobalReadOffsetScaleZeroA+0], v22, v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: + kGroup -> byte offset
-v_lshlrev_b32 v[vgprGlobalReadOffsetScaleZeroA+0], 1, v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: make room for the nibble bit
-v_and_b32 v22, 1, v6                               // scaleZeroA: nibble = row & 1
-v_or_b32 v[vgprGlobalReadOffsetScaleZeroA+0], v22, v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: (byte << 1) | nibble
+v_lshrrev_b32 v[vgprGlobalReadOffsetScaleZeroA+0], 3, v6 // ZP: row / 8
+v_mul_lo_u32 v[vgprGlobalReadOffsetScaleZeroA+0], s[sgprStrideScaleA], v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: (row/8) * kGroups
+v_add_nc_u32 v[vgprGlobalReadOffsetScaleZeroA+0], v22, v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: + kGroup -> word offset
+v_lshlrev_b32 v[vgprGlobalReadOffsetScaleZeroA+0], 3, v[vgprGlobalReadOffsetScaleZeroA+0] // ZP: word to nibble index
+v_and_b32 v22, 7, v6                               // ZP: row within word
+v_or_b32 v[vgprGlobalReadOffsetScaleZeroA+0], v22, v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: (word << 3) | nibble
 v_lshrrev_b32 v[vgprGlobalReadOffsetA+0], 1, v[vgprGlobalReadOffsetA+0] //  (multiple bpe)
 v_mul_lo_u32 v22, s[sgprStrideA0I], v[7]           // mul d1 lower
 v_add_co_u32 v[vgprGlobalReadOffsetA+1+0], vcc_lo, v[20], v[22+0] // accumulate K lower
@@ -1418,12 +1419,12 @@ v_lshrrev_b32 v22, 6, v20                          // scaleA: kGroup = k/64
 v_mul_lo_u32 v[vgprGlobalReadOffsetScaleA+1], s[sgprStrideScaleA], v7 // scaleA: row * StrideScaleA
 v_add_nc_u32 v[vgprGlobalReadOffsetScaleA+1], v22, v[vgprGlobalReadOffsetScaleA+1] // scaleA: + kGroup
 v_lshlrev_b32 v[vgprGlobalReadOffsetScaleA+1], 1, v[vgprGlobalReadOffsetScaleA+1] // scaleA: elements -> bytes
-v_lshrrev_b32 v[vgprGlobalReadOffsetScaleZeroA+1], 1, v7 // scaleZeroA: row / 2
-v_mul_lo_u32 v[vgprGlobalReadOffsetScaleZeroA+1], s[sgprStrideScaleA], v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: (row/2) * kGroups
-v_add_nc_u32 v[vgprGlobalReadOffsetScaleZeroA+1], v22, v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: + kGroup -> byte offset
-v_lshlrev_b32 v[vgprGlobalReadOffsetScaleZeroA+1], 1, v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: make room for the nibble bit
-v_and_b32 v22, 1, v7                               // scaleZeroA: nibble = row & 1
-v_or_b32 v[vgprGlobalReadOffsetScaleZeroA+1], v22, v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: (byte << 1) | nibble
+v_lshrrev_b32 v[vgprGlobalReadOffsetScaleZeroA+1], 3, v7 // ZP: row / 8
+v_mul_lo_u32 v[vgprGlobalReadOffsetScaleZeroA+1], s[sgprStrideScaleA], v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: (row/8) * kGroups
+v_add_nc_u32 v[vgprGlobalReadOffsetScaleZeroA+1], v22, v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: + kGroup -> word offset
+v_lshlrev_b32 v[vgprGlobalReadOffsetScaleZeroA+1], 3, v[vgprGlobalReadOffsetScaleZeroA+1] // ZP: word to nibble index
+v_and_b32 v22, 7, v7                               // ZP: row within word
+v_or_b32 v[vgprGlobalReadOffsetScaleZeroA+1], v22, v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: (word << 3) | nibble
 v_lshrrev_b32 v[vgprGlobalReadOffsetA+1], 1, v[vgprGlobalReadOffsetA+1] //  (multiple bpe)
 v_mul_lo_u32 v22, s[sgprStrideA0I], v[8]           // mul d1 lower
 v_add_co_u32 v[vgprGlobalReadOffsetA+2+0], vcc_lo, v[20], v[22+0] // accumulate K lower
@@ -1432,12 +1433,12 @@ v_lshrrev_b32 v22, 6, v20                          // scaleA: kGroup = k/64
 v_mul_lo_u32 v[vgprGlobalReadOffsetScaleA+2], s[sgprStrideScaleA], v8 // scaleA: row * StrideScaleA
 v_add_nc_u32 v[vgprGlobalReadOffsetScaleA+2], v22, v[vgprGlobalReadOffsetScaleA+2] // scaleA: + kGroup
 v_lshlrev_b32 v[vgprGlobalReadOffsetScaleA+2], 1, v[vgprGlobalReadOffsetScaleA+2] // scaleA: elements -> bytes
-v_lshrrev_b32 v[vgprGlobalReadOffsetScaleZeroA+2], 1, v8 // scaleZeroA: row / 2
-v_mul_lo_u32 v[vgprGlobalReadOffsetScaleZeroA+2], s[sgprStrideScaleA], v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: (row/2) * kGroups
-v_add_nc_u32 v[vgprGlobalReadOffsetScaleZeroA+2], v22, v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: + kGroup -> byte offset
-v_lshlrev_b32 v[vgprGlobalReadOffsetScaleZeroA+2], 1, v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: make room for the nibble bit
-v_and_b32 v22, 1, v8                               // scaleZeroA: nibble = row & 1
-v_or_b32 v[vgprGlobalReadOffsetScaleZeroA+2], v22, v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: (byte << 1) | nibble
+v_lshrrev_b32 v[vgprGlobalReadOffsetScaleZeroA+2], 3, v8 // ZP: row / 8
+v_mul_lo_u32 v[vgprGlobalReadOffsetScaleZeroA+2], s[sgprStrideScaleA], v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: (row/8) * kGroups
+v_add_nc_u32 v[vgprGlobalReadOffsetScaleZeroA+2], v22, v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: + kGroup -> word offset
+v_lshlrev_b32 v[vgprGlobalReadOffsetScaleZeroA+2], 3, v[vgprGlobalReadOffsetScaleZeroA+2] // ZP: word to nibble index
+v_and_b32 v22, 7, v8                               // ZP: row within word
+v_or_b32 v[vgprGlobalReadOffsetScaleZeroA+2], v22, v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: (word << 3) | nibble
 v_lshrrev_b32 v[vgprGlobalReadOffsetA+2], 1, v[vgprGlobalReadOffsetA+2] //  (multiple bpe)
 v_mul_lo_u32 v22, s[sgprStrideA0I], v[9]           // mul d1 lower
 v_add_co_u32 v[vgprGlobalReadOffsetA+3+0], vcc_lo, v[20], v[22+0] // accumulate K lower
@@ -1446,12 +1447,12 @@ v_lshrrev_b32 v22, 6, v20                          // scaleA: kGroup = k/64
 v_mul_lo_u32 v[vgprGlobalReadOffsetScaleA+3], s[sgprStrideScaleA], v9 // scaleA: row * StrideScaleA
 v_add_nc_u32 v[vgprGlobalReadOffsetScaleA+3], v22, v[vgprGlobalReadOffsetScaleA+3] // scaleA: + kGroup
 v_lshlrev_b32 v[vgprGlobalReadOffsetScaleA+3], 1, v[vgprGlobalReadOffsetScaleA+3] // scaleA: elements -> bytes
-v_lshrrev_b32 v[vgprGlobalReadOffsetScaleZeroA+3], 1, v9 // scaleZeroA: row / 2
-v_mul_lo_u32 v[vgprGlobalReadOffsetScaleZeroA+3], s[sgprStrideScaleA], v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: (row/2) * kGroups
-v_add_nc_u32 v[vgprGlobalReadOffsetScaleZeroA+3], v22, v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: + kGroup -> byte offset
-v_lshlrev_b32 v[vgprGlobalReadOffsetScaleZeroA+3], 1, v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: make room for the nibble bit
-v_and_b32 v22, 1, v9                               // scaleZeroA: nibble = row & 1
-v_or_b32 v[vgprGlobalReadOffsetScaleZeroA+3], v22, v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: (byte << 1) | nibble
+v_lshrrev_b32 v[vgprGlobalReadOffsetScaleZeroA+3], 3, v9 // ZP: row / 8
+v_mul_lo_u32 v[vgprGlobalReadOffsetScaleZeroA+3], s[sgprStrideScaleA], v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: (row/8) * kGroups
+v_add_nc_u32 v[vgprGlobalReadOffsetScaleZeroA+3], v22, v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: + kGroup -> word offset
+v_lshlrev_b32 v[vgprGlobalReadOffsetScaleZeroA+3], 3, v[vgprGlobalReadOffsetScaleZeroA+3] // ZP: word to nibble index
+v_and_b32 v22, 7, v9                               // ZP: row within word
+v_or_b32 v[vgprGlobalReadOffsetScaleZeroA+3], v22, v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: (word << 3) | nibble
 v_lshrrev_b32 v[vgprGlobalReadOffsetA+3], 1, v[vgprGlobalReadOffsetA+3] //  (multiple bpe)
 /* ============================================================= */
 
@@ -1671,9 +1672,9 @@ s_cselect_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0], BufferLimit // Move shadow t
 s_add_u32 s[sgprSrdScaleA+0], s[sgprSrdScaleA+0], 0x2 // scaleA SRD += inc(lower)
 s_addc_u32 s[sgprSrdScaleA+1], s[sgprSrdScaleA+1], 0 // scaleA SRD += inc(upper)
 s_sub_u32 s[sgprSrdScaleA+2], s[sgprSrdScaleA+2], 0x2 // scaleA limit -= inc
-s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], 0x1 // scaleZeroA SRD += inc(lower)
+s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], 0x4 // scaleZeroA SRD += inc(lower)
 s_addc_u32 s[sgprSrdScaleZeroA+1], s[sgprSrdScaleZeroA+1], 0 // scaleZeroA SRD += inc(upper)
-s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], 0x1 // scaleZeroA limit -= inc
+s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], 0x4 // scaleZeroA limit -= inc
 
 /* global read inc B loopL */
 s_add_u32 s18, s[sgprLoopCounterL], 1              // remove pf(1)
@@ -2828,9 +2829,9 @@ s_cselect_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0], BufferLimit // Move shadow t
 s_add_u32 s[sgprSrdScaleA+0], s[sgprSrdScaleA+0], 0x2 // scaleA SRD += inc(lower)
 s_addc_u32 s[sgprSrdScaleA+1], s[sgprSrdScaleA+1], 0 // scaleA SRD += inc(upper)
 s_sub_u32 s[sgprSrdScaleA+2], s[sgprSrdScaleA+2], 0x2 // scaleA limit -= inc
-s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], 0x1 // scaleZeroA SRD += inc(lower)
+s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], 0x4 // scaleZeroA SRD += inc(lower)
 s_addc_u32 s[sgprSrdScaleZeroA+1], s[sgprSrdScaleZeroA+1], 0 // scaleZeroA SRD += inc(upper)
-s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], 0x1 // scaleZeroA limit -= inc
+s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], 0x4 // scaleZeroA limit -= inc
 
 /* Global Read IncB */
 
@@ -2959,9 +2960,9 @@ s_cselect_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0], BufferLimit // Move shadow t
 s_add_u32 s[sgprSrdScaleA+0], s[sgprSrdScaleA+0], 0x2 // scaleA SRD += inc(lower)
 s_addc_u32 s[sgprSrdScaleA+1], s[sgprSrdScaleA+1], 0 // scaleA SRD += inc(upper)
 s_sub_u32 s[sgprSrdScaleA+2], s[sgprSrdScaleA+2], 0x2 // scaleA limit -= inc
-s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], 0x1 // scaleZeroA SRD += inc(lower)
+s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], 0x4 // scaleZeroA SRD += inc(lower)
 s_addc_u32 s[sgprSrdScaleZeroA+1], s[sgprSrdScaleZeroA+1], 0 // scaleZeroA SRD += inc(upper)
-s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], 0x1 // scaleZeroA limit -= inc
+s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], 0x4 // scaleZeroA limit -= inc
 
 /* Global Read IncB */
 

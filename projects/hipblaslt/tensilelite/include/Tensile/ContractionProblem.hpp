@@ -825,25 +825,9 @@ namespace TensileLite
 
                 if(zeroPoint)
                 {
-                    // Asymmetric: one signed int4 zero-point per group, in the
-                    // same [M][ceil(K/G)] row-major order as the scales, but
-                    // packed two per byte along *M* rather than along K:
-                    //   byte   = (m/2)*kGroups + g
-                    //   nibble = m & 1
-                    // i.e. one byte holds rows 2r and 2r+1 of the same K-group.
-                    //
-                    // Pairing along M rather than along the flattened index is
-                    // what keeps the K walk free of parity bookkeeping: a
-                    // thread's nibble is fixed by its row for the whole loop, and
-                    // one K iteration advances the SRD by exactly groupsPerIter
-                    // bytes for any group size. Pairing along K instead would
-                    // make an odd DepthU/G advance half a byte per row and flip
-                    // every thread's nibble -- neither expressible in a uniform
-                    // SRD increment.
-                    //
-                    // Packing along M also matches how AWQ/GPTQ store qzeros
-                    // natively (packed along the output dim).
-                    size_t zeroBytes = CeilDivide<size_t>(rows, 2) * kGroups;
+                    // Eight output rows per uint32 word, with K-groups contiguous.
+                    // Word (m/8)*kGroups+g holds m in bits 4*(m%8)..4*(m%8)+3.
+                    size_t zeroBytes = CeilDivide<size_t>(rows, 8) * kGroups * 4;
                     m_tensors[ContractionProblemGemm::TENSOR::SCALEZEROA]
                         = {"scaleZeroA", rocisa::DataType::Int8, {zeroBytes}, {1}};
                 }

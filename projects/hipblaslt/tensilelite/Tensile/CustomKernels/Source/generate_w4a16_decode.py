@@ -48,7 +48,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", default="hipcc")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--source", type=Path, help="alternate HIP source for tuning")
+    parser.add_argument("--name", help="override the generated kernel symbol")
     parser.add_argument("--group-size", type=int, choices=(32, 128), default=128)
+    parser.add_argument("--runtime-group", action="store_true")
+    parser.add_argument("--linear-k", action="store_true",
+                        help="traverse K without the row-dependent rotation")
     parser.add_argument("--load-width", type=int, choices=(4, 8), default=8)
     parser.add_argument("--unroll", type=int, choices=(1, 2, 4, 8), default=4)
     parser.add_argument("--accumulators", type=int, choices=(1, 4), default=1)
@@ -60,17 +65,24 @@ def main():
                        if (args.unroll, args.accumulators) != (4, 1) else "")
     if args.native_permute:
         schedule_suffix += "_NativePerm"
+    if args.linear_k:
+        schedule_suffix += "_LinearK"
     name = f"Custom_W4A16_Decode_G{args.group_size}{width_suffix}{schedule_suffix}_UnsignedBias8_gfx1151"
-    source = Path(__file__).resolve().parent / "w4a16_decode.hip"
+    if args.runtime_group:
+        name = f"RuntimeGroup_Decode{width_suffix}{schedule_suffix}_UnsignedBias8_gfx1151"
+    name = args.name or name
+    source = args.source or Path(__file__).resolve().parent / "w4a16_decode.hip"
     output = args.output or source.parent.parent / f"{name}.s"
     with tempfile.TemporaryDirectory() as directory:
         assembly = Path(directory) / "decode.s"
         subprocess.run(
             [args.compiler, "-O3", "--offload-arch=gfx1151", "-mcode-object-version=4",
              "-fuse-cuid=none", f"-DW4A16_GROUP_SIZE={args.group_size}",
+             f"-DW4A16_RUNTIME_GROUP={int(args.runtime_group)}",
              f"-DW4A16_KERNEL_NAME={name}", f"-DW4A16_LOAD_WIDTH={args.load_width}",
              f"-DW4A16_UNROLL={args.unroll}", f"-DW4A16_ACCUMULATORS={args.accumulators}",
              f"-DW4A16_NATIVE_PERMUTE={int(args.native_permute)}",
+             f"-DW4A16_LINEAR_K={int(args.linear_k)}",
              "--cuda-device-only", "-S", str(source), "-o", str(assembly)],
             check=True,
         )

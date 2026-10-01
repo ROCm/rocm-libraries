@@ -4,6 +4,9 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
 
+#ifndef W4A16_RUNTIME_GROUP
+#define W4A16_RUNTIME_GROUP 0
+#endif
 #ifndef W4A16_GROUP_SIZE
 #define W4A16_GROUP_SIZE 128
 #endif
@@ -18,6 +21,9 @@
 #endif
 #ifndef W4A16_NATIVE_PERMUTE
 #define W4A16_NATIVE_PERMUTE 0
+#endif
+#ifndef W4A16_LINEAR_K
+#define W4A16_LINEAR_K 0
 #endif
 #ifndef W4A16_KERNEL_NAME
 #define W4A16_KERNEL_NAME Custom_W4A16_Decode_G128_UnsignedBias8_gfx1151
@@ -73,11 +79,11 @@ namespace
                                 const half* __restrict__ b,
                                 const half* __restrict__ scaleA,
                                 const unsigned char* __restrict__ zeroA,
-                                unsigned row, unsigned lane, unsigned k, unsigned lda)
+                                unsigned row, unsigned lane, unsigned k, unsigned lda, unsigned groupShift)
     {
         float sums[W4A16_ACCUMULATORS] = {};
         constexpr unsigned chunk = 256 * Width;
-        const unsigned offset = (row % (k / 256)) * 256;
+        const unsigned offset = W4A16_LINEAR_K ? 0 : (row % (k / 256)) * 256;
         // Distribute simultaneous reads across memory channels even when lda is a
         // power of two. The wrap changes traversal order, not the packed layout.
         #pragma unroll W4A16_UNROLL
@@ -89,23 +95,25 @@ namespace
             using Packed = unsigned __attribute__((ext_vector_type(Width)));
             const Packed packed = __builtin_nontemporal_load(
                 reinterpret_cast<const Packed*>(a + size_t(row) * (lda / 8) + kk / 8));
-#if W4A16_GROUP_SIZE == 128
+#if W4A16_GROUP_SIZE == 128 && !W4A16_RUNTIME_GROUP
             unsigned scale = __half_as_ushort(scaleA[size_t(row) * (k / 128) + kk / 128]);
             scale |= scale << 16;
-            unsigned z = (zeroA[size_t(row / 2) * (k / 128) + kk / 128]
-                          >> ((row % 2) * 4)) & 15;
+            unsigned z = (reinterpret_cast<const uint32_t*>(zeroA)[size_t(row / 8) * (k / 128) + kk / 128]
+                          >> ((row % 8) * 4)) & 15;
             z |= z << 16;
 #endif
             #pragma unroll
             for(unsigned j = 0; j < Width; ++j)
             {
-#if W4A16_GROUP_SIZE != 128
-                constexpr unsigned groupSize = W4A16_GROUP_SIZE;
-                const unsigned group = kk / groupSize + j / (groupSize / 8);
-                unsigned scale = __half_as_ushort(scaleA[size_t(row) * (k / groupSize) + group]);
+#if W4A16_GROUP_SIZE != 128 || W4A16_RUNTIME_GROUP
+                // Aligned chunks of at most 32 values fit in every supported group.
+                constexpr bool sharedGroup = Width <= 4;
+                const unsigned group = (kk + (sharedGroup ? 0 : j * 8)) >> groupShift;
+                unsigned scale = __half_as_ushort(scaleA[size_t(row) * (k >> groupShift) + group]);
                 scale |= scale << 16;
-                unsigned z = (zeroA[size_t(row / 2) * (k / groupSize) + group]
-                              >> ((row % 2) * 4)) & 15;
+                const size_t zeroByte = (size_t(row / 8) * (k >> groupShift) + group) * 4
+                                        + (row % 8) / 2;
+                unsigned z = (zeroA[zeroByte] >> ((row % 2) * 4)) & 15;
                 z |= z << 16;
 #endif
                 // Independent chains hide dot-product latency without moving
@@ -164,8 +172,17 @@ void W4A16_KERNEL_NAME(
     unsigned ldd, unsigned strideD, unsigned ldc, unsigned strideC,
     const half* __restrict__ scaleA, const half* scaleB,
     const unsigned char* __restrict__ zeroA,
-    unsigned long offsetD, unsigned long offsetC, unsigned long offsetA, unsigned long offsetB)
+    unsigned long offsetD, unsigned long offsetC, unsigned long offsetA, unsigned long offsetB
+#if W4A16_RUNTIME_GROUP
+    , unsigned groupSize
+#endif
+    )
 {
+#if W4A16_RUNTIME_GROUP
+    const unsigned groupShift = __builtin_ctz(groupSize);
+#else
+    constexpr unsigned groupShift = __builtin_ctz(W4A16_GROUP_SIZE);
+#endif
     const unsigned lane = threadIdx.x % 32;
     const unsigned row = blockIdx.x * 4 + threadIdx.x / 32;
     if(row >= m)
@@ -177,9 +194,9 @@ void W4A16_KERNEL_NAME(
     if(alpha != 0)
     {
         if(k % (256 * W4A16_LOAD_WIDTH) == 0 && lda % (8 * W4A16_LOAD_WIDTH) == 0)
-            sum = accumulate<W4A16_LOAD_WIDTH>(a, b, scaleA, zeroA, row, lane, k, lda);
+            sum = accumulate<W4A16_LOAD_WIDTH>(a, b, scaleA, zeroA, row, lane, k, lda, groupShift);
         else
-            sum = accumulate<1>(a, b, scaleA, zeroA, row, lane, k, lda);
+            sum = accumulate<1>(a, b, scaleA, zeroA, row, lane, k, lda, groupShift);
     }
     for(unsigned distance = 16; distance; distance /= 2)
         sum += __shfl_xor(sum, distance);

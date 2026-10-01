@@ -139,21 +139,11 @@ def validateBlockDequantCombination(state, printRejectionReason):
                "(got SIA=%d, PGR=%d)" % (state["ScheduleIterAlg"], state["PrefetchGlobalRead"]))
         return False
 
-    # NOTE: there is deliberately no DepthU/ScaleBlockSizeA parity constraint.
-    # Zero-points sit at byte (m/2)*kGroups + g -- [M][kGroups] order, but packed
-    # two rows per byte -- so one K group is one byte: a K iteration advances the
-    # SRD by DepthU/G whole bytes and never changes a thread's nibble. Packing
-    # along K instead would need DepthU/G even, because an odd group advance is
-    # half a byte per row and flips every thread's nibble parity.
-
-    # Asymmetric: the kernel takes the nibble from the parity of the
-    # workgroup-local row. That is only the global row's parity when the
-    # workgroup's first row wgM*MacroTile0 is even, i.e. when MacroTile0 is even
-    # -- which it always is in practice, but the kernel would be silently wrong
-    # if not.
-    if usesBlockDequantZeroPointA(problemType) and state["MacroTile0"] % 2 != 0:
+    # Generated kernels use local row bits; custom kernels own their addressing.
+    if (usesBlockDequantZeroPointA(problemType) and not state.get("CustomKernelName")
+            and state["MacroTile0"] % 8 != 0):
         reject(state, printRejectionReason,
-               "UseScaleAB=Block with zero-points requires an even MacroTile0 (got %d)"
+               "UseScaleAB=Block with zero-points requires MacroTile0 divisible by eight (got %d)"
                % state["MacroTile0"])
         return False
 

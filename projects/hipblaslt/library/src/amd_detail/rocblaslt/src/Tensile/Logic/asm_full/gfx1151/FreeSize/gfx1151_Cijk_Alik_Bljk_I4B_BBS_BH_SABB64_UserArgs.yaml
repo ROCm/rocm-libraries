@@ -277,13 +277,13 @@ Solutions:
   AssertSummationElementMultiple: 64
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
-  BaseName: Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64_UserArgs_MT64x160x64_MI16x16x1_gfx1151
+  BaseName: RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBG_UserArgs_MT64x160x64_MI16x16x1_gfx1151
   CUCount: null
   CUOccupancy: -1
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
-  CustomKernelName: Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64_UserArgs_MT64x160x64_MI16x16x1_gfx1151
+  CustomKernelName: RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBG_UserArgs_MT64x160x64_MI16x16x1_gfx1151
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -310,7 +310,7 @@ Solutions:
   InitCIterWmma: 0
   InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
-  KernelNameMin: Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64_UserArgs_MT64x160x64_MI16x16x1_gfx1151
+  KernelNameMin: RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBG_UserArgs_MT64x160x64_MI16x16x1_gfx1151
   LDSSegInterleaveOffsets: null
   LSCA: 64
   LSCB: 64

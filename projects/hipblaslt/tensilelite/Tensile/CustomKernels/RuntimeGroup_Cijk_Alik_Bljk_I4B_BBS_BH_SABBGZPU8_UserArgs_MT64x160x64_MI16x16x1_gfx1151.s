@@ -1,19 +1,21 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 /******************************************/
 /* Begin Kernel                           */
 /******************************************/
 .amdgcn_target "amdgcn-amd-amdhsa--gfx1151"
 .text
-.protected Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32ZP_UserArgs_MT64x160x64_MI16x16x1_gfx1151
-.globl Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32ZP_UserArgs_MT64x160x64_MI16x16x1_gfx1151
+.protected RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
+.globl RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
 .p2align 8
-.type Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32ZP_UserArgs_MT64x160x64_MI16x16x1_gfx1151,@function
+.type RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151,@function
 .section .rodata,#alloc
 .p2align 6
-.amdhsa_kernel Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32ZP_UserArgs_MT64x160x64_MI16x16x1_gfx1151
+.amdhsa_kernel RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_next_free_vgpr 256 // vgprs
-  .amdhsa_next_free_sgpr 86 // sgprs
+  .amdhsa_next_free_sgpr 94 // sgprs
   .amdhsa_group_segment_fixed_size 65024 // lds bytes
   .amdhsa_wavefront_size32 1 // 32-thread wavefronts
   .amdhsa_private_segment_fixed_size 0
@@ -50,8 +52,8 @@ amdhsa.version:
   - 1
   - 1
 amdhsa.kernels:
-  - .name: Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32ZP_UserArgs_MT64x160x64_MI16x16x1_gfx1151
-    .symbol: 'Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32ZP_UserArgs_MT64x160x64_MI16x16x1_gfx1151.kd'
+  - .name: RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
+    .symbol: 'RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151.kd'
     .language:                   OpenCL C
     .language_version:
       - 2
@@ -209,19 +211,24 @@ amdhsa.kernels:
         .offset:          152
         .value_kind:      by_value
         .value_type:      u64
+      - .name:            groupSize
+        .size:            4
+        .offset:          160
+        .value_kind:      by_value
+        .value_type:      u32
     .group_segment_fixed_size:   65024
     .kernarg_segment_align:      8
-    .kernarg_segment_size:       160
+    .kernarg_segment_size:       168
     .max_flat_workgroup_size:    128
     .private_segment_fixed_size: 0
-    .sgpr_count:                 86
+    .sgpr_count:                 94
     .sgpr_spill_count:           0
     .vgpr_count:                 256
     .vgpr_spill_count:           0
     .wavefront_size:             32
 ...
 .end_amdgpu_metadata
-Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32ZP_UserArgs_MT64x160x64_MI16x16x1_gfx1151:
+RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151:
 label_ASM_Start:  /// Main body of the asm kernel
 
 /******************************************/
@@ -300,7 +307,8 @@ label_ASM_Start:  /// Main body of the asm kernel
 .set sgprAddressScaleB, 50
 .set sgprStrideScaleA, 47
 .set sgprSrdScaleA, 52
-.set sgprAddressScaleZeroA, 56
+.set sgprScaleAKCnt, 56
+.set sgprAddressScaleZeroA, 58
 .set sgprSrdScaleZeroA, 60
 
 /* Size Assignments */
@@ -359,6 +367,21 @@ label_ASM_Start:  /// Main body of the asm kernel
 /******************************************/
 /* Allocate Resources                     */
 /******************************************/
+
+// Uniform group-size parameters for G=32,64,128.
+s_load_b32 s86, s[sgprKernArgAddress:sgprKernArgAddress+1], 160
+s_waitcnt lgkmcnt(0)
+s_ff1_i32_b32 s87, s86
+s_lshr_b32 s88, s86, 6
+s_max_u32 s88, s88, 1
+s_sub_u32 s88, s88, 1
+s_mov_b32 s90, 64
+s_lshr_b32 s90, s90, s87
+s_max_u32 s90, s90, 1
+s_lshl_b32 s89, s90, 1
+s_lshl_b32 s90, s90, 2
+s_sub_u32 s86, s86, 1
+s_mov_b32 s91, 0
 
 /* Load num of Gemms */
 s_load_b32 s20, s[sgprKernArgAddress:sgprKernArgAddress+1], 0
@@ -938,13 +961,13 @@ label_NoEarlyStop_wgExceed:
 label_MultiGemmEnd:
 .set sgprSrdA, 64
 .set sgprSrdB, 68
-.set sgprShadowLimitA, 58
-.set sgprShadowLimitB, 72
-.set sgprStaggerUIter, 74
-.set sgprWrapUA, 75
-.set sgprWrapUB, 77
-.set sgprGlobalReadIncsA, 79
-.set sgprGlobalReadIncsB, 80
+.set sgprShadowLimitA, 72
+.set sgprShadowLimitB, 74
+.set sgprStaggerUIter, 57
+.set sgprWrapUA, 76
+.set sgprWrapUB, 78
+.set sgprGlobalReadIncsA, 80
+.set sgprGlobalReadIncsB, 81
 s_and_b32 s16, s[sgprArgType], 0xff                // mask ArgType domain (bit 8 = TDM wave-parity)
 s_cmp_eq_u32 s16, 3                                // ArgType == 3 for General Batched GEMM
 s_cbranch_scc1 label_Skip_Address_Prepad_For_Pointer_Array
@@ -1277,8 +1300,8 @@ label_StridedBatchedGemmLoadA_End:  /// End Computing the Batch Matrix's base ad
 s_mov_b32 s[sgprSrdA+3], Srd127_96                 // Set bits 127_96 in SRD
 
 /* global read addresses: block-scale A srd */
-s_add_u32 s[sgprStrideScaleA], s[sgprSizeL], 0x1f  // SizeL + G-1
-s_lshr_b32 s[sgprStrideScaleA], s[sgprStrideScaleA], 5 // StrideScaleA = ceil(SizeL/32) scale elements
+s_add_u32 s[sgprStrideScaleA], s[sgprSizeL], s86
+s_lshr_b32 s[sgprStrideScaleA], s[sgprStrideScaleA], s87
 s_mul_i32 s16, s[sgprWorkGroup0], 64               // scaleA: workgroup row origin
 s_mul_i32 s16, s16, s[sgprStrideScaleA]            // scaleA: * row stride
 s_mul_i32 s16, s16, 2                              // scaleA: elements -> bytes
@@ -1288,6 +1311,7 @@ s_sub_u32 s[sgprSrdScaleA+2], s17, s16             // scaleA: buffer limit from 
 s_add_u32 s[sgprSrdScaleA+0], s[sgprAddressScaleA+0], s16 // scaleA: SRD base lo
 s_addc_u32 s[sgprSrdScaleA+1], s[sgprAddressScaleA+1], 0 // scaleA: SRD base hi
 s_mov_b32 s[sgprSrdScaleA+3], Srd127_96            // scaleA: set bits 127_96 in SRD
+s_mov_b32 s[sgprScaleAKCnt], 0                     // scaleA: K-iteration counter within a group
 
 /* global read addresses: block-scale A zero-point srd */
 s_mul_i32 s16, s[sgprWorkGroup0], 64               // scaleZeroA: workgroup row origin
@@ -1401,7 +1425,7 @@ s_mov_b32 s[sgprSrdB+3], Srd127_96                 // Set bits 127_96 in SRD
 v_mul_lo_u32 v22, s[sgprStrideA0I], v[6]           // mul d1 lower
 v_add_co_u32 v[vgprGlobalReadOffsetA+0+0], vcc_lo, v[20], v[22+0] // accumulate K lower
 v_add_nc_u32 v[vgprGlobalReadOffsetA+0+0], 0x8, v[vgprGlobalReadOffsetA+0+0] // add prepad for pointer shift
-v_lshrrev_b32 v22, 5, v20                          // scaleA: kGroup = k/32
+v_lshrrev_b32 v22, s87, v20                          // scaleA: kGroup = k/128
 v_mul_lo_u32 v[vgprGlobalReadOffsetScaleA+0], s[sgprStrideScaleA], v6 // scaleA: row * StrideScaleA
 v_add_nc_u32 v[vgprGlobalReadOffsetScaleA+0], v22, v[vgprGlobalReadOffsetScaleA+0] // scaleA: + kGroup
 v_lshlrev_b32 v[vgprGlobalReadOffsetScaleA+0], 1, v[vgprGlobalReadOffsetScaleA+0] // scaleA: elements -> bytes
@@ -1415,7 +1439,7 @@ v_lshrrev_b32 v[vgprGlobalReadOffsetA+0], 1, v[vgprGlobalReadOffsetA+0] //  (mul
 v_mul_lo_u32 v22, s[sgprStrideA0I], v[7]           // mul d1 lower
 v_add_co_u32 v[vgprGlobalReadOffsetA+1+0], vcc_lo, v[20], v[22+0] // accumulate K lower
 v_add_nc_u32 v[vgprGlobalReadOffsetA+1+0], 0x8, v[vgprGlobalReadOffsetA+1+0] // add prepad for pointer shift
-v_lshrrev_b32 v22, 5, v20                          // scaleA: kGroup = k/32
+v_lshrrev_b32 v22, s87, v20                          // scaleA: kGroup = k/128
 v_mul_lo_u32 v[vgprGlobalReadOffsetScaleA+1], s[sgprStrideScaleA], v7 // scaleA: row * StrideScaleA
 v_add_nc_u32 v[vgprGlobalReadOffsetScaleA+1], v22, v[vgprGlobalReadOffsetScaleA+1] // scaleA: + kGroup
 v_lshlrev_b32 v[vgprGlobalReadOffsetScaleA+1], 1, v[vgprGlobalReadOffsetScaleA+1] // scaleA: elements -> bytes
@@ -1429,7 +1453,7 @@ v_lshrrev_b32 v[vgprGlobalReadOffsetA+1], 1, v[vgprGlobalReadOffsetA+1] //  (mul
 v_mul_lo_u32 v22, s[sgprStrideA0I], v[8]           // mul d1 lower
 v_add_co_u32 v[vgprGlobalReadOffsetA+2+0], vcc_lo, v[20], v[22+0] // accumulate K lower
 v_add_nc_u32 v[vgprGlobalReadOffsetA+2+0], 0x8, v[vgprGlobalReadOffsetA+2+0] // add prepad for pointer shift
-v_lshrrev_b32 v22, 5, v20                          // scaleA: kGroup = k/32
+v_lshrrev_b32 v22, s87, v20                          // scaleA: kGroup = k/128
 v_mul_lo_u32 v[vgprGlobalReadOffsetScaleA+2], s[sgprStrideScaleA], v8 // scaleA: row * StrideScaleA
 v_add_nc_u32 v[vgprGlobalReadOffsetScaleA+2], v22, v[vgprGlobalReadOffsetScaleA+2] // scaleA: + kGroup
 v_lshlrev_b32 v[vgprGlobalReadOffsetScaleA+2], 1, v[vgprGlobalReadOffsetScaleA+2] // scaleA: elements -> bytes
@@ -1443,7 +1467,7 @@ v_lshrrev_b32 v[vgprGlobalReadOffsetA+2], 1, v[vgprGlobalReadOffsetA+2] //  (mul
 v_mul_lo_u32 v22, s[sgprStrideA0I], v[9]           // mul d1 lower
 v_add_co_u32 v[vgprGlobalReadOffsetA+3+0], vcc_lo, v[20], v[22+0] // accumulate K lower
 v_add_nc_u32 v[vgprGlobalReadOffsetA+3+0], 0x8, v[vgprGlobalReadOffsetA+3+0] // add prepad for pointer shift
-v_lshrrev_b32 v22, 5, v20                          // scaleA: kGroup = k/32
+v_lshrrev_b32 v22, s87, v20                          // scaleA: kGroup = k/128
 v_mul_lo_u32 v[vgprGlobalReadOffsetScaleA+3], s[sgprStrideScaleA], v9 // scaleA: row * StrideScaleA
 v_add_nc_u32 v[vgprGlobalReadOffsetScaleA+3], v22, v[vgprGlobalReadOffsetScaleA+3] // scaleA: + kGroup
 v_lshlrev_b32 v[vgprGlobalReadOffsetScaleA+3], 1, v[vgprGlobalReadOffsetScaleA+3] // scaleA: elements -> bytes
@@ -1668,13 +1692,17 @@ s_subb_u32 s[sgprShadowLimitA+1], s[sgprShadowLimitA+1], s17 // limit -= inc)
 s_cmp_eq_u32 s[sgprShadowLimitA+1], 0              // are we within 2^32?
 s_cselect_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0], BufferLimit // Move shadow to real if we are within 2^32
 
-/* global read inc block-scale A (4 bytes) */
-s_add_u32 s[sgprSrdScaleA+0], s[sgprSrdScaleA+0], 0x4 // scaleA SRD += inc(lower)
+/* global read inc block-scale A (2 bytes every 2 iters) */
+s_add_u32 s91, s91, 1
+s_and_b32 s92, s91, s88
+s_cselect_b32 s92, 0, s89
+s_cselect_b32 s93, 0, s90
+s_add_u32 s[sgprSrdScaleA+0], s[sgprSrdScaleA+0], s92
 s_addc_u32 s[sgprSrdScaleA+1], s[sgprSrdScaleA+1], 0 // scaleA SRD += inc(upper)
-s_sub_u32 s[sgprSrdScaleA+2], s[sgprSrdScaleA+2], 0x4 // scaleA limit -= inc
-s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], 0x8 // scaleZeroA SRD += inc(lower)
+s_sub_u32 s[sgprSrdScaleA+2], s[sgprSrdScaleA+2], s92
+s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], s93
 s_addc_u32 s[sgprSrdScaleZeroA+1], s[sgprSrdScaleZeroA+1], 0 // scaleZeroA SRD += inc(upper)
-s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], 0x8 // scaleZeroA limit -= inc
+s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], s93
 
 /* global read inc B loopL */
 s_add_u32 s18, s[sgprLoopCounterL], 1              // remove pf(1)
@@ -1692,14 +1720,14 @@ s_cselect_b32 s[sgprSrdB+2], s[sgprShadowLimitB+0], BufferLimit // Move shadow t
 /* End setupNewTile                       */
 /******************************************/
 label_ShadowInitStart:
-s_and_b32 s81, s[sgprGSU], 0x3fff                  // Restore GSU
-s_cmp_eq_u32 s81, 1                                // GSU == 1 ?
+s_and_b32 s82, s[sgprGSU], 0x3fff                  // Restore GSU
+s_cmp_eq_u32 s82, 1                                // GSU == 1 ?
 s_cbranch_scc1 label_ArgTypeCheckD                 // Handling General Batched GEMM SRD initialization
 s_mov_b64 s[sgprSrdD+0:sgprSrdD+0+1], s[sgprAddressD+0:sgprAddressD+0+1] // init SRD base address
 s_branch label_GeneralBatchedGemmSrdInitiationD_End // End of handling General Batched GEMM SRD initialization
 label_ArgTypeCheckD:  /// Check if ArgType is for General Batched GEMM for D
-s_and_b32 s81, s[sgprArgType], 0xff                // mask ArgType domain (bit 8 = TDM wave-parity)
-s_cmp_eq_u32 s81, 3                                // ArgType == 3 for General Batched GEMM
+s_and_b32 s82, s[sgprArgType], 0xff                // mask ArgType domain (bit 8 = TDM wave-parity)
+s_cmp_eq_u32 s82, 3                                // ArgType == 3 for General Batched GEMM
 s_cbranch_scc0 label_RegularSrdInitializationD
 s_branch label_GeneralBatchedGemmSrdInitiationD    // General Batched GEMM, Srd initialized to 0
 label_RegularSrdInitializationD:  /// Regular SRD initialization for non-General Batched GEMM for D
@@ -1711,14 +1739,14 @@ label_GeneralBatchedGemmSrdInitiationD_End:  /// End of handling General Batched
 s_mov_b32 s[sgprSrdD+2], BufferOOB
 s_mov_b32 s[sgprSrdD+3], Srd127_96                 // Set bits 127_96 in post-loop SRD
 
-s_and_b32 s81, s[sgprGSU], 0x3fff                  // Restore GSU
-s_cmp_eq_u32 s81, 1                                // GSU == 1 ?
+s_and_b32 s82, s[sgprGSU], 0x3fff                  // Restore GSU
+s_cmp_eq_u32 s82, 1                                // GSU == 1 ?
 s_cbranch_scc1 label_ArgTypeCheckC                 // Handling General Batched GEMM SRD initialization
 s_mov_b64 s[sgprSrdC+0:sgprSrdC+0+1], s[sgprAddressC+0:sgprAddressC+0+1] // init SRD base address
 s_branch label_GeneralBatchedGemmSrdInitiationC_End // End of handling General Batched GEMM SRD initialization
 label_ArgTypeCheckC:  /// Check if ArgType is for General Batched GEMM for C
-s_and_b32 s81, s[sgprArgType], 0xff                // mask ArgType domain (bit 8 = TDM wave-parity)
-s_cmp_eq_u32 s81, 3                                // ArgType == 3 for General Batched GEMM
+s_and_b32 s82, s[sgprArgType], 0xff                // mask ArgType domain (bit 8 = TDM wave-parity)
+s_cmp_eq_u32 s82, 3                                // ArgType == 3 for General Batched GEMM
 s_cbranch_scc0 label_RegularSrdInitializationC
 s_branch label_GeneralBatchedGemmSrdInitiationC    // General Batched GEMM, Srd initialized to 0
 label_RegularSrdInitializationC:  /// Regular SRD initialization for non-General Batched GEMM for C
@@ -1748,8 +1776,8 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s83       // add hi to SRD
 s_and_b32 s83, s[sgprGSU], 0xfff                   // Restore GSU
 s_cmp_eq_u32 s83, 1                                // GSU == 1 ?
 s_cbranch_scc0 label_StridedBatchedGemmLoadC
-s_and_b32 s81, s[sgprArgType], 0xff                // mask ArgType domain (bit 8 = TDM wave-parity)
-s_cmp_eq_u32 s81, 3                                // ArgType == 3 for General Batched GEMM
+s_and_b32 s85, s[sgprArgType], 0xff                // mask ArgType domain (bit 8 = TDM wave-parity)
+s_cmp_eq_u32 s85, 3                                // ArgType == 3 for General Batched GEMM
 s_cbranch_scc1 label_GeneralBatchedGemmLoadC
 label_StridedBatchedGemmLoadC:  /// Computing the Batch Matrix's base address for Strided Batched GEMM
 s_mul_hi_u32 s83, s[sgprWorkGroup2], s[sgprStrideCK] // ScaleC s[sgprWorkGroup2] by Stride
@@ -1774,8 +1802,8 @@ label_GeneralBatchedGemmLoadC_End:  /// End of label GeneralBatchedGemmLoadC
 s_and_b32 s83, s[sgprGSU], 0xfff                   // Restore GSU
 s_cmp_eq_u32 s83, 1                                // GSU == 1 ?
 s_cbranch_scc0 label_StridedBatchedGemmLoadD
-s_and_b32 s81, s[sgprArgType], 0xff                // mask ArgType domain (bit 8 = TDM wave-parity)
-s_cmp_eq_u32 s81, 3                                // ArgType == 3 for General Batched GEMM
+s_and_b32 s85, s[sgprArgType], 0xff                // mask ArgType domain (bit 8 = TDM wave-parity)
+s_cmp_eq_u32 s85, 3                                // ArgType == 3 for General Batched GEMM
 s_cbranch_scc1 label_GeneralBatchedGemmLoadD
 label_StridedBatchedGemmLoadD:  /// Computing the Batch Matrix's base address for Strided Batched GEMM
 s_mul_hi_u32 s83, s[sgprWorkGroup2], s[sgprStrideDK] // ScaleD s[sgprWorkGroup2] by Stride
@@ -1798,24 +1826,24 @@ s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s82        // Add matrix address to SRD 
 s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s83       // Add matrix address to SRD (high)
 label_GeneralBatchedGemmLoadD_End:  /// End of label GeneralBatchedGemmLoadD
 
-s_and_b32 s81, s[sgprGSU], 0xfff                   // Restore GSU
-s_cmp_eq_u32 s81, 1                                // GSU == 1 ?
+s_and_b32 s82, s[sgprGSU], 0xfff                   // Restore GSU
+s_cmp_eq_u32 s82, 1                                // GSU == 1 ?
 s_cbranch_scc1 label_GSU_2                         // branch if GSU == 1
 // GSU Output Buffer offset: Free0 + (Free1-1)*StrideC1J + (Free2-1)*StrideCK * GSUIdx * bpe%s
 s_mul_hi_u32 s83, s[sgprSizesFree+0], s[sgprGSUSumIdx] // Free0
 s_mul_i32 s82, s[sgprSizesFree+0], s[sgprGSUSumIdx] // Free0
-s_sub_u32 s81, s[sgprSizesFree+1], 1               // Free1
-s_mul_i32 s81, s81, s[sgprGSUSumIdx]               // Free1
-s_mul_hi_u32 s84, s81, s[sgprStrideC1J]            // Free1
-s_mul_i32 s81, s81, s[sgprStrideC1J]               // Free1
-s_add_u32 s82, s82, s81                            // Free1
-s_addc_u32 s83, s83, s84                           // Free1
-s_sub_u32 s81, s[sgprSizesFree+2], 1               // Free2
-s_mul_i32 s81, s81, s[sgprGSUSumIdx]               // Free2
-s_mul_hi_u32 s84, s81, s[sgprStrideCK]             // Free2
-s_mul_i32 s81, s81, s[sgprStrideCK]                // Free2
-s_add_u32 s82, s82, s81                            // Free2
-s_addc_u32 s83, s83, s84                           // Free2
+s_sub_u32 s84, s[sgprSizesFree+1], 1               // Free1
+s_mul_i32 s84, s84, s[sgprGSUSumIdx]               // Free1
+s_mul_hi_u32 s85, s84, s[sgprStrideC1J]            // Free1
+s_mul_i32 s84, s84, s[sgprStrideC1J]               // Free1
+s_add_u32 s82, s82, s84                            // Free1
+s_addc_u32 s83, s83, s85                           // Free1
+s_sub_u32 s84, s[sgprSizesFree+2], 1               // Free2
+s_mul_i32 s84, s84, s[sgprGSUSumIdx]               // Free2
+s_mul_hi_u32 s85, s84, s[sgprStrideCK]             // Free2
+s_mul_i32 s84, s84, s[sgprStrideCK]                // Free2
+s_add_u32 s82, s82, s84                            // Free2
+s_addc_u32 s83, s83, s85                           // Free2
 s_lshl_b64 s[82:83], s[82:83], 2                   // scale by bpe
 s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s82        // add lo GSU offset to SRD
 s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s83       // add hi GSU offset to SRD
@@ -1928,13 +1956,13 @@ v_mov_b32 v238, 0x7fff0000                         // w4a16: bf16 Nan pattern
 v_lshlrev_b32 v234, 16, v[vgprG2LScaleA+0]         // scaleA: bf16 -> f32
 v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_i32 v231, v[vgprG2LScaleZeroA+0], v235, 0x4  // scaleZeroA: extract the selected nibble (sign-extended)
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+0], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
 v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
 v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
 v_mov_b32 v233, v[vgprG2LA+2+0]                    // w4a16: save packed int4 dword 0
-v_bfe_i32 v231, v233, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v232, v233, 0x4, 0x4                     // w4a16: sign-extend int4 #1
+v_bfe_u32 v231, v233, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v232, v233, 0x4, 0x4                     // w4a16: zero-extend int4 #1
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -1950,8 +1978,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+0+0], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v232, v233, 0xc, 0x4                     // w4a16: sign-extend int4 #3
+v_bfe_u32 v231, v233, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v232, v233, 0xc, 0x4                     // w4a16: zero-extend int4 #3
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -1967,8 +1995,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+0+1], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v232, v233, 0x14, 0x4                    // w4a16: sign-extend int4 #5
+v_bfe_u32 v231, v233, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v232, v233, 0x14, 0x4                    // w4a16: zero-extend int4 #5
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -1984,8 +2012,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+0+2], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v232, v233, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
+v_bfe_u32 v231, v233, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v232, v233, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2007,13 +2035,13 @@ v_mov_b32 v238, 0x7fff0000                         // w4a16: bf16 Nan pattern
 v_lshlrev_b32 v234, 16, v[vgprG2LScaleA+1]         // scaleA: bf16 -> f32
 v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_i32 v231, v[vgprG2LScaleZeroA+1], v235, 0x4  // scaleZeroA: extract the selected nibble (sign-extended)
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+1], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
 v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
 v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
 v_mov_b32 v233, v[vgprG2LA+6+0]                    // w4a16: save packed int4 dword 0
-v_bfe_i32 v231, v233, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v232, v233, 0x4, 0x4                     // w4a16: sign-extend int4 #1
+v_bfe_u32 v231, v233, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v232, v233, 0x4, 0x4                     // w4a16: zero-extend int4 #1
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2029,8 +2057,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+4+0], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v232, v233, 0xc, 0x4                     // w4a16: sign-extend int4 #3
+v_bfe_u32 v231, v233, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v232, v233, 0xc, 0x4                     // w4a16: zero-extend int4 #3
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2046,8 +2074,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+4+1], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v232, v233, 0x14, 0x4                    // w4a16: sign-extend int4 #5
+v_bfe_u32 v231, v233, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v232, v233, 0x14, 0x4                    // w4a16: zero-extend int4 #5
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2063,8 +2091,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+4+2], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v232, v233, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
+v_bfe_u32 v231, v233, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v232, v233, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2086,13 +2114,13 @@ v_mov_b32 v238, 0x7fff0000                         // w4a16: bf16 Nan pattern
 v_lshlrev_b32 v234, 16, v[vgprG2LScaleA+2]         // scaleA: bf16 -> f32
 v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_i32 v231, v[vgprG2LScaleZeroA+2], v235, 0x4  // scaleZeroA: extract the selected nibble (sign-extended)
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+2], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
 v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
 v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
 v_mov_b32 v233, v[vgprG2LA+10+0]                   // w4a16: save packed int4 dword 0
-v_bfe_i32 v231, v233, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v232, v233, 0x4, 0x4                     // w4a16: sign-extend int4 #1
+v_bfe_u32 v231, v233, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v232, v233, 0x4, 0x4                     // w4a16: zero-extend int4 #1
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2108,8 +2136,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+8+0], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v232, v233, 0xc, 0x4                     // w4a16: sign-extend int4 #3
+v_bfe_u32 v231, v233, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v232, v233, 0xc, 0x4                     // w4a16: zero-extend int4 #3
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2125,8 +2153,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+8+1], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v232, v233, 0x14, 0x4                    // w4a16: sign-extend int4 #5
+v_bfe_u32 v231, v233, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v232, v233, 0x14, 0x4                    // w4a16: zero-extend int4 #5
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2142,8 +2170,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+8+2], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v232, v233, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
+v_bfe_u32 v231, v233, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v232, v233, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2165,13 +2193,13 @@ v_mov_b32 v238, 0x7fff0000                         // w4a16: bf16 Nan pattern
 v_lshlrev_b32 v234, 16, v[vgprG2LScaleA+3]         // scaleA: bf16 -> f32
 v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_i32 v231, v[vgprG2LScaleZeroA+3], v235, 0x4  // scaleZeroA: extract the selected nibble (sign-extended)
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+3], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
 v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
 v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
 v_mov_b32 v233, v[vgprG2LA+14+0]                   // w4a16: save packed int4 dword 0
-v_bfe_i32 v231, v233, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v232, v233, 0x4, 0x4                     // w4a16: sign-extend int4 #1
+v_bfe_u32 v231, v233, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v232, v233, 0x4, 0x4                     // w4a16: zero-extend int4 #1
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2187,8 +2215,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+12+0], v231, v232        // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v232, v233, 0xc, 0x4                     // w4a16: sign-extend int4 #3
+v_bfe_u32 v231, v233, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v232, v233, 0xc, 0x4                     // w4a16: zero-extend int4 #3
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2204,8 +2232,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+12+1], v231, v232        // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v232, v233, 0x14, 0x4                    // w4a16: sign-extend int4 #5
+v_bfe_u32 v231, v233, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v232, v233, 0x14, 0x4                    // w4a16: zero-extend int4 #5
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2221,8 +2249,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+12+2], v231, v232        // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v232, v233, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
+v_bfe_u32 v231, v233, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v232, v233, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2464,13 +2492,13 @@ v_mov_b32 v238, 0x7fff0000                         // w4a16: bf16 Nan pattern
 v_lshlrev_b32 v234, 16, v[vgprG2LScaleA+0]         // scaleA: bf16 -> f32
 v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_i32 v231, v[vgprG2LScaleZeroA+0], v235, 0x4  // scaleZeroA: extract the selected nibble (sign-extended)
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+0], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
 v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
 v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
 v_mov_b32 v233, v[vgprG2LA+2+0]                    // w4a16: save packed int4 dword 0
-v_bfe_i32 v231, v233, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v232, v233, 0x4, 0x4                     // w4a16: sign-extend int4 #1
+v_bfe_u32 v231, v233, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v232, v233, 0x4, 0x4                     // w4a16: zero-extend int4 #1
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2486,8 +2514,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+0+0], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v232, v233, 0xc, 0x4                     // w4a16: sign-extend int4 #3
+v_bfe_u32 v231, v233, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v232, v233, 0xc, 0x4                     // w4a16: zero-extend int4 #3
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2503,8 +2531,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+0+1], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v232, v233, 0x14, 0x4                    // w4a16: sign-extend int4 #5
+v_bfe_u32 v231, v233, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v232, v233, 0x14, 0x4                    // w4a16: zero-extend int4 #5
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2520,8 +2548,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+0+2], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v232, v233, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
+v_bfe_u32 v231, v233, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v232, v233, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2543,13 +2571,13 @@ v_mov_b32 v238, 0x7fff0000                         // w4a16: bf16 Nan pattern
 v_lshlrev_b32 v234, 16, v[vgprG2LScaleA+1]         // scaleA: bf16 -> f32
 v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_i32 v231, v[vgprG2LScaleZeroA+1], v235, 0x4  // scaleZeroA: extract the selected nibble (sign-extended)
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+1], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
 v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
 v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
 v_mov_b32 v233, v[vgprG2LA+6+0]                    // w4a16: save packed int4 dword 0
-v_bfe_i32 v231, v233, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v232, v233, 0x4, 0x4                     // w4a16: sign-extend int4 #1
+v_bfe_u32 v231, v233, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v232, v233, 0x4, 0x4                     // w4a16: zero-extend int4 #1
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2565,8 +2593,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+4+0], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v232, v233, 0xc, 0x4                     // w4a16: sign-extend int4 #3
+v_bfe_u32 v231, v233, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v232, v233, 0xc, 0x4                     // w4a16: zero-extend int4 #3
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2582,8 +2610,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+4+1], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v232, v233, 0x14, 0x4                    // w4a16: sign-extend int4 #5
+v_bfe_u32 v231, v233, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v232, v233, 0x14, 0x4                    // w4a16: zero-extend int4 #5
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2599,8 +2627,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+4+2], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v232, v233, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
+v_bfe_u32 v231, v233, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v232, v233, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2622,13 +2650,13 @@ v_mov_b32 v238, 0x7fff0000                         // w4a16: bf16 Nan pattern
 v_lshlrev_b32 v234, 16, v[vgprG2LScaleA+2]         // scaleA: bf16 -> f32
 v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_i32 v231, v[vgprG2LScaleZeroA+2], v235, 0x4  // scaleZeroA: extract the selected nibble (sign-extended)
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+2], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
 v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
 v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
 v_mov_b32 v233, v[vgprG2LA+10+0]                   // w4a16: save packed int4 dword 0
-v_bfe_i32 v231, v233, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v232, v233, 0x4, 0x4                     // w4a16: sign-extend int4 #1
+v_bfe_u32 v231, v233, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v232, v233, 0x4, 0x4                     // w4a16: zero-extend int4 #1
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2644,8 +2672,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+8+0], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v232, v233, 0xc, 0x4                     // w4a16: sign-extend int4 #3
+v_bfe_u32 v231, v233, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v232, v233, 0xc, 0x4                     // w4a16: zero-extend int4 #3
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2661,8 +2689,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+8+1], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v232, v233, 0x14, 0x4                    // w4a16: sign-extend int4 #5
+v_bfe_u32 v231, v233, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v232, v233, 0x14, 0x4                    // w4a16: zero-extend int4 #5
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2678,8 +2706,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+8+2], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v232, v233, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
+v_bfe_u32 v231, v233, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v232, v233, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2701,13 +2729,13 @@ v_mov_b32 v238, 0x7fff0000                         // w4a16: bf16 Nan pattern
 v_lshlrev_b32 v234, 16, v[vgprG2LScaleA+3]         // scaleA: bf16 -> f32
 v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_i32 v231, v[vgprG2LScaleZeroA+3], v235, 0x4  // scaleZeroA: extract the selected nibble (sign-extended)
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+3], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
 v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
 v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
 v_mov_b32 v233, v[vgprG2LA+14+0]                   // w4a16: save packed int4 dword 0
-v_bfe_i32 v231, v233, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v232, v233, 0x4, 0x4                     // w4a16: sign-extend int4 #1
+v_bfe_u32 v231, v233, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v232, v233, 0x4, 0x4                     // w4a16: zero-extend int4 #1
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2723,8 +2751,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+12+0], v231, v232        // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v232, v233, 0xc, 0x4                     // w4a16: sign-extend int4 #3
+v_bfe_u32 v231, v233, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v232, v233, 0xc, 0x4                     // w4a16: zero-extend int4 #3
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2740,8 +2768,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+12+1], v231, v232        // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v232, v233, 0x14, 0x4                    // w4a16: sign-extend int4 #5
+v_bfe_u32 v231, v233, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v232, v233, 0x14, 0x4                    // w4a16: zero-extend int4 #5
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2757,8 +2785,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+12+2], v231, v232        // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v232, v233, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
+v_bfe_u32 v231, v233, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v232, v233, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -2825,13 +2853,17 @@ s_subb_u32 s[sgprShadowLimitA+1], s[sgprShadowLimitA+1], s83 // limit -= inc)
 s_cmp_eq_u32 s[sgprShadowLimitA+1], 0              // are we within 2^32?
 s_cselect_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0], BufferLimit // Move shadow to real if we are within 2^32
 
-/* global read inc block-scale A (4 bytes) */
-s_add_u32 s[sgprSrdScaleA+0], s[sgprSrdScaleA+0], 0x4 // scaleA SRD += inc(lower)
+/* global read inc block-scale A (2 bytes every 2 iters) */
+s_add_u32 s91, s91, 1
+s_and_b32 s92, s91, s88
+s_cselect_b32 s92, 0, s89
+s_cselect_b32 s93, 0, s90
+s_add_u32 s[sgprSrdScaleA+0], s[sgprSrdScaleA+0], s92
 s_addc_u32 s[sgprSrdScaleA+1], s[sgprSrdScaleA+1], 0 // scaleA SRD += inc(upper)
-s_sub_u32 s[sgprSrdScaleA+2], s[sgprSrdScaleA+2], 0x4 // scaleA limit -= inc
-s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], 0x8 // scaleZeroA SRD += inc(lower)
+s_sub_u32 s[sgprSrdScaleA+2], s[sgprSrdScaleA+2], s92
+s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], s93
 s_addc_u32 s[sgprSrdScaleZeroA+1], s[sgprSrdScaleZeroA+1], 0 // scaleZeroA SRD += inc(upper)
-s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], 0x8 // scaleZeroA limit -= inc
+s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], s93
 
 /* Global Read IncB */
 
@@ -2956,13 +2988,17 @@ s_subb_u32 s[sgprShadowLimitA+1], s[sgprShadowLimitA+1], s83 // limit -= inc)
 s_cmp_eq_u32 s[sgprShadowLimitA+1], 0              // are we within 2^32?
 s_cselect_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0], BufferLimit // Move shadow to real if we are within 2^32
 
-/* global read inc block-scale A (4 bytes) */
-s_add_u32 s[sgprSrdScaleA+0], s[sgprSrdScaleA+0], 0x4 // scaleA SRD += inc(lower)
+/* global read inc block-scale A (2 bytes every 2 iters) */
+s_add_u32 s91, s91, 1
+s_and_b32 s92, s91, s88
+s_cselect_b32 s92, 0, s89
+s_cselect_b32 s93, 0, s90
+s_add_u32 s[sgprSrdScaleA+0], s[sgprSrdScaleA+0], s92
 s_addc_u32 s[sgprSrdScaleA+1], s[sgprSrdScaleA+1], 0 // scaleA SRD += inc(upper)
-s_sub_u32 s[sgprSrdScaleA+2], s[sgprSrdScaleA+2], 0x4 // scaleA limit -= inc
-s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], 0x8 // scaleZeroA SRD += inc(lower)
+s_sub_u32 s[sgprSrdScaleA+2], s[sgprSrdScaleA+2], s92
+s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], s93
 s_addc_u32 s[sgprSrdScaleZeroA+1], s[sgprSrdScaleZeroA+1], 0 // scaleZeroA SRD += inc(upper)
-s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], 0x8 // scaleZeroA limit -= inc
+s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], s93
 
 /* Global Read IncB */
 
@@ -3102,13 +3138,13 @@ v_mov_b32 v238, 0x7fff0000                         // w4a16: bf16 Nan pattern
 v_lshlrev_b32 v234, 16, v[vgprG2LScaleA+0]         // scaleA: bf16 -> f32
 v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_i32 v231, v[vgprG2LScaleZeroA+0], v235, 0x4  // scaleZeroA: extract the selected nibble (sign-extended)
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+0], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
 v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
 v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
 v_mov_b32 v233, v[vgprG2LA+2+0]                    // w4a16: save packed int4 dword 0
-v_bfe_i32 v231, v233, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v232, v233, 0x4, 0x4                     // w4a16: sign-extend int4 #1
+v_bfe_u32 v231, v233, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v232, v233, 0x4, 0x4                     // w4a16: zero-extend int4 #1
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -3124,8 +3160,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+0+0], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v232, v233, 0xc, 0x4                     // w4a16: sign-extend int4 #3
+v_bfe_u32 v231, v233, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v232, v233, 0xc, 0x4                     // w4a16: zero-extend int4 #3
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -3141,8 +3177,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+0+1], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v232, v233, 0x14, 0x4                    // w4a16: sign-extend int4 #5
+v_bfe_u32 v231, v233, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v232, v233, 0x14, 0x4                    // w4a16: zero-extend int4 #5
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -3158,8 +3194,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+0+2], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v232, v233, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
+v_bfe_u32 v231, v233, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v232, v233, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -3181,13 +3217,13 @@ v_mov_b32 v238, 0x7fff0000                         // w4a16: bf16 Nan pattern
 v_lshlrev_b32 v234, 16, v[vgprG2LScaleA+1]         // scaleA: bf16 -> f32
 v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_i32 v231, v[vgprG2LScaleZeroA+1], v235, 0x4  // scaleZeroA: extract the selected nibble (sign-extended)
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+1], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
 v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
 v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
 v_mov_b32 v233, v[vgprG2LA+6+0]                    // w4a16: save packed int4 dword 0
-v_bfe_i32 v231, v233, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v232, v233, 0x4, 0x4                     // w4a16: sign-extend int4 #1
+v_bfe_u32 v231, v233, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v232, v233, 0x4, 0x4                     // w4a16: zero-extend int4 #1
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -3203,8 +3239,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+4+0], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v232, v233, 0xc, 0x4                     // w4a16: sign-extend int4 #3
+v_bfe_u32 v231, v233, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v232, v233, 0xc, 0x4                     // w4a16: zero-extend int4 #3
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -3220,8 +3256,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+4+1], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v232, v233, 0x14, 0x4                    // w4a16: sign-extend int4 #5
+v_bfe_u32 v231, v233, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v232, v233, 0x14, 0x4                    // w4a16: zero-extend int4 #5
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -3237,8 +3273,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+4+2], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v232, v233, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
+v_bfe_u32 v231, v233, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v232, v233, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -3260,13 +3296,13 @@ v_mov_b32 v238, 0x7fff0000                         // w4a16: bf16 Nan pattern
 v_lshlrev_b32 v234, 16, v[vgprG2LScaleA+2]         // scaleA: bf16 -> f32
 v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_i32 v231, v[vgprG2LScaleZeroA+2], v235, 0x4  // scaleZeroA: extract the selected nibble (sign-extended)
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+2], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
 v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
 v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
 v_mov_b32 v233, v[vgprG2LA+10+0]                   // w4a16: save packed int4 dword 0
-v_bfe_i32 v231, v233, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v232, v233, 0x4, 0x4                     // w4a16: sign-extend int4 #1
+v_bfe_u32 v231, v233, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v232, v233, 0x4, 0x4                     // w4a16: zero-extend int4 #1
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -3282,8 +3318,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+8+0], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v232, v233, 0xc, 0x4                     // w4a16: sign-extend int4 #3
+v_bfe_u32 v231, v233, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v232, v233, 0xc, 0x4                     // w4a16: zero-extend int4 #3
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -3299,8 +3335,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+8+1], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v232, v233, 0x14, 0x4                    // w4a16: sign-extend int4 #5
+v_bfe_u32 v231, v233, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v232, v233, 0x14, 0x4                    // w4a16: zero-extend int4 #5
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -3316,8 +3352,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+8+2], v231, v232         // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v232, v233, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
+v_bfe_u32 v231, v233, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v232, v233, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -3339,13 +3375,13 @@ v_mov_b32 v238, 0x7fff0000                         // w4a16: bf16 Nan pattern
 v_lshlrev_b32 v234, 16, v[vgprG2LScaleA+3]         // scaleA: bf16 -> f32
 v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_i32 v231, v[vgprG2LScaleZeroA+3], v235, 0x4  // scaleZeroA: extract the selected nibble (sign-extended)
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+3], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
 v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
 v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
 v_mov_b32 v233, v[vgprG2LA+14+0]                   // w4a16: save packed int4 dword 0
-v_bfe_i32 v231, v233, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v232, v233, 0x4, 0x4                     // w4a16: sign-extend int4 #1
+v_bfe_u32 v231, v233, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v232, v233, 0x4, 0x4                     // w4a16: zero-extend int4 #1
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -3361,8 +3397,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+12+0], v231, v232        // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v232, v233, 0xc, 0x4                     // w4a16: sign-extend int4 #3
+v_bfe_u32 v231, v233, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v232, v233, 0xc, 0x4                     // w4a16: zero-extend int4 #3
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -3378,8 +3414,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+12+1], v231, v232        // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v232, v233, 0x14, 0x4                    // w4a16: sign-extend int4 #5
+v_bfe_u32 v231, v233, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v232, v233, 0x14, 0x4                    // w4a16: zero-extend int4 #5
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -3395,8 +3431,8 @@ v_add3_u32 v236, v232, v236, v237                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v232, v236, v238, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v232, 16, v232                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+12+2], v231, v232        // w4a16: pack 2 bf16
-v_bfe_i32 v231, v233, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v232, v233, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
+v_bfe_u32 v231, v233, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v232, v233, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
 v_cvt_f32_i32 v231, v231                           // w4a16: int4 -> f32
 v_cvt_f32_i32 v232, v232                           // w4a16: int4 -> f32
 v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
@@ -3674,13 +3710,14 @@ label_Summation_End_2:
 .set sgprAddressScaleA, UNDEF
 .set sgprAddressScaleB, UNDEF
 .set sgprSrdScaleA, UNDEF
+.set sgprScaleAKCnt, UNDEF
+.set sgprStaggerUIter, UNDEF
 .set sgprAddressScaleZeroA, UNDEF
-.set sgprShadowLimitA, UNDEF
 .set sgprSrdScaleZeroA, UNDEF
 .set sgprSrdA, UNDEF
 .set sgprSrdB, UNDEF
+.set sgprShadowLimitA, UNDEF
 .set sgprShadowLimitB, UNDEF
-.set sgprStaggerUIter, UNDEF
 .set sgprWrapUA, UNDEF
 .set sgprWrapUB, UNDEF
 .set sgprGlobalReadIncsA, UNDEF
@@ -7641,7 +7678,7 @@ v_mov_b32 v125, 0x7fff0000                         // fp32 Nan
 v_mov_b32 v126, 0x7fff                             // rounding bias for bfloat16
 
 s_waitcnt vmcnt(61)                                // vlcnt(61) = 62 - 1 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v191                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v191                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+129], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+129], v[vgprValuC+129] // check Nan
 v_bfe_u32 v123, v[vgprValuC+129], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7651,7 +7688,7 @@ v_lshrrev_b32 v129, 16, v[vgprValuC+129]           // convert C to bf16
 buffer_store_b16 v129, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(60)                                // vlcnt(60) = 62 - 2 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v192                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v192                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+130], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+130], v[vgprValuC+130] // check Nan
 v_bfe_u32 v123, v[vgprValuC+130], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7661,7 +7698,7 @@ v_lshrrev_b32 v130, 16, v[vgprValuC+130]           // convert C to bf16
 buffer_store_b16 v130, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(59)                                // vlcnt(59) = 62 - 3 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v193                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v193                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+131], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+131], v[vgprValuC+131] // check Nan
 v_bfe_u32 v123, v[vgprValuC+131], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7674,7 +7711,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v131, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(58)                                // vlcnt(58) = 62 - 4 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v194                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v194                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+132], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+132], v[vgprValuC+132] // check Nan
 v_bfe_u32 v123, v[vgprValuC+132], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7684,7 +7721,7 @@ v_lshrrev_b32 v132, 16, v[vgprValuC+132]           // convert C to bf16
 buffer_store_b16 v132, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(57)                                // vlcnt(57) = 62 - 5 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v195                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v195                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+133], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+133], v[vgprValuC+133] // check Nan
 v_bfe_u32 v123, v[vgprValuC+133], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7697,7 +7734,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v133, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(56)                                // vlcnt(56) = 62 - 6 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v196                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v196                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+134], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+134], v[vgprValuC+134] // check Nan
 v_bfe_u32 v123, v[vgprValuC+134], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7707,7 +7744,7 @@ v_lshrrev_b32 v134, 16, v[vgprValuC+134]           // convert C to bf16
 buffer_store_b16 v134, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(55)                                // vlcnt(55) = 62 - 7 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v197                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v197                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+135], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+135], v[vgprValuC+135] // check Nan
 v_bfe_u32 v123, v[vgprValuC+135], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7720,7 +7757,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v135, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(54)                                // vlcnt(54) = 62 - 8 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v198                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v198                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+136], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+136], v[vgprValuC+136] // check Nan
 v_bfe_u32 v123, v[vgprValuC+136], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7730,7 +7767,7 @@ v_lshrrev_b32 v136, 16, v[vgprValuC+136]           // convert C to bf16
 buffer_store_b16 v136, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(53)                                // vlcnt(53) = 62 - 9 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v199                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v199                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+137], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+137], v[vgprValuC+137] // check Nan
 v_bfe_u32 v123, v[vgprValuC+137], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7743,7 +7780,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v137, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(52)                                // vlcnt(52) = 62 - 10 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v200                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v200                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+138], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+138], v[vgprValuC+138] // check Nan
 v_bfe_u32 v123, v[vgprValuC+138], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7753,7 +7790,7 @@ v_lshrrev_b32 v138, 16, v[vgprValuC+138]           // convert C to bf16
 buffer_store_b16 v138, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(51)                                // vlcnt(51) = 62 - 11 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v201                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v201                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+139], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+139], v[vgprValuC+139] // check Nan
 v_bfe_u32 v123, v[vgprValuC+139], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7766,7 +7803,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v139, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(50)                                // vlcnt(50) = 62 - 12 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v202                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v202                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+140], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+140], v[vgprValuC+140] // check Nan
 v_bfe_u32 v123, v[vgprValuC+140], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7776,7 +7813,7 @@ v_lshrrev_b32 v140, 16, v[vgprValuC+140]           // convert C to bf16
 buffer_store_b16 v140, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(49)                                // vlcnt(49) = 62 - 13 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v203                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v203                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+141], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+141], v[vgprValuC+141] // check Nan
 v_bfe_u32 v123, v[vgprValuC+141], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7789,7 +7826,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v141, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(48)                                // vlcnt(48) = 62 - 14 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v204                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v204                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+142], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+142], v[vgprValuC+142] // check Nan
 v_bfe_u32 v123, v[vgprValuC+142], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7799,7 +7836,7 @@ v_lshrrev_b32 v142, 16, v[vgprValuC+142]           // convert C to bf16
 buffer_store_b16 v142, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(47)                                // vlcnt(47) = 62 - 15 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v205                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v205                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+143], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+143], v[vgprValuC+143] // check Nan
 v_bfe_u32 v123, v[vgprValuC+143], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7812,7 +7849,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v143, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(46)                                // vlcnt(46) = 62 - 16 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v206                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v206                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+144], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+144], v[vgprValuC+144] // check Nan
 v_bfe_u32 v123, v[vgprValuC+144], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7822,7 +7859,7 @@ v_lshrrev_b32 v144, 16, v[vgprValuC+144]           // convert C to bf16
 buffer_store_b16 v144, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(45)                                // vlcnt(45) = 62 - 17 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v207                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v207                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+145], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+145], v[vgprValuC+145] // check Nan
 v_bfe_u32 v123, v[vgprValuC+145], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7835,7 +7872,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(18): gra SRD 
 buffer_store_b16 v145, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(44)                                // vlcnt(44) = 62 - 18 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v208                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v208                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+146], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+146], v[vgprValuC+146] // check Nan
 v_bfe_u32 v123, v[vgprValuC+146], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7845,7 +7882,7 @@ v_lshrrev_b32 v146, 16, v[vgprValuC+146]           // convert C to bf16
 buffer_store_b16 v146, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(43)                                // vlcnt(43) = 62 - 19 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v209                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v209                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+147], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+147], v[vgprValuC+147] // check Nan
 v_bfe_u32 v123, v[vgprValuC+147], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7858,7 +7895,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v147, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(42)                                // vlcnt(42) = 62 - 20 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v210                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v210                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+148], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+148], v[vgprValuC+148] // check Nan
 v_bfe_u32 v123, v[vgprValuC+148], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7868,7 +7905,7 @@ v_lshrrev_b32 v148, 16, v[vgprValuC+148]           // convert C to bf16
 buffer_store_b16 v148, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(41)                                // vlcnt(41) = 62 - 21 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v211                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v211                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+149], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+149], v[vgprValuC+149] // check Nan
 v_bfe_u32 v123, v[vgprValuC+149], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7881,7 +7918,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v149, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(40)                                // vlcnt(40) = 62 - 22 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v212                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v212                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+150], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+150], v[vgprValuC+150] // check Nan
 v_bfe_u32 v123, v[vgprValuC+150], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7891,7 +7928,7 @@ v_lshrrev_b32 v150, 16, v[vgprValuC+150]           // convert C to bf16
 buffer_store_b16 v150, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(39)                                // vlcnt(39) = 62 - 23 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v213                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v213                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+151], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+151], v[vgprValuC+151] // check Nan
 v_bfe_u32 v123, v[vgprValuC+151], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7904,7 +7941,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v151, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(38)                                // vlcnt(38) = 62 - 24 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v214                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v214                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+152], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+152], v[vgprValuC+152] // check Nan
 v_bfe_u32 v123, v[vgprValuC+152], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7914,7 +7951,7 @@ v_lshrrev_b32 v152, 16, v[vgprValuC+152]           // convert C to bf16
 buffer_store_b16 v152, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(37)                                // vlcnt(37) = 62 - 25 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v215                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v215                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+153], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+153], v[vgprValuC+153] // check Nan
 v_bfe_u32 v123, v[vgprValuC+153], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7927,7 +7964,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v153, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(36)                                // vlcnt(36) = 62 - 26 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v216                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v216                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+154], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+154], v[vgprValuC+154] // check Nan
 v_bfe_u32 v123, v[vgprValuC+154], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7937,7 +7974,7 @@ v_lshrrev_b32 v154, 16, v[vgprValuC+154]           // convert C to bf16
 buffer_store_b16 v154, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(35)                                // vlcnt(35) = 62 - 27 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v217                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v217                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+155], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+155], v[vgprValuC+155] // check Nan
 v_bfe_u32 v123, v[vgprValuC+155], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7950,7 +7987,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v155, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(34)                                // vlcnt(34) = 62 - 28 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v218                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v218                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+156], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+156], v[vgprValuC+156] // check Nan
 v_bfe_u32 v123, v[vgprValuC+156], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7960,7 +7997,7 @@ v_lshrrev_b32 v156, 16, v[vgprValuC+156]           // convert C to bf16
 buffer_store_b16 v156, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(33)                                // vlcnt(33) = 62 - 29 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v219                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v219                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+157], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+157], v[vgprValuC+157] // check Nan
 v_bfe_u32 v123, v[vgprValuC+157], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7973,7 +8010,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v157, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(32)                                // vlcnt(32) = 62 - 30 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v220                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v220                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+158], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+158], v[vgprValuC+158] // check Nan
 v_bfe_u32 v123, v[vgprValuC+158], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7983,7 +8020,7 @@ v_lshrrev_b32 v158, 16, v[vgprValuC+158]           // convert C to bf16
 buffer_store_b16 v158, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(31)                                // vlcnt(31) = 62 - 31 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v221                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v221                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+159], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+159], v[vgprValuC+159] // check Nan
 v_bfe_u32 v123, v[vgprValuC+159], 16, 1            // Non-Nan case: store lsb of bf16
@@ -7996,7 +8033,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v159, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(30)                                // vlcnt(30) = 62 - 32 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v222                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v222                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+160], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+160], v[vgprValuC+160] // check Nan
 v_bfe_u32 v123, v[vgprValuC+160], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8006,7 +8043,7 @@ v_lshrrev_b32 v160, 16, v[vgprValuC+160]           // convert C to bf16
 buffer_store_b16 v160, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(29)                                // vlcnt(29) = 62 - 33 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v223                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v223                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+161], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+161], v[vgprValuC+161] // check Nan
 v_bfe_u32 v123, v[vgprValuC+161], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8019,7 +8056,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(18): gra SRD 
 buffer_store_b16 v161, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(28)                                // vlcnt(28) = 62 - 34 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v224                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v224                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+162], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+162], v[vgprValuC+162] // check Nan
 v_bfe_u32 v123, v[vgprValuC+162], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8029,7 +8066,7 @@ v_lshrrev_b32 v162, 16, v[vgprValuC+162]           // convert C to bf16
 buffer_store_b16 v162, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(27)                                // vlcnt(27) = 62 - 35 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v225                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v225                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+163], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+163], v[vgprValuC+163] // check Nan
 v_bfe_u32 v123, v[vgprValuC+163], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8042,7 +8079,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v163, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(26)                                // vlcnt(26) = 62 - 36 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v226                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v226                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+164], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+164], v[vgprValuC+164] // check Nan
 v_bfe_u32 v123, v[vgprValuC+164], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8052,7 +8089,7 @@ v_lshrrev_b32 v164, 16, v[vgprValuC+164]           // convert C to bf16
 buffer_store_b16 v164, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(25)                                // vlcnt(25) = 62 - 37 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v227                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v227                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+165], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+165], v[vgprValuC+165] // check Nan
 v_bfe_u32 v123, v[vgprValuC+165], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8065,7 +8102,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v165, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(24)                                // vlcnt(24) = 62 - 38 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v228                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v228                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+166], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+166], v[vgprValuC+166] // check Nan
 v_bfe_u32 v123, v[vgprValuC+166], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8075,7 +8112,7 @@ v_lshrrev_b32 v166, 16, v[vgprValuC+166]           // convert C to bf16
 buffer_store_b16 v166, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(23)                                // vlcnt(23) = 62 - 39 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v229                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v229                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+167], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+167], v[vgprValuC+167] // check Nan
 v_bfe_u32 v123, v[vgprValuC+167], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8088,7 +8125,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v167, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(22)                                // vlcnt(22) = 62 - 40 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v231                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v231                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+168], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+168], v[vgprValuC+168] // check Nan
 v_bfe_u32 v123, v[vgprValuC+168], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8098,7 +8135,7 @@ v_lshrrev_b32 v168, 16, v[vgprValuC+168]           // convert C to bf16
 buffer_store_b16 v168, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(21)                                // vlcnt(21) = 62 - 41 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v232                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v232                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+169], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+169], v[vgprValuC+169] // check Nan
 v_bfe_u32 v123, v[vgprValuC+169], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8111,7 +8148,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v169, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(20)                                // vlcnt(20) = 62 - 42 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v233                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v233                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+170], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+170], v[vgprValuC+170] // check Nan
 v_bfe_u32 v123, v[vgprValuC+170], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8121,7 +8158,7 @@ v_lshrrev_b32 v170, 16, v[vgprValuC+170]           // convert C to bf16
 buffer_store_b16 v170, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(19)                                // vlcnt(19) = 62 - 43 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v234                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v234                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+171], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+171], v[vgprValuC+171] // check Nan
 v_bfe_u32 v123, v[vgprValuC+171], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8134,7 +8171,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v171, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(18)                                // vlcnt(18) = 62 - 44 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v235                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v235                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+172], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+172], v[vgprValuC+172] // check Nan
 v_bfe_u32 v123, v[vgprValuC+172], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8144,7 +8181,7 @@ v_lshrrev_b32 v172, 16, v[vgprValuC+172]           // convert C to bf16
 buffer_store_b16 v172, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(17)                                // vlcnt(17) = 62 - 45 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v236                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v236                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+173], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+173], v[vgprValuC+173] // check Nan
 v_bfe_u32 v123, v[vgprValuC+173], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8157,7 +8194,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v173, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(16)                                // vlcnt(16) = 62 - 46 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v237                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v237                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+174], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+174], v[vgprValuC+174] // check Nan
 v_bfe_u32 v123, v[vgprValuC+174], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8167,7 +8204,7 @@ v_lshrrev_b32 v174, 16, v[vgprValuC+174]           // convert C to bf16
 buffer_store_b16 v174, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(15)                                // vlcnt(15) = 62 - 47 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v238                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v238                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+175], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+175], v[vgprValuC+175] // check Nan
 v_bfe_u32 v123, v[vgprValuC+175], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8180,7 +8217,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v175, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(14)                                // vlcnt(14) = 62 - 48 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v239                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v239                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+176], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+176], v[vgprValuC+176] // check Nan
 v_bfe_u32 v123, v[vgprValuC+176], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8190,7 +8227,7 @@ v_lshrrev_b32 v176, 16, v[vgprValuC+176]           // convert C to bf16
 buffer_store_b16 v176, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(13)                                // vlcnt(13) = 62 - 49 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v240                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v240                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+177], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+177], v[vgprValuC+177] // check Nan
 v_bfe_u32 v123, v[vgprValuC+177], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8203,7 +8240,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(18): gra SRD 
 buffer_store_b16 v177, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(12)                                // vlcnt(12) = 62 - 50 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v241                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v241                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+178], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+178], v[vgprValuC+178] // check Nan
 v_bfe_u32 v123, v[vgprValuC+178], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8213,7 +8250,7 @@ v_lshrrev_b32 v178, 16, v[vgprValuC+178]           // convert C to bf16
 buffer_store_b16 v178, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(11)                                // vlcnt(11) = 62 - 51 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v242                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v242                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+179], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+179], v[vgprValuC+179] // check Nan
 v_bfe_u32 v123, v[vgprValuC+179], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8226,7 +8263,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v179, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(10)                                // vlcnt(10) = 62 - 52 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v243                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v243                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+180], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+180], v[vgprValuC+180] // check Nan
 v_bfe_u32 v123, v[vgprValuC+180], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8236,7 +8273,7 @@ v_lshrrev_b32 v180, 16, v[vgprValuC+180]           // convert C to bf16
 buffer_store_b16 v180, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(9)                                 // vlcnt(9) = 62 - 53 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v244                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v244                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+181], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+181], v[vgprValuC+181] // check Nan
 v_bfe_u32 v123, v[vgprValuC+181], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8249,7 +8286,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v181, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(8)                                 // vlcnt(8) = 62 - 54 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v245                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v245                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+182], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+182], v[vgprValuC+182] // check Nan
 v_bfe_u32 v123, v[vgprValuC+182], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8259,7 +8296,7 @@ v_lshrrev_b32 v182, 16, v[vgprValuC+182]           // convert C to bf16
 buffer_store_b16 v182, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(7)                                 // vlcnt(7) = 62 - 55 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v246                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v246                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+183], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+183], v[vgprValuC+183] // check Nan
 v_bfe_u32 v123, v[vgprValuC+183], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8272,7 +8309,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v183, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(6)                                 // vlcnt(6) = 62 - 56 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v247                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v247                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+184], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+184], v[vgprValuC+184] // check Nan
 v_bfe_u32 v123, v[vgprValuC+184], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8282,7 +8319,7 @@ v_lshrrev_b32 v184, 16, v[vgprValuC+184]           // convert C to bf16
 buffer_store_b16 v184, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(5)                                 // vlcnt(5) = 62 - 57 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v248                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v248                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+185], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+185], v[vgprValuC+185] // check Nan
 v_bfe_u32 v123, v[vgprValuC+185], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8295,7 +8332,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v185, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(4)                                 // vlcnt(4) = 62 - 58 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v249                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v249                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+186], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+186], v[vgprValuC+186] // check Nan
 v_bfe_u32 v123, v[vgprValuC+186], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8305,7 +8342,7 @@ v_lshrrev_b32 v186, 16, v[vgprValuC+186]           // convert C to bf16
 buffer_store_b16 v186, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(3)                                 // vlcnt(3) = 62 - 59 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v250                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v250                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+187], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+187], v[vgprValuC+187] // check Nan
 v_bfe_u32 v123, v[vgprValuC+187], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8318,7 +8355,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v187, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(2)                                 // vlcnt(2) = 62 - 60 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v251                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v251                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+188], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+188], v[vgprValuC+188] // check Nan
 v_bfe_u32 v123, v[vgprValuC+188], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8328,7 +8365,7 @@ v_lshrrev_b32 v188, 16, v[vgprValuC+188]           // convert C to bf16
 buffer_store_b16 v188, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(1)                                 // vlcnt(1) = 62 - 61 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v252                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v252                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+189], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+189], v[vgprValuC+189] // check Nan
 v_bfe_u32 v123, v[vgprValuC+189], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8341,7 +8378,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v189, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(0)                                 // vlcnt(0) = 62 - 62 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v253                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v253                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+190], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+190], v[vgprValuC+190] // check Nan
 v_bfe_u32 v123, v[vgprValuC+190], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8448,7 +8485,7 @@ v_mov_b32 v125, 0x7fff0000                         // fp32 Nan
 v_mov_b32 v126, 0x7fff                             // rounding bias for bfloat16
 
 s_waitcnt vmcnt(17)                                // vlcnt(17) = 18 - 1 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v147                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v147                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+129], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+129], v[vgprValuC+129] // check Nan
 v_bfe_u32 v123, v[vgprValuC+129], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8461,7 +8498,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v129, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(16)                                // vlcnt(16) = 18 - 2 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v148                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v148                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+130], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+130], v[vgprValuC+130] // check Nan
 v_bfe_u32 v123, v[vgprValuC+130], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8471,7 +8508,7 @@ v_lshrrev_b32 v130, 16, v[vgprValuC+130]           // convert C to bf16
 buffer_store_b16 v130, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(15)                                // vlcnt(15) = 18 - 3 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v149                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v149                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+131], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+131], v[vgprValuC+131] // check Nan
 v_bfe_u32 v123, v[vgprValuC+131], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8484,7 +8521,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(18): gra SRD 
 buffer_store_b16 v131, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(14)                                // vlcnt(14) = 18 - 4 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v150                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v150                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+132], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+132], v[vgprValuC+132] // check Nan
 v_bfe_u32 v123, v[vgprValuC+132], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8494,7 +8531,7 @@ v_lshrrev_b32 v132, 16, v[vgprValuC+132]           // convert C to bf16
 buffer_store_b16 v132, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(13)                                // vlcnt(13) = 18 - 5 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v151                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v151                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+133], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+133], v[vgprValuC+133] // check Nan
 v_bfe_u32 v123, v[vgprValuC+133], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8507,7 +8544,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v133, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(12)                                // vlcnt(12) = 18 - 6 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v152                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v152                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+134], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+134], v[vgprValuC+134] // check Nan
 v_bfe_u32 v123, v[vgprValuC+134], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8517,7 +8554,7 @@ v_lshrrev_b32 v134, 16, v[vgprValuC+134]           // convert C to bf16
 buffer_store_b16 v134, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(11)                                // vlcnt(11) = 18 - 7 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v153                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v153                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+135], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+135], v[vgprValuC+135] // check Nan
 v_bfe_u32 v123, v[vgprValuC+135], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8530,7 +8567,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v135, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(10)                                // vlcnt(10) = 18 - 8 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v154                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v154                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+136], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+136], v[vgprValuC+136] // check Nan
 v_bfe_u32 v123, v[vgprValuC+136], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8540,7 +8577,7 @@ v_lshrrev_b32 v136, 16, v[vgprValuC+136]           // convert C to bf16
 buffer_store_b16 v136, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(9)                                 // vlcnt(9) = 18 - 9 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v155                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v155                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+137], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+137], v[vgprValuC+137] // check Nan
 v_bfe_u32 v123, v[vgprValuC+137], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8553,7 +8590,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v137, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(8)                                 // vlcnt(8) = 18 - 10 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v156                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v156                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+138], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+138], v[vgprValuC+138] // check Nan
 v_bfe_u32 v123, v[vgprValuC+138], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8563,7 +8600,7 @@ v_lshrrev_b32 v138, 16, v[vgprValuC+138]           // convert C to bf16
 buffer_store_b16 v138, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(7)                                 // vlcnt(7) = 18 - 11 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v157                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v157                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+139], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+139], v[vgprValuC+139] // check Nan
 v_bfe_u32 v123, v[vgprValuC+139], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8576,7 +8613,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v139, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(6)                                 // vlcnt(6) = 18 - 12 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v158                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v158                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+140], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+140], v[vgprValuC+140] // check Nan
 v_bfe_u32 v123, v[vgprValuC+140], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8586,7 +8623,7 @@ v_lshrrev_b32 v140, 16, v[vgprValuC+140]           // convert C to bf16
 buffer_store_b16 v140, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(5)                                 // vlcnt(5) = 18 - 13 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v159                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v159                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+141], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+141], v[vgprValuC+141] // check Nan
 v_bfe_u32 v123, v[vgprValuC+141], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8599,7 +8636,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v141, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(4)                                 // vlcnt(4) = 18 - 14 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v160                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v160                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+142], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+142], v[vgprValuC+142] // check Nan
 v_bfe_u32 v123, v[vgprValuC+142], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8609,7 +8646,7 @@ v_lshrrev_b32 v142, 16, v[vgprValuC+142]           // convert C to bf16
 buffer_store_b16 v142, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(3)                                 // vlcnt(3) = 18 - 15 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v161                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v161                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+143], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+143], v[vgprValuC+143] // check Nan
 v_bfe_u32 v123, v[vgprValuC+143], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8622,7 +8659,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v143, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(2)                                 // vlcnt(2) = 18 - 16 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v162                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v162                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+144], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+144], v[vgprValuC+144] // check Nan
 v_bfe_u32 v123, v[vgprValuC+144], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8632,7 +8669,7 @@ v_lshrrev_b32 v144, 16, v[vgprValuC+144]           // convert C to bf16
 buffer_store_b16 v144, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:64 // store D
 
 s_waitcnt vmcnt(1)                                 // vlcnt(1) = 18 - 17 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v163                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v163                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+145], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+145], v[vgprValuC+145] // check Nan
 v_bfe_u32 v123, v[vgprValuC+145], 16, 1            // Non-Nan case: store lsb of bf16
@@ -8645,7 +8682,7 @@ s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], 0         // incToNextRow(2): gra SRD +
 buffer_store_b16 v145, v127, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(0)                                 // vlcnt(0) = 18 - 18 (beta) (interleaved)
-v_lshlrev_b32 v120, 16, v164                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v164                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+146], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s8, v[vgprValuC+146], v[vgprValuC+146] // check Nan
 v_bfe_u32 v123, v[vgprValuC+146], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9258,7 +9295,7 @@ s_waitcnt vmcnt(0)                                 // wait for Beta
 v_mov_b32 v124, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
 v_mov_b32 v125, 0x7fff0000                         // fp32 Nan
 v_mov_b32 v126, 0x7fff                             // rounding bias for bfloat16
-v_lshlrev_b32 v120, 16, v169                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v169                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+127], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+127], v[vgprValuC+127] // check Nan
 v_bfe_u32 v123, v[vgprValuC+127], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9266,7 +9303,7 @@ v_add3_u32 v123, v[vgprValuC+127], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+127], v123, v125, s28
 v_lshrrev_b32 v127, 16, v[vgprValuC+127]           // convert C to bf16
 buffer_store_b16 v127, v170, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v171                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v171                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+128], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+128], v[vgprValuC+128] // check Nan
 v_bfe_u32 v123, v[vgprValuC+128], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9274,7 +9311,7 @@ v_add3_u32 v123, v[vgprValuC+128], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+128], v123, v125, s28
 v_lshrrev_b32 v128, 16, v[vgprValuC+128]           // convert C to bf16
 buffer_store_b16 v128, v172, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v173                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v173                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+129], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+129], v[vgprValuC+129] // check Nan
 v_bfe_u32 v123, v[vgprValuC+129], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9282,7 +9319,7 @@ v_add3_u32 v123, v[vgprValuC+129], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+129], v123, v125, s28
 v_lshrrev_b32 v129, 16, v[vgprValuC+129]           // convert C to bf16
 buffer_store_b16 v129, v174, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v175                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v175                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+130], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+130], v[vgprValuC+130] // check Nan
 v_bfe_u32 v123, v[vgprValuC+130], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9290,7 +9327,7 @@ v_add3_u32 v123, v[vgprValuC+130], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+130], v123, v125, s28
 v_lshrrev_b32 v130, 16, v[vgprValuC+130]           // convert C to bf16
 buffer_store_b16 v130, v176, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v177                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v177                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+131], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+131], v[vgprValuC+131] // check Nan
 v_bfe_u32 v123, v[vgprValuC+131], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9298,7 +9335,7 @@ v_add3_u32 v123, v[vgprValuC+131], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+131], v123, v125, s28
 v_lshrrev_b32 v131, 16, v[vgprValuC+131]           // convert C to bf16
 buffer_store_b16 v131, v178, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v179                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v179                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+132], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+132], v[vgprValuC+132] // check Nan
 v_bfe_u32 v123, v[vgprValuC+132], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9306,7 +9343,7 @@ v_add3_u32 v123, v[vgprValuC+132], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+132], v123, v125, s28
 v_lshrrev_b32 v132, 16, v[vgprValuC+132]           // convert C to bf16
 buffer_store_b16 v132, v180, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v181                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v181                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+133], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+133], v[vgprValuC+133] // check Nan
 v_bfe_u32 v123, v[vgprValuC+133], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9314,7 +9351,7 @@ v_add3_u32 v123, v[vgprValuC+133], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+133], v123, v125, s28
 v_lshrrev_b32 v133, 16, v[vgprValuC+133]           // convert C to bf16
 buffer_store_b16 v133, v182, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v183                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v183                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+134], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+134], v[vgprValuC+134] // check Nan
 v_bfe_u32 v123, v[vgprValuC+134], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9322,7 +9359,7 @@ v_add3_u32 v123, v[vgprValuC+134], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+134], v123, v125, s28
 v_lshrrev_b32 v134, 16, v[vgprValuC+134]           // convert C to bf16
 buffer_store_b16 v134, v184, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v185                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v185                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+135], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+135], v[vgprValuC+135] // check Nan
 v_bfe_u32 v123, v[vgprValuC+135], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9330,7 +9367,7 @@ v_add3_u32 v123, v[vgprValuC+135], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+135], v123, v125, s28
 v_lshrrev_b32 v135, 16, v[vgprValuC+135]           // convert C to bf16
 buffer_store_b16 v135, v186, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v187                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v187                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+136], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+136], v[vgprValuC+136] // check Nan
 v_bfe_u32 v123, v[vgprValuC+136], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9338,7 +9375,7 @@ v_add3_u32 v123, v[vgprValuC+136], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+136], v123, v125, s28
 v_lshrrev_b32 v136, 16, v[vgprValuC+136]           // convert C to bf16
 buffer_store_b16 v136, v188, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v189                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v189                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+137], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+137], v[vgprValuC+137] // check Nan
 v_bfe_u32 v123, v[vgprValuC+137], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9346,7 +9383,7 @@ v_add3_u32 v123, v[vgprValuC+137], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+137], v123, v125, s28
 v_lshrrev_b32 v137, 16, v[vgprValuC+137]           // convert C to bf16
 buffer_store_b16 v137, v190, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v191                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v191                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+138], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+138], v[vgprValuC+138] // check Nan
 v_bfe_u32 v123, v[vgprValuC+138], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9354,7 +9391,7 @@ v_add3_u32 v123, v[vgprValuC+138], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+138], v123, v125, s28
 v_lshrrev_b32 v138, 16, v[vgprValuC+138]           // convert C to bf16
 buffer_store_b16 v138, v192, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v193                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v193                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+139], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+139], v[vgprValuC+139] // check Nan
 v_bfe_u32 v123, v[vgprValuC+139], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9362,7 +9399,7 @@ v_add3_u32 v123, v[vgprValuC+139], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+139], v123, v125, s28
 v_lshrrev_b32 v139, 16, v[vgprValuC+139]           // convert C to bf16
 buffer_store_b16 v139, v194, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v195                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v195                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+140], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+140], v[vgprValuC+140] // check Nan
 v_bfe_u32 v123, v[vgprValuC+140], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9370,7 +9407,7 @@ v_add3_u32 v123, v[vgprValuC+140], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+140], v123, v125, s28
 v_lshrrev_b32 v140, 16, v[vgprValuC+140]           // convert C to bf16
 buffer_store_b16 v140, v196, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v197                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v197                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+141], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+141], v[vgprValuC+141] // check Nan
 v_bfe_u32 v123, v[vgprValuC+141], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9378,7 +9415,7 @@ v_add3_u32 v123, v[vgprValuC+141], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+141], v123, v125, s28
 v_lshrrev_b32 v141, 16, v[vgprValuC+141]           // convert C to bf16
 buffer_store_b16 v141, v198, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v199                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v199                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+142], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+142], v[vgprValuC+142] // check Nan
 v_bfe_u32 v123, v[vgprValuC+142], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9386,7 +9423,7 @@ v_add3_u32 v123, v[vgprValuC+142], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+142], v123, v125, s28
 v_lshrrev_b32 v142, 16, v[vgprValuC+142]           // convert C to bf16
 buffer_store_b16 v142, v200, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v201                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v201                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+143], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+143], v[vgprValuC+143] // check Nan
 v_bfe_u32 v123, v[vgprValuC+143], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9394,7 +9431,7 @@ v_add3_u32 v123, v[vgprValuC+143], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+143], v123, v125, s28
 v_lshrrev_b32 v143, 16, v[vgprValuC+143]           // convert C to bf16
 buffer_store_b16 v143, v202, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v203                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v203                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+144], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+144], v[vgprValuC+144] // check Nan
 v_bfe_u32 v123, v[vgprValuC+144], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9402,7 +9439,7 @@ v_add3_u32 v123, v[vgprValuC+144], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+144], v123, v125, s28
 v_lshrrev_b32 v144, 16, v[vgprValuC+144]           // convert C to bf16
 buffer_store_b16 v144, v204, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v205                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v205                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+145], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+145], v[vgprValuC+145] // check Nan
 v_bfe_u32 v123, v[vgprValuC+145], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9410,7 +9447,7 @@ v_add3_u32 v123, v[vgprValuC+145], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+145], v123, v125, s28
 v_lshrrev_b32 v145, 16, v[vgprValuC+145]           // convert C to bf16
 buffer_store_b16 v145, v206, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v207                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v207                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+146], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+146], v[vgprValuC+146] // check Nan
 v_bfe_u32 v123, v[vgprValuC+146], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9418,7 +9455,7 @@ v_add3_u32 v123, v[vgprValuC+146], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+146], v123, v125, s28
 v_lshrrev_b32 v146, 16, v[vgprValuC+146]           // convert C to bf16
 buffer_store_b16 v146, v208, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v209                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v209                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+147], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+147], v[vgprValuC+147] // check Nan
 v_bfe_u32 v123, v[vgprValuC+147], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9426,7 +9463,7 @@ v_add3_u32 v123, v[vgprValuC+147], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+147], v123, v125, s28
 v_lshrrev_b32 v147, 16, v[vgprValuC+147]           // convert C to bf16
 buffer_store_b16 v147, v210, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v211                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v211                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+148], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+148], v[vgprValuC+148] // check Nan
 v_bfe_u32 v123, v[vgprValuC+148], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9434,7 +9471,7 @@ v_add3_u32 v123, v[vgprValuC+148], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+148], v123, v125, s28
 v_lshrrev_b32 v148, 16, v[vgprValuC+148]           // convert C to bf16
 buffer_store_b16 v148, v212, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v213                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v213                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+149], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+149], v[vgprValuC+149] // check Nan
 v_bfe_u32 v123, v[vgprValuC+149], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9442,7 +9479,7 @@ v_add3_u32 v123, v[vgprValuC+149], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+149], v123, v125, s28
 v_lshrrev_b32 v149, 16, v[vgprValuC+149]           // convert C to bf16
 buffer_store_b16 v149, v214, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v215                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v215                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+150], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+150], v[vgprValuC+150] // check Nan
 v_bfe_u32 v123, v[vgprValuC+150], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9450,7 +9487,7 @@ v_add3_u32 v123, v[vgprValuC+150], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+150], v123, v125, s28
 v_lshrrev_b32 v150, 16, v[vgprValuC+150]           // convert C to bf16
 buffer_store_b16 v150, v216, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v217                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v217                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+151], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+151], v[vgprValuC+151] // check Nan
 v_bfe_u32 v123, v[vgprValuC+151], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9458,7 +9495,7 @@ v_add3_u32 v123, v[vgprValuC+151], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+151], v123, v125, s28
 v_lshrrev_b32 v151, 16, v[vgprValuC+151]           // convert C to bf16
 buffer_store_b16 v151, v218, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v219                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v219                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+152], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+152], v[vgprValuC+152] // check Nan
 v_bfe_u32 v123, v[vgprValuC+152], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9466,7 +9503,7 @@ v_add3_u32 v123, v[vgprValuC+152], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+152], v123, v125, s28
 v_lshrrev_b32 v152, 16, v[vgprValuC+152]           // convert C to bf16
 buffer_store_b16 v152, v220, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v221                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v221                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+153], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+153], v[vgprValuC+153] // check Nan
 v_bfe_u32 v123, v[vgprValuC+153], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9474,7 +9511,7 @@ v_add3_u32 v123, v[vgprValuC+153], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+153], v123, v125, s28
 v_lshrrev_b32 v153, 16, v[vgprValuC+153]           // convert C to bf16
 buffer_store_b16 v153, v222, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v223                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v223                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+154], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+154], v[vgprValuC+154] // check Nan
 v_bfe_u32 v123, v[vgprValuC+154], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9482,7 +9519,7 @@ v_add3_u32 v123, v[vgprValuC+154], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+154], v123, v125, s28
 v_lshrrev_b32 v154, 16, v[vgprValuC+154]           // convert C to bf16
 buffer_store_b16 v154, v224, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v225                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v225                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+155], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+155], v[vgprValuC+155] // check Nan
 v_bfe_u32 v123, v[vgprValuC+155], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9490,7 +9527,7 @@ v_add3_u32 v123, v[vgprValuC+155], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+155], v123, v125, s28
 v_lshrrev_b32 v155, 16, v[vgprValuC+155]           // convert C to bf16
 buffer_store_b16 v155, v226, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v227                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v227                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+156], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+156], v[vgprValuC+156] // check Nan
 v_bfe_u32 v123, v[vgprValuC+156], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9498,7 +9535,7 @@ v_add3_u32 v123, v[vgprValuC+156], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+156], v123, v125, s28
 v_lshrrev_b32 v156, 16, v[vgprValuC+156]           // convert C to bf16
 buffer_store_b16 v156, v228, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v229                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v229                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+157], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+157], v[vgprValuC+157] // check Nan
 v_bfe_u32 v123, v[vgprValuC+157], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9506,7 +9543,7 @@ v_add3_u32 v123, v[vgprValuC+157], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+157], v123, v125, s28
 v_lshrrev_b32 v157, 16, v[vgprValuC+157]           // convert C to bf16
 buffer_store_b16 v157, v231, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v232                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v232                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+158], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+158], v[vgprValuC+158] // check Nan
 v_bfe_u32 v123, v[vgprValuC+158], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9514,7 +9551,7 @@ v_add3_u32 v123, v[vgprValuC+158], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+158], v123, v125, s28
 v_lshrrev_b32 v158, 16, v[vgprValuC+158]           // convert C to bf16
 buffer_store_b16 v158, v233, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v234                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v234                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+159], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+159], v[vgprValuC+159] // check Nan
 v_bfe_u32 v123, v[vgprValuC+159], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9522,7 +9559,7 @@ v_add3_u32 v123, v[vgprValuC+159], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+159], v123, v125, s28
 v_lshrrev_b32 v159, 16, v[vgprValuC+159]           // convert C to bf16
 buffer_store_b16 v159, v235, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v236                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v236                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+160], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+160], v[vgprValuC+160] // check Nan
 v_bfe_u32 v123, v[vgprValuC+160], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9530,7 +9567,7 @@ v_add3_u32 v123, v[vgprValuC+160], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+160], v123, v125, s28
 v_lshrrev_b32 v160, 16, v[vgprValuC+160]           // convert C to bf16
 buffer_store_b16 v160, v237, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v238                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v238                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+161], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+161], v[vgprValuC+161] // check Nan
 v_bfe_u32 v123, v[vgprValuC+161], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9538,7 +9575,7 @@ v_add3_u32 v123, v[vgprValuC+161], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+161], v123, v125, s28
 v_lshrrev_b32 v161, 16, v[vgprValuC+161]           // convert C to bf16
 buffer_store_b16 v161, v239, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v240                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v240                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+162], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+162], v[vgprValuC+162] // check Nan
 v_bfe_u32 v123, v[vgprValuC+162], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9546,7 +9583,7 @@ v_add3_u32 v123, v[vgprValuC+162], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+162], v123, v125, s28
 v_lshrrev_b32 v162, 16, v[vgprValuC+162]           // convert C to bf16
 buffer_store_b16 v162, v241, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v242                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v242                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+163], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+163], v[vgprValuC+163] // check Nan
 v_bfe_u32 v123, v[vgprValuC+163], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9554,7 +9591,7 @@ v_add3_u32 v123, v[vgprValuC+163], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+163], v123, v125, s28
 v_lshrrev_b32 v163, 16, v[vgprValuC+163]           // convert C to bf16
 buffer_store_b16 v163, v243, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v244                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v244                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+164], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+164], v[vgprValuC+164] // check Nan
 v_bfe_u32 v123, v[vgprValuC+164], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9562,7 +9599,7 @@ v_add3_u32 v123, v[vgprValuC+164], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+164], v123, v125, s28
 v_lshrrev_b32 v164, 16, v[vgprValuC+164]           // convert C to bf16
 buffer_store_b16 v164, v245, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v246                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v246                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+165], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+165], v[vgprValuC+165] // check Nan
 v_bfe_u32 v123, v[vgprValuC+165], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9570,7 +9607,7 @@ v_add3_u32 v123, v[vgprValuC+165], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+165], v123, v125, s28
 v_lshrrev_b32 v165, 16, v[vgprValuC+165]           // convert C to bf16
 buffer_store_b16 v165, v247, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v248                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v248                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+166], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+166], v[vgprValuC+166] // check Nan
 v_bfe_u32 v123, v[vgprValuC+166], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9578,7 +9615,7 @@ v_add3_u32 v123, v[vgprValuC+166], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+166], v123, v125, s28
 v_lshrrev_b32 v166, 16, v[vgprValuC+166]           // convert C to bf16
 buffer_store_b16 v166, v249, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v250                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v250                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+167], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+167], v[vgprValuC+167] // check Nan
 v_bfe_u32 v123, v[vgprValuC+167], 16, 1            // Non-Nan case: store lsb of bf16
@@ -9586,7 +9623,7 @@ v_add3_u32 v123, v[vgprValuC+167], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+167], v123, v125, s28
 v_lshrrev_b32 v167, 16, v[vgprValuC+167]           // convert C to bf16
 buffer_store_b16 v167, v251, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v252                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v252                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+168], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+168], v[vgprValuC+168] // check Nan
 v_bfe_u32 v123, v[vgprValuC+168], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10144,7 +10181,7 @@ s_waitcnt vmcnt(0)                                 // wait for Beta
 v_mov_b32 v124, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
 v_mov_b32 v125, 0x7fff0000                         // fp32 Nan
 v_mov_b32 v126, 0x7fff                             // rounding bias for bfloat16
-v_lshlrev_b32 v120, 16, v165                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v165                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+127], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+127], v[vgprValuC+127] // check Nan
 v_bfe_u32 v123, v[vgprValuC+127], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10152,7 +10189,7 @@ v_add3_u32 v123, v[vgprValuC+127], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+127], v123, v125, s28
 v_lshrrev_b32 v127, 16, v[vgprValuC+127]           // convert C to bf16
 buffer_store_b16 v127, v166, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v167                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v167                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+128], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+128], v[vgprValuC+128] // check Nan
 v_bfe_u32 v123, v[vgprValuC+128], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10160,7 +10197,7 @@ v_add3_u32 v123, v[vgprValuC+128], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+128], v123, v125, s28
 v_lshrrev_b32 v128, 16, v[vgprValuC+128]           // convert C to bf16
 buffer_store_b16 v128, v168, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v169                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v169                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+129], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+129], v[vgprValuC+129] // check Nan
 v_bfe_u32 v123, v[vgprValuC+129], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10168,7 +10205,7 @@ v_add3_u32 v123, v[vgprValuC+129], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+129], v123, v125, s28
 v_lshrrev_b32 v129, 16, v[vgprValuC+129]           // convert C to bf16
 buffer_store_b16 v129, v170, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v171                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v171                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+130], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+130], v[vgprValuC+130] // check Nan
 v_bfe_u32 v123, v[vgprValuC+130], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10176,7 +10213,7 @@ v_add3_u32 v123, v[vgprValuC+130], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+130], v123, v125, s28
 v_lshrrev_b32 v130, 16, v[vgprValuC+130]           // convert C to bf16
 buffer_store_b16 v130, v172, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v173                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v173                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+131], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+131], v[vgprValuC+131] // check Nan
 v_bfe_u32 v123, v[vgprValuC+131], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10184,7 +10221,7 @@ v_add3_u32 v123, v[vgprValuC+131], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+131], v123, v125, s28
 v_lshrrev_b32 v131, 16, v[vgprValuC+131]           // convert C to bf16
 buffer_store_b16 v131, v174, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v175                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v175                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+132], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+132], v[vgprValuC+132] // check Nan
 v_bfe_u32 v123, v[vgprValuC+132], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10192,7 +10229,7 @@ v_add3_u32 v123, v[vgprValuC+132], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+132], v123, v125, s28
 v_lshrrev_b32 v132, 16, v[vgprValuC+132]           // convert C to bf16
 buffer_store_b16 v132, v176, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v177                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v177                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+133], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+133], v[vgprValuC+133] // check Nan
 v_bfe_u32 v123, v[vgprValuC+133], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10200,7 +10237,7 @@ v_add3_u32 v123, v[vgprValuC+133], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+133], v123, v125, s28
 v_lshrrev_b32 v133, 16, v[vgprValuC+133]           // convert C to bf16
 buffer_store_b16 v133, v178, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v179                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v179                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+134], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+134], v[vgprValuC+134] // check Nan
 v_bfe_u32 v123, v[vgprValuC+134], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10208,7 +10245,7 @@ v_add3_u32 v123, v[vgprValuC+134], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+134], v123, v125, s28
 v_lshrrev_b32 v134, 16, v[vgprValuC+134]           // convert C to bf16
 buffer_store_b16 v134, v180, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v181                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v181                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+135], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+135], v[vgprValuC+135] // check Nan
 v_bfe_u32 v123, v[vgprValuC+135], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10216,7 +10253,7 @@ v_add3_u32 v123, v[vgprValuC+135], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+135], v123, v125, s28
 v_lshrrev_b32 v135, 16, v[vgprValuC+135]           // convert C to bf16
 buffer_store_b16 v135, v182, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v183                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v183                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+136], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+136], v[vgprValuC+136] // check Nan
 v_bfe_u32 v123, v[vgprValuC+136], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10224,7 +10261,7 @@ v_add3_u32 v123, v[vgprValuC+136], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+136], v123, v125, s28
 v_lshrrev_b32 v136, 16, v[vgprValuC+136]           // convert C to bf16
 buffer_store_b16 v136, v184, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v185                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v185                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+137], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+137], v[vgprValuC+137] // check Nan
 v_bfe_u32 v123, v[vgprValuC+137], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10232,7 +10269,7 @@ v_add3_u32 v123, v[vgprValuC+137], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+137], v123, v125, s28
 v_lshrrev_b32 v137, 16, v[vgprValuC+137]           // convert C to bf16
 buffer_store_b16 v137, v186, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v187                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v187                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+138], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+138], v[vgprValuC+138] // check Nan
 v_bfe_u32 v123, v[vgprValuC+138], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10240,7 +10277,7 @@ v_add3_u32 v123, v[vgprValuC+138], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+138], v123, v125, s28
 v_lshrrev_b32 v138, 16, v[vgprValuC+138]           // convert C to bf16
 buffer_store_b16 v138, v188, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v189                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v189                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+139], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+139], v[vgprValuC+139] // check Nan
 v_bfe_u32 v123, v[vgprValuC+139], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10248,7 +10285,7 @@ v_add3_u32 v123, v[vgprValuC+139], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+139], v123, v125, s28
 v_lshrrev_b32 v139, 16, v[vgprValuC+139]           // convert C to bf16
 buffer_store_b16 v139, v190, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v191                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v191                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+140], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+140], v[vgprValuC+140] // check Nan
 v_bfe_u32 v123, v[vgprValuC+140], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10256,7 +10293,7 @@ v_add3_u32 v123, v[vgprValuC+140], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+140], v123, v125, s28
 v_lshrrev_b32 v140, 16, v[vgprValuC+140]           // convert C to bf16
 buffer_store_b16 v140, v192, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v193                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v193                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+141], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+141], v[vgprValuC+141] // check Nan
 v_bfe_u32 v123, v[vgprValuC+141], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10264,7 +10301,7 @@ v_add3_u32 v123, v[vgprValuC+141], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+141], v123, v125, s28
 v_lshrrev_b32 v141, 16, v[vgprValuC+141]           // convert C to bf16
 buffer_store_b16 v141, v194, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v195                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v195                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+142], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+142], v[vgprValuC+142] // check Nan
 v_bfe_u32 v123, v[vgprValuC+142], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10272,7 +10309,7 @@ v_add3_u32 v123, v[vgprValuC+142], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+142], v123, v125, s28
 v_lshrrev_b32 v142, 16, v[vgprValuC+142]           // convert C to bf16
 buffer_store_b16 v142, v196, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v197                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v197                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+143], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+143], v[vgprValuC+143] // check Nan
 v_bfe_u32 v123, v[vgprValuC+143], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10280,7 +10317,7 @@ v_add3_u32 v123, v[vgprValuC+143], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+143], v123, v125, s28
 v_lshrrev_b32 v143, 16, v[vgprValuC+143]           // convert C to bf16
 buffer_store_b16 v143, v198, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v199                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v199                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+144], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+144], v[vgprValuC+144] // check Nan
 v_bfe_u32 v123, v[vgprValuC+144], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10288,7 +10325,7 @@ v_add3_u32 v123, v[vgprValuC+144], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+144], v123, v125, s28
 v_lshrrev_b32 v144, 16, v[vgprValuC+144]           // convert C to bf16
 buffer_store_b16 v144, v200, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v201                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v201                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+145], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+145], v[vgprValuC+145] // check Nan
 v_bfe_u32 v123, v[vgprValuC+145], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10296,7 +10333,7 @@ v_add3_u32 v123, v[vgprValuC+145], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+145], v123, v125, s28
 v_lshrrev_b32 v145, 16, v[vgprValuC+145]           // convert C to bf16
 buffer_store_b16 v145, v202, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v203                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v203                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+146], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+146], v[vgprValuC+146] // check Nan
 v_bfe_u32 v123, v[vgprValuC+146], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10304,7 +10341,7 @@ v_add3_u32 v123, v[vgprValuC+146], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+146], v123, v125, s28
 v_lshrrev_b32 v146, 16, v[vgprValuC+146]           // convert C to bf16
 buffer_store_b16 v146, v204, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v205                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v205                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+147], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+147], v[vgprValuC+147] // check Nan
 v_bfe_u32 v123, v[vgprValuC+147], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10312,7 +10349,7 @@ v_add3_u32 v123, v[vgprValuC+147], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+147], v123, v125, s28
 v_lshrrev_b32 v147, 16, v[vgprValuC+147]           // convert C to bf16
 buffer_store_b16 v147, v206, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v207                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v207                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+148], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+148], v[vgprValuC+148] // check Nan
 v_bfe_u32 v123, v[vgprValuC+148], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10320,7 +10357,7 @@ v_add3_u32 v123, v[vgprValuC+148], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+148], v123, v125, s28
 v_lshrrev_b32 v148, 16, v[vgprValuC+148]           // convert C to bf16
 buffer_store_b16 v148, v208, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v209                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v209                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+149], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+149], v[vgprValuC+149] // check Nan
 v_bfe_u32 v123, v[vgprValuC+149], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10328,7 +10365,7 @@ v_add3_u32 v123, v[vgprValuC+149], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+149], v123, v125, s28
 v_lshrrev_b32 v149, 16, v[vgprValuC+149]           // convert C to bf16
 buffer_store_b16 v149, v210, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v211                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v211                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+150], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+150], v[vgprValuC+150] // check Nan
 v_bfe_u32 v123, v[vgprValuC+150], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10336,7 +10373,7 @@ v_add3_u32 v123, v[vgprValuC+150], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+150], v123, v125, s28
 v_lshrrev_b32 v150, 16, v[vgprValuC+150]           // convert C to bf16
 buffer_store_b16 v150, v212, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v213                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v213                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+151], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+151], v[vgprValuC+151] // check Nan
 v_bfe_u32 v123, v[vgprValuC+151], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10344,7 +10381,7 @@ v_add3_u32 v123, v[vgprValuC+151], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+151], v123, v125, s28
 v_lshrrev_b32 v151, 16, v[vgprValuC+151]           // convert C to bf16
 buffer_store_b16 v151, v214, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v215                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v215                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+152], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+152], v[vgprValuC+152] // check Nan
 v_bfe_u32 v123, v[vgprValuC+152], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10352,7 +10389,7 @@ v_add3_u32 v123, v[vgprValuC+152], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+152], v123, v125, s28
 v_lshrrev_b32 v152, 16, v[vgprValuC+152]           // convert C to bf16
 buffer_store_b16 v152, v216, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v217                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v217                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+153], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+153], v[vgprValuC+153] // check Nan
 v_bfe_u32 v123, v[vgprValuC+153], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10360,7 +10397,7 @@ v_add3_u32 v123, v[vgprValuC+153], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+153], v123, v125, s28
 v_lshrrev_b32 v153, 16, v[vgprValuC+153]           // convert C to bf16
 buffer_store_b16 v153, v218, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v219                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v219                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+154], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+154], v[vgprValuC+154] // check Nan
 v_bfe_u32 v123, v[vgprValuC+154], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10368,7 +10405,7 @@ v_add3_u32 v123, v[vgprValuC+154], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+154], v123, v125, s28
 v_lshrrev_b32 v154, 16, v[vgprValuC+154]           // convert C to bf16
 buffer_store_b16 v154, v220, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v221                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v221                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+155], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+155], v[vgprValuC+155] // check Nan
 v_bfe_u32 v123, v[vgprValuC+155], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10376,7 +10413,7 @@ v_add3_u32 v123, v[vgprValuC+155], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+155], v123, v125, s28
 v_lshrrev_b32 v155, 16, v[vgprValuC+155]           // convert C to bf16
 buffer_store_b16 v155, v222, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v223                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v223                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+156], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+156], v[vgprValuC+156] // check Nan
 v_bfe_u32 v123, v[vgprValuC+156], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10384,7 +10421,7 @@ v_add3_u32 v123, v[vgprValuC+156], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+156], v123, v125, s28
 v_lshrrev_b32 v156, 16, v[vgprValuC+156]           // convert C to bf16
 buffer_store_b16 v156, v224, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v225                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v225                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+157], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+157], v[vgprValuC+157] // check Nan
 v_bfe_u32 v123, v[vgprValuC+157], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10392,7 +10429,7 @@ v_add3_u32 v123, v[vgprValuC+157], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+157], v123, v125, s28
 v_lshrrev_b32 v157, 16, v[vgprValuC+157]           // convert C to bf16
 buffer_store_b16 v157, v226, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v227                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v227                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+158], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+158], v[vgprValuC+158] // check Nan
 v_bfe_u32 v123, v[vgprValuC+158], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10400,7 +10437,7 @@ v_add3_u32 v123, v[vgprValuC+158], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+158], v123, v125, s28
 v_lshrrev_b32 v158, 16, v[vgprValuC+158]           // convert C to bf16
 buffer_store_b16 v158, v228, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v229                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v229                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+159], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+159], v[vgprValuC+159] // check Nan
 v_bfe_u32 v123, v[vgprValuC+159], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10408,7 +10445,7 @@ v_add3_u32 v123, v[vgprValuC+159], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+159], v123, v125, s28
 v_lshrrev_b32 v159, 16, v[vgprValuC+159]           // convert C to bf16
 buffer_store_b16 v159, v231, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v232                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v232                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+160], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+160], v[vgprValuC+160] // check Nan
 v_bfe_u32 v123, v[vgprValuC+160], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10416,7 +10453,7 @@ v_add3_u32 v123, v[vgprValuC+160], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+160], v123, v125, s28
 v_lshrrev_b32 v160, 16, v[vgprValuC+160]           // convert C to bf16
 buffer_store_b16 v160, v233, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v234                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v234                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+161], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+161], v[vgprValuC+161] // check Nan
 v_bfe_u32 v123, v[vgprValuC+161], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10424,7 +10461,7 @@ v_add3_u32 v123, v[vgprValuC+161], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+161], v123, v125, s28
 v_lshrrev_b32 v161, 16, v[vgprValuC+161]           // convert C to bf16
 buffer_store_b16 v161, v235, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v236                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v236                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+162], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+162], v[vgprValuC+162] // check Nan
 v_bfe_u32 v123, v[vgprValuC+162], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10432,7 +10469,7 @@ v_add3_u32 v123, v[vgprValuC+162], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+162], v123, v125, s28
 v_lshrrev_b32 v162, 16, v[vgprValuC+162]           // convert C to bf16
 buffer_store_b16 v162, v237, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v238                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v238                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+163], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+163], v[vgprValuC+163] // check Nan
 v_bfe_u32 v123, v[vgprValuC+163], 16, 1            // Non-Nan case: store lsb of bf16
@@ -10440,7 +10477,7 @@ v_add3_u32 v123, v[vgprValuC+163], v123, v126      // Non-Nan case: add lsb and 
 v_cndmask_b32 v[vgprValuC+163], v123, v125, s28
 v_lshrrev_b32 v163, 16, v[vgprValuC+163]           // convert C to bf16
 buffer_store_b16 v163, v239, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v120, 16, v240                       // cvt bf16 to fp32. 
+v_lshlrev_b32 v120, 16, v240                       // cvt bf16 to fp32.
 v_fmac_f32 v[vgprValuC+164], v120, s[sgprBeta]     // finalSum = sum*alpha + C*beta
 v_cmp_u_f32 s28, v[vgprValuC+164], v[vgprValuC+164] // check Nan
 v_bfe_u32 v123, v[vgprValuC+164], 16, 1            // Non-Nan case: store lsb of bf16

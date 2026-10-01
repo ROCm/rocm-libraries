@@ -4,16 +4,16 @@
 // Q27B unsigned_bias8 custom prefill kernel.
 .amdgcn_target "amdgcn-amd-amdhsa--gfx1151"
 .text
-.protected Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151
-.globl Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151
+.protected RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151
+.globl RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151
 .p2align 8
-.type Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151,@function
+.type RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151,@function
 .section .rodata,#alloc
 .p2align 6
-.amdhsa_kernel Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151
+.amdhsa_kernel RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_next_free_vgpr 164 // vgprs
-  .amdhsa_next_free_sgpr 86 // sgprs
+  .amdhsa_next_free_sgpr 94 // sgprs
   .amdhsa_group_segment_fixed_size 55296 // lds bytes
   .amdhsa_wavefront_size32 1 // 32-thread wavefronts
   .amdhsa_private_segment_fixed_size 0
@@ -38,8 +38,8 @@ amdhsa.version:
   - 1
   - 1
 amdhsa.kernels:
-  - .name: Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151
-    .symbol: 'Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151.kd'
+  - .name: RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151
+    .symbol: 'RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151.kd'
     .language:                   OpenCL C
     .language_version:
       - 2
@@ -197,19 +197,24 @@ amdhsa.kernels:
         .offset:          152
         .value_kind:      by_value
         .value_type:      u64
+      - .name:            groupSize
+        .size:            4
+        .offset:          160
+        .value_kind:      by_value
+        .value_type:      u32
     .group_segment_fixed_size:   55296
     .kernarg_segment_align:      8
-    .kernarg_segment_size:       160
+    .kernarg_segment_size:       168
     .max_flat_workgroup_size:    512
     .private_segment_fixed_size: 0
-    .sgpr_count:                 86
+    .sgpr_count:                 94
     .sgpr_spill_count:           0
     .vgpr_count:                 164
     .vgpr_spill_count:           0
     .wavefront_size:             32
 ...
 .end_amdgpu_metadata
-Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151:
+RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151:
 label_ASM_Start:
 .set vgprMXSBase, 0
 .set vgprValuC, 0
@@ -292,6 +297,20 @@ label_ASM_Start:
 .set BufferLimit, 0xffffffff
 .set BufferOOB, 0xfffff000
 .set Srd127_96, 0x31004000
+// Uniform group-size parameters for G=32,64,128.
+s_load_b32 s86, s[sgprKernArgAddress:sgprKernArgAddress+1], 160
+s_waitcnt lgkmcnt(0)
+s_ff1_i32_b32 s87, s86
+s_lshr_b32 s88, s86, 6
+s_max_u32 s88, s88, 1
+s_sub_u32 s88, s88, 1
+s_mov_b32 s90, 64
+s_lshr_b32 s90, s90, s87
+s_max_u32 s90, s90, 1
+s_lshl_b32 s89, s90, 1
+s_lshl_b32 s90, s90, 2
+s_sub_u32 s86, s86, 1
+s_mov_b32 s91, 0
 s_load_b32 s20, s[sgprKernArgAddress:sgprKernArgAddress+1], 0
 s_load_b32 s22, s[sgprKernArgAddress:sgprKernArgAddress+1], 4
 s_load_b32 s[sgprWGM], s[sgprKernArgAddress:sgprKernArgAddress+1], 8
@@ -1011,8 +1030,8 @@ s_add_u32 s[sgprSrdA+0], s[sgprAddressA+0], s18
 s_addc_u32 s[sgprSrdA+1], s[sgprAddressA+1], s19
 label_StridedBatchedGemmLoadA_End:
 s_mov_b32 s[sgprSrdA+3], Srd127_96
-s_add_u32 s[sgprStrideScaleA], s[sgprSizeL], 0x1f
-s_lshr_b32 s[sgprStrideScaleA], s[sgprStrideScaleA], 5
+s_add_u32 s[sgprStrideScaleA], s[sgprSizeL], s86
+s_lshr_b32 s[sgprStrideScaleA], s[sgprStrideScaleA], s87
 s_mul_i32 s16, s[sgprWorkGroup0], 128
 s_mul_i32 s16, s16, s[sgprStrideScaleA]
 s_mul_i32 s16, s16, 2
@@ -1127,7 +1146,7 @@ s_mov_b32 s[sgprSrdB+3], Srd127_96
 v_mul_lo_u32 v14, s[sgprStrideA0I], v[6]
 v_add_co_u32 v[vgprGlobalReadOffsetA+0+0], vcc_lo, v[12], v[14+0]
 v_add_nc_u32 v[vgprGlobalReadOffsetA+0+0], 0x8, v[vgprGlobalReadOffsetA+0+0]
-v_lshrrev_b32 v14, 5, v12
+v_lshrrev_b32 v14, s87, v12
 v_mul_lo_u32 v[vgprGlobalReadOffsetScaleA+0], s[sgprStrideScaleA], v6
 v_add_nc_u32 v[vgprGlobalReadOffsetScaleA+0], v14, v[vgprGlobalReadOffsetScaleA+0]
 v_lshlrev_b32 v[vgprGlobalReadOffsetScaleA+0], 1, v[vgprGlobalReadOffsetScaleA+0]
@@ -1141,7 +1160,7 @@ v_lshrrev_b32 v[vgprGlobalReadOffsetA+0], 1, v[vgprGlobalReadOffsetA+0]
 v_mul_lo_u32 v14, s[sgprStrideA0I], v[7]
 v_add_co_u32 v[vgprGlobalReadOffsetA+1+0], vcc_lo, v[12], v[14+0]
 v_add_nc_u32 v[vgprGlobalReadOffsetA+1+0], 0x8, v[vgprGlobalReadOffsetA+1+0]
-v_lshrrev_b32 v14, 5, v12
+v_lshrrev_b32 v14, s87, v12
 v_mul_lo_u32 v[vgprGlobalReadOffsetScaleA+1], s[sgprStrideScaleA], v7
 v_add_nc_u32 v[vgprGlobalReadOffsetScaleA+1], v14, v[vgprGlobalReadOffsetScaleA+1]
 v_lshlrev_b32 v[vgprGlobalReadOffsetScaleA+1], 1, v[vgprGlobalReadOffsetScaleA+1]
@@ -1301,12 +1320,16 @@ s_sub_u32 s[sgprShadowLimitA+0], s[sgprShadowLimitA+0], s16
 s_subb_u32 s[sgprShadowLimitA+1], s[sgprShadowLimitA+1], s17
 s_cmp_eq_u32 s[sgprShadowLimitA+1], 0
 s_cselect_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0], BufferLimit
-s_add_u32 s[sgprSrdScaleA+0], s[sgprSrdScaleA+0], 0x4
+s_add_u32 s91, s91, 1
+s_and_b32 s92, s91, s88
+s_cselect_b32 s92, 0, s89
+s_cselect_b32 s93, 0, s90
+s_add_u32 s[sgprSrdScaleA+0], s[sgprSrdScaleA+0], s92
 s_addc_u32 s[sgprSrdScaleA+1], s[sgprSrdScaleA+1], 0
-s_sub_u32 s[sgprSrdScaleA+2], s[sgprSrdScaleA+2], 0x4
-s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], 0x8
+s_sub_u32 s[sgprSrdScaleA+2], s[sgprSrdScaleA+2], s92
+s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], s93
 s_addc_u32 s[sgprSrdScaleZeroA+1], s[sgprSrdScaleZeroA+1], 0
-s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], 0x8
+s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], s93
 s_add_u32 s18, s[sgprLoopCounterL], 1
 s_cmp_eq_u32 s[sgprStaggerUIter], s18
 s_cselect_b32 s16, s[sgprWrapUB+0], s[sgprGlobalReadIncsB+0]
@@ -1677,14 +1700,18 @@ s_cselect_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0], BufferLimit
 s_waitcnt lgkmcnt(3)
 v_wmma_f32_16x16x16_f16 v[vgprValuC+8:vgprValuC+8+7], v[vgprValuB_X0_I0+0+0+0:vgprValuB_X0_I0+0+0+0+7], v[vgprValuA_X0_I0+8+0+0:vgprValuA_X0_I0+8+0+0+7], v[vgprValuC+8:vgprValuC+8+7]
 ds_load_b128 v[vgprValuB_X0_I0+20:vgprValuB_X0_I0+20+3], v[vgprLocalReadAddrB+0] offset:18480
-s_add_u32 s[sgprSrdScaleA+0], s[sgprSrdScaleA+0], 0x4
+s_add_u32 s91, s91, 1
+s_and_b32 s92, s91, s88
+s_cselect_b32 s92, 0, s89
+s_cselect_b32 s93, 0, s90
+s_add_u32 s[sgprSrdScaleA+0], s[sgprSrdScaleA+0], s92
 s_addc_u32 s[sgprSrdScaleA+1], s[sgprSrdScaleA+1], 0
-s_sub_u32 s[sgprSrdScaleA+2], s[sgprSrdScaleA+2], 0x4
+s_sub_u32 s[sgprSrdScaleA+2], s[sgprSrdScaleA+2], s92
 s_waitcnt lgkmcnt(2)
 v_wmma_f32_16x16x16_f16 v[vgprValuC+16:vgprValuC+16+7], v[vgprValuB_X0_I0+8+0+0:vgprValuB_X0_I0+8+0+0+7], v[vgprValuA_X0_I0+0+0+0:vgprValuA_X0_I0+0+0+0+7], v[vgprValuC+16:vgprValuC+16+7]
-s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], 0x8
+s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], s93
 s_addc_u32 s[sgprSrdScaleZeroA+1], s[sgprSrdScaleZeroA+1], 0
-s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], 0x8
+s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], s93
 v_wmma_f32_16x16x16_f16 v[vgprValuC+24:vgprValuC+24+7], v[vgprValuB_X0_I0+8+0+0:vgprValuB_X0_I0+8+0+0+7], v[vgprValuA_X0_I0+8+0+0:vgprValuA_X0_I0+8+0+0+7], v[vgprValuC+24:vgprValuC+24+7]
 ds_load_b128 v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprLocalReadAddrB+0] offset:27680
 ds_load_b128 v[vgprValuB_X0_I0+28:vgprValuB_X0_I0+28+3], v[vgprLocalReadAddrB+0] offset:27696

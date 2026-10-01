@@ -190,66 +190,156 @@ DefaultSolution:
 DeviceNames:
 - Device 1536
 ExactLogic:
-- - - 34816
-    - 2048
-    - 1
-    - 5120
-  - - 3
-    - 35894.0
-- - - 5120
-    - 2048
-    - 1
-    - 17408
-  - - 4
-    - 37592.3
-- - - 16384
-    - 2048
-    - 1
-    - 5120
-  - - 4
-    - 36668.4
-- - - 14336
-    - 2048
-    - 1
-    - 5120
-  - - 4
-    - 36567.2
-- - - 5120
-    - 2048
-    - 1
-    - 6144
-  - - 4
-    - 37037.9
-- - - 34816
-    - 1
-    - 1
-    - 5120
-  - - 2
-    - 810.4
-- - - 5120
-    - 1
-    - 1
-    - 17408
-  - - 5
-    - 825.3
-- - - 16384
-    - 1
-    - 1
-    - 5120
-  - - 2
-    - 900.9
-- - - 14336
-    - 1
-    - 1
-    - 5120
-  - - 2
-    - 844.0
 - - - 5120
     - 1
     - 1
     - 6144
   - - 6
     - 856.0
+- - - 5120
+    - 1
+    - 1
+    - 17408
+  - - 5
+    - 825.3
+- - - 5120
+    - 2
+    - 1
+    - 6144
+  - - 3
+    - 343.679
+- - - 5120
+    - 2
+    - 1
+    - 17408
+  - - 3
+    - 354.139
+- - - 5120
+    - 3
+    - 1
+    - 6144
+  - - 3
+    - 514.468
+- - - 5120
+    - 3
+    - 1
+    - 17408
+  - - 3
+    - 531.625
+- - - 5120
+    - 4
+    - 1
+    - 6144
+  - - 3
+    - 689.005
+- - - 5120
+    - 4
+    - 1
+    - 17408
+  - - 3
+    - 708.65
+- - - 5120
+    - 2048
+    - 1
+    - 6144
+  - - 4
+    - 37037.9
+- - - 5120
+    - 2048
+    - 1
+    - 17408
+  - - 4
+    - 37592.3
+- - - 14336
+    - 1
+    - 1
+    - 5120
+  - - 2
+    - 844.0
+- - - 14336
+    - 2
+    - 1
+    - 5120
+  - - 3
+    - 325.154
+- - - 14336
+    - 3
+    - 1
+    - 5120
+  - - 3
+    - 487.856
+- - - 14336
+    - 4
+    - 1
+    - 5120
+  - - 3
+    - 650.001
+- - - 14336
+    - 2048
+    - 1
+    - 5120
+  - - 4
+    - 36567.2
+- - - 16384
+    - 1
+    - 1
+    - 5120
+  - - 2
+    - 900.9
+- - - 16384
+    - 2
+    - 1
+    - 5120
+  - - 3
+    - 319.081
+- - - 16384
+    - 3
+    - 1
+    - 5120
+  - - 3
+    - 479.096
+- - - 16384
+    - 4
+    - 1
+    - 5120
+  - - 3
+    - 638.647
+- - - 16384
+    - 2048
+    - 1
+    - 5120
+  - - 4
+    - 36668.4
+- - - 34816
+    - 1
+    - 1
+    - 5120
+  - - 2
+    - 810.4
+- - - 34816
+    - 2
+    - 1
+    - 5120
+  - - 3
+    - 341.301
+- - - 34816
+    - 3
+    - 1
+    - 5120
+  - - 3
+    - 512.317
+- - - 34816
+    - 4
+    - 1
+    - 5120
+  - - 3
+    - 683.126
+- - - 34816
+    - 2048
+    - 1
+    - 5120
+  - - 3
+    - 35894.0
 IndexOrder:
 - 2
 - 3
@@ -376,13 +466,13 @@ Solutions:
   AssertSummationElementMultiple: 64
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
-  BaseName: Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
+  BaseName: RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
   CUCount: null
   CUOccupancy: -1
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
-  CustomKernelName: Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
+  CustomKernelName: RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -418,7 +508,7 @@ Solutions:
     UseSFC: false
     UseUniversalArgs: true
   Kernel: true
-  KernelNameMin: Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
+  KernelNameMin: RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
   LDSSegInterleaveOffsets: null
   LSCA: 64
   LSCB: 64
@@ -630,13 +720,13 @@ Solutions:
   AssertSummationElementMultiple: 64
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
-  BaseName: Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
+  BaseName: RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
   CUCount: null
   CUOccupancy: -1
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
-  CustomKernelName: Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
+  CustomKernelName: RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -672,7 +762,7 @@ Solutions:
     UseSFC: false
     UseUniversalArgs: true
   Kernel: true
-  KernelNameMin: Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
+  KernelNameMin: RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
   LDSSegInterleaveOffsets: null
   LSCA: 64
   LSCB: 64
@@ -881,9 +971,9 @@ Solutions:
   tailLoopOptB: false
   WorkGroupMapping: 4
 - SolutionIndex: 2
-  CustomKernelName: Custom_W4A16_Decode_G32_W4_UnsignedBias8_gfx1151
-  BaseName: Custom_W4A16_Decode_G32_W4_UnsignedBias8_gfx1151
-  KernelNameMin: Custom_W4A16_Decode_G32_W4_UnsignedBias8_gfx1151
+  CustomKernelName: RuntimeGroup_Decode_W4_NativePerm_LinearK_UnsignedBias8_gfx1151
+  BaseName: RuntimeGroup_Decode_W4_NativePerm_LinearK_UnsignedBias8_gfx1151
+  KernelNameMin: RuntimeGroup_Decode_W4_NativePerm_LinearK_UnsignedBias8_gfx1151
   EnableMatrixInstruction: false
   MatrixInstruction: []
   SourceSwap: false
@@ -1139,7 +1229,7 @@ Solutions:
   tailLoopOptA: false
   tailLoopOptB: false
   WorkGroupMapping: 1
-  CustomKernelName: Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT64x256x64_MI16x16x1_gfx1151
+  CustomKernelName: RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT64x256x64_MI16x16x1_gfx1151
   NumElementsPerBatchStore: 1
   1LDSBuffer: 1
 - ActivationFuncCall: false
@@ -1393,21 +1483,21 @@ Solutions:
   tailLoopOptA: false
   tailLoopOptB: false
   WorkGroupMapping: 1
-  CustomKernelName: Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151
+  CustomKernelName: RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151
   NumElementsPerBatchStore: 1
   1LDSBuffer: 1
 - SolutionIndex: 5
-  CustomKernelName: Custom_W4A16_Decode_G32_W4_U1_A4_UnsignedBias8_gfx1151
-  BaseName: Custom_W4A16_Decode_G32_W4_U1_A4_UnsignedBias8_gfx1151
-  KernelNameMin: Custom_W4A16_Decode_G32_W4_U1_A4_UnsignedBias8_gfx1151
+  CustomKernelName: RuntimeGroup_Decode_W4_U1_A4_UnsignedBias8_gfx1151
+  BaseName: RuntimeGroup_Decode_W4_U1_A4_UnsignedBias8_gfx1151
+  KernelNameMin: RuntimeGroup_Decode_W4_U1_A4_UnsignedBias8_gfx1151
   EnableMatrixInstruction: false
   MatrixInstruction: []
   SourceSwap: false
   ConvertAfterDS: false
 - SolutionIndex: 6
-  CustomKernelName: Custom_W4A16_Decode_G32_W4_NativePerm_UnsignedBias8_gfx1151
-  BaseName: Custom_W4A16_Decode_G32_W4_NativePerm_UnsignedBias8_gfx1151
-  KernelNameMin: Custom_W4A16_Decode_G32_W4_NativePerm_UnsignedBias8_gfx1151
+  CustomKernelName: RuntimeGroup_Decode_W4_NativePerm_UnsignedBias8_gfx1151
+  BaseName: RuntimeGroup_Decode_W4_NativePerm_UnsignedBias8_gfx1151
+  KernelNameMin: RuntimeGroup_Decode_W4_NativePerm_UnsignedBias8_gfx1151
   EnableMatrixInstruction: false
   MatrixInstruction: []
   SourceSwap: false

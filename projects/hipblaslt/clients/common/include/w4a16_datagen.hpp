@@ -68,7 +68,7 @@ namespace w4a16
         if(!zeroPoint)
             return static_cast<size_t>(m) * static_cast<size_t>(kGroups) * 2;
         return zeroPointOffset(m, kGroups)
-               + static_cast<size_t>((m + 1) / 2) * static_cast<size_t>(kGroups);
+               + static_cast<size_t>((m + 7) / 8) * static_cast<size_t>(kGroups) * 4;
     }
 }
 
@@ -118,9 +118,8 @@ inline std::vector<float> generateW4A16Input(void*       packedA,
                 const int raw = nibbleDist(rng);
                 // Same domain as the weights: raw [0,15] unsigned, else two's complement.
                 z = unsignedEnc ? raw : (raw ^ 0x8) - 8;
-                // [M][kGroups] order, two rows per byte:
-                // byte = (row/2)*kGroups + g, nibble = row & 1.
-                const size_t e = 2 * (static_cast<size_t>(row / 2) * kGroups + grp) + (row & 1);
+                // Eight rows per word; K-groups are contiguous words.
+                const size_t e = 8 * (static_cast<size_t>(row / 8) * kGroups + grp) + (row & 7);
                 writeNibble(zeros, e / 2, e & 1, static_cast<uint8_t>(raw));
             }
             zByGroup[si] = static_cast<float>(z);

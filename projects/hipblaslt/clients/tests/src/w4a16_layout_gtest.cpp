@@ -17,6 +17,7 @@
 #include <stdexcept>
 
 #include <cstdint>
+#include <cstring>
 
 namespace
 {
@@ -46,7 +47,7 @@ namespace
         {64, 256, 32},
         {128, 512, 32},
         {192, 256, 64},
-        {65, 256, 64},      // odd M: zero-point rows pad to an even count
+        {65, 256, 64},      // odd M: zero-point rows pad to a multiple of eight
         {128, 320, 128},
         {128, 384, 128},    // odd number of K groups
         {2560, 32896, 128}, // a realistic weight matrix
@@ -88,7 +89,7 @@ TEST(w4a16_layout, allocation_covers_both_regions)
     for(const auto& s : shapes)
     {
         const int64_t kGroups = kGroupsOf(s);
-        const size_t  zpBytes = static_cast<size_t>((s.m + 1) / 2) * static_cast<size_t>(kGroups);
+        const size_t  zpBytes = static_cast<size_t>((s.m + 7) / 8) * static_cast<size_t>(kGroups) * 4;
         EXPECT_EQ(w4a16::scaleBytes(s.m, kGroups, true),
                   w4a16::zeroPointOffset(s.m, kGroups) + zpBytes)
             << "m=" << s.m << " k=" << s.k << " g=" << s.groupSize;
@@ -113,4 +114,50 @@ TEST(w4a16_encoding, cpp_api_accepts_only_supported_encodings)
                      std::invalid_argument);
         EXPECT_EQ(problem.getInt4EncodingA(), HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXT);
     }
+}
+
+TEST(w4a16_layout, eight_row_words_match_dequantized_reference)
+{
+    for(int64_t m : {1, 7, 8, 9, 65})
+        for(int groupSize : {32, 64, 128})
+            for(auto dtype : {HIP_R_16F, HIP_R_16BF})
+                for(auto encoding : {HIPBLASLT_INT4_ENCODING_SIGNED_EXT,
+                                     HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXT})
+                {
+                    constexpr int64_t k = 384;
+                    const int64_t groups = k / groupSize;
+                    const size_t offset = (m * groups * 2 + 255) & ~size_t(255);
+                    const size_t bytes = offset + ((m + 7) / 8) * groups * 4;
+                    std::vector<uint8_t> packed(m * k / 2, 0);
+                    std::vector<uint32_t> allocation((bytes + 4) / 4, 0);
+                    allocation.back() = 0xdeadbeef;
+                    const auto reference = generateW4A16Input(packed.data(), allocation.data(),
+                        dtype, m, k, k, groupSize, true, encoding);
+                    const auto* scales = reinterpret_cast<const uint8_t*>(allocation.data());
+                    for(int64_t row = 0; row < m; ++row)
+                        for(int64_t col = 0; col < k; ++col)
+                        {
+                            uint32_t word;
+                            std::memcpy(&word, scales + offset
+                                + 4 * ((row / 8) * groups + col / groupSize), 4);
+                            int z = (word >> (4 * (row % 8))) & 15;
+                            const size_t element = row * k + col;
+                            int q = (packed[element / 2] >> (4 * (element % 2))) & 15;
+                            if(encoding == HIPBLASLT_INT4_ENCODING_SIGNED_EXT)
+                            {
+                                q = (q ^ 8) - 8;
+                                z = (z ^ 8) - 8;
+                            }
+                            const float scale = w4a16::loadAs(scales,
+                                row * groups + col / groupSize, dtype);
+                            const float value = (q - z) * scale;
+                            const float rounded = dtype == HIP_R_16F
+                                ? float(hipblasLtHalf(value)) : float(hip_bfloat16(value));
+                            ASSERT_EQ(reference[element], rounded)
+                                << "m=" << m << " row=" << row << " col=" << col
+                                << " group=" << groupSize << " dtype=" << dtype
+                                << " encoding=" << encoding;
+                        }
+                    EXPECT_EQ(allocation.back(), 0xdeadbeef);
+                }
 }

@@ -5374,43 +5374,29 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   def blockScaleZeroAComputeSrd(self, kernel):
-    """SrdScaleZeroA, based at this workgroup's first zero-point byte.
-
-    Zero-points are one signed int4 per group in the same [M][kGroups] row-major
-    order as the scales, but packed two per byte along M:
-
-        byte = (m/2)*kGroups + g        nibble = m & 1
-
-    Pairing along M (one byte = rows 2r and 2r+1 of the same K-group) is what
-    keeps the K walk parity-free: a thread's nibble is fixed by its row for the
-    whole loop, and one K iteration advances the SRD by exactly groupsPerIter
-    bytes whatever the group size. Pairing along K instead would make an odd
-    DepthU/G advance half a byte per row and flip every thread's nibble.
-
-    The workgroup base row is WorkGroup0*MacroTile0, which BlockDequant.py keeps
-    even (MacroTile0 even), so halving it is exact and the workgroup-local row
-    carries the global row's nibble parity.
-    """
+    """Eight-row uint32 words, with K-groups contiguous within each row block."""
     module = Module("blockScaleZeroAComputeSrd")
     module.addComment1("global read addresses: block-scale A zero-point srd")
 
     with self.allocTmpSgpr(2, alignment=2, tag="blockScaleZeroAComputeSrd") as tmpSgprInfo:
       tmp = tmpSgprInfo.idx
 
-      # Byte offset of this workgroup's first zero-point: (wg0*MT0/2)*kGroups.
+      # Aligned origin: (wg0*MT0/8)*4*kGroups == (wg0*MT0/2)*kGroups.
       module.add(SMulI32(dst=sgpr(tmp), src0=sgpr("WorkGroup0"), src1=kernel["MacroTile0"],
                          comment="scaleZeroA: workgroup row origin"))
       module.add(SLShiftRightB32(dst=sgpr(tmp), shiftHex=1, src=sgpr(tmp),
-                                 comment="scaleZeroA: 2 rows per byte"))
+                                 comment="scaleZeroA: aligned row origin to bytes"))
       module.add(SMulI32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr("StrideScaleA"),
                          comment="scaleZeroA: * kGroups"))
 
-      # Limit: ceil(SizeI/2)*kGroups bytes, minus what the base skipped.
+      # Limit: ceil(SizeI/8)*4*kGroups bytes, minus the base offset.
       module.add(SAddU32(dst=sgpr(tmp + 1),
-                         src0=self.sizeRef(kernel["ProblemType"]["Index0"]), src1=1,
-                         comment="scaleZeroA: SizeI + 1"))
-      module.add(SLShiftRightB32(dst=sgpr(tmp + 1), shiftHex=1, src=sgpr(tmp + 1),
-                                 comment="scaleZeroA: ceil(SizeI/2) row pairs"))
+                         src0=self.sizeRef(kernel["ProblemType"]["Index0"]), src1=7,
+                         comment="scaleZeroA: SizeI + 7"))
+      module.add(SLShiftRightB32(dst=sgpr(tmp + 1), shiftHex=3, src=sgpr(tmp + 1),
+                                 comment="scaleZeroA: ceil(SizeI/8) words"))
+      module.add(SLShiftLeftB32(dst=sgpr(tmp + 1), shiftHex=2, src=sgpr(tmp + 1),
+                                comment="scaleZeroA: words to bytes"))
       module.add(SMulI32(dst=sgpr(tmp + 1), src0=sgpr(tmp + 1), src1=sgpr("StrideScaleA"),
                          comment="scaleZeroA: total bytes"))
       module.add(SSubU32(dst=sgpr("SrdScaleZeroA+2"), src0=sgpr(tmp + 1), src1=sgpr(tmp),
@@ -5443,26 +5429,23 @@ class KernelWriterAssembly(KernelWriter):
                               comment="scaleA: elements -> bytes"))
 
     if kernel["ProblemType"]["ScaleZeroPointA"]:
-      # Zero-points share the scales' [M][kGroups] order but pack two rows per
-      # byte: byte = (row/2)*kGroups + kGroup, nibble = row & 1. Kept as
-      # (byte << 1) | nibble so one register carries both. vgprTile is the
-      # workgroup-local row and MacroTile0 is even, so its low bit is the
-      # nibble parity of the global row. tmp still holds kGroup here.
+      # Keep a linear nibble index; its low bit selects within the loaded byte.
       dstZ = "GlobalReadOffsetScaleZeroA+%u" % graIdx
-      module.add(VLShiftRightB32(dst=vgpr(dstZ), shiftHex=1, src=vgpr(vgprTile),
-                                 comment="scaleZeroA: row / 2"))
+      module.add(VLShiftRightB32(dst=vgpr(dstZ), shiftHex=3, src=vgpr(vgprTile),
+                                 comment="scaleZeroA: row / 8"))
       module.add(VMulLOU32(dst=vgpr(dstZ), src0=sgpr("StrideScaleA"), src1=vgpr(dstZ),
-                           comment="scaleZeroA: (row/2) * kGroups"))
+                           comment="scaleZeroA: (row/8) * kGroups"))
       module.add(VAddU32(dst=vgpr(dstZ), src0=vgpr(tmp), src1=vgpr(dstZ),
-                         comment="scaleZeroA: + kGroup -> byte offset"))
-      module.add(VMovB32(dst=vgpr("GlobalReadByteOffsetScaleZeroA+%u" % graIdx),
-                         src=vgpr(dstZ), comment="scaleZeroA: save loop-invariant byte offset"))
-      module.add(VLShiftLeftB32(dst=vgpr(dstZ), shiftHex=1, src=vgpr(dstZ),
-                                comment="scaleZeroA: make room for the nibble bit"))
-      module.add(VAndB32(dst=vgpr(tmp), src0=1, src1=vgpr(vgprTile),
-                         comment="scaleZeroA: nibble = row & 1"))
+                         comment="scaleZeroA: + kGroup -> word offset"))
+      module.add(VLShiftLeftB32(dst=vgpr(dstZ), shiftHex=3, src=vgpr(dstZ),
+                                comment="scaleZeroA: word to nibble index"))
+      module.add(VAndB32(dst=vgpr(tmp), src0=7, src1=vgpr(vgprTile),
+                         comment="scaleZeroA: nibble = row & 7"))
       module.add(VOrB32(dst=vgpr(dstZ), src0=vgpr(tmp), src1=vgpr(dstZ),
-                        comment="scaleZeroA: (byte << 1) | nibble"))
+                        comment="scaleZeroA: (word << 3) | nibble"))
+      module.add(VLShiftRightB32(dst=vgpr("GlobalReadByteOffsetScaleZeroA+%u" % graIdx),
+                                 shiftHex=1, src=vgpr(dstZ),
+                                 comment="scaleZeroA: save loop-invariant byte offset"))
     return module
 
   def blockScaleAGlobalRead(self, kernel, tP):
@@ -5562,7 +5545,7 @@ class KernelWriterAssembly(KernelWriter):
       # DepthU < blockSize: one group, one element, several iterations.
       numTmp = 2 if kernel["ProblemType"]["ScaleZeroPointA"] else 1
       with self.allocTmpSgpr(numTmp, tag="blockScaleAIncrement") as tmpSgprInfo:
-        module.add(self.blockScaleASlowIncrement(kernel, bpe, 1, tmpSgprInfo.idx))
+        module.add(self.blockScaleASlowIncrement(kernel, bpe, 4, tmpSgprInfo.idx))
       return module
 
     # BlockDequant.py guarantees blockSize divides DepthU on this path.
@@ -5576,11 +5559,8 @@ class KernelWriterAssembly(KernelWriter):
                        comment="scaleA limit -= inc"))
 
     if kernel["ProblemType"]["ScaleZeroPointA"]:
-      # Because bytes pair along M, one K-group is one byte: an iteration
-      # advances by exactly groupsPerIter bytes, an integer for any group size,
-      # and a thread's nibble is untouched. That is why this layout carries no
-      # DepthU/G parity constraint.
-      zeroIncBytes = kernel["DepthU"] // blockSize
+      # One K-group advances one uint32 word.
+      zeroIncBytes = 4 * (kernel["DepthU"] // blockSize)
       module.add(SAddU32(dst=sgpr("SrdScaleZeroA+0"), src0=sgpr("SrdScaleZeroA+0"),
                          src1=hex(zeroIncBytes), comment="scaleZeroA SRD += inc(lower)"))
       module.add(SAddCU32(dst=sgpr("SrdScaleZeroA+1"), src0=sgpr("SrdScaleZeroA+1"), src1=0,

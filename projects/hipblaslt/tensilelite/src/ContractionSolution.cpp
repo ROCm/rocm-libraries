@@ -2751,12 +2751,22 @@ namespace TensileLite
         // Batch offset support for General Batched GEMM (SupportUserArgs kernels).
         // Appended at the tail, after the dstD/Synchronizer block, to match the
         // kernel signature order (see Signature.py).
-        if(!problemType.groupedGemm && (customKernel.name.empty() || customKernel.generated))
+        const bool runtimeGroup = customKernel.name == "RuntimeGroup"
+                                  || customKernel.name.rfind("RuntimeGroup_", 0) == 0;
+        if(!problemType.groupedGemm
+           && (customKernel.name.empty() || customKernel.generated || runtimeGroup))
         {
             rv.args.append<int64_t>("batchOffsetD", inputs.batchOffsetD);
             rv.args.append<int64_t>("batchOffsetC", inputs.batchOffsetC);
             rv.args.append<int64_t>("batchOffsetA", inputs.batchOffsetA);
             rv.args.append<int64_t>("batchOffsetB", inputs.batchOffsetB);
+        }
+        if(runtimeGroup)
+        {
+            if(problemType.groupedGemm || (rv.args.size() != 152 && rv.args.size() != 160))
+                throw std::runtime_error("RuntimeGroup requires the 152- or 160-byte single-GEMM argument layout");
+            rv.args.append<uint32_t>("groupSize", problem.scaleBlockSizeA());
+            rv.args.append<uint32_t>("groupSizePadding", 0);
         }
 
         // The fused GEMM+A2A segment follows batchOffsets in the kernel signature.

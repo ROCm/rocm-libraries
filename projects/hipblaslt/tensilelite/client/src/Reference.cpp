@@ -156,7 +156,7 @@ namespace TensileLite
         }
 
         // w4a16 asymmetric zero-point: two rows per byte, with nibble index
-        // e = 2*((m/2)*kGroups + g) + (m&1) (see setScaleBlockSizeA).
+        // e = 8*((m/8)*kGroups + g) + (m&7) (see setScaleBlockSizeA).
         inline int blockZeroPointElement(void const* base, size_t e, bool isUnsigned)
         {
             uint8_t byte   = static_cast<uint8_t const*>(base)[e / 2];
@@ -2156,14 +2156,14 @@ namespace TensileLite
                                 size_t kGroup
                                     = (boundIndices[0].aMirror ? (boundSize[0] - i - 1) : i)
                                       / problem.scaleBlockSizeA();
-                                // [M][kGroups] row-major, packed two per byte
-                                // along M: byte = (m/2)*kGroups + g, nibble =
-                                // m & 1 (see setScaleBlockSizeA). Fold that back
+                                // Eight rows per word with contiguous K-groups.
+                                // along M: word = (m/8)*kGroups + g, nibble =
+                                // m & 7 (see setScaleBlockSizeA). Fold that back
                                 // into the flattened nibble index the accessor
                                 // takes.
                                 size_t m       = aCoord[freeIndicesA[0].i];
                                 size_t kGroups = problem.scaleATensor().sizes()[0];
-                                size_t e = 2 * ((m / 2) * kGroups + kGroup) + (m & 1);
+                                size_t e = 8 * ((m / 8) * kGroups + kGroup) + (m & 7);
                                 zAcc = static_cast<Accumulator>(blockZeroPointElement(
                                     inputs.scaleZeroA, e, problem.int4UnsignedA()));
                               }

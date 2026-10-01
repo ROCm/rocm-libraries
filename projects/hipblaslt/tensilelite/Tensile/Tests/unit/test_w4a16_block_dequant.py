@@ -558,6 +558,16 @@ def test_zero_point_solution_is_valid(toolchain):
         assert sol.get("Valid") is True, f"G={blockSize} DepthU={depthU} should be valid"
 
 
+@pytest.mark.parametrize("custom", [False, True])
+def test_eight_row_alignment_applies_only_to_generated_kernels(toolchain, custom):
+    from Tensile.SolutionStructs.Validators.BlockDequant import validateBlockDequantCombination
+
+    params = dict(_solution(toolchain, zeroPoint=True))
+    params["MacroTile0"] = 4
+    params["CustomKernelName"] = "CustomAbsoluteRowAddressing" if custom else ""
+    assert validateBlockDequantCombination(params, False) is custom
+
+
 @pytest.mark.parametrize(
     "kw",
     [
@@ -688,10 +698,9 @@ def test_zero_point_nibble_comes_from_the_row_not_the_scale_offset(toolchain):
         "nibble must be derived from the zero-point offset register"
     assert not re.search(r"v_and_b32 \S+, 2, v\[vgprGlobalReadOffsetScaleA\+\d+\]", src), \
         "nibble must no longer be derived from the scale offset"
-    # Packing along M makes one K-group exactly one byte, so a single group per
-    # iteration advances the zero-point SRD by a literal 1 byte.
-    assert re.search(r"s_add_u32 s\[sgprSrdScaleZeroA\+0\], s\[sgprSrdScaleZeroA\+0\], 0x1\b",
-                     src), "one group per iteration should advance the SRD by 1 byte"
+    # A K-group advances one four-byte word.
+    assert re.search(r"s_add_u32 s\[sgprSrdScaleZeroA\+0\], s\[sgprSrdScaleZeroA\+0\], 0x4\b",
+                     src), "one group per iteration should advance the SRD by 4 bytes"
 
 
 def test_zero_point_without_block_mode_is_rejected(toolchain):
@@ -771,8 +780,8 @@ def test_zero_point_byte_offsets_are_hoisted(toolchain, block_size):
     count = kernel["NumLoadsCoalescedA"] * kernel["NumLoadsPerpendicularA"]
     for index in range(count):
         offset = f"v[vgprGlobalReadByteOffsetScaleZeroA+{index}]"
-        assert f"v_mov_b32 {offset}," in prologue
-        assert f"v_mov_b32 {offset}," not in loop
+        assert f"v_lshrrev_b32 {offset}, 1," in prologue
+        assert f"v_lshrrev_b32 {offset}, 1," not in loop
         assert f"buffer_load_d16_u8 v[vgprG2LScaleZeroA+{index}], {offset}," in loop
     assert "drop the nibble bit" not in src
 
