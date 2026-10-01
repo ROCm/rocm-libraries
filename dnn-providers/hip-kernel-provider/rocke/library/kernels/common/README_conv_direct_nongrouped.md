@@ -90,8 +90,10 @@ Waves split the block `waves_m x waves_n`: `waves_m` along output channels,
    *base* byte offset: `select(valid, base, 0x7F000000)`. A buffer load whose
    offset lies past `num_records` returns zero — exactly the value a padded pixel
    or an out-of-range filter row needs — so the loop body carries no compare,
-   `and` or `select` at all. `0x7F000000` leaves headroom for the per-chunk
-   channel offset without wrapping i32.
+   `and` or `select` at all. `validate()` guarantees the trick holds: every
+   operand tensor must end at or below `0x7F000000` bytes (the tensor sizes are
+   compile-time, so the kernel's runtime byte lengths cannot exceed them), and
+   `0x7F000000` plus the largest per-chunk channel offset must still fit in i32.
 
 6. **Software prefetch through loop-carried registers**
   . The global loads
@@ -166,10 +168,16 @@ Constraints (`validate()` then `is_valid_nongrouped_spec(spec, arch)`):
 
 * `groups == 1`, dtype fp16/bf16, atom known and present on the target
   (`32x32x16` and `16x16x32` need gfx950; `32x32x8` / `16x16x16` also gfx942);
+* tile, wave, `ck` and stride values positive (checked before any derived
+  geometry, so a bad spec gets a reason, not a `ZeroDivisionError`);
 * `tile_w`, `tile_k`, `K` multiples of the atom tile; `tile_h % waves_n == 0`;
   `(tile_k / atom_tile) % waves_m == 0`;
 * `ck % atom_k == 0`, `ck % 8 == 0`, `C % ck == 0`, `C % 8 == 0`;
-* `lds_pad` even; `swizzle_wgm >= 1`; accumulators ≤ 256 registers per lane;
+* `lds_pad` non-negative and even (a negative pad overlaps neighbouring pixels
+  in LDS); `swizzle_wgm >= 1`; `iglp` None or ≥ 0; `waves_per_eu` None or ≥ 1
+  (the C++ port encodes None as -1 / 0, so those values are reserved in both
+  engines); A, B and D each ≤ `0x7F000000` bytes; accumulators ≤ 256 registers
+  per lane;
 * `stride ∈ {1, 2}`; threads, wave size and `lds_bytes` within the arch limits.
 
 Usage:
@@ -201,8 +209,9 @@ The grid is flat; the kernel decodes `(k_tile, spatial cell)` from the block id
 
 `nongrouped_specs(problem, arch=...)` returns every valid, name-deduplicated
 spec over `tile_h ∈ {8, 16}`, `tile_k ∈ {32, 64, 128, 256}`,
-`ck ∈ {16, 32, 64}`, five wave layouts, the two square atoms used for tuning
-(`32x32x16`, `16x16x32`) and the `tile_w_candidates` of each atom.
+`ck ∈ {16, 32, 64}`, five wave layouts, and per MFMA tile size the widest-K
+atom the target supports (`32x32x16` / `16x16x32` on gfx950, `32x32x8` /
+`16x16x16` on gfx942) with the `tile_w_candidates` of each atom.
 `benchmarks/common/benchmark_direct_conv.py` routes `groups == 1` shapes to
 this sweep:
 

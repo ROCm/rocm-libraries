@@ -357,13 +357,52 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
         NONGROUPED_REJECT("threads_per_block %d > 1024",
                           rocke_direct_conv_nongrouped_threads_per_block(spec));
     }
-    if(spec->lds_pad % 2 != 0)
+    if(spec->lds_pad < 0 || spec->lds_pad % 2 != 0)
     {
-        NONGROUPED_REJECT("lds_pad must be even to keep ds_read_b128 aligned");
+        /* A negative pad shrinks the pixel stride below the ck halves each
+         * pixel stages, so neighbouring pixels overlap in LDS. */
+        NONGROUPED_REJECT(
+            "lds_pad must be a non-negative even number to keep ds_read_b128 aligned (got %d)",
+            spec->lds_pad);
     }
     if(spec->swizzle_wgm < 1)
     {
         NONGROUPED_REJECT("swizzle_wgm must be >= 1 (got %d)", spec->swizzle_wgm);
+    }
+    /* -1 / 0 are this port's "None" sentinels; anything below them has no
+     * Python spelling, and Python rejects the sentinel values themselves. */
+    if(spec->iglp < ROCKE_DCONV_NONGROUPED_IGLP_NONE)
+    {
+        NONGROUPED_REJECT("iglp must be None or >= 0 (got %d)", spec->iglp);
+    }
+    if(spec->waves_per_eu < ROCKE_DCONV_NONGROUPED_WAVES_PER_EU_NONE)
+    {
+        NONGROUPED_REJECT("waves_per_eu must be None or >= 1 (got %d)", spec->waves_per_eu);
+    }
+    {
+        /* Masked staging loads read at OOB_BASE and rely on it being past
+         * num_records; a larger tensor would hand them real data. */
+        long long a_bytes = 2LL * p->N * p->H * p->W * p->cpg;
+        long long b_bytes = 2LL * p->kpg * p->KH * p->KW * p->cpg;
+        long long d_bytes = 2LL * p->N * nongrouped_ho(p) * nongrouped_wo(p) * p->kpg;
+        long long biggest = a_bytes > b_bytes ? a_bytes : b_bytes;
+        biggest = d_bytes > biggest ? d_bytes : biggest;
+        if(biggest > ROCKE_DCONV_NONGROUPED_OOB_BASE)
+        {
+            NONGROUPED_REJECT("tensors must fit below the %#x-byte masked-load offset (A %lld B, "
+                              "B %lld B, D %lld B)",
+                              ROCKE_DCONV_NONGROUPED_OOB_BASE,
+                              a_bytes,
+                              b_bytes,
+                              d_bytes);
+        }
+        /* The last prefetch runs one chunk (two when double-buffered) past C. */
+        if((long long)ROCKE_DCONV_NONGROUPED_OOB_BASE + 2LL * (p->cpg + spec->ck) > INT32_MAX)
+        {
+            NONGROUPED_REJECT("C %d too large: the masked-load offset plus the channel offset "
+                              "would overflow i32",
+                              p->cpg);
+        }
     }
     if(rocke_direct_conv_nongrouped_acc_vgprs(spec) > 256)
     {
@@ -1304,14 +1343,27 @@ rocke_kernel_def_t* rocke_build_direct_conv_nongrouped(
 rocke_kernel_def_t* rocke_build_direct_conv_nongrouped_new(
     rocke_ir_builder_t* b, const rocke_direct_conv_nongrouped_spec_t* spec, const char* arch)
 {
+    if(b != NULL)
+    {
+        /* Zero first, so every early return below leaves a builder the caller
+         * can safely query and rocke_ir_builder_free(). */
+        memset(b, 0, sizeof(*b));
+    }
     return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         char name[512];
-        if(b == NULL || spec == NULL)
+        if(b == NULL)
         {
+            return NULL;
+        }
+        if(spec == NULL)
+        {
+            rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, "build_direct_conv_nongrouped: null spec");
             return NULL;
         }
         if(rocke_direct_conv_nongrouped_kernel_name(spec, name, sizeof(name)) != ROCKE_OK)
         {
+            rocke_i_set_err_msg(
+                b, ROCKE_ERR_VALUE, "build_direct_conv_nongrouped: kernel name does not fit");
             return NULL;
         }
         if(rocke_ir_builder_init(b, name) != ROCKE_OK)
@@ -1330,7 +1382,7 @@ rocke_status_t
                                                char* err,
                                                size_t err_cap)
 {
-    rocke_ir_builder_t b;
+    rocke_ir_builder_t b = {};
     rocke_kernel_def_t* kernel;
     rocke_status_t st;
 

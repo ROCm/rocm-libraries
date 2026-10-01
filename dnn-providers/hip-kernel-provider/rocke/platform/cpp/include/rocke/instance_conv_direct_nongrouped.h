@@ -28,6 +28,8 @@
  *
  * Optional Python knobs (`iglp: int | None`, `waves_per_eu: int | None`) map to
  * the sentinels ROCKE_DCONV_NONGROUPED_IGLP_NONE / ROCKE_DCONV_NONGROUPED_WAVES_PER_EU_NONE.
+ * Python rejects the sentinel values themselves (iglp < 0, waves_per_eu < 1) and
+ * this port rejects anything below them, so a spec means the same in both engines.
  */
 #ifndef ROCKE_INSTANCE_CONV_DIRECT_NONGROUPED_H
 #define ROCKE_INSTANCE_CONV_DIRECT_NONGROUPED_H

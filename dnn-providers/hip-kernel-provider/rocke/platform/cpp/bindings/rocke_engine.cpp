@@ -1754,10 +1754,23 @@ rocke_direct_conv_nongrouped_spec_t dnongrouped_build_spec(const py::dict& d,
     s.chiplet_chunk = dict_int(d, "chiplet_chunk", s.chiplet_chunk);
     s.num_xcds = dict_int(d, "num_xcds", s.num_xcds);
     s.double_buffer = dict_bool(d, "double_buffer", s.double_buffer);
+    /* The C spec encodes None as a sentinel (-1 / 0). An explicit value in the
+     * sentinel range would silently read as None here, so reject it with the
+     * message Python's validate() raises for the same spec. */
     if(d.contains("iglp") && !d["iglp"].is_none())
+    {
         s.iglp = d["iglp"].cast<int>();
+        if(s.iglp < 0)
+            throw std::runtime_error("iglp must be None or >= 0 (got " + std::to_string(s.iglp)
+                                     + ")");
+    }
     if(d.contains("waves_per_eu") && !d["waves_per_eu"].is_none())
+    {
         s.waves_per_eu = d["waves_per_eu"].cast<int>();
+        if(s.waves_per_eu < 1)
+            throw std::runtime_error("waves_per_eu must be None or >= 1 (got "
+                                     + std::to_string(s.waves_per_eu) + ")");
+    }
     return s;
 }
 

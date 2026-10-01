@@ -2162,8 +2162,9 @@ def main() -> int:
         cpg = args.C // args.groups
         kpg = args.K // args.groups
 
-        # For fwd direction, cpg == kpg is required. For dgrad it need not hold.
-        if args.direction == "fwd" and cpg != kpg:
+        # The grouped/depthwise fwd kernels require cpg == kpg; the non-grouped
+        # (groups == 1) fwd kernel takes any C/K, and dgrad need not hold it.
+        if args.direction == "fwd" and args.groups != 1 and cpg != kpg:
             print(
                 f"error: cpg={cpg} != kpg={kpg}; forward direct grouped conv requires C/groups == K/groups",
                 file=sys.stderr,

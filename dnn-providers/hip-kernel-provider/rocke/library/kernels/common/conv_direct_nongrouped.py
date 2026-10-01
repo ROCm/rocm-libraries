@@ -81,6 +81,14 @@ from kernels.common.conv_direct_grouped import (
 # Global load width for the activation staging path, in halves (dwordx4).
 _X_LOAD_VEC = 8
 
+# Byte offset a masked-out staging load is redirected to (see
+# build_direct_conv_nongrouped). A buffer load whose offset is at or past
+# num_records returns zero, so every operand tensor must end at or below this
+# offset, and ``_OOB_BASE + chunk offset`` must still fit in i32 --
+# DirectNongroupedConvSpec.validate() enforces both.
+_OOB_BASE = 0x7F000000
+_I32_MAX = (1 << 31) - 1
+
 # Atom name -> (tile, K, frag). All supported atoms are square (M == N == tile),
 # which is what lets one code path serve them: a lane's operand row/column is
 # ``lane % tile`` and its K slice is ``(lane // tile) * frag``. ``frag`` is the
@@ -274,6 +282,21 @@ class DirectNongroupedConvSpec:
             raise ValueError(
                 f"unknown atom {self.atom!r}; expected one of {list(_ATOMS)}"
             )
+        if (
+            self.tile_h <= 0
+            or self.tile_w <= 0
+            or self.tile_k <= 0
+            or self.ck <= 0
+            or self.waves_m <= 0
+            or self.waves_n <= 0
+            or self.wave_size <= 0
+            or p.stride <= 0
+        ):
+            # Checked before any derived geometry: those divide by these.
+            raise ValueError(
+                "DirectNongroupedConvSpec: tile, wave and stride parameters "
+                "must be positive"
+            )
         t = self.atom_tile
         if self.tile_w % t != 0:
             raise ValueError(f"tile_w must be a multiple of {t} (got {self.tile_w})")
@@ -302,10 +325,37 @@ class DirectNongroupedConvSpec:
             raise ValueError(f"C {p.cpg} must be a multiple of {_X_LOAD_VEC}")
         if self.threads_per_block > 1024:
             raise ValueError(f"threads_per_block {self.threads_per_block} > 1024")
-        if self.lds_pad % 2 != 0:
-            raise ValueError("lds_pad must be even to keep ds_read_b128 aligned")
+        if self.lds_pad < 0 or self.lds_pad % 2 != 0:
+            # A negative pad shrinks the pixel stride below the ck halves each
+            # pixel stages, so neighbouring pixels overlap in LDS.
+            raise ValueError(
+                f"lds_pad must be a non-negative even number to keep "
+                f"ds_read_b128 aligned (got {self.lds_pad})"
+            )
         if self.swizzle_wgm < 1:
             raise ValueError(f"swizzle_wgm must be >= 1 (got {self.swizzle_wgm})")
+        if self.iglp is not None and self.iglp < 0:
+            raise ValueError(f"iglp must be None or >= 0 (got {self.iglp})")
+        if self.waves_per_eu is not None and self.waves_per_eu < 1:
+            raise ValueError(
+                f"waves_per_eu must be None or >= 1 (got {self.waves_per_eu})"
+            )
+        a_bytes = 2 * p.N * p.H * p.W * p.cpg
+        b_bytes = 2 * p.kpg * p.KH * p.KW * p.cpg
+        d_bytes = 2 * p.N * p.Ho * p.Wo * p.kpg
+        if max(a_bytes, b_bytes, d_bytes) > _OOB_BASE:
+            # Masked staging loads read at _OOB_BASE and rely on it being past
+            # num_records; a larger tensor would hand them real data.
+            raise ValueError(
+                f"tensors must fit below the {_OOB_BASE:#x}-byte masked-load "
+                f"offset (A {a_bytes} B, B {b_bytes} B, D {d_bytes} B)"
+            )
+        if _OOB_BASE + 2 * (p.cpg + self.ck) > _I32_MAX:
+            # The last prefetch runs one chunk (two when double-buffered) past C.
+            raise ValueError(
+                f"C {p.cpg} too large: the masked-load offset plus the channel "
+                f"offset would overflow i32"
+            )
         if self.acc_vgprs > 256:
             # A lane cannot hold more than the 256-entry accumulator file; past
             # that the config is not merely slow, it makes the backend
@@ -361,7 +411,28 @@ _SWEEP_TILE_H = (8, 16)
 _SWEEP_TILE_K = (32, 64, 128, 256)
 _SWEEP_CK = (16, 32, 64)
 _SWEEP_WAVES = ((2, 2), (1, 4), (2, 4), (4, 2), (1, 8))
-_SWEEP_ATOMS = ("32x32x16", "16x16x32")
+# Per MFMA tile size, the atoms to sweep in order of preference: the widest-K
+# atom the target has wins (fewer MFMAs per chunk), so gfx950 sweeps
+# 32x32x16 / 16x16x32 and gfx942 -- which has neither -- 32x32x8 / 16x16x16.
+_SWEEP_ATOMS = (("32x32x16", "32x32x8"), ("16x16x32", "16x16x16"))
+
+
+def _sweep_atoms(arch: str, dtype: str) -> "list[str]":
+    """The preferred supported atom of each tile size on ``arch``."""
+    from rocke.core.arch import ArchTarget
+
+    target = ArchTarget.from_gfx(arch)
+    ab = "bf16" if dtype == "bf16" else "f16"
+    out = []
+    for prefs in _SWEEP_ATOMS:
+        for atom in prefs:
+            t, k, _ = _ATOMS[atom]
+            if target.mma.has_shape(
+                a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=t, n=t, k=k
+            ):
+                out.append(atom)
+                break
+    return out
 
 
 def tile_w_candidates(Wo: int, atom_tile: int, max_mult: int = 6) -> "list[int]":
@@ -394,7 +465,7 @@ def nongrouped_specs(
 
     out: "list[DirectNongroupedConvSpec]" = []
     seen = set()
-    for atom in _SWEEP_ATOMS:
+    for atom in _sweep_atoms(arch, problem.dtype):
         at = _ATOMS[atom][0]
         for tw in tile_w_candidates(problem.Wo, at):
             for th, tk, ck, (wm, wn), wgm, ig, we in itertools.product(
@@ -492,13 +563,12 @@ def build_direct_conv_nongrouped(
     oob = b.const_i32((1 << 31) - 1)
     # Predication for the staging loads is loop-invariant, so it is folded into
     # the *base* offset once, before the channel loop, rather than re-selected
-    # every iteration. ``_OOB_BASE`` is far past any tensor this kernel accepts
-    # yet leaves headroom for ``+ c_off`` (at most ``2*C`` bytes) without
+    # every iteration. validate() guarantees ``_OOB_BASE`` is at or past the
+    # end of every operand tensor and leaves headroom for ``+ c_off`` without
     # wrapping i32, so ``base + c_off`` stays out of range for the whole loop.
     # A buffer load whose voffset exceeds num_records returns zero, which is
     # exactly the value a padded pixel or an out-of-range filter row needs --
     # so the masked *value* select disappears from the loop as well.
-    _OOB_BASE = 0x7F000000
     oob_base = b.const_i32(_OOB_BASE)
 
     a_rsrc = b.buffer_rsrc(A, A_bytes)
