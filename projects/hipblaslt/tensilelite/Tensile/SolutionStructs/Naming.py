@@ -23,8 +23,8 @@
 ################################################################################
 from functools import lru_cache
 
-from Tensile.Common.Constants import MAX_FILENAME_LENGTH
-from Tensile.Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
+from ..Common.Constants import MAX_FILENAME_LENGTH
+from ..Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
 
 from .Problem import ProblemType
 
@@ -149,7 +149,13 @@ def getParameterValueAbbreviation(key, value):
 def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInternalArgs):
 
   ck = state.get("CustomKernel")
-  if isinstance(ck, dict) and ck.get("name"):
+  # CustomKernel.name on a generated kernel is the assembly identity.
+  # Solution names (ignoreInternalArgs=False) still append the runtime
+  # dispatch tokens below: WGM, WGMXCCG, SU, SUM, SUS, GSUC, GSUWGMRR.
+  # Handwritten kernels have no parameter encoding, so the stamped name
+  # is the whole name for both callers.
+  generated = isinstance(ck, dict) and bool(ck.get("generated", False))
+  if isinstance(ck, dict) and ck.get("name") and (not generated or ignoreInternalArgs):
     return ck["name"]
   if state.get("CustomKernelName", ""):
     return state["CustomKernelName"]

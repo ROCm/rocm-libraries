@@ -37,7 +37,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB192
   FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, GlobalLoadB128, GlobalLoadB192, GlobalLoadB32, \
   GlobalLoadB64, GlobalLoadB96, GlobalLoadD16B16, GlobalLoadD16U8, GlobalLoadD16HIU8, \
   GlobalStoreB128, GlobalStoreB32, GlobalStoreB64, Instruction, MacroInstruction, \
-  MFMAInstruction, MXMFMAInstruction, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpLeU32, \
+  MFMAInstruction, MXMFMAInstruction, SAddU32, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpLeU32, \
   SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SMFMAInstruction, SMovB32, SMovB64, SNop, SEndpgm, SOrB32, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64, t16
 from rocisa.instruction import SSchedulingFence
@@ -52,6 +52,7 @@ from .Components.CustomSchedule import customMainLoopSchedule
 from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
+from .Components.Subtile.SubtileLdsLayout import applyLdsLayout
 from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, dcpLdsSide
 from .Components.DecouplePGR import tdmWaveIssueOrder, decoupledThickGateRelaxation, dcpThickGateFromTokenPasses, dcpThickGateUncoveredSites, dcpIsFillLabel, DCP_TENSORCNT_RE, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS
 from .Components.TDMFuse import tdmWavePartition
@@ -66,8 +67,8 @@ from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
   SW_INSTRUCTION_PREFETCH_AUTO
-from Tensile.SolutionStructs.Naming import getKernelNameMin
-from Tensile.Toolchain.Component import Assembler
+from .SolutionStructs.Naming import getKernelNameMin
+from .Toolchain.Component import Assembler
 
 import rocisa
 import math
@@ -115,7 +116,6 @@ class MatrixInfo:
 
   numSgprStrides: int            = -1
   tileInfo: object = field(init=False)  # TileInfo for all tile types
-
 
 
 @dataclass
@@ -304,6 +304,7 @@ class StateValues:
   combineLocalAddresses: bool            = False # Debug
   unifiedVgprRegs: bool                  = False
   useAtomicAdd: bool                     = False
+  useAtomicPkAddBF16: bool               = False
   serializedStore: bool                  = False
   storeAlign8: bool                      = False
   subtileTotalMOffsetSgpr: Optional[int] = None
@@ -3878,6 +3879,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
             self.codes.localWriteMXSB = Module()
           self.codes.globalReadMetadata = StructuredModule() # empty
 
+        # The gl2 prefetch modules are built for the unroll loop (_loopBody) and
+        # would otherwise be re-emitted here by makeSchedule, since nothing else
+        # rebuilds them. There is no load left for this workgroup to run ahead of
+        # once it reaches a no-load loop, and the address is only kept in range by
+        # the guards on the sites that do have one: the pre-loop skips itself when
+        # counterL <= PGR, and the unroll loop is only entered above that. Emitting
+        # them here reaches the start address without either guard, which for a
+        # short GSU chunk is PGR iterations past the end of K.
+        self.codes.gl2PrefetchIncrement = Module()
+        self.codes.gl2Prefetch = Module()
+
         callMakeSchedule = not isNGLL or kernel["ExpandPointerSwap"] or UnrollLoopSwapGlobalReadOrder or isDTVAB or \
           (kernel["PrefetchGlobalRead"] >= 3 and isNGLL) or \
           (self.states.doPackPreSchedulingNextLoop and isNGLL)
@@ -5331,12 +5343,42 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.isPrefetchAcrossPersistentEnabled(kernel):
       module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0, comment="PrefetchAcrossPersistent: not primed at kernel entry"))
 
-    # Should check for is swizzled instead of usesubtileimpl
+    # Swizzled layouts only; Solution.py rejects NoSwizzle under UseSubtileImpl.
     # TODO: Move this calculation to host-side?
-    if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockA"] and kernel["UseSubtileImpl"]:
-      module.addComment("Scale StridesMXSA by 32")
-      module.add(SLShiftLeftB32(sgpr("StridesMXSA"), 5, sgpr("StridesMXSA")))
-      module.add(SLShiftLeftB32(sgpr("StridesMXSB"), 5, sgpr("StridesMXSB")))
+    if (kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]) and kernel["UseSubtileImpl"]:
+      # The scale GR steps one group per 32 rows of the free dim, so Strides<tc>
+      # must hold that group's byte span, roundUp(ceil(K/mxBlock), 8) * 32.  Both
+      # numbers are properties of the swizzled layout: preSwizzleScalesGFX950 pads
+      # the K blocks to a multiple of 8 and groups 32 rows of the free dim.  The
+      # span is therefore derived from K on every layout rather than read back out
+      # of Strides<tc>+0, which only equals paddedKBlocks when the free dim is the
+      # slow one and the host did pad -- an assumption this code cannot check and
+      # which NoSwizzle breaks.  Costs four SALU in the prologue, once.
+      SWIZZLE_GROUP_ROWS = 32   # free-dim rows per scale group
+      K_BLOCK_PAD        = 8    # K blocks the host pads up to
+      for tc in ("MXSA", "MXSB"):
+        mxBlock = kernel["ProblemType"]["MXBlock%s" % tc[-1]]
+        if not mxBlock:
+          # No scales on this operand, so Strides<tc> is not a scale stride --
+          # and may not be allocated at all.
+          continue
+        # The ceil-divides below are shifts, so both have to be powers of two.
+        assert mxBlock & (mxBlock - 1) == 0, \
+               "MXBlock%s must be a power of two, got %u" % (tc[-1], mxBlock)
+        module.addComment("%s group span = roundUp(ceil(K/%u), %u) * %u"
+                          % (tc, mxBlock, K_BLOCK_PAD, SWIZZLE_GROUP_ROWS))
+        module.add(SAddU32(dst=sgpr("Strides%s"%tc), src0=sgpr("SizesSum"), src1=(mxBlock - 1),
+                           comment="K + %u - 1"%mxBlock))
+        module.add(SLShiftRightB32(sgpr("Strides%s"%tc), mxBlock.bit_length() - 1, sgpr("Strides%s"%tc),
+                                   comment="ceil(K/%u) = K blocks"%mxBlock))
+        module.add(SAddU32(dst=sgpr("Strides%s"%tc), src0=sgpr("Strides%s"%tc), src1=(K_BLOCK_PAD - 1),
+                           comment="+ %u - 1"%K_BLOCK_PAD))
+        module.add(SLShiftRightB32(sgpr("Strides%s"%tc), K_BLOCK_PAD.bit_length() - 1, sgpr("Strides%s"%tc),
+                                   comment="roundUp(K blocks, %u) / %u"%(K_BLOCK_PAD, K_BLOCK_PAD)))
+        module.add(SLShiftLeftB32(sgpr("Strides%s"%tc),
+                                  (K_BLOCK_PAD * SWIZZLE_GROUP_ROWS).bit_length() - 1,
+                                  sgpr("Strides%s"%tc),
+                                  comment="* %u blocks * %u bytes"%(K_BLOCK_PAD, SWIZZLE_GROUP_ROWS)))
 
     # Open persistent loop
     loopComponent = Component.PersistentLoop.find(self)
@@ -5414,7 +5456,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ProblemType"]["MXBlockB"]:
         module.addComment1("global read addresses: addresses mxsb")
         module.add(self.graAddresses(kernel, tensorParametersB["MX"]))
-
 
 
     # List of tiles that need to be read form
@@ -5538,7 +5579,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       ####################################
       # NOT LocalSplitU
       ####################################
-
 
 
       # global write indices
@@ -5849,7 +5889,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # Bracket them with a self-contained cluster-scope handshake so every
           # multicast load stays synchronized and signal/wait counts stay
           # balanced. Gated on streamKMulticast (cluster + TDM broadcast):
-          # gfx1250v0 has the cluster launch but no peer ld_bcst to keep in lockstep.
+          # gfx1250-strict has the cluster launch but no peer ld_bcst to keep in lockstep.
           if streamKMulticast(kernel):
             skComponent = Component.StreamK.find(self)
             module.add(skComponent.streamKMulticastProloguePrefetchHandshake(self, kernel))
@@ -6106,6 +6146,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(SCmpLeU32(src0=loopCounter, src1=hex(kernel["PrefetchGlobalRead"]), \
         comment="counterL<=PGR"))
       module.add(SCBranchSCC1(labelName=skipGL2Label.getLabelName(), comment=""))
+      module.add(self.gl2PrefetchSkipPGR(kernel, tensorParametersA, tensorParametersB))
       module.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
       if kernel["PrefetchGL2"] == 2:
         module.add(SCmpLeU32(src0=loopCounter, src1=hex(kernel["PrefetchGlobalRead"]+1), comment="counterL<=PGR+1"))
@@ -7304,6 +7345,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # colliding stepping is targeted) tells StinkyTofu which cost table to use.
                                "ArchName": str(globalParameters.get("StinkyTofuArchName") or ""),
                                "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
+                               # Per-pass wall-time report on stderr once the pipeline has run.
+                               # Forced on while profiling kernel-generation time; restore
+                               "TimePasses": bool(globalParameters.get("StinkyTofuTimePasses") or False),
                                "DebugLevel": int(globalParameters.get("StinkyTofuDebugLevel") or 0),
                                "PrintBeforePass": str(globalParameters.get("StinkyTofuPrintBeforePass") or ""),
                                "PrintAfterPass": str(globalParameters.get("StinkyTofuPrintAfterPass") or ""),
@@ -7337,7 +7381,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # an `s_wait_tensorcnt 0` is emitted after the cooperative
                                # tensor_load group so the broadcast retires before the back edge.
                                # Requires TDM multicast, not just a cluster: without a peer
-                               # ld_bcst that wait has nothing to retire (gfx1250v0).
+                               # ld_bcst that wait has nothing to retire (gfx1250-strict).
                                "StreamKMulticast": bool(streamKMulticast(kernel)),
                                # TDMLoadWaveSyncPass (Gfx1250Backend): insert a barrier
                                # between an urgent and a deferrable tensor_load group.
@@ -7523,96 +7567,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.asmAssert = Assert(self.states.laneSGPRCount, kernel["WavefrontSize"], self.db["EnableAsserts"])
 
-    def selectGRSubtileShape(tc):
-      """Select GR subtile shape based on wave cooperation level.
-
-      The GR tile shape represents the effective coverage per GR load round.
-      When multiple waves cooperate on a single GR load (waves_coop >= 4),
-      the GR tile expands from (1,2) to (2,2) MMA tiles.
-
-      For A: waves_coop = numWaves / MIWaveGroup[0]
-      For B: waves_coop = numWaves / MIWaveGroup[1]
-
-      Wave config → GR shape:
-        1x4 WG: A=(2,2), B=(1,2)   — A has 4 cooperating waves
-        4x1 WG: A=(1,2), B=(2,2)   — B has 4 cooperating waves
-        2x2 WG: A=(1,2), B=(1,2)   — 2 cooperating waves each
-        1x1 WG: A=(1,2), B=(1,2)   — 1 wave each
-
-      LR subtile shape is always (1,2) regardless of wave config.
-      """
-      mi = kernel["MIWaveGroup"]
-      numWaves = mi[0] * mi[1]
-      wg_idx = 0 if tc == 'A' else 1
-      wg_m = mi[wg_idx]
-      waves_coop = numWaves // wg_m
-      return (2, 2) if waves_coop >= 4 else (1, 2)
-
-    def initSubTileInfo(tc):
-      tileMap = {
-        'A' : self.states.a,
-        'B' : self.states.b,
-        'D' : self.states.d,
-        'MXSA' : self.states.mxsa,
-        'MXSB' : self.states.mxsb,
-      }
-      matrixInfo = tileMap[tc]
-      if tc == 'D':
-        geometry = selectDGeometry(kernel)
-        matrixInfo.tileInfo = TileInfo(geometry, tc, self, kernel)
-      elif tc in ('A', 'B'):
-        grShape = selectGRSubtileShape(tc)
-        matrixInfo.grSubtileShape = grShape
-        geometry = selectABGeometry(kernel, tc)
-        matrixInfo.tileInfo = TileInfo(geometry, tc, self, kernel)
-      elif tc in ('MXSA', 'MXSB'):
-        geometry = selectMXScaleGeometry(kernel, tc)
-        matrixInfo.tileInfo = TileInfo(geometry, tc, self, kernel)
-
-
     if kernel["UseSubtileImpl"]:
-      initSubTileInfo('A')
-      initSubTileInfo('B')
-      initSubTileInfo('D')
-
-      if kernel["ProblemType"].get("MXBlockA", 0) > 0:
-        initSubTileInfo('MXSA')
-      if kernel["ProblemType"].get("MXBlockB", 0) > 0:
-        initSubTileInfo('MXSB')
-
-      self.ldsStartOffsetA = 0
-      aTileInfo = self.states.a.tileInfo
-      bTileInfo = self.states.b.tileInfo
-      numASubtiles = int(aTileInfo.globalSubtileGrid[0] * aTileInfo.globalSubtileGrid[1])
-      numBSubtiles = int(bTileInfo.globalSubtileGrid[0] * bTileInfo.globalSubtileGrid[1])
-      readSize = 2*aTileInfo.subtileSize
-      # Align A and B sizes to readSize for DTL 2xsubtile reads.
-      # TDM-based solution use padding per row. Take that into account for size calculation.
-      mtA = kernel["MacroTile0"]
-      mtB = kernel["MacroTile1"]
-      padA = int(getattr(aTileInfo, "ldsRowPadBytes", 0)) * mtA
-      padB = int(getattr(bTileInfo, "ldsRowPadBytes", 0)) * mtB
-      sizeA = int(((numASubtiles * aTileInfo.subtileSize + padA + readSize-1) // readSize) * readSize)
-      sizeB = int(((numBSubtiles * bTileInfo.subtileSize + padB + readSize-1) // readSize) * readSize)
-      self.ldsStartOffsetB = sizeA
-      sizeMXSA = 0
-      sizeMXSB = 0
-      if kernel["ProblemType"].get("MXBlockA", 0) > 0 and kernel["ProblemType"].get("MXBlockB", 0) > 0:
-        mxsaTileInfo = self.states.mxsa.tileInfo
-        mxsbTileInfo = self.states.mxsb.tileInfo
-
-        # For Swizzled scale we use extra LDS space for now to allow wider DTL loads
-        numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
-        sizeMXSA = mxsaTileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves
-        sizeMXSB = mxsbTileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves
-        self.ldsStartOffsetMXSA = sizeA + sizeB
-        self.ldsStartOffsetMXSB = sizeA + sizeB + sizeMXSA
-
-      self.ldsTotalSize = sizeA + sizeB + sizeMXSA + sizeMXSB
-
-      kernel["LdsNumBytes"] = max(1, int(self.ldsTotalSize * kernel["NumLdsBlk"]))
-      if kernel["LdsNumBytes"] > self.states.archCaps["DeviceLDS"]:
-        self.states.overflowedResources = 8
+      applyLdsLayout(self, kernel)
 
 
     #print(self.states.a.tileInfo.getLocalSubtileId(1,0))
@@ -8181,6 +8137,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if kernel["ProblemType"]["Sparse"] and not (kernel["DirectToVgprSparseMetadata"] or kernel["DirectToLdsMetadata"]):
       kernel["LocalWriteUseSgprMetadata"] = False
+
+    # GSU whose atomic target is the BF16 D tensor itself rather than an fp32
+    # staging workspace (GlobalSplitUAlgorithm AtomicDest). Accumulation is done
+    # by buffer_atomic_pk_add_bf16 on packed element pairs.
+    self.states.useAtomicPkAddBF16 = kernel["GlobalSplitUAlgorithm"] == "AtomicDest"
 
     # The inst HasAtomicAdd is using is not compatible with int32.
     self.states.useAtomicAdd = (self.states.asmCaps["HasAtomicAdd"] and kernel["ProblemType"]["ComputeDataType"].isSingle()) and \
@@ -9851,7 +9812,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.totalVgprs = vgprIdx
 
       return
-
 
 
     # Dispatch to different VGPR allocation logic for subtile-based impl
@@ -12650,6 +12610,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
   
   @abc.abstractmethod
   def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
+    return ""
+  
+  @abc.abstractmethod
+  def gl2PrefetchSkipPGR(self, kernel, tPA, tPB) -> Module:
     return ""
 
   def _nextLdsToken(self, idx: int) -> int:
