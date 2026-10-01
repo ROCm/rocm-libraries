@@ -75,7 +75,7 @@ def _wmma_k64(a_kind, b_kind):
     return build
 
 
-def _wmma_scaled(a_kind, b_kind, scale_mode):
+def _wmma_scaled(a_kind, b_kind, scale_mode, scale_a="e8m0", scale_b="e8m0"):
     """K=128 scaled WMMA, parameterized by operand dtypes and scale mode."""
     scale_ty = {"scale": I32, "scale16": I64}[scale_mode]
     block_k = 16 if scale_mode == "scale16" else 32
@@ -84,7 +84,7 @@ def _wmma_scaled(a_kind, b_kind, scale_mode):
         a_dtype=a_kind,
         b_dtype=b_kind,
         c_dtype="fp32",
-        scales=("e8m0", "e8m0", block_k),
+        scales=(scale_a, scale_b, block_k),
         m=16,
         n=16,
         k=128,
@@ -318,6 +318,32 @@ CONFIGS.extend(
     for a in ("fp8", "bf8", "fp6", "bf6", "fp4")
     for b in ("fp8", "bf8", "fp6", "bf6", "fp4")
     if a != b
+)
+
+
+CONFIGS.extend(
+    (_wmma_scaled(a, b, mode, sa, sb), "gfx1250")
+    for mode in ("scale", "scale16")
+    for a, b, sa, sb in [
+        ("fp8", "fp4", "e8m0", "e5m3"),
+        ("fp8", "fp4", "e8m0", "e4m3"),
+        ("bf8", "fp4", "e8m0", "e5m3"),
+        ("bf8", "fp4", "e8m0", "e4m3"),
+        ("fp6", "fp4", "e8m0", "e5m3"),
+        ("fp6", "fp4", "e8m0", "e4m3"),
+        ("bf6", "fp4", "e8m0", "e5m3"),
+        ("bf6", "fp4", "e8m0", "e4m3"),
+        ("fp4", "fp8", "e5m3", "e8m0"),
+        ("fp4", "fp8", "e4m3", "e8m0"),
+        ("fp4", "bf8", "e5m3", "e8m0"),
+        ("fp4", "bf8", "e4m3", "e8m0"),
+        ("fp4", "fp6", "e5m3", "e8m0"),
+        ("fp4", "fp6", "e4m3", "e8m0"),
+        ("fp4", "bf6", "e5m3", "e8m0"),
+        ("fp4", "bf6", "e4m3", "e8m0"),
+        ("fp4", "fp4", "e5m3", "e5m3"),
+        ("fp4", "fp4", "e4m3", "e4m3"),
+    ]
 )
 
 

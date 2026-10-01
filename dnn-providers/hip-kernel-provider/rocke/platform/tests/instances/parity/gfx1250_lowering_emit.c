@@ -120,10 +120,15 @@ static void build_wmma_k64_bf8_bf8(rocke_ir_builder_t* b)
 
 /* K=128 FP8 SCALE/SCALE16 WMMA. Matrix fragments are <16 x i32>; packed
  * E8M0 scale operands are i32 for SCALE and i64 for SCALE16. */
-static void wmma_scaled(rocke_ir_builder_t* b, bool scale16, const char* dtype, const char* dtype_b)
+static void wmma_scaled(rocke_ir_builder_t* b,
+                        bool scale16,
+                        const char* dtype,
+                        const char* dtype_b,
+                        const char* scale_a,
+                        const char* scale_b)
 {
     const rocke_mma_scale_block_k_t block = scale16 ? ROCKE_MMA_SCALE_K16 : ROCKE_MMA_SCALE_K32;
-    const rocke_mma_scale_filter_t query = {"e8m0", "e8m0", block};
+    const rocke_mma_scale_filter_t query = {scale_a, scale_b, block};
     const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx1250");
     const rocke_mma_op_t* atom = rocke_mma_catalog_op_for_shape(
         &target->mma, "wmma_scaled", dtype, dtype_b, "fp32", 16, 16, 128, &query);
@@ -152,32 +157,32 @@ static void wmma_scaled(rocke_ir_builder_t* b, bool scale16, const char* dtype, 
 
 static void build_wmma_scale(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, false, "fp8e4m3", "fp8e4m3");
+    wmma_scaled(b, false, "fp8e4m3", "fp8e4m3", "e8m0", "e8m0");
 }
 
 static void build_wmma_scale_bf8(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, false, "bf8e5m2", "bf8e5m2");
+    wmma_scaled(b, false, "bf8e5m2", "bf8e5m2", "e8m0", "e8m0");
 }
 
 static void build_wmma_scale16(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, true, "fp8e4m3", "fp8e4m3");
+    wmma_scaled(b, true, "fp8e4m3", "fp8e4m3", "e8m0", "e8m0");
 }
 
 static void build_wmma_scale16_bf8(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, true, "bf8e5m2", "bf8e5m2");
+    wmma_scaled(b, true, "bf8e5m2", "bf8e5m2", "e8m0", "e8m0");
 }
 
 static void build_wmma_scale_fp4(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, false, "fp4e2m1", "fp4e2m1");
+    wmma_scaled(b, false, "fp4e2m1", "fp4e2m1", "e8m0", "e8m0");
 }
 
 static void build_wmma_scale16_fp4(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, true, "fp4e2m1", "fp4e2m1");
+    wmma_scaled(b, true, "fp4e2m1", "fp4e2m1", "e8m0", "e8m0");
 }
 
 /* ds_read_b128_tr_b16. gfx950 has one type-agnostic opcode returning
@@ -396,6 +401,8 @@ typedef struct config
     const char* dtype;
     bool scale16;
     const char* dtype_b;
+    const char* scale_a;
+    const char* scale_b;
 } config_t;
 
 /* Each gfx1250 config that tests a *choice* of encoding is followed by its
@@ -474,6 +481,42 @@ static const config_t CONFIGS[] = {
     {NULL, "gfx1250", "fp4", true, "bf8"},
     {NULL, "gfx1250", "fp4", true, "fp6"},
     {NULL, "gfx1250", "fp4", true, "bf6"},
+    {NULL, "gfx1250", "fp8", false, "fp4", "e8m0", "e5m3"},
+    {NULL, "gfx1250", "fp8", false, "fp4", "e8m0", "e4m3"},
+    {NULL, "gfx1250", "bf8", false, "fp4", "e8m0", "e5m3"},
+    {NULL, "gfx1250", "bf8", false, "fp4", "e8m0", "e4m3"},
+    {NULL, "gfx1250", "fp6", false, "fp4", "e8m0", "e5m3"},
+    {NULL, "gfx1250", "fp6", false, "fp4", "e8m0", "e4m3"},
+    {NULL, "gfx1250", "bf6", false, "fp4", "e8m0", "e5m3"},
+    {NULL, "gfx1250", "bf6", false, "fp4", "e8m0", "e4m3"},
+    {NULL, "gfx1250", "fp4", false, "fp8", "e5m3", "e8m0"},
+    {NULL, "gfx1250", "fp4", false, "fp8", "e4m3", "e8m0"},
+    {NULL, "gfx1250", "fp4", false, "bf8", "e5m3", "e8m0"},
+    {NULL, "gfx1250", "fp4", false, "bf8", "e4m3", "e8m0"},
+    {NULL, "gfx1250", "fp4", false, "fp6", "e5m3", "e8m0"},
+    {NULL, "gfx1250", "fp4", false, "fp6", "e4m3", "e8m0"},
+    {NULL, "gfx1250", "fp4", false, "bf6", "e5m3", "e8m0"},
+    {NULL, "gfx1250", "fp4", false, "bf6", "e4m3", "e8m0"},
+    {NULL, "gfx1250", "fp4", false, "fp4", "e5m3", "e5m3"},
+    {NULL, "gfx1250", "fp4", false, "fp4", "e4m3", "e4m3"},
+    {NULL, "gfx1250", "fp8", true, "fp4", "e8m0", "e5m3"},
+    {NULL, "gfx1250", "fp8", true, "fp4", "e8m0", "e4m3"},
+    {NULL, "gfx1250", "bf8", true, "fp4", "e8m0", "e5m3"},
+    {NULL, "gfx1250", "bf8", true, "fp4", "e8m0", "e4m3"},
+    {NULL, "gfx1250", "fp6", true, "fp4", "e8m0", "e5m3"},
+    {NULL, "gfx1250", "fp6", true, "fp4", "e8m0", "e4m3"},
+    {NULL, "gfx1250", "bf6", true, "fp4", "e8m0", "e5m3"},
+    {NULL, "gfx1250", "bf6", true, "fp4", "e8m0", "e4m3"},
+    {NULL, "gfx1250", "fp4", true, "fp8", "e5m3", "e8m0"},
+    {NULL, "gfx1250", "fp4", true, "fp8", "e4m3", "e8m0"},
+    {NULL, "gfx1250", "fp4", true, "bf8", "e5m3", "e8m0"},
+    {NULL, "gfx1250", "fp4", true, "bf8", "e4m3", "e8m0"},
+    {NULL, "gfx1250", "fp4", true, "fp6", "e5m3", "e8m0"},
+    {NULL, "gfx1250", "fp4", true, "fp6", "e4m3", "e8m0"},
+    {NULL, "gfx1250", "fp4", true, "bf6", "e5m3", "e8m0"},
+    {NULL, "gfx1250", "fp4", true, "bf6", "e4m3", "e8m0"},
+    {NULL, "gfx1250", "fp4", true, "fp4", "e5m3", "e5m3"},
+    {NULL, "gfx1250", "fp4", true, "fp4", "e4m3", "e4m3"},
 };
 
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));
@@ -517,7 +560,9 @@ int main(int argc, char** argv)
         wmma_scaled(&b,
                     CONFIGS[idx].scale16,
                     CONFIGS[idx].dtype,
-                    CONFIGS[idx].dtype_b ? CONFIGS[idx].dtype_b : CONFIGS[idx].dtype);
+                    CONFIGS[idx].dtype_b ? CONFIGS[idx].dtype_b : CONFIGS[idx].dtype,
+                    CONFIGS[idx].scale_a ? CONFIGS[idx].scale_a : "e8m0",
+                    CONFIGS[idx].scale_b ? CONFIGS[idx].scale_b : "e8m0");
     }
 
     if(!rocke_ir_builder_ok(&b))

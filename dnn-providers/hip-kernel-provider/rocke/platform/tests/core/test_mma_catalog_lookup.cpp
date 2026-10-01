@@ -304,10 +304,22 @@ static int test_scale_contracts()
                      op.scale_block_k);
             CHECK(strcmp(id, op.op_id) == 0);
             CHECK(rocke_mma_catalog_by_op_id(&arch->mma, id) == &op);
+            if(strcmp(op.a_dtype, "fp4e2m1") != 0)
+            {
+                auto invalid = op;
+                invalid.a_scale_dtype = "e4m3";
+                CHECK(rejects_query([&] { rocke_scaled_wmma_contract(&invalid); }));
+            }
+            if(strcmp(op.a_dtype, "fp4e2m1") == 0 && strcmp(op.b_dtype, "fp4e2m1") == 0)
+            {
+                auto invalid = op;
+                invalid.b_scale_dtype = strcmp(op.a_scale_dtype, "e4m3") == 0 ? "e5m3" : "e4m3";
+                CHECK(rejects_query([&] { rocke_scaled_wmma_contract(&invalid); }));
+            }
             ++scaled_rows;
         }
     }
-    CHECK(packed_rows == 4 && scaled_rows == 50);
+    CHECK(packed_rows == 4 && scaled_rows == 86);
     return 0;
 }
 
@@ -376,7 +388,7 @@ static int test_scale_layouts_and_families()
             }
         }
     }
-    CHECK(scaled == 50);
+    CHECK(scaled == 86);
     return 0;
 }
 

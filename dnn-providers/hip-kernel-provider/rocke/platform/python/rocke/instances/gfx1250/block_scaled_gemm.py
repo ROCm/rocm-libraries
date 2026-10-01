@@ -4,7 +4,7 @@
 
 The default path preserves the existing K=64 FP8/BF8 WMMA plus software
 post-scaling contract. ``matrix_path="wmma_scale"`` and ``"wmma_scale16"``
-select the native gfx1250 K=128 instructions and consume packed E8M0 scale
+select the native gfx1250 K=128 instructions and consume packed encoded scale
 bytes directly.
 """
 
@@ -99,6 +99,18 @@ class BlockScaledGemmSpec:
     tile_m: int = 16
     tile_n: int = 16
     tile_k: int = 128
+    scale_dtype_a: str | None = None
+    scale_dtype_b: str | None = None
+
+    def resolved_scale_dtypes(self) -> tuple[str, str]:
+        aliases = {"i8": "e8m0", "fp8e4m3": "e4m3"}
+        return tuple(
+            aliases.get(dtype, dtype)
+            for dtype in (
+                self.scale_dtype if self.scale_dtype_a is None else self.scale_dtype_a,
+                self.scale_dtype if self.scale_dtype_b is None else self.scale_dtype_b,
+            )
+        )
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "dtype_a", normalize_dtype(self.dtype_a))
@@ -116,7 +128,15 @@ class BlockScaledGemmSpec:
             f"M{self.M}N{self.N}K{self.K}",
             f"bk{self.block_k}",
             f"t{self.tile_m}x{self.tile_n}x{self.tile_k}",
-            flags={self.resolved_matrix_path(): True},
+            flags={
+                self.resolved_matrix_path(): True,
+                **{
+                    f"s{operand}_{dtype}": True
+                    for operand, dtype in zip("ab", self.resolved_scale_dtypes())
+                    if self.resolved_matrix_path() in ("wmma_scale", "wmma_scale16")
+                    and dtype != "e8m0"
+                },
+            },
         )
 
     def resolved_matrix_path(self) -> str:
@@ -128,13 +148,12 @@ class BlockScaledGemmSpec:
 
 
 def _native_scaled_atom(spec: BlockScaledGemmSpec, target: ArchTarget):
-    scale_dtype = "e8m0" if spec.scale_dtype == "i8" else spec.scale_dtype
     return target.mma.op_for_shape(
         family="wmma_scaled",
         a_dtype=spec.dtype_a,
         b_dtype=spec.dtype_b,
         c_dtype=spec.dtype_acc,
-        scales=(scale_dtype, scale_dtype, spec.block_k),
+        scales=(*spec.resolved_scale_dtypes(), spec.block_k),
         m=_BLOCK_M,
         n=_BLOCK_N,
         k=_WMMA_SCALE_K,
@@ -217,6 +236,8 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
             )
 
     else:
+        if spec.scale_dtype_a is not None or spec.scale_dtype_b is not None:
+            return False, "per-operand scale types require native scaled WMMA"
         try:
             _wire_scale_dtype(spec.scale_dtype)
         except ValueError as e:
@@ -295,7 +316,7 @@ def build_block_scaled_gemm(
     One wave (32 lanes) computes one 16x16 output tile without LDS. The legacy
     ``wmma`` path uses K=64 FP8/BF8 atoms, accumulates each ``block_k`` group,
     and applies FP16/FP32 A/B scales in software. The native ``wmma_scale`` and
-    ``wmma_scale16`` paths use K=128 scaled WMMA atoms and pass packed E8M0 scale bytes
+    ``wmma_scale16`` paths use K=128 scaled WMMA atoms and pass packed encoded scale bytes
     directly to the instruction, with K=32 and K=16 scale groups respectively.
 
     Lane ``l`` owns output column ``l % 16`` and rows
