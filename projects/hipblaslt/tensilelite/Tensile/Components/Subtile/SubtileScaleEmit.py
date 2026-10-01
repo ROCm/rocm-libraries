@@ -38,6 +38,21 @@ def _isMxSwizzledScaleFormat(kernel):
   return kernel.get("MXScaleFormat", "NoSwizzle") in ("HostPreSwizzle", "InMemorySwizzle")
 
 
+def scaleGRPtrIncBytes(ti, kernel):
+  """Per-macro-iteration scale SRD advance/rewind in bytes.
+
+  Must stay in lockstep for emitScaleGRPtrUpdate (advance) and
+  Kernel._emitMultiDUTailSrdRewind (undo one PGR=1 prefetch over-advance):
+
+    * HostPreSwizzle / InMemorySwizzle: one swizzle granule
+      (lrSubtileSize * lrGlobalSubtileGrid[1]).
+    * NoSwizzle Option B: canonical K-step (scaleDepthU * bpe).
+  """
+  if _isMxSwizzledScaleFormat(kernel):
+    return int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
+  return int(ti.scaleDepthU * ti.bpe)
+
+
 # ---------------------------------------------------------------------------
 # Scale GR offset
 # ---------------------------------------------------------------------------
@@ -210,18 +225,10 @@ def emitScaleGRPtrUpdate(ti, writer, kernel):
   module = Module()
   tc = ti.tc
 
-  if _isMxSwizzledScaleFormat(kernel):
-    # HPS/IMS: advance by one swizzle granule (LR subtile bytes * K groups).
-    # StreamK USO admits HostPreSwizzle when DepthU % 256 == 0 so a K-cut
-    # lands on a granule boundary (see streamKUniformSummationOrderObstacle).
-    # StreamK._depthUForTc applies the matching *32 for these formats so
-    # StreamKLocalStart offsets stay in the same units.
-    inc = int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
-  else:
-    # NoSwizzle: match GSU/KernelWriterAssembly canonical K-step.
-    # StreamK._depthUForTc is format-gated and uses unscaled _DepthUMXS* here,
-    # so StreamKLocalStart offsets match this increment under USO as well.
-    inc = int(ti.scaleDepthU * ti.bpe)
+  # HPS/IMS: one swizzle granule (StreamK USO requires DepthU % 256 == 0 so a
+  # K-cut lands on a granule boundary; StreamK._depthUForTc applies matching
+  # *32). NoSwizzle: canonical scaleDepthU*bpe (StreamK._depthUForTc unscaled).
+  inc = scaleGRPtrIncBytes(ti, kernel)
   module.addComment0("Scale SRD update: %s += %u" % (tc, inc))
   module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc))
   module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0))

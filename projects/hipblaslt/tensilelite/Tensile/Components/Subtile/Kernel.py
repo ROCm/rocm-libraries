@@ -119,6 +119,7 @@ from .SubtileLREmit import (
     emitSingleDsRead, emitSubtileDsRead, setExecMask,
 )
 from .SubtileScaleEmit import (
+    scaleGRPtrIncBytes,
     emitScaleGROffset, emitScaleLROffset,
     emitScaleGRLoad, emitScaleLRLoad,
     emitScaleGRPtrUpdate, emitScaleGRLDSSwap, emitScaleLRLDSSwap,
@@ -1298,11 +1299,13 @@ def _emitMultiDUTailSrdRewind(writer, kernel, numUnroll, tiA, tiB, scaleTiA, sca
   Undo exactly one per-macro-iteration GR advance on each SRD. On this branch the
   per-macro-iteration advance is what the multi-DU GR_INC pass emits as one
   GRIncOp per (tensor, uid): `numUnroll[tensor]` increments per tensor, each of
-  `depthUBytes` for data (SubtileGREmit._emitGRPtrUpdate_TLU0) and of
-  `lrSubtileSize*lrGlobalSubtileGrid[1]` for scale (SubtileScaleEmit.emitScaleGRPtrUpdate).
+  `depthUBytes` for data (SubtileGREmit._emitGRPtrUpdate_TLU0). Scale increments
+  must match SubtileScaleEmit.emitScaleGRPtrUpdate's format gate:
+  HostPreSwizzle/InMemorySwizzle use `lrSubtileSize*lrGlobalSubtileGrid[1]`
+  (swizzle granule); NoSwizzle Option B uses canonical `scaleDepthU*bpe`.
   So the rewind is numUnroll[tensor] * (per-inc bytes). Verified by codegen + a
   runtime SrdX-AddressX probe: each of the four SRDs is over-advanced by exactly
-  one macro-DU (256B for the MT256x256 MXFP8 repro).
+  one macro-DU (256B for the MT256x256 MXFP8 repro under HPS).
 
   Gated at runtime on this workgroup having actually run >=1 main macro iteration.
   The gate is the *per-WG* main-iter count (`mainIterSgpr`, a snapshot of
@@ -1318,13 +1321,15 @@ def _emitMultiDUTailSrdRewind(writer, kernel, numUnroll, tiA, tiB, scaleTiA, sca
   skipped). Single-DU never reaches here (not _is_multi_du()).
   """
   module = Module("MultiDU tail SRD rewind (partial macro tile)")
-  scaleInc = lambda ti: int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
+  # scaleGRPtrIncBytes mirrors emitScaleGRPtrUpdate (HPS/IMS granule vs
+  # NoSwizzle scaleDepthU*bpe). Using the HPS granule for NoSwizzle undoes the
+  # wrong byte count on SrdMXSA/SrdMXSB after a PGR=1 multi-DU partial tail.
   incs = [("A", int(numUnroll.get('A', 1)) * int(tiA.depthUBytes)),
           ("B", int(numUnroll.get('B', 1)) * int(tiB.depthUBytes))]
   if scaleTiA is not None:
-    incs.append(("MXSA", int(numUnroll.get('SA', 1)) * scaleInc(scaleTiA)))
+    incs.append(("MXSA", int(numUnroll.get('SA', 1)) * scaleGRPtrIncBytes(scaleTiA, kernel)))
   if scaleTiB is not None:
-    incs.append(("MXSB", int(numUnroll.get('SB', 1)) * scaleInc(scaleTiB)))
+    incs.append(("MXSB", int(numUnroll.get('SB', 1)) * scaleGRPtrIncBytes(scaleTiB, kernel)))
   module.addComment0(
       "Undo the PGR=1 prefetch over-advance of one macro-DU on the data/scale "
       "GR SRDs for the partial last macro tile (only for WGs that ran a main "
