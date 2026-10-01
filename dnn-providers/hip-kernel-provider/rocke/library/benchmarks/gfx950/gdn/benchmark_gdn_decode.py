@@ -40,6 +40,7 @@ def eager_us(spec: GdnDecodeSpec, batch: int, reps: int = 200) -> float:
     """
     import torch
     from builders.gfx950.gdn.gdn_decode import (
+        drain,
         launch,
         launcher_for,
         make_inputs,
@@ -57,6 +58,7 @@ def eager_us(spec: GdnDecodeSpec, batch: int, reps: int = 200) -> float:
         launch(launcher, values, cfg)
         torch.cuda.synchronize()
         samples.append((time.perf_counter_ns() - start) / 1e3)
+    drain()
     return statistics.median(samples)
 
 
@@ -70,6 +72,7 @@ def device_us(spec: GdnDecodeSpec, batch: int, reps: int = 64):
     """
     import torch
     from builders.gfx950.gdn.gdn_decode import (
+        drain,
         launch,
         launcher_for,
         make_inputs,
@@ -88,7 +91,7 @@ def device_us(spec: GdnDecodeSpec, batch: int, reps: int = 64):
                 launch(launcher, values, cfg)
     except Exception as exc:  # capture is environment-sensitive; report, don't crash
         print(f"    graph capture unavailable: {type(exc).__name__}", file=sys.stderr)
-        torch.cuda.synchronize()
+        drain()
         return None
     for _ in range(5):
         graph.replay()
@@ -102,6 +105,7 @@ def device_us(spec: GdnDecodeSpec, batch: int, reps: int = 64):
         end.record()
         torch.cuda.synchronize()
         best = min(best, start.elapsed_time(end) * 1e3 / reps)
+    drain()
     return best
 
 

@@ -43,11 +43,12 @@ DEFAULT_BATCHES = (1, 16, 64, 256)
 
 def device_is_visible() -> bool:
     """Load the ROCm-only measurement backend only when tuning is requested."""
-    global TOL, launch, launcher_for, make_inputs, prepare, ref_fp32, torch
+    global TOL, drain, launch, launcher_for, make_inputs, prepare, ref_fp32, torch
     try:
         import torch as torch_module
         from builders.gfx950.gdn.gdn_decode import (
             TOL,
+            drain,
             launch,
             launcher_for,
             make_inputs,
@@ -90,7 +91,7 @@ def device_us(values, cfg, launcher, reps: int = 32):
             for _ in range(reps):
                 launch(launcher, values, cfg)
     except Exception:
-        torch.cuda.synchronize()
+        drain()
         return None
     for _ in range(3):
         graph.replay()
@@ -104,6 +105,7 @@ def device_us(values, cfg, launcher, reps: int = 32):
         end.record()
         torch.cuda.synchronize()
         best = min(best, start.elapsed_time(end) * 1e3 / reps)
+    drain()
     return best
 
 
@@ -139,7 +141,7 @@ def sweep_registry_batch(batch: int, results):
             continue
         values, cfg = prepare(spec, inp, batch)
         launch(launcher, values, cfg)
-        torch.cuda.synchronize()
+        drain()
         err = max(
             (values["out"].float() - ref_out).abs().max().item(),
             (values["state"].float()[written] - ref_state).abs().max().item(),
@@ -189,7 +191,7 @@ def sweep_batch(base: GdnDecodeSpec, batch: int, configs):
             continue
         values, cfg = prepare(spec, inp, batch)
         launch(launcher, values, cfg)
-        torch.cuda.synchronize()
+        drain()
         err = max(
             (values["out"].float() - ref_out).abs().max().item(),
             (values["state"].float()[written] - ref_state).abs().max().item(),

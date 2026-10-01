@@ -582,3 +582,23 @@ def test_state_reset_is_bit_exact(harness):
         outputs.append((values["out"].clone(), values["state"].clone()))
     assert torch.equal(outputs[0][0], outputs[1][0])
     assert torch.equal(outputs[0][1], outputs[1][1])
+
+
+@requires_gfx950
+def test_repeated_checks_do_not_retain_device_memory(harness):
+    """`launch` enqueues under ``no_fence()``, which keeps every launch's tensors
+    alive until the stream is released. A caller that only synchronizes keeps
+    them all: a full tile sweep ran the device out of memory that way. After
+    ``check`` returns, nothing it launched may still be holding device memory.
+    """
+    import torch
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec
+
+    spec = GdnDecodeSpec()
+    harness["check"](spec, 64)  # compile and allocator warm-up
+    torch.cuda.empty_cache()
+    baseline = torch.cuda.memory_allocated()
+    for _ in range(5):
+        harness["check"](spec, 64)
+    torch.cuda.empty_cache()
+    assert torch.cuda.memory_allocated() <= baseline
