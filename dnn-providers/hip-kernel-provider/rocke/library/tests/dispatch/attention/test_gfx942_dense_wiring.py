@@ -297,19 +297,26 @@ class TestGfx942DenseWavesPerEu(unittest.TestCase):
 
 class TestGfx942DenseSpecIdentity(unittest.TestCase):
     def test_kernel_name_follows_the_runtime_shape_contract(self):
-        """Non-persistent gfx942 dense takes batch and both seqlens as kernel
-        params, so one name covers every batch. The persistent grid still bakes
-        batch into the symbol, and the dispatched signature matches that split."""
+        """Non-persistent gfx942 dense takes batch, both seqlens and both head
+        counts as kernel params, so one name covers every batch and head config.
+        The persistent grid still bakes batch and heads into the symbol, and the
+        dispatched signature matches that split."""
         from kernels.gfx942.attention_dense import attention_dense_signature
 
+        shapes = [
+            {"batch": b, "nhead_q": hq, "nhead_k": hk}
+            for b in (1, 2, 4)
+            for hq, hk in ((128, 8), (40, 8), (32, 32))
+        ]
         with _Gfx942Arch():
             runtime = [
-                dispatch_attention(_req(batch=b, dense_persistent="off")).spec
-                for b in (1, 2, 4)
+                dispatch_attention(_req(dense_persistent="off", **kw)).spec
+                for kw in shapes
             ]
             self.assertTrue(all(s.runtime_shape for s in runtime))
             self.assertEqual(len({s.kernel_name() for s in runtime}), 1)
             self.assertNotRegex(runtime[0].kernel_name(), r"_b\d+")
+            self.assertNotRegex(runtime[0].kernel_name(), r"_(hq|kv)\d+")
             names = [p["name"] for p in attention_dense_signature(runtime[0])]
             self.assertEqual(
                 names,
@@ -322,15 +329,18 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
                     "batch",
                     "seqlen_q",
                     "seqlen_kv",
+                    "num_query_heads",
+                    "num_kv_heads",
                 ],
             )
 
             baked = [
-                dispatch_attention(_req(batch=b, dense_persistent="on")).spec
-                for b in (1, 2, 4)
+                dispatch_attention(_req(dense_persistent="on", **kw)).spec
+                for kw in shapes
             ]
             self.assertTrue(all(not s.runtime_shape for s in baked))
-            self.assertEqual(len({s.kernel_name() for s in baked}), 3)
+            self.assertEqual(len({s.kernel_name() for s in baked}), len(shapes))
+            self.assertRegex(baked[0].kernel_name(), r"_hq\d+_kv\d+_")
             baked_names = [p["name"] for p in attention_dense_signature(baked[0])]
             self.assertEqual(baked_names, ["q_ptr", "k_ptr", "v_ptr", "o_ptr", "scale"])
 

@@ -250,12 +250,14 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
     shape -- and at priority 3 it is the only thing keeping this candidate off the
     default path.
 
-    The non-persistent body reads ``batch``, ``seqlen_q``, and ``seqlen_kv`` from
-    kernel params (``Gfx942AttentionDenseSpec.runtime_shape``). ``signature`` is
-    ``attention_dense_signature``, which appends those three i32s, and
-    ``bind_torch`` launches through ``run_attention_dense_torch``, which packs
-    them. The persistent grid declares no shape params and keeps batch in the
-    kernel name.
+    When ``Gfx942AttentionDenseSpec.runtime_shape`` holds (not persistent and no
+    sliding window), the body reads ``batch``, ``seqlen_q``, ``seqlen_kv``,
+    ``num_query_heads``, and ``num_kv_heads`` from kernel params
+    (``spec.runtime_param_fields``). ``signature`` is ``attention_dense_signature``,
+    which appends those five i32s after ``scale``, and ``bind_torch`` launches
+    through ``run_attention_dense_torch``, which packs them via
+    ``attention_dense_runtime_args``. The persistent and sliding-window bodies
+    declare no shape params and keep the shape in the kernel name.
 
     Carries the port's P1-P5 levers: the 32x32x8 atom with K-loop doubling,
     conflict-free V (D128 fp16), exp2_fast + fused softmax rescale, per-config

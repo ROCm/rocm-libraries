@@ -297,6 +297,82 @@ def test_one_binary_serves_every_shape():
 
 @requires_gfx942_gpu
 @pytest.mark.gpu
+def test_one_binary_serves_every_head_config():
+    """One compiled artifact, four head configs, correct numerics at each.
+
+    The head-count twin of :func:`test_one_binary_serves_every_shape`: on the
+    runtime-shape path ``num_query_heads`` / ``num_kv_heads`` are kernel params,
+    so the GQA ratio and the token strides are computed at run time. A body that
+    still baked one of them would compute wrong strides for every config but the
+    first one compiled -- caught here by the numeric check, while the ``is`` /
+    single-entry assertions catch a key or lookup regression that recompiles per
+    head config. Covers GQA 16, non-pow2 GQA 5 and 7, and MHA.
+    """
+    import torch
+    import torch.nn.functional as F
+
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+    from kernels.gfx942.attention_dense import _DENSE_LAUNCHER_CACHE
+
+    dtype, d, B, S = "fp16", 128, 1, 512  # flagship default, non-persistent
+    tol = 2e-2
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    scale = 1.0 / math.sqrt(d)
+
+    heads = ((128, 8), (40, 8), (28, 4), (32, 32))
+    specs = [
+        _as_gfx942_spec(_spec(dtype, d, hq, hkv, False, batch=B, sq=S))
+        for hq, hkv in heads
+    ]
+
+    # Preconditions: all on the runtime path and sharing one key -- otherwise the
+    # reuse assertion below is vacuous.
+    assert all(s.runtime_shape for s in specs), "a head config left the runtime path"
+    keys = [attention_dense_cache_key(s, arch="gfx942") for s in specs]
+    assert len(set(keys)) == 1, f"head configs {heads} did not share a cache key"
+
+    _DENSE_LAUNCHER_CACHE.pop(keys[0], None)
+    before = set(_DENSE_LAUNCHER_CACHE)
+
+    launchers = []
+    for (hq, hkv), spec in zip(heads, specs):
+        torch.manual_seed(0)
+        q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
+        k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+        v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+        out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+        torch.cuda.synchronize()
+        launchers.append(_launcher_for(spec))
+
+        rep = hq // hkv
+        ref = F.scaled_dot_product_attention(
+            q.transpose(1, 2).float(),
+            k.transpose(1, 2).float().repeat_interleave(rep, dim=1),
+            v.transpose(1, 2).float().repeat_interleave(rep, dim=1),
+            is_causal=True,
+            scale=scale,
+        ).transpose(1, 2)
+        max_abs = (ref - out.float()).abs().max().item()
+        assert max_abs < tol, f"Hq={hq} Hkv={hkv}: max_abs={max_abs:.3e} >= {tol}"
+
+    assert launchers[0] is not None, (
+        "no launcher cached after a successful run; _DENSE_LAUNCHER_CACHE is no "
+        "longer keyed by attention_dense_cache_key and this test is blind"
+    )
+    assert all(lau is launchers[0] for lau in launchers), (
+        f"head configs {heads} share a cache key but were served by DIFFERENT "
+        "launcher objects -- the runtime-heads kernel recompiled per head config"
+    )
+    assert set(_DENSE_LAUNCHER_CACHE) - before == {keys[0]}, (
+        "four head configs on the runtime path added more than one cache entry: "
+        f"{sorted(set(_DENSE_LAUNCHER_CACHE) - before)}"
+    )
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype,d,hq,hkv,persistent,sliding_window", _SWA_COHORT)
 def test_dense_swa_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, sliding_window):
     """Sliding-window (SWA) numeric parity, standalone (no sinks), both grids.
