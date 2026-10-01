@@ -39,7 +39,22 @@ _BLOCK_GROUPS = (1, 2, 4, 8, 16)
 _DOUBLE_BUFFER = (True, False)
 
 # Depthwise (cpg == 1) sweep dimensions.
-_DW_BLOCK_W = (4, 8, 16, 32)
+# block_w=32 is omitted from both directions: across the depthwise corpus, at
+# both dtypes, it never won a single geometry -- every shape whose best config
+# used a wide block_w landed on 8 or 16 -- while still costing a quarter of the
+# candidate builds and tuning launches.
+#
+# The surviving values differ by direction, because the two directions do not
+# have the same fallback.  Forward is overwhelmingly a block_w=4 story: the
+# column-streamed variant (its own grid below) covers the wide-block cases, so
+# the preloading kernel rarely needs to go wide, and the few shapes that do go
+# wide land on 16 rather than 8.  Dropping 8 from the forward grid is therefore
+# free, while dropping 16 is not.  Dgrad has no second variant to fall back on,
+# so its tail keeps both 8 and 16 -- dropping either regresses small-spatial /
+# large-filter shapes, 8 the more severely of the two.  Neither tuple is
+# reducible further without giving up a shape's best config.
+_DW_BLOCK_W_FWD = (4, 16)
+_DW_BLOCK_W_DGRAD = (4, 8, 16)
 _DW_BLOCK_WAVES = (1, 2, 4)
 
 # The column-streamed depthwise kernel keeps only ``Ho*block_w + KH`` f32 live
@@ -516,7 +531,7 @@ def _run_depthwise_sweep(
     else:
         combos = [
             ("preload", bw, bwv)
-            for bw, bwv in itertools.product(_DW_BLOCK_W, _DW_BLOCK_WAVES)
+            for bw, bwv in itertools.product(_DW_BLOCK_W_FWD, _DW_BLOCK_WAVES)
         ] + _col_combos
 
     if args.sample is not None:
@@ -1245,7 +1260,7 @@ def _run_dgrad_sweep(
             is_valid_depthwise_dgrad_stream_spec,
         )
 
-        combos_dw = list(itertools.product(_DW_BLOCK_W, _DW_BLOCK_WAVES))
+        combos_dw = list(itertools.product(_DW_BLOCK_W_DGRAD, _DW_BLOCK_WAVES))
         print(
             f"Sweeping {len(combos_dw)} depthwise dgrad combinations for {arch} {dtype} "
             f"{p.short()} (stride={p.stride}) ...",
