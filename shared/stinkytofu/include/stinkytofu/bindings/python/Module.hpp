@@ -125,7 +125,8 @@
     X(DsReadThrottleLatency, int, -1)                                 \
     X(DsReadPerCap, int, -1)                                          \
     X(DsReadPerWmma, int, -1) /* deprecated alias for DsReadPerCap */ \
-    X(ClusterBarrierRule3SignalLeadCycles, int, -1)
+    X(ClusterBarrierRule3SignalLeadCycles, int, -1)                   \
+    X(WaitRepairSlotsToMovePastAnchor, int, 1) /* 0 or less disables repair */
 
 namespace stinkytofu {
 /**
