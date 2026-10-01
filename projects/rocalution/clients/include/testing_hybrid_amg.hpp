@@ -54,7 +54,7 @@ bool testing_hybrid_amg(Arguments argus)
     bool        rebuildnumeric      = argus.rebuildnumeric;
     bool        disable_accelerator = !argus.use_acc;
 
-    const int ua_coarse_size = 1000;
+    const int ua_coarse_size = 100;
     const int rs_coarse_size = 20;
 
     // Initialize rocALUTION platform
