@@ -4,7 +4,6 @@
 #include "BatchnormBwdPlan.hpp"
 
 #include <string>
-#include <utility>
 
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -13,6 +12,8 @@
 #include "BatchnormKernelCompileOptions.hpp"
 #include "compilation/IKernelCompiler.hpp"
 #include "core/Utils.hpp"
+
+using namespace hip_kernel_provider::core::utils;
 
 namespace hip_kernel_provider::batchnorm
 {

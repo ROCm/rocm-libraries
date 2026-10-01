@@ -187,6 +187,9 @@ namespace TensileLite
         StreamKWithBatch,
         StreamKNoBatch,
         TilesXYBatchGSU,
+        PersistentGrid,
+        PersistentWithBatch,
+        PersistentNoBatch,
         CustomGridSize_Count,
     };
 
@@ -317,6 +320,51 @@ namespace TensileLite
         size_t depthUorMT1;
     };
 
+    // None selects ordinary GEMM; DataParallel and StreamK use persistent workgroups.
+    enum class TileProcessingStrategy { None, DataParallel, StreamK };
+    enum class WorkAssignment { StaticGrid, DynamicWorkQueue, Hybrid };
+
+    inline char const* toString(TileProcessingStrategy strategy)
+    {
+        switch(strategy)
+        {
+        case TileProcessingStrategy::None: return "None";
+        case TileProcessingStrategy::DataParallel: return "DataParallel";
+        case TileProcessingStrategy::StreamK: return "StreamK";
+        }
+        throw std::runtime_error("Invalid TileProcessingStrategy");
+    }
+    inline char const* toString(WorkAssignment assignment)
+    {
+        switch(assignment)
+        {
+        case WorkAssignment::StaticGrid: return "StaticGrid";
+        case WorkAssignment::DynamicWorkQueue: return "DynamicWorkQueue";
+        case WorkAssignment::Hybrid: return "Hybrid";
+        }
+        throw std::runtime_error("Invalid WorkAssignment");
+    }
+
+    inline TileProcessingStrategy parseTileProcessingStrategy(std::string const& name)
+    {
+        for(auto strategy : {TileProcessingStrategy::None,
+                             TileProcessingStrategy::DataParallel,
+                             TileProcessingStrategy::StreamK})
+            if(name == toString(strategy))
+                return strategy;
+        throw std::runtime_error("Invalid TileProcessingStrategy");
+    }
+
+    inline WorkAssignment parseWorkAssignment(std::string const& name)
+    {
+        for(auto assignment : {WorkAssignment::StaticGrid,
+                               WorkAssignment::DynamicWorkQueue,
+                               WorkAssignment::Hybrid})
+            if(name == toString(assignment))
+                return assignment;
+        throw std::runtime_error("Invalid WorkAssignment");
+    }
+
     struct SizeMapping
     {
         size_t waveNum;
@@ -346,8 +394,24 @@ namespace TensileLite
         size_t packBatchDims              = 0;
         int    packSummationDims          = 0;
         int    magicDivAlg                = 1;
-        int    streamK                    = 0;
-        int    streamKForceDPOnly         = 0;
+        TileProcessingStrategy tileProcessingStrategy = TileProcessingStrategy::None;
+        WorkAssignment workAssignment = WorkAssignment::StaticGrid;
+        bool isPersistent() const { return tileProcessingStrategy != TileProcessingStrategy::None; }
+        bool isStreamK() const { return tileProcessingStrategy == TileProcessingStrategy::StreamK; }
+        bool isPersistentDataParallel() const { return tileProcessingStrategy == TileProcessingStrategy::DataParallel; }
+        bool hasStaticAssignment() const { return isPersistent() && workAssignment == WorkAssignment::StaticGrid; }
+        bool hasDynamicAssignment() const { return isPersistent() && workAssignment == WorkAssignment::DynamicWorkQueue; }
+        bool hasHybridAssignment() const { return isPersistent() && workAssignment == WorkAssignment::Hybrid; }
+        bool requiresPartialReduction() const { return isStreamK() && streamKAtomic == 0; }
+        void validateExecutionPolicy() const
+        {
+            if(streamKAtomic < 0 || streamKAtomic > 1)
+                throw std::runtime_error("StreamKAtomic must be 0 or 1");
+            if(!isStreamK() && streamKAtomic)
+                throw std::runtime_error("StreamKAtomic requires TileProcessingStrategy=StreamK");
+            if(isPersistentDataParallel() && workAssignment != WorkAssignment::StaticGrid)
+                throw std::runtime_error(std::string(toString(tileProcessingStrategy)) + " supports WorkAssignment=StaticGrid only");
+        }
         int    streamKAtomic              = 0;
         int    prefetchAcrossPersistent   = 0;
         int    persistentKernel           = 0;
@@ -402,6 +466,11 @@ namespace TensileLite
         // kernels (e.g. rejecting them for small K).
         bool useSubtileImpl = false;
 
+        // SourceSwap: MFMA output is mapped so that M is the fast (stride-1)
+        // store axis in D.  Enabled for all non-sparse kernels; plumbed into
+        // the Origami epilogue model to select the correct store-pattern cost.
+        bool SourceSwap = false;
+
         int NonTemporalD = 0;
         int WaveSeparateGlobalReadA = 0;
         int WaveSeparateGlobalReadB = 0;
@@ -421,15 +490,25 @@ namespace TensileLite
         std::array<int, 2> waveGroup;
     };
 
-    struct StreamKSettings
+    struct PersistentLaunchSettings
     {
-        origami::reduction_t reduction = origami::reduction_t::tree;
+        TileProcessingStrategy tileProcessingStrategy = TileProcessingStrategy::None;
+        WorkAssignment workAssignment = WorkAssignment::StaticGrid;
+        WorkAssignment effectiveWorkAssignment = WorkAssignment::StaticGrid;
+        size_t selectedGrid = 0;
+        size_t totalTiles = 0;
+        size_t workspaceBytes = 0;
+        bool clusterGridClamp = false;
+        int argsVersion = 0;
+        origami::reduction_t reduction = origami::reduction_t::none;
         size_t               grid      = 0;
         // StreamK=5 tri-state (0=OFF default/SK3, 1=ON/SK4, 2=AUTO); see
         // hipblasLtStreamKTileSchedulingMode_t. Ignored when streamK != 5.
-        int                  streamKTileSchedulingMode = 0;
         int                  smCountTarget = 0; // 0 = use all device CUs; >0 engages origami heuristic when mode is OFF
     };
+
+    // Source compatibility for consumers using the former launch type.
+    using StreamKSettings = PersistentLaunchSettings;
 
     struct GSUSettings
     {
@@ -523,7 +602,7 @@ namespace TensileLite
      * Parallel extras are per PartialIdx and tile-symmetric, so I % F == 0 is
      * not required (unlike the tree all-partial model without per-tile extras).
      */
-    TENSILELITEHOST_EXPORT bool streamKParallelReductionRowUniform(StreamKSettings const& sk,
+    TENSILELITEHOST_EXPORT bool streamKParallelReductionRowUniform(PersistentLaunchSettings const& sk,
                                                                    int  streamKAtomic,
                                                                    bool staticTwoTilePacking,
                                                                    size_t tiles);
@@ -582,14 +661,12 @@ namespace TensileLite
     struct StreamKDecisions
     {
         // --- Mode ---
-        // available: sizeMapping.streamK, the mode solve() uses (0 = not StreamK, else 3/4/5).
-        int  streamKMode      = 0;
         // available: streamK5EffectiveDynamic(), the same helper solve()'s grid path uses
         // (SK5 resolved to the dynamic SK4 sub-path). Only meaningful for SK5: it stays
         // false for SK4 even though SK4 is unconditionally dynamic, so ask isDynamic
         // (below) -- not this -- whether a launch takes the dynamic path.
         bool effectiveDynamic = false;
-        // recomputed: derived from streamKMode + effectiveDynamic (SK4, or SK5 resolved dynamic).
+        // recomputed: DynamicWorkQueue assignment, or Hybrid resolved dynamic.
         // Launch-relevant rather than merely reported: solve() consumes this as the
         // dynamicQueuePath predicate guarding the work-stealing rejection.
         bool isDynamic        = false;
@@ -597,7 +674,7 @@ namespace TensileLite
         // --- Reduction ---
         // available: solve() wires this exact value into sk.reduction -- it is the final
         // (post workspace-DP fallback) reduction the launch uses.
-        origami::reduction_t reduction = origami::reduction_t::tree;
+        origami::reduction_t reduction = origami::reduction_t::none;
 
         // --- Grid / tiles / split ---
         // available: problem.getNumTiles(sizeMapping, 1), the same call solve() makes.
@@ -647,12 +724,12 @@ namespace TensileLite
 
         // --- DP-only ---
         // The three flags below distinguish the source of a data-parallel-only launch:
-        //   forceDPOnly              -> sizeMapping.streamKForceDPOnly compile-time param
+        //   forceDPOnly              -> sizeMapping.isPersistentDataParallel() compile-time param
         //   streamKDP                -> TENSILE_STREAMK_DATA_PARALLEL debug override
         //   workspaceDPFallbackFired -> runtime workspace-insufficient (below)
         // recomputed: OR of the three DP triggers above.
         bool dpOnly      = false;
-        // available: sizeMapping.streamKForceDPOnly param.
+        // available: sizeMapping.isPersistentDataParallel() param.
         bool forceDPOnly = false;
         // available: Debug::useStreamKDataParrallel() (TENSILE_STREAMK_DATA_PARALLEL).
         bool streamKDP   = false;
@@ -668,28 +745,22 @@ namespace TensileLite
         // WARNING: this is NOT ContractionSolution::requiredWorkspaceSize()'s return
         // value, even though the names are close. requiredWorkspaceSize() is the
         // separate, caller-facing implementation of the reserve-or-not rule -- it is
-        // what the allocator sizes the workspace buffer from -- and it computes the
-        // answer differently: it always asks getSKReduction(), and for parallel
-        // reduction it sizes with requiredWorkspaceSizeGsu(problem, hardware,
-        // grid / tiles) instead of partialTileSize(grid).
+        // what the allocator sizes the workspace buffer from. For generated
+        // kernels, both paths size parallel partial-result storage from the grid,
+        // after streamKReconcileReduction() demotes parallel to tree for split
+        // factors below two. At grid == tiles, the tree path needs no partials
+        // workspace. The parallel query additionally preserves the split-reduction
+        // sizing rules for bias-gradient and amaxD; this snapshot reports the
+        // partials buffer only.
         //
-        // The two can disagree about WHETHER a workspace is needed, not just how
-        // many bytes: at a k-split factor grid / tiles of 1,
-        // requiredWorkspaceSizeGsu() short-circuits to 0 while partialTileSize(grid)
-        // does not, so a parallel reduction whose grid came back equal to tiles would
-        // reserve here and not there. Both call sites run streamKReconcileReduction()
-        // on the same (reduction, grid, tiles) triple immediately after
-        // getSKGridImpl(), and it demotes parallel to tree below a split factor of 2
-        // unconditionally -- uniform summation order does not gate it -- so the gap
-        // closes in both modes. The formulas differ; the reserve-or-not answer does not.
-        //
-        // That agreement is load-bearing rather than incidental: it is what lets the
-        // allocate-then-launch flow close. The allocator sizes from
-        // requiredWorkspaceSize(), that size is what problem.workspaceSize() reports
-        // on the subsequent launch, and re-deriving this snapshot against it reaches
-        // a self-consistent fixed point. Both implementations encode the same
-        // intended rule, by way of the same reconcile helper -- change one, check
-        // the other two.
+        // Reduction selection still differs: this snapshot and
+        // resolveStreamKSettings() force tree for SK4 and SK5-dynamic, while
+        // requiredWorkspaceSize() always asks getSKReduction(). A fixed-grid
+        // override can preserve that difference; see requiredWorkspaceSize().
+        // Sharing the byte formula does not imply identical decisions in every
+        // mode. Changes to any of these three paths must be checked against the
+        // other two, including the allocate-then-launch flow where the queried
+        // size becomes problem.workspaceSize().
         size_t requiredWorkspaceBytes = 0;
         // recomputed: partials(+work-queue) bytes wanted, before the fit check against
         // givenWorkspaceBytes. Non-zero even when the fallback fires, which is what
@@ -809,7 +880,7 @@ namespace TensileLite
 
         bool isStreamK() const
         {
-            return sizeMapping.streamK > 0;
+            return sizeMapping.isStreamK();
         }
 
         /**
@@ -917,7 +988,7 @@ namespace TensileLite
         // streamKTileSchedulingMode (0=OFF/static unless smCountTarget()>0,
         // 1=ON/dynamic), then AUTO (2) via the origami hybrid-mode heuristic.
         // Only meaningful when
-        // sizeMapping.streamK == 5. This is the single source of truth shared by
+        // sizeMapping.hasHybridAssignment(). This is the single source of truth shared by
         // grid sizing (getSKGrid) and kernel-arg packing (generateSingleCall) so
         // the launch grid and the packed args can never disagree.
         bool                 streamK5EffectiveDynamic(Problem const&  problem,
@@ -957,8 +1028,16 @@ namespace TensileLite
         // StreamKDecisions field documents its own provenance (available vs
         // recomputed). Has no effect on the launch beyond producing these values, and
         // never mutates solution or problem state. For a non-StreamK solution
-        // (sizeMapping.streamK <= 0) it returns immediately with a default-initialised
-        // snapshot whose streamKMode is sizeMapping.streamK.
+        // (!sizeMapping.isStreamK()) it returns immediately with a default-initialised
+        // snapshot resolved from sizeMapping's execution policy.
+        PersistentLaunchSettings resolvePersistentSettings(Problem const& problem,
+                                                           Hardware const& hardware) const;
+
+        void validatePersistentLoopArgs() const;
+
+        void printPersistentLaunchSummary(std::ostream& os, Problem const& problem,
+                                          PersistentLaunchSettings const& launch) const;
+
         StreamKDecisions computeStreamKDecisions(Problem const&  problem,
                                                  Hardware const& hardware) const;
 
@@ -1060,7 +1139,7 @@ namespace TensileLite
                             dim3 const&              problemNumGroupTiles,
                             dim3 const&              numWorkGroups,
                             KA&                      args,
-                            StreamKSettings const&   sk,
+                            PersistentLaunchSettings const&   sk,
                             size_t                   resolvedGlobalAccumulation) const;
 
         template <bool T_Debug>
@@ -1108,7 +1187,7 @@ namespace TensileLite
         KernelInvocation generateCustomCall(Problem const&           problem,
                                             ContractionInputs const& inputs,
                                             Hardware const&          hardware,
-                                            StreamKSettings const&   sk) const;
+                                            PersistentLaunchSettings const&   sk) const;
 
         // Temporary: the proven per-feature argument-packing path, restored from
         // develop and used for all Tensile-generated kernels while the generic
@@ -1119,7 +1198,7 @@ namespace TensileLite
         KernelInvocation generateSingleCall(Problem const&           problem,
                                             ContractionInputs const& inputs,
                                             Hardware const&          hardware,
-                                            StreamKSettings const&   sk,
+                                            PersistentLaunchSettings const&   sk,
                                             GSUSettings const&       gsuSettings) const;
 
         template <bool T_Debug, typename KA>
@@ -1144,7 +1223,7 @@ namespace TensileLite
                                       ContractionInputs const& inputs,
                                       uint32_t const&          workspaceOffsetInByte,
                                       KA&                      args,
-                                      StreamKSettings const&   sk,
+                                      PersistentLaunchSettings const&   sk,
                                       uint32_t                 autoGsuVal,
                                       size_t                   resolvedGlobalAccumulation,
                                       uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;
@@ -1161,7 +1240,7 @@ namespace TensileLite
         template <bool T_Debug>
         KernelInvocation generateOutputConversionCall(Problem const&           problem,
                                                       ContractionInputs const& inputs,
-                                                      StreamKSettings const&   sk,
+                                                      PersistentLaunchSettings const&   sk,
                                                       uint32_t                 autoGsuVal,
                                                       size_t resolvedGlobalAccumulation) const;
 
@@ -1196,6 +1275,7 @@ namespace TensileLite
         struct InternalArgsSupport
         {
             int  version            = 0;
+            int  persistentLoopArgsVersion = 0;
             bool gsu                = true;
             bool wgm                = true;
             bool staggerU           = true;
@@ -1335,6 +1415,13 @@ namespace TensileLite
                                                    Hardware const* hardware) const;
 
     private:
+        // tiles is the total number of partial tiles, including batches and
+        // splits. The caller supplies it using either GSU tiles or a StreamK grid.
+        // Preserve the auxiliary-workspace rules even when gsu is zero or one.
+        size_t requiredWorkspaceSizeForSplitTiles(Problem const& problem,
+                                                 size_t         gsu,
+                                                 size_t         tiles) const;
+
         bool handwrittenCustomKernel() const;
 
         // Same StreamK grid / reduction solve() packs, including the
@@ -1362,7 +1449,7 @@ namespace TensileLite
         std::string uniformSummationOrderLaunchObstacle(
             Problem const&         problem,
             Hardware const&        hardware,
-            StreamKSettings const& sk,
+            PersistentLaunchSettings const& sk,
             size_t                 resolvedGlobalAccumulation,
             uint32_t               gsu,
             void const*            synchronizer,
@@ -1372,7 +1459,7 @@ namespace TensileLite
         // Launch gate. Call once sk and resolvedGlobalAccumulation are final.
         void checkUniformSummationOrder(Problem const&         problem,
                                         Hardware const&        hardware,
-                                        StreamKSettings const& sk,
+                                        PersistentLaunchSettings const& sk,
                                         size_t                 resolvedGlobalAccumulation,
                                         uint32_t               gsu,
                                         void const*            synchronizer) const;
@@ -1389,4 +1476,3 @@ namespace TensileLite
                              ContractionSolution::ProjectedPerformance const& spm);
     TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, BufferLoadCheckPacket const& st);
 } // namespace TensileLite
-

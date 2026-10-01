@@ -1,0 +1,59 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S00 designed config: loadBatchedAddress non-StridedBatched pointer-array deref.
+#
+# Target: Tensile/KernelWriterAssembly.py loadBatchedAddress (miss 2146-2209).
+#
+# loadBatchedAddress is emitted ONLY when not kernel["ProblemType"]["StridedBatched"]
+# (KernelWriterAssembly.py:2932). It dereferences an array of buffer pointers for
+# C/D (2153-2166), Beta-C (2168-2185) when UseBeta, and A/B (2188-2205).
+#
+# gfx942 (MFMA) does NOT have RequiresXCntForVolatileVMEM, so it takes the else
+# arms: 2163 (D SLoadB64), 2180-2185 (C block + else SLoadB64 2185), 2205-2206
+# (A/B else SLoadB64s). The XCnt arms (2157-2161, 2174-2178, 2197-2203) need a
+# gfx1250 twin (RequiresXCntForVolatileVMEM True).
+#
+# Overrides vs asmaddr2_fp32 base: StridedBatched: False (general batched /
+# pointer-array GEMM), Batched: True, UseBeta: True, batch count > 1 (batch=2).
+#
+# 1 emitted kernel.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # SSS (fp32) NT general-batched (StridedBatched: False), UseBeta.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      StridedBatched: False
+      UseBias: 0
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 2, 8, 2, 2]
+        - DepthU: [16]
+        - GlobalSplitU: [1]
+        - SourceSwap: [True]
+        - PrefetchGlobalRead: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 2, 256]
