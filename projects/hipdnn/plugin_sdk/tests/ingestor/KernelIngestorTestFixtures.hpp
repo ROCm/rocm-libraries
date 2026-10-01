@@ -158,15 +158,21 @@ inline GraphId makeNilGraphId()
 
 /// A real, serialized single-node graph: C[m, n] = A[m, k] x B[k, n], so the canonical work
 /// model publishes `graph.flops` = 2mnk for it. TestGraph carries no node and therefore no
-/// work, which a test of what a ranker learns from the problem cannot use.
+/// work, which a test of what a ranker learns from the problem cannot use. @p graphId, when
+/// given, makes the catalog cacheable, which a test of what the catalog cache retains needs.
 class MatmulTestGraph
 {
 public:
-    MatmulTestGraph(int64_t m, int64_t n, int64_t k)
+    MatmulTestGraph(int64_t m, int64_t n, int64_t k, std::optional<GraphId> graphId = std::nullopt)
     {
         using namespace hipdnn_flatbuffers_sdk::data_objects;
         GraphT graph;
         graph.name = "matmul";
+        if(graphId.has_value())
+        {
+            graph.id = std::make_unique<Uuid>(
+                hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(*graphId));
+        }
         const auto addTensor = [&graph](int64_t uid, int64_t rows, int64_t columns) {
             auto tensor = std::make_unique<TensorAttributesT>();
             tensor->uid = uid;
@@ -835,6 +841,11 @@ struct StubContext
     bool hasPlan() const
     {
         return _plan != nullptr;
+    }
+
+    const hipdnn_plugin_sdk::IPlan<StubHandle>& plan() const
+    {
+        return *_plan;
     }
 
 private:

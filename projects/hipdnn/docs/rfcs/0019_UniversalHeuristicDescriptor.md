@@ -1012,7 +1012,11 @@ the model is trained to rank exactly that catalog. Kernel selection then proceed
    record's chosen configuration*, and the metric is unavailable if no such model exists; the model never
    substitutes its own choice of configuration. A measured value names no UHD. A prediction that
    consulted the model while plan build consulted the record would advertise one kernel and build
-   another, and the engine would have competed on a number its plan does not deliver.
+   another, and the engine would have competed on a number its plan does not deliver. Both therefore
+   read one snapshot: a record that orders a cached catalog is cached with it, measured times and
+   all, and neither path looks the record up again while that catalog is cached. Otherwise the bounded
+   record store could evict the record from under a catalog it still orders, and the prediction alone
+   would fall back to the model.
 
 **The output is the ranked catalog, not just a winner.** Selection returns the candidates in score order;
 the winner is simply its first element. Callers need the ordering, not only the argmax — a knob query
@@ -2525,7 +2529,11 @@ set. The per-engine and per-configuration prediction queries carry the metric th
 architecture, or reports the metric unavailable; it never answers in a different metric. The answer
 carries the **metric name and value** rather than a field named for one metric, and the host checks
 that the returned metric is the requested one — a mismatch is *invalid*, not a conversion. Validity
-of the value is the metric's: non-negative throughput, positive time.
+of the value is the metric's: non-negative throughput, positive time. An available engine (A) estimate
+names the UHD that produced it. An available configuration (B) answer names one too when a model
+produced its value, and names none when the value is measured ([Section 5](#5-selection-flow) step 9);
+the host admits both, never invents an identity for a measurement, and still applies every other
+check — the metric, the value, the engine, and any explicit configuration constraint.
 
 **Capability query.** A caller can ask an engine which metrics it serves at which level, for the
 current device, without evaluating any model: a list of `(kind, metric, UHD id)`. It reads bindings only,

@@ -725,11 +725,17 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
     }
     if(response->status() == fb::PredictionStatus::AVAILABLE)
     {
-        if(!evaluate || !hipdnn_data_sdk::utilities::isValidMetricValue(metric, response->value())
-           || response->uhd_id() == nullptr || response->uhd_id()->size() == 0)
+        if(!evaluate || !hipdnn_data_sdk::utilities::isValidMetricValue(metric, response->value()))
         {
-            return invalid("Available prediction needs an evaluated UHD and a valid '"
-                           + result.metric + "' value");
+            return invalid("Available prediction needs an evaluation and a valid '" + result.metric
+                           + "' value");
+        }
+        // An engine estimate only ever comes from a UHD, so it names one. A configuration
+        // answer may instead be a measured value (RFC 0019 §5 step 9), which names no UHD.
+        if(kind == HIPDNN_ENGINE_PREDICTION_ENGINE
+           && (response->uhd_id() == nullptr || response->uhd_id()->size() == 0))
+        {
+            return invalid("Available engine prediction needs the UHD that evaluated it");
         }
         const auto* selected = response->engine_config();
         if(kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION

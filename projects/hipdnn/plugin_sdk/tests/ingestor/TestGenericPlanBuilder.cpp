@@ -2036,7 +2036,7 @@ TEST(TestIngestorGenericPlanBuilder, ANarrowRecordDoesNotCoverAWiderRunAndTrigge
 /// always leaves exactly one kernel and makes any ordering question vacuous.
 ///
 /// Falsifying mutation: order from `orderIfFullyCovered(*record, filtered)` again instead of
-/// from `catalog.orderedFromRecord`, and the narrowed run serves kernel_128.
+/// from `catalog.measuredRecord`, and the narrowed run serves kernel_128.
 TEST(TestIngestorGenericPlanBuilder, APartiallyCoveringRecordIsRefusedByTheNarrowedRunToo)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);

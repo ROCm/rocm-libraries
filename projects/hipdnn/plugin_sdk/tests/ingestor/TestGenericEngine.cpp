@@ -630,6 +630,108 @@ TEST(TestIngestorGenericEngine, ACoveringRecordDecidesTheConfigurationPrediction
     EXPECT_EQ(estimated.uhd_id, toString(HEURISTIC_ID));
 }
 
+/// Plan build and configuration prediction read ONE measured snapshot. The catalog cache keeps
+/// a measured order after the bounded winner cache has evicted the record that produced it, so
+/// plan build kept serving the measured K64 while the prediction looked the record up again,
+/// missed, and pinned the model's K128 with the model's number. Here the winner cache holds one
+/// record, so recording another evicts the first while the catalog it ordered stays cached.
+TEST(TestIngestorGenericEngine, AnEvictedRecordStillDecidesBothPlanAndPrediction)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+    const StubWorkspaceHandler handler; // sizes workspace by block size: names the built kernel
+    const ScopedDispatchRegistration<StubHandle> dispatch("hipdnn.kernel_ingestor.test.dispatch",
+                                                          handler);
+    MetadataSchema schema;
+    schema.id = SCHEMA_ID;
+    schema.fields = {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
+                     {DTYPE, MetadataType::STRING, std::nullopt}};
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    pack.kernels = {makeTestKernel(testId(0x64), "kernel_64_float", 64, "FLOAT"),
+                    makeTestKernel(testId(0x65), "kernel_128_float", 128, "FLOAT")};
+    HeuristicDescriptor model;
+    model.id = HEURISTIC_ID;
+    model.adapter = UhdAdapter::NATIVE;
+    model.nativeSymbol = SCORE_SYMBOL; // the block size: the model prefers K128
+    model.score = {"tflops", true, "identity"};
+    auto ranker = UhdKernelHeuristic::tryCreate(model, "calibrated configuration", {BLOCK_SIZE});
+    ASSERT_NE(ranker, nullptr);
+    auto owned = std::make_unique<KernelIngestorStateManager<StubHandle>>(
+        std::move(schema),
+        std::vector<MatchDescriptor>{},
+        makeStubDispatches(),
+        std::vector<KernelDescriptorPack>{std::move(pack)},
+        std::move(ranker),
+        GRAPH_MATCH_SYMBOL,
+        "",
+        KernelIngestorStateManager<StubHandle>::DEFAULT_CATALOG_CACHE_CAPACITY,
+        EngineIdentity{},
+        /*winnerCacheCapacity=*/1);
+    auto& manager = *owned;
+    const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), std::move(owned), resolver);
+    StubHandle handle;
+    const auto properties = testDeviceProperties();
+    const auto keyFor = [&](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+        return WinnerKey{hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{graph},
+                         DeviceKey{properties}};
+    };
+    // Identified, so its catalog is cached; real work, so a time becomes a throughput.
+    const MatmulTestGraph matmul(1024, 1024, 1024, makeGraphId(0x6F));
+    const auto& graph = matmul.graph();
+
+    // K64 measured at 1 ms, K128 at 2 ms, covering the whole catalog.
+    WinnerRecord record;
+    for(const auto& kernel : manager.unsortedDefinitions(MatchContext{graph, 0, properties}))
+    {
+        record.push_back({kernel.kernelId,
+                          kernel.packId,
+                          kernel.dispatchId,
+                          kernel.getIntMetadata(BLOCK_SIZE) == 64 ? 1.0 : 2.0});
+    }
+    std::sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.timeMs < rhs.timeMs;
+    });
+    ASSERT_EQ(record.size(), 2U);
+    manager.recordWinner(keyFor(graph), record, WinnerWriteCause::FRESH_MISS);
+
+    const auto buffer = configWithMetric("tflops");
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
+        buffer.GetBufferPointer(), buffer.GetSize());
+    const auto builtBlockSize
+        = [&](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) {
+              StubContext context;
+              engine.initializeExecutionContext(handle, graph, engineConfig, context);
+              return context.plan().getWorkspaceSize(handle);
+          };
+    // Plan build adopts the record and caches the measured catalog.
+    ASSERT_EQ(builtBlockSize(config), 64U);
+
+    const MatmulTestGraph other(512, 512, 512);
+    manager.recordWinner(keyFor(other.graph()), record, WinnerWriteCause::FRESH_MISS);
+    ASSERT_FALSE(manager.winnerFor(keyFor(graph)).has_value())
+        << "the precondition: the record that ordered the cached catalog is evicted";
+
+    const auto prediction
+        = engine.getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, true);
+    ASSERT_EQ(prediction.status, PredictionStatus::AVAILABLE) << prediction.reason;
+    ASSERT_NE(prediction.engine_config, nullptr);
+    EXPECT_DOUBLE_EQ(prediction.value, 2.0 * 1024 * 1024 * 1024 / 1e9)
+        << "the measured K64 throughput, not the model's estimate";
+    EXPECT_TRUE(prediction.uhd_id.empty()) << "a measured value was attributed to a model";
+
+    // The configuration the prediction names builds the kernel plan build serves unpinned.
+    flatbuffers::FlatBufferBuilder serialized;
+    serialized.Finish(EngineConfig::Pack(serialized, prediction.engine_config.get()));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper predicted(
+        serialized.GetBufferPointer(), serialized.GetSize());
+    EXPECT_EQ(builtBlockSize(config), 64U);
+    EXPECT_EQ(builtBlockSize(predicted), 64U);
+}
+
 /// Regression (R3). A candidate's knob tuple carries ordinals for non-integer knobs, but the
 /// uniqueness check compared each kernel's metadata as a raw int64_t -- so a string knob matched
 /// nothing, the count came out 0, and every candidate was refused as unidentifiable even when

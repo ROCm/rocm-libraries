@@ -230,7 +230,7 @@ public:
         }
 
         // Orderability is the FULL catalog's question, answered once, in sortedCatalog():
-        // `catalog.orderedFromRecord` says a benchmarked record covered and ordered every
+        // `catalog.measuredRecord` is the benchmarked record that covered and ordered every
         // kernel the matchers admitted, and `filtered` is that order with rows removed, so
         // it is the measured order restricted.
         //
@@ -241,21 +241,7 @@ public:
         // basis for exactly this reason: the decision is "resolved against the canonical
         // candidate set -- every kernel the matchers admitted for this graph, before any knob
         // filter narrows it ... Knob filtering then applies to the resulting order."
-        //
-        // The lookup itself stays lazy: a WinnerKey hashes the whole graph, so it is not
-        // worth building when neither a benchmark write nor a possible hit needs one.
-        std::optional<WinnerKey> winnerKey;
-        std::optional<WinnerRecord> record;
-        if(settings.benchmarkingEnabled
-           || _stateManager.mightHaveWinnerFor(context.deviceProperties.gcnArchName))
-        {
-            winnerKey
-                = WinnerKey{hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{opGraph},
-                            DeviceKey{context.deviceProperties}};
-            record = _stateManager.winnerFor(*winnerKey);
-        }
-
-        if(catalog.orderedFromRecord)
+        if(catalog.measuredRecord != nullptr)
         {
             // Walks the ranked list instead of committing to its front: constructing
             // a GenericPlan runs prepare()/workspaceBytes() and throws on a null
@@ -269,15 +255,14 @@ public:
                     auto plan = std::make_unique<GenericPlan<THandle>>(
                         _stateManager.getDispatchDetails(filtered[rank]), context, catalog.bound);
 
-                    // The record itself may have been evicted from the bounded winner cache
-                    // since the catalog was ordered by it; the order survives on the cached
-                    // catalog either way, so only the entry count in this line is unavailable.
-                    HIPDNN_PLUGIN_LOG_INFO(
-                        "ingestor: engine '"
-                        << _engine.name << "' served kernel " << toString(filtered[rank].kernelId)
-                        << " at rank " << rank << " from a benchmarked record of "
-                        << (record.has_value() ? std::to_string(record->size()) : "?")
-                        << " entry(s) for " << filtered.size() << " candidate(s)");
+                    // The record is the catalog's own snapshot, so this holds even after the
+                    // bounded winner cache has evicted the copy it was adopted from.
+                    HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
+                                           << _engine.name << "' served kernel "
+                                           << toString(filtered[rank].kernelId) << " at rank "
+                                           << rank << " from a benchmarked record of "
+                                           << catalog.measuredRecord->size() << " entry(s) for "
+                                           << filtered.size() << " candidate(s)");
 
                     executionContext.setPlan(std::move(plan));
                     return;
@@ -309,7 +294,21 @@ public:
                                    << "' found a benchmarked record whose entries no longer "
                                       "resolve; falling back to normal selection");
         }
-        else if(record.has_value() && settings.benchmarkingEnabled)
+
+        // The lookup stays lazy: a WinnerKey hashes the whole graph, so it is not worth
+        // building when neither a benchmark write nor a possible hit needs one.
+        std::optional<WinnerKey> winnerKey;
+        std::optional<WinnerRecord> record;
+        if(settings.benchmarkingEnabled
+           || _stateManager.mightHaveWinnerFor(context.deviceProperties.gcnArchName))
+        {
+            winnerKey
+                = WinnerKey{hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{opGraph},
+                            DeviceKey{context.deviceProperties}};
+            record = _stateManager.winnerFor(*winnerKey);
+        }
+
+        if(catalog.measuredRecord == nullptr && record.has_value() && settings.benchmarkingEnabled)
         {
             // A record only ever reorders candidates measured together; it never
             // replaces the heuristic's pick, so a record that does not fully cover
@@ -448,12 +447,12 @@ public:
         // or none of its ranked entries still resolved -- is being superseded, so its write must
         // append rather than adopt.
         //
-        // `catalog.orderedFromRecord` is consulted alongside the lookup because the two can
+        // `catalog.measuredRecord` is consulted alongside the lookup because the two can
         // disagree now that the winner cache is bounded: a catalog can carry a measured order
         // whose record has since been evicted, and reaching here then still means a record was
         // tried and did not serve. Reading the lookup alone would call that a fresh miss and
         // adopt the very line that just failed to resolve.
-        const auto cause = record.has_value() || catalog.orderedFromRecord
+        const auto cause = record.has_value() || catalog.measuredRecord != nullptr
                                ? WinnerWriteCause::COVERAGE_REBENCHMARK
                                : WinnerWriteCause::FRESH_MISS;
 
@@ -698,7 +697,11 @@ public:
         TSettings executionSettings;
         initializeExecutionSettings(handle, graph, config, executionSettings);
         const auto context = contextFor(handle, graph, metric.name);
-        auto catalog = _stateManager.unsortedCatalog(context);
+        // The measured catalog sortedCatalog() orders plan build by, read as one snapshot:
+        // its record is the one that ordered it, carried with the catalog, so a winner-cache
+        // eviction cannot leave plan build on the measured order while this falls back to
+        // the model. A catalog no record covers is the model's to answer.
+        auto catalog = _stateManager.measuredCatalog(context);
         const auto filtered
             = applyConstraints(catalog, executionSettings.ingestorSettings, context);
         std::string modelId;
@@ -708,12 +711,13 @@ public:
         // catalog's ranking restricted (KernelIngestorStateManager::calibratedRanking()), so
         // a pin can neither change the order source nor reorder two candidates. RFC 0019
         // §9.2 and §5 steps 8 and 9.
-        const auto measured = _stateManager.measuredOrder(catalog.entries, context);
+        const bool measured = catalog.measuredRecord != nullptr;
         std::vector<ScoredKernel> ranking;
-        if(measured.has_value())
+        if(measured)
         {
             bool measuresMetric = false;
-            ranking = measuredRanking(measured->record, filtered, metric, context, measuresMetric);
+            ranking = measuredRanking(
+                *catalog.measuredRecord, filtered, metric, context, measuresMetric);
             if(!measuresMetric)
             {
                 // A metric the record does not measure is the model's to answer -- for the
@@ -745,7 +749,7 @@ public:
             // Under a record the order is decided, so a candidate without a value is still the
             // configuration plan build would serve: it is answered UNAVAILABLE below rather
             // than passed over for one the engine would not run.
-            if(!valued && !measured.has_value())
+            if(!valued && !measured)
             {
                 continue;
             }

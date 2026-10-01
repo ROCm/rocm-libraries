@@ -81,7 +81,9 @@ struct ResolvedDispatch
 /// Everything between a lookup and a store is thread-local: `catalogFor` returns a
 /// `Catalog` by value and callers mutate that copy, so ordering a catalog touches no
 /// shared state. Returning a reference into `_catalogCache` instead would make those
-/// mutations a data race. `winnerFor` returns a copy for the same reason.
+/// mutations a data race. `winnerFor` returns a copy for the same reason. The one thing a
+/// catalog copy shares with the cached one is `Catalog::measuredRecord`, which points to
+/// const and is never written after it is created, so sharing it is not a race.
 ///
 /// Concurrent callers can therefore duplicate work -- two threads may rank the same
 /// catalog, or record a ranking for the same key -- and the last store wins. Both
@@ -327,89 +329,51 @@ public:
             return catalogFor(context);
         }
 
-        Catalog catalog = catalogFor(context);
-
-        // A measured order is final; a heuristic one is provisional, so this lookup runs
-        // again even when the catalog is already sorted -- a sweep can postdate the
-        // memoized sort.
-        if(catalog.isSorted && catalog.orderedFromRecord)
+        Catalog catalog = measuredCatalog(context);
+        if(catalog.isSorted)
         {
             return catalog;
         }
 
-        if(auto measured = measuredOrder(catalog.entries, context); measured.has_value())
-        {
-            catalog.entries = std::move(measured->entries);
-            catalog.orderedFromRecord = true;
-        }
-        else
-        {
-            if(catalog.isSorted)
-            {
-                return catalog;
-            }
-            catalog.entries = _heuristic->rank(catalog, context);
-        }
+        catalog.entries = _heuristic->rank(catalog, context);
         catalog.isSorted = true;
-
         if(const auto key = cacheKey(context); key.has_value())
         {
             // put, not putIfAbsent: sorted is strictly better than whatever is cached.
             _catalogCache.put(*key, catalog);
         }
-
         return catalog;
     }
 
-    /// What a covering benchmark record says about @p entries: its measured order over them,
-    /// and the record itself, which carries the measured times.
-    struct MeasuredOrder
-    {
-        std::vector<KernelDefinition> entries;
-        WinnerRecord record;
-    };
-
-    /// The measured order for @p context's graph and device, or nullopt when no record
-    /// fully covers @p entries and the caller must rank as it always has. The one
-    /// order-source decision shared by plan build (sortedCatalog()) and configuration
-    /// prediction, so the two cannot disagree about whether measurement outranks estimate.
+    /// The catalog in its measured order, with `measuredRecord` set, when a benchmarked record
+    /// covers it; otherwise the catalog as cached, which the heuristic may or may not have
+    /// sorted yet, with `measuredRecord` null. Never calls `rank()`.
+    ///
+    /// The one order-source decision shared by plan build (sortedCatalog()) and
+    /// configuration prediction, so the two cannot disagree about whether measurement
+    /// outranks estimate (RFC 0019 §5 step 9). The decision is made once per catalog: an
+    /// adopted record is cached with the order it produced, and every later caller reads
+    /// that snapshot -- order and measured times together -- rather than the winner cache,
+    /// whose bound may since have evicted the record.
     ///
     /// Full coverage is required: a partial record cannot order the rest, and
     /// interleaving measured with unmeasured entries would not be a valid order.
-    std::optional<MeasuredOrder> measuredOrder(const std::vector<KernelDefinition>& entries,
-                                               const MatchContext& context) const
+    Catalog measuredCatalog(const MatchContext& context) const
     {
-        // Cheap rejection first: mightHaveWinnerFor() accounts for an on-disk shard this
-        // process has not read yet, unlike a bare winnerCacheSize() check.
-        if(entries.empty() || !mightHaveWinnerFor(context.deviceProperties.gcnArchName))
+        Catalog catalog = catalogFor(context);
+        // A measured order is final; a heuristic one is provisional, so the lookup runs
+        // again even when the catalog is already sorted -- a sweep can postdate the
+        // memoized sort. An unresolved device yields an empty catalog, which no record
+        // covers, so nothing is cached for it here.
+        if(catalog.measuredRecord == nullptr && adoptCoveringRecord(catalog, context))
         {
-            return std::nullopt;
+            if(const auto key = cacheKey(context); key.has_value())
+            {
+                // put, not putIfAbsent: a measured order replaces a provisional one.
+                _catalogCache.put(*key, catalog);
+            }
         }
-
-        const WinnerKey key{
-            hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{context.graph},
-            DeviceKey{context.deviceProperties}};
-        if(!key.graph.isUsable())
-        {
-            // No bytes to key on; such graphs never match each other either.
-            return std::nullopt;
-        }
-
-        auto record = winnerFor(key);
-        if(!record.has_value())
-        {
-            return std::nullopt;
-        }
-
-        auto ordered = orderIfFullyCovered(*record, entries);
-        if(!ordered.has_value())
-        {
-            return std::nullopt;
-        }
-        HIPDNN_PLUGIN_LOG_INFO("ingestor: ordered " << ordered->size()
-                                                    << " catalog entries from a benchmarked "
-                                                       "record; heuristic ranking skipped");
-        return MeasuredOrder{std::move(*ordered), std::move(*record)};
+        return catalog;
     }
 
     /// Records @p record under @p key. Whether an existing on-disk ranking for @p key is
@@ -577,6 +541,48 @@ public:
     }
 
 private:
+    /// Orders @p catalog by the record for @p context's graph and device and attaches that
+    /// record, when the record fully covers @p catalog; false, leaving @p catalog untouched,
+    /// otherwise.
+    bool adoptCoveringRecord(Catalog& catalog, const MatchContext& context) const
+    {
+        const auto& entries = catalog.entries;
+        // Cheap rejection first: mightHaveWinnerFor() accounts for an on-disk shard this
+        // process has not read yet, unlike a bare winnerCacheSize() check.
+        if(entries.empty() || !mightHaveWinnerFor(context.deviceProperties.gcnArchName))
+        {
+            return false;
+        }
+
+        const WinnerKey key{
+            hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{context.graph},
+            DeviceKey{context.deviceProperties}};
+        if(!key.graph.isUsable())
+        {
+            // No bytes to key on; such graphs never match each other either.
+            return false;
+        }
+
+        auto record = winnerFor(key);
+        if(!record.has_value())
+        {
+            return false;
+        }
+
+        auto ordered = orderIfFullyCovered(*record, entries);
+        if(!ordered.has_value())
+        {
+            return false;
+        }
+        HIPDNN_PLUGIN_LOG_INFO("ingestor: ordered " << ordered->size()
+                                                    << " catalog entries from a benchmarked "
+                                                       "record; heuristic ranking skipped");
+        catalog.entries = std::move(*ordered);
+        catalog.measuredRecord = std::make_shared<const WinnerRecord>(std::move(*record));
+        catalog.isSorted = true;
+        return true;
+    }
+
     /// One memoized full-catalog calibrated ranking. The model id travels with it because
     /// the ranking is meaningless without the provenance the caller reports alongside it,
     /// and re-deriving it would mean calling the heuristic again, which is the cost this
