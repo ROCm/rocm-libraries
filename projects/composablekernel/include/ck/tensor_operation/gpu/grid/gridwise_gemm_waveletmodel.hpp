@@ -138,6 +138,7 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
               typename BGridBuffer,
               typename BBlockBuffer,
               typename BBlockTransferStep,
+              typename BlockSyncFunc,
               typename std::enable_if_t<impl::is_buffer_tuple<ABlockBuffer>::value &&
                                             impl::is_buffer_tuple<BBlockBuffer>::value,
                                         bool>* = nullptr>
@@ -153,7 +154,8 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
                                                const BGridBuffer& b_grid_buf,
                                                BBlockBuffer& b_block_buf,
                                                const BBlockTransferStep& b_block_copy_step,
-                                               index_t num_loop)
+                                               index_t num_loop,
+                                               BlockSyncFunc&& block_sync_func)
     {
         constexpr auto I0 = Number<0>{};
         constexpr auto I1 = Number<1>{};
@@ -170,6 +172,7 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
         // First prefetch buffer A0, B0
         __builtin_amdgcn_sched_barrier(0);
         b_blockwise_copy.Load(b_grid_buf, b_block_desc, b_block_buf.At(I0));
+        // b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_buf.At(I0));
         a_blockwise_copy.Load(a_grid_buf, a_block_desc, a_block_buf.At(I0));
         __builtin_amdgcn_sched_barrier(0);
 
@@ -180,13 +183,17 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
         b_blockwise_copy.PrecomputeIdx(b_grid_desc);
         __builtin_amdgcn_sched_barrier(0);
 
-        wait_dscnt();
-        block_sync_lds_direct_load();
+        block_sync_func();
+
+        // wait_dscnt();
+        // __builtin_amdgcn_s_wait_tensorcnt(0);
+        // block_sync_lds_direct_load();
 
         // Second prefetch buffer A1, B1
         __builtin_amdgcn_sched_barrier(0);
         a_blockwise_copy.Load(a_grid_buf, a_block_desc, a_block_buf.At(I1));
         b_blockwise_copy.Load(b_grid_buf, b_block_desc, b_block_buf.At(I1));
+        // b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_buf.At(I1));
         __builtin_amdgcn_sched_barrier(0);
 
         a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
@@ -206,12 +213,15 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
             // invoker.
             do
             {
-                wait_dscnt();
-                block_sync_lds_direct_load();
+                block_sync_func();
+                // wait_dscnt();
+                // __builtin_amdgcn_s_wait_tensorcnt(0);
+                // block_sync_lds_direct_load();
 
                 // Load A0, B0. Precompute indices for A1, B1
                 __builtin_amdgcn_sched_barrier(0);
                 b_blockwise_copy.Load(b_grid_buf, b_block_desc, b_block_buf.At(I0));
+                // b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_buf.At(I0));
                 a_blockwise_copy.Load(a_grid_buf, a_block_desc, a_block_buf.At(I0));
                 __builtin_amdgcn_sched_barrier(0);
 
@@ -221,13 +231,16 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
                 b_blockwise_copy.PrecomputeIdx(b_grid_desc);
                 __builtin_amdgcn_sched_barrier(0);
 
-                wait_dscnt();
-                block_sync_lds_direct_load();
+                block_sync_func();
+                // wait_dscnt();
+                // __builtin_amdgcn_s_wait_tensorcnt(0);
+                // block_sync_lds_direct_load();
 
                 // Load A1, B1. Precompute indices for A0, B0
                 __builtin_amdgcn_sched_barrier(0);
                 a_blockwise_copy.Load(a_grid_buf, a_block_desc, a_block_buf.At(I1));
                 b_blockwise_copy.Load(b_grid_buf, b_block_desc, b_block_buf.At(I1));
+                // b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_buf.At(I1));
                 __builtin_amdgcn_sched_barrier(0);
 
                 a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
@@ -244,8 +257,10 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
         if constexpr(TailNum == TailNumber::Even)
         {
             // Wait for last load of A1, B1 (to be processed by math waves)
-            wait_dscnt();
-            block_sync_lds_direct_load();
+            block_sync_func();
+            // wait_dscnt();
+            // __builtin_amdgcn_s_wait_tensorcnt(0);
+            // block_sync_lds_direct_load();
         }
     }
 };
