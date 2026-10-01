@@ -7158,6 +7158,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                # Cluster-barrier handshake insertion in Gfx1250Backend
                                # (kernel-scope at every OptLevel when set).
                                "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
+                               # InsertClusterBarrierPass duplicates the Rule 3 loop only for
+                               # HalfPLR kernels that already post a cluster barrier.
+                               # InitCIterWmma commits to cloning every chain head and skipping
+                               # v_mov, so the split must stay off or the clone cannot cover them.
+                               "ClusterBarrierSplitWaveLoop": bool(
+                                   kernel.get("HalfPLR", 0) and kernel.get("ClusterBarrier", False)
+                                   and kernel.get("InitCIterWmma", 0) != 1),
                                # TDMLoadWaveSyncPass (Gfx1250Backend): insert a barrier
                                # between an urgent and a deferrable tensor_load group.
                                # Off by default.
