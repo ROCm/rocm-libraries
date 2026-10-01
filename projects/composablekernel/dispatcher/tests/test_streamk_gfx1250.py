@@ -156,7 +156,10 @@ class TestGfx1250StreamKDriver(unittest.TestCase):
         )
 
     def test_ocp_reference_matches_device_input_quantization(self):
-        import ml_dtypes
+        try:
+            import ml_dtypes
+        except ImportError:
+            self.skipTest("ml_dtypes is required for fp8/bf8 reference checks")
 
         for dtype, numpy_type, tiny in (
             ("fp8", ml_dtypes.float8_e4m3fn, 2**-10),
