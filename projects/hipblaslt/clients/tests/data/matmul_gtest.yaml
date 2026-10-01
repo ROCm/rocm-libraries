@@ -3419,10 +3419,11 @@ Tests:
 # Subtile MXFP4 NoSwizzle (scaleA/B: 3 = Block_32_UE8M0 / VEC32 / MXScaleFormat 0)
 # Companion to the HostPreSwizzle (1001) suite above. Focused — not full HPS parity.
 # Requires device libs with MXScaleFormat=NoSwizzle F4BS solutions (non-MXSFHPS).
-# Scoped to BF16 dest (F4BS) to match currently shipping NoSwizzle Origami coverage.
+# Scoped to BF16 dest (F4BS) and sizes that match currently shipping NoSwizzle
+# Origami coverage (batch=1, aligned tiles; no bias / odd-size until libs expand).
 # ------------------------------------------------------------------------------
 
-# Basic correctness — BF16, K=DepthU and MultiDU, modest tiles + batch
+# Basic correctness — BF16, K=DepthU and MultiDU, modest aligned tiles
 - name: matmul_subtile_fp4_noswizzle_basic
   category: quick
   function:
@@ -3435,36 +3436,15 @@ Tests:
   transB: N
   alpha: 1.0
   beta: 0.0
-  batch_count: [1, 2]
+  batch_count: 1
   initialization: trig_float
   unit_check: 0
   norm_check: 1
   requested_solution_num: 1
   gpu_arch: '950'
 
-# Odd / non-aligned M,N with MultiDU K
-- name: matmul_subtile_fp4_noswizzle_odd
-  category: pre_checkin
-  function:
-    matmul:
-    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
-  matrix_size:
-    - { M: 17,  N: 33,  K: 256 }
-    - { M: 63,  N: 63,  K: 512 }
-    - { M: 130, N: 128, K: 256 }
-    - { M: 128, N: 130, K: 512 }
-  transA: T
-  transB: N
-  alpha: 1.0
-  beta: 0.0
-  initialization: trig_float
-  unit_check: 0
-  norm_check: 1
-  requested_solution_num: 1
-  gpu_arch: '950'
-
-# Bias path at small size (mirrors HPS bias coverage, BF16 dest)
-- name: matmul_subtile_fp4_noswizzle_bias
+# Beta path (no bias) — exercises C accumulation with NoSwizzle scales
+- name: matmul_subtile_fp4_noswizzle_beta
   category: pre_checkin
   function:
     matmul:
@@ -3476,7 +3456,6 @@ Tests:
   transB: N
   alpha: 1.0
   beta: [0.0, 2.0]
-  bias_vector: [0, 1]
   initialization: trig_float
   unit_check: 0
   norm_check: 1
