@@ -1767,8 +1767,8 @@ TEST_P(BlockSparsity, DataTypeConfig)
         false,         // drop_prefs
         mask_str,      // mask_str
         qscale_str,
-        true,           // is_rotary_interleaved
-        1,              // num_splits
+        true, // is_rotary_interleaved
+        1,    // num_splits
         init_method,
         static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
         1,              // do_validation
