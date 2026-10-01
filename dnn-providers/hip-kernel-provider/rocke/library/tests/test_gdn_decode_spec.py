@@ -41,6 +41,41 @@ def _lower(spec: GdnDecodeSpec, arch: str = ARCH, flavor: str = "llvm20") -> str
     )
 
 
+def _compiled_scratch_bytes(test: unittest.TestCase, spec: GdnDecodeSpec) -> int:
+    """Compile ``spec`` through comgr and return the scratch bytes it spills to.
+
+    Checking the lowered text for ``define amdgpu_kernel`` proves only that the
+    lowerer printed something. comgr runs the real pipeline (IR -> bitcode ->
+    code object), so invalid IR, an intrinsic the target lacks or a resource
+    overflow fails here. It needs no GPU. A compile error is a defect and
+    propagates; only a missing toolchain skips.
+    """
+    import tempfile
+    from pathlib import Path
+
+    try:
+        from rocke.analysis.isa import analyze_hsaco
+        from rocke.helpers.compile import compile_kernel
+    except Exception as e:  # pragma: no cover - env-dependent
+        test.skipTest(f"comgr toolchain unavailable: {e}")
+    try:
+        art = compile_kernel(
+            build_gdn_decode(spec, arch=ARCH), arch=ARCH, capture_ir_text=False
+        )
+    except ImportError as e:  # pragma: no cover - env-dependent
+        test.skipTest(f"comgr toolchain unavailable: {e}")
+    with tempfile.NamedTemporaryFile(suffix=".hsaco") as fh:
+        fh.write(bytes(art.hsaco))
+        fh.flush()
+        try:
+            scratch = analyze_hsaco(Path(fh.name)).resources.scratch_bytes
+        except (FileNotFoundError, RuntimeError) as e:  # pragma: no cover
+            test.skipTest(f"HSACO introspection tool unavailable: {e}")
+    if scratch is None:  # pragma: no cover - metadata shape drift
+        test.skipTest("could not parse the scratch size from the HSACO")
+    return scratch
+
+
 class TestSpecAdmission(unittest.TestCase):
     def test_default_spec_is_valid(self):
         ok, why = is_valid_spec(GdnDecodeSpec(), arch=ARCH)
@@ -291,28 +326,31 @@ class TestLaunchShape(unittest.TestCase):
 
 
 class TestEmission(unittest.TestCase):
-    """Every admitted spec must actually lower. No GPU, no comgr."""
+    """Every admitted spec must lower AND compile to a code object without
+    spilling to scratch. No GPU needed."""
 
-    def test_default_spec_emits_a_kernel(self):
-        llvm = _lower(GdnDecodeSpec())
-        self.assertIn("define amdgpu_kernel", llvm)
-        self.assertIn(GdnDecodeSpec().kernel_name(), llvm)
+    def test_default_spec_compiles(self):
+        spec = GdnDecodeSpec()
+        self.assertIn(spec.kernel_name(), _lower(spec))
+        self.assertEqual(_compiled_scratch_bytes(self, spec), 0)
 
-    def test_both_builder_paths_emit(self):
-        for simple in (False, True):
-            with self.subTest(simple=simple):
-                llvm = _lower(GdnDecodeSpec(simple=simple))
-                self.assertIn("define amdgpu_kernel", llvm)
+    def test_both_builder_paths_compile(self):
+        self.assertEqual(_compiled_scratch_bytes(self, GdnDecodeSpec()), 0)
+        # The simple path is the one-thread-per-state-row reference. Dispatch
+        # never selects it, and it holds a whole state row in registers, so
+        # whether it spills depends on the compiler version (0 B with ROCm 7.1,
+        # 1188 B with ROCm 7.13 on gfx950). Require only that it compiles.
+        _compiled_scratch_bytes(self, GdnDecodeSpec(simple=True))
 
-    def test_registered_gdn_tiles_emit(self):
+    def test_registered_gdn_tiles_compile(self):
         from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all
 
         results = dispatch_gdn_decode_all(GdnDecodeRequest(batch=16, arch="gfx950"))
         for result in (results[0], results[len(results) // 2], results[-1]):
             with self.subTest(spec_id=result.candidate.spec_id):
-                self.assertIn("define amdgpu_kernel", _lower(result.spec))
+                self.assertEqual(_compiled_scratch_bytes(self, result.spec), 0)
 
-    def test_every_kda_tuned_tile_emits(self):
+    def test_every_kda_tuned_tile_compiles(self):
         from dispatch.gdn.gfx950 import _TUNED_TILES_KDA
 
         for _, tile, spec_id in _TUNED_TILES_KDA:
@@ -324,7 +362,7 @@ class TestEmission(unittest.TestCase):
                     warp_threads_k=tile[1],
                     blocks_per_v_dim=tile[2],
                 )
-                self.assertIn("define amdgpu_kernel", _lower(spec))
+                self.assertEqual(_compiled_scratch_bytes(self, spec), 0)
 
     def test_distinct_tiles_emit_distinct_code(self):
         # If two tiles produced identical IR the tuning table would be choosing

@@ -109,6 +109,18 @@ def device_us(values, cfg, launcher, reps: int = 32):
     return best
 
 
+def _untouched_damage(state, before, untouched) -> float:
+    """1.0 if any page outside ``write_indices`` differs from its pre-launch
+    snapshot by even one bit, else 0.0 (above ``TOL``, so the tile is rejected).
+
+    Bit-exact on purpose: the kernel must not touch these pages at all, so a
+    tolerance would hide a small but real out-of-bounds write.
+    """
+    if not untouched.any():
+        return 0.0
+    return (state[untouched] != before[untouched]).any().to(torch.float32).item()
+
+
 def sweep_registry_batch(batch: int, results):
     """Return correct, timed GDN registry candidates for one batch, fastest first."""
     if not results:
@@ -117,11 +129,16 @@ def sweep_registry_batch(batch: int, results):
     base = results[0].spec
     inp = make_inputs(base, batch)
     ref_out, ref_state = ref_fp32(base, inp)
+    # Every candidate is compared against this snapshot, not against
+    # inp["state"]: if a launch ever wrote into inp (prepare() stopped cloning,
+    # or a kernel aliased it) the comparison would read the damaged tensor and
+    # pass for every later candidate.
+    before = inp["state"].clone()
     written = inp["write_indices"].long()
     # Pages the kernel was NOT told to write. The newer GDN validation found a
     # written-pages-only blind spot: a correct value in the WRONG slot looks
-    # correct if the damaged slot is never compared. prepare() gives every tile
-    # a fresh clone, so these pages must stay bit-unchanged.
+    # correct if the damaged slot is never compared, so these pages must stay
+    # bit-unchanged.
     untouched = torch.ones(
         inp["state"].shape[0], dtype=torch.bool, device=inp["state"].device
     )
@@ -146,14 +163,7 @@ def sweep_registry_batch(batch: int, results):
             (values["out"].float() - ref_out).abs().max().item(),
             (values["state"].float()[written] - ref_state).abs().max().item(),
         )
-        if untouched.any():
-            err = max(
-                err,
-                (values["state"][untouched] != inp["state"][untouched])
-                .any()
-                .to(torch.float32)
-                .item(),
-            )
+        err = max(err, _untouched_damage(values["state"], before, untouched))
         if err > TOL:
             print(
                 f"  {result.candidate.spec_id} INCORRECT err={err:.3e}", file=sys.stderr
@@ -170,6 +180,7 @@ def sweep_batch(base: GdnDecodeSpec, batch: int, configs):
     """Return correct, timed KDA configurations for one batch, fastest first."""
     inp = make_inputs(base, batch)
     ref_out, ref_state = ref_fp32(base, inp)
+    before = inp["state"].clone()  # see sweep_registry_batch
     written = inp["write_indices"].long()
     untouched = torch.ones(
         inp["state"].shape[0], dtype=torch.bool, device=inp["state"].device
@@ -196,14 +207,7 @@ def sweep_batch(base: GdnDecodeSpec, batch: int, configs):
             (values["out"].float() - ref_out).abs().max().item(),
             (values["state"].float()[written] - ref_state).abs().max().item(),
         )
-        if untouched.any():
-            spill = (
-                (values["state"][untouched].float() - inp["state"][untouched].float())
-                .abs()
-                .max()
-                .item()
-            )
-            err = max(err, spill)
+        err = max(err, _untouched_damage(values["state"], before, untouched))
         if err > TOL:
             print(f"  {tile} INCORRECT err={err:.3e}", file=sys.stderr)
             continue

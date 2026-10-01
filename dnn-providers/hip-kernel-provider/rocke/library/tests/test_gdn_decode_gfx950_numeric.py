@@ -190,6 +190,7 @@ def test_all_registry_candidates_are_correct(harness, request):
     )
     selected_id = request.config.getoption("--gdn-spec-id")
     launchers = {}
+    owners = {}  # compile_key -> every spec_id that used it, across ALL batches
     for batch in batches:
         results = dispatch_gdn_decode_all(GdnDecodeRequest(batch=batch, arch=ARCH))
         if selected_id:
@@ -200,9 +201,16 @@ def test_all_registry_candidates_are_correct(harness, request):
         else:
             assert len(results) == 54
         for result in results:
+            owners.setdefault(result.kernel_id.compile_key, set()).add(
+                result.candidate.spec_id
+            )
             _assert_dispatch_result_matches_fp32(harness, result, batch, launchers)
     # One compile per spec, shared by every batch; the key must not merge specs.
-    assert len(launchers) == len(results)
+    # Checked per key over every batch seen, so it does not depend on each batch
+    # returning the same candidate set.
+    merged = {key: ids for key, ids in owners.items() if len(ids) > 1}
+    assert not merged, f"compile_key shared by different specs: {merged}"
+    assert len(launchers) == len(owners)
 
 
 @requires_gfx950
