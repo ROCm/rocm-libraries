@@ -2411,7 +2411,16 @@ namespace rocalution
             send_offset_index[n + 1] = m;
         }
 
-        // Communicate boundary offsets
+        // Coarse boundary size per neighbor
+        int* send_boundary_size = NULL;
+        allocate_host(this->pm_->nsend_, &send_boundary_size);
+
+        for(int n = 0; n < this->pm_->nsend_; ++n)
+        {
+            send_boundary_size[n] = send_offset_index[n + 1] - send_offset_index[n];
+        }
+
+        // Communicate boundary sizes
         for(int n = 0; n < this->pm_->nrecv_; ++n)
         {
             communication_async_recv(&recv_offset_index[n + 1],
@@ -2424,7 +2433,7 @@ namespace rocalution
 
         for(int n = 0; n < this->pm_->nsend_; ++n)
         {
-            communication_async_send(&send_offset_index[n + 1],
+            communication_async_send(&send_boundary_size[n],
                                      1,
                                      this->pm_->sends_[n],
                                      0,
@@ -2461,8 +2470,10 @@ namespace rocalution
         int64_t nnzc = tmp.GetNnz();
         tmp.LeaveDataPtrCSR(&Ac_interior_row_offset, &Ac_interior_col, &Ac_interior_val);
 
-        // Wait for boundary offset communication to finish
+        // Wait for boundary size communication to finish
         communication_syncall(this->pm_->nrecv_ + this->pm_->nsend_, &req_offsets[0]);
+
+        free_host(&send_boundary_size);
 
         recv_offset_index[0] = 0;
         for(int n = 0; n < this->pm_->nrecv_; ++n)
