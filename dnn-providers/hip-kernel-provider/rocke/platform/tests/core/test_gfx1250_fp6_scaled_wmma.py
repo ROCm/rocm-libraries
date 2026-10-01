@@ -88,6 +88,52 @@ def test_fp6_cross_byte_packing():
     )
 
 
+@pytest.fixture(params=["byte-positions", 3, 24, 48, 96])
+def arbitrary_fp6_bytes(request):
+    if request.param == "byte-positions":
+        # Each byte takes every value with nonzero neighbors in the packed group.
+        packed = np.tile(np.array([0xAA, 0x55, 0xFF], dtype=np.uint8), (768, 1))
+        for position in range(3):
+            packed[position * 256 : (position + 1) * 256, position] = np.arange(
+                256, dtype=np.uint8
+            )
+        return packed
+    return np.random.default_rng(0xF6).integers(
+        0, 256, size=(7, request.param), dtype=np.uint8
+    )
+
+
+def _fp6_codes_from_bytes(packed):
+    # Independent whole-row integer oracle; no shared packer or np.unpackbits.
+    return np.array(
+        [
+            [
+                (int.from_bytes(row.tobytes(), "little") >> bit) & 63
+                for bit in range(0, row.size * 8, 6)
+            ]
+            for row in packed
+        ],
+        dtype=np.uint8,
+    )
+
+
+def test_arbitrary_fp6_bytes_repack_exactly(arbitrary_fp6_bytes):
+    codes = _fp6_codes_from_bytes(arbitrary_fp6_bytes)
+    np.testing.assert_array_equal(pack_fp6_codes(codes), arbitrary_fp6_bytes)
+
+
+@pytest.mark.parametrize(
+    "dtype,ml_name", [("fp6", "float6_e2m3fn"), ("bf6", "float6_e3m2fn")]
+)
+def test_arbitrary_fp6_bytes_decode_independently(arbitrary_fp6_bytes, dtype, ml_name):
+    ml = pytest.importorskip("ml_dtypes", minversion="0.6.0")
+    codes = _fp6_codes_from_bytes(arbitrary_fp6_bytes)
+    expected = codes.view(getattr(ml, ml_name)).astype(np.float64)
+    actual = decode_fp6(arbitrary_fp6_bytes, dtype)
+    np.testing.assert_array_equal(actual, expected)
+    np.testing.assert_array_equal(np.signbit(actual), np.signbit(expected))
+
+
 @pytest.mark.parametrize(
     "codes",
     [
