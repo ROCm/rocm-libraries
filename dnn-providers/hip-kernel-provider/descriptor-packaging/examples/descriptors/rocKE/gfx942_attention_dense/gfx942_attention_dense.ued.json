@@ -7,7 +7,9 @@
   },
   "metadata": "28fe7e39-e7a2-44d5-a07a-9779aba34ef3",
   "sort_kernel_catalog": {
-    "gfx942": "9c217783-1a5d-4666-83e3-8a22827af6d2"
+    "gfx942": [
+      "e2e8183c-c604-42b2-a536-59ec811cd98f"
+    ]
   },
   "knobs": [
     "head_size",

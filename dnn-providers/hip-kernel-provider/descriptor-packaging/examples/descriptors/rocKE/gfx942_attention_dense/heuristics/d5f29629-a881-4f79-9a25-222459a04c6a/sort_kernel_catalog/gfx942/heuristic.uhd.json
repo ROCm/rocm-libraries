@@ -1,25 +1,14 @@
 {
   "version": "1.0",
-  "id": "9c217783-1a5d-4666-83e3-8a22827af6d2",
-  "name": "hipkernel:Gfx942AttentionDense catalog ranker (gfx942, 881 graphs)",
+  "id": "e2e8183c-c604-42b2-a536-59ec811cd98f",
+  "name": "hipkernel:Gfx942AttentionDense throughput (gfx942, 7 collection(s))",
   "adapter": "tree_data",
   "features_signature": [
-    "$device.cu_count",
-    "$device.lds_size",
-    "$device.memory_bus_width",
-    "$device.memory_clock_rate",
-    "$device.multi_processor_count",
-    "$device.peak_memory_bandwidth",
-    "$device.total_global_mem",
-    "$device.warp_size",
     "$kernel.batch",
     "$kernel.block_m",
-    "$kernel.block_n",
     "$kernel.causal",
-    "$kernel.dtype",
     "$kernel.head_size",
     "$kernel.num_kv_heads",
-    "$kernel.num_persistent",
     "$kernel.num_query_heads",
     "$kernel.persistent",
     "$kernel.seqlen_kv",
@@ -32,17 +21,13 @@
     "$attention_dense.dtype",
     "$attention_dense.flops",
     "$attention_dense.head_size",
-    "$attention_dense.k.uid",
     "$attention_dense.num_kv_heads",
     "$attention_dense.num_query_heads",
-    "$attention_dense.o.uid",
-    "$attention_dense.q.uid",
     "$attention_dense.scale_bits",
     "$attention_dense.seqlen_kv",
-    "$attention_dense.seqlen_q",
-    "$attention_dense.v.uid"
+    "$attention_dense.seqlen_q"
   ],
-  "features_hash": "sha256:b2f419a44e57c4eb",
+  "features_hash": "sha256:b1d54c5d3299dba9",
   "trained_against": {
     "ued": {
       "id": "d5f29629-a881-4f79-9a25-222459a04c6a",
@@ -62,16 +47,13 @@
   "objective": "min",
   "score": {
     "calibrated": false,
-    "transform": "log1p"
+    "transform": "log"
   },
   "tree_data": {
-    "artifact": "model.bin"
+    "artifact": "model.bin",
+    "hash": "ee984a0972a05c376c8de8a9267b8f2b6288ecf19bf21422b2322cb7e55b4d62"
   },
   "categorical_encoding": {
-    "$kernel.dtype": {
-      "BF16": 0,
-      "FP16": 1
-    },
     "$attention_dense.dtype": {
       "bf16": 0,
       "fp16": 1
