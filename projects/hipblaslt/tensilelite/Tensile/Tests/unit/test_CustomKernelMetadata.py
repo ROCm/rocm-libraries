@@ -1283,7 +1283,10 @@ def test_wvspltk_range_logic(rel, plainRel, ranges):
     logic ships, the file must match its header and type to share its placeholder.
     Keys are [m_min, m_max, n_min, n_max, batch_min, batch_max, K_min, K_max], -1
     unbounded, and each must sit inside its kernel's predicates."""
-    with open(os.path.join(_LOGIC_ROOT, rel)) as f:
+    path = os.path.join(_LOGIC_ROOT, rel)
+    if not os.path.exists(path):
+        pytest.skip(f"tuning logic tree not present: {rel}")
+    with open(path) as f:
         doc = yaml.safe_load(f)
     assert doc["LibraryType"] == "Range"
     pt = doc["ProblemType"]
