@@ -295,6 +295,30 @@ namespace
         EXPECT_NE(res.message.find("integer alpha"), std::string::npos) << res.message;
     }
 
+    // The placement record must flag a buffer that crosses a 4 GiB boundary, give the boundary,
+    // and leave buffers that stay inside one 4 GiB window unflagged.
+    TEST(FastCheck, placement_record_flags_4gib_crossings)
+    {
+        const uint64_t four_gib = uint64_t(1) << 32;
+        auto           at       = [](uint64_t a) { return reinterpret_cast<const void*>(uintptr_t(a)); };
+        std::string    record   = fast_check_describe_buffers({
+            {"A", at(3 * four_gib - 0x600000), 0x1000000}, // crosses 3 * 2^32
+            {"B", at(5 * four_gib), 0x1000}, // starts exactly on a boundary
+            {"C", at(7 * four_gib - 0x1000), 0x1000}, // ends exactly on a boundary
+            {"unused", nullptr, 0},
+        });
+        EXPECT_NE(record.find("A: 0x2ffa00000 to 0x300a00000 (16777216 bytes), crosses a 4 GiB "
+                              "boundary at 0x300000000"),
+                  std::string::npos)
+            << record;
+        EXPECT_NE(record.find("B: 0x500000000 to 0x500001000 (4096 bytes)\n"), std::string::npos)
+            << record;
+        EXPECT_EQ(record.find("C: 0x6fffff000 to 0x700000000 (4096 bytes), crosses"),
+                  std::string::npos)
+            << record;
+        EXPECT_EQ(record.find("unused"), std::string::npos) << record;
+    }
+
     TEST(FastCheck, probe_entries_are_nonzero_residues_and_depend_on_seed)
     {
         int differ = 0;

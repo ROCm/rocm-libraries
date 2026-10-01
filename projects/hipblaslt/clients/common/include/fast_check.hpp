@@ -130,6 +130,19 @@ FastCheckResult fast_check_result_device(const FastCheckProblem&  problem,
 // The probe vector entry for the given seed and index, in [1, kFastCheckModulus).
 uint64_t fast_check_probe(uint64_t seed, uint64_t index);
 
+// One device buffer a GEMM reads or writes, for the placement record in failure messages.
+struct FastCheckBuffer
+{
+    const char* name;
+    const void* base;
+    size_t      bytes;
+};
+
+// Lists each buffer's address range, one per line, and flags any range that crosses a 4 GiB
+// boundary. A kernel that drops the carry out of the low 32 bits of an address goes wrong only
+// past such a boundary, so the record shows whether a failure lines up with one.
+std::string fast_check_describe_buffers(const std::vector<FastCheckBuffer>& buffers);
+
 // Device helpers. A device matrix is described by FastCheckMatrix with data pointing to device
 // memory; total_elements is the size of its allocation in elements, which may extend past the
 // last batch.

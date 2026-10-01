@@ -541,6 +541,26 @@ uint64_t fast_check_probe(uint64_t seed, uint64_t index)
     return 1 + splitmix64(splitmix64(seed) ^ index) % (P - 1);
 }
 
+std::string fast_check_describe_buffers(const std::vector<FastCheckBuffer>& buffers)
+{
+    constexpr uint64_t four_gib = uint64_t(1) << 32;
+    std::ostringstream s;
+    s << "Buffer placement:";
+    for(const auto& b : buffers)
+    {
+        if(!b.base || !b.bytes)
+            continue;
+        uint64_t begin = uint64_t(reinterpret_cast<uintptr_t>(b.base));
+        uint64_t end   = begin + b.bytes; // one past the last byte
+        s << "\n  " << b.name << ": 0x" << std::hex << begin << " to 0x" << end << std::dec << " ("
+          << b.bytes << " bytes)";
+        uint64_t boundary = (begin / four_gib + 1) * four_gib;
+        if(boundary < end)
+            s << ", crosses a 4 GiB boundary at 0x" << std::hex << boundary << std::dec;
+    }
+    return s.str();
+}
+
 FastCheckExpected fast_check_expected(const FastCheckProblem& p)
 {
     FastCheckExpected  e;

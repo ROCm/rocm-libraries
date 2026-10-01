@@ -1133,6 +1133,23 @@ inline uint64_t fast_check_seed(const Arguments& arg)
     return h;
 }
 
+// Names one solution for failure messages: its position in this test's list and its library
+// index. with_kernel adds the kernel name.
+inline std::string solution_description(hipblasLtHandle_t      handle,
+                                        hipblasLtMatmulAlgo_t& algo,
+                                        size_t                 sol,
+                                        size_t                 count,
+                                        bool                   with_kernel)
+{
+    std::ostringstream s;
+    s << "solution " << sol << " of " << count << " (library index "
+      << hipblaslt_ext::getIndexFromAlgo(algo);
+    if(with_kernel)
+        s << ", kernel " << hipblaslt_ext::getKernelNameFromAlgo(handle, algo);
+    s << ")";
+    return s.str();
+}
+
 void check(hipStream_t                   stream,
            const Arguments&              arg,
            const uint32_t&               gemm_count,
@@ -5449,6 +5466,10 @@ void testing_matmul_with_bias(const Arguments& arg,
     {
         for(size_t sol = 0; sol < heuristicResult.size(); sol++)
         {
+#ifdef GOOGLE_TEST
+            SCOPED_TRACE(solution_description(
+                handle, heuristicResult[sol].algo, sol, heuristicResult.size(), false));
+#endif
             if(arg.fast_check && !arg.c_equal_d)
             {
                 for(int i = 0; i < gemm_count; i++)
@@ -5683,16 +5704,36 @@ void testing_matmul_with_bias(const Arguments& arg,
                     if(sol == 0)
                         fcExpected[i] = fast_check_expected(fp);
                     FastCheckResult res = fast_check_result_device(fp, fcExpected[i], stream);
-#ifdef GOOGLE_TEST
-                    EXPECT_TRUE(scan.passed) << "fast_check, solution " << sol << ":\n"
-                                             << scan.message;
-                    EXPECT_TRUE(res.passed) << "fast_check, solution " << sol << ":\n"
-                                            << res.message;
-#else
                     if(!scan.passed || !res.passed)
-                        hipblaslt_cerr << "fast_check, solution " << sol << ":\n"
-                                       << scan.message << res.message << std::endl;
+                    {
+                        std::vector<FastCheckBuffer> buffers = {
+                            {"A", dA[i].buf(), size_A[i] * realDataTypeSize(TiA)},
+                            {"B", dB[i].buf(), size_B[i] * realDataTypeSize(TiB)},
+                            {"C", dC[i].buf(), size_C[i] * realDataTypeSize(To)},
+                            {"D", (*dDp)[i].buf(), size_D[i] * realDataTypeSize(To)},
+                            {"workspace", static_cast<unsigned char*>(*dWorkspace), workspace_size}};
+                        if(arg.bias_vector)
+                            buffers.push_back(
+                                {"bias", dBias[i].buf(), size_bias[i] * realDataTypeSize(Tbias)});
+                        if(arg.scaleAlpha_vector)
+                            buffers.push_back({"scaleAlpha_vector",
+                                               dScaleAlphaVec[i].buf(),
+                                               size_scaleAlphaVec[i] * realDataTypeSize(Talpha)});
+                        const std::string report
+                            = "fast_check, "
+                              + solution_description(handle,
+                                                     heuristicResult[sol].algo,
+                                                     sol,
+                                                     heuristicResult.size(),
+                                                     true)
+                              + ":\n" + scan.message + res.message
+                              + fast_check_describe_buffers(buffers);
+#ifdef GOOGLE_TEST
+                        ADD_FAILURE() << report;
+#else
+                        hipblaslt_cerr << report << std::endl;
 #endif
+                    }
                 }
             }
         }
