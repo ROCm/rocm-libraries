@@ -19,6 +19,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "harness/BundleMetadata.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/BundleDiscovery.hpp"
 #include "harness/bundle/HarnessDependencies.hpp"
@@ -128,9 +129,9 @@ struct FailedLoad
     std::string message;
 };
 
-// A bundle that failed to load for an ordinary reason (malformed JSON, an
+// A bundle that failed to load for an ordinary reason (malformed graph JSON, an
 // absent sweep metadata block with no golden data to validate, a bad sweep
-// case, ...). No test is registered for it — only the diagnostic message to
+// case, ...). Malformed metadata is not one of these: it is a FailedLoad. No test is registered for it — only the diagnostic message to
 // log. Kept distinct from FailedLoad so only the failures that would otherwise
 // shrink the suite behind our backs turn it red; every other load failure keeps
 // the original log-and-skip behavior.
@@ -163,6 +164,15 @@ inline LoadOutcome classifyBundle(const DiscoveredBundle& disc)
                           disc.testName,
                           "Failed to load bundle " + diagnosticPath.string() + ": " + e.what()};
     }
+    catch(const hipdnn_integration_tests::BundleMetadataError& e)
+    {
+        // Malformed metadata is an authoring error, not "metadata not recorded".
+        // Skipping it would let a typo silently delete the test; failing it with
+        // the parser's detail tells the author exactly what to fix.
+        return FailedLoad{disc.suiteName,
+                          disc.testName,
+                          "Failed to load bundle " + diagnosticPath.string() + ": " + e.what()};
+    }
     catch(const std::exception& e)
     {
         return SkippedLoad{"Skipping bundle " + diagnosticPath.string() + ": " + e.what()};
@@ -170,8 +180,8 @@ inline LoadOutcome classifyBundle(const DiscoveredBundle& disc)
 
     if(const auto* error = std::get_if<LoadError>(&loadResult))
     {
-        // Golden blobs on disk with no usable metadata is the one load failure that
-        // must not be a skip. Skipping it means pulling the DVC data *removes* a test
+        // Golden blobs on disk with no metadata is the one LoadError that must not
+        // be a skip. Skipping it means pulling the DVC data *removes* a test
         // and the run still passes — a more complete checkout verifying strictly less.
         // Every other error describes a bundle that was already unusable.
         if(*error == LoadError::UNVALIDATABLE_GOLDEN_DATA)

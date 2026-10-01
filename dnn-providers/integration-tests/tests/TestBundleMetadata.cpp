@@ -625,4 +625,37 @@ TEST(TestParseBundleMetadataJson, ErrorNamesTheSource)
     }
 }
 
+TEST(TestParseBundleMetadataJson, ParsesNumericInputsKeys)
+{
+    auto meta = parseBundleMetadataJson(nlohmann::json::parse(R"({"format_version": 1,
+            "inputs": {"0": {"fill": "zeros"}, "12": {"fill": "ones"}}})"),
+                                        "case_0");
+    ASSERT_TRUE(meta.inputs.has_value());
+    ASSERT_EQ(meta.inputs->size(), 2u);
+    EXPECT_EQ(meta.inputs->at(0)["fill"], "zeros");
+    EXPECT_EQ(meta.inputs->at(12)["fill"], "ones");
+}
+
+// inputs keys are tensor UIDs. A key that is not entirely an integer used to be
+// dropped with a warning, silently losing that tensor's input spec. A numeric
+// prefix ("12abc") is rejected too, rather than read as uid 12.
+TEST(TestParseBundleMetadataJson, ThrowsOnNonNumericInputsKey)
+{
+    for(const auto* key : {"x", "", "12abc", "1.5"})
+    {
+        const nlohmann::json json
+            = {{"format_version", 1}, {"inputs", {{key, nlohmann::json::object()}}}};
+        try
+        {
+            parseBundleMetadataJson(json, "case_0");
+            FAIL() << "expected BundleMetadataError for inputs key \"" << key << "\"";
+        }
+        catch(const BundleMetadataError& e)
+        {
+            EXPECT_NE(std::string(e.what()).find("non-numeric inputs key"), std::string::npos)
+                << e.what();
+        }
+    }
+}
+
 // NOLINTEND(readability-identifier-naming)

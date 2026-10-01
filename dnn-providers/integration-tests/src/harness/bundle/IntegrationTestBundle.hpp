@@ -44,7 +44,8 @@ using TensorMap = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::u
 //                      metadata for template-sweep cases. Metadata is mandatory
 //                      only when golden output blobs are present; graph-only and
 //                      reference-verified bundles without a .meta.json default to
-//                      empty metadata. Present-but-malformed metadata is a LoadError.
+//                      empty metadata. Present-but-malformed metadata throws
+//                      BundleMetadataError rather than loading.
 //   outputTensorUids — UIDs of the graph's output tensors, derived from the
 //                      graph. Always available, even for graph-only bundles, so
 //                      the harness knows which tensors to compare or allocate.
@@ -81,14 +82,17 @@ struct IntegrationTestBundle
 // blobs are on disk but nothing describes how they were produced, so the bundle
 // would be dropped at exactly the moment its data became available. Callers
 // (classifyBundle()) turn that one red; the rest stay log-and-skip.
+//
+// Metadata that is present but malformed is not a LoadError at all: the loader
+// lets BundleMetadataError propagate so its detail reaches the failure message.
 enum class LoadError
 {
     MALFORMED_JSON, // graph/template/sweep JSON is unreadable or syntactically invalid
     INVALID_GRAPH_SCHEMA, // expanded graph JSON cannot build a valid graph flatbuffer
     MISSING_METADATA, // metadata absent, and no golden data that would need validating
-    UNVALIDATABLE_GOLDEN_DATA, // golden blobs present but their metadata is missing/invalid
+    UNVALIDATABLE_GOLDEN_DATA, // golden blobs present but their metadata is absent
     TENSOR_LOAD_FAILED, // a present tensor blob is unreadable, wrong-sized, or unsupported
-    INVALID_SWEEP_CASE // sweep case id, placeholders, metadata, or golden path are invalid
+    INVALID_SWEEP_CASE // sweep case id, placeholders, or golden path are invalid
 };
 
 // A load either yields a bundle or explains why it could not. std::visit at the
@@ -104,9 +108,9 @@ inline const char* toString(LoadError error)
     case LoadError::INVALID_GRAPH_SCHEMA:
         return "graph JSON is not a valid graph";
     case LoadError::MISSING_METADATA:
-        return "missing or invalid .meta.json companion";
+        return "metadata is missing";
     case LoadError::UNVALIDATABLE_GOLDEN_DATA:
-        return "golden tensor .bin files are present but their metadata is missing or invalid, "
+        return "golden tensor .bin files are present but their metadata is missing, "
                "so the data cannot be validated";
     case LoadError::TENSOR_LOAD_FAILED:
         return "tensor .bin present but failed to load";
@@ -728,9 +732,8 @@ inline std::optional<std::filesystem::path>
 //   * graph .json not parseable            -> LoadError::MALFORMED_JSON
 //   * parseable but not a valid graph      -> LoadError::INVALID_GRAPH_SCHEMA
 //   * golden outputs present, no metadata  -> LoadError::UNVALIDATABLE_GOLDEN_DATA
-//   * golden outputs present, bad metadata -> LoadError::UNVALIDATABLE_GOLDEN_DATA
 //   * no golden outputs, no metadata       -> bundle with empty metadata
-//   * no golden outputs, bad metadata      -> LoadError::MISSING_METADATA
+//   * metadata present but malformed       -> throws BundleMetadataError
 //   * valid graph, input blobs absent      -> bundle with tensors == nullopt
 //   * present blob fails to load           -> LoadError::TENSOR_LOAD_FAILED
 //   * inputs present, outputs absent       -> bundle verified against reference
@@ -738,11 +741,11 @@ inline std::optional<std::filesystem::path>
 //
 // Inputs and outputs are loaded independently. Output uids come from the graph;
 // every other declared tensor is treated as input. Every failure above is
-// reported through the return value, except one: a
-// RuntimePassByValueInvariantError from buildGraphBuffer() propagates
-// uncaught, since callers (see BundleRegistration.hpp's classifyBundle())
-// deliberately treat that one contradiction as a hard failure rather than a
-// quiet skip.
+// reported through the return value, except two that propagate uncaught: a
+// BundleMetadataError from malformed metadata, and a
+// RuntimePassByValueInvariantError from buildGraphBuffer(). Callers (see
+// BundleRegistration.hpp's classifyBundle()) deliberately treat both as hard
+// failures rather than quiet skips, and the exception carries the detail.
 inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPath)
 {
     const auto graphJson = detail::parseJsonFile(jsonPath);
@@ -781,18 +784,9 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
 
     // An absent .meta.json is fine for a graph-only bundle (default metadata) but
     // not next to golden blobs. A present-but-malformed one is an authoring error
-    // either way, so it never falls back to default metadata.
-    std::optional<hipdnn_integration_tests::BundleMetadata> metadata;
-    try
-    {
-        metadata = hipdnn_integration_tests::loadBundleMetadata(jsonPath);
-    }
-    catch(const hipdnn_integration_tests::BundleMetadataError& e)
-    {
-        HIPDNN_SDK_LOG_WARN(e.what());
-        return goldenOutputsPresent ? LoadError::UNVALIDATABLE_GOLDEN_DATA
-                                    : LoadError::MISSING_METADATA;
-    }
+    // either way: loadBundleMetadata() throws BundleMetadataError, which is left
+    // to propagate so it never falls back to default metadata.
+    auto metadata = hipdnn_integration_tests::loadBundleMetadata(jsonPath);
     if(!metadata.has_value())
     {
         if(goldenOutputsPresent)
@@ -818,10 +812,9 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
 // case id, expand `${case...}` placeholders, load inline metadata, and resolve an
 // optional golden directory. Sweep authoring errors are reported as
 // INVALID_SWEEP_CASE; an expanded graph that still fails schema conversion is
-// INVALID_GRAPH_SCHEMA. As with the direct-bundle overload, a
-// RuntimePassByValueInvariantError from buildGraphBuffer() is the one
-// exception that propagates uncaught rather than being folded into
-// INVALID_GRAPH_SCHEMA.
+// INVALID_GRAPH_SCHEMA. As with the direct-bundle overload, two exceptions
+// propagate uncaught: a BundleMetadataError from a malformed metadata block, and
+// a RuntimePassByValueInvariantError from buildGraphBuffer().
 inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
 {
     if(!discovered.isTemplateSweepCase())
@@ -882,8 +875,7 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
 
     // Golden blobs without metadata cannot be validated, so that combination is
     // UNVALIDATABLE_GOLDEN_DATA and hard-fails downstream (see LoadError). Mirrors
-    // the direct-bundle path above, including the "unparseable is as bad as absent"
-    // rule: a typo in the metadata block must not quietly delete the case.
+    // the direct-bundle path above.
     const bool goldenOutputsPresent
         = goldenDirectory.has_value() && !bundle.outputTensorUids.empty()
           && detail::blobsPresentFor(bundle.outputTensorUids, [&](int64_t uid) {
@@ -892,24 +884,17 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
 
     // Every sweep case must carry a metadata block. Metadata (arch lock,
     // ROCm/GPU version, seed, VRAM guard) is what validates golden data and
-    // anchors the case, so an absent block is MISSING_METADATA and a present
-    // but unparseable block is an authoring error (INVALID_SWEEP_CASE).
+    // anchors the case, so an absent block is MISSING_METADATA. A present but
+    // malformed block is an authoring error: parseBundleMetadataJson() throws
+    // BundleMetadataError, which is left to propagate (a typo in the metadata
+    // block must not quietly delete the case).
     if(!caseJson->contains("metadata") || caseJson->at("metadata").is_null())
     {
         return goldenOutputsPresent ? LoadError::UNVALIDATABLE_GOLDEN_DATA
                                     : LoadError::MISSING_METADATA;
     }
-    try
-    {
-        bundle.metadata = hipdnn_integration_tests::parseBundleMetadataJson(
-            caseJson->at("metadata"), discovered.diagnosticPath().string());
-    }
-    catch(const hipdnn_integration_tests::BundleMetadataError& e)
-    {
-        HIPDNN_SDK_LOG_WARN(e.what());
-        return goldenOutputsPresent ? LoadError::UNVALIDATABLE_GOLDEN_DATA
-                                    : LoadError::INVALID_SWEEP_CASE;
-    }
+    bundle.metadata = hipdnn_integration_tests::parseBundleMetadataJson(
+        caseJson->at("metadata"), discovered.diagnosticPath().string());
 
     if(goldenDirectory.has_value())
     {

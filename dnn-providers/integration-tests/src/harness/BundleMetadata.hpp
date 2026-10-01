@@ -60,7 +60,8 @@ struct BundleMetadata
 
 /// Thrown when a metadata object exists but is malformed: not a JSON object,
 /// missing/invalid/unsupported `format_version`, an invalid `enforcement_level`,
-/// or (for a .meta.json file) unreadable or not valid JSON. An authoring error,
+/// a non-numeric `inputs` key, or (for a .meta.json file) unreadable or not
+/// valid JSON. An authoring error,
 /// never a "metadata not recorded" case, so it must not degrade to defaults.
 class BundleMetadataError : public std::runtime_error
 {
@@ -72,8 +73,9 @@ public:
 /// Parse metadata from a JSON object.
 ///
 /// Throws BundleMetadataError when the object is not a JSON object, is missing
-/// `format_version`, carries an unsupported format version, or has an invalid
-/// `enforcement_level`. `source` names the origin (file path or sweep case) in
+/// `format_version`, carries an unsupported format version, has an invalid
+/// `enforcement_level`, or has an `inputs` key that is not a tensor UID.
+/// `source` names the origin (file path or sweep case) in
 /// the error message.
 inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
                                               std::string_view source = {})
@@ -99,7 +101,7 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
     }
 
     BundleMetadata meta;
-    meta.formatVersion = version;
+    meta.formatVersion = 1;
 
     auto readString = [&](const char* key) -> std::optional<std::string> {
         if(json.contains(key) && json[key].is_string())
@@ -168,16 +170,27 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
         std::unordered_map<int64_t, nlohmann::json> inputMap;
         for(const auto& [key, val] : json["inputs"].items())
         {
+            // Keys are tensor UIDs. A key that is not entirely an integer ("x",
+            // "12abc") is an authoring error; dropping it would silently lose
+            // that tensor's input spec.
+            std::size_t parsed = 0;
+            int64_t uid = 0;
             try
             {
-                inputMap[std::stoll(key)] = val;
+                uid = std::stoll(key, &parsed);
             }
             catch(const std::exception&)
             {
-                HIPDNN_SDK_LOG_WARN("Skipping non-numeric inputs key \""
-                                    << key << "\" in " << (source.empty() ? "metadata" : source));
-                continue;
+                parsed = 0;
             }
+            if(parsed == 0 || parsed != key.size())
+            {
+                std::string message = where + " has non-numeric inputs key \"";
+                message += key;
+                message += '"';
+                throw BundleMetadataError(message);
+            }
+            inputMap[uid] = val;
         }
         meta.inputs = std::move(inputMap);
     }
