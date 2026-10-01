@@ -91,7 +91,7 @@ namespace rocsparse
                                    rocsparse_const_spmat_descr A,
                                    rocsparse_dnmat_descr       B,
                                    rocsparse_csrsm_info        csrsm_info,
-                                   size_t                      buffer_eize_in_bytes,
+                                   size_t                      buffer_size_in_bytes,
                                    void*                       buffer,
                                    rocsparse_error*            p_error);
 

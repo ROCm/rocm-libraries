@@ -76,8 +76,10 @@ public:
     rocsparse_sptrsm_stage get_stage() const;
     rocsparse_sptrsm_alg   get_alg() const;
 
+#if defined(ROCSPARSE_WITH_TRSM_REFACTORING)
     void    set_batch_count(int64_t);
     int64_t get_batch_count() const;
+#endif
 
     int64_t             get_nrhs() const;
     rocsparse_operation get_operation_A() const;
