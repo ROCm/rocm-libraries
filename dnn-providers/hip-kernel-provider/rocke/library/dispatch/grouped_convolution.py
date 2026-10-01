@@ -957,9 +957,7 @@ def _pick_group_merge(req: ConvGroupedRequest, tile_m: int, tile_n: int) -> int:
     return fwd_group_merge_for_geometry(groups, m, tile_m, tile_n)
 
 
-def fwd_group_merge_for_geometry(
-    groups: int, m: int, tile_m: int, tile_n: int
-) -> int:
+def fwd_group_merge_for_geometry(groups: int, m: int, tile_m: int, tile_n: int) -> int:
     """:func:`_pick_group_merge` with the request unwrapped to plain integers.
 
     Split out so the sweep benchmark can centre its merge-degree window on the

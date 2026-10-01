@@ -166,6 +166,7 @@ def _group_merge_window(
     lo = max(0, min(idx - radius, len(admissible) - width))
     return tuple(admissible[lo : lo + width])
 
+
 # Scratch replica counts swept when --ws-replicas 0 is passed. Powers of two
 # because the Stage 1 slab pick is `blockIdx.z % R`; 1 is the degenerate
 # no-replication case (one atomic target, Stage 2 collapses to a single load).
@@ -2307,9 +2308,7 @@ def _run_sweep(
         # restores the exhaustive baseline.
         if args.unmerged_frac < 1.0:
             _n_unmerged = len(combos)
-            combos = _sample_combos(
-                combos, args.unmerged_frac, args.seed + case_idx
-            )
+            combos = _sample_combos(combos, args.unmerged_frac, args.seed + case_idx)
             print(
                 f"  depthwise: sampling {len(combos)}/{_n_unmerged} unmerged "
                 f"(Gm=1) combos — on depthwise this leg is the baseline, not a "

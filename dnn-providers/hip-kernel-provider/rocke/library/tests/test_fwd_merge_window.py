@@ -27,9 +27,45 @@ from dispatch import grouped_convolution as D
 # awkward ones: primes, 2-adic-poor values (72 -> caps at 8), and 1/3 which have
 # no admissible degree at all.
 _GROUPS = (
-    1, 2, 3, 4, 5, 7, 8, 12, 16, 24, 32, 36, 48, 64, 72, 80, 96, 112, 128,
-    144, 160, 192, 240, 288, 320, 384, 416, 448, 512, 576, 640, 672, 768,
-    960, 1024, 1152, 1280, 1536, 2048,
+    1,
+    2,
+    3,
+    4,
+    5,
+    7,
+    8,
+    12,
+    16,
+    24,
+    32,
+    36,
+    48,
+    64,
+    72,
+    80,
+    96,
+    112,
+    128,
+    144,
+    160,
+    192,
+    240,
+    288,
+    320,
+    384,
+    416,
+    448,
+    512,
+    576,
+    640,
+    672,
+    768,
+    960,
+    1024,
+    1152,
+    1280,
+    1536,
+    2048,
 )
 
 # M = N*Ho*Wo. Spans the occupancy cap's whole range: 0 ("unknown", the cap is
@@ -50,19 +86,16 @@ class TestFwdMergePickMirror(unittest.TestCase):
                 for tile_m in B._TILE_MN:
                     for tile_n in B._TILE_MN:
                         got = B._fwd_merge_pick(groups, m, tile_m, tile_n)
-                        want = D.fwd_group_merge_for_geometry(
-                            groups, m, tile_m, tile_n
-                        )
+                        want = D.fwd_group_merge_for_geometry(groups, m, tile_m, tile_n)
                         self.assertEqual(
-                            got, want,
+                            got,
+                            want,
                             f"drift at groups={groups} M={m} "
                             f"tile={tile_m}x{tile_n}: sweep={got} dispatch={want}",
                         )
                         checked += 1
         # Guard against the loops silently collapsing to nothing.
-        self.assertEqual(
-            checked, len(_GROUPS) * len(_M) * len(B._TILE_MN) ** 2
-        )
+        self.assertEqual(checked, len(_GROUPS) * len(_M) * len(B._TILE_MN) ** 2)
 
 
 class TestGroupMergeWindow(unittest.TestCase):
@@ -76,7 +109,8 @@ class TestGroupMergeWindow(unittest.TestCase):
 
     def _admissible(self, groups, tile_n):
         return [
-            gm for gm in sorted(B._GROUP_MERGE_SWEEP, reverse=True)
+            gm
+            for gm in sorted(B._GROUP_MERGE_SWEEP, reverse=True)
             if groups % gm == 0 and gm <= tile_n
         ]
 
@@ -106,9 +140,7 @@ class TestGroupMergeWindow(unittest.TestCase):
                                 ctx,
                             )
                             lo = adm.index(win[0])
-                            self.assertEqual(
-                                list(win), adm[lo:lo + len(win)], ctx
-                            )
+                            self.assertEqual(list(win), adm[lo : lo + len(win)], ctx)
                             self.assertEqual(
                                 len(win), min(2 * radius + 1, len(adm)), ctx
                             )
@@ -133,7 +165,8 @@ class TestGroupMergeWindow(unittest.TestCase):
                                 groups, m, tile_m, tile_n, radius
                             )
                             self.assertIn(
-                                pick, win,
+                                pick,
+                                win,
                                 f"groups={groups} M={m} "
                                 f"tile={tile_m}x{tile_n} r={radius} "
                                 f"pick={pick} win={win}",
@@ -142,9 +175,7 @@ class TestGroupMergeWindow(unittest.TestCase):
     def test_unmergeable_shapes_yield_empty_window(self):
         # groups=1 is not grouped at all; 3 and 5 have no degree in the sweep.
         for groups in (1, 3, 5, 7):
-            self.assertEqual(
-                B._group_merge_window(groups, 1024, 64, 64, 1), ()
-            )
+            self.assertEqual(B._group_merge_window(groups, 1024, 64, 64, 1), ())
 
     def test_tile_n_cap_is_respected(self):
         # tile_n=16 cannot host Gm=32 or 64 however divisible the group count.
@@ -153,17 +184,13 @@ class TestGroupMergeWindow(unittest.TestCase):
 
     def test_known_windows(self):
         # groups=512 at a large M is ceiling-bound: cap is _FWD_MERGE_MAX=32.
-        self.assertEqual(
-            B._group_merge_window(512, 12544, 64, 64, 1), (64, 32, 16)
-        )
+        self.assertEqual(B._group_merge_window(512, 12544, 64, 64, 1), (64, 32, 16))
         self.assertEqual(B._group_merge_window(512, 12544, 64, 64, 0), (32,))
         self.assertEqual(
             B._group_merge_window(512, 12544, 64, 64, 2), (64, 32, 16, 8, 4)
         )
         # groups=72 admits only 8/4/2 -- the window must not name 32 or 16.
-        self.assertEqual(
-            B._group_merge_window(72, 82944, 64, 64, 1), (8, 4, 2)
-        )
+        self.assertEqual(B._group_merge_window(72, 82944, 64, 64, 1), (8, 4, 2))
         # groups=448 at M=64 is occupancy-bound; the pick falls through to 1,
         # so the window anchors on the smallest admissible degree.
         self.assertEqual(B._group_merge_window(448, 64, 64, 64, 1), (8, 4, 2))
