@@ -325,11 +325,13 @@ class DirectNongroupedConvSpec:
             raise ValueError(f"C {p.cpg} must be a multiple of {_X_LOAD_VEC}")
         if self.threads_per_block > 1024:
             raise ValueError(f"threads_per_block {self.threads_per_block} > 1024")
-        if self.lds_pad < 0 or self.lds_pad % 2 != 0:
+        if self.lds_pad < 0 or self.lds_pad % 8 != 0:
             # A negative pad shrinks the pixel stride below the ck halves each
-            # pixel stages, so neighbouring pixels overlap in LDS.
+            # pixel stages, so neighbouring pixels overlap in LDS. The vec8 LDS
+            # store/load is emitted with align 16, so the pixel stride
+            # (ck + lds_pad halves) must be a multiple of 8 halves.
             raise ValueError(
-                f"lds_pad must be a non-negative even number to keep "
+                f"lds_pad must be a non-negative multiple of 8 to keep "
                 f"ds_read_b128 aligned (got {self.lds_pad})"
             )
         if self.swizzle_wgm < 1:

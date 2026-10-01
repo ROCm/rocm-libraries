@@ -173,8 +173,9 @@ Constraints (`validate()` then `is_valid_nongrouped_spec(spec, arch)`):
 * `tile_w`, `tile_k`, `K` multiples of the atom tile; `tile_h % waves_n == 0`;
   `(tile_k / atom_tile) % waves_m == 0`;
 * `ck % atom_k == 0`, `ck % 8 == 0`, `C % ck == 0`, `C % 8 == 0`;
-* `lds_pad` non-negative and even (a negative pad overlaps neighbouring pixels
-  in LDS); `swizzle_wgm >= 1`; `iglp` None or ≥ 0; `waves_per_eu` None or ≥ 1
+* `lds_pad` a non-negative multiple of 8 (a negative pad overlaps neighbouring
+  pixels in LDS; the vec8 LDS access is emitted `align 16`, so the pixel stride
+  `ck + lds_pad` must stay a multiple of 8 halves); `swizzle_wgm >= 1`; `iglp` None or ≥ 0; `waves_per_eu` None or ≥ 1
   (the C++ port encodes None as -1 / 0, so those values are reserved in both
   engines); A, B and D each ≤ `0x7F000000` bytes; accumulators ≤ 256 registers
   per lane;

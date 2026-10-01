@@ -23,7 +23,7 @@ import ctypes
 import importlib.util
 import math
 import unittest
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import List, Tuple
 
 from rocke.runtime.hip_module import get_device_arch
@@ -1075,6 +1075,37 @@ _NG_CASES: List[_NgCase] = [
 ]
 
 
+# The cases are written for gfx950. gfx942 has neither wide-K atom for
+# fp16/bf16 and a 64 KiB LDS, so there each case falls back to the narrower-K
+# atom of the same tile size and then shrinks ck (and, failing that, tile_h)
+# until the staged tiles fit. The addressing branch a case pins down depends on
+# its shape, stride and filter -- not on ck -- so it still gets a numeric check
+# instead of a skip. On gfx950 every case is used as written.
+_NG_ATOM_FALLBACK = {"32x32x16": "32x32x8", "16x16x32": "16x16x16"}
+
+
+def _fit_nongrouped_to_arch(spec, arch: str):
+    """``spec`` with its atom / ck / tile_h narrowed until ``arch`` can run it."""
+    from kernels.common.conv_direct_nongrouped import _ATOMS, _X_LOAD_VEC
+    from rocke.core.arch import ArchTarget
+
+    target = ArchTarget.from_gfx(arch)
+    ab = "bf16" if spec.problem.dtype == "bf16" else "f16"
+    t, k, _ = _ATOMS[spec.atom]
+    if not target.mma.has_shape(a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=t, n=t, k=k):
+        spec = replace(spec, atom=_NG_ATOM_FALLBACK.get(spec.atom, spec.atom))
+    min_ck = max(spec.atom_k, _X_LOAD_VEC)
+    while not target.fits_lds(spec.lds_bytes) and spec.ck // 2 >= min_ck:
+        spec = replace(spec, ck=spec.ck // 2)
+    while (
+        not target.fits_lds(spec.lds_bytes)
+        and spec.tile_h > spec.waves_n
+        and (spec.tile_h // 2) % spec.waves_n == 0
+    ):
+        spec = replace(spec, tile_h=spec.tile_h // 2)
+    return spec
+
+
 def _run_nongrouped_one(arch: str, case: _NgCase) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one non-grouped direct-conv kernel."""
     from kernels.common.conv_direct_grouped import DirectConvProblem
@@ -1108,7 +1139,7 @@ def _run_nongrouped_one(arch: str, case: _NgCase) -> Tuple[bool, str]:
         chiplet_swizzle=case.chiplet_swizzle,
         swizzle_wgm=case.swizzle_wgm,
     )
-    return _run_nongrouped_spec(arch, spec, case.id)
+    return _run_nongrouped_spec(arch, _fit_nongrouped_to_arch(spec, arch), case.id)
 
 
 def _run_nongrouped_spec(arch: str, spec, case_id: str) -> Tuple[bool, str]:

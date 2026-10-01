@@ -357,12 +357,14 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
         NONGROUPED_REJECT("threads_per_block %d > 1024",
                           rocke_direct_conv_nongrouped_threads_per_block(spec));
     }
-    if(spec->lds_pad < 0 || spec->lds_pad % 2 != 0)
+    if(spec->lds_pad < 0 || spec->lds_pad % 8 != 0)
     {
         /* A negative pad shrinks the pixel stride below the ck halves each
-         * pixel stages, so neighbouring pixels overlap in LDS. */
+         * pixel stages, so neighbouring pixels overlap in LDS. The vec8 LDS
+         * store/load is emitted with align 16, so the pixel stride
+         * (ck + lds_pad halves) must be a multiple of 8 halves. */
         NONGROUPED_REJECT(
-            "lds_pad must be a non-negative even number to keep ds_read_b128 aligned (got %d)",
+            "lds_pad must be a non-negative multiple of 8 to keep ds_read_b128 aligned (got %d)",
             spec->lds_pad);
     }
     if(spec->swizzle_wgm < 1)
@@ -444,8 +446,8 @@ bool rocke_direct_conv_nongrouped_is_valid_spec(const rocke_direct_conv_nongroup
     target = rocke_archtarget_from_gfx(arch);
     if(target == NULL)
     {
-        snprintf(msg, sizeof(msg), "unknown gfx target '%s'", arch);
-        nongrouped_set_reason(reason, reason_cap, msg);
+        /* Same text as Python's str(KeyError) from ArchTarget.from_gfx. */
+        rocke_set_unknown_arch_reason(reason, reason_cap, arch);
         return false;
     }
     if(rocke_direct_conv_nongrouped_validate(spec, reason, reason_cap) != ROCKE_OK)
