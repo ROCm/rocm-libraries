@@ -11,6 +11,12 @@ Documentation for rocFFT is available at
 * Fixed out-of-bounds memory access when executing a multi-device complex-to-complex plan whose
   bricks used non-contiguous data layouts.
 * Fixed a memory leak when `rocfft_plan_create` fails.
+* The offline tuner now reports failures from `rocfft_setup`, `rocfft_cleanup`,
+  `rocfft_get_offline_tuner_handle` and `rocfft_get_version_string` instead of ignoring them.
+* Fixed a failed `rocfft_setup` counting as a use of the library, which made the next
+  `rocfft_setup` report success without initializing. A failed `rocfft_setup` acquires nothing
+  and must not be paired with a `rocfft_cleanup`. Log files opened by the failed attempt are
+  now closed when a later `rocfft_setup` reopens them.
 
 ## rocFFT 1.0.40 for ROCm 10.1
 

@@ -132,7 +132,8 @@ std::unique_ptr<RTCKernel> compile(const std::string& name, const std::string& s
     std::vector<char> code(codeSize);
     if(hiprtcGetCode(prog, code.data()) != HIPRTC_SUCCESS)
         throw std::runtime_error("failed to get code");
-    hiprtcDestroyProgram(&prog);
+    if(hiprtcDestroyProgram(&prog) != HIPRTC_SUCCESS)
+        throw std::runtime_error("failed to destroy program");
 
     hipModule_wrapper_t module;
     module.alloc(code.data());
