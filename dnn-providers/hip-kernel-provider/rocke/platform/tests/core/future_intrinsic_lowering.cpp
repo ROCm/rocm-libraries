@@ -2119,25 +2119,46 @@ void case_gfx1250_cluster_dims_rejects()
     }
 }
 
-/* ---- gfx1250 feature flags ---- */
+/* ---- memory capabilities ---- */
 
-/* Mirrors test_new_feature_flags_start_false: each flag flips only after its
- * feature passes a functional run on a device, so every arch reports False. */
-void case_new_feature_flags_start_false()
+/* The embedded table must match arch_specs.json, which test_memory_caps_mirror
+ * reads on the Python side. The gfx1250 feature flags are set only where the
+ * feature passed a functional run on a device, which today is gfx1250 alone. */
+void case_memory_caps()
 {
-    static const char* const arches[]
-        = {"gfx11-generic", "gfx1151", "gfx1201", "gfx1250", "gfx90a", "gfx942", "gfx950"};
-    for(const char* gfx : arches)
+    struct expected_caps
     {
-        const rocke_arch_target_t* t = rocke_arch_target_from_gfx(gfx);
+        const char* gfx;
+        rocke_memory_caps_t caps;
+    };
+    static const expected_caps table[] = {
+        {"gfx11-generic", {false, false, false, false, 4, false, false, false, false}},
+        {"gfx1151", {false, false, false, false, 4, false, false, false, false}},
+        {"gfx1201", {false, false, false, false, 4, false, false, false, false}},
+        {"gfx1250", {false, true, false, true, 4, true, true, true, true}},
+        {"gfx90a", {false, false, false, false, 4, false, false, false, false}},
+        {"gfx942", {true, true, false, false, 4, false, false, false, false}},
+        {"gfx950", {true, true, true, false, 4, false, false, false, false}},
+    };
+    for(const expected_caps& row : table)
+    {
+        const rocke_arch_target_t* t = rocke_arch_target_from_gfx(row.gfx);
         if(t == nullptr)
         {
-            fail(gfx, __LINE__);
+            fail(row.gfx, __LINE__);
             continue;
         }
-        if(t->memory.has_scalar_data_prefetch || t->memory.has_global_prefetch
-           || t->memory.has_cluster_launch || t->memory.has_multicast_load)
-            fail(gfx, __LINE__);
+        const rocke_memory_caps_t& got = t->memory;
+        const rocke_memory_caps_t& want = row.caps;
+        if(got.has_async_lds != want.has_async_lds
+           || got.has_async_global_lds != want.has_async_global_lds
+           || got.has_ds_read_tr != want.has_ds_read_tr || got.has_tdm != want.has_tdm
+           || got.buffer_load_max_dwords != want.buffer_load_max_dwords
+           || got.has_scalar_data_prefetch != want.has_scalar_data_prefetch
+           || got.has_global_prefetch != want.has_global_prefetch
+           || got.has_cluster_launch != want.has_cluster_launch
+           || got.has_multicast_load != want.has_multicast_load)
+            fail(row.gfx, __LINE__);
     }
 }
 
@@ -2476,7 +2497,7 @@ const TestCase k_cases[] = {
     {"gfx1250_tdm_purity", case_gfx1250_tdm_purity},
     {"gfx1250_cluster_dims", case_gfx1250_cluster_dims},
     {"gfx1250_cluster_dims_rejects", case_gfx1250_cluster_dims_rejects},
-    {"new_feature_flags_start_false", case_new_feature_flags_start_false},
+    {"memory_caps", case_memory_caps},
     {"buffer_load_lds_async", case_buffer_load_lds_async},
     {"global_load_async_to_lds_b8", case_global_load_async_to_lds_b8},
     {"hip_zext_uses_unsigned_source_cast", case_hip_zext_uses_unsigned_source_cast},

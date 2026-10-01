@@ -904,7 +904,7 @@ class MemoryCapabilities:
     has_ds_read_tr: bool
     has_tdm: bool
     buffer_load_max_dwords: int
-    # gfx1250 feature flags. Each stays False until its feature passes a
+    # gfx1250 feature flags. An arch sets one only after its feature passes a
     # functional run on a device; the ops themselves are gated separately.
     has_scalar_data_prefetch: bool = False
     has_global_prefetch: bool = False

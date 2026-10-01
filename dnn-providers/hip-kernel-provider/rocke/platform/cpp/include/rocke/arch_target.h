@@ -176,9 +176,13 @@ const rocke_layout_map_t* rocke_mma_op_b_scale_layout(const rocke_mma_op_t* op,
 typedef struct rocke_memory_caps
 {
     bool has_async_lds;
+    /* Python defaults has_async_global_lds to has_async_lds when the JSON
+     * omits it. */
+    bool has_async_global_lds;
     bool has_ds_read_tr;
+    bool has_tdm;
     int buffer_load_max_dwords;
-    /* gfx1250 feature flags; each stays false until its feature passes a
+    /* gfx1250 feature flags; an arch sets one only after its feature passes a
      * functional run on a device. */
     bool has_scalar_data_prefetch;
     bool has_global_prefetch;

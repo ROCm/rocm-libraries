@@ -38,27 +38,51 @@ class TestGfx1250Arch(unittest.TestCase):
         # gfx1250 HAS async global->LDS DMA via its own GFX12 family
         # (global_load_async_to_lds_b128 + s_wait_asynccnt), GPU-validated via the
         # DTLA path -- distinct from the gfx9 buffer_load_lds (which does not
-        # select here). TDM is not verified on this part.
+        # select here). TDM passes the tdm_verify round trip on a device.
         self.assertTrue(target.memory.has_async_global_lds)
-        self.assertFalse(target.memory.has_tdm)
+        self.assertTrue(target.memory.has_tdm)
         # has_async_lds / has_ds_read_tr denote the gfx9/gfx950 ds_read_tr / async
         # ABI (MFMA-pipeline gating), which gfx1250 lacks; its async/transpose use
         # distinct GFX12 opcodes gated in the ISA backend, so these stay False.
         self.assertFalse(target.memory.has_async_lds)
         self.assertFalse(target.memory.has_ds_read_tr)
 
-    def test_new_feature_flags_start_false(self):
-        # Prefetch, cluster launch, and multicast flags flip only after a
-        # functional run on a device; every arch must report them False now.
+    def test_memory_caps_mirror(self):
+        # The same table as case_memory_caps in future_intrinsic_lowering.cpp,
+        # which checks the C++ engine's embedded copy, so a change to
+        # arch_specs.json fails here until both tables are updated. Prefetch,
+        # cluster launch, multicast, and TDM are set only where the feature
+        # passed a functional run on a device: gfx1250 alone today.
         from rocke.core.arch import ArchTarget, known_arches
+        from rocke.core.arch.target import MemoryCapabilities
 
-        for gfx in known_arches():
-            memory = ArchTarget.from_gfx(gfx).memory
+        none = dict(
+            has_async_lds=False,
+            has_async_global_lds=False,
+            has_ds_read_tr=False,
+            has_tdm=False,
+            buffer_load_max_dwords=4,
+        )
+        cdna_async = dict(none, has_async_lds=True, has_async_global_lds=True)
+        expected = {
+            "gfx11-generic": MemoryCapabilities(**none),
+            "gfx1151": MemoryCapabilities(**none),
+            "gfx1201": MemoryCapabilities(**none),
+            "gfx1250": MemoryCapabilities(
+                **dict(none, has_async_global_lds=True, has_tdm=True),
+                has_scalar_data_prefetch=True,
+                has_global_prefetch=True,
+                has_cluster_launch=True,
+                has_multicast_load=True,
+            ),
+            "gfx90a": MemoryCapabilities(**none),
+            "gfx942": MemoryCapabilities(**cdna_async),
+            "gfx950": MemoryCapabilities(**dict(cdna_async, has_ds_read_tr=True)),
+        }
+        self.assertEqual(sorted(known_arches()), sorted(expected))
+        for gfx, caps in expected.items():
             with self.subTest(gfx=gfx):
-                self.assertFalse(memory.has_scalar_data_prefetch)
-                self.assertFalse(memory.has_global_prefetch)
-                self.assertFalse(memory.has_cluster_launch)
-                self.assertFalse(memory.has_multicast_load)
+                self.assertEqual(ArchTarget.from_gfx(gfx).memory, caps)
 
     def test_wmma_atom_is_k32(self):
         from rocke.core.arch import ArchTarget
