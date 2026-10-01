@@ -17,8 +17,8 @@
 #     dnn-providers/integration-tests/src/integration-tests/CMakeLists.txt),
 #     but keep the pattern regardless so a graph-tests-enabled build still
 #     picks them up. GTest treats '/' and '_' as literal chars, so both
-#     pattern shapes are needed. "*" (comprehensive/full) also matches the
-#     full-tier bundles (integration-test-bundles/full/...).
+#     pattern shapes are needed. "full_*" matches the full-tier bundles
+#     (integration-test-bundles/full/...).
 #
 # hipdnn_integration_tests covers ops (conv, matmul, sdpa, reduction, ...) that
 # HIP_MLOPS_ENGINE doesn't implement; the harness's generic engine-support check
@@ -36,7 +36,7 @@ test_categories:
       - "quick_*"
       - "Smoke/*"
       # "Quick/*" and "Standard/*" match the C++ suites that carry an explicit
-      # tier prefix (layernorm uses Quick/Standard/Comprehensive/Full).
+      # tier prefix (layernorm uses Quick/Standard/Full).
       - "Quick/*"
     exclude: *common_excludes
     labels:
@@ -61,24 +61,28 @@ test_categories:
   comprehensive:
     description: "Nightly comprehensive external integration coverage"
     # An include list, like quick and standard above, rather than "*". With "*"
-    # this tier was byte-identical to "full" below, so the C++ tier prefixes
-    # meant nothing here: layernorm backward is always built
-    # (HIPDNN_IT_ALWAYS_BUILT_SOURCES) and its Full tier alone is ~2800 s on
-    # gfx1151, past the 30-minute wall this job actually dies at
-    # (ROCm/rocm-libraries#11529) regardless of the 7200 s CTest timeout below.
+    # this tier was byte-identical to "full" below, so the on-disk bundle tiers
+    # and the C++ tier prefixes meant nothing here.
+    #
+    # Everything listed has to fit the 30-minute wall the nightly job actually
+    # dies at (ROCm/rocm-libraries#11529), which the 7200 s CTest timeout below
+    # never gets to enforce.
     #
     # Two namespaces are in play and both are needed. Lowercase "quick_*" /
     # "standard_*" / "full_*" are bundle suites, named after their on-disk tier
     # under integration-test-bundles/. Capitalised "Smoke/" / "Quick/" /
     # "Standard/" / "Comprehensive/" are C++ gtest prefixes. "full_*" is listed
-    # and "Full/*" is not: the bundle full tier is nightly coverage this tier has
-    # always carried, while the C++ Full tier is the weekly-only set that "full"
-    # below still runs.
+    # and "Full/*" is not: the bundle full tier is nightly coverage this tier
+    # has always carried, while the C++ Full tier is the weekly-only set that
+    # "full" below still runs. "Comprehensive/*" matches nothing today --
+    # layernorm was the only op with that prefix and its shapes moved to Full --
+    # but it is kept so a future op that adopts the tier prefixes is picked up
+    # here, and so all three provider files keep the same shape.
     #
     # This replaced a list of hand-maintained carve-outs that had to name gtest
     # parameter indices, which shifted silently whenever a shape list changed.
-    # Only this engine's file is scoped this way; the other providers are
-    # deliberately left on "*".
+    # The miopen and hipblaslt files are include-lists of the same shape; only
+    # the "full_Layernorm_*" carve-out below is unique to this engine.
     test_patterns:
       - "quick_*"
       - "standard_*"
@@ -90,7 +94,20 @@ test_categories:
       # The always-built C++ tests that carry no tier prefix
       # (IntegrationIsSupportedExtPerformance, IntegrationCpuSdpaFwdBwdChained).
       - "Integration*"
-    exclude: *common_excludes
+    # Not *common_excludes: this tier needs one extra carve-out, and YAML
+    # cannot append to an aliased sequence, so the shared entry is repeated.
+    exclude:
+      - "*DISABLED*"
+      # The full-tier Layernorm bundles are the whole reason this job times
+      # out. On the 2026-09-16 gfx110X nightly, full_Layernorm_Default alone
+      # cost 838 s for 320 of its 336 cases -- more than every other full-tier
+      # bundle combined (300 s) -- and the job was killed inside it, before
+      # full_Layernorm_Variant2 (144 more cases, ~0.4x Default's element load)
+      # or any quick/standard bundle had run. Excluded by suite name rather
+      # than by dropping "full_*" wholesale so the cheap full-tier batchnorm
+      # and convolution bundles keep their nightly coverage. Both Layernorm
+      # sweeps still run in the weekly "full" tier below.
+      - "full_Layernorm_*"
     labels:
       - "comprehensive"
       - "nightly"

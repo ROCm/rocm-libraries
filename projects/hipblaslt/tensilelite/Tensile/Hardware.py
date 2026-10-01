@@ -25,7 +25,7 @@
 from typing import List, Optional
 
 from . import Properties
-from Tensile.Common.Architectures import \
+from .Common.Architectures import \
     SUPPORTED_CHIP_ID_FALLBACKS, SUPPORTED_BUILD_CHIP_IDS, GFX_CHIP_IDS, \
     isaToGfx, supportsChipIdPredicate, print1
 
@@ -124,6 +124,14 @@ class HardwarePredicate(Properties.Predicate):
     @classmethod
     def FromHardware(cls, isa, cuCount=None, deviceNames=None, logicFile=None):
         """Create a HardwarePredicate from hardware specifications.
+
+        The Processor value comes from the ISA, so gfx1250 and gfx1250-strict get
+        the same name here. What separates them is the master library file name,
+        which spells the architecture the runtime reports, so this predicate is
+        only evaluated against a device of the revision it was built for even
+        where both sit in one directory. Naming the revision would emit a value
+        no released runtime has in its enum table, and those reject the whole
+        file rather than the one row.
 
         Args:
             isa: ISA tuple (e.g., (9, 5, 0) for gfx950)
