@@ -2,8 +2,16 @@
 # SPDX-License-Identifier: MIT
 #
 # gfx950 subtile MX FP4 with MXScaleFormat=NoSwizzle (VEC32 / scaleA=3).
-# Companion to subtile_mxfp4.yaml (HostPreSwizzle). Scoped to a few MTs for
-# overnight numerical sign-off of NoSwizzle gather emit.
+# Companion to subtile_mxfp4.yaml (HostPreSwizzle). Intentionally a focused
+# overnight suite for NoSwizzle gather emit — not full HostPreSwizzle parity.
+#
+# Coverage beyond the original smoke (StreamK=0, F4→bf16, K=DepthU only):
+#   - StreamK=0 and StreamK=3
+#   - K > DepthU (MultiDU / deep K)
+#   - Modest edge M/N (odd / non-aligned)
+#   - One F4HS (fp16 dest) path
+#   - One bias + relu (F4BS) epilogue path
+# Keeps MT / PGR / size fan-out small so overnight time stays reasonable.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
 
@@ -21,6 +29,7 @@ GlobalParameters:
   DataInitTypeC: 0
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
+  DataInitTypeBias: 1
   DataInitTypeMXSA: 3
   DataInitTypeMXSB: 3
   MXScaleFormat: 0
@@ -30,6 +39,12 @@ GlobalParameters:
   RotatingBufferSize: 0
 
 BenchmarkProblems:
+  ########################################
+  # FP4 TN — NoSwizzle base (F4→bf16)
+  #
+  # StreamK=0 and SK=3; K = 1×DU and K > DU (MultiDU / deep K including
+  # itersPerTile>=3 where gather waitcnt bugs surface). Modest edge M/N.
+  ########################################
   -
     - # ProblemType
       OperationType: GEMM
@@ -56,7 +71,7 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0]
+        - StreamK: [0, 3]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
         - MXScaleFormat: ["NoSwizzle"]
@@ -64,6 +79,106 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
+          # Full-tile / near-full (K = 1×DU)
           - Exact: [64,  64,  1, 256]
           - Exact: [128, 128, 1, 256]
           - Exact: [256, 256, 1, 256]
+          # K > DepthU (MultiDU / deep K; K=768 → itersPerTile>=3)
+          - Exact: [128, 128, 1, 512]
+          - Exact: [128, 128, 1, 768]
+          # Edge M/N (odd / non-aligned), keep modest
+          - Exact: [48,   48, 1, 256]
+          - Exact: [63,   63, 1, 256]
+          - Exact: [17,   33, 1, 256]
+          - Exact: [112, 176, 1, 256]
+
+  ########################################
+  # F4HS TN — MX FP4 input, F16 output
+  #
+  # Single MT; StreamK=0/3; small size set including K>DepthU.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0, 3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - MXScaleFormat: ["NoSwizzle"]
+        - MXLoadInst: ["BufferLoad"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [128, 128, 1, 512]
+          - Exact: [63,   63, 1, 256]
+
+  ########################################
+  # F4BS TN — bias + relu epilogue
+  #
+  # Mirrors HostPreSwizzle bias structure with a single MT and small sizes.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      UseBias: 1
+      BiasDataTypeList: [s]
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0, 3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - MXScaleFormat: ["NoSwizzle"]
+        - MXLoadInst: ["BufferLoad"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [128, 128, 1, 512]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+          - [Enum: relu]
