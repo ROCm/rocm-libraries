@@ -667,3 +667,14 @@ retained six-word payload for generated DataParallel kernels. Generated DP uses
 two scheduling words and a tile cursor; prebuilt version-zero layouts retain
 their recorded argument contract. ABI, emitted-control-flow, and numerical
 tests carry the evidence for this change.
+
+## D45 — Accept basename identity changes from the LDSTrInstA/LDSTrInstB split
+
+**ADR:** [`adr/0029-ldstrinst-ab-split-basename-identity-change.md`](adr/0029-ldstrinst-ab-split-basename-identity-change.md)
+
+**Decision:** Accept the `basename`-only golden changes on stable
+architectures (gfx90a, gfx942) and other targets (gfx950, gfx1250) that
+result from splitting the single `LDSTrInst` parameter into per-tensor
+`LDSTrInstA`/`LDSTrInstB` fields that now feed the solution naming hash.
+These targets have no LDSTr hardware, so `err` codes and emitted assembly
+are unchanged; only the recorded hash text differs.
