@@ -870,15 +870,21 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
         RETURN_IF_ROCBLAS_ERROR((rocblas_internal_flip_vector<BLOCK, T>(
             handle, B, m, abs_incx, stride_B, batch_count, offset_B)));
 
-    // B is the caller's buffer and the line above reversed it in place, so every exit
-    // from here on has to put it back -- the failing exits included. A solve that
-    // reports an error is allowed to leave B unsolved; it is not allowed to hand back
-    // the caller's own input reversed. The status of the restoring flip is reported
-    // rather than returned so that it cannot displace the failure being reported.
+    // B is the caller's buffer and the line above reversed it in place. Called on the
+    // exits where B still holds that reversed input, so that a solve reporting an error
+    // does not also hand the caller's own data back reversed. Not needed on the exits
+    // below where B already holds the solution.
+    //
+    // The status is discarded rather than reported: this runs in the per-call path of
+    // rocblas_trsv, where the stream has just failed and so this flip will most likely
+    // fail too, and PRINT_IF_ROCBLAS_ERROR writes to stderr without consulting
+    // layer_mode. That would put a line on stderr for every failing call in a loop,
+    // on top of the status the caller already has. There is nothing to be done with it
+    // here in any case: the failure being returned is the one worth reporting.
     auto restore_B = [&] {
         if(incx < 0)
-            PRINT_IF_ROCBLAS_ERROR((rocblas_internal_flip_vector<BLOCK, T>(
-                handle, B, m, abs_incx, stride_B, batch_count, offset_B)));
+            (void)rocblas_internal_flip_vector<BLOCK, T>(
+                handle, B, m, abs_incx, stride_B, batch_count, offset_B);
     };
 
     if(BATCHED)
