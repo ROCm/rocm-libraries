@@ -126,6 +126,34 @@ Repeat it over at least three seeds or rounds, since error near the limit can ch
 between runs with a fixed seed. A miss the baseline shares is a pre-existing condition
 to report next to the result, not a pass.
 
+### Reference torch environment
+
+`--validate pytorch` needs a GPU torch. With CPU-only torch the reference row is
+`skipped` ("PyTorch GPU not available", `pytorch_executor.py` in dnn-benchmarking), while
+the suite still reports `Failed: 0`, so that run validates nothing. The hipDNN images
+ship no torch, and the ROCm torch nightly plus its SDK wheels are several GB; one gfx942
+run downloaded at 0.7 to 5 MB/s and was still installing after 45 minutes. Start that
+install early, in parallel with stages 2 to 4, and keep downloads on shared storage so
+later runs reuse them. `setup_env.py` passes the environment through to pip. Finish with
+`--torch-mode existing`: any other mode deletes an existing workspace venv first
+(`setup_venv`), torch included:
+
+```bash
+export PIP_CACHE_DIR=/shared/writable/pip-cache   # every later pip run reuses downloads
+WS=/absolute/path/to/bench-workspace
+python3 -m venv "$WS/.venv"
+nohup "$WS/.venv/bin/python" -m pip install --pre --index-url "$TORCH_INDEX_URL" \
+  "torch[device-$ARCH]" "rocm[libraries,devel,device-$ARCH]" > "$WS/torch-install.log" 2>&1 &
+# later, when the download is done:
+# python3 setup_env.py --workspace "$WS" --torch-mode existing -y
+```
+
+Use the index `setup_env.py` would use for `--torch-mode rocm` (its default or your
+`--torch-index-url`). Do not run setup in another mode on that workspace while it
+downloads. To reuse
+exact wheels without the network, `pip download` them once into a shared directory and
+install with `--no-index --find-links <dir>` (or `PIP_FIND_LINKS=<dir>`).
+
 ### Terminal sweep statuses
 
 | Status | Exit | Means | Accepts? |
