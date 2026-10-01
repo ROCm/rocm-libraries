@@ -48,9 +48,10 @@ HIPBLASLT_JIT=2 HIPBLASLT_JIT_LIBRARY_PATH=/path/to/jit-library \
   --verify --iters 3 --cold_iters 1 --print_kernel_info
 ```
 
-`HIPBLASLT_JIT=1` benchmarks the pre-tuned solutions first and uses JIT only
-for the part of `--requested_solution` that they leave unfilled, with kernels
-that the pre-tuned solutions do not already use. Datatype
+`HIPBLASLT_JIT=1` benchmarks the pre-tuned Equality solutions first, then JIT
+solutions for the part of `--requested_solution` that they leave unfilled, with
+kernels that the Equality solutions do not already use, then the other
+pre-tuned solutions for what is still missing. Datatype
 options keep their usual defaults and meaning. The `--api_method` option chooses
 how hipBLASLt prepares and executes the algorithms:
 

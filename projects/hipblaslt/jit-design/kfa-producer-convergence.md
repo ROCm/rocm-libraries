@@ -11,7 +11,7 @@ producers, not identical symbols, layouts, or tuning values.
 The approved [target design](../JIT.md#target-design) makes the explicit JIT entry
 points internal, adds rocRoller as a future independent backend behind the Jit
 interface, and has JIT-generated solutions supply the heuristic query after the
-pre-tuned lookup. The sections below reflect that design. The
+pre-tuned Equality results. The sections below reflect that design. The
 [roadmap](../JIT.md#roadmap) records which steps are implemented.
 
 **The infrastructure already exists in the source tree as Gemm-From-Anywhere (GFA) V1.**
@@ -198,19 +198,22 @@ is a different task and remains outside the existing-solution ranking contract.
 The approved target design in [JIT.md](../JIT.md#heuristic-integration-and-hipblaslt_jit)
 places JIT generation outside the pre-tuned library:
 
-- JIT is not a leaf row inside the pre-tuned library. With `HIPBLASLT_JIT=1`, the
-  trigger is evaluated after the complete pre-tuned lookup and the existing
-  `getAllSolutions` shortfall fill. That placement covers an absent root library or
-  operation branch, which a leaf could not catch.
-- The trigger also runs after the retry that repeats an xf32 lookup with FP32 math
-  inside `getBestSolutions`. Results from rocRoller's early route count toward
-  `requestedAlgoCount`.
-- The trigger fires when the result is empty **or** contains fewer than
-  `requestedAlgoCount` solutions. The query then consults the JIT solution library
-  and generates as many solutions as are needed to reach the requested count. Filling
-  top-N is intended, and the trigger sits outside the
+- JIT is not a row inside the pre-tuned library. With `HIPBLASLT_JIT=1`,
+  `getBestSolutions` searches the pre-tuned library twice, once in its Equality
+  rows and once in the other rows, and consults JIT in between. JIT is also
+  consulted when there is no root library or operation branch, which a row could
+  not catch.
+- The retry that repeats an xf32 lookup with FP32 math covers both pre-tuned
+  searches, and JIT runs once per query. When rocRoller's early route applies, its
+  results and the `getAllSolutions` fill come first, and JIT supplies what is still
+  missing from `requestedAlgoCount`.
+- JIT is consulted when the Equality results are fewer than `requestedAlgoCount`.
+  It consults the JIT solution library and generates as many solutions as are
+  needed to reach the requested count; the other pre-tuned libraries and the
+  `getAllSolutions` fill supply what is still missing. Filling top-N is intended,
+  and JIT runs outside the
   [ExactLogicLibrary::findTopSolutions](../tensilelite/include/Tensile/ExactLogicLibrary.hpp)
-  accumulation.
+  accumulation, which skips the rows that a search excludes.
 - With `HIPBLASLT_JIT=2`, JIT is the only source: Equality, Prediction, the other
   pre-tuned libraries and the rocRoller early route are skipped. The JIT solution
   library is consulted before generation.

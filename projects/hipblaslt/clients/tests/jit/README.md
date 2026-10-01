@@ -96,7 +96,8 @@ to replay, publish or rebuild it.
 | `heuristic-concurrent` | In modes 1 and 2, four processes of four threads each start the same query through a file barrier: every query returns the same two distinct solutions with checked numerics and no JIT report, and the library holds exactly those two entries with the allocator just past them |
 | `heuristic-null-algo` | `hipblasLtMatmul` without an algorithm runs a JIT solution with checked numerics in modes 1 and 2, and does not use JIT in mode 0 |
 | `heuristic-report` | In modes 1 and 2, a missing Python and a failing generator each print exactly one `hipblaslt error: JIT` line across two handles, two queries and both APIs; the queries return no results with the status the mode defines, and the generator log named in the report is kept |
-| `heuristic-partial-fill` | With the build's device library, a request for one more than the pre-tuned count in mode 1 returns the same pre-tuned solutions followed by one JIT solution whose kernel is not among them. It first queries 4096 solutions without JIT, and prints SKIP when that query fails or returns none (the build has no device library for the problem) or when it returns all 4096 (the device library leaves no shortfall for JIT to fill) |
+| `heuristic-partial-fill` | With the build's device library and one solution published in mode 2, a request for one more than the pre-tuned count in mode 1 whose generator fails if it runs returns that JIT solution once and every pre-tuned solution whose kernel differs from it, and reports the shortfall as a warning. It first queries 4096 solutions without JIT, and prints SKIP when that query fails or returns none (the build has no device library for the problem) or when it returns all 4096 (the device library leaves no shortfall) |
+| `heuristic-provider-order` | With the build's device library in mode 1, for a size with an Equality match and for the default size, which has none: a request the Equality results fill returns the mode 0 result without consulting JIT, and `hipblasLtMatmul` without an algorithm runs the Equality solution; larger requests return the Equality results followed by JIT solutions, or only JIT solutions for the default size; a second process whose generator fails if it runs returns the same results, and its `hipblasLtMatmul` without an algorithm runs the same first solution, a JIT one for the default size; with generation failing, a request for two more returns those results followed by the next pre-tuned results whose kernels JIT does not use. It prints SKIP when no candidate size has an Equality match, the default size has one, or either returns fewer than eight pre-tuned results |
 | `bench` | `HIPBLASLT_JIT=2` through the benchmark's ordinary heuristic query: genuine Origami ranking and first-valid selection, unchanged numerical checks, compilation outside timing, publication and reuse, and one error report when ranking or validation cannot produce a recipe |
 | `disabled-api` | The JIT headers are absent from the public include tree, `hipblaslt-ext.hpp` compiles without them, and the extension API links against the disabled library; the disabled benchmark and heuristic test print one warning that `HIPBLASLT_JIT` is ignored, and the heuristic results match a run without it |
 
@@ -182,8 +183,9 @@ and then runs every returned algorithm and compares the output with a CPU
 reference. `--api c|cpp|both|none`, `--requested`, `--m`, `--n`, `--k`,
 `--handles`, `--queries` and `--workspace` shape the queries, `--null-algo`
 also checks `hipblasLtMatmul` without an algorithm, `--from-index i,j,...`
-resolves indices through `hipblaslt_ext::getAlgosFromIndex` and runs them, and
-`--no-run` skips execution. `--threads N` runs the whole sequence in N threads,
+resolves indices through `hipblaslt_ext::getAlgosFromIndex` and runs them,
+`--tuned` prints whether `hipblaslt_ext::matmulIsTuned` finds an Equality
+solution for the problem, and `--no-run` skips execution. `--threads N` runs the whole sequence in N threads,
 each with its own handles; with `--barrier DIR` each thread claims a
 `ready-<n>` file in `DIR` after creating its first handle and waits for
 `DIR/go` before its first query, so that threads in several processes start

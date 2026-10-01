@@ -34,8 +34,9 @@ lets `hipblasLtMatmulAlgoGetHeuristic`, `GemmInstance::algoGetHeuristic` and
 `hipblasLtMatmul` without an algorithm return solutions from a persistent JIT
 solution library on disk. Solutions that the library lacks are generated
 through TensileLite, published into it, and returned by solution index, so any
-later process runs them without generating again. In fallback mode the
-pre-tuned libraries are consulted first; in forced mode JIT is the only source.
+later process runs them without generating again. In fallback mode JIT is
+consulted after the pre-tuned Equality results and before the other pre-tuned
+libraries; in forced mode JIT is the only source.
 See [heuristic integration](#heuristic-integration).
 
 The JIT test binaries also call internal entry points directly: they pass GEMM
@@ -383,7 +384,7 @@ when the first handle is created.
 | `HIPBLASLT_JIT` | Mode | Behavior |
 | --- | --- | --- |
 | unset, empty or `0` | Off | Heuristic queries and `hipblasLtMatmul` behave as in a build without JIT. |
-| `1` | Fallback | The existing lookup runs to completion first. JIT fills a result that is still shorter than `requestedAlgoCount`. |
+| `1` | Fallback | JIT comes after the Equality results: a query takes the Equality results, then JIT solutions, then the results of the other pre-tuned libraries and the `getAllSolutions` fill, each only for what is still missing. |
 | `2` | Forced | JIT is the only source. The query skips the override file, every pre-tuned library, rocRoller's early path and the `getAllSolutions` fill. |
 
 Any other value leaves JIT off and prints
@@ -394,23 +395,35 @@ once. The [comgr cache policy](#code-object-construction-with-comgr) follows
 the same parsing.
 
 **Order.** In fallback mode, `hipblasLtMatmulAlgoGetHeuristic` and
-`GemmInstance::algoGetHeuristic` first run the override file, `getBestSolutions`
-(with rocRoller's early path when it applies, and the xf32 retry) and the
-`getAllSolutions` fill. rocRoller results count toward the request. If the
-result is still short, JIT continues:
+`GemmInstance::algoGetHeuristic` take results from these sources in turn, each
+only for what is still missing from `requestedAlgoCount`:
 
-1. It looks the problem up in the JIT solution library under the process's
-   cache key.
-2. If that is still short, Jit generates the rest: Origami ranks candidates,
-   TensileLite generates them, comgr builds them, and the library publishes
-   them. Every kernel that the query has already returned is excluded by name,
-   and a ranked candidate that would repeat an accepted kernel is skipped, so
-   selection moves on until each new result is a different kernel.
+1. The override file.
+2. The Equality rows of the pre-tuned libraries.
+3. JIT. It looks the problem up in the JIT solution library under the process's
+   cache key. If that is still short, Jit generates the rest: Origami ranks
+   candidates, TensileLite generates them, comgr builds them, and the library
+   publishes them. Every kernel that the query has already returned is
+   excluded by name, and a ranked candidate that would repeat an accepted
+   kernel is skipped, so selection moves on until each new result is a
+   different kernel.
+4. The other pre-tuned libraries: the Range, Prediction (Origami), GridBased and
+   FreeSize rows and the MLP rows.
+5. The `getAllSolutions` fill.
 
-In forced mode, these two steps are the whole query. Each JIT result passes the
-same support and workspace checks as a `getAllSolutions` result and is appended
-after the results already found. Its solution index is in the reserved JIT
-range.
+JIT results count toward the request, so a query that the Equality results
+fill does not consult JIT and returns what it returns with JIT off. The sources
+after JIT skip the kernels its results use. The Equality pass covers every
+hardware branch of the pre-tuned library before the other rows are searched, so
+an Equality result of the generic branch can come before a result that a
+CU-specific branch would put first with JIT off. When neither pre-tuned pass
+finds a solution for an xf32 problem, both repeat with FP32 math; JIT runs once
+for the query. When rocRoller's early path applies, its results come first and
+JIT fills only what is still missing after the `getAllSolutions` fill.
+
+In forced mode, the JIT lookup and generation are the whole query. Each JIT
+result passes the same support and workspace checks as a `getAllSolutions`
+result. Its solution index is in the reserved JIT range.
 
 **Return count.** `hipblasLtMatmulAlgoGetHeuristic` sets `*returnAlgoCount` to 0
 before it validates the request, so a rejected request also reports no results:
@@ -423,8 +436,10 @@ for example because no pre-tuned library could be loaded, succeeds when JIT adds
 a result and otherwise keeps its error. In forced mode the query succeeds even
 when JIT fails; it then returns no results and reports the failure.
 
-**`hipblasLtMatmul` without an algorithm.** In fallback mode it uses a JIT
-solution only when the pre-tuned lookup finds none. In forced mode it uses only
+**`hipblasLtMatmul` without an algorithm.** In fallback mode it runs the first
+solution of the same order: an Equality result, else a JIT solution, else a
+result of the other pre-tuned libraries. When rocRoller's early path applies, it
+uses a JIT solution only when that path finds none. In forced mode it uses only
 JIT solutions. When no solution is found it returns
 `HIPBLAS_STATUS_NOT_SUPPORTED`.
 
@@ -484,9 +499,10 @@ The [JIT test guide](clients/tests/jit/README.md) describes the test binaries
 and the shared driver, `.github/scripts/test_hipblaslt_jit.py`, which runs them
 on a GPU of the requested architecture. Its heuristic routes cover each mode,
 reuse of the library by later processes and by `getAlgosFromIndex` with JIT
-off, distinct kernels when several solutions are requested, filling after a
-device library's pre-tuned solutions, the same query from several threads and
-processes at once, a problem the backend cannot rank, and failure reports.
+off, distinct kernels when several solutions are requested, the order of a
+device library's Equality results, JIT solutions and other pre-tuned results,
+the same query from several threads and processes at once, a problem the
+backend cannot rank, and failure reports.
 The `code-object-gfx1250` and `jit-gemm-gfx1250` routes run compile-only for
 gfx1250 on any host; the second generates heuristic solutions with
 `Tensile.JitGemm` and builds them with comgr. The
@@ -530,10 +546,10 @@ flowchart RL
         Origami["Origami"]
     end
 
-    EqualityLibrary --> SolutionLibrary
-    OrigamiLibrary --> SolutionLibrary
+    EqualityLibrary -- "1. first" --> SolutionLibrary
+    Jit -- "2. what Equality leaves" --> SolutionLibrary
+    OrigamiLibrary -- "3. what is still missing" --> SolutionLibrary
     SolutionLibrary --> AlgoGetHeuristic
-    Jit -- "if not satisfied by pre-tuned libraries" --> SolutionLibrary
     TensileLite --> Jit
     HipKittens -.-> Jit
     rocRoller -.-> Jit
@@ -558,7 +574,7 @@ TensileLite.
 | SolutionLibrary | The existing Tensile solution-library lookup, fed by the pre-tuned libraries and, when enabled, by the JIT solution library. |
 | EqualityLibrary | The existing Equality matching library. |
 | OrigamiLibrary | The existing `LibraryType: Prediction` (C++ `ProblemPredictionLibrary`), described under [pre-tuned heuristic selection](#pre-tuned-heuristic-selection). The name is a design label, not a new type. |
-| Jit | hipBLASLt code that calls a backend-specific JIT interface and builds a library of JIT-generated kernels. It supplies SolutionLibrary only when the pre-tuned libraries do not satisfy the request. |
+| Jit | hipBLASLt code that calls a backend-specific JIT interface and builds a library of JIT-generated kernels. In fallback mode it supplies SolutionLibrary after the Equality results and before the other pre-tuned libraries. |
 | JIT interface | Input: algorithm parameters (for GEMM: M, N, K, datatypes, scale types, layout, activation and the remaining operation description) plus the gfx target. Output: solutions. Each backend implements it. |
 | TensileLite backend | The live backend. It emits assembly, HIP helper source and metadata. See the [TensileLite backend guide](JIT_TENSILELITE.md). |
 | rocRoller, HipKittens, other backends | Future extension points behind the same interface. HipKittens is explicitly deferred in this pass. |
@@ -674,26 +690,27 @@ override them. Step 5 implements this; see
 | `HIPBLASLT_JIT` | Behavior |
 | --- | --- |
 | `0` or unset (default) | JIT is off. Heuristic queries behave as they do today. |
-| `1` | Fallback. JIT runs only when the existing lookup leaves the result short of `requestedAlgoCount`. |
+| `1` | Fallback. JIT is a source after the Equality results and before the other pre-tuned libraries. |
 | `2` | Forced. JIT is the only source: the query skips the override file, Equality, Origami (Prediction), all other pre-tuned libraries, rocRoller's early path and the `getAllSolutions` fill. It looks up the JIT solution library first, then generates. |
 
-In fallback mode, the existing lookup runs unchanged and to completion first:
+In fallback mode, each source supplies only what is still missing from
+`requestedAlgoCount`, in this order:
 
-1. `getBestSolutions`, including rocRoller's early path when it applies and the
-   retry that repeats an xf32 lookup with FP32 math when it finds no solution.
-2. The existing `getAllSolutions` shortfall fill.
-
-Results from rocRoller's path count toward `requestedAlgoCount`. If the result
-is still empty or contains fewer than `requestedAlgoCount` solutions, the query
-continues:
-
-3. The JIT solution library for the problem's `ProblemType` and sizes.
-4. Generation: Jit asks the backend for as many new solutions as are needed to
+1. The override file and the Equality rows of the pre-tuned libraries.
+2. The JIT solution library for the problem's `ProblemType` and sizes.
+3. Generation: Jit asks the backend for as many new solutions as are needed to
    reach `requestedAlgoCount`, builds their code objects, publishes them into
    the JIT solution library and returns them.
+4. The other pre-tuned libraries (Range, Origami (Prediction), GridBased and
+   FreeSize), then the existing `getAllSolutions` shortfall fill.
+
+The retry that repeats an xf32 lookup with FP32 math covers both pre-tuned
+steps and does not generate again. When rocRoller's early path applies, its
+results come first, followed by the `getAllSolutions` fill, and JIT supplies
+only what is still missing.
 
 This mirrors `AlgoGetHeuristic`, which already returns up to the requested count.
-Generated solutions therefore can fill a partial result, not only an empty one.
+JIT solutions therefore can complete a partial result, not only an empty one.
 
 Failures follow these rules:
 
@@ -704,7 +721,8 @@ Failures follow these rules:
 - In forced mode, a failure returns zero results and is still reported.
 
 `hipblasLtMatmul` without an algorithm follows the mode: in fallback mode it
-uses JIT only when the pre-tuned lookup finds nothing, and in forced mode it uses
+runs the first solution of the same order, so an Equality result wins, then a
+JIT solution, then the other pre-tuned libraries, and in forced mode it uses
 only JIT. A build with `HIPBLASLT_ENABLE_JIT=OFF` ignores `HIPBLASLT_JIT` and
 prints a one-time warning when it is set. Step 5 implements this section; see
 [heuristic integration](#heuristic-integration).
@@ -744,7 +762,7 @@ each step advances.
 | 3. comgr code-object builder | Done | hipBLASLt builds one code object per solution through comgr, adapted from rocRoller's `InProcessAssembler`, linking the main kernel assembly and the helper HIP source together. With `--source-only`, TensileLite emits only assembly, helper source and metadata, and `Tensile.JitGemm` can publish several ranked bundles. hipBLASLt disables the comgr cache when `HIPBLASLT_JIT` is `1` or `2`. | Backend interface |
 | 4. JIT solution library | Done | One standard lazy TensileLite library per cache key under `HIPBLASLT_JIT_LIBRARY_PATH` or a private per-user default, with exact-size entries merged under a file lock by atomic rename, loaded as a second master library that reloads when other processes publish, with reserved solution indices from 2^30 to `INT32_MAX`. `jit::getLibraryAlgos` looks solutions up and publishes them; step 5 connects the heuristic queries to it. | JIT solution library (cache) |
 | 5. Heuristic integration | Done | `HIPBLASLT_JIT` modes 0, 1 and 2 in `hipblasLtMatmulAlgoGetHeuristic`, `GemmInstance::algoGetHeuristic` and `hipblasLtMatmul` without an algorithm, with the fallback order and failure rules above and every JIT failure reported on stderr. The tool-path defaults are compiled into the library, a JIT-off build warns once when it sees `HIPBLASLT_JIT`, and `hipblaslt-bench --jit-gemm` is removed. The shared driver checks each mode, reuse of the library by a second process, failure reports and the JIT-off warning. | JustInTime library type; backend interface |
-| 6. Validation sweep | Done | The shared driver's heuristic routes cover each mode, a published index resolved with JIT off, distinct kernels when several solutions are requested, filling after a device library's pre-tuned solutions, a problem the backend cannot rank, and threads and processes that query the same problem at once. The gfx1250 routes generate ranked heuristic solutions and build their code objects without a gfx1250 device. | Overall JIT validation |
+| 6. Validation sweep | Done | The shared driver's heuristic routes cover each mode, a published index resolved with JIT off, distinct kernels when several solutions are requested, the order of a device library's Equality results, JIT solutions and other pre-tuned results, a problem the backend cannot rank, and threads and processes that query the same problem at once. The gfx1250 routes generate ranked heuristic solutions and build their code objects without a gfx1250 device. | Overall JIT validation |
 
 The following work sits outside the six steps and remains future:
 
