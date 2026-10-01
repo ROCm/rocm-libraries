@@ -412,6 +412,21 @@ class TestBatchedCompileJobOutputDir(unittest.TestCase):
             self.assertTrue(lib_path.parent.is_dir())
             self.assertEqual(job["lib_path"], str(lib_path))
 
+    def test_compile_cmd_has_arch_feature_defines(self):
+        import tempfile
+
+        for arch in ("gfx942", "gfx950", "gfx1250"):
+            with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+                batched_gemm_utils._cu, "get_build_dir", return_value=Path(tmp)
+            ):
+                config = BatchedGemmKernelConfig(dtype_a="fp8", gfx_arch=arch)
+                job, _ = batched_gemm_utils._build_batched_compile_jobs(
+                    config, Path(tmp) / "k.hpp"
+                )
+                cmd = job["compile_cmd"]
+                for flag in batched_gemm_utils.arch_feature_defines(arch):
+                    self.assertIn(flag, cmd, f"{arch}: missing {flag}")
+
 
 class TestBatchedRepeatGate(unittest.TestCase):
     """Old-TE IsSupportedArgument parity: reject the odd-per-wave-repeat /

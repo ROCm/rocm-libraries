@@ -32,7 +32,7 @@ byte-identical AMDGPU backend flags -- a prerequisite for fair A/B parity.
 """
 
 from __future__ import annotations
-from dispatcher_common import unified_framework_flags
+from dispatcher_common import unified_framework_flags, arch_feature_defines
 
 import ctypes
 import multiprocessing
@@ -599,6 +599,9 @@ def _build_batched_compile_jobs(
         f"--offload-arch={gfx_arch}",
         f'-DGFX_ARCH="{gfx_arch}"',
         *unified_framework_flags(gfx_arch),
+        # Keep host/device fp8 encodings consistent and enable the target's
+        # WMMA/MX features, matching the CMake build and gemm_utils.
+        *arch_feature_defines(gfx_arch),
         # Byte-identical AMDGPU backend flags to the single-problem bridge and
         # Old-TE (see gemm_utils._tile_engine_codegen_flags) -- required for a
         # fair A/B parity comparison.
