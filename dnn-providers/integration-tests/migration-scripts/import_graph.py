@@ -349,21 +349,23 @@ def main() -> int:
     ap.add_argument(
         "--tier",
         default=None,
-        help="tier folder (default: from the sidecar's suite prefix, else quick;"
-        " contradicting the sidecar warns, or errors under --strict)",
+        help="tier folder (default: from the sidecar's suite prefix, else quick)."
+        " Contradicting the sidecar warns; errors under --strict",
     )
     ap.add_argument(
         "--meta",
         action="append",
         default=[],
-        help="key=value metadata pairs (repeatable); override the sidecar."
+        help="key=value metadata pairs (repeatable). For graphs without a sidecar,"
+        " or a deliberate override of it (warns; errors under --strict)."
         " Values parse as JSON when they can (seed=42 is a number)",
     )
     ap.add_argument(
         "--seed",
         type=int,
         default=None,
-        help="global seed for metadata; overrides the sidecar's",
+        help="global seed for metadata. For graphs without a sidecar, or a"
+        " deliberate override of its seed (warns; errors under --strict)",
     )
     ap.add_argument("--dry-run", action="store_true", help="report without writing")
     ap.add_argument(
