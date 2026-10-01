@@ -91,17 +91,38 @@ Notes
 */
 
 // The base emboss taps, row-major, top-left to bottom-right, in the same dy/dx order
-// gather_roi_window() produces. Only the sizes the test grids are provided: the API documents
-// 3/5/7/9, but no table was transcribed for 7 or 9, so those are rejected outright rather than
-// falling back to k5 and reading 24 or 56 doubles past its end.
+// gather_roi_window() produces. One table per documented size (3/5/7/9); any other size is
+// rejected outright.
 inline std::vector<double> emboss_kernel(Rpp32u kernelSize, double strength) {
     static const double k3[9] = {2, 1, 0, 1, 1, -1, 0, -1, -2};
     static const double k5[25] = {3,  3,  2, 1, 0,  3,  2,  1, 0,  -1, 2,  1, 1,
                                   -1, -2, 1, 0, -1, -2, -3, 0, -1, -2, -3, -3};
-    if (kernelSize != 3 && kernelSize != 5)
-        throw std::invalid_argument("emboss_reference has no tap table for kernelSize " +
-                                    std::to_string(kernelSize) + " (only 3 and 5 are transcribed)");
-    const double* base = (kernelSize == 3) ? k3 : k5;
+    static const double k7[49] = {4,  5, 4,  3,  2,  1,  0,  5,  3,  3,  2,  1,  0,  -1, 4,  3,  2,
+                                  1,  0, -1, -2, 3,  2,  1,  1,  -1, -2, -3, 2,  1,  0,  -1, -2, -3,
+                                  -4, 1, 0,  -1, -2, -3, -3, -5, 0,  -1, -2, -3, -4, -5, -4};
+    static const double k9[81] = {5,  7,  6,  5,  4, 3,  2,  1,  0,  7,  4,  5,  4, 3, 2,  1,  0,
+                                  -1, 6,  5,  3,  3, 2,  1,  0,  -1, -2, 5,  4,  3, 2, 1,  0,  -1,
+                                  -2, -3, 4,  3,  2, 1,  1,  -1, -2, -3, -4, 3,  2, 1, 0,  -1, -2,
+                                  -3, -4, -5, 2,  1, 0,  -1, -2, -3, -3, -5, -6, 1, 0, -1, -2, -3,
+                                  -4, -5, -4, -7, 0, -1, -2, -3, -4, -5, -6, -7, -5};
+    const double* base = nullptr;
+    switch (kernelSize) {
+        case 3:
+            base = k3;
+            break;
+        case 5:
+            base = k5;
+            break;
+        case 7:
+            base = k7;
+            break;
+        case 9:
+            base = k9;
+            break;
+        default:
+            throw std::invalid_argument("emboss_reference has no tap table for kernelSize " +
+                                        std::to_string(kernelSize));
+    }
     const std::size_t count = static_cast<std::size_t>(kernelSize) * kernelSize;
     const double scale = (strength > 2.0) ? 2.0 : strength;  // clamped from above only
     std::vector<double> kernel(count);

@@ -41,8 +41,8 @@ using namespace rpptest;
 
 namespace {
 
-// kernelSize is documented as 3/5/7/9; the grid covers 3 and 5, matching how box/gaussian are
-// gridded. strength has no documented range -- 1.0 is the value the legacy harness uses and leaves
+// kernelSize covers all four documented sizes (3/5/7/9), matching how box/gaussian are gridded.
+// strength has no documented range -- 1.0 is the value the legacy harness uses and leaves
 // the filter DC-preserving, 2.0 is the point the scaling saturates at, which also exercises the
 // I8 intensity-space lift (at strength 1 the +128 shift cancels and would hide a mistake there).
 struct EmbossParams {
@@ -136,6 +136,7 @@ INSTANTIATE_TEST_SUITE_P(Image_Filter, EmbossTest,
                                               {Roi::Full, Roi::Partial},
                                               {presets::kDefaultSize, presets::kSubVectorSize}),
                              }),
-                             {EmbossParams{1.0f, 3}, EmbossParams{1.0f, 5}, EmbossParams{2.0f, 3},
-                              EmbossParams{2.0f, 5}})),
+                             {EmbossParams{1.0f, 3}, EmbossParams{1.0f, 5}, EmbossParams{1.0f, 7},
+                              EmbossParams{1.0f, 9}, EmbossParams{2.0f, 3}, EmbossParams{2.0f, 5},
+                              EmbossParams{2.0f, 7}, EmbossParams{2.0f, 9}})),
                          op_config_name<EmbossParams>);
