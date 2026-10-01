@@ -479,6 +479,50 @@ def partial_fill(run, output):
     )
 
 
+def tuning_override(run, output):
+    stderr, records = run(
+        "publish", ["--api", "cpp", "--requested", "2", "--no-run"], HIPBLASLT_JIT="2"
+    )
+    (published,) = queries(records, "cpp")
+    require(published["count"] == 2, f"The JIT library was not seeded: {published}")
+    stderr, records = run("revision", ["--api", "none", "--git-revision"])
+    (revision,) = queries(records, "revision")
+    m, n, k = DEFAULT_SIZE
+    for first, second in (published["indices"], published["indices"][::-1]):
+        # The C query ignores the file unless its first line names this
+        # library's revision.
+        tuning = output / f"override-{first}.csv"
+        tuning.write_text(
+            f"Git Version: {revision['revision']}\n"
+            "transA,transB,batch_count,m,n,k,a_type,b_type,c_type,compute_type,"
+            "solution_index\n"
+            f"N,N,1,{m},{n},{k},f16_r,f16_r,f16_r,f32_r,{first}\n"
+        )
+        stderr, records = run(
+            f"override-{first}",
+            ["--api", "both", "--requested", "3"],
+            HIPBLASLT_JIT="1",
+            HIPBLASLT_TUNING_OVERRIDE_FILE=str(tuning),
+        )
+        for api in ("c", "cpp"):
+            (record,) = queries(records, api)
+            require(record["status"] == 0, f"{api} query failed: {record}")
+            require(
+                record["indices"][:2] == [first, second],
+                f"{api} query did not return the override, then the other JIT solution:"
+                f" {record['indices']}",
+            )
+            require(
+                len(set(record["kernels"])) == len(record["kernels"]),
+                f"{api} query repeated a kernel: {record['indices']}",
+            )
+        require(not reports(stderr, "error"), "A JIT error was reported")
+    print(
+        "PASS heuristic-override: a tuning override that names a JIT solution comes"
+        " first, and JIT does not return its kernel again"
+    )
+
+
 def provider_order(run, output):
     drop = ("HIPBLASLT_TENSILE_LIBPATH",)
 
@@ -659,6 +703,7 @@ ROUTES = {
     "null-algo": null_algo,
     "report": report,
     "partial-fill": partial_fill,
+    "override": tuning_override,
     "provider-order": provider_order,
     "jit-off": jit_off,
 }

@@ -501,8 +501,9 @@ on a GPU of the requested architecture. Its heuristic routes cover each mode,
 reuse of the library by later processes and by `getAlgosFromIndex` with JIT
 off, distinct kernels when several solutions are requested, the order of a
 device library's Equality results, JIT solutions and other pre-tuned results,
-the same query from several threads and processes at once, a problem the
-backend cannot rank, and failure reports.
+a tuning override that names a JIT solution, the same query from several
+threads and processes at once, a problem the backend cannot rank, and failure
+reports.
 The `code-object-gfx1250` and `jit-gemm-gfx1250` routes run compile-only for
 gfx1250 on any host; the second generates heuristic solutions with
 `Tensile.JitGemm` and builds them with comgr. The
