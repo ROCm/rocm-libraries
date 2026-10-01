@@ -136,6 +136,7 @@
     X(DsReadPerCap, int, -1)                                                                    \
     X(DsReadPerWmma, int, -1) /* deprecated alias for DsReadPerCap */                           \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                             \
+    X(WaitRepairSlotsToMovePastAnchor, int, 1) /* 0 or less disables repair */                  \
     X(TensorLoadDsLoadGapCycles, int, 64)
 
 namespace stinkytofu {
