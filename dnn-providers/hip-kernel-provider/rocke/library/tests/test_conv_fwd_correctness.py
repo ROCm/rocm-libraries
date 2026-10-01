@@ -238,7 +238,8 @@ def _run_one(
     from rocke import compile_kernel
     from builders.common.conv_reference import conv_reference, conv_reference_gfx1250
     from rocke.core.arch import ArchTarget
-    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_args import ConvArgs
+    from kernels.common.conv_abi import conv_args_signature
     from kernels.common.conv_implicit_gemm import (
         ConvDataSpec,
         ConvProblem,
@@ -346,7 +347,7 @@ def _run_one(
     rt.memcpy_h2d(B_dev, _u8(B_t), B_t.nbytes)
     rt.memset(D_dev, 0, D_t.nbytes)
 
-    sig = conv_args_signature(dtype)
+    sig = conv_args_signature(dtype, is_3d=problem.is_3d)
     try:
         launcher = KernelLauncher(
             hsaco=artifact.hsaco,
@@ -364,14 +365,16 @@ def _run_one(
     grid = (gx, gy, problem.groups)
     block = (spec.launch_block_size, 1, 1)
 
-    values = {
-        "A": A_dev,
-        "B": B_dev,
-        "D": D_dev,
-        "A_bytes": A_t.nbytes,
-        "B_bytes": B_t.nbytes,
-        "D_bytes": D_t.nbytes,
-    }
+    values = ConvArgs.from_problem(
+        problem, tile_m=spec.tile_m, tile_n=spec.tile_n
+    ).to_launch_values(
+        int(A_dev),
+        int(B_dev),
+        int(D_dev),
+        A_t.nbytes,
+        B_t.nbytes,
+        D_t.nbytes,
+    )
     launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
 
     D_cpu = torch.empty_like(D_t)

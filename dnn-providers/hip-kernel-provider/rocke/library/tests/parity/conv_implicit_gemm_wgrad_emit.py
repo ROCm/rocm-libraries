@@ -28,6 +28,7 @@
 #   15 -- split-K=4, two_stage=True (workspace-store epilogue), fp16, gfx950
 #   16 -- split-K=4, two_stage=True (workspace-store epilogue), fp16, gfx942
 #   17 -- gfx1250 wave32 WMMA 16x16x32 K-outer (ds_load_tr16_b128 transpose reads)
+#   18 -- unroll_k double-buffered loop under split-K=4 (odd-tail prefetch guard), gfx950
 #   (async_dma omitted: C++ async load path does not yet honour the wgrad A-descriptor
 #    override, so it would produce different IR and break the byte-identity gate)
 #
@@ -36,7 +37,7 @@
 #   102 -- split_k > 1 on RDNA gfx1151 (must raise ValueError)
 #   103 -- two_stage=True with split_k=1 (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-17, so run_diff.py stops at the shared END before reaching 100+; these
+# 0-18, so run_diff.py stops at the shared END before reaching 100+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -457,6 +458,33 @@ def _spec(idx: int):
                 lds_k_outer=True,
             ),
             "gfx1250",
+        )
+
+    if idx == 18:
+        # unroll_k: the double-buffered loop computes two tiles per step, so
+        # under split-K the prefetch past an odd slice end has to be redirected
+        # to wg_K or it pulls in the next slice's first tile.
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
+        return (
+            WgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                data=ConvDataSpec(dtype_d="fp32"),
+                unroll_k=True,
+                split_k=4,
+            ),
+            "gfx950",
         )
 
     # ----------------------------------------------------------------

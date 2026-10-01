@@ -28,18 +28,28 @@ What lives here
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from rocke.core.ir import (
     BF16,
     F16,
     F32,
+    I32,
     IRBuilder,
     Type,
     Value,
 )
 from rocke.helpers.spec import choose_load_vec
-from rocke.helpers.transforms import TensorDescriptor, embed, pad, unmerge_magic
+from rocke.helpers.transforms import (
+    TensorDescriptor,
+    DynamicTensorDescriptor,
+    embed,
+    embed_dynamic,
+    pad,
+    pad_dynamic,
+    unmerge_magic,
+    unmerge_magic_dynamic,
+)
 
 
 # ---------------------------------------------------------------------
@@ -427,6 +437,45 @@ def make_a_descriptor(
 
 
 # ---------------------------------------------------------------------
+# AOT kernarg block
+# ---------------------------------------------------------------------
+
+
+def emit_param_block(
+    b: IRBuilder,
+    arg_names: Sequence[Tuple[str, str]],
+    *,
+    declare_ptr: Optional[Callable[[str, str], Value]] = None,
+) -> Dict[str, Value]:
+    """Declare an AOT kernarg block in :mod:`kernels.common.conv_abi` order.
+
+    Emitting the params from the same ordered list the launch signature is
+    built from is what makes the two agree by construction — kernargs are
+    packed positionally, so a hand-maintained second copy of the order is a
+    silent-corruption bug waiting to happen (see the module docstring there).
+
+    ``declare_ptr(name, kind)`` is called for every non-``i32`` entry and must
+    return the declared ``Value``; the caller owns those because the
+    noalias / readonly / align attributes are direction-specific. It is only
+    optional for blocks that contain no pointers.
+
+    Returns ``{name: Value}`` for every entry.
+    """
+    out: Dict[str, Value] = {}
+    for name, kind in arg_names:
+        if kind == "i32":
+            out[name] = b.param(name, I32)
+        else:
+            if declare_ptr is None:
+                raise ValueError(
+                    f"AOT arg {name!r} has kind {kind!r} but no declare_ptr "
+                    f"callback was supplied"
+                )
+            out[name] = declare_ptr(name, kind)
+    return out
+
+
+# ---------------------------------------------------------------------
 # MFMA body helpers (shared by forward and wgrad K-loop bodies)
 # ---------------------------------------------------------------------
 
@@ -762,3 +811,472 @@ def emit_wavelet_kloop(
 
             for _ in range(epi_barriers):
                 b.sync()
+
+
+def emit_wavelet_kloop_dynamic(
+    b: IRBuilder,
+    *,
+    warp_id: Value,
+    tid: Value,
+    n_math_warps: int,
+    math_block_size: int,
+    k_lo: Value,
+    k_hi: Value,
+    block_k: int,
+    A_smem: Value,
+    B_smem: Value,
+    a_wavelet_loader,
+    b_wavelet_loader,
+    a_descriptor: Callable,
+    b_descriptor: Callable,
+    a_rsrc: Value,
+    b_rsrc: Value,
+    k_off_capture: List,
+    accs: List,
+    emit_mfma_phase: Callable,
+    emit_epilogue_fn: Callable,
+    epi_barriers: int,
+) -> None:
+    """Runtime-extent variant of :func:`emit_wavelet_kloop`.
+
+    The compile-time version peels the final tile so its trailing barrier
+    pair can be omitted. That peel is not expressible against a runtime
+    ``k_hi``, and guarding the barriers with ``scf_if`` is not an option: the
+    math and load wave groups would then emit different barrier counts and
+    the workgroup would hang at ``s_barrier``.
+
+    Instead both loops run the *same* runtime trip count and every iteration
+    emits the full barrier pair. The cost is one extra fetch+store of a tile
+    at ``k >= k_hi``; its coords fall outside the descriptor's padded bounds,
+    so the buffer resource returns zero and nothing ever reads it back.
+
+    Barrier protocol — the two branches emit ``1 + 2 * K_tiles + epi_barriers``
+    barriers each, which is what keeps them in lockstep::
+
+        MATH: barrier_0                       ← tile k_lo is already in LDS
+              for k in [k_lo, k_hi) step block_k:
+                WMMA(LDS)                     ← consumes tile k
+                barrier_A                     ← math done reading LDS
+                barrier_B                     ← wait for load to write tile k+1
+              epilogue                        ← emits epi_barriers bare syncs
+
+        LOAD: fetch tile k_lo → regs, store → LDS
+              barrier_0
+              for k in [k_lo, k_hi) step block_k:
+                fetch tile k+1 → regs         ← overlaps math's WMMA of tile k
+                barrier_A                     ← wait for math to release LDS
+                store regs → LDS
+                barrier_B                     ← signal tile k+1 ready
+              for _ in epi_barriers: barrier
+
+    ``emit_epilogue_fn(final_accs)`` is called in the math branch after the
+    loop; it must emit exactly ``epi_barriers`` barriers internally.
+    ``k_lo`` / ``k_hi`` are i32 SSA values bounding this CTA's K slice
+    (``k_lo`` is nonzero only on the split-K paths).
+    """
+    c_block_k = b.const_i32(block_k)
+    c_nmath = b.const_i32(n_math_warps)
+    warp_id_s = b.readfirstlane(warp_id)
+    is_math = b.cmp_lt(warp_id_s, c_nmath)
+
+    load_tid = b.sub(tid, b.const_i32(math_block_size))
+
+    def _fetch(k_off: Value):
+        k_off_capture[0] = k_off
+        af = a_wavelet_loader.fetch(
+            b, tid=load_tid, descriptor=a_descriptor, rsrc=a_rsrc
+        )
+        bf = b_wavelet_loader.fetch(
+            b, tid=load_tid, descriptor=b_descriptor, rsrc=b_rsrc
+        )
+        return af, bf
+
+    def _store(af, bf):
+        a_wavelet_loader.store_fetched(b, smem_dst=A_smem, fetched=af)
+        b_wavelet_loader.store_fetched(b, smem_dst=B_smem, fetched=bf)
+
+    with b.scf_if_else(is_math) as (math_ctx, load_ctx):
+        with math_ctx:
+            b.sync()  # barrier_0
+
+            for_m = b.scf_for_iter(k_lo, k_hi, c_block_k, accs, iv_name="k_math")
+            with for_m as (k_math, m_vars):
+                k_off_capture[0] = k_math
+                new_accs = emit_mfma_phase(A_smem, B_smem, list(m_vars))
+                b.sync()  # barrier_A
+                b.sync()  # barrier_B
+                b.scf_yield(*new_accs)
+
+            emit_epilogue_fn(list(for_m.results))
+
+        with load_ctx:
+            af0, bf0 = _fetch(k_lo)
+            b.s_waitcnt(vmcnt=0)
+            _store(af0, bf0)
+            b.s_waitcnt(lgkmcnt=0)
+            b.sync()  # barrier_0
+
+            # No carried state on this side, so a plain scf.for suffices.
+            with b.scf_for(k_lo, k_hi, c_block_k, iv_name="k_load") as k_load:
+                af_next, bf_next = _fetch(b.add(k_load, c_block_k))
+                b.sync()  # barrier_A
+                b.s_waitcnt(vmcnt=0)
+                _store(af_next, bf_next)
+                b.s_waitcnt(lgkmcnt=0)
+                b.sync()  # barrier_B
+
+            for _ in range(epi_barriers):
+                b.sync()
+
+
+# -----------------------------------------------------------------------
+# Dynamic (AOT) descriptor builders — shared by all conv directions
+# -----------------------------------------------------------------------
+
+
+def _magic_triple(params, prefix: str, name: str, dim: Value):
+    """One ``(mult, shift, dim)`` entry for :func:`unmerge_magic_dynamic`.
+
+    ``UnmergeMagicDiv`` peels one extent at a time off the flat coord
+    (``tmp //= dims[i]``), so every triple divides by a *single* extent --
+    ``m -> (n, ho, wo)`` divides by ``Wo`` and then by ``Ho``, never by
+    ``Ho*Wo``. The host precomputes the magic pair for that same extent.
+    """
+    return (
+        params[f"p_magic_{prefix}{name}_mult"],
+        params[f"p_magic_{prefix}{name}_shift"],
+        dim,
+    )
+
+
+def spatial_unmerge_dynamic(
+    params, *, upper: str, prefix: str, is_3d: bool, leading: str = "n"
+):
+    """``m``/``k_wg`` -> ``(n, [do,] ho, wo)`` with runtime magic numbers.
+
+    ``prefix`` selects the magic-pair family: the forward ``m`` decode uses
+    ``m_``, the wgrad reduction index ``k_wg`` uses ``k_``. The coord names
+    stay the same either way because both index the same output grid.
+    """
+    into = [leading] + (["do"] if is_3d else []) + ["ho", "wo"]
+    triples = []
+    if is_3d:
+        triples.append(_magic_triple(params, prefix, "Do", params["p_Do"]))
+    triples.append(_magic_triple(params, prefix, "Ho", params["p_Ho"]))
+    triples.append(_magic_triple(params, prefix, "Wo", params["p_Wo"]))
+    return unmerge_magic_dynamic(upper, into=into, magic_triples=triples)
+
+
+def channel_unmerge_dynamic(
+    params, *, upper: str, prefix: str, is_3d: bool, cdim: Value, last: str = "c"
+):
+    """``k``/``n_wg`` -> ``([z,] y, x, c)`` with runtime magic numbers."""
+    into = (["z"] if is_3d else []) + ["y", "x", last]
+    triples = []
+    if is_3d:
+        triples.append(_magic_triple(params, prefix, "Y", params["p_Y"]))
+    triples.append(_magic_triple(params, prefix, "X", params["p_X"]))
+    triples.append(_magic_triple(params, prefix, "cpg", cdim))
+    return unmerge_magic_dynamic(upper, into=into, magic_triples=triples)
+
+
+def filter_pads_dynamic(params, *, is_3d: bool):
+    """Bound checks on the filter coords produced by the ``k`` unmerge.
+
+    When the reduction extent is not a multiple of ``tile_k`` the K-loop runs
+    past it and the unmerge yields ``y >= Y`` / ``x >= X``. Without these the
+    kernel would read valid-looking offsets that cross into adjacent weight
+    rows.
+    """
+    out = []
+    if is_3d:
+        out.append(pad_dynamic("z", lo=0, hi=params["p_Z"]))
+    out.append(pad_dynamic("y", lo=0, hi=params["p_Y"]))
+    out.append(pad_dynamic("x", lo=0, hi=params["p_X"]))
+    return out
+
+
+def _a_channel_decode_dynamic(
+    b, params, *, is_3d: bool, grouped: bool, upper: str, prefix: str
+):
+    """Runtime counterpart of :func:`_a_channel_decode`.
+
+    Ungrouped, the contraction index unmerges straight to the absolute NHWC
+    channel. Grouped, it only spans ``cpg``, so it unmerges to ``c_in_group``
+    and an ``embed`` recovers ``c = group*cpg + c_in_group`` from the caller's
+    block-z index.
+    """
+    if grouped:
+        return [
+            channel_unmerge_dynamic(
+                params,
+                upper=upper,
+                prefix=prefix,
+                is_3d=is_3d,
+                cdim=params["p_cpg"],
+                last="c_in_group",
+            ),
+            embed_dynamic(
+                upper=["group", "c_in_group"],
+                lower="c",
+                strides=[params["p_cpg"], 1],
+                offset=0,
+                lo=0,
+                hi=params["p_C"],
+            ),
+        ]
+    return [
+        channel_unmerge_dynamic(
+            params, upper=upper, prefix=prefix, is_3d=is_3d, cdim=params["p_cpg"]
+        )
+    ]
+
+
+def make_a_descriptor_dynamic(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    *,
+    is_3d: bool = False,
+    grouped: bool = False,
+    decompose_m: bool = True,
+    spatial_upper: str = "m",
+    spatial_prefix: str = "m_",
+    channel_upper: str = "k",
+    channel_prefix: str = "k_",
+    stride_prefix: str = "p_A_stride_",
+    name: Optional[str] = None,
+):
+    """AOT counterpart of :func:`make_a_descriptor`: ``(m, k) -> N[D]HWC``.
+
+    Same transform DAG as the compile-time builder, with every extent, stride
+    and magic constant taken from the AOT kernarg block instead of being
+    folded in as ``const_i32``.
+
+    ``decompose_m=False`` drops the leading ``m`` unmerge so callers that
+    already hold ``(n, ho, wo)`` cheaply feed them straight in, exactly as in
+    the static version.
+
+    The coord / magic-prefix / stride-prefix overrides exist for wgrad, whose
+    X operand has the same DAG under different names (``k_wg`` for the output
+    position and ``n_wg`` for the filter-channel index) -- which is why the
+    static version there simply reuses ``make_a_descriptor``.
+    """
+    neg_pH = b.sub(b.const_i32(0), params["p_pH"])
+    neg_pW = b.sub(b.const_i32(0), params["p_pW"])
+
+    transforms = []
+    if decompose_m:
+        transforms.append(
+            spatial_unmerge_dynamic(
+                params, upper=spatial_upper, prefix=spatial_prefix, is_3d=is_3d
+            )
+        )
+    if is_3d:
+        neg_pD = b.sub(b.const_i32(0), params["p_pD"])
+        transforms.append(
+            embed_dynamic(
+                upper=["do", "z"],
+                lower="di",
+                strides=[params["p_sD"], params["p_dD"]],
+                offset=neg_pD,
+                lo=0,
+                hi=params["p_Di"],
+            )
+        )
+    transforms += [
+        embed_dynamic(
+            upper=["ho", "y"],
+            lower="hi",
+            strides=[params["p_sH"], params["p_dH"]],
+            offset=neg_pH,
+            lo=0,
+            hi=params["p_Hi"],
+        ),
+        embed_dynamic(
+            upper=["wo", "x"],
+            lower="wi",
+            strides=[params["p_sW"], params["p_dW"]],
+            offset=neg_pW,
+            lo=0,
+            hi=params["p_Wi"],
+        ),
+        *_a_channel_decode_dynamic(
+            b,
+            params,
+            is_3d=is_3d,
+            grouped=grouped,
+            upper=channel_upper,
+            prefix=channel_prefix,
+        ),
+        *filter_pads_dynamic(params, is_3d=is_3d),
+    ]
+
+    if is_3d:
+        coord_names = ["n", "di", "hi", "wi", "c"]
+        strides = [
+            params[f"{stride_prefix}n"],
+            params[f"{stride_prefix}di"],
+            params[f"{stride_prefix}hi"],
+            params[f"{stride_prefix}wi"],
+            b.const_i32(1),
+        ]
+        default_name = "A_ndhwc"
+    else:
+        coord_names = ["n", "hi", "wi", "c"]
+        strides = [
+            params[f"{stride_prefix}n"],
+            params[f"{stride_prefix}hi"],
+            params[f"{stride_prefix}wi"],
+            b.const_i32(1),
+        ]
+        default_name = "A_nhwc"
+    return DynamicTensorDescriptor.create(
+        name or default_name, coord_names=coord_names, strides=strides
+    ).transform(*transforms)
+
+
+def make_b_descriptor_dynamic(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    *,
+    is_3d: bool = False,
+    channel_upper: str = "k_gemm",
+    channel_prefix: str = "k_",
+    stride_prefix: str = "p_B_stride_",
+    name: Optional[str] = None,
+):
+    """AOT counterpart of :func:`make_b_descriptor`: ``(k_out, k_gemm) -> K[Z]YXC``.
+
+    The weight slab is per-group (channel extent ``cpg``); the group rides in
+    the absolute ``k_out`` row index supplied by the caller.
+
+    The coord / prefix overrides serve wgrad's dW, which is the same layout
+    indexed by ``n_wg`` instead of ``k_gemm``.
+    """
+    transforms = [
+        channel_unmerge_dynamic(
+            params,
+            upper=channel_upper,
+            prefix=channel_prefix,
+            is_3d=is_3d,
+            cdim=params["p_cpg"],
+        ),
+        *filter_pads_dynamic(params, is_3d=is_3d),
+    ]
+    if is_3d:
+        coord_names = ["k_out", "z", "y", "x", "c"]
+        strides = [
+            params[f"{stride_prefix}k"],
+            params[f"{stride_prefix}z"],
+            params[f"{stride_prefix}y"],
+            params[f"{stride_prefix}x"],
+            b.const_i32(1),
+        ]
+        default_name = "B_kzyxc"
+    else:
+        coord_names = ["k_out", "y", "x", "c"]
+        strides = [
+            params[f"{stride_prefix}k"],
+            params[f"{stride_prefix}y"],
+            params[f"{stride_prefix}x"],
+            b.const_i32(1),
+        ]
+        default_name = "B_kyxc"
+    return DynamicTensorDescriptor.create(
+        name or default_name, coord_names=coord_names, strides=strides
+    ).transform(*transforms)
+
+
+def make_d_descriptor_dynamic(
+    b: IRBuilder, params: Dict[str, Value], *, is_3d: bool = False
+):
+    """AOT counterpart of :func:`make_d_descriptor`: ``(m, k_out) -> N[D]HWK``."""
+    transforms = [spatial_unmerge_dynamic(params, upper="m", prefix="m_", is_3d=is_3d)]
+    if is_3d:
+        coord_names = ["n", "do", "ho", "wo", "k_out"]
+        strides = [
+            params["p_D_stride_n"],
+            params["p_D_stride_do"],
+            params["p_D_stride_ho"],
+            params["p_D_stride_wo"],
+            b.const_i32(1),
+        ]
+        name = "D_ndhwk"
+    else:
+        coord_names = ["n", "ho", "wo", "k_out"]
+        strides = [
+            params["p_D_stride_n"],
+            params["p_D_stride_ho"],
+            params["p_D_stride_wo"],
+            b.const_i32(1),
+        ]
+        name = "D_nhwk"
+    return DynamicTensorDescriptor.create(
+        name, coord_names=coord_names, strides=strides
+    ).transform(*transforms)
+
+
+def emit_direct_epilogue_wmma(
+    b,
+    spec,
+    op,
+    accs,
+    warp_m_idx,
+    warp_n_idx,
+    lane,
+    block_m_off,
+    block_n_off,
+    d_rsrc,
+    c0,
+    *,
+    addr_fn,
+    p_M,
+    p_kpg,
+):
+    """Per-lane WMMA direct epilogue with runtime bounds.
+
+    ``addr_fn(b, m_val, n_val) -> (off_elements, valid)`` — same AddrFn
+    contract as DirectEpilogue / CShuffleEpilogue.
+    """
+    mfmas_m = spec.mfmas_per_warp_m
+    mfmas_n = spec.mfmas_per_warp_n
+    warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
+    warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * spec.warp_tile_n))
+    c_map = op.c_layout()
+    _fp32_out = spec.data.dtype_d == "fp32"
+    _bf16_out = spec.data.dtype_d == "bf16"
+    _elem_bytes = 4 if _fp32_out else 2
+
+    flat = 0
+    for mi in range(mfmas_m):
+        for ni in range(mfmas_n):
+            acc = accs[flat]
+            flat += 1
+            atom_m_off = b.add(
+                b.add(block_m_off, warp_m_off),
+                b.const_i32(mi * spec.warp_tile_m),
+            )
+            atom_n_off = b.add(
+                b.add(block_n_off, warp_n_off),
+                b.const_i32(ni * spec.warp_tile_n),
+            )
+            for i in range(op.c_frag_len):
+                row_off, col_off = c_map.coord(b, lane, i)
+                m_val = b.add(atom_m_off, row_off)
+                n_val = b.add(atom_n_off, col_off)
+                m_ok = b.cmp_lt(m_val, p_M)
+                n_ok = b.cmp_lt(n_val, p_kpg)
+                ok = b.land(m_ok, n_ok)
+
+                v_f32 = b.vec_extract(acc, i)
+                d_off_elems, _ = addr_fn(b, m_val, n_val)
+                d_off_bytes = b.mul(d_off_elems, b.const_i32(_elem_bytes))
+                safe_off = b.select(ok, d_off_bytes, b.const_i32((1 << 31) - 1))
+                if _fp32_out:
+                    b.buffer_store_f32(d_rsrc, safe_off, c0, v_f32)
+                elif _bf16_out:
+                    b.buffer_store_bf16(
+                        d_rsrc, safe_off, c0, b.trunc_f32_to_bf16(v_f32)
+                    )
+                else:
+                    b.buffer_store_f16(d_rsrc, safe_off, c0, b.trunc_f32_to_f16(v_f32))

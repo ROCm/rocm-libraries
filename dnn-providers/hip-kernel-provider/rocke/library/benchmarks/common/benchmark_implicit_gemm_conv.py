@@ -63,16 +63,28 @@ os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
 # ---------------------------------------------------------------------------
 # Swept parameter grids
+#
+# All axes are imported from the AOT cache grid (kernel_sweep.py CACHE_*) so
+# the two stay in sync: a kernel found fastest by this JIT sweep will always
+# have a cached counterpart that --run-from-cache can offer.
+#
+# gfx1250 extensions (tile=512, warp=16) go beyond what gfx950/942 can use
+# and are defined locally; they are skipped automatically by the spec
+# validators on other targets.
 # ---------------------------------------------------------------------------
 
-_TILE_MN = (16, 32, 64, 128, 256)
-_TILE_MN_GFX1250 = (16, 32, 64, 128, 256, 512)
-_TILE_K = (16, 32, 64)
-_WARP_MN = (1, 2, 4, 8)
-_WARP_MN_GFX1250 = (1, 2, 4, 8, 16)
-_WARP_TILE_MN = (16, 32)
-_PIPELINES = ("mem", "compv3", "compv4", "wavelet", "basic")
-_EPILOGUES = ("default", "cshuffle")
+from benchmarks.common.kernel_sweep import (  # noqa: E402
+    CACHE_EPILOGUES as _EPILOGUES,
+    CACHE_PIPELINES as _PIPELINES,
+    CACHE_TILE_K as _TILE_K,
+    CACHE_TILE_MN as _TILE_MN,
+    CACHE_WARP_MN as _WARP_MN,
+    CACHE_WARP_TILE_MN as _WARP_TILE_MN,
+)
+
+# gfx1250-only: wider CUs allow larger tiles and more warp concurrency.
+_TILE_MN_GFX1250 = _TILE_MN + (512,)
+_WARP_MN_GFX1250 = _WARP_MN + (16,)
 # The async leg overrides spec.pipeline (SchedulePolicy.for_pipeline("async_dma"))
 # and its K-loop branch ignores it, so one canonical value stands for all of
 # _PIPELINES there. "mem" is the neutral one: no scheduling hints.
@@ -1039,6 +1051,51 @@ def main() -> int:
         help="number of conv groups; C and K must each be divisible by groups (default: 1)",
     )
 
+    cache_grp = parser.add_argument_group(
+        "AOT mode",
+        "Ahead-of-time compilation: build shape-generic kernels whose "
+        "problem dimensions are runtime kernel arguments. A single compiled "
+        "HSACO handles any compatible shape.",
+    )
+    cache_grp.add_argument(
+        "--compile-all",
+        action="store_true",
+        dest="compile_all",
+        help="AOT only: compile every valid tile/pipeline/epilogue/vec-size "
+        "variant for the target arch+dtype across --directions and save "
+        "the HSACOs to --cache-dir. Shape-independent: no problem is needed "
+        "and no GPU is used. Parallelised with --jobs.",
+    )
+    cache_grp.add_argument(
+        "--run-from-cache",
+        default=None,
+        metavar="DIR",
+        dest="run_from_cache",
+        help="AOT only: load pre-compiled HSACOs from DIR, keep the ones whose "
+        "vector widths and baked capabilities fit the requested shape, and "
+        "benchmark those. Nothing is compiled.",
+    )
+    cache_grp.add_argument(
+        "--cache-dir",
+        default=None,
+        metavar="DIR",
+        dest="cache_dir",
+        help="Directory for AOT HSACO cache (default: ./kernel_cache).",
+    )
+    cache_grp.add_argument(
+        "--directions",
+        default="fwd,wgrad,dgrad",
+        dest="directions",
+        help="Comma-separated directions to build or run (default: all three).",
+    )
+    cache_grp.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        dest="limit",
+        help="AOT only: stop after building this many kernels (smoke tests).",
+    )
+
     args = parser.parse_args()
 
     # Checked here rather than left to the slice: --csv-top is a bare bound on
@@ -1203,6 +1260,11 @@ def main() -> int:
     ]
 
     all_rc = 0
+
+    # ---- AOT dispatch (--compile-all or --run-from-cache) ----
+    if args.compile_all or args.run_from_cache:
+        return _cache_dispatch(args, arch, target, cases)
+
     # Maps (shape, dtype, direction) -> best CK tflops/ms/gbps for that case.
     # Populated before the rocke sweep so the CSV join is available immediately.
     ck_best: dict[tuple, dict] = {}
@@ -2036,7 +2098,8 @@ def _run_sweep(
     **_ignored,  # absorbs keys from _common not used by this sweep
 ) -> int:
     import torch
-    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_abi import conv_args_signature
+    from kernels.common.conv_args import ConvArgs
 
     _u8 = u8
 
@@ -2056,11 +2119,6 @@ def _run_sweep(
             else torch.empty(*shape).uniform_(-1.0, 1.0)
         )
 
-    # Weight is per-group: its channel extent is cpg = C / groups (== C when
-    # groups == 1), matching make_b_descriptor (KYXC/KZYXC with C = cpg), the
-    # grouped NumPy oracle, and torch's F.conv2d weight shape
-    # [K, C/groups, Y, X]. Allocating full C here silently mismatched the kernel
-    # and broke the grouped --verify reference.
     if p.is_3d:
         _A_f32 = _make(p.N, p.Di, p.Hi, p.Wi, p.C)
         _B_f32 = _make(p.K, p.Z, p.Y, p.X, p.cpg)
@@ -2075,7 +2133,11 @@ def _run_sweep(
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
 
-    sig = conv_args_signature(dtype)
+    sig = conv_args_signature(dtype, is_3d=p.is_3d)
+    # AOT args: extents, strides and magic constants the kernel would otherwise
+    # have had folded in as compile-time constants.
+    # Built per spec below: the tile is part of the args object because the
+    # kernel bakes it, and the sweep walks specs with different tiles.
 
     _mma_family = "wmma" if target.wave_size == 32 else "mma"
 
@@ -2216,14 +2278,17 @@ def _run_sweep(
         block = (spec.launch_block_size, 1, 1)
         stream = 0
 
-        values = {
-            "A": A_dev,
-            "B": B_dev,
-            "D": D_dev,
-            "A_bytes": A_t.nbytes,
-            "B_bytes": B_t.nbytes,
-            "D_bytes": D_t.nbytes,
-        }
+        # AOT: the whole problem shape travels as kernargs.
+        values = ConvArgs.from_problem(
+            p, tile_m=spec.tile_m, tile_n=spec.tile_n
+        ).to_launch_values(
+            int(A_dev),
+            int(B_dev),
+            int(D_dev),
+            A_t.nbytes,
+            B_t.nbytes,
+            D_t.nbytes,
+        )
         cfg = LaunchConfig(grid=grid, block=block, stream=stream)
 
         # Verify every kernel against the pre-computed reference (when --verify).
@@ -2391,7 +2456,8 @@ def _run_wgrad_sweep(
         0 (auto) — sweep all degrees in _SPLIT_K_AUTO.
     """
     import torch
-    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_abi import conv_args_signature
+    from kernels.common.conv_args import ConvArgs
 
     _u8 = u8
     p = problem
@@ -2402,10 +2468,6 @@ def _run_wgrad_sweep(
         "fp32": torch.float32,
     }
     _torch_dtype = _TORCH_DT[dtype]
-    # dW may be wider than A/B. The packed 16-bit atomic in the split-K epilogue
-    # pairs (c, c+1) inside one filter position and so requires an even
-    # cpg=C/groups; an fp32 dW uses a scalar atomic with no pairing rule, which
-    # is the only way to reach split-K at all on an odd-cpg shape.
     _torch_dtype_d = _TORCH_DT[dtype]
     torch.manual_seed(42)
 
@@ -2416,12 +2478,6 @@ def _run_wgrad_sweep(
             else torch.empty(*shape).uniform_(-1.0, 1.0)
         )
 
-    # dW is the PyTorch grouped-weight layout [K, (Z,) Y, X, C/groups]: the filter
-    # of output channel k spans only its own group's input channels, so the inner
-    # dim is cpg, not the dense C. Using C here over-allocates by a factor of
-    # `groups` AND gives the comparison a different stride from the reference
-    # (wgrad_reference returns [K, Y, X, cpg]), so --verify reported a constant
-    # large rel_err for every grouped shape regardless of kernel correctness.
     _cpg = p.C // p.groups
     if p.is_3d:
         _X_f32 = _make(p.N, p.Di, p.Hi, p.Wi, p.C)
@@ -2438,9 +2494,13 @@ def _run_wgrad_sweep(
     bytes_xfer = float(dY_t.nbytes + X_t.nbytes + dW_t.nbytes)
     flop = float(p.flops)
 
-    sig = conv_args_signature(dtype)
-    # Extended signature for runtime split-K kernels (split_k=0): adds ks i32 arg.
-    sig_rt = sig + [{"name": "ks", "type": "i32", "size_bytes": 4}]
+    # AOT: wgrad-specific signature with runtime problem dims. There is only
+    # one form now -- ks/ks_count are always kernargs -- so the split and
+    # unsplit launches below share it.
+    sig = conv_args_signature(dtype, direction="wgrad", is_3d=p.is_3d)
+
+    # Pre-compute wgrad AOT args (dims, strides, magic numbers).
+    # Built per spec below; see the forward sweep.
 
     # split_k degrees used to build kernel specs:
     #   0   → compile two variants: split_k=1 (no-atomic) and split_k=0 (runtime-atomic);
@@ -2714,7 +2774,7 @@ def _run_wgrad_sweep(
                 n_skipped += 1
                 continue
 
-        _kernel_sig = sig_rt if _is_rt else sig
+        _kernel_sig = sig
         try:
             launcher = KernelLauncher(
                 hsaco=artifact.hsaco,
@@ -2745,31 +2805,23 @@ def _run_wgrad_sweep(
             block = (spec.block_size, 1, 1)
             stream = 0
 
-            if _is_rt:
-                wg_K_padded = spec.wg_K_padded(split_k=_launch_sk)
-                _ks_val = wg_K_padded // _launch_sk
-                grid = _grid_for_wgrad_spec(spec, _launch_sk)
-                values = {
-                    "A": dY_dev,
-                    "B": X_dev,
-                    "D": dW_dev,
-                    "A_bytes": dY_t.nbytes,
-                    "B_bytes": X_t.nbytes,
-                    "D_bytes": dW_t.nbytes,
-                    "ks": _ks_val,
-                }
-                _is_atomic_launch = True
-            else:
-                grid = _grid_for_wgrad_spec(spec, _launch_sk)
-                values = {
-                    "A": dY_dev,
-                    "B": X_dev,
-                    "D": dW_dev,
-                    "A_bytes": dY_t.nbytes,
-                    "B_bytes": X_t.nbytes,
-                    "D_bytes": dW_t.nbytes,
-                }
-                _is_atomic_launch = _launch_sk > 1
+            grid = _grid_for_wgrad_spec(spec, _launch_sk)
+            values = ConvArgs.from_problem(
+                p,
+                direction="wgrad",
+                tile_m=spec.tile_m,
+                tile_n=spec.tile_n,
+                tile_k=spec.tile_k,
+            ).to_launch_values(
+                int(dY_dev),
+                int(X_dev),
+                int(dW_dev),
+                dY_t.nbytes,
+                X_t.nbytes,
+                dW_t.nbytes,
+                split_k=_launch_sk,
+            )
+            _is_atomic_launch = _is_rt or _launch_sk > 1
 
             cfg = LaunchConfig(grid=grid, block=block, stream=stream)
 
@@ -2901,6 +2953,7 @@ def _run_wgrad_sweep(
         )
         from kernels.common.conv_implicit_gemm_wgrad_two_stage import (
             _wgrad_stage1_signature,
+            wgrad_stage1_launch_values,
             wgrad_two_stage_workspace_nbytes,
         )
         from kernels.common.conv_wgrad_workspace_reduce import (
@@ -2978,16 +3031,17 @@ def _run_wgrad_sweep(
                 )
                 continue
 
-            s1_values = {
-                "A": dY_dev2,
-                "B": X_dev2,
-                "D": dW_dev2,
-                "A_bytes": dY_t.nbytes,
-                "B_bytes": X_t.nbytes,
-                "D_bytes": dW_t.nbytes,
-                "ws_ptr": ws_dev,
-                "ws_bytes": ws_nbytes,
-            }
+            s1_values = wgrad_stage1_launch_values(
+                spec,
+                dY_ptr=int(dY_dev2),
+                X_ptr=int(X_dev2),
+                dW_ptr=int(dW_dev2),
+                dY_bytes=dY_t.nbytes,
+                X_bytes=X_t.nbytes,
+                dW_bytes=dW_t.nbytes,
+                ws_ptr=int(ws_dev),
+                ws_bytes=ws_nbytes,
+            )
             s2_values = {
                 "ws_ptr": ws_dev,
                 "dw_ptr": dW_dev2,
@@ -3177,7 +3231,8 @@ def _run_dgrad_sweep(
     """
     import ctypes
     import torch
-    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_abi import conv_args_signature
+    from kernels.common.conv_args import ConvArgs
 
     _u8 = u8
     p = problem
@@ -3197,9 +3252,6 @@ def _run_dgrad_sweep(
         )
 
     _dY_f32 = _make(p.N, p.Ho, p.Wo, p.K)
-    # Weight is stored per-group packed: KYXC with channel extent cpg = C/groups
-    # (== C when groups == 1), matching the dgrad w_descriptor and the forward
-    # make_b_descriptor.  dY/dX carry full K/C (the group rides the k_out/c index).
     _W_f32 = _make(p.K, p.Y, p.X, p.cpg)
     dX_t = torch.empty(p.N, p.Hi, p.Wi, p.C, dtype=_torch_dtype)
 
@@ -3209,14 +3261,15 @@ def _run_dgrad_sweep(
     bytes_xfer = float(dY_t.nbytes + W_t.nbytes + dX_t.nbytes)
     flop = float(p.flops)
 
-    # Per-group channel runs (cpg/kpg) bound the vector widths for grouped dgrad
-    # so loads/stores never straddle a group boundary (cpg==C, kpg==K ungrouped).
     vec_a, vec_b, vec_c = DgradConvSpec.default_vector_sizes(p.cpg, p.kpg, dtype)
-    base_sig = conv_args_signature(dtype)
-    ext_sig = base_sig + [
-        {"name": "sub_gemm_buf", "type": "ptr<i32, global>", "size_bytes": 8},
-        {"name": "num_sub_gemms", "type": "i32", "size_bytes": 4},
-    ]
+    # AOT: dgrad signature with runtime dims + sub_gemm tilde buffer.
+    # The dgrad ABI already carries the tilde record buffer; there is no
+    # separate "extended" form.
+    base_sig = conv_args_signature(dtype, direction="dgrad")
+    ext_sig = base_sig
+
+    # Pre-compute dgrad AOT args.
+    # Built per spec below; see the forward sweep.
 
     split_k_values = _SPLIT_K_AUTO if args.split_k == 0 else (args.split_k,)
 
@@ -3324,16 +3377,20 @@ def _run_dgrad_sweep(
         # sub-GEMM geometry is channel-independent so flat_tiles is per-group.
         _groups = max(int(spec.problem.groups), 1)
         grid = (flat_tiles, _groups, resolved_split_k)
-        values = {
-            "A": dY_dev,
-            "B": W_dev,
-            "D": dX_dev,
-            "A_bytes": dY_t.nbytes,
-            "B_bytes": W_t.nbytes,
-            "D_bytes": dX_t.nbytes,
-            "sub_gemm_buf": sgbuf_dev,
-            "num_sub_gemms": len(sub_gemms),
-        }
+        # AOT: the whole problem shape travels as kernargs, including the
+        # tilde record buffer the CTA dispatch search reads.
+        values = ConvArgs.from_problem(
+            p, direction="dgrad", tile_m=spec.tile_m, tile_n=spec.tile_n
+        ).to_launch_values(
+            int(dY_dev),
+            int(W_dev),
+            int(dX_dev),
+            dY_t.nbytes,
+            W_t.nbytes,
+            dX_t.nbytes,
+            sub_gemm_buf=int(sgbuf_dev),
+            num_sub_gemms=len(sub_gemms),
+        )
 
         launcher = KernelLauncher(
             hsaco=artifact.hsaco,
@@ -3459,6 +3516,322 @@ def _run_dgrad_sweep(
     best = results[0]
     print(f"\nBest: {best.tflops:.1f} TFLOPS -- {best.kernel_name}")
     return 0, results
+
+
+# ---------------------------------------------------------------------------
+# AOT dispatch: --compile-all and --run-from-cache
+# ---------------------------------------------------------------------------
+
+
+def _cache_dispatch(args, arch, target, cases) -> int:
+    """Handle the AOT-only benchmark modes.
+
+    ``--compile-all`` fills the cache and never touches a GPU; the artifacts it
+    writes are shape-generic, so the same cache serves every later run.
+    ``--run-from-cache`` takes the parsed cases, asks the cache which kernels
+    can run each one, and benchmarks those.
+    """
+    from pathlib import Path
+
+    from benchmarks.common.kernel_sweep import compile_all, describe_cache
+    from benchmarks.common.kernel_cache import KernelCache
+
+    directions = (
+        tuple(d.strip() for d in args.directions.split(",") if d.strip())
+        if getattr(args, "directions", None)
+        else ("fwd", "wgrad", "dgrad")
+    )
+
+    if args.compile_all:
+        cache_dir = Path(args.cache_dir) if args.cache_dir else Path("./kernel_cache")
+        return compile_all(
+            cache=KernelCache(cache_dir, arch),
+            arch=arch,
+            dtype=args.dtype,
+            target=target,
+            directions=directions,
+            jobs=max(1, int(args.jobs or 1)),
+            limit=args.limit,
+        )
+
+    cache = KernelCache(Path(args.run_from_cache), arch)
+    rc = describe_cache(cache)
+    if rc:
+        return rc
+    return _run_from_cache(args, arch, target, cases, cache, directions)
+
+
+def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
+    """Benchmark every cached kernel that can run each requested case.
+
+    Nothing is compiled here: the whole point of the AOT split is that a
+    compiled kernel is shape-generic, so picking one for a shape is a filter,
+    not a build.
+    """
+    import ctypes
+
+    import torch
+
+    from rocke.runtime import synchronize_and_release, time_launches
+    from rocke.runtime.hip_module import HipError, Runtime
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+    from benchmarks.common.kernel_sweep import _launch_values_for
+
+    _TORCH_DT = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}
+
+    def _u8(t):
+        return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
+
+    overall_rc = 0
+    for case_idx, case in enumerate(cases, 1):
+        problem = case[0]
+        case_dtype = case[1] if len(case) > 1 else args.dtype
+
+        for direction in directions:
+            candidates = [
+                (ident, path, meta)
+                for ident, path, meta in cache.compatible(problem, direction=direction)
+                if ident.dtype_a == case_dtype
+            ]
+            if not candidates:
+                _, why = next(
+                    (
+                        (i, cache.supports_problem(i, problem)[1])
+                        for i, _ in cache.list_all(direction)
+                    ),
+                    (None, "cache has no kernels for this direction"),
+                )
+                print(
+                    f"Case {case_idx} {problem.short()} {case_dtype} {direction}: "
+                    f"no compatible kernel ({why})",
+                    flush=True,
+                )
+                continue
+
+            print(
+                f"\nCase {case_idx}: {problem.short()} {case_dtype} {direction} — "
+                f"{len(candidates)} compatible kernels",
+                flush=True,
+            )
+
+            torch_dt = _TORCH_DT[case_dtype]
+            torch.manual_seed(42)
+            # Operand shapes follow the direction: fwd contracts A x B -> D,
+            # wgrad contracts dY x X -> dW, dgrad contracts dY x W -> dX. The
+            # three tensors always bind to the same three kernarg slots, so
+            # only their extents differ.
+            nhwc = (problem.N, problem.Hi, problem.Wi, problem.C)
+            nhwk = (problem.N, problem.Ho, problem.Wo, problem.K)
+            krsc = (problem.K, problem.Y, problem.X, problem.cpg)
+            if direction == "wgrad":
+                a_shape, b_shape, d_shape = nhwk, nhwc, krsc
+            elif direction == "dgrad":
+                a_shape, b_shape, d_shape = nhwk, krsc, nhwc
+            else:
+                a_shape, b_shape, d_shape = nhwc, krsc, nhwk
+
+            A_t = torch.empty(*a_shape, dtype=torch_dt).uniform_(-1, 1)
+            B_t = torch.empty(*b_shape, dtype=torch_dt).uniform_(-1, 1)
+            D_t = torch.empty(*d_shape, dtype=torch_dt)
+
+            rt = Runtime()
+            A_dev = rt.alloc(A_t.nbytes)
+            B_dev = rt.alloc(B_t.nbytes)
+            D_dev = rt.alloc(D_t.nbytes)
+            rt.memcpy_h2d(A_dev, _u8(A_t), A_t.nbytes)
+            rt.memcpy_h2d(B_dev, _u8(B_t), B_t.nbytes)
+
+            flop = float(problem.flops)
+            bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
+            results = []
+
+            for ident, hsaco_path, meta in candidates:
+                kernel_name = meta.get("kernel_name")
+                if not kernel_name:
+                    print(
+                        f"  [skip] {ident.short_label()}: cache entry has no "
+                        f"kernel_name (rebuild the cache)",
+                        flush=True,
+                    )
+                    continue
+                try:
+                    launcher = KernelLauncher(
+                        hsaco=hsaco_path.read_bytes(),
+                        kernel_name=kernel_name,
+                        signature=_signature_for_identity(ident, case_dtype),
+                    )
+                except HipError as e:
+                    print(f"  [skip] {ident.short_label()}: {e}", flush=True)
+                    continue
+
+                try:
+                    extras, grid = _extras_and_grid(
+                        direction, problem, ident, rt, case_dtype
+                    )
+                except ValueError as e:
+                    print(f"  [skip] {ident.short_label()}: {e}", flush=True)
+                    continue
+                values = _launch_values_for(
+                    direction,
+                    problem,
+                    ident,
+                    (A_dev, B_dev, D_dev),
+                    (A_t.nbytes, B_t.nbytes, D_t.nbytes),
+                    extras,
+                )
+                cfg = LaunchConfig(
+                    grid=grid,
+                    block=(
+                        meta.get("block_size")
+                        or (ident.warp_m * ident.warp_n * ident.wave_size),
+                        1,
+                        1,
+                    ),
+                    stream=0,
+                )
+                try:
+                    ms = time_launches(
+                        lambda: launcher(values, config=cfg),
+                        warmup=args.warmup,
+                        iters=args.iters,
+                        stream=0,
+                    )
+                except (HipError, RuntimeError) as e:
+                    print(f"  [skip] {ident.short_label()}: {e}", flush=True)
+                    continue
+                results.append((flop / (ms * 1e9), bytes_xfer / (ms * 1e6), ms, ident))
+
+            synchronize_and_release()
+            if not results:
+                print("  No successful launches.", flush=True)
+                overall_rc = 1
+                continue
+
+            results.sort(key=lambda r: -r[0])
+            top = min(args.top, len(results))
+            print(f"  Top-{top}:", flush=True)
+            for rank, (tflops, gbps, ms, ident) in enumerate(results[:top], 1):
+                print(
+                    f"  {rank:>4}  {tflops:>7.1f} TFLOPS  {gbps:>7.1f} GB/s  "
+                    f"{ms:>8.3f} ms  {ident.short_label()}",
+                    flush=True,
+                )
+
+    return overall_rc
+
+
+def _signature_for_identity(ident, dtype):
+    """Launch signature matching what this cached kernel was built with."""
+    from kernels.common.conv_abi import conv_args_signature
+
+    if ident.direction == "wgrad":
+        return conv_args_signature(
+            dtype, direction="wgrad", is_3d=ident.is_3d, two_stage=ident.two_stage
+        )
+    if ident.direction == "dgrad":
+        return conv_args_signature(dtype, direction="dgrad", is_3d=ident.is_3d)
+    return conv_args_signature(dtype, is_3d=ident.is_3d)
+
+
+def _extras_and_grid(direction, problem, ident, rt, dtype):
+    """Trailing kernargs and the launch grid for one cached kernel.
+
+    Both backward directions need host-side state that an AOT kernel takes as
+    a buffer rather than baking in:
+
+    * **dgrad** indexes a table of tilde sub-GEMM records. The decomposition
+      depends on the launch shape, so the host enumerates it and passes the
+      records plus their count; the grid is the total tile count across them.
+    * **wgrad** with ``two_stage`` writes partial sums to an f32 workspace
+      sized ``groups * split_k * wg_M * wg_N``, and with a runtime split-K
+      also needs the slice width.
+    """
+    from kernels.common.conv_args import ConvArgs
+
+    extras: dict = {}
+    if direction == "dgrad":
+        from dataclasses import replace as dc_replace
+
+        import numpy as np
+
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            pack_sub_gemm_buffer,
+        )
+
+        spec = DgradConvSpec(
+            problem=problem,
+            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+            tile_m=ident.tile_m,
+            tile_n=ident.tile_n,
+            tile_k=ident.tile_k,
+            warp_m=ident.warp_m,
+            warp_n=ident.warp_n,
+            warp_tile_m=ident.warp_tile_m,
+            warp_tile_n=ident.warp_tile_n,
+            warp_tile_k=ident.warp_tile_k,
+            max_sub_gemms=ident.max_sub_gemms or 64,
+        )
+        sub_gemms = spec.compute_sub_gemms()
+        if len(sub_gemms) > (ident.max_sub_gemms or 64):
+            raise ValueError(
+                f"problem needs {len(sub_gemms)} tilde sub-GEMMs, kernel "
+                f"unrolled for {ident.max_sub_gemms}"
+            )
+        flat = np.array(
+            pack_sub_gemm_buffer(sub_gemms, ident.tile_m, ident.tile_n),
+            dtype=np.int32,
+        )
+        buf = rt.alloc(flat.nbytes)
+        rt.memcpy_h2d(buf, flat.ctypes.data, flat.nbytes)
+        extras["sub_gemm_buf"] = buf
+        extras["num_sub_gemms"] = len(sub_gemms)
+        blocks = sum(
+            -(-sg.gemm_m // ident.tile_m) * -(-sg.gemm_n // ident.tile_n)
+            for sg in sub_gemms
+        )
+        # The flat tile count is per group; the kernel reads its conv group
+        # from blockIdx.y, as in the dispatcher's _dgrad_grid.
+        return extras, (blocks, max(1, problem.groups), max(1, ident.split_k))
+
+    if direction == "wgrad":
+        # The degree is a launch parameter; ConvArgs turns it into the
+        # ks/ks_count pair the kernel reads.
+        split_k = max(1, ident.split_k)
+        extras["split_k"] = split_k
+        if ident.two_stage:
+            params = ConvArgs.from_problem(
+                problem,
+                direction="wgrad",
+                tile_m=ident.tile_m,
+                tile_n=ident.tile_n,
+                tile_k=ident.tile_k,
+            )
+            slabs = problem.groups * split_k
+            ws_bytes = slabs * params.gemm_m * params.gemm_n * 4
+            ws = rt.alloc(ws_bytes)
+            rt.memset(ws, 0, ws_bytes)
+            extras["ws_ptr"] = ws
+            extras["ws_bytes"] = ws_bytes
+        return extras, _grid_for(direction, problem, ident)
+
+    return extras, _grid_for(direction, problem, ident)
+
+
+def _grid_for(direction, problem, ident):
+    from kernels.common.conv_args import ConvArgs
+
+    tm, tn = ident.tile_m, ident.tile_n
+    if direction == "wgrad":
+        return ConvArgs.from_problem(
+            problem, direction="wgrad", tile_m=tm, tile_n=tn, tile_k=ident.tile_k
+        ).grid(max(1, ident.split_k))
+    if direction == "dgrad":
+        return ConvArgs.from_problem(
+            problem, direction="dgrad", tile_m=tm, tile_n=tn
+        ).grid()
+    return ConvArgs.from_problem(problem, tile_m=tm, tile_n=tn).grid()
 
 
 if __name__ == "__main__":

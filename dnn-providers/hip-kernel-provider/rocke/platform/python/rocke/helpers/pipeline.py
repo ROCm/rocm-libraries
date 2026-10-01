@@ -265,3 +265,174 @@ class SoftwarePipeline:
             if not rotating:
                 b.sync()
         return state
+
+    def _ping_pong_phase(
+        self,
+        b: IRBuilder,
+        *,
+        k_cur: Any,
+        k_next: Any,
+        cur_buf: BufferPair,
+        nxt_buf: BufferPair,
+        state: Sequence[Any],
+        issue_load_fn: Callable[[Any, BufferPair], None],
+        compute_fn: Callable[[Any, BufferPair, Any], Any],
+        schedule: Optional[SchedulePolicy],
+    ) -> list:
+        """One prefetch+compute phase of the dynamic ping-pong.
+
+        Emits the same barrier / ``s_waitcnt`` sequence as one steady-state
+        iteration of :meth:`run_ping_pong` with ``num_buffers=2``: issue the
+        next tile into the buffer the current compute is *not* reading, wait
+        for everything except that just-issued load, then compute.
+        """
+        if self.sync_before_issue:
+            # Close the ABA window: every wave must be done reading
+            # ``nxt_buf`` (two phases ago) before we overwrite it.
+            if self.overlap_vmcnt:
+                b.sync_lds_only()
+            else:
+                b.sync()
+        issue_load_fn(k_next, nxt_buf)
+        if self.wait_vmcnt:
+            # prefetch_depth == 1: leave the just-issued load in flight.
+            b.s_waitcnt(vmcnt=1 if self.overlap_vmcnt else 0)
+        if self.sync_after_wait:
+            if self.overlap_vmcnt:
+                b.sync_lds_only()
+            else:
+                b.sync()
+        if schedule is not None:
+            schedule.emit_compute_prologue(b)
+        state = compute_fn(k_cur, cur_buf, list(state))
+        if schedule is not None:
+            schedule.emit_compute_epilogue(b)
+        return list(state)
+
+    def run_ping_pong_dynamic(
+        self,
+        b: IRBuilder,
+        *,
+        k_extent: Any,
+        block_k: int,
+        k_lo: Any = None,
+        k_zero_fill: Any = None,
+        buffers: Sequence[BufferPair],
+        iter_args: Sequence[Tuple[str, Any]],
+        issue_load_fn: Callable[[Any, BufferPair], None],
+        compute_fn: Callable[[Any, BufferPair, Any], Any],
+        schedule: Optional[SchedulePolicy] = None,
+    ) -> list:
+        """Double-buffered ping-pong over a **runtime** reduction extent.
+
+        Unlike :meth:`run_ping_pong`, the trip count is not known at build
+        time: ``k_extent`` is an i32 SSA ``Value`` holding the reduction
+        extent in *elements* (e.g. the ``p_K_gemm`` kernel arg), and
+        ``block_k`` is the compile-time tile width.
+
+        Why the body is unrolled 2x
+        ---------------------------
+        An LDS allocation is a build-time SSA value, so ``buffers[it % 2]``
+        cannot be evaluated against a runtime ``it``. Unrolling the body
+        twice and stepping by ``2 * block_k`` binds each phase to a
+        Python-time buffer constant while still alternating them, which is
+        what makes it a real ping-pong rather than a single-buffer loop
+        wearing one.
+
+        Odd tile counts
+        ---------------
+        When the tile count is odd the second phase of the final body
+        iteration addresses ``k >= k_extent``. At the real end of the tensor
+        those coords fall outside the descriptor's padded bounds, so the
+        buffer resource returns zero and a zero tile contributes nothing to
+        the accumulator — the same zero-fill the single-buffer path already
+        relies on for a partial last tile. Issuing it unconditionally keeps
+        the loop free of divergent control flow around barriers.
+
+        That breaks when ``k_extent`` is a split-K slice end inside the
+        tensor: the tile at ``k_extent`` is the *next* slice's first tile and
+        reads as real data. Pass ``k_zero_fill`` -- an offset whose tile is
+        known to read as zero, i.e. the global reduction extent -- and the
+        phase-A prefetch is redirected there when it lands at or past
+        ``k_extent``. That is one scalar select per iteration, and the barrier
+        sequence stays uniform.
+
+        ``k_lo`` is the first tile offset; it defaults to 0.  Split-K passes
+        the slice base here so the loop walks ``[k_lo, k_extent)`` -- the
+        reduction is sliced by offsetting both ends, not by rebasing the
+        descriptors.
+
+        ``iter_args`` is a sequence of ``(name, init_value)`` pairs, exactly
+        as :meth:`~rocke.core.ir.IRBuilder.scf_for_iter` expects.
+        ``issue_load_fn(k_offset, buf_pair)`` and
+        ``compute_fn(k_offset, buf_pair, state)`` both receive i32 SSA
+        values for the tile offset.
+
+        Only the 2-buffer rotation is supported; for single-buffer or
+        4-buffer modes use the compile-time variant.
+        """
+        if len(buffers) < 2:
+            raise ValueError(
+                f"run_ping_pong_dynamic needs 2 buffer pairs, got {len(buffers)}"
+            )
+        if block_k <= 0:
+            raise ValueError(f"block_k must be positive, got {block_k}")
+
+        buf0, buf1 = buffers[0], buffers[1]
+        c_bk = b.const_i32(block_k)
+        c_2bk = b.const_i32(2 * block_k)
+        k_first = b.const_i32(0) if k_lo is None else k_lo
+
+        # Prologue: stage the first tile into buf0 so the first phase's
+        # compute has something to read. Every later tile is staged by the
+        # phase before the one that consumes it.
+        issue_load_fn(k_first, buf0)
+
+        for_op = b.scf_for_iter(
+            k_first, k_extent, c_2bk, list(iter_args), iv_name="k_pipe"
+        )
+        with for_op as entered:
+            # scf_for_iter hands back the bare induction variable when there
+            # is no loop-carried state, and (iv, vars) otherwise.
+            k, loop_vars = entered if iter_args else (entered, ())
+            state = list(loop_vars)
+            k1 = b.add(k, c_bk)
+            k2 = b.add(k, c_2bk)
+            k1_load = (
+                k1
+                if k_zero_fill is None
+                else b.select(b.cmp_lt(k1, k_extent), k1, k_zero_fill)
+            )
+            # Phase A: compute tile k out of buf0 while tile k+1 streams
+            # into buf1.
+            state = self._ping_pong_phase(
+                b,
+                k_cur=k,
+                k_next=k1_load,
+                cur_buf=buf0,
+                nxt_buf=buf1,
+                state=state,
+                issue_load_fn=issue_load_fn,
+                compute_fn=compute_fn,
+                schedule=schedule,
+            )
+            # Phase B: the buffers swap roles.
+            state = self._ping_pong_phase(
+                b,
+                k_cur=k1,
+                k_next=k2,
+                cur_buf=buf1,
+                nxt_buf=buf0,
+                state=state,
+                issue_load_fn=issue_load_fn,
+                compute_fn=compute_fn,
+                schedule=schedule,
+            )
+            b.scf_yield(*state)
+
+        # The final phase left a prefetch in flight and (with overlap_vmcnt)
+        # only an LDS-scoped barrier behind it. Drain both before the
+        # epilogue, which stages its own data through the same LDS.
+        b.s_waitcnt(vmcnt=0)
+        b.sync()
+        return list(for_op.results)

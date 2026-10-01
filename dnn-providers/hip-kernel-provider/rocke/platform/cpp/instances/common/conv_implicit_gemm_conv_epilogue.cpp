@@ -251,7 +251,11 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                           rocke_value_t* block_n_off,
                                           rocke_value_t* d_rsrc,
                                           rocke_value_t* c0,
-                                          rocke_value_t* ir_c_K_pw)
+                                          rocke_value_t* ir_c_K_pw,
+                                          const rocke_tensor_descriptor_t* D_desc,
+                                          rocke_value_t* k_out_group_base,
+                                          rocke_value_t* bound_m,
+                                          rocke_value_t* bound_n)
 {
     const rocke_conv_problem_t* p = &spec->problem;
     int mfmas_m = rocke_implicit_gemm_conv_spec_mfmas_per_warp_m(spec);
@@ -270,21 +274,14 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
     rocke_value_t* warp_n_off
         = rocke_b_mul(b, warp_n_idx, rocke_b_const_i32(b, mfmas_n * spec->warp_tile_n));
 
-    /* c_M = b.const_i32(p.M); c_N = b.const_i32(p.N_gemm) */
-    rocke_value_t* c_M = rocke_b_const_i32(b, rocke_conv_problem_m(p));
-    rocke_value_t* c_N = rocke_b_const_i32(b, rocke_conv_problem_n_gemm(p));
-    /* Pointwise: skip descriptor, use kpg constant for flat D offset. */
+    /* AOT: the store bounds are the p_M / p_kpg kernargs and the D descriptor
+     * and grouped k_out base were built before the K-loop, so this epilogue
+     * emits no shape constants of its own. */
+    rocke_value_t* c_M = bound_m;
+    rocke_value_t* c_N = bound_n;
     bool _is_pointwise = rocke_conv_problem_is_pointwise(p);
-    /* Python _emit_direct_epilogue_wmma emits its own _c_K_wmma = b.const_i32(kpg).
-     * Emit a new const here to match the Python SSA sequence. */
-    rocke_value_t* c_K_wmma
-        = _is_pointwise ? rocke_b_const_i32(b, rocke_conv_problem_kpg(p)) : NULL;
-    (void)ir_c_K_pw; /* prologue value not used in wmma path */
-    /* D_desc = make_d_descriptor(p) (NULL when pointwise) */
-    rocke_tensor_descriptor_t* D_desc = _is_pointwise ? NULL : rocke_conv_make_d_descriptor(b, p);
-    /* Grouped conv: k_out_group_base = b.mul(b.block_id_z(), b.const_i32(p.kpg))
-     * if p.groups > 1 else None  (Python PR #10064 _emit_direct_epilogue_wmma). */
-    rocke_value_t* k_out_group_base = _is_pointwise ? NULL : rocke_conv_make_k_out_group_base(b, p);
+    /* Pointwise: no descriptor; the flat D offset uses the kpg kernarg. */
+    rocke_value_t* c_K_wmma = _is_pointwise ? ir_c_K_pw : NULL;
     /* c_map = op.c_layout() */
     const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
 
@@ -407,7 +404,11 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        const rocke_warp_grid_t* grid,
                                        rocke_value_t* d_rsrc,
                                        rocke_value_t* ir_c_K_pw,
-                                       const rocke_mmaop_t* op)
+                                       const rocke_mmaop_t* op,
+                                       const rocke_tensor_descriptor_t* D_desc,
+                                       rocke_value_t* k_out_group_base,
+                                       rocke_value_t* bound_m,
+                                       rocke_value_t* bound_n)
 {
     const rocke_conv_problem_t* p = &spec->problem;
     int max_store_vec;
@@ -442,35 +443,27 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
     epi.no_alias = spec->cshuffle_no_alias;
     epi.war_barriers = _war_barriers;
 
+    /* AOT: the D descriptor, the grouped k_out base and the store bounds all
+     * come from the build context. Python builds them before the K-loop (so
+     * the wavelet driver can reuse the same store code) and bounds with the
+     * p_M / p_kpg kernargs, so nothing is emitted here. */
     if(rocke_conv_problem_is_pointwise(p))
     {
-        /* Python _emit_cshuffle_epilogue emits _c_K_ir FIRST, then bounds:
-         *   _c_K_ir = b.const_i32(kpg)            <- first
-         *   bounds = (b.const_i32(M), b.const_i32(N_gemm))   <- second/third */
-        rocke_value_t* c_K = rocke_b_const_i32(b, rocke_conv_problem_kpg(p));
-        rocke_value_t* bound_m = rocke_b_const_i32(b, rocke_conv_problem_m(p));
-        rocke_value_t* bound_n = rocke_b_const_i32(b, rocke_conv_problem_n_gemm(p));
-        (void)ir_c_K_pw;
         rocke_cshuffle_epilogue_store(b,
                                       &epi,
                                       accs,
                                       num_accs,
                                       rocke_conv_d_addr_pointwise,
-                                      (void*)c_K,
+                                      (void*)ir_c_K_pw,
                                       d_rsrc,
                                       bound_m,
                                       bound_n);
     }
     else
     {
-        /* D_desc = make_d_descriptor(p) */
-        rocke_tensor_descriptor_t* D_desc = rocke_conv_make_d_descriptor(b, p);
         rocke_conv_d_addr_ctx_t dctx;
         dctx.D_desc = D_desc;
-        dctx.k_out_group_base = rocke_conv_make_k_out_group_base(b, p);
-        /* hoist bounds in Python's left-to-right order: M first, then N_gemm */
-        rocke_value_t* bound_m = rocke_b_const_i32(b, rocke_conv_problem_m(p));
-        rocke_value_t* bound_n = rocke_b_const_i32(b, rocke_conv_problem_n_gemm(p));
+        dctx.k_out_group_base = k_out_group_base;
         rocke_cshuffle_epilogue_store(
             b, &epi, accs, num_accs, rocke_conv_d_addr, (void*)&dctx, d_rsrc, bound_m, bound_n);
     }
@@ -514,8 +507,18 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
     /* elif spec.epilogue == "cshuffle": */
     else if(spec->epilogue != NULL && strcmp(spec->epilogue, "cshuffle") == 0)
     {
-        rocke_conv_emit_cshuffle_epilogue(
-            b, spec, final_accs, num_accs, &ctx->grid, ctx->d_rsrc, ctx->ir_c_K_pw, ctx->op);
+        rocke_conv_emit_cshuffle_epilogue(b,
+                                          spec,
+                                          final_accs,
+                                          num_accs,
+                                          &ctx->grid,
+                                          ctx->d_rsrc,
+                                          ctx->ir_c_K_pw,
+                                          ctx->op,
+                                          ctx->D_desc,
+                                          ctx->d_k_out_group_base,
+                                          ctx->p_M,
+                                          ctx->p_kpg);
     }
     /* elif op.family == "wmma": */
     else if(ctx->op != NULL && ctx->op->family != NULL && strcmp(ctx->op->family, "wmma") == 0)
@@ -532,7 +535,11 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
                                              ctx->block_n_off_v,
                                              ctx->d_rsrc,
                                              ctx->c0,
-                                             ctx->ir_c_K_pw);
+                                             ctx->ir_c_K_pw,
+                                             ctx->D_desc,
+                                             ctx->d_k_out_group_base,
+                                             ctx->p_M,
+                                             ctx->p_kpg);
     }
     /* else: */
     else

@@ -43,7 +43,13 @@ N_gemm = K
 K_gemm = Y * X * C
 ```
 
-Kernel ABI (`conv_args_signature()`):
+Kernel ABI: conv kernels are AOT, so the problem shape travels as kernargs.
+The ordered argument list is owned by the conv instances, not by the platform
+helpers: `kernels.common.conv_abi` in the library (`conv_arg_names`,
+`conv_args_signature`, `conv_direct_args_signature`) and its C++ twin
+`rocke/instance_conv_abi.h`. Every direction opens with the same six entries,
+followed by the runtime problem block (extents, strides, magic-division
+pairs) and any direction-specific extras:
 
 ```text
 A: ptr<f16, global>      8 bytes
@@ -52,6 +58,7 @@ D: ptr<f16, global>      8 bytes
 A_bytes: i32             4 bytes   # buffer rsrc bound
 B_bytes: i32             4 bytes
 D_bytes: i32             4 bytes
+p_N, p_Hi, p_Wi, ...: i32          # runtime problem block (see conv_abi)
 ```
 
 The `*_bytes` args drive the AMDGPU buffer descriptor `num_records` field (DW2). With the DW3 flags `0x00027000`, OOB byte offsets silently return zero on load and are dropped on store.

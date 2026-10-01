@@ -76,11 +76,11 @@ Emitted by `make_conv_manifest(...)`:
 | Field           | Notes                                                                |
 |-----------------|----------------------------------------------------------------------|
 | `conv_layout`   | `"implicit_gemm"`, `"direct_grouped_16c"`, `"direct_grouped_4c"`     |
-| `conv`          | exactly 13 ints (raises `ValueError` otherwise)                      |
+| `conv`          | 13 ints, or 18 for `implicit_gemm_3d` (`ValueError` otherwise)       |
 | `groups/cpg/kpg`| grouping; dense conv uses `groups=1, cpg=C, kpg=K`                   |
 | `grid_explicit` | bypass automatic grid derivation; required for direct conv kernels   |
 | `grid_order`    | `"MN"` or `"NM"` when `grid_explicit` not given                      |
-| `args_signature`| from `conv_args_signature()` (A, B, D, A_bytes, B_bytes, D_bytes)    |
+| `args_signature`| required; from `kernels.common.conv_abi` (AOT problem block included)|
 
 `sig_has_bytes=1` for all conv manifests (buffer-resource path requires the `*_bytes` args).
 
@@ -159,8 +159,8 @@ gemm_args_signature(with_bytes=False) ->
 gemm_args_signature(with_bytes=True) ->
   [A, B, C, A_bytes: i32, B_bytes: i32, C_bytes: i32]   # buffer-rsrc shape
 
-conv_args_signature() ->
-  [A, B, D, A_bytes, B_bytes, D_bytes]                  # always with bytes
+kernels.common.conv_abi.conv_args_signature(direction=...) ->
+  [A, B, D, A_bytes, B_bytes, D_bytes, <AOT problem block>, <extras>]
 
 attention_args_signature(path="2d") -> 16 entries (see above)
 attention_args_signature(path="reduce") -> 6 entries

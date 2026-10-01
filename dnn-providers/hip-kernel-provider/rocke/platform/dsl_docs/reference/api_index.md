@@ -39,7 +39,8 @@ SoftwarePipeline
 
 # Manifests
 make_gemm_manifest, make_conv_manifest, make_attention_manifest
-attention_args_signature, conv_args_signature, gemm_args_signature
+attention_args_signature, gemm_args_signature
+# (conv signatures live next to the conv instances: kernels.common.conv_abi)
 write_artifact
 
 # Attention helpers

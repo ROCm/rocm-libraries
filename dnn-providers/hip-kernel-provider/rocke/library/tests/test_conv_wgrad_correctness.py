@@ -327,7 +327,8 @@ def _run_one(
     import torch
 
     from rocke import compile_kernel
-    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_args import ConvArgs
+    from kernels.common.conv_abi import conv_args_signature
     from kernels.common.conv_implicit_gemm_wgrad import (
         build_implicit_gemm_conv_wgrad,
         is_valid_wgrad_spec,
@@ -397,7 +398,12 @@ def _run_one(
     rt.memcpy_h2d(X_dev, _u8(X_t), X_t.nbytes)
     rt.memset(dW_dev, 0, dW_t.nbytes)  # split-K atomic-add needs a zeroed dW
 
-    sig = conv_args_signature(dtype)
+    sig = conv_args_signature(
+        dtype,
+        direction="wgrad",
+        is_3d=spec.problem.is_3d,
+        two_stage=bool(getattr(spec, "two_stage", False)),
+    )
     try:
         launcher = KernelLauncher(
             hsaco=artifact.hsaco,
@@ -419,14 +425,21 @@ def _run_one(
     grid = (gx, gy, gz)
     block = (spec.block_size, 1, 1)
 
-    values = {
-        "A": dY_dev,
-        "B": X_dev,
-        "D": dW_dev,
-        "A_bytes": dY_t.nbytes,
-        "B_bytes": X_t.nbytes,
-        "D_bytes": dW_t.nbytes,
-    }
+    values = ConvArgs.from_problem(
+        spec.problem,
+        direction="wgrad",
+        tile_m=spec.tile_m,
+        tile_n=spec.tile_n,
+        tile_k=spec.tile_k,
+    ).to_launch_values(
+        int(dY_dev),
+        int(X_dev),
+        int(dW_dev),
+        dY_t.nbytes,
+        X_t.nbytes,
+        dW_t.nbytes,
+        split_k=max(1, spec.split_k),
+    )
     launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
 
     dW_cpu = torch.empty_like(dW_t)
@@ -1245,6 +1258,7 @@ def _run_two_stage_ts(spec, arch, rt, dY_t, X_t):
     import torch
     from kernels.common.conv_implicit_gemm_wgrad_two_stage import (
         build_implicit_gemm_conv_wgrad_two_stage,
+        wgrad_stage1_launch_values,
     )
     from kernels.common.conv_wgrad_workspace_reduce import (
         WgradReduceSpec,
@@ -1293,16 +1307,18 @@ def _run_two_stage_ts(spec, arch, rt, dY_t, X_t):
         )
         s1_block = (spec.block_size, 1, 1)
 
-        s1_vals = {
-            "A": dY_dev,
-            "B": X_dev,
-            "D": dW_dev,
-            "A_bytes": dY_t.nbytes,
-            "B_bytes": X_t.nbytes,
-            "D_bytes": dW_t.nbytes,
-            "ws_ptr": ws_dev,
-            "ws_bytes": ws_nbytes,
-        }
+        # Stage 1 is an AOT wgrad kernel: the shape travels as kernargs.
+        s1_vals = wgrad_stage1_launch_values(
+            spec,
+            dY_ptr=int(dY_dev),
+            X_ptr=int(X_dev),
+            dW_ptr=int(dW_dev),
+            dY_bytes=dY_t.nbytes,
+            X_bytes=X_t.nbytes,
+            dW_bytes=dW_t.nbytes,
+            ws_ptr=int(ws_dev),
+            ws_bytes=ws_nbytes,
+        )
         s2_vals = {
             "ws_ptr": ws_dev,
             "dw_ptr": dW_dev,

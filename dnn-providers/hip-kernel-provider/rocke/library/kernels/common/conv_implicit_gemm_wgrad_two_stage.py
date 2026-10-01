@@ -94,48 +94,66 @@ def wgrad_two_stage_workspace_nbytes(spec: WgradConvSpec) -> int:
 
 
 def _wgrad_stage1_signature(spec: WgradConvSpec) -> list:
-    """Signature for the Stage 1 wgrad kernel (two_stage=True).
+    """Launch signature for the Stage 1 wgrad kernel (``two_stage=True``).
 
-    Extends the standard conv ABI (A/B/D + byte sizes) with two extra
-    parameters for the workspace: ``ws_ptr`` and ``ws_bytes``.
+    The Stage 1 kernel is an ordinary AOT wgrad kernel with the two-stage
+    workspace pair appended, so the signature is the shared wgrad AOT one
+    built with ``two_stage=True`` -- deriving it here rather than restating
+    the argument list is what keeps it from drifting out of step with the
+    builder (kernargs pack positionally, so a stale copy corrupts silently).
 
     A (dY), B (X), and D (dW) each carry their own element type so that
     mixed-dtype configurations (e.g. bf16 inputs with fp32 output) are
     described correctly.
     """
-    _dtype_map = {
-        "fp16": "f16",
-        "bf16": "bf16",
-        "fp32": "f32",
-        "f16": "f16",
-        "f32": "f32",
-    }
+    from kernels.common.conv_abi import conv_args_signature
 
-    def _ir(dt: str) -> str:
-        return _dtype_map.get(dt, dt)
+    return conv_args_signature(
+        spec.data.dtype_a,
+        direction="wgrad",
+        dtype_b=spec.data.dtype_b,
+        dtype_d=spec.data.dtype_d,
+        is_3d=spec.problem.is_3d,
+        two_stage=True,
+    )
 
-    return [
-        {
-            "name": "A",
-            "type": f"ptr<{_ir(spec.data.dtype_a)}, global>",
-            "size_bytes": 8,
-        },
-        {
-            "name": "B",
-            "type": f"ptr<{_ir(spec.data.dtype_b)}, global>",
-            "size_bytes": 8,
-        },
-        {
-            "name": "D",
-            "type": f"ptr<{_ir(spec.data.dtype_d)}, global>",
-            "size_bytes": 8,
-        },
-        {"name": "A_bytes", "type": "i32", "size_bytes": 4},
-        {"name": "B_bytes", "type": "i32", "size_bytes": 4},
-        {"name": "D_bytes", "type": "i32", "size_bytes": 4},
-        {"name": "ws_ptr", "type": "ptr<f32, global>", "size_bytes": 8},
-        {"name": "ws_bytes", "type": "i32", "size_bytes": 4},
-    ]
+
+def wgrad_stage1_launch_values(
+    spec: WgradConvSpec,
+    *,
+    dY_ptr: int,
+    X_ptr: int,
+    dW_ptr: int,
+    dY_bytes: int,
+    X_bytes: int,
+    dW_bytes: int,
+    ws_ptr: int,
+    ws_bytes: int,
+) -> dict:
+    """Host-side ``values`` dict for a Stage 1 launch.
+
+    Mirrors :func:`_wgrad_stage1_signature`: the shared wgrad AOT arguments
+    plus the workspace pair.
+    """
+    from kernels.common.conv_args import ConvArgs
+
+    return ConvArgs.from_problem(
+        spec.problem,
+        direction="wgrad",
+        tile_m=spec.tile_m,
+        tile_n=spec.tile_n,
+        tile_k=spec.tile_k,
+    ).to_launch_values(
+        dY_ptr,
+        X_ptr,
+        dW_ptr,
+        dY_bytes,
+        X_bytes,
+        dW_bytes,
+        split_k=max(1, spec.split_k),
+        ws_ptr=ws_ptr,
+        ws_bytes=ws_bytes,
+    )
 
 
 def build_implicit_gemm_conv_wgrad_two_stage(
