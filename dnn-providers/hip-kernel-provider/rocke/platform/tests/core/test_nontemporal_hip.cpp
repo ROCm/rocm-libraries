@@ -76,10 +76,17 @@ rocke_value_t*
     return rocke_b_param(b, name, rocke_ptr_type(b, elem, "global"), &o);
 }
 
-/* Builder calls in _copy_kernel's order so both engines assign the same ids.
- * `int_attr` rewrites the load's attr to the integer 1 (a hand-built or
- * deserialized IR could carry it). */
-void build(rocke_ir_builder_t* b, const CopyCase& c, bool int_attr)
+/* Which op, if any, gets its nontemporal attr rewritten to the integer 1 (a
+ * hand-built or deserialized IR could carry it). */
+enum class BadAttr
+{
+    none,
+    load,
+    store
+};
+
+/* Builder calls in _copy_kernel's order so both engines assign the same ids. */
+void build(rocke_ir_builder_t* b, const CopyCase& c, BadAttr bad)
 {
     const rocke_type_t* elem = c.f16 ? rocke_f16() : rocke_bf16();
     rocke_value_t* src = copy_param(b, "S", elem, true);
@@ -87,19 +94,27 @@ void build(rocke_ir_builder_t* b, const CopyCase& c, bool int_attr)
     rocke_value_t* tid = rocke_b_thread_id_x(b);
     rocke_value_t* off = rocke_b_mul(b, tid, rocke_b_const_i32(b, c.n));
     rocke_value_t* v = rocke_b_global_load_vN_ex(b, src, off, elem, c.n, c.load_align, c.load_nt);
-    if(int_attr && v && v->op)
+    if(bad == BadAttr::load && v && v->op)
         rocke_attr_set_int(b, &v->op->attrs, "nontemporal", 1);
     rocke_b_global_store_vN_ex(b, dst, off, v, c.n, 0, c.store_nt);
+    if(bad == BadAttr::store)
+    {
+        /* The store returns no value; find its op in the entry region. */
+        const rocke_region_t* body = rocke_ir_builder_kernel(b)->body;
+        for(int i = 0; i < body->num_ops; ++i)
+            if(body->ops[i]->opcode == ROCKE_OP_MEMREF_GLOBAL_STORE_VN)
+                rocke_attr_set_int(b, &body->ops[i]->attrs, "nontemporal", 1);
+    }
     rocke_b_ret(b);
 }
 
 /* Lower one case to HIP; returns the status and fills `hip` on success. */
-rocke_status_t lower(const CopyCase& c, const char* arch, bool int_attr, std::string* hip)
+rocke_status_t lower(const CopyCase& c, const char* arch, BadAttr bad, std::string* hip)
 {
     rocke_ir_builder_t b;
     if(rocke_ir_builder_init(&b, "nt_copy") != ROCKE_OK)
         return ROCKE_ERR_VALUE;
-    build(&b, c, int_attr);
+    build(&b, c, bad);
     rocke_status_t st = ROCKE_ERR_VALUE;
     if(rocke_ir_builder_ok(&b))
     {
@@ -126,7 +141,7 @@ bool has(const std::string& s, const char* needle)
 void self_check(const char* arch)
 {
     std::string hip;
-    if(lower(*find_case("both"), arch, false, &hip) != ROCKE_OK)
+    if(lower(*find_case("both"), arch, BadAttr::none, &hip) != ROCKE_OK)
         fail("flagged copy kernel failed to lower", arch, __LINE__);
     if(!has(hip, "__builtin_nontemporal_load(reinterpret_cast<const bf16x8*>("))
         fail("flagged load is not __builtin_nontemporal_load", arch, __LINE__);
@@ -136,7 +151,7 @@ void self_check(const char* arch)
     for(const char* one : {"load", "store"})
     {
         hip.clear();
-        if(lower(*find_case(one), arch, false, &hip) != ROCKE_OK)
+        if(lower(*find_case(one), arch, BadAttr::none, &hip) != ROCKE_OK)
             fail("single-flag kernel failed to lower", arch, __LINE__);
         const bool load = strcmp(one, "load") == 0;
         if(has(hip, "__builtin_nontemporal_load(") != load)
@@ -146,22 +161,24 @@ void self_check(const char* arch)
     }
 
     hip.clear();
-    if(lower(*find_case("plain"), arch, false, &hip) != ROCKE_OK)
+    if(lower(*find_case("plain"), arch, BadAttr::none, &hip) != ROCKE_OK)
         fail("plain copy kernel failed to lower", arch, __LINE__);
     if(has(hip, "__builtin_nontemporal"))
         fail("unflagged ops must not use the nontemporal builtins", arch, __LINE__);
 
     /* The memcpy path has no nontemporal form: the flag is rejected there, and
      * the same kernel without it still lowers through memcpy. */
-    if(lower(*find_case("memcpy_nt"), arch, false, nullptr) != ROCKE_ERR_VALUE)
+    if(lower(*find_case("memcpy_nt"), arch, BadAttr::none, nullptr) != ROCKE_ERR_VALUE)
         fail("nontemporal on the memcpy load path must be ROCKE_ERR_VALUE", arch, __LINE__);
     hip.clear();
-    if(lower(*find_case("memcpy_plain"), arch, false, &hip) != ROCKE_OK
+    if(lower(*find_case("memcpy_plain"), arch, BadAttr::none, &hip) != ROCKE_OK
        || !has(hip, "__builtin_memcpy("))
         fail("unflagged unaligned load must still take the memcpy path", arch, __LINE__);
 
-    if(lower(*find_case("load"), arch, true, nullptr) != ROCKE_ERR_VALUE)
-        fail("a non-bool nontemporal attr must be ROCKE_ERR_VALUE", arch, __LINE__);
+    if(lower(*find_case("load"), arch, BadAttr::load, nullptr) != ROCKE_ERR_VALUE)
+        fail("a non-bool nontemporal attr on the load must be ROCKE_ERR_VALUE", arch, __LINE__);
+    if(lower(*find_case("store"), arch, BadAttr::store, nullptr) != ROCKE_ERR_VALUE)
+        fail("a non-bool nontemporal attr on the store must be ROCKE_ERR_VALUE", arch, __LINE__);
 }
 
 } // namespace
@@ -177,7 +194,7 @@ int main(int argc, char** argv)
             return 2;
         }
         std::string hip;
-        const rocke_status_t st = lower(*c, argv[3], false, &hip);
+        const rocke_status_t st = lower(*c, argv[3], BadAttr::none, &hip);
         if(st != ROCKE_OK)
         {
             fprintf(stderr, "HIP lowering failed (status %d)\n", (int)st);

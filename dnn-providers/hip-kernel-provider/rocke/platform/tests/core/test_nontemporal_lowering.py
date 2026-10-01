@@ -93,22 +93,41 @@ def test_default_adds_no_attr_and_no_metadata(monkeypatch):
     assert "!{i32 1}" not in py
 
 
-def _with_int_attr(kernel):
-    """Rewrite the load's attr to ``1`` -- what a hand-built/deserialized IR
-    could carry. A lowerer that coerced it would silently change cache policy."""
+_OP = {"load": "memref.global_load_vN", "store": "memref.global_store_vN"}
+
+
+def _with_int_attr(which: str):
+    """A copy kernel whose `which` op ("load"/"store") carries the attr as the
+    integer ``1`` -- what a hand-built/deserialized IR could carry. A lowerer
+    that coerced it would silently change cache policy."""
+    kernel = _copy_kernel(load_nt=which == "load", store_nt=which == "store")
     for op in kernel.body.ops:
-        if op.name == "memref.global_load_vN":
+        if op.name == _OP[which]:
             op.attrs["nontemporal"] = 1
             return kernel
-    raise AssertionError("no global_load_vN in kernel")
+    raise AssertionError(f"no {_OP[which]} in kernel")
 
 
-def test_non_bool_attr_is_rejected_by_both_engines(monkeypatch):
-    kernel = _with_int_attr(_copy_kernel(load_nt=True, store_nt=False))
+def _require_cpp_engine(monkeypatch):
+    """Strict C++ lowering, or skip when the engine is not importable (so the
+    C++ half of a two-engine test skips instead of failing on a bare host)."""
+    from rocke.core.backend import BackendError
+
+    monkeypatch.setenv("ROCKE_CPP_STRICT", "1")
+    probe = _copy_kernel(load_nt=False, store_nt=False)
+    try:
+        _lower_llvm_via_backend(probe, arch="gfx950", backend="cpp", spec=None)
+    except BackendError as e:
+        pytest.skip(f"C++ engine not importable: {str(e)[:200]}")
+
+
+@pytest.mark.parametrize("which", ["load", "store"])
+def test_non_bool_attr_is_rejected_by_both_engines(which, monkeypatch):
+    kernel = _with_int_attr(which)
     with pytest.raises(ValueError, match="nontemporal attr must be a bool"):
         _lower_llvm_via_backend(kernel, arch="gfx950", backend="python", spec=None)
     # Strict mode re-raises the engine's own rejection (no Python fallback).
-    monkeypatch.setenv("ROCKE_CPP_STRICT", "1")
+    _require_cpp_engine(monkeypatch)
     with pytest.raises(RuntimeError, match="nontemporal attr must be a bool"):
         _lower_llvm_via_backend(kernel, arch="gfx950", backend="cpp", spec=None)
 
@@ -134,10 +153,10 @@ def test_hip_backend_rejects_nontemporal_on_the_memcpy_path():
     assert "__builtin_memcpy(" in lower_kernel_to_hip(plain, arch="gfx950")
 
 
-def test_hip_backend_rejects_non_bool_attr():
-    kernel = _with_int_attr(_copy_kernel(load_nt=True, store_nt=False))
+@pytest.mark.parametrize("which", ["load", "store"])
+def test_hip_backend_rejects_non_bool_attr(which):
     with pytest.raises(ValueError, match="nontemporal attr must be a bool"):
-        lower_kernel_to_hip(kernel, arch="gfx950")
+        lower_kernel_to_hip(_with_int_attr(which), arch="gfx950")
 
 
 # Case names shared with tests/core/test_nontemporal_hip.cpp.
