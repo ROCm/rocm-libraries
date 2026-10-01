@@ -22,23 +22,23 @@
 #
 ################################################################################
 
-from Tensile import __version__
-from Tensile import LibraryIO
-from Tensile.Common.GlobalParameters import defaultInternalSupportParams, defaultSolution
-from Tensile.Common.Constants import HR
-from Tensile.CustomKernels import isCustomKernelConfig
-from Tensile.SolutionStructs.Problem import ProblemType
-from Tensile.SolutionStructs.Problem import _defaultProblemType as defaultProblemType
-from Tensile.Common.GlobalParameters import globalParameters
-from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, gfxToIsa, isaToGfx
-from Tensile.Common import IsaVersion
-from Tensile.Common.ValidParameters import (
+from . import __version__
+from . import LibraryIO
+from .Common.GlobalParameters import defaultInternalSupportParams, defaultSolution
+from .Common.Constants import HR
+from .CustomKernels import isCustomKernelConfig
+from .SolutionStructs.Problem import ProblemType
+from .SolutionStructs.Problem import _defaultProblemType as defaultProblemType
+from .Common.GlobalParameters import globalParameters
+from .Common.Architectures import gfxToIsa, isaToGfx, steppingArchOf, tuningArchOf
+from .Common import IsaVersion
+from .Common.ValidParameters import (
     checkParametersAreValid,
     validParameters,
     validParametersForArch,
 )
-from Tensile.Common.GlobalParameters import globalParameters as globalParameterDefaults
-from Tensile.Common.Utilities import versionIsCompatible
+from .Common.GlobalParameters import globalParameters as globalParameterDefaults
+from .Common.Utilities import versionIsCompatible
 
 import argparse
 import ast
@@ -943,7 +943,7 @@ def clientParameterMap() -> Tuple[Dict[str, str], Dict[str, str]]:
     Returns:
         (iniKey -> GlobalParameters key, iniKey -> Enum class name to decode with)
     """
-    from Tensile import ClientWriter
+    from . import ClientWriter
 
     mapping: Dict[str, str] = {}
     decoders: Dict[str, str] = {}
@@ -1008,7 +1008,7 @@ def problemTypeConfigKeys() -> frozenset:
     """
     # import_module, not "from ... import Problem": the package re-exports a
     # class of that name.
-    problemModule = import_module("Tensile.SolutionStructs.Problem")
+    problemModule = import_module(".SolutionStructs.Problem", __package__)
 
     try:
         tree = ast.parse(inspect.getsource(problemModule))
@@ -1082,7 +1082,7 @@ def _invertNameLookup(functionName: str) -> Dict[str, int]:
     The helpers return None once past their last mode, which bounds the probe
     without restating the mode list here.
     """
-    from Tensile import ClientWriter
+    from . import ClientWriter
 
     function = getattr(ClientWriter, functionName)
     inverse = {}
@@ -1101,7 +1101,7 @@ def _coerceClientValue(globalKey: str, rawValue: str, decoder: Optional[str]) ->
     setting emitted as a member name is read back as its numeric value.
     """
     if decoder is not None:
-        from Tensile import ClientWriter
+        from . import ClientWriter
 
         decoderObject = getattr(ClientWriter, decoder)
         if isinstance(decoderObject, type) and issubclass(decoderObject, Enum):
@@ -1351,24 +1351,22 @@ def formLibraryLogic(
 
 
 def buildTarget(libraryLogic: dict) -> str:
-    """The architecture the solution was generated for, read from its LibraryLogic block.
+    """The architecture the solution was generated for: its logic's ArchitectureName.
 
-    A revision (gfx1250v0) shares its arch's ISA, so its logic declares the arch's
-    name and only ScheduleName tells the two apart -- the rule TensileCreateLibrary
-    applies when it picks logic for a revision build.
+    That is the name TensileCreateLibrary matches logic files by. A build alias
+    names another architecture's logic built for an existing target, and a config
+    can name only real targets, so an alias stands for the logic it builds.
     """
-    scheduleName = str(libraryLogic["ScheduleName"])
-    if scheduleName in ARCH_COMPILER_TARGET:
-        return scheduleName
-    return str(libraryLogic["ArchitectureName"])
+    return tuningArchOf(str(libraryLogic["ArchitectureName"]))
 
 
 def addBuildTarget(globalParams: dict, target: str) -> None:
     """Names the build target in GlobalParameters unless the run settings already do.
 
     Without it Tensile builds for whatever GPU it detects. ISA selects the
-    architecture; a revision can only be named through Architecture, which
-    Tensile reads for an ISA it is building.
+    architecture; a stepping (gfx1250-strict) shares its ISA with the base
+    architecture, so it can only be named through Architecture, which Tensile
+    reads for an ISA it is building.
     """
     isa = gfxToIsa(target)
     if isa is None:
@@ -1376,7 +1374,7 @@ def addBuildTarget(globalParams: dict, target: str) -> None:
     globalParams.setdefault("ISA", [FlowList(list(isa))])
     builtIsas = [tuple(entry) for entry in globalParams["ISA"]]
     if (
-        target in ARCH_COMPILER_TARGET
+        steppingArchOf(target)
         and "Architecture" not in globalParams
         and tuple(isa) in builtIsas
     ):

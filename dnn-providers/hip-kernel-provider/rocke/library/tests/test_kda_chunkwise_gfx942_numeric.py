@@ -15,10 +15,11 @@ _BUILDER = _ROCKE / "builders" / "gfx942" / "kda"
 sys.path.insert(0, str(_BUILDER))
 
 
+torch = pytest.importorskip("torch", reason="ROCm torch required")
+
+
 def _gpu_ready() -> bool:
     try:
-        import torch
-
         if not torch.cuda.is_available():
             return False
         props = torch.cuda.get_device_properties(0)

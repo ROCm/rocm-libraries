@@ -21,6 +21,7 @@ option(ALLOW_FETCH_DEPS
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(BUILD_THREAD_SANITIZER "Build with Thread Sanitizer enabled" OFF)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Sanitizers.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/WindowsDllStaging.cmake)
 
 option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
 if(NOT ENABLE_CLANG_TIDY)
@@ -241,7 +242,7 @@ function(add_hipdnn_sample_test TARGET_NAME)
     install(TARGETS ${TARGET_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
     # On Windows, stage the shadowed ROCm DLLs before this sample is built so a partial build
-    # (`cmake --build --target ${TARGET_NAME}`) doesn't load the stale System32 amd_comgr.dll.
+    # (`cmake --build --target ${TARGET_NAME}`) doesn't load the stale System32 ROCm DLLs.
     if(TARGET stage_shadowed_rocm_dlls)
         add_dependencies(${TARGET_NAME} stage_shadowed_rocm_dlls)
     endif()

@@ -20,6 +20,7 @@ pytestmark = pytest.mark.unit
 M = importlib.import_module("Tensile.TensileLibLogicToYaml")
 LibraryIO = importlib.import_module("Tensile.LibraryIO")
 
+from Tensile.Common.Architectures import ARCH_BUILD_ALIASES
 from Tensile.Common.GlobalParameters import defaultInternalSupportParams, defaultSolution
 from Tensile.Common.ValidParameters import validParameters, validParametersForArch
 
@@ -414,31 +415,37 @@ def test_read_source_rejects_unknown_format(monkeypatch):
 # ---------------------------------------------------------------------------
 # Build target
 # ---------------------------------------------------------------------------
-def test_build_target_prefers_a_revision_schedule():
-    assert M.buildTarget({"ScheduleName": "gfx1250v0", "ArchitectureName": "gfx1250"}) == "gfx1250v0"
+def test_build_target_is_the_logic_architecture():
     assert M.buildTarget({"ScheduleName": "aquavanjaram", "ArchitectureName": "gfx942"}) == "gfx942"
+    assert (
+        M.buildTarget({"ScheduleName": "gfx1250-strict", "ArchitectureName": "gfx1250-strict"})
+        == "gfx1250-strict"
+    )
+    # A build alias stands for the architecture whose logic it builds.
+    for alias, entry in ARCH_BUILD_ALIASES.items():
+        assert M.buildTarget({"ScheduleName": alias, "ArchitectureName": alias}) == entry["tuningArch"]
 
 
-def test_add_build_target_names_isa_and_revision():
+def test_add_build_target_names_isa_and_stepping():
     params = {}
     M.addBuildTarget(params, "gfx942")
     assert [list(isa) for isa in params["ISA"]] == [[9, 4, 2]]
     assert "Architecture" not in params
 
     params = {}
-    M.addBuildTarget(params, "gfx1250v0")
+    M.addBuildTarget(params, "gfx1250-strict")
     assert [list(isa) for isa in params["ISA"]] == [[12, 5, 0]]
-    assert params["Architecture"] == "gfx1250v0"
+    assert params["Architecture"] == "gfx1250-strict"
 
 
 def test_add_build_target_keeps_run_settings():
     params = {"ISA": [[12, 5, 0]], "Architecture": "gfx1250"}
-    M.addBuildTarget(params, "gfx1250v0")
+    M.addBuildTarget(params, "gfx1250-strict")
     assert params == {"ISA": [[12, 5, 0]], "Architecture": "gfx1250"}
 
-    # A revision of an ISA the run did not build would make Tensile raise.
+    # A stepping of an ISA the run did not build would make Tensile raise.
     params = {"ISA": [[9, 5, 0]]}
-    M.addBuildTarget(params, "gfx1250v0")
+    M.addBuildTarget(params, "gfx1250-strict")
     assert params == {"ISA": [[9, 5, 0]]}
 
 

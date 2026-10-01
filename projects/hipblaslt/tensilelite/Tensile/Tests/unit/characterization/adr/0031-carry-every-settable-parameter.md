@@ -23,7 +23,8 @@ Three more gaps had the same effect:
   raised `KeyError` (`MIArchVgpr`, `WorkGroup`) and the rest silently took
   today's defaults (`MaxOccupancy` 64 where the file records 40).
 - The build target was not emitted, so Tensile built for whatever GPU it
-  detected, and a gfx1250v0 solution built as gfx1250.
+  detected, and a stepping's solution (gfx1250-strict) built as its base
+  architecture.
 - Values recorded in a form the config validator rejects (0/1 for a bool
   parameter), or a `MinimumRequiredVersion` from another major version, made
   the emitted config unloadable.
@@ -42,9 +43,10 @@ named in the converter:
   same state as building the recorded block the way `LibraryIO` does
   (`normalizeLogicProblemType`, now shared).
 - **Keys with a home elsewhere in the config.** `MatrixInstruction` and
-  `WorkGroup` go in `Groups`. The target goes in `GlobalParameters.ISA`, plus
-  `Architecture` for a revision, which only `ScheduleName` identifies — the rule
-  TensileCreateLibrary applies. A handwritten custom kernel becomes a
+  `WorkGroup` go in `Groups`. The target — the logic's `ArchitectureName`, which
+  TensileCreateLibrary matches logic files by — goes in `GlobalParameters.ISA`,
+  plus `Architecture` when it is a stepping (`steppingArchOf`), the one thing the
+  ISA cannot express. A handwritten custom kernel becomes a
   `CustomKernels` entry carrying its `InternalSupportParams`, with no fork
   parameters. A generated kernel's `CustomKernel` block is the stamp
   `KernelWriter` writes during codegen, so it is rebuilt rather than carried:
