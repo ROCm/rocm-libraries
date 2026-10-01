@@ -13,16 +13,22 @@
 #   python rocke/platform/tests/run_all.py [--no-guard] [--no-gate] [--no-pytest]
 #       [--no-both] [--only SUBSTR] [--only-ir SUBSTR] [--build-root DIR]
 #
-# The two filters are deliberately separate. `--only` selects *families* for the
-# byte-identity gate; `--only-ir` selects *case ids* for the emitted-IR validity
-# gate, and a case id is `family/arch/variant`, so the two vocabularies overlap
-# without being the same. Forwarding one substring to both was a real trap: a
-# word can be a legal family while matching no corpus case, and the two tools
-# read an empty selection oppositely -- run_diff runs zero families and reports
-# green, check_ir_validity calls it FATAL -- so a partial run could go red for a
-# filter that was valid where the user aimed it. Filtering is also kept separate
-# from skipping: an unfiltered gate still runs in full; use `--no-gate` /
-# `--no-ir-validity` to opt out of one.
+# The two filters are deliberately separate, and the split is by *vocabulary*,
+# not by gate. `--only` selects *families* for the byte-identity gate.
+# `--only-ir` selects *case ids* for both gates that lower the shared corpus --
+# emitted-IR validity and arch-domain -- where a case id is `family/arch/
+# variant`. The two vocabularies overlap without being the same.
+#
+# Forwarding one substring to all of them was a real trap: a word can be a legal
+# family while matching no corpus case, and the tools read an empty selection
+# oppositely -- run_diff runs zero families and reports green, while
+# check_ir_validity and check_arch_domain both call it FATAL -- so a partial run
+# could go red for a filter that was valid where the user aimed it. Any new
+# corpus gate belongs on `--only-ir` for the same reason.
+#
+# Filtering is also kept separate from skipping: an unfiltered gate still runs
+# in full; use `--no-gate` / `--no-ir-validity` / `--no-arch-domain` to opt out
+# of one.
 
 from __future__ import annotations
 
@@ -175,13 +181,14 @@ def main() -> int:
         "--only",
         default="",
         help="restrict byte-identity gate to families containing SUBSTR "
-        "(comma-separated); does not affect the emitted-IR validity gate",
+        "(comma-separated); does not affect the corpus gates",
     )
     ap.add_argument(
         "--only-ir",
         default="",
-        help="restrict emitted-IR validity gate to case ids containing SUBSTR "
-        "(comma-separated); a case id is family/arch/variant",
+        help="restrict the corpus gates (emitted-IR validity, arch-domain) to "
+        "case ids containing SUBSTR (comma-separated); a case id is "
+        "family/arch/variant",
     )
     ap.add_argument(
         "--build-root", default=str(Path(tempfile.gettempdir()) / "rocke_verify")
@@ -227,8 +234,11 @@ def main() -> int:
         # on every LLVM flavor on any host.
         print("\n== arch-domain warning gate ==")
         ad_gate = [sys.executable, str(TOOLS / "check_arch_domain.py")]
-        if args.only:
-            ad_gate += ["--only", args.only]
+        # `--only-ir`, not `--only`: this gate matches case ids, the same
+        # vocabulary check_ir_validity uses and a different one from the
+        # byte-identity families. See the note at the top of this file.
+        if args.only_ir:
+            ad_gate += ["--only", args.only_ir]
         status |= subprocess.run(ad_gate).returncode
 
     if not args.no_pytest:

@@ -679,6 +679,41 @@ class ValidityGateTest(unittest.TestCase):
             with self.subTest(banner=banner):
                 self.assertIsNone(I.flavor_of_clang(banner))
 
+    def test_both_corpus_gates_skip_a_newer_flavor_the_same_way(self):
+        """Both gates lower the shared corpus, so both meet an instance that
+        declines the flavor they asked for -- check_ir_validity on a host whose
+        LLVM is too old, check_arch_domain on every pass below the newest
+        committed column. Neither may count that as a failure, and they must
+        not disagree about which refusals qualify, so they share
+        `_flavor_gate`. This pins the sharing.
+
+        The match is on the emitter's wording, not the exception type: the
+        refusal is a bare NotImplementedError, and so are real defects.
+        """
+        import _flavor_gate as F
+        import check_arch_domain as A
+        import check_ir_validity as V
+
+        self.assertIs(V._requires_newer_flavor, F.requires_newer_flavor)
+        self.assertIs(A.requires_newer_flavor, F.requires_newer_flavor)
+
+        self.assertTrue(
+            F.requires_newer_flavor(
+                NotImplementedError(
+                    "tile.wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32 "
+                    "requires llvm23 (ROCm 7.13+), got llvm20"
+                )
+            )
+        )
+        # A lowering defect must stay fatal, however it is spelled.
+        for other in (
+            NotImplementedError("op 'tile.nope' has no lowering handler"),
+            ValueError("requires gfx1250, got gfx942"),
+            KeyError("llvm23"),
+        ):
+            with self.subTest(exc=other):
+                self.assertFalse(F.requires_newer_flavor(other))
+
 
 class ArchDomainRegenerationTest(unittest.TestCase):
     """Re-probe this host's flavor and require the committed column to match."""

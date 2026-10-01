@@ -52,12 +52,12 @@ from __future__ import annotations
 import argparse
 import concurrent.futures as cf
 import os
-import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
+from _flavor_gate import requires_newer_flavor as _requires_newer_flavor
 from _llvm_identity import clang_identity, flavor_of_clang
 
 HERE = Path(__file__).resolve().parent
@@ -157,23 +157,6 @@ def _llvm_tool(name: str) -> str | None:
     import shutil
 
     return shutil.which(name)
-
-
-def _requires_newer_flavor(exc: BaseException) -> bool:
-    """Did the instance decline to lower because this LLVM is too old?
-
-    The corpus is flavor-wide but a host is not. An instance gated on a newer
-    vintage says so and refuses -- `tile.wmma_gfx1250_..._scale_e8m0_e8m0_k32`
-    raises `requires llvm23 (ROCm 7.13+), got llvm22` -- and that refusal is
-    the emitter working correctly, on a case this host was never going to be
-    able to validate.
-
-    It has to be separated from every other lowering error, because those are
-    still a validity failure of exactly the kind this gate exists to catch. So
-    the match is on the gate's own wording rather than on the exception type:
-    a bare `NotImplementedError` from anywhere else in the lowerer stays fatal.
-    """
-    return bool(re.search(r"requires llvm\d+", str(exc)))
 
 
 def _dump_corpus(

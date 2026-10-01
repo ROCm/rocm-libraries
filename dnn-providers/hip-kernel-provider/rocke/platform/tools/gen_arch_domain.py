@@ -924,21 +924,6 @@ def main() -> int:
         if imm_variants:
             imm_modules[key] = imm_variants
 
-    # Stage A -- the flavor axis, once per key. Arch-free, so it costs one
-    # `opt` run instead of one link per arch, and it is the only stage that can
-    # answer a key whose codegen crashes.
-    canonical: dict[str, str] = {}
-    absent: set[str] = set()
-    for key in keys:
-        exists, note = _name_exists(opt, decls[key], Path(ir_dir))
-        if exists:
-            canonical[key] = note
-        else:
-            absent.add(key)
-    print(
-        f"   names  : {len(keys) - len(absent)} present, {len(absent)} absent in {flavor}"
-    )
-
     # Stage B -- the arch axis, only for names that exist.
     work = [(k, a) for k in keys if k not in absent for a in arches]
 

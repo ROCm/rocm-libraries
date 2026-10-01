@@ -41,6 +41,8 @@ import sys
 import warnings
 from pathlib import Path
 
+from _flavor_gate import requires_newer_flavor
+
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parent  # tools -> rocke/platform
 
@@ -62,7 +64,10 @@ def _bootstrap_sys_path() -> None:
 
 # Every (declaration key, target, flavor) the corpus is currently allowed to
 # demand against a target the artifact says cannot lower it, with the reason and
-# the work that owns the fix.
+# the ticket that owns the fix.
+#
+# Naming the owning ticket is a requirement of AICK-2273, not decoration: the
+# rule below says entries burn down, and an entry nobody owns cannot burn down.
 #
 # Same rule as KNOWN_BAD in check_ir_validity.py and KNOWN_VIOLATIONS in
 # library/tests/test_library_layering.py: **this list only ever SHRINKS**. An
@@ -73,9 +78,10 @@ EXPECTED_WARNINGS: dict[tuple[str, str, str], str] = {}
 for _flavor in ("llvm20", "llvm22", "llvm23"):
     for _key in ("ds.read.tr16.b64", "mfma.f32.16x16x32.bf16", "mfma.f32.16x16x32.f16"):
         EXPECTED_WARNINGS[(_key, "gfx942", _flavor)] = (
-            "attention 3d d128/b64 requests a CDNA4 path on a CDNA3 target; the "
-            "same two cases check_ir_validity.py lists in KNOWN_BAD, found here "
-            "at declaration-demand time with the intrinsic named"
+            "AICK-2053 / AICK-2275 -- attention 3d d128/b64 requests a CDNA4 "
+            "path on a CDNA3 target; the same two cases check_ir_validity.py "
+            "lists in KNOWN_BAD, found here at declaration-demand time with "
+            "the intrinsic named"
         )
 del _flavor, _key
 
@@ -91,18 +97,29 @@ del _flavor, _key
 
 def _harvest(
     cases: list[dict], flavor: str
-) -> tuple[dict[tuple[str, str, str], set[str]], list[tuple[str, str]]]:
+) -> tuple[
+    dict[tuple[str, str, str], set[str]], list[tuple[str, str]], list[tuple[str, str]]
+]:
     """Lower every case at ``flavor`` and collect the arch-domain warnings.
 
     Returns the warnings keyed by (key, arch, flavor) -> the case ids that
-    raised them, plus any case that failed to lower at all. A lowering failure
-    is reported rather than raised: one broken family must not hide the warning
-    state of the other thirty-nine.
+    raised them, then two separate lists of cases that did not lower: the ones
+    that *could not* at this flavor, and the ones that failed.
+
+    The split is the whole point. Unlike check_ir_validity, which runs at the
+    host's one flavor, this gate lowers the same corpus at *every* committed
+    flavor -- so every llvm23-gated instance is guaranteed to refuse on the
+    llvm20 and llvm22 passes, by design, on a clean tree. Counting those as
+    failures reds the gate (and `run_all.py` with it) for cases that were never
+    answerable at that vintage. A genuine lowering error is still reported, and
+    still red: it is reported rather than raised only so that one broken family
+    cannot hide the warning state of the rest.
     """
     from rocke.core.lower_llvm import ArchDomainWarning, lower_kernel_to_llvm
 
     found: dict[tuple[str, str, str], set[str]] = {}
     errors: list[tuple[str, str]] = []
+    unlowerable: list[tuple[str, str]] = []
     for case in cases:
         with warnings.catch_warnings(record=True) as caught:
             # `always`, not the default `once`: the default dedupes per code
@@ -114,13 +131,14 @@ def _harvest(
                     case["build"](), arch=case["arch"], llvm_flavor=flavor
                 )
             except Exception as exc:  # noqa: BLE001 -- reported, not raised
-                errors.append((case["case_id"], f"{type(exc).__name__}: {exc}"))
+                bucket = unlowerable if requires_newer_flavor(exc) else errors
+                bucket.append((case["case_id"], f"{type(exc).__name__}: {exc}"))
                 continue
         for item in caught:
             w = item.message
             if isinstance(w, ArchDomainWarning):
                 found.setdefault((w.key, w.arch, w.flavor), set()).add(case["case_id"])
-    return found, errors
+    return found, errors, unlowerable
 
 
 def main() -> int:
@@ -175,10 +193,12 @@ def main() -> int:
 
     found: dict[tuple[str, str, str], set[str]] = {}
     errors: list[tuple[str, str]] = []
+    unlowerable: list[tuple[str, str]] = []
     for flavor in flavors:
-        got, errs = _harvest(keep, flavor)
+        got, errs, skipped_cases = _harvest(keep, flavor)
         found.update(got)
         errors.extend(errs)
+        unlowerable.extend(skipped_cases)
 
     # Only entries whose flavor was actually measured can be judged stale. A
     # --flavor or --arch selection narrows what ran, and an entry that did not
@@ -195,6 +215,8 @@ def main() -> int:
     print()
     print(f"   expected  : {len(found) - len(unexpected)} / {len(in_scope)} in scope")
     print(f"   unexpected: {len(unexpected)}")
+    if unlowerable:
+        print(f"   not asked : {len(unlowerable)} (instance needs a newer LLVM)")
 
     if args.verbose:
         print("\n== expected warnings that fired ==")
@@ -202,6 +224,13 @@ def main() -> int:
             print(f"  {k[0]}  [{k[1]} @ {k[2]}]")
             for cid in sorted(found[k]):
                 print(f"      {cid}")
+
+    if unlowerable and args.verbose:
+        # Not a finding, so it stays behind --verbose: on a three-flavor sweep
+        # every llvm23-gated instance lands here twice, every run, forever.
+        print("\n== not asked (instance declined this flavor) ==")
+        for cid, msg in unlowerable:
+            print(f"  {cid}\n    {msg}")
 
     if errors:
         print("\n== cases that failed to lower ==")
@@ -244,13 +273,14 @@ def main() -> int:
     if stale:
         print("RESULT: RED - EXPECTED_WARNINGS is stale; remove the entries above.")
         return 1
+    tail = f" ({len(unlowerable)} not asked)" if unlowerable else ""
     if found:
         print(
             f"RESULT: GREEN - the lane fires exactly the {len(found)} documented "
-            "warning(s)."
+            f"warning(s).{tail}"
         )
     else:
-        print("RESULT: GREEN - no kernel demands an unavailable intrinsic.")
+        print(f"RESULT: GREEN - no kernel demands an unavailable intrinsic.{tail}")
     return 0
 
 
