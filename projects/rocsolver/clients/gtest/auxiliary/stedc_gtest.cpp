@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -59,14 +59,9 @@ const vector<vector<int>> matrix_size_range = {
     {40, 40, 3}};
 
 // for daily_lapack tests
-const vector<vector<int>> large_matrix_size_range = {
-    {192, 192, 0}, 
-    {250, 250, 0}, 
-    {256, 270, 0}, 
-    {300, 300, 0},
-    {300, 300, 1},
-    {310, 310, 2},
-    {350, 350, 3}};
+const vector<vector<int>> large_matrix_size_range
+    = {{192, 192, 0}, {250, 250, 0}, {256, 270, 0}, {300, 300, 0},
+       {300, 300, 1}, {310, 310, 2}, {350, 350, 3}};
 
 Arguments stedc_setup_arguments(stedc_tuple tup)
 {
@@ -135,4 +130,3 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          STEDC,
                          Combine(ValuesIn(matrix_size_range), ValuesIn(op_range)));
-
