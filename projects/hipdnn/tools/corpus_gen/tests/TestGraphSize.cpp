@@ -32,7 +32,10 @@ builders::GraphBytes graphOf(const std::vector<int64_t>& dims, fb::DataType type
     tensor.dims = dims;
     tensor.strides.assign(dims.size(), 1);
     tensor.dataType = type;
-    return builders::reduction(tensor, tensor, fb::ReductionMode::ADD, /*deterministic=*/false,
+    return builders::reduction(tensor,
+                               tensor,
+                               fb::ReductionMode::ADD,
+                               /*deterministic=*/false,
                                builders::GraphTypes::uniform(type));
 }
 

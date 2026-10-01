@@ -111,10 +111,8 @@ TEST(TestPoolAssembly, ATruncatedPoolKeepsItsRegimeMixRatherThanAnAlphabeticalPr
     }
 
     std::map<std::string, int64_t> allocation;
-    const auto selected = select({{"model", pool}},
-                                 20,
-                                 {{"model", 1.0}, {"kernel", 0.0}, {"sweep", 0.0}},
-                                 allocation);
+    const auto selected = select(
+        {{"model", pool}}, 20, {{"model", 1.0}, {"kernel", 0.0}, {"sweep", 0.0}}, allocation);
 
     EXPECT_EQ(allocation.at("model"), 20);
     const std::map<std::string, int64_t> expected{{"prefill_short_mha", 16},
@@ -183,11 +181,10 @@ TEST(TestPoolAssembly, ASourceWithNoPoolIsNotAnError)
     // is the whole mechanism by which coverage is "whatever has a declaration", so it must be a
     // quiet zero rather than a missing key that throws.
     std::map<std::string, int64_t> allocation;
-    const auto selected
-        = select({{"sweep", {entryAt("sweep", 1, "r"), entryAt("sweep", 2, "r")}}},
-                 2,
-                 defaultShares(),
-                 allocation);
+    const auto selected = select({{"sweep", {entryAt("sweep", 1, "r"), entryAt("sweep", 2, "r")}}},
+                                 2,
+                                 defaultShares(),
+                                 allocation);
 
     EXPECT_EQ(allocation.at("model"), 0);
     EXPECT_EQ(allocation.at("kernel"), 0);

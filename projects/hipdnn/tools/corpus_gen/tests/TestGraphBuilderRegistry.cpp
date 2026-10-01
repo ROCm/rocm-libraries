@@ -674,12 +674,12 @@ TEST(TestGraphBuilderRegistry, TheCausalAnchorFollowsTheDeclarationNotTheSchemaD
 {
     using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
 
-    for(const auto& [declared, expected] :
-        std::vector<std::pair<std::string, DiagonalAlignment>>{
+    for(const auto& [declared, expected] : std::vector<std::pair<std::string, DiagonalAlignment>>{
             {"top_left", DiagonalAlignment::TOP_LEFT},
             {"bottom_right", DiagonalAlignment::BOTTOM_RIGHT}})
     {
-        const auto built = buildGraphFor(sdpaAlignmentMetadata(), ProblemPoint{{"alignment", declared}});
+        const auto built
+            = buildGraphFor(sdpaAlignmentMetadata(), ProblemPoint{{"alignment", declared}});
 
         ASSERT_TRUE(built.ok()) << declared << ": " << built.error;
         const auto recorded = recordedAlignment(built.bytes);
@@ -693,8 +693,8 @@ TEST(TestGraphBuilderRegistry, AnUndeclaredAnchorIsRefusedRatherThanReadAsTopLef
     // The reason this is not a default: at Sq < Sk the two anchors are different work, so a
     // spelling nobody defined, read as TOP_LEFT, would build, benchmark and record a corpus of
     // the wrong problem with no line anywhere saying so.
-    const auto built
-        = buildGraphFor(sdpaAlignmentMetadata(), ProblemPoint{{"alignment", std::string("middle")}});
+    const auto built = buildGraphFor(sdpaAlignmentMetadata(),
+                                     ProblemPoint{{"alignment", std::string("middle")}});
 
     EXPECT_FALSE(built.ok());
     EXPECT_NE(built.error.find("diagonalAlignment"), std::string::npos) << built.error;
@@ -704,7 +704,7 @@ TEST(TestGraphBuilderRegistry, ADeclarationThatNeverHeardOfTheAnchorStillBuildsW
 {
     // TOP_LEFT is the schema default, so an unset argument must write the bytes a declaration
     // predating this axis wrote -- otherwise every corpus id in flight would move.
-    auto metadata  = sdpaAlignmentMetadata();
+    auto metadata = sdpaAlignmentMetadata();
     auto& arguments = metadata.graphBuilder.arguments;
     arguments.erase(std::remove_if(arguments.begin(),
                                    arguments.end(),
@@ -769,11 +769,10 @@ TEST(TestGraphBuilderRegistry, TheShippedSdpaMetadataBuildsGraphsTheEnginesAccep
     EXPECT_FLOAT_EQ(attributes->attn_scale_value().value(), 0.125F); // 1/sqrt(64)
 
     // (B, H, S, D) dims, token-major: [S*H*D, D, H*D, 1].
-    const std::map<std::string, std::vector<int64_t>> expected{
-        {"q", {16 * 8 * 64, 64, 8 * 64, 1}},
-        {"k", {32 * 2 * 64, 64, 2 * 64, 1}},
-        {"v", {32 * 2 * 64, 64, 2 * 64, 1}},
-        {"o", {16 * 8 * 64, 64, 8 * 64, 1}}};
+    const std::map<std::string, std::vector<int64_t>> expected{{"q", {16 * 8 * 64, 64, 8 * 64, 1}},
+                                                               {"k", {32 * 2 * 64, 64, 2 * 64, 1}},
+                                                               {"v", {32 * 2 * 64, 64, 2 * 64, 1}},
+                                                               {"o", {16 * 8 * 64, 64, 8 * 64, 1}}};
     size_t seen = 0;
     for(const auto* tensor : *graph->tensors())
     {
@@ -801,8 +800,7 @@ TEST(TestGraphBuilderRegistry, ACausalSdpaGraphSaysCausalWithBoundsNotTheDepreca
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
     ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
 
-    for(const auto& [anchor, expected] :
-        std::vector<std::pair<std::string, DiagonalAlignment>>{
+    for(const auto& [anchor, expected] : std::vector<std::pair<std::string, DiagonalAlignment>>{
             {"top_left", DiagonalAlignment::TOP_LEFT},
             {"bottom_right", DiagonalAlignment::BOTTOM_RIGHT}})
     {
@@ -849,7 +847,8 @@ TEST(TestGraphBuilderRegistry, AShippedUnaryActivationLeavesItsParametersUnset)
                             {"dtype", std::string("fp16")}};
     const auto built = buildGraphFor(*parsed.metadata, relu);
     ASSERT_TRUE(built.ok()) << built.error;
-    const auto* attributes = asGraph(built.bytes)->nodes()->Get(0)->attributes_as_PointwiseAttributes();
+    const auto* attributes
+        = asGraph(built.bytes)->nodes()->Get(0)->attributes_as_PointwiseAttributes();
     ASSERT_NE(attributes, nullptr);
     EXPECT_EQ(attributes->operation(), PointwiseMode::RELU_FWD);
     EXPECT_FALSE(attributes->relu_lower_clip().has_value());

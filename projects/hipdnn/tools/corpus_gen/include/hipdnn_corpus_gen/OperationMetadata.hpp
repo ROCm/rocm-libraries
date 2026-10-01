@@ -679,15 +679,14 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
                     if(!name.empty() && metadata.find(name) == nullptr)
                     {
                         load.errors.push_back("regime_label axis '" + axis.name
-                                              + "' references undeclared parameter '" + name
-                                              + "'");
+                                              + "' references undeclared parameter '" + name + "'");
                     }
                 }
             }
             catch(const std::exception& error)
             {
-                load.errors.push_back("regime_label axis '" + axis.name + "': "
-                                      + std::string(error.what()));
+                load.errors.push_back("regime_label axis '" + axis.name
+                                      + "': " + std::string(error.what()));
             }
             metadata.regimeLabel.push_back(std::move(axis));
         }
@@ -701,8 +700,8 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
         // returns by value, and iterating the items of a temporary walks a destroyed object --
         // which at -O0 throws and at -O3 quietly iterates nothing, so every check below would
         // pass by never running. Same reason as the archetype values at the end of this file.
-        const auto fields    = catalog.value("metadata", nlohmann::json::object());
-        const auto enums     = catalog.value("enums", nlohmann::json::object());
+        const auto fields = catalog.value("metadata", nlohmann::json::object());
+        const auto enums = catalog.value("enums", nlohmann::json::object());
         const auto constants = catalog.value("constants", nlohmann::json::object());
 
         for(const auto& field : fields.items())
@@ -770,8 +769,8 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
             const auto& json = constant.value();
             const auto printed = json.is_string() ? json.get<std::string>() : json.dump();
             const auto wrongType = [&load, &constant, &printed](const char* expected) {
-                load.errors.push_back("kernel_catalog fixes '" + constant.key() + "' at '"
-                                      + printed + "', which is not " + expected);
+                load.errors.push_back("kernel_catalog fixes '" + constant.key() + "' at '" + printed
+                                      + "', which is not " + expected);
             };
 
             switch(parameter->type)

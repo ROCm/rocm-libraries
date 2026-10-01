@@ -164,9 +164,9 @@ def test_pinning_never_silently_drops_a_problem():
 
     assert by_value[64]["uncovered"] == 1
     assert by_value[256]["uncovered"] == 0
-    assert block_m["problems_lost_by_pinning"] == 0, (
-        "the recommended value must be one that still serves every problem"
-    )
+    assert (
+        block_m["problems_lost_by_pinning"] == 0
+    ), "the recommended value must be one that still serves every problem"
 
 
 def test_the_variant_curve_finds_the_cheap_covering_set():
@@ -305,7 +305,9 @@ def test_a_matched_field_is_not_reported_as_droppable():
     badly in it. Ranked on cost alone it reads 0.00% and the report recommends dropping
     it, which means shipping kernels for one head size.
     """
-    ranked = {r["short_name"]: r for r in rank_knobs(analyse_knobs(_corpus_with_geometry()))}
+    ranked = {
+        r["short_name"]: r for r in rank_knobs(analyse_knobs(_corpus_with_geometry()))
+    }
     assert ranked["head_size"]["verdict"] == "MATCHED"
     assert ranked["head_size"]["tunable"] is False
     # And the real knob beside it is still judged on its merits.
@@ -324,7 +326,9 @@ def test_a_matched_field_is_never_in_what_to_change():
     assert "head_size" not in text.split("## What to change")[1]
 
 
-def _corpus_no_value_covers_everything(problems: int = 45, seed: int = 11) -> pd.DataFrame:
+def _corpus_no_value_covers_everything(
+    problems: int = 45, seed: int = 11
+) -> pd.DataFrame:
     """A knob that genuinely varies within every problem, yet cannot be pinned.
 
     Each problem was built with two of the three tile values, rotating, so every problem
@@ -399,7 +403,9 @@ def test_a_field_the_pack_pinned_is_told_apart_from_one_the_graph_binds():
     differently. The gfx942 pack has exactly this shape: waves_per_eu and persistent
     vary within 0 of its 664 geometries.
     """
-    ranked = {r["short_name"]: r for r in rank_knobs(analyse_knobs(_corpus_with_geometry()))}
+    ranked = {
+        r["short_name"]: r for r in rank_knobs(analyse_knobs(_corpus_with_geometry()))
+    }
 
     assert ranked["head_size"]["verdict"] == "MATCHED"
     assert ranked["head_size"]["graph_bound"] is True

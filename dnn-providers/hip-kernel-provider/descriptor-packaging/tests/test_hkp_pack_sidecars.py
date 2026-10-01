@@ -201,7 +201,9 @@ class TestRejection:
         tree is the descriptor-side half of a path-traversal.
         """
         root = tmp_path / "src"
-        _write_json(root / "pack" / "heuristic.uhd.json", _model_uhd("../../outside.bin"))
+        _write_json(
+            root / "pack" / "heuristic.uhd.json", _model_uhd("../../outside.bin")
+        )
         (tmp_path.parent / "outside.bin").write_bytes(b"outside")
 
         with pytest.raises(HkpPackError, match="payload escapes the source root"):
@@ -214,7 +216,9 @@ class TestRejection:
         when the real fault is where they pointed.
         """
         root = tmp_path / "src"
-        _write_json(root / "pack" / "heuristic.uhd.json", _model_uhd("../../nowhere.bin"))
+        _write_json(
+            root / "pack" / "heuristic.uhd.json", _model_uhd("../../nowhere.bin")
+        )
 
         with pytest.raises(HkpPackError, match="payload escapes the source root"):
             load_flat_input(root, log=lambda *_: None)
@@ -229,7 +233,12 @@ class TestIntermediateStaging:
         inter_dir = tmp_path / "inter" / "gfx942"
 
         compile_intermediate(
-            flat, root, "gfx942", hipcc=None, inter_arch_dir=inter_dir, log=lambda *_: None
+            flat,
+            root,
+            "gfx942",
+            hipcc=None,
+            inter_arch_dir=inter_dir,
+            log=lambda *_: None,
         )
 
         assert (inter_dir / "pack" / "heuristic.uhd.json").is_file()
@@ -250,7 +259,12 @@ class TestIntermediateStaging:
         inter_dir = tmp_path / "inter" / "gfx942"
 
         compile_intermediate(
-            flat, root, "gfx942", hipcc=None, inter_arch_dir=inter_dir, log=lambda *_: None
+            flat,
+            root,
+            "gfx942",
+            hipcc=None,
+            inter_arch_dir=inter_dir,
+            log=lambda *_: None,
         )
 
         # Staged where `../shared/model.bin` still reaches it from the UHD.
@@ -258,7 +272,16 @@ class TestIntermediateStaging:
         assert not (inter_dir / "rocKE" / "attn" / "model.bin").exists()
 
 
-@pytest.mark.parametrize("missing", ["objective", "features_signature", "features_hash", "trained_against", "tree_data"])
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "objective",
+        "features_signature",
+        "features_hash",
+        "trained_against",
+        "tree_data",
+    ],
+)
 def test_feature_models_require_complete_headers_before_packaging(tmp_path, missing):
     root = _root_with_model_uhd(tmp_path)
     doc = _model_uhd("model.bin")
@@ -287,11 +310,16 @@ def test_custom_library_uses_library_and_carries_the_shared_object(tmp_path):
 
 def test_explicit_semantic_revision_does_not_change_format_admission(tmp_path):
     root = tmp_path / "src"
-    _write_json(root / "metadata.kmd.json", {
-        "version": "1.0", "revision": "12.34",
-        "id": "799a8b19-8e34-4f74-86d6-b6495a6483f3", "name": "metadata",
-        "fields": [{"name": "block_size", "type": "int"}],
-    })
+    _write_json(
+        root / "metadata.kmd.json",
+        {
+            "version": "1.0",
+            "revision": "12.34",
+            "id": "799a8b19-8e34-4f74-86d6-b6495a6483f3",
+            "name": "metadata",
+            "fields": [{"name": "block_size", "type": "int"}],
+        },
+    )
     flat = load_flat_input(root, log=lambda *_: None)
     assert flat.descriptors[0].doc["revision"] == "12.34"
     doc = _native_uhd()
@@ -304,20 +332,42 @@ def test_explicit_semantic_revision_does_not_change_format_admission(tmp_path):
 def _canonical_uhd_validator():
     """The published schema, which the runtime loader (UhdParser.hpp) mirrors."""
     jsonschema = pytest.importorskip("jsonschema")
-    schema_path = next(parent / "projects/hipdnn/plugin_sdk/schemas/uhd.schema.json"
-                       for parent in Path(__file__).resolve().parents
-                       if (parent / "projects/hipdnn/plugin_sdk/schemas/uhd.schema.json").is_file())
-    return jsonschema.Draft7Validator(json.loads(schema_path.read_text(encoding="utf-8")))
+    schema_path = next(
+        parent / "projects/hipdnn/plugin_sdk/schemas/uhd.schema.json"
+        for parent in Path(__file__).resolve().parents
+        if (parent / "projects/hipdnn/plugin_sdk/schemas/uhd.schema.json").is_file()
+    )
+    return jsonschema.Draft7Validator(
+        json.loads(schema_path.read_text(encoding="utf-8"))
+    )
 
 
-@pytest.mark.parametrize("mutation", [
-    "valid", "missing_objective", "missing_provenance", "legacy_provenance",
-    "wrong_body", "two_bodies", "legacy_derived", "bare_feature", "empty_feature",
-    "invalid_hash", "unknown_header", "unsupported_format",
-    "tflops_metric", "time_metric", "legacy_units", "unregistered_metric",
-    "calibrated_without_metric", "metric_objective_mismatch",
-    "feature_semantics", "feature_semantics_zero", "feature_semantics_text",
-])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "valid",
+        "missing_objective",
+        "missing_provenance",
+        "legacy_provenance",
+        "wrong_body",
+        "two_bodies",
+        "legacy_derived",
+        "bare_feature",
+        "empty_feature",
+        "invalid_hash",
+        "unknown_header",
+        "unsupported_format",
+        "tflops_metric",
+        "time_metric",
+        "legacy_units",
+        "unregistered_metric",
+        "calibrated_without_metric",
+        "metric_objective_mismatch",
+        "feature_semantics",
+        "feature_semantics_zero",
+        "feature_semantics_text",
+    ],
+)
 def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation):
     validator = _canonical_uhd_validator()
     doc = _model_uhd("model.bin")
@@ -396,7 +446,9 @@ def test_schema_admits_the_extension_namespaces_the_loader_ignores():
     doc["trained_against"]["_run"] = 17
     doc["tree_data"]["x-bytes"] = 2048
 
-    assert validator.is_valid(doc), [error.message for error in validator.iter_errors(doc)]
+    assert validator.is_valid(doc), [
+        error.message for error in validator.iter_errors(doc)
+    ]
 
     # The reserved namespaces are what make the closed schema affordable, not a hole in it:
     # a name in neither namespace is still refused, at the root and nested alike.
@@ -424,7 +476,9 @@ def test_packaging_refuses_static_order_criteria(tmp_path):
     root = tmp_path / "src"
     _write_json(root / "order.uhd.json", _static_order_uhd({}))
     load_flat_input(root, log=lambda *_: None)
-    _write_json(root / "order.uhd.json", _static_order_uhd({"order": ["priority", "id"]}))
+    _write_json(
+        root / "order.uhd.json", _static_order_uhd({"order": ["priority", "id"]})
+    )
     with pytest.raises(HkpPackError, match="static_order.order is not supported"):
         load_flat_input(root, log=lambda *_: None)
 
@@ -432,7 +486,9 @@ def test_packaging_refuses_static_order_criteria(tmp_path):
 def test_schema_refuses_static_order_criteria():
     validator = _canonical_uhd_validator()
     empty = _static_order_uhd({"x-note": "extension keys stay legal"})
-    assert validator.is_valid(empty), [error.message for error in validator.iter_errors(empty)]
+    assert validator.is_valid(empty), [
+        error.message for error in validator.iter_errors(empty)
+    ]
     assert not validator.is_valid(_static_order_uhd({"order": ["priority", "id"]}))
 
 
@@ -446,21 +502,29 @@ def test_schema_ties_the_objective_to_the_score_metric():
     doc["score"] = {"metric": "tflops", "calibrated": True}
 
     doc["objective"] = "max"
-    assert validator.is_valid(doc), [error.message for error in validator.iter_errors(doc)]
+    assert validator.is_valid(doc), [
+        error.message for error in validator.iter_errors(doc)
+    ]
     doc["objective"] = "min"
     assert not validator.is_valid(doc)
 
     doc["score"] = {"metric": "time", "calibrated": False}
-    assert validator.is_valid(doc), [error.message for error in validator.iter_errors(doc)]
+    assert validator.is_valid(doc), [
+        error.message for error in validator.iter_errors(doc)
+    ]
     doc["objective"] = "max"
     assert not validator.is_valid(doc)
 
     # A metric-less ordering is legal in either direction and needs no trainer-side
     # negation (§4.1's `objective` row).
     doc["score"] = {"calibrated": False}
-    assert validator.is_valid(doc), [error.message for error in validator.iter_errors(doc)]
+    assert validator.is_valid(doc), [
+        error.message for error in validator.iter_errors(doc)
+    ]
     doc["objective"] = "min"
-    assert validator.is_valid(doc), [error.message for error in validator.iter_errors(doc)]
+    assert validator.is_valid(doc), [
+        error.message for error in validator.iter_errors(doc)
+    ]
 
 
 def test_schema_requires_the_signature_a_categorical_encoding_encodes():
@@ -477,7 +541,9 @@ def test_schema_requires_the_signature_a_categorical_encoding_encodes():
     doc["features_signature"] = ["$kernel.layout"]
     doc["features_hash"] = "sha256:" + "0" * 16
     doc["trained_against"] = {"selector_revision": "hkp-2026.09"}
-    assert validator.is_valid(doc), [error.message for error in validator.iter_errors(doc)]
+    assert validator.is_valid(doc), [
+        error.message for error in validator.iter_errors(doc)
+    ]
 
 
 def _metric_uhd(identity: str, metric: str | None) -> dict:
@@ -500,9 +566,15 @@ def _root_with_roles(tmp_path: Path, main_fixture: Path, **roles) -> Path:
     """The main fixture with extra per-metric UHDs, its UED's roles overridden by @p roles."""
     root = tmp_path / "src"
     shutil.copytree(main_fixture, root)
-    for identity, metric in ((_TFLOPS_ID, "tflops"), (_TIME_ID, "time"),
-                             (_OTHER_TFLOPS_ID, "tflops"), (_ORDERING_ID, None)):
-        _write_json(root / f"model_{identity[:3]}.uhd.json", _metric_uhd(identity, metric))
+    for identity, metric in (
+        (_TFLOPS_ID, "tflops"),
+        (_TIME_ID, "time"),
+        (_OTHER_TFLOPS_ID, "tflops"),
+        (_ORDERING_ID, None),
+    ):
+        _write_json(
+            root / f"model_{identity[:3]}.uhd.json", _metric_uhd(identity, metric)
+        )
     ued_path = root / "pointwise.ued.json"
     ued = json.loads(ued_path.read_text(encoding="utf-8"))
     ued.update(roles)
@@ -510,10 +582,14 @@ def _root_with_roles(tmp_path: Path, main_fixture: Path, **roles) -> Path:
     return root
 
 
-def test_all_role_and_arch_models_remain_reachable_when_packaging(tmp_path, main_fixture):
+def test_all_role_and_arch_models_remain_reachable_when_packaging(
+    tmp_path, main_fixture
+):
     from hkp_pack.descriptors import reachable_generic_ids
+
     root = _root_with_roles(
-        tmp_path, main_fixture,
+        tmp_path,
+        main_fixture,
         # One model per metric: the list form, whose every entry must survive pruning.
         predict_engine={"gfx942": [_TFLOPS_ID, _TIME_ID]},
         predict_applicable_kernels={"default": _ORDERING_ID},
@@ -528,18 +604,35 @@ def test_all_role_and_arch_models_remain_reachable_when_packaging(tmp_path, main
     assert {original, _TFLOPS_ID, _TIME_ID, _OTHER_TFLOPS_ID, _ORDERING_ID} <= retained
 
 
-@pytest.mark.parametrize("roles, message", [
-    # RFC 0019 §3.1: at most one model per metric for an architecture, or the loader
-    # cannot choose and disables the metric there.
-    ({"sort_kernel_catalog": {"gfx942": [_TFLOPS_ID, _OTHER_TFLOPS_ID]}}, "metric 'tflops'"),
-    ({"predict_engine": {"default": [_TFLOPS_ID, _OTHER_TFLOPS_ID]}}, "metric 'tflops'"),
-    # At most one metric-less ranker, for the same reason.
-    ({"sort_kernel_catalog": {"default": ["bb58374f-2972-57b1-a9cb-c358bddef2e5",
-                                          _ORDERING_ID]}}, "no metric"),
-    # An engine prediction is a value in a registered metric's units, or nothing.
-    ({"predict_engine": {"gfx942": _ORDERING_ID}}, "declares no score.metric"),
-])
-def test_packaging_rejects_ambiguous_per_metric_models(tmp_path, main_fixture, roles, message):
+@pytest.mark.parametrize(
+    "roles, message",
+    [
+        # RFC 0019 §3.1: at most one model per metric for an architecture, or the loader
+        # cannot choose and disables the metric there.
+        (
+            {"sort_kernel_catalog": {"gfx942": [_TFLOPS_ID, _OTHER_TFLOPS_ID]}},
+            "metric 'tflops'",
+        ),
+        (
+            {"predict_engine": {"default": [_TFLOPS_ID, _OTHER_TFLOPS_ID]}},
+            "metric 'tflops'",
+        ),
+        # At most one metric-less ranker, for the same reason.
+        (
+            {
+                "sort_kernel_catalog": {
+                    "default": ["bb58374f-2972-57b1-a9cb-c358bddef2e5", _ORDERING_ID]
+                }
+            },
+            "no metric",
+        ),
+        # An engine prediction is a value in a registered metric's units, or nothing.
+        ({"predict_engine": {"gfx942": _ORDERING_ID}}, "declares no score.metric"),
+    ],
+)
+def test_packaging_rejects_ambiguous_per_metric_models(
+    tmp_path, main_fixture, roles, message
+):
     root = _root_with_roles(tmp_path, main_fixture, **roles)
     with pytest.raises(HkpPackError, match=message):
         load_flat_input(root, log=lambda *_: None)
@@ -549,36 +642,56 @@ def test_one_metric_per_architecture_is_per_architecture(tmp_path, main_fixture)
     """The same metric under two architecture keys is two models for two devices, not a
     collision: uniqueness is per (architecture, metric)."""
     root = _root_with_roles(
-        tmp_path, main_fixture,
+        tmp_path,
+        main_fixture,
         predict_engine={"gfx942": _TFLOPS_ID, "gfx950": [_OTHER_TFLOPS_ID, _TIME_ID]},
     )
     load_flat_input(root, log=lambda *_: None)
 
 
-@pytest.mark.parametrize("legacy", [
-    {"heuristic": "233a8b19-8e34-4f74-86d6-b6495a6483f3"},
-    {"sort_kernel_catalog": "233a8b19-8e34-4f74-86d6-b6495a6483f3"},
-])
+@pytest.mark.parametrize(
+    "legacy",
+    [
+        {"heuristic": "233a8b19-8e34-4f74-86d6-b6495a6483f3"},
+        {"sort_kernel_catalog": "233a8b19-8e34-4f74-86d6-b6495a6483f3"},
+    ],
+)
 def test_packaging_rejects_legacy_heuristic_spellings(tmp_path, legacy):
     root = tmp_path / "src"
-    _write_json(root / "engine.ued.json", {
-        "version": "1.0", "id": "699a8b19-8e34-4f74-86d6-b6495a6483f3",
-        "name": "test:engine", **legacy,
-    })
+    _write_json(
+        root / "engine.ued.json",
+        {
+            "version": "1.0",
+            "id": "699a8b19-8e34-4f74-86d6-b6495a6483f3",
+            "name": "test:engine",
+            **legacy,
+        },
+    )
     with pytest.raises(HkpPackError):
         load_flat_input(root, log=lambda *_: None)
 
 
-@pytest.mark.parametrize("roles, message", [
-    # Renamed to `predict_engine`; the old spelling is an unknown key, not an alias.
-    ({"predict_engine_tflops": {"gfx942": _TFLOPS_ID}}, "unknown fields"),
-    ({"predict_engine": {"gfx942": []}}, "nonempty list"),
-    ({"sort_kernel_catalog": {"gfx942": [_TFLOPS_ID, _TFLOPS_ID.upper()]}}, "twice"),
-    ({"predict_engine": {"gfx942": [_TFLOPS_ID, "not-a-uuid"]}}, "requires a UUID"),
-    # A candidate generator has no metric to key a list on (RFC 0019 §3.1).
-    ({"predict_applicable_kernels": {"default": [_ORDERING_ID]}}, "requires a UUID"),
-])
-def test_packaging_rejects_malformed_role_values(tmp_path, main_fixture, roles, message):
+@pytest.mark.parametrize(
+    "roles, message",
+    [
+        # Renamed to `predict_engine`; the old spelling is an unknown key, not an alias.
+        ({"predict_engine_tflops": {"gfx942": _TFLOPS_ID}}, "unknown fields"),
+        ({"predict_engine": {"gfx942": []}}, "nonempty list"),
+        (
+            {"sort_kernel_catalog": {"gfx942": [_TFLOPS_ID, _TFLOPS_ID.upper()]}},
+            "twice",
+        ),
+        ({"predict_engine": {"gfx942": [_TFLOPS_ID, "not-a-uuid"]}}, "requires a UUID"),
+        # A candidate generator has no metric to key a list on (RFC 0019 §3.1).
+        (
+            {"predict_applicable_kernels": {"default": [_ORDERING_ID]}},
+            "requires a UUID",
+        ),
+    ],
+)
+def test_packaging_rejects_malformed_role_values(
+    tmp_path, main_fixture, roles, message
+):
     root = _root_with_roles(tmp_path, main_fixture, **roles)
     with pytest.raises(HkpPackError, match=message):
         load_flat_input(root, log=lambda *_: None)

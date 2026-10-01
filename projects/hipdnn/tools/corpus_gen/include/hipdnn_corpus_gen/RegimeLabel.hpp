@@ -43,7 +43,7 @@ namespace hipdnn_corpus_gen
 /// a problem, and reporting one population as another is worse than falling through to the
 /// axis' declared `otherwise`.
 inline std::vector<std::pair<std::string, std::string>>
-regimeFacets(const std::vector<RegimeAxis>& axes, const ProblemPoint& point)
+    regimeFacets(const std::vector<RegimeAxis>& axes, const ProblemPoint& point)
 {
     const auto context = detail::contextFor(point);
 

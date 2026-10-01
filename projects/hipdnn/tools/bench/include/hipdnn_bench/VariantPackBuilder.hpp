@@ -42,17 +42,20 @@ inline int64_t elementBits(hipdnn_frontend::DataType dataType)
     {
     case DataType::DOUBLE:
     case DataType::INT64:
-    case DataType::COMPLEX_FP32: return 64;
+    case DataType::COMPLEX_FP32:
+        return 64;
 
     case DataType::FLOAT:
     case DataType::INT32:
     // Four packed 8-bit values addressed as one element.
     case DataType::INT8x4:
     case DataType::UINT8x4:
-    case DataType::FAST_FLOAT_FOR_FP8: return 32;
+    case DataType::FAST_FLOAT_FOR_FP8:
+        return 32;
 
     case DataType::HALF:
-    case DataType::BFLOAT16: return 16;
+    case DataType::BFLOAT16:
+        return 16;
 
     case DataType::INT8:
     case DataType::UINT8:
@@ -61,19 +64,25 @@ inline int64_t elementBits(hipdnn_frontend::DataType dataType)
     case DataType::FP8_E5M2:
     case DataType::FP8_E8M0:
     case DataType::FP8_E4M3_FNUZ:
-    case DataType::FP8_E5M2_FNUZ: return 8;
+    case DataType::FP8_E5M2_FNUZ:
+        return 8;
 
     case DataType::FP6_E2M3:
-    case DataType::FP6_E3M2: return 6;
+    case DataType::FP6_E3M2:
+        return 6;
 
     case DataType::FP4_E2M1:
-    case DataType::INT4: return 4;
+    case DataType::INT4:
+        return 4;
 
-    case DataType::COMPLEX_FP64: return 128;
-    case DataType::INT8x32: return 256;
+    case DataType::COMPLEX_FP64:
+        return 128;
+    case DataType::INT8x32:
+        return 256;
 
     case DataType::NOT_SET:
-    default: return 0;
+    default:
+        return 0;
     }
 }
 

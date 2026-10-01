@@ -229,7 +229,7 @@ else
 fi
 
 step "engines this build ships"
-"$LIST_ENGINES" --plugin-dir "$PLUGIN_DIR" 2>&1 | tee "$OUT/engines.log" | grep -E "^  \S+ \(0x" 
+"$LIST_ENGINES" --plugin-dir "$PLUGIN_DIR" 2>&1 | tee "$OUT/engines.log" | grep -E "^  \S+ \(0x"
 ENGINE_HEX=$(grep -F "$ENGINE (" "$OUT/engines.log" | head -1 | sed -E 's/.*\((0x[0-9a-fA-F]+)\).*/\1/')
 [ -n "$ENGINE_HEX" ] || { echo "FATAL: engine $ENGINE is not registered"; exit 1; }
 ENGINE_ID=$(python3 -c "v=int('$ENGINE_HEX',16); print(v-(1<<64) if v>=(1<<63) else v)")

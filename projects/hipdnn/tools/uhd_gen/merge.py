@@ -113,7 +113,12 @@ def merge_corpora(paths: list[Path]) -> tuple[pd.DataFrame, dict]:
             else 0
         )
         per_file.append(
-            {"path": str(path), "rows": int(len(frame)), "devices": devices, "problems": problems}
+            {
+                "path": str(path),
+                "rows": int(len(frame)),
+                "devices": devices,
+                "problems": problems,
+            }
         )
         frames.append(frame)
 
@@ -146,7 +151,9 @@ def merge_corpora(paths: list[Path]) -> tuple[pd.DataFrame, dict]:
             if BENCHMARK_COLUMN in merged.columns
             else 0
         ),
-        "repeated_devices": {device: files for device, files in sorted(repeated.items())},
+        "repeated_devices": {
+            device: files for device, files in sorted(repeated.items())
+        },
     }
     return merged, report
 
@@ -189,8 +196,10 @@ def run_merge(args: argparse.Namespace) -> int:
             f"  {entry['rows']:>10,}  {entry['problems']:>9,}  "
             f"{len(entry['devices']):>7}  {entry['path']}"
         )
-    print(f"  {report['rows']:>10,}  {report['problems']:>9,}  "
-          f"{len(report['devices']):>7}  TOTAL")
+    print(
+        f"  {report['rows']:>10,}  {report['problems']:>9,}  "
+        f"{len(report['devices']):>7}  TOTAL"
+    )
     # The identities themselves, because a merged corpus that turned out to hold one
     # board is the failure this command exists to make visible.
     print(f"\n  device identities: {', '.join(report['devices'])}")

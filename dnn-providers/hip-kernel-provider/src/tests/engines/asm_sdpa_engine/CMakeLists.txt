@@ -49,6 +49,9 @@ set(_hkp_asm_engine_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../engines/asm_sdpa_e
 cmake_path(NORMAL_PATH _hkp_asm_engine_dir)
 include("${_hkp_asm_engine_dir}/AsmSdpaSelectorRevision.cmake")
 
+# cmake-lint: disable=E1126
+# cmake-lint carries no form spec for file(COPY_FILE) or file(CONFIGURE) and reports them
+# as invalid discriminators. Both are valid CMake (3.21 and 3.18); the floor here is 3.25.
 set(_hkp_asm_lf "${CMAKE_CURRENT_BINARY_DIR}/selector_revision/lf")
 set(_hkp_asm_crlf "${CMAKE_CURRENT_BINARY_DIR}/selector_revision/crlf")
 file(REMOVE_RECURSE "${CMAKE_CURRENT_BINARY_DIR}/selector_revision")
@@ -80,11 +83,11 @@ endforeach()
 hkp_asm_sdpa_fwd_revision(_hkp_asm_rev_lf "${_hkp_asm_lf}")
 hkp_asm_sdpa_fwd_revision(_hkp_asm_rev_crlf "${_hkp_asm_crlf}")
 
+set(_hkp_asm_probe_rows "")
 # One probe: apply <change> to <rel> in the LF tree, take the revision, undo it, and record
 # a table row asserting whether the revision had to move. EDIT appends a line to an
 # existing text file; ADD creates <rel>. The undo restores the exact bytes from a copy kept
 # outside the tree (file(WRITE) would rewrite the line endings on Windows).
-set(_hkp_asm_probe_rows "")
 function(_hkp_asm_revision_probe _change _rel _must_expire)
     set(_path "${_hkp_asm_lf}/${_rel}")
     set(_saved "${CMAKE_CURRENT_BINARY_DIR}/selector_revision/probe_original")

@@ -6,8 +6,8 @@
 #include <hipdnn_corpus_gen/ProblemSpace.hpp>
 
 #include <algorithm>
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <set>
 #include <string>
@@ -119,8 +119,8 @@ inline std::map<std::string, int64_t> allocate(int64_t count,
     int64_t assigned = 0;
     for(const auto& entry : capacity)
     {
-        const auto wanted = static_cast<int64_t>(static_cast<double>(count)
-                                                 * shareOf(entry.first) / total);
+        const auto wanted
+            = static_cast<int64_t>(static_cast<double>(count) * shareOf(entry.first) / total);
         allocation[entry.first] = std::min(entry.second, wanted);
         assigned += allocation[entry.first];
     }
@@ -292,8 +292,8 @@ inline std::vector<PoolEntry> select(const SourcePools& pools,
         const auto found = pools.find(source);
         // Every pool is spread before it is cut, not only the model pool: a pack or a search
         // arrives in its own order, and taking a prefix of that keeps whatever came first.
-        ordered[source] = detail::spread(
-            found == pools.end() ? std::vector<PoolEntry>{} : found->second);
+        ordered[source]
+            = detail::spread(found == pools.end() ? std::vector<PoolEntry>{} : found->second);
         capacity[source] = static_cast<int64_t>(ordered[source].size());
     }
 
@@ -304,8 +304,9 @@ inline std::vector<PoolEntry> select(const SourcePools& pools,
     {
         const auto& pool = ordered[source];
         const auto take = static_cast<size_t>(std::max<int64_t>(0, allocation[source]));
-        selected.insert(selected.end(), pool.begin(), pool.begin() + static_cast<ptrdiff_t>(
-                                                          std::min(take, pool.size())));
+        selected.insert(selected.end(),
+                        pool.begin(),
+                        pool.begin() + static_cast<ptrdiff_t>(std::min(take, pool.size())));
     }
     return selected;
 }

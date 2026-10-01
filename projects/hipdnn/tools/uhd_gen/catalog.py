@@ -89,7 +89,9 @@ class CatalogDensity:
             "max_candidates": self.max_candidates,
             "deterministic": self.deterministic,
             # JSON object keys are strings; the histogram is emitted into the report.
-            "histogram": {str(key): value for key, value in sorted(self.histogram.items())},
+            "histogram": {
+                str(key): value for key, value in sorted(self.histogram.items())
+            },
             "grouped_by": list(self.grouping.columns) if self.grouping else None,
         }
 

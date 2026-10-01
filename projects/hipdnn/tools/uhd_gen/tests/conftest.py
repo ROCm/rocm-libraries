@@ -60,13 +60,20 @@ def evaluator_reporting(evaluator, tmp_path):
         stem = tmp_path / f"evaluator_{len(made)}"
         made.append(revision)
         script = stem.with_suffix(".py")
-        script.write_text(_REPORTING_EVALUATOR.format(real=evaluator, revision=revision), encoding="utf-8")
+        script.write_text(
+            _REPORTING_EVALUATOR.format(real=evaluator, revision=revision),
+            encoding="utf-8",
+        )
         if os.name == "nt":
             wrapper = stem.with_suffix(".cmd")
             wrapper.write_text(f'@"{sys.executable}" "{script}" %*\n', encoding="utf-8")
         else:
             wrapper = stem
-            wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n', encoding="utf-8")
+            wrapper.write_text(
+                f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n',
+                encoding="utf-8",
+            )
             wrapper.chmod(0o755)
         return str(wrapper)
+
     return make

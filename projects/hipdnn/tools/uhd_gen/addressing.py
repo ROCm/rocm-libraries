@@ -70,7 +70,8 @@ def observe(candidates, table: dict | None = None) -> dict:
                 raise ValueError(
                     f"knob {name!r} ordinal {pinned} addressed {known!r} and then {observed!r}; "
                     "the engine's numbering changed during collection, so rows recorded "
-                    "before the change no longer address the kernels they measured")
+                    "before the change no longer address the kernels they measured"
+                )
             entry[pinned] = observed
     return table
 
@@ -108,8 +109,13 @@ def as_manifest(table: dict) -> dict:
     for name, entry in sorted(table.items()):
         manifest[name] = {
             "ordinal": is_ordinal(table, name),
-            "values": [{"pin": pin, "value": list(value) if isinstance(value, tuple) else value}
-                       for pin, value in sorted(entry.items())],
+            "values": [
+                {
+                    "pin": pin,
+                    "value": list(value) if isinstance(value, tuple) else value,
+                }
+                for pin, value in sorted(entry.items())
+            ],
         }
     return manifest
 

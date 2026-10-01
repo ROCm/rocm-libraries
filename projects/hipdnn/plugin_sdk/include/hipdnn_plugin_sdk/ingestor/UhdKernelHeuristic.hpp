@@ -415,8 +415,8 @@ public:
             {
                 HIPDNN_PLUGIN_LOG_ERROR(
                     "uhd: " << describedBy << " model expects " << adapter->expectedFeatureCount()
-                            << " features, its signature "
-                            << "produces " << extractor->featureCount()
+                            << " features, its signature " << "produces "
+                            << extractor->featureCount()
                             << "; the model is not used and kernels rank by priority, then id");
                 return nullptr;
             }
@@ -676,8 +676,8 @@ public:
         // added without it, so a selection that fell through for want of an architecture was
         // the one degradation the trace could not account for.
         HIPDNN_PLUGIN_LOG_INFO("uhd trace: " << _describedBy << " decided_by=declared_order"
-                                             << " reason=no_model_for_arch"
-                                             << " metric=" << metric << " arch=" << arch
+                                             << " reason=no_model_for_arch" << " metric=" << metric
+                                             << " arch=" << arch
                                              << " candidates=" << catalog.entries.size());
         return detail::asScored(detail::declaredOrder(catalog.entries));
     }
@@ -1015,13 +1015,12 @@ private:
             // synonym. A degraded ranking is a degraded ranking however it got there; `reason`
             // carries the difference. Two spellings for one condition is what makes a trace
             // unassertable, and unassertable observability is the thing §12 is trying to avoid.
-            HIPDNN_PLUGIN_LOG_INFO("uhd trace: " << _describedBy << " decided_by=declared_order"
-                                                 << " reason=ranking_failed"
-                                                 << " metric=" << context.rankingMetric
-                                                 << " candidates=" << catalog.entries.size()
-                                                 << " uhd=" << _config.uhdId
-                                                 << " adapter=" << _config.adapterType
-                                                 << " features_hash=" << _config.featuresHash);
+            HIPDNN_PLUGIN_LOG_INFO(
+                "uhd trace: " << _describedBy << " decided_by=declared_order"
+                              << " reason=ranking_failed" << " metric=" << context.rankingMetric
+                              << " candidates=" << catalog.entries.size()
+                              << " uhd=" << _config.uhdId << " adapter=" << _config.adapterType
+                              << " features_hash=" << _config.featuresHash);
             // Declared order carries no model score. It reports 0 -- RFC 0019 §5 step 7's
             // value for "no measurement" -- so a degraded ranking and a model that scored zero
             // describe themselves the same way, which is what lets calibratedRanking apply one

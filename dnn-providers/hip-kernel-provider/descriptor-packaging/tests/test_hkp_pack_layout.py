@@ -1173,7 +1173,11 @@ def test_example_tree_cross_references_resolve_to_the_right_types():
     ueds = 0
     for path in EXAMPLE_ROOT.rglob("*.ued.json"):
         doc = _read(path)
-        for role in ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels"):
+        for role in (
+            "sort_kernel_catalog",
+            "predict_engine",
+            "predict_applicable_kernels",
+        ):
             for value in doc.get(role, {}).values():
                 # The scoring roles take one id or a list of them, one per metric.
                 for ref in [value] if isinstance(value, str) else value:
@@ -1296,8 +1300,14 @@ def test_a_model_uhds_artifact_reaches_the_shipped_tree(
                 "features_signature": ["$kernel.block_size"],
                 "features_hash": "sha256:" + "0" * 16,
                 "trained_against": {
-                    "ued": {"id": "699a8b19-8e34-4f74-86d6-b6495a6483f3", "revision": "1.0"},
-                    "kmd": {"id": "799a8b19-8e34-4f74-86d6-b6495a6483f3", "revision": "1.0"},
+                    "ued": {
+                        "id": "699a8b19-8e34-4f74-86d6-b6495a6483f3",
+                        "revision": "1.0",
+                    },
+                    "kmd": {
+                        "id": "799a8b19-8e34-4f74-86d6-b6495a6483f3",
+                        "revision": "1.0",
+                    },
                     "umd": [],
                 },
                 "objective": "max",

@@ -212,14 +212,14 @@ TEST(TestOperationMetadata, ReadsDeclaredTensorContents)
     // so the contents are part of the problem specification.
     auto metadata = layernormMetadata();
     metadata["parameters"]["num_experts"] = {{"type", "int64"}};
-    metadata["parameters"]["skew"]
-        = {{"type", "enum"}, {"values", {"uniform", "imbalanced"}}};
-    metadata["variant_pack"] = nlohmann::json::array(
-        {{{"tensor", "first_token_offset"},
-          {"fill", "routing_offsets"},
-          {"arguments", {"$q.num_experts", "$q.skew"}}},
-         {{"tensor", "token_index"}, {"fill", "expert_assignment"},
-          {"arguments", {"$q.num_experts"}}}});
+    metadata["parameters"]["skew"] = {{"type", "enum"}, {"values", {"uniform", "imbalanced"}}};
+    metadata["variant_pack"]
+        = nlohmann::json::array({{{"tensor", "first_token_offset"},
+                                  {"fill", "routing_offsets"},
+                                  {"arguments", {"$q.num_experts", "$q.skew"}}},
+                                 {{"tensor", "token_index"},
+                                  {"fill", "expert_assignment"},
+                                  {"arguments", {"$q.num_experts"}}}});
 
     const auto load = parseOperationMetadata(metadata);
 
@@ -236,8 +236,8 @@ TEST(TestOperationMetadata, RefusesAnUnknownFillRatherThanDefaultingToZeros)
     // declaration exists to prevent: the benchmark still runs, still produces a time, and the
     // time describes a routing the corpus never asked for.
     auto metadata = layernormMetadata();
-    metadata["variant_pack"] = nlohmann::json::array(
-        {{{"tensor", "x"}, {"fill", "gaussian_with_outliers"}}});
+    metadata["variant_pack"]
+        = nlohmann::json::array({{{"tensor", "x"}, {"fill", "gaussian_with_outliers"}}});
 
     const auto load = parseOperationMetadata(metadata);
 
@@ -297,11 +297,16 @@ TEST(TestOperationMetadata, ExpressesAConvolutionsOutputExtent)
     ASSERT_TRUE(metadata.ok()) << (metadata.errors.empty() ? "" : metadata.errors.front());
 
     // 224 + 2*3 - 1*(7-1) - 1 = 223; 223/2 = 111; + 1 = 112. ResNet50 conv1.
-    const ProblemPoint resnetConv1{{"N", int64_t{64}},   {"C", int64_t{3}},
-                                   {"K", int64_t{64}},   {"H", int64_t{224}},
-                                   {"W", int64_t{224}},  {"R", int64_t{7}},
-                                   {"S", int64_t{7}},    {"pad_h", int64_t{3}},
-                                   {"stride_h", int64_t{2}}, {"dilation_h", int64_t{1}},
+    const ProblemPoint resnetConv1{{"N", int64_t{64}},
+                                   {"C", int64_t{3}},
+                                   {"K", int64_t{64}},
+                                   {"H", int64_t{224}},
+                                   {"W", int64_t{224}},
+                                   {"R", int64_t{7}},
+                                   {"S", int64_t{7}},
+                                   {"pad_h", int64_t{3}},
+                                   {"stride_h", int64_t{2}},
+                                   {"dilation_h", int64_t{1}},
                                    {"dtype", std::string("fp16")}};
 
     const auto resolved = resolveArguments(metadata.metadata->graphBuilder, resnetConv1);
@@ -394,10 +399,9 @@ TEST(TestOperationMetadata, AConstantIsTypedAgainstItsParameterAtLoad)
     EXPECT_NE(wrongType(R"({"metadata": {"batch": "batch"}, "constants": {"scale": "half"}})")
                   .find("not a number"),
               std::string::npos);
-    EXPECT_NE(
-        wrongType(R"({"metadata": {"batch": "batch"}, "constants": {"alignment": "middle"}})")
-            .find("not one of its declared values"),
-        std::string::npos);
+    EXPECT_NE(wrongType(R"({"metadata": {"batch": "batch"}, "constants": {"alignment": "middle"}})")
+                  .find("not one of its declared values"),
+              std::string::npos);
 
     // And the well-typed ones survive with their declared types intact.
     const auto load = parseOperationMetadata(catalogMetadata(nlohmann::json::parse(R"({

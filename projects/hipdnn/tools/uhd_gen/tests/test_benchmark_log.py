@@ -116,7 +116,10 @@ class TestExtraction:
 
         convert([log], tmp_path / "out.csv")
 
-        assert [row["kernel"] for row in _read_csv(tmp_path / "out.csv")] == ["k1", "k2"]
+        assert [row["kernel"] for row in _read_csv(tmp_path / "out.csv")] == [
+            "k1",
+            "k2",
+        ]
 
     def test_a_severity_prefix_does_not_hide_the_record(self, tmp_path: Path):
         """The sink prepends a timestamp and level; the object starts mid-line."""
@@ -221,8 +224,11 @@ class TestFeatureColumns:
                     "g",
                     "k1",
                     0.02,
-                    features={"q.seqlen": 512, "kernel.tile_m": 128,
-                              "kernel.dtype": "fp16"},
+                    features={
+                        "q.seqlen": 512,
+                        "kernel.tile_m": 128,
+                        "kernel.dtype": "fp16",
+                    },
                 )
             ],
         )
@@ -308,9 +314,7 @@ class TestFeatureColumns:
         assert row["q.seqlen"] == "512"
         assert row["kernel.tile_m"] == "64"
 
-    def test_the_envelope_columns_are_never_mistaken_for_features(
-        self, tmp_path: Path
-    ):
+    def test_the_envelope_columns_are_never_mistaken_for_features(self, tmp_path: Path):
         """`kernel` is identity; `kernel.dtype` is a feature. One dot apart.
 
         `device` is the same pairing: the dotless envelope column naming which GPU
@@ -369,7 +373,10 @@ class TestDeviceIdentity:
     def test_the_device_reaches_the_row_that_was_measured_on_it(self, tmp_path: Path):
         log = _write_log(
             tmp_path / "sweep.log",
-            [_ok("g", "k1", 0.02, device="dev-a"), _ok("g", "k1", 0.05, device="dev-b")],
+            [
+                _ok("g", "k1", 0.02, device="dev-a"),
+                _ok("g", "k1", 0.05, device="dev-b"),
+            ],
         )
 
         convert([log], tmp_path / "out.csv")
@@ -397,7 +404,10 @@ class TestDeviceIdentity:
     def test_one_graph_on_two_devices_counts_as_two_problems(self, tmp_path: Path):
         log = _write_log(
             tmp_path / "sweep.log",
-            [_ok("g", "k1", 0.02, device="dev-a"), _ok("g", "k1", 0.05, device="dev-b")],
+            [
+                _ok("g", "k1", 0.02, device="dev-a"),
+                _ok("g", "k1", 0.05, device="dev-b"),
+            ],
         )
 
         stats = convert([log], tmp_path / "out.csv")
@@ -464,7 +474,9 @@ class TestProvenance:
 
 
 class TestCli:
-    def test_an_empty_log_is_an_error_that_names_the_cause(self, tmp_path: Path, caplog):
+    def test_an_empty_log_is_an_error_that_names_the_cause(
+        self, tmp_path: Path, caplog
+    ):
         """The overwhelmingly likely cause is forgetting HIPDNN_LOG_LEVEL.
 
         Silently writing a header-only CSV would send someone to debug their

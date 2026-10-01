@@ -35,8 +35,8 @@ namespace
 
 constexpr int64_t kOutputUid = 7;
 
-std::map<int64_t, hipdnn_bench::TensorDescription>
-    tensors(hipdnn_frontend::DataType dataType = hipdnn_frontend::DataType::FLOAT)
+std::map<int64_t, hipdnn_bench::TensorDescription> tensors(hipdnn_frontend::DataType dataType
+                                                           = hipdnn_frontend::DataType::FLOAT)
 {
     return {{kOutputUid, {"Y", dataType}}};
 }
@@ -174,8 +174,8 @@ TEST(TestNumericalValidation, NonFiniteOutputDisagreesWithAFiniteReference)
 {
     // A NaN fails every magnitude comparison it takes part in, so a candidate that produced
     // one would slip through a gate written as `abs(a - b) > tolerance` alone.
-    const auto verdicts = crossCheck(
-        {ran({1.0F, 2.0F}), ran({1.0F, 2.0F}), ran({1.0F, std::nanf("")})}, tensors());
+    const auto verdicts
+        = crossCheck({ran({1.0F, 2.0F}), ran({1.0F, 2.0F}), ran({1.0F, std::nanf("")})}, tensors());
 
     EXPECT_EQ(verdicts[2].verdict, NumericalVerdict::DISAGREED);
 }
@@ -219,8 +219,7 @@ TEST(TestNumericalValidation, ACandidateThatNeverRanNeitherJoinsNorSplitsACohort
     hipdnn_bench::CandidateOutput failed;
     failed.failure = "engine declined to build this configuration";
 
-    const auto verdicts
-        = crossCheck({ran({1.0F, 2.0F}), failed, ran({1.0F, 2.0F})}, tensors());
+    const auto verdicts = crossCheck({ran({1.0F, 2.0F}), failed, ran({1.0F, 2.0F})}, tensors());
 
     EXPECT_EQ(verdicts[0].verdict, NumericalVerdict::AGREED);
     EXPECT_EQ(verdicts[1].verdict, NumericalVerdict::UNKNOWN);
@@ -290,11 +289,11 @@ TEST(TestNumericalValidation, EveryCandidateOfAProblemReadsTheSameNonZeroInputs)
               hipdnn_bench::detail::inputFillImage(
                   DataType::FLOAT, kElements * sizeof(float), seed, kOutputUid + 1));
     EXPECT_NE(image,
-              hipdnn_bench::detail::inputFillImage(DataType::FLOAT,
-                                                   kElements * sizeof(float),
-                                                   hipdnn_bench::detail::graphFillSeed(
-                                                       {0x01, 0x02, 0x04}),
-                                                   kOutputUid));
+              hipdnn_bench::detail::inputFillImage(
+                  DataType::FLOAT,
+                  kElements * sizeof(float),
+                  hipdnn_bench::detail::graphFillSeed({0x01, 0x02, 0x04}),
+                  kOutputUid));
 
     // Every value is 1 or 2 in magnitude: exactly representable in every type the encoder
     // writes, and small enough that a reduction over a filled tensor does not reach fp16's
@@ -304,10 +303,10 @@ TEST(TestNumericalValidation, EveryCandidateOfAProblemReadsTheSameNonZeroInputs)
     ASSERT_EQ(halfImage.size(), kElements * sizeof(uint16_t));
     for(size_t index = 0; index < kElements; ++index)
     {
-        const double single = std::abs(hipdnn_bench::detail::decodeElement(
-            image, index, DataType::FLOAT));
-        const double half = std::abs(hipdnn_bench::detail::decodeElement(
-            halfImage, index, DataType::HALF));
+        const double single
+            = std::abs(hipdnn_bench::detail::decodeElement(image, index, DataType::FLOAT));
+        const double half
+            = std::abs(hipdnn_bench::detail::decodeElement(halfImage, index, DataType::HALF));
         EXPECT_TRUE(single == 1.0 || single == 2.0) << "element " << index << " is " << single;
         EXPECT_TRUE(half == 1.0 || half == 2.0) << "element " << index << " is " << half;
     }

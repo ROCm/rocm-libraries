@@ -257,8 +257,8 @@ inline double noveltyRadiusSquared(const std::vector<ShapeDimension>& dimensions
 ///
 /// k-centre over the observations, which is the practical stand-in for the centroidal Voronoi
 /// tessellation CVT-MAP-Elites uses to avoid a grid exponential in the parameter count.
-inline std::vector<std::vector<double>> buildCentroids(
-    const std::vector<std::vector<double>>& observed, size_t count)
+inline std::vector<std::vector<double>>
+    buildCentroids(const std::vector<std::vector<double>>& observed, size_t count)
 {
     std::vector<std::vector<double>> centroids;
     if(observed.empty())
@@ -368,10 +368,8 @@ public:
 
     size_t occupied() const
     {
-        return static_cast<size_t>(
-            std::count_if(_occupants.begin(), _occupants.end(), [](const auto& o) {
-                return o.has_value();
-            }));
+        return static_cast<size_t>(std::count_if(
+            _occupants.begin(), _occupants.end(), [](const auto& o) { return o.has_value(); }));
     }
 
     size_t cells() const
@@ -469,9 +467,8 @@ inline std::optional<Shape> hitAndRunStep(const ShapeOracle& oracle,
         Shape candidate(current.size());
         for(size_t d = 0; d < dimensions.size(); ++d)
         {
-            candidate[d] = fromLogFrom(position[d] + (t * direction[d]),
-                                       dimensions[d].low,
-                                       dimensions[d].high);
+            candidate[d] = fromLogFrom(
+                position[d] + (t * direction[d]), dimensions[d].low, dimensions[d].high);
         }
 
         if(candidate == current)
@@ -673,8 +670,7 @@ inline FeasibleShapeSet buildFeasibleShapeSet(const ShapeOracle& oracle,
     result.shapes = archive.contents();
     result.stats.cells = static_cast<int64_t>(archive.cells());
     result.stats.cellsOccupied = static_cast<int64_t>(archive.occupied());
-    result.stats.budgetExhausted
-        = static_cast<int64_t>(result.shapes.size()) < request.targetCount;
+    result.stats.budgetExhausted = static_cast<int64_t>(result.shapes.size()) < request.targetCount;
     return result;
 }
 

@@ -18,7 +18,11 @@ from hipdnn_flatbuffers_sdk.data_objects.GbdtGroup import GbdtGroupT  # noqa: E4
 from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModelT  # noqa: E402
 from hipdnn_flatbuffers_sdk.data_objects.GbdtTree import GbdtTreeT  # noqa: E402
 
-from uhd_gen.artifact import artifact_digest, is_grouped_tree, verify_tree_artifact  # noqa: E402
+from uhd_gen.artifact import (
+    artifact_digest,
+    is_grouped_tree,
+    verify_tree_artifact,
+)  # noqa: E402
 from uhd_gen.evaluate import load_model  # noqa: E402
 
 
@@ -61,9 +65,16 @@ def test_a_buffer_the_runtime_does_not_identify_as_a_gbdt_model_is_refused(tmp_p
     nope = _artifact(tmp_path / "model.bin", identifier=b"NOPE")
     with pytest.raises(ValueError, match="identifier"):
         verify_tree_artifact(nope, None)
-    (tmp_path / "heuristic.uhd.json").write_text(json.dumps(
-        {"objective": "max", "tree_data": {"artifact": "model.bin"},
-         "features_signature": ["$q.size", "$kernel.group"]}), encoding="utf-8")
+    (tmp_path / "heuristic.uhd.json").write_text(
+        json.dumps(
+            {
+                "objective": "max",
+                "tree_data": {"artifact": "model.bin"},
+                "features_signature": ["$q.size", "$kernel.group"],
+            }
+        ),
+        encoding="utf-8",
+    )
     with pytest.raises(ValueError, match="identifier"):
         load_model(tmp_path)
 
@@ -81,22 +92,33 @@ def test_the_declared_digest_is_bare_hex_over_the_file_and_is_enforced(tmp_path)
 def test_a_declared_digest_the_evaluated_artifact_does_not_match_is_refused(tmp_path):
     """load_model holds the descriptor's `tree_data.hash` to the file it scores."""
     _artifact(tmp_path / "model.bin")
-    (tmp_path / "heuristic.uhd.json").write_text(json.dumps(
-        {"objective": "max", "tree_data": {"artifact": "model.bin", "hash": "0" * 64},
-         "features_signature": ["$q.size", "$kernel.group"]}), encoding="utf-8")
+    (tmp_path / "heuristic.uhd.json").write_text(
+        json.dumps(
+            {
+                "objective": "max",
+                "tree_data": {"artifact": "model.bin", "hash": "0" * 64},
+                "features_signature": ["$q.size", "$kernel.group"],
+            }
+        ),
+        encoding="utf-8",
+    )
     with pytest.raises(ValueError, match="hash mismatch"):
         load_model(tmp_path)
 
 
 def test_a_tree_the_runtime_cannot_prepare_is_refused(tmp_path):
     """`prepareTrees` rejects a child cycle at load, reached or not by any row."""
-    cyclic = _artifact(tmp_path / "model.bin", trees=[_stump(left=(1, 0, -1), right=(2, 2, -1))])
+    cyclic = _artifact(
+        tmp_path / "model.bin", trees=[_stump(left=(1, 0, -1), right=(2, 2, -1))]
+    )
     with pytest.raises(ValueError, match="cycle"):
         verify_tree_artifact(cyclic, None)
 
 
 def test_grouping_is_read_from_the_artifact(tmp_path):
-    grouped = verify_tree_artifact(_artifact(tmp_path / "grouped.bin", grouped=True), None)
+    grouped = verify_tree_artifact(
+        _artifact(tmp_path / "grouped.bin", grouped=True), None
+    )
     flat = verify_tree_artifact(_artifact(tmp_path / "flat.bin"), None)
     assert is_grouped_tree(grouped)
     assert not is_grouped_tree(flat)

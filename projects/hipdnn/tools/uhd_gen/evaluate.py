@@ -93,6 +93,7 @@ def _regime_column(columns: Iterable[str]) -> str | None:
         return named
     return next((c for c in columns if c.endswith(".regime")), None)
 
+
 #: Two candidates whose measured times differ by less than this are treated as the same
 #: choice for top-k recall. See `_tie_mask` for why recall needs it and regret does not.
 DEFAULT_TIE_REL_TOLERANCE = 0.01
@@ -390,7 +391,10 @@ def score_is_physical(score_declaration: dict | None) -> bool:
     an identity or exp transform is an ordering key, which may legitimately be signed.
     """
     declaration = score_declaration or {}
-    return bool(declaration.get("metric")) or declaration.get("transform") in _PHYSICAL_TRANSFORMS
+    return (
+        bool(declaration.get("metric"))
+        or declaration.get("transform") in _PHYSICAL_TRANSFORMS
+    )
 
 
 def rankable_scores(recovered: np.ndarray, physical: bool) -> np.ndarray:
@@ -423,14 +427,20 @@ def regret_of(picked: float, oracle: float, objective: str) -> float:
     return max(value, 0.0)
 
 
-def _regret_vector(values: np.ndarray, oracle_value: float, objective: str) -> np.ndarray:
+def _regret_vector(
+    values: np.ndarray, oracle_value: float, objective: str
+) -> np.ndarray:
     """`regret_of`, vectorised over one problem's whole candidate set.
 
     Used wherever a metric needs every candidate's shortfall rather than one pick's:
     the tie mask, and §11.4's random reference, whose expected regret is the mean of
     exactly these numbers.
     """
-    cost = values / oracle_value - 1.0 if objective == "min" else 1.0 - values / oracle_value
+    cost = (
+        values / oracle_value - 1.0
+        if objective == "min"
+        else 1.0 - values / oracle_value
+    )
     return np.maximum(cost, 0.0)
 
 
@@ -487,7 +497,11 @@ def _tie_mask(
 
 
 def _percentile(values: list[float], q: float) -> float:
-    return float(np.percentile(np.asarray(values, dtype=float), q)) if values else float("nan")
+    return (
+        float(np.percentile(np.asarray(values, dtype=float), q))
+        if values
+        else float("nan")
+    )
 
 
 def _summarise(regrets: list[float]) -> dict[str, float | None]:
@@ -643,7 +657,9 @@ def evaluate_corpus(
             continue
 
         measured = values.loc[candidates.index].to_numpy(dtype=float)
-        oracle_position = int(np.argmin(measured) if objective == "min" else np.argmax(measured))
+        oracle_position = int(
+            np.argmin(measured) if objective == "min" else np.argmax(measured)
+        )
         oracle_value = float(measured[oracle_position])
         if not oracle_value > 0.0:
             # Both regret formulas divide by the oracle value, and under `max` a
@@ -678,7 +694,9 @@ def evaluate_corpus(
         # order among themselves, so if nothing is rankable the pick is §5 step 7's declared
         # order -- what the engine runs.
         rankable = rankable_scores(predictions, physical)
-        discarded_predictions += int(np.count_nonzero(np.isfinite(predictions) & ~rankable))
+        discarded_predictions += int(
+            np.count_nonzero(np.isfinite(predictions) & ~rankable)
+        )
         ranking_key = -predictions if objective == "max" else predictions
         ranking_key = np.where(rankable, ranking_key, np.inf)
         order = np.argsort(ranking_key, kind="stable")
@@ -714,8 +732,16 @@ def evaluate_corpus(
             objective,
             tie_rel_tolerance,
             tie_sigma,
-            stddev_all.loc[candidates.index].to_numpy(dtype=float) if noise_available else None,
-            iters_all.loc[candidates.index].to_numpy(dtype=float) if noise_available else None,
+            (
+                stddev_all.loc[candidates.index].to_numpy(dtype=float)
+                if noise_available
+                else None
+            ),
+            (
+                iters_all.loc[candidates.index].to_numpy(dtype=float)
+                if noise_available
+                else None
+            ),
         )
 
         # §11.4's two non-oracle references, read off the same measured values.
@@ -741,8 +767,10 @@ def evaluate_corpus(
         # member of the right one, and they are fixed in different places.
         group_regret = in_group_regret = None
         if group_column is not None and group_column in candidates.columns:
-            same_group = (candidates[group_column].to_numpy()
-                          == candidates[group_column].iloc[picked_position])
+            same_group = (
+                candidates[group_column].to_numpy()
+                == candidates[group_column].iloc[picked_position]
+            )
             in_group = measured[same_group]
             group_best = float(in_group.min() if objective == "min" else in_group.max())
             group_regret = regret_of(group_best, oracle_value, objective)
@@ -760,11 +788,15 @@ def evaluate_corpus(
                 tied_rank=int(rank_of[tied].min()),
                 tied_candidates=int(tied.sum()),
                 static_order_value=static_order_value,
-                static_order_regret=regret_of(static_order_value, oracle_value, objective),
+                static_order_regret=regret_of(
+                    static_order_value, oracle_value, objective
+                ),
                 static_order_oracle_rank=oracle_position,
                 static_order_tied_rank=int(np.flatnonzero(tied)[0]),
                 random_regret=float(candidate_regrets.mean()),
-                random_tail_fraction=float((candidate_regrets > regret_tail_threshold).mean()),
+                random_tail_fraction=float(
+                    (candidate_regrets > regret_tail_threshold).mean()
+                ),
                 group_regret=group_regret,
                 in_group_regret=in_group_regret,
             )
@@ -898,10 +930,13 @@ def _calibration_block(
         "status": "computed",
         "metric": metric,
         "target": target,
-        "all_candidates": _calibration_summary(predicted_array[usable], measured_array[usable]),
+        "all_candidates": _calibration_summary(
+            predicted_array[usable], measured_array[usable]
+        ),
         "selected_candidate": (
             _calibration_summary(
-                picked_predicted_array[picked_usable], picked_measured_array[picked_usable]
+                picked_predicted_array[picked_usable],
+                picked_measured_array[picked_usable],
             )
             if picked_usable.any()
             else None
@@ -987,9 +1022,13 @@ def _references(
             for k in TOP_K_VALUES
         }
 
-    def expected(value: Callable[[ProblemResult, int], float]) -> dict[str, float | None]:
+    def expected(
+        value: Callable[[ProblemResult, int], float],
+    ) -> dict[str, float | None]:
         return {
-            str(k): (float(np.mean([value(item, k) for item in results])) if count else None)
+            str(k): (
+                float(np.mean([value(item, k) for item in results])) if count else None
+            )
             for k in TOP_K_VALUES
         }
 
@@ -1017,7 +1056,9 @@ def _references(
             "problems": count,
             "top1_regret": _summarise([item.static_order_regret for item in results]),
             "regret_tail": tail(
-                sum(item.static_order_regret > regret_tail_threshold for item in results)
+                sum(
+                    item.static_order_regret > regret_tail_threshold for item in results
+                )
             ),
             "topk_recall": {
                 "strict": recall(lambda item: item.static_order_oracle_rank),
@@ -1038,14 +1079,22 @@ def _references(
         "random": {
             "problems": count,
             "top1_regret": _summarise([item.random_regret for item in results]),
-            "regret_tail": tail(float(sum(item.random_tail_fraction for item in results))),
+            "regret_tail": tail(
+                float(sum(item.random_tail_fraction for item in results))
+            ),
             "topk_recall": {
-                "strict": expected(lambda item, k: min(k, item.candidates) / item.candidates),
+                "strict": expected(
+                    lambda item, k: min(k, item.candidates) / item.candidates
+                ),
                 "tie_aware": expected(
-                    lambda item, k: _random_tie_recall(item.candidates, item.tied_candidates, k)
+                    lambda item, k: _random_tie_recall(
+                        item.candidates, item.tied_candidates, k
+                    )
                 ),
             },
-            "per_regime": _regime_means(results, lambda item: item.random_regret, regime_column),
+            "per_regime": _regime_means(
+                results, lambda item: item.random_regret, regime_column
+            ),
             "note": (
                 "Uniform choice from V(p), §11.4's sanity floor. Every figure is an "
                 "exact expectation over the candidate set rather than a sampled draw, "
@@ -1079,17 +1128,29 @@ def _build_report(
     regrets = [item.regret for item in results]
     tail = [item for item in results if item.regret > regret_tail_threshold]
 
-    recall: dict[str, dict[str, float | None]] = {"strict": {}, "tie_aware": {}, "trivial": {}}
+    recall: dict[str, dict[str, float | None]] = {
+        "strict": {},
+        "tie_aware": {},
+        "trivial": {},
+    }
     for k in TOP_K_VALUES:
         if results:
-            recall["strict"][str(k)] = sum(item.oracle_rank < k for item in results) / len(results)
-            recall["tie_aware"][str(k)] = sum(item.tied_rank < k for item in results) / len(results)
+            recall["strict"][str(k)] = sum(
+                item.oracle_rank < k for item in results
+            ) / len(results)
+            recall["tie_aware"][str(k)] = sum(
+                item.tied_rank < k for item in results
+            ) / len(results)
             # A problem with no more than k measured candidates scores a hit whatever
             # the model does. Counted so a recall@5 of 1.0 on a corpus of 4-candidate
             # problems is legible as the tautology it is.
-            recall["trivial"][str(k)] = sum(item.candidates <= k for item in results) / len(results)
+            recall["trivial"][str(k)] = sum(
+                item.candidates <= k for item in results
+            ) / len(results)
         else:
-            recall["strict"][str(k)] = recall["tie_aware"][str(k)] = recall["trivial"][str(k)] = None
+            recall["strict"][str(k)] = recall["tie_aware"][str(k)] = recall["trivial"][
+                str(k)
+            ] = None
 
     # Present only when the model groups and the corpus carries the column, so an absent
     # section means "not a two-layer model", not "the split came out zero".
@@ -1100,7 +1161,9 @@ def _build_report(
             "group_column": group_column,
             "problems": len(split_results),
             "group_regret": _summarise([item.group_regret for item in split_results]),
-            "in_group_regret": _summarise([item.in_group_regret for item in split_results]),
+            "in_group_regret": _summarise(
+                [item.in_group_regret for item in split_results]
+            ),
             "note": (
                 "Both parts are measured against the same oracle, so they sum to "
                 "top1_regret. group_regret is what choosing the group cost -- the best "
@@ -1150,7 +1213,8 @@ def _build_report(
         losing = [
             name
             for name, values in per_regime.items()
-            if values["mean_regret"] > static_per_regime[name]["mean_regret"] + _REGRET_EPSILON
+            if values["mean_regret"]
+            > static_per_regime[name]["mean_regret"] + _REGRET_EPSILON
         ]
         if losing:
             warnings.append(
@@ -1331,11 +1395,19 @@ def _flatbuffer_scorer(
     from .artifact import verify_tree_artifact
     from .train_uhd import build_feature_matrix
 
-    model = GbdtModelT.InitFromPackedBuf(bytearray(verify_tree_artifact(artifact, model_hash)), 0)
+    model = GbdtModelT.InitFromPackedBuf(
+        bytearray(verify_tree_artifact(artifact, model_hash)), 0
+    )
     if expected_hash is not None:
-        stored_hash = model.featuresHash.decode("utf-8") if isinstance(model.featuresHash, bytes) else model.featuresHash
+        stored_hash = (
+            model.featuresHash.decode("utf-8")
+            if isinstance(model.featuresHash, bytes)
+            else model.featuresHash
+        )
         if stored_hash != expected_hash:
-            raise ValueError("descriptor features_hash does not match the shipped model artifact")
+            raise ValueError(
+                "descriptor features_hash does not match the shipped model artifact"
+            )
 
     def arrays_of(trees) -> list[tuple[np.ndarray, ...]]:
         return [
@@ -1358,14 +1430,21 @@ def _flatbuffer_scorer(
     # orders within it. Reading only `trees` would score layer 1 alone and silently report a
     # single-layer model's behaviour for a two-layer one -- the same number a correct
     # single-layer model produces, so nothing about the output would look wrong.
-    group_slot = int(model.groupByFeatureIndex if model.groupByFeatureIndex is not None else -1)
-    groups = {float(group.value): arrays_of(group.trees) for group in (model.groups or [])}
+    group_slot = int(
+        model.groupByFeatureIndex if model.groupByFeatureIndex is not None else -1
+    )
+    groups = {
+        float(group.value): arrays_of(group.trees) for group in (model.groups or [])
+    }
     if groups and objective not in ("max", "min"):
-        raise ValueError(f"{artifact}: a grouped artifact chooses its group in the objective's "
-                         f"direction, and the descriptor declares none ({objective!r})")
+        raise ValueError(
+            f"{artifact}: a grouped artifact chooses its group in the objective's "
+            f"direction, and the descriptor declares none ({objective!r})"
+        )
 
-    def ensemble(arrays: list[tuple[np.ndarray, ...]], matrix: np.ndarray,
-                 rows: np.ndarray) -> np.ndarray:
+    def ensemble(
+        arrays: list[tuple[np.ndarray, ...]], matrix: np.ndarray, rows: np.ndarray
+    ) -> np.ndarray:
         total = np.full(len(rows), base, dtype=np.float64)
         for feature_index, threshold, left, right, leaf, default_left, lte in arrays:
             node = np.zeros(len(rows), dtype=np.int64)
@@ -1392,8 +1471,13 @@ def _flatbuffer_scorer(
         return np.expm1(raw) if score_transform == "log1p" else raw
 
     def score(frame: pd.DataFrame) -> np.ndarray:
-        matrix = build_feature_matrix(frame, features, categorical_encoding,
-                                      signature=signature, feature_evaluator=feature_evaluator)
+        matrix = build_feature_matrix(
+            frame,
+            features,
+            categorical_encoding,
+            signature=signature,
+            feature_evaluator=feature_evaluator,
+        )
         every = np.arange(len(frame))
         layer_one = ensemble(trees, matrix, every)
         if group_slot < 0 or not groups:
@@ -1411,11 +1495,17 @@ def _flatbuffer_scorer(
         # group value, so the choice does not depend on row order. With no such row nothing
         # is chosen and every candidate is unusable: declared order.
         group_values = matrix[:, group_slot]
-        eligible = ~np.isnan(group_values) & rankable_scores(recover(layer_one), physical)
+        eligible = ~np.isnan(group_values) & rankable_scores(
+            recover(layer_one), physical
+        )
         raw = np.full(len(frame), -np.inf, dtype=np.float64)
         if not eligible.any():
             return raw
-        best = layer_one[eligible].min() if objective == "min" else layer_one[eligible].max()
+        best = (
+            layer_one[eligible].min()
+            if objective == "min"
+            else layer_one[eligible].max()
+        )
         chosen = group_values[eligible & (layer_one == best)].min()
         inside = np.flatnonzero(group_values == chosen)
         # A group layer 1 picked but layer 2 does not describe is ranked by layer 1, matching
@@ -1448,19 +1538,33 @@ def _booster_scorer(
     booster = lgb.Booster(model_file=str(model_file))
 
     def score(frame: pd.DataFrame) -> np.ndarray:
-        values = booster.predict(build_feature_matrix(
-            frame, features, categorical_encoding, signature=signature, feature_evaluator=feature_evaluator))
+        values = booster.predict(
+            build_feature_matrix(
+                frame,
+                features,
+                categorical_encoding,
+                signature=signature,
+                feature_evaluator=feature_evaluator,
+            )
+        )
         return np.expm1(values) if score_transform == "log1p" else values
 
     return score
 
 
-def load_model(model_dir: Path, model_file: Path | None = None, *, feature_evaluator: str | None = None,
-               runtime_predictions: list[dict] | None = None) -> ModelBundle:
+def load_model(
+    model_dir: Path,
+    model_file: Path | None = None,
+    *,
+    feature_evaluator: str | None = None,
+    runtime_predictions: list[dict] | None = None,
+) -> ModelBundle:
     """Load a `train --output-dir` result: features, direction, and something to rank with."""
     descriptor_paths = sorted(model_dir.glob("*.uhd.json"))
     if len(descriptor_paths) > 1:
-        raise ValueError(f"{model_dir} has multiple UHD descriptors; use a directory containing one model")
+        raise ValueError(
+            f"{model_dir} has multiple UHD descriptors; use a directory containing one model"
+        )
     descriptor = _load_json(descriptor_paths[0]) if descriptor_paths else {}
     manifest_path = model_dir / "train_manifest.json"
     manifest = _load_json(manifest_path) if manifest_path.exists() else {}
@@ -1471,22 +1575,32 @@ def load_model(model_dir: Path, model_file: Path | None = None, *, feature_evalu
         # role map in the install layout, `<ued-id>/<role>/<arch>/[<metric>/]`, so read it
         # back.
         from .provenance import ROLES
+
         for ancestor in model_dir.resolve().parents[:2]:
             if ancestor.name in ROLES:
                 role = ancestor.name
                 break
     from .immediate import ROLE, validate_model
+
     immediate = role == ROLE
     l1_metric = validate_model(descriptor) if immediate else None
 
-    from .features import (build_features_signature, compute_features_hash,
-                           evaluator_feature_semantics_revision, signature_references)
+    from .features import (
+        build_features_signature,
+        compute_features_hash,
+        evaluator_feature_semantics_revision,
+        signature_references,
+    )
     from .provenance import require_feature_semantics
 
-    signature = descriptor.get("features_signature") or manifest.get("features_signature")
+    signature = descriptor.get("features_signature") or manifest.get(
+        "features_signature"
+    )
     if not signature and manifest.get("features"):
         signature = build_features_signature(manifest["features"])
-    if not signature and not (immediate and descriptor.get("adapter") in ("native", "custom_library")):
+    if not signature and not (
+        immediate and descriptor.get("adapter") in ("native", "custom_library")
+    ):
         raise ValueError(f"{model_dir} carries no features_signature")
     signature = signature or []
     features = [reference[1:] for reference in signature_references(signature)]
@@ -1497,23 +1611,34 @@ def load_model(model_dir: Path, model_file: Path | None = None, *, feature_evalu
 
     group_feature = manifest.get("group_by_feature")
 
-    categorical_encoding = descriptor.get("categorical_encoding", manifest.get("categorical_encoding", {}))
+    categorical_encoding = descriptor.get(
+        "categorical_encoding", manifest.get("categorical_encoding", {})
+    )
     expected_hash = descriptor.get("features_hash", manifest.get("features_hash"))
     if expected_hash is not None:
         # RFC 0019 §6.3: verification runs the routine generation stamped with, so the
         # digest is recomputed by the shared evaluator whatever the signature contains.
         # Checking a C++-stamped hash against a Python-recomputed one only ever proved
         # that the two implementations had not drifted yet.
-        if compute_features_hash(signature, categorical_encoding, feature_evaluator) != expected_hash:
-            raise ValueError("features_signature/categorical_encoding does not match features_hash")
+        if (
+            compute_features_hash(signature, categorical_encoding, feature_evaluator)
+            != expected_hash
+        ):
+            raise ValueError(
+                "features_signature/categorical_encoding does not match features_hash"
+            )
         # The loader refuses a feature-reading model trained under other feature semantics
         # (FeatureSemantics.hpp), so numbers reported for one describe a model no engine
         # would ever score. Same rule, same evaluator the digest above came from.
         if signature:
-            require_feature_semantics(descriptor.get("trained_against", manifest.get("trained_against")),
-                                      evaluator_feature_semantics_revision(feature_evaluator))
+            require_feature_semantics(
+                descriptor.get("trained_against", manifest.get("trained_against")),
+                evaluator_feature_semantics_revision(feature_evaluator),
+            )
 
-    transform = descriptor.get("score", {}).get("transform", manifest.get("score_transform", "log1p"))
+    transform = descriptor.get("score", {}).get(
+        "transform", manifest.get("score_transform", "log1p")
+    )
     if transform not in ("identity", "log1p"):
         # The engine's transform vocabulary is wider (score_transform::isSupported);
         # what is missing here is this module's inverse, not the descriptor's validity.
@@ -1523,13 +1648,18 @@ def load_model(model_dir: Path, model_file: Path | None = None, *, feature_evalu
         )
     if runtime_predictions is not None:
         if not immediate:
-            raise ValueError("--predictions is only supported for engine-immediate evaluation")
+            raise ValueError(
+                "--predictions is only supported for engine-immediate evaluation"
+            )
         from .immediate import prediction_scorer
+
         scorer = prediction_scorer(descriptor, runtime_predictions)
         candidate = Path("<runtime-predictions>")
     else:
         if descriptor.get("adapter") in ("native", "custom_library"):
-            raise ValueError("native/custom models require --predictions from hipdnn_bench --predict-engine")
+            raise ValueError(
+                "native/custom models require --predictions from hipdnn_bench --predict-engine"
+            )
         if model_file is not None:
             candidate = model_file
         elif descriptor.get("tree_data", {}).get("artifact"):
@@ -1544,31 +1674,57 @@ def load_model(model_dir: Path, model_file: Path | None = None, *, feature_evalu
         if not candidate.exists():
             raise ValueError(f"no model artifact at {candidate}")
         if candidate.suffix in (".lgbm", ".txt"):
-            scorer = _booster_scorer(candidate, features, categorical_encoding,
-                                     signature=signature, feature_evaluator=feature_evaluator,
-                                     score_transform=transform)
+            scorer = _booster_scorer(
+                candidate,
+                features,
+                categorical_encoding,
+                signature=signature,
+                feature_evaluator=feature_evaluator,
+                score_transform=transform,
+            )
         else:
             # The declared digest guards the artifact the descriptor names; an explicitly
             # supplied other file (--model) has no declaration to hold it to.
             declared = descriptor.get("tree_data", {})
-            named = model_dir / declared["artifact"] if declared.get("artifact") else None
-            model_hash = declared.get("hash") if named is not None and candidate.resolve() == named.resolve() else None
-            scorer = _flatbuffer_scorer(candidate, features, categorical_encoding,
-                                        signature=signature, feature_evaluator=feature_evaluator,
-                                        expected_hash=expected_hash, model_hash=model_hash,
-                                        objective=objective, score_transform=transform,
-                                        physical=score_is_physical(descriptor.get("score")))
+            named = (
+                model_dir / declared["artifact"] if declared.get("artifact") else None
+            )
+            model_hash = (
+                declared.get("hash")
+                if named is not None and candidate.resolve() == named.resolve()
+                else None
+            )
+            scorer = _flatbuffer_scorer(
+                candidate,
+                features,
+                categorical_encoding,
+                signature=signature,
+                feature_evaluator=feature_evaluator,
+                expected_hash=expected_hash,
+                model_hash=model_hash,
+                objective=objective,
+                score_transform=transform,
+                physical=score_is_physical(descriptor.get("score")),
+            )
 
     return ModelBundle(
-        scorer=scorer, features=list(features),
+        scorer=scorer,
+        features=list(features),
         target=manifest.get("target", l1_metric.label if l1_metric else None),
-        objective=objective, source=str(candidate), trained_on=manifest.get("input_file"),
-        training_rows=manifest.get("num_samples"), descriptor=descriptor, manifest=manifest, role=role,
+        objective=objective,
+        source=str(candidate),
+        trained_on=manifest.get("input_file"),
+        training_rows=manifest.get("num_samples"),
+        descriptor=descriptor,
+        manifest=manifest,
+        role=role,
         group_feature=group_feature,
     )
 
 
-def _holdout_integrity(bundle: ModelBundle, evaluated: Iterable[Sequence[str]]) -> dict[str, str]:
+def _holdout_integrity(
+    bundle: ModelBundle, evaluated: Iterable[Sequence[str]]
+) -> dict[str, str]:
     """Was the model kept away from the problems it is about to be scored on?
 
     Only problem identity can answer that. The training manifest records the keys the model
@@ -1582,10 +1738,12 @@ def _holdout_integrity(bundle: ModelBundle, evaluated: Iterable[Sequence[str]]) 
     if recorded is None:
         trained_on = getattr(bundle, "trained_on", None)
         trained_on = f" ({trained_on})" if trained_on else ""
-        return {"status": "unknown",
-                "detail": f"the model records no training problem keys{trained_on}, so whether it "
-                "saw this corpus's evaluation problems cannot be shown; if it did, the regret "
-                "below is optimistic (RFC 0019.13 §5.6.4)."}
+        return {
+            "status": "unknown",
+            "detail": f"the model records no training problem keys{trained_on}, so whether it "
+            "saw this corpus's evaluation problems cannot be shown; if it did, the regret "
+            "below is optimistic (RFC 0019.13 §5.6.4).",
+        }
     trained = {tuple(str(part) for part in key) for key in recorded}
     # A corpus without device identity groups by graph alone. Keys of different widths are
     # compared on the graph both still carry: no shared graph is disjoint, but a shared
@@ -1596,19 +1754,25 @@ def _holdout_integrity(bundle: ModelBundle, evaluated: Iterable[Sequence[str]]) 
         evaluated = {key[:1] for key in evaluated}
     overlap = trained & evaluated
     if overlap and narrowed:
-        return {"status": "unknown",
-                "detail": "training and evaluation keys differ in width (one corpus has no device "
-                "identity) and share graphs, so disjointness cannot be shown"}
+        return {
+            "status": "unknown",
+            "detail": "training and evaluation keys differ in width (one corpus has no device "
+            "identity) and share graphs, so disjointness cannot be shown",
+        }
     if overlap:
-        return {"status": "COMPROMISED",
-                "detail": f"{len(overlap)} of {len(evaluated)} evaluated problem(s) are among the "
-                "model's recorded training problems. §5.6.4: scoring a problem with a model that "
-                "trained on it is a leak, and the regret below is optimistic by an unknown "
-                "amount. Use --emit-train-slice to write the training side of this split, train "
-                "on THAT, then evaluate again with the same --seed and --eval-fraction."}
-    return {"status": "held_out",
-            "detail": f"none of the {len(evaluated)} evaluated problem(s) is among the "
-            f"{len(trained)} recorded training problem(s)"}
+        return {
+            "status": "COMPROMISED",
+            "detail": f"{len(overlap)} of {len(evaluated)} evaluated problem(s) are among the "
+            "model's recorded training problems. §5.6.4: scoring a problem with a model that "
+            "trained on it is a leak, and the regret below is optimistic by an unknown "
+            "amount. Use --emit-train-slice to write the training side of this split, train "
+            "on THAT, then evaluate again with the same --seed and --eval-fraction.",
+        }
+    return {
+        "status": "held_out",
+        "detail": f"none of the {len(evaluated)} evaluated problem(s) is among the "
+        f"{len(trained)} recorded training problem(s)",
+    }
 
 
 # --------------------------------------------------------------------------------------
@@ -1617,13 +1781,25 @@ def _holdout_integrity(bundle: ModelBundle, evaluated: Iterable[Sequence[str]]) 
 
 
 def add_evaluate_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--input", required=True,
-                        help="Corpus to evaluate on: the published .parquet dataset, or a collected .csv/.json corpus")
-    parser.add_argument("--feature-evaluator", help="Path to the shared hipdnn_uhd_features executable")
-    parser.add_argument("--additional-model-dir", action="append", default=[],
-                        help="Another engine's L1 model; repeat for cross-engine immediate comparison")
-    parser.add_argument("--predictions", nargs="+",
-                        help="Runtime --predict-engine JSON responses for common native/custom model evaluation")
+    parser.add_argument(
+        "--input",
+        required=True,
+        help="Corpus to evaluate on: the published .parquet dataset, or a collected .csv/.json corpus",
+    )
+    parser.add_argument(
+        "--feature-evaluator", help="Path to the shared hipdnn_uhd_features executable"
+    )
+    parser.add_argument(
+        "--additional-model-dir",
+        action="append",
+        default=[],
+        help="Another engine's L1 model; repeat for cross-engine immediate comparison",
+    )
+    parser.add_argument(
+        "--predictions",
+        nargs="+",
+        help="Runtime --predict-engine JSON responses for common native/custom model evaluation",
+    )
     parser.add_argument(
         "--model-dir",
         required=True,
@@ -1744,8 +1920,12 @@ def run_evaluate(args: argparse.Namespace) -> int:
             logger.error("%s", error)
             return 1
     try:
-        bundle = load_model(model_dir, Path(args.model) if args.model else None,
-                            feature_evaluator=args.feature_evaluator, runtime_predictions=predictions)
+        bundle = load_model(
+            model_dir,
+            Path(args.model) if args.model else None,
+            feature_evaluator=args.feature_evaluator,
+            runtime_predictions=predictions,
+        )
     except (ValueError, OSError) as error:
         logger.error("%s", error)
         return 1
@@ -1754,26 +1934,51 @@ def run_evaluate(args: argparse.Namespace) -> int:
     # A registered metric fixes the direction (RFC 0019 §4.4); an override that
     # contradicts it would invert every regret, so it is refused rather than applied.
     declared = bundle.descriptor.get("score", {}).get("metric")
-    if declared in RANKING_METRICS and args.objective not in (None, RANKING_METRICS[declared].objective):
-        logger.error("score.metric %r ranks %s; --objective %s contradicts it", declared,
-                     RANKING_METRICS[declared].objective, args.objective)
+    if declared in RANKING_METRICS and args.objective not in (
+        None,
+        RANKING_METRICS[declared].objective,
+    ):
+        logger.error(
+            "score.metric %r ranks %s; --objective %s contradicts it",
+            declared,
+            RANKING_METRICS[declared].objective,
+            args.objective,
+        )
         return 1
     if bundle.role == ROLE:
         from .immediate import evaluate_immediate, read_corpus
+
         try:
             if args.target not in (None, RANKING_METRICS[declared].label):
-                raise ValueError(f"L1 evaluation of {declared!r} cannot override its calibrated label")
+                raise ValueError(
+                    f"L1 evaluation of {declared!r} cannot override its calibrated label"
+                )
             if args.device_column not in (None, "device"):
-                raise ValueError("L1 evaluation groups by the recorded graph/device identity")
-            bundles = [bundle] + [load_model(Path(path), feature_evaluator=args.feature_evaluator,
-                                            runtime_predictions=predictions)
-                                  for path in args.additional_model_dir]
+                raise ValueError(
+                    "L1 evaluation groups by the recorded graph/device identity"
+                )
+            bundles = [bundle] + [
+                load_model(
+                    Path(path),
+                    feature_evaluator=args.feature_evaluator,
+                    runtime_predictions=predictions,
+                )
+                for path in args.additional_model_dir
+            ]
             frame = read_corpus(corpus_path)
-            report = evaluate_immediate(frame, bundles, eval_fraction=args.eval_fraction, seed=args.seed,
-                                        include_per_problem=args.include_per_problem,
-                                        feature_evaluator=args.feature_evaluator)
+            report = evaluate_immediate(
+                frame,
+                bundles,
+                eval_fraction=args.eval_fraction,
+                seed=args.seed,
+                include_per_problem=args.include_per_problem,
+                feature_evaluator=args.feature_evaluator,
+            )
             report["corpus"]["path"] = str(corpus_path)
-            report["models"] = [{"artifact": item.source, "uhd_id": item.descriptor.get("id")} for item in bundles]
+            report["models"] = [
+                {"artifact": item.source, "uhd_id": item.descriptor.get("id")}
+                for item in bundles
+            ]
             if args.emit_train_slice:
                 keys = problem_keys(frame, resolve_grouping(frame))
                 held_out = {tuple(key) for key in report["split"]["eval_problem_keys"]}
@@ -1781,20 +1986,28 @@ def run_evaluate(args: argparse.Namespace) -> int:
                 slice_path.parent.mkdir(parents=True, exist_ok=True)
                 frame[~keys.isin(held_out)].to_csv(slice_path, index=False)
                 report["split"]["train_slice"] = str(slice_path)
-            output_path = Path(args.output) if args.output else model_dir / "eval_report.json"
+            output_path = (
+                Path(args.output) if args.output else model_dir / "eval_report.json"
+            )
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+            output_path.write_text(
+                json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8"
+            )
             metrics = report["metrics"]
             print(f"Immediate prediction report: {output_path}")
             print(f"  calibration: {json.dumps(metrics['calibration'])}")
-            print(f"  cross-engine selection: {json.dumps(metrics['immediate_selection'])}")
+            print(
+                f"  cross-engine selection: {json.dumps(metrics['immediate_selection'])}"
+            )
             print(f"  holdout integrity: {report['holdout_integrity']['status']}")
             return 0
         except (OSError, TypeError, ValueError, KeyError) as error:
             logger.error("%s", error)
             return 1
     if args.additional_model_dir or args.predictions:
-        logger.error("additional models and runtime predictions require %s models", ROLE)
+        logger.error(
+            "additional models and runtime predictions require %s models", ROLE
+        )
         return 1
 
     # The same suffix rule and the same identity pinning the trainer applies, so a model
@@ -1851,7 +2064,9 @@ def run_evaluate(args: argparse.Namespace) -> int:
         "trained_on": bundle.trained_on,
         "training_rows": bundle.training_rows,
     }
-    report["holdout_integrity"] = _holdout_integrity(bundle, report["split"]["eval_problem_keys"])
+    report["holdout_integrity"] = _holdout_integrity(
+        bundle, report["split"]["eval_problem_keys"]
+    )
     if report["holdout_integrity"]["status"] == "COMPROMISED":
         report["warnings"].append(
             "HELD-OUT SLICE COMPROMISED: " + report["holdout_integrity"]["detail"]
@@ -1907,7 +2122,9 @@ def _print_summary(report: dict[str, Any], output_path: Path) -> None:
         print(f"\n!! {warning}")
 
     print(f"\nRegret report ({report['rfc']}) -- {output_path}")
-    print(f"  metric:             {report.get('metric') or '(none: ranks its own catalog only)'}")
+    print(
+        f"  metric:             {report.get('metric') or '(none: ranks its own catalog only)'}"
+    )
     print(f"  target/objective:   {report['target']} ({report['objective']})")
     print(f"  problems grouped by: {', '.join(report['grouping']['columns'])}")
     print(

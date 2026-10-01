@@ -62,7 +62,7 @@ struct BuildTally
 /// something.
 inline std::optional<GraphBytes> buildAdmissible(const OperationMetadata& metadata,
                                                  const ProblemPoint& point,
-                                                 int64_t maxBytes    = 0,
+                                                 int64_t maxBytes = 0,
                                                  const BuildTally& tally = {})
 {
     const auto built = buildGraphFor(metadata, point);
@@ -86,9 +86,9 @@ inline std::optional<GraphBytes> buildAdmissible(const OperationMetadata& metada
 /// also the only oracle available when no engine was named -- and naming one is optional
 /// precisely because this exists.
 inline ProblemOracle makeDeclaredOracle(const OperationMetadata& metadata,
-                                        int64_t* buildFailures     = nullptr,
+                                        int64_t* buildFailures = nullptr,
                                         std::string* firstBuildError = nullptr,
-                                        int64_t maxBytes           = 0)
+                                        int64_t maxBytes = 0)
 {
     const BuildTally tally{buildFailures, firstBuildError};
     return [&metadata, tally, maxBytes](const ProblemPoint& point) -> bool {

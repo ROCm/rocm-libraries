@@ -17,7 +17,9 @@ MAX_SAFE_NUMERIC_LITERAL = 1e15
 def feature_reference(column: str) -> str:
     """Use published names verbatim, adding only the reference marker."""
     if not isinstance(column, str) or not column or column.startswith("$"):
-        raise ValueError(f"feature column must be a full published name without '$': {column!r}")
+        raise ValueError(
+            f"feature column must be a full published name without '$': {column!r}"
+        )
     if any(char.isspace() for char in column):
         raise ValueError(f"feature column contains whitespace: {column!r}")
     return "$" + column
@@ -35,7 +37,9 @@ def parse_signature_entry(entry):
     if isinstance(entry, dict) and len(entry) == 1:
         _validate_numeric_literals(entry)
         return entry
-    raise ValueError("features_signature entries must be bare $references or inline expression objects")
+    raise ValueError(
+        "features_signature entries must be bare $references or inline expression objects"
+    )
 
 
 def signature_references(signature: list) -> list[str]:
@@ -72,12 +76,16 @@ def kernel_axes(signature: list) -> set[str]:
     on, so generation's proposal, its check of an authored recipe and promotion's install
     gate all read them here rather than each deciding what a signature "uses".
     """
-    return {reference[len(_KERNEL_REFERENCE):].split("[", 1)[0]
-            for reference in signature_references(signature)
-            if reference.startswith(_KERNEL_REFERENCE)}
+    return {
+        reference[len(_KERNEL_REFERENCE) :].split("[", 1)[0]
+        for reference in signature_references(signature)
+        if reference.startswith(_KERNEL_REFERENCE)
+    }
 
 
-def require_admissible_kernel_axes(signature: list, knobs, kmd_fields, where: str) -> None:
+def require_admissible_kernel_axes(
+    signature: list, knobs, kmd_fields, where: str
+) -> None:
     """Refuse a signature the runtime would refuse to rank with (RFC 0019 §6.3 check 2).
 
     `UhdKernelHeuristic` admits a model only when every `$kernel.*` axis is a field of the
@@ -93,15 +101,20 @@ def require_admissible_kernel_axes(signature: list, knobs, kmd_fields, where: st
     unexposed = sorted(axes - set(knobs))
     problems = []
     if undeclared:
-        problems.append(f"reads [{', '.join(undeclared)}], which the KMD does not declare as fields")
+        problems.append(
+            f"reads [{', '.join(undeclared)}], which the KMD does not declare as fields"
+        )
     if unexposed:
-        problems.append(f"ranks on [{', '.join(unexposed)}], which the UED does not expose as knobs "
-                        f"[{', '.join(sorted(knobs)) or '<none>'}]")
+        problems.append(
+            f"ranks on [{', '.join(unexposed)}], which the UED does not expose as knobs "
+            f"[{', '.join(sorted(knobs)) or '<none>'}]"
+        )
     if problems:
         raise ValueError(
             f"{where} {'; and '.join(problems)}. The runtime refuses such a model and ranks by "
             "priority, then id (RFC 0019 §6.3 check 2). Read problem-side facts from the graph's "
-            "own column, not $kernel.*")
+            "own column, not $kernel.*"
+        )
 
 
 def _validate_numeric_literals(node) -> None:
@@ -109,7 +122,9 @@ def _validate_numeric_literals(node) -> None:
         return
     if isinstance(node, (int, float)):
         if abs(node) >= MAX_SAFE_NUMERIC_LITERAL or not math.isfinite(node):
-            raise ValueError(f"features_signature numeric literal {node!r} must be finite with magnitude below 1e15")
+            raise ValueError(
+                f"features_signature numeric literal {node!r} must be finite with magnitude below 1e15"
+            )
     elif isinstance(node, list):
         for value in node:
             _validate_numeric_literals(value)
@@ -118,8 +133,11 @@ def _validate_numeric_literals(node) -> None:
             _validate_numeric_literals(value)
 
 
-def compute_features_hash(signature: list, categorical_encoding: dict | None = None,
-                          executable: str | Path | None = None) -> str:
+def compute_features_hash(
+    signature: list,
+    categorical_encoding: dict | None = None,
+    executable: str | Path | None = None,
+) -> str:
     """The descriptor's `features_hash`, from the routine the loader verifies it with.
 
     RFC 0019 §6.3 requires generation and verification to share ONE definition of this
@@ -133,7 +151,9 @@ def compute_features_hash(signature: list, categorical_encoding: dict | None = N
     canonicalisation would have shipped a descriptor the runtime refuses to load rather
     than failing a test here.
     """
-    digest, _, _ = _run_feature_evaluator(signature, categorical_encoding, [], executable)
+    digest, _, _ = _run_feature_evaluator(
+        signature, categorical_encoding, [], executable
+    )
     return digest
 
 
@@ -141,14 +161,22 @@ def encode_feature_value(reference: str, value) -> float:
     if isinstance(value, (bool, int, float)):
         numeric = float(value)
         if not math.isfinite(numeric):
-            raise ValueError(f"{reference}: feature value must be finite, got {value!r}")
+            raise ValueError(
+                f"{reference}: feature value must be finite, got {value!r}"
+            )
         return numeric
     if isinstance(value, str):
-        raise ValueError(f"{reference}: {value!r} is a string and no categorical_encoding declares this reference")
-    raise TypeError(f"{reference}: cannot use {type(value).__name__} as a feature value")
+        raise ValueError(
+            f"{reference}: {value!r} is a string and no categorical_encoding declares this reference"
+        )
+    raise TypeError(
+        f"{reference}: cannot use {type(value).__name__} as a feature value"
+    )
 
 
-def derive_categorical_encoding(df, feature_cols: list[str]) -> dict[str, dict[str, int]]:
+def derive_categorical_encoding(
+    df, feature_cols: list[str]
+) -> dict[str, dict[str, int]]:
     """Stable per-reference codes, preserving the exact published string values.
 
     An absent binding (a column no row publishes, or a row that does not publish it) has no
@@ -171,7 +199,9 @@ def derive_categorical_encoding(df, feature_cols: list[str]) -> dict[str, dict[s
         if not values:
             continue
         if other_types:
-            raise ValueError(f"feature column {column!r} mixes strings with {', '.join(sorted(other_types))}")
+            raise ValueError(
+                f"feature column {column!r} mixes strings with {', '.join(sorted(other_types))}"
+            )
         encoding[feature_reference(column)] = {
             value: code for code, value in enumerate(sorted(values))
         }
@@ -229,12 +259,16 @@ def resolve_feature_evaluator(executable: str | Path | None = None) -> str:
     looking: silently falling through to a different binary than the one asked for is how
     a typo becomes a model stamped by something nobody chose.
     """
-    for source, requested in ((" (--feature-evaluator)", str(executable) if executable else None),
-                              (f" ({EVALUATOR_ENV_VAR})", os.environ.get(EVALUATOR_ENV_VAR))):
+    for source, requested in (
+        (" (--feature-evaluator)", str(executable) if executable else None),
+        (f" ({EVALUATOR_ENV_VAR})", os.environ.get(EVALUATOR_ENV_VAR)),
+    ):
         if requested:
             resolved = shutil.which(requested)
             if resolved is None:
-                raise ValueError(f"feature evaluator {requested!r}{source} is not a runnable executable")
+                raise ValueError(
+                    f"feature evaluator {requested!r}{source} is not a runnable executable"
+                )
             return resolved
     searched = []
     for root in _evaluator_search_roots():
@@ -266,8 +300,12 @@ def evaluator_feature_semantics_revision(executable: str | Path | None = None) -
     return _run_feature_evaluator([], None, [], executable)[2]
 
 
-def _run_feature_evaluator(signature: list, categorical_encoding: dict | None, rows: list,
-                           executable: str | Path | None) -> tuple[str, list[list[float]], int]:
+def _run_feature_evaluator(
+    signature: list,
+    categorical_encoding: dict | None,
+    rows: list,
+    executable: str | Path | None,
+) -> tuple[str, list[list[float]], int]:
     """The only crossing into FeatureExtractor, which owns both the digest and the values.
 
     Entries are parsed before the request is built so an unauthorable signature fails with
@@ -276,14 +314,23 @@ def _run_feature_evaluator(signature: list, categorical_encoding: dict | None, r
     get hashed are the ones the evaluator dumps, never the ones serialised here.
     """
     parsed = [parse_signature_entry(entry) for entry in signature]
-    request = {"signature": parsed, "categorical_encoding": categorical_encoding or {}, "rows": rows}
+    request = {
+        "signature": parsed,
+        "categorical_encoding": categorical_encoding or {},
+        "rows": rows,
+    }
     result = subprocess.run(
         [resolve_feature_evaluator(executable)],
         input=json.dumps(request, ensure_ascii=False, allow_nan=False),
-        capture_output=True, text=True, encoding="utf-8", check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
     )
     if result.returncode:
-        raise ValueError(f"{EVALUATOR_NAME} failed ({result.returncode}): {result.stderr.strip()}")
+        raise ValueError(
+            f"{EVALUATOR_NAME} failed ({result.returncode}): {result.stderr.strip()}"
+        )
     try:
         response = json.loads(result.stdout)
         digest, values = response["features_hash"], response["values"]
@@ -292,33 +339,48 @@ def _run_feature_evaluator(signature: list, categorical_encoding: dict | None, r
         # the same rule that reads a UHD recording none as revision 1.
         revision = response.get("feature_semantics_revision", 1)
         if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
-            raise ValueError(f"feature_semantics_revision must be an integer >= 1, got {revision!r}")
+            raise ValueError(
+                f"feature_semantics_revision must be an integer >= 1, got {revision!r}"
+            )
         if not isinstance(digest, str) or not digest.startswith("sha256:"):
             raise ValueError("missing features_hash")
         if len(values) != len(rows) or any(len(row) != len(parsed) for row in values):
             raise ValueError("feature matrix shape does not match the request")
-        if any(not isinstance(value, (int, float)) or not math.isfinite(value)
-               for row in values for value in row):
+        if any(
+            not isinstance(value, (int, float)) or not math.isfinite(value)
+            for row in values
+            for value in row
+        ):
             raise ValueError("non-finite or non-numeric feature result")
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError(f"invalid {EVALUATOR_NAME} response: {error}") from error
     return digest, values, revision
 
 
-def evaluate_feature_maps(rows: list[dict], signature: list, categorical_encoding: dict | None = None,
-                          executable: str | Path | None = None) -> tuple[str, list[list[float]]]:
+def evaluate_feature_maps(
+    rows: list[dict],
+    signature: list,
+    categorical_encoding: dict | None = None,
+    executable: str | Path | None = None,
+) -> tuple[str, list[list[float]]]:
     """Feature maps (name -> value, None for absent) through the runtime's FeatureExtractor.
 
     A map that leaves a bare reference unbound fails the whole batch, exactly as the engine
     refuses that row; `value_or_default`/`present` over an absent name evaluate as they do
     at runtime. That is the only definition of "this signature evaluates" there is.
     """
-    digest, values, _ = _run_feature_evaluator(signature, categorical_encoding, rows, executable)
+    digest, values, _ = _run_feature_evaluator(
+        signature, categorical_encoding, rows, executable
+    )
     return digest, values
 
 
-def evaluate_feature_rows(df, signature: list, categorical_encoding: dict | None = None,
-                          executable: str | Path | None = None) -> tuple[str, list[list[float]]]:
+def evaluate_feature_rows(
+    df,
+    signature: list,
+    categorical_encoding: dict | None = None,
+    executable: str | Path | None = None,
+) -> tuple[str, list[list[float]]]:
     """One batch through the exact C++ expression implementation used at runtime.
 
     Every referenced name goes over as JSON null where the row does not publish it,
@@ -329,7 +391,16 @@ def evaluate_feature_rows(df, signature: list, categorical_encoding: dict | None
     present = [column for column in columns if column in df.columns]
     # to_dict preserves full floating-point precision and native list-valued bindings. With
     # no referenced column present it returns no records at all, not one empty map per row.
-    records = df[present].to_dict(orient="records") if present else [{} for _ in range(len(df))]
-    rows = [{column: None if _is_absent(record.get(column)) else record[column] for column in columns}
-            for record in records]
+    records = (
+        df[present].to_dict(orient="records")
+        if present
+        else [{} for _ in range(len(df))]
+    )
+    rows = [
+        {
+            column: None if _is_absent(record.get(column)) else record[column]
+            for column in columns
+        }
+        for record in records
+    ]
     return evaluate_feature_maps(rows, signature, categorical_encoding, executable)

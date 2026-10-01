@@ -26,7 +26,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from uhd_gen.merge import MergeError, merge_corpora  # noqa: E402
 
 
-def _corpus(path: Path, device: str, *, problems: int = 4, extra: dict | None = None) -> Path:
+def _corpus(
+    path: Path, device: str, *, problems: int = 4, extra: dict | None = None
+) -> Path:
     rows = []
     for problem in range(problems):
         for block_m in (64, 256):

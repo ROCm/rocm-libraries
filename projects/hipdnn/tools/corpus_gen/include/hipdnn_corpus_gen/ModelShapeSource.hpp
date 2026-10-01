@@ -262,10 +262,10 @@ inline std::vector<PoolEntry> readModelShapes(const OperationMetadata& metadata,
 
         const auto name = values.find("name");
         entry.source = "model";
-        entry.origin = path.filename().string() + " "
-                       + (name == values.end() || name->second.empty()
-                              ? "row " + std::to_string(report.rows)
-                              : name->second);
+        entry.origin
+            = path.filename().string() + " "
+              + (name == values.end() || name->second.empty() ? "row " + std::to_string(report.rows)
+                                                              : name->second);
         entry.regime = regimeLabel(metadata, entry.point);
         entries.push_back(std::move(entry));
     }

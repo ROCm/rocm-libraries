@@ -279,12 +279,21 @@ def main(argv: list[str] | None = None) -> int:
             "cannot know it and does not claim it."
         ),
     )
-    parser.add_argument("--shard-id", type=int, default=0, help="shard that produced these logs")
-    parser.add_argument("--config-set-hash", default="", help="hash of the enumerated config set")
-    parser.add_argument("--applicability-id", default="", help="identity of the applicability predicate")
+    parser.add_argument(
+        "--shard-id", type=int, default=0, help="shard that produced these logs"
+    )
+    parser.add_argument(
+        "--config-set-hash", default="", help="hash of the enumerated config set"
+    )
+    parser.add_argument(
+        "--applicability-id", default="", help="identity of the applicability predicate"
+    )
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
 
     stats = convert(
         args.logs,

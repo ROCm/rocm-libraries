@@ -58,9 +58,8 @@ TEST(TestFeasibleShapeSet, EveryShapeReturnedIsAccepted)
 {
     // The floor. A set containing one shape the engine would refuse is worse than an empty
     // one: it is benchmarked, fails, and the failure is attributed to the kernel.
-    const auto region = [](const Shape& shape) {
-        return shape[0] * shape[1] <= 1000000 && shape[2] % 8 == 0;
-    };
+    const auto region
+        = [](const Shape& shape) { return shape[0] * shape[1] <= 1000000 && shape[2] % 8 == 0; };
 
     const auto result = buildFeasibleShapeSet(region, requestFor(matmulLikeDimensions()));
 
@@ -94,8 +93,8 @@ TEST(TestFeasibleShapeSet, FindsARegionTooSparseForRejectionSampling)
     // oracle calls per shape in this region however many it wants.
     const double callsPerShape = static_cast<double>(result.stats.oracleCalls)
                                  / static_cast<double>(result.stats.accepted);
-    EXPECT_LT(callsPerShape, 150.0) << "oracle calls " << result.stats.oracleCalls
-                                    << " for " << result.stats.accepted << " accepted";
+    EXPECT_LT(callsPerShape, 150.0) << "oracle calls " << result.stats.oracleCalls << " for "
+                                    << result.stats.accepted << " accepted";
 }
 
 TEST(TestFeasibleShapeSet, HandlesParametersThatConstrainEachOther)
@@ -134,12 +133,10 @@ TEST(TestFeasibleShapeSet, ReachesBothHalvesOfADisconnectedRegion)
     request.restarts = 16;
     const auto result = buildFeasibleShapeSet(region, request);
 
-    const bool reachedSmall = std::any_of(result.shapes.begin(),
-                                          result.shapes.end(),
-                                          [](const Shape& s) { return s[0] <= 100; });
-    const bool reachedLarge = std::any_of(result.shapes.begin(),
-                                          result.shapes.end(),
-                                          [](const Shape& s) { return s[0] >= 4000; });
+    const bool reachedSmall = std::any_of(
+        result.shapes.begin(), result.shapes.end(), [](const Shape& s) { return s[0] <= 100; });
+    const bool reachedLarge = std::any_of(
+        result.shapes.begin(), result.shapes.end(), [](const Shape& s) { return s[0] >= 4000; });
 
     EXPECT_TRUE(reachedSmall);
     EXPECT_TRUE(reachedLarge) << "restarts did not reach the second island";
@@ -158,10 +155,10 @@ TEST(TestFeasibleShapeSet, SpreadsAcrossTheRangeRatherThanClustering)
     EXPECT_GT(distinctValues(result.shapes, 0), 20U);
 
     // Spanning the range, not just varied: something small and something large in each.
-    const auto minMax = std::minmax_element(
-        result.shapes.begin(), result.shapes.end(), [](const Shape& a, const Shape& b) {
-            return a[0] < b[0];
-        });
+    const auto minMax
+        = std::minmax_element(result.shapes.begin(),
+                              result.shapes.end(),
+                              [](const Shape& a, const Shape& b) { return a[0] < b[0]; });
     EXPECT_LT((*minMax.first)[0], 100);
     EXPECT_GT((*minMax.second)[0], 1000);
 }
@@ -217,8 +214,7 @@ TEST(TestFeasibleShapeSet, StaysInsideTheDeclaredSearchWindow)
     // there wastes oracle calls on shapes that could never enter a corpus.
     const auto region = [](const Shape&) { return true; };
 
-    const auto result
-        = buildFeasibleShapeSet(region, requestFor({{"M", 16, 512}, {"N", 16, 512}}));
+    const auto result = buildFeasibleShapeSet(region, requestFor({{"M", 16, 512}, {"N", 16, 512}}));
 
     ASSERT_FALSE(result.shapes.empty());
     for(const auto& shape : result.shapes)

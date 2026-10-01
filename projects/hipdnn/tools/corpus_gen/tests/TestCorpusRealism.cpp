@@ -126,10 +126,9 @@ Composition compose(const ProblemCorpus& corpus)
         composition.fromExploration += combination.fromExploration;
     }
     composition.total = corpus.problems().size();
-    composition.realistic
-        = composition.total == 0
-              ? 0.0
-              : static_cast<double>(realistic) / static_cast<double>(composition.total);
+    composition.realistic = composition.total == 0 ? 0.0
+                                                   : static_cast<double>(realistic)
+                                                         / static_cast<double>(composition.total);
     return composition;
 }
 
@@ -141,8 +140,8 @@ TEST(TestCorpusRealism, MostOfTheShippedConvolutionCorpusLooksLikeRealLayers)
     request.pointsPerCombination = 300;
     request.seed = 11;
 
-    const auto composition = compose(
-        exploreProblemSpace(shippedConvolution(), request, ACCEPT_EVERYTHING));
+    const auto composition
+        = compose(exploreProblemSpace(shippedConvolution(), request, ACCEPT_EVERYTHING));
 
     ASSERT_GT(composition.total, 0U);
     // Reported, not just asserted: the figure is the point of the change, and a threshold that
@@ -165,8 +164,8 @@ TEST(TestCorpusRealism, TheCorpusStillContainsShapesNobodyDeclared)
     request.pointsPerCombination = 300;
     request.seed = 12;
 
-    const auto composition = compose(
-        exploreProblemSpace(shippedConvolution(), request, ACCEPT_EVERYTHING));
+    const auto composition
+        = compose(exploreProblemSpace(shippedConvolution(), request, ACCEPT_EVERYTHING));
 
     EXPECT_LT(composition.realistic, 0.98)
         << "the corpus is entirely anchored and covers nothing unexpected";
@@ -182,8 +181,8 @@ TEST(TestCorpusRealism, EverySourceContributes)
     request.pointsPerCombination = 200;
     request.seed = 13;
 
-    const auto composition = compose(
-        exploreProblemSpace(shippedConvolution(), request, ACCEPT_EVERYTHING));
+    const auto composition
+        = compose(exploreProblemSpace(shippedConvolution(), request, ACCEPT_EVERYTHING));
 
     EXPECT_GT(composition.fromArchetypes, 0);
     EXPECT_GT(composition.fromNeighbourhood, 0);
@@ -204,8 +203,8 @@ TEST(TestCorpusRealism, TheAnchoredShapesAreTheRealisticOnes)
 
     for(const auto& combination : corpus.combinations)
     {
-        const auto anchored = static_cast<size_t>(combination.fromArchetypes
-                                                  + combination.fromNeighbourhood);
+        const auto anchored
+            = static_cast<size_t>(combination.fromArchetypes + combination.fromNeighbourhood);
         size_t realistic = 0;
         for(size_t i = 0; i < anchored && i < combination.problems.size(); ++i)
         {
@@ -262,8 +261,8 @@ TEST(TestCorpusRealism, TheAnchoredGeometriesCoverStridePaddingAndDilation)
     std::set<int64_t> filters;
     for(const auto& combination : corpus.combinations)
     {
-        const auto anchored = static_cast<size_t>(combination.fromArchetypes
-                                                  + combination.fromNeighbourhood);
+        const auto anchored
+            = static_cast<size_t>(combination.fromArchetypes + combination.fromNeighbourhood);
         for(size_t i = 0; i < anchored && i < combination.problems.size(); ++i)
         {
             strides.insert(at(combination.problems[i], "stride_h"));
@@ -307,9 +306,12 @@ TEST(TestCorpusRealism, TheAnchoredGeometriesCoverStridePaddingAndDilation)
                      << "% dilated, " << (100.0 * static_cast<double>(padded) / total)
                      << "% padded, over " << strides.size() << " strides, " << paddings.size()
                      << " paddings, " << dilations.size() << " dilations";
-    EXPECT_GT(static_cast<double>(strided) / total, 0.05) << "strided convolutions are a rounding error";
-    EXPECT_GT(static_cast<double>(dilated) / total, 0.02) << "dilated convolutions are a rounding error";
-    EXPECT_GT(static_cast<double>(padded) / total, 0.20) << "padded convolutions are a rounding error";
+    EXPECT_GT(static_cast<double>(strided) / total, 0.05)
+        << "strided convolutions are a rounding error";
+    EXPECT_GT(static_cast<double>(dilated) / total, 0.02)
+        << "dilated convolutions are a rounding error";
+    EXPECT_GT(static_cast<double>(padded) / total, 0.20)
+        << "padded convolutions are a rounding error";
 }
 
 TEST(TestCorpusRealism, EveryDeclaredArchetypeSetIsActuallyDrawnFrom)
@@ -317,8 +319,7 @@ TEST(TestCorpusRealism, EveryDeclaredArchetypeSetIsActuallyDrawnFrom)
     // Operation-agnostic, and the check the conv-specific ones cannot make: a declaration whose
     // archetypes never match a combination parses, validates, and silently contributes nothing.
     // The whole file then reads as workload knowledge that is present and inert.
-    for(const auto& file :
-        std::filesystem::directory_iterator(HIPDNN_CORPUS_GEN_OPERATIONS_DIR))
+    for(const auto& file : std::filesystem::directory_iterator(HIPDNN_CORPUS_GEN_OPERATIONS_DIR))
     {
         if(file.path().string().find(".opmeta.json") == std::string::npos)
         {

@@ -46,7 +46,9 @@ def test_a_wholly_positive_model_reports_nothing(caplog):
             return np.full(len(features), 1.5)
 
     with caplog.at_level(logging.ERROR):
-        count = _report_out_of_range_predictions(_AlwaysPositive(), np.zeros((3, 2)), "tflops")
+        count = _report_out_of_range_predictions(
+            _AlwaysPositive(), np.zeros((3, 2)), "tflops"
+        )
 
     assert count == 0
     assert caplog.text == ""

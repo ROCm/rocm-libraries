@@ -128,7 +128,9 @@ def main():
             "data_objects",
         )
 
-        _run_flatc(flatc_path, schemas_dir, ["--cpp", *FLATC_EXTRA_FLAGS], output_dir, f)
+        _run_flatc(
+            flatc_path, schemas_dir, ["--cpp", *FLATC_EXTRA_FLAGS], output_dir, f
+        )
 
         python_out = PYTHON_BINDING_SCHEMAS.get(os.path.basename(f))
         if python_out is not None:
@@ -156,7 +158,9 @@ def _run_flatc(flatc_path, schemas_dir, flags, output_dir, schema):
             text=True,
         )
     except subprocess.CalledProcessError as e:
-        print(f"ERROR: Failed to compile {schema} with {' '.join(flags)}", file=sys.stderr)
+        print(
+            f"ERROR: Failed to compile {schema} with {' '.join(flags)}", file=sys.stderr
+        )
         print("STDOUT:", file=sys.stderr)
         print(e.stdout, file=sys.stderr)
         print("STDERR:", file=sys.stderr)

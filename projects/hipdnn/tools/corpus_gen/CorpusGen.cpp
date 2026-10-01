@@ -48,10 +48,10 @@
 namespace
 {
 
-using hipdnn_corpus_gen::ExplorationRequest;
-using hipdnn_corpus_gen::ProblemPoint;
 using hipdnn_corpus_gen::asQueryArgument;
 using hipdnn_corpus_gen::asQueryColumns;
+using hipdnn_corpus_gen::ExplorationRequest;
+using hipdnn_corpus_gen::ProblemPoint;
 
 /// @brief The name the graph document carries: the operation, its regime, and its parameters.
 ///
@@ -61,9 +61,8 @@ using hipdnn_corpus_gen::asQueryColumns;
 /// available there and the name is all that is left. That makes uniqueness the requirement:
 /// every parameter is spelled out rather than abbreviated, because two problems that differ
 /// only in a field the name elided would join to one row and be reported as one.
-std::string graphNameFor(const std::string& operation,
-                         const std::string& regime,
-                         const ProblemPoint& point)
+std::string
+    graphNameFor(const std::string& operation, const std::string& regime, const ProblemPoint& point)
 {
     std::string name = operation;
     if(!regime.empty())
@@ -98,8 +97,17 @@ std::vector<std::pair<int64_t, std::string>> loadedEngines(hipdnnHandle_t handle
         size_t pluginLength = 0;
         size_t versionLength = 0;
         size_t typeLength = 0;
-        if(hipdnnGetEngineInfo_ext(handle, index, &id, nullptr, &nameLength, nullptr,
-                                   &pluginLength, nullptr, &versionLength, nullptr, &typeLength)
+        if(hipdnnGetEngineInfo_ext(handle,
+                                   index,
+                                   &id,
+                                   nullptr,
+                                   &nameLength,
+                                   nullptr,
+                                   &pluginLength,
+                                   nullptr,
+                                   &versionLength,
+                                   nullptr,
+                                   &typeLength)
            != HIPDNN_STATUS_SUCCESS)
         {
             continue;
@@ -108,9 +116,17 @@ std::vector<std::pair<int64_t, std::string>> loadedEngines(hipdnnHandle_t handle
         std::string plugin(pluginLength, '\0');
         std::string version(versionLength, '\0');
         std::string type(typeLength, '\0');
-        if(hipdnnGetEngineInfo_ext(handle, index, nullptr, name.data(), &nameLength,
-                                   plugin.data(), &pluginLength, version.data(), &versionLength,
-                                   type.data(), &typeLength)
+        if(hipdnnGetEngineInfo_ext(handle,
+                                   index,
+                                   nullptr,
+                                   name.data(),
+                                   &nameLength,
+                                   plugin.data(),
+                                   &pluginLength,
+                                   version.data(),
+                                   &versionLength,
+                                   type.data(),
+                                   &typeLength)
            != HIPDNN_STATUS_SUCCESS)
         {
             continue;
@@ -235,8 +251,7 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
         else if(arg == "--engine-name")
         {
             options.engineName = next();
-            options.engineId
-                = hipdnn_data_sdk::utilities::engineNameToId(options.engineName);
+            options.engineId = hipdnn_data_sdk::utilities::engineNameToId(options.engineName);
             options.haveEngineId = true;
         }
         else if(arg == "--engine-id")
@@ -270,8 +285,7 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
         }
         else if(arg == "--per-combination")
         {
-            options.exploration.pointsPerCombination
-                = std::strtoll(next().c_str(), nullptr, 10);
+            options.exploration.pointsPerCombination = std::strtoll(next().c_str(), nullptr, 10);
         }
         else if(arg == "--kdp-root" || arg == "--kdp")
         {
@@ -303,8 +317,7 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
         }
         else if(arg == "--budget")
         {
-            options.exploration.budgetPerCombination
-                = std::strtoll(next().c_str(), nullptr, 10);
+            options.exploration.budgetPerCombination = std::strtoll(next().c_str(), nullptr, 10);
         }
         else if(arg == "--ceiling")
         {
@@ -382,18 +395,17 @@ int runGenerator(const std::vector<std::string>& args)
     }
     if(!options.haveEngineId && !options.withoutEngine)
     {
-        std::cerr
-            << "--engine-name (or --engine-id) is required.\n"
-            << "\n"
-            << "  A corpus is generated FOR an engine: every problem is offered to it, so\n"
-            << "  what comes out is what that engine serves. This needs a GPU and\n"
-            << "  --plugin-dir pointing at the provider.\n"
-            << "\n"
-            << "  To generate with no engine and no GPU, pass --without-engine. Understand\n"
-            << "  what that gives you: every problem the declarations express, which is a\n"
-            << "  superset of what any engine serves. --keep and --kdp-root narrow it by\n"
-            << "  inference, not by asking, and an engine trained on a corpus it mostly\n"
-            << "  declines is biased rather than merely small.\n";
+        std::cerr << "--engine-name (or --engine-id) is required.\n"
+                  << "\n"
+                  << "  A corpus is generated FOR an engine: every problem is offered to it, so\n"
+                  << "  what comes out is what that engine serves. This needs a GPU and\n"
+                  << "  --plugin-dir pointing at the provider.\n"
+                  << "\n"
+                  << "  To generate with no engine and no GPU, pass --without-engine. Understand\n"
+                  << "  what that gives you: every problem the declarations express, which is a\n"
+                  << "  superset of what any engine serves. --keep and --kdp-root narrow it by\n"
+                  << "  inference, not by asking, and an engine trained on a corpus it mostly\n"
+                  << "  declines is biased rather than merely small.\n";
         return 1;
     }
     if(options.withoutEngine)
@@ -413,8 +425,7 @@ int runGenerator(const std::vector<std::string>& args)
         return 1;
     }
 
-    const auto declarations
-        = hipdnn_corpus_gen::loadOperationDirectory(options.operationsDir);
+    const auto declarations = hipdnn_corpus_gen::loadOperationDirectory(options.operationsDir);
     for(const auto& error : declarations.errors)
     {
         // Reported, never skipped silently: a declaration that does not load is an operation
@@ -614,8 +625,9 @@ int runGenerator(const std::vector<std::string>& args)
     {
         if(options.packRoots.empty())
         {
-            std::cerr << resolvedEngine << " serves exactly its pack's shapes (engines.json: "
-                      << coverage.reason << ")\n"
+            std::cerr << resolvedEngine
+                      << " serves exactly its pack's shapes (engines.json: " << coverage.reason
+                      << ")\n"
                       << "so its corpus comes from the pack: pass --kdp-root.\n";
             release();
             return 1;
@@ -668,9 +680,8 @@ int runGenerator(const std::vector<std::string>& args)
 
         const auto& metadata = selected.operations.front().second;
         std::cout << "constraints: "
-                  << (hipdnn_corpus_gen::detail::satisfiesConstraints(metadata, point)
-                          ? "satisfied"
-                          : "REFUSED")
+                  << (hipdnn_corpus_gen::detail::satisfiesConstraints(metadata, point) ? "satisfied"
+                                                                                       : "REFUSED")
                   << "\n";
 
         const auto built = hipdnn_corpus_gen::buildGraphFor(metadata, point);
@@ -679,13 +690,13 @@ int runGenerator(const std::vector<std::string>& args)
         {
             hipdnn_frontend::graph::Graph graph;
             const auto restored = graph.deserialize(handle, built.bytes);
-            std::cout << "deserialize: "
-                      << (restored.is_good() ? "ok" : restored.get_message()) << "\n";
+            std::cout << "deserialize: " << (restored.is_good() ? "ok" : restored.get_message())
+                      << "\n";
             if(restored.is_good())
             {
                 const auto finalized = graph.build_operation_graph(handle);
-                std::cout << "finalize: "
-                          << (finalized.is_good() ? "ok" : finalized.get_message()) << "\n";
+                std::cout << "finalize: " << (finalized.is_good() ? "ok" : finalized.get_message())
+                          << "\n";
                 if(finalized.is_good())
                 {
                     std::string asJson;
@@ -716,43 +727,42 @@ int runGenerator(const std::vector<std::string>& args)
     // points that survive them. Exclusion needs the id the graph will be written under, which
     // is content-derived, so it is computed exactly as emission computes it.
     int64_t heldOutDuringSearch = 0;
-    const hipdnn_corpus_gen::CorpusFilter searchFilter
-        = [&](const std::string& operation, const ProblemPoint& point) {
-              if(!hipdnn_corpus_gen::keeps(keep, point))
-              {
-                  return false;
-              }
-              if(excluded.empty())
-              {
-                  return true;
-              }
-              const auto declaration = std::find_if(
-                  selected.operations.begin(),
-                  selected.operations.end(),
-                  [&](const auto& entry) { return entry.second.operation == operation; });
-              if(declaration == selected.operations.end())
-              {
-                  return true;
-              }
-              const auto graph = hipdnn_corpus_gen::buildGraphFor(declaration->second, point);
-              if(!graph.ok())
-              {
-                  return true; // not this filter's refusal; the oracle reports build failures
-              }
-              const auto id
-                  = hipdnn_corpus_gen::stampGraphIdentity(
-                        graph.bytes,
-                        graphNameFor(operation,
-                                     hipdnn_corpus_gen::regimeLabel(declaration->second, point),
-                                     point))
-                        .id;
-              if(excluded.count(id) > 0)
-              {
-                  ++heldOutDuringSearch;
-                  return false;
-              }
-              return true;
-          };
+    const hipdnn_corpus_gen::CorpusFilter searchFilter = [&](const std::string& operation,
+                                                             const ProblemPoint& point) {
+        if(!hipdnn_corpus_gen::keeps(keep, point))
+        {
+            return false;
+        }
+        if(excluded.empty())
+        {
+            return true;
+        }
+        const auto declaration
+            = std::find_if(selected.operations.begin(),
+                           selected.operations.end(),
+                           [&](const auto& entry) { return entry.second.operation == operation; });
+        if(declaration == selected.operations.end())
+        {
+            return true;
+        }
+        const auto graph = hipdnn_corpus_gen::buildGraphFor(declaration->second, point);
+        if(!graph.ok())
+        {
+            return true; // not this filter's refusal; the oracle reports build failures
+        }
+        const auto id
+            = hipdnn_corpus_gen::stampGraphIdentity(
+                  graph.bytes,
+                  graphNameFor(
+                      operation, hipdnn_corpus_gen::regimeLabel(declaration->second, point), point))
+                  .id;
+        if(excluded.count(id) > 0)
+        {
+            ++heldOutDuringSearch;
+            return false;
+        }
+        return true;
+    };
 
     const auto start = std::chrono::steady_clock::now();
 
@@ -865,8 +875,7 @@ int runGenerator(const std::vector<std::string>& args)
                             .emplace(key,
                                      hipdnn_corpus_gen::stampGraphIdentity(
                                          graph.bytes,
-                                         graphNameFor(result.operation, entry.regime,
-                                                      entry.point)))
+                                         graphNameFor(result.operation, entry.regime, entry.point)))
                             .first;
             }
             if(excluded.count(known->second.id) > 0)
@@ -927,7 +936,6 @@ int runGenerator(const std::vector<std::string>& args)
                                {"first_problem", report.firstProblem}});
         }
 
-
         auto request = options.exploration;
         request.corpusTarget
             = options.count > 0
@@ -947,16 +955,16 @@ int runGenerator(const std::vector<std::string>& args)
         }
         else
         {
-            result.corpus = hipdnn_corpus_gen::exploreProblemSpace(metadata, request, admits,
-                                                                   alreadyPooled);
+            result.corpus
+                = hipdnn_corpus_gen::exploreProblemSpace(metadata, request, admits, alreadyPooled);
         }
 
         const auto problems = result.corpus.problems();
         if(timing.queries > 0)
         {
-            const auto wall = std::chrono::duration<double>(std::chrono::steady_clock::now()
-                                                            - searchStart)
-                                  .count();
+            const auto wall
+                = std::chrono::duration<double>(std::chrono::steady_clock::now() - searchStart)
+                      .count();
             const auto perQuery = [&timing](double seconds) {
                 return seconds * 1e6 / static_cast<double>(timing.queries);
             };
@@ -976,8 +984,8 @@ int runGenerator(const std::vector<std::string>& args)
         {
             // A metadata bug, not an engine refusal, and the difference matters: the first
             // makes an operation look unsupported when it is undeclared.
-            std::cerr << " (" << result.buildFailures << " failed to build: "
-                      << result.firstBuildError << ")";
+            std::cerr << " (" << result.buildFailures
+                      << " failed to build: " << result.firstBuildError << ")";
         }
         // Coverage as measured, not asserted: how many distinct feasible points the search
         // reached, and how many cells the corpus spreads them over.
@@ -985,8 +993,9 @@ int runGenerator(const std::vector<std::string>& args)
         {
             if(combination.stats.distinct > 0)
             {
-                std::cerr << "\n    " << hipdnn_corpus_gen::detail::describe(combination.categorical)
-                          << ": " << combination.stats.distinct << " distinct feasible, "
+                std::cerr << "\n    "
+                          << hipdnn_corpus_gen::detail::describe(combination.categorical) << ": "
+                          << combination.stats.distinct << " distinct feasible, "
                           << combination.stats.cellsOccupied << "/" << combination.stats.cells
                           << " cells";
             }
@@ -1021,7 +1030,7 @@ int runGenerator(const std::vector<std::string>& args)
         for(size_t i = 0; i < problems.size(); ++i)
         {
             hipdnn_corpus_gen::PoolEntry entry;
-            entry.point  = problems[i];
+            entry.point = problems[i];
             entry.source = "sweep";
             entry.origin = result.operation + " draw " + std::to_string(i);
             entry.regime = hipdnn_corpus_gen::regimeLabel(metadata, entry.point);
@@ -1030,7 +1039,6 @@ int runGenerator(const std::vector<std::string>& args)
                 pools["sweep"].push_back(std::move(entry));
             }
         }
-
 
         // Spread a cut over every categorical combination as well as the regime, so a count
         // below the pools' size takes a proportional share of each dtype, layout and mode.
@@ -1049,8 +1057,8 @@ int runGenerator(const std::vector<std::string>& args)
                     const auto held = entry.point.find(parameter.name);
                     if(held != entry.point.end())
                     {
-                        stratum += parameter.name + "=" + hipdnn_corpus_gen::asText(held->second)
-                                   + ",";
+                        stratum
+                            += parameter.name + "=" + hipdnn_corpus_gen::asText(held->second) + ",";
                     }
                 }
                 entry.stratum = stratum + "|" + entry.regime;
@@ -1105,9 +1113,8 @@ int runGenerator(const std::vector<std::string>& args)
         for(size_t i = 0; i < chosen.size(); ++i)
         {
             const auto& entry = chosen[i];
-            const auto& graph
-                = stamped.at(result.operation + "|"
-                             + hipdnn_corpus_gen::detail::describe(entry.point));
+            const auto& graph = stamped.at(result.operation + "|"
+                                           + hipdnn_corpus_gen::detail::describe(entry.point));
 
             // Stem == manifest `name`, as the corpus contract has always had it: scoring joins
             // bench output (keyed by file stem) to measurements (keyed by `name`), and a file
@@ -1119,11 +1126,11 @@ int runGenerator(const std::vector<std::string>& args)
             problem.close();
 
             hipdnn_corpus_gen::ManifestEntry row;
-            row.entry      = entry;
-            row.benchmark  = graph.id;
-            row.name       = graph.name;
-            row.file       = "graphs/" + name;
-            row.operation  = result.operation;
+            row.entry = entry;
+            row.benchmark = graph.id;
+            row.name = graph.name;
+            row.file = "graphs/" + name;
+            row.operation = result.operation;
             row.regimeAxes = metadata.regimeLabel;
             // The tensor footprint the byte budget admitted it on, not the file size: the
             // latter is a few kilobytes for every graph and says nothing about the problem.
@@ -1135,8 +1142,7 @@ int runGenerator(const std::vector<std::string>& args)
                 index << "problem," << asQueryColumns(entry.point, true) << "\n";
                 wroteHeader = true;
             }
-            index << graph.name << "," << asQueryColumns(entry.point, false)
-                  << "\n";
+            index << graph.name << "," << asQueryColumns(entry.point, false) << "\n";
 
             commands << options.benchPath;
             for(const auto& dir : options.pluginDirs)
@@ -1148,9 +1154,8 @@ int runGenerator(const std::vector<std::string>& args)
             {
                 commands << " --engine-name " << options.engineName;
             }
-            commands << " --sweep --no-header"
-                     << " --problem-id " << graph.name
-                     << " --query " << asQueryArgument(entry.point) << "\n";
+            commands << " --sweep --no-header" << " --problem-id " << graph.name << " --query "
+                     << asQueryArgument(entry.point) << "\n";
             ++total;
         }
     }
@@ -1171,8 +1176,8 @@ int runGenerator(const std::vector<std::string>& args)
         // What was asked for, per operation and summed. Reported, never filled: a corpus of
         // 664 problems from an engine that serves 664 is complete, and the gap between this
         // and the row count is the only place that shows.
-        manifest.requested        = requested;
-        manifest.allocation       = allocationTotals;
+        manifest.requested = requested;
+        manifest.allocation = allocationTotals;
         manifest.duplicatesDropped = droppedTotals;
         for(const auto& entry : selected.operations)
         {

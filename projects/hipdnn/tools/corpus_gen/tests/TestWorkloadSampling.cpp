@@ -85,8 +85,8 @@ TEST(TestWorkloadSampling, ADrawKeepsAnArchetypesValuesTogether)
 
     for(int i = 0; i < 50; ++i)
     {
-        const auto drawn = detail::drawFromArchetype(
-            metadata, metadata.archetypes.front(), ProblemPoint{}, rng);
+        const auto drawn
+            = detail::drawFromArchetype(metadata, metadata.archetypes.front(), ProblemPoint{}, rng);
         ASSERT_TRUE(drawn.has_value());
         EXPECT_EQ(at(*drawn, "C"), 3);
         EXPECT_EQ(at(*drawn, "H"), 224);
@@ -120,7 +120,8 @@ TEST(TestWorkloadSampling, AnArchetypeThatContradictsTheCombinationDeclinesRathe
     EXPECT_FALSE(
         detail::drawFromArchetype(metadata, metadata.archetypes.front(), half, rng).has_value());
 
-    const auto matching = detail::drawFromArchetype(metadata, metadata.archetypes.back(), half, rng);
+    const auto matching
+        = detail::drawFromArchetype(metadata, metadata.archetypes.back(), half, rng);
     ASSERT_TRUE(matching.has_value());
     EXPECT_EQ(std::get<std::string>(matching->at("dtype")), "fp16");
     EXPECT_EQ(at(*matching, "C"), 64);
@@ -134,8 +135,11 @@ TEST(TestWorkloadSampling, PerturbationKeepsChannelsAligned)
     const auto metadata = tinyConv();
     std::mt19937_64 rng(4);
 
-    const ProblemPoint anchor{{"C", int64_t{64}}, {"H", int64_t{56}}, {"W", int64_t{56}},
-                              {"R", int64_t{3}},  {"pad", int64_t{1}},
+    const ProblemPoint anchor{{"C", int64_t{64}},
+                              {"H", int64_t{56}},
+                              {"W", int64_t{56}},
+                              {"R", int64_t{3}},
+                              {"pad", int64_t{1}},
                               {"dtype", std::string{"fp32"}}};
 
     for(int i = 0; i < 200; ++i)
@@ -154,8 +158,11 @@ TEST(TestWorkloadSampling, ADistinguishedSmallValueSurvivesAnAlignmentNeighbourh
     const auto metadata = tinyConv();
     std::mt19937_64 rng(41);
 
-    const ProblemPoint stem{{"C", int64_t{3}},  {"H", int64_t{224}}, {"W", int64_t{224}},
-                            {"R", int64_t{7}},  {"pad", int64_t{3}},
+    const ProblemPoint stem{{"C", int64_t{3}},
+                            {"H", int64_t{224}},
+                            {"W", int64_t{224}},
+                            {"R", int64_t{7}},
+                            {"pad", int64_t{3}},
                             {"dtype", std::string{"fp32"}}};
 
     for(int i = 0; i < 200; ++i)
@@ -165,8 +172,11 @@ TEST(TestWorkloadSampling, ADistinguishedSmallValueSurvivesAnAlignmentNeighbourh
     }
 
     // A value at or above the alignment still moves, and still lands on a multiple.
-    const ProblemPoint body{{"C", int64_t{64}}, {"H", int64_t{56}}, {"W", int64_t{56}},
-                            {"R", int64_t{3}},  {"pad", int64_t{1}},
+    const ProblemPoint body{{"C", int64_t{64}},
+                            {"H", int64_t{56}},
+                            {"W", int64_t{56}},
+                            {"R", int64_t{3}},
+                            {"pad", int64_t{1}},
                             {"dtype", std::string{"fp32"}}};
     std::set<int64_t> seen;
     for(int i = 0; i < 200; ++i)
@@ -185,8 +195,11 @@ TEST(TestWorkloadSampling, PerturbationActuallyMoves)
     const auto metadata = tinyConv();
     std::mt19937_64 rng(5);
 
-    const ProblemPoint anchor{{"C", int64_t{64}}, {"H", int64_t{56}}, {"W", int64_t{56}},
-                              {"R", int64_t{3}},  {"pad", int64_t{1}},
+    const ProblemPoint anchor{{"C", int64_t{64}},
+                              {"H", int64_t{56}},
+                              {"W", int64_t{56}},
+                              {"R", int64_t{3}},
+                              {"pad", int64_t{1}},
                               {"dtype", std::string{"fp32"}}};
 
     std::set<int64_t> channels;
@@ -211,8 +224,11 @@ TEST(TestWorkloadSampling, AMirrorFollowsThePerturbedValueNotTheOriginal)
     const auto metadata = tinyConv();
     std::mt19937_64 rng(6);
 
-    const ProblemPoint anchor{{"C", int64_t{64}}, {"H", int64_t{56}}, {"W", int64_t{56}},
-                              {"R", int64_t{3}},  {"pad", int64_t{1}},
+    const ProblemPoint anchor{{"C", int64_t{64}},
+                              {"H", int64_t{56}},
+                              {"W", int64_t{56}},
+                              {"R", int64_t{3}},
+                              {"pad", int64_t{1}},
                               {"dtype", std::string{"fp32"}}};
 
     for(int i = 0; i < 100; ++i)
@@ -233,8 +249,11 @@ TEST(TestWorkloadSampling, AParameterWithNoNeighbourhoodDoesNotDrift)
     const auto metadata = tinyConv();
     std::mt19937_64 rng(7);
 
-    const ProblemPoint anchor{{"C", int64_t{64}}, {"H", int64_t{56}}, {"W", int64_t{56}},
-                              {"R", int64_t{3}},  {"pad", int64_t{1}},
+    const ProblemPoint anchor{{"C", int64_t{64}},
+                              {"H", int64_t{56}},
+                              {"W", int64_t{56}},
+                              {"R", int64_t{3}},
+                              {"pad", int64_t{1}},
                               {"dtype", std::string{"fp32"}}};
 
     for(int i = 0; i < 100; ++i)

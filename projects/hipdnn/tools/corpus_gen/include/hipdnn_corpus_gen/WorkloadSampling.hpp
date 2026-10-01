@@ -227,10 +227,10 @@ inline int64_t perturbOne(const Parameter& parameter,
         // At or above the alignment, align first: an anchor is usually already a multiple, but
         // one that is not would otherwise carry its misalignment through every perturbation,
         // and alignment is the property this kind exists to preserve.
-        const auto aligned
-            = std::max(hood.of, static_cast<int64_t>(std::llround(static_cast<double>(base)
-                                                                  / static_cast<double>(hood.of)))
-                                    * hood.of);
+        const auto aligned = std::max(hood.of,
+                                      static_cast<int64_t>(std::llround(
+                                          static_cast<double>(base) / static_cast<double>(hood.of)))
+                                          * hood.of);
         const auto step = hood.steps.at(choose(hood.steps.size()));
         return clampToRange(parameter, std::max(hood.of, aligned + (step * hood.of)));
     }
@@ -245,8 +245,7 @@ inline int64_t perturbOne(const Parameter& parameter,
         }
         const auto ratio = hood.ratios.empty() ? 1.0 : hood.ratios.at(choose(hood.ratios.size()));
         return clampToRange(
-            parameter,
-            static_cast<int64_t>(std::llround(static_cast<double>(*followed) * ratio)));
+            parameter, static_cast<int64_t>(std::llround(static_cast<double>(*followed) * ratio)));
     }
     default:
         return clampToRange(parameter, base);

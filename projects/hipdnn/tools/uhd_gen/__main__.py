@@ -56,8 +56,14 @@ import pandas as pd
 
 from .benchmark_log import main as benchmark_log_main
 from .catalog import require_rankable
-from .evaluate import (BENCHMARK_COLUMN, Grouping, add_evaluate_arguments, problem_keys,
-                       resolve_grouping, run_evaluate)
+from .evaluate import (
+    BENCHMARK_COLUMN,
+    Grouping,
+    add_evaluate_arguments,
+    problem_keys,
+    resolve_grouping,
+    run_evaluate,
+)
 from .corpus_io import read_corpus_frame
 from .coverage import device_field_coverage, enforce_device_coverage
 from .knobs import add_knob_arguments, run_knobs
@@ -160,9 +166,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     add_promote_arguments(promote)
 
-    immediate_import = subparsers.add_parser("import-immediate", help="import hipdnn_bench --collect-immediate JSON without candidate enumeration")
-    immediate_import.add_argument("--input", nargs="+", required=True, help="Immediate JSON responses or normalized CSV corpora")
-    immediate_import.add_argument("--output", required=True, help="Output .json or .csv corpus")
+    immediate_import = subparsers.add_parser(
+        "import-immediate",
+        help="import hipdnn_bench --collect-immediate JSON without candidate enumeration",
+    )
+    immediate_import.add_argument(
+        "--input",
+        nargs="+",
+        required=True,
+        help="Immediate JSON responses or normalized CSV corpora",
+    )
+    immediate_import.add_argument(
+        "--output", required=True, help="Output .json or .csv corpus"
+    )
 
     knobs = subparsers.add_parser(
         "knobs",
@@ -179,7 +195,10 @@ def main(argv: list[str] | None = None) -> int:
     add_merge_arguments(merge)
 
     from .generate import add_generate_arguments, run_generate
-    generate = subparsers.add_parser("generate", help="collect, train, evaluate and promote from a graph corpus")
+
+    generate = subparsers.add_parser(
+        "generate", help="collect, train, evaluate and promote from a graph corpus"
+    )
     add_generate_arguments(generate)
 
     # export-benchmarks parses its own argv tail, so it is split off before the
@@ -192,15 +211,27 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "import-immediate":
         from .immediate import normalize_corpus, read_corpus
+
         try:
-            frame = normalize_corpus(pd.concat([read_corpus(Path(path)) for path in args.input], ignore_index=True))
+            frame = normalize_corpus(
+                pd.concat(
+                    [read_corpus(Path(path)) for path in args.input], ignore_index=True
+                )
+            )
             destination = Path(args.output)
             if destination.suffix not in (".json", ".csv"):
                 raise ValueError("--output must have .json or .csv suffix")
             destination.parent.mkdir(parents=True, exist_ok=True)
             if destination.suffix == ".json":
-                records = frame.astype(object).where(pd.notna(frame), None).to_dict(orient="records")
-                destination.write_text(json.dumps(records, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+                records = (
+                    frame.astype(object)
+                    .where(pd.notna(frame), None)
+                    .to_dict(orient="records")
+                )
+                destination.write_text(
+                    json.dumps(records, indent=2, allow_nan=False) + "\n",
+                    encoding="utf-8",
+                )
             else:
                 frame.to_csv(destination, index=False)
             return 0
@@ -222,8 +253,11 @@ def main(argv: list[str] | None = None) -> int:
 
 def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
     from .provenance import ROLES
+
     parser.add_argument("--role", choices=ROLES, default="sort_kernel_catalog")
-    parser.add_argument("--arch", help="UED role-map architecture, or default for a multi-arch model")
+    parser.add_argument(
+        "--arch", help="UED role-map architecture, or default for a multi-arch model"
+    )
     parser.add_argument(
         "--input",
         required=True,
@@ -231,13 +265,27 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         "uhd_gen/dataset publishes, or a collected .csv/.json corpus",
     )
     feature_source = parser.add_mutually_exclusive_group(required=True)
-    feature_source.add_argument("--features", nargs="+", help="Full published feature column names")
-    feature_source.add_argument("--feature-signature", help="JSON file containing a canonical inline features_signature array")
+    feature_source.add_argument(
+        "--features", nargs="+", help="Full published feature column names"
+    )
+    feature_source.add_argument(
+        "--feature-signature",
+        help="JSON file containing a canonical inline features_signature array",
+    )
     provenance = parser.add_mutually_exclusive_group()
-    provenance.add_argument("--descriptor-tree", help="Descriptors whose revisions are captured before fitting")
-    provenance.add_argument("--provenance", help="Explicit recorded trained_against JSON snapshot")
-    parser.add_argument("--engine", help="UED name/UUID, or immediate engine canonical name/public ID")
-    parser.add_argument("--feature-evaluator", help="Path to the shared hipdnn_uhd_features executable")
+    provenance.add_argument(
+        "--descriptor-tree",
+        help="Descriptors whose revisions are captured before fitting",
+    )
+    provenance.add_argument(
+        "--provenance", help="Explicit recorded trained_against JSON snapshot"
+    )
+    parser.add_argument(
+        "--engine", help="UED name/UUID, or immediate engine canonical name/public ID"
+    )
+    parser.add_argument(
+        "--feature-evaluator", help="Path to the shared hipdnn_uhd_features executable"
+    )
     parser.add_argument(
         "--metric",
         choices=tuple(RANKING_METRICS),
@@ -379,14 +427,14 @@ def _resolve_uhd_id(requested: str | None) -> str:
     try:
         parsed = uuid.UUID(requested)
     except (ValueError, AttributeError, TypeError) as error:
-        raise ValueError(
-            f"--uhd-id {requested!r} is not a UUID ({error})"
-        ) from error
+        raise ValueError(f"--uhd-id {requested!r} is not a UUID ({error})") from error
     canonical = str(parsed)
     if canonical != requested:
         # Braced/urn/undashed spellings parse, but the descriptor is written canonical.
         # Say so, or the id in the file quietly differs from the one that was typed.
-        logger.warning("--uhd-id %r normalized to canonical form %s", requested, canonical)
+        logger.warning(
+            "--uhd-id %r normalized to canonical form %s", requested, canonical
+        )
     return canonical
 
 
@@ -404,35 +452,55 @@ def _resolve_score(args: argparse.Namespace, immediate: bool) -> None:
         args.metric = DEFAULT_RANKING_METRIC
     if args.metric is None:
         if immediate:
-            raise ValueError(f"{args.role} requires --metric: engine selection compares its "
-                             "score across engines, so it must name a registered metric")
+            raise ValueError(
+                f"{args.role} requires --metric: engine selection compares its "
+                "score across engines, so it must name a registered metric"
+            )
         if args.calibrated:
-            raise ValueError("--calibrated requires --metric: a calibrated score must name the "
-                             "quantity it is calibrated in (RFC 0019 §4.1)")
+            raise ValueError(
+                "--calibrated requires --metric: a calibrated score must name the "
+                "quantity it is calibrated in (RFC 0019 §4.1)"
+            )
         args.objective = args.objective or "max"
         return
     metric = ranking_metric(args.metric)
     if args.target not in (None, metric.label):
-        raise ValueError(f"--metric {metric.name} trains on the {metric.label!r} column; "
-                         f"--target {args.target} contradicts it")
+        raise ValueError(
+            f"--metric {metric.name} trains on the {metric.label!r} column; "
+            f"--target {args.target} contradicts it"
+        )
     if args.objective not in (None, metric.objective):
-        raise ValueError(f"--metric {metric.name} fixes objective {metric.objective}; "
-                         f"--objective {args.objective} contradicts it")
+        raise ValueError(
+            f"--metric {metric.name} fixes objective {metric.objective}; "
+            f"--objective {args.objective} contradicts it"
+        )
     args.target, args.objective = metric.label, metric.objective
     if metric.label == LABEL_STATISTIC:
         # This metric's label IS a timing statistic, so it cannot have been derived from
         # another one.
         if args.timing_statistic not in (None, LABEL_STATISTIC):
-            raise ValueError(f"--metric {metric.name} is labelled by {LABEL_STATISTIC}; "
-                             f"--timing-statistic {args.timing_statistic} contradicts it")
+            raise ValueError(
+                f"--metric {metric.name} is labelled by {LABEL_STATISTIC}; "
+                f"--timing-statistic {args.timing_statistic} contradicts it"
+            )
         args.timing_statistic = LABEL_STATISTIC
 
 
-
 def _run_train(args: argparse.Namespace) -> int:
-    from .provenance import record_feature_semantics, snapshot_provenance, validate_provenance
-    from .immediate import (LABEL_STATISTIC, ROLE, check_signature_evaluates, read_corpus,
-                            require_binding_metric, training_binding, validate_signature)
+    from .provenance import (
+        record_feature_semantics,
+        snapshot_provenance,
+        validate_provenance,
+    )
+    from .immediate import (
+        LABEL_STATISTIC,
+        ROLE,
+        check_signature_evaluates,
+        read_corpus,
+        require_binding_metric,
+        training_binding,
+        validate_signature,
+    )
 
     immediate = args.role == ROLE
     binding = None
@@ -441,7 +509,9 @@ def _run_train(args: argparse.Namespace) -> int:
     output_dir = Path(args.output_dir)
     try:
         uhd_id = _resolve_uhd_id(args.uhd_id)
-        if Path(args.descriptor_name).name != args.descriptor_name or args.descriptor_name in ("", ".", ".."):
+        if Path(
+            args.descriptor_name
+        ).name != args.descriptor_name or args.descriptor_name in ("", ".", ".."):
             raise ValueError("--descriptor-name must be a file stem, not a path")
         # Settled, and captured below, before data preparation or fitting, never stamped later.
         _resolve_score(args, immediate)
@@ -451,24 +521,38 @@ def _run_train(args: argparse.Namespace) -> int:
                 # chosen across unrelated graphs has no per-row meaning: until an L1 contract
                 # for grouped artifacts exists, training one would ship a model nobody scores
                 # the way it was fitted.
-                raise ValueError(f"--group-by-feature is not supported for {ROLE}: a grouped "
-                                 "artifact has no engine-level (per-row) scoring contract")
+                raise ValueError(
+                    f"--group-by-feature is not supported for {ROLE}: a grouped "
+                    "artifact has no engine-level (per-row) scoring contract"
+                )
             df, binding = training_binding(read_corpus(input_path), args.engine)
             # Every row, not the first: the selector that picked each measured kernel answered
             # in the binding's metric, so rows of another metric describe another selector.
             for index, row_binding in enumerate(df["binding"]):
-                require_binding_metric(json.loads(row_binding), args.metric, f"{input_path} row {index}")
+                require_binding_metric(
+                    json.loads(row_binding), args.metric, f"{input_path} row {index}"
+                )
             trained_against = binding["trained_against"]
             if args.provenance:
-                recorded = validate_provenance(json.loads(Path(args.provenance).read_text(encoding="utf-8")))
+                recorded = validate_provenance(
+                    json.loads(Path(args.provenance).read_text(encoding="utf-8"))
+                )
                 if recorded != trained_against:
-                    raise ValueError("recorded provenance differs from immediate engine binding")
+                    raise ValueError(
+                        "recorded provenance differs from immediate engine binding"
+                    )
             elif args.descriptor_tree:
-                recorded = snapshot_provenance(Path(args.descriptor_tree), args.engine, args.arch)
+                recorded = snapshot_provenance(
+                    Path(args.descriptor_tree), args.engine, args.arch
+                )
                 if recorded != trained_against:
-                    raise ValueError("descriptor provenance differs from immediate engine binding")
+                    raise ValueError(
+                        "descriptor provenance differs from immediate engine binding"
+                    )
             if args.group_by is not None and args.group_by != ["benchmark", "device"]:
-                raise ValueError("L1 training groups must be benchmark device, never engine/candidate rows")
+                raise ValueError(
+                    "L1 training groups must be benchmark device, never engine/candidate rows"
+                )
             args.group_by = ["benchmark", "device"]
             args.calibrated = True
             # RFC 0019.13 §11.2 (:2003) and §10.6.2 (:1914-1916): L1 always declares a
@@ -477,24 +561,44 @@ def _run_train(args: argparse.Namespace) -> int:
             if args.timing_statistic not in (None, LABEL_STATISTIC):
                 raise ValueError(
                     f"{ROLE} labels are derived from {LABEL_STATISTIC}; "
-                    f"--timing-statistic {args.timing_statistic} contradicts the corpus")
+                    f"--timing-statistic {args.timing_statistic} contradicts the corpus"
+                )
             args.timing_statistic = LABEL_STATISTIC
             observed_arches = sorted(df["arch"].unique())
-            if args.training_arches and sorted(set(args.training_arches)) != observed_arches:
-                raise ValueError("--training-arches must match the measured immediate corpus")
+            if (
+                args.training_arches
+                and sorted(set(args.training_arches)) != observed_arches
+            ):
+                raise ValueError(
+                    "--training-arches must match the measured immediate corpus"
+                )
             args.training_arches = observed_arches
             if args.arch is None:
                 if len(observed_arches) != 1:
-                    raise ValueError("multi-architecture L1 training requires --arch default")
+                    raise ValueError(
+                        "multi-architecture L1 training requires --arch default"
+                    )
                 args.arch = observed_arches[0]
-            if args.arch != "default" and (len(observed_arches) != 1 or args.arch != observed_arches[0]):
-                raise ValueError("L1 role-map arch must cover the complete training corpus")
+            if args.arch != "default" and (
+                len(observed_arches) != 1 or args.arch != observed_arches[0]
+            ):
+                raise ValueError(
+                    "L1 role-map arch must cover the complete training corpus"
+                )
         else:
             if args.provenance:
-                trained_against = validate_provenance(json.loads(Path(args.provenance).read_text(encoding="utf-8")))
+                trained_against = validate_provenance(
+                    json.loads(Path(args.provenance).read_text(encoding="utf-8"))
+                )
             elif args.descriptor_tree:
-                arch = args.training_arches[0] if args.training_arches and len(args.training_arches) == 1 else None
-                trained_against = snapshot_provenance(Path(args.descriptor_tree), args.engine, arch)
+                arch = (
+                    args.training_arches[0]
+                    if args.training_arches and len(args.training_arches) == 1
+                    else None
+                )
+                trained_against = snapshot_provenance(
+                    Path(args.descriptor_tree), args.engine, arch
+                )
             else:
                 raise ValueError("training requires --descriptor-tree or --provenance")
             # The suffix decides, in `corpus_io.read_corpus_frame` for every command
@@ -543,7 +647,11 @@ def _run_train(args: argparse.Namespace) -> int:
                 logger.info(
                     "Dropped %d row(s) with is_valid=False, %d row(s) carrying a "
                     "collection error, and %d row(s) whose %s is not a finite number",
-                    invalid, errored, unmeasured, args.target)
+                    invalid,
+                    errored,
+                    unmeasured,
+                    args.target,
+                )
             # RFC 0019.13 §11.2 (:2003): "A UHD declaring `calibrated: true` MUST train
             # its score on `avgTimeMs`". A calibrated model is the one whose absolute
             # value gets compared across engines, and minimum- or robust-mean-derived
@@ -553,7 +661,8 @@ def _run_train(args: argparse.Namespace) -> int:
             if args.calibrated and args.timing_statistic != LABEL_STATISTIC:
                 raise ValueError(
                     "--calibrated requires --timing-statistic avgTimeMs (RFC 0019.13 "
-                    f"§11.2); got {args.timing_statistic!r}")
+                    f"§11.2); got {args.timing_statistic!r}"
+                )
         if df.empty:
             raise ValueError("No valid rows to train on")
         if not immediate:
@@ -571,9 +680,12 @@ def _run_train(args: argparse.Namespace) -> int:
             census_grouping = None
             if args.group_by is not None:
                 census_grouping = Grouping(
-                    columns=tuple(args.group_by), degraded=False, detail="--group-by")
+                    columns=tuple(args.group_by), degraded=False, detail="--group-by"
+                )
             if census_grouping is not None or BENCHMARK_COLUMN in df.columns:
-                density = require_rankable(df, engine=args.engine, grouping=census_grouping)
+                density = require_rankable(
+                    df, engine=args.engine, grouping=census_grouping
+                )
                 thin = density.near_deterministic_warning()
                 if thin:
                     logger.warning("%s", thin)
@@ -581,10 +693,12 @@ def _run_train(args: argparse.Namespace) -> int:
                 logger.info(
                     "catalog census skipped: the corpus has no %r column and no --group-by, "
                     "so rows carry no problem identity to count candidates over",
-                    BENCHMARK_COLUMN)
+                    BENCHMARK_COLUMN,
+                )
         signature = (
             json.loads(Path(args.feature_signature).read_text(encoding="utf-8"))
-            if args.feature_signature else build_features_signature(args.features)
+            if args.feature_signature
+            else build_features_signature(args.features)
         )
         if not isinstance(signature, list) or not signature:
             raise ValueError("features_signature must be a nonempty JSON array")
@@ -603,38 +717,62 @@ def _run_train(args: argparse.Namespace) -> int:
             raise ValueError(f"Missing target column: {args.target}")
         coverage = device_field_coverage(df)
         enforce_device_coverage(signature, coverage)
-        categorical_encoding = derive_categorical_encoding(df, [ref[1:] for ref in references])
+        categorical_encoding = derive_categorical_encoding(
+            df, [ref[1:] for ref in references]
+        )
         if immediate:
             # After the encoding, because a published string is only evaluable through it.
-            check_signature_evaluates(signature, df["features"], categorical_encoding,
-                                      args.feature_evaluator)
+            check_signature_evaluates(
+                signature, df["features"], categorical_encoding, args.feature_evaluator
+            )
         # The branch decides where the VALUES come from, never where the digest comes from:
         # RFC 0019 §6.3 gives features_hash one definition and both kinds of signature take
         # it from the shared evaluator. Values still split, because a raw reference is a
         # column gather that pandas does in-process, and pushing a whole training corpus
         # through the evaluator's JSON pipe to re-derive it would buy nothing.
         if any(isinstance(entry, dict) for entry in signature):
-            features_hash, values = evaluate_feature_rows(df, signature, categorical_encoding, args.feature_evaluator)
+            features_hash, values = evaluate_feature_rows(
+                df, signature, categorical_encoding, args.feature_evaluator
+            )
             matrix = np.asarray(values, dtype=np.float64)
         else:
-            features_hash = compute_features_hash(signature, categorical_encoding, args.feature_evaluator)
-            matrix = build_feature_matrix(df, [entry[1:] for entry in signature], categorical_encoding)
+            features_hash = compute_features_hash(
+                signature, categorical_encoding, args.feature_evaluator
+            )
+            matrix = build_feature_matrix(
+                df, [entry[1:] for entry in signature], categorical_encoding
+            )
         # From the evaluator that just digested this signature: what the published values
         # mean is that build's, and the loader refuses a model recording any other revision
         # (FeatureSemantics.hpp). Recorded before fitting, like the rest of the provenance.
         trained_against = record_feature_semantics(
-            trained_against, evaluator_feature_semantics_revision(args.feature_evaluator))
-        names = [entry[1:] if isinstance(entry, str) else f"expression_{index}"
-                 for index, entry in enumerate(signature)]
-        constant_indices = [index for index in range(matrix.shape[1])
-                            if np.all(matrix[:, index] == matrix[0, index])]
+            trained_against,
+            evaluator_feature_semantics_revision(args.feature_evaluator),
+        )
+        names = [
+            entry[1:] if isinstance(entry, str) else f"expression_{index}"
+            for index, entry in enumerate(signature)
+        ]
+        constant_indices = [
+            index
+            for index in range(matrix.shape[1])
+            if np.all(matrix[:, index] == matrix[0, index])
+        ]
         constants = []
         for index in constant_indices:
-            value = df[signature[index][1:]].iloc[0] if isinstance(signature[index], str) else float(matrix[0, index])
-            constants.append((names[index], value.item() if hasattr(value, "item") else value))
+            value = (
+                df[signature[index][1:]].iloc[0]
+                if isinstance(signature[index], str)
+                else float(matrix[0, index])
+            )
+            constants.append(
+                (names[index], value.item() if hasattr(value, "item") else value)
+            )
         if len(constants) == len(signature):
-            raise ValueError("Every requested feature column is constant: " +
-                             ", ".join(f"{name}={value!r}" for name, value in constants))
+            raise ValueError(
+                "Every requested feature column is constant: "
+                + ", ".join(f"{name}={value!r}" for name, value in constants)
+            )
         dropped = [{"column": name, "value": value} for name, value in constants]
         if constants:
             # A column with one value is a column no tree can split on, so it buys the
@@ -650,24 +788,46 @@ def _run_train(args: argparse.Namespace) -> int:
             # measured against the corpus that was collected: a field the sweep failed to
             # cover is indistinguishable here from one the kernels pin, and only the
             # author can tell those apart.
-            logger.warning("Dropping %d feature column(s) that never vary in this corpus: %s. "
-                           "RFC 0019.13 §10.4: this prunes model inputs only, and leaves the "
-                           "engine's authored public knobs untouched.",
-                           len(constants), ", ".join(f"{name}={value!r}" for name, value in constants))
+            logger.warning(
+                "Dropping %d feature column(s) that never vary in this corpus: %s. "
+                "RFC 0019.13 §10.4: this prunes model inputs only, and leaves the "
+                "engine's authored public knobs untouched.",
+                len(constants),
+                ", ".join(f"{name}={value!r}" for name, value in constants),
+            )
             if len(constants) / len(signature) >= CONSTANT_FEATURE_WARN_FRACTION:
-                logger.warning("High constant-feature proportion: check device and problem coverage")
-            keep = [index for index in range(len(signature)) if index not in constant_indices]
+                logger.warning(
+                    "High constant-feature proportion: check device and problem coverage"
+                )
+            keep = [
+                index
+                for index in range(len(signature))
+                if index not in constant_indices
+            ]
             signature = [signature[index] for index in keep]
             names = [names[index] for index in keep]
             matrix = matrix[:, keep]
             remaining_refs = set(signature_references(signature))
-            categorical_encoding = {key: value for key, value in categorical_encoding.items() if key in remaining_refs}
+            categorical_encoding = {
+                key: value
+                for key, value in categorical_encoding.items()
+                if key in remaining_refs
+            }
             # Pruning changed the signature, so the descriptor's identity changed with
             # it (§6.3). Only the digest is restated -- the kept columns of `matrix`
             # are already the values for the surviving entries.
-            features_hash = compute_features_hash(signature, categorical_encoding, args.feature_evaluator)
-        if args.metric is None and args.objective == "max" and _looks_like_cost_metric(args.target):
-            logger.warning("Target '%s' looks like a cost; use --objective min to prefer faster candidates", args.target)
+            features_hash = compute_features_hash(
+                signature, categorical_encoding, args.feature_evaluator
+            )
+        if (
+            args.metric is None
+            and args.objective == "max"
+            and _looks_like_cost_metric(args.target)
+        ):
+            logger.warning(
+                "Target '%s' looks like a cost; use --objective min to prefer faster candidates",
+                args.target,
+            )
         groups = args.group_by
         if groups is None and "benchmark" in df.columns:
             groups = ["benchmark"] + (["device"] if "device" in df.columns else [])
@@ -687,19 +847,27 @@ def _run_train(args: argparse.Namespace) -> int:
             keys = list(groups) + [args.group_by_feature]
             positions = (
                 df.assign(_uhd_row=np.arange(len(df)))
-                  .sort_values(args.target, ascending=(args.objective == "min"))
-                  .drop_duplicates(subset=keys, keep="first")["_uhd_row"]
-                  .to_numpy()
+                .sort_values(args.target, ascending=(args.objective == "min"))
+                .drop_duplicates(subset=keys, keep="first")["_uhd_row"]
+                .to_numpy()
             )
             positions = np.sort(positions)
             layer_one_df = df.iloc[positions].reset_index(drop=True)
             layer_one_matrix = None if matrix is None else matrix[positions]
-            logger.info("Layer 1 fitted on %d group rows (from %d candidates)",
-                        len(layer_one_df), len(df))
+            logger.info(
+                "Layer 1 fitted on %d group rows (from %d candidates)",
+                len(layer_one_df),
+                len(df),
+            )
 
         model = train_model(
-            layer_one_df, names, args.target, groups, num_boost_round=args.num_boost_round,
-            early_stopping_rounds=args.early_stopping, categorical_encoding=categorical_encoding,
+            layer_one_df,
+            names,
+            args.target,
+            groups,
+            num_boost_round=args.num_boost_round,
+            early_stopping_rounds=args.early_stopping,
+            categorical_encoding=categorical_encoding,
             feature_matrix=layer_one_matrix,
         )
 
@@ -729,23 +897,34 @@ def _run_train(args: argparse.Namespace) -> int:
                 # layer 1, which the adapter already handles -- a group it chose but layer 2
                 # does not describe ranks by layer 1 rather than being discarded.
                 try:
-                    group_models.append((
-                        float(codes[value]) if codes is not None else float(value),
-                        train_model(
-                            df.iloc[at].reset_index(drop=True), names, args.target, groups,
-                            num_boost_round=args.num_boost_round,
-                            early_stopping_rounds=args.early_stopping,
-                            categorical_encoding=categorical_encoding,
-                            feature_matrix=None if matrix is None else matrix[at],
-                        ),
-                    ))
+                    group_models.append(
+                        (
+                            float(codes[value]) if codes is not None else float(value),
+                            train_model(
+                                df.iloc[at].reset_index(drop=True),
+                                names,
+                                args.target,
+                                groups,
+                                num_boost_round=args.num_boost_round,
+                                early_stopping_rounds=args.early_stopping,
+                                categorical_encoding=categorical_encoding,
+                                feature_matrix=None if matrix is None else matrix[at],
+                            ),
+                        )
+                    )
                 except (ValueError, RuntimeError) as error:
                     # Warn rather than fail: one unfittable group must not cost the artifact
                     # every other group's layer 2, and the degradation is visible here.
-                    logger.warning("group %s not fitted (%s); it will rank by layer 1",
-                                   value, str(error).split(chr(10))[0][:90])
-            logger.info("Trained %d group model(s) on %s",
-                        len(group_models), args.group_by_feature)
+                    logger.warning(
+                        "group %s not fitted (%s); it will rank by layer 1",
+                        value,
+                        str(error).split(chr(10))[0][:90],
+                    )
+            logger.info(
+                "Trained %d group model(s) on %s",
+                len(group_models),
+                args.group_by_feature,
+            )
     except (OSError, TypeError, ValueError, KeyError) as error:
         logger.error("%s", error)
         return 1
@@ -756,21 +935,34 @@ def _run_train(args: argparse.Namespace) -> int:
     model.save_model(str(lgbm_path))
 
     fb_path = output_dir / "model.bin"
-    model_sha256 = convert(lgbm_path, features_hash, fb_path, num_training_samples=len(df),
-                           training_arches=args.training_arches,
-                           model_version=args.model_version,
-                           group_by_feature_index=group_index,
-                           group_models=group_models or None)
+    model_sha256 = convert(
+        lgbm_path,
+        features_hash,
+        fb_path,
+        num_training_samples=len(df),
+        training_arches=args.training_arches,
+        model_version=args.model_version,
+        group_by_feature_index=group_index,
+        group_models=group_models or None,
+    )
     if not args.keep_lgbm:
         lgbm_path.unlink()
     descriptor = {
-        "version": "1.0", "id": uhd_id, "name": args.name, "adapter": "tree_data",
-        "features_signature": signature, "features_hash": features_hash,
-        "trained_against": trained_against, "objective": args.objective,
+        "version": "1.0",
+        "id": uhd_id,
+        "name": args.name,
+        "adapter": "tree_data",
+        "features_signature": signature,
+        "features_hash": features_hash,
+        "trained_against": trained_against,
+        "objective": args.objective,
         # RFC 0019 §4.1: `metric` names the registered quantity the score estimates, and
         # is absent from a within-engine ranker that estimates none of them.
-        "score": {**({"metric": args.metric} if args.metric else {}),
-                  "calibrated": args.calibrated, "transform": "log1p"},
+        "score": {
+            **({"metric": args.metric} if args.metric else {}),
+            "calibrated": args.calibrated,
+            "transform": "log1p",
+        },
         # RFC 0019 §7.2: the body naming the artifact carries the digest of its bytes,
         # which TreeDataAdapter recomputes before parsing and refuses on mismatch. It
         # answers the question features_hash does not -- that one fingerprints the input
@@ -785,22 +977,30 @@ def _run_train(args: argparse.Namespace) -> int:
     descriptor_document = json.dumps(descriptor, indent=2) + "\n"
     descriptor_path.write_text(descriptor_document, encoding="utf-8")
     manifest = {
-        "uhd_id": uhd_id, "requested_features": args.features or requested_signature,
-        "features": names, "features_signature": signature, "features_hash": features_hash,
-        "trained_against": trained_against, "device_coverage": coverage,
+        "uhd_id": uhd_id,
+        "requested_features": args.features or requested_signature,
+        "features": names,
+        "features_signature": signature,
+        "features_hash": features_hash,
+        "trained_against": trained_against,
+        "device_coverage": coverage,
         "dropped_constant_features": dropped,
         # RFC 0019.13 §10.5: a content hash over the UHD document AND the model artifact.
         # Conversion is deterministic (`lgbm_to_flatbuffer.resolve_training_date`), so
         # these are checkable against the sources rather than merely recorded.
         "uhd_sha256": hashlib.sha256(descriptor_document.encode("utf-8")).hexdigest(),
         "model_sha256": model_sha256,
-        "categorical_encoding": categorical_encoding, "target": args.target, "objective": args.objective,
-        "score_metric": args.metric, "score_calibrated": args.calibrated,
+        "categorical_encoding": categorical_encoding,
+        "target": args.target,
+        "objective": args.objective,
+        "score_metric": args.metric,
+        "score_calibrated": args.calibrated,
         # RFC 0019.13 §10.5/§11.2: which measured timing the target came from. §11.2
         # refuses cross-engine comparison between models trained on different ones, so
         # a consumer has to be able to read it off the artifact rather than infer it.
         "timing_statistic": args.timing_statistic,
-        "score_transform": "log1p", "group_by": groups or [],
+        "score_transform": "log1p",
+        "group_by": groups or [],
         # The feature layer 1 groups on, and the count it produced. Recorded because the
         # artifact alone gives an evaluator only a slot index, and a slot index cannot say
         # which column it came from -- without the name, a report cannot attribute a regret
@@ -810,24 +1010,44 @@ def _run_train(args: argparse.Namespace) -> int:
         "num_trees": model.num_trees(),
         "feature_importance": {
             name: {"gain": float(gain), "split": int(split)}
-            for name, gain, split in zip(names, model.feature_importance(importance_type="gain"),
-                                         model.feature_importance(importance_type="split"))
+            for name, gain, split in zip(
+                names,
+                model.feature_importance(importance_type="gain"),
+                model.feature_importance(importance_type="split"),
+            )
         },
-        "num_samples": len(df), "input_file": str(input_path.resolve()),
+        "num_samples": len(df),
+        "input_file": str(input_path.resolve()),
         "input_sha256": hashlib.sha256(input_path.read_bytes()).hexdigest(),
-        "training_arches": args.training_arches or [], "model_version": args.model_version,
-        "training_options": {"num_boost_round": args.num_boost_round, "early_stopping_rounds": args.early_stopping},
+        "training_arches": args.training_arches or [],
+        "model_version": args.model_version,
+        "training_options": {
+            "num_boost_round": args.num_boost_round,
+            "early_stopping_rounds": args.early_stopping,
+        },
     }
     if immediate:
-        manifest.update(role=ROLE, binding=binding, arch=args.arch,
-                        training_problem_keys=sorted(set(zip(df["benchmark"], df["device"]))))
+        manifest.update(
+            role=ROLE,
+            binding=binding,
+            arch=args.arch,
+            training_problem_keys=sorted(set(zip(df["benchmark"], df["device"]))),
+        )
     elif BENCHMARK_COLUMN in df.columns:
         # The problems this model saw, in `evaluate`'s own identity, so a later standalone
         # evaluation can prove its slice held out from content rather than from a path.
-        manifest["training_problem_keys"] = sorted(set(problem_keys(df, resolve_grouping(df))))
-    (output_dir / "train_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    print(f"UHD generated: {descriptor_path}\nModel: {fb_path}\nFeatures hash: {features_hash}")
-    print(f"Install: python -m uhd_gen promote --model-dir {output_dir} --descriptor-tree <TREE> --role {args.role} --arch {args.arch or '<ARCH>'}")
+        manifest["training_problem_keys"] = sorted(
+            set(problem_keys(df, resolve_grouping(df)))
+        )
+    (output_dir / "train_manifest.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
+    print(
+        f"UHD generated: {descriptor_path}\nModel: {fb_path}\nFeatures hash: {features_hash}"
+    )
+    print(
+        f"Install: python -m uhd_gen promote --model-dir {output_dir} --descriptor-tree <TREE> --role {args.role} --arch {args.arch or '<ARCH>'}"
+    )
     return 0
 
 

@@ -25,14 +25,20 @@ from uhd_gen.dataset.publish import (  # noqa: E402  (deliberately after the ski
 
 def rows(**overrides) -> pd.DataFrame:
     base = {
-        "q.M": [1024, 1024], "q.N": [1024, 1024], "q.K": [1024, 1024],
+        "q.M": [1024, 1024],
+        "q.N": [1024, 1024],
+        "q.K": [1024, 1024],
         "q.dtype": ["fp32", "fp32"],
         # What the engine published beside the shape (RFC 0019 13.6), and the only thing the
         # metrics are derived from: 2*M*N*K, and three 1024^2 fp32 tensors.
-        "q.flops": [2 * 1024**3, 2 * 1024**3], "q.bytes": [3 * 1024**2 * 4, 3 * 1024**2 * 4],
-        "kernel.tile_m": [64, 128], "device.cu_count": [80, 80],
-        "minTimeMs": [1.0, 2.0], "avgTimeMs": [1.1, 2.1],
-        "stddevMs": [0.01, 0.01], "iters": [10, 10],
+        "q.flops": [2 * 1024**3, 2 * 1024**3],
+        "q.bytes": [3 * 1024**2 * 4, 3 * 1024**2 * 4],
+        "kernel.tile_m": [64, 128],
+        "device.cu_count": [80, 80],
+        "minTimeMs": [1.0, 2.0],
+        "avgTimeMs": [1.1, 2.1],
+        "stddevMs": [0.01, 0.01],
+        "iters": [10, 10],
         "error": ["", ""],
     }
     base.update(overrides)
@@ -58,7 +64,9 @@ def test_the_published_rate_names_the_winner_the_calibrated_label_names():
     """
     out = build_dataset(rows(minTimeMs=[1.0, 1.5], avgTimeMs=[2.0, 1.6]))
     assert out.loc[out["tflops"].idxmax(), "kernel.tile_m"] == 128
-    assert out["tflops"].tolist() == pytest.approx([2 * 1024**3 / t / 1e9 for t in (2.0, 1.6)])
+    assert out["tflops"].tolist() == pytest.approx(
+        [2 * 1024**3 / t / 1e9 for t in (2.0, 1.6)]
+    )
 
 
 def test_absent_optional_columns_take_their_defaults():
@@ -69,13 +77,22 @@ def test_absent_optional_columns_take_their_defaults():
 
 def test_a_failed_row_keeps_null_metrics_and_downgrades_its_problem():
     """The failure is information about a candidate, so the row stays -- but the problem can no
-    longer claim its space was fully measured, or regret over it reads as exact when it is not."""
-    frame = rows(minTimeMs=[1.0, None], avgTimeMs=[1.1, None], stddevMs=[0.01, None],
-                 iters=[10, None], error=["", "HIP error 700"], problem_complete=[True, True])
+    longer claim its space was fully measured, or regret over it reads as exact when it is not.
+    """
+    frame = rows(
+        minTimeMs=[1.0, None],
+        avgTimeMs=[1.1, None],
+        stddevMs=[0.01, None],
+        iters=[10, None],
+        error=["", "HIP error 700"],
+        problem_complete=[True, True],
+    )
     out = build_dataset(frame)
 
     assert pd.isna(out["tflops"].iloc[1]) and pd.isna(out["gbs"].iloc[1])
-    assert not out["problem_complete"].any(), "the errored candidate left the problem complete"
+    assert not out[
+        "problem_complete"
+    ].any(), "the errored candidate left the problem complete"
 
 
 def test_a_row_claiming_both_a_measurement_and_an_error_is_rejected():
@@ -128,11 +145,14 @@ def test_the_problem_namespace_is_the_operations_own_name():
     is published as `<root>.flops`, and reading it means the namespace really was stripped
     rather than the column merely tolerated.
     """
-    frame = rows().rename(columns=lambda c: c.replace("q.", "matmul.", 1)
-                          if c.startswith("q.") else c)
+    frame = rows().rename(
+        columns=lambda c: c.replace("q.", "matmul.", 1) if c.startswith("q.") else c
+    )
     out = build_dataset(frame)
 
-    assert "matmul.M" in out.columns and not any(c.startswith("q.") for c in out.columns)
+    assert "matmul.M" in out.columns and not any(
+        c.startswith("q.") for c in out.columns
+    )
     assert out["tflops"].iloc[0] == pytest.approx(2 * 1024**3 / 1.1e-3 / 1e12)
 
 
@@ -163,8 +183,13 @@ def test_shards_concatenate_and_round_trip_through_parquet(tmp_path):
     # What the round trip actually has to preserve: a null stays null rather than becoming an
     # empty string or a zero, since null is the whole signal that a row has no measurement.
     nulled = build_dataset(
-        rows(minTimeMs=[1.0, None], avgTimeMs=[1.1, None], stddevMs=[0.01, None],
-             iters=[10, None], error=["", "HIP error 700"]),
+        rows(
+            minTimeMs=[1.0, None],
+            avgTimeMs=[1.1, None],
+            stddevMs=[0.01, None],
+            iters=[10, None],
+            error=["", "HIP error 700"],
+        ),
     )
     write_parquet(nulled, destination)
     reread = pd.read_parquet(destination)
@@ -193,23 +218,35 @@ def test_a_solver_name_bound_to_two_ids_is_refused():
     solver wearing two names is two candidates -- and regret is then computed over a catalog that
     existed on no machine.
     """
-    frame = rows(**{"kernel.solver": ["ConvBinWinoRxS", "ConvBinWinoRxS"],
-                    "kernel.solver_id": [37, 53]})
+    frame = rows(
+        **{
+            "kernel.solver": ["ConvBinWinoRxS", "ConvBinWinoRxS"],
+            "kernel.solver_id": [37, 53],
+        }
+    )
     with pytest.raises(ValidationError, match="ambiguous"):
         build_dataset(frame)
 
 
 def test_a_solver_id_bound_to_two_names_is_refused():
     """The other direction: a reused id, which the registrar's policy exists to prevent."""
-    frame = rows(**{"kernel.solver": ["ConvBinWinogradRxSf3x2", "ConvBinWinoRxS<3-2>"],
-                    "kernel.solver_id": [37, 37]})
+    frame = rows(
+        **{
+            "kernel.solver": ["ConvBinWinogradRxSf3x2", "ConvBinWinoRxS<3-2>"],
+            "kernel.solver_id": [37, 37],
+        }
+    )
     with pytest.raises(ValidationError, match="ambiguous"):
         build_dataset(frame)
 
 
 def test_the_agreeing_case_passes():
-    frame = rows(**{"kernel.solver": ["ConvBinWinogradRxSf3x2", "ConvBinWinogradRxSf2x3"],
-                    "kernel.solver_id": [37, 53]})
+    frame = rows(
+        **{
+            "kernel.solver": ["ConvBinWinogradRxSf3x2", "ConvBinWinogradRxSf2x3"],
+            "kernel.solver_id": [37, 53],
+        }
+    )
     assert len(build_dataset(frame)) == 2
 
 
@@ -272,14 +309,22 @@ def test_resolution_keeps_the_latest_occasion_per_problem():
     cover -- typically the ones an older, broader sweep measured, which carry the widest
     candidate coverage. Here one problem is re-measured and another is not; both must survive.
     """
-    frame = pd.DataFrame({
-        "q.M": [1024, 1024, 2048], "q.N": [1024, 1024, 2048], "q.K": [1024, 1024, 2048],
-        "q.dtype": ["fp32"] * 3,
-        "kernel.tile_m": [64, 64, 64], "device.cu_count": [80, 80, 80],
-        "minTimeMs": [5.0, 1.0, 7.0], "avgTimeMs": [5.1, 1.1, 7.1],
-        "stddevMs": [0.01] * 3, "iters": [10] * 3, "error": [""] * 3,
-        "date_run": ["2026-01-01", "2026-02-01", "2026-01-01"],
-    })
+    frame = pd.DataFrame(
+        {
+            "q.M": [1024, 1024, 2048],
+            "q.N": [1024, 1024, 2048],
+            "q.K": [1024, 1024, 2048],
+            "q.dtype": ["fp32"] * 3,
+            "kernel.tile_m": [64, 64, 64],
+            "device.cu_count": [80, 80, 80],
+            "minTimeMs": [5.0, 1.0, 7.0],
+            "avgTimeMs": [5.1, 1.1, 7.1],
+            "stddevMs": [0.01] * 3,
+            "iters": [10] * 3,
+            "error": [""] * 3,
+            "date_run": ["2026-01-01", "2026-02-01", "2026-01-01"],
+        }
+    )
 
     out = resolve_duplicates(frame, "date_run", "minTimeMs")
 
@@ -291,17 +336,26 @@ def test_resolution_keeps_the_latest_occasion_per_problem():
 
 def test_a_repeat_within_one_occasion_keeps_the_fastest():
     """Repeats differ by contention and clocks, not by anything about the kernel."""
-    frame = pd.DataFrame({
-        "q.M": [1024, 1024], "q.N": [1024, 1024], "q.K": [1024, 1024],
-        "q.dtype": ["fp32", "fp32"],
-        # What the engine published beside the shape (RFC 0019 13.6), and the only thing the
-        # metrics are derived from: 2*M*N*K, and three 1024^2 fp32 tensors.
-        "q.flops": [2 * 1024**3, 2 * 1024**3], "q.bytes": [3 * 1024**2 * 4, 3 * 1024**2 * 4],
-        "kernel.tile_m": [64, 64], "device.cu_count": [80, 80],
-        "minTimeMs": [5.0, 2.0], "avgTimeMs": [5.1, 2.1],
-        "stddevMs": [0.01, 0.01], "iters": [10, 10], "error": ["", ""],
-        "date_run": ["2026-01-01", "2026-01-01"],
-    })
+    frame = pd.DataFrame(
+        {
+            "q.M": [1024, 1024],
+            "q.N": [1024, 1024],
+            "q.K": [1024, 1024],
+            "q.dtype": ["fp32", "fp32"],
+            # What the engine published beside the shape (RFC 0019 13.6), and the only thing the
+            # metrics are derived from: 2*M*N*K, and three 1024^2 fp32 tensors.
+            "q.flops": [2 * 1024**3, 2 * 1024**3],
+            "q.bytes": [3 * 1024**2 * 4, 3 * 1024**2 * 4],
+            "kernel.tile_m": [64, 64],
+            "device.cu_count": [80, 80],
+            "minTimeMs": [5.0, 2.0],
+            "avgTimeMs": [5.1, 2.1],
+            "stddevMs": [0.01, 0.01],
+            "iters": [10, 10],
+            "error": ["", ""],
+            "date_run": ["2026-01-01", "2026-01-01"],
+        }
+    )
 
     out = resolve_duplicates(frame, "date_run", "minTimeMs")
     assert out["minTimeMs"].tolist() == [2.0]
@@ -313,18 +367,27 @@ def test_resolution_settles_what_validation_would_otherwise_reject():
     A complete problem carrying one configuration twice is rejected as two merged collections.
     A re-measured problem trips the same check, and this is the rule that distinguishes them.
     """
-    frame = pd.DataFrame({
-        "q.M": [1024, 1024], "q.N": [1024, 1024], "q.K": [1024, 1024],
-        "q.dtype": ["fp32", "fp32"],
-        # What the engine published beside the shape (RFC 0019 13.6), and the only thing the
-        # metrics are derived from: 2*M*N*K, and three 1024^2 fp32 tensors.
-        "q.flops": [2 * 1024**3, 2 * 1024**3], "q.bytes": [3 * 1024**2 * 4, 3 * 1024**2 * 4],
-        "kernel.tile_m": [64, 64], "device.cu_count": [80, 80],
-        "minTimeMs": [5.0, 1.0], "avgTimeMs": [5.1, 1.1],
-        "stddevMs": [0.01, 0.01], "iters": [10, 10], "error": ["", ""],
-        "problem_complete": [True, True],
-        "date_run": ["2026-01-01", "2026-02-01"],
-    })
+    frame = pd.DataFrame(
+        {
+            "q.M": [1024, 1024],
+            "q.N": [1024, 1024],
+            "q.K": [1024, 1024],
+            "q.dtype": ["fp32", "fp32"],
+            # What the engine published beside the shape (RFC 0019 13.6), and the only thing the
+            # metrics are derived from: 2*M*N*K, and three 1024^2 fp32 tensors.
+            "q.flops": [2 * 1024**3, 2 * 1024**3],
+            "q.bytes": [3 * 1024**2 * 4, 3 * 1024**2 * 4],
+            "kernel.tile_m": [64, 64],
+            "device.cu_count": [80, 80],
+            "minTimeMs": [5.0, 1.0],
+            "avgTimeMs": [5.1, 1.1],
+            "stddevMs": [0.01, 0.01],
+            "iters": [10, 10],
+            "error": ["", ""],
+            "problem_complete": [True, True],
+            "date_run": ["2026-01-01", "2026-02-01"],
+        }
+    )
 
     with pytest.raises(ValidationError, match="same kernel configuration twice"):
         build_dataset(frame)
@@ -338,19 +401,33 @@ def test_resolution_keeps_each_boards_problem_apart():
     Keyed on the shape alone, February's board-B sweep deleted board A's January rows, and on
     one occasion the two boards' candidates merged into one problem.
     """
-    frame = pd.DataFrame({
-        "benchmark": ["g0"] * 4, "device": ["boardA", "boardA", "boardB", "boardB"],
-        "q.M": [1024] * 4, "q.N": [1024] * 4, "q.K": [1024] * 4, "q.dtype": ["fp32"] * 4,
-        "kernel.tile_m": [64, 128, 64, 128], "device.cu_count": [256, 256, 304, 304],
-        "minTimeMs": [1.0, 2.0, 3.0, 0.5], "avgTimeMs": [1.1, 2.1, 3.1, 0.6],
-        "stddevMs": [0.01] * 4, "iters": [10] * 4, "error": [""] * 4,
-        "date_run": ["2026-01-01", "2026-01-01", "2026-02-01", "2026-02-01"],
-    })
+    frame = pd.DataFrame(
+        {
+            "benchmark": ["g0"] * 4,
+            "device": ["boardA", "boardA", "boardB", "boardB"],
+            "q.M": [1024] * 4,
+            "q.N": [1024] * 4,
+            "q.K": [1024] * 4,
+            "q.dtype": ["fp32"] * 4,
+            "kernel.tile_m": [64, 128, 64, 128],
+            "device.cu_count": [256, 256, 304, 304],
+            "minTimeMs": [1.0, 2.0, 3.0, 0.5],
+            "avgTimeMs": [1.1, 2.1, 3.1, 0.6],
+            "stddevMs": [0.01] * 4,
+            "iters": [10] * 4,
+            "error": [""] * 4,
+            "date_run": ["2026-01-01", "2026-01-01", "2026-02-01", "2026-02-01"],
+        }
+    )
 
     for dated in (frame, frame.assign(date_run="2026-01-01")):
         out = resolve_duplicates(dated, "date_run", "avgTimeMs")
         assert sorted(zip(out["device"], out["kernel.tile_m"])) == [
-            ("boardA", 64), ("boardA", 128), ("boardB", 64), ("boardB", 128)]
+            ("boardA", 64),
+            ("boardA", 128),
+            ("boardB", 64),
+            ("boardB", 128),
+        ]
 
 
 def test_scoping_gives_each_group_its_own_positions():
@@ -361,10 +438,12 @@ def test_scoping_gives_each_group_its_own_positions():
     asked to split on a column with no consistent meaning. Measured on a real corpus, scoping
     moved total regret from 0.1007 to 0.0889, effectively all of it in the group decision.
     """
-    frame = rows(**{
-        "kernel.solver_id": [107, 137],
-        "kernel.descriptor": ["a,64,4", "b,7"],
-    })
+    frame = rows(
+        **{
+            "kernel.solver_id": [107, 137],
+            "kernel.descriptor": ["a,64,4", "b,7"],
+        }
+    )
     out = expand_descriptors(
         build_dataset(frame), ["kernel.descriptor"], scope_by="kernel.solver_id"
     )
@@ -382,21 +461,27 @@ def test_a_row_outside_its_group_takes_the_absent_value():
     Zero is a legal tuning value, so filling with it would make "this group has no field here"
     indistinguishable from "this field is set to nothing".
     """
-    frame = rows(**{
-        "kernel.solver_id": [107, 137],
-        "kernel.descriptor": ["a,0", "b,7"],
-    })
+    frame = rows(
+        **{
+            "kernel.solver_id": [107, 137],
+            "kernel.descriptor": ["a,0", "b,7"],
+        }
+    )
     out = expand_descriptors(
         build_dataset(frame), ["kernel.descriptor"], scope_by="kernel.solver_id"
     )
-    assert out["kernel.descriptor.s107_f0"].tolist() == [0, -1], "a real 0 was confused with absent"
+    assert out["kernel.descriptor.s107_f0"].tolist() == [
+        0,
+        -1,
+    ], "a real 0 was confused with absent"
 
 
 def test_scoping_by_a_column_the_corpus_lacks_is_refused():
     with pytest.raises(ValidationError, match="scope-by"):
         expand_descriptors(
             build_dataset(rows(**{"kernel.descriptor": ["a,1", "b,2"]})),
-            ["kernel.descriptor"], scope_by="kernel.nope",
+            ["kernel.descriptor"],
+            scope_by="kernel.nope",
         )
 
 
@@ -415,7 +500,9 @@ def test_two_boards_measuring_one_shape_import_as_two_problems():
     second board's rows look exactly like a second collection of the first board's problem, and
     the candidate-set check below refuses a corpus that is simply two GPUs.
     """
-    frame = pd.concat([rows(device=["a", "a"]), rows(device=["b", "b"])], ignore_index=True)
+    frame = pd.concat(
+        [rows(device=["a", "a"]), rows(device=["b", "b"])], ignore_index=True
+    )
     frame["problem_complete"] = True
 
     out = build_dataset(frame)
@@ -430,8 +517,14 @@ def test_a_fault_on_one_board_does_not_downgrade_the_other_boards_problem():
     to a board that measured everything is a silently pessimistic number about working hardware.
     """
     healthy = rows(device=["a", "a"])
-    faulted = rows(device=["b", "b"], minTimeMs=[1.0, None], avgTimeMs=[1.1, None],
-                   stddevMs=[0.01, None], iters=[10, None], error=["", "HIP error 700"])
+    faulted = rows(
+        device=["b", "b"],
+        minTimeMs=[1.0, None],
+        avgTimeMs=[1.1, None],
+        stddevMs=[0.01, None],
+        iters=[10, None],
+        error=["", "HIP error 700"],
+    )
 
     out = build_dataset(pd.concat([healthy, faulted], ignore_index=True))
 
@@ -445,9 +538,14 @@ def test_the_collectors_spelling_of_a_failure_is_republished_as_an_error():
     error, so every sweep containing a failure would be refused and the documented chain from
     the collector to the dataset would not compose.
     """
-    frame = rows(minTimeMs=[1.0, None], avgTimeMs=[1.1, None], stddevMs=[0.01, None],
-                 iters=[10, None], is_valid=["True", "False"],
-                 skip_reason=["", "hip error 700"]).drop(columns=["error"])
+    frame = rows(
+        minTimeMs=[1.0, None],
+        avgTimeMs=[1.1, None],
+        stddevMs=[0.01, None],
+        iters=[10, None],
+        is_valid=["True", "False"],
+        skip_reason=["", "hip error 700"],
+    ).drop(columns=["error"])
 
     out = build_dataset(frame)
 
@@ -462,7 +560,9 @@ def test_a_row_marked_failed_that_still_carries_a_timing_is_still_rejected():
     """The translation must not launder a producer bug into a valid row: a candidate that both
     reports a time and says it never ran cannot be trusted either way.
     """
-    frame = rows(is_valid=["True", "False"], skip_reason=["", "hip error 700"]).drop(columns=["error"])
+    frame = rows(is_valid=["True", "False"], skip_reason=["", "hip error 700"]).drop(
+        columns=["error"]
+    )
     with pytest.raises(ValidationError, match="both"):
         build_dataset(frame)
 
@@ -491,25 +591,40 @@ def test_a_collected_sdpa_corpus_imports_and_is_given_its_metrics(tmp_path):
     keeps them intact through the import.
     """
     path = tmp_path / "sdpa.csv"
-    pd.DataFrame({
-        "benchmark": ["prefill", "decode"], "device": ["gfx942-0", "gfx942-0"],
-        "q.batch": [2, 2], "q.heads": [16, 16], "q.seqlen_q": [1024, 1],
-        "q.seqlen_k": [1024, 4096], "q.head_dim": [128, 128],
-        "q.is_causal": [1, 1], "q.dtype": ["fp16", "fp16"],
-        "q.flops": [4 * 2 * 16 * 128 * (1024 * 1024 - 1024 * 1023 / 2),
-                    4 * 2 * 16 * 128 * 1 * 4096],
-        "q.bytes": [2 * 2 * 16 * 128 * (2 * 1024 + 2 * 1024),
-                    2 * 2 * 16 * 128 * (2 * 1 + 2 * 4096)],
-        "kernel.tile_m": [64, 128], "device.cu_count": [304, 304],
-        "minTimeMs": [1.0, 0.5], "avgTimeMs": [1.1, 0.55],
-        "stddevMs": [0.01, 0.01], "iters": [20, 20],
-    }).to_csv(path, index=False)
+    pd.DataFrame(
+        {
+            "benchmark": ["prefill", "decode"],
+            "device": ["gfx942-0", "gfx942-0"],
+            "q.batch": [2, 2],
+            "q.heads": [16, 16],
+            "q.seqlen_q": [1024, 1],
+            "q.seqlen_k": [1024, 4096],
+            "q.head_dim": [128, 128],
+            "q.is_causal": [1, 1],
+            "q.dtype": ["fp16", "fp16"],
+            "q.flops": [
+                4 * 2 * 16 * 128 * (1024 * 1024 - 1024 * 1023 / 2),
+                4 * 2 * 16 * 128 * 1 * 4096,
+            ],
+            "q.bytes": [
+                2 * 2 * 16 * 128 * (2 * 1024 + 2 * 1024),
+                2 * 2 * 16 * 128 * (2 * 1 + 2 * 4096),
+            ],
+            "kernel.tile_m": [64, 128],
+            "device.cu_count": [304, 304],
+            "minTimeMs": [1.0, 0.5],
+            "avgTimeMs": [1.1, 0.55],
+            "stddevMs": [0.01, 0.01],
+            "iters": [20, 20],
+        }
+    ).to_csv(path, index=False)
 
     out = build_dataset(load_csvs([path]))
 
     scale = 4 * 2 * 16 * 128
     assert out["tflops"].iloc[0] == pytest.approx(
-        scale * (1024 * 1024 - 1024 * 1023 / 2) / 1.1e-3 / 1e12)
+        scale * (1024 * 1024 - 1024 * 1023 / 2) / 1.1e-3 / 1e12
+    )
     # One query against 4096 keys is a full row of the mask, not half of it.
     assert out["tflops"].iloc[1] == pytest.approx(scale * 1 * 4096 / 5.5e-4 / 1e12)
     assert out["gbs"].notna().all()

@@ -71,7 +71,9 @@ def knob_columns(df: pd.DataFrame) -> list[str]:
     return [
         c
         for c in df.columns
-        if c.startswith(_KERNEL_PREFIX) and c not in _NOT_KNOBS and not c.endswith(".uid")
+        if c.startswith(_KERNEL_PREFIX)
+        and c not in _NOT_KNOBS
+        and not c.endswith(".uid")
     ]
 
 
@@ -82,9 +84,11 @@ def graph_bound_twins(columns) -> dict[str, str]:
     kernel's value to the graph's. Matched on the short name, since the two sides do not
     share a root: a knob is `kernel.seqlen_q` while its twin is `attention_dense.seqlen_q`.
     """
-    return {column.split(".", 1)[1]: column
-            for column in columns
-            if "." in column and not column.startswith(_RESERVED_PREFIXES)}
+    return {
+        column.split(".", 1)[1]: column
+        for column in columns
+        if "." in column and not column.startswith(_RESERVED_PREFIXES)
+    }
 
 
 @dataclass
@@ -147,7 +151,9 @@ class KnobAblation:
         """
         if not self.per_value:
             return None
-        return min(self.per_value, key=lambda v: (v.uncovered, v.p95_regret, v.mean_regret))
+        return min(
+            self.per_value, key=lambda v: (v.uncovered, v.p95_regret, v.mean_regret)
+        )
 
     def to_dict(self) -> dict:
         best = self.best
@@ -216,7 +222,7 @@ def analyse_knobs(
     within = usable.groupby(group, dropna=False)
     knobs = []
     for name in knob_columns(usable):
-        short = name[len(_KERNEL_PREFIX):]
+        short = name[len(_KERNEL_PREFIX) :]
         values = sorted(usable[name].dropna().unique().tolist(), key=repr)
         tunable = bool((within[name].nunique(dropna=False) > 1).any())
         ablation = KnobAblation(
@@ -302,7 +308,8 @@ def _variant_curve(df, group, target, objective, oracle) -> list[dict]:
             )
             served = joined[joined["restricted"].notna()]
             regrets = [
-                regret_of(r.restricted, r.oracle, objective) for r in served.itertuples()
+                regret_of(r.restricted, r.oracle, objective)
+                for r in served.itertuples()
             ]
             series = pd.Series(regrets, dtype="float64")
             scored.append(
@@ -463,7 +470,9 @@ def rank_knobs(report: dict, importance: dict[str, dict] | None = None) -> list[
     return sorted(ranked, key=_order)
 
 
-def format_author_report(report: dict, ranked: list[dict], engine: str | None = None) -> str:
+def format_author_report(
+    report: dict, ranked: list[dict], engine: str | None = None
+) -> str:
     """The ranking as something a kernel author can act on without reading JSON."""
     lines = [
         f"# Knob value report{f' -- {engine}' if engine else ''}",
@@ -500,7 +509,13 @@ def format_author_report(report: dict, ranked: list[dict], engine: str | None = 
 
     curve = report.get("variant_curve") or []
     if curve:
-        lines += ["", "## How few variants per geometry would do", "", "| variants | mean regret | p95 |", "|---|---|---|"]
+        lines += [
+            "",
+            "## How few variants per geometry would do",
+            "",
+            "| variants | mean regret | p95 |",
+            "|---|---|---|",
+        ]
         for row in curve[:5]:
             lines.append(
                 f"| {row['variants']} | {row['mean_regret']:.2%} | {row['p95_regret']:.2%} |"
@@ -509,19 +524,29 @@ def format_author_report(report: dict, ranked: list[dict], engine: str | None = 
 
 
 def add_knob_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--input", required=True,
-                        help="benchmark corpus: the published .parquet dataset, a collected "
-                             ".csv, or .json records -- the same three forms train takes")
-    parser.add_argument("--target", default="robustMeanMs", help="timing column to rank on")
     parser.add_argument(
-        "--objective", default="min", choices=("min", "max"), help="direction of --target"
+        "--input",
+        required=True,
+        help="benchmark corpus: the published .parquet dataset, a collected "
+        ".csv, or .json records -- the same three forms train takes",
+    )
+    parser.add_argument(
+        "--target", default="robustMeanMs", help="timing column to rank on"
+    )
+    parser.add_argument(
+        "--objective",
+        default="min",
+        choices=("min", "max"),
+        help="direction of --target",
     )
     parser.add_argument(
         "--device-column",
         default=None,
         help="column naming the device; joins the problem key so one corpus may span GPUs",
     )
-    parser.add_argument("--output", default=None, help="write the full report as JSON here")
+    parser.add_argument(
+        "--output", default=None, help="write the full report as JSON here"
+    )
     parser.add_argument(
         "--manifest",
         default=None,
@@ -532,13 +557,15 @@ def add_knob_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="write the ranking as markdown for the kernel author",
     )
-    parser.add_argument("--engine", default=None, help="engine name, for the report title")
+    parser.add_argument(
+        "--engine", default=None, help="engine name, for the report title"
+    )
     parser.add_argument(
         "--curve-rows",
         type=int,
         default=12,
         help="how many rows of the variant curve to print; the tail is flat and long, "
-             "and printing all of it has already pushed the ranking out of a log",
+        "and printing all of it has already pushed the ranking out of a log",
     )
 
 
@@ -571,8 +598,10 @@ def run_knobs(args: argparse.Namespace) -> int:
     ranked = rank_knobs(report, importance)
     report["ranked"] = ranked
 
-    print(f"\nKnob value over {report['problems']} problem(s), "
-          f"{report['measurements']} measurement(s)")
+    print(
+        f"\nKnob value over {report['problems']} problem(s), "
+        f"{report['measurements']} measurement(s)"
+    )
     print(f"  grouped by: {', '.join(report['grouped_by'])}")
     print(f"  target:     {report['target']} ({report['objective']})\n")
 
@@ -582,16 +611,22 @@ def run_knobs(args: argparse.Namespace) -> int:
     # `orphans` is not decoration: a zero cost beside a non-zero orphan count is the
     # difference between "free to pin" and "pinning it ships no kernel for those
     # problems at all", and a table without it cannot be checked by its reader.
-    header = (f"    {'field':22} {'values':>6} {'verdict':>9} {'cost':>8} "
-              f"{'orphans':>8} {'best':>8}")
+    header = (
+        f"    {'field':22} {'values':>6} {'verdict':>9} {'cost':>8} "
+        f"{'orphans':>8} {'best':>8}"
+    )
     if importance:
         header += f" {'gain':>12} {'splits':>7}"
     print(header)
     for row in ranked:
         cost = "     --" if row["cost"] is None else f"{row['cost']:7.2%}"
-        lost = "      --" if row["problems_lost"] is None else f"{row['problems_lost']:8,}"
-        line = (f"    {row['short_name']:22} {row['distinct_values']:>6} "
-                f"{row['verdict']:>9} {cost} {lost} {str(row['best_value']):>8}")
+        lost = (
+            "      --" if row["problems_lost"] is None else f"{row['problems_lost']:8,}"
+        )
+        line = (
+            f"    {row['short_name']:22} {row['distinct_values']:>6} "
+            f"{row['verdict']:>9} {cost} {lost} {str(row['best_value']):>8}"
+        )
         if importance:
             gain = "          --" if row["gain"] is None else f"{row['gain']:12,.0f}"
             split = "     --" if row["split"] is None else f"{row['split']:7,}"
@@ -600,11 +635,15 @@ def run_knobs(args: argparse.Namespace) -> int:
 
     matched = [r for r in ranked if r["verdict"] in ("MATCHED", "PINNED")]
     if matched:
-        print("\n  No AOT choice exists -- every candidate for a problem shares one value:")
+        print(
+            "\n  No AOT choice exists -- every candidate for a problem shares one value:"
+        )
         for row in matched:
             cause = "graph-bound" if row["graph_bound"] else "pinned by the pack"
-            print(f"    {row['short_name']:22} {row['distinct_values']} values, "
-                  f"one per problem ({cause})")
+            print(
+                f"    {row['short_name']:22} {row['distinct_values']} values, "
+                f"one per problem ({cause})"
+            )
 
     print("\n  What to change:")
     actionable = [r for r in ranked if r["verdict"] in ("CONSTANT", "DROP", "PINNED")]
@@ -618,15 +657,21 @@ def run_knobs(args: argparse.Namespace) -> int:
     if curve:
         shown = curve[: max(1, args.curve_rows)]
         print("\n  Variants per geometry, added greedily:")
-        print(f"    {'#':>3} {'covered':>8} {'uncovered':>10} {'mean':>9} {'p95':>9}  combination")
+        print(
+            f"    {'#':>3} {'covered':>8} {'uncovered':>10} {'mean':>9} {'p95':>9}  combination"
+        )
         for row in shown:
-            print(f"    {row['variants']:>3} {row['problems_covered']:>8} "
-                  f"{row['problems_uncovered']:>10} {row['mean_regret']:>8.2%} "
-                  f"{row['p95_regret']:>8.2%}  {row['added']}")
+            print(
+                f"    {row['variants']:>3} {row['problems_covered']:>8} "
+                f"{row['problems_uncovered']:>10} {row['mean_regret']:>8.2%} "
+                f"{row['p95_regret']:>8.2%}  {row['added']}"
+            )
         if len(curve) > len(shown):
             last = curve[-1]
-            print(f"    ... {len(curve) - len(shown)} more, to "
-                  f"{last['variants']} variants at {last['mean_regret']:.2%} mean")
+            print(
+                f"    ... {len(curve) - len(shown)} more, to "
+                f"{last['variants']} variants at {last['mean_regret']:.2%} mean"
+            )
 
     if args.output:
         with open(args.output, "w", encoding="utf-8") as handle:

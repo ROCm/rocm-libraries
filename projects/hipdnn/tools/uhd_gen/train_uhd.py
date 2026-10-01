@@ -53,7 +53,9 @@ def build_feature_matrix(
     """Project raw columns or batch inline expressions through the shared runtime."""
     if signature is not None:
         if any(isinstance(entry, dict) for entry in signature):
-            _, values = evaluate_feature_rows(df, signature, categorical_encoding, feature_evaluator)
+            _, values = evaluate_feature_rows(
+                df, signature, categorical_encoding, feature_evaluator
+            )
             return np.asarray(values, dtype=np.float64)
         feature_cols = [entry[1:] for entry in signature]
     if not feature_cols:
@@ -92,7 +94,9 @@ def build_feature_matrix(
                 else:
                     encoded[row] = encode_feature_value(reference, raw)
             except (TypeError, ValueError) as error:
-                raise ValueError(f"feature column {name!r}, row {row}: {error}") from error
+                raise ValueError(
+                    f"feature column {name!r}, row {row}: {error}"
+                ) from error
         columns.append(encoded)
 
     return np.column_stack(columns)
@@ -133,16 +137,24 @@ def train_model(
     Returns:
         Trained LightGBM Booster.
     """
-    X = build_feature_matrix(df, feature_cols, categorical_encoding) if feature_matrix is None else feature_matrix
+    X = (
+        build_feature_matrix(df, feature_cols, categorical_encoding)
+        if feature_matrix is None
+        else feature_matrix
+    )
     target = df[target_col].to_numpy(dtype=np.float64)
     if not np.isfinite(target).all() or (target < 0).any():
-        raise ValueError(f"target {target_col!r} must contain finite nonnegative values")
+        raise ValueError(
+            f"target {target_col!r} must contain finite nonnegative values"
+        )
     y = np.log1p(target)
 
     if params is None:
         params = dict(_DEFAULT_PARAMS)
 
-    train_data = lgb.Dataset(X, label=y, feature_name=[f"f{index}" for index in range(X.shape[1])])
+    train_data = lgb.Dataset(
+        X, label=y, feature_name=[f"f{index}" for index in range(X.shape[1])]
+    )
 
     # `folds` takes precomputed splits; a plain split count goes in `nfold`. Passing
     # the integer as `folds` raises AttributeError inside lgb.cv, which made the

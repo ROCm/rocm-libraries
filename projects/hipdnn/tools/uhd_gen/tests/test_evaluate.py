@@ -227,7 +227,12 @@ def test_invalid_rows_are_never_the_oracle():
             {"benchmark": "g1", "kernel": "ok_slow", "minTimeMs": 3.0},
             # Exactly what `export-benchmarks` writes for a candidate that would not
             # compile: identity and features kept, every timing column empty.
-            {"benchmark": "g1", "kernel": "failed", "minTimeMs": "", "is_valid": "False"},
+            {
+                "benchmark": "g1",
+                "kernel": "failed",
+                "minTimeMs": "",
+                "is_valid": "False",
+            },
         ]
     )
     result = evaluate_all(
@@ -247,7 +252,12 @@ def test_an_invalid_row_carrying_a_stale_timing_is_still_excluded():
         [
             {"benchmark": "g1", "kernel": "real", "minTimeMs": 2.0},
             {"benchmark": "g1", "kernel": "also_real", "minTimeMs": 3.0},
-            {"benchmark": "g1", "kernel": "bogus", "minTimeMs": 0.01, "is_valid": "False"},
+            {
+                "benchmark": "g1",
+                "kernel": "bogus",
+                "minTimeMs": 0.01,
+                "is_valid": "False",
+            },
         ]
     )
     result = evaluate_all(
@@ -375,7 +385,9 @@ def test_split_is_reproducible_and_seed_dependent():
     again = split_problems(list(reversed(keys)), 0.25, seed=7)
     other = split_problems(keys, 0.25, seed=8)
 
-    assert first.eval_problems == again.eval_problems, "row order must not move the slice"
+    assert (
+        first.eval_problems == again.eval_problems
+    ), "row order must not move the slice"
     assert len(first.eval_problems) == 10
     assert set(first.eval_problems) & set(first.train_problems) == set()
     assert first.eval_problems != other.eval_problems
@@ -605,7 +617,9 @@ def test_a_corpus_without_stddev_names_the_missing_column_not_the_units():
     assert ties["noise_band_applied"] is False
     assert "no `stddevMs` column" in ties["policy"]
     assert "not a millisecond timing column" not in ties["policy"]
-    assert any("NO MEASUREMENT NOISE" in warning for warning in result.report["warnings"])
+    assert any(
+        "NO MEASUREMENT NOISE" in warning for warning in result.report["warnings"]
+    )
 
 
 # ---------------------------------------------------------------------------------
@@ -649,9 +663,14 @@ def test_a_model_that_loses_to_static_order_says_so():
     )
 
     # Static order already picks the oracle; the model picks the other one.
-    assert result.report["metrics"]["references"]["static_order"]["top1_regret"]["mean"] == 0.0
+    assert (
+        result.report["metrics"]["references"]["static_order"]["top1_regret"]["mean"]
+        == 0.0
+    )
     assert result.report["metrics"]["top1_regret"]["mean"] == pytest.approx(1.0)
-    assert any("DOES NOT BEAT STATIC ORDER" in warning for warning in result.report["warnings"])
+    assert any(
+        "DOES NOT BEAT STATIC ORDER" in warning for warning in result.report["warnings"]
+    )
 
 
 def test_a_regime_that_regresses_against_static_order_is_named():
@@ -659,11 +678,31 @@ def test_a_regime_that_regresses_against_static_order_is_named():
     df = make_corpus(
         [
             # decode: the model beats the shipped order by a wide margin.
-            {"benchmark": "d1", "kernel": "first", "minTimeMs": 5.0, "regime": "decode"},
-            {"benchmark": "d1", "kernel": "second", "minTimeMs": 1.0, "regime": "decode"},
+            {
+                "benchmark": "d1",
+                "kernel": "first",
+                "minTimeMs": 5.0,
+                "regime": "decode",
+            },
+            {
+                "benchmark": "d1",
+                "kernel": "second",
+                "minTimeMs": 1.0,
+                "regime": "decode",
+            },
             # prefill: the shipped order is already right and the model is not.
-            {"benchmark": "p1", "kernel": "first", "minTimeMs": 1.0, "regime": "prefill"},
-            {"benchmark": "p1", "kernel": "second", "minTimeMs": 1.5, "regime": "prefill"},
+            {
+                "benchmark": "p1",
+                "kernel": "first",
+                "minTimeMs": 1.0,
+                "regime": "prefill",
+            },
+            {
+                "benchmark": "p1",
+                "kernel": "second",
+                "minTimeMs": 1.5,
+                "regime": "prefill",
+            },
         ]
     )
 
@@ -676,7 +715,9 @@ def test_a_regime_that_regresses_against_static_order_is_named():
     # Aggregate: the model's (0 + 0.5)/2 against static order's (4.0 + 0)/2, so the
     # aggregate says "shipped it" and only the per-regime split says otherwise.
     assert metrics["top1_regret"]["mean"] == pytest.approx(0.25)
-    assert metrics["references"]["static_order"]["top1_regret"]["mean"] == pytest.approx(2.0)
+    assert metrics["references"]["static_order"]["top1_regret"][
+        "mean"
+    ] == pytest.approx(2.0)
     assert not any("DOES NOT BEAT STATIC ORDER" in w for w in result.report["warnings"])
     warning = next(w for w in result.report["warnings"] if "REGIME REGRESSION" in w)
     assert "prefill" in warning
@@ -827,7 +868,9 @@ def test_a_perfectly_ranking_model_can_still_be_wrong_about_its_absolute_scale()
     calibration = metrics["calibration"]
     assert calibration["status"] == "computed"
     assert calibration["all_candidates"]["signed_relative_bias"] == pytest.approx(0.5)
-    assert calibration["all_candidates"]["relative_absolute_error"] == pytest.approx(0.5)
+    assert calibration["all_candidates"]["relative_absolute_error"] == pytest.approx(
+        0.5
+    )
     # The picked candidate is the oracle here, so its absolute error is the oracle's.
     assert calibration["selected_candidate"]["signed_bias"] == pytest.approx(
         (200.0 * 0.5 + 800.0 * 0.5) / 2
@@ -877,10 +920,15 @@ def test_a_time_score_that_reads_low_is_favoured_not_avoided():
         score_declaration={"metric": "time", "calibrated": True},
     ).report
 
-    assert (report["metric"], report["metrics"]["top1_regret"]["mean"]) == ("time", pytest.approx(0.0))
+    assert (report["metric"], report["metrics"]["top1_regret"]["mean"]) == (
+        "time",
+        pytest.approx(0.0),
+    )
     assert "warning" not in report["metrics"]["calibration"]
-    assert any("UNDER-predicts by 50.0%" in warning and "will favour" in warning
-               for warning in report["warnings"])
+    assert any(
+        "UNDER-predicts by 50.0%" in warning and "will favour" in warning
+        for warning in report["warnings"]
+    )
 
 
 def test_a_score_within_the_advisory_band_is_measured_but_not_warned_about():
@@ -895,7 +943,9 @@ def test_a_score_within_the_advisory_band_is_measured_but_not_warned_about():
     assert result["metrics"]["calibration"]["all_candidates"][
         "signed_relative_bias"
     ] == pytest.approx(0.02)
-    assert not any("CALIBRATED SCORE IS BIASED" in warning for warning in result["warnings"])
+    assert not any(
+        "CALIBRATED SCORE IS BIASED" in warning for warning in result["warnings"]
+    )
 
 
 def test_an_uncalibrated_score_is_declined_rather_than_measured_meaninglessly():
@@ -913,7 +963,9 @@ def test_an_uncalibrated_score_is_declined_rather_than_measured_meaninglessly():
 
     assert report["metrics"]["calibration"]["status"] == "not applicable"
     assert "all_candidates" not in report["metrics"]["calibration"]
-    assert not any("CALIBRATED SCORE IS BIASED" in warning for warning in report["warnings"])
+    assert not any(
+        "CALIBRATED SCORE IS BIASED" in warning for warning in report["warnings"]
+    )
     # And it is no longer declared missing, because a calibrated model does get them.
     assert not any(
         "calibration metrics" in entry for entry in report["not_implemented"]
@@ -922,12 +974,16 @@ def test_an_uncalibrated_score_is_declined_rather_than_measured_meaninglessly():
 
 def _negative_time_problem():
     """Measured [1, 2]; the model predicts a time of -0.2 for the faster and 1.0 for the slower."""
-    corpus = make_corpus([
-        {"benchmark": "g1", "kernel": "k1", "avgTimeMs": 1.0},
-        {"benchmark": "g1", "kernel": "k2", "avgTimeMs": 2.0},
-    ])
+    corpus = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "k1", "avgTimeMs": 1.0},
+            {"benchmark": "g1", "kernel": "k2", "avgTimeMs": 2.0},
+        ]
+    )
     predictions = {"k1": -0.2, "k2": 1.0}
-    return corpus, lambda frame: np.array([predictions[kernel] for kernel in frame["kernel"]])
+    return corpus, lambda frame: np.array(
+        [predictions[kernel] for kernel in frame["kernel"]]
+    )
 
 
 def test_a_score_the_runtime_discards_ranks_last_and_is_not_calibrated():
@@ -935,9 +991,13 @@ def test_a_score_the_runtime_discards_ranks_last_and_is_not_calibrated():
     that candidate last, so it runs the 2.0 kernel: regret 1.0. Ranking the -0.2 as the
     smallest time reported a perfect pick the engine never makes."""
     corpus, scorer = _negative_time_problem()
-    report = evaluate_all(corpus, scorer, target="avgTimeMs", objective="min",
-                          score_declaration={"metric": "time", "calibrated": True,
-                                             "transform": "log1p"}).report
+    report = evaluate_all(
+        corpus,
+        scorer,
+        target="avgTimeMs",
+        objective="min",
+        score_declaration={"metric": "time", "calibrated": True, "transform": "log1p"},
+    ).report
 
     assert report["metrics"]["top1_regret"]["max"] == pytest.approx(1.0)
     calibration = report["metrics"]["calibration"]
@@ -950,8 +1010,13 @@ def test_a_metric_less_identity_score_may_be_signed():
     """An ordering key with no metric and no log/sqrt transform is not a physical quantity,
     so the runtime ranks a negative score like any other: the -0.2 is the pick."""
     corpus, scorer = _negative_time_problem()
-    report = evaluate_all(corpus, scorer, target="avgTimeMs", objective="min",
-                          score_declaration={"transform": "identity"}).report
+    report = evaluate_all(
+        corpus,
+        scorer,
+        target="avgTimeMs",
+        objective="min",
+        score_declaration={"transform": "identity"},
+    ).report
 
     assert report["metrics"]["top1_regret"]["max"] == pytest.approx(0.0)
 
@@ -973,13 +1038,22 @@ def test_a_renamed_copy_of_the_training_corpus_is_not_held_out():
 
     evaluated = [["identical-problem", "board"]]
     assert _holdout_integrity(_trained(), evaluated)["status"] == "unknown"
-    assert _holdout_integrity(_trained([["identical-problem", "board"]]), evaluated)["status"] == "COMPROMISED"
-    assert _holdout_integrity(_trained([["other-problem", "board"]]), evaluated)["status"] == "held_out"
+    assert (
+        _holdout_integrity(_trained([["identical-problem", "board"]]), evaluated)[
+            "status"
+        ]
+        == "COMPROMISED"
+    )
+    assert (
+        _holdout_integrity(_trained([["other-problem", "board"]]), evaluated)["status"]
+        == "held_out"
+    )
 
 
 def test_keys_without_device_identity_compare_on_the_graph_alone():
     """A degraded grouping keys on the graph only: a shared graph might have been measured
-    on another device, so it proves nothing either way; no shared graph is still disjoint."""
+    on another device, so it proves nothing either way; no shared graph is still disjoint.
+    """
     from uhd_gen.evaluate import _holdout_integrity
 
     trained = _trained([["g1", "board"]])

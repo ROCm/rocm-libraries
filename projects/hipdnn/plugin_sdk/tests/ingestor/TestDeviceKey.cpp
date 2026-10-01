@@ -190,7 +190,6 @@ INSTANTIATE_TEST_SUITE_P(,
                              }
                          });
 
-
 // ---- the $device.* vocabulary ------------------------------------------------------
 //
 // One arch spans several boards and a UHD is arch-keyed, so a gfx942 model is trained on
@@ -234,7 +233,7 @@ TEST(TestIngestorDeviceVocabulary, PeakBandwidthIsDerivedFromClockAndWidth)
 {
     auto properties = propertiesFor("gfx942");
     properties.memoryBusWidth = 8192;
-    properties.memoryClockRate = 2600000;  // kHz
+    properties.memoryClockRate = 2600000; // kHz
 
     // 2 (DDR) * 2.6e9 Hz * 1024 bytes.
     EXPECT_DOUBLE_EQ(peakMemoryBandwidth(properties), 2.0 * 2600000.0 * 1000.0 * 1024.0);

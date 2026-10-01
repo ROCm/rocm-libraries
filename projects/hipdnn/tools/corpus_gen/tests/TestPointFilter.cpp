@@ -61,9 +61,8 @@ TEST(TestPointFilter, AClauseWithNoValueIsRefused)
 
 TEST(TestPointFilter, EveryDeclaredTypeIsFilteredWithTheSameTextSpelling)
 {
-    const ProblemPoint point{{"dtype", std::string("bf16")},
-                             {"head_dim", int64_t{128}},
-                             {"is_causal", true}};
+    const ProblemPoint point{
+        {"dtype", std::string("bf16")}, {"head_dim", int64_t{128}}, {"is_causal", true}};
 
     EXPECT_TRUE(keeps({{"dtype", "bf16"}}, point));
     EXPECT_TRUE(keeps({{"head_dim", "128"}}, point));
@@ -95,12 +94,11 @@ TEST(TestPointFilter, RepeatingAParameterWidensItRatherThanEmptyingTheCorpus)
     EXPECT_FALSE(keeps(either, ProblemPoint{{"head_dim", int64_t{192}}}));
 
     // Different parameters still conjoin, so widening one facet does not widen another.
-    const std::vector<KeepClause> mixed{
-        {"head_dim", "64"}, {"head_dim", "128"}, {"dtype", "bf16"}};
-    EXPECT_TRUE(keeps(mixed, ProblemPoint{{"head_dim", int64_t{64}},
-                                          {"dtype", std::string("bf16")}}));
-    EXPECT_FALSE(keeps(mixed, ProblemPoint{{"head_dim", int64_t{64}},
-                                           {"dtype", std::string("fp16")}}));
+    const std::vector<KeepClause> mixed{{"head_dim", "64"}, {"head_dim", "128"}, {"dtype", "bf16"}};
+    EXPECT_TRUE(
+        keeps(mixed, ProblemPoint{{"head_dim", int64_t{64}}, {"dtype", std::string("bf16")}}));
+    EXPECT_FALSE(
+        keeps(mixed, ProblemPoint{{"head_dim", int64_t{64}}, {"dtype", std::string("fp16")}}));
 }
 
 TEST(TestPointFilter, APointWithoutTheFilteredParameterFails)

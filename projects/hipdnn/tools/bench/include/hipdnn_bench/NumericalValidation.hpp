@@ -50,9 +50,9 @@ namespace hipdnn_bench
 /// Why a row's measurement may or may not be trusted as a label.
 enum class NumericalVerdict
 {
-    AGREED,    ///< Cross-checked against the catalog and consistent with it.
+    AGREED, ///< Cross-checked against the catalog and consistent with it.
     DISAGREED, ///< Cross-checked and inconsistent; §13.2's invalid marker.
-    UNKNOWN    ///< Not cross-checkable here. Never a synonym for AGREED.
+    UNKNOWN ///< Not cross-checkable here. Never a synonym for AGREED.
 };
 
 /// A verdict and the short machine-readable reason recorded beside it on the row.
@@ -95,10 +95,13 @@ inline const char* verdictText(NumericalVerdict verdict)
 {
     switch(verdict)
     {
-    case NumericalVerdict::AGREED: return "True";
-    case NumericalVerdict::DISAGREED: return "False";
+    case NumericalVerdict::AGREED:
+        return "True";
+    case NumericalVerdict::DISAGREED:
+        return "False";
     case NumericalVerdict::UNKNOWN:
-    default: return "Unknown";
+    default:
+        return "Unknown";
     }
 }
 
@@ -127,16 +130,23 @@ inline NumericKind numericKind(hipdnn_frontend::DataType dataType)
     using hipdnn_frontend::DataType;
     switch(dataType)
     {
-    case DataType::DOUBLE: return NumericKind::FLOAT64;
-    case DataType::FLOAT: return NumericKind::FLOAT32;
-    case DataType::HALF: return NumericKind::FLOAT16;
-    case DataType::BFLOAT16: return NumericKind::BFLOAT16;
+    case DataType::DOUBLE:
+        return NumericKind::FLOAT64;
+    case DataType::FLOAT:
+        return NumericKind::FLOAT32;
+    case DataType::HALF:
+        return NumericKind::FLOAT16;
+    case DataType::BFLOAT16:
+        return NumericKind::BFLOAT16;
     case DataType::INT8:
     case DataType::INT32:
-    case DataType::INT64: return NumericKind::SIGNED_INTEGER;
+    case DataType::INT64:
+        return NumericKind::SIGNED_INTEGER;
     case DataType::UINT8:
-    case DataType::BOOLEAN: return NumericKind::UNSIGNED_INTEGER;
-    default: return NumericKind::NONE;
+    case DataType::BOOLEAN:
+        return NumericKind::UNSIGNED_INTEGER;
+    default:
+        return NumericKind::NONE;
     }
 }
 
@@ -212,8 +222,10 @@ inline double decodeElement(const std::vector<uint8_t>& image,
         std::memcpy(&value, bytes, sizeof(value));
         return static_cast<double>(value);
     }
-    case DataType::INT8: return static_cast<double>(static_cast<int8_t>(*bytes));
-    default: return static_cast<double>(*bytes); // UINT8, BOOLEAN
+    case DataType::INT8:
+        return static_cast<double>(static_cast<int8_t>(*bytes));
+    default:
+        return static_cast<double>(*bytes); // UINT8, BOOLEAN
     }
 }
 
@@ -328,7 +340,9 @@ inline bool encodeFillElement(hipdnn_frontend::DataType dataType, FillValue valu
     // A block scale: no sign and no mantissa, so the code is the biased exponent alone. It
     // is filled rather than skipped because a zero scale zeroes the tensor it scales, which
     // is the all-zero output this fill exists to stop.
-    case DataType::FP8_E8M0: *bytes = static_cast<uint8_t>(127 + value.exponent); return true;
+    case DataType::FP8_E8M0:
+        *bytes = static_cast<uint8_t>(127 + value.exponent);
+        return true;
     case DataType::INT64:
     {
         std::memcpy(bytes, &magnitude, sizeof(magnitude));
@@ -341,11 +355,16 @@ inline bool encodeFillElement(hipdnn_frontend::DataType dataType, FillValue valu
         return true;
     }
     case DataType::INT8:
-    case DataType::UINT8: *bytes = static_cast<uint8_t>(magnitude); return true;
+    case DataType::UINT8:
+        *bytes = static_cast<uint8_t>(magnitude);
+        return true;
     // A mask of every element true. The other choice zeroes whatever it gates, and a fill
     // that switches the graph off is the state this replaces.
-    case DataType::BOOLEAN: *bytes = 1; return true;
-    default: return false;
+    case DataType::BOOLEAN:
+        *bytes = 1;
+        return true;
+    default:
+        return false;
     }
 }
 
@@ -407,11 +426,16 @@ inline double agreementTolerance(NumericKind kind)
 {
     switch(kind)
     {
-    case NumericKind::FLOAT64: return 1e-12;
-    case NumericKind::FLOAT32: return 1e-5;
-    case NumericKind::FLOAT16: return 2e-2; // 10 mantissa bits
-    case NumericKind::BFLOAT16: return 6e-2; // 7 mantissa bits
-    default: return 0.0;
+    case NumericKind::FLOAT64:
+        return 1e-12;
+    case NumericKind::FLOAT32:
+        return 1e-5;
+    case NumericKind::FLOAT16:
+        return 2e-2; // 10 mantissa bits
+    case NumericKind::BFLOAT16:
+        return 6e-2; // 7 mantissa bits
+    default:
+        return 0.0;
     }
 }
 
@@ -425,11 +449,16 @@ inline double agreementFloor(NumericKind kind)
 {
     switch(kind)
     {
-    case NumericKind::FLOAT64: return 0x1p-52; // 52 mantissa bits
-    case NumericKind::FLOAT32: return 0x1p-23;
-    case NumericKind::FLOAT16: return 0x1p-10;
-    case NumericKind::BFLOAT16: return 0x1p-7;
-    default: return 0.0; // integers are exact; their bar is equality
+    case NumericKind::FLOAT64:
+        return 0x1p-52; // 52 mantissa bits
+    case NumericKind::FLOAT32:
+        return 0x1p-23;
+    case NumericKind::FLOAT16:
+        return 0x1p-10;
+    case NumericKind::BFLOAT16:
+        return 0x1p-7;
+    default:
+        return 0.0; // integers are exact; their bar is equality
     }
 }
 
@@ -530,9 +559,8 @@ inline bool leftOutputUntouched(const CandidateOutput& candidate,
         {
             continue;
         }
-        if(std::any_of(image->second.begin(), image->second.end(), [](uint8_t byte) {
-               return byte != 0;
-           }))
+        if(std::any_of(
+               image->second.begin(), image->second.end(), [](uint8_t byte) { return byte != 0; }))
         {
             return false;
         }
@@ -620,11 +648,12 @@ public:
         _outcomes.emplace_back();
         if(!candidate.executed)
         {
-            _outcomes[index] = {NumericalVerdict::UNKNOWN,
-                                "not_executed: " + (candidate.failure.empty()
-                                                        ? std::string("the candidate produced no "
-                                                                      "output to cross-check")
-                                                        : candidate.failure)};
+            _outcomes[index]
+                = {NumericalVerdict::UNKNOWN,
+                   "not_executed: "
+                       + (candidate.failure.empty() ? std::string("the candidate produced no "
+                                                                  "output to cross-check")
+                                                    : candidate.failure)};
             return;
         }
         if(detail::comparableTensors(candidate, _tensors) == 0)
@@ -716,9 +745,8 @@ public:
                 {
                     outcomes[index]
                         = {NumericalVerdict::AGREED,
-                           "agrees_with_catalog: "
-                               + std::to_string(_cohorts[cohort].members.size()) + " of "
-                               + std::to_string(_crossChecked)
+                           "agrees_with_catalog: " + std::to_string(_cohorts[cohort].members.size())
+                               + " of " + std::to_string(_crossChecked)
                                + " cross-checked candidates produced this output"};
                 }
                 continue;
@@ -730,9 +758,9 @@ public:
             const std::string detailText = mismatchDetail(_cohorts[cohort].founder, reference);
             for(const size_t index : _cohorts[cohort].members)
             {
-                outcomes[index] = {NumericalVerdict::DISAGREED,
-                                   (decided ? "output_mismatch: " : "disputed_output: ")
-                                       + detailText};
+                outcomes[index]
+                    = {NumericalVerdict::DISAGREED,
+                       (decided ? "output_mismatch: " : "disputed_output: ") + detailText};
             }
         }
         return outcomes;

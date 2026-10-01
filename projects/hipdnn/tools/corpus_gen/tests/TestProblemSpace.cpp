@@ -412,8 +412,8 @@ TEST(TestProblemSpace, AnEngineThatServesOnlyHeldPointsIsSearchedNotDeclined)
     const ProblemOracle heldAll = [](const ProblemPoint& point) {
         return std::get<int64_t>(point.at("M")) <= 3 && std::get<int64_t>(point.at("N")) <= 3;
     };
-    const auto corpus = exploreProblemSpace(
-        twoDimsAndADtype(), request, servesOnlyFp16(3, 3, nullptr), heldAll);
+    const auto corpus
+        = exploreProblemSpace(twoDimsAndADtype(), request, servesOnlyFp16(3, 3, nullptr), heldAll);
 
     EXPECT_TRUE(corpus.problems().empty()) << "returned a point the caller already held";
     ASSERT_FALSE(corpus.shortfall.empty());
@@ -438,9 +438,8 @@ TEST(TestProblemSpace, HeldPointsDoNotWallTheSearchOffFromTheRestOfTheRegion)
     request.corpusTarget = 60;
     request.seed = 16;
 
-    const ProblemOracle heldHalf = [](const ProblemPoint& point) {
-        return std::get<int64_t>(point.at("M")) % 2 == 0;
-    };
+    const ProblemOracle heldHalf
+        = [](const ProblemPoint& point) { return std::get<int64_t>(point.at("M")) % 2 == 0; };
     const auto corpus = exploreProblemSpace(
         twoDimsAndADtype(), request, servesOnlyFp16(256, 256, nullptr), heldHalf);
 

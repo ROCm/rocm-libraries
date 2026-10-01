@@ -736,8 +736,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
                               && found.stats.distinct * 100 >= found.stats.oracleCalls;
             while(static_cast<int64_t>(found.shapes.size()) < search.targetCount)
             {
-                if(search.oracleBudget
-                   >= request.budgetPerCombination * request.budgetGrowthLimit)
+                if(search.oracleBudget >= request.budgetPerCombination * request.budgetGrowthLimit)
                 {
                     result.searchCapped = true;
                     break;
@@ -801,8 +800,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
     {
         const auto total = supplied();
         corpus.shortfall.push_back(std::to_string(total) + " of "
-                                   + std::to_string(request.corpusTarget)
-                                   + " problems requested");
+                                   + std::to_string(request.corpusTarget) + " problems requested");
         for(size_t index = 0; index < corpus.combinations.size(); ++index)
         {
             const auto& result = corpus.combinations[index];
@@ -829,8 +827,9 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             }
             else
             {
-                corpus.shortfall.push_back(who + "grown, but its new points repeated ones it "
-                                                 "already held");
+                corpus.shortfall.push_back(who
+                                           + "grown, but its new points repeated ones it "
+                                             "already held");
             }
         }
     }

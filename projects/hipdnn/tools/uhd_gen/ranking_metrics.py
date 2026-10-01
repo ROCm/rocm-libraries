@@ -31,7 +31,9 @@ class RankingMetric:
 DEFAULT_RANKING_METRIC = "tflops"
 
 RANKING_METRICS: dict[str, RankingMetric] = {
-    "tflops": RankingMetric("tflops", "TFLOPS", "max", "tflops", strictly_positive=False),
+    "tflops": RankingMetric(
+        "tflops", "TFLOPS", "max", "tflops", strictly_positive=False
+    ),
     "time": RankingMetric("time", "ms", "min", "avgTimeMs", strictly_positive=True),
 }
 
@@ -48,6 +50,10 @@ def ranking_metric(name: str) -> RankingMetric:
 
 def is_valid_metric_value(name: str, value) -> bool:
     """`isValidMetricValue`: finite, and nonnegative throughput or positive time."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+    ):
         return False
     return value > 0 if ranking_metric(name).strictly_positive else value >= 0

@@ -131,11 +131,7 @@ class TestTensorOperands(unittest.TestCase):
             [
                 (
                     "Custom",
-                    [
-                        field(
-                            "input_tensor_uids", "Vector", 0, element="Long", uid=True
-                        )
-                    ],
+                    [field("input_tensor_uids", "Vector", 0, element="Long", uid=True)],
                 )
             ]
         )
@@ -243,7 +239,9 @@ class TestAttributeOperands(unittest.TestCase):
         )
 
     def test_an_absent_optional_is_skipped(self):
-        self.assertIn("if(const auto value = op.alpha(); value.has_value())", self.visitor)
+        self.assertIn(
+            "if(const auto value = op.alpha(); value.has_value())", self.visitor
+        )
 
     def test_strings_payloads_and_deprecated_fields_are_not_visited(self):
         for name in ("name", "payload", "labels", "old"):

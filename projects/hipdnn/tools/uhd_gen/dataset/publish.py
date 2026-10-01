@@ -111,10 +111,7 @@ def _query_columns(frame: pd.DataFrame) -> list[str]:
     dotless column is envelope -- the collector writes every envelope key as a bare word and
     every feature key namespaced, which is what makes the dot sufficient here.
     """
-    return [
-        c for c in frame.columns
-        if "." in c and not c.startswith(_RESERVED_ROOTS)
-    ]
+    return [c for c in frame.columns if "." in c and not c.startswith(_RESERVED_ROOTS)]
 
 
 def _short_name(column: str) -> str:
@@ -165,8 +162,11 @@ def _paired_identities(frame: pd.DataFrame) -> list[tuple[str, str]]:
     A convention rather than a fixed list, so this reads any producer's corpus. Where only one
     of a pair is present there is nothing to disagree, and the check does not apply.
     """
-    return [(column, f"{column}_id") for column in frame.columns
-            if f"{column}_id" in frame.columns]
+    return [
+        (column, f"{column}_id")
+        for column in frame.columns
+        if f"{column}_id" in frame.columns
+    ]
 
 
 def _validate_identity_is_unambiguous(frame: pd.DataFrame) -> None:
@@ -226,8 +226,11 @@ def _translate_collector_failure(frame: pd.DataFrame) -> pd.DataFrame:
     failed = frame["is_valid"].astype(str).str.strip().str.lower().isin({"false", "0"})
     # An error already recorded is the producer's own words and is never overwritten; a row
     # marked failed with no reason gets the flag itself, which is all the corpus knows.
-    reason = (frame["skip_reason"].fillna("").astype(str).str.strip()
-              if "skip_reason" in frame.columns else pd.Series("", index=frame.index))
+    reason = (
+        frame["skip_reason"].fillna("").astype(str).str.strip()
+        if "skip_reason" in frame.columns
+        else pd.Series("", index=frame.index)
+    )
     reason = reason.where(reason.str.len() > 0, "is_valid=False")
     blank = frame["error"].astype(str).str.strip().str.len() == 0
     frame.loc[failed & blank, "error"] = reason[failed & blank]
@@ -244,7 +247,9 @@ def _validate(frame: pd.DataFrame) -> None:
         )
     for group in _RESERVED_ROOTS:
         if not any(c.startswith(group) for c in frame.columns):
-            raise ValidationError(f"no {group}* columns; a corpus must identify its {group[:-1]}")
+            raise ValidationError(
+                f"no {group}* columns; a corpus must identify its {group[:-1]}"
+            )
 
     measured = frame["minTimeMs"].notna()
     has_error = frame["error"].astype(str).str.len() > 0
@@ -253,7 +258,9 @@ def _validate(frame: pd.DataFrame) -> None:
     # the whole flag -- there is no validity column that could disagree with it.
     both = measured & has_error
     if both.any():
-        raise ValidationError(f"{int(both.sum())} rows carry both a measurement and an error")
+        raise ValidationError(
+            f"{int(both.sum())} rows carry both a measurement and an error"
+        )
     neither = ~measured & ~has_error
     if neither.any():
         raise ValidationError(
@@ -272,7 +279,9 @@ def _validate(frame: pd.DataFrame) -> None:
     kernels = _kernel_columns(frame)
     for _, rows in frame.groupby(key, dropna=False):
         if rows["problem_complete"].nunique() > 1:
-            raise ValidationError("problem_complete disagrees across rows of one problem")
+            raise ValidationError(
+                "problem_complete disagrees across rows of one problem"
+            )
 
         # A problem whose candidate space was fully measured must present the same candidates
         # wherever it came from. Two collections taken against different kernel sets merge into
@@ -344,7 +353,9 @@ def expand_descriptors(
                     f"--scope-by names {scope_by!r}, which this corpus does not carry"
                 )
             groups = frame[scope_by].tolist()
-            for group, positions in sorted(slots_used_by(rows, groups).items(), key=str):
+            for group, positions in sorted(
+                slots_used_by(rows, groups).items(), key=str
+            ):
                 for index in positions:
                     # A row outside this group takes the absent value, which is what a kernel
                     # with no such field means -- the same state an unfilled slot already has.
@@ -356,7 +367,9 @@ def expand_descriptors(
     return frame
 
 
-def resolve_duplicates(frame: pd.DataFrame, latest_column: str, best_column: str) -> pd.DataFrame:
+def resolve_duplicates(
+    frame: pd.DataFrame, latest_column: str, best_column: str
+) -> pd.DataFrame:
     """Keep, per problem, only the most recent occasion it was measured.
 
     `_validate` rejects a complete problem carrying one configuration twice, because that
@@ -390,8 +403,9 @@ def resolve_duplicates(frame: pd.DataFrame, latest_column: str, best_column: str
     kernels = _kernel_columns(frame)
     if kernels:
         keep = frame[query + kernels].astype(str).agg("|".join, axis=1)
-        frame = (frame.sort_values(best_column, kind="mergesort")
-                      .loc[lambda f: ~keep.loc[f.index].duplicated()])
+        frame = frame.sort_values(best_column, kind="mergesort").loc[
+            lambda f: ~keep.loc[f.index].duplicated()
+        ]
     return frame.sort_index()
 
 
@@ -429,33 +443,46 @@ def main(argv: list[str] | None = None) -> int:
     # Named explicitly: argparse would otherwise take the program name from the file argv[0]
     # points at and print `usage: __main__.py`, which is neither what anyone typed nor
     # something they could type.
-    parser = argparse.ArgumentParser(prog="python -m uhd_gen.dataset", description=__doc__)
+    parser = argparse.ArgumentParser(
+        prog="python -m uhd_gen.dataset", description=__doc__
+    )
     parser.add_argument("--csv", nargs="+", required=True, type=pathlib.Path)
     parser.add_argument("--out", required=True, type=pathlib.Path)
     parser.add_argument(
-        "--expand-descriptor", action="append", default=[], dest="expand_descriptor",
+        "--expand-descriptor",
+        action="append",
+        default=[],
+        dest="expand_descriptor",
         metavar="COLUMN",
         help="expand a configuration string column (e.g. kernel.descriptor) into "
-             "COLUMN.cfg0..N (numbers) and COLUMN.variant (the word shape, as a string -- "
-             "RFC 0019 §6.5 has the training tool number it and ship the map). Repeatable.",
+        "COLUMN.cfg0..N (numbers) and COLUMN.variant (the word shape, as a string -- "
+        "RFC 0019 §6.5 has the training tool number it and ship the map). Repeatable.",
     )
     parser.add_argument(
-        "--scope-by", default=None, dest="scope_by", metavar="COLUMN",
+        "--scope-by",
+        default=None,
+        dest="scope_by",
+        metavar="COLUMN",
         help="give each value of COLUMN (e.g. kernel.solver_id) its own expanded columns, for "
-             "an engine whose configuration schema varies by kernel. Without it one set of "
-             "positions is shared, and a position then means different things in different "
-             "groups.",
+        "an engine whose configuration schema varies by kernel. Without it one set of "
+        "positions is shared, and a position then means different things in different "
+        "groups.",
     )
     parser.add_argument(
-        "--resolve-duplicates", default=None, dest="resolve_duplicates", metavar="COLUMN",
+        "--resolve-duplicates",
+        default=None,
+        dest="resolve_duplicates",
+        metavar="COLUMN",
         help="keep, per problem, only the most recent occasion it was measured, ordered by "
-             "COLUMN (e.g. date_run), breaking ties within it by --best-column. Without this "
-             "a re-measured problem is rejected as two merged collections.",
+        "COLUMN (e.g. date_run), breaking ties within it by --best-column. Without this "
+        "a re-measured problem is rejected as two merged collections.",
     )
     parser.add_argument(
-        "--best-column", default="avgTimeMs", dest="best_column",
+        "--best-column",
+        default="avgTimeMs",
+        dest="best_column",
         help="the column a repeat is resolved by, smallest kept (default: avgTimeMs, the "
-             "statistic the published rates are derived from)",
+        "statistic the published rates are derived from)",
     )
     args = parser.parse_args(argv)
 
