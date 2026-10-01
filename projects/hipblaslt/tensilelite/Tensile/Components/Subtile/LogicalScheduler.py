@@ -5662,7 +5662,11 @@ class LogicalScheduler:
         # restores the deferred route, which hands stage p to partition p+1.
         if plsinDebugEnv("TENSILE_PLSIN_DRAIN_EARLY", "1") == "0":
             return None, units
-        flat = list(partModule.flatitems())
+        # Keep DPP folds atomic so an early drain cannot overwrite their shared packed
+        # store data between the paired stores. This conservatively hides gap MFMAs
+        # inside a fold from placement and pacing; dependency-aware atomic regions
+        # would recover those scheduling opportunities without splitting the fold.
+        flat = self._plsinFlatKeepingFolds(partModule)
         mfmaPos = [i for i, inst in enumerate(flat)
                    if isinstance(inst, (MFMAInstruction, MXMFMAInstruction))]
         if not units or not mfmaPos:
