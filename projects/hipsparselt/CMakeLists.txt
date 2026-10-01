@@ -260,7 +260,7 @@ if(_hipsparselt_requires_hipblaslt)
     if(BUILD_SHARED_LIBS)
         rocm_package_add_dependencies(
             COMPONENT runtime
-            DEPENDS hipblaslt
+            DEPENDS tensilelite-host
         )
         rocm_package_add_deb_dependencies(
             COMPONENT devel

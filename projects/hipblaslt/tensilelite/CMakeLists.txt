@@ -1,6 +1,30 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    cmake_minimum_required(VERSION 3.25.2)
+    set(TENSILELITE_STANDALONE ON)
+    set(TENSILELITE_OUTER_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+    cmake_path(SET ROCM_LIBRARIES_ROOT NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
+    include("${ROCM_LIBRARIES_ROOT}/cmake/modules/default_amdclang.cmake")
+else()
+    set(TENSILELITE_STANDALONE OFF)
+    set(TENSILELITE_OUTER_BINARY_DIR "${PROJECT_BINARY_DIR}")
+endif()
+
+set(TENSILELITE_PROJECT_VERSION "1.5.0" CACHE STRING "Semantic version string.")
+project(tensilelite VERSION "${TENSILELITE_PROJECT_VERSION}" LANGUAGES CXX)
+
+if(TENSILELITE_STANDALONE)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/tensilelite_standalone.cmake")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/tensilelite_dependencies.cmake")
+    set(TENSILELITE_RUNTIME_COMPONENT runtime)
+    set(TENSILELITE_DEVEL_COMPONENT devel)
+else()
+    set(TENSILELITE_RUNTIME_COMPONENT tensilelite)
+    set(TENSILELITE_DEVEL_COMPONENT tensilelite-devel)
+endif()
+
 option(TENSILELITE_BUILD_SHARED_LIBS "Build the TensileLite host library as shared vs static." ON)
 set(BUILD_SHARED_LIBS "${TENSILELITE_BUILD_SHARED_LIBS}")
 
@@ -57,11 +81,11 @@ if(TENSILELITE_ENABLE_HOST)
         # Apply sanitizer only to host code, not device code
         # Use SHELL: to pass flags that should not be applied to device offload
         target_compile_options(tensilelite-host PUBLIC
-            $<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fsanitize=address>
-            $<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fno-omit-frame-pointer>
+            $<BUILD_INTERFACE:$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fsanitize=address>>
+            $<BUILD_INTERFACE:$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fno-omit-frame-pointer>>
         )
         target_link_options(tensilelite-host PUBLIC
-            SHELL:-Xarch_host -fsanitize=address
+            $<BUILD_INTERFACE:SHELL:-Xarch_host -fsanitize=address>
         )
     endif()
 
@@ -69,10 +93,10 @@ if(TENSILELITE_ENABLE_HOST)
         # Apply sanitizer only to host code, not device code
         # Use SHELL: to pass flags that should not be applied to device offload
         target_compile_options(tensilelite-host PUBLIC
-            $<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fsanitize=thread>
+            $<BUILD_INTERFACE:$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fsanitize=thread>>
         )
         target_link_options(tensilelite-host PUBLIC
-            SHELL:-Xarch_host -fsanitize=thread
+            $<BUILD_INTERFACE:SHELL:-Xarch_host -fsanitize=thread>
         )
     endif()
 
@@ -81,7 +105,7 @@ if(TENSILELITE_ENABLE_HOST)
         target_include_directories(tensilelite-host PRIVATE ${LLVM_INCLUDE_DIRS})
         target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILE_YAML>)
     else()
-        target_link_libraries(tensilelite-host PRIVATE ${hipblaslt_msgpack_target})
+        target_link_libraries(tensilelite-host PRIVATE ${tensilelite_msgpack_target})
         target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILE_MSGPACK>)
     endif()
 
@@ -165,7 +189,8 @@ if(TENSILELITE_ENABLE_HOST)
         if(_mxdatagen_incs)
             target_include_directories(tensilelite-host PRIVATE ${_mxdatagen_incs})
         endif()
-        target_link_libraries(tensilelite-host PRIVATE $<LINK_ONLY:${_mxdatagen_target}>)
+        set_property(TARGET tensilelite-host APPEND PROPERTY
+            LINK_LIBRARIES $<LINK_ONLY:${_mxdatagen_target}>)
         target_compile_definitions(tensilelite-host PRIVATE HIPBLASLT_ENABLE_MXDATAGENERATOR)
     endif()
 
@@ -186,33 +211,61 @@ if(TENSILELITE_ENABLE_HOST)
     if(TENSILELITE_ENABLE_COVERAGE)
         message(STATUS "Enabling C++ code coverage instrumentation for tensilelite-host")
         target_compile_options(tensilelite-host PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-        target_link_options(tensilelite-host PUBLIC -fprofile-instr-generate -fcoverage-mapping)
+        target_link_options(tensilelite-host PUBLIC $<BUILD_INTERFACE:-fprofile-instr-generate -fcoverage-mapping>)
     endif()
 
     add_subdirectory(src)
     add_subdirectory(include)
 
-    # The shared library ships in its own "tensilelite" component (package
-    # tensilelite-host) rather than hipblaslt's runtime component. hipSPARSELt
-    # needs this one ~6.5 MB .so; bundling it in hipblaslt's runtime package
-    # would force every hipSPARSELt install to pull ~1.6 GB of Tensile kernel
-    # binaries it does not use. See AIHPBLAS-4434.
-    # Interim: the static archive, headers and the roc::tensilelite-host
-    # imported target still ship through hipblaslt-devel and the
-    # hipblaslt-targets export set. A standalone tensilelite package moves
-    # them to its own export set, config file and devel package.
     install(TARGETS tensilelite-host
-        EXPORT hipblaslt-targets
-        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT tensilelite
-        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT tensilelite
-        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel
+        EXPORT tensilelite-targets
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT ${TENSILELITE_RUNTIME_COMPONENT}
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT ${TENSILELITE_RUNTIME_COMPONENT}
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT}
         FILE_SET tensilelite_public_headers
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT}
         FILE_SET tensilelite_generated_headers
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT}
         FILE_SET rocisa_public_headers
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT}
     )
+
+    set(_tensilelite_config_dir "${CMAKE_INSTALL_LIBDIR}/cmake/tensilelite")
+    install(EXPORT tensilelite-targets
+        NAMESPACE roc::
+        DESTINATION "${_tensilelite_config_dir}"
+        COMPONENT ${TENSILELITE_DEVEL_COMPONENT}
+    )
+
+    get_target_property(_tensilelite_host_type tensilelite-host TYPE)
+    if(_tensilelite_host_type STREQUAL "STATIC_LIBRARY")
+        set(TENSILELITE_CONFIG_STATIC ON)
+    else()
+        set(TENSILELITE_CONFIG_STATIC OFF)
+    endif()
+    set(TENSILELITE_CONFIG_YAML "${HIPBLASLT_ENABLE_YAML}")
+    set(TENSILELITE_CONFIG_MSGPACK_TARGET "${tensilelite_msgpack_target}")
+    include(CMakePackageConfigHelpers)
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/tensilelite-config.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-config.cmake"
+        INSTALL_DESTINATION "${_tensilelite_config_dir}"
+    )
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-config-version.cmake"
+        VERSION "${PROJECT_VERSION}"
+        COMPATIBILITY SameMajorVersion
+    )
+    install(
+        FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-config.cmake"
+            "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-config-version.cmake"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/hipblaslt_codegen.cmake"
+        DESTINATION "${_tensilelite_config_dir}"
+        COMPONENT ${TENSILELITE_DEVEL_COMPONENT}
+    )
+    unset(_tensilelite_config_dir)
+    unset(_tensilelite_host_type)
 
     if(BUILD_SHARED_LIBS)
         set_property(TARGET tensilelite-host APPEND PROPERTY INSTALL_RPATH "$ORIGIN")
@@ -225,4 +278,128 @@ if(TENSILELITE_ENABLE_HOST)
     if(TENSILELITE_BUILD_TESTING OR BUILD_TESTING)
         add_subdirectory(tests)
     endif()
+endif()
+
+if(TENSILELITE_STANDALONE)
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.md")
+    set(CPACK_RPM_PACKAGE_LICENSE "MIT")
+    rocm_get_patch_version(_tensilelite_patch_version)
+    set(_tensilelite_moved_from "1.5.0")
+    if(_tensilelite_patch_version)
+        string(APPEND _tensilelite_moved_from ".${_tensilelite_patch_version}")
+    endif()
+    if(TENSILELITE_BUILD_SHARED_LIBS)
+        set(CPACK_DEBIAN_RUNTIME_PACKAGE_REPLACES "hipblaslt (<< ${_tensilelite_moved_from})")
+        set(CPACK_DEBIAN_RUNTIME_PACKAGE_BREAKS "hipblaslt (<< ${_tensilelite_moved_from})")
+        set(CPACK_RPM_RUNTIME_PACKAGE_CONFLICTS "hipblaslt < ${_tensilelite_moved_from}")
+    endif()
+    set(CPACK_DEBIAN_DEVEL_PACKAGE_REPLACES "hipblaslt-dev (<< ${_tensilelite_moved_from}), hipblaslt-static-dev (<< ${_tensilelite_moved_from})")
+    set(CPACK_DEBIAN_DEVEL_PACKAGE_BREAKS "hipblaslt-dev (<< ${_tensilelite_moved_from}), hipblaslt-static-dev (<< ${_tensilelite_moved_from})")
+    set(CPACK_RPM_DEVEL_PACKAGE_CONFLICTS "hipblaslt-devel < ${_tensilelite_moved_from}, hipblaslt-static-devel < ${_tensilelite_moved_from}")
+    rocm_create_package(
+        NAME tensilelite-host
+        DESCRIPTION "TensileLite host library for GEMM solution selection and kernel launch"
+        MAINTAINER "hipBLASLt Maintainer <hipblaslt-maintainer@amd.com>"
+        LDCONFIG
+    )
+elseif(TENSILELITE_ENABLE_HOST AND (ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT))
+    block(SCOPE_FOR VARIABLES)
+        set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.md")
+        set(CPACK_RPM_PACKAGE_LICENSE "MIT")
+        set(CPACK_OUTPUT_CONFIG_FILE "${PROJECT_BINARY_DIR}/CPackConfig.cmake")
+        set(CPACK_SOURCE_OUTPUT_CONFIG_FILE "${PROJECT_BINARY_DIR}/CPackSourceConfig.cmake")
+        set(CPACK_INSTALL_CMAKE_PROJECTS "${PROJECT_BINARY_DIR};tensilelite;ALL;/")
+        if(tensilelite_bundled_origami_component)
+            list(APPEND CPACK_INSTALL_CMAKE_PROJECTS
+                "${TENSILELITE_OUTER_BINARY_DIR}/origami;Origami;ALL;/")
+        endif()
+
+        set(ROCM_PACKAGE_COMPONENTS "")
+        set(ROCM_PACKAGE_COMPONENT_DEPENDENCIES "")
+        rocm_get_patch_version(_tensilelite_patch_version)
+        set(_tensilelite_package_version "${PROJECT_VERSION}")
+        set(_tensilelite_moved_from "1.5.0")
+        if(_tensilelite_patch_version)
+            string(APPEND _tensilelite_package_version ".${_tensilelite_patch_version}")
+            string(APPEND _tensilelite_moved_from ".${_tensilelite_patch_version}")
+        endif()
+
+        if(ENABLE_ASAN_PACKAGING)
+            rocm_package_setup_component(tensilelite)
+            set(CPACK_RPM_TENSILELITE_PACKAGE_NAME "tensilelite-host-asan")
+            set(CPACK_DEBIAN_TENSILELITE_PACKAGE_NAME "tensilelite-host-asan")
+            if(ROCM_DEP_ROCMCORE)
+                rocm_package_add_dependencies(DEPENDS "rocm-core-asan")
+            endif()
+            install(FILES "${CPACK_RESOURCE_FILE_LICENSE}"
+                DESTINATION "share/doc/tensilelite-host-asan"
+                COMPONENT tensilelite)
+            set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME tensilelite-license)
+        else()
+            rocm_package_setup_component(tensilelite-devel)
+            if(TENSILELITE_BUILD_SHARED_LIBS)
+                rocm_package_setup_component(tensilelite
+                    LIBRARY_NAME tensilelite
+                    PACKAGE_NAME host
+                    PARENT tensilelite-devel)
+                set(_tensilelite_devel_package tensilelite-host)
+                set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME tensilelite)
+                set(CPACK_DEBIAN_TENSILELITE_PACKAGE_RECOMMENDS
+                    "tensilelite-host-dev (>=${_tensilelite_package_version})")
+                rocm_find_program_version(rpmbuild GREATER_EQUAL 4.12.0 QUIET)
+                if(rpmbuild_VERSION_OK)
+                    set(CPACK_RPM_TENSILELITE_PACKAGE_SUGGESTS
+                        "tensilelite-host-devel >= ${_tensilelite_package_version}")
+                endif()
+            else()
+                set(_tensilelite_devel_package tensilelite-host-static)
+                set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME tensilelite-devel)
+            endif()
+            set(CPACK_RPM_TENSILELITE-DEVEL_PACKAGE_NAME "${_tensilelite_devel_package}-devel")
+            set(CPACK_DEBIAN_TENSILELITE-DEVEL_PACKAGE_NAME "${_tensilelite_devel_package}-dev")
+            set(_tensilelite_deb_devel_owners "hipblaslt-dev (<< ${_tensilelite_moved_from}), hipblaslt-static-dev (<< ${_tensilelite_moved_from})")
+            set(_tensilelite_rpm_devel_owners "hipblaslt-devel < ${_tensilelite_moved_from}, hipblaslt-static-devel < ${_tensilelite_moved_from}")
+            set(CPACK_DEBIAN_TENSILELITE-DEVEL_PACKAGE_REPLACES "${_tensilelite_deb_devel_owners}")
+            set(CPACK_DEBIAN_TENSILELITE-DEVEL_PACKAGE_BREAKS "${_tensilelite_deb_devel_owners}")
+            set(CPACK_RPM_TENSILELITE-DEVEL_PACKAGE_CONFLICTS "${_tensilelite_rpm_devel_owners}")
+            if(tensilelite_bundled_origami_component)
+                rocm_package_setup_component(origami-devel PARENT tensilelite-devel)
+                set(CPACK_RPM_ORIGAMI-DEVEL_PACKAGE_NAME "origami-static-devel")
+                set(CPACK_DEBIAN_ORIGAMI-DEVEL_PACKAGE_NAME "origami-static-dev")
+                set(CPACK_DEBIAN_ORIGAMI-DEVEL_PACKAGE_REPLACES "${_tensilelite_deb_devel_owners}")
+                set(CPACK_DEBIAN_ORIGAMI-DEVEL_PACKAGE_BREAKS "${_tensilelite_deb_devel_owners}")
+                set(CPACK_RPM_ORIGAMI-DEVEL_PACKAGE_CONFLICTS "${_tensilelite_rpm_devel_owners}")
+            endif()
+        endif()
+
+        if(TENSILELITE_BUILD_SHARED_LIBS)
+            set(CPACK_DEBIAN_TENSILELITE_PACKAGE_REPLACES "hipblaslt (<< ${_tensilelite_moved_from})")
+            set(CPACK_DEBIAN_TENSILELITE_PACKAGE_BREAKS "hipblaslt (<< ${_tensilelite_moved_from})")
+            set(CPACK_RPM_TENSILELITE_PACKAGE_CONFLICTS "hipblaslt < ${_tensilelite_moved_from}")
+
+            # rocm-cmake's packaging defaults set CPACK_RPM_PACKAGE_AUTOREQPROV to
+            # Off for every ROCm library, so no package currently Provides or
+            # Requires a soname. Re-enable rpmbuild's ELF scanning for this one
+            # component: tensilelite-host then Provides
+            # libtensilelite-host.so.1()(64bit), derived from the binary rather
+            # than hand-written, so the capability tracks SOVERSION automatically.
+            # This is scoped to the component and does not change any other
+            # package's dependency surface.
+            set(CPACK_RPM_TENSILELITE_PACKAGE_AUTOREQPROV "ON")
+        endif()
+
+        set(ROCM_USE_DEV_COMPONENT OFF)
+        set(BUILD_SHARED_LIBS ON)
+        if(ENABLE_ASAN_PACKAGING)
+            set(ENABLE_ASAN_PACKAGING OFF)
+            set(ROCM_DEP_ROCMCORE OFF)
+        endif()
+        rocm_create_package(
+            NAME tensilelite-host
+            DESCRIPTION "TensileLite host library for GEMM solution selection and kernel launch"
+            MAINTAINER "hipBLASLt Maintainer <hipblaslt-maintainer@amd.com>"
+            LDCONFIG
+            HEADER_ONLY
+        )
+    endblock()
 endif()

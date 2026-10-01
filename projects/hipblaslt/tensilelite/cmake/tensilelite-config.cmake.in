@@ -1,0 +1,29 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(hip)
+find_dependency(origami CONFIG
+    PATHS "${CMAKE_CURRENT_LIST_DIR}/../origami"
+          "${CMAKE_CURRENT_LIST_DIR}/origami"
+    NO_DEFAULT_PATH)
+
+if(@TENSILELITE_CONFIG_STATIC@)
+    find_dependency(ZLIB)
+    if(@TENSILELITE_CONFIG_YAML@)
+        find_dependency(LLVM)
+    elseif("@TENSILELITE_CONFIG_MSGPACK_TARGET@" STREQUAL "msgpack-cxx")
+        find_dependency(msgpack-cxx CONFIG)
+    else()
+        find_dependency(msgpackc-cxx CONFIG NAMES msgpackc-cxx msgpack)
+    endif()
+endif()
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
+
+include("${CMAKE_CURRENT_LIST_DIR}/tensilelite-targets.cmake")
+
+check_required_components(tensilelite)
