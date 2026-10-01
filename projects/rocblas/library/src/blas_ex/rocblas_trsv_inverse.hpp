@@ -870,10 +870,26 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
         RETURN_IF_ROCBLAS_ERROR((rocblas_internal_flip_vector<BLOCK, T>(
             handle, B, m, abs_incx, stride_B, batch_count, offset_B)));
 
+    // B is the caller's buffer and the line above reversed it in place, so every exit
+    // from here on has to put it back -- the failing exits included. A solve that
+    // reports an error is allowed to leave B unsolved; it is not allowed to hand back
+    // the caller's own input reversed. The status of the restoring flip is reported
+    // rather than returned so that it cannot displace the failure being reported.
+    auto restore_B = [&] {
+        if(incx < 0)
+            PRINT_IF_ROCBLAS_ERROR((rocblas_internal_flip_vector<BLOCK, T>(
+                handle, B, m, abs_incx, stride_B, batch_count, offset_B)));
+    };
+
     if(BATCHED)
     {
-        RETURN_IF_ROCBLAS_ERROR(setup_batched_array<BLOCK>(
-            handle->get_stream(), (T*)x_temp, x_temp_els, (T**)x_temparr, batch_count));
+        status = setup_batched_array<BLOCK>(
+            handle->get_stream(), (T*)x_temp, x_temp_els, (T**)x_temparr, batch_count);
+        if(status != rocblas_status_success)
+        {
+            restore_B();
+            return status;
+        }
     }
 
     if(exact_blocks)
@@ -900,7 +916,10 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
                                                                   batch_count);
 
         if(status != rocblas_status_success)
+        {
+            restore_B();
             return status;
+        }
 
         // TODO: workaround to fix negative incx issue
         if(incx < 0)
@@ -930,22 +949,32 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
                                                       batch_count);
 
         if(status != rocblas_status_success)
+        {
+            restore_B();
             return status;
+        }
 
         // copy solution X into B
         // TODO: workaround to fix negative incx issue
-        RETURN_IF_ROCBLAS_ERROR(
-            (rocblas_internal_strided_vector_copy<BLOCK, T>(handle,
-                                                            B,
-                                                            abs_incx,
-                                                            stride_B,
-                                                            (V)(BATCHED ? x_temparr : x_temp),
-                                                            incx < 0 ? -1 : 1,
-                                                            x_temp_els,
-                                                            m,
-                                                            batch_count,
-                                                            offset_B,
-                                                            incx < 0 ? m - 1 : 0)));
+        status = rocblas_internal_strided_vector_copy<BLOCK, T>(handle,
+                                                                B,
+                                                                abs_incx,
+                                                                stride_B,
+                                                                (V)(BATCHED ? x_temparr : x_temp),
+                                                                incx < 0 ? -1 : 1,
+                                                                x_temp_els,
+                                                                m,
+                                                                batch_count,
+                                                                offset_B,
+                                                                incx < 0 ? m - 1 : 0);
+        if(status != rocblas_status_success)
+        {
+            // This copy is what writes the solution over the reversed B, reversing it
+            // back as it goes, so if it did not run then B is still the caller's input
+            // reversed.
+            restore_B();
+            return status;
+        }
     }
 
     return status;
