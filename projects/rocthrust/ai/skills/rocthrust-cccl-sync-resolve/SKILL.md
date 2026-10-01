@@ -139,6 +139,9 @@ If any of these don't hold, STOP and ask the human before proceeding.
 6. **Apply the change** to the translated local path(s) and `git add` them.
    For adaptation cases, the change is hand-written to match the upstream
    commit's intent using HIP/rocThrust idiom, not a mechanical patch apply.
+   Don't compile, build, or go looking for toolchains/dependencies (e.g.
+   libhipcxx) on your own: ask the human first, saying what you'd compile
+   and which configurations it would cover.
 
 7. **Tick the checkbox**, adding an indented rationale note:
 
