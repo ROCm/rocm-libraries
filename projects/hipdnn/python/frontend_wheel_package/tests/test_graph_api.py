@@ -178,6 +178,12 @@ class TestGraphExecuteTimedExt:
         The stub engine enqueues no device work, so the timed span is empty. Some
         runtimes (seen on Windows) read an empty span as a negative interval, which
         the API reports as INVALID with no elapsed time rather than an error.
+
+        This test therefore checks only that quality and elapsed_ms agree; it
+        would pass if every result were INVALID. The valid-timing path with
+        real device work is covered in C++ by
+        IntegrationGpuTimedExecute.ReportsTimingFromActivePlan, which requires
+        a finite elapsed time greater than zero.
         """
         graph, a, b, out = build_pointwise_add_graph(n=1, c=1, h=2, w=2)
         handle = build_all_plans(graph)

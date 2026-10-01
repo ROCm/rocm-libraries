@@ -12,8 +12,10 @@
 
 #include <chrono>
 #include <hipdnn_data_sdk/utilities/StallGate.hpp>
+#include <memory>
 #include <string>
 #include <thread>
+#include <type_traits>
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
@@ -652,19 +654,29 @@ TEST_F(TestGpuProfilingControlDescriptor, StallGateDeclinesStreamOnAnotherDevice
     hipdnn_data_sdk::utilities::StallGate gate;
     ASSERT_TRUE(gate.isUsable());
 
-    ASSERT_EQ(hipSetDevice(otherDevice), hipSuccess);
-    hipStream_t otherStream = nullptr;
-    const auto createStatus = hipStreamCreate(&otherStream);
-    ASSERT_EQ(hipSetDevice(device), hipSuccess);
+    // Restore the device and own the stream before any assertion can return early, so a
+    // failure here cannot leak the stream or leave later tests on the wrong device.
+    const auto switchStatus = hipSetDevice(otherDevice);
+    hipStream_t rawStream = nullptr;
+    const auto createStatus
+        = switchStatus == hipSuccess ? hipStreamCreate(&rawStream) : switchStatus;
+    const auto restoreStatus = hipSetDevice(device);
+    const std::unique_ptr<std::remove_pointer_t<hipStream_t>, void (*)(hipStream_t)> otherStream(
+        rawStream, [](hipStream_t stream) {
+            if(stream != nullptr)
+            {
+                static_cast<void>(hipStreamDestroy(stream));
+            }
+        });
+    ASSERT_EQ(restoreStatus, hipSuccess);
     ASSERT_EQ(createStatus, hipSuccess);
 
-    EXPECT_FALSE(gate.arm(otherStream));
+    EXPECT_FALSE(gate.arm(otherStream.get()));
     EXPECT_EQ(gate.lastError(), hipSuccess);
     ASSERT_NE(gate.lastOperation(), nullptr);
     EXPECT_STREQ(gate.lastOperation(), "hipStreamGetDevice");
     // Nothing was enqueued on the foreign stream, so it drains without a release.
-    EXPECT_EQ(hipStreamSynchronize(otherStream), hipSuccess);
-    EXPECT_EQ(hipStreamDestroy(otherStream), hipSuccess);
+    EXPECT_EQ(hipStreamSynchronize(otherStream.get()), hipSuccess);
 
     // The decline left the gate reusable on its own device.
     ASSERT_TRUE(gate.arm(_testStream));

@@ -40,12 +40,13 @@ namespace hipdnn_plugin_sdk::ingestor
 constexpr int BENCHMARK_WARMUP_RUNS = 1;
 constexpr int BENCHMARK_ITERATIONS = 7;
 
-/// A finite negative elapsed time is a known artifact of HIP event timing near the
-/// clock's resolution floor, not proof a candidate is broken: sampleCandidate() discards
-/// it and re-measures the same slot, using at most this many extra attempts for the
-/// whole candidate. Exhausting the budget restarts a stalled comparison unstalled and
-/// scores the candidate unusable in an unstalled one. NaN, Inf, and a backend timing
-/// error are never retried this way.
+/// A finite negative elapsed time is a HIP event timing artifact, not proof a candidate
+/// is broken. It appears near the timer's resolution and, under the stall gate on some
+/// runtimes, persistently for short work (seen on Windows: -15 us for a 4 MiB fill).
+/// sampleCandidate() discards it and re-measures the same slot, using at most this many
+/// extra attempts for the whole candidate. Exhausting the budget restarts a stalled
+/// comparison unstalled and scores the candidate unusable in an unstalled one. NaN, Inf,
+/// and a backend timing error are never retried this way.
 constexpr int MAX_NEGATIVE_SAMPLE_RETRIES = 2;
 
 // A zero iteration count would leave sampleCandidate()'s reduction at its DBL_MAX seed
@@ -560,12 +561,12 @@ private:
                 }
                 if(*sample.elapsedMs < 0.0)
                 {
-                    // A finite negative elapsed time is a known HIP-event-timing artifact
-                    // near the clock's resolution floor, not proof the candidate is
-                    // broken: discard it and re-measure the same slot rather than
-                    // condemning the whole candidate on one bad reading. A persistently
-                    // negative candidate exhausts the retry budget below and never enters
-                    // the reduction, ranking, or cache.
+                    // A finite negative elapsed time is a HIP-event-timing artifact, not
+                    // proof the candidate is broken. Under the stall gate it can repeat
+                    // for short work on some runtimes, so discard it and re-measure the
+                    // same slot rather than condemning the whole candidate on one bad
+                    // reading. A persistently negative candidate exhausts the retry budget
+                    // below and never enters the reduction, ranking, or cache.
                     if(negativeSampleRetriesLeft > 0)
                     {
                         --negativeSampleRetriesLeft;
