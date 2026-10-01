@@ -11227,8 +11227,6 @@ namespace rocalution
                     free_hip(&csr_col_ind);
                     free_hip(&csr_val);
 
-                    cast_glo->Clear();
-
                     return false;
                 }
             }
