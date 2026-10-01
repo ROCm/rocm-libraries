@@ -120,6 +120,7 @@ def getRequiredParametersMin() -> set:
         'PrefetchGlobalReadB',
         'PrefetchLocalRead',
         'PrefetchGL2',
+        'PrefetchGL2Inc64Bit',
         'PreloadKernArgs',
         'ReuseAcrossPersistent',
         'ScheduleIterAlg',
