@@ -93,4 +93,10 @@ generate_sharded_instantiations(
   OUTPUT_DIR ${GENERATED_DIR}/xdl/mem
 )
 
+if(SUPPORTED_GPU_TARGETS STREQUAL "gfx1250")
+  # Early inlining with disabled device calls miscompiles BF16 scalar staging.
+  set_property(SOURCE xdl/device_grouped_conv3d_fwd_xdl_ngcdhw_gkczyx_ngkdhw_bf16_16x16_instance.cpp
+    APPEND PROPERTY COMPILE_OPTIONS "-mllvm" "-amdgpu-early-inline-all=false")
+endif()
+
 add_instance_library(device_grouped_conv3d_fwd_ngcdhw_instance ${GROUPED_CONV3D_FWD_NGCDHW})
