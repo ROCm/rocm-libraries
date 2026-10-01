@@ -7,6 +7,84 @@
   ],
   "engine": "d5f29629-a881-4f79-9a25-222459a04c6a",
   "dispatch": "d99370b7-2610-4528-895c-8c38916a88d4",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "d5f29629-a881-4f79-9a25-222459a04c6a",
+          "kmd_id": "28fe7e39-e7a2-44d5-a07a-9779aba34ef3",
+          "metadata_fields": [
+            "dtype",
+            "head_size",
+            "num_query_heads",
+            "num_kv_heads",
+            "seqlen_q",
+            "seqlen_kv",
+            "batch",
+            "causal",
+            "block_m",
+            "block_n",
+            "waves_per_eu",
+            "persistent",
+            "num_persistent",
+            "use_exp2_fast"
+          ],
+          "matcher_only_fields": [],
+          "bindings": {
+            "dtype": {
+              "field": "dtype"
+            },
+            "head_size": {
+              "field": "head_size"
+            },
+            "num_query_heads": {
+              "field": "num_query_heads"
+            },
+            "num_kv_heads": {
+              "field": "num_kv_heads"
+            },
+            "seqlen_q": {
+              "field": "seqlen_q"
+            },
+            "seqlen_kv": {
+              "field": "seqlen_kv"
+            },
+            "batch": {
+              "field": "batch"
+            },
+            "causal": {
+              "field": "causal"
+            },
+            "block_m": {
+              "field": "block_m"
+            },
+            "block_n": {
+              "field": "block_n"
+            },
+            "waves_per_eu": {
+              "field": "waves_per_eu"
+            },
+            "persistent": {
+              "field": "persistent"
+            },
+            "num_persistent": {
+              "field": "num_persistent"
+            },
+            "use_exp2_fast": {
+              "method": "resolved_use_exp2_fast"
+            }
+          },
+          "vocabulary": {
+            "dtype": {
+              "bf16": "BF16",
+              "fp16": "FP16"
+            }
+          }
+        }
+      ]
+    }
+  },
   "kernelDescriptors": [
     {
       "version": "1.0",
@@ -454,7 +532,8 @@
           "dtype": "bf16",
           "block_m": 128,
           "waves_per_eu": 2,
-          "persistent": false
+          "persistent": false,
+          "use_exp2_fast": true
         }
       },
       "metadata": {
@@ -500,7 +579,8 @@
           "dtype": "bf16",
           "block_m": 64,
           "waves_per_eu": 2,
-          "persistent": false
+          "persistent": false,
+          "use_exp2_fast": true
         }
       },
       "metadata": {
@@ -546,7 +626,8 @@
           "dtype": "bf16",
           "block_m": 256,
           "waves_per_eu": 2,
-          "persistent": false
+          "persistent": false,
+          "use_exp2_fast": true
         }
       },
       "metadata": {
@@ -639,7 +720,8 @@
           "dtype": "bf16",
           "block_m": 128,
           "waves_per_eu": 2,
-          "persistent": false
+          "persistent": false,
+          "use_exp2_fast": true
         }
       },
       "metadata": {
@@ -685,7 +767,8 @@
           "dtype": "bf16",
           "block_m": 64,
           "waves_per_eu": 2,
-          "persistent": false
+          "persistent": false,
+          "use_exp2_fast": true
         }
       },
       "metadata": {
@@ -731,7 +814,8 @@
           "dtype": "bf16",
           "block_m": 256,
           "waves_per_eu": 2,
-          "persistent": false
+          "persistent": false,
+          "use_exp2_fast": true
         }
       },
       "metadata": {
@@ -1433,7 +1517,8 @@
           "dtype": "bf16",
           "block_m": 256,
           "waves_per_eu": 2,
-          "persistent": true
+          "persistent": true,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -1620,7 +1705,8 @@
           "dtype": "bf16",
           "block_m": 256,
           "waves_per_eu": 2,
-          "persistent": true
+          "persistent": true,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -23850,7 +23936,8 @@
           "dtype": "bf16",
           "block_m": 256,
           "waves_per_eu": 2,
-          "persistent": true
+          "persistent": true,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -24084,7 +24171,8 @@
           "dtype": "bf16",
           "block_m": 256,
           "waves_per_eu": 2,
-          "persistent": true
+          "persistent": true,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -45226,7 +45314,8 @@
           "dtype": "bf16",
           "block_m": 256,
           "waves_per_eu": 2,
-          "persistent": true
+          "persistent": true,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -45272,7 +45361,8 @@
           "dtype": "bf16",
           "block_m": 256,
           "waves_per_eu": 2,
-          "persistent": true
+          "persistent": true,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -48563,7 +48653,8 @@
           "dtype": "bf16",
           "block_m": 256,
           "waves_per_eu": 2,
-          "persistent": true
+          "persistent": true,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -48701,7 +48792,8 @@
           "dtype": "bf16",
           "block_m": 256,
           "waves_per_eu": 2,
-          "persistent": true
+          "persistent": true,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -48747,7 +48839,8 @@
           "dtype": "bf16",
           "block_m": 256,
           "waves_per_eu": 2,
-          "persistent": true
+          "persistent": true,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -48840,7 +48933,8 @@
           "dtype": "bf16",
           "block_m": 256,
           "waves_per_eu": 2,
-          "persistent": true
+          "persistent": true,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -48932,7 +49026,8 @@
           "dtype": "bf16",
           "block_m": 256,
           "waves_per_eu": 2,
-          "persistent": true
+          "persistent": true,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -48978,7 +49073,8 @@
           "dtype": "bf16",
           "block_m": 256,
           "waves_per_eu": 2,
-          "persistent": true
+          "persistent": true,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -49070,7 +49166,8 @@
           "dtype": "bf16",
           "block_m": 256,
           "waves_per_eu": 2,
-          "persistent": true
+          "persistent": true,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -49727,7 +49824,8 @@
           "dtype": "bf16",
           "block_m": 256,
           "waves_per_eu": 2,
-          "persistent": true
+          "persistent": true,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -49820,7 +49918,8 @@
           "dtype": "bf16",
           "block_m": 256,
           "waves_per_eu": 2,
-          "persistent": true
+          "persistent": true,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -63297,7 +63396,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": true
         }
       },
       "metadata": {
@@ -63343,7 +63443,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": true
         }
       },
       "metadata": {
@@ -63389,7 +63490,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": true
         }
       },
       "metadata": {
@@ -63852,7 +63954,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": true
         }
       },
       "metadata": {
@@ -63898,7 +64001,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": true
         }
       },
       "metadata": {
@@ -63944,7 +64048,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": true
         }
       },
       "metadata": {
@@ -66997,7 +67102,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": true
         }
       },
       "metadata": {
@@ -67043,7 +67149,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": true
         }
       },
       "metadata": {
@@ -67089,7 +67196,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": true
         }
       },
       "metadata": {
@@ -69587,7 +69695,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": true
         }
       },
       "metadata": {
@@ -69633,7 +69742,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": true
         }
       },
       "metadata": {
@@ -69679,7 +69789,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": true
         }
       },
       "metadata": {
@@ -78095,7 +78206,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -78141,7 +78253,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -78234,7 +78347,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -78280,7 +78394,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -78835,7 +78950,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -78881,7 +78997,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -79436,7 +79553,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -79482,7 +79600,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -79575,7 +79694,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -79621,7 +79741,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -81840,7 +81961,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -81886,7 +82008,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -81979,7 +82102,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -82025,7 +82149,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -82995,7 +83120,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -83041,7 +83167,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -83134,7 +83261,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -83180,7 +83308,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -88267,7 +88396,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -88313,7 +88443,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -88359,7 +88490,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -90487,7 +90619,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -90533,7 +90666,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -90579,7 +90713,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -91504,7 +91639,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -91550,7 +91686,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -93488,7 +93625,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -93534,7 +93672,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -93580,7 +93719,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -95338,7 +95478,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -95384,7 +95525,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -95430,7 +95572,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -96818,7 +96961,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -96864,7 +97008,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -96910,7 +97055,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -97188,7 +97334,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -97234,7 +97381,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -97280,7 +97428,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -98113,7 +98262,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -98159,7 +98309,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -98899,7 +99050,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -98945,7 +99097,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -98991,7 +99144,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -99269,7 +99423,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -99315,7 +99470,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -99361,7 +99517,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -100749,7 +100906,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -100795,7 +100953,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -100841,7 +101000,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -101119,7 +101279,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -101165,7 +101326,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -101211,7 +101373,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -102784,7 +102947,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -102830,7 +102994,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -102876,7 +103041,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -102969,7 +103135,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -103015,7 +103182,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -103061,7 +103229,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -103339,7 +103508,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -103385,7 +103555,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -103431,7 +103602,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -104449,7 +104621,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -104495,7 +104668,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -104541,7 +104715,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -104819,7 +104994,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -104865,7 +105041,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -104911,7 +105088,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -105189,7 +105367,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -105235,7 +105414,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -105281,7 +105461,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -106114,7 +106295,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -106160,7 +106342,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -106438,7 +106621,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -106484,7 +106668,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -106530,7 +106715,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -106808,7 +106994,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -106854,7 +107041,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -106900,7 +107088,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -107178,7 +107367,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -107224,7 +107414,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -107270,7 +107461,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -107548,7 +107740,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -107594,7 +107787,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -107640,7 +107834,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -109398,7 +109593,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -109444,7 +109640,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -109490,7 +109687,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -109768,7 +109966,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -109814,7 +110013,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -109860,7 +110060,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -110138,7 +110339,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -110184,7 +110386,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -110230,7 +110433,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -111433,7 +111637,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -111479,7 +111684,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -111525,7 +111731,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -111803,7 +112010,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -111849,7 +112057,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -111895,7 +112104,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -111988,7 +112198,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -112034,7 +112245,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -112080,7 +112292,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -112358,7 +112571,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -112404,7 +112618,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -112450,7 +112665,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -113653,7 +113869,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -113699,7 +113916,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -113745,7 +113963,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -114023,7 +114242,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -114069,7 +114289,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -114115,7 +114336,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -114393,7 +114615,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -114439,7 +114662,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -114485,7 +114709,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -115503,7 +115728,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -115549,7 +115775,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -115595,7 +115822,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -115873,7 +116101,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -115919,7 +116148,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -115965,7 +116195,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -116243,7 +116474,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -116289,7 +116521,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -116335,7 +116568,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -116613,7 +116847,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -116659,7 +116894,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -116705,7 +116941,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -117723,7 +117960,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -117769,7 +118007,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -117815,7 +118054,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -118093,7 +118333,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -118139,7 +118380,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -118185,7 +118427,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -119018,7 +119261,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -119064,7 +119308,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -119110,7 +119355,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -125842,7 +126088,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -125888,7 +126135,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -126073,7 +126321,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -126119,7 +126368,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -126304,7 +126554,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {
@@ -126350,7 +126601,8 @@
           "lds_k_group_pad": 8,
           "lds_row_pad": 8,
           "lazy_rescale": true,
-          "iglp": false
+          "iglp": false,
+          "use_exp2_fast": false
         }
       },
       "metadata": {

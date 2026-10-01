@@ -65,6 +65,38 @@ graph_match:
   discriminator: none
 kernel_source_kind: rocke
 workspace_policy: none
+# Every field is one the Gfx942AttentionDenseSpec each kernel's kernel_source.spec
+# hydrates hands `build_attention_dense`, so each reached the compiler and is bound to the
+# spec attribute it was read from. use_exp2_fast binds to the resolved accessor, not the
+# field: a spec may leave it None for `_use_exp2_fast` to decide, and that verdict has
+# changed under shipped kernels before (bf16 D128 inverted after this pack was generated),
+# so only the effective value is checkable.
+#
+# `dtype` needs a translation because the matcher compares the hipDNN spelling while the
+# spec carries the builder's; both spellings are mapped, as gfx950_attention_dense.yaml
+# does, so a first fp16 kernel is not a phantom disagreement.
+specialization:
+  metadata_fields:
+    [dtype, head_size, num_query_heads, num_kv_heads, seqlen_q, seqlen_kv, batch, causal,
+     block_m, block_n, waves_per_eu, persistent, num_persistent, use_exp2_fast]
+  matcher_only_fields: []
+  bindings:
+    dtype: {field: dtype}
+    head_size: {field: head_size}
+    num_query_heads: {field: num_query_heads}
+    num_kv_heads: {field: num_kv_heads}
+    seqlen_q: {field: seqlen_q}
+    seqlen_kv: {field: seqlen_kv}
+    batch: {field: batch}
+    causal: {field: causal}
+    block_m: {field: block_m}
+    block_n: {field: block_n}
+    waves_per_eu: {field: waves_per_eu}
+    persistent: {field: persistent}
+    num_persistent: {field: num_persistent}
+    use_exp2_fast: {method: resolved_use_exp2_fast}
+  vocabulary:
+    dtype: {bf16: BF16, fp16: FP16}
 packs:
 - name: attention_dense
   arch:
