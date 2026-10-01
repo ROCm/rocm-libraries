@@ -46,9 +46,11 @@ struct ReduceShapeLimitsCase
     }
 };
 
-std::vector<ReduceShapeLimitsCase> GetReduceShapeLimitsCases()
+std::vector<ReduceShapeLimitsCase> GetReduceShapeLimitsFP32Cases()
 {
     constexpr std::size_t intMax = std::numeric_limits<int>::max();
+    // the smallest row length for which two fp32 rows span more than INT32_MAX bytes
+    constexpr std::size_t fp32SpanRowLen = (intMax / sizeof(float) + 1) / 2;
     const std::vector<std::size_t> rank7(7, 2);
     const std::vector<std::size_t> rank7Strides{64, 32, 16, 8, 4, 2, 1};
     const std::vector<std::size_t> rank7Out(7, 1);
@@ -65,26 +67,39 @@ std::vector<ReduceShapeLimitsCase> GetReduceShapeLimitsCases()
         {"OutputStrideAboveIntMax", ReduceTensorRejects, {2, 4}, {4, 1}, {2, 1}, {intMax + 1, 1},
          "output tensor has a length or stride exceeding INT32_MAX"},
         // every length and stride fits, but the fp32 byte span does not
-        {"ByteSpanAboveIntMax", ReduceTensorRejects, {2, (1ULL << 28) + 1}, {(1ULL << 28) + 1, 1}, {2, 1}, {1, 1},
+        {"ByteSpanAboveIntMax", ReduceTensorRejects, {2, fp32SpanRowLen}, {fp32SpanRowLen, 1}, {2, 1}, {1, 1},
          "input tensor spans more than INT32_MAX bytes"},
-        // sizing stays permissive: the RNN sizes reductions it may never run (ReductionWorkspaceSize)
+        // the sizing queries do not check the int32 limits, because the RNN uses them to size
+        // reductions it may never run (ReductionWorkspaceSize)
         {"StrideAboveIntMaxSizing", SizingAccepts, {2, 4}, {intMax + 1, 1}, {1, 4}, {4, 1}, ""},
-        {"RnnLikeSizing", SizingAccepts, {1, 8, 16}, {1ULL << 32, 16, 1}, {1, 1, 16}, {16, 16, 1}, ""},
-        // the stride of a length-1 dimension is never used, so it may exceed INT32_MAX
-        {"RnnLikeReduceTensor", ReduceTensorAccepts, {1, 8, 16}, {1ULL << 32, 16, 1}, {1, 1, 16}, {16, 16, 1}, ""},
+        {"RnnLikeSizing", SizingAccepts, {1, 8, 16}, {intMax + 1, 16, 1}, {1, 1, 16}, {16, 16, 1}, ""},
+        // the stride of a length-1 dimension is never used, so it may exceed INT32_MAX without the
+        // tensor being rejected
+        {"RnnLikeReduceTensor", ReduceTensorAccepts, {1, 8, 16}, {intMax + 1, 16, 1}, {1, 1, 16}, {16, 16, 1}, ""},
     };
     // clang-format on
 }
 
-} // anonymous namespace
-
-class GPU_ReduceShapeLimits_FP32 : public ::testing::TestWithParam<ReduceShapeLimitsCase>
+std::vector<ReduceShapeLimitsCase> GetReduceShapeLimitsFP16Cases()
 {
-};
+    // the most 2-byte elements that fit into INT32_MAX bytes
+    constexpr std::size_t maxLen = std::numeric_limits<int>::max() / 2;
 
-TEST_P(GPU_ReduceShapeLimits_FP32, EnforcesLimits)
+    // a single reduction of that many elements is split over so many blocks that the padded length
+    // the kernel computes exceeds INT32_MAX, although the tensor itself fits
+    return {
+        {"SingleOutputPaddedLengthAboveIntMax",
+         ReduceCheck::ReduceTensorRejects,
+         {maxLen},
+         {1},
+         {1},
+         {1},
+         "padded reduced length"},
+    };
+}
+
+void RunReduceShapeLimitsCase(const ReduceShapeLimitsCase& c, miopenDataType_t type)
 {
-    const auto& c = GetParam();
     auto&& handle = get_handle();
 
     // MAX with flattened indices, so that GetIndicesSize() has something to size
@@ -93,8 +108,8 @@ TEST_P(GPU_ReduceShapeLimits_FP32, EnforcesLimits)
                                                     MIOPEN_NOT_PROPAGATE_NAN,
                                                     MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES,
                                                     MIOPEN_32BIT_INDICES};
-    const miopen::TensorDescriptor inDesc{miopenFloat, c.inLengths, c.inStrides};
-    const miopen::TensorDescriptor outDesc{miopenFloat, c.outLengths, c.outStrides};
+    const miopen::TensorDescriptor inDesc{type, c.inLengths, c.inStrides};
+    const miopen::TensorDescriptor outDesc{type, c.outLengths, c.outStrides};
 
     const auto expectBadParm = [&](auto&& call) {
         try
@@ -118,7 +133,9 @@ TEST_P(GPU_ReduceShapeLimits_FP32, EnforcesLimits)
     case ReduceCheck::ReduceTensorRejects: {
         const float alpha = 1.0f;
         const float beta  = 0.0f;
-        // oversized buffer sizes, so the "not enough" checks cannot fire first
+        // oversized buffer sizes, so the "not enough" checks cannot fire first; the null
+        // workspace makes ReduceTensor() throw before launching any kernel if the checks are
+        // missing, so a regression fails the test instead of running on invalid buffers
         expectBadParm([&] {
             reduceDesc.ReduceTensor(handle,
                                     nullptr,
@@ -139,6 +156,7 @@ TEST_P(GPU_ReduceShapeLimits_FP32, EnforcesLimits)
         EXPECT_NO_THROW(std::ignore = reduceDesc.GetIndicesSize(inDesc, outDesc));
         break;
     case ReduceCheck::ReduceTensorAccepts: {
+        ASSERT_EQ(type, miopenFloat) << "only implemented for fp32";
         // the input is 3-D with a leading length-1 dimension; only the elements reachable through
         // the other two dimensions are allocated
         const std::size_t rows = c.inLengths[1];
@@ -182,7 +200,32 @@ TEST_P(GPU_ReduceShapeLimits_FP32, EnforcesLimits)
     }
 }
 
+} // anonymous namespace
+
+class GPU_ReduceShapeLimits_FP32 : public ::testing::TestWithParam<ReduceShapeLimitsCase>
+{
+};
+
+class GPU_ReduceShapeLimits_FP16 : public ::testing::TestWithParam<ReduceShapeLimitsCase>
+{
+};
+
+TEST_P(GPU_ReduceShapeLimits_FP32, EnforcesLimits)
+{
+    RunReduceShapeLimitsCase(GetParam(), miopenFloat);
+}
+
+TEST_P(GPU_ReduceShapeLimits_FP16, EnforcesLimits)
+{
+    RunReduceShapeLimitsCase(GetParam(), miopenHalf);
+}
+
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_ReduceShapeLimits_FP32,
-                         ::testing::ValuesIn(GetReduceShapeLimitsCases()),
+                         ::testing::ValuesIn(GetReduceShapeLimitsFP32Cases()),
+                         [](const auto& info) { return info.param.name; });
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_ReduceShapeLimits_FP16,
+                         ::testing::ValuesIn(GetReduceShapeLimitsFP16Cases()),
                          [](const auto& info) { return info.param.name; });
