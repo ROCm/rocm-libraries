@@ -13,8 +13,9 @@ Every flavor in ``LLVM_FLAVORS`` is checked from any host, through the shared
 fixture is re-blessed.
 
 Covers the acceptance matrix: D64/D128 x bf16/fp16 x default/persistent x GQA, causal
-and full. Every case is in the gfx942 supported set (varlen / ragged / sliding-window
-are rejected on gfx942, so -- unlike the gfx950 sibling -- they are absent here).
+and full, plus sliding-window (W128/W256, both grids, D64/D128). Every case is in the
+gfx942 supported set (varlen / ragged are rejected on gfx942, so -- unlike the gfx950
+sibling -- they are absent here).
 
 Both D64 K-LDS layouts are pinned so drift on either is caught:
   * ``default_d64_*``  -- specs built DIRECTLY with ``lds_k_group_pad=0``: the UNPADDED
@@ -213,18 +214,13 @@ def _sha_for(build, flavor):
     return hashlib.sha256(data).hexdigest(), len(data)
 
 
-def _run(flavor, *, record_errors=False):
-    """One flavor's golden sub-document. The test lets a build error propagate
-    with its traceback; ``--write`` records it in the fixture instead."""
+def _run(flavor):
+    """One flavor's golden sub-document. A build error propagates with its
+    traceback, in the test and under ``--write`` alike, so a fixture can never be
+    blessed with a case that fails to lower."""
     cases = {}
     for cid, build in _cases().items():
-        try:
-            sha, nbytes = _sha_for(build, flavor)
-        except Exception as e:  # pragma: no cover - diagnostic
-            if not record_errors:
-                raise
-            cases[cid] = {"error": str(e)[:160]}
-            continue
+        sha, nbytes = _sha_for(build, flavor)
         cases[cid] = {"sha256": sha, "bytes": nbytes}
     return {"cases": cases}
 
@@ -234,7 +230,7 @@ def _build_doc():
 
     return {
         "schema": "attention_dense_gfx942.ir_golden_sha256/v1",
-        "flavors": {fl: _run(fl, record_errors=True) for fl in GOLDEN_FLAVORS},
+        "flavors": {fl: _run(fl) for fl in GOLDEN_FLAVORS},
     }
 
 

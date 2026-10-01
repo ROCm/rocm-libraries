@@ -129,7 +129,7 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
       the generic `CandidateRegistry` + `dispatch_<family>` for a platform family
       ([dispatch/families/](platform/python/rocke/dispatch/families/)), or
       `ATTENTION_REGISTRY` for attention. A family not in a registry is unreachable.
-- [ ] Golden created for the new family; gate GREEN both flavors.
+- [ ] Golden created for the new family; gate GREEN at every flavor in `LLVM_FLAVORS`.
 - [ ] **End-user visibility:** family added to the support matrix
       (`SUPPORT_MATRIX.md` / operation-support doc) so users can see it is
       supported.
@@ -390,6 +390,7 @@ export ROCKE=$(pwd) PYTHONPATH=$ROCKE/Python
 
 python tools/check_byte_identity.py                            # llvm20, build engine + gate
 ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # llvm22 flavor
+ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # llvm23 flavor
 python tools/check_byte_identity.py --only attention           # scope to a family
 ```
 
@@ -406,7 +407,7 @@ Python emitter and the compiled C emitter for each config index and diffs the
    golden at
    [rocke_representative_ir_sha256.json](platform/tests/golden/rocke_representative_ir_sha256.json));
    library goldens re-bless with `--write` on their own `library/tests/test_*_golden.py`.
-3. Re-run the gate GREEN at **both** flavors before considering it done.
+3. Re-run the gate GREEN at **every** flavor in `LLVM_FLAVORS` before considering it done.
 4. A default-OFF, unwired knob must produce **no** golden diff — a clean gate
    with no re-bless is the proof it is inert.
 
