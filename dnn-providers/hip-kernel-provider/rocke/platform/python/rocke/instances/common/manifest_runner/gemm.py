@@ -12,6 +12,19 @@ from ....runtime.hip_module import Runtime
 from .utils import as_u8_buffer, nbytes, require_numpy
 
 
+def _gemm_is_bf16(manifest: dict) -> bool:
+    """Whether the GEMM operands are bf16, per the ``A`` ptr type.
+
+    The manifest ``kind`` is ``gemm_fp16`` for every GEMM, so the element
+    type is carried by ``args_signature`` (``ptr<bf16, global>`` vs
+    ``ptr<f16, global>``, emitted by ``helpers.manifest.gemm_args_signature``).
+    Both are 2 bytes wide, so only the interpretation differs.
+    """
+    sig = manifest.get("args_signature", [])
+    ptr_type = next((a.get("type", "") for a in sig if a.get("name") == "A"), "")
+    return "bf16" in ptr_type
+
+
 def run_gemm_manifest_problem(
     manifest: dict, shape: Optional[Tuple[int, int, int]], verify: bool
 ) -> tuple:
@@ -21,9 +34,21 @@ def run_gemm_manifest_problem(
         M, N, K = int(ds[0]), int(ds[1]), int(ds[2])
     else:
         M, N, K = shape
+    is_bf16 = _gemm_is_bf16(manifest)
     rng = np.random.default_rng(0xC0FFEE)
-    A = rng.integers(-5, 6, size=(M, K), dtype=np.int16).astype(np.float16)
-    B = rng.integers(-5, 6, size=(N, K), dtype=np.int16).astype(np.float16)
+    A_f32 = None  # float32 inputs for bf16 reference, set when is_bf16
+    B_f32 = None
+    if is_bf16:
+        # Small integers (-5..5) are exactly representable in bf16; their fp32
+        # lower 16 bits are zero so truncation == RNE for the inputs.
+        A_f32 = rng.integers(-5, 6, size=(M, K), dtype=np.int16).astype(np.float32)
+        B_f32 = rng.integers(-5, 6, size=(N, K), dtype=np.int16).astype(np.float32)
+        # Encode as bf16 raw bytes stored behind a float16 view for device transfer.
+        A = (A_f32.view(np.uint32) >> 16).astype(np.uint16).view(np.float16)
+        B = (B_f32.view(np.uint32) >> 16).astype(np.uint16).view(np.float16)
+    else:
+        A = rng.integers(-5, 6, size=(M, K), dtype=np.int16).astype(np.float16)
+        B = rng.integers(-5, 6, size=(N, K), dtype=np.int16).astype(np.float16)
     C = np.empty((M, N), dtype=np.float16)
     gx = (N + int(manifest["block_n"]) - 1) // int(manifest["block_n"])
     gy = (M + int(manifest["block_m"]) - 1) // int(manifest["block_m"])
@@ -51,10 +76,21 @@ def run_gemm_manifest_problem(
         if not verify:
             return 0.0, 0, C.size
         rt.memcpy_d2h(as_u8_buffer(C), ptrs[2], nbytes(C))
-        ref = (A.astype(np.float32) @ B.astype(np.float32).T).astype(np.float16)
-        ref_f32 = ref.astype(np.float32)
+        if is_bf16:
+            from ....dispatch.gemm.binding import _bf16_from_f32, _f32_from_bf16
+
+            # Reference: fp32 accumulation (exact for small-integer inputs),
+            # then round-to-nearest-even to bf16 matching the kernel's fptrunc.
+            ref_u16 = _bf16_from_f32(np, A_f32 @ B_f32.T)
+            ref_f32 = _f32_from_bf16(np, ref_u16)
+            # Decode raw output bytes as bf16, not fp16.
+            out_f32 = _f32_from_bf16(np, C.view(np.uint16))
+        else:
+            ref = (A.astype(np.float32) @ B.astype(np.float32).T).astype(np.float16)
+            ref_f32 = ref.astype(np.float32)
+            out_f32 = C.astype(np.float32)
         tol = 1e-2
-        err = np.abs(C.astype(np.float32) - ref_f32)
+        err = np.abs(out_f32 - ref_f32)
         bad = err > tol + tol * np.abs(ref_f32)
         return float(err.max()), int(np.count_nonzero(bad)), C.size
 

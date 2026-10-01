@@ -22,15 +22,17 @@
 #
 ################################################################################
 
+from .ExecutionPolicy import isStreamK
+
 from copy import deepcopy
 from enum import IntEnum
 
-from Tensile.Common.GlobalParameters import internalParameters
-from Tensile.KernelWriterBetaOnly import KernelWriterBetaOnly
-from Tensile.KernelWriterConversion import KernelWriterConversion
-from Tensile.KernelWriterActivationEnumHeader import KernelWriterActivationEnumHeader
-from Tensile.KernelWriterActivationFunction import KernelWriterActivationFunction
-from Tensile.KernelWriterReduction import KernelWriterReduction
+from .Common.GlobalParameters import internalParameters
+from .KernelWriterBetaOnly import KernelWriterBetaOnly
+from .KernelWriterConversion import KernelWriterConversion
+from .KernelWriterActivationEnumHeader import KernelWriterActivationEnumHeader
+from .KernelWriterActivationFunction import KernelWriterActivationFunction
+from .KernelWriterReduction import KernelWriterReduction
 
 
 class KernelHelperEnum(IntEnum):
@@ -48,6 +50,9 @@ def conversionKernelNames(solution):
   conversionKernelNames = []
   loadVectorWidth = [1, 2] if solution["ProblemType"]["DataType"].isDouble() else [1, 2, 4]
   gsuList = [internalParameters["GlobalSplitUPGR"]]
+  if solution["GlobalSplitUAlgorithm"] == "AtomicDest":
+    # The GSU slices already produced the final D in place.
+    return conversionKernelNames
   if solution["GlobalSplitUAlgorithm"] == "SingleBuffer":
     gsuList = [1]
   elif solution["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel":
@@ -94,7 +99,7 @@ def reductionKernelNames(solution):
 
 def betaOnlyKernelNames(solution):
   betaOnlyKernelNames = []
-  if (solution["GlobalSplitU"] > 1 or solution["GlobalSplitU"] == -1) or (solution["StreamK"] > 0 and solution["StreamKAtomic"] == 1):
+  if (solution["GlobalSplitU"] > 1 or solution["GlobalSplitU"] == -1) or (isStreamK(solution) and solution["StreamKAtomic"] == 1):
     if solution["ProblemType"]["UseBias"]:
       for btype in solution["ProblemType"]["BiasDataTypeList"]:
         betaOnlyKernelNames.append(KernelWriterBetaOnly.kernelName(solution, btype))
@@ -131,7 +136,7 @@ def initHelperKernelObjects(solution, kernelHelperType, cxxCompiler, isaInfoMap)
 
 def initBetaOnlyKernelObjects(solution):
   betaOnlyKernelObjects = []
-  if (solution["GlobalSplitU"] > 1 or solution["GlobalSplitU"] == -1) or (solution["StreamK"] > 0 and solution["StreamKAtomic"] == 1):
+  if (solution["GlobalSplitU"] > 1 or solution["GlobalSplitU"] == -1) or (isStreamK(solution) and solution["StreamKAtomic"] == 1):
     if solution["ProblemType"]["UseBias"]:
       for btype in solution["ProblemType"]["BiasDataTypeList"]:
         state = {}
@@ -158,6 +163,9 @@ def initConversionKernelObjects(solution, isaInfoMap):
     [1, 2] if solution["ProblemType"]["DataType"].numBytes() > 4 else [1, 2, 4]
   genPGRPostKernels = True
   gsuList = [internalParameters["GlobalSplitUPGR"]]
+  if solution["GlobalSplitUAlgorithm"] == "AtomicDest":
+    # The GSU slices already produced the final D in place.
+    return conversionKernelObjects
   if solution["GlobalSplitUAlgorithm"] == "SingleBuffer":
     genPGRPostKernels = False
     gsuList = [1]

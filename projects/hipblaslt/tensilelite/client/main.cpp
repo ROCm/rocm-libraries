@@ -34,6 +34,7 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include "BenchmarkTimer.hpp"
+#include "ClientConfig.hpp"
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
 #include "HardwareMonitorListener.hpp"
@@ -54,9 +55,6 @@
 #include "ProgramOptions.hpp"
 #include "Utility.hpp"
 
-#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
-#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
-#endif
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
 #include "Profiler.hpp"
 #endif
@@ -292,7 +290,7 @@ namespace TensileLite
                 ("device-idx",               po::value<int>()->default_value(0), "Device index")
                 ("fused-a2a-world",          po::value<int>()->default_value(0), "World size (number of GPUs) for the fused GEMM.A2A run. 0 takes the visible device count.")
                 ("fused-a2a-drain-recv",     po::value<int>()->default_value(1), "Runtime drainRecv flag passed to the fused kernel (1=on): the kernel exits only once this card's recv buffer is complete.")
-                ("fused-a2a-drain-send",     po::value<int>()->default_value(0), "Runtime drainSend flag passed to the fused kernel (1=on): the kernel exits only once this card's engines have finished reading D[0:AM), so D can be reused on stream order alone. Independent of --fused-a2a-drain-recv.")
+                ("fused-a2a-drain-send",     po::value<int>()->default_value(1), "Runtime drainSend flag passed to the fused kernel (1=on): the kernel exits only once this card's engines have finished reading D[0:AM), so D can be reused on stream order alone. Independent of --fused-a2a-drain-recv.")
                 ("fused-a2a-am",             po::value<std::vector<int>>()->default_value(std::vector<int>()), "A2A column count along FEATURE (M, index-0) for the fused GEMM.A2A run (col-major swap): the first AM feature columns PUSH all-to-all; [AM,M) stay local. Defaults to M, so every feature column goes all-to-all. Must satisfy AM%W==0, (AM/W)%MT0==0, AM%MT0==0, AM<=M (MT0 = solution MacroTile0). AM is a per-problem dimension: pass it once to apply to every problem, or comma-separated, one value per problem selected by --problem-start-idx/--num-problems, in that order (e.g. 2048 for the medium shape, 10240 for the full shape).")
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
 
@@ -828,7 +826,20 @@ int main(int argc, const char* argv[])
             throw std::runtime_error("Failed to load solution library");
     }
 
+    auto filename = args["library-file"].as<std::string>();
+
+    size_t      directoryPos     = filename.rfind('/');
+    std::string libraryDirectory = filename;
+    if(directoryPos != std::string::npos)
+        libraryDirectory.resize(directoryPos + 1);
+    else
+        libraryDirectory = '.';
+
     TensileLite::hip::SolutionAdapter adapter;
+    // A failed primary code-object load may ask the adapter to reload its
+    // helper HSACOs. Record that context before the first load can enter the
+    // recovery path; actual helper loading remains below.
+    adapter.setLazyLoadingContext(hardware->archName(), libraryDirectory);
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
     RocProfiler::getInstance().start();
 #endif
@@ -859,15 +870,6 @@ int main(int argc, const char* argv[])
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
     RocProfiler::getInstance().stop();
 #endif
-
-    auto filename = args["library-file"].as<std::string>();
-
-    size_t      directoryPos     = filename.rfind('/');
-    std::string libraryDirectory = filename;
-    if(directoryPos != std::string::npos)
-        libraryDirectory.resize(directoryPos + 1);
-    else
-        libraryDirectory = '.';
 
     {
         ScopedTimer timer("lazy_loading_init");

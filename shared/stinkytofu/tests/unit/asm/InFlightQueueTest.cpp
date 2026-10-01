@@ -153,3 +153,47 @@ TEST(InFlightQueue, IssueCapSeedsAcrossRegionBoundary) {
     InFlightQueue noCarry(/*depth=*/3);
     EXPECT_FALSE(noCarry.full()) << "without the carry the window starts empty";
 }
+
+// ---------------------------------------------------------------------------
+// Per-entry residual carry (residuals() / seed(vector<int>)): a cross-BB carry
+// that keeps each credit's own remaining drain latency instead of collapsing
+// every entry to one worst-case value.
+// ---------------------------------------------------------------------------
+
+TEST(InFlightQueue, ResidualsReportsEachEntrysOwnRemainingLatency) {
+    InFlightQueue queue(/*depth=*/0);
+    queue.push(/*drainLatency=*/2);
+    queue.push(/*drainLatency=*/4);
+    queue.push(/*drainLatency=*/10);
+
+    EXPECT_EQ(queue.residuals(), (std::vector<int>{2, 4, 10}))
+        << "oldest-first, matching push order, not sorted or collapsed to one value";
+}
+
+TEST(InFlightQueue, SeedFromResidualsRecreatesEachEntrysOwnLatency) {
+    InFlightQueue prev(/*depth=*/0);
+    prev.push(/*drainLatency=*/2);
+    prev.push(/*drainLatency=*/4);
+    prev.push(/*drainLatency=*/10);
+
+    InFlightQueue next(/*depth=*/3);
+    next.seed(prev.residuals());
+
+    // A (count, worst-case) seed would have reported minResidual == maxResidual
+    // == 10 for all three; the per-entry carry preserves the spread instead.
+    EXPECT_EQ(next.size(), 3);
+    EXPECT_EQ(next.minResidual(), 2);
+    EXPECT_EQ(next.maxResidual(), 10);
+}
+
+TEST(InFlightQueue, SeedFromResidualsDrainsEntriesAtTheirOwnTimeNotTheWorstCase) {
+    InFlightQueue next(/*depth=*/3);
+    next.seed(std::vector<int>{2, 4, 10});
+    ASSERT_TRUE(next.full());
+
+    // The (count, worst-case) form would keep all three around for 10 cycles;
+    // the shortest-lived carried entry must retire on its own schedule.
+    next.advance(2);
+    EXPECT_EQ(next.size(), 2) << "the entry seeded with residual 2 has drained";
+    EXPECT_FALSE(next.full());
+}

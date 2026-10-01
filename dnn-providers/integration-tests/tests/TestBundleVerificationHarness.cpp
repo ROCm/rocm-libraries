@@ -7,12 +7,18 @@
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/PackedElementTraits.hpp>
+#include <hipdnn_data_sdk/utilities/PackedSubByteTensor.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
@@ -128,6 +134,98 @@ std::shared_ptr<IntegrationTestBundle> makeRuntimePassByValueBundle()
     return bundle;
 }
 
+// uids: x_a=1, scale_a=2, x_b=4, scale_b=5 (leaf); y_a=3, y_b=6 virtual; c=7 output.
+// A is 32x128 with column-major strides {1, 32}.
+std::shared_ptr<IntegrationTestBundle>
+    makeMxMatmulBundle(hipdnn_flatbuffers_sdk::data_objects::DataType xType)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidMxMatmulGraph(
+        {32, 128}, {1, 32}, {128, 32}, {32, 1}, {32, 32}, {32, 1}, {32, 4}, {4, 32}, xType);
+    auto bundle = std::make_shared<IntegrationTestBundle>();
+    bundle->graphBuffer = builder.Release();
+    bundle->outputTensorUids = {7};
+    return bundle;
+}
+
+// Runs a graph-only bundle through the harness on the host. The outputs stay
+// sentinels, so the verdict is not what the caller is testing.
+void fillOnHost(IntegrationBundleVerificationHarness& harness,
+                std::shared_ptr<IntegrationTestBundle> bundle)
+{
+    harness.setBundle(std::move(bundle), "unit-test-bundle");
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+}
+
+// Reads the code in bit slot `slot` of a packed buffer, LSB-first.
+uint8_t packedCodeAt(const uint8_t* packed, size_t slot, size_t bits)
+{
+    const size_t bitOffset = slot * bits;
+    const size_t byteIndex = bitOffset / 8;
+    const auto bitIndex = static_cast<unsigned>(bitOffset % 8);
+
+    auto window = static_cast<unsigned>(packed[byteIndex]);
+    if(bitIndex > 8 - bits)
+    {
+        window |= static_cast<unsigned>(packed[byteIndex + 1]) << 8;
+    }
+    return static_cast<uint8_t>((window >> bitIndex) & ((1u << bits) - 1));
+}
+
+// The packed set must hold the same uids as the bundle's tensors: the sub-byte
+// operands packed and code-for-code equal at every coordinate, the scales
+// byte-for-byte equal.
+template <typename T>
+void expectPackedInputsTwinBundleTensors(hipdnn_flatbuffers_sdk::data_objects::DataType xType)
+{
+    using Traits = hipdnn_data_sdk::utilities::PackedElementTraits<T>;
+    using PackedTensor
+        = hipdnn_data_sdk::utilities::PackedSubByteTensor<T, Traits::BITS_PER_ELEMENT>;
+
+    testing_support::HarnessMocks mocks;
+    IntegrationBundleVerificationHarness harness(
+        mocks.dependencies(testing_support::hostPolicy(VerificationMode::CPU)));
+    auto bundle = makeMxMatmulBundle(xType);
+    fillOnHost(harness, bundle);
+
+    ASSERT_TRUE(bundle->tensors.has_value());
+    const auto& unpacked = *bundle->tensors;
+    const auto& packed = harness.packedInputs();
+    ASSERT_EQ(packed.size(), unpacked.size());
+
+    for(const int64_t uid : {1, 4})
+    {
+        ASSERT_EQ(packed.count(uid), 1u) << "uid " << uid;
+        ASSERT_NE(dynamic_cast<const PackedTensor*>(packed.at(uid).get()), nullptr)
+            << "uid " << uid;
+        const auto& expected
+            = dynamic_cast<const hipdnn_data_sdk::utilities::Tensor<T>&>(*unpacked.at(uid));
+        const auto* packedHost = static_cast<const uint8_t*>(packed.at(uid)->rawHostData());
+        const auto& dims = expected.dims();
+        const auto& strides = expected.strides();
+        for(int64_t i0 = 0; i0 < dims[0]; ++i0)
+        {
+            for(int64_t i1 = 0; i1 < dims[1]; ++i1)
+            {
+                const auto slot = static_cast<size_t>((i0 * strides[0]) + (i1 * strides[1]));
+                ASSERT_EQ(
+                    packedCodeAt(packedHost, slot, Traits::BITS_PER_ELEMENT),
+                    static_cast<uint8_t>(expected.getHostValue(i0, i1).data & Traits::CODE_MASK))
+                    << "uid " << uid << " at (" << i0 << "," << i1 << ")";
+            }
+        }
+    }
+
+    for(const int64_t uid : {2, 5})
+    {
+        ASSERT_EQ(packed.count(uid), 1u) << "uid " << uid;
+        const size_t bytes = unpacked.at(uid)->elementSpace() * unpacked.at(uid)->elementSize();
+        EXPECT_EQ(
+            std::memcmp(unpacked.at(uid)->rawHostData(), packed.at(uid)->rawHostData(), bytes), 0)
+            << "uid " << uid;
+    }
+}
+
 TEST(TestBundleVerificationHarness, DeviceVariantPackUsesHostPointerForRuntimePassByValue)
 {
     SKIP_IF_NO_DEVICES();
@@ -204,6 +302,30 @@ TEST_F(TestGoldenHarnessFixture, GraphOnlyRuntimePbvValuesAreFilledEndToEnd)
     EXPECT_FLOAT_EQ(secondMomentum, firstMomentum);
 }
 
+TEST_F(TestGoldenHarnessFixture, PackedInputsTwinBundleTensorsForFp4)
+{
+    expectPackedInputsTwinBundleTensors<hipdnn_data_sdk::types::fp4_e2m1>(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1);
+}
+
+TEST_F(TestGoldenHarnessFixture, PackedInputsTwinBundleTensorsForFp6)
+{
+    expectPackedInputsTwinBundleTensors<hipdnn_data_sdk::types::fp6_e2m3>(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E2M3);
+}
+
+TEST_F(TestGoldenHarnessFixture, NonSubByteBundleHasNoPackedInputs)
+{
+    testing_support::HarnessMocks mocks;
+    IntegrationBundleVerificationHarness harness(
+        mocks.dependencies(testing_support::hostPolicy(VerificationMode::CPU)));
+    auto bundle = makeMxMatmulBundle(hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3);
+    fillOnHost(harness, bundle);
+
+    ASSERT_TRUE(bundle->tensors.has_value());
+    EXPECT_TRUE(harness.packedInputs().empty());
+}
+
 // Was ExecutorThrowsYieldsSkip: IGraphEngineRunner::execute() now answers "not
 // mine" with EngineOpResult::declinedBy(...) instead of throwing
 // EngineNotApplicableError. The outcome the test defends is unchanged (SKIP).
@@ -219,6 +341,31 @@ TEST_F(TestGoldenHarnessFixture, ExecutorDeclineYieldsSkip)
 
     EXPECT_TRUE(testing_support::anySkipped(results));
     EXPECT_FALSE(testing_support::anyFailed(results));
+}
+
+// A declined graph must not pay for its inputs. Sweep bundles carry no tensor data,
+// so the harness generates it -- and on the largest full-tier cases that fill alone
+// is seconds per test, which is what put whole provider suites past their CI wall
+// when every one of those cases was going to be declined anyway.
+TEST_F(TestGoldenHarnessFixture, DeclinedGraphSkipsWithoutFillingInputs)
+{
+    testing_support::HarnessMocks mocks;
+    ON_CALL(mocks.engineRunner, openGraph(::testing::_, ::testing::_))
+        .WillByDefault([](const IntegrationTestBundle&, const std::optional<LoadedEngine>&) {
+            return testing_support::declinedSession();
+        });
+
+    auto bundle = makeRuntimePbvFillBundle();
+    ASSERT_FALSE(bundle->tensors.has_value());
+
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks, bundle, &results);
+
+    EXPECT_TRUE(testing_support::anySkipped(results));
+    EXPECT_FALSE(testing_support::anyFailed(results));
+    EXPECT_NE(testing_support::allMessages(results).find("Engine could not execute bundle"),
+              std::string::npos);
+    EXPECT_FALSE(bundle->tensors.has_value());
 }
 
 TEST_F(TestGoldenHarnessFixture, MatchingOutputYieldsPass)

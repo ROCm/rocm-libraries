@@ -35,14 +35,14 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
   SMovB32, SMFMAInstruction, SNop, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32
 from rocisa.instruction import SAddU32, SAddCU32, SCmpEQU32, SCSelectB32, SSubBU32
-from Tensile.Common import IsaVersion
-from Tensile.Common.Utilities import printWarning
-from Tensile.Utilities.Decorators.Shared import CallableGuard
+from ..Common import IsaVersion
+from ..Common.Utilities import printWarning
+from ..Utilities.Decorators.Shared import CallableGuard
 
 from copy import deepcopy
 from typing import Callable, Optional, Union, Tuple
 from enum import Enum, auto
-import Tensile.Components.CMSValidator as cmsv
+from . import CMSValidator as cmsv
 from typing import Callable
 from itertools import product
 
@@ -112,7 +112,6 @@ class CMSKernelInfo:
             if self.TransposeA != (layout[0] == "T") or self.TransposeB != (layout[1] == "T"):
                 return False
         return True
-
 
 
 @dataclass
@@ -4323,6 +4322,11 @@ def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     if isTN(kernel) and useLDSTr and TLDS==1:
 
+        # The partial VMEM waits rely on B being issued before A, including
+        # the prefetch that feeds the first loop iteration. GRA/GRB name
+        # the first/second load streams when SwapGlobalReadOrder is set.
+        kernel["SwapGlobalReadOrder"] = 1
+
         kernel["UsePLRPack"] = 1
         kernel["UseMFMAF32XEmulation"] = False
         kernel["UseDot2F32XEmulation"] = False
@@ -4369,9 +4373,9 @@ def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
             'LRB0': [[12,13,14,15]],
              # First two LRB0 need to be done at 18, all LRB0 done by 23
             'PackB0' : [create_range(19,4,22, repeat=3) +  create_range(24,12,35, repeat=3) ],
-            'GRB': [[36,36,38,38,40,40,42,42],
+            'GRA': [[36,36,38,38,40,40,42,42],
                     [37,37,39,39,41,41,43,43]],
-            'GRA': [[45,45,47,47,49,49,51,51,53,53,55,55],
+            'GRB': [[45,45,47,47,49,49,51,51,53,53,55,55],
                     [46,46,48,48,50,50,52,52,54,54,56,56]],
             'LRSA': [[36]],
             'LRSB': [[36]],
@@ -5227,6 +5231,9 @@ def _get_schedule_256x128x32_TF32(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
 
     if isTN(kernel) and useLDSTr and TLDS==1:
+        # Match the prologue's load order to the B-before-A loop schedule;
+        # its partial waits also consume the final prefetched set.
+        kernel["SwapGlobalReadOrder"] = 1
         kernel["UseMFMAF32XEmulation"] = False
         kernel["UseDot2F32XEmulation"] = False
         kernel["UsePLRPack"] = 1
@@ -5290,8 +5297,8 @@ def _get_schedule_256x128x32_TF32(kernel, useLDSTr, TLDS):
             'LRB0'   : [lrB0],
             'PackB0' : [packB0],
 
-            'GRA': [[48, 48, 50, 50, 52, 52, 54, 54, 66, 66, 68, 68, 70, 70, 72, 72]],
-            'GRB': [[30, 32, 34, 36, 40, 42, 44, 46]],
+            'GRB': [[48, 48, 50, 50, 52, 52, 54, 54, 66, 66, 68, 68, 70, 70, 72, 72]],
+            'GRA': [[30, 32, 34, 36, 40, 42, 44, 46]],
 
             'LRA3'   : [lrA3],
             'PackA3' : [packA3],

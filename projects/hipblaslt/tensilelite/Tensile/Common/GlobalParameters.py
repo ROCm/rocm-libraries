@@ -30,7 +30,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from typing import Dict
 
-from Tensile import __version__
+from .. import __version__
 
 from .Architectures import isaToGfx
 from .Types import IsaVersion, IsaInfo
@@ -397,6 +397,11 @@ globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 # splits, and how many s_nop cycles were wasted.
 globalParameters["StinkyTofuEnableRemarks"] = False
 
+# StinkyTofu per-pass wall time (stderr).  After each kernel's pipeline finishes,
+# report self time, inclusive total, and run count for every pass that ran, so a
+# slow kernel generation can be attributed to individual passes.
+globalParameters["StinkyTofuTimePasses"] = False
+
 # Directory for StinkyTofu per-kernel instruction-cost output files (empty = disabled).
 # When set, each kernel's StinkyTofu module writes its cost file here via
 # StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).
@@ -437,6 +442,7 @@ internalParameters = {
 
 # These parameters are used in ContractionSolutions for user arguments support.
 defaultInternalSupportParams = {
+    "PersistentLoopArgsVersion": 0,
     "KernArgsVersion": 3,
     # Information about user input internal kernel argument support
     # Change this to False if the CustomKernel does not support.
@@ -589,11 +595,11 @@ defaultBenchmarkCommonParameters = [
     {"StoreSyncOpt": [0]},
     {"GroupLoadStore": [False]},
     {"MIArchVgpr": [False]},
-    {"StreamK": [0]},
-    {"StreamKForceDPOnly": [0]},
+    {"TileProcessingStrategy": ["None"]},
+    {"WorkAssignment": ["StaticGrid"]},
     {"StreamKAtomic": [0]},
-    {"StreamKWorkStealing": [0]},
-    {"StreamKXCCMapping": [0]},
+    {"WorkQueueStealing": [0]},
+    {"PersistentXCCMapping": [0]},
     {"StreamKFixupTreeReduction": [0]},
     {"DebugStreamK": [0]},
     {"DebugPersistentKernelLoopForever": [False]},
@@ -652,7 +658,6 @@ for paramDict in defaultBenchmarkCommonParameters:
     for key, value in paramDict.items():
         defaultSolution[key] = value[0]
 # other non-benchmark options for solutions
-
 
 
 defaultProblemSizes = [{"Range": [[2880], 0, 0]}]
@@ -844,6 +849,7 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "Experimental",       # --experimental logic-dir toggle in ParseArguments
     "EnableGemmA2AFusion", # --enable-gemm-a2a-fusion toggle in ParseArguments
     "GenSolTable",        # --gen-sol-table toggle in ParseArguments
+    "BuildGfx1250v0",     # --gfx1250v0 toggle in ParseArguments
     # Keys with a sanctioned opt-out from the strict gate:
     #   - Live but read via DebugConfig (makeDebugConfig in
     #     Tensile/Common/Types.py) directly from the raw config dict

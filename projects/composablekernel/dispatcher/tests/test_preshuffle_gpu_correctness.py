@@ -196,16 +196,10 @@ def _run_preshuffle(gfx_arch: str, dtype: str) -> tuple[str, str]:
                   f"max_rel_err={worst:.4e}")
 
 
-def test_preshuffle_gpu() -> None:
-    import pytest
-
-    if not _has_gpu():
-        pytest.skip("no supported GPU detected")
+def test_preshuffle_gpu(gpu_arch, dispatcher_static_lib) -> None:
+    """Build the prerequisite and verify the result whenever a GPU is available."""
     for dtype in ("fp16", "bf16"):
-        try:
-            status, detail = _run_preshuffle(_resolve_arch(None), dtype)
-        except FileNotFoundError as exc:
-            pytest.skip(f"dispatcher not built ({exc})")
+        status, detail = _run_preshuffle(gpu_arch, dtype)
         assert status == PASS, detail
 
 
@@ -230,6 +224,16 @@ def main() -> int:
               f"{'/'.join(_SUPPORTED_ARCHS)}; got {gfx}")
         return SKIP_EXIT
     log.info("Running preshuffle GEMM GPU correctness on %s", gfx)
+
+    # Build the prerequisite the pytest entry point gets from the
+    # dispatcher_static_lib fixture; ctest runs this script directly.
+    from dispatcher_build import ensure_dispatcher_static_lib
+
+    try:
+        ensure_dispatcher_static_lib()
+    except RuntimeError as exc:
+        print(f"FAIL: could not build the dispatcher static lib: {exc}")
+        return 1
 
     results = []
     for dtype in ("fp16", "bf16"):

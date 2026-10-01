@@ -45,6 +45,16 @@ using InputTypes = ::testing::Types<std::tuple<float>,
                                     std::tuple<TensileLite::BFloat16>,
                                     std::tuple<TensileLite::Float8>,
                                     std::tuple<TensileLite::BFloat8>,
+#ifdef _WIN32
+                                    std::tuple<TensileLite::Float6>,
+                                    std::tuple<TensileLite::BFloat6>,
+                                    std::tuple<TensileLite::Float4>,
+#else
+                                    std::tuple<TensileLite::Float6x32>,
+                                    std::tuple<TensileLite::BFloat6x32>,
+                                    std::tuple<TensileLite::Float4x2>,
+#endif
+                                    std::tuple<TensileLite::E8>,
                                     std::tuple<std::complex<float>>,
                                     std::tuple<std::complex<double>>,
                                     std::tuple<int8_t>,
@@ -72,6 +82,7 @@ TYPED_TEST(TypedDataTypesTest, TypeInfo_Consistency)
     EXPECT_EQ(fromEnum.dataType, MyTypeInfo::Enum);
     EXPECT_EQ(fromEnum.elementSize * fromEnum.packing, sizeof(TheType));
     EXPECT_EQ(fromEnum.packing, MyTypeInfo::Packing);
+    EXPECT_EQ(rocisa::GetElementSize(MyTypeInfo::Enum), MyTypeInfo::ElementSize);
 
     EXPECT_EQ(fromEnum.isComplex, MyTypeInfo::IsComplex);
     EXPECT_EQ(fromEnum.isIntegral, MyTypeInfo::IsIntegral);
@@ -145,6 +156,10 @@ INSTANTIATE_TEST_SUITE_P(DataTypesTest,
                                            rocisa::DataType::BFloat16,
                                            rocisa::DataType::Float8,
                                            rocisa::DataType::BFloat8,
+                                           rocisa::DataType::Float6,
+                                           rocisa::DataType::BFloat6,
+                                           rocisa::DataType::Float4,
+                                           rocisa::DataType::E8,
                                            rocisa::DataType::Int8,
                                            rocisa::DataType::Int8x4,
                                            rocisa::DataType::Int32));

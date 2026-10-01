@@ -405,6 +405,69 @@ validator = "allclose"
     EXPECT_EQ(bf16->kind, hipdnn_integration_tests::ValidatorOverrideKind::ALLCLOSE);
 }
 
+TEST(TestSettingsValidatorOverrides, ParsesAllcloseMatchingInfinities)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*SdpaFwd*"]
+tensors = ["*::LSE"]
+validator = "allclose_matching_infinities"
+)");
+
+    const TestSettings settings(file.path());
+    ASSERT_EQ(settings.validatorOverrideCount(), 1U);
+
+    const auto hit
+        = settings.findValidatorOverride("Smoke/SdpaFwdPure4D.Correctness/0", "Sdpa_0::LSE");
+    ASSERT_TRUE(hit.has_value());
+    EXPECT_EQ(hit->kind,
+              hipdnn_integration_tests::ValidatorOverrideKind::ALLCLOSE_MATCHING_INFINITIES);
+    // Nothing else on the entry carries a number: this kind takes its atol/rtol from
+    // the tolerance the harness resolved, so rms_threshold stays zero.
+    EXPECT_FLOAT_EQ(hit->rmsThreshold, 0.0F);
+
+    EXPECT_FALSE(settings.findValidatorOverride("Smoke/SdpaFwdPure4D.Correctness/0", "Sdpa_0::O")
+                     .has_value())
+        << "the 'tensors' glob is what keeps the other outputs of the same graph on allclose";
+    EXPECT_FALSE(settings.findValidatorOverride("Smoke/ConvFwdPure4D.Correctness/0", "Conv_0::LSE")
+                     .has_value())
+        << "the 'filters' glob is what keeps other tests out";
+}
+
+TEST(TestSettingsValidatorOverrides, AllcloseMatchingInfinitiesLaterEntryTakesPrecedence)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*SdpaFwd*"]
+tensors = ["*::LSE"]
+validator = "rms"
+rms_threshold = 1e-4
+
+[[validator_overrides]]
+filters = ["*SdpaFwd*Masked*"]
+tensors = ["*::LSE"]
+validator = "allclose_matching_infinities"
+)");
+
+    const TestSettings settings(file.path());
+
+    const auto unmasked = settings.findValidatorOverride("Smoke/SdpaFwdPure4D.C/0", "Sdpa_0::LSE");
+    ASSERT_TRUE(unmasked.has_value());
+    EXPECT_EQ(unmasked->kind, hipdnn_integration_tests::ValidatorOverrideKind::RMS);
+
+    const auto masked
+        = settings.findValidatorOverride("Smoke/SdpaFwdMaskedPure4D.C/0", "Sdpa_0::LSE");
+    ASSERT_TRUE(masked.has_value());
+    EXPECT_EQ(masked->kind,
+              hipdnn_integration_tests::ValidatorOverrideKind::ALLCLOSE_MATCHING_INFINITIES);
+}
+
 TEST(TestSettingsValidatorOverrides, ThrowsOnMissingTensors)
 {
     const TempTomlFile file(R"(
@@ -420,6 +483,10 @@ rms_threshold = 1e-4
     EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
 }
 
+// This entry is wrong twice over: the name is not one the parser knows, and it carries
+// a threshold no non-rms validator may carry. The name is the one to report: an
+// operator told to delete 'rms_threshold' would be sent to the line that is not the
+// mistake.
 TEST(TestSettingsValidatorOverrides, ThrowsOnUnknownValidatorKind)
 {
     const TempTomlFile file(R"(
@@ -433,7 +500,16 @@ validator = "relative-rms"
 rms_threshold = 1e-4
 )");
 
-    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
+    try
+    {
+        const TestSettings settings(file.path());
+        FAIL() << "an unknown validator name must be a load error";
+    }
+    catch(const std::runtime_error& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("unknown validator"), std::string::npos)
+            << "reported the wrong line: " << e.what();
+    }
 }
 
 TEST(TestSettingsValidatorOverrides, ThrowsOnRmsWithoutThreshold)
@@ -480,6 +556,24 @@ version = 1
 filters = ["*LayernormBackward*"]
 tensors = ["*::DSCALE"]
 validator = "allclose"
+rms_threshold = 1e-4
+)");
+
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
+}
+
+// The same "does not say what it means" rule covers the matching-infinities spelling:
+// it takes its atol/rtol from the resolved tolerance and has no threshold of its own.
+TEST(TestSettingsValidatorOverrides, ThrowsOnAllcloseMatchingInfinitiesWithRmsThreshold)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*SdpaFwd*"]
+tensors = ["*::LSE"]
+validator = "allclose_matching_infinities"
 rms_threshold = 1e-4
 )");
 
