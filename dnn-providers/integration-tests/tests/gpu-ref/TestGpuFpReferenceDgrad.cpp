@@ -167,10 +167,6 @@ TEST(TestGpuConvBwdRefAlphaBeta, AlphaOnly)
     fillWithRandomValues(dyTensor, -1.0f, 1.0f, seed);
     fillWithRandomValues(wTensor, -1.0f, 1.0f, seed + 1);
 
-    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
-    dyTensor.memory().hostData();
-    wTensor.memory().hostData();
-
     // Compute with alpha=1.0
     GpuFpReferenceConvolution::dgrad<float>(dxRef, wTensor, dyTensor, {1, 1}, {1, 1}, {0, 0});
 
@@ -200,10 +196,6 @@ TEST(TestGpuConvBwdRefAlphaBeta, BetaAccumulate)
     fillWithRandomValues(dyTensor, -1.0f, 1.0f, seed);
     fillWithRandomValues(wTensor, -1.0f, 1.0f, seed + 1);
     dxTensor.fillWithValue(1.0f);
-
-    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
-    dyTensor.memory().hostData();
-    wTensor.memory().hostData();
 
     // Pre-fill dx with 1.0, then compute with alpha=1.0, beta=1.0
     // Result should be dgrad(dy,w) + 1.0
@@ -235,10 +227,6 @@ TEST(TestGpuConvBwdRefAlphaBeta, BetaZeroSkipsRead)
     const unsigned int seed = 42;
     fillWithRandomValues(dyTensor, -1.0f, 1.0f, seed);
     fillWithRandomValues(wTensor, -1.0f, 1.0f, seed + 1);
-
-    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
-    dyTensor.memory().hostData();
-    wTensor.memory().hostData();
 
     // Pre-fill with garbage — should be ignored when beta=0
     dxBetaZero.fillWithValue(999.0f);
