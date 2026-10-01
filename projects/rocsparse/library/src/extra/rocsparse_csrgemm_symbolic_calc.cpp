@@ -660,8 +660,8 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_template(rocsparse_handle     
                                                       csr_col_ind_D,
                                                       base_D,
                                                       csr_row_ptr_C,
-                                                      descr_C->base,
-                                                      csr_col_ind_C)));
+                                                      csr_col_ind_C,
+                                                      descr_C->base)));
 
 #undef CSRGEMM_SYMBOLIC_FILL_BLOCK_PER_ROW
 #undef CSRGEMM_SYMBOLIC_FILL_BLOCK_PER_ROW_2

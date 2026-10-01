@@ -270,6 +270,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   # sort_csr_column_indices / radix_sort_pairs primitive host wrappers.
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_segmented_radix_sort_keys.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_radix_sort_pairs.cpp
+  # Bitmap path of csrgemm, for unit_test_internal_extra_csrgemm_bitmap.cpp.
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgemm_bitmap.cpp
   # --------------------------------------------------------------------------
 )
