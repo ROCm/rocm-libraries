@@ -2977,7 +2977,9 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         from kernels.gfx942.attention_dense import build_attention_dense
 
         kernel = build_attention_dense(spec, arch="gfx942")
-        return hashlib.sha256(lower_kernel_to_llvm(kernel).encode()).hexdigest()
+        return hashlib.sha256(
+            lower_kernel_to_llvm(kernel, arch="gfx942").encode()
+        ).hexdigest()
 
     def test_runtime_shape_specs_sharing_a_key_lower_to_identical_ir(self):
         """Shapes that collapse to one cache key must emit one kernel -- and,

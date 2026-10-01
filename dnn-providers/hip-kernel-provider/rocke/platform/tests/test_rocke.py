@@ -1773,10 +1773,14 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         from rocke.runtime import comgr as comgr_mod
 
         candidates = ["/first/libamd_comgr.so", "/second/libamd_comgr.so"]
-        with patch.object(
-            comgr_mod, "_candidate_lib_paths", return_value=candidates
-        ), patch.object(comgr_mod, "_add_dll_dir"), patch.object(
-            comgr_mod.ctypes, "CDLL", side_effect=OSError("cannot open shared object")
+        with (
+            patch.object(comgr_mod, "_candidate_lib_paths", return_value=candidates),
+            patch.object(comgr_mod, "_add_dll_dir"),
+            patch.object(
+                comgr_mod.ctypes,
+                "CDLL",
+                side_effect=OSError("cannot open shared object"),
+            ),
         ):
             with self.assertRaises(comgr_mod.ComgrError) as cm:
                 comgr_mod._load_lib()
@@ -3857,8 +3861,14 @@ class TestBothBackendDifferentialGate(unittest.TestCase):
         b.ret()
         return b.kernel
 
-    def _run(self, cpp_result, arch=None):
-        """Dispatch with the cpp engine stubbed to ``cpp_result``."""
+    def _run(self, cpp_result, arch="gfx950"):
+        """Dispatch with the cpp engine stubbed to ``cpp_result``.
+
+        ``arch`` is named rather than left to default, because there is no
+        default: ``lower_kernel_via_backend`` rejects a ``None`` target. These
+        tests are about what dispatch does with the two results, not about
+        target selection, so they pick one and move on.
+        """
 
         def python_lower(kernel, *, llvm_flavor=None, arch=None):
             return "PYTHON IR\n"

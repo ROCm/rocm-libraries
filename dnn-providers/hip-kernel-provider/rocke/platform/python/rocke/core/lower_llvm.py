@@ -6467,8 +6467,8 @@ def lower_kernel_to_llvm(
     specific flavor regardless of the host ROCm install.
 
     ``arch`` selects the ISA backend (e.g. ``"gfx942"``, ``"gfx950"``) that
-    owns the datalayout, triple, and waitcnt encoding. Defaults to ``gfx950``
-    so existing callers and the gfx950 byte-identical baseline are preserved.
+    owns the datalayout, triple, and waitcnt encoding. It is required: there
+    is no default target, and omitting it raises.
 
     Backend dispatch: this is the single chokepoint every Python-authored
     kernel funnels through. The active backend is resolved (explicit env
@@ -6489,6 +6489,20 @@ def lower_kernel_to_llvm(
     well-defined (see :func:`rocke.core.backend.lower_kernel_via_backend`).
     """
     from .backend import lower_kernel_via_backend
+
+    # Validated here, *before* dispatch, not only in the Python lowerer's
+    # constructor. The constructor runs on the Python path alone, so with the
+    # C++ engine available -- which is the default -- an omitted target slipped
+    # past it and the backend substituted gfx950, meaning the same call raised
+    # under ROCKE_BACKEND=python and silently lowered for a guessed target
+    # otherwise. A requirement enforced on one of two backends is not a
+    # requirement; the chokepoint every caller funnels through is the only
+    # place it holds for both.
+    if arch is None:
+        raise ValueError(
+            "lowering requires an explicit gfx target; "
+            "pass arch=... (there is no default)"
+        )
 
     return lower_kernel_via_backend(
         kernel,

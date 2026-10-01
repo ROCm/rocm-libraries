@@ -3435,7 +3435,18 @@ std::string lower_serialized_ir(const std::string& ir_text,
     {
         throw std::runtime_error("rocke_engine.lower_serialized_ir: empty IR input");
     }
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    /* No empty-string fallback to gfx950. This is the endpoint the
+     * ROCKE_BACKEND=cpp dispatch calls, so a default here is the same silent
+     * guessed target the Python lowerer stopped accepting -- and rejecting
+     * NULL in the core resolver does not reach it, because an empty
+     * std::string is not NULL by the time it gets there. The target is
+     * required on both engines or on neither. */
+    if(arch.empty())
+    {
+        throw std::runtime_error("rocke_engine.lower_serialized_ir: lowering requires an "
+                                 "explicit gfx target; pass arch=... (there is no default)");
+    }
+    const char* a = arch.c_str();
 
     /* flavor: "" => AUTO (resolve from env / ROCm version); a named flavor
      * pins the intrinsic declaration shape. An unrecognised non-empty flavor
@@ -3525,7 +3536,7 @@ PYBIND11_MODULE(rocke_engine, m)
     m.def("lower_serialized_ir",
           &lower_serialized_ir,
           py::arg("ir_text"),
-          py::arg("arch") = "gfx950",
+          py::arg("arch"), /* required: no default target on either engine */
           py::arg("flavor") = "",
           "Parse serialized ck.dsl.ir/v1 text and lower it to AMDGPU LLVM IR "
           "(.ll) text via the C++ engine. Family-agnostic; byte-identical to "

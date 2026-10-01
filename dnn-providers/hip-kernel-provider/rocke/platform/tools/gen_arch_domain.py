@@ -38,6 +38,10 @@ matrix, we can read each answer off its own oracle.
     stage A resolves      -> continue to stage B
     stage A verbatim      -> "name_absent"   this SPELLING is not an intrinsic
                                              in this LLVM (flavor axis)
+    stage A `opt` failed  -> no-data         the process died or rejected our
+                                             text; the question was never
+                                             answered, so nothing is recorded
+                                             about the name (see NameVerdict)
     link OK               -> "ok"            available here
     Cannot select / fatal -> "arch_absent"   the name is real, this target
                                              cannot lower it (arch axis)
@@ -81,6 +85,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import NamedTuple
 
 from _hostcaps import available_cpus
 from _llvm_identity import clang_identity, flavor_of_clang
@@ -152,7 +157,16 @@ STATUS_PROBE_ERROR = _domain.STATUS_PROBE_ERROR
 #   4 -- llvm23 diagnostics understood; the sweep also runs on probe_error
 #   5 -- probes built from the declare `opt` resolved, so `immarg` comes from
 #        the LLVM being measured instead of from the hand-written decl table
-GENERATOR = 5
+#   6 -- stage A can return no-data. A failed `opt` process used to be recorded
+#        as `name_absent` for every arch; it is now `toolchain_crash` /
+#        `toolchain_timeout` / `probe_error` with the real diagnostic, and the
+#        key is held out of stage B rather than probed from a declare we could
+#        not validate. On a healthy toolchain no cell moves,
+#        which is why the three columns re-bless cell-for-cell identical -- but
+#        the stamp has to move anyway, because a column written by generator 5
+#        cannot be told apart from one where a crashed `opt` was silently
+#        banked as a definite negative.
+GENERATOR = 6
 
 # Hoisted out of `_probe` so the artifact can record the flags that actually
 # ran rather than a hand-copied list that drifts from them. `-O0` is the one
@@ -415,10 +429,36 @@ def _probe_module(
     return text, ""
 
 
-def _name_exists(opt: str, decl: str, scratch: Path) -> tuple[bool, str, str]:
+class NameVerdict(NamedTuple):
+    """What the flavor axis learned about one declare.
+
+    ``exists`` is deliberately tri-state. ``True``/``False`` are answers --
+    `opt` ran, parsed the declare, and either resolved it as an intrinsic or
+    printed it back verbatim. ``None`` is *not an answer*: the `opt` process
+    itself failed, so nothing was measured, and ``status``/``evidence`` carry
+    the real diagnostic for the no-data cell.
+
+    Collapsing ``None`` into ``False`` is the defect this type exists to
+    prevent. A crashed, OOM-killed or timed-out `opt` would otherwise be
+    written as `name_absent` -- a definite negative, for all seven arches,
+    with generic evidence -- and `name_absent` is exactly the status the lane
+    and the readers treat as authoritative. The arch axis has had
+    `toolchain_crash` / `toolchain_timeout` / `probe_error` since the first
+    generator for this reason; the flavor axis simply never grew them, and a
+    failure to measure recorded as data is worse than no column at all.
+    """
+
+    exists: bool | None
+    canonical: str
+    resolved: str
+    status: str = ""
+    evidence: str = ""
+
+
+def _name_exists(opt: str, decl: str, scratch: Path) -> NameVerdict:
     """Ask this LLVM whether it recognises the declare's name as an intrinsic.
 
-    Returns (exists, canonical_name_or_reason, resolved_declare).
+    Returns a :class:`NameVerdict`; see there for why ``exists`` is tri-state.
 
     This is the *flavor* axis, and it is worth answering separately because it
     is arch-free: a name either exists in this LLVM or it does not, and asking
@@ -444,14 +484,58 @@ def _name_exists(opt: str, decl: str, scratch: Path) -> tuple[bool, str, str]:
     """
     src = scratch / "name.ll"
     src.write_text(decl.strip() + "\n", encoding="utf-8")
-    proc = subprocess.run(
-        [opt, "-S", "-o", "-", str(src)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+
+    # Two attempts, same budget. A parse verdict is stable under retry; a
+    # resource failure -- OOM, fork limit, a transient under -j elsewhere on
+    # the box -- often is not, which is the same bargain the arch axis strikes
+    # in its serial second pass.
+    proc = None
+    for attempt in (1, 2):
+        try:
+            proc = subprocess.run(
+                [opt, "-S", "-o", "-", str(src)],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=PROBE_TIMEOUT_S,
+                cwd=str(scratch),
+            )
+        except subprocess.TimeoutExpired:
+            if attempt == 1:
+                continue
+            return NameVerdict(
+                None,
+                "",
+                "",
+                STATUS_TOOLCHAIN_TIMEOUT,
+                f"opt did not terminate within {PROBE_TIMEOUT_S:g}s",
+            )
+        if proc.returncode == 0 or attempt == 2:
+            break
+
+    assert proc is not None
     if proc.returncode != 0:
-        return False, f"opt rejected the declare: {_first_error(proc.stderr)}", ""
+        # `opt` ran and failed. Which no-data status depends on who was at
+        # fault, and both are recorded rather than guessed at: a death by
+        # signal or an LLVM-side abort is the toolchain's, a parse diagnostic
+        # about our own text is the probe's. Neither is evidence that the name
+        # is absent -- that question was never reached.
+        diag = (proc.stderr or proc.stdout).strip()
+        low = diag.lower()
+        crashed = (
+            proc.returncode < 0
+            or "llvm error" in low
+            or "stack dump" in low
+            or "out of memory" in low
+        )
+        status = STATUS_TOOLCHAIN_CRASH if crashed else STATUS_PROBE_ERROR
+        return NameVerdict(
+            None,
+            "",
+            "",
+            status,
+            f"opt exited {proc.returncode} on the declare: {_first_error(diag)}",
+        )
     for line in proc.stdout.splitlines():
         if line.startswith("declare "):
             attributed = re.search(r"#\d+\s*$", line) is not None
@@ -461,19 +545,19 @@ def _name_exists(opt: str, decl: str, scratch: Path) -> tuple[bool, str, str]:
             m = _DECL_RE.match(resolved)
             canonical = m.group(2) if m else ""
             if attributed:
-                return True, canonical, resolved if m else ""
+                return NameVerdict(True, canonical, resolved if m else "")
             # Remangled but attribute-free: still a resolved intrinsic.
             original = _DECL_RE.match(decl.strip())
             if original and canonical and canonical != original.group(2):
-                return True, canonical, resolved if m else ""
-            return False, "", ""
+                return NameVerdict(True, canonical, resolved if m else "")
+            return NameVerdict(False, "", "")
     # The declare did not survive the round-trip at all. An unrecognised
     # `llvm.*` name is an ordinary external function and is printed back
     # verbatim even when unused, so a vanished declare means AutoUpgrade
     # consumed it -- `amdgcn.global.atomic.fadd` becoming a plain `atomicrmw`
     # is the live example. That still links, so the name counts as present.
     # There is no resolved declare to build from; the hand-written row stands.
-    return True, "(auto-upgraded)", ""
+    return NameVerdict(True, "(auto-upgraded)", "")
 
 
 # --------------------------------------------------------------------------
@@ -863,19 +947,35 @@ def main() -> int:
     canonical: dict[str, str] = {}
     resolved: dict[str, str] = {}
     absent: set[str] = set()
+    # Keys whose flavor-axis probe did not produce an answer, with the no-data
+    # status and the diagnostic that explains it.
+    unmeasured: dict[str, tuple[str, str]] = {}
     for key in keys:
-        exists, note, decl_text = (
-            _name_exists(opt, decls[key], Path(ir_dir)) if opt else (True, "", "")
+        v = (
+            _name_exists(opt, decls[key], Path(ir_dir))
+            if opt
+            else NameVerdict(True, "", "")
         )
-        if exists:
-            canonical[key] = note
-            if decl_text:
-                resolved[key] = decl_text
+        if v.exists is None:
+            unmeasured[key] = (v.status, v.evidence)
+        elif v.exists:
+            canonical[key] = v.canonical
+            if v.resolved:
+                resolved[key] = v.resolved
         else:
             absent.add(key)
     print(
-        f"   names  : {len(keys) - len(absent)} present, {len(absent)} absent in {flavor}"
+        f"   names  : {len(keys) - len(absent) - len(unmeasured)} present, "
+        f"{len(absent)} absent in {flavor}"
     )
+    if unmeasured:
+        # Loud, not a footnote. These keys have no flavor-axis answer, so the
+        # column carries a no-data hole where a reader might expect a verdict,
+        # and a hole nobody mentioned is how the old silent `name_absent` went
+        # unnoticed for two columns.
+        print(f"   UNMEASURED: {len(unmeasured)} key(s) whose `opt` probe failed")
+        for key, (status, evidence) in sorted(unmeasured.items()):
+            print(f"     {key:44s} {status}: {evidence}")
 
     # Build every probe module; an unparseable declare is a probe_error for
     # every arch rather than a crash mid-sweep.
@@ -924,8 +1024,14 @@ def main() -> int:
         if imm_variants:
             imm_modules[key] = imm_variants
 
-    # Stage B -- the arch axis, only for names that exist.
-    work = [(k, a) for k in keys if k not in absent for a in arches]
+    # Stage B -- the arch axis, only for names that exist. A key stage A could
+    # not measure is held out too: its probe module would have to be built from
+    # the hand-written row rather than from a declare `opt` resolved, and that
+    # is precisely the generator-4 construction that produced false
+    # `arch_absent` cells. A no-data cell is the honest result.
+    work = [
+        (k, a) for k in keys if k not in absent and k not in unmeasured for a in arches
+    ]
 
     def run(item: tuple[str, str]) -> tuple[str, str, str, str, int | None]:
         key, arch = item
@@ -1043,6 +1149,15 @@ def main() -> int:
     for key in absent:
         for arch in arches:
             record(key, arch, STATUS_NAME_ABSENT, f"not an intrinsic in {flavor}")
+
+    # The diagnostic `opt` actually produced, not a generic reason. "not an
+    # intrinsic in llvm20" written over an out-of-memory is unfalsifiable from
+    # inside the data -- it reads exactly like a real negative -- so the cell
+    # carries the process's own words and a status the readers treat as
+    # silence.
+    for key, (status, evidence) in unmeasured.items():
+        for arch in arches:
+            record(key, arch, status, evidence)
 
     with cf.ThreadPoolExecutor(max_workers=jobs) as ex:
         for key, arch, status, evidence, imm in ex.map(run, work):

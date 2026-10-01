@@ -37,6 +37,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import warnings
 from pathlib import Path
@@ -114,8 +115,24 @@ def _harvest(
     answerable at that vintage. A genuine lowering error is still reported, and
     still red: it is reported rather than raised only so that one broken family
     cannot hide the warning state of the rest.
+
+    The native lowerer is called directly, NOT the backend-dispatched public
+    entry point. The default backend is the C++ engine, and only the Python
+    lowerer consults the arch-domain table -- so on any host where the engine
+    is importable, the public entry point would lower every case successfully
+    and harvest nothing. The gate would report a serene green while asserting
+    nothing at all, and worse, would call every EXPECTED_WARNINGS entry stale,
+    because stale is exactly what "this warning no longer fires" looks like
+    from here. That failure is invisible on a host without the extension
+    (where dispatch falls back to Python anyway), which is the kind of gate
+    that passes everywhere except where it matters.
+
+    `ROCKE_ARCH_DOMAIN` is pinned for the same reason: the lane it measures
+    must not be switchable off by ambient environment. A developer with `off`
+    exported would otherwise get a green gate measuring a disabled lane.
     """
-    from rocke.core.lower_llvm import ArchDomainWarning, lower_kernel_to_llvm
+    from rocke.core.lower_llvm import ArchDomainWarning
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower_native
 
     found: dict[tuple[str, str, str], set[str]] = {}
     errors: list[tuple[str, str]] = []
@@ -127,9 +144,7 @@ def _harvest(
             # the same intrinsic from the same line.
             warnings.simplefilter("always")
             try:
-                lower_kernel_to_llvm(
-                    case["build"](), arch=case["arch"], llvm_flavor=flavor
-                )
+                lower_native(case["build"](), arch=case["arch"], llvm_flavor=flavor)
             except Exception as exc:  # noqa: BLE001 -- reported, not raised
                 bucket = unlowerable if requires_newer_flavor(exc) else errors
                 bucket.append((case["case_id"], f"{type(exc).__name__}: {exc}"))
@@ -156,6 +171,12 @@ def main() -> int:
         "--verbose", action="store_true", help="list every expected warning too"
     )
     args = ap.parse_args()
+
+    # Pin the lane on before anything imports the lowerer. A developer with
+    # ROCKE_ARCH_DOMAIN=off exported would otherwise get a green gate that
+    # measured a disabled lane -- the gate must not be silenceable by the
+    # environment it runs in. See _harvest for the matching backend pin.
+    os.environ["ROCKE_ARCH_DOMAIN"] = "warn"
 
     _bootstrap_sys_path()
     from rocke.core.arch import domain as arch_domain

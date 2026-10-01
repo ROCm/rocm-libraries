@@ -38,6 +38,20 @@ from rocke.core.lower_llvm import ArchDomainWarning, lower_kernel_to_llvm
 PLATFORM = Path(__file__).resolve().parents[2]
 LOWER_LLVM = PLATFORM / "python" / "rocke" / "core" / "lower_llvm.py"
 CPP_CORE = PLATFORM / "cpp" / "core" / "lower_llvm" / "core.cpp"
+CHECK_GATE = PLATFORM / "tools" / "check_arch_domain.py"
+
+# Most of this file tests the installed package and travels with it. Three
+# tests below instead read the *sources* next to it -- the Python emitter, the
+# C++ core, the gate script -- and `install(DIRECTORY tests/)` ships only
+# `tests/`, so in an installed layout those paths do not exist. Without this
+# they fail there, which reads as "the lane is broken" when it means "the file
+# being asserted about was not shipped". Skipping is right and excluding the
+# whole module is not: the rest of the file is portable and is exactly what an
+# installed-package consumer wants run.
+_needs_sources = pytest.mark.skipif(
+    not (LOWER_LLVM.exists() and CPP_CORE.exists() and CHECK_GATE.exists()),
+    reason="reads the platform sources, which an installed test layout omits",
+)
 
 
 # --------------------------------------------------------------------------
@@ -133,6 +147,7 @@ def _needs_intrin_writes() -> list[tuple[str, int]]:
     return out
 
 
+@_needs_sources
 def test_needs_intrin_is_only_written_by_need() -> None:
     """A path that writes the map directly gets its declare emitted and skips
     the arch-domain lookup — the exact failure this lane exists to prevent, and
@@ -186,6 +201,7 @@ def test_python_lowering_requires_an_explicit_arch() -> None:
         lower_kernel_to_llvm(_a_kernel())
 
 
+@_needs_sources
 def test_cpp_backend_resolution_has_no_default_arch() -> None:
     """The C++ side has no diagnostic channel to assert against from Python
     without a built engine, so assert on the source: a NULL arch must not fall
@@ -243,6 +259,7 @@ def test_lane_can_be_switched_off(monkeypatch: pytest.MonkeyPatch) -> None:
 # --------------------------------------------------------------------------
 
 
+@_needs_sources
 def test_corpus_matches_the_expected_warning_set() -> None:
     """Delegates to the gate rather than re-deriving the set, so the tool and
     the test cannot disagree about what the lane is allowed to say."""

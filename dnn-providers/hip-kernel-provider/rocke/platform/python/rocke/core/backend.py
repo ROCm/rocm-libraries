@@ -342,7 +342,17 @@ def lower_kernel_via_backend(
     if chosen == BACKEND_PYTHON:
         return python_lower(kernel, llvm_flavor=llvm_flavor, arch=arch)
 
-    _arch = arch or "gfx950"
+    # No `arch or "gfx950"` here. This function is reached only through
+    # `lower_kernel_to_llvm`, which rejects a missing target before dispatch,
+    # so a None arriving here is a caller that bypassed the chokepoint -- and
+    # substituting a target for it would hand the engine a guess while the
+    # Python path next door raises on the same input. Fail instead.
+    if arch is None:
+        raise ValueError(
+            "lowering requires an explicit gfx target; "
+            "pass arch=... (there is no default)"
+        )
+    _arch = arch
     name = getattr(kernel, "name", "?")
 
     # The serialized artifact is the family-agnostic hand-off to the C++ engine.

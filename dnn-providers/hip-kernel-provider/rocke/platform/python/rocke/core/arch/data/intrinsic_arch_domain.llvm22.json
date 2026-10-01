@@ -5658,7 +5658,7 @@
     ],
     "clang": "AMD clang version 22.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.2.0 26014 7b800a19466229b8479a78de19143dc33c3ab9b5)",
     "flavor": "llvm22",
-    "generator": 5,
+    "generator": 6,
     "probe_cflags": [
       "-O0",
       "-nogpulib"

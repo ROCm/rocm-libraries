@@ -5608,7 +5608,7 @@
     ],
     "clang": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 8f497e0992fb7513f7f78a6f6b6f1056c375e961)",
     "flavor": "llvm23",
-    "generator": 5,
+    "generator": 6,
     "probe_cflags": [
       "-O0",
       "-nogpulib"
