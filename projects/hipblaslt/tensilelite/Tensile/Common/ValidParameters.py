@@ -365,6 +365,11 @@ validParameters = { # we need to make sure this matches develop
     # workgroup cluster it forces GlobalSplitUWorkGroupMappingRoundRobin on so the
     # cluster's peers share a K chunk. May remove these limitations in the future.
     "PrefetchGL2": [0, 1, 2],
+    # Width of the PrefetchGL2 address increment sgpr (GL2PrefetchInc{A,B,...}).
+    # False: 32-bit (1 sgpr). True: 64-bit (2 sgprs), for when the per-iteration
+    # byte increment (unroll stride * DepthU * bpe, times the GSU chunk stride
+    # under GSU) can overflow 32 bits. Forced off when PrefetchGL2 == 0.
+    "PrefetchGL2Inc64Bit": [False, True],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
     # So we can schedule these localReads to the front of the loop

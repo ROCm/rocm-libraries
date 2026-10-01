@@ -504,6 +504,7 @@ defaultBenchmarkCommonParameters = [
     {"PrefetchGlobalRead": [1]},
     {"PrefetchLocalRead": [1]},
     {"PrefetchGL2": [0]},
+    {"PrefetchGL2Inc64Bit": [False]},
     {"ClusterLocalRead": [1]},
     {"SuppressNoLoadLoop": [False]},
     {"ExpandPointerSwap": [True]},
