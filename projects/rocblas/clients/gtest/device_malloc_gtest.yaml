@@ -12,8 +12,13 @@ Tests:
 # graph_test is what gets the handle built with stream-order allocation, which is the
 # branch carrying the discarded status. It does not run a graph capture here: that is
 # rocblas_local_handle::pre_test, which this test never calls.
+#
+# pre_checkin rather than quick, which is where the other 44 graph_test entries sit: a
+# stream-order handle's destructor calls rocblas_abort if it cannot trim the memory
+# pool, and that is not a hazard to introduce into the smoke gate. pre_checkin still
+# runs for PR validation (ctest_standard is *quick*:*pre_checkin*-*known_bug*).
 - name: device_malloc_count_alloc_failure
-  category: quick
+  category: pre_checkin
   function: device_malloc_count_alloc_failure
   graph_test: true
   precision: *single_precision
