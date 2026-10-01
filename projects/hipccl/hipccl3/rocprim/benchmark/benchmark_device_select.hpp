@@ -99,6 +99,31 @@ constexpr auto config_name()
     }
 }
 
+// These two functors exist for build time optimization of predicate-based benchmarks.
+// These benchmarks require a predicate function. Defining that prodice function via
+// a lambda function (within the benchmark's run() implementation) creates this problem:
+// - The benchmark struct takes template args. So if we define a predicate function within run() using a lambda,
+//   then for each unique instantiation of the benchmark, the lambda predicate function will be given a unique type.
+// - The predicate passed into rocprim::select, and its type is passed as a template argument to partition_impl.
+// - This means that each unique instantiation of the benchmark will ultimately cause a unique kernel to be generated.
+// - Since the predicate-based benchmarks are instantiated with different probabilities, there is a unique kernel
+//   generated for each unique probability value, even though the actual kernel code is identical.
+// Defining the predicates as functors here (that take the theshold/flag type as a template parameter) means that the same
+// type is passed into each benchmark instance's call to rocprim::select. This can significantly reduce the number
+// of kernels that need to be generated.
+template<typename T>
+struct select_less_than_op
+{
+    T threshold;
+    __host__ __device__ bool operator()(const T& value) const { return value < threshold; }
+};
+
+template<typename FlagType>
+struct flag_to_bool_op
+{
+    __host__ __device__ bool operator()(const FlagType& value) const { return value; }
+};
+
 template<typename DataType,
          typename Config                = rocprim::default_config,
          typename FlagType              = int8_t,
@@ -239,15 +264,13 @@ struct device_select_predicate_benchmark : public primbench::benchmark_interface
         {
             const auto dispatch_predicate = [&](float probability)
             {
-                auto predicate = [probability](const DataType& value) -> bool
-                { return value < static_cast<DataType>(127 * probability); };
                 HIP_CHECK(rocprim::select<Config>(d_temp_storage,
                                                   temp_storage_size_bytes,
                                                   d_input.get(),
                                                   d_output.get(),
                                                   d_selected_count_output.get(),
                                                   items,
-                                                  predicate,
+                                                  select_less_than_op<DataType>{static_cast<DataType>(127 * probability)},
                                                   stream));
             };
 
@@ -344,7 +367,6 @@ struct device_select_predicated_flag_benchmark : public primbench::benchmark_int
         {
             const auto dispatch_predicated_flags = [&](FlagType* d_flags)
             {
-                auto predicate = [](const FlagType& value) -> bool { return value; };
                 HIP_CHECK(rocprim::select<Config>(d_temp_storage,
                                                   temp_storage_size_bytes,
                                                   d_input.get(),
@@ -352,7 +374,7 @@ struct device_select_predicated_flag_benchmark : public primbench::benchmark_int
                                                   d_output.get(),
                                                   d_selected_count_output.get(),
                                                   items,
-                                                  predicate,
+                                                  flag_to_bool_op<FlagType>{},
                                                   stream));
             };
 

@@ -53,6 +53,33 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
+// This functor exists for compile-time optimization purposes.
+// Creating this predicate in segmented_radix_sort_impl using
+// a lambda expression results in many generated kernels because:
+// - the segmented_radix_sort_impl function template depends on the key/value iterators
+// - a separate lambda type is defined for each combination of template args
+// - the lambda function types are passes as template args to Partitioner.
+// - this ultimately results in multiple kernels being generated for the
+//   different lambda types, which is unnecessary becase the predicate code
+//   is always the same.
+// Defining the predicate as a functor here works around this problem - the type
+// of the predicate functor that's passed to Partition is always the same, so no
+// extra kernels are generated.
+template<class OffsetIterator>
+struct segment_length_greater_than
+{
+    const OffsetIterator begin_offsets;
+    const OffsetIterator end_offsets;
+    const unsigned int   threshold;
+
+    ROCPRIM_HOST_DEVICE bool operator()(const unsigned int segment_index) const
+    {
+        const unsigned int segment_length
+            = end_offsets[segment_index] - begin_offsets[segment_index];
+        return segment_length > threshold;
+    }
+};
+
 struct Partitioner
 {
     bool three_way_partitioning;
@@ -179,18 +206,8 @@ inline hipError_t segmented_radix_sort_impl(
     const bool  three_way_partitioning = max_small_segment_length < max_medium_segment_length;
     Partitioner partitioner(three_way_partitioning);
 
-    const auto large_segment_selector = [=](const unsigned int segment_index) mutable -> bool
-    {
-        const unsigned int segment_length
-            = end_offsets[segment_index] - begin_offsets[segment_index];
-        return segment_length > max_medium_segment_length;
-    };
-    const auto medium_segment_selector = [=](const unsigned int segment_index) mutable -> bool
-    {
-        const unsigned int segment_length
-            = end_offsets[segment_index] - begin_offsets[segment_index];
-        return segment_length > max_small_segment_length;
-    };
+    const segment_length_greater_than<OffsetIterator> large_segment_selector = {begin_offsets, end_offsets, max_medium_segment_length};
+    const segment_length_greater_than<OffsetIterator> medium_segment_selector = {begin_offsets, end_offsets, max_small_segment_length};
 
     const bool         with_double_buffer = keys_tmp != nullptr;
     const unsigned int bits               = end_bit - begin_bit;
