@@ -22,6 +22,8 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
+import copy
+
 import pytest
 import yaml
 from pprint import pformat
@@ -109,7 +111,7 @@ WorkGroup: [16, 16, 1]
     assert outputConf["EnableF32XdlMathOp"] == False
     assert outputConf["MFMA_BF16_1K"] == False
 
-    solution = defaultSolution
+    solution = copy.deepcopy(defaultSolution)
     solution.update(input_conf)
     solution.update(outputConf)
 
@@ -211,7 +213,7 @@ custom.config:
     assert outputConf["EnableF32XdlMathOp"] == False
     assert outputConf["MFMA_BF16_1K"] == False
 
-    solution = defaultSolution
+    solution = copy.deepcopy(defaultSolution)
     solution.update(inputConf)
     solution.update(outputConf)
 

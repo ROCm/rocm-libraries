@@ -44,7 +44,6 @@
 #include "UserDrivenTuningParser.hpp"
 #include "definitions.h"
 #include "handle.h"
-#include "rocblaslt_arch_revision.hpp"
 #include "rocblaslt.h"
 #include "rocblaslt_fused_a2a_validate.hpp"
 #include "rocblaslt_mat_utils.hpp"
@@ -2712,19 +2711,6 @@ std::string rocblaslt_internal_get_arch_name()
     hipDeviceProp_t deviceProperties;
     static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
     return ArchName{}(deviceProperties);
-}
-
-// The GEMM library subtree the current device loads; folds in asicRevision, the
-// only signal telling the gfx1250 revisions apart (see rocblaslt_arch_revision.hpp).
-std::string rocblaslt_internal_get_library_arch_name()
-{
-    int deviceId = 0;
-    static_cast<void>(hipGetDevice(&deviceId));
-    // Zero-init: a failed query leaves the arch name empty, so no subtree matches.
-    hipDeviceProp_t deviceProperties{};
-    static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-    const int asicRevision = deviceProperties.asicRevision;
-    return rocblaslt_revisioned_arch_name(ArchName{}(deviceProperties), asicRevision);
 }
 
 bool rocblaslt_internal_test_path(const std::string& path)
