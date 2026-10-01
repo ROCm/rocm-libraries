@@ -30,6 +30,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Fixed the WMMA backward-weight interface regression fixture to run on gfx12 while preserving its supported reduction tile.
 * Fixed repeated split-K universal GEMM invocations to clear the complete strided output span.
 * Fixed regular-launch TDM WMMA test coverage on gfx1250 A0 without enabling unsupported multicast cluster launches.
+* Removed an unused self-referential offset temporary from WMMA backward-weight kernels that prevented gfx1250 A0 module translation.
 
 ## Composable Kernel 1.3.0 for ROCm 10.1.0
 

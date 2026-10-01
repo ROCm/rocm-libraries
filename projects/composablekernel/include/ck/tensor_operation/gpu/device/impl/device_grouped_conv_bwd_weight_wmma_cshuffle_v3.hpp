@@ -100,7 +100,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
             c_grid_desc_mblock_mperblock_nblock_nperblock,
             block_2_ctile_map_,
             compute_ptr_offset_of_batch,
-            ComputePtrOffsetOfBatch{}, // placeholder
+            compute_ptr_offset_of_batch,
             num_k_per_block,
             karg,
             epilogue_args);
