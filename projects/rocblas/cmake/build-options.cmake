@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -91,6 +91,11 @@ if( BUILD_WITH_TENSILE )
   option( Tensile_PRINT_DEBUG "Tensile to print runtime debug info?" OFF )
   option( Tensile_SEPARATE_ARCHITECTURES "Tensile to use GPU architecture specific files?" ON )
   option( Tensile_LAZY_LIBRARY_LOADING "Tensile to load kernels on demand?" ON )
+
+  # GPU_TARGETS / --offload-arch still include these; TensileCreateLibrary does not.
+  # Prefix match: gfx1250 also excludes gfx1250:xnack+. Set empty to disable.
+  set( ROCBLAS_TENSILE_ARCH_SKIPLIST "gfx1101" CACHE STRING
+    "GPU targets skipped during Tensile library generation; rocBLAS still compiles for GPU_TARGETS" )
 
   if(Tensile_LIBRARY_FORMAT MATCHES "yaml")
     option(TENSILE_USE_LLVM      "Use LLVM for parsing config files." ON)
