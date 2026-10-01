@@ -59,6 +59,15 @@ A single `s_barrier_wait -3` immediately before the first `tensor_load_to_lds`
 of the whole kernel, above any wait-cnt drains that precede it (see
 [Drain hoisting](#drain-hoisting)).
 
+### First load inside a loop
+
+With `PrefetchGlobalRead=0` the first tensor load is the main loop's own, so a
+wait in front of it would run every trip against one run-up signal. When the
+loop body has no cluster barrier and the loop is entered only by falling into
+its head, Rule 2 drains the run-up signal with an `s_barrier_wait -3` above the
+loop head and gives the load a Rule 3 handshake confined to its segment, so
+every trip signals before it waits.
+
 ---
 
 ## Rule 3 -- Loop-body cluster handshake
