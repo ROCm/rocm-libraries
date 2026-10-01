@@ -970,8 +970,8 @@ def supports_attention_dense(
         return False, "gfx942 attention_dense: ragged not yet supported"
     # sliding_window is supported (KV-loop prune + window mask); the shared spec
     # __post_init__ re-run above enforces its constraints (W % block_n, causal).
-    # use_sinks is supported (m/l seed per work item); __post_init__ rejects it with
-    # paged/varlen.
+    # use_sinks is supported here (m/l seed per work item). The shared __post_init__
+    # still rejects it combined with paged or varlen.
 
     # --- gfx942-private sweep knobs. Validated here rather than only in the builder
     # because the module contract is support() => build(): a knob that only the
@@ -1102,7 +1102,9 @@ def supports_attention_dense(
     # Sliding-window + causal: the last query block's window can start past
     # seqlen_kv (start_tile >= n_up), giving a zero-trip KV loop -> l == 0 ->
     # rcp(0) -> NaN. Same class as the block_m % block_n gate above; reject.
-    if spec.sliding_window and spec.causal:
+    # Sinks make the zero-trip loop well-defined: l stays at the l0 = 1 seed and
+    # o at zero, so the output is 0, which is softmax([sink]) applied to no values.
+    if spec.sliding_window and spec.causal and not spec.use_sinks:
         _n_q = spec.seqlen_q // spec.block_m
         # Floor division, so the guard reads the same tile count the KV loop uses
         # (n_ktiles = Skv // BN). The shared spec enforces seqlen_kv % block_n == 0,
@@ -1114,7 +1116,8 @@ def supports_attention_dense(
             return False, (
                 f"sliding_window={spec.sliding_window}: last query block's window "
                 f"starts at tile {(_n_q - 1) * _n_per - _swt}, past seqlen_kv tile "
-                f"count {_n_ktiles} -> zero-trip KV loop -> NaN"
+                f"count {_n_ktiles} -> zero-trip KV loop -> NaN (well-defined "
+                f"with use_sinks)"
             )
     return True, ""
 

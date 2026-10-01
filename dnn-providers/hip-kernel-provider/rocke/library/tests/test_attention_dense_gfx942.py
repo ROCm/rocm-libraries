@@ -603,14 +603,22 @@ def test_supports_accepts_sinks_alone_and_with_sliding_window():
         assert ok, f"{kw}: {why}"
 
 
-def test_supports_still_rejects_empty_window_with_sinks():
-    """Sinks would turn the empty-window NaN into a 0 output, but the zero-trip KV
-    loop is still out of scope, so the guard must hold with sinks on too."""
-    ok, why = supports_attention_dense(
-        _spec(seqlen_q=1024, seqlen_kv=256, sliding_window=128, use_sinks=True),
-        arch="gfx942",
+@pytest.mark.parametrize("persistent", [False, True])
+def test_supports_accepts_empty_window_with_sinks(persistent):
+    """With sinks the zero-trip KV loop leaves l at the l0 = 1 seed and o at zero, so
+    the empty-window rows output 0 (softmax over the sink alone) instead of NaN. The
+    guard is lifted for sinks only; the same shape without sinks is still rejected
+    by test_supports_rejects_sliding_window_past_seqlen_kv."""
+    spec = _spec(
+        seqlen_q=1024,
+        seqlen_kv=256,
+        sliding_window=128,
+        use_sinks=True,
+        persistent=persistent,
     )
-    assert not ok and "sliding_window" in why
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, why
+    build_attention_dense(spec, arch="gfx942")
 
 
 def _sink_seed_sites(kernel):

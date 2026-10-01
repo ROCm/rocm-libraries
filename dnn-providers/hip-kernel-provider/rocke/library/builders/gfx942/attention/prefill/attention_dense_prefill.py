@@ -44,7 +44,8 @@ from here rather than keeping a second, drifting resolver.
 
 NOTE: ``--sw`` (sliding window) now builds a supported spec (KV-loop prune + window
 mask); only the degenerate shape whose last query block's window starts past
-``seqlen_kv`` is rejected (zero-trip KV loop -> NaN). ``--use-sinks`` adds random
+``seqlen_kv`` is rejected (zero-trip KV loop -> NaN), and only without sinks: with
+sinks those rows output 0, softmax over the sink alone. ``--use-sinks`` adds random
 per-head sink logits and checks against a manual sink reference; it combines with
 ``--sw``. ``--persistent`` is NOT a
 deferred mode either: the persistent grid ships and dispatch turns it on
@@ -365,15 +366,18 @@ def make_sinks(spec: Gfx942AttentionDenseSpec, device="cuda"):
     ).contiguous()
 
 
-def dense_reference(q, k, v, spec: Gfx942AttentionDenseSpec, sinks=None):
+def dense_reference(q, k, v, spec: Gfx942AttentionDenseSpec, *, scale, sinks=None):
     """fp32 reference [B, Sq, Hq, D] for ``spec`` (causal / full / SWA, GQA).
+
+    ``scale`` is the softmax scale the kernel was launched with, taken from the
+    caller so the reference cannot silently diverge from the launch.
 
     Without sinks this is torch SDPA. With sinks SDPA cannot append the sink
     column, so it is ``softmax(concat([QK*scale, sink]))[..., :-1] @ V``, chunked
     over queries so the fp32 score matrix stays near 1 GiB at large Sq (softmax
     runs along keys, so query rows are independent and chunking is exact).
     """
-    B, Sq, Hq, D = q.shape
+    B, Sq, Hq, _ = q.shape
     Skv = k.shape[1]
     dev = q.device
     rep = Hq // k.shape[2]
@@ -388,15 +392,14 @@ def dense_reference(q, k, v, spec: Gfx942AttentionDenseSpec, sinks=None):
             qi = torch.arange(Sq, device=dev).view(-1, 1)
             allowed = (ki <= qi) & (ki > qi - W)
             ref = torch.nn.functional.scaled_dot_product_attention(
-                qh, kh, vh, attn_mask=allowed
+                qh, kh, vh, attn_mask=allowed, scale=scale
             )
         else:
             ref = torch.nn.functional.scaled_dot_product_attention(
-                qh, kh, vh, is_causal=spec.causal
+                qh, kh, vh, is_causal=spec.causal, scale=scale
             )
         return ref.transpose(1, 2)
 
-    scale = 1.0 / math.sqrt(D)
     sink_col = sinks.float().view(1, Hq, 1, 1)
     q_blk = max(1, min(Sq, (1 << 30) // max(1, B * Hq * (Skv + 1) * 4)))
     ref = torch.empty_like(qh)
@@ -459,7 +462,7 @@ def run(
 
     err = float("nan")
     if check:
-        ref = dense_reference(q, k, v, spec, sinks)
+        ref = dense_reference(q, k, v, spec, scale=scale, sinks=sinks)
         err = (out.float() - ref).abs().max().item()
 
     for _ in range(warmup):

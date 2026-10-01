@@ -226,7 +226,7 @@ def bench_dense(spec: AttentionDenseSpec, *, warmup: int, iters: int, seed: int)
 
     # correctness vs the fp32 reference (SDPA, or the manual sink softmax).
     W = spec.sliding_window
-    ref = dense_reference(q, k, v, spec, sinks)
+    ref = dense_reference(q, k, v, spec, scale=scale, sinks=sinks)
     max_err = (out.float() - ref).abs().max().item()
 
     ms = time_launches(call, warmup=warmup, iters=iters, stream=stream)
