@@ -412,13 +412,14 @@ only for what is still missing from `requestedAlgoCount`:
 
 JIT results count toward the request, so a query that the Equality results
 fill does not consult JIT and returns what it returns with JIT off. The sources
-after JIT skip the kernels its results use. The Equality pass covers every
-hardware branch of the pre-tuned library before the other rows are searched, so
-an Equality result of the generic branch can come before a result that a
-CU-specific branch would put first with JIT off. When neither pre-tuned pass
-finds a solution for an xf32 problem, both repeat with FP32 math; JIT runs once
-for the query. When rocRoller's early path applies, its results come first and
-JIT fills only what is still missing after the `getAllSolutions` fill.
+after JIT skip the kernels its results use. When the override entry names a
+JIT solution, the JIT results do not repeat its kernel. The Equality pass
+covers every hardware branch of the pre-tuned library before the other rows are
+searched, so an Equality result of the generic branch can come before a result
+that a CU-specific branch would put first with JIT off. When neither pre-tuned
+pass finds a solution for an xf32 problem, both repeat with FP32 math; JIT runs
+once for the query. When rocRoller's early path applies, its results come first
+and JIT fills only what is still missing after the `getAllSolutions` fill.
 
 In forced mode, the JIT lookup and generation are the whole query. Each JIT
 result passes the same support and workspace checks as a `getAllSolutions`

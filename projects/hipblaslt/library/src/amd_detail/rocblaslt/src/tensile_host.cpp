@@ -6231,7 +6231,7 @@ void dropJitKernels(rocblaslt_handle                                handle,
 {
     std::vector<std::string> kernels;
     for(int i = 0; i < count; ++i)
-        if(isJitAlgorithm(&results[i].algo))
+        if(isJitSolution(&results[i].algo))
             kernels.push_back(getKernelNameFromAlgoIndex(handle, results[i].algo));
     if(kernels.empty())
         return;
@@ -6256,7 +6256,7 @@ int dropRepeatedJitKernels(rocblaslt_handle                  handle,
     for(int i = 0; i < count; ++i)
     {
         auto       name     = getKernelNameFromAlgoIndex(handle, results[i].algo);
-        const bool repeated = isJitAlgorithm(&results[i].algo) && !name.empty()
+        const bool repeated = isJitSolution(&results[i].algo) && !name.empty()
                               && std::find(kernels.begin(), kernels.end(), name) != kernels.end();
         if(repeated)
             continue;
