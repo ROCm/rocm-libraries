@@ -154,15 +154,9 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif // End of if (!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__))
 }
 
-// T2-01 block-diagonal WMMA packing (GroupsPerWmma > 1): prepass that packs
-// GroupsPerWmma consecutive groups' weights into a dense, block-diagonal
+// Pack consecutive groups' contiguous GKYXC weights into a dense block-diagonal
 // [GroupsPerWmma*K_per_group, GroupsPerWmma*Y*X*C_per_group] tile per group-cluster.
-// Off-diagonal (cross-group) entries are zeroed by construction: a lane only ever
-// loads from the source weight tensor when its output row's group-in-cluster equals
-// its output column's group-in-cluster, mirroring hipConv's `nz` load predicate (see
-// docs_gfx1250/T2-01_BLOCK_DIAGONAL_WMMA_PACKING_DESIGN.md) but realized once at pack
-// time instead of per-WMMA-lane. Assumes a packed (contiguous) GKYXC weight tensor,
-// consistent with the MakeBDescriptor_N_K overload this prepass feeds.
+// Cross-group entries are zero; diagonal entries retain their source weights.
 template <typename BDataType>
 __global__ void kernel_pack_block_diagonal_wmma_weight(const BDataType* __restrict__ p_b_in,
                                                        BDataType* __restrict__ p_b_out,
@@ -362,18 +356,20 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
                                        (is_same_v<ELayout, tensor_layout::convolution::NGKHW> ||
                                         is_same_v<ELayout, tensor_layout::convolution::NGKDHW>);
 
-    // T2-01 block-diagonal WMMA packing is currently scoped to plain grouped_conv2d_fwd:
-    // NDimSpatial=2, NHWGC/GNHWC (A), GKYXC (B), NHWGK/GNHWK/G_NHW_K (E) layouts, no
-    // multi-A/B/D, no NGCHW transpose kernel, no CTranspose, and the general (Default)
-    // im2col path. See docs_gfx1250/T2-01_BLOCK_DIAGONAL_WMMA_PACKING_DESIGN.md.
+    // Block-diagonal packing uses the general 2D im2col path without transposes
+    // or additional tensors.
     static_assert(GroupsPerWmma >= 1);
     static_assert(GroupsPerWmma == 1 ||
                       (NDimSpatial == 2 && !isMultiA && !isMultiB && !isMultiD &&
                        !NeedTransposeKernel && !CTranspose && NumDTensor == 0 &&
                        ConvForwardSpecialization == ConvolutionForwardSpecialization::Default),
-                  "GroupsPerWmma > 1 (T2-01) is scoped to plain grouped_conv2d_fwd, no "
+                  "GroupsPerWmma > 1 requires plain grouped_conv2d_fwd, no "
                   "multi-A/B/D, no NGCHW transpose, no CTranspose, no Ds, and "
                   "ConvolutionForwardSpecialization::Default");
+    static_assert(GroupsPerWmma == 1 ||
+                      (is_same_v<AElementwiseOperation, element_wise::PassThrough> &&
+                       is_same_v<BElementwiseOperation, element_wise::PassThrough>),
+                  "GroupsPerWmma > 1 requires PassThrough A and B element operations");
 
     // Generate vector size for C & Ds
     using CDEBlockTransferScalarPerVectors =
@@ -957,8 +953,7 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
             }
             else if constexpr(GroupsPerWmma > 1)
             {
-                // Block-diagonal weight-packing scratch buffer (T2-01): one dense
-                // (GroupsPerWmma*K_)-by-(GroupsPerWmma*Y_*X_*C_) tile per group-cluster.
+                // One dense block-diagonal weight tile per group-cluster.
                 return static_cast<std::size_t>(b_grid_desc_n_k_.GetElementSpaceSize()) *
                        static_cast<std::size_t>(num_group_ / GroupsPerWmma) * sizeof(BDataType);
             }
@@ -1003,10 +998,10 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
                              is_same_v<ALayout, tensor_layout::convolution::NHWGC> ||
                              is_same_v<ALayout, tensor_layout::convolution::NDHWGC>)
                 {
-                    size_as_buffers[i] =
-                        (a_grid_desc_m_k_.GetElementSpaceSize() +
-                         (num_group_ - NumGroupsToMerge) * (a_g_n_c_wis_strides_[0])) *
-                        sizeof(ADataType_single) / GridwiseGemm::APackedSize;
+                    size_as_buffers[i] = (a_grid_desc_m_k_.GetElementSpaceSize() +
+                                          (num_group_ - NumGroupsToMerge * GroupsPerWmma) *
+                                              a_g_n_c_wis_strides_[0]) *
+                                         sizeof(ADataType_single) / GridwiseGemm::APackedSize;
                 }
                 else
                 {
@@ -1602,10 +1597,7 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
 
                 if constexpr(GroupsPerWmma > 1)
                 {
-                    // T2-01 block-diagonal WMMA packing: pack GroupsPerWmma consecutive
-                    // groups' weights into a dense, block-diagonal scratch buffer before
-                    // the main gemm reads it as an ordinary (already-packed) B operand.
-                    // See docs_gfx1250/T2-01_BLOCK_DIAGONAL_WMMA_PACKING_DESIGN.md.
+                    // Pack each group-cluster's weights before GEMM reads the dense B tile.
                     if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
                     {
                         printf("\033[32mPacking B into block-diagonal GroupsPerWmma=%d scratch "
@@ -1864,6 +1856,18 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
         }
         if constexpr(GroupsPerWmma > 1)
         {
+            if(!arg.p_workspace_)
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout
+                        << "Warning: Workspace for "
+                           "DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3::Argument is not "
+                           "allocated, use SetWorkSpacePointer."
+                        << std::endl;
+                }
+                return false;
+            }
             if(G % GroupsPerWmma != 0)
             {
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
@@ -1874,11 +1878,6 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
                 }
                 return false;
             }
-            // The block-diagonal path is validated for four input and output
-            // channels per group; wider groups need separate tuning and proof.
-            if(C != 4 || K != 4)
-                return false;
-
             // The packing prepass indexes the source as contiguous GKYXC.
             // A strided weight tensor would silently read the wrong taps.
             long_index_t packed_stride = C;
@@ -2548,9 +2547,12 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
             << BlkGemmPipelineSchedulerToString[BlkGemmPipeSched] << ", "
             << "BlkGemmPipelineVersion: "
             << BlkGemmPipelineVersionToString[BlkGemmPipelineVer] << ", "
-            << NumGroupsToMerge << ", "
-            << GroupsPerWmma
-            << ">";
+            << NumGroupsToMerge;
+        if constexpr(GroupsPerWmma > 1)
+        {
+            str << ", GroupsPerWmma: " << GroupsPerWmma;
+        }
+        str << ">";
         // clang-format on
 
         return str.str();

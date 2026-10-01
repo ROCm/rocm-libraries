@@ -27,11 +27,11 @@ void add_device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_f16_packed_
                                                                 PassThrough,
                                                                 PassThrough>>>& instances)
 {
-    // The measured block-diagonal candidate is only selected on gfx1250.
+    // Register the block-diagonal candidate only on gfx1250.
     if(!ck::is_gfx125_supported())
         return;
 
-    using PackedInstance =
+    using PackedBase =
         DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<2,
                                                          NHWGC,
                                                          GKYXC,
@@ -83,6 +83,15 @@ void add_device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_f16_packed_
                                                          F16,
                                                          1,
                                                          4>;
+    struct PackedInstance : PackedBase
+    {
+        bool IsSupportedArgument(const BaseArgument* p_arg) override
+        {
+            const auto* arg = dynamic_cast<const PackedBase::Argument*>(p_arg);
+            return arg != nullptr && arg->b_g_k_c_xs_lengths_[2] == 4 &&
+                   arg->b_g_k_c_xs_lengths_[1] == 4 && PackedBase::IsSupportedArgument(*arg);
+        }
+    };
     instances.emplace_back(std::make_unique<PackedInstance>());
 }
 
