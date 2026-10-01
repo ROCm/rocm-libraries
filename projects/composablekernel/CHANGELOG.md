@@ -26,6 +26,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Applied gfx1250 BF16 large-tile compiler flags consistently to single-target `GPU_ARCHS` library builds.
 * Fixed grouped-convolution profiler `--instance` selection to index supported instances, and removed the duplicated first forward candidate.
 * Rejected unsupported FP8/BF8 K=16 WMMA and K=32 MFMA warp-GEMM tiles at compile time on gfx1250 instead of producing zero results.
+* Fixed the WMMA backward-weight interface regression fixture to run on gfx12 with an FP16 reduction tile supported by gfx1250.
 
 ## Composable Kernel 1.3.0 for ROCm 10.1.0
 
