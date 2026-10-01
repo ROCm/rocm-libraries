@@ -15,6 +15,7 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/gbdt_model_generated.h>
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/ScoreTransform.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/Sha256.hpp>
 #include <limits>
 #include <memory>
@@ -38,11 +39,16 @@ public:
     /// @param expectedModelHash Optional checksum of the model file for integrity validation.
     /// @param objective The UHD's `objective`: `min` when the model predicts a cost. Only a
     ///        grouped model reads it -- see scoreBatch.
+    /// @param transform The UHD's `score.transform`, and @p metric its `score.metric` (empty
+    ///        for a metric-less ranker). Only a grouped model reads them: its layer-1 group
+    ///        choice applies RFC 0019 §8.3's score rule (score_transform::isRankableScore).
     /// @returns Adapter or nullptr if loading/validation fails.
     static std::unique_ptr<TreeDataAdapter> load(const std::string& modelPath,
                                                  const std::string& expectedFeaturesHash,
                                                  const std::string& expectedModelHash = "",
-                                                 const std::string& objective = "max");
+                                                 const std::string& objective = "max",
+                                                 const std::string& transform = "",
+                                                 const std::string& metric = "");
 
     /// Load from an in-memory buffer.
     /// @param buffer FlatBuffer data. Used only during this call; prepared nodes
@@ -51,13 +57,17 @@ public:
     /// @param expectedFeaturesHash Hash from UHD features_signature.
     /// @param expectedModelHash Optional checksum of the model file for integrity validation.
     /// @param objective The UHD's `objective`, as for load().
+    /// @param transform The UHD's `score.transform`, as for load().
+    /// @param metric The UHD's `score.metric`, as for load().
     /// @returns Adapter or nullptr if validation fails.
     static std::unique_ptr<TreeDataAdapter> loadFromBuffer(const uint8_t* buffer,
                                                            size_t size,
                                                            const std::string& expectedFeaturesHash,
                                                            const std::string& expectedModelHash
                                                            = "",
-                                                           const std::string& objective = "max");
+                                                           const std::string& objective = "max",
+                                                           const std::string& transform = "",
+                                                           const std::string& metric = "");
 
     ~TreeDataAdapter() override = default;
 
@@ -128,7 +138,9 @@ private:
                     size_t numFeatures,
                     double baseScore,
                     std::vector<std::string> trainingArches,
-                    bool lowerIsBetter);
+                    bool lowerIsBetter,
+                    std::string transform,
+                    bool positiveRequired);
 
     /// Prepare one ensemble. Takes the tree vector rather than the model so that a group's
     /// trees go through exactly the validation layer 1's do -- a group whose trees were
@@ -169,6 +181,11 @@ private:
     /// than hands back, so it is the one place the adapter has to know.
     bool _lowerIsBetter;
 
+    /// The UHD's `score.transform`, and whether §8.3 requires its recovered score to be
+    /// positive: what layer 1 needs to refuse a group score as layer 2's scores are refused.
+    std::string _transform;
+    bool _positiveRequired;
+
     // RFC 0019 §9.2: training arches for out-of-distribution detection.
     std::vector<std::string> _trainingArches;
 };
@@ -179,7 +196,9 @@ inline std::unique_ptr<TreeDataAdapter>
     TreeDataAdapter::load(const std::string& modelPath,
                           const std::string& expectedFeaturesHash,
                           const std::string& expectedModelHash,
-                          const std::string& objective)
+                          const std::string& objective,
+                          const std::string& transform,
+                          const std::string& metric)
 {
     std::ifstream file(modelPath, std::ios::binary | std::ios::ate);
     if(!file)
@@ -200,8 +219,13 @@ inline std::unique_ptr<TreeDataAdapter>
         return nullptr;
     }
 
-    return loadFromBuffer(
-        buffer.data(), buffer.size(), expectedFeaturesHash, expectedModelHash, objective);
+    return loadFromBuffer(buffer.data(),
+                          buffer.size(),
+                          expectedFeaturesHash,
+                          expectedModelHash,
+                          objective,
+                          transform,
+                          metric);
 }
 
 inline std::unique_ptr<TreeDataAdapter>
@@ -209,7 +233,9 @@ inline std::unique_ptr<TreeDataAdapter>
                                     size_t size,
                                     const std::string& expectedFeaturesHash,
                                     const std::string& expectedModelHash,
-                                    const std::string& objective)
+                                    const std::string& objective,
+                                    const std::string& transform,
+                                    const std::string& metric)
 {
     // Guard against null/empty buffer
     if(buffer == nullptr || size < sizeof(flatbuffers::uoffset_t) + 4 || size > 256 * 1024 * 1024)
@@ -340,15 +366,18 @@ inline std::unique_ptr<TreeDataAdapter>
         }
     }
 
-    return std::unique_ptr<TreeDataAdapter>(new TreeDataAdapter(std::move(nodes),
-                                                                std::move(roots),
-                                                                std::move(groups),
-                                                                groupFeatureIndex,
-                                                                modelHash,
-                                                                numFeatures,
-                                                                baseScore,
-                                                                std::move(trainingArches),
-                                                                objective == "min"));
+    return std::unique_ptr<TreeDataAdapter>(
+        new TreeDataAdapter(std::move(nodes),
+                            std::move(roots),
+                            std::move(groups),
+                            groupFeatureIndex,
+                            modelHash,
+                            numFeatures,
+                            baseScore,
+                            std::move(trainingArches),
+                            objective == "min",
+                            transform,
+                            score_transform::isPhysicalScore(metric, transform)));
 }
 
 inline TreeDataAdapter::TreeDataAdapter(std::vector<Node> nodes,
@@ -359,7 +388,9 @@ inline TreeDataAdapter::TreeDataAdapter(std::vector<Node> nodes,
                                         size_t numFeatures,
                                         double baseScore,
                                         std::vector<std::string> trainingArches,
-                                        bool lowerIsBetter)
+                                        bool lowerIsBetter,
+                                        std::string transform,
+                                        bool positiveRequired)
     : _nodes(std::move(nodes))
     , _roots(std::move(roots))
     , _groups(std::move(groups))
@@ -368,6 +399,8 @@ inline TreeDataAdapter::TreeDataAdapter(std::vector<Node> nodes,
     , _numFeatures(numFeatures)
     , _baseScore(baseScore)
     , _lowerIsBetter(lowerIsBetter)
+    , _transform(std::move(transform))
+    , _positiveRequired(positiveRequired)
     , _trainingArches(std::move(trainingArches))
 {
 }
@@ -530,20 +563,33 @@ inline std::vector<double>
     // `min` model predicts a cost, and taking its largest would choose the slowest group.
     // The raw score is compared, before any transform inversion, which is safe because every
     // registered transform is increasing and so preserves the direction.
+    //
+    // A row's layer-1 score stands for its group only when RFC 0019 §8.3 admits it -- the
+    // same rule the ranker applies to layer 2's scores -- so a model predicting a negative
+    // time for a group cannot choose it and then hide that behind a valid layer-2 score.
+    // Equal standings go to the smaller group value: a key of the groups themselves, so the
+    // choice does not depend on the order the catalog's rows arrived in.
     const auto slot = static_cast<size_t>(_groupFeatureIndex);
     double bestGroupScore = 0.0;
     double chosenGroup = 0.0;
     bool chosen = false;
     for(const auto& row : batch)
     {
-        if(slot >= row.size())
+        // A row with no group value cannot stand for a group: NaN matches no layer-2 group,
+        // and compares false both ways, so it would make the tie-break order-dependent.
+        if(slot >= row.size() || std::isnan(row[slot]))
         {
             continue;
         }
         const double groupScore = score(row);
+        if(!score_transform::isRankableScore(score_transform::applyInverse(groupScore, _transform),
+                                             _positiveRequired))
+        {
+            continue;
+        }
         const bool better
             = _lowerIsBetter ? groupScore < bestGroupScore : groupScore > bestGroupScore;
-        if(!chosen || better)
+        if(!chosen || better || (groupScore == bestGroupScore && row[slot] < chosenGroup))
         {
             bestGroupScore = groupScore;
             chosenGroup = row[slot];

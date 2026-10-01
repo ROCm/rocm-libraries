@@ -249,8 +249,9 @@ inline hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
                 binding["uhd_id"] = config.uhdId;
             }
             // A descriptor-backed engine ADDS its set to trained_against on top of this
-            // (GenericEngine.hpp:211-221): it is trained against both the descriptors it
-            // loaded and the provider build that ran them.
+            // (GenericEngine::getPrediction): it is trained against both the descriptors it
+            // loaded and the provider build that ran them, and binds a model only when that
+            // model recorded this selector_revision (GenericEngine's constructor).
             result.uhd_id = config.uhdId;
             result.binding_json = binding.dump();
             result.features_json = features.toJson().dump();

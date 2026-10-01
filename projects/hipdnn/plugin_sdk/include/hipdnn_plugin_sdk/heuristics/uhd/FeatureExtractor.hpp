@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -186,20 +187,45 @@ public:
     {
         return getMissingKmdFields(fields).empty();
     }
+    /// The `$kernel.*` fields the signature reads that @p fields does not declare, each once.
+    /// A reference is covered by its declared field (`tile` for `$kernel.tile[0]`) or by a
+    /// field declared under the reference's full name.
     std::vector<std::string>
         getMissingKmdFields(const std::unordered_set<std::string>& fields) const
     {
+        constexpr std::string_view PREFIX = "$kernel.";
         std::vector<std::string> missing;
         for(const auto& reference : getVariableRefs())
         {
-            constexpr std::string_view PREFIX = "$kernel.";
-            if(reference.rfind(PREFIX, 0) == 0
-               && fields.count(reference.substr(PREFIX.size())) == 0)
+            auto field = kernelFieldOf(reference);
+            if(!field || fields.count(*field) != 0
+               || fields.count(reference.substr(PREFIX.size())) != 0)
             {
-                missing.push_back(reference.substr(PREFIX.size()));
+                continue;
+            }
+            if(std::find(missing.begin(), missing.end(), *field) == missing.end())
+            {
+                missing.push_back(std::move(*field));
             }
         }
         return missing;
+    }
+
+    /// The KMD field a `$kernel.*` reference reads, or nullopt for any other reference.
+    ///
+    /// An element of a list field is bound as `<field>[<i>]` (one name per element, as the
+    /// runtime binds kernel metadata), but the field the KMD declares -- and the knob the UED
+    /// exposes -- is `<field>`. Admission compares that declared name; extraction still reads
+    /// the indexed one. Comparing the whole suffix refused every model reading a list field.
+    static std::optional<std::string> kernelFieldOf(const std::string& reference)
+    {
+        constexpr std::string_view PREFIX = "$kernel.";
+        if(reference.rfind(PREFIX, 0) != 0)
+        {
+            return std::nullopt;
+        }
+        const auto field = std::string_view(reference).substr(PREFIX.size());
+        return std::string(field.substr(0, field.find('[')));
     }
 
     /// Compact, sorted-key JSON AST plus the optional sorted categorical vocabulary.

@@ -690,13 +690,20 @@ private:
     std::filesystem::path _path;
 };
 
-/// A device whose arch carries the feature suffix a real gfx942 reports.
+/// A device whose arch carries the feature suffix a real gfx942 reports, with the memory
+/// properties a live HIP query fills in. Nonzero on purpose: DeviceKey compares them, so a
+/// codec that drops one can only be caught by a device on which it is not zero.
 DeviceProperties suffixedDeviceProperties(int multiProcessorCount = 304)
 {
     DeviceProperties properties;
     properties.gcnArchName = "gfx942:sramecc+:xnack-";
     properties.warpSize = 64;
     properties.multiProcessorCount = multiProcessorCount;
+    // MI300X: 192 GiB of HBM3 -- past 2^32, so a 32-bit round trip would truncate it.
+    properties.totalGlobalMem = std::size_t{206'141'652'992};
+    properties.memoryBusWidth = 8192;
+    properties.memoryClockRate = 2'600'000;
+    properties.sharedMemPerBlock = 65'536;
     return properties;
 }
 
@@ -1071,7 +1078,7 @@ TEST(TestIngestorWinnerCacheStateManager, ALineWithAWrongFormatVersionIsSkipped)
     {
         auto malformed
             = nlohmann::json::parse(encodeWinnerRecordLine(laterKey, recordFor(0x32, 2.0)));
-        malformed["v"] = 2;
+        malformed["v"] = detail::WINNER_LINE_FORMAT_VERSION + 1;
         std::ofstream out(path, std::ios::app);
         out << malformed.dump() << "\n";
         out << encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties(500)),
@@ -1082,7 +1089,7 @@ TEST(TestIngestorWinnerCacheStateManager, ALineWithAWrongFormatVersionIsSkipped)
     const auto reader = makeNamedStateManager("test:FormatFieldWrongVersion");
     EXPECT_TRUE(reader->winnerFor(key).has_value());
     EXPECT_FALSE(reader->winnerFor(laterKey).has_value())
-        << "a line stamped 'v': 2 must be skipped by a reader that only knows version 1";
+        << "a line stamped with a future format version must be skipped";
     EXPECT_TRUE(reader->winnerFor(keyFor(graph, suffixedDeviceProperties(500))).has_value())
         << "the good line after the malformed one must still load";
 }
@@ -1162,6 +1169,140 @@ TEST(TestIngestorWinnerCacheStateManager, ALineWithAnOutOfRangeMultiProcessorCou
         << "an out-of-int-range multi_processor_count must be declined, not wrapped";
     EXPECT_TRUE(reader->winnerFor(keyFor(graph, suffixedDeviceProperties(500))).has_value())
         << "the good line after the malformed one must still load";
+}
+
+/// DeviceKey compares the memory properties, so the codec must carry them. A record
+/// persisted for a real device must be served to the key the live device builds -- a
+/// separate DeviceProperties, not the one that was written. Falsifying mutation: drop any
+/// one memory field from encodeWinnerRecordLine()/decodeWinnerRecordLine(); the decoded key
+/// then carries a zero where the live one does not, and the lookup misses.
+TEST(TestIngestorWinnerCacheStateManager, ARecordForARealDeviceIsServedToTheLiveDevicesKey)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("memory_identity");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+
+    {
+        const auto writer = makeNamedStateManager("test:MemoryIdentity");
+        writer->recordWinner(keyFor(graph, suffixedDeviceProperties()),
+                             recordFor(0x41, 1.0),
+                             WinnerWriteCause::FRESH_MISS);
+    }
+
+    const auto liveKey = keyFor(graph, suffixedDeviceProperties());
+    const auto served = makeNamedStateManager("test:MemoryIdentity")->winnerFor(liveKey);
+    ASSERT_TRUE(served.has_value())
+        << "a persisted record must be found again by the device that measured it";
+    EXPECT_EQ(served->front().kernelId, testId(0x41));
+
+    // And the memory fields are part of the identity, not merely tolerated: a board of the
+    // same arch and CU count with different HBM is not served that measurement.
+    auto otherBoard = suffixedDeviceProperties();
+    otherBoard.totalGlobalMem /= 2;
+    EXPECT_FALSE(makeNamedStateManager("test:MemoryIdentity")
+                     ->winnerFor(keyFor(graph, otherBoard))
+                     .has_value());
+}
+
+/// a line in the previous format carries no memory fields. Decoding it with zeros
+/// would hand its ranking to any device whose memory properties are unresolved (all
+/// zero) -- a device it was not measured on. It must miss instead. Falsifying mutation:
+/// accept version 1 and default the absent fields, and the zero-memory lookup below hits.
+TEST(TestIngestorWinnerCacheStateManager, APreviousFormatLineIsAMissNeverAZeroMemoryDevice)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("previous_format");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    DeviceProperties unresolvedMemory;
+    unresolvedMemory.gcnArchName = "gfx942:sramecc+:xnack-";
+    unresolvedMemory.warpSize = 64;
+    unresolvedMemory.multiProcessorCount = 304;
+    const auto zeroMemoryKey = keyFor(graph, unresolvedMemory);
+
+    {
+        // Creates the shard (and its version line) under an unrelated key.
+        const auto writer = makeNamedStateManager("test:PreviousFormat");
+        writer->recordWinner(keyFor(graph, suffixedDeviceProperties()),
+                             recordFor(0x51, 1.0),
+                             WinnerWriteCause::FRESH_MISS);
+    }
+    const auto path = winnerCacheShardPath({"test:PreviousFormat"}, unresolvedMemory.gcnArchName);
+    ASSERT_TRUE(std::filesystem::exists(path));
+    {
+        // Exactly what the previous build wrote: version 1, arch/warp/CU only.
+        auto previous
+            = nlohmann::json::parse(encodeWinnerRecordLine(zeroMemoryKey, recordFor(0x52, 2.0)));
+        previous["v"] = 1;
+        for(const char* field :
+            {"total_global_mem", "memory_bus_width", "memory_clock_rate", "shared_mem_per_block"})
+        {
+            previous["device"].erase(field);
+        }
+        std::ofstream out(path, std::ios::app);
+        out << previous.dump() << "\n";
+    }
+
+    EXPECT_FALSE(makeNamedStateManager("test:PreviousFormat")->winnerFor(zeroMemoryKey).has_value())
+        << "a previous-format line must miss, not decode its absent fields as zero";
+}
+
+/// within the current format every device field is required. A line missing any one
+/// of them is declined rather than decoded with that field zeroed.
+TEST(TestIngestorWinnerCache, ALineMissingAnyDeviceFieldIsDeclined)
+{
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto line
+        = encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties()), recordFor(0x61, 1.0));
+    ASSERT_TRUE(decodeWinnerRecordLine(line).has_value());
+
+    for(const char* field : {"gcn_arch_name",
+                             "warp_size",
+                             "multi_processor_count",
+                             "total_global_mem",
+                             "memory_bus_width",
+                             "memory_clock_rate",
+                             "shared_mem_per_block"})
+    {
+        SCOPED_TRACE(field);
+        auto truncated = nlohmann::json::parse(line);
+        truncated["device"].erase(field);
+        EXPECT_FALSE(decodeWinnerRecordLine(truncated.dump()).has_value());
+    }
+}
+
+/// last-line-wins must hold whatever the cache's capacity. With capacity 2 and the
+/// shard A_old, B, C, A_new, a line-by-line putIfAbsent() over the reversed file admitted
+/// A_new, then C and B evicted it, and A_old -- now absent -- was admitted in its place.
+/// Eviction may cost a miss; it must never serve a superseded ranking. The newest lines are
+/// the ones kept resident, so here A_new is served.
+TEST(TestIngestorWinnerCacheStateManager, AnEvictedNewerLineNeverLetsAnOlderDuplicateBack)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("last_line_wins_bounded");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const EngineIdentity engine{"test:LastLineWinsBounded"};
+    const auto keyA = keyFor(graph, suffixedDeviceProperties(100));
+    const auto keyB = keyFor(graph, suffixedDeviceProperties(200));
+    const auto keyC = keyFor(graph, suffixedDeviceProperties(300));
+
+    {
+        const auto writer = makeIdentifiedStateManager(engine, 2);
+        writer->recordWinner(keyA, recordFor(0x71, 1.0), WinnerWriteCause::FRESH_MISS);
+    }
+    const auto path = winnerCacheShardPath(engine, keyA.device.properties().gcnArchName);
+    ASSERT_TRUE(std::filesystem::exists(path));
+    {
+        std::ofstream out(path, std::ios::app);
+        out << encodeWinnerRecordLine(keyB, recordFor(0x72, 1.0)) << "\n";
+        out << encodeWinnerRecordLine(keyC, recordFor(0x73, 1.0)) << "\n";
+        out << encodeWinnerRecordLine(keyA, recordFor(0x74, 1.0)) << "\n";
+    }
+
+    const auto served = makeIdentifiedStateManager(engine, 2)->winnerFor(keyA);
+    ASSERT_TRUE(served.has_value()) << "the shard's newest lines must be the resident ones";
+    EXPECT_NE(served->front().kernelId, testId(0x71))
+        << "the superseded first line for A was served over the last one";
+    EXPECT_EQ(served->front().kernelId, testId(0x74));
 }
 
 /// A manager built without an engine name has no shard path to compose, so it neither

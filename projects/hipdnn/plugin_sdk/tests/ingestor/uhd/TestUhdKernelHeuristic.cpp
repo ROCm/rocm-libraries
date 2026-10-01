@@ -1350,6 +1350,78 @@ TEST(TestIngestorUhdKernelHeuristic, AZeroCostPredictionDoesNotWinUnderAMinObjec
     EXPECT_DOUBLE_EQ(scored.back().score, 0.0);
 }
 
+TEST(TestIngestorUhdKernelHeuristic, AMetriclessRankerOrdersOnSignedScores)
+{
+    // Regression (S1). RFC 0019 §8.3's positivity applies to a physical score -- a declared
+    // metric, or a transform only a positive target admits. A metric-less `identity` ranker
+    // scores on an ordering scale of its own, where -0.5 beats -2 like any other pair; refusing
+    // both flattened the model's preference into declared order, which here is the opposite.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_metricless_signed");
+    const auto fixture
+        = writeFixture(dir.path(), preferNegativeScores(), "max", {}, /*calibrated=*/false);
+    auto descriptor = modelDescriptor(dir.path(), fixture);
+    descriptor.score.metric.clear();
+
+    const auto heuristic = makeKernelHeuristic(descriptor, {}, KNOBS, FIELDS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+
+    const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(scored.size(), 2U);
+    EXPECT_EQ(scored.front().kernelId, testId(0x02)) << "the model's preference was discarded";
+    EXPECT_DOUBLE_EQ(scored.front().score, -0.5);
+    EXPECT_DOUBLE_EQ(scored.back().score, -2.0);
+
+    // The same scores under a positive-domain transform are out of range again: log1p's
+    // inverse of a negative prediction is below zero, which no target it admits can take.
+    const hipdnn_test_sdk::utilities::ScopedDirectory logDir("uhd_metricless_log1p");
+    const auto logFixture = writeFixture(
+        logDir.path(), preferNegativeScores(), "max", {}, /*calibrated=*/false, "log1p");
+    auto logDescriptor = modelDescriptor(logDir.path(), logFixture);
+    logDescriptor.score.metric.clear();
+    const auto bounded = makeKernelHeuristic(logDescriptor, {}, KNOBS, FIELDS);
+    ASSERT_NE(bounded, nullptr);
+    const auto declared = bounded->rankScored(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(declared.size(), 2U);
+    EXPECT_EQ(declared.front().kernelId, testId(0x01)) << "declared order did not decide";
+    EXPECT_DOUBLE_EQ(declared.front().score, 0.0);
+}
+
+TEST(TestIngestorUhdKernelHeuristic, AModelReadingAListFieldElementIsAdmittedOnTheField)
+{
+    // Regression (S3). A list field's elements are bound as `tile[0]`, `tile[1]`, ... but the
+    // KMD declares, and the UED exposes, `tile`. Admission compared the whole indexed suffix,
+    // so every model reading a list element was refused as ranking on an undeclared axis.
+    const std::vector<nlohmann::json> signature = {"$kernel.tile[1]", "$attention.seqlen"};
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_indexed_kernel_field");
+    const auto fixture = writeFixture(
+        dir.path(), preferLargeTiles(), "max", {}, /*calibrated=*/true, "identity", signature);
+
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture),
+                                               {},
+                                               {"tile"},
+                                               std::unordered_set<std::string>{"tile"});
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    Catalog catalog = catalogAgainstPriority(2048);
+    for(auto& kernel : catalog.entries)
+    {
+        kernel.metadata["tile"]
+            = std::vector<int64_t>{16, std::get<int64_t>(kernel.metadata.at("tile_m"))};
+    }
+
+    const auto scored = heuristic->rankScored(catalog, context);
+    ASSERT_EQ(scored.size(), 2U);
+    EXPECT_EQ(scored.front().kernelId, testId(0x02)) << "the model was refused admission";
+    EXPECT_DOUBLE_EQ(scored.front().score, 9.0);
+}
+
 TEST(TestIngestorUhdKernelHeuristic, ANegativeThroughputIsReportedAsAnErrorNotSwallowed)
 {
     // A model predicting a value its target cannot take is broken, and the runtime's only

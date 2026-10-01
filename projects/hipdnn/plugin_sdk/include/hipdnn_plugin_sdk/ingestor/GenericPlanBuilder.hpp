@@ -669,8 +669,17 @@ public:
     /// @brief Predicts an executable configuration identified by its exposed knobs, in the
     ///        ranking metric @p config carries.
     ///
-    /// Only that metric's own calibrated ranker answers (RFC 0019 §11.4): the default ranker
-    /// may choose kernels for a metric with no ranker, but its number is another metric's.
+    /// The configuration comes from the order source plan build resolves (RFC 0019 §5 step 9):
+    /// a benchmark record covering the full catalog, else the metric's calibrated ranker.
+    /// Answering from the model while a record decides plan build predicted a configuration
+    /// the engine would not serve, with an estimate where a measurement existed.
+    ///
+    /// The value follows the order source. Under a record it is the measured value in the
+    /// requested metric -- the time, or the throughput derived from it and `graph.flops` --
+    /// and a metric the record cannot supply is answered by the calibrated model's estimate
+    /// for the record's configuration. Otherwise only that metric's own calibrated ranker
+    /// answers (RFC 0019 §11.4): the default ranker may choose kernels for a metric with no
+    /// ranker, but its number is another metric's.
     void predictConfiguration(const THandle& handle,
                               const IGraph& graph,
                               const IEngineConfig& config,
@@ -693,21 +702,50 @@ public:
         const auto filtered
             = applyConstraints(catalog, executionSettings.ingestorSettings, context);
         std::string modelId;
-        // Both halves of the catalog go in: the full one is the basis the ranking is decided
-        // on, the filtered one is what the answer may name. Passing only the filtered set --
-        // which is what this did -- ranked the pinned subset fresh and bypassed the cached
-        // full-catalog order entirely, so a pin could reorder two candidates relative to each
-        // other and a scorer that threw only on an excluded candidate degraded the unpinned
-        // prediction while the pinned one scored normally. RFC 0019 §9.2 and §5 step 8; see
-        // KernelIngestorStateManager::calibratedRanking().
-        const auto ranking = _stateManager.calibratedRanking(catalog, filtered, context, modelId);
+        // Both halves of the catalog go in: the full one is the basis the order is decided
+        // on, the filtered one is what the answer may name. Coverage is the full catalog's
+        // question exactly as in sortedCatalog(), and the calibrated ranking is the full
+        // catalog's ranking restricted (KernelIngestorStateManager::calibratedRanking()), so
+        // a pin can neither change the order source nor reorder two candidates. RFC 0019
+        // §9.2 and §5 steps 8 and 9.
+        const auto measured = _stateManager.measuredOrder(catalog.entries, context);
+        std::vector<ScoredKernel> ranking;
+        if(measured.has_value())
+        {
+            bool measuresMetric = false;
+            ranking = measuredRanking(measured->record, filtered, metric, context, measuresMetric);
+            if(!measuresMetric)
+            {
+                // A metric the record does not measure is the model's to answer -- for the
+                // record's configurations, never by choosing among them.
+                const auto estimates
+                    = _stateManager.calibratedRanking(catalog, filtered, context, modelId);
+                for(auto& entry : ranking)
+                {
+                    const auto estimate
+                        = std::find_if(estimates.begin(), estimates.end(), [&](const auto& scored) {
+                              return scored.kernelId == entry.kernelId;
+                          });
+                    entry.score = estimate == estimates.end() ? 0.0 : estimate->score;
+                }
+            }
+        }
+        else
+        {
+            ranking = _stateManager.calibratedRanking(catalog, filtered, context, modelId);
+        }
         catalog.entries = filtered;
         result.reason
             = "No calibrated '" + result.metric + "' configuration prediction is available";
         for(const auto& scored : ranking)
         {
-            if(scored.score == 0.0
-               || !hipdnn_data_sdk::utilities::isValidMetricValue(metric, scored.score))
+            const bool valued
+                = scored.score != 0.0
+                  && hipdnn_data_sdk::utilities::isValidMetricValue(metric, scored.score);
+            // Under a record the order is decided, so a candidate without a value is still the
+            // configuration plan build would serve: it is answered UNAVAILABLE below rather
+            // than passed over for one the engine would not run.
+            if(!valued && !measured.has_value())
             {
                 continue;
             }
@@ -743,6 +781,15 @@ public:
                 // prediction must refer to a candidate that can actually be built.
                 GenericPlan<THandle> prepared(
                     _stateManager.getDispatchDetails(*selected), context, catalog.bound);
+                if(!valued)
+                {
+                    // Only reachable under a record: this is the configuration plan build
+                    // serves, and nothing can say what it is worth in this metric.
+                    result.reason = "The benchmarked configuration has no '" + result.metric
+                                    + "' value: the record does not measure it and no "
+                                      "calibrated model estimates it";
+                    return;
+                }
                 auto exact = config.isValid()
                                  ? std::unique_ptr<EngineConfigT>(config.getEngineConfig().UnPack())
                                  : std::make_unique<EngineConfigT>();
@@ -767,6 +814,7 @@ public:
                 }
                 result.engine_config = std::move(exact);
                 result.value = scored.score;
+                // Empty when the record supplied the value: no model produced the number.
                 result.uhd_id = modelId;
                 result.status = PredictionStatus::AVAILABLE;
                 result.reason.clear();
@@ -774,7 +822,14 @@ public:
                 {
                     auto binding = nlohmann::json::parse(result.binding_json);
                     binding["role"] = "sort_kernel_catalog";
-                    binding["uhd_id"] = modelId;
+                    if(modelId.empty())
+                    {
+                        binding.erase("uhd_id");
+                    }
+                    else
+                    {
+                        binding["uhd_id"] = modelId;
+                    }
                     result.binding_json = binding.dump();
                 }
                 return;
@@ -814,6 +869,62 @@ public:
     }
 
 private:
+    /// @p record's order over @p filtered, each kernel carrying its measured value in
+    /// @p metric: the time itself, or for `tflops` the throughput `graph.flops / (ms * 1e9)`
+    /// -- the label uhd_gen trains a tflops model on, so a measurement and an estimate are
+    /// the same quantity (RFC 0019 §5 step 9).
+    /// @param measuresMetric Set false when the record cannot supply @p metric -- a metric it
+    ///        does not time, or a throughput for a graph whose work is unknown -- in which
+    ///        case every value is 0 and only the order is the record's.
+    static std::vector<ScoredKernel>
+        measuredRanking(const WinnerRecord& record,
+                        const std::vector<KernelDefinition>& filtered,
+                        const hipdnn_data_sdk::utilities::RankingMetric& metric,
+                        const MatchContext& context,
+                        bool& measuresMetric)
+    {
+        std::optional<double> flops;
+        if(metric.name == "tflops")
+        {
+            const auto problem
+                = heuristics::problemFeatures(context.graph, context.deviceProperties);
+            if(const auto* value = problem.getContext().find("graph.flops"))
+            {
+                if(const auto* known = std::get_if<double>(value))
+                {
+                    flops = *known;
+                }
+            }
+        }
+        measuresMetric = metric.name == "time" || flops.has_value();
+
+        std::vector<ScoredKernel> ranking;
+        ranking.reserve(filtered.size());
+        for(const auto& entry : record)
+        {
+            const bool admitted
+                = std::any_of(filtered.begin(), filtered.end(), [&entry](const auto& kernel) {
+                      return kernel.kernelId == entry.kernelId && kernel.packId == entry.packId
+                             && kernel.dispatchId == entry.dispatchId;
+                  });
+            if(!admitted)
+            {
+                continue;
+            }
+            double value = 0.0;
+            if(metric.name == "time")
+            {
+                value = entry.timeMs;
+            }
+            else if(flops.has_value() && entry.timeMs > 0.0)
+            {
+                value = *flops / (entry.timeMs * 1e9);
+            }
+            ranking.push_back({entry.kernelId, value});
+        }
+        return ranking;
+    }
+
     std::vector<KernelDefinition> applyConstraints(const Catalog& catalog,
                                                    const IngestorSettings& settings,
                                                    const MatchContext& context) const

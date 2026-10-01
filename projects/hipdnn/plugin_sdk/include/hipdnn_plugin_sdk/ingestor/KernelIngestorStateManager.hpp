@@ -337,9 +337,9 @@ public:
             return catalog;
         }
 
-        if(auto ordered = orderFromWinnerRecord(catalog.entries, context); ordered.has_value())
+        if(auto measured = measuredOrder(catalog.entries, context); measured.has_value())
         {
-            catalog.entries = std::move(*ordered);
+            catalog.entries = std::move(measured->entries);
             catalog.orderedFromRecord = true;
         }
         else
@@ -359,6 +359,57 @@ public:
         }
 
         return catalog;
+    }
+
+    /// What a covering benchmark record says about @p entries: its measured order over them,
+    /// and the record itself, which carries the measured times.
+    struct MeasuredOrder
+    {
+        std::vector<KernelDefinition> entries;
+        WinnerRecord record;
+    };
+
+    /// The measured order for @p context's graph and device, or nullopt when no record
+    /// fully covers @p entries and the caller must rank as it always has. The one
+    /// order-source decision shared by plan build (sortedCatalog()) and configuration
+    /// prediction, so the two cannot disagree about whether measurement outranks estimate.
+    ///
+    /// Full coverage is required: a partial record cannot order the rest, and
+    /// interleaving measured with unmeasured entries would not be a valid order.
+    std::optional<MeasuredOrder> measuredOrder(const std::vector<KernelDefinition>& entries,
+                                               const MatchContext& context) const
+    {
+        // Cheap rejection first: mightHaveWinnerFor() accounts for an on-disk shard this
+        // process has not read yet, unlike a bare winnerCacheSize() check.
+        if(entries.empty() || !mightHaveWinnerFor(context.deviceProperties.gcnArchName))
+        {
+            return std::nullopt;
+        }
+
+        const WinnerKey key{
+            hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{context.graph},
+            DeviceKey{context.deviceProperties}};
+        if(!key.graph.isUsable())
+        {
+            // No bytes to key on; such graphs never match each other either.
+            return std::nullopt;
+        }
+
+        auto record = winnerFor(key);
+        if(!record.has_value())
+        {
+            return std::nullopt;
+        }
+
+        auto ordered = orderIfFullyCovered(*record, entries);
+        if(!ordered.has_value())
+        {
+            return std::nullopt;
+        }
+        HIPDNN_PLUGIN_LOG_INFO("ingestor: ordered " << ordered->size()
+                                                    << " catalog entries from a benchmarked "
+                                                       "record; heuristic ranking skipped");
+        return MeasuredOrder{std::move(*ordered), std::move(*record)};
     }
 
     /// Records @p record under @p key. Whether an existing on-disk ranking for @p key is
@@ -969,47 +1020,6 @@ private:
         return true;
     }
 
-    /// The measured order for @p context's graph and device, or nullopt when no record
-    /// covers @p entries and the caller must rank as it always has.
-    ///
-    /// Full coverage is required: a partial record cannot order the rest, and
-    /// interleaving measured with unmeasured entries would not be a valid order.
-    std::optional<std::vector<KernelDefinition>>
-        orderFromWinnerRecord(const std::vector<KernelDefinition>& entries,
-                              const MatchContext& context) const
-    {
-        // Cheap rejection first: mightHaveWinnerFor() accounts for an on-disk shard this
-        // process has not read yet, unlike a bare winnerCacheSize() check.
-        if(entries.empty() || !mightHaveWinnerFor(context.deviceProperties.gcnArchName))
-        {
-            return std::nullopt;
-        }
-
-        const WinnerKey key{
-            hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{context.graph},
-            DeviceKey{context.deviceProperties}};
-        if(!key.graph.isUsable())
-        {
-            // No bytes to key on; such graphs never match each other either.
-            return std::nullopt;
-        }
-
-        const auto record = winnerFor(key);
-        if(!record.has_value())
-        {
-            return std::nullopt;
-        }
-
-        auto ordered = orderIfFullyCovered(*record, entries);
-        if(ordered.has_value())
-        {
-            HIPDNN_PLUGIN_LOG_INFO("ingestor: ordered " << ordered->size()
-                                                        << " catalog entries from a benchmarked "
-                                                           "record; heuristic ranking skipped");
-        }
-        return ordered;
-    }
-
     /// Loads the on-disk shard covering @p gcnArchName into `_winnerCache` once, tracked
     /// by `_loadedWinnerShards`. File I/O runs with `_winnerCacheMutex` UNHELD, so a slow
     /// disk read never blocks an unrelated call.
@@ -1089,9 +1099,16 @@ private:
             return;
         }
 
-        // Walk in reverse and never overwrite: within the file the last line for a key
-        // wins, and a key already in memory was put there by this process's own
-        // measurement, which is newer than anything the file can offer.
+        // Last line wins within the file, and a key already in memory was put there by this
+        // process's own measurement, which is newer than anything the file can offer. Both
+        // rules are resolved by mergeAbsent() as one atomic step over the whole shard,
+        // independently of the cache's capacity: inserting line by line with putIfAbsent()
+        // let a newer line be evicted by later inserts and then an OLDER duplicate of the
+        // same key be admitted in its place, and let a racing recordWinner() be evicted and
+        // overwritten by its own stale disk record. Eviction may still cost a miss; it can
+        // no longer resurrect a superseded ranking.
+        std::vector<std::pair<WinnerKey, WinnerRecord>> newestFirst;
+        newestFirst.reserve(decoded.size());
         for(auto it = decoded.rbegin(); it != decoded.rend(); ++it)
         {
             if(!it->first.graph.isUsable())
@@ -1102,13 +1119,9 @@ private:
                 // recordWinner() rejects these on the write side too.
                 continue;
             }
-            // A shard holding more lines than the cache's capacity keeps the LAST ones it
-            // decodes, which are the file's EARLIEST: reverse iteration means capacity is
-            // spent on whichever lines happen to come first. That is arbitrary but never
-            // wrong -- an evicted key simply misses and is re-measured, and the shard still
-            // holds every line for a later process to read.
-            _winnerCache.putIfAbsent(it->first, std::move(it->second));
+            newestFirst.push_back(std::move(*it));
         }
+        _winnerCache.mergeAbsent(std::move(newestFirst));
     }
 
     /// Write-back: re-reads @p key's shard under its LineStore lock, then applies

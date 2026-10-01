@@ -5,13 +5,17 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <cstddef>
+#include <functional>
 #include <list>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace hipdnn_plugin_sdk::ingestor
 {
@@ -22,6 +26,8 @@ template <typename Key, typename Value, typename Hash = std::hash<Key>>
 class LruCache
 {
 public:
+    using Entry = std::pair<Key, Value>;
+
     /// @throws std::invalid_argument if @p capacity is zero.
     explicit LruCache(size_t capacity)
         : _capacity(capacity)
@@ -93,6 +99,48 @@ public:
         return true;
     }
 
+    /// Merges a batch whose entries are ordered newest-first, under ONE hold of the lock:
+    /// a key already present is left alone (whatever is in memory is newer than the batch),
+    /// and of several batch entries for one key only the first is taken. Which keys are
+    /// absent is decided before anything is inserted, so an entry evicted by the batch
+    /// itself can never be refilled by an older value later in that batch -- the failure a
+    /// putIfAbsent() loop has once the batch outgrows the capacity.
+    ///
+    /// The first admitted entry ends up most-recently-used, so when the batch exceeds the
+    /// capacity it is the newest entries that stay resident.
+    void mergeAbsent(std::vector<Entry> newestFirst)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+
+        // References into the batch, which does not move while they live: the keys are
+        // compared, never stored.
+        std::unordered_set<std::reference_wrapper<const Key>, Hash, std::equal_to<Key>> seen;
+        std::vector<Entry*> admitted;
+        admitted.reserve(newestFirst.size());
+        for(auto& entry : newestFirst)
+        {
+            if(_index.find(entry.first) != _index.end() || !seen.insert(entry.first).second)
+            {
+                continue;
+            }
+            admitted.push_back(&entry);
+        }
+
+        // Anything past the first `_capacity` admitted entries would be evicted by the newer
+        // ones inserted after it, so it is never inserted at all.
+        const auto resident = std::min(admitted.size(), _capacity);
+        for(auto index = resident; index-- > 0;)
+        {
+            _order.emplace_front(std::move(*admitted[index]));
+            _index[_order.front().first] = _order.begin();
+            if(_index.size() > _capacity)
+            {
+                _index.erase(_order.back().first);
+                _order.pop_back();
+            }
+        }
+    }
+
     size_t size() const
     {
         const std::lock_guard<std::mutex> lock(_mutex);
@@ -105,8 +153,6 @@ public:
     }
 
 private:
-    using Entry = std::pair<Key, Value>;
-
     mutable std::mutex _mutex;
     size_t _capacity;
     std::list<Entry> _order; ///< Most-recently-used first.

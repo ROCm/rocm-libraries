@@ -1244,6 +1244,69 @@ TEST(TestTreeDataAdapterGrouped, TheSurvivingRowsAreScoredByTheirOwnGroupsTrees)
     EXPECT_DOUBLE_EQ(scores[1], 100.0);
 }
 
+TEST(TestTreeDataAdapterGrouped, EqualGroupStandingsResolveIndependentlyOfRowOrder)
+{
+    // Regression (S4a). Layer 1 kept the first row reaching the best score, so two groups
+    // scoring alike were decided by the order the catalog's rows arrived in -- and rank()'s
+    // priority/id tie-break could not repair it, since the other group was already discarded.
+    GbdtModelBuilder builder;
+    builder.setNumFeatures(2)
+        .setFeaturesHash("sha256:grouped")
+        .setGroupByFeatureIndex(0)
+        .addTree(makeLeafTree(5.0));
+    builder.addGroup(0.0, {makeLeafTree(100.0)});
+    builder.addGroup(1.0, {makeLeafTree(200.0)});
+    const auto buffer = builder.build();
+    const auto adapter
+        = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "sha256:grouped");
+    ASSERT_NE(adapter, nullptr);
+
+    const auto forward = adapter->scoreBatch({{1.0, 0.0}, {0.0, 0.0}});
+    const auto reversed = adapter->scoreBatch({{0.0, 0.0}, {1.0, 0.0}});
+    ASSERT_EQ(forward.size(), 2u);
+    ASSERT_EQ(reversed.size(), 2u);
+    // The smaller group value wins the tie, whichever row came first.
+    EXPECT_DOUBLE_EQ(forward[1], 100.0);
+    EXPECT_EQ(forward[0], -std::numeric_limits<double>::infinity());
+    EXPECT_DOUBLE_EQ(reversed[0], 100.0);
+    EXPECT_EQ(reversed[1], -std::numeric_limits<double>::infinity());
+}
+
+TEST(TestTreeDataAdapterGrouped, ALayerOneScoreOutsideItsTargetCannotChooseTheGroup)
+{
+    // Regression (S4b). A `time` model's layer 1 predicting a negative time for group 0.0 won
+    // the `min` comparison outright, and the group's valid layer-2 score then hid that the
+    // decision rested on a value no time can take. RFC 0019 §8.3 refuses that score for a
+    // candidate; it must not decide a group either.
+    GbdtModelBuilder builder;
+    builder.setNumFeatures(2).setFeaturesHash("sha256:grouped").setGroupByFeatureIndex(0);
+    GbdtModelBuilder::TreeSpec layerOne;
+    layerOne.featureIndices = {0, 0, 0};
+    layerOne.thresholds = {0.5, 0.0, 0.0};
+    layerOne.leftChildren = {1, -1, -1};
+    layerOne.rightChildren = {2, -1, -1};
+    layerOne.leafValues = {0.0, -1.0, 9.0}; // group 0.0: -1 ms; group 1.0: 9 ms
+    layerOne.defaultLeft = {1, 1, 1};
+    builder.addTree(layerOne);
+    builder.addGroup(0.0, {makeLeafTree(100.0)});
+    builder.addGroup(1.0, {makeLeafTree(200.0)});
+    const auto buffer = builder.build();
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(),
+                                                         buffer.size(),
+                                                         "sha256:grouped",
+                                                         /*expectedModelHash=*/"",
+                                                         "min",
+                                                         "identity",
+                                                         "time");
+    ASSERT_NE(adapter, nullptr);
+
+    const auto scores = adapter->scoreBatch({{0.0, 0.0}, {1.0, 0.0}});
+    ASSERT_EQ(scores.size(), 2u);
+    EXPECT_EQ(scores[0], -std::numeric_limits<double>::infinity())
+        << "a negative time chose the group";
+    EXPECT_DOUBLE_EQ(scores[1], 200.0);
+}
+
 TEST(TestTreeDataAdapterGrouped, ScoreStillAnswersWithLayerOne)
 {
     // A single row cannot express a group decision, so score() gives the coarse answer

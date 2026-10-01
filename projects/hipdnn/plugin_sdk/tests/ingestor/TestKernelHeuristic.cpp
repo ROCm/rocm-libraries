@@ -421,6 +421,39 @@ TEST(TestIngestorKernelHeuristic, ACalibratedNativeTimeScorerReportsAscendingMil
     EXPECT_EQ(modelId, toString(HEURISTIC_ID));
 }
 
+/// Regression (S2). A direct scorer's value was reported in its transform's space and the
+/// inverse applied afterwards, past a zero test meant for "no measurement" -- so a `log` time
+/// scorer pricing a kernel at exactly 1 ms (log 1 = 0) read as unmeasured, and the whole
+/// calibrated ranking was withheld because its winner looked unpriced.
+TEST(TestIngestorKernelHeuristic, ATransformedZeroIsAMeasurementNotItsAbsence)
+{
+    constexpr const char* LOG_MILLISECONDS_SYMBOL = "hipdnn.kernel_ingestor.test.log_milliseconds";
+    ScoreRegistry::registerSymbol(
+        LOG_MILLISECONDS_SYMBOL,
+        +[](const MatchContext&, const BoundTokens&, const KernelDefinition& kernel) {
+            return std::log(kernel.getIntMetadata(BLOCK_SIZE) == 256 ? 1.0 : 10.0);
+        });
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties, "time"};
+
+    Catalog catalog;
+    catalog.entries = {makeDefinition(testId(0x01), 64), makeDefinition(testId(0x02), 256)};
+
+    auto descriptor = millisecondsDescriptor("time");
+    descriptor.nativeSymbol = LOG_MILLISECONDS_SYMBOL;
+    descriptor.score.transform = "log";
+    const auto heuristic = makeKernelHeuristic(descriptor);
+    std::string modelId;
+    const auto calibrated = heuristic->calibratedRanking(catalog, context, modelId);
+
+    ASSERT_EQ(calibrated.size(), 2U) << "a 1 ms winner was taken for an unmeasured one";
+    EXPECT_EQ(calibrated.front().kernelId, testId(0x02));
+    EXPECT_DOUBLE_EQ(calibrated.front().score, 1.0);
+    EXPECT_NEAR(calibrated.back().score, 10.0, 1e-12);
+    ScoreRegistry::unregisterSymbol(LOG_MILLISECONDS_SYMBOL);
+}
+
 /// Under `min` a zero cost is no measurement. Negated it would be -0, above every real
 /// candidate's negated cost, so the one kernel the scorer could not price would win.
 TEST(TestIngestorKernelHeuristic, AZeroCostDoesNotWinUnderANativeMinScorer)

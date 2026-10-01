@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <atomic>
 #include <memory>
 #include <stdexcept>
@@ -271,6 +272,8 @@ TEST(TestIngestorGenericEngine, BrokenEngineModelDoesNotRemoveGraphApplicability
     model.engineName = descriptor.name;
     model.role = "predict_engine";
     model.arch = "default";
+    // Recorded and matching, so what refuses this model is its kernel feature, not provenance.
+    model.trainedAgainstSelectorRevision = "selector-test";
     model.trainedAgainstJson
         = {{"ued", {{"id", "20112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}}},
            {"kmd", {{"id", "30112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}}},
@@ -293,6 +296,74 @@ TEST(TestIngestorGenericEngine, BrokenEngineModelDoesNotRemoveGraphApplicability
     EXPECT_EQ(evaluated.status, PredictionStatus::INVALID);
     EXPECT_EQ(evaluated.metric, "tflops") << "a config naming no metric asks in the default";
     EXPECT_TRUE(engine.isApplicable(handle, graph));
+}
+
+/// The L1 test scorer: its single feature, `device.cu_count` (304 on the stub device).
+double firstL1Feature(const double* values, size_t count)
+{
+    return count == 0 ? 0.0 : values[0];
+}
+
+/// Regression (#4, C3). A descriptor-backed engine bound its `predict_engine` model with no
+/// selector check, so an estimate trained against another build of the engine -- other
+/// rankers, packs, kernels -- was answered as this one's and competed across engines. The
+/// opaque-engine path always refused it; this pins the descriptor path to the same rule.
+TEST(TestIngestorGenericEngine, AnEngineModelAnswersOnlyForTheSelectorItWasTrainedAgainst)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    constexpr const char* L1_SYMBOL = "hipdnn.kernel_ingestor.test.generic_engine.l1_cu_count";
+    hipdnn_plugin_sdk::uhd::NativeScorerRegistry::registerSymbol(L1_SYMBOL, firstL1Feature);
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+    const std::vector<nlohmann::json> signature = {"$device.cu_count"};
+    HeuristicDescriptor model;
+    model.id = testId(0xA5);
+    model.name = "engine throughput";
+    model.adapter = UhdAdapter::NATIVE;
+    model.nativeSymbol = L1_SYMBOL;
+    model.featuresSignature = signature;
+    model.featuresHash = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(signature);
+    model.objective = "max";
+    model.score = {"tflops", true, "identity"};
+    const auto evaluate = [&](const std::string& trainedAgainst) {
+        model.trainedAgainstSelectorRevision = trainedAgainst;
+        model.trainedAgainstJson
+            = {{"ued", {{"id", "20112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}}},
+               {"kmd", {{"id", "30112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}}},
+               {"umd", nlohmann::json::array()}};
+        if(!trainedAgainst.empty())
+        {
+            model.trainedAgainstJson["selector_revision"] = trainedAgainst;
+        }
+        const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}),
+                                makeStubStateManager(),
+                                resolver,
+                                {{"tflops", {{"default", model}}}},
+                                {},
+                                "selector-new");
+        StubHandle handle;
+        const TestGraph graph(makeGraphId(0x6C));
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(nullptr, 0);
+        return engine.getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
+    };
+
+    const auto current = evaluate("selector-new");
+    EXPECT_EQ(current.status, PredictionStatus::AVAILABLE) << current.reason;
+    EXPECT_DOUBLE_EQ(current.value, 304.0);
+
+    // Wrong build, not a bad model: UNAVAILABLE, naming both revisions.
+    const auto stale = evaluate("selector-old");
+    EXPECT_EQ(stale.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_NE(stale.reason.find("selector-old"), std::string::npos) << stale.reason;
+    EXPECT_NE(stale.reason.find("selector-new"), std::string::npos) << stale.reason;
+    EXPECT_DOUBLE_EQ(stale.value, 0.0);
+
+    // Nothing to compare against is a contract failure, as on the opaque-engine path.
+    const auto unrecorded = evaluate("");
+    EXPECT_EQ(unrecorded.status, PredictionStatus::INVALID);
+    EXPECT_NE(unrecorded.reason.find("selector_revision"), std::string::npos) << unrecorded.reason;
+
+    hipdnn_plugin_sdk::uhd::NativeScorerRegistry::unregisterSymbol(L1_SYMBOL);
 }
 
 /// An engine config as the backend stamps one: no knobs, only the ranking metric.
@@ -442,6 +513,122 @@ INSTANTIATE_TEST_SUITE_P(KnobTuples,
                          ::testing::Values(ConfigurationCatalog::SINGLETON,
                                            ConfigurationCatalog::DISTINCT_KNOBS,
                                            ConfigurationCatalog::AMBIGUOUS_KNOBS));
+
+/// Regression (#5, RFC 0019 §5 step 9). Plan build orders the catalog from a benchmark
+/// record covering it, but configuration prediction always asked the calibrated model -- so
+/// it pinned the model's favourite, a kernel plan build would not serve, and reported an
+/// estimate where a measurement existed. Here the model prefers K128 and the record measured
+/// K64 at 1 ms against K128's 2 ms: the prediction must pin K64 and report the measurement.
+TEST(TestIngestorGenericEngine, ACoveringRecordDecidesTheConfigurationPredictionAndItsValue)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+    const StubWorkspaceHandler handler;
+    const ScopedDispatchRegistration<StubHandle> dispatch("hipdnn.kernel_ingestor.test.dispatch",
+                                                          handler);
+    MetadataSchema schema;
+    schema.id = SCHEMA_ID;
+    schema.fields = {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
+                     {DTYPE, MetadataType::STRING, std::nullopt}};
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    pack.kernels = {makeTestKernel(testId(0x64), "kernel_64_float", 64, "FLOAT"),
+                    makeTestKernel(testId(0x65), "kernel_128_float", 128, "FLOAT")};
+    HeuristicDescriptor model;
+    model.id = HEURISTIC_ID;
+    model.adapter = UhdAdapter::NATIVE;
+    model.nativeSymbol = SCORE_SYMBOL; // the block size: K128 scores 128 tflops, K64 64
+    model.score = {"tflops", true, "identity"};
+    auto ranker = UhdKernelHeuristic::tryCreate(model, "calibrated configuration", {BLOCK_SIZE});
+    ASSERT_NE(ranker, nullptr);
+    auto owned = std::make_unique<KernelIngestorStateManager<StubHandle>>(
+        std::move(schema),
+        std::vector<MatchDescriptor>{},
+        makeStubDispatches(),
+        std::vector<KernelDescriptorPack>{std::move(pack)},
+        std::move(ranker),
+        GRAPH_MATCH_SYMBOL);
+    auto& manager = *owned;
+    const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), std::move(owned), resolver);
+    StubHandle handle;
+    const auto properties = testDeviceProperties();
+
+    // K64 measured at 1 ms, K128 at 2 ms, covering the whole catalog.
+    const auto measure = [&](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+        WinnerRecord record;
+        for(const auto& kernel : manager.unsortedDefinitions(MatchContext{graph, 0, properties}))
+        {
+            record.push_back({kernel.kernelId,
+                              kernel.packId,
+                              kernel.dispatchId,
+                              kernel.getIntMetadata(BLOCK_SIZE) == 64 ? 1.0 : 2.0});
+        }
+        std::sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.timeMs < rhs.timeMs;
+        });
+        ASSERT_EQ(record.size(), 2U);
+        manager.recordWinner(
+            WinnerKey{hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{graph},
+                      DeviceKey{properties}},
+            record,
+            WinnerWriteCause::FRESH_MISS);
+    };
+    const auto predict = [&](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                             const std::string& metric) {
+        const auto buffer = configWithMetric(metric);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
+            buffer.GetBufferPointer(), buffer.GetSize());
+        return engine.getPrediction(
+            handle, graph, config, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, true);
+    };
+    // The kernel a predicted configuration replays to.
+    const auto pinned = [&](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                            const EnginePredictionT& prediction) {
+        flatbuffers::FlatBufferBuilder serialized;
+        serialized.Finish(EngineConfig::Pack(serialized, prediction.engine_config.get()));
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper selected(
+            serialized.GetBufferPointer(), serialized.GetSize());
+        hipdnnPluginConstData_t details{};
+        engine.enumerateCandidates(handle, graph, selected, 0, 10, details);
+        const auto* candidates = GetEngineDetails(details.ptr)->candidate_page()->candidates();
+        return candidates->size() == 1 ? candidates->Get(0)->id()->str() : std::string();
+    };
+
+    // Time is what the record measures, so it answers -- and no model produced the number.
+    const TestGraph timed(makeGraphId(0x6D));
+    measure(timed);
+    const auto inTime = predict(timed, "time");
+    ASSERT_EQ(inTime.status, PredictionStatus::AVAILABLE) << inTime.reason;
+    ASSERT_NE(inTime.engine_config, nullptr);
+    EXPECT_EQ(pinned(timed, inTime), toString(testId(0x64)));
+    EXPECT_DOUBLE_EQ(inTime.value, 1.0);
+    EXPECT_TRUE(inTime.uhd_id.empty()) << "a measured value was attributed to a model";
+
+    // Throughput is derived from the measured time and the graph's work: 2*1024^3 flops in
+    // 1 ms. The model's 128 for K128 is never consulted.
+    const MatmulTestGraph matmul(1024, 1024, 1024);
+    measure(matmul.graph());
+    const auto inTflops = predict(matmul.graph(), "tflops");
+    ASSERT_EQ(inTflops.status, PredictionStatus::AVAILABLE) << inTflops.reason;
+    ASSERT_NE(inTflops.engine_config, nullptr);
+    EXPECT_EQ(pinned(matmul.graph(), inTflops), toString(testId(0x64)));
+    EXPECT_DOUBLE_EQ(inTflops.value, 2.0 * 1024 * 1024 * 1024 / 1e9);
+    EXPECT_TRUE(inTflops.uhd_id.empty());
+
+    // A graph with no published work cannot turn a time into a throughput: the record still
+    // decides the configuration, and the model answers what that configuration is worth.
+    const TestGraph unknownWork(makeGraphId(0x6E));
+    measure(unknownWork);
+    const auto estimated = predict(unknownWork, "tflops");
+    ASSERT_EQ(estimated.status, PredictionStatus::AVAILABLE) << estimated.reason;
+    ASSERT_NE(estimated.engine_config, nullptr);
+    EXPECT_EQ(pinned(unknownWork, estimated), toString(testId(0x64)));
+    EXPECT_DOUBLE_EQ(estimated.value, 64.0);
+    EXPECT_EQ(estimated.uhd_id, toString(HEURISTIC_ID));
+}
 
 /// Regression (R3). A candidate's knob tuple carries ordinals for non-integer knobs, but the
 /// uniqueness check compared each kernel's metadata as a raw int64_t -- so a string knob matched

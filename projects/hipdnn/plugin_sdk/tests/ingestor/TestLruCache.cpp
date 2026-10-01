@@ -6,6 +6,8 @@
 #include <functional>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -161,6 +163,47 @@ TEST(TestIngestorLruCache, PutIfAbsentRefreshesRecencyOnAKeyItDidNotWrite)
 
     EXPECT_TRUE(cache.get(1).has_value());
     EXPECT_FALSE(cache.get(2).has_value());
+}
+
+using Batch = std::vector<std::pair<int, std::string>>;
+
+/// The failure a putIfAbsent() loop has once a batch outgrows the capacity: the newer value
+/// for key 1 is evicted by later inserts, key 1 is absent again, and its older duplicate
+/// gets in. A miss is acceptable; the older value never is.
+TEST(TestIngestorLruCache, MergeAbsentNeverAdmitsAnOlderDuplicate)
+{
+    LruCache<int, std::string> cache(2);
+
+    cache.mergeAbsent(Batch{{1, "newer"}, {3, "three"}, {2, "two"}, {1, "older"}});
+
+    const auto found = cache.get(1);
+    ASSERT_TRUE(found.has_value()) << "the newest entries are the resident ones";
+    EXPECT_EQ(*found, "newer");
+}
+
+/// A key already cached is newer than anything in the batch, and stays so even when the
+/// batch's own inserts evict it: it may go missing, it is never replaced by the batch's.
+TEST(TestIngestorLruCache, MergeAbsentNeverReplacesAKeyThatWasPresent)
+{
+    LruCache<int, std::string> cache(2);
+    cache.put(1, "in memory");
+
+    cache.mergeAbsent(Batch{{2, "two"}, {3, "three"}, {1, "from batch"}});
+
+    const auto found = cache.get(1);
+    EXPECT_TRUE(!found.has_value() || *found == "in memory");
+}
+
+TEST(TestIngestorLruCache, MergeAbsentKeepsTheEarliestBatchEntriesWhenItOverflows)
+{
+    LruCache<int, std::string> cache(2);
+
+    cache.mergeAbsent(Batch{{1, "one"}, {2, "two"}, {3, "three"}});
+
+    EXPECT_EQ(cache.size(), 2U);
+    EXPECT_TRUE(cache.get(1).has_value());
+    EXPECT_TRUE(cache.get(2).has_value());
+    EXPECT_FALSE(cache.get(3).has_value());
 }
 
 } // namespace

@@ -185,10 +185,10 @@ inline std::unordered_set<std::string> kernelAxesOf(const uhd::FeatureExtractor&
     std::unordered_set<std::string> axes;
     for(const auto& variable : extractor.getVariableRefs())
     {
-        constexpr std::string_view PREFIX = "$kernel.";
-        if(variable.rfind(PREFIX, 0) == 0)
+        // The declared field, not the indexed element: `$kernel.tile[0]` ranks on knob `tile`.
+        if(auto field = uhd::FeatureExtractor::kernelFieldOf(variable))
         {
-            axes.insert(variable.substr(PREFIX.size()));
+            axes.insert(std::move(*field));
         }
     }
     return axes;
@@ -287,7 +287,8 @@ public:
                         = std::make_shared<NativeKernelHeuristic>(descriptor.nativeSymbol,
                                                                   describedBy,
                                                                   config.objective,
-                                                                  config.scoreTransform);
+                                                                  config.scoreTransform,
+                                                                  config.scoreMetric);
                 }
                 built->_config = std::move(config);
                 built->_hasDefaultModel = true;
@@ -557,15 +558,12 @@ public:
         auto ranking = rankWith(catalog, context);
         for(auto& candidate : ranking)
         {
-            // Every ranker here reports a score oriented so higher wins; undoing the
-            // orientation recovers the physical value, and a direct scorer's transform is
-            // inverted after it. 0 is the no-measurement sentinel either way, and stays +0
+            // Every ranker here reports the recovered score oriented so higher wins -- a direct
+            // scorer inverts its transform itself -- so undoing the orientation recovers the
+            // physical value. A calibrated score names a metric, so it is physical and only a
+            // positive value was admitted: 0 is the no-measurement sentinel, and stays +0
             // rather than becoming -0 under a `min` objective.
-            const double unoriented = _objectiveSign * candidate.score;
-            candidate.score
-                = candidate.score == 0.0 ? 0.0
-                  : _direct ? uhd::score_transform::applyInverse(unoriented, _config.scoreTransform)
-                            : unoriented;
+            candidate.score = candidate.score == 0.0 ? 0.0 : _objectiveSign * candidate.score;
         }
         // Degraded rankings use zero sentinels, never available physical estimates.
         if(ranking.empty() || ranking.front().score == 0.0
@@ -1118,6 +1116,8 @@ private:
         , _adapter(std::move(adapter))
         , _extractor(std::move(extractor))
         , _objectiveSign(objectiveSignOf(_config.objective))
+        , _positiveRequired(
+              uhd::score_transform::isPhysicalScore(_config.scoreMetric, _config.scoreTransform))
         , _describedBy(std::move(describedBy))
         , _hasDefaultModel(true)
     {
@@ -1156,12 +1156,14 @@ private:
     {
         const double recovered = uhd::score_transform::applyInverse(raw, _config.scoreTransform);
 
-        // `recovered` is a physical quantity before any orientation is applied: throughput for
-        // a calibrated model, and a cost -- a time -- for the `min` targets §15.1 permits.
-        // RFC 0019 §8.3 accepts only a finite, strictly positive value as a prediction. A
-        // negative value is the model predicting outside the range it was fitted to, and a
-        // zero is no measurement at all: under `objective: min` a zero cost would outrank every
-        // real candidate. Both are refused whatever the model declares.
+        // `recovered` is the model's own quantity before any orientation is applied. RFC 0019
+        // §8.3 accepts it only finite, and -- when it is physical (score_transform's
+        // isPhysicalScore: a declared metric, or a transform only a positive target admits)
+        // -- strictly positive.
+        // A negative throughput or time is the model predicting outside the range it was
+        // fitted to, and a zero is no measurement at all: under `objective: min` a zero cost
+        // would outrank every real candidate. A metric-less `identity` or `exp` ranker scores
+        // on an ordering scale of its own, where zero and negatives are ordinary.
         //
         // Only some transforms make it loud. log's inverse yields NaN, but log1p's yields a
         // finite negative, and log1p is what uhd_gen emits by default -- so the most common
@@ -1169,7 +1171,7 @@ private:
         //
         // Bounded here rather than in the adapter because this is the only layer that knows
         // what the number means: TreeDataAdapter sums leaves and has no transform and no units.
-        if(!std::isfinite(recovered) || recovered <= 0.0)
+        if(!uhd::score_transform::isRankableScore(recovered, _positiveRequired))
         {
             // Not reported here. One ranking can trip this for a single candidate or for all
             // of them, and those mean different things -- a bad extrapolation versus a model
@@ -1182,8 +1184,8 @@ private:
         // Orientation is applied only to a value that survived the range check, which is what
         // keeps the two ideas apart. A negative *oriented* score is ordinary -- `objective: min`
         // negates a cost, so every real candidate scores below zero -- while a negative
-        // *recovered* value is never meaningful. Reporting 0 as the ordering key would have
-        // made an unmeasured candidate outrank every measured one under that objective.
+        // *recovered* physical value is never meaningful. Reporting 0 as the ordering key would
+        // have made an unmeasured candidate outrank every measured one under that objective.
         const double oriented = _objectiveSign * recovered;
         return {oriented, oriented};
     }
@@ -1266,6 +1268,8 @@ private:
     std::shared_ptr<const uhd::IUhdAdapter> _adapter;
     std::shared_ptr<const uhd::FeatureExtractor> _extractor;
     double _objectiveSign = 1.0;
+    /// Whether §8.3 requires this model's recovered score to be positive as well as finite.
+    bool _positiveRequired = true;
 
     /// Set the first time an out-of-range score is reported. Mutable and atomic because
     /// ranking runs through a shared_ptr<const> from any thread.

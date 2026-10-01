@@ -92,6 +92,21 @@ bool readIsOverrideShapeEnabled(const GraphDescriptor& graphDesc)
     return flag;
 }
 
+/// Union payloads are optional in FlatBuffers, so VerifyBuffer accepts a KnobSetting whose
+/// type tag names a value with no payload table behind it -- and UnPack() then dereferences
+/// that null payload. True when every tagged knob value in @p config has its payload.
+bool everyKnobValueIsPresent(const hipdnn_flatbuffers_sdk::data_objects::EngineConfig* config)
+{
+    if(config == nullptr || config->knobs() == nullptr)
+    {
+        return true;
+    }
+    return std::all_of(config->knobs()->begin(), config->knobs()->end(), [](const auto* setting) {
+        return setting->value_type() == hipdnn_flatbuffers_sdk::data_objects::KnobValue::NONE
+               || setting->value() != nullptr;
+    });
+}
+
 } // namespace
 
 // Static accessor implementations for CRTP base class
@@ -683,6 +698,12 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
         return invalid("Malformed prediction response");
     }
     const auto* response = fb::GetEnginePrediction(data.ptr);
+    // Checked before anything reads the configuration, whatever the status: UnPackTo()
+    // below unpacks it for every status.
+    if(!everyKnobValueIsPresent(response->engine_config()))
+    {
+        return invalid("Prediction configuration names a knob value it does not carry");
+    }
     if(response->engine_id() != engineId || response->kind() != result.kind)
     {
         return invalid("Prediction engine or layer does not match the request");
