@@ -326,6 +326,28 @@ if [[ "+$ROLES+" == *"+l1+"* ]]; then
     tail -20 "$OUT/l1.stdout"; echo "--- stderr ---"; tail -10 "$OUT/l1.stderr"
 fi
 
+step "VERIFY - the runtime admits what was installed"
+# Offline evaluation scores a model the runtime may still refuse (an axis the UED does not
+# expose, a stale selector revision): it then ranks by declared order and nothing here would
+# say so. Ask the built loader and the engine itself, with logging on, before trusting any
+# number above.
+VALIDATE=$(find "$BUILD" -name hipdnn_validate_descriptors -type f -perm -u+x | head -1)
+{
+    if [ -n "$VALIDATE" ] && [ -n "$(find "$TREE_ROOT" -name '*.ued.json' -print -quit)" ]; then
+        "$VALIDATE" "$TREE_ROOT" --expect-engine "$ENGINE"
+        echo "validate_descriptors rc=$?"
+    fi
+    PROBE=$(ls "$PROBLEMS"/*.json "$PROBLEMS"/*.fb 2>/dev/null | head -1)
+    for metric in ${L1_METRICS//+/ }; do
+        [ -n "$PROBE" ] || break
+        HIPDNN_LOG_LEVEL=info "$BENCH" --graph "$PROBE" --plugin-dir "$PLUGIN_DIR" \
+            --engine-id "$ENGINE_ID" --predict-engine --ranking-metric "$metric" 2>&1
+        echo "predict-engine $metric rc=$?"
+    done
+} > "$OUT/verify.log" 2>&1
+grep -E "rc=|\"status\"|VIOLATION|is not used|does not expose|refus|UNAVAILABLE" "$OUT/verify.log" \
+    | cut -c1-300 | head -40
+
 step "KEEP"
 mkdir -p "$KEEP"
 for dir in l1 l2; do
@@ -338,7 +360,7 @@ done
 for preserved in "$OUT"/.uhd-generate-*; do
     [ -d "$preserved" ] && cp -r "$preserved" "$KEEP/preserved-$(basename "$preserved")" 2>/dev/null
 done
-cp "$OUT/engines.log" "$KEEP/" 2>/dev/null
+cp "$OUT/engines.log" "$OUT/verify.log" "$KEEP/" 2>/dev/null
 ls "$OUT/declined" 2>/dev/null | sed -E 's/\.(json|fb)$//' > "$KEEP/declined.txt"
 echo "  admitted=$ADMITTED declined=$(wc -l < "$KEEP/declined.txt") -> $KEEP"
 du -sh "$KEEP" 2>/dev/null
