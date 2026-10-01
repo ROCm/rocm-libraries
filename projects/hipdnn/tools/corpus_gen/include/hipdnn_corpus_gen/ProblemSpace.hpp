@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <random>
 #include <set>
@@ -715,11 +716,46 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             auto& result = corpus.combinations[index];
             auto& search = searches[index];
             const auto oracle = oracleFor(index);
-            // Sized over everything the combination holds, anchored draws included: the search
-            // may return an anchored point again (they seed it), and a target that did not
-            // leave room for that could be met entirely by repeats and add nothing.
-            // Held points are among what the search returns and are then set aside, so they
-            // are budgeted for too.
+            // What the search returns is judged by what the corpus can use: a point the caller
+            // already holds, or one an anchored draw already supplied, fills a cell and adds
+            // nothing. Anchored draws stay whatever the search returns.
+            std::set<std::string> anchoredSeen;
+            for(size_t i = 0; i < anchoredCounts[index]; ++i)
+            {
+                anchoredSeen.insert(detail::describe(result.problems[i]));
+            }
+            struct Selection
+            {
+                std::vector<ProblemPoint> fresh;
+                int64_t held = 0;
+            };
+            const auto select = [&](const FeasibleShapeSet& set) {
+                Selection selection;
+                for(const auto& shape : set.shapes)
+                {
+                    auto point = result.categorical;
+                    for(size_t i = 0; i < corpus.numericParameters.size(); ++i)
+                    {
+                        point[corpus.numericParameters[i]] = shape[i];
+                    }
+                    if(isHeld(point))
+                    {
+                        ++selection.held;
+                    }
+                    else if(anchoredSeen.count(detail::describe(point)) == 0)
+                    {
+                        selection.fresh.push_back(std::move(point));
+                    }
+                }
+                return selection;
+            };
+
+            // The new search supersedes the old one's contribution, so it must supply all of
+            // that again plus this round's share.
+            const auto wanted
+                = static_cast<int64_t>(result.problems.size() - anchoredCounts[index]) + share;
+            // Sized over everything the combination holds, anchored and held points included:
+            // both are among what the search returns and are then set aside.
             search.targetCount
                 = static_cast<int64_t>(result.problems.size()) + heldFound[index] + share;
 
@@ -730,12 +766,30 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             // isolated shapes (rocKE, whose kernels match exact geometries) otherwise pays the
             // most to prove it has nothing more.
             auto found = buildFeasibleShapeSet(oracle, search);
+            auto selection = select(found);
             // A region still yielding a new point per hundred queries is nowhere near spent, and
             // probing it first only adds a round; one yielding far less gets the cheap probe.
             bool productive = found.stats.oracleCalls > 0
                               && found.stats.distinct * 100 >= found.stats.oracleCalls;
-            while(static_cast<int64_t>(found.shapes.size()) < search.targetCount)
+            while(static_cast<int64_t>(selection.fresh.size()) < wanted)
             {
+                const auto cells = static_cast<int64_t>(found.shapes.size());
+                if(cells < found.stats.distinct)
+                {
+                    // The selection, not the search, was the limit: every cell asked for was
+                    // filled, but held or anchored points took some of them, and the walk has
+                    // observed more than were selected. Ask for more cells over the same
+                    // observations, scaled by how many cells each usable point has cost --
+                    // budget is for when the observations themselves run out.
+                    const auto fresh = static_cast<int64_t>(selection.fresh.size());
+                    const auto deficit = wanted - fresh;
+                    const auto extra
+                        = fresh > 0 ? (deficit * cells + fresh - 1) / fresh : found.stats.distinct;
+                    search.targetCount = std::min(cells + extra, found.stats.distinct);
+                    found = buildFeasibleShapeSet(oracle, search);
+                    selection = select(found);
+                    continue;
+                }
                 if(search.oracleBudget >= request.budgetPerCombination * request.budgetGrowthLimit)
                 {
                     result.searchCapped = true;
@@ -748,6 +802,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
                 search.oracleBudget = grow(search.oracleBudget, productive);
                 search.stepsPerStart = grow(search.stepsPerStart, productive);
                 found = buildFeasibleShapeSet(oracle, search);
+                selection = select(found);
                 if(found.stats.distinct <= reached)
                 {
                     result.saturated = true;
@@ -757,41 +812,20 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             }
             spent[index] = result.saturated || result.searchCapped;
 
-            // The new search supersedes the old one's contribution; anchored draws stay.
             result.problems.resize(anchoredCounts[index]);
-            result.fromExploration = 0;
-            heldFound[index] = 0;
+            result.fromExploration = static_cast<int64_t>(selection.fresh.size());
+            heldFound[index] = selection.held;
             result.stats = found.stats;
-            std::set<std::string> seen;
-            for(const auto& point : result.problems)
-            {
-                seen.insert(detail::describe(point));
-            }
-            for(const auto& shape : found.shapes)
-            {
-                auto point = result.categorical;
-                for(size_t i = 0; i < corpus.numericParameters.size(); ++i)
-                {
-                    point[corpus.numericParameters[i]] = shape[i];
-                }
-                if(isHeld(point))
-                {
-                    ++heldFound[index];
-                    continue;
-                }
-                if(seen.insert(detail::describe(point)).second)
-                {
-                    result.problems.push_back(std::move(point));
-                    ++result.fromExploration;
-                }
-            }
+            result.problems.insert(result.problems.end(),
+                                   std::make_move_iterator(selection.fresh.begin()),
+                                   std::make_move_iterator(selection.fresh.end()));
         }
 
         if(supplied() <= before)
         {
-            // Every growable combination was searched and none added a point. Not the same as
-            // saturation -- the new shapes may all have repeated anchored ones -- but another
-            // round would do exactly the same thing.
+            // Every growable combination was searched and none added a point. Each one either
+            // supplies its share or ends saturated or capped, so this is the round in which the
+            // last of them was spent; another would do exactly the same thing.
             break;
         }
     }
