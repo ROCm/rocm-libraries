@@ -177,7 +177,7 @@ global_load_fp8e4m3(ptr, idx, align=1)
 masked_global_load(ptr, idx, mask, other, dtype, align=1)   # clamps false-lane idx to 0
 global_store(ptr, idx, value, align=1)
 global_load_vN_f16(ptr, idx, n)        # n in {2,4,8}; aligned by default
-global_load_vN(ptr, idx, dtype, n, nontemporal=False)   # f16 or bf16; n in {2,4,8}
+global_load_vN(ptr, idx, dtype, n, nontemporal=False)   # 16-bit n in {2,4,6,8,16}; f32/i32 {2,3,4,8}; 8-bit {2,4,8,12,16}
 global_store_vN(ptr, idx, value, n, nontemporal=False)  # vector stores
 # nontemporal=True: streaming access; LLVM `!nontemporal`, bits chosen per arch by the
 # backend (gfx942/gfx950: `nt` only = CACHE_STREAM, NOT NON_TEMPORAL; gfx90a: GLC+SLC).
