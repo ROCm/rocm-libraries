@@ -396,8 +396,17 @@ def dispatch_for_arches(
     """Run :func:`dispatch_attention` for each arch in a comma-separated list.
 
     Returns a ``{canonical_arch: DispatchResult}`` mapping so the caller can
-    compare selections across architectures from a single host without probing
-    any GPU.
+    compare selections across architectures from a single host.
+
+    .. note:: **The arch is taken from the request, never from the device** --
+       that part is unconditional. One host read remains: with ``req.num_cus ==
+       0`` the CU count is auto-resolved, and on a box whose arch matches the
+       target arch that resolution reads the live device (see
+       :func:`~.common._resolve_num_cus`). Since ``num_cus`` drives 2D/3D routing
+       and ``num_segments``, the same ``(req, arch)`` pair can select a different
+       kernel on a gfx942 box, a gfx950 box, and a CPU box. **Pass an explicit
+       ``num_cus`` (or ``target_ctas``) to make the comparison reproducible and
+       fully host-independent.**
 
     Example::
 

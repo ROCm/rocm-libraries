@@ -23,11 +23,13 @@ statically -- see that class for the full argument.
 from __future__ import annotations
 
 import ast
+import contextlib
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 import kernels.common.attention_unified as au
+import rocke.runtime.hip_module as hip_module
 from dispatch.attention import (
     AttentionRequest,
     dispatch_attention,
@@ -59,21 +61,80 @@ def _make_request(arch: str, **kw) -> AttentionRequest:
     return AttentionRequest(**defaults)
 
 
+@contextlib.contextmanager
+def _no_live_device():
+    """Run the body as if the box had no GPU at all.
+
+    Patching only ``au._resolve_attention_arch`` is not enough: the dispatcher
+    has a second, independent device read in
+    ``dispatch.attention.common._resolve_num_cus``, which goes through
+    ``rocke.runtime.hip_module.get_device_arch`` / ``get_device_num_cus``. A test
+    that patches just the first one proves nothing about the second. Patch both,
+    so anything reaching for hardware during selection is visible here.
+
+    ``_resolve_num_cus`` swallows exceptions by design (an off-box build must not
+    fail), so a raising ``get_device_arch`` lands on the documented ``120``
+    fallback rather than erroring -- which is exactly the no-device behaviour
+    this harness is meant to simulate.
+    """
+    with (
+        patch.object(au, "_RESOLVED_ATTENTION_ARCH", None),
+        patch.object(
+            au,
+            "_resolve_attention_arch",
+            side_effect=AssertionError(
+                "live GPU arch read on the selection path -- selection must use "
+                "req.arch only"
+            ),
+        ),
+        patch.object(
+            hip_module,
+            "get_device_arch",
+            side_effect=RuntimeError("no GPU on this box (simulated)"),
+        ),
+        patch.object(
+            hip_module,
+            "get_device_num_cus",
+            side_effect=RuntimeError("no GPU on this box (simulated)"),
+        ),
+    ):
+        yield
+
+
+@contextlib.contextmanager
+def _simulated_host(arch: "str | None", num_cus: int = 304):
+    """Pretend the running box is ``arch`` with ``num_cus`` CUs.
+
+    ``arch=None`` simulates a box with no visible GPU. Used to prove which
+    decisions move with the host and which do not.
+    """
+
+    def _arch():
+        if arch is None:
+            raise RuntimeError("no GPU on this box (simulated)")
+        return arch
+
+    def _cus():
+        if arch is None:
+            raise RuntimeError("no GPU on this box (simulated)")
+        return num_cus
+
+    with (
+        patch.object(hip_module, "get_device_arch", side_effect=_arch),
+        patch.object(hip_module, "get_device_num_cus", side_effect=_cus),
+    ):
+        yield
+
+
 class TestDispatchDoesNotReadLiveDevice(unittest.TestCase):
     """_resolve_attention_arch must NOT be called during selection."""
 
     def _assert_no_live_arch_call(self, arch: str, **kw):
         req = _make_request(arch, **kw)
-        with patch.object(
-            au,
-            "_resolve_attention_arch",
-            side_effect=AssertionError(
-                f"_resolve_attention_arch() called during dispatch for arch={arch!r} — "
-                "selection path must not read the live device"
-            ),
-        ):
+        with _no_live_device():
             # If _resolve_attention_arch() is called on the selection path the
-            # patch raises AssertionError, failing the test.
+            # patch raises AssertionError, failing the test. hip_module is
+            # patched too, so the CU resolver cannot reach hardware either.
             result = dispatch_attention(req)
         self.assertIsNotNone(result)
         self.assertIsNotNone(result.spec)
@@ -185,16 +246,7 @@ class TestArchFromRequestNotDevice(unittest.TestCase):
         """Dispatching for a non-host arch completes without touching the GPU."""
         # Simulate CPU-only box: clear the memoized arch AND make any real GPU
         # lookup raise so the test fails fast if the dispatch path falls through.
-        with (
-            patch.object(au, "_RESOLVED_ATTENTION_ARCH", None),
-            patch.object(
-                au,
-                "_resolve_attention_arch",
-                side_effect=AssertionError(
-                    "live GPU read during dispatch — must not happen on selection path"
-                ),
-            ),
-        ):
+        with _no_live_device():
             for arch in ("gfx942", "gfx950", "gfx1250"):
                 with self.subTest(arch=arch):
                     req = _make_request(arch, dtype="fp16")
@@ -203,22 +255,14 @@ class TestArchFromRequestNotDevice(unittest.TestCase):
 
     def test_bf16_gfx942_dispatch_no_device_read(self):
         """bf16 gfx942 dispatch uses request arch, not live device."""
-        with patch.object(
-            au,
-            "_resolve_attention_arch",
-            side_effect=AssertionError("live GPU read on selection path"),
-        ):
+        with _no_live_device():
             req = _make_request("gfx942", dtype="bf16", seqlen_q=1024, seqlen_k=2048)
             result = dispatch_attention(req)
             self.assertIsNotNone(result.spec)
 
     def test_gfx950_dispatch_no_device_read(self):
         """gfx950 dispatch (combo/transposed path) uses request arch."""
-        with patch.object(
-            au,
-            "_resolve_attention_arch",
-            side_effect=AssertionError("live GPU read on selection path"),
-        ):
+        with _no_live_device():
             req = _make_request(
                 "gfx950",
                 dtype="bf16",
@@ -235,11 +279,7 @@ class TestArchFromRequestNotDevice(unittest.TestCase):
 
     def test_gfx1250_dispatch_no_device_read(self):
         """gfx1250 dispatch uses request arch, not live device."""
-        with patch.object(
-            au,
-            "_resolve_attention_arch",
-            side_effect=AssertionError("live GPU read on selection path"),
-        ):
+        with _no_live_device():
             req = _make_request(
                 "gfx1250",
                 dtype="fp16",
@@ -253,6 +293,90 @@ class TestArchFromRequestNotDevice(unittest.TestCase):
             )
             result = dispatch_attention(req)
             self.assertIsNotNone(result.spec)
+
+
+class TestNumCusHostDependence(unittest.TestCase):
+    """Pin the exact scope of the host-independence guarantee.
+
+    ``_resolve_num_cus`` is the one selection input still allowed to read the
+    box, and only when ``num_cus`` is left at 0 and the host arch equals the
+    target arch. ``num_cus`` feeds 2D/3D routing and ``num_segments``, so that
+    read is load-bearing, not cosmetic.
+
+    Rather than claim it away, both halves are pinned here: setting ``num_cus``
+    buys a fully host-independent decision, and leaving it at 0 does not. If a
+    later change collapses the auto-resolve branch to a per-arch constant,
+    ``test_unset_num_cus_is_host_derived`` is the test that should fail and be
+    deleted -- deliberately, not by accident.
+    """
+
+    # 64 q-heads / 8 kv-heads hd128 bf16: a shape near the 2D<->3D boundary, so a
+    # change in the CU-count target moves the routing decision.
+    _SHAPE = dict(
+        batch=1,
+        nhead_q=64,
+        nhead_k=8,
+        seqlen_q=128,
+        seqlen_k=1024,
+        hdim_q=128,
+        hdim_v=128,
+        dtype="bf16",
+    )
+
+    def _selected(self, arch: str, host: "str | None", **kw) -> str:
+        with _simulated_host(host):
+            return dispatch_attention(_make_request(arch, **kw)).candidate.name
+
+    def test_explicit_num_cus_is_fully_host_independent(self):
+        """With num_cus pinned, every simulated host selects the same kernel."""
+        for arch in ("gfx942", "gfx950"):
+            for cus in (120, 304):
+                with self.subTest(arch=arch, num_cus=cus):
+                    picked = {
+                        host: self._selected(arch, host, num_cus=cus, **self._SHAPE)
+                        for host in ("gfx942", "gfx950", None)
+                    }
+                    self.assertEqual(
+                        len(set(picked.values())),
+                        1,
+                        "an explicit num_cus must make selection a pure function "
+                        f"of (problem, arch); got {picked}",
+                    )
+
+    def test_unset_num_cus_is_host_derived(self):
+        """Documented limitation: num_cus=0 lets the host move the decision.
+
+        Not an aspiration -- the current, intended behaviour. An on-box request
+        is meant to pick the kernel tuned for the part it runs on. This test
+        exists so the limitation stays visible and tested instead of being
+        quietly contradicted by the module docstrings.
+        """
+        on_box = self._selected("gfx950", "gfx950", **self._SHAPE)
+        off_box = self._selected("gfx950", None, **self._SHAPE)
+        # The claim under test is "the host can change this", not "it always
+        # does" -- a 304-CU gfx950 and the 120 fallback straddle the 2D/3D
+        # boundary for this shape.
+        self.assertNotEqual(
+            on_box,
+            off_box,
+            "expected the simulated 304-CU gfx950 host and the no-GPU 120 "
+            "fallback to route this boundary shape differently; if this now "
+            "matches, either the shape drifted off the boundary (repick it) or "
+            "auto-resolution was removed (then delete this test and tighten the "
+            "_resolve_num_cus / dispatch_for_arches docstrings)",
+        )
+
+    def test_arch_is_never_host_derived(self):
+        """The arch half of the guarantee holds unconditionally.
+
+        Even with num_cus unset, a gfx942 request never becomes a gfx950
+        selection because the box is gfx950.
+        """
+        for host in ("gfx942", "gfx950", None):
+            with self.subTest(host=host), _simulated_host(host):
+                result = dispatch_attention(_make_request("gfx942", **self._SHAPE))
+                self.assertIn("gfx942", result.explanation[0])
+                self.assertNotIn("gfx950", result.explanation[0])
 
 
 # =====================================================================

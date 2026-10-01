@@ -136,9 +136,11 @@ class AttentionRequest(OperatorRequest):
     use_sinks: bool = False
     sliding_window: int = 0
     kv_block_size: int = 16  # paged KV block_size (modulus); {16,32,64}
-    num_cus: int = (
-        0  # 0 => auto-resolve to the device CU count at dispatch (_resolve_num_cus)
-    )
+    # 0 => auto-resolve at dispatch (_resolve_num_cus). NOTE: auto-resolution is
+    # the one part of selection that is NOT host-independent -- on-box it reads
+    # the live CU count. Pass a real count (or `target_ctas`) for a reproducible,
+    # host-independent decision. See _resolve_num_cus for the full contract.
+    num_cus: int = 0
     target_ctas: int = (
         0  # 0 => auto: num_cus*4. >0 pins the routing/segmentation target directly.
     )
@@ -329,6 +331,26 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
     the on-box value is device-dependent within an arch (varies across parts); for
     a reproducible or cross-compile target pass an explicit ``num_cus`` or the
     ``target_ctas`` spec override rather than relying on the live query.
+
+    **Scope limit of AICK-2146's host-independence guarantee.** Branch 2 is the
+    one surviving host read on the selection path, and it is deliberate: it is
+    how a same-arch on-box request keeps picking the kernel tuned for the part it
+    is actually running on. So the guarantee this dispatcher makes is
+    *arch*-independence, not full host-independence:
+
+    * ``num_cus > 0`` (or ``target_ctas > 0``) -- selection is a pure function of
+      ``(problem, arch)``. Same inputs, same kernel, on any box or no box.
+    * ``num_cus == 0`` and ``arch in _AUTO_RESOLVE_ARCHS`` -- the CU count, and
+      therefore 2D/3D routing and ``num_segments``, is still host-derived when the
+      host happens to BE that arch. A gfx942 request can route differently on a
+      gfx942 box than on a gfx950 box or a CPU box (both of which take branch 3's
+      ``120``). ``tests/dispatch/attention/test_host_independent_dispatch.py::
+      TestNumCusHostDependence`` pins both halves of this.
+
+    Collapsing branch 2 into a per-arch constant would make selection fully
+    host-independent, but it would also change the shipped on-box routing and
+    segment counts for every caller that leaves ``num_cus`` at 0 -- a measured
+    behaviour change, not a refactor. It is deliberately out of scope here.
     """
     n = int(req.num_cus)
     if n > 0:
