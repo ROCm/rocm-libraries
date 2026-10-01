@@ -68,6 +68,8 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_input value)
     case rocsparse_sptrsm_input_scalar_datatype:
     case rocsparse_sptrsm_input_scalar_alpha:
     case rocsparse_sptrsm_input_analysis_policy:
+    case rocsparse_sptrsm_input_solve_mode:
+    case rocsparse_sptrsm_input_diagonal_modifier:
     {
         return false;
     }
