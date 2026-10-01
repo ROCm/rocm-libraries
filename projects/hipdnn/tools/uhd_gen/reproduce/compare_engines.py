@@ -13,7 +13,6 @@ rather than as one aggregate that hides a model excellent on prefill and useless
 Usage:
     python compare_engines.py --manifest corpus/manifest.json \
         --engine rocKE=uhd-gen-dense/l1/corpus.csv \
-        --engine flyDSL=uhd-gen-fly/l1/corpus.csv \
         --engine AITER=uhd-gen-aiter/l1/corpus.csv \
         [--report out.json]
 """

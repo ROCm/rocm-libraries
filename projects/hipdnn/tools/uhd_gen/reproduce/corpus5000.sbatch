@@ -9,11 +9,9 @@
 # Build one 5000-graph corpus PER ENGINE, each generated FOR that engine: every candidate
 # problem is offered to it, so a corpus holds what the engine serves and nothing it declines.
 #
-# Per engine, not one shared corpus, and the reason is measured: AITER's first gfx950 L1
-# trained on the 68 graphs it could serve out of a 1000-graph corpus drawn from rocKE's
-# geometries, and came out systematically under-predicting by -285 TFLOPS. Rebuilt against
-# a corpus of what AITER actually serves, the same pipeline produced -80 TFLOPS bias and took
-# engine selection from 78.9% to 94.2% correct.
+# Per engine, not one shared corpus: an engine trained on the few graphs it can serve out of
+# a corpus drawn from another engine's geometries learns a systematically biased model, and
+# rebuilding its corpus from what it actually serves is what removes that bias.
 #
 # A corpus an engine mostly declines is not a smaller training set; it is a biased one --
 # the declines are not random, they are one end of the shape distribution. That is why the
@@ -21,8 +19,8 @@
 # used to be narrowed.
 #
 # Runs for ONE arch, the node's: UHD_ARCH picks the rows (gfx942 by default; submit with
-# --constraint=GFX950 and UHD_ARCH=gfx950 for the other). The gfx950 rocKE pack lives on
-# users/jascampb/uhd-integration-test-branch, the default branch here.
+# --constraint=GFX950 and UHD_ARCH=gfx950 for the other). Partition, account and GPU
+# constraint are passed at submission (reproduce/README.md, "What every job needs").
 #
 # UHD_BUILD=<dir> with UHD_SRC=<dir> reuses an existing build instead of cloning and building,
 # which is how a change is tested before it is pushed.
@@ -42,10 +40,9 @@ OUT=${UHD_OUT:-/exchange/corpus-5000}
 # --container-remap-root container is not the host home that /exchange maps to: the file
 # is written and then thrown away with the container. Everything is teed into /exchange
 # from the first line instead, because a job whose failure is invisible costs a whole
-# run to diagnose (this one: 18 minutes to learn nothing).
+# run to diagnose.
 mkdir -p "$OUT"
 exec > >(tee "$OUT/job-${SLURM_JOB_ID:-manual}.log") 2>&1
-BRANCH=${UHD_BRANCH:-users/jascampb/uhd-integration-test-branch}
 ARCH=${UHD_ARCH:-gfx942}
 COUNT=${UHD_COUNT:-5000}
 SEED=${UHD_SEED:-0}
@@ -56,6 +53,8 @@ hostname
 rocminfo 2>/dev/null | grep -m1 "Name:.*gfx" || echo "NO GPU VISIBLE"
 
 if [ -z "${UHD_BUILD:-}" ]; then
+    # Required only here: a reused build (UHD_BUILD) clones nothing.
+    BRANCH=${UHD_BRANCH:?set UHD_BRANCH to the rocm-libraries branch to build}
     step "toolchain"
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq 2>&1 | tail -1
@@ -82,8 +81,8 @@ if [ -z "${UHD_BUILD:-}" ]; then
 
     # The providers, not just the tool: an engine is asked, so it has to be built and its
     # descriptors staged. ALL rather than a target list, because descriptor staging rides on
-    # `add_custom_target(... ALL)` rules that a --target build skips (run 67928117 registered
-    # 2 engines instead of 10 that way).
+    # `add_custom_target(... ALL)` rules that a --target build skips, registering only a
+    # fraction of the engines.
     step "build (hipdnn + hip-kernel-provider, $ARCH)"
     cmake -S "$SRC" -B "$BUILD" -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
@@ -92,7 +91,7 @@ if [ -z "${UHD_BUILD:-}" ]; then
         -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ \
         -DROCM_LIBS_ENABLE_COMPONENTS="hipdnn;hipdnn-integration-tests;hip-kernel-provider" \
         -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPDNN_ENABLE_SDPA=ON \
-        -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON -DHIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE=ON \
+        -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
         -DHIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON \
         "${PRODUCTION_ROOT_ARGS[@]}" \
         -DGPU_TARGETS="$ARCH" -DCMAKE_HIP_ARCHITECTURES="$ARCH" \
@@ -111,23 +110,17 @@ echo "tool:    $GEN"
 echo "plugins: $PLUGIN_DIR"
 
 TOOLS="$SRC/projects/hipdnn/tools"
-PACKS="$SRC/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors/rocKE"
+# The shipped descriptor root, the one the provider packs as `product` by default.
+PACKS="$SRC/dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE"
 OPS="$TOOLS/corpus_gen/operations"
 
 # name|engine|extra hipdnn_corpus_gen arguments, for this arch only.
 #
 # rocKE's pack is a source, not a filter: it proposes the geometries its kernels are compiled
-# for and the engine admits them. Its kernels match exact geometries, so rocKE's corpus is
-# capped at its pack's shapes (664 on gfx942) however large COUNT is. That is recorded in
-# corpus_gen/operations/engines.json, so the tool takes the pack, runs no search, and exits 0.
-# AITER has no pack; its corpus is found by the search alone.
-#
-# flyDSL (hipkernel:FlydslAttention, gfx950) is not a row: its kernels are not committed and
-# its pack lives outside arch_content, so it is only registered from the composed tree that
-# generate.sbatch builds under UHD_COMPOSE_FLYDSL=1.
+# for and the engine admits them. AITER has no pack; its corpus is found by the search alone.
+# rocKE ships an attention_dense pack for gfx950 only, so gfx942 has the AITER row alone.
 case "$ARCH" in
-    gfx942) CORPORA="rocke-gfx942|hipkernel:Gfx942AttentionDense|--kdp-root PACKS/gfx942_attention_dense
-aiter-gfx942|ASM_SDPA_ENGINE|" ;;
+    gfx942) CORPORA="aiter-gfx942|ASM_SDPA_ENGINE|" ;;
     gfx950) CORPORA="rocke-gfx950|hipkernel:Gfx950AttentionDense|--kdp-root PACKS/gfx950_attention_dense
 aiter-gfx950|ASM_SDPA_ENGINE|" ;;
     *) echo "FATAL: no corpus rows for UHD_ARCH=$ARCH"; exit 1 ;;

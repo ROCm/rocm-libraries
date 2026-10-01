@@ -23,9 +23,12 @@
 # offset by the shard index), so each shard keeps the whole shape distribution instead of
 # one contiguous alphabetical block of it. Shards collect and train independently; their
 # rows are merged by `uhd_gen.dataset` afterwards when a single model is wanted.
+#
+# The #SBATCH lines are defaults; the site's partition, account and GPU constraint are
+# passed at submission (reproduce/README.md, "What every job needs").
 set -uo pipefail
 
-BRANCH=${UHD_BRANCH:-users/jscampb/uhd-integration-test-branch}
+BRANCH=${UHD_BRANCH:?set UHD_BRANCH to the rocm-libraries branch to build}
 SRC=/tmp/uhd/src
 # The descriptor root the provider packs as `product`. Unset keeps the provider's own
 # default, the shipped root (src/engines/kernel_ingestor_engine/descriptors) that carries
@@ -39,15 +42,15 @@ OUT=/tmp/uhd/out
 ENGINE=${UHD_ENGINE:?set UHD_ENGINE to a registered engine name, e.g. hipkernel:Gfx950AttentionDense}
 GRAPHS=${UHD_GRAPHS:?set UHD_GRAPHS to a staged corpus directory}
 # `+`-separated, not comma: sbatch's own --export parser splits its value on commas, so
-# UHD_ROLES=l2,l1 arrives as UHD_ROLES=l2 plus a stray empty l1 -- which is how run 67929135
-# collected and trained L2 over 909 graphs and then silently skipped L1 entirely.
+# UHD_ROLES=l2,l1 arrives as UHD_ROLES=l2 plus a stray empty l1 -- and the run then collects
+# and trains L2 and silently skips L1 entirely.
 ROLES=${UHD_ROLES:-l2+l1}
 # Ranking metrics to train, `+`-separated for the same reason (RFC 0019 §4.4): one UHD per
 # metric per role from one run. Unset keeps generate's default (tflops, with the metric-less
 # fallback for an engine publishing no work count) and the `<role>/model/` layout; several
 # metrics write `<role>/model_<metric>/`. UHD_L2_METRICS / UHD_L1_METRICS override
 # UHD_METRICS for one role: a catalog enumeration page publishes no graph.flops yet, so an
-# L2 `tflops` label is refused after the whole collection (run 68007459, 35 min) while
+# L2 `tflops` label is refused only after the whole collection has been paid for, while
 # `time` trains, and L1's immediate measurement carries both.
 L2_METRICS=${UHD_L2_METRICS:-${UHD_METRICS:-}}
 L1_METRICS=${UHD_L1_METRICS:-${UHD_METRICS:-}}
@@ -61,7 +64,7 @@ ARCH=${UHD_ARCH:-gfx942}
 KEEP=${UHD_KEEP:-/exchange/uhd-gen-${SLURM_JOB_ID:-manual}}
 # Providers to build, `+`-separated for the same reason. `miopen-provider` adds
 # MIOPEN_ENGINE and MIOPEN_ENGINE_DETERMINISTIC (convolutions), built against the MIOpen the
-# ROCm install ships; `hip-kernel-provider` is rocKE/AITER/flyDSL. Either or both.
+# ROCm install ships; `hip-kernel-provider` is rocKE/AITER. Either or both.
 PROVIDERS=${UHD_PROVIDERS:-hip-kernel-provider}
 # The L1 role-map arch. MIOpen declares its ids under `default` (one model per metric
 # covers every arch it was trained on; an untrained arch answers "no coverage"), so its
@@ -103,7 +106,7 @@ step "source: $BRANCH"
 rm -rf /tmp/uhd; mkdir -p /tmp/uhd "$OUT"
 # --depth 200, not 1: a bundle carries commits relative to a base, and a one-commit
 # clone has no ancestor for it to apply against ("Repository lacks these prerequisite
-# commits", run 67933122, on a node whose mirror was current rather than stale).
+# commits"), even on a node whose mirror is current rather than stale.
 GIT_LFS_SKIP_SMUDGE=1 git clone --depth 200 --single-branch --branch "$BRANCH" \
     https://github.com/ROCm/rocm-libraries.git "$SRC" > /tmp/uhd/clone.log 2>&1 \
     || { echo "FATAL: clone failed"; tail -5 /tmp/uhd/clone.log; exit 1; }
@@ -119,10 +122,9 @@ for ref in ${UHD_PREREQ_REFS:-}; do
 done
 if [ -n "${UHD_BUNDLE:-}" ]; then
     # The compute sites do not all resolve github.com to the same mirror: a node can clone a
-    # branch tip hours behind the one `git ls-remote` reports from the login node (measured:
-    # runs 67930607/67930689 built a655f903 while the ref was aeed8422). A bundle carries the
-    # exact commits from the machine that pushed them, so verification cannot silently test
-    # a different tree than the one under review.
+    # branch tip hours behind the one `git ls-remote` reports from the login node. A bundle
+    # carries the exact commits from the machine that pushed them, so verification cannot
+    # silently test a different tree than the one under review.
     # `git bundle create <file> <base>..HEAD` names its tip HEAD, not a branch ref, so the
     # fetch asks for exactly that and checks out FETCH_HEAD.
     git -C "$SRC" fetch "$UHD_BUNDLE" "${UHD_COMMIT:-HEAD}" >> /tmp/uhd/clone.log 2>&1 \
@@ -142,7 +144,7 @@ echo "declared ids: ${ID_ARGS[*]:-none (a UED engine, or ids reported by the eng
 step "configure: $PROVIDERS"
 HKP_ARGS=()
 if [[ "+$PROVIDERS+" == *"+hip-kernel-provider+"* ]]; then
-    HKP_ARGS=(-DHIPKERNELPROVIDER_ENABLE_ROCKE=ON -DHIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE=ON
+    HKP_ARGS=(-DHIPKERNELPROVIDER_ENABLE_ROCKE=ON
               -DHIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON
               "${PRODUCTION_ROOT_ARGS[@]}")
 fi
@@ -162,8 +164,8 @@ grep -B2 -A10 "CMake Error" /tmp/uhd/configure.log | head -30 || tail -3 /tmp/uh
 step "build"
 # ALL, not a target list: the descriptors every engine is registered from are staged by
 # `add_custom_target(... ALL)` rules (hip_kernel_provider_descriptors, hkp_descriptor_staging,
-# hkp_packaging_*), which a `--target <list>` build skips. Run 67928117 did exactly that and
-# registered 2 engines instead of 10.
+# hkp_packaging_*), which a `--target <list>` build skips, registering only a fraction of
+# the engines.
 cmake --build "$BUILD" -j "$(nproc)" > /tmp/uhd/build.log 2>&1
 BLD=$?; echo "build rc=$BLD"
 if [ "$BLD" -ne 0 ]; then grep -n -B2 -A20 "^FAILED:" /tmp/uhd/build.log | head -50; exit 1; fi
@@ -180,10 +182,10 @@ PLUGIN_DIR=$(dirname "$(find "$BUILD" \( -name "libhip_kernel_provider*.so" -o -
 # at the arch root and every descriptor climbs out of its own folder to reach it, so the
 # tree handed to the generator must be the root that owns kpack -- copying one engine's
 # folder leaves its kernels unresolvable and every pinned configuration comes back
-# config_not_applicable (measured, run 67926620).
+# config_not_applicable.
 # The shipped (product) tree for this arch, never test_arch_content: that tree also holds
-# kpack archives, sorts first, and carries none of the provider's engines (run 68007330 took
-# test_arch_content/.../unit/shared/gfx950 and found no UED for the engine).
+# kpack archives, sorts first, and carries none of the provider's engines, so taking it
+# finds no UED for the engine.
 TREE_ROOT=$(find "$BUILD" -type d -name kpack -path "*/arch_content/*/$ARCH/kpack" \
     -not -path "*/test_arch_content/*" | head -1)
 TREE_ROOT=${TREE_ROOT%/kpack}
@@ -201,45 +203,10 @@ for path in "$BENCH" "$LIST_ENGINES" "$FEATURE_EVAL" "$PLUGIN_DIR" "$TREE_ROOT";
     [ -e "$path" ] || { echo "FATAL: a required runtime path is missing"; exit 1; }
 done
 
-if [ "${UHD_COMPOSE_FLYDSL:-0}" = "1" ]; then
-    step "compose the flyDSL pack into the descriptor tree"
-    # The POC tree is not on this branch: it lives on users/jascampb/uhd-integration-test-branch
-    # and lands here with the rest of that work. Checked rather than assumed, because
-    # `cp -r` of a missing source composes a tree with no flyDSL in it and the run then
-    # reports "no engine UHD is deployed" several minutes later, far from this cause.
-    [ -d "$SRC/flydsl_poc_scratch/flydsl_descriptors_attention" ] || {
-        echo "FATAL: UHD_COMPOSE_FLYDSL=1 but $SRC/flydsl_poc_scratch is not in this checkout"
-        exit 1
-    }
-    # flyDSL's 21 HSACOs are not committed (REPLICATE_ATTENTION.md) and its pack lives in
-    # flydsl_poc_scratch, outside arch_content. HIPDNN_DESCRIPTOR_DIR replaces the search
-    # roots, so the only way to have rocKE and flyDSL loaded at once is one composed tree.
-    COMPOSED=/tmp/uhd/descriptors
-    mkdir -p "$COMPOSED"
-    cp -r "$TREE_ROOT"/. "$COMPOSED"/
-    cp -r "$SRC/flydsl_poc_scratch/flydsl_descriptors_attention/." "$COMPOSED"/
-    HSACO_DIR="$SRC/flydsl_poc_scratch"
-    if [ -n "${UHD_HSACO_DIR:-}" ] && [ -d "${UHD_HSACO_DIR}" ]; then
-        # Reuse the enablement job's binaries: the flyDSL compiler is a pip wheel whose
-        # output must match the kernarg ABI the pack decodes, so the artifacts that were
-        # already proven to launch are preferred over a fresh rebuild of the same source.
-        cp "$UHD_HSACO_DIR"/*.hsaco "$HSACO_DIR"/ 2>/dev/null
-        echo "reused $(ls "$UHD_HSACO_DIR"/*.hsaco 2>/dev/null | wc -l) staged HSACOs"
-    else
-        python3 -m pip install --quiet --break-system-packages flydsl==0.3.2 2>&1 | tail -1
-        python3 "$SRC/flydsl_poc_scratch/flydsl_build/build_all_flydsl_attention.py" \
-            > "$OUT/flydsl-build.log" 2>&1
-        echo "flydsl build rc=$? hsacos=$(ls "$HSACO_DIR"/*.hsaco 2>/dev/null | wc -l)"
-    fi
-    export FLYDSL_ATTENTION_HSACO_DIR="$HSACO_DIR"
-    export HIPDNN_DESCRIPTOR_DIR="$COMPOSED"
-    TREE_ROOT="$COMPOSED"
-    echo "composed tree: $TREE_ROOT ($(find "$COMPOSED" -name '*.json' | wc -l) descriptors, $(ls "$HSACO_DIR"/*.hsaco 2>/dev/null | wc -l) hsacos)"
-fi
 # AITER resolves its .co catalog from HIPDNN_AITER_ASM_DIR, falling back to the AITER_ASM_DIR
 # compile definition -- which is the INSTALL path (/opt/rocm/lib/...), empty in a build tree.
-# Run 67929136 collected 843 admitted graphs and then failed every execution with "failed to
-# load kernel module from /opt/rocm/.../fwd_hd128_bf16_rtne.co". The directory wanted is the
+# Without it a run admits its graphs and then fails every execution with "failed to load
+# kernel module from /opt/rocm/.../fwd_hd128_bf16_rtne.co". The directory wanted is the
 # one holding the arch subdirectories, so it is chosen by looking for the arch inside it
 # rather than by name alone: the build carries more than one directory called asm_kernels.
 AITER_ASM=""

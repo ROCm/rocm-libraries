@@ -1,68 +1,93 @@
-# Reproducing the shipped SDPA heuristics
+# Reproducing the shipped heuristics
 
-Everything needed to regenerate, re-measure and independently check the L1/L2 models for
-`hipkernel:Gfx942AttentionDense`, `hipkernel:Gfx950AttentionDense` and `ASM_SDPA_ENGINE`
-(AITER). No measured performance numbers are recorded here — the procedure produces them
-on your own hardware, which is the only place they mean anything.
+Everything needed to regenerate, re-measure and independently check the L1/L2 models this
+branch ships. No measured performance numbers are recorded here: the procedure produces
+them on your own hardware, which is the only place they mean anything.
 
-**Two branches, on purpose.** This procedure spans both, and the split is deliberate
-rather than an omission:
+## What this branch ships
 
-| on `users/jscampb/uhd-heuristics-e2e` (this branch) | on `users/jascampb/uhd-integration-test-branch` |
-|---|---|
-| the productized path: `rocKE/gfx942_attention_dense`, the `ASM_SDPA_ENGINE` descriptors, `hipdnn_corpus_gen`, and every script in this directory except the two named opposite | the experiment path: the `rocKE/gfx950_attention_dense` descriptor pack (`gfx950_attention_dense.{ued,kmd,umd,kdp,udd,uhd}.json` and its `heuristics/` tree) and the flyDSL POC — `flydsl_catalog.sbatch`, `flydsl_enable.sbatch`, the Flydsl* packs, `flydsl_poc_scratch/` |
-
-A step below that names a gfx950 rocKE descriptor or a `flydsl_*.sbatch` needs the
-integration branch checked out; everything else runs here. The rocKE *kernels* for gfx950
-are on both branches (`rocke/library/kernels/gfx950/`); it is the packaged descriptor set
-that is not, so on this branch that engine has kernels and no installed heuristic.
-
-## What is installed, and where it came from
-
-| engine | arch | roles | binding |
+| engine | arch | roles (metrics) | binding |
 |---|---|---|---|
-| `hipkernel:Gfx942AttentionDense` | gfx942 | `sort_kernel_catalog`, `predict_engine` | UED role map, `rocKE/gfx942_attention_dense/heuristics/` |
-| `hipkernel:Gfx950AttentionDense` | gfx950 | `sort_kernel_catalog`, `predict_engine` | UED role map, `rocKE/gfx950_attention_dense/heuristics/` — **integration branch only** |
-| `ASM_SDPA_ENGINE` | gfx942, gfx950 | `predict_engine` | UUID declared in `AsmSdpaEngine.hpp`; document staged from `src/engines/asm_sdpa_engine/descriptors/` |
+| `hipkernel:Gfx950AttentionDense` | gfx950 | `sort_kernel_catalog`, `predict_engine` (`tflops`, `time`) | UED role map; the pack and its `heuristics/` tree are in the shipped descriptor root, `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_attention_dense/` |
+| `ASM_SDPA_ENGINE` (AITER) | gfx942, gfx950 | `predict_engine` (`tflops`) | UUID declared in `AsmSdpaEngine.hpp` (`L1_MODEL_IDS`); documents staged from `src/engines/asm_sdpa_engine/descriptors/predict_engine/<arch>/` |
+| `MIOPEN_ENGINE`, `MIOPEN_ENGINE_DETERMINISTIC` | `default` | `predict_engine` (`tflops`, `time`) | UUIDs declared in `MiopenContainer.cpp`; the ids ship, the models are trained with `generate.sbatch` below |
 
-AITER owns no descriptor set, so its model is bound by the UUID the provider declares
-(RFC 0019 §4.1, Open Question 7) rather than by a role map. The document's `id` IS the
-binding: change it and the engine silently reports no model.
+There is no gfx942 `attention_dense` pack: on gfx942 the rocKE provider registers no dense
+attention engine, and AITER is the SDPA engine that carries a model there. The
+`descriptor-packaging/examples/descriptors` tree is a packaging fixture, not the shipped
+root; `UHD_PRODUCTION_ROOT=<path relative to the checkout>` packs it (or any other tree)
+instead when a script needs it.
+
+An engine with no descriptor set (AITER, MIOpen) has its model bound by the UUID the
+provider declares (RFC 0019 §4.1, Open Question 7) rather than by a role map. The
+document's `id` IS the binding: change it and the engine silently reports no model.
 
 ## 0. What every job needs
 
-The sbatch files here take their inputs through `/exchange`, which is the container's view
-of your home directory. Every submission therefore carries the same container flags; leaving
-them off runs the script on the bare node, where `/exchange` does not exist and apt refuses
-to install (measured: run 67932435).
+- **`UHD_BRANCH` is required.** Every script clones `https://github.com/ROCm/rocm-libraries.git`
+  at that branch, so the branch must be pushed; `UHD_BUNDLE` (last section) carries commits
+  the clone cannot see. `corpus5000.sbatch` with `UHD_BUILD` reuses a build and clones nothing.
+- **Site settings are passed at submission.** The `#SBATCH` lines in the scripts are
+  defaults only; `--partition`, `--account` and `--constraint` on the `sbatch` command line
+  override them, and are whatever your site calls them.
+- **`/exchange` is the container mount point.** The scripts read corpora and models from,
+  and keep their results under, `/exchange`; the submission maps a node-visible directory
+  there with `--container-mounts=<dir>:/exchange` (`$HOME` below). Without the container
+  flags the script runs on the bare node, where `/exchange` does not exist and apt refuses
+  to install.
+- **The submit directory and `--output` must exist on the compute node.** Submit with
+  `--chdir=/tmp` and point `--output` at a node-visible directory; `generate.sbatch` and
+  `corpus5000.sbatch` also tee their whole log into the kept directory, because the
+  container's view of the submit directory is discarded with it.
+- **The sbatch files need LF line endings.** `sbatch` refuses a script with DOS line
+  breaks, which is what a Windows checkout with `core.autocrlf=true` writes; convert with
+  `tr -d '\r'` (or `dos2unix`) before submitting from such a tree.
+
+A working gfx950 collection, L2 then L1, both metrics:
 
 ```bash
-SUBMIT="sbatch --cpus-per-task=16 --mem=96G --gres=gpu:1 \
+sbatch --partition=<p> --account=<a> --constraint=GFX950 --gres=gpu:1 \
+  --chdir=/tmp --output=<node-visible dir>/%x-%j.log \
   --container-image=docker://rocm/dev-ubuntu-24.04:7.14.0-full \
-  --container-writable --container-remap-root \
-  --container-mounts=$HOME:/exchange"
+  --container-writable --container-remap-root --container-mounts=$HOME:/exchange \
+  --export=ALL,UHD_BRANCH=<branch>,UHD_ENGINE=hipkernel:Gfx950AttentionDense,UHD_ARCH=gfx950,UHD_ROLES=l2+l1,UHD_L2_METRICS=tflops+time,UHD_L1_METRICS=tflops+time,UHD_GRAPHS=/exchange/<corpus>,UHD_KEEP=/exchange/<out> \
+  generate.sbatch
 ```
 
-Stage corpora and artifacts in `$HOME` on the login node; they appear under `/exchange`
-inside the job. `UHD_BUNDLE` (see the last section) is how a job builds the tree you pushed
-rather than whatever its site mirror happens to serve.
+The examples below abbreviate the common flags as:
+
+```bash
+SUBMIT="sbatch --partition=<p> --account=<a> --gres=gpu:1 \
+  --chdir=/tmp --output=<node-visible dir>/%x-%j.log \
+  --container-image=docker://rocm/dev-ubuntu-24.04:7.14.0-full \
+  --container-writable --container-remap-root --container-mounts=$HOME:/exchange"
+```
 
 ## 1. Build the corpus (per engine, on a GPU)
 
 A corpus is generated **for an engine**: every candidate problem is offered to it, so what
 comes out is what that engine serves. `--engine-name` is required and needs the provider
-built and staged, so this runs on a GPU node -- through `corpus5000.sbatch`, or by hand in
+built and staged, so this runs on a GPU node -- through `corpus5000.sbatch` (both SDPA
+engines of the node's arch; `UHD_ARCH`, `UHD_COUNT`, `UHD_SEED`, `UHD_OUT`), or by hand in
 a job as below. Deterministic from the seed and the in-tree inputs, and `benchmark` ids are
 content-derived so results join across runs.
+
+```bash
+$SUBMIT --constraint=GFX950 \
+    --export=ALL,UHD_BRANCH=<branch>,UHD_ARCH=gfx950,UHD_OUT=/exchange/corpus-950 \
+    corpus5000.sbatch
+```
+
+By hand:
 
 ```bash
 cd projects/hipdnn/tools
 GEN=<build>/bin/hipdnn_corpus_gen
 PLUGINS=<build>/lib/hipdnn_plugins/engines
-PACKS=../../../dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors/rocKE
+PACKS=../../../dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE
 
 # rocKE, gfx950: its pack proposes, the engine admits. This is also the comparison corpus
-# of step 3. --kdp-root names the integration branch's pack; from this branch it does not exist.
+# of step 3.
 $GEN --operations corpus_gen/operations --operation sdpa_fwd --plugin-dir $PLUGINS \
     --engine-name hipkernel:Gfx950AttentionDense --kdp-root $PACKS/gfx950_attention_dense \
     --output /tmp/corpus-950 --count 1000 --seed 0
@@ -74,8 +99,8 @@ $GEN --operations corpus_gen/operations --operation sdpa_fwd --plugin-dir $PLUGI
 ```
 
 Graphs land in `<output>/graphs/`, beside `manifest.json`. `--count` is met unless the
-engine physically serves fewer: rocKE's kernels match exact geometries, so its corpus is
-capped at the pack's shapes, and the tool says so and exits 0. Any other shortfall exits 3.
+engine physically serves fewer: an engine whose kernels match exact geometries is capped
+at its pack's shapes, and the tool says so and exits 0. Any other shortfall exits 3.
 
 No `--keep` is needed to narrow a corpus to an engine's facets: the engine decides. For
 reference, AITER's gfx942 forward table is four kernels (bf16, hd128/hd192->128, no mask
@@ -91,30 +116,25 @@ print(len(rows), 'kernels'); [print(r) for r in rows]" \
 
 `generate.sbatch` builds the branch, counts what the engine admits, then runs L2 followed
 by L1 — in that order, because an immediate run executes whatever the installed catalog
-ranker picked, so L1's labels describe the selector that ships.
+ranker picked, so L1's labels describe the selector that ships. Section 0 has the rocKE
+gfx950 submission; AITER takes L1 alone:
 
 ```bash
-$SUBMIT --constraint=GFX950 --time=08:00:00 \
-    --export=ALL,UHD_GRAPHS=/exchange/corpus-950,UHD_ENGINE=hipkernel:Gfx950AttentionDense,UHD_ROLES=l2+l1,UHD_ARCH=gfx950,UHD_KEEP=/exchange/out-950-dense \
-    generate.sbatch
 $SUBMIT --constraint=GFX950 --time=06:00:00 \
-    --export=ALL,UHD_GRAPHS=/exchange/corpus-950-aiter,UHD_ENGINE=ASM_SDPA_ENGINE,UHD_ROLES=l1,UHD_ARCH=gfx950,UHD_KEEP=/exchange/out-950-aiter \
+    --export=ALL,UHD_BRANCH=<branch>,UHD_GRAPHS=/exchange/corpus-950-aiter,UHD_ENGINE=ASM_SDPA_ENGINE,UHD_ROLES=l1,UHD_ARCH=gfx950,UHD_KEEP=/exchange/out-950-aiter \
     generate.sbatch
 ```
 
-The first submission needs the integration branch: `hipkernel:Gfx950AttentionDense` has no
-descriptor pack here, so on this branch it registers nothing to collect against. The AITER
-submission runs on either.
-
 `UHD_ROLES` is `+`-separated: sbatch's own `--export` parser splits its value on commas.
 `UHD_METRICS` (e.g. `tflops+time`, same separator) trains one UHD per ranking metric per
-role from the same run; unset, each role trains its default `tflops` model as before.
-`UHD_PROVIDERS` (same separator, default `hip-kernel-provider`) picks the providers built;
-`miopen-provider` adds `MIOPEN_ENGINE` and `MIOPEN_ENGINE_DETERMINISTIC` (convolutions):
+role from the same run; unset, each role trains its default `tflops` model.
+`UHD_L2_METRICS` / `UHD_L1_METRICS` override it for one role. `UHD_PROVIDERS` (same
+separator, default `hip-kernel-provider`) picks the providers built; `miopen-provider` adds
+`MIOPEN_ENGINE` and `MIOPEN_ENGINE_DETERMINISTIC` (convolutions):
 
 ```bash
 $SUBMIT --constraint=GFX950 --time=06:00:00 \
-    --export=ALL,UHD_PROVIDERS=miopen-provider,UHD_GRAPHS=/exchange/conv-corpus-950,UHD_ENGINE=MIOPEN_ENGINE,UHD_ROLES=l1,UHD_METRICS=tflops+time,UHD_ARCH=gfx950,UHD_KEEP=/exchange/out-950-miopen \
+    --export=ALL,UHD_BRANCH=<branch>,UHD_PROVIDERS=miopen-provider,UHD_GRAPHS=/exchange/conv-corpus-950,UHD_ENGINE=MIOPEN_ENGINE,UHD_ROLES=l1,UHD_METRICS=tflops+time,UHD_ARCH=gfx950,UHD_KEEP=/exchange/out-950-miopen \
     generate.sbatch
 ```
 
@@ -125,6 +145,7 @@ and `generate` refuses an id that contradicts what the engine reports. MIOpen de
 ids under `default`, so its models are promoted there (`UHD_L1_ARCH` overrides). A corpus
 root is read through its `manifest.json`; a graph whose collection fails is skipped and
 recorded (`failed_graphs` in `generation_manifest.json`) unless more than 5% fail.
+`UHD_SHARDS` / `UHD_SHARD` split a large corpus across jobs by interleaved slices.
 
 Each run keeps `l1/corpus.csv` (one measured row per graph), `l1/model/` (the artifact and
 `eval_report.json`) and `declined.txt`. With several metrics these become
@@ -153,7 +174,7 @@ predict every graph — the cross-engine question L1 exists for — once per met
 
 ```bash
 $SUBMIT --constraint=GFX950 \
-    --export=ALL,UHD_CORPUS=/exchange/corpus-950,UHD_ARCH=gfx950,"UHD_MODELS=rocKE=/exchange/out-950-dense/l1/model:hipkernel:Gfx950AttentionDense;AITER=/exchange/out-950-aiter/l1/model:ASM_SDPA_ENGINE",UHD_KEEP=/exchange/bakeoff-950 \
+    --export=ALL,UHD_BRANCH=<branch>,UHD_CORPUS=/exchange/corpus-950,UHD_ARCH=gfx950,"UHD_MODELS=rocKE=/exchange/out-950-dense/l1/model:hipkernel:Gfx950AttentionDense;AITER=/exchange/out-950-aiter/l1/model:ASM_SDPA_ENGINE",UHD_KEEP=/exchange/bakeoff-950 \
     bakeoff.sbatch
 ```
 
@@ -203,41 +224,18 @@ read backward kernels, and a backward kernel cannot move a forward throughput nu
 `UHD_COMMIT=<sha>` pins `bakeoff.sbatch` to an older build when you do need to reproduce
 against one.
 
-## 4b. Including flyDSL — integration branch only
-
-`flydsl_catalog.sbatch` and `flydsl_enable.sbatch` are on
-`users/jascampb/uhd-integration-test-branch`, with the rest of the flyDSL POC; they are
-not on this branch and this section does not run here. It is kept because the procedure is
-the same one, and because the environment variables below are what a composed rocKE+flyDSL
-tree needs on either branch.
-
-flyDSL's kernels are not committed anywhere; `flydsl_catalog.sbatch` clones
-`https://github.com/ROCm/FlyDSL.git`, builds all 240 variants with the `flydsl==0.3.2` wheel,
-checks every one still carries the 608-byte kernarg and the pack's entry point, and stages
-them. `flydsl_enable.sbatch` then proves the engine registers and executes one graph.
-
-```bash
-$SUBMIT --constraint=GFX950 --time=04:00:00 \
-    --export=ALL,UHD_KEEP=/exchange/flydsl-catalog flydsl_catalog.sbatch
-```
-
-Collection and bake-off then take `UHD_COMPOSE_FLYDSL=1`,
-`UHD_HSACO_DIR=/exchange/flydsl-catalog` and `UHD_FLYDSL_CATALOG=/exchange/flydsl-catalog`:
-the pack lives outside `arch_content`, and `HIPDNN_DESCRIPTOR_DIR` replaces the search roots
-rather than adding to them, so rocKE and flyDSL are only both visible from one composed tree.
-
 ## 5. Which engine answers at all
 
 `engine_matrix.sbatch` is the cheap first check: it lists the engines a build registers and
-asks each of them for a prediction on every graph, printing per-engine coverage and, for
-any engine that answers nothing, its own words at `HIPDNN_LOG_LEVEL=info`.
+asks each of them for a prediction on every graph of `UHD_CORPUS` (built for
+`UHD_GPU_TARGETS`, default gfx942), printing per-engine coverage and, for any engine that
+answers nothing, its own words at `HIPDNN_LOG_LEVEL=info`.
 
-Use it before spending hours on a sweep. Four separate defects were found by it alone: a
-target list that skipped the `ALL`-only descriptor staging (2 engines registered instead of
-10), a corpus pinning `mma_core_mode` that AITER refuses outright, a corpus spelling
-causality top-left when AITER's gfx942 kernels are bottom-right, and an AITER `.co` catalog
-resolved from the install path rather than the build tree
-(`HIPDNN_AITER_ASM_DIR`).
+Use it before spending hours on a sweep. It catches in minutes what otherwise costs a full
+collection: a target list that skipped the `ALL`-only descriptor staging, a corpus pinning
+a field an engine refuses outright, a corpus spelling a causal alignment an engine's
+kernels do not serve, and an AITER `.co` catalog resolved from the install path rather
+than the build tree (`HIPDNN_AITER_ASM_DIR`).
 
 ## When the node builds the wrong commit
 
@@ -248,50 +246,23 @@ yourself rather than trusting the clone:
 ```bash
 git bundle create delta.bundle <a commit the mirror has>..HEAD --branches=<branch>
 scp delta.bundle <cluster>:~/
-sbatch --export=ALL,UHD_BUNDLE=/exchange/delta.bundle,... <script>.sbatch
+$SUBMIT --export=ALL,UHD_BRANCH=<branch>,UHD_BUNDLE=/exchange/delta.bundle,... <script>.sbatch
 ```
 
 Every script here fetches the bundle over the clone and checks out its tip, so the job
-builds the tree you meant.
+builds the tree you meant. The clone is 200 commits deep, so the bundle's base must be
+within that depth of the branch tip; `UHD_PREREQ_REFS` (generate, corpus5000) fetches
+further branches a merged bundle depends on.
 
-## What the shipped artifacts were actually built from
+## Where a shipped artifact came from
 
-Exact provenance for everything the two branches produced, so a check can reproduce the
-same inputs rather than similar ones. The `branch` column is the tree you must have
-checked out for that row to run: `e2e` is this branch, `integration` is
-`users/jascampb/uhd-integration-test-branch`, which carries the gfx950 rocKE pack and the
-flyDSL POC.
-
-| artifact | branch | built by |
-|---|---|---|
-| comparison corpus (1000 graphs, gfx950) | integration | `--count 1000 --seed 0 --kdp-root <rocKE/gfx950_attention_dense> --min-candidates 2 --head-dim 64 --head-dim 128` |
-| gfx942 corpus (5000 graphs) | e2e | `--count 5000 --seed 0` |
-| flyDSL 240-kernel catalog | integration | `flydsl_catalog.sbatch` (waves 1/2/4 x stagger on/off x lazy on/off, setprio on) |
-| rocKE gfx950 L1+L2, flyDSL L1+L2 | integration | `generate.sbatch`, `UHD_ROLES=l2+l1`, on the comparison corpus |
-| AITER gfx950 L1 | e2e | `--count 2500 --seed 11 --dtype bf16 --head-dim 128 --causal 0 --exclude-corpus <comparison manifest>` then `generate.sbatch UHD_ROLES=l1` |
-| the 94.2% number | integration | `bakeoff.sbatch` over the comparison corpus, then `score_predictions.py` |
-
-The corpus rows are recorded as they were run, under the retired Python `corpus_build`. To
-rebuild them with `hipdnn_corpus_gen`: `--out` is `--output`, and the engine the row was
-built for is named with `--engine-name`, which replaces the facet flags -- the engine now
-decides what it serves, where `--dtype/--head-dim/--causal` guessed it. `--min-candidates`
-is gone: pack density is an upper bound on what the matcher offers at runtime, never a count
-of it. A rebuilt corpus is not byte-identical to the recorded one: the sampler now holds
-declared shares per categorical combination rather than in expectation per draw, and causal
-graphs are expressed as bounds (`right_bound = 0`) rather than the deprecated `causal_mask`
-flag, which providers read as top-left whatever the alignment said.
-
-flyDSL additionally needs a FlyDSL checkout; `flydsl_catalog.sbatch` clones
-`https://github.com/ROCm/FlyDSL.git` itself, and the standalone builders take `FLYDSL_REPO`.
+Each shipped model records its own provenance: the `name` of its `heuristic.uhd.json`
+(for AITER, `asm_sdpa_engine_tflops.uhd.json`) carries the engine, arch and graph count it
+was trained on, and `trained_against` carries the selector revision -- for a UED engine
+also the descriptors and feature-semantics revision it was measured against. A retrain is
+checked against those fields, not against a figure copied into a document.
 
 ## Known gaps
 
-- **flyDSL (`hipkernel:FlydslAttention`)** is not part of this: its 21 HSACOs are not
-  committed and its builder imports `kernels.attention.flash_attn_gfx950`, which is not in
-  this repository — the rocKE wheels are built from `rocke/library`, whose `kernels/gfx950/`
-  carries the productized `attention_dense` and no `experiments/` tree. It needs either the
-  prebuilt HSACOs or that kernel snapshot.
-- **`hipkernel:Gfx950AttentionTiled`** requires page tables and correctly declines every
-  dense SDPA graph, so a dense corpus cannot exercise it.
 - **Causal cross attention** (`seqlen_q > seqlen_kv` with a causal mask) is refused by
   `hipdnn_corpus_gen`: the declared FLOP count goes non-positive, so no label can be derived.

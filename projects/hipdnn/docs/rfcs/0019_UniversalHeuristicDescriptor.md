@@ -456,9 +456,9 @@ Other adapters keep the same header and swap the body:
 { …, "adapter": "onnx",
   "onnx": {"artifact": "fmha_fwd/model.onnx"} }
 
-// static_order — no features, no hash, no model
+// static_order — no features, no hash, no model, no parameters
 { "version": "1.0", "id": "…", "name": "…", "adapter": "static_order",
-  "static_order": {"order": ["priority", "id"]} }
+  "static_order": {} }
 
 // custom_library — author-shipped .so behind a C ABI; features_hash advisory if it self-features
 { …, "adapter": "custom_library",
@@ -466,12 +466,14 @@ Other adapters keep the same header and swap the body:
                      "config": { … }} }                // symbol + typed config, never inline code
 ```
 
-**On `static_order.order`.** The entries are *ordering criteria* (`priority`, then `id`), not a literal
-list of UKD ids — the same deterministic arbitration
-[RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria) defines. An explicit id list is a
-reasonable future extension for pinning a known-good order; if one is supplied, ids present in the list
-rank first in the given order and **any catalog entry not named falls through to the default criteria**,
-so a stale list degrades gracefully rather than hiding kernels.
+**On `static_order`.** The body has no parameters. It ranks by UKD `priority` (higher first), then by
+stable descriptor `id` — the same deterministic arbitration
+[RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria) defines. Declared
+ordering criteria and an explicit id list for pinning a known-good order are possible future
+extensions, not part of v1.0: a v1.0 loader **refuses** a body that declares `order` rather than
+ignoring it, so a descriptor cannot appear to pin an order it does not get. Should the id list land,
+ids present in it rank first in the given order and **any catalog entry not named falls through to
+`priority` then `id`**, so a stale list degrades gracefully rather than hiding kernels.
 
 ### 4.1 Field Reference (normative)
 
@@ -606,8 +608,7 @@ file drives both the build-time and runtime checks.
     },
 
     "static_order":   { "type": "object", "additionalProperties": false,
-                        "patternProperties": { "^(x-|_)": {} },
-                        "properties": { "order": { "type": "array", "items": { "type": "string" } } } },
+                        "patternProperties": { "^(x-|_)": {} } },
     "native":         { "type": "object", "additionalProperties": false,
                         "patternProperties": { "^(x-|_)": {} },
                         "required": ["symbol"],
@@ -747,7 +748,7 @@ new model family) is one more `adapter` value — the single discriminant is wha
 
 | `adapter` | What it is | Ranking | Model artifact |
 |-----------|------------|---------|----------------|
-| `static_order` | A fixed precedence with no learned model | Declared criteria / UKD `priority` | none |
+| `static_order` | A fixed precedence with no learned model | UKD `priority`, then `id` | none |
 | `native` | A scorer compiled into the engine, resolved by symbol name — **first to land** | Whatever the function returns | none (code, not data) |
 | `table` | A bucketed lookup over quantized feature ranges, carried as a FlatBuffer | Quantize the row, look up the bucket, then tie-break | with engine |
 | `tree_data` | A GBDT tree table (LightGBM/XGBoost), in-tree walker — **default shipping path** | Score each candidate, argmax | with engine |
@@ -1657,7 +1658,7 @@ loadable artifact rather than baked into `libhipdnn_provider.so`.
 | Adapter | Runtime dependency | Standalone drop-in? | Notes |
 |---------|-------------------|---------------------|-------|
 | *(none named)* | none | n/a | **A UHD is optional.** No heuristic → deterministic `priority`/`id` order plus a warning ([Section 5](#5-selection-flow) step 6) |
-| `static_order` | none | Yes (always available) | The same behavior, stated explicitly rather than inferred. Not a scorer: it names ordering criteria, so it resolves to a comparator rather than to an adapter instance |
+| `static_order` | none | Yes (always available) | The same behavior, stated explicitly rather than inferred. Not a scorer: it has no parameters and resolves to the fixed priority-then-id comparator rather than to an adapter instance |
 | `native` | none | **No — compiled into the engine** | Scorer function resolved by symbol name; the bootstrap path |
 | `table` | none | Yes | Bucketed lookup over quantized feature ranges, carried as a FlatBuffer beside the descriptor |
 | `tree_data` | none | **Yes — default shipping path** | GBDT tree table + in-tree walker |
@@ -1755,8 +1756,9 @@ covers. They sit at opposite ends of the same tradeoff, which is why `native` la
 The initial adapters are **`static_order`, then `native`, then `tree_data`**. `static_order` is trivial
 and always available; `native` proves the seam with a compiled function and needs no new format;
 `tree_data` is the data-driven shipping path. `table` is a low-cost addition for coarse bucketed
-heuristics. `onnx` and `custom_library` are added when a concrete need appears, the latter gated on the
-trust audit.
+heuristics. `onnx` is added when a concrete need appears. `custom_library` was meant to wait on the
+trust audit; it has in fact landed without that gate, and [Open Question 11](#operational) records what
+the code does today.
 
 ---
 
@@ -3058,7 +3060,7 @@ pipeline built on top of it.
 | 6 | `table` | Cheap bucketed heuristics for ops that don't warrant a model. |
 | 7 | Engine-selection integration | Score-only mode, the A/B plugin-query surface, engine-selection policies. Introduces the engine estimate (A) — not needed before competing or opaque engines exist ([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)). Co-owned with [RFC 0007](0007_EngineSelectionHeuristicsFramework.md). |
 | 7a | Ranking metrics ([Section 4.4](#44-ranking-metrics), [Section 11.4](#114-selecting-a-uhd-by-metric)) | Lands in four independently shippable steps, each keeping `tflops` the default so no step changes a request that names no metric: (1) the metric registry, `score.metric`, list-valued role maps and the loader's `(role, arch, metric)` index; (2) the metric on the plugin query, the metric-carrying answer and the capability query; (3) the request's ranking metric, direction-aware policies, and the quick policy's L1-only rule; (4) the metric carried to plan build and into every ranking cache key. Generation emits several metrics from one timing run alongside step 1. |
-| 8 | `custom_library` | Author-shipped scorer `.so` for models the in-tree walker doesn't cover. Dependency + trust audit gated ([Open Question 11](#operational)). |
+| 8 | `custom_library` | Author-shipped scorer `.so` for models the in-tree walker doesn't cover. Planned as dependency + trust audit gated; implemented ahead of that audit, with no trust gate yet ([Open Question 11](#operational)). |
 | 9 | AOT selection ([Section 14.2](#142-pipeline-aot-selection)) | Benchmark an all-knobs KDP, prioritize by frequency / cost-of-poor-selection, emit the AOT kernel set. Needed first for **non-JIT** engines (rocKE today, CK), where it is filtering rather than selection. Depends on phase 5. |
 | 10 | Knob reduction loop ([Section 14.4](#144-pipeline-knob-reduction-hipdnn-jit-case)) | Backwards-evaluate a generated heuristic for weak knobs, regenerate the UED with a reduced knob set, then regenerate AOT kernels. Requires an engine that can **JIT in hipDNN**; depends on phases 5 and 9. |
 
@@ -3213,7 +3215,17 @@ dependency-gated and land only when a concrete need appears.
     for a shipped provider (license, distro packaging, ROCm image contents), and for `custom_library`
     the trust/signing rules for dropping in author-compiled native code. The former decides whether
     the in-tree tree-walker must be fully first-party or may vendor a third-party evaluator; the
-    latter gates the `custom_library` drop-in path.
+    latter was meant to gate the `custom_library` drop-in path.
+
+    **Current status: no trust gate exists.** The adapter is implemented and enabled in every build
+    with `HIPDNN_ENABLE_KERNEL_INGESTOR`, and that build flag is the only switch. Any `.uhd.json` the
+    loader accepts that names `adapter: custom_library` with a `library` and `symbol` reaches
+    `dlopen`/`LoadLibrary` (`AdapterFactory.hpp`, `CustomLibraryAdapter::load`), whether bound as
+    `sort_kernel_catalog` or `predict_engine`. The only checks are integrity checks the descriptor
+    itself supplies: an optional `custom_library.hash`, compared against the library bytes before the
+    open, and the `features_hash` comparison after it. Neither is a trust decision, since whoever
+    writes the descriptor also writes the hash. No signing, allow-list, or opt-in exists; the audit
+    this question asks for has not happened.
     *(Impacts [Section 7](#7-model-adapters), [Section 9.1](#91-dependencies).)*
 
 12. **Enumerating the valid catalog — RESOLVED.** The generation path enumerates the applicable catalog
@@ -3449,7 +3461,8 @@ dependency-gated and land only when a concrete need appears.
   runtime dependency.
 
 - **`custom_library`:** The drop-in escape hatch — a compiled scorer `.so` shipped with the engine and
-  `dlopen`'d through a tiny C ABI; standalone, any model family, gated on the trust audit. Distinct from
+  `dlopen`'d through a tiny C ABI; standalone, any model family. Meant to be gated on the trust audit;
+  today it is not ([Open Question 11](#operational)). Distinct from
   `native`, which is compiled *into* the engine and needs no loading or trust boundary.
 
 - **Scorer / adapter:** The thing that turns a UHD's model content into a per-candidate score; reached
