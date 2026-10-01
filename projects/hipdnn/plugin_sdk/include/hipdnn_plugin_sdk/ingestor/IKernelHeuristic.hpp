@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/ScoreTransform.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
@@ -275,8 +276,22 @@ public:
     /// `scoreIsCalibrated()` flag read off the heuristic's own descriptor, and the two
     /// disagreed whenever the descriptor answering was not the one the running architecture
     /// ranks with.
-    virtual std::vector<ScoredKernel>
-        calibratedRanking(const Catalog&, const MatchContext&, std::string& /*modelId*/) const
+    virtual std::vector<ScoredKernel> calibratedRanking(const Catalog& /*catalog*/,
+                                                        const MatchContext& /*context*/,
+                                                        std::string& /*modelId*/) const
+    {
+        return {};
+    }
+
+    /// @brief The id of the model calibratedRanking() would answer with for @p metric on
+    ///        @p arch, from what is bound alone -- nothing loaded, nothing ranked. Empty when
+    ///        no bound model could answer, which is the default for the same reason
+    ///        calibratedRanking() is empty by default.
+    ///
+    /// A description asks this: it names the model an evaluation would use, and describing
+    /// is how a caller discovers what an engine predicts, so it must cost no ranking.
+    virtual std::string calibratedModelId(const std::string& /*metric*/,
+                                          const std::string& /*arch*/) const
     {
         return {};
     }
@@ -319,22 +334,60 @@ public:
 class NativeKernelHeuristic : public IKernelHeuristic
 {
 public:
+    /// @param objective The UHD's `objective`. `min` means the scorer returns a cost, which
+    ///        score() negates so that rankScored's higher-wins order puts the cheapest first.
+    /// @param transform The UHD's `score.transform`, the space the scorer's value is in.
+    /// @param metric The UHD's `score.metric`; empty for a metric-less ranker. With
+    ///        @p transform it says whether the score is physical (score_transform's
+    ///        isPhysicalScore).
     /// @throws std::runtime_error if @p scoreSymbol is not registered.
     explicit NativeKernelHeuristic(const std::string& scoreSymbol,
-                                   const std::string& describedBy = {})
+                                   const std::string& describedBy = {},
+                                   const std::string& objective = "max",
+                                   std::string transform = {},
+                                   const std::string& metric = {})
         : _scoreFn(ScoreRegistry::resolve(scoreSymbol, describedBy))
+        , _sign(objective == "min" ? -1.0 : 1.0)
+        , _transform(std::move(transform))
+        // A native cost scorer says "no measurement" with 0 -- negated, a zero cost would be
+        // -0 and outrank every real candidate's negated cost -- so under `min` a cost must be
+        // positive whatever the score's units. Otherwise §8.3's rule decides.
+        , _positiveRequired(objective == "min"
+                            || uhd::score_transform::isPhysicalScore(metric, _transform))
     {
     }
 
+    /// The scorer's value recovered through `score.transform` and oriented so higher wins --
+    /// the form a model-backed heuristic reports too, so a caller undoes one orientation rule
+    /// whichever kind ranked, and never an inverse transform on top of it.
+    ///
+    /// Recovered before anything compares it to zero: a transformed 0 is a real value (under
+    /// `log`, 1 ms), and reporting the raw 0 made it indistinguishable from the 0 §5 step 7
+    /// gives "no measurement". Every supported inverse is increasing, so ranking on the
+    /// recovered value keeps the scorer's order.
+    ///
+    /// When positivity is required (see the constructor) a recovered value that is not finite
+    /// and positive comes back NaN, which rankScored sorts last and reports as 0. Otherwise the
+    /// value passes through, infinities included: a metric-less `max` scorer may rank on any
+    /// real number, zero and negatives included.
     double score(const MatchContext& context,
                  const BoundTokens& bound,
                  const KernelDefinition& kernel) const override
     {
-        return _scoreFn(context, bound, kernel);
+        const double recovered
+            = uhd::score_transform::applyInverse(_scoreFn(context, bound, kernel), _transform);
+        if(_positiveRequired && !uhd::score_transform::isRankableScore(recovered, true))
+        {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        return _sign * recovered;
     }
 
 private:
     ScoreFn _scoreFn;
+    double _sign;
+    std::string _transform;
+    bool _positiveRequired;
 };
 
 /// Used when an engine ships no UHD: scores every kernel alike, so rank()'s tie-break

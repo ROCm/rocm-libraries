@@ -230,7 +230,7 @@ public:
         }
 
         // Orderability is the FULL catalog's question, answered once, in sortedCatalog():
-        // `catalog.orderedFromRecord` says a benchmarked record covered and ordered every
+        // `catalog.measuredRecord` is the benchmarked record that covered and ordered every
         // kernel the matchers admitted, and `filtered` is that order with rows removed, so
         // it is the measured order restricted.
         //
@@ -241,25 +241,11 @@ public:
         // basis for exactly this reason: the decision is "resolved against the canonical
         // candidate set -- every kernel the matchers admitted for this graph, before any knob
         // filter narrows it ... Knob filtering then applies to the resulting order."
-        //
-        // The lookup itself stays lazy: a WinnerKey hashes the whole graph, so it is not
-        // worth building when neither a benchmark write nor a possible hit needs one.
-        std::optional<WinnerKey> winnerKey;
-        std::optional<WinnerRecord> record;
-        if(settings.benchmarkingEnabled
-           || _stateManager.mightHaveWinnerFor(context.deviceProperties.gcnArchName))
-        {
-            winnerKey
-                = WinnerKey{hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{opGraph},
-                            DeviceKey{context.deviceProperties}};
-            record = _stateManager.winnerFor(*winnerKey);
-        }
-
-        if(catalog.orderedFromRecord)
+        if(catalog.measuredRecord != nullptr)
         {
             // Walks the ranked list instead of committing to its front: constructing
             // a GenericPlan runs prepare()/workspaceBytes() and throws on a null
-            // prepare (GenericPlan.hpp:33-41), and a cache hit must not be stricter
+            // prepare (GenericPlan::GenericPlan), and a cache hit must not be stricter
             // than an empty cache.
             for(size_t rank = 0; rank < filtered.size(); ++rank)
             {
@@ -269,15 +255,14 @@ public:
                     auto plan = std::make_unique<GenericPlan<THandle>>(
                         _stateManager.getDispatchDetails(filtered[rank]), context, catalog.bound);
 
-                    // The record itself may have been evicted from the bounded winner cache
-                    // since the catalog was ordered by it; the order survives on the cached
-                    // catalog either way, so only the entry count in this line is unavailable.
-                    HIPDNN_PLUGIN_LOG_INFO(
-                        "ingestor: engine '"
-                        << _engine.name << "' served kernel " << toString(filtered[rank].kernelId)
-                        << " at rank " << rank << " from a benchmarked record of "
-                        << (record.has_value() ? std::to_string(record->size()) : "?")
-                        << " entry(s) for " << filtered.size() << " candidate(s)");
+                    // The record is the catalog's own snapshot, so this holds even after the
+                    // bounded winner cache has evicted the copy it was adopted from.
+                    HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
+                                           << _engine.name << "' served kernel "
+                                           << toString(filtered[rank].kernelId) << " at rank "
+                                           << rank << " from a benchmarked record of "
+                                           << catalog.measuredRecord->size() << " entry(s) for "
+                                           << filtered.size() << " candidate(s)");
 
                     executionContext.setPlan(std::move(plan));
                     return;
@@ -309,7 +294,21 @@ public:
                                    << "' found a benchmarked record whose entries no longer "
                                       "resolve; falling back to normal selection");
         }
-        else if(record.has_value() && settings.benchmarkingEnabled)
+
+        // The lookup stays lazy: a WinnerKey hashes the whole graph, so it is not worth
+        // building when neither a benchmark write nor a possible hit needs one.
+        std::optional<WinnerKey> winnerKey;
+        std::optional<WinnerRecord> record;
+        if(settings.benchmarkingEnabled
+           || _stateManager.mightHaveWinnerFor(context.deviceProperties.gcnArchName))
+        {
+            winnerKey
+                = WinnerKey{hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{opGraph},
+                            DeviceKey{context.deviceProperties}};
+            record = _stateManager.winnerFor(*winnerKey);
+        }
+
+        if(catalog.measuredRecord == nullptr && record.has_value() && settings.benchmarkingEnabled)
         {
             // A record only ever reorders candidates measured together; it never
             // replaces the heuristic's pick, so a record that does not fully cover
@@ -381,6 +380,7 @@ public:
         std::vector<std::string> benchmarkFailures;
         std::vector<typename BenchmarkPlan<THandle>::Candidate> candidates;
         candidates.reserve(filtered.size());
+        const auto problem = problemFeaturesJson(context, catalog.bound);
         for(const auto& kernel : filtered)
         {
             try
@@ -391,7 +391,7 @@ public:
                          _stateManager.getDispatchDetails(kernel), context, catalog.bound),
                      kernel.packId,
                      kernel.dispatchId,
-                     candidateFeatures(catalog.bound, kernel, context.deviceProperties)});
+                     candidateFeatures(problem, kernel)});
                 continue;
             }
             catch(const HipdnnPluginException& error)
@@ -447,12 +447,12 @@ public:
         // or none of its ranked entries still resolved -- is being superseded, so its write must
         // append rather than adopt.
         //
-        // `catalog.orderedFromRecord` is consulted alongside the lookup because the two can
+        // `catalog.measuredRecord` is consulted alongside the lookup because the two can
         // disagree now that the winner cache is bounded: a catalog can carry a measured order
         // whose record has since been evicted, and reaching here then still means a record was
         // tried and did not serve. Reading the lookup alone would call that a fresh miss and
         // adopt the very line that just failed to resolve.
-        const auto cause = record.has_value() || catalog.orderedFromRecord
+        const auto cause = record.has_value() || catalog.measuredRecord != nullptr
                                ? WinnerWriteCause::COVERAGE_REBENCHMARK
                                : WinnerWriteCause::FRESH_MISS;
 
@@ -596,19 +596,23 @@ public:
         page.device_arch = context.deviceProperties.gcnArchName;
         page.total_count = filtered.size();
         page.offset = offset;
-        nlohmann::json problem = nlohmann::json::object();
-        for(const auto& [token, value] : catalog.bound)
+        // The live ranker's own problem half, split at the namespace so device facts keep
+        // their field: a model trained on this page reads at runtime what it was fitted on.
+        auto problem = problemFeaturesJson(context, catalog.bound);
+        nlohmann::json device = nlohmann::json::object();
+        for(auto it = problem.begin(); it != problem.end();)
         {
-            detail::addMetadataFeature(
-                problem, !token.empty() && token.front() == '$' ? token.substr(1) : token, value);
+            if(it.key().rfind("device.", 0) == 0)
+            {
+                device.emplace(it.key(), std::move(it.value()));
+                it = problem.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
         }
         page.problem_features = problem.dump();
-        nlohmann::json device = nlohmann::json::object();
-        for(const auto& entry : deviceFeatureValues(context.deviceProperties))
-        {
-            std::visit([&device, &entry](auto held) { device["device." + entry.first] = held; },
-                       entry.second);
-        }
         page.device_features = device.dump();
         const auto end = offset + std::min<uint64_t>(limit, filtered.size() - offset);
         page.candidates.reserve(static_cast<size_t>(end - offset));
@@ -650,17 +654,7 @@ public:
         {
             if(const auto bound = _stateManager.graphBindings(context))
             {
-                // Matchers may add published names but never overwrite common facts.
-                for(const auto& entry : detail::queryVarsFrom(*bound))
-                {
-                    const auto& name = entry.first;
-                    const auto bare = !name.empty() && name.front() == '$' ? name.substr(1) : name;
-                    if(bare.rfind("graph.", 0) != 0 && bare.rfind("device.", 0) != 0
-                       && bare.rfind("constraint.", 0) != 0 && bare.rfind("kernel.", 0) != 0)
-                    {
-                        features.bind(name, entry.second);
-                    }
-                }
+                detail::bindGraphMatchBindings(features, *bound);
             }
         }
         catch(const std::exception& error)
@@ -674,8 +668,17 @@ public:
     /// @brief Predicts an executable configuration identified by its exposed knobs, in the
     ///        ranking metric @p config carries.
     ///
-    /// Only that metric's own calibrated ranker answers (RFC 0019 §11.4): the default ranker
-    /// may choose kernels for a metric with no ranker, but its number is another metric's.
+    /// The configuration comes from the order source plan build resolves (RFC 0019 §5 step 9):
+    /// a benchmark record covering the full catalog, else the metric's calibrated ranker.
+    /// Answering from the model while a record decides plan build predicted a configuration
+    /// the engine would not serve, with an estimate where a measurement existed.
+    ///
+    /// The value follows the order source. Under a record it is the measured value in the
+    /// requested metric -- the time, or the throughput derived from it and `graph.flops` --
+    /// and a metric the record cannot supply is answered by the calibrated model's estimate
+    /// for the record's configuration. Otherwise only that metric's own calibrated ranker
+    /// answers (RFC 0019 §11.4): the default ranker may choose kernels for a metric with no
+    /// ranker, but its number is another metric's.
     void predictConfiguration(const THandle& handle,
                               const IGraph& graph,
                               const IEngineConfig& config,
@@ -694,25 +697,59 @@ public:
         TSettings executionSettings;
         initializeExecutionSettings(handle, graph, config, executionSettings);
         const auto context = contextFor(handle, graph, metric.name);
-        auto catalog = _stateManager.unsortedCatalog(context);
+        // The measured catalog sortedCatalog() orders plan build by, read as one snapshot:
+        // its record is the one that ordered it, carried with the catalog, so a winner-cache
+        // eviction cannot leave plan build on the measured order while this falls back to
+        // the model. A catalog no record covers is the model's to answer.
+        auto catalog = _stateManager.measuredCatalog(context);
         const auto filtered
             = applyConstraints(catalog, executionSettings.ingestorSettings, context);
         std::string modelId;
-        // Both halves of the catalog go in: the full one is the basis the ranking is decided
-        // on, the filtered one is what the answer may name. Passing only the filtered set --
-        // which is what this did -- ranked the pinned subset fresh and bypassed the cached
-        // full-catalog order entirely, so a pin could reorder two candidates relative to each
-        // other and a scorer that threw only on an excluded candidate degraded the unpinned
-        // prediction while the pinned one scored normally. RFC 0019 §9.2 and §5 step 8; see
-        // KernelIngestorStateManager::calibratedRanking().
-        const auto ranking = _stateManager.calibratedRanking(catalog, filtered, context, modelId);
+        // Both halves of the catalog go in: the full one is the basis the order is decided
+        // on, the filtered one is what the answer may name. Coverage is the full catalog's
+        // question exactly as in sortedCatalog(), and the calibrated ranking is the full
+        // catalog's ranking restricted (KernelIngestorStateManager::calibratedRanking()), so
+        // a pin can neither change the order source nor reorder two candidates. RFC 0019
+        // §9.2 and §5 steps 8 and 9.
+        const bool measured = catalog.measuredRecord != nullptr;
+        std::vector<ScoredKernel> ranking;
+        if(measured)
+        {
+            bool measuresMetric = false;
+            ranking = measuredRanking(
+                *catalog.measuredRecord, filtered, metric, context, measuresMetric);
+            if(!measuresMetric)
+            {
+                // A metric the record does not measure is the model's to answer -- for the
+                // record's configurations, never by choosing among them.
+                const auto estimates
+                    = _stateManager.calibratedRanking(catalog, filtered, context, modelId);
+                for(auto& entry : ranking)
+                {
+                    const auto estimate
+                        = std::find_if(estimates.begin(), estimates.end(), [&](const auto& scored) {
+                              return scored.kernelId == entry.kernelId;
+                          });
+                    entry.score = estimate == estimates.end() ? 0.0 : estimate->score;
+                }
+            }
+        }
+        else
+        {
+            ranking = _stateManager.calibratedRanking(catalog, filtered, context, modelId);
+        }
         catalog.entries = filtered;
         result.reason
             = "No calibrated '" + result.metric + "' configuration prediction is available";
         for(const auto& scored : ranking)
         {
-            if(scored.score == 0.0
-               || !hipdnn_data_sdk::utilities::isValidMetricValue(metric, scored.score))
+            const bool valued
+                = scored.score != 0.0
+                  && hipdnn_data_sdk::utilities::isValidMetricValue(metric, scored.score);
+            // Under a record the order is decided, so a candidate without a value is still the
+            // configuration plan build would serve: it is answered UNAVAILABLE below rather
+            // than passed over for one the engine would not run.
+            if(!valued && !measured)
             {
                 continue;
             }
@@ -726,15 +763,16 @@ public:
                                             "Ranker returned an unknown candidate");
             }
             const auto knobs = candidateKnobs(*selected);
+            // The same comparison the replay's knob filter makes (applyKnobFilter): the tuple
+            // holds ordinals for non-integer knobs, so reading the metadata as a raw int64_t
+            // found no match for a string, bool, float or list knob, and every candidate that
+            // carried one was refused as unidentifiable.
             const auto matching = std::count_if(
-                catalog.entries.begin(), catalog.entries.end(), [&knobs](const auto& kernel) {
-                    return std::all_of(knobs.begin(), knobs.end(), [&kernel](const auto& setting) {
-                        const auto field = kernel.metadata.find(setting.first);
-                        const auto* value = field == kernel.metadata.end()
-                                                ? nullptr
-                                                : std::get_if<int64_t>(&field->second);
-                        return value != nullptr && *value == setting.second;
-                    });
+                catalog.entries.begin(), catalog.entries.end(), [this, &knobs](const auto& kernel) {
+                    return std::all_of(
+                        knobs.begin(), knobs.end(), [this, &kernel](const auto& setting) {
+                            return _stateManager.knobMatches(kernel, setting.first, setting.second);
+                        });
                 });
             if(matching != 1)
             {
@@ -745,8 +783,17 @@ public:
             {
                 // Normal selection walks past candidates that cannot prepare. The
                 // prediction must refer to a candidate that can actually be built.
-                GenericPlan<THandle> prepared(
+                const GenericPlan<THandle> prepared(
                     _stateManager.getDispatchDetails(*selected), context, catalog.bound);
+                if(!valued)
+                {
+                    // Only reachable under a record: this is the configuration plan build
+                    // serves, and nothing can say what it is worth in this metric.
+                    result.reason = "The benchmarked configuration has no '" + result.metric
+                                    + "' value: the record does not measure it and no "
+                                      "calibrated model estimates it";
+                    return;
+                }
                 auto exact = config.isValid()
                                  ? std::unique_ptr<EngineConfigT>(config.getEngineConfig().UnPack())
                                  : std::make_unique<EngineConfigT>();
@@ -771,6 +818,7 @@ public:
                 }
                 result.engine_config = std::move(exact);
                 result.value = scored.score;
+                // Empty when the record supplied the value: no model produced the number.
                 result.uhd_id = modelId;
                 result.status = PredictionStatus::AVAILABLE;
                 result.reason.clear();
@@ -778,7 +826,14 @@ public:
                 {
                     auto binding = nlohmann::json::parse(result.binding_json);
                     binding["role"] = "sort_kernel_catalog";
-                    binding["uhd_id"] = modelId;
+                    if(modelId.empty())
+                    {
+                        binding.erase("uhd_id");
+                    }
+                    else
+                    {
+                        binding["uhd_id"] = modelId;
+                    }
                     result.binding_json = binding.dump();
                 }
                 return;
@@ -792,6 +847,8 @@ public:
             }
             catch(const std::exception&)
             {
+                // This candidate cannot prepare; the walk moves on to the next one.
+                continue;
             }
         }
     }
@@ -818,6 +875,62 @@ public:
     }
 
 private:
+    /// @p record's order over @p filtered, each kernel carrying its measured value in
+    /// @p metric: the time itself, or for `tflops` the throughput `graph.flops / (ms * 1e9)`
+    /// -- the label uhd_gen trains a tflops model on, so a measurement and an estimate are
+    /// the same quantity (RFC 0019 §5 step 9).
+    /// @param measuresMetric Set false when the record cannot supply @p metric -- a metric it
+    ///        does not time, or a throughput for a graph whose work is unknown -- in which
+    ///        case every value is 0 and only the order is the record's.
+    static std::vector<ScoredKernel>
+        measuredRanking(const WinnerRecord& record,
+                        const std::vector<KernelDefinition>& filtered,
+                        const hipdnn_data_sdk::utilities::RankingMetric& metric,
+                        const MatchContext& context,
+                        bool& measuresMetric)
+    {
+        std::optional<double> flops;
+        if(metric.name == "tflops")
+        {
+            const auto problem
+                = heuristics::problemFeatures(context.graph, context.deviceProperties);
+            if(const auto* value = problem.getContext().find("graph.flops"))
+            {
+                if(const auto* known = std::get_if<double>(value))
+                {
+                    flops = *known;
+                }
+            }
+        }
+        measuresMetric = metric.name == "time" || flops.has_value();
+
+        std::vector<ScoredKernel> ranking;
+        ranking.reserve(filtered.size());
+        for(const auto& entry : record)
+        {
+            const bool admitted
+                = std::any_of(filtered.begin(), filtered.end(), [&entry](const auto& kernel) {
+                      return kernel.kernelId == entry.kernelId && kernel.packId == entry.packId
+                             && kernel.dispatchId == entry.dispatchId;
+                  });
+            if(!admitted)
+            {
+                continue;
+            }
+            double value = 0.0;
+            if(metric.name == "time")
+            {
+                value = entry.timeMs;
+            }
+            else if(flops.has_value() && entry.timeMs > 0.0)
+            {
+                value = *flops / (entry.timeMs * 1e9);
+            }
+            ranking.push_back({entry.kernelId, value});
+        }
+        return ranking;
+    }
+
     std::vector<KernelDefinition> applyConstraints(const Catalog& catalog,
                                                    const IngestorSettings& settings,
                                                    const MatchContext& context) const
@@ -862,43 +975,48 @@ private:
         return tuple;
     }
 
+    /// The problem half of every collected `sort_kernel_catalog` row, as JSON: exactly the
+    /// scalar name->value set the live ranker binds (detail::catalogProblemFeatures), plus
+    /// each int-list token whole beside its indexed elements.
+    ///
+    /// The `device.*` facts are what a board IS, where the row envelope's `device` says only
+    /// which one it was: a sweep merged from several boards of one arch needs both, since the
+    /// UHD is arch-keyed. Keys are the published names without '$'.
+    static nlohmann::json problemFeaturesJson(const MatchContext& context, const BoundTokens& bound)
+    {
+        auto features = detail::catalogProblemFeatures(context, bound).toJson();
+        for(const auto& [token, value] : bound)
+        {
+            // A list has no scalar binding, so a model reads it only through the indexed
+            // names already present; the whole list rides along for readers of the row.
+            const auto* values = std::get_if<std::vector<int64_t>>(&value);
+            if(values != nullptr && !detail::isReservedFeatureName(token))
+            {
+                features[!token.empty() && token.front() == '$' ? token.substr(1) : token]
+                    = *values;
+            }
+        }
+        return features;
+    }
+
     /// Every feature value that describes one benchmarked (problem, kernel) pair: the
-    /// tokens graph matching bound for the problem, and the kernel's own KMD metadata.
+    /// problem half (problemFeaturesJson, computed once per sweep) and the kernel's own KMD
+    /// metadata under `kernel.`, the names an enumeration page gives the same kernel.
     ///
     /// This is where the knowledge lives -- BenchmarkPlan holds the MatchContext and the
     /// KernelDefinition for nothing, and teaching it to reach into a graph would cost it
     /// the opacity its benchmarkId comment exists to protect.
     ///
-    /// Keys are the exact published binding names without '$'; array elements are
-    /// also emitted as indexed references for direct-column feature projection.
-    ///
     /// Built for every sweep, whatever the engine ships. Gating this on a UHD being
     /// present would make the corpus collectable only by a build that already has the
     /// model the corpus exists to train.
-    static nlohmann::json candidateFeatures(const BoundTokens& bound,
-                                            const KernelDefinition& kernel,
-                                            const DeviceProperties& device)
+    static nlohmann::json candidateFeatures(const nlohmann::json& problem,
+                                            const KernelDefinition& kernel)
     {
-        nlohmann::json features = nlohmann::json::object();
-        for(const auto& [token, value] : bound)
-        {
-            detail::addMetadataFeature(
-                features, !token.empty() && token.front() == '$' ? token.substr(1) : token, value);
-        }
+        auto features = problem;
         for(const auto& [field, value] : kernel.metadata)
         {
             detail::addMetadataFeature(features, "kernel." + field, value);
-        }
-        // The device half. A sweep merged from several boards of one arch is the point:
-        // the UHD is arch-keyed, so `device` alone says which card a row came from while
-        // these say what that card IS, which is what a model can actually learn from.
-        // Through deviceFeatureValues, the same list the extractor binds, so a logged
-        // column and a `features_signature` entry cannot drift apart.
-        for(const auto& entry : deviceFeatureValues(device))
-        {
-            // entry.first, not a captured structured binding: those are C++20.
-            std::visit([&features, &entry](auto held) { features["device." + entry.first] = held; },
-                       entry.second);
         }
         return features;
     }

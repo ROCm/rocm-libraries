@@ -42,22 +42,35 @@ GROUPS = (0.0, 1.0)
 def _booster(rows: list[tuple[float, float, float]], num_trees: int = 8) -> lgb.Booster:
     """A booster over (q.size, kernel.group) -> target, with enough signal to split on."""
     frame = pd.DataFrame(rows, columns=["q.size", "kernel.group", "y"])
-    data = lgb.Dataset(frame[["q.size", "kernel.group"]].to_numpy(), label=frame["y"].to_numpy())
+    data = lgb.Dataset(
+        frame[["q.size", "kernel.group"]].to_numpy(), label=frame["y"].to_numpy()
+    )
     return lgb.train(
-        {"objective": "regression", "num_leaves": 4, "learning_rate": 0.3,
-         "min_data_in_leaf": 1, "min_data_in_bin": 1, "verbose": -1},
+        {
+            "objective": "regression",
+            "num_leaves": 4,
+            "learning_rate": 0.3,
+            "min_data_in_leaf": 1,
+            "min_data_in_bin": 1,
+            "verbose": -1,
+        },
         data,
         num_boost_round=num_trees,
     )
 
 
-def _write_model(directory: Path, *, grouped: bool) -> Path:
+def _write_model(directory: Path, *, grouped: bool, objective: str = "max") -> Path:
     """A trained pair on disk, as `train --output-dir` leaves it."""
     directory.mkdir(parents=True, exist_ok=True)
 
     # Layer 1 prefers group 1 on large sizes and group 0 on small ones.
-    layer_one = _booster([(size, g, (10.0 + size) if g == 1.0 else (20.0 - size))
-                          for size in range(1, 12) for g in GROUPS])
+    layer_one = _booster(
+        [
+            (size, g, (10.0 + size) if g == 1.0 else (20.0 - size))
+            for size in range(1, 12)
+            for g in GROUPS
+        ]
+    )
     lgbm_path = directory / "model.lgbm"
     layer_one.save_model(str(lgbm_path))
 
@@ -66,8 +79,15 @@ def _write_model(directory: Path, *, grouped: bool) -> Path:
         # Within a group, larger q.size is better -- a shape layer 1 does not express, so a
         # difference in the ranking can only have come from layer 2.
         group_models = [
-            (float(g), _booster([(size, g, float(size) * (2.0 if g == 1.0 else 1.0))
-                                 for size in range(1, 12)]))
+            (
+                float(g),
+                _booster(
+                    [
+                        (size, g, float(size) * (2.0 if g == 1.0 else 1.0))
+                        for size in range(1, 12)
+                    ]
+                ),
+            )
             for g in GROUPS
         ]
 
@@ -84,15 +104,22 @@ def _write_model(directory: Path, *, grouped: bool) -> Path:
     manifest = {
         "features": FEATURES,
         "target": "tflops",
-        "objective": "max",
+        "objective": objective,
         "num_samples": 22,
         "group_by_feature": "kernel.group" if grouped else None,
         "group_models": len(group_models or []),
     }
-    (directory / "train_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (directory / "train_manifest.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
     (directory / "heuristic.uhd.json").write_text(
-        json.dumps({"objective": "max", "tree_data": {"artifact": "model.bin"},
-                    "features_signature": [f"${name}" for name in FEATURES]}),
+        json.dumps(
+            {
+                "objective": objective,
+                "tree_data": {"artifact": "model.bin"},
+                "features_signature": [f"${name}" for name in FEATURES],
+            }
+        ),
         encoding="utf-8",
     )
     return directory
@@ -114,8 +141,12 @@ def test_a_grouped_artifact_rejects_every_candidate_outside_the_chosen_group():
     bundle = load_model(_write_model(with_tmp / "grouped", grouped=True))
     scores = bundle.scorer(_candidates())
 
-    assert np.isneginf(scores).any(), "no candidate was rejected; layer 2 was not consulted"
-    assert np.isfinite(scores).any(), "every candidate was rejected; nothing could be picked"
+    assert np.isneginf(
+        scores
+    ).any(), "no candidate was rejected; layer 2 was not consulted"
+    assert np.isfinite(
+        scores
+    ).any(), "every candidate was rejected; nothing could be picked"
 
     # Exactly one group survives, and it survives whole.
     survived = _candidates().loc[np.isfinite(scores), "kernel.group"].unique()
@@ -145,7 +176,9 @@ def test_a_grouped_model_is_not_ranked_with_the_booster():
     """
     with_tmp = Path(__import__("tempfile").mkdtemp())
     directory = _write_model(with_tmp / "both", grouped=True)
-    assert (directory / "model.lgbm").exists(), "fixture must keep the booster to be meaningful"
+    assert (
+        directory / "model.lgbm"
+    ).exists(), "fixture must keep the booster to be meaningful"
 
     bundle = load_model(directory)
     assert bundle.source.endswith("model.bin")
@@ -167,21 +200,37 @@ def test_the_group_decision_is_made_per_problem():
         assert np.isfinite(scores).any(), f"every candidate rejected at q.size={size}"
 
 
+@pytest.mark.parametrize("objective, expected", [("max", 1.0), ("min", 0.0)])
+def test_layer_one_picks_the_group_in_the_objective_direction(objective, expected):
+    """At q.size 9 layer 1 scores group 1 near 19 and group 0 near 11. A `max` model keeps
+    the larger; a `min` (time) model the smaller -- taking the argmax there kept the
+    slowest group, the same inversion TreeDataAdapter::scoreBatch had."""
+    with_tmp = Path(__import__("tempfile").mkdtemp())
+    bundle = load_model(
+        _write_model(with_tmp / objective, grouped=True, objective=objective)
+    )
+    frame = pd.DataFrame([{"q.size": 9.0, "kernel.group": g} for g in GROUPS])
+    scores = bundle.scorer(frame)
+    assert frame.loc[np.isfinite(scores), "kernel.group"].tolist() == [expected]
+
+
 def _corpus() -> pd.DataFrame:
     """Two problems, two groups each, with the best candidate in different groups."""
     rows = []
     for benchmark, best_group in (("aaaa", 1.0), ("bbbb", 0.0)):
         for group in GROUPS:
             for size in (2.0, 9.0):
-                rows.append({
-                    "benchmark": benchmark,
-                    "device": "d0",
-                    "kernel": f"k{group}{size}",
-                    "q.size": size,
-                    "kernel.group": group,
-                    "is_valid": "True",
-                    "tflops": (100.0 if group == best_group else 40.0) + size,
-                })
+                rows.append(
+                    {
+                        "benchmark": benchmark,
+                        "device": "d0",
+                        "kernel": f"k{group}{size}",
+                        "q.size": size,
+                        "kernel.group": group,
+                        "is_valid": "True",
+                        "tflops": (100.0 if group == best_group else 40.0) + size,
+                    }
+                )
     return pd.DataFrame(rows)
 
 
@@ -210,7 +259,9 @@ def test_two_stage_regret_sums_to_the_total():
 
     for problem in result.problems:
         assert problem.group_regret is not None
-        assert problem.group_regret + problem.in_group_regret == pytest.approx(problem.regret)
+        assert problem.group_regret + problem.in_group_regret == pytest.approx(
+            problem.regret
+        )
         assert problem.group_regret >= 0.0
 
 
@@ -238,9 +289,6 @@ def _strict_less_than_model(directory: Path) -> Path:
     model can exercise the other branch. A hand-written or foreign artifact can -- which is
     exactly what `TestTreeDataAdapter` and the rocKE model generator produce.
     """
-    import flatbuffers
-
-    from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModelT
     from hipdnn_flatbuffers_sdk.data_objects.GbdtTree import GbdtTreeT
 
     tree = GbdtTreeT()
@@ -254,6 +302,17 @@ def _strict_less_than_model(directory: Path) -> Path:
     tree.leafValues = [0.0, 1.0, 9.0]
     tree.defaultLeft = [True, True, True]
     tree.decisionLte = [False, False, False]
+    return _single_tree_model(directory, tree)
+
+
+def _single_tree_model(
+    directory: Path, tree, *, score: dict | None = None, manifest: dict | None = None
+) -> Path:
+    """A one-tree, one-feature (`q.size`) artifact written by hand, as a foreign producer
+    would, with the descriptor and training manifest beside it."""
+    import flatbuffers
+
+    from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModelT
 
     model = GbdtModelT()
     model.trees = [tree]
@@ -263,18 +322,27 @@ def _strict_less_than_model(directory: Path) -> Path:
     model.groupByFeatureIndex = -1
 
     builder = flatbuffers.Builder(1024)
-    builder.Finish(model.Pack(builder))
+    builder.Finish(model.Pack(builder), file_identifier=b"HGBM")
 
+    objective = "min" if score else "max"
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "model.bin").write_bytes(bytes(builder.Output()))
     (directory / "train_manifest.json").write_text(
-        json.dumps({"features": ["q.size"], "target": "tflops", "objective": "max"}),
+        json.dumps(
+            {"features": ["q.size"], "target": "tflops", "objective": objective}
+            | (manifest or {})
+        ),
         encoding="utf-8",
     )
+    descriptor = {
+        "objective": objective,
+        "tree_data": {"artifact": "model.bin"},
+        "features_signature": ["$q.size"],
+    }
+    if score is not None:
+        descriptor["score"] = score
     (directory / "heuristic.uhd.json").write_text(
-        json.dumps({"objective": "max", "tree_data": {"artifact": "model.bin"},
-                    "features_signature": ["$q.size"]}),
-        encoding="utf-8",
+        json.dumps(descriptor), encoding="utf-8"
     )
     return directory
 
@@ -291,14 +359,82 @@ def test_a_strict_less_than_split_routes_the_way_the_runtime_routes_it():
     with_tmp = Path(__import__("tempfile").mkdtemp())
     bundle = load_model(_strict_less_than_model(with_tmp / "strict_lt"))
 
-    scores = bundle.scorer(pd.DataFrame([{"q.size": 5.0}, {"q.size": 10.0}, {"q.size": 15.0}]))
+    scores = bundle.scorer(
+        pd.DataFrame([{"q.size": 5.0}, {"q.size": 10.0}, {"q.size": 15.0}])
+    )
 
-    # Under `<`: 5 goes left (1.0), 10 and 15 go right (9.0). expm1 is monotonic, so the
-    # comparison holds on the returned values.
+    # Under `<`: 5 goes left (1.0), 10 and 15 go right (9.0). The descriptor declares no
+    # transform, which the runtime reads as identity, so the scores are the leaves.
     assert scores[0] < scores[1], "a value below the threshold took the wrong branch"
-    assert scores[1] == pytest.approx(scores[2]), "10 and 15 must share the right-hand leaf"
-    assert scores[0] == pytest.approx(np.expm1(1.0))
-    assert scores[1] == pytest.approx(np.expm1(9.0))
+    assert scores[1] == pytest.approx(
+        scores[2]
+    ), "10 and 15 must share the right-hand leaf"
+    assert scores[0] == pytest.approx(1.0)
+    assert scores[1] == pytest.approx(9.0)
+
+
+def _routing_tree(nodes: int, default_left, decision_lte):
+    """`nodes` 3: a stump at 0. `nodes` 5: the same root, its right child splitting at 2."""
+    from hipdnn_flatbuffers_sdk.data_objects.GbdtTree import GbdtTreeT
+
+    tree = GbdtTreeT()
+    if nodes == 3:
+        tree.featureIndices = [0, -1, -1]
+        tree.thresholds = [0.0, 0.0, 0.0]
+        tree.leftChildren = [1, -1, -1]
+        tree.rightChildren = [2, -1, -1]
+        tree.leafValues = [0.0, 1.0, 9.0]
+    else:
+        tree.featureIndices = [0, -1, 0, -1, -1]
+        tree.thresholds = [0.0, 0.0, 2.0, 0.0, 0.0]
+        tree.leftChildren = [1, -1, 3, -1, -1]
+        tree.rightChildren = [2, -1, 4, -1, -1]
+        tree.leafValues = [0.0, 1.0, 0.0, 3.0, 9.0]
+    tree.defaultLeft = default_left
+    tree.decisionLte = decision_lte
+    return tree
+
+
+@pytest.mark.parametrize(
+    "nodes, default_left, decision_lte, expected",
+    [
+        # Both vectors omitted: `<=` everywhere.
+        (3, None, None, [1.0, 1.0, 9.0]),
+        # Shorter than the tree: the root's entries apply, and past them a nonempty
+        # `decision_lte` means `<`, so 2 is not below node 2's threshold of 2. Padding with
+        # `<=` would send it left, to 3.
+        (5, [True], [True], [1.0, 1.0, 9.0]),
+    ],
+)
+def test_optional_routing_vectors_take_the_runtimes_defaults(
+    tmp_path, nodes, default_left, decision_lte, expected
+):
+    """`default_left` and `decision_lte` are optional and may be short; TreeDataAdapter
+    loads such an artifact and fills them in. The scores are the runtime's for the same
+    bytes (x = -1, 0, 2), not an IndexError."""
+    bundle = load_model(
+        _single_tree_model(
+            tmp_path / "model", _routing_tree(nodes, default_left, decision_lte)
+        )
+    )
+    scores = bundle.scorer(pd.DataFrame({"q.size": [-1.0, 0.0, 2.0]}))
+    assert scores.tolist() == pytest.approx(expected)
+
+
+def test_a_descriptor_declaring_no_transform_is_scored_as_identity(tmp_path):
+    """The engine reads an absent `score.transform` as identity (ScoreTransform.hpp), so the
+    descriptor's raw scores are its estimates; a training manifest saying log1p must not
+    reinterpret the UHD that ships."""
+    bundle = load_model(
+        _single_tree_model(
+            tmp_path / "model",
+            _routing_tree(3, [False] * 3, [True] * 3),
+            score={"metric": "time", "calibrated": True},
+            manifest={"score_transform": "log1p", "target": "avgTimeMs"},
+        )
+    )
+    scores = bundle.scorer(pd.DataFrame({"q.size": [-1.0, 0.0, 2.0]}))
+    assert scores.tolist() == pytest.approx([1.0, 1.0, 9.0])
 
 
 def test_a_generated_encoding_survives_train_then_score(tmp_path, evaluator):
@@ -313,25 +449,42 @@ def test_a_generated_encoding_survives_train_then_score(tmp_path, evaluator):
     import sys
 
     corpus = tmp_path / "corpus.csv"
-    frame = pd.DataFrame([
-        {"q.size": size, "kernel.pipeline": pipeline,
-         "tflops": size * (2.0 if pipeline == "interwave" else 1.0)}
-        # Wide enough to split: LightGBM's default min_data_in_leaf is 20, so a corpus of a
-        # couple of dozen rows trains to a single constant leaf and would fail the ordering
-        # assertion below for a reason that has nothing to do with the encoding.
-        for size in range(1, 41) for pipeline in ("interwave", "intrawave")
-    ])
+    frame = pd.DataFrame(
+        [
+            {
+                "q.size": size,
+                "kernel.pipeline": pipeline,
+                "tflops": size * (2.0 if pipeline == "interwave" else 1.0),
+            }
+            # Wide enough to split: LightGBM's default min_data_in_leaf is 20, so a corpus of a
+            # couple of dozen rows trains to a single constant leaf and would fail the ordering
+            # assertion below for a reason that has nothing to do with the encoding.
+            for size in range(1, 41)
+            for pipeline in ("interwave", "intrawave")
+        ]
+    )
     frame.to_csv(corpus, index=False)
 
     # `train` refuses to record an unattributable model, so the round trip needs a
     # provenance snapshot. It is fixture scaffolding: this test is about the encoding
     # surviving the trip, not about what the snapshot says.
     snapshot = tmp_path / "provenance.json"
-    snapshot.write_text(json.dumps({
-        "ued": {"id": "13ab344f-4818-4772-bb8e-8e1441fec82c", "revision": "1.0"},
-        "kmd": {"id": "46d64d06-18eb-483d-9bb4-94472d32b78d", "revision": "1.0"},
-        "umd": [],
-    }), encoding="utf-8")
+    snapshot.write_text(
+        json.dumps(
+            {
+                "ued": {
+                    "id": "13ab344f-4818-4772-bb8e-8e1441fec82c",
+                    "revision": "1.0",
+                },
+                "kmd": {
+                    "id": "46d64d06-18eb-483d-9bb4-94472d32b78d",
+                    "revision": "1.0",
+                },
+                "umd": [],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     # `evaluator` because training stamps a features_hash, and that digest has one
     # definition -- the binary. Named on the command line rather than left to the child's
@@ -339,13 +492,31 @@ def test_a_generated_encoding_survives_train_then_score(tmp_path, evaluator):
     # nothing built skips here instead of failing on a search that came up empty.
     out = tmp_path / "model"
     result = subprocess.run(
-        [sys.executable, "-m", "uhd_gen", "train",
-         "--input", str(corpus), "--provenance", str(snapshot),
-         "--features", "q.size", "kernel.pipeline",
-         "--target", "tflops", "--group-by", "q.size",
-         "--feature-evaluator", str(evaluator),
-         "--output-dir", str(out), "--name", "encoding round trip"],
-        capture_output=True, text=True,
+        [
+            sys.executable,
+            "-m",
+            "uhd_gen",
+            "train",
+            "--input",
+            str(corpus),
+            "--provenance",
+            str(snapshot),
+            "--features",
+            "q.size",
+            "kernel.pipeline",
+            "--target",
+            "tflops",
+            "--group-by",
+            "q.size",
+            "--feature-evaluator",
+            str(evaluator),
+            "--output-dir",
+            str(out),
+            "--name",
+            "encoding round trip",
+        ],
+        capture_output=True,
+        text=True,
         cwd=str(Path(__file__).resolve().parents[2]),
     )
     assert result.returncode == 0, result.stderr[-3000:]
@@ -359,8 +530,104 @@ def test_a_generated_encoding_survives_train_then_score(tmp_path, evaluator):
     # "is a string and has no categorical encoding" refusal.
     bundle = load_model(out)
     scores = bundle.scorer(
-        pd.DataFrame([{"q.size": 12.0, "kernel.pipeline": "interwave"},
-                      {"q.size": 12.0, "kernel.pipeline": "intrawave"}])
+        pd.DataFrame(
+            [
+                {"q.size": 12.0, "kernel.pipeline": "interwave"},
+                {"q.size": 12.0, "kernel.pipeline": "intrawave"},
+            ]
+        )
     )
     assert np.all(np.isfinite(scores))
     assert scores[0] > scores[1], "the faster pipeline did not score higher"
+
+
+def _two_group_time_model(directory: Path, group_zero: float, group_one: float) -> Path:
+    """A grouped `time` ranker whose layer 1 scores group 0 and group 1 as the raw values given.
+
+    Built from dumped ensembles rather than by training, so the layer-1 values are exact:
+    one split on `kernel.group` at 0.5. Each group's layer 2 is a constant.
+    """
+    from uhd_gen.lgbm_to_flatbuffer import build_gbdt_model
+
+    def constant(leaf: float) -> dict:
+        return {
+            "max_feature_idx": 1,
+            "tree_info": [{"tree_structure": {"leaf_value": leaf}}],
+        }
+
+    layer_one = {
+        "max_feature_idx": 1,
+        "tree_info": [
+            {
+                "tree_structure": {
+                    "split_feature": 1,
+                    "threshold": 0.5,
+                    "decision_type": "<=",
+                    "default_left": True,
+                    "left_child": {"leaf_value": group_zero},
+                    "right_child": {"leaf_value": group_one},
+                }
+            }
+        ],
+    }
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "model.bin").write_bytes(
+        build_gbdt_model(
+            layer_one,
+            "sha256:grouped_admission",
+            group_by_feature_index=1,
+            groups=[(0.0, constant(1.0)), (1.0, constant(1.0))],
+        )
+    )
+    (directory / "train_manifest.json").write_text(
+        json.dumps(
+            {
+                "features": FEATURES,
+                "target": "avgTimeMs",
+                "objective": "min",
+                "group_by_feature": "kernel.group",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (directory / "heuristic.uhd.json").write_text(
+        json.dumps(
+            {
+                "objective": "min",
+                "tree_data": {"artifact": "model.bin"},
+                "score": {"metric": "time", "calibrated": True, "transform": "log1p"},
+                "features_signature": [f"${name}" for name in FEATURES],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return directory
+
+
+@pytest.mark.parametrize(
+    "group_zero, group_one, rows, survivor",
+    [
+        # A negative recovered time is discarded by the runtime, so it cannot choose a group,
+        # even though it is the best raw score under `min`.
+        (-0.5, 0.5, (0.0, 1.0), 1.0),
+        # An exact tie goes to the smaller group value whatever order the rows arrive in.
+        (0.5, 0.5, (1.0, 0.0), 0.0),
+        # Nothing admissible: no group is chosen and every candidate falls to declared order.
+        (-0.5, -0.5, (0.0, 1.0), None),
+    ],
+)
+def test_layer_one_chooses_a_group_only_from_scores_the_runtime_admits(
+    tmp_path, group_zero, group_one, rows, survivor
+):
+    """TreeDataAdapter::scoreBatch's group decision: only a row naming a group whose layer-1
+    score is admissible (finite, and positive for a physical score) may choose; the best in
+    the objective's direction wins, exact ties to the smaller group value."""
+    bundle = load_model(
+        _two_group_time_model(tmp_path / "model", group_zero, group_one)
+    )
+    frame = pd.DataFrame([{"q.size": 4.0, "kernel.group": group} for group in rows])
+    scores = bundle.scorer(frame)
+    if survivor is None:
+        assert np.isneginf(scores).all()
+    else:
+        assert frame.loc[np.isfinite(scores), "kernel.group"].tolist() == [survivor]

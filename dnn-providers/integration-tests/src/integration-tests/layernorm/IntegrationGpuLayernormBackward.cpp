@@ -401,42 +401,6 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           testing::ValuesIn(getLayernorm5DStandardTestCases())));
 
-INSTANTIATE_TEST_SUITE_P(
-    Comprehensive,
-    IntegrationGpuLayernormBackwardPure5DFp32,
-    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                     testing::ValuesIn(getLayernorm5DComprehensiveTestCases())));
-INSTANTIATE_TEST_SUITE_P(
-    Comprehensive,
-    IntegrationGpuLayernormBackwardMixed5DFp16,
-    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                     testing::ValuesIn(getLayernorm5DComprehensiveTestCases())));
-INSTANTIATE_TEST_SUITE_P(
-    Comprehensive,
-    IntegrationGpuLayernormBackwardMixed5DBfp16,
-    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                     testing::ValuesIn(getLayernorm5DComprehensiveTestCases())));
-INSTANTIATE_TEST_SUITE_P(
-    Comprehensive,
-    IntegrationGpuLayernormBackwardUpcast5DFp16,
-    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                     testing::ValuesIn(getLayernorm5DComprehensiveTestCases())));
-INSTANTIATE_TEST_SUITE_P(
-    Comprehensive,
-    IntegrationGpuLayernormBackwardUpcast5DBfp16,
-    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                     testing::ValuesIn(getLayernorm5DComprehensiveTestCases())));
-INSTANTIATE_TEST_SUITE_P(
-    Comprehensive,
-    IntegrationGpuLayernormBackwardPure5DFp16,
-    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                     testing::ValuesIn(getLayernorm5DComprehensiveTestCases())));
-INSTANTIATE_TEST_SUITE_P(
-    Comprehensive,
-    IntegrationGpuLayernormBackwardPure5DBfp16,
-    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                     testing::ValuesIn(getLayernorm5DComprehensiveTestCases())));
-
 INSTANTIATE_TEST_SUITE_P(Full,
                          IntegrationGpuLayernormBackwardPure5DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),

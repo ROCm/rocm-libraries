@@ -59,7 +59,8 @@ std::string declaration(const std::string& operation)
 {
     return R"({
       "schema_version": "1.0",
-      "operation": ")" + operation + R"(",
+      "operation": ")"
+           + operation + R"(",
       "parameters": { "M": { "type": "int64" } },
       "stratification_axis": "working_set",
       "regimes": {},

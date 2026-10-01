@@ -8,7 +8,6 @@ loop.
 |---|---|
 | `tile_selector.uhd.json` | the UHD: `features_signature`, objective, score metric, and the artifact it names |
 | `model.bin` | the GBDT artifact |
-| `train_manifest.json` | provenance, including the `features_hash` both sides must agree on |
 | `training_data.csv` | the input, so the model is reproducible rather than magic |
 
 ## What it models
@@ -39,6 +38,10 @@ python -m uhd_gen train \
 The `id` in `tile_selector.uhd.json` is a fresh UUID on every run, and the model
 carries a training date, so a regeneration produces different bytes for the same
 inputs. That is expected; nothing asserts on either.
+
+`uhd_gen train` also writes a `train_manifest.json`. Delete it rather than commit
+it: no test reads it, and it records absolute paths from the machine that ran
+the training.
 
 The fixture descriptor tree records the engine and metadata revision used for training.
 Both the model and its provenance are regenerated together; do not copy provenance into

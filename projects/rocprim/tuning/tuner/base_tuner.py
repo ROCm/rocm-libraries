@@ -210,15 +210,13 @@ class BaseTuner(ABC):
         cls(defaults).tune_all()
 
     @abstractmethod
-    def _get_tune_params(self, key_type: str, value_type: Optional[str] = None) -> OrderedDict:
+    def _get_tune_params(self, types: Dict[str, Any]) -> OrderedDict:
         """Returns tuning parameters and their possible values as an OrderedDict.
         Each parameter maps to a list of valid values to explore during tuning."""
         pass
 
     @abstractmethod
-    def _get_restrictions(
-        self, key_type: str, value_type: Optional[str] = None
-    ) -> Callable[[dict], bool] | List[str]:
+    def _get_restrictions(self, types: Dict[str, Any]) -> Callable[[dict], bool] | List[str]:
         """Define constraints for what parameter combinations are valid during tuning.
 
         Two options:
@@ -240,22 +238,21 @@ class BaseTuner(ABC):
 
     @abstractmethod
     def tune_all(self) -> None:
-        """Call tune_type for all key type and value type combinations"""
+        """Call tune_type for all type combinations"""
         pass
 
-    def _get_problem_size(self, key_type: str, value_type: Optional[str] = None):
-        return self.bytes_size // (
-            TYPE_CONFIGS[key_type].size
-            + (TYPE_CONFIGS[value_type].size if value_type else 0)
+    def _get_problem_size(self, types: Dict[str, Any]):
+        return self.bytes_size // sum(
+            TYPE_CONFIGS[t].size for t in types.values() if t in TYPE_CONFIGS
         )
 
-    def _get_metrics(self, key_type: str, value_type: Optional[str] = None) -> Dict:
+    def _get_metrics(self, types: Dict[str, Any]) -> Dict:
         """Default metrics for performance measurement."""
         # p["time"] is measured in ms/GiB
         return {"GiB/s": lambda p: (1000.0 / p["time"])}
 
     def _run_default_config(
-        self, tune_kernel_args: Dict, key_type: str, value_type: Optional[str] = None
+        self, tune_kernel_args: Dict, types: Dict[str, Any]
     ) -> None:
         """Runs the default configuration if enabled."""
         if self.exclude_default_config or self.simulation_mode:
@@ -295,25 +292,24 @@ class BaseTuner(ABC):
             (
                 c
                 for c in arch_config
-                if c[self._get_key_type_name()] == key_type
-                and (not self._get_value_type_name() in c or c[self._get_value_type_name()] == (value_type or "empty_type"))
+                if all(str(c.get(k, "empty_type")) == str(v) for k, v in types.items())
             ),
             None,
         )
         if config is None:
             warnings.warn(
-                f"No existing configuration found for key_type '{key_type}' and value_type '{value_type}'"
+                f"No existing configuration found for types '{types}'"
             )
             return
-
-        default_tune_params = {
-            k: [v] for k, v in config.items() if k not in [self._get_key_type_name(), self._get_value_type_name()]
-        }
 
         # Get the base tuning archs and force set the range of the tune parameters
         # to the single-element lists 'default_tune_params'. We also change the
         # strategy to bruteforce and clear any set strategy options.
-        tune_kernel_args = self._get_base_tune_kernel_args(key_type, value_type).copy()
+        default_tune_params = {
+            k: [v] for k, v in config.items() if k not in set(types.keys())
+        }
+
+        tune_kernel_args = self._get_base_tune_kernel_args(types).copy()
         tune_kernel_args.update(
             {
                 "tune_params": default_tune_params,
@@ -327,11 +323,10 @@ class BaseTuner(ABC):
 
     def tune_type(
         self,
-        key_type: str,
-        value_type: Optional[str] = None,
+        types: Dict[str, Any],
     ) -> None:
-        """Performs auto-tuning for a specific key type and optional value type combination."""
-        print(f"\nTuning for {key_type} {value_type if value_type else ''}")
+        """Performs auto-tuning for a specific type combination."""
+        print(f"\nTuning for {' '.join([str(x) for x in types.values()])}")
         print(f"Using size: {self.bytes_size} bytes")
         strategy_print_message = (
             f"Using strategy: {self.strategy if self.strategy else 'brute_force'}"
@@ -342,25 +337,24 @@ class BaseTuner(ABC):
         print(strategy_print_message)
 
         try:
-            tune_kernel_args = self._get_base_tune_kernel_args(key_type, value_type)
+            tune_kernel_args = self._get_base_tune_kernel_args(types)
             # Run main tuning
             results, _ = kernel_tuner.tune_kernel(**tune_kernel_args)
             # Run default config if enabled
-            self._run_default_config(tune_kernel_args, key_type, value_type)
+            self._run_default_config(tune_kernel_args, types)
 
-            cache_file_path = self._get_cache_file_path(key_type, value_type)
-            self._save_output(cache_file_path, key_type, value_type, results)
+            cache_file_path = self._get_cache_file_path(types)
+            self._save_output(cache_file_path, types, results)
 
         except Exception as e:
-            print(f"Failed tuning for {key_type} {value_type if value_type else ''}")
+            print(f"Failed tuning for {' '.join([str(x) for x in types.values()])}")
             print(f"Error: {str(e)}")
             raise
 
     def generate_wrapper(
         self,
         config: OrderedDict,
-        key_type: str,
-        value_type: Optional[str] = None,
+        types: Dict[str, Any],
     ) -> str:
         """Generate wrapper code using Jinja2 template inheritance."""
         template_dir = pathlib.Path(f"{BASE_DIR}/tuner/templates")
@@ -378,11 +372,8 @@ class BaseTuner(ABC):
             "algo_type": self.algo_type,
             "algo_name": self.algo_name,
             "config": config,
-            self._get_key_type_name(): key_type,
+            **types,
         }
-
-        if self._get_value_type_name():
-            context[self._get_value_type_name()] = value_type
 
         content = template.render(**context)
 
@@ -390,32 +381,30 @@ class BaseTuner(ABC):
 
     def _get_base_tune_kernel_args(
         self,
-        key_type: str,
-        value_type: Optional[str] = None,
+        types: Dict[str, Any],
     ) -> Dict:
         """Returns base arguments for kernel_tuner.tune_kernel()."""
         np.random.seed(self.seed)
 
         wrapper_string = lambda config: self.generate_wrapper(
             config=config,
-            key_type=key_type,
-            value_type=value_type,
+            types=types,
         )
 
         tune_kernel_args = {
             "defines": {},
             "kernel_name": f"{self.algo_full_name}_wrapper",
             "kernel_source": wrapper_string,
-            "problem_size": self._get_problem_size(key_type, value_type),
+            "problem_size": self._get_problem_size(types),
             "arguments": [np.uint64(self.bytes_size)],
-            "tune_params": self._get_tune_params(key_type, value_type),
+            "tune_params": self._get_tune_params(types),
             "strategy": self.strategy,
             "grid_div_x": self._get_grid_div_x(),
-            "cache": str(self._get_cache_file_path(key_type, value_type)),
+            "cache": str(self._get_cache_file_path(types)),
             "lang": "C",
             "compiler": "hipcc",
             "compiler_options": self._get_compiler_options(),
-            "restrictions": self._get_restrictions(key_type, value_type),
+            "restrictions": self._get_restrictions(types),
             "verbose": False,
             "iterations": 1,
             "log": False,
@@ -430,30 +419,20 @@ class BaseTuner(ABC):
 
         return tune_kernel_args
 
-    def _get_cache_file_name(self, key_type: str, value_type: str | None = None):
-        """Return the name of the cache file based on algo name, arch name and key value types"""
-        cache_file_path = f'{self.algo_full_name}_{self.arch_name}_{key_type.replace("rocprim::", "")}'
-        if value_type:
-            cache_file_path += f"_{value_type.replace('rocprim::', '')}"
-        cache_file_path += "_cache.json"
+    def _get_cache_file_name(self, types: Dict[str, Any]):
+        """Return the name of the cache file based on algo name, arch name and types"""
+        parts = [self.algo_full_name, self.arch_name]
+        parts += [str(v).replace("rocprim::", "") for _, v in sorted(types.items())]
+        return "_".join(parts) + "_cache.json"
 
-        return cache_file_path
-
-    def _get_cache_file_path(self, key_type: str, value_type: str | None = None):
-        "Return the path of the cache file"
-        return self.output_dir / self._get_cache_file_name(key_type, value_type)
-
-    def _get_key_type_name(self) -> str:
-        return "key_type"
-
-    def _get_value_type_name(self) -> str:
-        return "value_type"
+    def _get_cache_file_path(self, types: Dict[str, Any]):
+        """Return the path of the cache file"""
+        return self.output_dir / self._get_cache_file_name(types)
 
     def _save_output(
         self,
         cache_file: str | pathlib.Path,
-        key_type,
-        value_type,
+        types: Dict[str, Any],
         results: List | object | Any | None = None,
     ):
         """Save tuning results and metadata to files."""
@@ -463,8 +442,8 @@ class BaseTuner(ABC):
                 f"../simulated_output/{self.strategy}_fevals{self.max_fevals}"
             )
             cache_file.mkdir(parents=True, exist_ok=True)
-            cache_file = cache_file / self._get_cache_file_name(key_type, value_type)
-            store_output_file(str(cache_file), results, self._get_tune_params(key_type, value_type))
+            cache_file = cache_file / self._get_cache_file_name(types)
+            store_output_file(str(cache_file), results, self._get_tune_params(types))
 
         with open(cache_file, "r") as f:
             cache_dict = json.load(f)
@@ -475,10 +454,10 @@ class BaseTuner(ABC):
             new_content = "{\n"
             new_content += f'"arch_name": "{self.arch_name}",\n'
             new_content += f'"algo_name": "{self.algo_full_name}",\n'
-            new_content += f'"{self._get_key_type_name()}": "{key_type}",'
-            value_type_string = f"{value_type}" if value_type else "empty_type"
-            if self._get_value_type_name():
-                new_content += f'\n"{self._get_value_type_name()}": "{value_type_string}",'
+            for i, (k, v) in enumerate(types.items()):
+                new_content += f'"{k}": "{v}",'
+                if i < len(types) - 1:
+                    new_content += '\n'
             new_content += content.lstrip()[1:]
 
             with open(cache_file, "w") as f:

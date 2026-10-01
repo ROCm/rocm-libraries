@@ -121,6 +121,30 @@ inline double applyForward(double value, const std::string& transform)
     return value;
 }
 
+/// Whether a recovered score -- the raw score with `score.transform` inverted -- is a physical
+/// quantity, which RFC 0019 §8.3 accepts as a prediction only when it is strictly positive.
+///
+/// It is physical when the model declares a metric (a throughput or a time, §4.4), or when it
+/// was trained under a transform only a positive target admits (`log`, `log1p`, `sqrt`), so a
+/// non-positive value lies outside anything it was fitted to. A metric-less ranker under
+/// `identity` or `exp` scores on an ordering scale of its own, where zero and negatives are
+/// opinions like any other: refusing them flattened distinct predictions into declared order.
+///
+/// The one definition of the rule. uhd_gen's offline evaluators apply exactly this predicate,
+/// so a model is measured offline the way it ranks here.
+inline bool isPhysicalScore(const std::string& metric, const std::string& transform)
+{
+    return !metric.empty() || transform == "log" || transform == "log1p" || transform == "sqrt";
+}
+
+/// RFC 0019 §8.3's score-range rule: a candidate is rankable only when its recovered score is
+/// finite, and also strictly positive when @p positiveRequired (isPhysicalScore). Anything
+/// else ranks last and reports the 0 that §5 step 7 gives "no measurement".
+inline bool isRankableScore(double recovered, bool positiveRequired)
+{
+    return std::isfinite(recovered) && (!positiveRequired || recovered > 0.0);
+}
+
 } // namespace score_transform
 
 } // namespace hipdnn_plugin_sdk::uhd

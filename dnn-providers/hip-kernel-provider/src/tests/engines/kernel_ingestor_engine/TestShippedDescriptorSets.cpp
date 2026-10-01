@@ -14,8 +14,12 @@
 #include <variant>
 #include <vector>
 
+#include "TestDescriptorRoot.hpp"
+
 /// @file TestShippedDescriptorSets.cpp
-/// @brief RFC 0019 §12's descriptor-set validation, run over the descriptors this build ships.
+/// @brief RFC 0019 §12's descriptor-set validation, run over each staged descriptor tree this
+///        build produces: the unit test root, and the production tree whenever this build packs
+///        one.
 ///
 /// The loader already enforces these rules -- and enforces them by *dropping* the offending set,
 /// which is the right behavior at runtime for third-party data and the wrong place to find out
@@ -23,9 +27,13 @@
 /// engine that silently declines every graph; every functional test still passes, because they
 /// assert on what the surviving engines do. So the check has to run somewhere that fails a build.
 ///
-/// It reads the staged tree rather than the source tree: staging is what packaging produces and
+/// It reads the staged trees rather than the source tree: staging is what packaging produces and
 /// what the provider loads at runtime, and a descriptor correct in source but mis-staged is
 /// exactly the failure a source-tree check cannot see.
+///
+/// The production instance exists only where this build wires the `product` pack -- a production
+/// root holding descriptors for an architecture in GPU_TARGETS. Elsewhere it skips, naming why,
+/// rather than passing over a tree that was never staged.
 namespace hipdnn_plugin_sdk::ingestor
 {
 namespace
@@ -45,12 +53,43 @@ struct IsList<std::vector<T>> : std::true_type
 };
 } // namespace detail
 
-std::filesystem::path shippedDescriptorRoot()
+/// One staged descriptor tree this suite validates.
+struct StagedTree
 {
-    // HIPDNN_TEST_DESCRIPTOR_DIR already ends in HIPDNN_DESCRIPTOR_SUBDIR -- it is the staged
-    // root the provider itself loads from, not the plugin directory above it.
+    /// The instantiation suffix.
+    const char* name;
+    /// The build target that stages the tree, named in the diagnostics.
+    const char* packTarget;
+    /// False when this build packs no such tree; every case then skips.
+    bool stagedByThisBuild;
+    /// Where the tree is. Called only when stagedByThisBuild.
+    std::filesystem::path (*root)();
+};
+
+std::filesystem::path unitRoot()
+{
+    // HIPDNN_TEST_DESCRIPTOR_DIR is the unit root this binary stages, holding every unit pack
+    // under it.
     return {HIPDNN_TEST_DESCRIPTOR_DIR};
 }
+
+#ifdef HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR
+constexpr bool PRODUCT_TREE_STAGED = true;
+
+std::filesystem::path productRoot()
+{
+    // The arch-neutral production root, as the provider loads it: every arch shard under it.
+    return hip_kernel_provider::testing::descriptorSetRoot(
+        HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR);
+}
+#else
+constexpr bool PRODUCT_TREE_STAGED = false;
+
+std::filesystem::path productRoot()
+{
+    return {};
+}
+#endif
 
 /// A kernel's completed metadata tuple: every schema field, defaults applied, in schema order.
 ///
@@ -120,48 +159,71 @@ std::string metadataTuple(const MetadataSchema& schema, const MetadataValues& me
     return tuple.str();
 }
 
-/// Holder for the shared load. Not a fixture: every case below is a TEST, and the sets are
-/// read-only once parsed.
-class ShippedSets
+/// Parameterized over the staged trees. The sets are read-only once parsed, so each tree is
+/// loaded once and shared by every case that reads it.
+class TestShippedDescriptorSets : public ::testing::TestWithParam<StagedTree>
 {
-public:
-    /// Loaded once: the sets are immutable and parsing the tree per case buys nothing.
+protected:
+    void SetUp() override
+    {
+        const auto& tree = GetParam();
+        if(!tree.stagedByThisBuild)
+        {
+            GTEST_SKIP() << "this build packs no " << tree.name
+                         << " descriptor tree: " << tree.packTarget
+                         << " is not wired, because no production descriptor declares an "
+                            "architecture in GPU_TARGETS (or the production root is empty)";
+        }
+    }
+
+    static std::filesystem::path root()
+    {
+        return GetParam().root();
+    }
+
     static const std::vector<DescriptorSet>& sets()
     {
-        static const std::vector<DescriptorSet> s_loaded
-            = resolveDescriptorSets(loadDescriptorCatalog(shippedDescriptorRoot()));
-        return s_loaded;
+        static std::map<std::filesystem::path, std::vector<DescriptorSet>> s_loaded;
+        const auto treeRoot = root();
+        auto found = s_loaded.find(treeRoot);
+        if(found == s_loaded.end())
+        {
+            found
+                = s_loaded.emplace(treeRoot, resolveDescriptorSets(loadDescriptorCatalog(treeRoot)))
+                      .first;
+        }
+        return found->second;
     }
 };
 
-TEST(TestShippedDescriptorSets, TheStagedTreeContainsDescriptorsAtAll)
+TEST_P(TestShippedDescriptorSets, TheStagedTreeContainsDescriptorsAtAll)
 {
     // Guards every other case here. An empty tree makes them all vacuously pass, and an empty
     // tree is a real and recurring state: reconfiguring the build wipes the staged content, and
     // engines then decline everything with no error anywhere.
-    ASSERT_TRUE(std::filesystem::exists(shippedDescriptorRoot()))
-        << "no staged descriptor tree at " << shippedDescriptorRoot()
-        << ". Build hkp_descriptor_staging first.";
-    EXPECT_FALSE(ShippedSets::sets().empty()) << "the staged tree parsed to zero engines";
+    ASSERT_TRUE(std::filesystem::exists(root()))
+        << "no staged descriptor tree at " << root() << ". Build " << GetParam().packTarget
+        << " first.";
+    EXPECT_FALSE(sets().empty()) << "the staged tree at " << root() << " parsed to zero engines";
 }
 
-TEST(TestShippedDescriptorSets, EveryEngineResolvesItsMetadataSchema)
+TEST_P(TestShippedDescriptorSets, EveryEngineResolvesItsMetadataSchema)
 {
     // RFC 0019 §4: a UED names its KMD by id. An unresolvable one leaves the schema empty, and
     // an engine with no schema cannot type-check the knobs it advertises.
-    for(const auto& set : ShippedSets::sets())
+    for(const auto& set : sets())
     {
         EXPECT_FALSE(set.schema.fields.empty())
             << "engine '" << set.engine.name << "' resolved no metadata schema";
     }
 }
 
-TEST(TestShippedDescriptorSets, EveryAdvertisedKnobIsDeclaredInTheSchema)
+TEST_P(TestShippedDescriptorSets, EveryAdvertisedKnobIsDeclaredInTheSchema)
 {
     // The knob names in a UED are what a caller queries and what autotune sweeps. A knob with
     // no schema field has no type and no default, so it reads back as absent -- the query
     // succeeds and returns nothing, rather than failing.
-    for(const auto& set : ShippedSets::sets())
+    for(const auto& set : sets())
     {
         std::set<std::string> declared;
         for(const auto& field : set.schema.fields)
@@ -178,12 +240,12 @@ TEST(TestShippedDescriptorSets, EveryAdvertisedKnobIsDeclaredInTheSchema)
     }
 }
 
-TEST(TestShippedDescriptorSets, EveryHeuristicReferenceResolves)
+TEST_P(TestShippedDescriptorSets, EveryHeuristicReferenceResolves)
 {
     // RFC 0019 §3.1: the engine owns the UHD that ranks it. A dangling reference degrades to
     // declared order, which is a legal ranking -- so the engine keeps working and simply stops
     // using the model it shipped. Nothing downstream can tell those two apart.
-    for(const auto& set : ShippedSets::sets())
+    for(const auto& set : sets())
     {
         if(set.engine.sortKernelCatalog.empty())
         {
@@ -195,11 +257,11 @@ TEST(TestShippedDescriptorSets, EveryHeuristicReferenceResolves)
     }
 }
 
-TEST(TestShippedDescriptorSets, EveryHeuristicDeclaresSomethingToScoreWith)
+TEST_P(TestShippedDescriptorSets, EveryHeuristicDeclaresSomethingToScoreWith)
 {
     // A UHD is either a native symbol or an artifact on disk. Neither being present is a
     // descriptor that parses, resolves, and scores nothing.
-    for(const auto& set : ShippedSets::sets())
+    for(const auto& set : sets())
     {
         std::vector<const HeuristicDescriptor*> all;
         if(set.heuristic.has_value())
@@ -258,7 +320,7 @@ TEST(TestShippedDescriptorSets, EveryHeuristicDeclaresSomethingToScoreWith)
     }
 }
 
-TEST(TestShippedDescriptorSets, NoTwoKernelsOfAPackShareAMetadataTuple)
+TEST_P(TestShippedDescriptorSets, NoTwoKernelsOfAPackShareAMetadataTuple)
 {
     // The completed metadata tuple is the catalog key -- it is how a plan resolves a kernel
     // once matchers have chosen the pack. Two kernels answering to the same tuple make the
@@ -267,7 +329,7 @@ TEST(TestShippedDescriptorSets, NoTwoKernelsOfAPackShareAMetadataTuple)
     //
     // Scoped to the pack, which is the collision domain: two packs of one engine are selected
     // by different matchers, so the same tuple in each is answering a different graph.
-    for(const auto& set : ShippedSets::sets())
+    for(const auto& set : sets())
     {
         if(set.schema.fields.empty())
         {
@@ -288,6 +350,14 @@ TEST(TestShippedDescriptorSets, NoTwoKernelsOfAPackShareAMetadataTuple)
         }
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestShippedDescriptorSets,
+    ::testing::Values(StagedTree{"Unit", "hkp_packaging_unit", true, &unitRoot},
+                      StagedTree{
+                          "Product", "hkp_packaging_product", PRODUCT_TREE_STAGED, &productRoot}),
+    [](const ::testing::TestParamInfo<StagedTree>& info) { return std::string(info.param.name); });
 
 } // namespace
 } // namespace hipdnn_plugin_sdk::ingestor

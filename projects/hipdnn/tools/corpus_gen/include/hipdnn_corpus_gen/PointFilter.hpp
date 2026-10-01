@@ -90,12 +90,11 @@ inline bool keeps(const std::vector<KeepClause>& clauses, const ProblemPoint& po
             return false;
         }
 
-        const auto held      = asText(found->second);
-        const auto satisfied = std::any_of(clauses.begin(), clauses.end(),
-                                           [&](const KeepClause& alternative) {
-                                               return alternative.parameter == clause.parameter
-                                                      && alternative.value == held;
-                                           });
+        const auto held = asText(found->second);
+        const auto satisfied
+            = std::any_of(clauses.begin(), clauses.end(), [&](const KeepClause& alternative) {
+                  return alternative.parameter == clause.parameter && alternative.value == held;
+              });
         if(!satisfied)
         {
             return false;

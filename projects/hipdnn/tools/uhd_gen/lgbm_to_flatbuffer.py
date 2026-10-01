@@ -58,7 +58,9 @@ def resolve_training_date(training_date: str | None = None) -> str | None:
     try:
         seconds = int(epoch)
     except ValueError:
-        raise ValueError(f"{SOURCE_DATE_EPOCH} must be an integer count of seconds; got {epoch!r}") from None
+        raise ValueError(
+            f"{SOURCE_DATE_EPOCH} must be an integer count of seconds; got {epoch!r}"
+        ) from None
     return datetime.fromtimestamp(seconds, timezone.utc).isoformat()
 
 
@@ -106,9 +108,11 @@ def convert(
         model_version=model_version,
         training_date=training_date,
         group_by_feature_index=group_by_feature_index,
-        groups=None
-        if not group_models
-        else [(value, booster.dump_model()) for value, booster in group_models],
+        groups=(
+            None
+            if not group_models
+            else [(value, booster.dump_model()) for value, booster in group_models]
+        ),
     )
 
     Path(output_path).write_bytes(buffer)
@@ -154,7 +158,8 @@ def build_gbdt_model(
     """
     model = GbdtModelT()
     model.trees = [
-        _build_tree(tree_info["tree_structure"]) for tree_info in model_json["tree_info"]
+        _build_tree(tree_info["tree_structure"])
+        for tree_info in model_json["tree_info"]
     ]
     model.numFeatures = model_json["max_feature_idx"] + 1
     model.featuresHash = features_hash
@@ -246,11 +251,13 @@ def _flatten_tree(node: dict[str, Any], nodes: list[dict[str, Any]]) -> int:
     current_idx = len(nodes)
 
     if "leaf_value" in node:
-        nodes.append({
-            "leaf_value": node["leaf_value"],
-            "left_idx": -1,
-            "right_idx": -1,
-        })
+        nodes.append(
+            {
+                "leaf_value": node["leaf_value"],
+                "left_idx": -1,
+                "right_idx": -1,
+            }
+        )
     else:
         nodes.append({})
         left_idx = _flatten_tree(node["left_child"], nodes)

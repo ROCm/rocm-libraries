@@ -101,6 +101,7 @@ TEST(TestPoolAssembly, ATruncatedPoolKeepsItsRegimeMixRatherThanAnAlphabeticalPr
     // Proportional, not one row of each: the pool's own mix is what real models run, so a fifth
     // of the pool should look like the pool.
     std::vector<PoolEntry> pool;
+    pool.reserve(100);
     for(int64_t index = 0; index < 80; ++index)
     {
         pool.push_back(entryAt("model", index, "prefill_short_mha"));
@@ -111,10 +112,8 @@ TEST(TestPoolAssembly, ATruncatedPoolKeepsItsRegimeMixRatherThanAnAlphabeticalPr
     }
 
     std::map<std::string, int64_t> allocation;
-    const auto selected = select({{"model", pool}},
-                                 20,
-                                 {{"model", 1.0}, {"kernel", 0.0}, {"sweep", 0.0}},
-                                 allocation);
+    const auto selected = select(
+        {{"model", pool}}, 20, {{"model", 1.0}, {"kernel", 0.0}, {"sweep", 0.0}}, allocation);
 
     EXPECT_EQ(allocation.at("model"), 20);
     const std::map<std::string, int64_t> expected{{"prefill_short_mha", 16},
@@ -137,6 +136,7 @@ TEST(TestPoolAssembly, ASpreadPoolKeepsEachRegimesInternalOrder)
     // inside a regime is the only ranking it carries, and shuffling it would silently pick
     // different members whenever the allocation changed.
     std::vector<PoolEntry> pool;
+    pool.reserve(6);
     for(int64_t index = 0; index < 6; ++index)
     {
         pool.push_back(entryAt("model", index, index % 2 == 0 ? "even" : "odd"));
@@ -166,7 +166,7 @@ TEST(TestPoolAssembly, TheSameProblemFromTwoSourcesIsMeasuredOnce)
     pools["sweep"] = {entryAt("sweep", 1, "r"), entryAt("sweep", 4, "r")};
 
     std::map<std::string, int64_t> dropped;
-    const auto unique = deduplicate(pools, dropped);
+    const auto unique = deduplicate(pools, defaultShares(), dropped);
 
     EXPECT_EQ(dropped.at("model"), 0);
     EXPECT_EQ(dropped.at("kernel"), 1);
@@ -177,17 +177,43 @@ TEST(TestPoolAssembly, TheSameProblemFromTwoSourcesIsMeasuredOnce)
     EXPECT_EQ(unique.at("sweep").size(), 1u);
 }
 
+TEST(TestPoolAssembly, ADisabledSourceCannotTakeAPointFromAnEnabledOne)
+{
+    // Kernel-only, against a pack of two geometries, with a model pool that happens to name
+    // one of them. The model pool won that geometry in deduplication and was then given no
+    // share, so the corpus came back with one problem of the two the pack holds.
+    const std::map<std::string, double> kernelOnly{{"model", 0.0}, {"kernel", 1.0}, {"sweep", 0.0}};
+    SourcePools pools;
+    pools["model"] = {entryAt("model", 2, "r")};
+    pools["kernel"] = {entryAt("kernel", 2, "r"), entryAt("kernel", 3, "r")};
+    pools["sweep"] = {entryAt("sweep", 3, "r")};
+
+    std::map<std::string, int64_t> dropped;
+    const auto unique = deduplicate(pools, kernelOnly, dropped);
+    std::map<std::string, int64_t> allocation;
+    const auto selected = select(unique, 2, kernelOnly, allocation);
+
+    ASSERT_EQ(selected.size(), 2U);
+    std::set<int64_t> batches;
+    for(const auto& entry : selected)
+    {
+        EXPECT_EQ(entry.source, "kernel");
+        batches.insert(std::get<int64_t>(entry.point.at("batch")));
+    }
+    EXPECT_EQ(batches, (std::set<int64_t>{2, 3}));
+    EXPECT_EQ(dropped.at("kernel"), 0) << "nothing enabled duplicates a kernel geometry";
+}
+
 TEST(TestPoolAssembly, ASourceWithNoPoolIsNotAnError)
 {
     // An operation whose declaration carries no kernel catalog simply has no kernel pool. That
     // is the whole mechanism by which coverage is "whatever has a declaration", so it must be a
     // quiet zero rather than a missing key that throws.
     std::map<std::string, int64_t> allocation;
-    const auto selected
-        = select({{"sweep", {entryAt("sweep", 1, "r"), entryAt("sweep", 2, "r")}}},
-                 2,
-                 defaultShares(),
-                 allocation);
+    const auto selected = select({{"sweep", {entryAt("sweep", 1, "r"), entryAt("sweep", 2, "r")}}},
+                                 2,
+                                 defaultShares(),
+                                 allocation);
 
     EXPECT_EQ(allocation.at("model"), 0);
     EXPECT_EQ(allocation.at("kernel"), 0);

@@ -407,6 +407,13 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     #   unported. Stays default OFF; it is kept as a knob only because it toggles IR.
     iglp: bool = _DEFAULT_IGLP
 
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.causal_bottom_right:
+            raise ValueError(
+                "gfx942 attention_dense: causal_bottom_right not yet supported"
+            )
+
     def resolved_use_cfvst(self) -> bool:
         """Resolved conflict-free-V decision (``None`` -> :func:`_use_cfvst`)."""
         if self.use_cfvst is None:
@@ -923,6 +930,8 @@ def supports_attention_dense(
     # returning the structured rejection the contract promises.
     if not isinstance(spec, AttentionDenseSpec):
         return False, f"spec must be an AttentionDenseSpec, got {type(spec).__name__}"
+    if spec.causal_bottom_right:
+        return False, "gfx942 attention_dense: causal_bottom_right not yet supported"
     try:
         spec = _as_gfx942_spec(spec)
     except TypeError as exc:

@@ -138,6 +138,8 @@ __all__ = [
     "AutotuneResult",
     "AutotuneStorageConfig",
     "AutotuneCacheWriteOutcome",
+    "TimingQuality",
+    "ExecutionTiming",
     "Handle",
     "create_handle",
     "destroy_handle",

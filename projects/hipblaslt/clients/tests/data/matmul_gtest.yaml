@@ -3039,6 +3039,75 @@ Tests:
   unit_check: 1
   gpu_arch: '9(0a|42|50)'
 
+# ROCM-31258: hand-written custom kernels bound D and C stores with a buffer
+# descriptor length (num_records) of BufferOOB. While BufferOOB was 0x80000000,
+# the host admitted shapes whose checked store extent, ldd * min(MacroTile1, N)
+# * 4, lies past 2 GiB, and the kernel silently dropped those stores. On gfx950,
+# fp32 NN with the xf32 fast path selects such a kernel (MacroTile1 = 256):
+#   M = 2097152 -> extent is exactly 0x80000000, clean even with the old value
+#   M = 2097153 -> one step past it, the last element was dropped
+#   M = 3000000 -> 14976 elements in the trailing rows were dropped
+# The custom kernel is the heuristic's first choice for these shapes; checking
+# all ~680 candidates exceeds the per-test time limit. c_equal_d leaves
+# unwritten elements holding C rather than 2AB - 2C, so unit_check catches them.
+# With integer_exact and K = 32 every |D| is at most 256, exact on the xf32 path.
+# Each shape needs about 3.2 GiB of device memory and ~15 s end to end.
+- name: matmul_integer_exact_custom_kernel_store_extent_xf32_ROCM31258
+  category: pre_checkin
+  function:
+    matmul: *xf32_precision
+  matrix_size:
+    - { M: 2097152, N: 256, K: 32 }
+    - { M: 2097153, N: 256, K: 32 }
+    - { M: 3000000, N: 256, K: 32 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  c_equal_d: true
+  initialization: integer_exact
+  unit_check: 1
+  gpu_arch: '950'
+
+# Concrete ROCM-31230 reproducer: fp32 NN with an oversized A leading dimension, so
+# lda * DepthU * bpe reaches 2^31 and the signed widen of the StaggerU global-read
+# increment walks the A read descriptor backwards instead of forwards. On gfx1201 this
+# FAILs pre-fix / PASSes post-fix. The failure is a memory fault at this lda, because
+# the displacement is close to 2 GB and lands unmapped; at an lda near 2^32 the same
+# defect displaces by only tens of bytes, stays inside mapped memory and returns
+# silently wrong results instead. unit_check with integer_exact is bit-exact, so it
+# gates both faces of the defect, but the shape here is the one that fits on a 16 GiB
+# part -- the silent-corruption shape needs 17 GiB for A.
+#
+# Every supported solution is exercised, via algo_method 1 with
+# requested_solution_num -1 (the matmul_heuristic_all_solutions pattern), rather than
+# only the heuristic's pick. The defect is kernel-specific, so a gate that ran one
+# heuristically chosen solution would stop covering it the moment a retune changed
+# that choice, and it would do so silently. Pinning solution_index is the other way
+# to guarantee the affected kernel runs, but indices are not stable across retunes
+# either. The all-solutions cost is small here because the 8.6 GiB allocation is made
+# once and reused across launches: 17 solutions at this shape, about 7 s in total
+# against 4.3 s for a single one.
+#
+# nightly rather than pre_checkin: A is 8.6 GiB on both the host and the device and
+# cannot be made smaller, and a host-side shortfall currently crashes the harness
+# instead of skipping (see the get_available_host_memory note on ROCM-31230), so this
+# is kept off the per-PR tier.
+- name: matmul_size_t_stagger_incs_overflow_f32_ROCM31230
+  category: nightly
+  function:
+    matmul: *single_precision
+  matrix_size: *size_t_stagger_incs_overflow
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: 0.0
+  algo_method: [1]
+  requested_solution_num: -1
+  initialization: integer_exact
+  unit_check: 1
+  gpu_arch: '1201'
+
 
 - name: matmul_96_complex
   category: pre_checkin

@@ -140,7 +140,7 @@ std::string EngineHeuristicDescriptor::resolveRankingMetric() const
     // RFC 0019 §11.4: the same precedence as the policy order — environment, then the
     // descriptor attribute, then the default — so an operator can re-rank a deployed
     // application by another metric without rebuilding it.
-    const std::string envStr = hipdnn_data_sdk::utilities::getEnv("HIPDNN_HEUR_RANKING_METRIC");
+    std::string envStr = hipdnn_data_sdk::utilities::getEnv("HIPDNN_HEUR_RANKING_METRIC");
     if(!envStr.empty())
     {
         // The attribute path refuses an unknown name at set; the environment has no set,

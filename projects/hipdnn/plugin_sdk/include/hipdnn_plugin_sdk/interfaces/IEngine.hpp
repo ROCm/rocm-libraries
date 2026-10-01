@@ -92,17 +92,19 @@ public:
     /// Optional matched-catalog enumeration. A successful empty page means no
     /// candidates in scope; engines without this capability must decline explicitly.
     /// Output is EngineDetails with candidate_page, freed like ordinary details.
-    virtual void
-        enumerateCandidates(THandle&,
-                            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph&,
-                            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&,
-                            uint64_t,
-                            uint64_t,
-                            hipdnnPluginConstData_t&) const
+    // NOLINTBEGIN(portability-template-virtual-member-function) - body is valid for any THandle
+    virtual void enumerateCandidates(
+        THandle& /*handle*/,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/,
+        uint64_t /*offset*/,
+        uint64_t /*limit*/,
+        hipdnnPluginConstData_t& /*detailsOut*/) const
     {
         throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
                                     "Engine does not support matched-catalog enumeration");
     }
+    // NOLINTEND(portability-template-virtual-member-function)
 
     /**
      * @brief Describes or evaluates an optional calibrated prediction in the metric the
@@ -118,9 +120,10 @@ public:
      * @throws HipdnnPluginException BAD_PARAM for an unregistered metric: it is a malformed
      *         request, not a missing model.
      */
+    // NOLINTBEGIN(portability-template-virtual-member-function) - body is valid for any THandle
     virtual hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
-        getPrediction(THandle&,
-                      const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph&,
+        getPrediction(THandle& /*handle*/,
+                      const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
                       const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config,
                       hipdnnEnginePredictionKind_t kind,
                       bool /*evaluate*/) const
@@ -136,6 +139,7 @@ public:
         prediction.reason = "Engine does not provide predictions";
         return prediction;
     }
+    // NOLINTEND(portability-template-virtual-member-function)
 
     /**
      * @brief Returns the maximum workspace size required for the given graph.

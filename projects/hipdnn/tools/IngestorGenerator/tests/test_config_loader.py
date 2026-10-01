@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 
 """Unit tests for codegen/config_loader.py: the happy path over both worked-example
-configs, the five pre-mint loader-mirroring checks, deprecated-key rejection, and the
-kernel_source_kind rejections."""
+configs, the five pre-mint loader-mirroring checks, deprecated- and duplicate-key
+rejection, and the kernel_source_kind rejections."""
 
 import pytest
 import yaml
@@ -1010,20 +1010,252 @@ class TestDeprecatedKeys:
             load_config(path)
 
 
+_AUTHORED_HEAD = (
+    "authored_subpath: unit\n"
+    "engine:\n"
+    '  name: "hipkernel:Test"\n'
+    "  knobs: [block_size]\n"
+    "kmd_fields:\n"
+    "  - {name: block_size, type: int, default_value: 64}\n"
+    "packs:\n"
+    "  - name: p\n"
+    "    kernels:\n"
+)
+
+_AUTHORED_KERNEL = (
+    "      - name: k\n"
+    "        kernel_source:\n"
+    "          kind: embedded_source\n"
+    "          source_file: K.cpp\n"
+    "          entry_point: K\n"
+    "        metadata:\n"
+    "          block_size: 64\n"
+)
+
+
+def _mark_of(text, needle, occurrence=0):
+    """0-based ``(line, column)`` of ``needle``'s ``occurrence``-th match, as a
+    PyYAML ``Mark`` reports it."""
+    index = -1
+    for _ in range(occurrence + 1):
+        index = text.index(needle, index + 1)
+    return text.count("\n", 0, index), index - (text.rfind("\n", 0, index) + 1)
+
+
+def _parse(text):
+    from codegen.config_loader import _DuplicateKeySafeLoader
+
+    return yaml.load(text, Loader=_DuplicateKeySafeLoader)  # nosec B506
+
+
+class TestRepeatedYamlKeys:
+    """Stock PyYAML keeps the last of two equal mapping keys and drops the other
+    silently, so the value an author reads first is not the one generated. Merge keys,
+    aliases and YAML's scalar resolution stay what stock SafeLoader makes of them."""
+
+    def _load(self, tmp_path, text):
+        path = tmp_path / "c.yaml"
+        path.write_text(text)
+        return load_config(path)
+
+    def _assert_rejected(self, tmp_path, text, key, first, second):
+        with pytest.raises(yaml.constructor.ConstructorError) as excinfo:
+            self._load(tmp_path, text)
+        error = excinfo.value
+        assert repr(key) in str(error), str(error)
+        assert (error.context_mark.line, error.context_mark.column) == first
+        assert (error.problem_mark.line, error.problem_mark.column) == second
+
+    def test_a_top_level_key_declared_twice_is_rejected_at_both_marks(self, tmp_path):
+        text = _AUTHORED_HEAD + _AUTHORED_KERNEL + "authored_subpath: other\n"
+        self._assert_rejected(
+            tmp_path,
+            text,
+            "authored_subpath",
+            _mark_of(text, "authored_subpath: unit"),
+            _mark_of(text, "authored_subpath: other"),
+        )
+
+    def test_a_nested_key_declared_twice_is_rejected_at_both_marks(self, tmp_path):
+        text = _AUTHORED_HEAD + _AUTHORED_KERNEL + "          block_size: 32\n"
+        self._assert_rejected(
+            tmp_path,
+            text,
+            "block_size",
+            _mark_of(text, "block_size: 64"),
+            _mark_of(text, "block_size: 32"),
+        )
+
+    def test_a_key_repeated_inside_a_merge_source_is_rejected(self, tmp_path):
+        """The inline source is never constructed as a mapping of its own: only
+        flattening into its parent ever reads it."""
+        text = _AUTHORED_HEAD + (
+            "      - name: k\n"
+            "        kernel_source:\n"
+            "          <<: {kind: embedded_source, source_file: K.cpp, "
+            "source_file: J.cpp}\n"
+            "          entry_point: K\n"
+            "        metadata:\n"
+            "          block_size: 64\n"
+        )
+        self._assert_rejected(
+            tmp_path,
+            text,
+            "source_file",
+            _mark_of(text, "source_file: K.cpp"),
+            _mark_of(text, "source_file: J.cpp"),
+        )
+
+    def test_a_repeated_merge_key_is_rejected(self, tmp_path):
+        text = _AUTHORED_HEAD + (
+            "      - name: k1\n"
+            "        kernel_source: &src\n"
+            "          kind: embedded_source\n"
+            "          source_file: K.cpp\n"
+            "          entry_point: K\n"
+            "        metadata:\n"
+            "          block_size: 64\n"
+            "      - name: k2\n"
+            "        kernel_source:\n"
+            "          <<: *src\n"
+            "          <<: *src\n"
+            "        metadata:\n"
+            "          block_size: 32\n"
+        )
+        self._assert_rejected(
+            tmp_path,
+            text,
+            "<<",
+            _mark_of(text, "<<: *src"),
+            _mark_of(text, "<<: *src", occurrence=1),
+        )
+
+    def test_merges_and_reused_aliases_load_as_stock_yaml(self, tmp_path):
+        """k2 overrides a merged key explicitly; k3 merges ``[*k2src, *src]``, where
+        the first source wins, and reuses k2src after it was flattened with both its
+        inherited and its own ``entry_point``."""
+        text = _AUTHORED_HEAD + (
+            "      - name: k1\n"
+            "        kernel_source: &src\n"
+            "          kind: embedded_source\n"
+            "          source_file: K.cpp\n"
+            "          entry_point: K\n"
+            "        metadata: &md\n"
+            "          block_size: 64\n"
+            "      - name: k2\n"
+            "        kernel_source: &k2src\n"
+            "          <<: *src\n"
+            "          entry_point: K2\n"
+            "        metadata:\n"
+            "          block_size: 128\n"
+            "      - name: k3\n"
+            "        kernel_source:\n"
+            "          <<: [*k2src, *src]\n"
+            "        metadata:\n"
+            "          <<: *md\n"
+            "          block_size: 32\n"
+        )
+        kernels = self._load(tmp_path, text).packs[0].kernels
+        assert [
+            (k.name, k.kernel_source.source_file, k.kernel_source.entry_point)
+            for k in kernels
+        ] == [("k1", "K.cpp", "K"), ("k2", "K.cpp", "K2"), ("k3", "K.cpp", "K2")]
+        assert [k.metadata["block_size"] for k in kernels] == [64, 128, 32]
+        assert _parse(text) == yaml.safe_load(text)
+
+    def test_quoted_and_unquoted_off_are_different_keys_and_values(self):
+        text = 'off: 1\n"off": 2\nflag: off\nname: "off"\n'
+        parsed = _parse(text)
+        assert parsed == {False: 1, "off": 2, "flag": False, "name": "off"}
+        assert parsed == yaml.safe_load(text)
+
+    def test_two_spellings_yaml_resolves_to_one_key_are_rejected(self):
+        """``off`` and ``no`` are both the boolean false, so stock YAML keeps one."""
+        text = "off: 1\nno: 2\n"
+        with pytest.raises(yaml.constructor.ConstructorError) as excinfo:
+            _parse(text)
+        error = excinfo.value
+        assert (error.context_mark.line, error.context_mark.column) == (0, 0)
+        assert (error.problem_mark.line, error.problem_mark.column) == (1, 0)
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            "extra: !!python/object/apply:os.getcwd []\n",
+            "? !!python/object/apply:os.getcwd []\n: 1\n",
+        ],
+        ids=["value", "key"],
+    )
+    def test_an_unsafe_tag_is_still_rejected(self, tmp_path, entry):
+        text = _AUTHORED_HEAD + _AUTHORED_KERNEL + entry
+        with pytest.raises(yaml.constructor.ConstructorError) as excinfo:
+            self._load(tmp_path, text)
+        mark = excinfo.value.problem_mark
+        assert (mark.line, mark.column) == _mark_of(text, "!!python")
+
+
 class TestShippedExampleConfigsLoad:
     """Every config under `configs/` is a worked example a reader copies, so a retired
-    key they still set would make each copy a config the loader refuses."""
+    key they still set would make each copy a config the loader refuses.
 
-    def test_every_shipped_config_loads(self, configs_dir):
-        # A `*.profile.yaml` drives dispatch_parity.py, not the loader.
-        paths = sorted(
+    `configs/` holds TWO schemas. `*.profile.yaml` is a dispatch profile: it names the
+    dispatcher, request class and predicate the tools import, and carries none of the
+    keys `load_config` requires. Selecting it by extension alone feeds the wrong schema
+    into the generator loader, so it is selected out here and checked through the loader
+    that owns it.
+    """
+
+    @staticmethod
+    def _generator_configs(configs_dir):
+        return sorted(
             path
             for path in configs_dir.glob("*.yaml")
             if not path.name.endswith(".profile.yaml")
         )
-        assert len(paths) == 7
+
+    def test_every_shipped_generator_config_loads(self, configs_dir):
+        paths = self._generator_configs(configs_dir)
+        assert paths, f"no generator configs found under {configs_dir}"
         for path in paths:
             assert load_config(path).engine.name
+
+    def test_every_shipped_dispatch_profile_loads_through_its_own_loader(
+        self, configs_dir
+    ):
+        """The profiles are shipped worked examples too, so leaving them unchecked
+        would just move the gap rather than close it."""
+        # Imported here rather than at module scope: this suite is about
+        # codegen.config_loader, and `tools/` is not otherwise on its path.
+        import sys
+        from pathlib import Path
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import dispatch_parity
+
+        paths = sorted(configs_dir.glob("*.profile.yaml"))
+        assert paths, f"no dispatch profiles found under {configs_dir}"
+        for path in paths:
+            profile = dispatch_parity._load_profile(str(path))
+            # The blocks every profile tool dereferences; `_required` is the tool's
+            # own check, so this cannot drift from what the tools demand.
+            for scope, keys in (
+                ("dispatch", ("module", "function")),
+                ("request", ("module", "class")),
+                ("predicate", ("module", "function")),
+            ):
+                dispatch_parity._required(profile[scope], scope, *keys)
+            assert profile["provider_root"], path
+
+    def test_a_dispatch_profile_is_not_a_generator_config(self, configs_dir):
+        """The control for the selection above: if `load_config` ever accepted a
+        profile, the split would be silently unnecessary and the next reader would
+        re-merge it."""
+        profiles = sorted(configs_dir.glob("*.profile.yaml"))
+        assert profiles, f"no dispatch profiles found under {configs_dir}"
+        assert not [p for p in self._generator_configs(configs_dir) if p in profiles]
+        for path in profiles:
+            with pytest.raises(ConfigError):
+                load_config(path)
 
 
 class TestBehaviorNotesVocabulary:

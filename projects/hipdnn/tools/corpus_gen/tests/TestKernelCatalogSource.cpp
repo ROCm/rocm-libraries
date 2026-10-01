@@ -88,7 +88,10 @@ public:
         std::filesystem::remove_all(_root, ignored);
     }
 
-    const std::filesystem::path& root() const { return _root; }
+    const std::filesystem::path& root() const
+    {
+        return _root;
+    }
 
     /// @brief Writes @p descriptors as a pack at @p relative, creating any parent directories.
     std::filesystem::path pack(const std::string& relative, const nlohmann::json& descriptors)
@@ -394,10 +397,9 @@ TEST(TestKernelCatalogSource, ACollectedPoolIsSpreadAcrossRegimesRatherThanLeftI
     // The lone prefill geometry is not last: the smaller population is interleaved, so a prefix
     // of this pool still contains it.
     EXPECT_NE(entries.back().regime, "prefill_short_mha");
-    EXPECT_EQ(std::count_if(entries.begin(),
-                            entries.end(),
-                            [](const PoolEntry& entry) {
-                                return entry.regime == "prefill_short_mha";
-                            }),
-              1);
+    EXPECT_EQ(
+        std::count_if(entries.begin(),
+                      entries.end(),
+                      [](const PoolEntry& entry) { return entry.regime == "prefill_short_mha"; }),
+        1);
 }

@@ -50,7 +50,9 @@ def _create_synthetic_data(n_samples: int = 1000, n_features: int = 5, seed: int
     return X, y
 
 
-def _train_simple_model(X: np.ndarray, y: np.ndarray, num_trees: int = 5) -> lgb.Booster:
+def _train_simple_model(
+    X: np.ndarray, y: np.ndarray, num_trees: int = 5
+) -> lgb.Booster:
     """Train a simple LightGBM model for testing."""
     train_data = lgb.Dataset(X, label=y)
     params = {
@@ -95,7 +97,9 @@ def _score_flatbuffer_tree(tree, features) -> float:
     while node < tree.LeftChildrenLength():
         steps += 1
         if steps > max_steps:
-            raise AssertionError("tree descent exceeded node count: cyclic child indices")
+            raise AssertionError(
+                "tree descent exceeded node count: cyclic child indices"
+            )
 
         left = tree.LeftChildren(node)
         right = tree.RightChildren(node)
@@ -271,9 +275,9 @@ class TestRoundTrip:
         expected = model.predict(X, raw_score=True)
         for row in range(X.shape[0]):
             actual = _score_flatbuffer_model(buffer, X[row])
-            assert actual == pytest.approx(expected[row], rel=1e-9, abs=1e-9), (
-                f"row {row}: flatbuffer {actual} != lightgbm {expected[row]}"
-            )
+            assert actual == pytest.approx(
+                expected[row], rel=1e-9, abs=1e-9
+            ), f"row {row}: flatbuffer {actual} != lightgbm {expected[row]}"
 
     def test_exact_threshold_values_match(self):
         """Feature values sitting exactly on a split threshold.
@@ -301,9 +305,9 @@ class TestRoundTrip:
         expected = model.predict(probe_matrix, raw_score=True)
         for i, row in enumerate(probes):
             actual = _score_flatbuffer_model(buffer, row)
-            assert actual == pytest.approx(expected[i], rel=1e-9, abs=1e-9), (
-                f"probe {i} on threshold: flatbuffer {actual} != lightgbm {expected[i]}"
-            )
+            assert actual == pytest.approx(
+                expected[i], rel=1e-9, abs=1e-9
+            ), f"probe {i} on threshold: flatbuffer {actual} != lightgbm {expected[i]}"
 
     def test_missing_values_match(self):
         """NaN features must take the direction `default_left` records.
@@ -324,9 +328,9 @@ class TestRoundTrip:
         expected = model.predict(probes, raw_score=True)
         for i, row in enumerate(probes):
             actual = _score_flatbuffer_model(buffer, row)
-            assert actual == pytest.approx(expected[i], rel=1e-9, abs=1e-9), (
-                f"NaN probe {i}: flatbuffer {actual} != lightgbm {expected[i]}"
-            )
+            assert actual == pytest.approx(
+                expected[i], rel=1e-9, abs=1e-9
+            ), f"NaN probe {i}: flatbuffer {actual} != lightgbm {expected[i]}"
 
     def test_learning_rate_is_not_applied_twice(self):
         """A non-default shrinkage must not scale the ensemble a second time.
@@ -452,72 +456,147 @@ class TestReproducibility:
     def test_two_conversions_of_one_model_produce_identical_bytes(self, tmp_path: Path):
         lgbm_path = self._saved(tmp_path)
         first, second = tmp_path / "first.bin", tmp_path / "second.bin"
-        first_digest = convert(lgbm_path, "sha256:0123456789abcdef", first,
-                               num_training_samples=200, training_arches=["gfx942"],
-                               model_version="1.0.0")
-        second_digest = convert(lgbm_path, "sha256:0123456789abcdef", second,
-                                num_training_samples=200, training_arches=["gfx942"],
-                                model_version="1.0.0")
+        first_digest = convert(
+            lgbm_path,
+            "sha256:0123456789abcdef",
+            first,
+            num_training_samples=200,
+            training_arches=["gfx942"],
+            model_version="1.0.0",
+        )
+        second_digest = convert(
+            lgbm_path,
+            "sha256:0123456789abcdef",
+            second,
+            num_training_samples=200,
+            training_arches=["gfx942"],
+            model_version="1.0.0",
+        )
         assert first.read_bytes() == second.read_bytes()
         # The returned digest is what the descriptor body records and TreeDataAdapter
         # recomputes, so it has to be over the bytes that reached the file.
-        assert first_digest == second_digest == hashlib.sha256(first.read_bytes()).hexdigest()
+        assert (
+            first_digest
+            == second_digest
+            == hashlib.sha256(first.read_bytes()).hexdigest()
+        )
 
-    def test_an_unstamped_conversion_omits_the_date_rather_than_inventing_one(self, tmp_path: Path,
-                                                                             monkeypatch):
+    def test_an_unstamped_conversion_omits_the_date_rather_than_inventing_one(
+        self, tmp_path: Path, monkeypatch
+    ):
         monkeypatch.delenv("SOURCE_DATE_EPOCH", raising=False)
-        convert(self._saved(tmp_path), "sha256:0123456789abcdef", tmp_path / "model.bin")
+        convert(
+            self._saved(tmp_path), "sha256:0123456789abcdef", tmp_path / "model.bin"
+        )
         model = _read_model(tmp_path / "model.bin")
         assert model.TrainingDate() is None
         # Everything else that is provenance rather than a clock still lands.
         assert model.Framework() == b"lightgbm"
 
     def test_source_date_epoch_supplies_the_stamp_a_reproducible_build_can_reproduce(
-            self, tmp_path: Path, monkeypatch):
+        self, tmp_path: Path, monkeypatch
+    ):
         monkeypatch.setenv("SOURCE_DATE_EPOCH", "1700000000")
-        convert(self._saved(tmp_path), "sha256:0123456789abcdef", tmp_path / "model.bin")
-        assert _read_model(tmp_path / "model.bin").TrainingDate() == b"2023-11-14T22:13:20+00:00"
+        convert(
+            self._saved(tmp_path), "sha256:0123456789abcdef", tmp_path / "model.bin"
+        )
+        assert (
+            _read_model(tmp_path / "model.bin").TrainingDate()
+            == b"2023-11-14T22:13:20+00:00"
+        )
 
-    def test_an_explicit_stamp_outranks_the_environment(self, tmp_path: Path, monkeypatch):
+    def test_an_explicit_stamp_outranks_the_environment(
+        self, tmp_path: Path, monkeypatch
+    ):
         monkeypatch.setenv("SOURCE_DATE_EPOCH", "1700000000")
-        convert(self._saved(tmp_path), "sha256:0123456789abcdef", tmp_path / "model.bin",
-                training_date="2024-02-29T00:00:00+00:00")
-        assert _read_model(tmp_path / "model.bin").TrainingDate() == b"2024-02-29T00:00:00+00:00"
+        convert(
+            self._saved(tmp_path),
+            "sha256:0123456789abcdef",
+            tmp_path / "model.bin",
+            training_date="2024-02-29T00:00:00+00:00",
+        )
+        assert (
+            _read_model(tmp_path / "model.bin").TrainingDate()
+            == b"2024-02-29T00:00:00+00:00"
+        )
 
-    def test_an_unparseable_source_date_epoch_is_refused_not_ignored(self, tmp_path: Path,
-                                                                    monkeypatch):
+    def test_an_unparseable_source_date_epoch_is_refused_not_ignored(
+        self, tmp_path: Path, monkeypatch
+    ):
         # Ignoring it would drop a stamp the build asked for without saying so, and the
         # reproducible-builds specification requires the error.
         monkeypatch.setenv("SOURCE_DATE_EPOCH", "yesterday")
         with pytest.raises(ValueError, match="SOURCE_DATE_EPOCH"):
-            convert(self._saved(tmp_path), "sha256:0123456789abcdef", tmp_path / "model.bin")
+            convert(
+                self._saved(tmp_path), "sha256:0123456789abcdef", tmp_path / "model.bin"
+            )
 
     def test_training_records_the_artifact_digest_in_the_descriptor_and_the_manifest(
-            self, tmp_path: Path, evaluator):
+        self, tmp_path: Path, evaluator
+    ):
         block = [64 if row % 2 else 256 for row in range(80)]
         corpus = tmp_path / "corpus.csv"
-        pd.DataFrame({"kernel.block_size": block,
-                      "tflops": [120 - 0.2 * value for value in block]}).to_csv(corpus, index=False)
+        pd.DataFrame(
+            {
+                "kernel.block_size": block,
+                "tflops": [120 - 0.2 * value for value in block],
+            }
+        ).to_csv(corpus, index=False)
         snapshot = tmp_path / "provenance.json"
-        snapshot.write_text(json.dumps({
-            "ued": {"id": "13ab344f-4818-4772-bb8e-8e1441fec82c", "revision": "1.0"},
-            "kmd": {"id": "46d64d06-18eb-483d-9bb4-94472d32b78d", "revision": "1.0"},
-            "umd": []}), encoding="utf-8")
+        snapshot.write_text(
+            json.dumps(
+                {
+                    "ued": {
+                        "id": "13ab344f-4818-4772-bb8e-8e1441fec82c",
+                        "revision": "1.0",
+                    },
+                    "kmd": {
+                        "id": "46d64d06-18eb-483d-9bb4-94472d32b78d",
+                        "revision": "1.0",
+                    },
+                    "umd": [],
+                }
+            ),
+            encoding="utf-8",
+        )
         output = tmp_path / "model"
-        assert main(["train", "--input", str(corpus), "--provenance", str(snapshot),
-                     "--features", "kernel.block_size", "--target", "tflops",
-                     "--output-dir", str(output), "--num-boost-round", "10",
-                     "--early-stopping", "5"]) == 0
+        assert (
+            main(
+                [
+                    "train",
+                    "--input",
+                    str(corpus),
+                    "--provenance",
+                    str(snapshot),
+                    "--features",
+                    "kernel.block_size",
+                    "--target",
+                    "tflops",
+                    "--output-dir",
+                    str(output),
+                    "--num-boost-round",
+                    "10",
+                    "--early-stopping",
+                    "5",
+                ]
+            )
+            == 0
+        )
         document = (output / "heuristic.uhd.json").read_text(encoding="utf-8")
         descriptor = json.loads(document)
-        manifest = json.loads((output / "train_manifest.json").read_text(encoding="utf-8"))
+        manifest = json.loads(
+            (output / "train_manifest.json").read_text(encoding="utf-8")
+        )
         artifact = (output / descriptor["tree_data"]["artifact"]).read_bytes()
         # Bare hex: TreeDataAdapter compares this against `sha256(buffer, size)`, which
         # carries no `sha256:` prefix. A prefixed value would refuse every model it guards.
         assert descriptor["tree_data"]["hash"] == hashlib.sha256(artifact).hexdigest()
         # RFC 0019.13 §10.5 wants the pair: the document and the artifact it names.
         assert manifest["model_sha256"] == descriptor["tree_data"]["hash"]
-        assert manifest["uhd_sha256"] == hashlib.sha256(document.encode("utf-8")).hexdigest()
+        assert (
+            manifest["uhd_sha256"]
+            == hashlib.sha256(document.encode("utf-8")).hexdigest()
+        )
 
 
 if __name__ == "__main__":

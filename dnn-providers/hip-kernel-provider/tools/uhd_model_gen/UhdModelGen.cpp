@@ -109,17 +109,8 @@ void writeModel(const std::filesystem::path& path, const std::string& featuresHa
               static_cast<std::streamsize>(builder.GetSize()));
 }
 
-/// Writes the descriptor itself, which under the current schema IS the UHD -- a text file
-/// with the fields inline, not a stub naming a binary that holds them.
-///
-/// Still generated rather than committed, for the reason the model is: `features_hash` is
-/// computed here with the runtime's own function, so the pair cannot drift. A committed
-/// copy would be free to disagree with the signature beside it, and the runtime would then
-/// refuse the model at load with nothing pointing at which of the two moved.
-///
-/// Hand-rolled rather than routed through a JSON library: this is nine fixed fields with no
-/// user input, the tool already links the flatbuffers and plugin SDKs and nothing else, and
-/// the output is read back by DescriptorLoader in the same build.
+/// The `trained_against` record: id and revision of the UED, KMD and UMDs this model is
+/// generated for, read from the descriptor set whose `default` catalog ranker names this UHD.
 nlohmann::json snapshotProvenance(const std::vector<std::filesystem::path>& roots)
 {
     using namespace hipdnn_plugin_sdk::ingestor;
@@ -154,6 +145,17 @@ nlohmann::json snapshotProvenance(const std::vector<std::filesystem::path>& root
         "Model fixture UED did not resolve from the supplied descriptor roots");
 }
 
+/// Writes the descriptor itself, which under the current schema IS the UHD -- a text file
+/// with the fields inline, not a stub naming a binary that holds them.
+///
+/// Still generated rather than committed, for the reason the model is: `features_hash` is
+/// computed here with the runtime's own function, so the pair cannot drift. A committed
+/// copy would be free to disagree with the signature beside it, and the runtime would then
+/// refuse the model at load with nothing pointing at which of the two moved.
+///
+/// The fixed fields are streamed as text in a fixed order; only the two structured values,
+/// the signature and the provenance, are serialized through nlohmann::json. The output is
+/// read back by DescriptorLoader in the same build.
 void writeUhd(const std::filesystem::path& path,
               const std::string& featuresHash,
               const nlohmann::json& provenance)
@@ -161,14 +163,14 @@ void writeUhd(const std::filesystem::path& path,
     std::ostringstream json;
     json << "{\n";
     json << "  \"version\": \"1.0\",\n";
-    json << "  \"id\": \"" << UHD_ID << "\",\n";
+    json << R"(  "id": ")" << UHD_ID << "\",\n";
     json << "  \"name\": \"pointwise model selector\",\n";
     json << "  \"adapter\": \"tree_data\",\n";
 
     json << "  \"features_signature\": " << nlohmann::json(SIGNATURE).dump() << ",\n";
     json << "  \"trained_against\": " << provenance.dump() << ",\n";
 
-    json << "  \"features_hash\": \"" << featuresHash << "\",\n";
+    json << R"(  "features_hash": ")" << featuresHash << "\",\n";
     json << "  \"objective\": \"max\",\n";
 
     // Not calibrated and no metric: 9.0 and 1.0 are ordering, not throughput, so this score
@@ -178,7 +180,7 @@ void writeUhd(const std::filesystem::path& path,
     json << "  \"score\": { \"calibrated\": false, \"transform\": \"identity\" },\n";
 
     // Relative: resolved against this file's own directory, wherever the pack is staged.
-    json << "  \"tree_data\": { \"artifact\": \"" << MODEL_FILE << "\" }\n";
+    json << R"(  "tree_data": { "artifact": ")" << MODEL_FILE << "\" }\n";
     json << "}\n";
 
     const auto text = json.str();

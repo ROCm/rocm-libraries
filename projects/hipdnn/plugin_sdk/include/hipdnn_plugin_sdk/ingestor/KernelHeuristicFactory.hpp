@@ -53,7 +53,9 @@ inline std::shared_ptr<IKernelHeuristic> makeKernelHeuristic(
         {
             return std::make_shared<NativeKernelHeuristic>(
                 descriptor->nativeSymbol,
-                describeDescriptor("heuristic", descriptor->name, descriptor->id));
+                describeDescriptor("heuristic", descriptor->name, descriptor->id),
+                descriptor->objective,
+                descriptor->score.transform);
         }
     }
     auto entries = byMetric;

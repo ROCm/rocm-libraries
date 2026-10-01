@@ -68,7 +68,7 @@ std::vector<uint8_t> someGraph()
 
 TEST(TestGraphIdentity, AGraphIdentityIsAFunctionOfTheBytesAndNothingElse)
 {
-    const std::string left  = "some graph bytes";
+    const std::string left = "some graph bytes";
     const std::string right = "some graph byteS";
 
     const auto identity = [](const std::string& text) {
@@ -101,8 +101,7 @@ TEST(TestGraphIdentity, AGraphIdentityIsShapedLikeAUuidSoItRoundTripsThroughTheG
         {
             continue;
         }
-        EXPECT_NE(std::string("0123456789abcdef").find(identity[i]), std::string::npos)
-            << identity;
+        EXPECT_NE(std::string("0123456789abcdef").find(identity[i]), std::string::npos) << identity;
     }
 }
 
@@ -128,7 +127,7 @@ TEST(TestGraphIdentity, StampingAnAlreadyStampedGraphReproducesTheSameId)
     // The digest is taken with the id cleared, so restamping does not digest the previous id.
     // Without that, a corpus regenerated from stamped inputs would drift exactly as an id-less
     // one does, and the idempotence is what makes the id safe to recompute anywhere.
-    const auto once  = stampGraphIdentity(someGraph(), "a_graph");
+    const auto once = stampGraphIdentity(someGraph(), "a_graph");
     const auto twice = stampGraphIdentity(once.bytes, "a_graph");
 
     EXPECT_EQ(twice.id, once.id);
@@ -140,7 +139,7 @@ TEST(TestGraphIdentity, TwoGraphsDifferingOnlyInTheirNameGetDifferentIds)
     // The name is set before the digest for this reason: two problems that differ only in a
     // parameter the builder ignores would otherwise collide, and the name is where that
     // parameter still shows.
-    const auto left  = stampGraphIdentity(someGraph(), "a_graph");
+    const auto left = stampGraphIdentity(someGraph(), "a_graph");
     const auto right = stampGraphIdentity(someGraph(), "another_graph");
 
     EXPECT_NE(left.id, right.id);

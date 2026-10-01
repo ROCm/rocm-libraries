@@ -2,15 +2,15 @@
 
 Every other pack in this tree declares `"adapter": "native"`: its heuristic is a compiled
 function resolved by symbol. This one declares `"adapter": "tree_data"`, so its heuristic
-is a trained artifact loaded at plan build (RFC 0019 §7). It exists to keep that path exercised
-end to end, on a device, rather than only in unit tests.
+is a trained artifact loaded at plan build (RFC 0019 §7). It exists so a model-backed UHD is
+generated, packed and validated with the rest of the test descriptors.
 
 ## What is deliberate here
 
 **It reuses the native pack's symbols.** The graph matcher, the ADD and dtype matchers and
-the dispatch handler are referenced by the same ids `pointwise/` uses. A model-backed
-heuristic resolves no score symbol, so this pack adds no C++ at all — the only difference from
-`pointwise/` is which heuristic its UED names.
+the dispatch handler resolve to the same native symbols `pointwise/` uses. A model-backed
+heuristic resolves no score symbol, so this pack adds no C++ to the provider — the only
+difference from `pointwise/` is which heuristic its UED names.
 
 **Its model disagrees with the native scorer, on purpose.** `hipkernel.pointwise.score`
 returns `block_size`, so the native engine prefers the 256 kernel. This model prefers the
@@ -26,10 +26,12 @@ which is how a test reads the outcome.
 
 ## Where it lives
 
-Under `src/integration_tests/`, staged into the descriptor build tree so the integration
-tests find it beside the shipped packs, and excluded from `install`. A two-leaf model over
-one feature has no business in a customer's plugin directory; it is scaffolding that has to
-sit where the engine looks, not product.
+Authored under `src/integration_tests/`, assembled into a build-tree stage directory (with
+the generated artifacts below), and packed into the unit test descriptor root only, excluded
+from `install`. Its kernel is `embedded_source`, so only `hip_kernel_provider_tests`, which
+embeds `kernels/PointwiseModelAdd.cpp`, can serve it; the dlopened plugin the integration
+binary loads carries no such source. A two-leaf model over one feature has no business in a
+customer's plugin directory; it is scaffolding, not product.
 
 ## What this is not
 

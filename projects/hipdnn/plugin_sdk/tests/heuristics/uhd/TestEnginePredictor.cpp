@@ -8,7 +8,10 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <limits>
+#include <string>
+#include <vector>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
@@ -31,10 +34,10 @@ double firstFeature(const double* values, size_t count)
 
 std::filesystem::path uniqueDirectory()
 {
-    static std::atomic<size_t> counter{0};
-    static const auto session = std::chrono::steady_clock::now().time_since_epoch().count();
+    static std::atomic<size_t> s_counter{0};
+    static const auto s_session = std::chrono::steady_clock::now().time_since_epoch().count();
     return std::filesystem::temp_directory_path()
-           / ("engine_prediction_" + std::to_string(session) + "_" + std::to_string(counter++));
+           / ("engine_prediction_" + std::to_string(s_session) + "_" + std::to_string(s_counter++));
 }
 
 /// A UHD reaches an engine only through the UED role map the descriptor loader resolves
@@ -116,6 +119,35 @@ protected:
         doc["score"] = {{"metric", "time"}, {"calibrated", true}, {"transform", "identity"}};
         return config(doc);
     }
+
+    /// document() as a tree_data model naming @p artifact beside the UHD, declaring no hash.
+    nlohmann::json treeDocument(const std::string& artifact) const
+    {
+        auto doc = document();
+        doc["adapter"] = "tree_data";
+        doc.erase("native");
+        doc["tree_data"] = {{"artifact", artifact}};
+        return doc;
+    }
+
+    /// A flat one-feature ensemble matching document()'s signature that predicts
+    /// @p throughput everywhere, trained on @p trainingArches.
+    GbdtModelTestBuilder treeModel(double throughput,
+                                   const std::vector<std::string>& trainingArches
+                                   = {"gfx942"}) const
+    {
+        GbdtModelTestBuilder builder;
+        builder.setNumFeatures(1)
+            .setFeaturesHash(document().at("features_hash").get<std::string>())
+            .setBaseScore(std::log1p(throughput))
+            .setTrainingArches(trainingArches);
+        return builder;
+    }
+
+    std::string artifactPath(const std::string& artifact) const
+    {
+        return (_directory.path() / artifact).string();
+    }
 };
 
 TEST_F(TestEnginePredictor, NativeCustomAndTreeRecoverTheSamePhysicalThroughput)
@@ -133,7 +165,7 @@ TEST_F(TestEnginePredictor, NativeCustomAndTreeRecoverTheSamePhysicalThroughput)
               std::filesystem::path(HIPDNN_TEST_PLUGIN_DIR)
               / hipdnn_data_sdk::utilities::getLibraryName("hipdnn_test_scorer_lib"))
               .string();
-    custom.customLibrarySymbol = "test_linear_scorer";
+    custom.customLibrarySymbol = "testLinearScorer";
     const auto customResult = predict(custom);
     ASSERT_EQ(customResult.status, PredictionStatus::AVAILABLE);
     EXPECT_NEAR(customResult.value, nativeResult.value, 1e-12);
@@ -168,7 +200,7 @@ TEST_F(TestEnginePredictor, ACustomLibraryWhoseDeclaredHashIsNotItsBytesYieldsNo
               std::filesystem::path(HIPDNN_TEST_PLUGIN_DIR)
               / hipdnn_data_sdk::utilities::getLibraryName("hipdnn_test_scorer_lib"))
               .string();
-    custom.customLibrarySymbol = "test_linear_scorer";
+    custom.customLibrarySymbol = "testLinearScorer";
     custom.modelHash = sha256(std::string("not this library"));
 
     const auto result = predict(custom);
@@ -263,6 +295,57 @@ TEST_F(TestEnginePredictor, AModelIsNeverAnsweredInAnotherMetric)
     EXPECT_EQ(asTime.status, PredictionStatus::INVALID);
     EXPECT_EQ(asTime.metric, "time");
     EXPECT_DOUBLE_EQ(asTime.value, 0.0);
+}
+
+/// FeatureSemantics.hpp: the revision says what published feature values MEAN, so a model
+/// trained under another one reads the same names and passes the same features_hash while
+/// scoring numbers it was never fitted on. It is refused as UNAVAILABLE -- not a bad model,
+/// just not this build's -- naming both revisions. A document recording none is revision 1:
+/// the shape of every model shipped before the revision existed.
+TEST_F(TestEnginePredictor, AModelTrainedOnOtherFeatureSemanticsIsUnavailable)
+{
+    using hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION;
+    auto current = document();
+    current["trained_against"]["feature_semantics_revision"] = FEATURE_SEMANTICS_REVISION;
+    ASSERT_EQ(predict(config(current)).status, PredictionStatus::AVAILABLE);
+
+    ASSERT_FALSE(document().at("trained_against").contains("feature_semantics_revision"));
+    auto one = document();
+    one["trained_against"]["feature_semantics_revision"] = 1;
+    const auto absent = predict(config(document()));
+    const auto recordedOne = predict(config(one));
+    EXPECT_EQ(absent.status, recordedOne.status);
+    EXPECT_EQ(absent.reason, recordedOne.reason);
+
+    const auto newer = FEATURE_SEMANTICS_REVISION + 1;
+    auto stale = document();
+    stale["trained_against"]["feature_semantics_revision"] = newer;
+    scorerCalls = 0;
+    const auto refused = predict(config(stale));
+    EXPECT_EQ(refused.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_NE(refused.reason.find("revision " + std::to_string(newer)), std::string::npos)
+        << refused.reason;
+    EXPECT_NE(refused.reason.find("revision " + std::to_string(FEATURE_SEMANTICS_REVISION)),
+              std::string::npos)
+        << refused.reason;
+    EXPECT_EQ(scorerCalls, 0U);
+}
+
+/// Revisions are compared for equality, so one value must have one spelling: 1.0, "1" or
+/// true reaching the comparison as 1 would let a malformed document through as current.
+TEST_F(TestEnginePredictor, AFeatureSemanticsRevisionMustBeAPositiveInteger)
+{
+    for(const auto& value : {nlohmann::json(0),
+                             nlohmann::json(-1),
+                             nlohmann::json(1.0),
+                             nlohmann::json("1"),
+                             nlohmann::json(true),
+                             nlohmann::json(std::numeric_limits<uint64_t>::max())})
+    {
+        auto doc = document();
+        doc["trained_against"]["feature_semantics_revision"] = value;
+        EXPECT_THROW(config(doc), std::invalid_argument) << value.dump();
+    }
 }
 
 /// One engine may bind one model per metric (RFC 0019 §3.1), and the arch fallback stays
@@ -401,12 +484,105 @@ TEST_F(TestEnginePredictor, LoadedModelIsImmutableAndTrainingArchitectureLimitsC
     EXPECT_EQ(predictWith(cfg, compiled, true, "gfx950").status, PredictionStatus::UNAVAILABLE);
 }
 
+/// D2: one UUID bound under several architecture keys is one model. It is compiled once and
+/// shared, and where it answers is decided by the artifact's `training_arches`, never by the
+/// binding: bound for gfx942 and gfx950 but trained on gfx942 only, it answers on gfx942 and
+/// reports "no coverage" on gfx950.
+///
+/// The artifact is removed between the two queries. Compiled per arch key, the gfx950 query
+/// recompiles and reports the artifact "not deployed"; compiled per UUID, it reaches the
+/// model gfx942 already compiled, and that model's coverage is what answers.
+TEST_F(TestEnginePredictor, OneUuidBoundUnderTwoArchesIsOneModelAnsweringOnlyWhereTrained)
+{
+    ASSERT_TRUE(treeModel(42.0, {"gfx942"}).buildToFile(artifactPath("shared.fb")));
+    const auto shared = config(treeDocument("shared.fb"));
+    EngineModelBinding binding;
+    binding.bind("tflops", "gfx942", shared);
+    binding.bind("tflops", "gfx950", shared);
+    const auto ask = [&](const std::string& arch) {
+        return binding.predict(17, "test:opaque", "selector-1", "tflops", arch, _features, true);
+    };
+
+    const auto trained = ask("gfx942:sramecc+:xnack-");
+    ASSERT_EQ(trained.status, PredictionStatus::AVAILABLE) << trained.reason;
+    EXPECT_NEAR(trained.value, 42.0, 1e-12);
+
+    ASSERT_TRUE(std::filesystem::remove(artifactPath("shared.fb")));
+    const auto untrained = ask("gfx950");
+    EXPECT_EQ(untrained.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(untrained.reason, "UHD model has no coverage for this architecture");
+    EXPECT_EQ(untrained.uhd_id, shared.uhdId);
+}
+
+/// R6: a UHD declaring no artifact hash is identified by the bytes present when it was
+/// parsed, in the same format a declared hash takes, so replacing the weights changes the
+/// identity every cache keys on. The adapter verifies against it like a declared digest:
+/// weights replaced after parse are refused, never scored under the old identity.
+TEST_F(TestEnginePredictor, AModelDeclaringNoHashIsIdentifiedByTheBytesItWasParsedWith)
+{
+    const auto path = artifactPath("weights.fb");
+    const auto bytesDigest = [&]() {
+        std::ifstream file(path, std::ios::binary);
+        const std::string bytes{std::istreambuf_iterator<char>(file),
+                                std::istreambuf_iterator<char>()};
+        return sha256(bytes);
+    };
+    ASSERT_TRUE(treeModel(42.0).buildToFile(path));
+    const auto original = config(treeDocument("weights.fb"));
+    EXPECT_EQ(original.modelHash, bytesDigest());
+
+    ASSERT_TRUE(treeModel(9.0).buildToFile(path));
+    const auto retrained = config(treeDocument("weights.fb"));
+    EXPECT_EQ(retrained.modelHash, bytesDigest());
+    EXPECT_NE(retrained.modelHash, original.modelHash);
+
+    const auto stale = predict(original);
+    EXPECT_EQ(stale.status, PredictionStatus::INVALID);
+    const auto current = predict(retrained);
+    ASSERT_EQ(current.status, PredictionStatus::AVAILABLE) << current.reason;
+    EXPECT_NEAR(current.value, 9.0, 1e-12);
+
+    // Nothing deployed yet: no bytes, so no content identity (RFC 0019 §5).
+    ASSERT_TRUE(std::filesystem::remove(path));
+    EXPECT_TRUE(config(treeDocument("weights.fb")).modelHash.empty());
+}
+
+/// R9: a grouped tree_data model decides per group, and an L1 estimate is one row per graph
+/// with no contract naming its group, so the runtime would answer from the root ensemble
+/// alone -- a number nothing trained or evaluated. Refused as INVALID, naming why; the same
+/// ensemble without groups is the control.
+TEST_F(TestEnginePredictor, AGroupedTreeArtifactIsRefusedForTheEngineRole)
+{
+    GbdtModelTestBuilder::TreeSpec zero;
+    zero.featureIndices = {0};
+    zero.thresholds = {0.0};
+    zero.leftChildren = {-1};
+    zero.rightChildren = {-1};
+    zero.leafValues = {0.0};
+    zero.defaultLeft = {1};
+
+    ASSERT_TRUE(treeModel(42.0).addTree(zero).buildToFile(artifactPath("flat.fb")));
+    const auto flat = predict(config(treeDocument("flat.fb")));
+    ASSERT_EQ(flat.status, PredictionStatus::AVAILABLE) << flat.reason;
+
+    ASSERT_TRUE(treeModel(42.0)
+                    .addTree(zero)
+                    .setGroupByFeatureIndex(0)
+                    .addGroup(0.0, {zero})
+                    .addGroup(1.0, {zero})
+                    .buildToFile(artifactPath("grouped.fb")));
+    const auto grouped = predict(config(treeDocument("grouped.fb")));
+    EXPECT_EQ(grouped.status, PredictionStatus::INVALID);
+    EXPECT_NE(grouped.reason.find("grouped"), std::string::npos) << grouped.reason;
+    EXPECT_DOUBLE_EQ(grouped.value, 0.0);
+}
+
 TEST_F(TestEnginePredictor, ParserRejectsDuplicateKeysAndOversizedNesting)
 {
     const auto path = _directory.path() / "duplicate.uhd.json";
     {
         std::ofstream file(path);
-        file << "{\"name\":\"first\",\"name\":\"second\"}";
+        file << R"({"name":"first","name":"second"})";
     }
     EXPECT_THROW(readUhdDocument(path), std::invalid_argument);
     {

@@ -61,6 +61,9 @@ struct CatalogKey
     /// that outlive the process (see `EngineIdentity` in WinnerCacheFile.hpp). A stale
     /// ranking is not a wrong answer today only because nothing hands entries across that
     /// boundary; keying it makes that a property of the key rather than of the call graph.
+    // Not redundant: partial aggregate inits such as CatalogKey{graph, device} would
+    // otherwise trip -Wmissing-field-initializers.
+    // NOLINTNEXTLINE(readability-redundant-member-init) - see above
     hipdnn_data_sdk::utilities::Version engineVersion{};
     /// The ranking metric the order was computed for (RFC 0019 §11.4): every cache of a
     /// ranked order is keyed by metric, or a `time` request is served a `tflops` order.

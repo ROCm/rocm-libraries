@@ -32,6 +32,11 @@ const std::vector<IngestorPack>& ingestorPacks()
          &registerGfx942AttentionDenseSymbols,
          true,
          &resetGfx942AttentionDenseModuleCache},
+        // Packaged/kpack (develop #12311): it owns a module cache the reset sweep must reach.
+        {"hipkernel:Gfx950AttentionDense",
+         &registerGfx950AttentionDenseSymbols,
+         true,
+         &resetGfx950AttentionDenseModuleCache},
     };
     return s_packs;
 }

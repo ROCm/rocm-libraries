@@ -146,7 +146,8 @@ def store(tmp_path, monkeypatch):
         return {"engine_id": 7, "engine_name": "provider:engine7", "graph_id": graph["id"],
                 "device_id": engine["device"], "arch": "gfx942", "metric": metric,
                 "binding": {"engine": "provider:engine7", "role": "predict_engine", "arch": "gfx942",
-                            "selector_revision": "provider-1", "trained_against": provenance},
+                            "metric": metric, "selector_revision": "provider-1",
+                            "trained_against": {**provenance, "selector_revision": "provider-1"}},
                 "features": {"graph.flops": 2e9 * (graph["size"] + 1), "device.cu_count": 120},
                 "avgTimeMs": average, "robustMeanMs": average * 0.9, "stddevMs": 0.01, "iters": 30,
                 "is_valid": True, "selection_mode": "immediate", "timing_statistic": "robustMeanMs"}

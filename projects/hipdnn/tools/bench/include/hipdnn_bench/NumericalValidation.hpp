@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <sstream>
@@ -50,9 +51,9 @@ namespace hipdnn_bench
 /// Why a row's measurement may or may not be trusted as a label.
 enum class NumericalVerdict
 {
-    AGREED,    ///< Cross-checked against the catalog and consistent with it.
+    AGREED, ///< Cross-checked against the catalog and consistent with it.
     DISAGREED, ///< Cross-checked and inconsistent; §13.2's invalid marker.
-    UNKNOWN    ///< Not cross-checkable here. Never a synonym for AGREED.
+    UNKNOWN ///< Not cross-checkable here. Never a synonym for AGREED.
 };
 
 /// A verdict and the short machine-readable reason recorded beside it on the row.
@@ -78,7 +79,7 @@ struct CandidateOutput
     /// directions in the dataset so the model learns the failure surface.
     std::string failure;
 
-    /// Host image of every non-virtual tensor, keyed by uid.
+    /// Host image of every tensor crossCheckedOutputs() selects, keyed by uid.
     std::map<int64_t, std::vector<uint8_t>> images;
 };
 
@@ -89,16 +90,36 @@ struct TensorDescription
     hipdnn_frontend::DataType dataType = hipdnn_frontend::DataType::NOT_SET;
 };
 
+/// @brief The tensors a candidate's capture holds and the cross-check judges: the
+///        non-virtual tensors some node of the graph writes.
+///
+/// Outputs only. Every candidate of a problem is handed the same input bytes, so an input
+/// agrees across the catalog whatever the kernels did; counted as output it turns
+/// "nothing comparable" into a comparison and "every output untouched" into a non-zero
+/// image, which is exactly how an FP8-only or write-nothing catalog came back AGREED.
+inline std::vector<TensorRequirement> crossCheckedOutputs(const VariantPackPlan& plan)
+{
+    std::vector<TensorRequirement> outputs;
+    std::copy_if(plan.tensors.begin(),
+                 plan.tensors.end(),
+                 std::back_inserter(outputs),
+                 [](const TensorRequirement& tensor) { return tensor.produced; });
+    return outputs;
+}
+
 /// CSV spelling of @p verdict. Three words rather than a boolean, so the column cannot be
 /// read back as one and quietly collapse UNKNOWN into one of the other two.
 inline const char* verdictText(NumericalVerdict verdict)
 {
     switch(verdict)
     {
-    case NumericalVerdict::AGREED: return "True";
-    case NumericalVerdict::DISAGREED: return "False";
+    case NumericalVerdict::AGREED:
+        return "True";
+    case NumericalVerdict::DISAGREED:
+        return "False";
     case NumericalVerdict::UNKNOWN:
-    default: return "Unknown";
+    default:
+        return "Unknown";
     }
 }
 
@@ -127,16 +148,23 @@ inline NumericKind numericKind(hipdnn_frontend::DataType dataType)
     using hipdnn_frontend::DataType;
     switch(dataType)
     {
-    case DataType::DOUBLE: return NumericKind::FLOAT64;
-    case DataType::FLOAT: return NumericKind::FLOAT32;
-    case DataType::HALF: return NumericKind::FLOAT16;
-    case DataType::BFLOAT16: return NumericKind::BFLOAT16;
+    case DataType::DOUBLE:
+        return NumericKind::FLOAT64;
+    case DataType::FLOAT:
+        return NumericKind::FLOAT32;
+    case DataType::HALF:
+        return NumericKind::FLOAT16;
+    case DataType::BFLOAT16:
+        return NumericKind::BFLOAT16;
     case DataType::INT8:
     case DataType::INT32:
-    case DataType::INT64: return NumericKind::SIGNED_INTEGER;
+    case DataType::INT64:
+        return NumericKind::SIGNED_INTEGER;
     case DataType::UINT8:
-    case DataType::BOOLEAN: return NumericKind::UNSIGNED_INTEGER;
-    default: return NumericKind::NONE;
+    case DataType::BOOLEAN:
+        return NumericKind::UNSIGNED_INTEGER;
+    default:
+        return NumericKind::NONE;
     }
 }
 
@@ -212,8 +240,10 @@ inline double decodeElement(const std::vector<uint8_t>& image,
         std::memcpy(&value, bytes, sizeof(value));
         return static_cast<double>(value);
     }
-    case DataType::INT8: return static_cast<double>(static_cast<int8_t>(*bytes));
-    default: return static_cast<double>(*bytes); // UINT8, BOOLEAN
+    case DataType::INT8:
+        return static_cast<double>(static_cast<int8_t>(*bytes));
+    default:
+        return static_cast<double>(*bytes); // UINT8, BOOLEAN
     }
 }
 
@@ -328,7 +358,9 @@ inline bool encodeFillElement(hipdnn_frontend::DataType dataType, FillValue valu
     // A block scale: no sign and no mantissa, so the code is the biased exponent alone. It
     // is filled rather than skipped because a zero scale zeroes the tensor it scales, which
     // is the all-zero output this fill exists to stop.
-    case DataType::FP8_E8M0: *bytes = static_cast<uint8_t>(127 + value.exponent); return true;
+    case DataType::FP8_E8M0:
+        *bytes = static_cast<uint8_t>(127 + value.exponent);
+        return true;
     case DataType::INT64:
     {
         std::memcpy(bytes, &magnitude, sizeof(magnitude));
@@ -341,11 +373,16 @@ inline bool encodeFillElement(hipdnn_frontend::DataType dataType, FillValue valu
         return true;
     }
     case DataType::INT8:
-    case DataType::UINT8: *bytes = static_cast<uint8_t>(magnitude); return true;
+    case DataType::UINT8:
+        *bytes = static_cast<uint8_t>(magnitude);
+        return true;
     // A mask of every element true. The other choice zeroes whatever it gates, and a fill
     // that switches the graph off is the state this replaces.
-    case DataType::BOOLEAN: *bytes = 1; return true;
-    default: return false;
+    case DataType::BOOLEAN:
+        *bytes = 1;
+        return true;
+    default:
+        return false;
     }
 }
 
@@ -354,7 +391,7 @@ inline bool encodeFillElement(hipdnn_frontend::DataType dataType, FillValue valu
 inline std::vector<uint8_t>
     inputFillImage(hipdnn_frontend::DataType dataType, size_t bytes, uint64_t seed, int64_t uid)
 {
-    const size_t width = static_cast<size_t>(elementBits(dataType) / 8);
+    const auto width = static_cast<size_t>(elementBits(dataType) / 8);
     if(width == 0 || bytes < width)
     {
         return {};
@@ -407,11 +444,16 @@ inline double agreementTolerance(NumericKind kind)
 {
     switch(kind)
     {
-    case NumericKind::FLOAT64: return 1e-12;
-    case NumericKind::FLOAT32: return 1e-5;
-    case NumericKind::FLOAT16: return 2e-2; // 10 mantissa bits
-    case NumericKind::BFLOAT16: return 6e-2; // 7 mantissa bits
-    default: return 0.0;
+    case NumericKind::FLOAT64:
+        return 1e-12;
+    case NumericKind::FLOAT32:
+        return 1e-5;
+    case NumericKind::FLOAT16:
+        return 2e-2; // 10 mantissa bits
+    case NumericKind::BFLOAT16:
+        return 6e-2; // 7 mantissa bits
+    default:
+        return 0.0;
     }
 }
 
@@ -425,11 +467,16 @@ inline double agreementFloor(NumericKind kind)
 {
     switch(kind)
     {
-    case NumericKind::FLOAT64: return 0x1p-52; // 52 mantissa bits
-    case NumericKind::FLOAT32: return 0x1p-23;
-    case NumericKind::FLOAT16: return 0x1p-10;
-    case NumericKind::BFLOAT16: return 0x1p-7;
-    default: return 0.0; // integers are exact; their bar is equality
+    case NumericKind::FLOAT64:
+        return 0x1p-52; // 52 mantissa bits
+    case NumericKind::FLOAT32:
+        return 0x1p-23;
+    case NumericKind::FLOAT16:
+        return 0x1p-10;
+    case NumericKind::BFLOAT16:
+        return 0x1p-7;
+    default:
+        return 0.0; // integers are exact; their bar is equality
     }
 }
 
@@ -530,9 +577,8 @@ inline bool leftOutputUntouched(const CandidateOutput& candidate,
         {
             continue;
         }
-        if(std::any_of(image->second.begin(), image->second.end(), [](uint8_t byte) {
-               return byte != 0;
-           }))
+        if(std::any_of(
+               image->second.begin(), image->second.end(), [](uint8_t byte) { return byte != 0; }))
         {
             return false;
         }
@@ -585,13 +631,16 @@ inline size_t comparableTensors(const CandidateOutput& candidate,
 /// Candidates are partitioned into cohorts that left identical output. The rule is majority,
 /// not first-one-wins: if the catalog's first candidate is the broken one, taking it as truth
 /// would invert the verdicts and mark every correct kernel invalid. A strict majority cohort
-/// is the reference and its members are AGREED; every candidate outside it is DISAGREED.
+/// -- more than half of the cross-checked candidates -- is the reference and its members are
+/// AGREED; every candidate outside it is DISAGREED.
 ///
-/// An even split is DISAGREED for everyone in the dispute, which is the deliberate choice
-/// here. At least one of those candidates is computing the wrong answer, and §13.2 says the
-/// timing of a candidate that is not known correct is not a label. Reporting it as UNKNOWN
-/// would let the wrong-but-fast one through, which is the case the section is about. §13.2
-/// also names the remedy: the marker is cleared in the matcher or the kernel, not here.
+/// Without a strict majority -- an even split, or a largest cohort that is only a plurality,
+/// such as 2 of {1, 1, 2, 3} -- every cross-checked candidate is DISAGREED, which is the
+/// deliberate choice here. The catalog has not agreed on an answer, at least one of those
+/// candidates is computing the wrong one, and §13.2 says the timing of a candidate that is
+/// not known correct is not a label. Reporting it as UNKNOWN would let the wrong-but-fast one
+/// through, which is the case the section is about. §13.2 also names the remedy: the marker
+/// is cleared in the matcher or the kernel, not here.
 ///
 /// **Streaming, because the batch form did not fit in host memory.** Comparison happens as
 /// each candidate arrives, and only a cohort's founder keeps its image; a candidate that
@@ -620,11 +669,12 @@ public:
         _outcomes.emplace_back();
         if(!candidate.executed)
         {
-            _outcomes[index] = {NumericalVerdict::UNKNOWN,
-                                "not_executed: " + (candidate.failure.empty()
-                                                        ? std::string("the candidate produced no "
-                                                                      "output to cross-check")
-                                                        : candidate.failure)};
+            _outcomes[index]
+                = {NumericalVerdict::UNKNOWN,
+                   "not_executed: "
+                       + (candidate.failure.empty() ? std::string("the candidate produced no "
+                                                                  "output to cross-check")
+                                                    : candidate.failure)};
             return;
         }
         if(detail::comparableTensors(candidate, _tensors) == 0)
@@ -676,12 +726,6 @@ public:
                 largest = cohort;
             }
         }
-        // Counted after `largest` is final: a running tally would miss an earlier cohort that
-        // the eventual winner only matched in size, and report a split as decided.
-        const size_t tied = static_cast<size_t>(
-            std::count_if(_cohorts.begin(), _cohorts.end(), [&](const Cohort& cohort) {
-                return cohort.members.size() == _cohorts[largest].members.size();
-            }));
 
         if(_crossChecked < 2)
         {
@@ -706,7 +750,9 @@ public:
             return outcomes;
         }
 
-        const bool decided = tied == 1;
+        // A strict majority, written so it cannot overflow. It is necessarily unique: two
+        // cohorts of more than half each would hold more candidates than were checked.
+        const bool decided = _cohorts[largest].members.size() > _crossChecked / 2;
         const CandidateOutput& reference = _cohorts[decided ? largest : 0].founder;
         for(size_t cohort = 0; cohort < _cohorts.size(); ++cohort)
         {
@@ -716,9 +762,8 @@ public:
                 {
                     outcomes[index]
                         = {NumericalVerdict::AGREED,
-                           "agrees_with_catalog: "
-                               + std::to_string(_cohorts[cohort].members.size()) + " of "
-                               + std::to_string(_crossChecked)
+                           "agrees_with_catalog: " + std::to_string(_cohorts[cohort].members.size())
+                               + " of " + std::to_string(_crossChecked)
                                + " cross-checked candidates produced this output"};
                 }
                 continue;
@@ -730,9 +775,9 @@ public:
             const std::string detailText = mismatchDetail(_cohorts[cohort].founder, reference);
             for(const size_t index : _cohorts[cohort].members)
             {
-                outcomes[index] = {NumericalVerdict::DISAGREED,
-                                   (decided ? "output_mismatch: " : "disputed_output: ")
-                                       + detailText};
+                outcomes[index]
+                    = {NumericalVerdict::DISAGREED,
+                       (decided ? "output_mismatch: " : "disputed_output: ") + detailText};
             }
         }
         return outcomes;

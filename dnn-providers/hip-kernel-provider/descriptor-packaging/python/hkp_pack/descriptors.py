@@ -415,15 +415,23 @@ def _validate_ued(desc):
         )
     where = f"UED {desc.path.name}"
     if "heuristic" in desc.doc:
-        raise HkpPackError(f"{where}: legacy heuristic is not supported; use role/arch maps")
+        raise HkpPackError(
+            f"{where}: legacy heuristic is not supported; use role/arch maps"
+        )
     # Mirrors the loader's requireKnownKeys: a misspelled role is absent rather than
     # wrong, and an absent role is legal, so the engine would silently lose its model.
-    unknown = sorted(key for key in desc.doc
-                     if key not in _UED_KEYS and not key.startswith(("x-", "_"))
-                     and key != "provenance")
+    unknown = sorted(
+        key
+        for key in desc.doc
+        if key not in _UED_KEYS
+        and not key.startswith(("x-", "_"))
+        and key != "provenance"
+    )
     if unknown:
-        raise HkpPackError(f"{where} has unknown fields {unknown}; "
-                           "extension keys must start with 'x-' or '_'")
+        raise HkpPackError(
+            f"{where} has unknown fields {unknown}; "
+            "extension keys must start with 'x-' or '_'"
+        )
     for role in _UHD_ROLES:
         if role not in desc.doc:
             continue
@@ -440,7 +448,9 @@ def _validate_ued(desc):
             # RFC 0019 §3.1: a scoring role names one UHD per metric, so its value may
             # be a list. The list names models, not metrics -- each UHD declares its own.
             if not isinstance(value, list) or not value:
-                raise HkpPackError(f"{entry_where} must be a UUID or a nonempty list of UUIDs")
+                raise HkpPackError(
+                    f"{entry_where} must be a UUID or a nonempty list of UUIDs"
+                )
             seen = set()
             for identity in value:
                 _validate_uuid(identity, entry_where)
@@ -463,13 +473,31 @@ def _role_references(doc, role):
 # DescriptorLoader.hpp matchScopeFromString / heuristicKindFromString /
 # metadataTypeFromString / parseEngineDescriptor.
 _MATCH_SCOPES = ("graph", "kernel")
-_UHD_ADAPTERS = ("static_order", "native", "tree_data", "table", "onnx", "custom_library")
+_UHD_ADAPTERS = (
+    "static_order",
+    "native",
+    "tree_data",
+    "table",
+    "onnx",
+    "custom_library",
+)
 _UHD_ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
 # The roles that map an architecture to one UHD per ranking metric. A candidate
 # generator produces the set a ranker scores, so it has no metric and stays single.
 _METRIC_ROLES = ("sort_kernel_catalog", "predict_engine")
-_UED_KEYS = ("version", "revision", "id", "name", "sdk_version", *_UHD_ROLES, "metadata",
-             "knobs", "behavior_notes", "numerical_notes", "graph_match")
+_UED_KEYS = (
+    "version",
+    "revision",
+    "id",
+    "name",
+    "sdk_version",
+    *_UHD_ROLES,
+    "metadata",
+    "knobs",
+    "behavior_notes",
+    "numerical_notes",
+    "graph_match",
+)
 # RFC 0019 §4.4's closed ranking-metric registry, mirrored from
 # hipdnn_data_sdk/utilities/RankingMetrics.hpp: each metric fixes the UHD
 # `objective` a model of it must declare.
@@ -532,8 +560,25 @@ def _validate_trained_against(value, where):
     # names the descriptor set (ued/kmd/umd, all three or none); a model an engine with no
     # UED binds by provider-declared UUID names selector_revision, the provider build that
     # was measured, because it has no descriptor set to be trained against. Loader is
-    # authoritative: UhdParser.hpp parser_detail::provenance.
-    _known_keys(value, ("ued", "kmd", "umd", "selector_revision"), where)
+    # authoritative: UhdParser.hpp parser_detail::provenance. Either form may also record
+    # feature_semantics_revision (FeatureSemantics.hpp), which uhd_gen stamps on every
+    # model it trains: an integer >= 1 the loader compares for equality, never a form on
+    # its own.
+    _known_keys(
+        value,
+        ("ued", "kmd", "umd", "selector_revision", "feature_semantics_revision"),
+        where,
+    )
+    if "feature_semantics_revision" in value:
+        semantics = value["feature_semantics_revision"]
+        if (
+            isinstance(semantics, bool)
+            or not isinstance(semantics, int)
+            or not 1 <= semantics < 2**63
+        ):
+            raise HkpPackError(
+                f"{where}.feature_semantics_revision must be an integer >= 1"
+            )
     names_descriptor_set = any(key in value for key in ("ued", "kmd", "umd"))
     if "selector_revision" in value:
         revision = value["selector_revision"]
@@ -541,7 +586,8 @@ def _validate_trained_against(value, where):
             raise HkpPackError(f"{where}.selector_revision must be a nonempty string")
     elif not names_descriptor_set:
         raise HkpPackError(
-            f"{where} must name a descriptor set (ued/kmd/umd) or a selector_revision")
+            f"{where} must name a descriptor set (ued/kmd/umd) or a selector_revision"
+        )
     if not names_descriptor_set:
         return
     _require(value, ("ued", "kmd", "umd"), where)
@@ -572,19 +618,37 @@ def _validate_uhd(desc, source_root):
     """
     doc = desc.doc
     where = f"UHD {desc.path.name}"
-    _known_keys(doc, ("version", "id", "name", "adapter", "features_signature",
-                     "features_hash", "categorical_encoding", "trained_against",
-                     "objective", "score", *_UHD_ADAPTERS), where)
+    _known_keys(
+        doc,
+        (
+            "version",
+            "id",
+            "name",
+            "adapter",
+            "features_signature",
+            "features_hash",
+            "categorical_encoding",
+            "trained_against",
+            "objective",
+            "score",
+            *_UHD_ADAPTERS,
+        ),
+        where,
+    )
     _require(doc, ("version", "id", "name", "adapter"), where)
     if doc["version"] != "1.0":
-        raise HkpPackError(f"{where}: unsupported file-format version {doc['version']!r}")
+        raise HkpPackError(
+            f"{where}: unsupported file-format version {doc['version']!r}"
+        )
     _validate_uuid(doc["id"], where)
     _string(doc["name"], f"{where}.name")
     _require_enum(doc, "adapter", _UHD_ADAPTERS, where)
     adapter = doc["adapter"]
     bodies = [key for key in _UHD_ADAPTERS if key in doc]
     if bodies != [adapter] or not isinstance(doc[adapter], dict):
-        raise HkpPackError(f"{where} requires exactly one body matching adapter '{adapter}'")
+        raise HkpPackError(
+            f"{where} requires exactly one body matching adapter '{adapter}'"
+        )
     if adapter != "static_order" or "objective" in doc:
         _require(doc, ("objective",), where)
         _require_enum(doc, "objective", ("max", "min"), where)
@@ -595,13 +659,19 @@ def _validate_uhd(desc, source_root):
         if not isinstance(signature, list) or not signature:
             raise HkpPackError(f"{where}.features_signature must be a nonempty array")
         for entry in signature:
-            if not ((isinstance(entry, str) and entry.startswith("$") and len(entry) > 1)
-                    or (isinstance(entry, dict) and len(entry) == 1)):
-                raise HkpPackError(f"{where}.features_signature requires bare references or inline expressions")
+            if not (
+                (isinstance(entry, str) and entry.startswith("$") and len(entry) > 1)
+                or (isinstance(entry, dict) and len(entry) == 1)
+            ):
+                raise HkpPackError(
+                    f"{where}.features_signature requires bare references or inline expressions"
+                )
         _require(doc, ("features_hash", "trained_against"), where)
     if "features_hash" in doc:
         value = doc["features_hash"]
-        if not isinstance(value, str) or not re.fullmatch(r"sha256:[0-9a-f]{16}", value):
+        if not isinstance(value, str) or not re.fullmatch(
+            r"sha256:[0-9a-f]{16}", value
+        ):
             raise HkpPackError(f"{where}.features_hash must be a sha256 digest")
     if "trained_against" in doc:
         _validate_trained_against(doc["trained_against"], f"{where}.trained_against")
@@ -610,18 +680,27 @@ def _validate_uhd(desc, source_root):
         if not isinstance(encoding, dict):
             raise HkpPackError(f"{where}.categorical_encoding must be an object")
         for name, codes in encoding.items():
-            if not isinstance(codes, dict) or not codes or any(type(code) is not int for code in codes.values()):
-                raise HkpPackError(f"{where}.categorical_encoding.{name} must map values to integer codes")
+            if (
+                not isinstance(codes, dict)
+                or not codes
+                or any(type(code) is not int for code in codes.values())
+            ):
+                raise HkpPackError(
+                    f"{where}.categorical_encoding.{name} must map values to integer codes"
+                )
     if "score" in doc:
         score = doc["score"]
         _known_keys(score, ("metric", "calibrated", "transform"), f"{where}.score")
         if "transform" in score:
             _string(score["transform"], f"{where}.score.transform")
-        if "metric" in score and (not isinstance(score["metric"], str)
-                                  or score["metric"] not in _RANKING_METRIC_OBJECTIVES):
+        if "metric" in score and (
+            not isinstance(score["metric"], str)
+            or score["metric"] not in _RANKING_METRIC_OBJECTIVES
+        ):
             raise HkpPackError(
                 f"{where}.score.metric {score['metric']!r} is not a registered ranking "
-                f"metric (expected one of {', '.join(_RANKING_METRIC_OBJECTIVES)})")
+                f"metric (expected one of {', '.join(_RANKING_METRIC_OBJECTIVES)})"
+            )
         if "calibrated" in score and not isinstance(score["calibrated"], bool):
             raise HkpPackError(f"{where}.score.calibrated must be a boolean")
         # A calibrated score claims to be comparable across engines, which a number is
@@ -635,20 +714,29 @@ def _validate_uhd(desc, source_root):
             if doc.get("objective") != expected:
                 raise HkpPackError(
                     f"{where}: score.metric '{score['metric']}' requires objective "
-                    f"'{expected}', got {doc.get('objective')!r}")
+                    f"'{expected}', got {doc.get('objective')!r}"
+                )
     body = doc[adapter]
     if adapter == "static_order":
-        _known_keys(body, ("order",), f"{where}.{adapter}")
-        if "order" in body and (not isinstance(body["order"], list)
-                                or any(not isinstance(item, str) for item in body["order"])):
-            raise HkpPackError(f"{where}.static_order.order must be an array of strings")
+        # No parameters: static_order ranks by UKD priority, then descriptor id. Declared
+        # criteria are refused, as UhdParser refuses them, rather than packed and ignored.
+        if isinstance(body, dict) and "order" in body:
+            raise HkpPackError(
+                f"{where}.static_order.order is not supported: declared ordering criteria are "
+                "not implemented; static_order ranks by priority, then descriptor id"
+            )
+        _known_keys(body, (), f"{where}.{adapter}")
         return
     if adapter == "native":
         _known_keys(body, ("symbol",), f"{where}.{adapter}")
         _string(body.get("symbol"), f"{where}.native.symbol")
         return
     key = "library" if adapter == "custom_library" else "artifact"
-    allowed = ("library", "symbol", "hash", "config") if adapter == "custom_library" else ("artifact", "hash")
+    allowed = (
+        ("library", "symbol", "hash", "config")
+        if adapter == "custom_library"
+        else ("artifact", "hash")
+    )
     _known_keys(body, allowed, f"{where}.{adapter}")
     _string(body.get(key), f"{where}.{adapter}.{key}")
     if "hash" in body:
@@ -920,8 +1008,11 @@ def _validate_references(flat):
     uhd_by_id = {d.id: d for d in flat.by_type("uhd")}
     for ued in flat.by_type("ued"):
         references = [(ued.doc.get("metadata"), "kmd")]
-        references += [(ref, "uhd") for role in _UHD_ROLES
-                       for ref in _role_references(ued.doc, role)]
+        references += [
+            (ref, "uhd")
+            for role in _UHD_ROLES
+            for ref in _role_references(ued.doc, role)
+        ]
         for ref, kind in references:
             if ref is not None and ref not in typed_ids[kind]:
                 raise HkpPackError(
@@ -947,12 +1038,16 @@ def _validate_role_metrics(ued, uhd_by_id):
             for ref in [value] if isinstance(value, str) else value:
                 metric = (uhd_by_id[ref].doc.get("score") or {}).get("metric")
                 if metric is None and role == "predict_engine":
-                    raise HkpPackError(f"{where} names UHD '{ref}', which declares no "
-                                       "score.metric; an engine prediction needs one")
+                    raise HkpPackError(
+                        f"{where} names UHD '{ref}', which declares no "
+                        "score.metric; an engine prediction needs one"
+                    )
                 if metric in by_metric:
                     what = f"metric '{metric}'" if metric else "no metric"
-                    raise HkpPackError(f"{where} names two UHDs with {what}: "
-                                       f"'{by_metric[metric]}' and '{ref}'")
+                    raise HkpPackError(
+                        f"{where} names two UHDs with {what}: "
+                        f"'{by_metric[metric]}' and '{ref}'"
+                    )
                 by_metric[metric] = ref
 
 
@@ -977,5 +1072,7 @@ def reachable_generic_ids(flat, surviving_kdps):
         gdesc = by_id[rid]
         if gdesc.type == "ued":
             pending.append(gdesc.doc.get("metadata"))
-            pending += [ref for role in _UHD_ROLES for ref in _role_references(gdesc.doc, role)]
+            pending += [
+                ref for role in _UHD_ROLES for ref in _role_references(gdesc.doc, role)
+            ]
     return reachable

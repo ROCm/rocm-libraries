@@ -23,16 +23,12 @@
 /// @file CorpusManifest.hpp
 /// @brief What was generated, where each graph came from, and the key it is measured under.
 ///
-/// Two manifests, one content, as the retired Python assembler wrote them.
-/// `manifest.json` is the audit record. `manifest.csv` is the same rows in the form
-/// `uhd_gen evaluate --regime-column` consumes -- keyed on `benchmark`, which is the identity
-/// the collected corpus reports for the same graph, so the two join directly. Without that
-/// column RFC 0019.13 §11.2's per-regime table reports UNAVAILABLE, which is the state the
-/// Python was written to end and which this port must not reintroduce.
+/// Two manifests, one content. `manifest.json` is the audit record. `manifest.csv` is the same
+/// rows in the form `uhd_gen evaluate --regime-column` consumes -- keyed on `benchmark`, which
+/// is the identity the collected corpus reports for the same graph, so the two join directly.
+/// Without that column RFC 0019.13 §11.2's per-regime table reports UNAVAILABLE.
 ///
-/// The port is op-general in one place: the Python emitted a column per SDPA field
-/// (`dtype`, `batch`, `heads_q`, ...) and a column per hardcoded regime facet (`phase`,
-/// `context`, `grouping`). Here the parameter columns come from the point itself via
+/// The columns are op-general: the parameter columns come from the point itself via
 /// `asQueryColumns` -- already the spelling `uhd_gen`'s feature hash expects -- and the facet
 /// columns from the declaration's `regime_label` axes. Nothing here knows an operation's name.
 namespace hipdnn_corpus_gen
@@ -149,10 +145,10 @@ inline std::string digestOf(const std::filesystem::path& path)
 
 /// @brief The `manifest.json` document.
 ///
-/// Top-level keys are the Python's verbatim, because `uhd_gen/reproduce/score_predictions.py`
-/// and `compare_engines.py` index `manifest["graphs"]` and read `benchmark`, `name` and
-/// `regime` off each row. Those three surviving the port unchanged is the contract; renaming
-/// any of them is a silent break, since both scripts fall back to reporting the graph id.
+/// The top-level keys are a contract: `uhd_gen/reproduce/score_predictions.py` and
+/// `compare_engines.py` index `manifest["graphs"]` and read `benchmark`, `name` and `regime`
+/// off each row. Renaming any of them is a silent break, since both scripts fall back to
+/// reporting the graph id.
 inline nlohmann::json corpusManifest(const std::vector<ManifestEntry>& entries,
                                      const ManifestContext& context)
 {
@@ -164,11 +160,11 @@ inline nlohmann::json corpusManifest(const std::vector<ManifestEntry>& entries,
     {
         nlohmann::json record;
         record["benchmark"] = entry.benchmark;
-        record["file"]      = entry.file;
-        record["name"]      = entry.name;
-        record["source"]    = entry.entry.source;
-        record["origin"]    = entry.entry.origin;
-        record["regime"]    = entry.entry.regime;
+        record["file"] = entry.file;
+        record["name"] = entry.name;
+        record["source"] = entry.entry.source;
+        record["origin"] = entry.entry.origin;
+        record["regime"] = entry.entry.regime;
 
         // The facets beside the joined label, so a report can group by one of them without
         // parsing the other. Derived from the point rather than split out of `regime`, whose
@@ -197,18 +193,18 @@ inline nlohmann::json corpusManifest(const std::vector<ManifestEntry>& entries,
     }
 
     nlohmann::json manifest;
-    manifest["tool"]              = context.tool;
-    manifest["operations"]        = context.operations;
-    manifest["seed"]              = context.seed;
-    manifest["requested"]         = context.requested;
-    manifest["emitted"]           = static_cast<int64_t>(entries.size());
-    manifest["mix"]               = mix;
-    manifest["allocation"]        = context.allocation;
+    manifest["tool"] = context.tool;
+    manifest["operations"] = context.operations;
+    manifest["seed"] = context.seed;
+    manifest["requested"] = context.requested;
+    manifest["emitted"] = static_cast<int64_t>(entries.size());
+    manifest["mix"] = mix;
+    manifest["allocation"] = context.allocation;
     manifest["duplicates_dropped"] = context.duplicatesDropped;
-    manifest["regimes"]           = regimes;
-    manifest["inputs"]            = inputs;
-    manifest["reports"]           = context.reports;
-    manifest["graphs"]            = records;
+    manifest["regimes"] = regimes;
+    manifest["inputs"] = inputs;
+    manifest["reports"] = context.reports;
+    manifest["graphs"] = records;
     manifest["note"]
         = "`benchmark` is the content-derived id written into each graph document, and is the "
           "`benchmark` column of the corpus collected from it -- join manifest.csv on it to "
@@ -259,8 +255,9 @@ inline std::vector<std::string> unionOfColumns(const std::vector<ManifestEntry>&
 }
 
 /// The value @p entry has in each of @p columns, empty where it has none.
-inline std::vector<std::string> valuesFor(const std::vector<std::string>& columns,
-                                          const std::vector<std::pair<std::string, std::string>>& held)
+inline std::vector<std::string>
+    valuesFor(const std::vector<std::string>& columns,
+              const std::vector<std::pair<std::string, std::string>>& held)
 {
     std::vector<std::string> values(columns.size());
     for(const auto& one : held)
@@ -278,16 +275,15 @@ inline std::vector<std::string> valuesFor(const std::vector<std::string>& column
 
 /// @brief The `manifest.csv` header and rows, in one ordered pass.
 ///
-/// Column order follows the Python's: identity, then what the graph is, then where it came
-/// from, then the problem itself, then the file. The `q.*` block sits exactly where the SDPA
-/// field columns did.
+/// Column order: identity, then what the graph is, then where it came from, then the problem
+/// itself (the `q.*` block), then the file.
 ///
 /// Header and rows are generated from the same column list for the same reason
 /// `asQueryColumns` is -- a header that disagrees with its rows transposes two features and
-/// trains a model on the wrong ones. Where the Python could assume one operation's fields, this
-/// takes the union across entries and leaves a cell empty where an entry has no such parameter:
-/// a row of a two-operation corpus is not wrong about its own columns just because the other
-/// operation has some it does not.
+/// trains a model on the wrong ones. The `q.*` and facet columns are the union across entries,
+/// with a cell left empty where an entry has no such parameter: a row of a two-operation
+/// corpus is not wrong about its own columns just because the other operation has some it
+/// does not.
 /// Takes no @ref ManifestContext: every column it writes is now per-entry, which is the point
 /// of the union above.
 inline std::string corpusManifestCsv(const std::vector<ManifestEntry>& entries)

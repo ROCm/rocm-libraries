@@ -30,7 +30,9 @@ from uhd_gen.dataset.config_features import (
 # The three shapes really seen in one MIOpen corpus: a tuning tuple, a C++ template, and a
 # bare index. They share no layout, which is the situation the positional scheme has to survive.
 TUPLE = "fwd,nhwc,bf16,0,0,32,64,32,16,64,4,1,1,1,1"
-TEMPLATE = "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 32, 32, Filter1x1Pad0, 8>"
+TEMPLATE = (
+    "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 32, 32, Filter1x1Pad0, 8>"
+)
 INDEX = "205"
 
 
@@ -113,4 +115,6 @@ def test_configurations_of_one_kernel_become_distinguishable():
     b = "fwd,nhwc,bf16,0,0,128,64"
     rows, shapes, _ = expand([a, b])
     assert rows[0] != rows[1], "two configurations still look identical to a model"
-    assert shapes[0] == shapes[1], "same word shape, so only the numbers should separate them"
+    assert (
+        shapes[0] == shapes[1]
+    ), "same word shape, so only the numbers should separate them"

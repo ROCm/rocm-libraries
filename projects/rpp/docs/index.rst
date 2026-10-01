@@ -6,16 +6,16 @@
 ROCm Performance Primitives documentation
 ********************************************************************
 
-AMD ROCm Performance Primitives (RPP) is a high-performance computer vision library for AMD processors that have HIP or CPU backends.
+ROCm Performance Primitives (RPP) is a computer vision library for AMD CPUs and GPUs that have a HIP or CPU backend.
 
-RPP provides a way to utilize all the hardware available for training and augmentation.
+RPP implements image, voxel, and audio augmentations used in deep learning training pipelines. The same primitives run on the HOST CPU backend and the HIP GPU backend.
 
 .. image:: ./data/rpp_structure_4.png
-  :alt: RPP Functions
+  :alt: RPP architecture with Host and HIP backends calling image, voxel, and audio primitives
   :width: 200pt
   :align: center
 
-The RPP project is located in https://github.com/ROCm/rocm-libraries/tree/develop/projects/rpp.
+The RPP project is located in `ROCm/rocm-libraries <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rpp>`_.
 
 .. grid:: 2
   :gutter: 3
@@ -24,6 +24,10 @@ The RPP project is located in https://github.com/ROCm/rocm-libraries/tree/develo
 
     * :doc:`Install RPP <install/rpp-install>`
     * :doc:`Build from source <install/rpp-build>`
+
+  .. grid-item-card:: How to
+
+    * :doc:`Run a tensor augmentation <./how-to/rpp-run-tensor-augmentation>`
 
   .. grid-item-card:: Examples
 
@@ -34,12 +38,7 @@ The RPP project is located in https://github.com/ROCm/rocm-libraries/tree/develo
     * :doc:`RPP environment variables <./reference/rpp-env-variables>`
     * :doc:`Supported RPP functionalities and variants <./reference/rpp-supported-functionalities>`
     * :doc:`RPP functionality and variant example outputs <./reference/rpp-supported-func-and-var-examples>`
-
-    * RPP API reference
-
-      * :doc:`RPP header files <./doxygen/html/files>`
-      * :doc:`RPP common definitions <./doxygen/html/group__group__rppdefs>`
-      * :doc:`RPP data structures <./doxygen/html/annotated>`
+    * :doc:`RPP API reference guide <./reference/rpp-api-reference>`
 
 To contribute to the documentation refer to :doc:`Contributing to ROCm  <rocm:contribute/contributing>`.
 

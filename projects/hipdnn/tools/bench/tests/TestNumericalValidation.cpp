@@ -27,18 +27,19 @@
 #include <cstdint>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace
 {
 
-constexpr int64_t kOutputUid = 7;
+constexpr int64_t OUTPUT_UID = 7;
 
-std::map<int64_t, hipdnn_bench::TensorDescription>
-    tensors(hipdnn_frontend::DataType dataType = hipdnn_frontend::DataType::FLOAT)
+std::map<int64_t, hipdnn_bench::TensorDescription> tensors(hipdnn_frontend::DataType dataType
+                                                           = hipdnn_frontend::DataType::FLOAT)
 {
-    return {{kOutputUid, {"Y", dataType}}};
+    return {{OUTPUT_UID, {"Y", dataType}}};
 }
 
 /// A candidate that executed and left @p values in the single output tensor.
@@ -48,7 +49,7 @@ hipdnn_bench::CandidateOutput ran(const std::vector<float>& values)
     candidate.executed = true;
     std::vector<uint8_t> image(values.size() * sizeof(float));
     std::memcpy(image.data(), values.data(), image.size());
-    candidate.images[kOutputUid] = std::move(image);
+    candidate.images[OUTPUT_UID] = std::move(image);
     return candidate;
 }
 
@@ -57,7 +58,7 @@ hipdnn_bench::CandidateOutput ranRaw(const std::vector<uint8_t>& bytes)
 {
     hipdnn_bench::CandidateOutput candidate;
     candidate.executed = true;
-    candidate.images[kOutputUid] = bytes;
+    candidate.images[OUTPUT_UID] = bytes;
     return candidate;
 }
 
@@ -88,7 +89,113 @@ std::vector<hipdnn_bench::ValidationOutcome>
     return check.verdicts();
 }
 
+/// A graph with one input X (uid 1, FLOAT) and one result Y (uid 2, @p outputType): Y = X * X.
+hipdnn_bench::VariantPackPlan inputAndOutputPlan(hipdnn_frontend::DataType outputType)
+{
+    using hipdnn_frontend::graph::TensorAttributes;
+    hipdnn_frontend::graph::Graph graph;
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1).set_name("X").set_dim({2}).set_stride({1}).set_data_type(
+        hipdnn_frontend::DataType::FLOAT);
+    hipdnn_frontend::graph::PointwiseAttributes square;
+    square.set_mode(hipdnn_frontend::PointwiseMode::MUL);
+    auto y = graph.pointwise(x, x, square);
+    y->set_uid(2).set_name("Y").set_dim({2}).set_stride({1}).set_data_type(outputType);
+    y->set_output(true);
+    return hipdnn_bench::planVariantPack(graph);
+}
+
+/// What the tool reads back after a candidate ran, given what device memory then holds for
+/// every uid -- the selection is the tool's own (crossCheckedOutputs), not this test's.
+hipdnn_bench::CandidateOutput captured(const hipdnn_bench::VariantPackPlan& plan,
+                                       const std::map<int64_t, std::vector<uint8_t>>& memory,
+                                       std::map<int64_t, hipdnn_bench::TensorDescription>& tensors)
+{
+    hipdnn_bench::CandidateOutput candidate;
+    candidate.executed = true;
+    for(const auto& tensor : hipdnn_bench::crossCheckedOutputs(plan))
+    {
+        tensors[tensor.uid] = {tensor.name, tensor.dataType};
+        candidate.images[tensor.uid] = memory.at(tensor.uid);
+    }
+    return candidate;
+}
+
+std::vector<uint8_t> floatBytes(const std::vector<float>& values)
+{
+    std::vector<uint8_t> bytes(values.size() * sizeof(float));
+    std::memcpy(bytes.data(), values.data(), bytes.size());
+    return bytes;
+}
+
 } // namespace
+
+TEST(TestNumericalValidation, IdenticalInputsAreNotAgreementAboutUndecodableOutputs)
+{
+    // Every candidate is handed the same filled inputs, so an input compares equal across the
+    // catalog whatever the kernels computed. Counted as output, it made two candidates with
+    // different FP8 results -- nothing the gate can decode -- come back AGREED.
+    const auto plan = inputAndOutputPlan(hipdnn_frontend::DataType::FP8_E4M3);
+    ASSERT_TRUE(plan.error.empty()) << plan.error;
+    const auto input = floatBytes({1.0F, 2.0F});
+
+    std::map<int64_t, hipdnn_bench::TensorDescription> declared;
+    hipdnn_bench::CatalogCrossCheck check(declared);
+    check.add(captured(plan, {{1, input}, {2, {0x01, 0x02}}}, declared));
+    check.add(captured(plan, {{1, input}, {2, {0x40, 0x50}}}, declared));
+    const auto verdicts = check.verdicts();
+
+    for(const auto& verdict : verdicts)
+    {
+        EXPECT_EQ(verdict.verdict, NumericalVerdict::UNKNOWN) << verdict.reason;
+        EXPECT_NE(verdict.reason.find("no_comparable_output"), std::string::npos);
+    }
+}
+
+TEST(TestNumericalValidation, NonZeroInputsDoNotMakeAnUntouchedOutputEvidence)
+{
+    // The inputs are filled, the output buffers are not. A catalog that wrote nothing leaves
+    // every Y at zero; counting the filled X as output made that set look touched, and the
+    // degenerate-reference guard never fired.
+    const auto plan = inputAndOutputPlan(hipdnn_frontend::DataType::FLOAT);
+    ASSERT_TRUE(plan.error.empty()) << plan.error;
+    const std::map<int64_t, std::vector<uint8_t>> memory{{1, floatBytes({1.0F, 2.0F})},
+                                                         {2, floatBytes({0.0F, 0.0F})}};
+
+    std::map<int64_t, hipdnn_bench::TensorDescription> declared;
+    hipdnn_bench::CatalogCrossCheck check(declared);
+    check.add(captured(plan, memory, declared));
+    check.add(captured(plan, memory, declared));
+    check.add(captured(plan, memory, declared));
+
+    for(const auto& verdict : check.verdicts())
+    {
+        EXPECT_EQ(verdict.verdict, NumericalVerdict::UNKNOWN) << verdict.reason;
+        EXPECT_NE(verdict.reason.find("degenerate_reference"), std::string::npos);
+    }
+}
+
+TEST(TestNumericalValidation, APluralityIsNotAgreement)
+{
+    // {1, 1, 2, 3}: the largest cohort is unique but holds two of four. Half the catalog
+    // computed something else, so the cohort is not the catalog's answer and its timings are
+    // not known-correct labels.
+    const auto verdicts
+        = crossCheck({ran({1.0F}), ran({1.0F}), ran({2.0F}), ran({3.0F})}, tensors());
+
+    for(const auto& verdict : verdicts)
+    {
+        EXPECT_EQ(verdict.verdict, NumericalVerdict::DISAGREED) << verdict.reason;
+        EXPECT_NE(verdict.reason.find("disputed_output"), std::string::npos);
+    }
+
+    // One more vote for the cohort makes it three of five: a strict majority, which decides.
+    const auto decided
+        = crossCheck({ran({1.0F}), ran({1.0F}), ran({2.0F}), ran({3.0F}), ran({1.0F})}, tensors());
+    EXPECT_EQ(decided[0].verdict, NumericalVerdict::AGREED);
+    EXPECT_EQ(decided[2].verdict, NumericalVerdict::DISAGREED);
+    EXPECT_NE(decided[2].reason.find("output_mismatch"), std::string::npos);
+}
 
 TEST(TestNumericalValidation, WrongKernelIsMarkedInvalidAndNamedInTheReason)
 {
@@ -174,8 +281,8 @@ TEST(TestNumericalValidation, NonFiniteOutputDisagreesWithAFiniteReference)
 {
     // A NaN fails every magnitude comparison it takes part in, so a candidate that produced
     // one would slip through a gate written as `abs(a - b) > tolerance` alone.
-    const auto verdicts = crossCheck(
-        {ran({1.0F, 2.0F}), ran({1.0F, 2.0F}), ran({1.0F, std::nanf("")})}, tensors());
+    const auto verdicts
+        = crossCheck({ran({1.0F, 2.0F}), ran({1.0F, 2.0F}), ran({1.0F, std::nanf("")})}, tensors());
 
     EXPECT_EQ(verdicts[2].verdict, NumericalVerdict::DISAGREED);
 }
@@ -219,8 +326,7 @@ TEST(TestNumericalValidation, ACandidateThatNeverRanNeitherJoinsNorSplitsACohort
     hipdnn_bench::CandidateOutput failed;
     failed.failure = "engine declined to build this configuration";
 
-    const auto verdicts
-        = crossCheck({ran({1.0F, 2.0F}), failed, ran({1.0F, 2.0F})}, tensors());
+    const auto verdicts = crossCheck({ran({1.0F, 2.0F}), failed, ran({1.0F, 2.0F})}, tensors());
 
     EXPECT_EQ(verdicts[0].verdict, NumericalVerdict::AGREED);
     EXPECT_EQ(verdicts[1].verdict, NumericalVerdict::UNKNOWN);
@@ -267,11 +373,11 @@ TEST(TestNumericalValidation, EveryCandidateOfAProblemReadsTheSameNonZeroInputs)
     // input, so `agrees_with_catalog` would claim more than the run tested. The fill is what
     // the candidates read instead, and four of its properties are load-bearing.
     using hipdnn_frontend::DataType;
-    constexpr size_t kElements = 16;
+    constexpr size_t ELEMENTS = 16;
     const uint64_t seed = hipdnn_bench::detail::graphFillSeed({0x01, 0x02, 0x03});
     const auto image = hipdnn_bench::detail::inputFillImage(
-        DataType::FLOAT, kElements * sizeof(float), seed, kOutputUid);
-    ASSERT_EQ(image.size(), kElements * sizeof(float));
+        DataType::FLOAT, ELEMENTS * sizeof(float), seed, OUTPUT_UID);
+    ASSERT_EQ(image.size(), ELEMENTS * sizeof(float));
 
     // Not zero, or the graph is still running on the allocator's fill.
     EXPECT_NE(std::count(image.begin(), image.end(), uint8_t{0}),
@@ -282,32 +388,32 @@ TEST(TestNumericalValidation, EveryCandidateOfAProblemReadsTheSameNonZeroInputs)
     // the gate reports a disagreement it manufactured itself.
     EXPECT_EQ(image,
               hipdnn_bench::detail::inputFillImage(
-                  DataType::FLOAT, kElements * sizeof(float), seed, kOutputUid));
+                  DataType::FLOAT, ELEMENTS * sizeof(float), seed, OUTPUT_UID));
 
     // Different per tensor and per graph. Two input tensors filled alike make an A == B
     // matmul symmetric, and a kernel that transposed one of them would still agree.
     EXPECT_NE(image,
               hipdnn_bench::detail::inputFillImage(
-                  DataType::FLOAT, kElements * sizeof(float), seed, kOutputUid + 1));
+                  DataType::FLOAT, ELEMENTS * sizeof(float), seed, OUTPUT_UID + 1));
     EXPECT_NE(image,
-              hipdnn_bench::detail::inputFillImage(DataType::FLOAT,
-                                                   kElements * sizeof(float),
-                                                   hipdnn_bench::detail::graphFillSeed(
-                                                       {0x01, 0x02, 0x04}),
-                                                   kOutputUid));
+              hipdnn_bench::detail::inputFillImage(
+                  DataType::FLOAT,
+                  ELEMENTS * sizeof(float),
+                  hipdnn_bench::detail::graphFillSeed({0x01, 0x02, 0x04}),
+                  OUTPUT_UID));
 
     // Every value is 1 or 2 in magnitude: exactly representable in every type the encoder
     // writes, and small enough that a reduction over a filled tensor does not reach fp16's
     // 65504 and leave the gate comparing two infinities.
     const auto halfImage = hipdnn_bench::detail::inputFillImage(
-        DataType::HALF, kElements * sizeof(uint16_t), seed, kOutputUid);
-    ASSERT_EQ(halfImage.size(), kElements * sizeof(uint16_t));
-    for(size_t index = 0; index < kElements; ++index)
+        DataType::HALF, ELEMENTS * sizeof(uint16_t), seed, OUTPUT_UID);
+    ASSERT_EQ(halfImage.size(), ELEMENTS * sizeof(uint16_t));
+    for(size_t index = 0; index < ELEMENTS; ++index)
     {
-        const double single = std::abs(hipdnn_bench::detail::decodeElement(
-            image, index, DataType::FLOAT));
-        const double half = std::abs(hipdnn_bench::detail::decodeElement(
-            halfImage, index, DataType::HALF));
+        const double single
+            = std::abs(hipdnn_bench::detail::decodeElement(image, index, DataType::FLOAT));
+        const double half
+            = std::abs(hipdnn_bench::detail::decodeElement(halfImage, index, DataType::HALF));
         EXPECT_TRUE(single == 1.0 || single == 2.0) << "element " << index << " is " << single;
         EXPECT_TRUE(half == 1.0 || half == 2.0) << "element " << index << " is " << half;
     }
@@ -315,9 +421,8 @@ TEST(TestNumericalValidation, EveryCandidateOfAProblemReadsTheSameNonZeroInputs)
     // A type the encoder cannot write exactly keeps the zero fill rather than a guess: a
     // wrong code in an input makes every candidate compute NaN, and the gate would then
     // condemn a catalog that was fine.
-    EXPECT_TRUE(
-        hipdnn_bench::detail::inputFillImage(DataType::FP4_E2M1, kElements, seed, kOutputUid)
-            .empty());
+    EXPECT_TRUE(hipdnn_bench::detail::inputFillImage(DataType::FP4_E2M1, ELEMENTS, seed, OUTPUT_UID)
+                    .empty());
 }
 
 TEST(TestNumericalValidation, ACandidateThatJoinsACohortDoesNotKeepItsImage)

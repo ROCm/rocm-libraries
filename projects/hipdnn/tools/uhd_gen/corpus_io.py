@@ -25,7 +25,12 @@ from pathlib import Path
 
 import pandas as pd
 
-__all__ = ["IDENTITY_COLUMNS", "IDENTITY_DTYPES", "pin_identity_dtypes", "read_corpus_frame"]
+__all__ = [
+    "IDENTITY_COLUMNS",
+    "IDENTITY_DTYPES",
+    "pin_identity_dtypes",
+    "read_corpus_frame",
+]
 
 #: The columns that name a thing rather than measure one: the graph and the board, in
 #: both the §8.3 envelope's spelling (`benchmark`/`device`) and the immediate corpus's

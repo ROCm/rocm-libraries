@@ -235,9 +235,10 @@ endfunction() # _create_check_targets_internal
 
 
 
-# Registers the cache-key generator's own unit tests as a ctest test. The generated
-# header's runtime behaviour is covered by the C++ suites; this covers the generator's
-# field policy, so a change to it fails here rather than silently reshaping the key.
+# Registers the schema generators' own unit tests (cache key, node operands) as a ctest
+# test. The generated headers' runtime behaviour is covered by the C++ suites; this covers
+# the generators' field policy, so a change to it fails here rather than silently
+# reshaping the key or the published operands.
 #
 # The policy under test belongs to the schemas, so this runs regardless of
 # HIPDNN_ENABLE_KERNEL_INGESTOR.
@@ -246,7 +247,7 @@ function(_create_cache_key_codegen_test_internal prefix_name)
         add_test(
             NAME ${prefix_name}_cache_key_codegen_tests
             COMMAND ${Python3_EXECUTABLE} -m unittest discover -s
-                    ${PROJECT_SOURCE_DIR}/scripts -p "test_gen_cache_key.py" -v
+                    ${PROJECT_SOURCE_DIR}/scripts -p "test_gen_*.py" -v
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/scripts
         )
         _apply_hipdnn_test_category_labels(${prefix_name}_cache_key_codegen_tests)
@@ -368,7 +369,7 @@ function(add_hipdnn_test TARGET WORKING_DIR)
     install(TARGETS ${TARGET} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
     # On Windows, stage the shadowed ROCm DLLs before this test binary is built so a
-    # partial build + manual ctest doesn't load the stale System32 amd_comgr.dll.
+    # partial build + manual ctest doesn't load the stale System32 ROCm DLLs.
     if(TARGET stage_shadowed_rocm_dlls)
         add_dependencies(${TARGET} stage_shadowed_rocm_dlls)
     endif()

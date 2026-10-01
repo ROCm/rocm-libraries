@@ -24,10 +24,12 @@
 #include <cmath>
 #include <initializer_list>
 #include <map>
+#include <optional>
 #include <set>
 #include <string_view>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 
 namespace hipdnn_frontend::detail
 {
@@ -107,6 +109,41 @@ inline Error applyCandidateScope(hipdnnBackendDescriptor_t engineDesc,
     return {};
 }
 
+/// The value one wire KnobSetting carries, or nullopt when there is none to take. Union
+/// payloads are optional in FlatBuffers, so a buffer whose KnobSetting names IntValue (or
+/// FloatValue, StringValue) with no payload table behind it passes VerifyBuffer, and the
+/// typed accessor then returns null. That is checked here, before any dereference, rather
+/// than trusted to the verifier.
+inline std::optional<KnobValueVariant>
+    decodeKnobValue(const hipdnn_flatbuffers_sdk::data_objects::KnobSetting& setting)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    switch(setting.value_type())
+    {
+    case fb::KnobValue::IntValue:
+        if(const auto* payload = setting.value_as_IntValue())
+        {
+            return KnobValueVariant{payload->value()};
+        }
+        return std::nullopt;
+    case fb::KnobValue::FloatValue:
+        if(const auto* payload = setting.value_as_FloatValue())
+        {
+            return KnobValueVariant{payload->value()};
+        }
+        return std::nullopt;
+    case fb::KnobValue::StringValue:
+        if(const auto* payload = setting.value_as_StringValue();
+           payload != nullptr && payload->value() != nullptr)
+        {
+            return KnobValueVariant{payload->value()->str()};
+        }
+        return std::nullopt;
+    default:
+        return std::nullopt;
+    }
+}
+
 inline Error
     decodeEnginePrediction(const hipdnn_flatbuffers_sdk::data_objects::EnginePrediction& source,
                            int64_t engineId,
@@ -159,11 +196,11 @@ inline Error
     }
     try
     {
-        if(source.binding_json() != nullptr && source.binding_json()->size() != 0)
+        if(source.binding_json() != nullptr && !source.binding_json()->empty())
         {
             decoded.binding = nlohmann::json::parse(source.binding_json()->str());
         }
-        if(source.features_json() != nullptr && source.features_json()->size() != 0)
+        if(source.features_json() != nullptr && !source.features_json()->empty())
         {
             decoded.features = nlohmann::json::parse(source.features_json()->str());
         }
@@ -194,30 +231,17 @@ inline Error
                 {
                     return {ErrorCode::HIPDNN_BACKEND_ERROR, "Unnamed prediction knob"};
                 }
-                KnobValueVariant value;
-                switch(setting->value_type())
+                auto value = decodeKnobValue(*setting);
+                if(!value.has_value())
                 {
-                case fb::KnobValue::IntValue:
-                    value = setting->value_as_IntValue()->value();
-                    break;
-                case fb::KnobValue::FloatValue:
-                    if(!std::isfinite(setting->value_as_FloatValue()->value()))
-                    {
-                        return {ErrorCode::HIPDNN_BACKEND_ERROR, "Non-finite prediction knob"};
-                    }
-                    value = setting->value_as_FloatValue()->value();
-                    break;
-                case fb::KnobValue::StringValue:
-                    if(setting->value_as_StringValue()->value() == nullptr)
-                    {
-                        return {ErrorCode::HIPDNN_BACKEND_ERROR, "Null string knob value"};
-                    }
-                    value = setting->value_as_StringValue()->value()->str();
-                    break;
-                default:
                     return {ErrorCode::HIPDNN_BACKEND_ERROR, "Invalid prediction knob value"};
                 }
-                if(!variant.knobSettings.emplace(setting->knob_id()->str(), std::move(value))
+                if(const auto* real = std::get_if<double>(&*value);
+                   real != nullptr && !std::isfinite(*real))
+                {
+                    return {ErrorCode::HIPDNN_BACKEND_ERROR, "Non-finite prediction knob"};
+                }
+                if(!variant.knobSettings.emplace(setting->knob_id()->str(), std::move(*value))
                         .second)
                 {
                     return {ErrorCode::HIPDNN_BACKEND_ERROR, "Duplicate prediction knob"};
@@ -469,28 +493,14 @@ inline Error getEngineCandidates(hipdnnBackendDescriptor_t graphDesc,
                         {
                             return {ErrorCode::HIPDNN_BACKEND_ERROR, "Unnamed candidate knob"};
                         }
-                        KnobValueVariant value;
-                        switch(setting->value_type())
+                        auto value = decodeKnobValue(*setting);
+                        if(!value.has_value())
                         {
-                        case KnobValue::IntValue:
-                            value = setting->value_as_IntValue()->value();
-                            break;
-                        case KnobValue::FloatValue:
-                            value = setting->value_as_FloatValue()->value();
-                            break;
-                        case KnobValue::StringValue:
-                            if(setting->value_as_StringValue()->value() == nullptr)
-                            {
-                                return {ErrorCode::HIPDNN_BACKEND_ERROR, "Null string knob value"};
-                            }
-                            value = setting->value_as_StringValue()->value()->str();
-                            break;
-                        default:
                             return {ErrorCode::HIPDNN_BACKEND_ERROR,
                                     "Invalid candidate knob value"};
                         }
                         if(!candidate.variant.knobSettings
-                                .emplace(setting->knob_id()->str(), std::move(value))
+                                .emplace(setting->knob_id()->str(), std::move(*value))
                                 .second)
                         {
                             return {ErrorCode::HIPDNN_BACKEND_ERROR, "Duplicate candidate knob"};

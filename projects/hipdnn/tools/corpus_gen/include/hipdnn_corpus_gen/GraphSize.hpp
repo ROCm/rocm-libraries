@@ -61,7 +61,7 @@ inline int64_t elementBytes(hipdnn_flatbuffers_sdk::data_objects::DataType type)
     }
 }
 
-/// @brief Total bytes the tensors of @p bytes occupy.
+/// @brief Total bytes the tensors of @p bytes need allocated.
 ///
 /// The benchmarking ceiling §4.3.2 describes: a problem whose tensors do not fit cannot be
 /// timed, so it cannot enter a corpus at any budget. Computed rather than declared, because it
@@ -69,10 +69,20 @@ inline int64_t elementBytes(hipdnn_flatbuffers_sdk::data_objects::DataType type)
 /// per-dimension window can express it. Without it the search faithfully proposes convolutions
 /// that are applicable, enormous, and take minutes each.
 ///
+/// Each tensor is charged its strided span -- `1 + sum((dim_i - 1) * stride_i)` elements, the
+/// furthest addressable offset plus one -- because that is what the bench allocates
+/// (hipdnn_bench::elementSpan). The element count is the same number only for a packed tensor:
+/// three 2x2 fp32 tensors with a row stride of 4096 were charged 48 bytes against the 49176
+/// the bench needed, so a padded layout passed any ceiling.
+///
 /// Saturates rather than overflowing: a problem large enough to wrap the arithmetic is
-/// certainly over any real ceiling, and a wrapped total would read as a small one.
+/// certainly over any real ceiling, and a wrapped total would read as a small one. A tensor
+/// that cannot be sized -- a non-positive extent, a negative stride, strides that do not match
+/// its rank -- saturates too: the bench refuses it, so no budget can admit it.
 inline int64_t graphBytes(const builders::GraphBytes& bytes)
 {
+    constexpr auto SATURATED = std::numeric_limits<int64_t>::max();
+
     const auto* graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(bytes.data());
     if(graph == nullptr || graph->tensors() == nullptr)
     {
@@ -87,23 +97,35 @@ inline int64_t graphBytes(const builders::GraphBytes& bytes)
         {
             continue;
         }
-        int64_t elements = 1;
-        for(const auto dim : *dims)
+        const auto* strides = tensor->strides();
+        if(strides == nullptr || strides->size() != dims->size())
         {
-            if(dim <= 0 || elements > std::numeric_limits<int64_t>::max() / dim)
-            {
-                return std::numeric_limits<int64_t>::max();
-            }
-            elements *= dim;
+            return SATURATED;
         }
 
-        const auto width = elementBytes(tensor->data_type());
-        if(elements > std::numeric_limits<int64_t>::max() / width
-           || total > std::numeric_limits<int64_t>::max() - (elements * width))
+        int64_t furthest = 0;
+        for(flatbuffers::uoffset_t i = 0; i < dims->size(); ++i)
         {
-            return std::numeric_limits<int64_t>::max();
+            const auto dim = dims->Get(i);
+            const auto stride = strides->Get(i);
+            if(dim <= 0 || stride < 0)
+            {
+                return SATURATED;
+            }
+            if(stride > 0 && dim - 1 > (SATURATED - 1 - furthest) / stride)
+            {
+                return SATURATED;
+            }
+            furthest += (dim - 1) * stride;
         }
-        total += elements * width;
+        const auto span = furthest + 1;
+
+        const auto width = elementBytes(tensor->data_type());
+        if(span > SATURATED / width || total > SATURATED - (span * width))
+        {
+            return SATURATED;
+        }
+        total += span * width;
     }
     return total;
 }

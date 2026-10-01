@@ -64,14 +64,14 @@ public:
     using IEngineConfig = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig;
 
     /// @throws std::invalid_argument if a knob names no field in the metadata schema.
-    GenericEngine(EngineDescriptor engine,
-                  std::unique_ptr<KernelIngestorStateManager<THandle>> stateManager,
-                  const IDeviceResolver<THandle>& deviceResolver,
-                  std::map<std::string, std::map<std::string, HeuristicDescriptor>> predictions
-                  = {},
-                  std::map<std::string, std::set<std::string>> unavailablePredictionArches = {},
-                  std::string selectorRevision = {},
-                  nlohmann::json provenance = nlohmann::json::object())
+    GenericEngine(
+        EngineDescriptor engine,
+        std::unique_ptr<KernelIngestorStateManager<THandle>> stateManager,
+        const IDeviceResolver<THandle>& deviceResolver,
+        const std::map<std::string, std::map<std::string, HeuristicDescriptor>>& predictions = {},
+        const std::map<std::string, std::set<std::string>>& unavailablePredictionArches = {},
+        std::string selectorRevision = {},
+        nlohmann::json provenance = nlohmann::json::object())
         : _engine(std::move(engine))
         , _stateManager(std::move(stateManager))
         , _id(hipdnn_data_sdk::utilities::engineNameToId(_engine.name))
@@ -90,11 +90,41 @@ public:
         // RFC 0019 §3.1: the UED's role map is this engine's L1 binding, and it lives in
         // the loader's resolution rather than in the UHD the map names. The metric is the
         // one each UHD declares, by which the loader keyed it.
+        //
+        // §4.1 `trained_against.selector_revision` is checked here exactly as the loader's
+        // resolveDeclaredEnginePredictions checks it for an engine with no descriptors. The
+        // loader proved only the descriptors' provenance, while the selector this engine
+        // computes (MakeEngine.hpp's engineSelectorRevision) also covers its rankers, packs,
+        // kernels and native symbols. An L1 estimate is compared across engines, so a model
+        // measured against another selector does not merely misreport a number -- it changes
+        // which engine is chosen.
         for(const auto& [metric, byArch] : predictions)
         {
             for(const auto& [arch, descriptor] : byArch)
             {
-                _binding.bind(metric, arch, UhdKernelHeuristic::configFrom(descriptor));
+                if(descriptor.trainedAgainstSelectorRevision.empty())
+                {
+                    // Nothing to match against: a contract failure, not a wrong build.
+                    _binding.markUnusable(
+                        metric,
+                        arch,
+                        hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::INVALID,
+                        "model records no trained_against.selector_revision, so it cannot be "
+                        "matched to a provider build");
+                }
+                else if(descriptor.trainedAgainstSelectorRevision != _selectorRevision)
+                {
+                    _binding.markUnusable(
+                        metric,
+                        arch,
+                        hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::UNAVAILABLE,
+                        "model was trained against " + descriptor.trainedAgainstSelectorRevision
+                            + ", engine reports " + _selectorRevision);
+                }
+                else
+                {
+                    _binding.bind(metric, arch, UhdKernelHeuristic::configFrom(descriptor));
+                }
             }
         }
         // A UED named this (metric, architecture)'s model and the loader refused it: RFC 0019
@@ -241,13 +271,24 @@ public:
         {
             result.kind = PredictionKind::CONFIGURATION;
             result.status = PredictionStatus::UNAVAILABLE;
-            result.uhd_id.clear();
+            // The model a configuration prediction evaluates is the L2 ranker's, not the L1
+            // model the binding above named. Clearing the id instead -- which this did -- left
+            // getPredictionCapabilities unable to list any L2 model, since a capability is a
+            // description that names one. Read off the bindings: describing ranks nothing.
+            result.uhd_id = _stateManager->calibratedModelId(metric, arch);
             result.reason = "Exact configuration prediction was not evaluated";
             if(!result.binding_json.empty())
             {
                 auto binding = nlohmann::json::parse(result.binding_json);
                 binding["role"] = "sort_kernel_catalog";
-                binding.erase("uhd_id");
+                if(result.uhd_id.empty())
+                {
+                    binding.erase("uhd_id");
+                }
+                else
+                {
+                    binding["uhd_id"] = result.uhd_id;
+                }
                 result.binding_json = binding.dump();
             }
         }

@@ -484,6 +484,79 @@ TEST(TestIngestorUhdKernelHeuristic, TheProblemChangesTheRanking)
     EXPECT_EQ(shortSeq.front().kernelId, testId(0x01)); // short sequence: small tile
 }
 
+/// A kernel axis and the graph's canonical logical work, the pair a ranker trained on an
+/// enumeration corpus reads: slot 1 is published by the work model, not by any matcher.
+/// Paired with preferLargeTilesOnLongSequences(), whose root splits slot 1 at 1024: at or
+/// below that much work the small tile scores 9, above it the large tile does.
+const std::vector<nlohmann::json> WORK_SIGNATURE = {"$kernel.tile_m", "$graph.flops"};
+
+TEST(TestIngestorUhdKernelHeuristic, TheGraphsLogicalWorkChangesTheRankingThroughTheLiveSelector)
+{
+    // R2: the ranker a model trained on enumeration pages runs under must bind the graph
+    // features those pages publish. Two graphs differing only in size, one catalog: the
+    // winner follows `graph.flops`, which no matcher binds.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_graph_work");
+    const auto fixture = writeFixture(dir.path(),
+                                      preferLargeTilesOnLongSequences(),
+                                      "max",
+                                      {},
+                                      /*calibrated=*/true,
+                                      "identity",
+                                      WORK_SIGNATURE);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::MatmulTestGraph small(4, 4, 4); // 128 flops
+    const testing::MatmulTestGraph large(64, 64, 64); // 524288 flops
+    const auto properties = gfx942();
+    const auto catalog = catalogAgainstPriority(2048);
+
+    const auto onSmall = heuristic->rankScored(catalog, MatchContext{small.graph(), 0, properties});
+    const auto onLarge = heuristic->rankScored(catalog, MatchContext{large.graph(), 0, properties});
+
+    ASSERT_EQ(onSmall.size(), 2U);
+    ASSERT_EQ(onLarge.size(), 2U);
+    EXPECT_EQ(onSmall.front().kernelId, testId(0x01)) << "small problem: small tile";
+    EXPECT_EQ(onLarge.front().kernelId, testId(0x02)) << "large problem: large tile";
+    // The winning leaf, not the 0 of a declared-order fallback, which also puts the small
+    // tile first: an unbound `$graph.flops` would pass the small case by degrading.
+    EXPECT_DOUBLE_EQ(onSmall.front().score, 9.0);
+    EXPECT_DOUBLE_EQ(onLarge.front().score, 9.0);
+}
+
+TEST(TestIngestorUhdKernelHeuristic, AGraphMatchTokenCannotStandInForTheCanonicalWork)
+{
+    // A matcher may publish new names, never a reserved one: a pack binding its own
+    // `graph.flops` would otherwise feed the model a number the corpus never carried.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_reserved_token");
+    const auto fixture = writeFixture(dir.path(),
+                                      preferLargeTilesOnLongSequences(),
+                                      "max",
+                                      {},
+                                      /*calibrated=*/true,
+                                      "identity",
+                                      WORK_SIGNATURE);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::MatmulTestGraph large(64, 64, 64);
+    const auto properties = gfx942();
+    const MatchContext context{large.graph(), 0, properties};
+    for(const auto* token : {"graph.flops", "$graph.flops"})
+    {
+        auto catalog = catalogAgainstPriority(2048);
+        catalog.bound[token] = 1.0; // a "small problem" if it were believed
+        const auto ranked = heuristic->rankScored(catalog, context);
+        ASSERT_EQ(ranked.size(), 2U);
+        EXPECT_EQ(ranked.front().kernelId, testId(0x02)) << token << " overrode graph.flops";
+        EXPECT_DOUBLE_EQ(ranked.front().score, 9.0);
+        EXPECT_DOUBLE_EQ(heuristic->score(context, catalog.bound, catalog.entries[1]), 9.0)
+            << "the single-kernel path binds a different problem half from the ranking";
+    }
+}
+
 TEST(TestIngestorUhdKernelHeuristic, AMinimisingObjectiveReversesTheOrder)
 {
     // Same model, same catalog; only `objective` differs. A UHD trained on a cost rather
@@ -1275,6 +1348,78 @@ TEST(TestIngestorUhdKernelHeuristic, AZeroCostPredictionDoesNotWinUnderAMinObjec
     ASSERT_EQ(scored.size(), 2U);
     EXPECT_LT(scored.front().score, 0.0) << "the zero-cost candidate outranked a measured one";
     EXPECT_DOUBLE_EQ(scored.back().score, 0.0);
+}
+
+TEST(TestIngestorUhdKernelHeuristic, AMetriclessRankerOrdersOnSignedScores)
+{
+    // Regression (S1). RFC 0019 §8.3's positivity applies to a physical score -- a declared
+    // metric, or a transform only a positive target admits. A metric-less `identity` ranker
+    // scores on an ordering scale of its own, where -0.5 beats -2 like any other pair; refusing
+    // both flattened the model's preference into declared order, which here is the opposite.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_metricless_signed");
+    const auto fixture
+        = writeFixture(dir.path(), preferNegativeScores(), "max", {}, /*calibrated=*/false);
+    auto descriptor = modelDescriptor(dir.path(), fixture);
+    descriptor.score.metric.clear();
+
+    const auto heuristic = makeKernelHeuristic(descriptor, {}, KNOBS, FIELDS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+
+    const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(scored.size(), 2U);
+    EXPECT_EQ(scored.front().kernelId, testId(0x02)) << "the model's preference was discarded";
+    EXPECT_DOUBLE_EQ(scored.front().score, -0.5);
+    EXPECT_DOUBLE_EQ(scored.back().score, -2.0);
+
+    // The same scores under a positive-domain transform are out of range again: log1p's
+    // inverse of a negative prediction is below zero, which no target it admits can take.
+    const hipdnn_test_sdk::utilities::ScopedDirectory logDir("uhd_metricless_log1p");
+    const auto logFixture = writeFixture(
+        logDir.path(), preferNegativeScores(), "max", {}, /*calibrated=*/false, "log1p");
+    auto logDescriptor = modelDescriptor(logDir.path(), logFixture);
+    logDescriptor.score.metric.clear();
+    const auto bounded = makeKernelHeuristic(logDescriptor, {}, KNOBS, FIELDS);
+    ASSERT_NE(bounded, nullptr);
+    const auto declared = bounded->rankScored(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(declared.size(), 2U);
+    EXPECT_EQ(declared.front().kernelId, testId(0x01)) << "declared order did not decide";
+    EXPECT_DOUBLE_EQ(declared.front().score, 0.0);
+}
+
+TEST(TestIngestorUhdKernelHeuristic, AModelReadingAListFieldElementIsAdmittedOnTheField)
+{
+    // Regression (S3). A list field's elements are bound as `tile[0]`, `tile[1]`, ... but the
+    // KMD declares, and the UED exposes, `tile`. Admission compared the whole indexed suffix,
+    // so every model reading a list element was refused as ranking on an undeclared axis.
+    const std::vector<nlohmann::json> signature = {"$kernel.tile[1]", "$attention.seqlen"};
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_indexed_kernel_field");
+    const auto fixture = writeFixture(
+        dir.path(), preferLargeTiles(), "max", {}, /*calibrated=*/true, "identity", signature);
+
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture),
+                                               {},
+                                               {"tile"},
+                                               std::unordered_set<std::string>{"tile"});
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    Catalog catalog = catalogAgainstPriority(2048);
+    for(auto& kernel : catalog.entries)
+    {
+        kernel.metadata["tile"]
+            = std::vector<int64_t>{16, std::get<int64_t>(kernel.metadata.at("tile_m"))};
+    }
+
+    const auto scored = heuristic->rankScored(catalog, context);
+    ASSERT_EQ(scored.size(), 2U);
+    EXPECT_EQ(scored.front().kernelId, testId(0x02)) << "the model was refused admission";
+    EXPECT_DOUBLE_EQ(scored.front().score, 9.0);
 }
 
 TEST(TestIngestorUhdKernelHeuristic, ANegativeThroughputIsReportedAsAnErrorNotSwallowed)
@@ -2095,10 +2240,11 @@ namespace
 {
 /// A grouped artifact over SIGNATURE, grouping on slot 0 (`$kernel.tile_m`).
 ///
-/// Layer 1 is a stump preferring the large tile, so group 128 wins; layer 2 is a constant per
-/// group, so a score identifies which ensemble ran. The catalog's two kernels therefore sit in
-/// different groups, which is what lets a test tell a per-candidate group from a per-ranking one.
-Fixture writeGroupedFixture(const std::filesystem::path& dir)
+/// Layer 1 is a stump scoring the large tile higher, so group 128 wins under `max` and group 64
+/// under @p objective `min`; layer 2 is a constant per group, so a score identifies which
+/// ensemble ran. The catalog's two kernels therefore sit in different groups, which is what lets
+/// a test tell a per-candidate group from a per-ranking one.
+Fixture writeGroupedFixture(const std::filesystem::path& dir, const std::string& objective = "max")
 {
     const std::string signatureHash = uhd::FeatureExtractor::computeHash(SIGNATURE);
 
@@ -2131,7 +2277,7 @@ Fixture writeGroupedFixture(const std::filesystem::path& dir)
     model.addGroup(128.0, {constantTree(7.0)});
     model.buildToFile((dir / "model.bin").string());
 
-    return {"model.bin", signatureHash, "max", true, "identity", SIGNATURE};
+    return {"model.bin", signatureHash, objective, true, "identity", SIGNATURE};
 }
 } // namespace
 
@@ -2183,6 +2329,33 @@ TEST(TestIngestorUhdKernelHeuristicGrouped, TheReportedGroupIsTheOneThatScored)
     ASSERT_FALSE(scored.empty());
     EXPECT_DOUBLE_EQ(scored.front().score, 7.0);
     EXPECT_DOUBLE_EQ(scored.front().group, 128.0);
+}
+
+TEST(TestIngestorUhdKernelHeuristicGrouped, AMinObjectiveChoosesTheCheapestGroup)
+{
+    // Regression. Layer 1 of a `min` model predicts a cost, but the adapter chose the group
+    // with the largest layer-1 score whatever the objective -- the slowest group -- and layer 2
+    // then ranked within it. The same artifact as the `max` cases: only the objective differs,
+    // so the group has to flip from 128 to 64.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_grouped_min");
+    const auto fixture = writeGroupedFixture(dir.path(), "min");
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties, "time"};
+    const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
+
+    ASSERT_EQ(scored.size(), 2U);
+    // Group 64's layer 2 predicts 3, negated for `min`: the model ranked, from the right group.
+    EXPECT_EQ(scored.front().kernelId, testId(0x01));
+    EXPECT_DOUBLE_EQ(scored.front().group, 64.0);
+    EXPECT_DOUBLE_EQ(scored.front().score, -3.0) << "the winner was not scored by group 64";
+    // Group 128 was declined, so it reports no measurement.
+    EXPECT_DOUBLE_EQ(scored.back().group, 128.0);
+    EXPECT_DOUBLE_EQ(scored.back().score, 0.0) << "the slower group was not excluded";
 }
 
 TEST(TestIngestorUhdKernelHeuristicGrouped, ExcludingAGroupIsNotReportedAsATrainingDefect)

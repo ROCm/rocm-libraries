@@ -15,6 +15,7 @@
 #include <hipdnn_plugin_sdk/heuristic_api_version.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -39,7 +40,7 @@ using hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME;
 using hipdnn_data_sdk::utilities::policyNameToId;
 using hipdnn_data_sdk::utilities::RankingMetric;
 
-thread_local char lastError[1024]{};
+thread_local std::array<char, 1024> lastError{};
 
 // File-scope logging callback / level, set through the C-ABI-shaped
 // SetLoggingCallback / SetLogLevel below. registerPlugin() installs a callback
@@ -65,11 +66,11 @@ hipdnnPluginStatus_t guarded(F&& f) noexcept
     }
     catch(const std::exception& error)
     {
-        std::snprintf(lastError, sizeof(lastError), "%s", error.what());
+        std::snprintf(lastError.data(), lastError.size(), "%s", error.what());
     }
     catch(...)
     {
-        std::snprintf(lastError, sizeof(lastError), "Unknown prediction policy exception");
+        std::snprintf(lastError.data(), lastError.size(), "Unknown prediction policy exception");
     }
     return HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR;
 }
@@ -130,7 +131,7 @@ bool usableConfig(const EngineConfig* config, int64_t engineId)
     {
         for(const auto* knob : *knobs)
         {
-            if(knob == nullptr || knob->knob_id() == nullptr || knob->knob_id()->size() == 0
+            if(knob == nullptr || knob->knob_id() == nullptr || knob->knob_id()->empty()
                || !knobIds.insert(knob->knob_id()->string_view()).second
                || knob->value() == nullptr)
             {
@@ -269,7 +270,7 @@ void getLastErrorString(const char** error)
 {
     if(error != nullptr)
     {
-        *error = lastError;
+        *error = lastError.data();
     }
 }
 
@@ -394,7 +395,7 @@ hipdnnPluginStatus_t policySetEngineIds(hipdnnHeuristicPolicyDescriptor_t descri
         desc.engineIds.clear();
         if(count != 0)
         {
-            std::unordered_set<int64_t> unique(ids, ids + count);
+            const std::unordered_set<int64_t> unique(ids, ids + count);
             if(unique.size() != count)
             {
                 return HIPDNN_PLUGIN_STATUS_BAD_PARAM;
@@ -453,8 +454,8 @@ hipdnnPluginStatus_t policyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t de
         const auto* metric = requestedMetric(*host);
         if(metric == nullptr)
         {
-            std::snprintf(lastError,
-                          sizeof(lastError),
+            std::snprintf(lastError.data(),
+                          lastError.size(),
                           "Host names unregistered ranking metric '%s'",
                           host->ranking_metric == nullptr ? "(null)" : host->ranking_metric);
             return HIPDNN_PLUGIN_STATUS_BAD_PARAM;

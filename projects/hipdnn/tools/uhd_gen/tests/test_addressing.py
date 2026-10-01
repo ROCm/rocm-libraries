@@ -9,16 +9,21 @@ from uhd_gen import addressing
 
 
 def candidate(knobs, features):
-    return {"knob_settings": knobs, "kernel_features": {"kernel." + k: v for k, v in features.items()}}
+    return {
+        "knob_settings": knobs,
+        "kernel_features": {"kernel." + k: v for k, v in features.items()},
+    }
 
 
 def test_an_ordinal_learns_its_value_from_the_candidate_it_addressed():
     # The pair the engine hands over on every enumerated candidate: the pin that selects
     # this kernel, and what the kernel is. No second derivation, so nothing to disagree.
-    table = addressing.observe([
-        candidate({"dtype": 0, "block_m": 256}, {"dtype": "BF16", "block_m": 256}),
-        candidate({"dtype": 1, "block_m": 128}, {"dtype": "FP16", "block_m": 128}),
-    ])
+    table = addressing.observe(
+        [
+            candidate({"dtype": 0, "block_m": 256}, {"dtype": "BF16", "block_m": 256}),
+            candidate({"dtype": 1, "block_m": 128}, {"dtype": "FP16", "block_m": 128}),
+        ]
+    )
     assert addressing.decode(table, "dtype", 1) == "FP16"
     assert addressing.is_ordinal(table, "dtype")
 
@@ -42,10 +47,12 @@ def test_every_non_integer_kmd_type_is_addressable(value):
 
 def test_two_kernels_differing_only_in_a_string_field_get_distinct_pins():
     """The collision that aborted a real run: identical exposed tuples for two kernels."""
-    table = addressing.observe([
-        candidate({"block_m": 64, "dtype": 0}, {"block_m": 64, "dtype": "BF16"}),
-        candidate({"block_m": 64, "dtype": 1}, {"block_m": 64, "dtype": "FP16"}),
-    ])
+    table = addressing.observe(
+        [
+            candidate({"block_m": 64, "dtype": 0}, {"block_m": 64, "dtype": "BF16"}),
+            candidate({"block_m": 64, "dtype": 1}, {"block_m": 64, "dtype": "FP16"}),
+        ]
+    )
     assert addressing.decode(table, "dtype", 0) != addressing.decode(table, "dtype", 1)
 
 
@@ -72,10 +79,14 @@ def test_a_knob_no_candidate_pinned_is_reported():
 
 
 def test_the_manifest_form_survives_json_and_says_which_knobs_are_indices():
-    table = addressing.observe([
-        candidate({"dtype": 0, "tile": 1, "block_m": 64},
-                  {"dtype": "BF16", "tile": [4, 4], "block_m": 64}),
-    ])
+    table = addressing.observe(
+        [
+            candidate(
+                {"dtype": 0, "tile": 1, "block_m": 64},
+                {"dtype": "BF16", "tile": [4, 4], "block_m": 64},
+            ),
+        ]
+    )
     restored = json.loads(json.dumps(addressing.as_manifest(table)))
     assert restored["dtype"]["ordinal"] is True
     assert restored["block_m"]["ordinal"] is False
@@ -124,17 +135,3 @@ def test_load_collections_trains_shards_whose_tables_differ_only_by_what_they_sa
                   [candidate({"dtype": 1}, {"dtype": "FP16"})])))]
     merged = load_collections(shards, role="sort_kernel_catalog", sources=[None])
     assert [v["value"] for v in merged["knob_encodings"]["dtype"]["values"]] == ["BF16", "FP16"]
-
-
-def test_a_catalog_ranker_may_rank_only_on_what_the_shipping_ued_exposes():
-    """The runtime drops a model ranking on a non-knob field; training must not produce one."""
-    from uhd_gen.features import build_features_signature
-    from uhd_gen.generate import exposed_axes, refuse_unexposed_axes
-
-    kernel_fields = {"kernel.dtype", "kernel.block_m"}
-    assert exposed_axes(["block_m"]) == {"kernel.block_m"}
-    refuse_unexposed_axes(build_features_signature(["kernel.block_m", "q.seqlen"]),
-                          kernel_fields, ["block_m"])
-    with pytest.raises(ValueError, match=r"\['kernel.dtype'\].*does not expose"):
-        refuse_unexposed_axes(build_features_signature(["kernel.dtype", "kernel.block_m"]),
-                              kernel_fields, ["block_m"])

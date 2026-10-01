@@ -21,7 +21,7 @@ using namespace hipdnn_corpus_gen;
 namespace
 {
 
-const std::vector<std::string> kKnown{"dtype", "head_dim", "is_causal"};
+const std::vector<std::string> KNOWN{"dtype", "head_dim", "is_causal"};
 
 } // namespace
 
@@ -30,7 +30,7 @@ TEST(TestPointFilter, AClauseIsAcceptedWithOrWithoutTheColumnPrefix)
     std::vector<KeepClause> parsed;
     std::string error;
 
-    ASSERT_TRUE(parseKeepClauses({"q.dtype=bf16", "head_dim=128"}, kKnown, parsed, error)) << error;
+    ASSERT_TRUE(parseKeepClauses({"q.dtype=bf16", "head_dim=128"}, KNOWN, parsed, error)) << error;
     ASSERT_EQ(parsed.size(), 2u);
     EXPECT_EQ(parsed[0].parameter, "dtype");
     EXPECT_EQ(parsed[0].value, "bf16");
@@ -45,7 +45,7 @@ TEST(TestPointFilter, AParameterNoDeclarationDeclaresIsRefusedRatherThanIgnored)
 
     // `headdim` for `head_dim` is the whole failure mode: ignored, it filters nothing and the
     // manifest still says the run was filtered.
-    EXPECT_FALSE(parseKeepClauses({"q.headdim=128"}, kKnown, parsed, error));
+    EXPECT_FALSE(parseKeepClauses({"q.headdim=128"}, KNOWN, parsed, error));
     EXPECT_NE(error.find("headdim"), std::string::npos) << error;
 }
 
@@ -54,16 +54,15 @@ TEST(TestPointFilter, AClauseWithNoValueIsRefused)
     std::vector<KeepClause> parsed;
     std::string error;
 
-    EXPECT_FALSE(parseKeepClauses({"q.dtype"}, kKnown, parsed, error));
-    EXPECT_FALSE(parseKeepClauses({"q.dtype="}, kKnown, parsed, error));
-    EXPECT_FALSE(parseKeepClauses({"=bf16"}, kKnown, parsed, error));
+    EXPECT_FALSE(parseKeepClauses({"q.dtype"}, KNOWN, parsed, error));
+    EXPECT_FALSE(parseKeepClauses({"q.dtype="}, KNOWN, parsed, error));
+    EXPECT_FALSE(parseKeepClauses({"=bf16"}, KNOWN, parsed, error));
 }
 
 TEST(TestPointFilter, EveryDeclaredTypeIsFilteredWithTheSameTextSpelling)
 {
-    const ProblemPoint point{{"dtype", std::string("bf16")},
-                             {"head_dim", int64_t{128}},
-                             {"is_causal", true}};
+    const ProblemPoint point{
+        {"dtype", std::string("bf16")}, {"head_dim", int64_t{128}}, {"is_causal", true}};
 
     EXPECT_TRUE(keeps({{"dtype", "bf16"}}, point));
     EXPECT_TRUE(keeps({{"head_dim", "128"}}, point));
@@ -95,12 +94,11 @@ TEST(TestPointFilter, RepeatingAParameterWidensItRatherThanEmptyingTheCorpus)
     EXPECT_FALSE(keeps(either, ProblemPoint{{"head_dim", int64_t{192}}}));
 
     // Different parameters still conjoin, so widening one facet does not widen another.
-    const std::vector<KeepClause> mixed{
-        {"head_dim", "64"}, {"head_dim", "128"}, {"dtype", "bf16"}};
-    EXPECT_TRUE(keeps(mixed, ProblemPoint{{"head_dim", int64_t{64}},
-                                          {"dtype", std::string("bf16")}}));
-    EXPECT_FALSE(keeps(mixed, ProblemPoint{{"head_dim", int64_t{64}},
-                                           {"dtype", std::string("fp16")}}));
+    const std::vector<KeepClause> mixed{{"head_dim", "64"}, {"head_dim", "128"}, {"dtype", "bf16"}};
+    EXPECT_TRUE(
+        keeps(mixed, ProblemPoint{{"head_dim", int64_t{64}}, {"dtype", std::string("bf16")}}));
+    EXPECT_FALSE(
+        keeps(mixed, ProblemPoint{{"head_dim", int64_t{64}}, {"dtype", std::string("fp16")}}));
 }
 
 TEST(TestPointFilter, APointWithoutTheFilteredParameterFails)

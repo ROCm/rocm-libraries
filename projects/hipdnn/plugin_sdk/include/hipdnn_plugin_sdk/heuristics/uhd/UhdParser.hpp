@@ -7,23 +7,28 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <limits>
 #include <set>
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_plugin_sdk/heuristics/FeatureSemantics.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/ScoreTransform.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/Sha256.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/UhdConfig.hpp>
 
 namespace hipdnn_plugin_sdk::uhd
 {
 namespace parser_detail
 {
-inline constexpr size_t MAX_DOCUMENT_BYTES = 8 * 1024 * 1024;
+inline constexpr size_t MAX_DOCUMENT_BYTES = size_t{8} * 1024 * 1024;
 inline constexpr size_t MAX_DOCUMENT_NODES = 131072;
 inline constexpr size_t MAX_DOCUMENT_DEPTH = 2 * ExpressionSet::MAX_EXPRESSION_DEPTH + 8;
 
@@ -144,11 +149,32 @@ inline void dependency(const nlohmann::json& value, const std::string& where)
 ///     reports: L1 is the one score compared ACROSS engines, so a stale estimate does not
 ///     merely misreport a number, it changes which engine is selected.
 ///
+/// Either form may also carry `feature_semantics_revision` (FeatureSemantics.hpp), the
+/// meaning of the features the model was trained on. It never names what the model binds
+/// to, so on its own it satisfies neither form.
+///
 /// Neither names an engine. A UHD still cannot say what it attaches to -- the binding is
 /// the UED role map or the provider-declared UUID, both of which live in compiled code.
 inline void provenance(const nlohmann::json& value, const std::string& where)
 {
-    keys(value, {"ued", "kmd", "umd", "selector_revision"}, where);
+    keys(value, {"ued", "kmd", "umd", "selector_revision", "feature_semantics_revision"}, where);
+    if(value.contains("feature_semantics_revision"))
+    {
+        // An integer, not a number: 1.0 and 1 must not be two spellings of one revision, and
+        // a bool would otherwise convert to one. Bounded so featureSemanticsRevision's
+        // int64_t read cannot wrap; parsed text is unsigned, a document built in memory
+        // may be signed, and both spell the same revision.
+        const auto& recorded = value.at("feature_semantics_revision");
+        const bool valid = recorded.is_number_unsigned()
+                               ? recorded.get<uint64_t>() >= 1
+                                     && recorded.get<uint64_t>() <= static_cast<uint64_t>(
+                                            std::numeric_limits<int64_t>::max())
+                               : recorded.is_number_integer() && recorded.get<int64_t>() >= 1;
+        if(!valid)
+        {
+            fail("trained_against.feature_semantics_revision must be an integer >= 1 in " + where);
+        }
+    }
     const bool namesDescriptorSet
         = value.contains("ued") || value.contains("kmd") || value.contains("umd");
     const bool namesSelector = value.contains("selector_revision");
@@ -190,6 +216,46 @@ inline void provenance(const nlohmann::json& value, const std::string& where)
     }
 }
 } // namespace parser_detail
+
+/// @brief Why a model cannot read this build's features, or "" when it can.
+///
+/// The revision describes what the values behind published feature names mean
+/// (FeatureSemantics.hpp), so it governs exactly the models that read them: those with a
+/// @p featuresSignature. A signature-less ranker -- static order, or a native comparator
+/// over kernel metadata compiled into this same build -- reads no published feature and
+/// cannot be misled by one changing, so a bump does not refuse it.
+///
+/// A validated @p trainedAgainst that records no revision was trained before the revision
+/// existed, which is revision 1 by definition, so today's shipped documents need no edit.
+/// A mismatch in either direction refuses: an older model reads names whose values have
+/// since changed meaning, and a newer one expects meanings this build does not compute.
+/// Neither is wrong about the model itself -- it is simply not this build's -- which is
+/// why every caller that can say so reports it as UNAVAILABLE. The one rule every binding
+/// path asks, so the loader, the L2 ranker and the L1 predictor cannot drift apart.
+inline std::string featureSemanticsMismatch(const std::vector<nlohmann::json>& featuresSignature,
+                                            const nlohmann::json& trainedAgainst)
+{
+    if(featuresSignature.empty())
+    {
+        return {};
+    }
+    int64_t recorded = 1;
+    if(trainedAgainst.is_object())
+    {
+        if(const auto found = trainedAgainst.find("feature_semantics_revision");
+           found != trainedAgainst.end())
+        {
+            recorded = found->get<int64_t>();
+        }
+    }
+    if(recorded == heuristics::FEATURE_SEMANTICS_REVISION)
+    {
+        return {};
+    }
+    return "model was trained against feature semantics revision " + std::to_string(recorded)
+           + ", this build computes revision "
+           + std::to_string(heuristics::FEATURE_SEMANTICS_REVISION);
+}
 
 /// @brief Read a bounded UHD JSON document, rejecting duplicate keys before interpretation.
 inline nlohmann::json readUhdDocument(const std::filesystem::path& path)
@@ -236,9 +302,36 @@ inline nlohmann::json readUhdDocument(const std::filesystem::path& path)
         });
 }
 
+/// @brief The digest of the model artifact at @p path, in the format a UHD declares one
+/// (lowercase SHA-256 hex over the whole file, as every adapter compares it), or "" when
+/// there are no bytes to identify: absent, not a regular file, empty, over the adapters'
+/// 256 MiB bound, or unreadable.
+inline std::string artifactDigest(const std::filesystem::path& path)
+{
+    constexpr std::uintmax_t MAX_ARTIFACT_BYTES = std::uintmax_t{256} * 1024 * 1024;
+    std::error_code error;
+    if(!std::filesystem::is_regular_file(path, error))
+    {
+        return {};
+    }
+    const auto size = std::filesystem::file_size(path, error);
+    if(error || size == 0 || size > MAX_ARTIFACT_BYTES)
+    {
+        return {};
+    }
+    std::ifstream file(path, std::ios::binary);
+    std::vector<uint8_t> bytes(static_cast<size_t>(size));
+    if(!file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size)))
+    {
+        return {};
+    }
+    return sha256(bytes.data(), bytes.size());
+}
+
 /// @brief Parse the common UHD format independently of any descriptor catalog.
 /// @param root Already-decoded document; structural size/depth bounds still apply.
-/// @param path Descriptor filename, used to resolve artifact paths absolutely.
+/// @param path Descriptor filename, used to resolve artifact paths absolutely. A model body
+///        declaring no `hash` has its artifact read and digested (artifactDigest()).
 /// @throws std::invalid_argument or nlohmann::json::exception for malformed input.
 inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesystem::path& path)
 {
@@ -297,9 +390,9 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
         result.featuresSignature = signature.get<std::vector<nlohmann::json>>();
         for(const auto& entry : result.featuresSignature)
         {
-            if(!(entry.is_string() && !entry.get_ref<const std::string&>().empty()
-                 && entry.get_ref<const std::string&>().front() == '$')
-               && !(entry.is_object() && entry.size() == 1))
+            if((!entry.is_string() || entry.get_ref<const std::string&>().empty()
+                || entry.get_ref<const std::string&>().front() != '$')
+               && (!entry.is_object() || entry.size() != 1))
             {
                 fail("features_signature requires references or inline expressions in " + where);
             }
@@ -421,15 +514,16 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
     const auto& body = root.at(result.adapterType);
     if(result.adapterType == "static_order")
     {
-        keys(body, {"order"}, where);
+        // static_order has no parameters: it ranks by UKD priority, then descriptor id
+        // (detail::declaredOrder). Declared criteria would be accepted and silently ignored,
+        // so a body naming them is refused rather than ranked by something it did not ask for.
         if(body.contains("order"))
         {
-            result.staticOrderFields = body.at("order").get<std::vector<std::string>>();
-            if(result.staticOrderFields.empty())
-            {
-                result.staticOrderFields = {"priority", "id"};
-            }
+            fail("static_order.order is not supported in " + where
+                 + ": declared ordering criteria are not implemented; static_order ranks by "
+                   "priority, then descriptor id");
         }
+        keys(body, {}, where);
     }
     else if(result.adapterType == "native")
     {
@@ -462,10 +556,15 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
                                         / text(body, custom ? "library" : "artifact", where))
                   .lexically_normal()
                   .string();
-        if(body.contains("hash"))
-        {
-            result.modelHash = text(body, "hash", where);
-        }
+        // Model identity is content (R6): what versions the persistent winner cache and the
+        // selector revision is this digest, so a model that declares none is identified by
+        // the bytes present now. Computed once, here, and then verified by the adapter like
+        // a declared one -- bytes replaced after load are refused rather than scored under
+        // the old identity. Empty only when nothing is deployed yet (deployment is separate
+        // from load, RFC 0019 §5); such a model has no content identity, and the winner
+        // cache declines to persist for it (engineIdentity).
+        result.modelHash = body.contains("hash") ? text(body, "hash", where)
+                                                 : artifactDigest(result.modelArtifactPath);
     }
     return result;
 }

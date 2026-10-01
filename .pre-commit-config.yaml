@@ -48,6 +48,9 @@ exclude: |
     projects/hipdnn/.*\.bin$|
     # Generated hipDNN FlatBuffers headers
     projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/.*_generated\.h|
+    # Generated hipDNN FlatBuffers Python bindings: flatc-hipdnn rewrites them, so a
+    # formatter that touched them would fight that hook on every run.
+    projects/hipdnn/tools/uhd_gen/_generated/.*|
     # Reference data (auto-generated)
     dnn-providers/integration-tests/integration-test-bundles/.*|
     # Generated files (see rocrand/tools/ _generator.cpp files)
@@ -57,6 +60,14 @@ exclude: |
     projects/miopen/.*\.s$|
     projects/miopen/.*\.inc$|
     projects/miopen/.*\.model$|
+    # Machine-generated LGBM assets: native LightGBM text models + baked
+    # catalog/metadata + golden parity fixtures (large, not human-authored;
+    # exceed check-added-large-files and are not lintable/end-of-file-fixable).
+    # Match every lgbm_* asset under kernels/ so new metadata/model files stay
+    # covered without touching this list.
+    projects/miopen/src/conv/heuristics/lgbm_models/.*|
+    projects/miopen/src/conv/heuristics/lgbm_pcfg_models/.*|
+    projects/miopen/src/kernels/lgbm_.*\.(json|txt|bin)|
     # RPP exclusion list - raw test data with no early NUL byte, which pre-commit would
     # otherwise treat as text and corrupt. Matched by extension so new data stays covered.
     projects/rpp/.*\.(bin|rgb|yuv)$
@@ -140,6 +151,15 @@ repos:
         entry: python projects/hipdnn/scripts/gen_cache_key.py
         language: python
         files: ^projects/hipdnn/flatbuffers_sdk/schemas/.*\.fbs$|^projects/hipdnn/scripts/gen_cache_key\.py$|^projects/hipdnn/cmake/default_flatc_version\.txt$
+        pass_filenames: false
+
+      # Same trigger set as cache-key-hipdnn, plus the cache-key script it imports its
+      # schema reader from.
+      - id: node-operands-hipdnn
+        name: node operand visitor codegen (hipDNN)
+        entry: python projects/hipdnn/scripts/gen_node_operands.py
+        language: python
+        files: ^projects/hipdnn/flatbuffers_sdk/schemas/.*\.fbs$|^projects/hipdnn/scripts/gen_(cache_key|node_operands)\.py$|^projects/hipdnn/cmake/default_flatc_version\.txt$
         pass_filenames: false
 
       - id: verify-support-claims

@@ -694,7 +694,6 @@ inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
     heuristic.modelArtifactPath = config.modelArtifactPath;
     heuristic.modelHash = config.modelHash;
     heuristic.customLibrarySymbol = config.customLibrarySymbol;
-    heuristic.staticOrderFields = config.staticOrderFields;
     heuristic.trainedAgainstJson = config.trainedAgainst;
     if(config.trainedAgainst.is_object())
     {
@@ -1991,9 +1990,19 @@ inline std::string provenanceError(const HeuristicDescriptor& model,
     {
         return "incompatible KMD identity or semantic revision";
     }
+    // Checked per bound architecture (D2): one model may be bound under several arch keys,
+    // and an L1 model records the matchers of every pack the engine has
+    // (enginePredictionProvenance), not just the ones this key's packs use. So a recorded
+    // matcher is judged by which packs own it:
+    //   - owned by a pack serving @p arch: must be loaded at a compatible revision;
+    //   - owned only by the engine's other-arch packs: says nothing about this arch, ignored;
+    //   - owned by no pack at all: the model was trained against a matcher this engine no
+    //     longer has, which is a contract break on every arch.
     std::set<DescriptorId> relevant;
+    std::set<DescriptorId> owned;
     for(const auto& pack : packs)
     {
+        owned.insert(pack.matcherIds.begin(), pack.matcherIds.end());
         if(arch == "default" || pack.arch.empty()
            || std::find(pack.arch.begin(), pack.arch.end(), arch) != pack.arch.end())
         {
@@ -2002,6 +2011,10 @@ inline std::string provenanceError(const HeuristicDescriptor& model,
     }
     for(const auto& dependency : trained.umd)
     {
+        if(relevant.count(dependency.id) == 0 && owned.count(dependency.id) != 0)
+        {
+            continue;
+        }
         const auto found
             = std::find_if(matchers.begin(), matchers.end(), [&](const MatchDescriptor& matcher) {
                   return matcher.id == dependency.id;
@@ -2385,9 +2398,16 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
 
         // Model validity is independent of engine/pack validity. Check every role and
         // architecture now, but leave artifact loading to the selected model at rank time.
+        // A model trained on features this build computes differently (FeatureSemantics.hpp)
+        // is refused here too, for every role alike: an L2 ranker reads the same published
+        // graph features an L1 estimate does, so neither may score through a changed meaning.
         const auto provenanceError = [&](const HeuristicDescriptor& model,
                                          const std::string& arch) {
-            return detail::provenanceError(model, arch, &engine, schema, set.packs, set.matchers);
+            auto reason
+                = detail::provenanceError(model, arch, &engine, schema, set.packs, set.matchers);
+            return reason.empty() ? uhd::featureSemanticsMismatch(model.featuresSignature,
+                                                                  model.trainedAgainstJson)
+                                  : reason;
         };
         const auto disabled = [&](const char* roleName,
                                   const std::string& arch,
@@ -2625,9 +2645,10 @@ struct DeclaredEnginePredictions
  * engine (§3.1).
  *
  * A declared id gets the pre-flight a role reference gets -- the same symbol and artifact
- * check (detail::usableModel), and the same provenance rule (detail::provenanceError),
- * which refuses a model claiming a descriptor set this engine does not have -- plus the
- * one check that only applies here: @p selectorRevision.
+ * check (detail::usableModel), the same provenance rule (detail::provenanceError), which
+ * refuses a model claiming a descriptor set this engine does not have, and the same
+ * feature-semantics rule (uhd::featureSemanticsMismatch) -- plus the one check that only
+ * applies here: @p selectorRevision.
  *
  * **Staleness is refused, not warned about.** An opaque engine's behaviour is the vendor
  * library's, so what its model was measured against is a provider build, recorded as
@@ -2751,6 +2772,14 @@ inline DeclaredEnginePredictions resolveDeclaredEnginePredictions(
                     reason = "model was trained against " + bound.trainedAgainstSelectorRevision
                              + ", engine reports " + selectorRevision;
                 }
+                else if(auto mismatch = uhd::featureSemanticsMismatch(bound.featuresSignature,
+                                                                      bound.trainedAgainstJson);
+                        !mismatch.empty())
+                {
+                    // Wrong build, not a broken model: the same refusal as a stale selector.
+                    status = PredictionStatus::UNAVAILABLE;
+                    reason = std::move(mismatch);
+                }
             }
             if(!reason.empty())
             {
@@ -2800,14 +2829,21 @@ inline std::deque<std::string>& registeredEngineNames()
  *
  * Takes a parsed catalog rather than roots so a provider that also resolves declared L1
  * models out of the same trees (resolveDeclaredEnginePredictions) walks them once.
+ * @p source names where the catalog was read from, for the summary line.
+ *
+ * A summary line reports how many sets survived and how many validation dropped. The line
+ * is an error if validation drops a set.
  *
  * @warning Native symbols must already be registered when this is called; a set naming an
  *          unregistered symbol is dropped.
  */
 template <typename THandle>
-inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const DescriptorCatalog& catalog)
+inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const DescriptorCatalog& catalog,
+                                                              std::string_view source
+                                                              = "the descriptor catalog")
 {
     std::vector<DescriptorSet> validated;
+    size_t dropped = 0;
 
     for(auto& set : resolveDescriptorSets(catalog))
     {
@@ -2914,6 +2950,7 @@ inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const DescriptorCa
         }
         if(!resolvable)
         {
+            ++dropped;
             continue;
         }
 
@@ -2932,6 +2969,7 @@ inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const DescriptorCa
             HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
                                     << set.engine.name << "' does not validate: " << error.what()
                                     << "; dropping it");
+            ++dropped;
             continue;
         }
 
@@ -2958,8 +2996,19 @@ inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const DescriptorCa
         validated.push_back(std::move(set));
     }
 
-    HIPDNN_PLUGIN_LOG_INFO("descriptor loader: " << validated.size()
-                                                 << " descriptor-backed engine(s) loaded");
+    if(dropped == 0)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("descriptor loader: "
+                               << validated.size() << " descriptor-backed engine(s) loaded from "
+                               << source << "; " << dropped << " dropped during validation");
+    }
+    else
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: "
+                                << dropped << " descriptor set(s) dropped during validation; "
+                                << validated.size() << " descriptor-backed engine(s) loaded from "
+                                << source);
+    }
     return validated;
 }
 
@@ -2974,7 +3023,7 @@ inline std::vector<DescriptorSet>
         from += (from.empty() ? "" : ", ") + root.string();
     }
     HIPDNN_PLUGIN_LOG_INFO("descriptor loader: reading descriptor root(s) " << from);
-    return loadValidatedDescriptorSets<THandle>(loadDescriptorCatalog(roots));
+    return loadValidatedDescriptorSets<THandle>(loadDescriptorCatalog(roots), from);
 }
 
 /// @brief The one-root form: every constructible descriptor set under @p root.

@@ -178,14 +178,14 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         OUTPUT_NAMESPACE hipdnn_flatbuffers_sdk
     )
 
-    # Python bindings for the two schemas uhd_gen writes. Generated into the tool's
+    # Python bindings for the one schema uhd_gen writes. Generated into the tool's
     # own `_generated/` rather than a shared location: uhd_gen is pip-installable, so
     # a sibling top-level package would not travel with the wheel, and prepending its
     # own copy to sys.path is what keeps a stale install from shadowing the bindings
-    # that match these schemas (see uhd_gen/__init__.py).
+    # that match this schema (see uhd_gen/__init__.py).
     #
-    # Only these two. Every other schema is consumed exclusively from C++, and
-    # generating Python for all 38 would ship a package nothing imports.
+    # Only this one. Every other schema is consumed exclusively from C++, and
+    # generating Python for all of them would ship a package nothing imports.
     hipdnn_generate_flatbuffer_python(
         NAME uhd_gen
         TARGET hipdnn_flatbuffers_sdk
@@ -235,6 +235,32 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             COMMENT "Cache-key header generation"
         )
         add_dependencies(hipdnn_flatbuffers_sdk generate_hipdnn_cache_key)
+
+        # Same shape as the cache-key header, for the same reasons: the node-operand
+        # visitor is driven by the `cache_uid` and `work_data_dependent` annotations,
+        # which flatc's C++ output does not expose. gen_node_operands.py imports
+        # gen_cache_key.py's schema reader, so a change to either script regenerates it.
+        set(_node_operands_header
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/hipdnn_flatbuffers_sdk/data_objects/node_operands_generated.h"
+        )
+        add_custom_command(
+            OUTPUT "${_node_operands_header}"
+            COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/gen_node_operands.py" --flatc
+                    "${_cache_key_flatc}"
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/gen_node_operands.py"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/gen_cache_key.py"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/default_flatc_version.txt"
+                    ${_cache_key_schema_depends} ${_cache_key_flatc_dependency}
+            COMMENT "Generating node_operands_generated.h from the FlatBuffers schemas"
+            VERBATIM
+        )
+        add_custom_target(
+            generate_hipdnn_node_operands
+            DEPENDS "${_node_operands_header}"
+            COMMENT "Node-operand visitor header generation"
+        )
+        add_dependencies(hipdnn_flatbuffers_sdk generate_hipdnn_node_operands)
     endif()
 endif()
 

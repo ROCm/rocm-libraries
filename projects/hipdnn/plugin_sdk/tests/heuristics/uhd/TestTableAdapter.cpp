@@ -69,12 +69,6 @@ public:
         return *this;
     }
 
-    TableModelBuilder& setModelVersion(const std::string& version)
-    {
-        _modelVersion = version;
-        return *this;
-    }
-
     std::vector<uint8_t> build()
     {
         flatbuffers::FlatBufferBuilder builder;
@@ -106,13 +100,12 @@ public:
         }
 
         auto hashOffset = builder.CreateString(_featuresHash);
-        auto versionOffset = builder.CreateString(_modelVersion);
         auto bucketsVec = builder.CreateVector(bucketOffsets);
         auto entriesVec = builder.CreateVector(entryOffsets);
         auto archesVec = builder.CreateVector(archOffsets);
 
         auto model = fb::CreateTableModel(
-            builder, _numFeatures, hashOffset, bucketsVec, entriesVec, archesVec, versionOffset);
+            builder, _numFeatures, hashOffset, bucketsVec, entriesVec, archesVec);
 
         builder.Finish(model, fb::TableModelIdentifier());
 
@@ -137,7 +130,6 @@ private:
     std::vector<Bucket> _buckets;
     std::vector<Entry> _entries;
     std::vector<std::string> _trainingArches;
-    std::string _modelVersion;
 };
 
 } // namespace
@@ -160,7 +152,6 @@ TEST_F(TestTableAdapter, LoadFromBufferBasic)
 
     auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
-    EXPECT_EQ(adapter->type(), UhdAdapterType::TABLE);
     EXPECT_EQ(adapter->expectedFeatureCount(), 2U);
     EXPECT_EQ(adapter->getFeaturesHash(), TEST_HASH);
 }
@@ -237,8 +228,7 @@ TEST_F(TestTableAdapter, TheFeaturesHashCheckReportsAnError)
     EXPECT_EQ(TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH), nullptr);
     EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
         << recorder.getRecordedLogsAsString();
-    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0U)
-        << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0U) << recorder.getRecordedLogsAsString();
 }
 
 TEST_F(TestTableAdapter, TrainingArchDetection)
@@ -259,22 +249,6 @@ TEST_F(TestTableAdapter, TrainingArchDetection)
     EXPECT_TRUE(adapter->isTrainedForArch("gfx942:sramecc+:xnack-"));
     EXPECT_FALSE(adapter->isTrainedForArch("gfx1100"));
     EXPECT_FALSE(adapter->isTrainedForArch("gfx9420:sramecc+:xnack-"));
-}
-
-TEST_F(TestTableAdapter, ModelVersion)
-{
-    const std::string version = "v1.0.0-test";
-    auto buffer = TableModelBuilder()
-                      .setNumFeatures(1)
-                      .setFeaturesHash(TEST_HASH)
-                      .addBucket(0, {5.0})
-                      .addEntry({0}, 100, 1.0)
-                      .setModelVersion(version)
-                      .build();
-
-    auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
-    ASSERT_NE(adapter, nullptr);
-    EXPECT_EQ(adapter->getModelVersion(), version);
 }
 
 TEST_F(TestTableAdapter, MultipleBuckets)

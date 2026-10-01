@@ -16,16 +16,19 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/AdapterFactory.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/ScoreTransform.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/UhdConfig.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/UhdParser.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
@@ -67,20 +70,6 @@ inline std::optional<uhd::VariableContext::ValueType> toValueType(const Metadata
     return std::nullopt;
 }
 
-inline uhd::FeatureExtractionContext::ValueMap
-    deviceVarsFrom(const DeviceProperties& deviceProperties)
-{
-    // Through deviceFeatureValues, never a second list: the benchmark recorder writes
-    // the same names as `device.*` columns, and a vocabulary maintained twice drifts
-    // into a model trained on a column the runtime cannot bind.
-    uhd::FeatureExtractionContext::ValueMap vars;
-    for(const auto& entry : deviceFeatureValues(deviceProperties))
-    {
-        // entry.first, not a captured structured binding: those are C++20.
-        std::visit([&vars, &entry](auto held) { vars.emplace(entry.first, held); }, entry.second);
-    }
-    return vars;
-}
 inline void appendFeatureValue(uhd::FeatureExtractionContext::ValueMap& vars,
                                const std::string& name,
                                const MetadataValue& value)
@@ -106,6 +95,58 @@ inline uhd::FeatureExtractionContext::ValueMap queryVarsFrom(const BoundTokens& 
         appendFeatureValue(vars, name, value);
     }
     return vars;
+}
+
+/// True for a name in a namespace the engine publishes itself: `graph.*` and `device.*`
+/// (problemFeatures), `constraint.*` (engineFeatures) and `kernel.*` (kernel metadata).
+inline bool isReservedFeatureName(const std::string& name)
+{
+    const std::string_view bare
+        = !name.empty() && name.front() == '$' ? std::string_view(name).substr(1) : name;
+    for(const std::string_view reserved : {"graph.", "device.", "constraint.", "kernel."})
+    {
+        if(bare.substr(0, reserved.size()) == reserved)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// Binds what graph matching resolved, under the names the matchers published.
+///
+/// Matchers may add names but never overwrite a reserved one: a token spelled `graph.flops`
+/// would otherwise replace the canonical value, and a model trained on the work model would
+/// read whatever one pack's matcher happened to bind.
+inline void bindGraphMatchBindings(uhd::FeatureExtractionContext& features,
+                                   const BoundTokens& bound)
+{
+    for(const auto& entry : queryVarsFrom(bound))
+    {
+        if(!isReservedFeatureName(entry.first))
+        {
+            features.bind(entry.first, entry.second);
+        }
+    }
+}
+
+/// The problem half of every `sort_kernel_catalog` feature row: the canonical `graph.*` and
+/// `device.*` features (heuristics::problemFeatures) plus the graph-match bindings.
+///
+/// The one binding both sides use -- the live ranker, and the enumeration pages and sweep
+/// rows a ranker is trained on -- so a model reads at runtime exactly the name->value set it
+/// was fitted on. Kernel metadata is bound per candidate on top of it. No `constraint.*`: a
+/// ranked catalog is cached per CatalogKey (graph, device, engine version, metric), so its
+/// order must not depend on the configuration of whichever request first ranked it.
+///
+/// Computed once per graph per selection, page or sweep, never per candidate: the tensor
+/// and node features cost string building proportional to the graph.
+inline uhd::FeatureExtractionContext catalogProblemFeatures(const MatchContext& context,
+                                                            const BoundTokens& bound)
+{
+    auto features = heuristics::problemFeatures(context.graph, context.deviceProperties);
+    bindGraphMatchBindings(features, bound);
+    return features;
 }
 
 inline uhd::FeatureExtractionContext::ValueMap kernelVarsFrom(const KernelDefinition& kernel)
@@ -144,10 +185,10 @@ inline std::unordered_set<std::string> kernelAxesOf(const uhd::FeatureExtractor&
     std::unordered_set<std::string> axes;
     for(const auto& variable : extractor.getVariableRefs())
     {
-        constexpr std::string_view PREFIX = "$kernel.";
-        if(variable.rfind(PREFIX, 0) == 0)
+        // The declared field, not the indexed element: `$kernel.tile[0]` ranks on knob `tile`.
+        if(auto field = uhd::FeatureExtractor::kernelFieldOf(variable))
         {
-            axes.insert(variable.substr(PREFIX.size()));
+            axes.insert(std::move(*field));
         }
     }
     return axes;
@@ -215,21 +256,41 @@ public:
             // fields, which made the descriptor unreadable to save 134 bytes on a file
             // read once per engine.
             auto config = configFrom(descriptor);
+            // The loader refuses this before binding (resolveDescriptorSets); repeated where
+            // the ranker is built so a descriptor that reaches it another way cannot rank
+            // candidates through feature values that no longer mean what it was trained on.
+            if(const auto mismatch
+               = uhd::featureSemanticsMismatch(config.featuresSignature, config.trainedAgainst);
+               !mismatch.empty())
+            {
+                HIPDNN_PLUGIN_LOG_ERROR("uhd: " << describedBy << " " << mismatch
+                                                << "; the model is not used and kernels rank "
+                                                   "by priority, then id");
+                return nullptr;
+            }
             if(descriptor.adapter == UhdAdapter::STATIC_ORDER
                || (descriptor.adapter == UhdAdapter::NATIVE && config.featuresSignature.empty()))
             {
                 auto built
                     = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(describedBy));
-                built->_config = std::move(config);
+                built->_objectiveSign = objectiveSignOf(config.objective);
                 if(descriptor.adapter == UhdAdapter::STATIC_ORDER)
                 {
                     built->_direct = std::make_shared<UnrankedKernelHeuristic>();
                 }
                 else
                 {
-                    built->_direct = std::make_shared<NativeKernelHeuristic>(
-                        descriptor.nativeSymbol, describedBy);
+                    // The objective travels with the scorer: rankScored orders higher-first,
+                    // so a native cost scorer handed no objective ranks the slowest kernel
+                    // first.
+                    built->_direct
+                        = std::make_shared<NativeKernelHeuristic>(descriptor.nativeSymbol,
+                                                                  describedBy,
+                                                                  config.objective,
+                                                                  config.scoreTransform,
+                                                                  config.scoreMetric);
                 }
+                built->_config = std::move(config);
                 built->_hasDefaultModel = true;
                 return built;
             }
@@ -354,8 +415,8 @@ public:
             {
                 HIPDNN_PLUGIN_LOG_ERROR(
                     "uhd: " << describedBy << " model expects " << adapter->expectedFeatureCount()
-                            << " features, its signature "
-                            << "produces " << extractor->featureCount()
+                            << " features, its signature " << "produces "
+                            << extractor->featureCount()
                             << "; the model is not used and kernels rank by priority, then id");
                 return nullptr;
             }
@@ -391,7 +452,6 @@ public:
         config.scoreMetric = descriptor.score.metric;
         config.scoreCalibrated = descriptor.score.calibrated;
         config.scoreTransform = descriptor.score.transform;
-        config.staticOrderFields = descriptor.staticOrderFields;
         config.nativeSymbol = descriptor.nativeSymbol;
         config.customLibrarySymbol = descriptor.customLibrarySymbol;
         config.modelHash = descriptor.modelHash;
@@ -451,9 +511,7 @@ public:
         {
             return 0.0;
         }
-        uhd::FeatureExtractionContext ctx;
-        ctx.bindDeviceVars(detail::deviceVarsFrom(context.deviceProperties));
-        ctx.bindQueryVars(detail::queryVarsFrom(bound));
+        auto ctx = detail::catalogProblemFeatures(context, bound);
         ctx.bindKernelVars(detail::kernelVarsFrom(kernel));
         // The reported form: this entry point answers "what is this kernel worth", and
         // ranking does not go through it -- rankScored is overridden and uses both forms.
@@ -486,32 +544,26 @@ public:
                             : std::vector<ScoredKernel>{};
         }
         const auto* metric = hipdnn_data_sdk::utilities::findRankingMetric(context.rankingMetric);
-        if(!_hasDefaultModel || metric == nullptr || _config.scoreMetric != metric->name
-           || !_config.scoreCalibrated
-           || _config.objective != hipdnn_data_sdk::utilities::objectiveOf(*metric)
+        if(!_hasDefaultModel || metric == nullptr
+           || !answersCalibrated(_config.scoreMetric,
+                                 _config.scoreCalibrated,
+                                 _config.objective,
+                                 context.rankingMetric)
            || (!_direct
                && (!_adapter || !_extractor
                    || !_adapter->isTrainedForArch(context.deviceProperties.gcnArchName))))
         {
             return {};
         }
-        // A direct scorer is ordered higher-first by IKernelHeuristic::rankScored and never
-        // sees the objective, so its order is best-first only for a metric where higher wins.
-        if(_direct
-           && metric->direction != hipdnn_data_sdk::utilities::MetricDirection::HIGHER_IS_BETTER)
-        {
-            return {};
-        }
         auto ranking = rankWith(catalog, context);
         for(auto& candidate : ranking)
         {
-            // A model's reported score is oriented so higher wins; undoing the orientation
-            // recovers the physical value. 0 is the no-measurement sentinel either way, and
-            // stays +0 rather than becoming -0 under a `min` objective.
-            candidate.score = _direct ? uhd::score_transform::applyInverse(candidate.score,
-                                                                           _config.scoreTransform)
-                              : candidate.score == 0.0 ? 0.0
-                                                       : _objectiveSign * candidate.score;
+            // Every ranker here reports the recovered score oriented so higher wins -- a direct
+            // scorer inverts its transform itself -- so undoing the orientation recovers the
+            // physical value. A calibrated score names a metric, so it is physical and only a
+            // positive value was admitted: 0 is the no-measurement sentinel, and stays +0
+            // rather than becoming -0 under a `min` objective.
+            candidate.score = candidate.score == 0.0 ? 0.0 : _objectiveSign * candidate.score;
         }
         // Degraded rankings use zero sentinels, never available physical estimates.
         if(ranking.empty() || ranking.front().score == 0.0
@@ -624,8 +676,8 @@ public:
         // added without it, so a selection that fell through for want of an architecture was
         // the one degradation the trace could not account for.
         HIPDNN_PLUGIN_LOG_INFO("uhd trace: " << _describedBy << " decided_by=declared_order"
-                                             << " reason=no_model_for_arch"
-                                             << " metric=" << metric << " arch=" << arch
+                                             << " reason=no_model_for_arch" << " metric=" << metric
+                                             << " arch=" << arch
                                              << " candidates=" << catalog.entries.size());
         return detail::asScored(detail::declaredOrder(catalog.entries));
     }
@@ -638,46 +690,8 @@ public:
     std::shared_ptr<const UhdKernelHeuristic> resolveFor(const std::string& metric,
                                                          const std::string& arch) const
     {
-        static const std::set<std::string> NONE_UNAVAILABLE;
-        const auto refusedIt = _unavailable.find(metric);
-        const auto& refused
-            = refusedIt == _unavailable.end() ? NONE_UNAVAILABLE : refusedIt->second;
-        for(const auto& unavailable : refused)
-        {
-            if(unavailable != "default" && archMatches(arch, unavailable, ArchMatchMode::PREFIX))
-            {
-                return nullptr;
-            }
-        }
-        const auto models = _byMetric.find(metric);
-        if(models == _byMetric.end())
-        {
-            return nullptr;
-        }
-        const HeuristicDescriptor* chosen = nullptr;
         std::string key;
-        for(const auto& [candidate, descriptor] : models->second)
-        {
-            if(candidate != "default" && archMatches(arch, candidate, ArchMatchMode::PREFIX)
-               && candidate.size() > key.size())
-            {
-                chosen = &descriptor;
-                key = candidate;
-            }
-        }
-        if(chosen == nullptr)
-        {
-            if(refused.count("default") != 0)
-            {
-                return nullptr;
-            }
-            if(const auto fallback = models->second.find("default");
-               fallback != models->second.end())
-            {
-                chosen = &fallback->second;
-                key = "default";
-            }
-        }
+        const auto* chosen = boundFor(metric, arch, key);
         if(chosen == nullptr)
         {
             return nullptr;
@@ -703,7 +717,95 @@ public:
         return loaded;
     }
 
+    /// @brief The id of the model calibratedRanking() answers with for @p metric on @p arch,
+    ///        read off what is bound: no model is loaded and nothing is ranked.
+    ///
+    /// What a CONFIGURATION prediction description names. Describing is how a caller
+    /// discovers which predictions an engine can make, one query per (kind, metric), so it
+    /// must cost no model load and no catalog ranking. Artifact coverage is not checked, as
+    /// L1's description does not check it: that needs the artifact, and evaluation reports it.
+    std::string calibratedModelId(const std::string& metric, const std::string& arch) const override
+    {
+        if(isResolver())
+        {
+            std::string key;
+            const auto* bound = boundFor(metric, arch, key);
+            if(bound == nullptr
+               || !answersCalibrated(
+                   bound->score.metric, bound->score.calibrated, bound->objective, metric))
+            {
+                return {};
+            }
+            return toString(bound->id);
+        }
+        if(!_hasDefaultModel
+           || !answersCalibrated(
+               _config.scoreMetric, _config.scoreCalibrated, _config.objective, metric))
+        {
+            return {};
+        }
+        return _config.uhdId;
+    }
+
 private:
+    /// The descriptor @p metric's own entries bind for @p arch, and its arch key, or null.
+    /// RFC 0019 §3.1's arch fallback stays inside the metric, and a refused entry -- exact or
+    /// `default` -- never falls through to a model it would have shadowed.
+    const HeuristicDescriptor*
+        boundFor(const std::string& metric, const std::string& arch, std::string& key) const
+    {
+        static const std::set<std::string> s_noneUnavailable;
+        const auto refusedIt = _unavailable.find(metric);
+        const auto& refused
+            = refusedIt == _unavailable.end() ? s_noneUnavailable : refusedIt->second;
+        for(const auto& unavailable : refused)
+        {
+            if(unavailable != "default" && archMatches(arch, unavailable, ArchMatchMode::PREFIX))
+            {
+                return nullptr;
+            }
+        }
+        const auto models = _byMetric.find(metric);
+        if(models == _byMetric.end())
+        {
+            return nullptr;
+        }
+        const HeuristicDescriptor* chosen = nullptr;
+        key.clear();
+        for(const auto& [candidate, descriptor] : models->second)
+        {
+            if(candidate != "default" && archMatches(arch, candidate, ArchMatchMode::PREFIX)
+               && candidate.size() > key.size())
+            {
+                chosen = &descriptor;
+                key = candidate;
+            }
+        }
+        if(chosen == nullptr && refused.count("default") == 0)
+        {
+            if(const auto fallback = models->second.find("default");
+               fallback != models->second.end())
+            {
+                chosen = &fallback->second;
+                key = "default";
+            }
+        }
+        return chosen;
+    }
+
+    /// Whether a model declaring this score answers calibratedRanking() in @p metric: it
+    /// estimates exactly that registered metric (RFC 0019 §11.4 -- no substitution), is
+    /// calibrated, and orders in the metric's own direction.
+    static bool answersCalibrated(const std::string& scoreMetric,
+                                  bool calibrated,
+                                  const std::string& objective,
+                                  std::string_view metric)
+    {
+        const auto* registered = hipdnn_data_sdk::utilities::findRankingMetric(metric);
+        return registered != nullptr && calibrated && scoreMetric == registered->name
+               && objective == hipdnn_data_sdk::utilities::objectiveOf(*registered);
+    }
+
     /// Which ranker decides a kernel choice, and why -- the answer §11.4 asks the trace for.
     struct RankerChoice
     {
@@ -777,10 +879,6 @@ private:
         }
         try
         {
-            uhd::FeatureExtractionContext ctx;
-            ctx.bindDeviceVars(detail::deviceVarsFrom(context.deviceProperties));
-            ctx.bindQueryVars(detail::queryVarsFrom(catalog.bound));
-
             if(!_adapter->isTrainedForArch(context.deviceProperties.gcnArchName))
             {
                 // A warning, not a refusal: RFC 0019 §9.3 treats an unseen architecture as
@@ -791,11 +889,13 @@ private:
             }
 
             // RFC 0019 §6 step 2: the problem and device slots are the same for every
-            // candidate, so they are evaluated once and the kernel slots overwritten.
-            // §9.4 asks for the two halves to be timed apart, because the prefix is paid
-            // once per graph while the tail is the O(N) term the RFC calls "the main lever
-            // on selection cost" -- one aggregate number cannot tell them apart.
+            // candidate, so they are bound and evaluated once and the kernel slots
+            // overwritten. §9.4 asks for the two halves to be timed apart, because the
+            // prefix is paid once per graph while the tail is the O(N) term the RFC calls
+            // "the main lever on selection cost" -- one aggregate number cannot tell them
+            // apart. Binding the graph features is part of the prefix, so it is timed in it.
             const auto prefixStart = Clock::now();
+            auto ctx = detail::catalogProblemFeatures(context, catalog.bound);
             auto features = _extractor->prepare(ctx);
             _timing.prefixNs.fetch_add(elapsedNs(prefixStart), std::memory_order_relaxed);
             _timing.selections.fetch_add(1, std::memory_order_relaxed);
@@ -915,13 +1015,12 @@ private:
             // synonym. A degraded ranking is a degraded ranking however it got there; `reason`
             // carries the difference. Two spellings for one condition is what makes a trace
             // unassertable, and unassertable observability is the thing §12 is trying to avoid.
-            HIPDNN_PLUGIN_LOG_INFO("uhd trace: " << _describedBy << " decided_by=declared_order"
-                                                 << " reason=ranking_failed"
-                                                 << " metric=" << context.rankingMetric
-                                                 << " candidates=" << catalog.entries.size()
-                                                 << " uhd=" << _config.uhdId
-                                                 << " adapter=" << _config.adapterType
-                                                 << " features_hash=" << _config.featuresHash);
+            HIPDNN_PLUGIN_LOG_INFO(
+                "uhd trace: " << _describedBy << " decided_by=declared_order"
+                              << " reason=ranking_failed" << " metric=" << context.rankingMetric
+                              << " candidates=" << catalog.entries.size()
+                              << " uhd=" << _config.uhdId << " adapter=" << _config.adapterType
+                              << " features_hash=" << _config.featuresHash);
             // Declared order carries no model score. It reports 0 -- RFC 0019 §5 step 7's
             // value for "no measurement" -- so a degraded ranking and a model that scored zero
             // describe themselves the same way, which is what lets calibratedRanking apply one
@@ -934,10 +1033,9 @@ private:
     /// and whether the model or a fallback decided -- plus the model provenance that says
     /// which model produced them.
     ///
-    /// Logged rather than returned. The removed backend implementation kept an in-memory trace
-    /// map with a retrieval path that had no public API, so nothing outside its own test could
-    /// read it; a log line is what an operator can actually see, and §12 exists so selection is
-    /// inspectable rather than queryable.
+    /// Logged rather than returned: the heuristic plugin ABI has no trace-retrieval entry
+    /// point, so a log line is what an operator can actually see, and §12 exists so selection
+    /// is inspectable rather than queryable.
     ///
     /// At INFO because it is per-graph and verbose: a build ranking thousands of graphs should
     /// not pay for it by default, and §12's error-level requirements are the contract
@@ -1016,12 +1114,19 @@ private:
         : _config(std::move(config))
         , _adapter(std::move(adapter))
         , _extractor(std::move(extractor))
-        // rank() sorts descending, so a model predicting a cost rather than a rate has to
-        // be negated. Omitting this silently inverts every latency-trained UHD.
-        , _objectiveSign(_config.objective == "min" ? -1.0 : 1.0)
+        , _objectiveSign(objectiveSignOf(_config.objective))
+        , _positiveRequired(
+              uhd::score_transform::isPhysicalScore(_config.scoreMetric, _config.scoreTransform))
         , _describedBy(std::move(describedBy))
         , _hasDefaultModel(true)
     {
+    }
+
+    /// rank() sorts descending, so a ranker predicting a cost rather than a rate has to be
+    /// negated. Omitting this silently inverts every latency-trained UHD.
+    static double objectiveSignOf(const std::string& objective)
+    {
+        return objective == "min" ? -1.0 : 1.0;
     }
 
     /// The model's score, returned to its metric's units and oriented so higher always wins,
@@ -1050,12 +1155,14 @@ private:
     {
         const double recovered = uhd::score_transform::applyInverse(raw, _config.scoreTransform);
 
-        // `recovered` is a physical quantity before any orientation is applied: throughput for
-        // a calibrated model, and a cost -- a time -- for the `min` targets §15.1 permits.
-        // RFC 0019 §8.3 accepts only a finite, strictly positive value as a prediction. A
-        // negative value is the model predicting outside the range it was fitted to, and a
-        // zero is no measurement at all: under `objective: min` a zero cost would outrank every
-        // real candidate. Both are refused whatever the model declares.
+        // `recovered` is the model's own quantity before any orientation is applied. RFC 0019
+        // §8.3 accepts it only finite, and -- when it is physical (score_transform's
+        // isPhysicalScore: a declared metric, or a transform only a positive target admits)
+        // -- strictly positive.
+        // A negative throughput or time is the model predicting outside the range it was
+        // fitted to, and a zero is no measurement at all: under `objective: min` a zero cost
+        // would outrank every real candidate. A metric-less `identity` or `exp` ranker scores
+        // on an ordering scale of its own, where zero and negatives are ordinary.
         //
         // Only some transforms make it loud. log's inverse yields NaN, but log1p's yields a
         // finite negative, and log1p is what uhd_gen emits by default -- so the most common
@@ -1063,7 +1170,7 @@ private:
         //
         // Bounded here rather than in the adapter because this is the only layer that knows
         // what the number means: TreeDataAdapter sums leaves and has no transform and no units.
-        if(!std::isfinite(recovered) || recovered <= 0.0)
+        if(!uhd::score_transform::isRankableScore(recovered, _positiveRequired))
         {
             // Not reported here. One ranking can trip this for a single candidate or for all
             // of them, and those mean different things -- a bad extrapolation versus a model
@@ -1076,8 +1183,8 @@ private:
         // Orientation is applied only to a value that survived the range check, which is what
         // keeps the two ideas apart. A negative *oriented* score is ordinary -- `objective: min`
         // negates a cost, so every real candidate scores below zero -- while a negative
-        // *recovered* value is never meaningful. Reporting 0 as the ordering key would have
-        // made an unmeasured candidate outrank every measured one under that objective.
+        // *recovered* physical value is never meaningful. Reporting 0 as the ordering key would
+        // have made an unmeasured candidate outrank every measured one under that objective.
         const double oriented = _objectiveSign * recovered;
         return {oriented, oriented};
     }
@@ -1160,6 +1267,8 @@ private:
     std::shared_ptr<const uhd::IUhdAdapter> _adapter;
     std::shared_ptr<const uhd::FeatureExtractor> _extractor;
     double _objectiveSign = 1.0;
+    /// Whether §8.3 requires this model's recovered score to be positive as well as finite.
+    bool _positiveRequired = true;
 
     /// Set the first time an out-of-range score is reported. Mutable and atomic because
     /// ranking runs through a shared_ptr<const> from any thread.

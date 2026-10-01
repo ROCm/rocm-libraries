@@ -3,18 +3,28 @@
 #SBATCH --output=%x-%j.log
 #
 # Validation, not generation: does every engine that serves a graph report an L1
-# number on it? Builds the integration branch, lists the engines it ships, and for
+# number on it? Builds UHD_BRANCH, lists the engines it ships, and for
 # each graph asks every engine for an engine-kind prediction. The interesting rows
 # are the graphs several engines answer for -- those are the ones they compete on.
 #
 # No model is installed by this job. Before an L1 model exists the honest answer is
 # UNAVAILABLE with a reason, and this run is what proves the plumbing reaches that
 # answer for every engine rather than failing or staying silent.
+#
+# Partition, account and GPU constraint are passed at submission (reproduce/README.md,
+# "What every job needs").
 set -uo pipefail
 
-BRANCH=${UHD_BRANCH:-users/jascampb/uhd-integration-test-branch}
+BRANCH=${UHD_BRANCH:?set UHD_BRANCH to the rocm-libraries branch to build}
 CORPUS=${UHD_CORPUS:-/exchange/corpus-small}
 SRC=/tmp/uhd/src
+# The descriptor root the provider packs as `product`. Unset keeps the provider's own
+# default, the shipped root (src/engines/kernel_ingestor_engine/descriptors) that carries
+# hipkernel:Gfx950AttentionDense; UHD_PRODUCTION_ROOT=<path relative to the checkout>
+# packs another tree instead, e.g. the descriptor-packaging examples fixture tree.
+PRODUCTION_ROOT_ARGS=()
+[ -n "${UHD_PRODUCTION_ROOT:-}" ] && \
+    PRODUCTION_ROOT_ARGS=(-DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$SRC/$UHD_PRODUCTION_ROOT")
 BUILD=/tmp/uhd/build
 OUT=/tmp/uhd/out
 step() { echo; echo "===== $* ====="; date -Is; }
@@ -34,7 +44,7 @@ if ! command -v cmake >/dev/null || ! command -v ninja >/dev/null; then
     export PATH="$PATH:$(python3 -m site --user-base)/bin"
 fi
 python3 -m pip install --quiet --break-system-packages "zstandard>=0.20.0" msgpack \
-    lightgbm pandas "scikit-learn>=1.3.0" flatbuffers numpy pyarrow 2>&1 | tail -1
+    lightgbm pandas "scikit-learn>=1.3.0" flatbuffers numpy pyarrow pytest 2>&1 | tail -1
 for c in git cmake ninja hipcc python3; do
     printf '%-8s ' "$c"; command -v "$c" >/dev/null && "$c" --version 2>&1 | head -1 || echo MISSING
 done
@@ -43,16 +53,15 @@ step "source: $BRANCH"
 rm -rf /tmp/uhd; mkdir -p /tmp/uhd
 # --depth 200, not 1: a bundle carries commits relative to a base, and a one-commit
 # clone has no ancestor for it to apply against ("Repository lacks these prerequisite
-# commits", run 67933122, on a node whose mirror was current rather than stale).
+# commits"), even on a node whose mirror is current rather than stale.
 GIT_LFS_SKIP_SMUDGE=1 git clone --depth 200 --single-branch --branch "$BRANCH" \
     https://github.com/ROCm/rocm-libraries.git "$SRC" > /tmp/uhd/clone.log 2>&1 \
     || { echo "FATAL: clone failed"; tail -5 /tmp/uhd/clone.log; exit 1; }
 if [ -n "${UHD_BUNDLE:-}" ]; then
     # The compute sites do not all resolve github.com to the same mirror: a node can clone a
-    # branch tip hours behind the one `git ls-remote` reports from the login node (measured:
-    # runs 67930607/67930689 built a655f903 while the ref was aeed8422). A bundle carries the
-    # exact commits from the machine that pushed them, so verification cannot silently test
-    # a different tree than the one under review.
+    # branch tip hours behind the one `git ls-remote` reports from the login node. A bundle
+    # carries the exact commits from the machine that pushed them, so verification cannot
+    # silently test a different tree than the one under review.
     # `git bundle create <file> <base>..HEAD` names its tip HEAD, not a branch ref, so the
     # fetch asks for exactly that and checks out FETCH_HEAD.
     git -C "$SRC" fetch "$UHD_BUNDLE" "${UHD_COMMIT:-HEAD}" >> /tmp/uhd/clone.log 2>&1 \
@@ -69,9 +78,9 @@ cmake -S "$SRC" -B "$BUILD" -G Ninja \
     -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ \
     -DROCM_LIBS_ENABLE_COMPONENTS="hipdnn;hipdnn-integration-tests;hip-kernel-provider" \
     -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPDNN_ENABLE_SDPA=ON \
-    -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON -DHIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE=ON \
+    -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
     -DHIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON \
-    -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$SRC/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors" \
+    "${PRODUCTION_ROOT_ARGS[@]}" \
     -DGPU_TARGETS="${UHD_GPU_TARGETS:-gfx942}" -DCMAKE_HIP_ARCHITECTURES="${UHD_GPU_TARGETS:-gfx942}" \
     -DENABLE_CLANG_FORMAT=OFF -DENABLE_CLANG_TIDY=OFF > /tmp/uhd/configure.log 2>&1
 echo "configure rc=$?"
@@ -80,10 +89,9 @@ grep -B2 -A10 "CMake Error" /tmp/uhd/configure.log | head -30 || tail -3 /tmp/uh
 step "build"
 # Build ALL, not a target list. Every descriptor that reaches an engine is staged by an
 # `add_custom_target(... ALL)`: hip_kernel_provider_descriptors for the in-tree packs,
-# hkp_descriptor_staging and hkp_packaging_* for the rocKE production packs. Run 67928117
-# named an explicit target list, skipped all of them, and registered only the two
-# hand-written engines; run 67928437 added one of the three and still missed the rocKE
-# attention packs. A full build is ~10 minutes and cannot miss a staging step.
+# hkp_descriptor_staging and hkp_packaging_* for the rocKE production packs. An explicit
+# target list skips them and registers only the hand-written engines, and naming some of
+# them still misses the rest; a full build cannot miss a staging step.
 cmake --build "$BUILD" -j "$(nproc)" > /tmp/uhd/build.log 2>&1
 BLD=$?; echo "build rc=$BLD"
 if [ "$BLD" -ne 0 ]; then
@@ -125,7 +133,7 @@ for graph in graphs:
         proc = subprocess.run(command, capture_output=True, text=True, timeout=600)
         row = {"graph": graph.stem, "engine": name, "rc": proc.returncode}
         # Keep the tool's own words whatever happens: a declining engine exits non-zero and
-        # says why on stderr, and run 67928117 threw that away because a JSON line existed.
+        # says why on stderr, which is lost if only the JSON line is kept.
         tail = [line for line in (proc.stdout + "\n" + proc.stderr).splitlines()
                 if line.strip() and not line.startswith("{") and "HIP Library Path" not in line]
         row["output"] = tail[-1][:200] if tail else ""

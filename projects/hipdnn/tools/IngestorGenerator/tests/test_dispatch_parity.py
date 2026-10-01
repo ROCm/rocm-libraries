@@ -1,608 +1,442 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Stage-1 parity: the set the dispatcher itself would resolve.
+"""What `dispatch_parity.py` reports, and what it refuses to report.
 
-The defect this tool exists to prevent is not a crash. A field the dispatcher
-DERIVES from the request reads like an ordinary local variable, so a human
-transcribing "the constants" copies the constants and misses the rule. The
-descriptor then takes the dataclass default, which was the OPPOSITE of the
-dispatcher's answer on most of a shipped set, and nothing failed: descriptors
-validated, the desk check was clean, correctness passed on device. The only
-symptom was a performance number, misattributed three times before the cause was
-found.
+A shape that is not served has exactly ONE per-shape explanation: the eligibility
+predicate ran, returned false, and gave a reason. Spec construction failing aborts the
+command instead, because a corpus the request class cannot hydrate makes every
+remaining count untrustworthy, and a `rejected` bucket that can only print 0 claims a
+failure was checked for. The dispatcher, request class and predicate are stubs.
 
-So the assertions here are about AGREEMENT WITH A RULE, not about a tool running.
-The central one recomputes `work >= num_persistent` independently and requires
-every emitted descriptor to match it -- if the tool ever silently reverts to a
-default, that test fails and no other one would.
-
-These run against the real rocKE dispatcher and skip cleanly when it is not
-importable, because the thing under test IS "we asked the library". A mocked
-dispatcher would assert that the mock was called.
+Also what the tool BINDS before it can report anything: where a profile's
+``provider_root`` resolves from, and which dispatch arm the shipped profile pins.
 """
 
 from __future__ import annotations
 
 import json
-import subprocess
+import os
 import sys
 from pathlib import Path
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+
+import dispatch_parity  # noqa: E402
+import launch_surface  # noqa: E402
+
 _TOOLS = Path(__file__).resolve().parents[1] / "tools"
-_PARITY = _TOOLS / "dispatch_parity.py"
-_GATE = _TOOLS / "verify_variant_sets.py"
-_GENERATE = _TOOLS.parent / "generate.py"
-_PROFILE = _TOOLS.parent / "configs" / "gfx942_attention_dense.profile.yaml"
-_REPO_ROOT = Path(__file__).resolve().parents[5]
-
-_BLOCK_M = 256  # baked; the kernel faults at other values
-
-
-def _rocke_importable() -> bool:
-    provider = _REPO_ROOT / "dnn-providers/hip-kernel-provider"
-    return (provider / "rocke/library/dispatch/attention/gfx942.py").exists()
-
-
-pytestmark = pytest.mark.skipif(
-    not _rocke_importable(),
-    reason="rocKE library not present; stage-1 parity asks the real dispatcher",
+_SHIPPED_PROFILE = (
+    Path(__file__).resolve().parents[1]
+    / "configs"
+    / "gfx950_attention_dense.profile.yaml"
 )
 
-
-def _shapes() -> list[dict]:
-    """A corpus spanning both sides of the persistent threshold."""
-    out = []
-    for batch in (1, 2):
-        for heads_q, heads_kv in ((32, 8), (16, 16)):
-            for seqlen in (512, 4096):
-                for head_size in (64, 128):
-                    for mask in (0, 1):
-                        out.append(
-                            {
-                                "batch": batch,
-                                "nhead_q": heads_q,
-                                "nhead_k": heads_kv,
-                                "seqlen_q": seqlen,
-                                "seqlen_k": seqlen,
-                                "hdim_q": head_size,
-                                "hdim_v": head_size,
-                                "dtype": "bf16",
-                                "mask_type": mask,
-                            }
-                        )
-    return out
+#: The decline carries a real reason rather than a blanket refusal so the served
+#: control survives alongside it.
+_STUB_PROVIDER = '''
+import dataclasses
 
 
-def _emitted_kernels(config_path) -> list[dict]:
-    """The kernels an emitted config stands for, as plain dicts.
-
-    Read through the config loader rather than off the YAML, because the tool emits
-    the COMPACT `variants` form -- a shape list crossed with named knob sets -- and
-    what these tests are about is the variant set that reaches a descriptor, not the
-    syntax it was written in. Expanding through the loader is also the only reading
-    that stays honest if the compact form ever gains a feature: a test that parsed
-    the YAML itself would quietly stop seeing some of the kernels.
-    """
-    sys.path.insert(0, str(_TOOLS.parent))
-    from codegen.config_loader import load_config
-
-    return [
-        {
-            "name": kernel.name,
-            "metadata": dict(kernel.metadata),
-            "kernel_source": {"spec": dict(kernel.kernel_source.spec)},
-        }
-        for kernel in load_config(config_path).packs[0].kernels
-    ]
+@dataclasses.dataclass
+class Request:
+    seqlen_q: int
+    head_size: int = 128
 
 
-@pytest.fixture(scope="module")
-def parity(tmp_path_factory):
-    """Run the tool once; every test reads the same emitted config."""
-    work = tmp_path_factory.mktemp("parity")
-    shapes = work / "shapes.json"
-    shapes.write_text(json.dumps(_shapes()))
-    config = work / "parity.yaml"
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(_PARITY),
-            "--profile",
-            str(_PROFILE),
-            "--shapes",
-            str(shapes),
-            "--out",
-            str(config),
-            "--report-knobs",
-        ],
-        cwd=_REPO_ROOT,
-        capture_output=True,
-        text=True,
+@dataclasses.dataclass
+class Spec:
+    seqlen_q: int
+    head_size: int
+    block_n: int
+
+
+def resolve(request):
+    """Derive a field rather than defaulting it, as a real dispatcher would."""
+    return Spec(
+        seqlen_q=request.seqlen_q,
+        head_size=request.head_size,
+        block_n=64 if request.seqlen_q >= 1024 else 32,
     )
-    if result.returncode != 0:
-        pytest.skip(f"dispatcher unavailable: {result.stderr.strip()[:200]}")
-    import yaml
 
-    return {
-        "work": work,
-        "stdout": result.stdout,
-        "config_path": config,
-        "config": yaml.safe_load(config.read_text()),
-        "kernels": _emitted_kernels(config),
-        "n_shapes": len(_shapes()),
+
+def resolve_but_raise(request):
+    """A dispatcher that fails operationally once the per-shape loop calls it.
+
+    The message names the request it was handed, so a test can tell "the factory
+    ran and threw" apart from "the factory was never reached".
+    """
+    raise ValueError(f"dispatcher exploded on seqlen_q {request.seqlen_q}")
+
+
+def supports(spec, arch=None):
+    if spec.seqlen_q == 777:
+        return False, "seqlen_q 777 is not a supported prefill length"
+    return True, ""
+'''
+
+
+@pytest.fixture
+def parity(tmp_path, monkeypatch):
+    """A profile, a corpus and a provider root the tool can bind. Returns a callable
+    over the shape list, so each test states its own corpus."""
+    library = tmp_path / "provider" / "rocke" / "library"
+    library.mkdir(parents=True)
+    (tmp_path / "provider" / "rocke" / "platform" / "python").mkdir(parents=True)
+    (library / "stub_provider.py").write_text(_STUB_PROVIDER)
+    # The tool inserts the provider dirs itself; popping the module keeps one test's
+    # import from satisfying the next one's from a stale sys.modules entry.
+    monkeypatch.delitem(sys.modules, "stub_provider", raising=False)
+
+    profile = {
+        "slug": "stub_attention",
+        "source": "kernels/stub.py",
+        "builder": "build_stub",
+        "engine": {"name": "stub:Engine"},
+        "kmd_fields": [{"name": "seqlen_q", "type": "int", "default_value": 256}],
+        "provider_root": str(tmp_path / "provider"),
+        "dispatch": {"module": "stub_provider", "function": "resolve"},
+        "request": {"module": "stub_provider", "class": "Request"},
+        "predicate": {"module": "stub_provider", "function": "supports"},
     }
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(json.dumps(profile))
 
-
-class TestDerivedFieldsSurvive:
-    """The rule must be applied, not the default taken."""
-
-    def test_persistent_matches_the_dispatchers_own_rule(self, parity):
-        """Recomputed independently: nqb * Hq * B >= num_persistent.
-
-        This is the assertion the whole tool exists for. Transcribing constants by
-        hand got this backwards on most of a shipped set while every gate stayed
-        green.
-        """
-        kernels = parity["kernels"]
-        assert kernels, "no kernels emitted"
-        disagreed = []
-        for kernel in kernels:
-            spec = kernel["kernel_source"]["spec"]
-            nqb = -(-int(spec["seqlen_q"]) // _BLOCK_M)
-            work = nqb * int(spec["num_query_heads"]) * int(spec["batch"])
-            expected = work >= int(spec["num_persistent"])
-            if bool(spec["persistent"]) != expected:
-                disagreed.append(kernel["name"])
-        assert not disagreed, (
-            f"{len(disagreed)} descriptors disagree with the dispatcher's own "
-            f"persistent rule, e.g. {disagreed[0]}"
-        )
-
-    def test_both_sides_of_the_persistent_rule_are_present(self, parity):
-        """Otherwise the test above passes on a constant."""
-        values = {
-            bool(k["kernel_source"]["spec"]["persistent"]) for k in parity["kernels"]
-        }
-        assert values == {True, False}, (
-            "corpus must straddle the persistent threshold or the rule check is "
-            "vacuous"
-        )
-
-    def test_num_persistent_is_the_arch_value_not_the_shared_default(self, parity):
-        """304 is gfx942's CU count; the shared dataclass default 256 is gfx950's."""
-        values = {
-            int(k["kernel_source"]["spec"]["num_persistent"]) for k in parity["kernels"]
-        }
-        assert values == {304}, f"expected the gfx942 CU count, got {values}"
-
-    def test_waves_per_eu_comes_from_the_kernels_policy(self, parity):
-        """Policy-resolved per (head_size, dtype), so it must not be one value."""
-        values = {
-            int(k["kernel_source"]["spec"]["waves_per_eu"]) for k in parity["kernels"]
-        }
-        assert len(values) > 1, (
-            f"waves_per_eu is policy-owned and varies by head_size; got {values} -- "
-            f"a single value means it was defaulted, not resolved"
-        )
-
-
-class TestMetadataDescribesTheBinary:
-    def test_dtype_is_written_in_the_matchers_vocabulary(self, parity):
-        """The spec says bf16; the matcher compares BF16."""
-        for kernel in parity["kernels"]:
-            assert kernel["metadata"]["dtype"] in ("BF16", "FP16")
-            assert kernel["kernel_source"]["spec"]["dtype"] in ("bf16", "fp16")
-
-    def test_a_policy_owned_tristate_is_resolved_not_omitted(self, parity):
-        """`use_exp2_fast` is absent from the dispatcher's shared spec, but the
-        binary still has a definite setting, so metadata must state it."""
-        values = {k["metadata"].get("use_exp2_fast") for k in parity["kernels"]}
-        assert None not in values, "a policy knob was left for the KMD default"
-        assert values <= {0, 1}, f"unresolved or bogus values: {values}"
-        assert len(values) > 1, (
-            "the policy is seqlen-dependent; one value across a corpus that spans "
-            "the threshold means it was pinned rather than asked"
-        )
-
-    def test_every_emitted_kernel_name_is_distinct(self, parity):
-        """Colliding names are not caught anywhere downstream.
-
-        The config loader checks PACK name uniqueness, not kernel names, and
-        de-duplication keys on metadata rather than name -- so two variants sharing a
-        name ship as separate descriptors that cannot be told apart in a log, a
-        winner record, or a failure message.
-        """
-        names = [k["name"] for k in parity["kernels"]]
-        assert len(names) == len(set(names)), "emitted kernel names collide"
-
-
-class TestNamingIsOpAgnostic:
-    """The tool must not assume attention's field names.
-
-    The first version abbreviated a hardcoded list of them. On any other op it found
-    none, and every variant collapsed onto one string -- two distinct conv variants
-    both named `conv_fwd_dtfp16`, silently. This is a unit test rather than a
-    pipeline one because the whole point is a kernel this repo's dispatcher does not
-    serve.
-    """
-
-    def _name(self, slug, spec, index):
-        import sys
-
-        sys.path.insert(0, str(_TOOLS))
-        from dispatch_parity import _kernel_name
-
-        return _kernel_name(slug, spec, index)
-
-    def test_a_conv_shaped_spec_names_its_variants_apart(self):
-        import dataclasses
-
-        @dataclasses.dataclass
-        class ConvSpec:
-            n: int
-            c: int
-            h: int
-            w: int
-            k: int
-            dtype: str
-
-        specs = [
-            ConvSpec(1, 64, 56, 56, 64, "fp16"),
-            ConvSpec(1, 128, 28, 28, 128, "fp16"),
-        ]
-        names = [self._name("conv_fwd", s, i) for i, s in enumerate(specs)]
-        assert len(set(names)) == len(names), f"conv names collide: {names}"
-        assert (
-            "c64" in names[0] and "c128" in names[1]
-        ), "the name must carry the fields that actually vary"
-
-    def test_two_specs_differing_only_in_a_bool_are_named_apart(self):
-        """A flag reads as present-or-absent, not as 0/1, but must still separate."""
-        import dataclasses
-
-        @dataclasses.dataclass
-        class FlagSpec:
-            size: int
-            fused: bool
-
-        names = [
-            self._name("op", FlagSpec(64, True), 0),
-            self._name("op", FlagSpec(64, False), 1),
-        ]
-        assert names[0] != names[1]
-
-    def test_a_non_dataclass_spec_still_yields_a_unique_name(self):
-        """Degenerate input must not produce a collision either."""
-
-        class Opaque:
-            pass
-
-        names = [self._name("op", Opaque(), i) for i in range(3)]
-        assert len(set(names)) == 3
-
-
-class TestKnobPartition:
-    def test_constant_knobs_are_named_as_non_axes(self, parity):
-        """The mechanical form of "which knobs may be exposed"."""
-        assert "CONSTANT -- shipped values, NOT tuning axes" in parity["stdout"]
-        for knob in ("block_n", "lazy_rescale", "interleave"):
-            assert knob in parity["stdout"]
-
-    def test_shape_fields_and_the_two_real_axes_vary(self, parity):
-        varies = parity["stdout"].split("VARIES", 1)[1].split("CONSTANT", 1)[0]
-        for knob in ("waves_per_eu", "persistent", "seqlen_q", "head_size"):
-            assert knob in varies, f"{knob} should vary across dispatch decisions"
-
-
-class TestEndToEnd:
-    def test_the_emitted_config_generates_and_passes_the_gate(self, parity):
-        """The one that matters: parity -> generate -> gate, no hand editing.
-
-        Stage 1 claims to be ONE command's worth of work. If the emitted config
-        needs a human to finish it before the generator will read it, that claim is
-        false, and this catches it.
-        """
-        bundle = parity["work"] / "bundle"
-        generated = subprocess.run(
-            [
-                sys.executable,
-                str(_GENERATE),
-                "--config",
-                str(parity["config_path"]),
-                "--output-dir",
-                str(bundle),
-            ],
-            cwd=_GENERATE.parent,
-            capture_output=True,
-            text=True,
-        )
-        assert generated.returncode == 0, generated.stdout + generated.stderr
-
-        gated = subprocess.run(
-            [sys.executable, str(_GATE), "--mode", "structural", "A", str(bundle),
-             "--profile", str(_PROFILE)],
-            cwd=_REPO_ROOT,
-            capture_output=True,
-            text=True,
-        )
-        assert gated.returncode == 0, gated.stdout + gated.stderr
-        assert "GATE PASSED" in gated.stdout
-        # Structural mode reads no compiled evidence, so it always reports that one
-        # check as not run; anything else not checked is the profile narrowing it.
-        narrowed = [
-            line
-            for line in gated.stdout.splitlines()
-            if "NOT CHECKED" in line and "COMPILED SPECIALIZATION AGREEMENT" not in line
-        ]
-        assert (
-            not narrowed
-        ), "the parity profile must satisfy every gate property, not narrow the gate"
-
-
-def _run_parity(work, *extra, name="out.yaml"):
-    shapes = work / "shapes.json"
-    if not shapes.exists():
-        shapes.write_text(json.dumps(_shapes()))
-    out = work / name
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(_PARITY),
+    def argv(shapes: list, *extra: str) -> list:
+        shapes_path = tmp_path / "shapes.json"
+        shapes_path.write_text(json.dumps(shapes))
+        return [
             "--profile",
-            str(_PROFILE),
+            str(profile_path),
             "--shapes",
-            str(shapes),
-            "--out",
-            str(out),
+            str(shapes_path),
             *extra,
-        ],
-        cwd=_REPO_ROOT,
-        capture_output=True,
-        text=True,
-    )
-    return result, out
-
-
-class TestTheShippingCrossProduct:
-    """Stage 4a-3 builds the shipping package from the knobs that EARNED a slot.
-
-    The runbook documented this step against a tool that could not do it: the base
-    set is dispatcher-resolved, one spec per shape, so it cannot be expressed as a
-    pack `axes:` block (axes cross one kernel_template). Following the step
-    literally produced a config identical to the parity set, silently, and the
-    survivors had to be enumerated by hand -- which is the transcription this whole
-    tool exists to prevent.
-    """
-
-    def test_the_base_set_is_multiplied_by_the_surviving_knob(self, tmp_path):
-        base_result, base_out = _run_parity(tmp_path, name="base.yaml")
-        if base_result.returncode != 0:
-            pytest.skip("dispatcher unavailable")
-        result, out = _run_parity(
-            tmp_path, "--knobs", '{"use_exp2_fast": [0, 1]}', name="ship.yaml"
-        )
-        assert result.returncode == 0, result.stderr
-        import yaml
-
-        base = _emitted_kernels(base_out)
-        ship = _emitted_kernels(out)
-        assert len(ship) == 2 * len(base), (
-            "the shipping set must be the dispatcher's set crossed with the "
-            "survivors, not a re-derivation of it"
-        )
-        assert {k["metadata"]["use_exp2_fast"] for k in ship} == {
-            0,
-            1,
-        }, "both arms of a surviving knob must ship; one value is not a sweep"
-
-    def test_no_knobs_is_byte_identical_to_the_parity_set(self, tmp_path):
-        """The parity path is the stage-1 deliverable and must not move because a
-        later stage gained a flag."""
-        a, out_a = _run_parity(tmp_path, name="a.yaml")
-        if a.returncode != 0:
-            pytest.skip("dispatcher unavailable")
-        _, out_b = _run_parity(tmp_path, "--knobs", "{}", name="b.yaml")
-        assert (
-            out_a.read_bytes() == out_b.read_bytes()
-        ), "an empty --knobs mapping is the parity set, exactly"
-
-    def test_every_crossed_variant_is_named_apart(self, tmp_path):
-        """Two variants of one shape differ only in the pinned knob. If the name
-        does not encode it they collide; the loader rejects that, so a set this tool
-        emits must encode the knob rather than lean on the rejection."""
-        result, out = _run_parity(
-            tmp_path, "--knobs", '{"use_exp2_fast": [0, 1]}', name="n.yaml"
-        )
-        if result.returncode != 0:
-            pytest.skip("dispatcher unavailable")
-        import yaml
-
-        names = [k["name"] for k in _emitted_kernels(out)]
-        assert len(names) == len(set(names))
-
-    def test_an_undeclared_knob_is_refused_not_crossed(self, tmp_path):
-        """An undeclared metadata field drops the WHOLE pack at
-        resolveDescriptorSets(). Emitting the cross-product and discovering that at
-        load time costs a build; refusing here costs nothing."""
-        result, _ = _run_parity(
-            tmp_path, "--knobs", '{"not_a_metadata_field": [1]}', name="bad.yaml"
-        )
-        assert result.returncode == 2
-        assert "metadata_fields does not declare" in result.stderr
-
-    def test_an_empty_knob_list_fails_loudly(self, tmp_path):
-        """An empty axis's cross-product is empty: it would emit ZERO kernels."""
-        result, _ = _run_parity(
-            tmp_path, "--knobs", '{"use_exp2_fast": []}', name="empty.yaml"
-        )
-        assert result.returncode == 2
-        assert "non-empty list" in result.stderr
-
-    def test_malformed_knobs_json_names_the_problem(self, tmp_path):
-        result, _ = _run_parity(tmp_path, "--knobs", "not json", name="bad2.yaml")
-        assert result.returncode == 2
-        assert "not valid JSON" in result.stderr
-
-    def test_a_pinned_knob_overrides_the_policy_resolved_value(self, tmp_path):
-        """Sweeping a policy-owned knob is exactly the case where the author is
-        overriding the policy on purpose. If the policy value won instead, both
-        arms would carry the same setting and the sweep would measure nothing."""
-        result, out = _run_parity(
-            tmp_path, "--knobs", '{"use_exp2_fast": [0, 1]}', name="p.yaml"
-        )
-        if result.returncode != 0:
-            pytest.skip("dispatcher unavailable")
-        import yaml
-
-        kernels = _emitted_kernels(out)
-        by_shape = {}
-        for kernel in kernels:
-            by_shape.setdefault(kernel["name"].rsplit(".", 1)[0], set()).add(
-                kernel["metadata"]["use_exp2_fast"]
-            )
-        assert all(
-            v == {0, 1} for v in by_shape.values()
-        ), "every shape must appear under both pinned values"
-
-
-class TestAPinnedKnobReachesTheBinary:
-    """The arms must be different KERNELS, not one kernel under two catalog names.
-
-    `--knobs` used to write the pinned value into `metadata` and into the spec only
-    `if knob in variant_spec`. The dispatcher returns the SHARED spec, and every
-    arch-private knob -- `use_exp2_fast`, `block_m`, the LDS pads -- is absent from
-    it, which is precisely the set most worth sweeping. So the guard skipped exactly
-    those: both arms carried the same spec, `hkp_pack` compiled ONE binary, and the
-    two descriptors differed only in the catalog key the matcher compares.
-
-    Nothing downstream called that an error. `verify_variant_sets.py` did flag it
-    ("mislabel their binary"), but the runbook's own 4a-3 worked example produced it,
-    so the gate read as the tool being wrong. The measurable symptom is the worst
-    kind: the sweep reports ~1.000x and the knob is recorded as "no effect", when its
-    other side was never compiled.
-    """
-
-    def test_both_arms_build_distinct_specs(self, tmp_path):
-        """The regression test proper: N shapes x K arms must be N*K binaries."""
-        result, out = _run_parity(
-            tmp_path, "--knobs", '{"use_exp2_fast": [0, 1]}', name="spec.yaml"
-        )
-        if result.returncode != 0:
-            pytest.skip("dispatcher unavailable")
-        kernels = _emitted_kernels(out)
-        specs = {
-            json.dumps(k["kernel_source"]["spec"], sort_keys=True) for k in kernels
-        }
-        assert len(specs) == len(kernels), (
-            f"{len(kernels)} descriptors collapse to {len(specs)} distinct specs -- "
-            f"the pinned knob did not reach the spec, so the arms share a binary"
-        )
-
-    def test_the_pinned_value_is_in_the_spec_not_only_the_metadata(self, tmp_path):
-        """Metadata is what the matcher compares; the spec is what gets compiled.
-        Agreeing on one while diverging on the other is the tri-state trap."""
-        result, out = _run_parity(
-            tmp_path, "--knobs", '{"use_exp2_fast": [0, 1]}', name="layers.yaml"
-        )
-        if result.returncode != 0:
-            pytest.skip("dispatcher unavailable")
-        for kernel in _emitted_kernels(out):
-            spec_value = kernel["kernel_source"]["spec"].get("use_exp2_fast")
-            assert spec_value is not None, (
-                f"{kernel['name']}: pinned knob absent from the spec, so the "
-                f"builder's own policy -- not the pin -- decides the binary"
-            )
-            assert int(bool(spec_value)) == kernel["metadata"]["use_exp2_fast"], (
-                f"{kernel['name']}: spec says {spec_value!r} and metadata says "
-                f"{kernel['metadata']['use_exp2_fast']!r}; the matcher would select "
-                f"this descriptor for a binary built the other way"
-            )
-
-    def test_the_emitted_arms_pass_the_variant_set_gate(self, tmp_path):
-        """End to end, because the unit assertions above are reconstructions and
-        the gate is what actually ships. This failed before the fix."""
-        result, out = _run_parity(
-            tmp_path, "--knobs", '{"use_exp2_fast": [0, 1]}', name="gated.yaml"
-        )
-        if result.returncode != 0:
-            pytest.skip("dispatcher unavailable")
-        tree = tmp_path / "tree"
-        generated = subprocess.run(
-            [
-                sys.executable,
-                str(_GENERATE),
-                "--config",
-                str(out),
-                "--output-dir",
-                str(tree),
-            ],
-            cwd=_GENERATE.parent,
-            capture_output=True,
-            text=True,
-        )
-        assert generated.returncode == 0, generated.stdout + generated.stderr
-        gated = subprocess.run(
-            [
-                sys.executable,
-                str(_GATE),
-                "--mode",
-                "structural",
-                "--profile",
-                str(_PROFILE),
-                "arms",
-                str(tree / "descriptors"),
-            ],
-            cwd=_REPO_ROOT,
-            capture_output=True,
-            text=True,
-        )
-        assert gated.returncode == 0, gated.stdout + gated.stderr
-        assert "GATE PASSED" in gated.stdout
-
-    def test_a_knob_the_builder_cannot_take_is_refused(self, tmp_path):
-        """The other half. A metadata-only field can never change the binary, so
-        crossing on it manufactures duplicate kernels; refuse instead of emitting
-        a set whose arms are identical by construction."""
-        import yaml
-
-        profile = yaml.safe_load(_PROFILE.read_text())
-        profile["metadata_fields"] = list(profile["metadata_fields"]) + ["role"]
-        profile["kmd_fields"] = list(profile["kmd_fields"]) + [
-            {"name": "role", "type": "string"}
         ]
-        # provider_root is repo-relative and the tool runs from _REPO_ROOT, so it
-        # survives being written to a temp path unchanged.
-        doctored = tmp_path / "role.profile.yaml"
-        doctored.write_text(yaml.safe_dump(profile))
-        shapes = tmp_path / "shapes.json"
-        shapes.write_text(json.dumps(_shapes()))
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(_PARITY),
-                "--profile",
-                str(doctored),
-                "--shapes",
-                str(shapes),
-                "--knobs",
-                '{"role": ["segment", "reduce"]}',
-                "--out",
-                str(tmp_path / "role.yaml"),
-            ],
-            cwd=_REPO_ROOT,
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 2, result.stdout + result.stderr
-        assert "does not accept" in result.stderr
 
-    def test_a_real_spec_knob_is_not_refused(self, tmp_path):
-        """Control for the refusal above: it must reject metadata-only fields
-        WITHOUT rejecting the ordinary case, or 4a-3 stops working entirely."""
-        result, _ = _run_parity(
-            tmp_path, "--knobs", '{"block_n": [64, 32]}', name="ok.yaml"
+    return argv
+
+
+_SERVED_AND_DECLINED = [{"seqlen_q": 256}, {"seqlen_q": 2048}, {"seqlen_q": 777}]
+
+
+class TestTheReportCarriesNoUnpopulatableBucket:
+    def test_the_summary_names_no_rejected_bucket(self, parity, capsys):
+        """Only two `kind` values can exist: the dataclass default "constructed" and the
+        "declined" the predicate path sets, since a construction failure returns 2 long
+        before the summary prints."""
+        assert dispatch_parity.main(parity(_SERVED_AND_DECLINED)) == 0
+        out = capsys.readouterr().out
+        assert "rejected" not in out, (
+            "the summary still prints a bucket nothing can populate; a count that "
+            "is structurally always 0 reads as a check that passed"
         )
-        assert result.returncode == 0, result.stdout + result.stderr
+        assert "spec construction raised" not in out, (
+            "the summary still offers spec construction as a per-shape outcome, but "
+            "that path aborts the command instead of bucketing the shape"
+        )
+
+    def test_the_counts_that_remain_are_still_right(self, parity, capsys):
+        """A control: the live counts are right, so an absent `rejected` line is a
+        report with a bucket missing rather than a harness that printed nothing."""
+        assert dispatch_parity.main(parity(_SERVED_AND_DECLINED)) == 0
+        out = capsys.readouterr().out
+        assert "shapes in         3" in out
+        assert "servable          2" in out
+        assert "declined          1" in out
+
+    def test_report_gaps_lists_the_decline_with_its_reason(self, parity, capsys):
+        """`--report-gaps` is the tool's whole answer to an uncovered shape, and it
+        prints from the same loop the dead bucket would join."""
+        assert dispatch_parity.main(parity(_SERVED_AND_DECLINED, "--report-gaps")) == 0
+        out = capsys.readouterr().out
+        assert "[declined]" in out
+        assert "seqlen_q 777 is not a supported prefill length" in out
+
+    def test_report_gaps_prints_nothing_when_every_shape_is_served(
+        self, parity, capsys
+    ):
+        """No gaps means no gap lines, not a bucket header with 0 under it."""
+        assert dispatch_parity.main(parity([{"seqlen_q": 256}], "--report-gaps")) == 0
+        out = capsys.readouterr().out
+        assert "[declined]" not in out
+        assert "rejected" not in out
+
+
+class TestConstructionFailureAbortsRatherThanBuckets:
+    def test_an_unhydratable_shape_exits_2_naming_the_failure(self, parity, capsys):
+        """A corpus key the request class does not accept is not a shape-level verdict:
+        the tool cannot say whether the kernel would serve it."""
+        shapes = [{"seqlen_q": 256}, {"seqlen_q": 512, "nonexistent_field": 1}]
+        assert dispatch_parity.main(parity(shapes)) == 2
+
+        captured = capsys.readouterr()
+        assert "request/spec construction failed" in captured.err
+        assert captured.err.startswith("FAIL:")
+        assert "dispatcher parity" not in captured.out, (
+            "a summary was printed for a corpus that failed to hydrate; the counts "
+            "would describe only the shapes processed before the failure"
+        )
+
+    def test_a_dispatcher_that_raises_also_exits_2(self, parity, capsys, monkeypatch):
+        """The factory is inside the same try as the request constructor, so a
+        dispatcher that raises is operational, never a decline. The dispatcher's own
+        message is asserted so an exit 2 raised while resolving the symbol does not
+        pass."""
+        shapes = [{"seqlen_q": 256}]
+        argv = parity(shapes)
+        real_resolve_shapes = dispatch_parity.resolve_shapes
+
+        def with_raising_dispatcher(shapes_arg, profile):
+            profile = dict(profile)
+            profile["dispatch"] = {
+                "module": "stub_provider",
+                "function": "resolve_but_raise",
+            }
+            return real_resolve_shapes(shapes_arg, profile)
+
+        monkeypatch.setattr(dispatch_parity, "resolve_shapes", with_raising_dispatcher)
+        assert dispatch_parity.main(argv) == 2
+
+        captured = capsys.readouterr()
+        assert "FAIL:" in captured.err
+        assert "dispatcher exploded on seqlen_q 256" in captured.err
+        assert "request/spec construction failed" in captured.err
+        assert "dispatcher parity" not in captured.out, (
+            "a summary was printed for a corpus whose dispatcher raised; the counts "
+            "would describe only the shapes resolved before the failure"
+        )
+
+    def test_a_predicate_decline_is_not_promoted_to_an_abort(self, parity, capsys):
+        """The abort policy must not swallow the one outcome that IS a per-shape
+        verdict."""
+        assert dispatch_parity.main(parity([{"seqlen_q": 777}])) == 1
+        assert "no shape resolved" in capsys.readouterr().err
+
+
+#: The relative root the shipped profile names. Spelled out so the decoy below can
+#: reproduce it exactly: under a cwd-relative resolution the decoy is what binds.
+_REPO_RELATIVE_ROOT = "dnn-providers/hip-kernel-provider"
+
+
+def _make_provider(root: Path) -> Path:
+    """The two directories ``_bind_provider`` requires of a provider root."""
+    (root / "rocke" / "library").mkdir(parents=True)
+    (root / "rocke" / "platform" / "python").mkdir(parents=True)
+    return root
+
+
+class TestProviderBindingIsIndependentOfTheInvocationDirectory:
+    """``provider_root`` is repository-relative, anchored on the tool's own location.
+
+    A root resolved against the current directory makes one profile correct from one
+    directory and silently wrong from every other: the import fails where the tree is
+    absent, and -- worse -- binds a same-shaped tree that happens to sit under the
+    caller's cwd.
+    """
+
+    @pytest.fixture
+    def bind(self, monkeypatch):
+        """Bind a root and return the entries it ADDED to ``sys.path``.
+
+        The difference, not a substring scan of the whole path: earlier tests in this
+        module bind stub providers of their own, and a scan would report those too. A
+        copy of ``sys.path`` is swapped in for the duration, so one test's provider
+        cannot satisfy the next one's import and no real rocKE library outlives it.
+        """
+        monkeypatch.setattr(sys, "path", list(sys.path))
+        baseline = list(sys.path)
+
+        def _bind(root):
+            dispatch_parity._bind_provider(root)
+            return [entry for entry in sys.path if entry not in baseline]
+
+        return _bind
+
+    def test_a_relative_root_binds_the_checkout_not_a_look_alike_under_the_cwd(
+        self, bind, tmp_path, monkeypatch
+    ):
+        """The decoy has the SAME relative layout and sits at the cwd, so a pass here
+        cannot be explained by the tool simply failing to find anything."""
+        decoy = _make_provider(tmp_path / "decoy" / _REPO_RELATIVE_ROOT)
+        monkeypatch.chdir(tmp_path / "decoy")
+
+        added = bind(_REPO_RELATIVE_ROOT)
+
+        assert added, "nothing was bound at all"
+        assert not [entry for entry in added if str(decoy) in entry], (
+            f"the look-alike tree under the current directory was bound: {added}. "
+            "The root was resolved against the cwd rather than the checkout"
+        )
+        expected = launch_surface.find_repo_root(_TOOLS) / _REPO_RELATIVE_ROOT
+        for entry in added:
+            assert str(expected) in entry, (
+                f"{entry!r} is not under the checkout's {expected} -- the anchor is "
+                "neither the cwd nor the repository root"
+            )
+
+    def test_the_shipped_profile_binds_from_an_unrelated_directory(
+        self, bind, tmp_path, monkeypatch
+    ):
+        """End to end on the value that actually ships, so a correct resolver paired
+        with a stale profile string still fails."""
+        profile = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))
+        root = profile["provider_root"]
+        assert not os.path.isabs(root), (
+            f"the shipped profile names an absolute provider root ({root!r}); it "
+            "would only resolve on the machine that wrote it"
+        )
+        monkeypatch.chdir(tmp_path)
+
+        added = bind(root)
+
+        assert added, (
+            f"the shipped provider_root {root!r} did not bind from an unrelated "
+            "directory"
+        )
+
+    def test_a_relative_root_that_is_absent_names_the_checkout_it_looked_under(
+        self, bind, tmp_path, monkeypatch
+    ):
+        """The failure has to say where it looked, or a mis-anchored root reads as a
+        missing checkout."""
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(dispatch_parity.ParityError) as excinfo:
+            bind("no/such/provider")
+        message = str(excinfo.value)
+        assert str(launch_surface.find_repo_root(_TOOLS)) in message, message
+        assert (
+            str(tmp_path) not in message
+        ), f"the message names the current directory: {message}"
+
+    def test_an_absolute_root_is_still_taken_verbatim(
+        self, bind, tmp_path, monkeypatch
+    ):
+        """Repository-relative resolution is for relative values only; an absolute
+        root may legitimately point outside the checkout."""
+        provider = _make_provider(tmp_path / "elsewhere")
+        monkeypatch.chdir(tmp_path)
+        added = bind(str(provider))
+        assert [entry for entry in added if str(provider) in entry], added
+
+    def test_a_user_relative_root_is_still_expanded(self, bind, tmp_path, monkeypatch):
+        """``~`` expands to an absolute path, so it must not fall into the
+        repository-relative branch and be looked for inside the checkout."""
+        provider = _make_provider(tmp_path / "home" / "provider")
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+        added = bind(os.path.join("~", "provider"))
+        assert [entry for entry in added if str(provider) in entry], added
+
+    def test_the_environment_is_the_fallback_when_the_profile_names_none(
+        self, bind, tmp_path, monkeypatch
+    ):
+        provider = _make_provider(tmp_path / "from_env")
+        monkeypatch.setenv("ROCKE_PROVIDER_ROOT", str(provider))
+        added = bind(None)
+        assert [entry for entry in added if str(provider) in entry], added
+
+    def test_a_nonempty_profile_value_still_outranks_the_environment(
+        self, bind, tmp_path, monkeypatch
+    ):
+        chosen = _make_provider(tmp_path / "from_profile")
+        ignored = _make_provider(tmp_path / "from_env")
+        monkeypatch.setenv("ROCKE_PROVIDER_ROOT", str(ignored))
+        added = bind(str(chosen))
+        assert [entry for entry in added if str(chosen) in entry], added
+        assert not [entry for entry in added if str(ignored) in entry], added
+
+    def test_the_sibling_tools_share_this_one_binding(self):
+        """``knob_sweep`` and ``reconcile_applicability`` read the same ``provider_root``
+        out of the same profiles. They must reach it through THIS function rather than
+        resolving a root of their own, or the fix above holds for one tool only."""
+        import knob_sweep
+        import reconcile_applicability
+
+        assert knob_sweep._bind_provider is dispatch_parity._bind_provider
+        assert reconcile_applicability._bind_provider is dispatch_parity._bind_provider
+
+
+class TestTheShippedProfilePinsTheDispatchArmItsCatalogWasBuiltFrom:
+    """The request defaults decide which kernel the dispatcher resolves, and this
+    catalog contains one arm of that choice only."""
+
+    def test_dense_persistent_is_the_string_off_not_a_yaml_boolean(self):
+        defaults = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))["request"][
+            "defaults"
+        ]
+        assert "dense_persistent" in defaults, (
+            "the profile leaves dense_persistent unset, so AttentionRequest defaults "
+            "it to 'auto' and the dispatcher resolves the persistent arm once "
+            "work >= dense_num_persistent -- a kernel this catalog does not ship"
+        )
+        value = defaults["dense_persistent"]
+        assert isinstance(value, str), (
+            f"dense_persistent parsed as {type(value).__name__} ({value!r}): the key "
+            "was written unquoted and PyYAML read `off` as a boolean. The dispatcher "
+            "calls .strip().lower() on it, so the tool aborts rather than pinning "
+            "the non-persistent arm"
+        )
+        assert value == "off", value
+
+    @staticmethod
+    def _resolve_with_the_real_dispatcher(monkeypatch, **overrides):
+        """B1, Sq=Skv=8192, Hq=Hkv=8, D=128, bf16, causal through the dispatcher and
+        request class the shipped profile binds, on its own ``request.defaults``.
+
+        At that shape ``work = 32 * 8 * 1 = 256 = dense_num_persistent``, so the
+        unpinned ``auto`` arm resolves persistent and, at D=128 causal bf16, wide DMA
+        with it: the one shape where the pin is the whole difference.
+        """
+        import importlib
+
+        profile = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))
+        monkeypatch.setattr(sys, "path", list(sys.path))
+        dispatch_parity._bind_provider(profile["provider_root"])
+        dispatch, request = profile["dispatch"], profile["request"]
+        try:
+            factory_module = importlib.import_module(dispatch["module"])
+            request_module = importlib.import_module(request["module"])
+        except ImportError as exc:
+            pytest.skip(
+                f"the rocKE library cannot be imported here ({exc}) -- run with an "
+                "interpreter that has its dependencies, e.g. <build-dir>/dnn-providers/"
+                "hip-kernel-provider/descriptor-packaging/hkp-rocke-venv/bin/python"
+            )
+        factory = getattr(factory_module, dispatch["function"])
+        request_cls = getattr(request_module, request["class"])
+        fields = {
+            **request["defaults"],
+            "batch": 1,
+            "seqlen_q": 8192,
+            "seqlen_k": 8192,
+            "nhead_q": 8,
+            "nhead_k": 8,
+            "hdim_q": 128,
+            "hdim_v": 128,
+            "dtype": "bf16",
+            "mask_type": 1,
+            **overrides,
+        }
+        return factory(request_cls(**fields))
+
+    def test_the_real_dispatcher_resolves_the_arm_the_catalog_ships(self, monkeypatch):
+        """Checking the YAML value is only half of it: this is what the dispatcher does
+        with that value, so a profile that parses correctly but no longer reaches the
+        non-persistent eight-argument kernel still fails."""
+        spec = self._resolve_with_the_real_dispatcher(monkeypatch)
+        assert spec.persistent is False, (
+            "the shipped profile resolves the persistent arm at B1/Sq8192/H8/D128 -- "
+            "a kernel with a different argument contract that this catalog does not "
+            "ship"
+        )
+        assert spec.wide_lds_dma is False, spec
+
+    def test_the_unpinned_control_does_resolve_the_persistent_arm(self, monkeypatch):
+        """A control: without the pin this shape IS persistent, so the case above
+        exercises the pin rather than a shape that is never persistent."""
+        spec = self._resolve_with_the_real_dispatcher(
+            monkeypatch, dense_persistent="auto"
+        )
+        assert spec.persistent is True, spec

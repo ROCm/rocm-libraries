@@ -29,6 +29,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "../IntegrationGraphVerificationHarness.hpp"
+#include "ScopedPluginLogCapture.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -50,8 +51,6 @@ namespace
 
 constexpr const char* ENGINE_NAME = "hipkernel:Pointwise";
 constexpr const char* CONV_ENGINE_NAME = "hipkernel:ConvFwd";
-/// Same kernels and matchers as ENGINE_NAME's packs; the heuristic is the only difference.
-constexpr const char* MODEL_ENGINE_NAME = "hipkernel:PointwiseModel";
 constexpr const char* BLOCK_SIZE_KNOB = "block_size";
 
 /// In epsilons of the fixture's element type. Elementwise ops accumulate nothing, so one
@@ -186,65 +185,6 @@ size_t countSelectionLogs(const hipdnn_test_sdk::utilities::LogRecorderBase& rec
     }));
 }
 
-/// Captures plugin logs for one test and restores every piece of process-global state it
-/// touched. Both the global log level and the user callback registration outlive the
-/// test otherwise: a raised level changes what later tests emit, and a callback keyed on
-/// a destroyed fixture would stay registered. Manual teardown at the end of the body is
-/// not enough, because an early ASSERT return skips it.
-class ScopedPluginLogCapture
-{
-public:
-    explicit ScopedPluginLogCapture(void* userHandle)
-        : _userHandle(userHandle)
-    {
-        const auto levelRead = hipdnn_frontend::getGlobalLogLevel(_previousLevel);
-        EXPECT_EQ(levelRead.code, ErrorCode::OK) << levelRead.err_msg;
-
-        const auto registered = setCallback(HIPDNN_SEV_INFO);
-        EXPECT_EQ(registered.code, ErrorCode::OK) << registered.err_msg;
-        _registered = registered.code == ErrorCode::OK;
-
-        const auto levelSet = hipdnn_frontend::setGlobalLogLevel(HIPDNN_SEV_INFO);
-        EXPECT_EQ(levelSet.code, ErrorCode::OK) << levelSet.err_msg;
-    }
-
-    ~ScopedPluginLogCapture()
-    {
-        if(_registered)
-        {
-            static_cast<void>(setCallback(HIPDNN_SEV_OFF));
-        }
-        static_cast<void>(hipdnn_frontend::setGlobalLogLevel(_previousLevel));
-    }
-
-    ScopedPluginLogCapture(const ScopedPluginLogCapture&) = delete;
-    ScopedPluginLogCapture& operator=(const ScopedPluginLogCapture&) = delete;
-    ScopedPluginLogCapture(ScopedPluginLogCapture&&) = delete;
-    ScopedPluginLogCapture& operator=(ScopedPluginLogCapture&&) = delete;
-
-    hipdnn_test_sdk::utilities::IsolatedLogRecorder& recorder() const
-    {
-        return _recorder;
-    }
-
-private:
-    hipdnn_frontend::Error setCallback(hipdnnSeverity_t minLevel) const
-    {
-        return hipdnn_frontend::setUserLogCallback(
-            hipdnn_test_sdk::utilities::IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
-            minLevel,
-            hipdnn_frontend::LogCallbackMode::SYNC,
-            _userHandle);
-    }
-
-    // Declared before the recorder so the recorder's own saved-level restore runs first.
-    hipdnnSeverity_t _previousLevel = HIPDNN_SEV_OFF;
-    void* _userHandle;
-    bool _registered = false;
-    mutable hipdnn_test_sdk::utilities::IsolatedLogRecorder _recorder
-        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-};
-
 } // namespace
 
 class IntegrationGpuKernelIngestor
@@ -300,11 +240,6 @@ protected:
     static int64_t convEngineId()
     {
         return hipdnn_data_sdk::utilities::engineNameToId(CONV_ENGINE_NAME);
-    }
-
-    static int64_t modelEngineId()
-    {
-        return hipdnn_data_sdk::utilities::engineNameToId(MODEL_ENGINE_NAME);
     }
 
     /// The block_size @p engine ranks first for a pointwise-add graph, read from the knob
@@ -713,31 +648,15 @@ TEST_F(IntegrationGpuKernelIngestor, ResolvesAConvGraphToTheConvEngineAndNotTheP
     EXPECT_FALSE(offers(pointwiseEngines, convEngineId()));
 }
 
-// A model-backed UHD
-//
-// Every other pack here declares a native heuristic: a compiled scorer resolved by symbol.
-// hipkernel:PointwiseModel declares "kind": "model", so its heuristic is a trained artifact
-// loaded at plan build (RFC 0019 §7). These cases are the only place that path runs on a
-// device.
-//
-// The two engines are arranged to disagree. The native scorer returns block_size, so it
-// ranks the 256 kernel first; the model prefers the small one. Both model-pack kernels sit
-// at priority 0 and the 256 kernel carries the lower descriptor id, so the declared-order
-// fallback lands on 256 as well. A model that failed to load therefore reads as 256 rather
-// than hiding behind a coincidence -- which matters, because that failure is silent by
-// design: RFC 0019 §5 degrades to declared order instead of erroring.
-//
-// The knob default is the observable. get_knobs_for_engine reports the top-ranked kernel's
-// block_size; get_workspace_size cannot serve, being a max across the catalog rather than a
-// property of the selection.
+// The model-backed pointwise pack (hipkernel:PointwiseModel) is embedded_source, which only
+// the unit binary can serve, so it is staged and validated there, not exercised here.
 
 /// The shipped engines are the ones with no way to prove themselves by outcome.
 ///
 /// Every UHD failure path degrades to declared order, which is a legal ranking, so a test can
 /// only tell a working UHD from a discarded one if the two produce different kernels. For the
-/// model engine they do -- that is what the next test relies on. For the shipped native engines
-/// they do not: every kernel carries priority=0, so declared order falls to the id tiebreak and
-/// lands on block_size=256, which is exactly what the native scorer picks.
+/// shipped native engines they do not: every kernel carries priority=0, so declared order falls
+/// to the id tiebreak and lands on block_size=256, which is exactly what the native scorer picks.
 ///
 /// So the assertion has to be on provenance, which RFC 0019 §12 puts in the selection trace.
 /// This matters more since a throwing scorer began degrading instead of propagating (§5 step 7):
@@ -754,55 +673,6 @@ TEST_F(IntegrationGpuKernelIngestor, TheShippedEngineRanksByItsOwnScorerNotByFal
         << "the shipped engine's UHD did not decide this ranking";
     EXPECT_FALSE(recorder.hasLogContaining("decided_by=declared_order"))
         << "the shipped engine degraded to declared order without failing any test";
-}
-
-TEST_F(IntegrationGpuKernelIngestor, ModelEngineRanksItsCatalogAheadOfDeclaredOrder)
-{
-    // 64 is reachable only by ranking: it is neither the declared-order answer nor the
-    // native scorer's, both of which are 256.
-    EXPECT_EQ(rankedFirstBlockSize(modelEngineId()), 64);
-}
-
-TEST_F(IntegrationGpuKernelIngestor, TheModelAndTheNativeScorerPickDifferentKernels)
-{
-    // Same graph, same kernels, same everything but the heuristic. If these ever agree,
-    // either the model stopped ranking or the two packs drifted into one catalog.
-    EXPECT_NE(rankedFirstBlockSize(modelEngineId()), rankedFirstBlockSize(engineId()));
-}
-
-TEST_F(IntegrationGpuKernelIngestor, ExecutesAModelSelectedKernelOnDevice)
-{
-    // Ranking is worth nothing if the kernel it picks cannot run. Checked against the CPU
-    // reference, so a wrong launch configuration fails here rather than quietly producing
-    // plausible numbers.
-    auto graph = buildPointwiseAddGraph();
-    buildAndCompile(*graph, modelEngineId());
-
-    int64_t workspaceSize = 0;
-    ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
-    GraphVerificationContext context(*graph);
-    registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS);
-    verifyBuiltGraph(context, /*seed=*/0);
-}
-
-TEST_F(IntegrationGpuKernelIngestor, BothPointwiseEnginesOfferTheSameGraph)
-{
-    // The model pack reuses the native pack's matchers, so both engines accept a
-    // pointwise-add graph and neither shadows the other. A caller chooses between them by
-    // pinning an id, which is what the cases above rely on.
-    auto graph = buildPointwiseAddGraph();
-    ASSERT_EQ(graph->build_operation_graph(_handle).code, ErrorCode::OK);
-
-    std::vector<int64_t> rankedEngineIds;
-    ASSERT_EQ(graph->get_ranked_engine_ids(rankedEngineIds).code, ErrorCode::OK);
-
-    const auto offers = [&rankedEngineIds](int64_t id) {
-        return std::find(rankedEngineIds.begin(), rankedEngineIds.end(), id)
-               != rankedEngineIds.end();
-    };
-
-    EXPECT_TRUE(offers(engineId()));
-    EXPECT_TRUE(offers(modelEngineId()));
 }
 
 INSTANTIATE_TEST_SUITE_P(,

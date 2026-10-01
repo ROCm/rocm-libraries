@@ -8,9 +8,11 @@
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/NativeAdapter.hpp>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -20,11 +22,11 @@
 /// @file TestUhdAdapters.cpp
 /// @brief makeUhdAdapter's dispatch -- RFC 0019 §7's kind names, resolved to an adapter.
 ///
-/// Scoped to the factory. The adapters themselves are covered by the backend suite, which owns
-/// TestNativeAdapter, TestCustomLibraryAdapter, TestTableAdapter and TestTreeDataAdapter and
-/// drives each one directly, including a real dlopen'd scorer built from test_scorer_lib.cpp.
-/// Only the dispatch was untested: nothing outside TestUhdGenArtifact's happy path called
-/// makeUhdAdapter, so no case covered what it does with a kind it cannot build.
+/// Scoped to the factory. The adapters themselves are covered by TestNativeAdapter,
+/// TestCustomLibraryAdapter, TestTableAdapter and TestTreeDataAdapter in this suite, which drive
+/// each one directly, including a real dlopen'd scorer built from test_scorer_lib.cpp. Each case
+/// here asserts the built adapter scores the way the named kind does, which is what proves the
+/// dispatch reached that kind and not some other one.
 ///
 /// That matters because the alternative to declining is not an error. A factory falling through
 /// to a default kind would score against a model the descriptor never named, and §5 step 7's
@@ -76,7 +78,7 @@ TEST(TestIngestorUhdAdapters, TheFactoryBuildsANativeAdapterFromItsConfig)
 
     const auto adapter = makeUhdAdapter(config);
     ASSERT_NE(adapter, nullptr);
-    EXPECT_EQ(adapter->type(), UhdAdapterType::NATIVE);
+    EXPECT_DOUBLE_EQ(adapter->score({1.0}), 7.0) << "not the registered native scorer";
 }
 
 TEST(TestIngestorUhdAdapters, TheFactoryDeclinesAKindItCannotBuild)
@@ -137,7 +139,7 @@ TEST(TestIngestorUhdAdapters, TheFactoryRefusesACustomLibraryWhoseDeclaredHashIs
     UhdConfig config;
     config.adapterType = "custom_library";
     config.modelArtifactPath = testScorerLibrary();
-    config.customLibrarySymbol = "test_linear_scorer";
+    config.customLibrarySymbol = "testLinearScorer";
     config.featuresSignature = {"$kernel.tile_m", "$kernel.split_k", "$q.seqlen"};
     config.featuresHash = FEATURES_HASH;
 
@@ -151,11 +153,58 @@ TEST(TestIngestorUhdAdapters, TheFactoryRefusesACustomLibraryWhoseDeclaredHashIs
     config.modelHash = bytesHashOf(config.modelArtifactPath);
     const auto loaded = makeUhdAdapter(config);
     ASSERT_NE(loaded, nullptr);
-    EXPECT_EQ(loaded->type(), UhdAdapterType::CUSTOM_LIBRARY);
+    EXPECT_DOUBLE_EQ(loaded->score({1.0, 2.0, 3.0}), 6.0) << "not testLinearScorer";
 
     // And a UHD declaring no digest still loads: §4.1 makes the artifact hash optional.
     config.modelHash.clear();
     EXPECT_NE(makeUhdAdapter(config), nullptr);
+}
+
+/// A one-feature table scoring every value 1.0, written to @p path; returns its bytes' digest.
+std::string writeTableModel(const std::filesystem::path& path)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<double> boundaries = {5.0};
+    const std::vector<uint32_t> key = {0};
+    const std::vector<flatbuffers::Offset<fb::FeatureBucket>> buckets
+        = {fb::CreateFeatureBucket(builder, 0, builder.CreateVector(boundaries))};
+    const std::vector<flatbuffers::Offset<fb::TableEntry>> entries
+        = {fb::CreateTableEntry(builder, builder.CreateVector(key), 100, 1.0)};
+    const auto model = fb::CreateTableModel(builder,
+                                            1,
+                                            builder.CreateString(FEATURES_HASH),
+                                            builder.CreateVector(buckets),
+                                            builder.CreateVector(entries));
+    builder.Finish(model, fb::TableModelIdentifier());
+    std::ofstream(path, std::ios::binary)
+        .write(reinterpret_cast<const char*>(builder.GetBufferPointer()),
+               static_cast<std::streamsize>(builder.GetSize()));
+    return sha256(builder.GetBufferPointer(), builder.GetSize());
+}
+
+/// R8: the table arm dropped `modelHash` exactly as the custom_library arm once did, so a
+/// table artifact was scored whatever its bytes -- under an identity (the declared digest)
+/// those bytes do not have. It now verifies the digest the way tree_data does.
+TEST(TestIngestorUhdAdapters, TheFactoryRefusesATableWhoseDeclaredHashIsNotItsBytes)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        std::filesystem::temp_directory_path()
+        / ("uhd_adapters_table_"
+           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())));
+    UhdConfig config;
+    config.adapterType = "table";
+    config.modelArtifactPath = (dir.path() / "table.fb").string();
+    config.featuresHash = FEATURES_HASH;
+    const auto digest = writeTableModel(config.modelArtifactPath);
+
+    config.modelHash = sha256(std::string("a different table"));
+    EXPECT_EQ(makeUhdAdapter(config), nullptr);
+
+    config.modelHash = digest;
+    const auto loaded = makeUhdAdapter(config);
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_DOUBLE_EQ(loaded->score({0.0}), 1.0) << "not the table's one entry";
 }
 
 } // namespace

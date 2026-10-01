@@ -226,6 +226,81 @@ TEST_F(TestEnginePredictionTransport, SelectedConfigurationCarriesTheRequestedMe
     EXPECT_EQ(query(HIPDNN_ENGINE_PREDICTION_CONFIGURATION).status, fb::PredictionStatus::INVALID);
 }
 
+// A measured configuration value names no UHD (RFC 0019 §5 step 9): the host admits it
+// with its value and configuration. An engine-level estimate always comes from a UHD, so
+// one that names none is still refused.
+TEST_F(TestEnginePredictionTransport, MeasuredConfigurationNeedsNoUhdButEngineEstimateDoes)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    _config.ranking_metric = "time";
+    _prediction.metric = "time";
+    _prediction.value = 1.0;
+    _prediction.uhd_id.clear();
+
+    EXPECT_EQ(query().status, fb::PredictionStatus::INVALID);
+
+    _prediction.kind = fb::PredictionKind::CONFIGURATION;
+    _prediction.engine_config = std::make_unique<fb::EngineConfigT>();
+    _prediction.engine_config->engine_id = 100;
+    const auto result = query(HIPDNN_ENGINE_PREDICTION_CONFIGURATION);
+    ASSERT_EQ(result.status, fb::PredictionStatus::AVAILABLE);
+    EXPECT_DOUBLE_EQ(result.value, 1.0);
+    EXPECT_TRUE(result.uhd_id.empty());
+    ASSERT_NE(result.engine_config, nullptr);
+    EXPECT_EQ(result.engine_config->engine_id, 100);
+
+    _prediction.value = 0.0;
+    EXPECT_EQ(query(HIPDNN_ENGINE_PREDICTION_CONFIGURATION).status, fb::PredictionStatus::INVALID);
+}
+
+// A union payload is optional in FlatBuffers, so a KnobSetting tagged IntValue, FloatValue or
+// StringValue with no payload table passes VerifyBuffer. The host must refuse it before
+// UnPackTo(), which dereferences the missing payload. Falsifying mutation: drop the
+// everyKnobValueIsPresent() check, and this crashes inside UnPackTo().
+TEST_F(TestEnginePredictionTransport, KnobTaggedWithoutItsValueIsInvalidNotUnpacked)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    for(const auto tag :
+        {fb::KnobValue::IntValue, fb::KnobValue::FloatValue, fb::KnobValue::StringValue})
+    {
+        SCOPED_TRACE(fb::EnumNameKnobValue(tag));
+        ON_CALL(*_plugin, getPrediction(_, _, _, _, _, _))
+            .WillByDefault([this, tag](hipdnnEnginePluginHandle_t,
+                                       const hipdnnPluginConstData_t*,
+                                       const hipdnnPluginConstData_t*,
+                                       hipdnnEnginePredictionKind_t,
+                                       bool,
+                                       hipdnnPluginConstData_t* out) {
+                _response.Clear();
+                // Offset 0 for the payload: the builder omits the field, leaving the tag.
+                const std::vector<flatbuffers::Offset<fb::KnobSetting>> knobs{
+                    fb::CreateKnobSettingDirect(_response, "test.knob", tag, 0)};
+                const auto config = fb::CreateEngineConfigDirect(_response, 100, &knobs);
+                _response.Finish(fb::CreateEnginePredictionDirect(_response,
+                                                                  100,
+                                                                  fb::PredictionKind::CONFIGURATION,
+                                                                  fb::PredictionStatus::AVAILABLE,
+                                                                  10.0,
+                                                                  _prediction.uhd_id.c_str(),
+                                                                  nullptr,
+                                                                  config,
+                                                                  nullptr,
+                                                                  nullptr,
+                                                                  "tflops"));
+                *out = {_response.GetBufferPointer(), _response.GetSize()};
+                return true;
+            });
+
+        const auto result = query(HIPDNN_ENGINE_PREDICTION_CONFIGURATION);
+
+        // The precondition that makes this a host-side obligation: the buffer verifies.
+        flatbuffers::Verifier verifier(_response.GetBufferPointer(), _response.GetSize());
+        ASSERT_TRUE(verifier.VerifyBuffer<fb::EnginePrediction>());
+        EXPECT_EQ(result.status, fb::PredictionStatus::INVALID);
+        EXPECT_EQ(result.engine_config, nullptr);
+    }
+}
+
 TEST(TestEngineDetailsWrapper, DestroysPluginDetailsWhenFlatbufferVerificationFails)
 {
     auto resourceManager = std::make_shared<MockEnginePluginResourceManager>();

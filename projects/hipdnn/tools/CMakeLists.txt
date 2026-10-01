@@ -77,12 +77,17 @@ if(Python3_Interpreter_FOUND)
         # moved here; unregistered, it would have stopped being run at the same moment it
         # became the only place that behaviour is pinned. Offline and GPU-free, and it
         # needs no ML dependencies.
+        #
+        # Only this file: the rest of IngestorGenerator/tests is the generator's own suite,
+        # which its conftest ties to PyYAML and Jinja2 (IngestorGenerator/requirements.txt)
+        # and which runs from that tool's venv. --noconftest because test_mine_shapes.py
+        # uses none of that conftest's fixtures and must not inherit its imports.
         add_test(
-            NAME ingestor_generator_tests
-            COMMAND ${Python3_EXECUTABLE} -m pytest -q
-                    ${CMAKE_CURRENT_SOURCE_DIR}/IngestorGenerator/tests
+            NAME mine_shapes_tests
+            COMMAND ${Python3_EXECUTABLE} -m pytest -q --noconftest
+                    ${CMAKE_CURRENT_SOURCE_DIR}/IngestorGenerator/tests/test_mine_shapes.py
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-        set_tests_properties(ingestor_generator_tests PROPERTIES SKIP_RETURN_CODE 5 LABELS "unit")
+        set_tests_properties(mine_shapes_tests PROPERTIES SKIP_RETURN_CODE 5 LABELS "unit")
 
     else()
         message(WARNING
@@ -171,7 +176,7 @@ endif()
     )
 
     # On Windows, stage the shadowed ROCm DLLs before the tool is built so a partial build plus a
-    # manual ctest doesn't load the stale System32 amd_comgr.dll. add_hipdnn_test() does this for
+    # manual ctest doesn't load the stale System32 ROCm DLLs. add_hipdnn_test() does this for
     # gtest binaries; mirror it here.
     if(TARGET stage_shadowed_rocm_dlls)
         add_dependencies(hipdnn_list_engines stage_shadowed_rocm_dlls)
@@ -307,7 +312,7 @@ endif()
         )
 
         # On Windows, stage the shadowed ROCm DLLs before the tool is built so a partial
-        # build plus a manual ctest does not load the stale System32 amd_comgr.dll.
+        # build plus a manual ctest does not load the stale System32 ROCm DLLs.
         if(TARGET stage_shadowed_rocm_dlls)
             add_dependencies(hipdnn_validate_descriptors stage_shadowed_rocm_dlls)
         endif()

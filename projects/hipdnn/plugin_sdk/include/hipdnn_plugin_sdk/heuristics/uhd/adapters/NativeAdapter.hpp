@@ -70,11 +70,6 @@ public:
 
     double score(const std::vector<double>& features) const override;
 
-    UhdAdapterType type() const override
-    {
-        return UhdAdapterType::NATIVE;
-    }
-
     size_t expectedFeatureCount() const override
     {
         return _numFeatures;

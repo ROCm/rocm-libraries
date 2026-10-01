@@ -67,9 +67,10 @@ public:
     void bindNamespace(const std::string& ns,
                        const std::unordered_map<std::string, ValueType>& values)
     {
+        const std::string prefix = ns + ".";
         for(const auto& [name, value] : values)
         {
-            _bindings.insert_or_assign(ns + "." + name, value);
+            _bindings.insert_or_assign(prefix + name, value);
         }
     }
 

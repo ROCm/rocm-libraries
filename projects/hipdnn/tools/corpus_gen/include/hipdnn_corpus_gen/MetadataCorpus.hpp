@@ -79,7 +79,8 @@ inline ProblemOracle makeMetadataOracle(hipdnnHandle_t handle,
                                         OracleTiming* timing = nullptr)
 {
     const BuildTally tally{buildFailures, firstBuildError};
-    return [handle, engineId, &metadata, tally, maxBytes, timing](const ProblemPoint& point) -> bool {
+    return [handle, engineId, &metadata, tally, maxBytes, timing](
+               const ProblemPoint& point) -> bool {
         using Clock = std::chrono::steady_clock;
         auto mark = Clock::now();
         const auto lap = [&mark](double OracleTiming::*stage, OracleTiming* into) {
@@ -156,8 +157,8 @@ inline ProblemOracle makeCorpusOracle(hipdnnHandle_t handle,
     {
         return makeDeclaredOracle(metadata, buildFailures, firstBuildError, maxBytes);
     }
-    return makeMetadataOracle(handle, engineId, metadata, buildFailures, firstBuildError,
-                              maxBytes, timing);
+    return makeMetadataOracle(
+        handle, engineId, metadata, buildFailures, firstBuildError, maxBytes, timing);
 }
 
 /// @brief Generates the problem corpus for @p engineId across every declared operation.
@@ -173,13 +174,12 @@ inline ProblemOracle makeCorpusOracle(hipdnnHandle_t handle,
 /// short by exactly the filtered fraction. It receives the operation's name alongside the point.
 using CorpusFilter = std::function<bool(const std::string&, const ProblemPoint&)>;
 
-inline std::vector<MetadataOperationCorpus>
-    generateCorpus(hipdnnHandle_t handle,
-                   int64_t engineId,
-                   const MetadataSet& declarations,
-                   const ExplorationRequest& request,
-                   int64_t maxBytes = 0,
-                   const CorpusFilter& keep = {})
+inline std::vector<MetadataOperationCorpus> generateCorpus(hipdnnHandle_t handle,
+                                                           int64_t engineId,
+                                                           const MetadataSet& declarations,
+                                                           const ExplorationRequest& request,
+                                                           int64_t maxBytes = 0,
+                                                           const CorpusFilter& keep = {})
 {
     std::vector<MetadataOperationCorpus> results;
 

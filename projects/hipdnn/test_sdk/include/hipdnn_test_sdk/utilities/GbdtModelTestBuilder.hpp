@@ -157,8 +157,7 @@ public:
             }
             groupOffsets.push_back(fb::CreateGbdtGroup(fbb, value, fbb.CreateVector(inner)));
         }
-        const auto groupsVector
-            = groupOffsets.empty() ? 0 : fbb.CreateVector(groupOffsets).o;
+        const auto groupsVector = groupOffsets.empty() ? 0 : fbb.CreateVector(groupOffsets).o;
 
         fb::GbdtModelBuilder modelBuilder(fbb);
         modelBuilder.add_trees(treesVector);

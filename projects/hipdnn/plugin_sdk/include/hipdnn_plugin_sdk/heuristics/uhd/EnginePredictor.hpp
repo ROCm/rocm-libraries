@@ -28,7 +28,7 @@ namespace prediction_detail
 {
 using PredictionStatus = hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
 inline constexpr const char* ENGINE_ROLE = "predict_engine";
-inline constexpr size_t MAX_ARTIFACT_BYTES = 256 * 1024 * 1024;
+inline constexpr size_t MAX_ARTIFACT_BYTES = size_t{256} * 1024 * 1024;
 
 struct Model
 {
@@ -52,6 +52,17 @@ inline std::shared_ptr<const Model> model(const UhdConfig& config)
         if(config.trainedAgainst.is_object())
         {
             parser_detail::provenance(config.trainedAgainst, "L1 UHD trained_against");
+        }
+        // Not this build's features, so not this build's answer: UNAVAILABLE, exactly as a
+        // stale selector revision is (§11.2). The loader refuses such a model before it is
+        // ever bound; this catches a config that reached the binding by another path.
+        if(auto mismatch
+           = featureSemanticsMismatch(config.featuresSignature, config.trainedAgainst);
+           !mismatch.empty())
+        {
+            loaded->status = PredictionStatus::UNAVAILABLE;
+            loaded->reason = std::move(mismatch);
+            return loaded;
         }
         loaded->extractor = std::make_unique<const FeatureExtractor>(config.featuresSignature,
                                                                      config.categoricalEncoding);
@@ -106,6 +117,15 @@ inline std::shared_ptr<const Model> model(const UhdConfig& config)
             loaded->status = config.adapterType == "native" ? PredictionStatus::UNAVAILABLE
                                                             : PredictionStatus::INVALID;
             loaded->reason = "UHD adapter is unavailable or its model failed validation";
+        }
+        // R9: a grouped tree_data model decides per group, and an L1 estimate is one row per
+        // graph -- there is no per-row contract saying which group a graph's row belongs to,
+        // so score() would answer from the root ensemble alone, which is not what was
+        // trained or evaluated. Refused as a contract failure (INVALID) until one exists.
+        else if(config.adapterType == "tree_data" && loaded->adapter->groupFeatureIndex() >= 0)
+        {
+            loaded->reason = "grouped tree_data artifact cannot be bound to the predict_engine "
+                             "role: grouped L1 models have no per-row contract";
         }
         else if(loaded->adapter->expectedFeatureCount() != loaded->extractor->featureCount()
                 || loaded->adapter->getFeaturesHash() != config.featuresHash)
@@ -229,8 +249,9 @@ inline hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
                 binding["uhd_id"] = config.uhdId;
             }
             // A descriptor-backed engine ADDS its set to trained_against on top of this
-            // (GenericEngine.hpp:211-221): it is trained against both the descriptors it
-            // loaded and the provider build that ran them.
+            // (GenericEngine::getPrediction): it is trained against both the descriptors it
+            // loaded and the provider build that ran them, and binds a model only when that
+            // model recorded this selector_revision (GenericEngine's constructor).
             result.uhd_id = config.uhdId;
             result.binding_json = binding.dump();
             result.features_json = features.toJson().dump();
@@ -316,7 +337,8 @@ public:
     /// RFC 0019 §11.2 separates two refusals, and @p status is which one this is:
     ///   - UNAVAILABLE -- "I do not answer this question". The model is fine, it just is
     ///     not this build's: a model trained against another provider revision (§4.1
-    ///     `trained_against.selector_revision`) says nothing about this one.
+    ///     `trained_against.selector_revision`) or on features another revision computes
+    ///     (`trained_against.feature_semantics_revision`) says nothing about this one.
     ///   - INVALID -- "I answer, and the answer is bad". A model that is present and
     ///     failed its contract is a claim: do not pick me.
     /// @param reason Surfaced verbatim to the caller, so it must name what was compared.
@@ -377,7 +399,7 @@ public:
         }
         // Nothing outside this binding can attach a model to the engine, so an engine
         // with no bound model for this metric and architecture simply has none.
-        static const UhdConfig UNBOUND;
+        static const UhdConfig s_unbound;
         const bool evaluateModel = evaluate && refused == nullptr;
         std::shared_ptr<const prediction_detail::Model> compiled;
         if(evaluateModel && selected != nullptr)
@@ -391,7 +413,7 @@ public:
                                     arch,
                                     features,
                                     evaluateModel,
-                                    selected != nullptr ? *selected : UNBOUND,
+                                    selected != nullptr ? *selected : s_unbound,
                                     compiled);
         if(refused != nullptr)
         {
@@ -421,12 +443,18 @@ private:
     /// A failed compile is NOT cached: deployment is separate from load (RFC 0019 §5), so
     /// an artifact that is still being installed, or a transient read error, must not
     /// disable the model for the rest of the provider's lifetime.
+    ///
+    /// Keyed by the model's UUID, not the arch key that bound it (D2): one UUID bound under
+    /// several architecture keys is one model, so it is compiled once and shared. Coverage
+    /// per architecture is the artifact's `training_arches`, checked per query. A config
+    /// built in memory without an id falls back to its arch key.
     std::shared_ptr<const prediction_detail::Model> compiledModel(const std::string& metric,
                                                                   const std::string& arch,
                                                                   const UhdConfig& config) const
     {
         const std::lock_guard<std::mutex> lock(_modelMutex);
-        const auto key = std::make_pair(metric, arch);
+        const auto key
+            = std::make_pair(metric, config.uhdId.empty() ? "arch:" + arch : config.uhdId);
         if(const auto cached = _modelCache.find(key); cached != _modelCache.end())
         {
             return cached->second;

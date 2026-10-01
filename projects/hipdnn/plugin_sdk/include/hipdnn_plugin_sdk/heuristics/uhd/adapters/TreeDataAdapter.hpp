@@ -15,6 +15,7 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/gbdt_model_generated.h>
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/ScoreTransform.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/Sha256.hpp>
 #include <limits>
 #include <memory>
@@ -36,10 +37,18 @@ public:
     /// @param modelPath Path to the .fb model file.
     /// @param expectedFeaturesHash Hash from UHD features_signature.
     /// @param expectedModelHash Optional checksum of the model file for integrity validation.
+    /// @param objective The UHD's `objective`: `min` when the model predicts a cost. Only a
+    ///        grouped model reads it -- see scoreBatch.
+    /// @param transform The UHD's `score.transform`, and @p metric its `score.metric` (empty
+    ///        for a metric-less ranker). Only a grouped model reads them: its layer-1 group
+    ///        choice applies RFC 0019 §8.3's score rule (score_transform::isRankableScore).
     /// @returns Adapter or nullptr if loading/validation fails.
     static std::unique_ptr<TreeDataAdapter> load(const std::string& modelPath,
                                                  const std::string& expectedFeaturesHash,
-                                                 const std::string& expectedModelHash = "");
+                                                 const std::string& expectedModelHash = "",
+                                                 const std::string& objective = "max",
+                                                 const std::string& transform = "",
+                                                 const std::string& metric = "");
 
     /// Load from an in-memory buffer.
     /// @param buffer FlatBuffer data. Used only during this call; prepared nodes
@@ -47,12 +56,18 @@ public:
     /// @param size Size of buffer in bytes.
     /// @param expectedFeaturesHash Hash from UHD features_signature.
     /// @param expectedModelHash Optional checksum of the model file for integrity validation.
+    /// @param objective The UHD's `objective`, as for load().
+    /// @param transform The UHD's `score.transform`, as for load().
+    /// @param metric The UHD's `score.metric`, as for load().
     /// @returns Adapter or nullptr if validation fails.
     static std::unique_ptr<TreeDataAdapter> loadFromBuffer(const uint8_t* buffer,
                                                            size_t size,
                                                            const std::string& expectedFeaturesHash,
                                                            const std::string& expectedModelHash
-                                                           = "");
+                                                           = "",
+                                                           const std::string& objective = "max",
+                                                           const std::string& transform = "",
+                                                           const std::string& metric = "");
 
     ~TreeDataAdapter() override = default;
 
@@ -65,18 +80,14 @@ public:
     ///
     /// A single-layer model answers per row, so the base implementation's loop is right for
     /// it and this override reduces to that. A grouped model cannot: picking the group is a
-    /// decision across rows, and no per-row call can express it.
+    /// decision across rows, and no per-row call can express it. Scores are returned raw --
+    /// unoriented, like score()'s -- so only the group choice depends on the objective.
     std::vector<double> scoreBatch(const std::vector<std::vector<double>>& batch) const override;
 
     /// The slot `scoreBatch` groups on, so a ranker reports the same group the model used.
     int groupFeatureIndex() const override
     {
         return _groupFeatureIndex;
-    }
-
-    UhdAdapterType type() const override
-    {
-        return UhdAdapterType::TREE_DATA;
     }
 
     size_t expectedFeatureCount() const override
@@ -95,22 +106,8 @@ public:
         return _roots.size();
     }
 
-    /// Get the model version string (RFC 0019 §13: model provenance).
-    /// Empty if not set in the model.
-    std::string getModelVersion() const override
-    {
-        return _modelVersion;
-    }
-
-    /// Get the list of GPU architectures the model was trained on.
-    /// Empty if not set in the model.
-    /// RFC 0019 §9.2: used for out-of-distribution detection.
-    std::vector<std::string> getTrainingArches() const override
-    {
-        return _trainingArches;
-    }
-
-    /// Check if the given architecture was seen during training.
+    /// Check if the given architecture was seen during training (RFC 0019 §9.2: out-of-
+    /// distribution detection).
     /// Matches the bare target, ignoring runtime feature suffixes. An empty list is unrestricted.
     bool isTrainedForArch(const std::string& arch) const override;
 
@@ -141,26 +138,27 @@ private:
                     size_t numFeatures,
                     double baseScore,
                     std::vector<std::string> trainingArches,
-                    std::string modelVersion);
+                    bool lowerIsBetter,
+                    std::string transform,
+                    bool positiveRequired);
 
     /// Prepare one ensemble. Takes the tree vector rather than the model so that a group's
     /// trees go through exactly the validation layer 1's do -- a group whose trees were
     /// trusted where layer 1's were checked would be the one path into the walker that can
     /// index outside a row.
-    static bool
-        prepareTrees(const flatbuffers::Vector<
-                         flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>>* trees,
-                     int32_t numFeatures,
-                     std::vector<Node>& nodes,
-                     std::vector<uint32_t>& roots);
+    static bool prepareTrees(
+        const flatbuffers::Vector<
+            flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>>* trees,
+        int32_t numFeatures,
+        std::vector<Node>& nodes,
+        std::vector<uint32_t>& roots);
 
     template <bool CheckFeatureCount>
     double scorePrepared(const std::vector<double>& features,
                          const std::vector<uint32_t>& roots) const;
 
     /// Sum one ensemble over a row, choosing the short-row path the same way `score` does.
-    double scoreRoots(const std::vector<double>& features,
-                      const std::vector<uint32_t>& roots) const
+    double scoreRoots(const std::vector<double>& features, const std::vector<uint32_t>& roots) const
     {
         if(roots.empty())
         {
@@ -178,9 +176,18 @@ private:
     size_t _numFeatures;
     double _baseScore;
 
-    // RFC 0019 §9.2, §13: Model provenance for out-of-distribution detection
+    /// Which way layer 1's score points. The artifact does not record it -- the UHD's
+    /// `objective` does -- and the group choice is the one decision this adapter makes rather
+    /// than hands back, so it is the one place the adapter has to know.
+    bool _lowerIsBetter;
+
+    /// The UHD's `score.transform`, and whether §8.3 requires its recovered score to be
+    /// positive: what layer 1 needs to refuse a group score as layer 2's scores are refused.
+    std::string _transform;
+    bool _positiveRequired;
+
+    // RFC 0019 §9.2: training arches for out-of-distribution detection.
     std::vector<std::string> _trainingArches;
-    std::string _modelVersion;
 };
 
 namespace fb = hipdnn_flatbuffers_sdk::data_objects;
@@ -188,7 +195,10 @@ namespace fb = hipdnn_flatbuffers_sdk::data_objects;
 inline std::unique_ptr<TreeDataAdapter>
     TreeDataAdapter::load(const std::string& modelPath,
                           const std::string& expectedFeaturesHash,
-                          const std::string& expectedModelHash)
+                          const std::string& expectedModelHash,
+                          const std::string& objective,
+                          const std::string& transform,
+                          const std::string& metric)
 {
     std::ifstream file(modelPath, std::ios::binary | std::ios::ate);
     if(!file)
@@ -209,17 +219,27 @@ inline std::unique_ptr<TreeDataAdapter>
         return nullptr;
     }
 
-    return loadFromBuffer(buffer.data(), buffer.size(), expectedFeaturesHash, expectedModelHash);
+    return loadFromBuffer(buffer.data(),
+                          buffer.size(),
+                          expectedFeaturesHash,
+                          expectedModelHash,
+                          objective,
+                          transform,
+                          metric);
 }
 
 inline std::unique_ptr<TreeDataAdapter>
     TreeDataAdapter::loadFromBuffer(const uint8_t* buffer,
                                     size_t size,
                                     const std::string& expectedFeaturesHash,
-                                    const std::string& expectedModelHash)
+                                    const std::string& expectedModelHash,
+                                    const std::string& objective,
+                                    const std::string& transform,
+                                    const std::string& metric)
 {
     // Guard against null/empty buffer
-    if(buffer == nullptr || size < sizeof(flatbuffers::uoffset_t) + 4 || size > 256 * 1024 * 1024)
+    if(buffer == nullptr || size < sizeof(flatbuffers::uoffset_t) + 4
+       || size > size_t{256} * 1024 * 1024)
     {
         return nullptr;
     }
@@ -309,10 +329,9 @@ inline std::unique_ptr<TreeDataAdapter>
         // would be read for every candidate of every ranking.
         if(groupFeatureIndex < 0 || groupFeatureIndex >= model->num_features())
         {
-            HIPDNN_SDK_LOG_ERROR(
-                "TreeDataAdapter: grouped model's group_by_feature_index "
-                << groupFeatureIndex << " is outside the declared feature count "
-                << model->num_features());
+            HIPDNN_SDK_LOG_ERROR("TreeDataAdapter: grouped model's group_by_feature_index "
+                                 << groupFeatureIndex << " is outside the declared feature count "
+                                 << model->num_features());
             return nullptr;
         }
         groups.reserve(model->groups()->size());
@@ -348,19 +367,18 @@ inline std::unique_ptr<TreeDataAdapter>
         }
     }
 
-    // Extract model version (RFC 0019 §13)
-    const std::string modelVersion
-        = model->model_version() != nullptr ? model->model_version()->str() : "";
-
-    return std::unique_ptr<TreeDataAdapter>(new TreeDataAdapter(std::move(nodes),
-                                                                std::move(roots),
-                                                                std::move(groups),
-                                                                groupFeatureIndex,
-                                                                modelHash,
-                                                                numFeatures,
-                                                                baseScore,
-                                                                std::move(trainingArches),
-                                                                modelVersion));
+    return std::unique_ptr<TreeDataAdapter>(
+        new TreeDataAdapter(std::move(nodes),
+                            std::move(roots),
+                            std::move(groups),
+                            groupFeatureIndex,
+                            modelHash,
+                            numFeatures,
+                            baseScore,
+                            std::move(trainingArches),
+                            objective == "min",
+                            transform,
+                            score_transform::isPhysicalScore(metric, transform)));
 }
 
 inline TreeDataAdapter::TreeDataAdapter(std::vector<Node> nodes,
@@ -371,7 +389,9 @@ inline TreeDataAdapter::TreeDataAdapter(std::vector<Node> nodes,
                                         size_t numFeatures,
                                         double baseScore,
                                         std::vector<std::string> trainingArches,
-                                        std::string modelVersion)
+                                        bool lowerIsBetter,
+                                        std::string transform,
+                                        bool positiveRequired)
     : _nodes(std::move(nodes))
     , _roots(std::move(roots))
     , _groups(std::move(groups))
@@ -379,8 +399,10 @@ inline TreeDataAdapter::TreeDataAdapter(std::vector<Node> nodes,
     , _featuresHash(std::move(featuresHash))
     , _numFeatures(numFeatures)
     , _baseScore(baseScore)
+    , _lowerIsBetter(lowerIsBetter)
+    , _transform(std::move(transform))
+    , _positiveRequired(positiveRequired)
     , _trainingArches(std::move(trainingArches))
-    , _modelVersion(std::move(modelVersion))
 {
 }
 
@@ -538,19 +560,37 @@ inline std::vector<double>
 
     // Layer 1 ranks the groups. Its score for a row stands for the group that row belongs
     // to, so the group's standing is the best its members achieve -- the same "achievable
-    // when tuned" quantity layer 1 was trained on.
+    // when tuned" quantity layer 1 was trained on. "Best" is in the objective's direction: a
+    // `min` model predicts a cost, and taking its largest would choose the slowest group.
+    // The raw score is compared, before any transform inversion, which is safe because every
+    // registered transform is increasing and so preserves the direction.
+    //
+    // A row's layer-1 score stands for its group only when RFC 0019 §8.3 admits it -- the
+    // same rule the ranker applies to layer 2's scores -- so a model predicting a negative
+    // time for a group cannot choose it and then hide that behind a valid layer-2 score.
+    // Equal standings go to the smaller group value: a key of the groups themselves, so the
+    // choice does not depend on the order the catalog's rows arrived in.
     const auto slot = static_cast<size_t>(_groupFeatureIndex);
-    double bestGroupScore = -std::numeric_limits<double>::infinity();
+    double bestGroupScore = 0.0;
     double chosenGroup = 0.0;
     bool chosen = false;
     for(const auto& row : batch)
     {
-        if(slot >= row.size())
+        // A row with no group value cannot stand for a group: NaN matches no layer-2 group,
+        // and compares false both ways, so it would make the tie-break order-dependent.
+        if(slot >= row.size() || std::isnan(row[slot]))
         {
             continue;
         }
         const double groupScore = score(row);
-        if(!chosen || groupScore > bestGroupScore)
+        if(!score_transform::isRankableScore(score_transform::applyInverse(groupScore, _transform),
+                                             _positiveRequired))
+        {
+            continue;
+        }
+        const bool better
+            = _lowerIsBetter ? groupScore < bestGroupScore : groupScore > bestGroupScore;
+        if(!chosen || better || (groupScore == bestGroupScore && row[slot] < chosenGroup))
         {
             bestGroupScore = groupScore;
             chosenGroup = row[slot];
@@ -586,8 +626,9 @@ inline std::vector<double>
         // A group layer 1 picked but layer 2 does not describe: rank it by layer 1 rather
         // than discarding it, so a partially trained artifact degrades instead of refusing
         // the only group it chose.
-        scores[i] = within == nullptr || within->roots.empty() ? score(batch[i])
-                                                               : scoreRoots(batch[i], within->roots);
+        scores[i] = within == nullptr || within->roots.empty()
+                        ? score(batch[i])
+                        : scoreRoots(batch[i], within->roots);
     }
     return scores;
 }

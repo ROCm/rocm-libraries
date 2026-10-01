@@ -21,21 +21,28 @@ import pandas as pd
 
 from . import addressing
 from .catalog import DeterministicCatalogError, candidate_density
+from .correctness import REASON, VERDICT, known_wrong, numerical_verdict, suppress_timings
 from .coverage import device_field_coverage, enforce_device_coverage, propose_features
 from .evaluate import problem_keys, resolve_grouping, split_problems
-from .features import build_features_signature, signature_references
-from .provenance import ROLES, snapshot_provenance
+from .features import build_features_signature, require_admissible_kernel_axes, signature_references
+from .knobs import graph_bound_twins
+from .provenance import ROLES, descriptor_id, snapshot_provenance
 from .immediate import LABEL_STATISTIC, ROLE, normalize_row, normalize_corpus, training_binding, validate_signature
 from .ranking_metrics import DEFAULT_RANKING_METRIC, RANKING_METRICS, ranking_metric
 
 logger = logging.getLogger(__name__)
+
+#: The graph list `hipdnn_corpus_gen` writes at a corpus root (CorpusManifest.hpp).
+MANIFEST = "manifest.json"
 
 
 def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
     inputs = parser.add_mutually_exclusive_group(required=True)
     inputs.add_argument("--graphs", nargs="+",
                         help="Graph files -- JSON, or the binary FlatBuffers hipdnn_corpus_gen writes "
-                             "as graphs/*.fb -- or corpus directories (recursive)")
+                             "as graphs/*.fb -- or directories. A hipdnn_corpus_gen root (or its "
+                             "manifest.json) is read through the manifest's graph list; any other "
+                             "directory is searched recursively")
     inputs.add_argument("--collection", nargs="+", metavar="DIR",
                         help="Train from recorded collections (written by --collect-only) instead of "
                              "measuring; several are merged into one measurement of each configuration "
@@ -71,8 +78,16 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--num-boost-round", type=int, default=500)
     parser.add_argument("--early-stopping", type=int, default=50)
     parser.add_argument("--name", default="Generated UHD")
-    parser.add_argument("--uhd-id")
     parser.add_argument("--arch", help="Promotion arch; otherwise infer one observed architecture")
+    parser.add_argument("--uhd-id", action="append", default=[], dest="uhd_ids", metavar="METRIC=UUID",
+                        help="UHD id for one metric's model (repeatable). A bare UUID names the "
+                             "model of a single-metric run. An engine with no UED reads only the "
+                             "ids its provider declares per metric: those default to the id its "
+                             "description reports, and are required when it reports none")
+    parser.add_argument("--max-graph-failures", type=float, default=0.05, metavar="FRACTION",
+                        help="Fraction of graphs whose collection may fail and be skipped (each is "
+                             "recorded in generation_manifest.json); more fails the run with the "
+                             "list (default: 0.05)")
     parser.add_argument("--role", default="sort_kernel_catalog", choices=ROLES)
     parser.add_argument("--metric", nargs="+", action="extend", choices=tuple(RANKING_METRICS),
                         help="Ranking metric(s) to train, one UHD per metric from the same "
@@ -120,7 +135,8 @@ def _corpus_name(sources: list, source) -> str:
 def write_collection(stage: Path, *, collected_at: str, role: str, engine: str | None,
                      engine_id: int, sources: list, rows: dict, published: set, commands: list,
                      graph_inputs: list, provenance, knob_encodings: dict, shipping_knobs: list,
-                     collection_knobs: list, kernel_fields: set, shard: str | None = None) -> dict:
+                     collection_knobs: list, kernel_fields: set, shard: str | None = None,
+                     failed_graphs: list | None = None) -> dict:
     """Write what a measuring run produced so a later `--collection` can train from it.
 
     Everything training reads from a collection is here, and nothing training decides is:
@@ -154,6 +170,9 @@ def write_collection(stage: Path, *, collected_at: str, role: str, engine: str |
         "published": sorted(published), "kernel_fields": sorted(kernel_fields),
         "knob_encodings": knob_encodings, "shipping_knobs": shipping_knobs,
         "collection_knobs": collection_knobs, "graphs": graph_inputs, "commands": commands,
+        # Graphs skipped within the --max-graph-failures budget, each with its error: what
+        # this collection does not cover, recorded where training will read it.
+        "failed_graphs": list(failed_graphs or []),
     }
     if shard:
         # Which slice of its corpus this is: N shards of one corpus are N collections, and
@@ -212,27 +231,6 @@ def one_measurement_per_shape(measured: list) -> tuple[list, int]:
         newest[key] = session
     kept = [row for session, row in measured if newest[_measurement_key(row)] == session]
     return kept, len(measured) - len(kept)
-
-
-def exposed_axes(shipping_knobs) -> set:
-    """The kernel columns a shipped catalog ranker may rank on: the shipping UED's knobs.
-
-    The collection UED exposes every KMD field, so each catalog entry is reachable while
-    measuring; the UED that ships does not, and the runtime refuses a model ranking on a field
-    it does not expose (RFC 0019 §6.3, UhdKernelHeuristic.hpp) -- the engine then ranks by
-    priority and nothing says the model was dropped except a log line.
-    """
-    return {"kernel." + knob for knob in shipping_knobs or []}
-
-
-def refuse_unexposed_axes(signature, kernel_fields, shipping_knobs) -> None:
-    """Refuse a recipe ranking on a kernel field the shipping UED does not expose."""
-    unexposed = sorted({ref[1:] for ref in signature_references(signature)}
-                       & set(kernel_fields) - exposed_axes(shipping_knobs))
-    if unexposed:
-        raise ValueError(f"the features rank on {unexposed}, which the shipping UED does not "
-                         f"expose as knobs {sorted(shipping_knobs or [])}; the runtime would refuse "
-                         "the model (RFC 0019 §6.3) and rank by priority instead")
 
 
 def load_collections(paths: list, *, role: str, sources: list) -> dict:
@@ -298,6 +296,8 @@ def load_collections(paths: list, *, role: str, sources: list) -> dict:
                    for graph in manifest["graphs"]],
         "commands": [dict(command, collection=directory) for _, directory, manifest in loaded
                      for command in manifest["commands"]],
+        "failed_graphs": [dict(failure, collection=directory) for _, directory, manifest in loaded
+                          for failure in manifest.get("failed_graphs") or []],
         "collections": [{"path": directory, "collected_at": collected_at,
                          "devices": manifest["devices"], "rows": manifest["row_counts"]}
                         for collected_at, directory, manifest in loaded],
@@ -448,12 +448,10 @@ def collect_graph(command: list[str], environment: dict, log_dir: Path, commands
         # the inverted oracle the section exists to prevent. `null` is the honest verdict
         # when the cross-check could decide nothing, and it is spelled differently from
         # `true` precisely so it cannot be mistaken for one.
-        if "numerically_valid" not in result or not isinstance(result.get("validation"), str):
+        if VERDICT not in result or not isinstance(result.get(REASON), str):
             raise ValueError("timing response must carry a numerical-validation verdict "
                              "(RFC 0019 §13.2); this benchmark performed no correctness check")
-        verdict = result["numerically_valid"]
-        if verdict not in (True, False, None):
-            raise ValueError("numerically_valid must be true, false or null")
+        verdict = numerical_verdict(result[VERDICT])
         elapsed = result.get("robust_time_ms")
         if result.get("succeeded") and (not isinstance(elapsed, (int, float)) or not math.isfinite(elapsed) or elapsed <= 0):
             raise ValueError("successful timing requires a positive finite robust_time_ms")
@@ -464,7 +462,7 @@ def collect_graph(command: list[str], environment: dict, log_dir: Path, commands
                # "a measurement was obtained" and §8.1 plus `evaluate`'s exclusion counters
                # both read it that way; a row that ran and computed the wrong answer is a
                # different fact from a row that never ran, and §13.2 keeps both.
-               "numerically_valid": verdict, "validation": result["validation"],
+               VERDICT: verdict, REASON: result[REASON],
                "succeeded": result.get("succeeded"), "skip_reason": result.get("skip_reason"),
                "robustMeanMs": elapsed, "minTimeMs": result.get("min_time_ms"), "avgTimeMs": result.get("avg_time_ms"),
                # RFC 0019.13 §8.3 makes `stddevMs` and `iters` columns of the result
@@ -481,8 +479,7 @@ def collect_graph(command: list[str], environment: dict, log_dir: Path, commands
             # `evaluate` regret pass that reads the corpus back, and any later retrain. A
             # wrong-but-fast kernel holds the best time in its group, so leaving the number
             # in place and relying on each consumer to filter is how it becomes the label.
-            for column in ("robustMeanMs", "minTimeMs", "avgTimeMs", "stddevMs"):
-                row[column] = None
+            suppress_timings(row)
         for mapping in (first["problem_features"], first["device_features"], candidate["kernel_features"]):
             collision = set(row) & set(mapping)
             if collision:
@@ -607,21 +604,13 @@ def _measure(args: argparse.Namespace, tree: Path, stage: Path, sources: list, i
     bench = shutil.which(args.bench)
     if bench is None:
         raise ValueError(f"hipdnn_bench executable {args.bench!r} was not found")
-    graphs = set()
-    for supplied in args.graphs:
-        path = Path(supplied).resolve()
-        # `hipdnn_corpus_gen` writes its problems as binary FlatBuffers under
-        # `graphs/<operation>_<n>.fb`, so a generated corpus composes with
-        # `generate` only if that form is collected alongside hand-written JSON.
-        graphs.update([*path.rglob("*.json"), *path.rglob("*.fb")] if path.is_dir() else [path])
-    if not graphs or any(not path.is_file() for path in graphs):
-        raise ValueError("--graphs must identify existing graph .json or .fb files")
+    graphs = discover_graphs(args.graphs)
     if args.shard:
         index, count = parse_shard(args.shard)
         # Every N-th in path order, not a contiguous block: a corpus is written regime by
         # regime, so a block would hand one GPU all the decode shapes.
         total = len(graphs)
-        graphs = set(sorted(graphs)[index::count])
+        graphs = graphs[index::count]
         if not graphs:
             raise ValueError(f"shard {args.shard} of {total} graph(s) is empty")
     collected_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -631,9 +620,17 @@ def _measure(args: argparse.Namespace, tree: Path, stage: Path, sources: list, i
         ued_path, ued = _descriptor(tree, ".ued.json", provenance["ued"]["id"])
         _, kmd = _descriptor(tree, ".kmd.json", provenance["kmd"]["id"])
         kernel_fields = {"kernel." + field["name"] for field in kmd["fields"]}
+    # The tree this run measures is the ONE root the bench loads from: DIR replaces the
+    # provider's installed tree, while RUNTIME_DIR and PATH only add roots beside it, and
+    # the loader keeps the FIRST definition of an id. Inherited additive roots are
+    # cleared for both roles, and the measured tree goes in as the replacement, so an
+    # earlier root's selector can never stand in for the one being generated against --
+    # an L1 label is a measurement of the selection this tree makes, nothing else's.
     environment = dict(os.environ)
+    environment.pop("HIPDNN_DESCRIPTOR_PATH", None)
+    environment.pop("HIPDNN_DESCRIPTOR_RUNTIME_DIR", None)
     if immediate:
-        environment["HIPDNN_DESCRIPTOR_PATH"] = str(tree)
+        environment["HIPDNN_DESCRIPTOR_DIR"] = str(tree)
     else:
         collection_tree = stage / "collection_descriptors"
         shutil.copytree(tree, collection_tree)
@@ -653,11 +650,12 @@ def _measure(args: argparse.Namespace, tree: Path, stage: Path, sources: list, i
         _write_json(collection_tree / ued_path.relative_to(tree), exposed)
         _write_json(stage / "shipping_ued.json", ued)
         environment["HIPDNN_DESCRIPTOR_DIR"] = str(collection_tree)
-        environment.pop("HIPDNN_DESCRIPTOR_RUNTIME_DIR", None)
     rows = {source: [] for source in sources}
-    commands, graph_inputs = [], []
+    commands, graph_inputs, failed_graphs = [], [], []
     published = set()
-    for graph_index, graph in enumerate(sorted(graphs)):
+    for graph_index, graph in enumerate(graphs):
+        graph_rows = {source: [] for source in sources}
+        graph_names = set()
         payload = graph.read_bytes()
         # `hipdnn_bench` tells the two serialized forms apart by content rather than
         # by extension, so a renamed file still loads; the staged copy follows the
@@ -665,43 +663,73 @@ def _measure(args: argparse.Namespace, tree: Path, stage: Path, sources: list, i
         binary = not payload.lstrip().startswith(b"{")
         saved_graph = stage / "graphs" / f"{graph_index:06d}{'.fb' if binary else '.json'}"
         saved_graph.parent.mkdir(exist_ok=True)
-        if immediate and not binary:
-            graph_document = json.loads(payload.decode("utf-8"))
-            if not isinstance(graph_document, dict):
-                raise ValueError("graph input must be a JSON object")
-            if not graph_document.get("id"):
-                canonical = json.dumps(graph_document, sort_keys=True, separators=(",", ":"), allow_nan=False)
-                graph_document["id"] = str(uuid.uuid5(uuid.NAMESPACE_URL, "hipdnn:graph:" + canonical))
-            _write_json(saved_graph, graph_document)
-        else:
-            # A serialized graph already carries its own id, and the bench preserves
-            # it across the deserialize/serialize round trip it does for L1, so there
-            # is nothing to inject: the identity the corpus records is the one the
-            # benchmark reports back as `graph_id`, keyed to this copy's sha256.
-            saved_graph.write_bytes(payload)
-        graph_inputs.append({"source": str(graph), "copy": str(saved_graph.relative_to(stage)),
-                             "sha256": hashlib.sha256(payload).hexdigest()})
-        command = [bench, "--graph", str(saved_graph), "--engine-id", str(args.engine_id)]
-        if args.plugin_dir:
-            command.extend(["--plugin-dir", str(Path(args.plugin_dir).resolve())])
-        if args.workspace_limit is not None:
-            command.extend(["--workspace-limit", str(args.workspace_limit)])
-        for knob in args.knob:
-            command.extend(["--knob", knob])
-        for device in args.device or [environment.get("HIP_VISIBLE_DEVICES")]:
-            run_env = dict(environment)
-            if device is not None:
-                run_env["HIP_VISIBLE_DEVICES"] = device
+        graph_input = {"source": str(graph), "copy": str(saved_graph.relative_to(stage)),
+                       "sha256": hashlib.sha256(payload).hexdigest()}
+        graph_inputs.append(graph_input)
+        # One graph's failure costs that graph, not the run: a bench that crashes or a
+        # response that fails validation on one problem says nothing about the others.
+        # All of the graph's rows go together, for every device and metric, so the
+        # metrics' corpora stay over one problem set. The budget below still ends a run
+        # whose failures are systematic rather than incidental.
+        try:
+            if immediate and not binary:
+                graph_document = json.loads(payload.decode("utf-8"))
+                if not isinstance(graph_document, dict):
+                    raise ValueError("graph input must be a JSON object")
+                if not graph_document.get("id"):
+                    canonical = json.dumps(graph_document, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                    graph_document["id"] = str(uuid.uuid5(uuid.NAMESPACE_URL, "hipdnn:graph:" + canonical))
+                _write_json(saved_graph, graph_document)
+            else:
+                # A serialized graph already carries its own id, and the bench preserves
+                # it across the deserialize/serialize round trip it does for L1, so there
+                # is nothing to inject: the identity the corpus records is the one the
+                # benchmark reports back as `graph_id`, keyed to this copy's sha256.
+                saved_graph.write_bytes(payload)
+            command = [bench, "--graph", str(saved_graph), "--engine-id", str(args.engine_id)]
+            if args.plugin_dir:
+                command.extend(["--plugin-dir", str(Path(args.plugin_dir).resolve())])
+            if args.workspace_limit is not None:
+                command.extend(["--workspace-limit", str(args.workspace_limit)])
+            for knob in args.knob:
+                command.extend(["--knob", knob])
+            for device in args.device or [environment.get("HIP_VISIBLE_DEVICES")]:
+                run_env = dict(environment)
+                if device is not None:
+                    run_env["HIP_VISIBLE_DEVICES"] = device
+                for source in sources:
+                    if immediate:
+                        collected, names = collect_immediate_graph(command, run_env, stage / "commands",
+                                                                   commands, metric=source)
+                    else:
+                        collected, names = collect_graph(command, run_env, stage / "commands", commands,
+                                                         addressing_table=ordinals,
+                                                         engine_descriptor_id=ued["id"])
+                    graph_rows[source].extend(collected)
+                    graph_names.update(names)
+        except ValueError as error:
+            failed_graphs.append({**graph_input, "error": str(error)})
+            logger.warning("graph %s skipped: %s", graph, error)
+            continue
+        if immediate and not args.collect_only and not any(rows.values()):
+            # Settled on the first measured graph, not after the corpus: the id an opaque
+            # engine reads is its declaration and does not vary by graph, so a run that could
+            # only train an unread model stops here. A collect-only run trains nothing.
+            requested = _requested_uhd_ids(args.uhd_ids, list(sources))
             for source in sources:
-                if immediate:
-                    collected, names = collect_immediate_graph(command, run_env, stage / "commands",
-                                                               commands, metric=source)
-                else:
-                    collected, names = collect_graph(command, run_env, stage / "commands", commands,
-                                                     addressing_table=ordinals,
-                                                     engine_descriptor_id=ued["id"])
-                rows[source].extend(collected)
-                published.update(names)
+                if graph_rows[source]:
+                    _declared_uhd_id(json.loads(graph_rows[source][0]["binding"]), source,
+                                     requested.get(source))
+        for source in sources:
+            rows[source].extend(graph_rows[source])
+        published.update(graph_names)
+    if len(failed_graphs) > args.max_graph_failures * len(graphs):
+        _write_json(stage / "failed_graphs.json", failed_graphs)
+        listed = "\n".join(f"  {failure['source']}: {failure['error']}" for failure in failed_graphs[:10])
+        more = f"\n  ... and {len(failed_graphs) - 10} more" if len(failed_graphs) > 10 else ""
+        raise ValueError(f"{len(failed_graphs)} of {len(graphs)} graph(s) failed collection, over "
+                         f"the --max-graph-failures budget of {args.max_graph_failures:g}:\n"
+                         f"{listed}{more}")
     regimes = corpus_regimes(graphs)
     for source in sources:
         for row in rows[source]:
@@ -709,7 +737,150 @@ def _measure(args: argparse.Namespace, tree: Path, stage: Path, sources: list, i
     return {"collected_at": collected_at, "rows": rows, "published": published,
             "commands": commands, "graph_inputs": graph_inputs, "provenance": provenance,
             "kernel_fields": kernel_fields, "knob_encodings": addressing.as_manifest(ordinals),
-            "shipping_knobs": ued.get("knobs", []), "collection_knobs": exposed.get("knobs", [])}
+            "shipping_knobs": ued.get("knobs", []), "collection_knobs": exposed.get("knobs", []),
+            "failed_graphs": failed_graphs}
+
+
+def discover_graphs(supplied: list[str]) -> list[Path]:
+    """The graph files `--graphs` names, sorted and each once.
+
+    A `hipdnn_corpus_gen` root is read through its `manifest.json` graph list rather than
+    searched: the manifest sits beside the graphs, is JSON, and is not one of them (T6 --
+    collected as a graph, it aborted the run). A listed graph that is absent is an error,
+    because a silently shorter corpus is not the one the manifest describes.
+    """
+    graphs = set()
+    for text in supplied:
+        path = Path(text).resolve()
+        manifest = path / MANIFEST if path.is_dir() else path if path.name == MANIFEST else None
+        if manifest is not None and manifest.is_file():
+            graphs.update(_manifest_graphs(manifest))
+        elif path.is_dir():
+            # `hipdnn_corpus_gen` writes its problems as binary FlatBuffers under
+            # `graphs/<operation>_<n>.fb`, so a generated corpus composes with `generate`
+            # only if that form is collected alongside hand-written JSON. A nested corpus
+            # root's manifest is not a graph either.
+            graphs.update(found for found in [*path.rglob("*.json"), *path.rglob("*.fb")]
+                          if found.name != MANIFEST)
+        else:
+            graphs.add(path)
+    if not graphs or any(not path.is_file() for path in graphs):
+        raise ValueError("--graphs must identify existing graph .json or .fb files")
+    return sorted(graphs)
+
+
+def _manifest_graphs(manifest: Path) -> list[Path]:
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    rows = document.get("graphs") if isinstance(document, dict) else document
+    if not isinstance(rows, list) or not rows:
+        raise ValueError(f"{manifest}: expected a nonempty graphs list")
+    graphs = []
+    for row in rows:
+        named = row.get("file") if isinstance(row, dict) else None
+        if not isinstance(named, str) or not named:
+            raise ValueError(f"{manifest}: every graphs entry must name its file")
+        graph = (manifest.parent / named).resolve()
+        if not graph.is_file():
+            raise ValueError(f"{manifest} lists {named}, which does not exist")
+        graphs.append(graph)
+    return graphs
+
+
+def _requested_uhd_ids(values: list[str], metrics: list[str]) -> dict[str, str]:
+    """`--uhd-id` as requested metric -> UUID for this run's metrics."""
+    from .promote import parse_uhd_ids
+
+    ids = parse_uhd_ids(values)
+    if None in ids:
+        if len(metrics) != 1:
+            raise ValueError("a bare --uhd-id names one UHD, and this run emits one per metric; "
+                             "name each as METRIC=UUID")
+        return {metrics[0]: ids[None]}
+    unrequested = sorted(set(ids) - set(metrics))
+    if unrequested:
+        raise ValueError(f"--uhd-id names {', '.join(unrequested)}, which --metric does not request")
+    return ids
+
+
+def _declared_uhd_id(binding: dict, metric: str, requested: str | None) -> str | None:
+    """The id an L1 model for `metric` must carry, or None to mint one.
+
+    An engine with no UED binds its models by UUIDs its provider declares per metric, and
+    its description reports the one for the requested metric as `binding.uhd_id`. Training
+    under any other id ships a model the engine never reads, so the declaration is the
+    default, a contradicting --uhd-id is refused, and with neither the run stops here --
+    after one graph, not after the whole corpus -- rather than minting an unread id.
+    """
+    declared = binding.get("uhd_id")
+    if "ued" in binding["trained_against"]:
+        # A UED role map binds whatever id promotion writes into it.
+        return requested
+    if declared is not None:
+        declared = descriptor_id(declared, "binding.uhd_id")
+        if requested is not None and requested != declared:
+            raise ValueError(f"--uhd-id {metric}={requested} contradicts the id "
+                             f"{binding['engine']} declares for {metric} ({declared})")
+        return declared
+    if requested is None:
+        raise ValueError(
+            f"{binding['engine']} owns no UED, so it reads only the UHD ids its provider "
+            f"declares per metric, and its description reports none for {metric}. Pass "
+            f"--uhd-id {metric}=<uuid> naming the id the provider declares; a minted id would "
+            "install a model the engine never reads")
+    return requested
+
+
+def withheld_kernel_fields(kmd_fields: list[str], knobs: list[str], published) -> list[dict]:
+    """The KMD fields generation never offers as `$kernel.*` features, each with why.
+
+    The collection UED exposes every KMD field (RFC 0019 §13.2) so every catalog entry is
+    reachable while timing; the model, though, ships under the AUTHORED UED, and the runtime
+    admits it only if each `$kernel.*` axis is one of that UED's knobs. A field the matcher
+    binds from the graph is no loss: its value is on the problem side under the twin column
+    named here, which is where the model reads it.
+    """
+    twins = graph_bound_twins(published)
+    withheld = []
+    for field in kmd_fields:
+        if field in knobs:
+            continue
+        if field in twins:
+            withheld.append({"field": field, "reason": "graph_bound", "read_instead": twins[field],
+                             "detail": "the matcher binds it from the graph, so the problem column "
+                                       "carries the same value"})
+        else:
+            withheld.append({"field": field, "reason": "not_a_shipping_knob",
+                             "detail": "the shipping UED does not expose it, so the runtime would "
+                                       "refuse a model ranking on it"})
+    return withheld
+
+
+def feature_recipe(train_frame: pd.DataFrame, published: set[str], authored: list | None,
+                   kmd_fields: list[str] | None, knobs: list[str],
+                   pairs: list[tuple[str, str]]) -> tuple[list, list]:
+    """(signature, omitted proposals): the authored recipe, or one proposed from the corpus.
+
+    `kmd_fields` is None for an engine-level run, which reads no kernel fields at all. For a
+    catalog run the proposal offers `$kernel.*` only for the shipping UED's knobs, and an
+    authored recipe reading any other kernel field is refused here, before training spends
+    hours on a model the runtime would not use.
+    """
+    omitted = []
+    if authored is not None:
+        signature = authored
+    else:
+        offered = {"kernel." + field for field in kmd_fields or () if field in knobs}
+        scalar_columns = [name for name in sorted(published)
+                          if train_frame[name].notna().all()
+                          and train_frame[name].map(lambda value: isinstance(value, (str, int, float, bool))).all()]
+        legal_kernel_fields = {name for name in scalar_columns if name.split("[", 1)[0] in offered}
+        signature, omitted = propose_features(train_frame[scalar_columns], legal_kernel_fields, pairs)
+    if not isinstance(signature, list) or not signature:
+        raise ValueError("the feature recipe must be a nonempty canonical array")
+    if kmd_fields is not None:
+        require_admissible_kernel_axes(signature, knobs, kmd_fields, "the feature recipe")
+    return signature, omitted
+
 
 
 def run_generate(args: argparse.Namespace) -> int:
@@ -726,9 +897,9 @@ def run_generate(args: argparse.Namespace) -> int:
     metrics = list(dict.fromkeys(args.metric or [DEFAULT_RANKING_METRIC]))
     single = len(metrics) == 1
     try:
-        if args.uhd_id and not single:
-            raise ValueError("--uhd-id names one UHD, and this run emits one per metric; omit it "
-                             "and each metric's UHD is minted its own id")
+        uhd_ids = _requested_uhd_ids(args.uhd_ids, metrics)
+        if not 0 <= args.max_graph_failures < 1:
+            raise ValueError("--max-graph-failures must be a fraction in [0, 1)")
         output = Path(args.output_dir).resolve()
         tree = Path(args.descriptor_tree).resolve()
         if output.exists():
@@ -769,7 +940,7 @@ def run_generate(args: argparse.Namespace) -> int:
                     graph_inputs=measured["graph_inputs"], provenance=measured["provenance"],
                     knob_encodings=measured["knob_encodings"], shipping_knobs=measured["shipping_knobs"],
                     collection_knobs=measured["collection_knobs"], kernel_fields=measured["kernel_fields"],
-                    shard=args.shard)
+                    shard=args.shard, failed_graphs=measured["failed_graphs"])
                 stage.rename(output)
                 stage = None
                 print(f"Collected {sum(manifest['row_counts'].values())} measurement(s) of "
@@ -793,7 +964,18 @@ def run_generate(args: argparse.Namespace) -> int:
         provenance, kernel_fields = measured["provenance"], measured["kernel_fields"]
         knob_encodings = measured["knob_encodings"]
         shipping_knobs, collection_knobs = measured["shipping_knobs"], measured["collection_knobs"]
-        shipped_axes = exposed_axes(shipping_knobs)
+        # What the shipping UED exposes and the KMD declares, as the measurement recorded them:
+        # the catalog admission rule (feature_recipe) checks the recipe against both.
+        knobs = list(shipping_knobs)
+        kmd_fields = None if immediate else sorted(f.removeprefix("kernel.") for f in kernel_fields)
+        failed_graphs = measured.get("failed_graphs", [])
+        if immediate:
+            for source in sources:
+                if rows[source]:
+                    # The engine's declaration, read off its own response: it does not vary by
+                    # graph, so the first row of each metric settles it, measured or collected.
+                    uhd_ids[source] = _declared_uhd_id(json.loads(rows[source][0]["binding"]),
+                                                       source, uhd_ids.get(source))
 
         # One corpus per source, named plainly when there is only one.
         def staged(stem: str, source) -> str:
@@ -826,10 +1008,15 @@ def run_generate(args: argparse.Namespace) -> int:
         # check against (Open Question 19). Gating on it would train on nothing at all.
         # The row itself is not dropped -- it is already in `corpus.json`/`corpus.csv` above,
         # with its measurement suppressed and its marker, which is what §13.2 asks for.
-        usable = {source: (frame.copy() if immediate else
-                           frame[frame["is_valid"] & frame["succeeded"].eq(True)
-                                 & frame["numerically_valid"].ne(False)].copy())
-                  for source, frame in frames.items()}
+        # The verdict gates both roles: an engine whose immediate pick computed the wrong
+        # answer must not teach the estimator its time either. An immediate row is always
+        # `is_valid` (`normalize_row`), so only the verdict gates it.
+        usable = {}
+        for source, frame in frames.items():
+            keep = ~known_wrong(frame)
+            if not immediate:
+                keep &= frame["is_valid"] & frame["succeeded"].eq(True)
+            usable[source] = frame[keep].copy()
         if any(candidates.empty for candidates in usable.values()):
             raise ValueError("the benchmark produced no successful valid timings")
         # Checked here, the first moment it is knowable, rather than at the
@@ -881,28 +1068,18 @@ def run_generate(args: argparse.Namespace) -> int:
             if len(parts) != 2:
                 raise ValueError("--dim-tile requires DIMENSION=KERNEL_FIELD")
             pairs.append(tuple(part.removeprefix("$") for part in parts))
-        omitted = []
         if args.feature_signature:
-            signature = json.loads(Path(args.feature_signature).read_text(encoding="utf-8"))
+            authored = json.loads(Path(args.feature_signature).read_text(encoding="utf-8"))
         elif args.features:
-            signature = build_features_signature(args.features)
+            authored = build_features_signature(args.features)
         else:
-            scalar_columns = [name for name in sorted(published)
-                              if train_frame[name].notna().all()
-                              and train_frame[name].map(lambda value: isinstance(value, (str, int, float, bool))).all()]
-            # Of the kernel fields, only the shipping UED's knobs: the collection exposed every
-            # KMD field so each catalog entry was reachable, but the runtime refuses a model
-            # ranking on a field its UED does not expose as a knob (RFC 0019 §6.3,
-            # UhdKernelHeuristic.hpp), and keeps ranking by priority.
-            legal_kernel_fields = {name for name in scalar_columns
-                                   if name.split("[", 1)[0] in kernel_fields
-                                   and name.split("[", 1)[0] in shipped_axes}
-            signature, omitted = propose_features(train_frame[scalar_columns], legal_kernel_fields, pairs)
-        if not isinstance(signature, list) or not signature:
-            raise ValueError("the feature recipe must be a nonempty canonical array")
-        refuse_unexposed_axes(signature, kernel_fields, shipping_knobs)
+            authored = None
+        signature, omitted = feature_recipe(train_frame, published, authored, kmd_fields, knobs, pairs)
+        withheld = withheld_kernel_fields(kmd_fields or [], knobs, published)
         if immediate:
-            validate_signature(signature, published)
+            # Leakage only; whether every entry evaluates on each graph's published features
+            # is the shared evaluator's answer, which training asks once the encoding exists.
+            validate_signature(signature)
         unknown = {ref[1:] for ref in signature_references(signature)} - published
         if unknown:
             raise ValueError(f"features are not published by this engine: {sorted(unknown)}")
@@ -935,8 +1112,8 @@ def run_generate(args: argparse.Namespace) -> int:
                 train_args.append("--calibrated")
             if immediate:
                 train_args.extend(["--arch", args.arch or arches[0]])
-            if args.uhd_id:
-                train_args.extend(["--uhd-id", args.uhd_id])
+            if uhd_ids.get(requested):
+                train_args.extend(["--uhd-id", uhd_ids[requested]])
             if args.feature_evaluator:
                 train_args.extend(["--feature-evaluator", args.feature_evaluator])
             if main(train_args):
@@ -973,6 +1150,7 @@ def run_generate(args: argparse.Namespace) -> int:
             report["holdout_integrity"] = {"status": "held_out", "detail": "Verified disjoint graph/device identities in recorded training and evaluation slices"}
             _write_json(report_path, report)
             models.append({"metric": declared, "requested_metric": requested,
+                           "uhd_id": uhd_ids.get(requested),
                            "model_dir": str(model_dir), "corpus": str(corpora[source]),
                            "training_arguments": train_args, "evaluation_arguments": eval_args,
                            "training_problem_keys": sorted(training_keys),
@@ -982,7 +1160,13 @@ def run_generate(args: argparse.Namespace) -> int:
             # Where the measurements came from when this run measured nothing, and how many
             # rows were set aside so each configuration on a shape is trained on once.
             "collections": collections, "superseded_rows": superseded,
+            # Graphs whose collection failed and were skipped, each with its error, within
+            # the --max-graph-failures budget; their staged copies stay under graphs/.
+            "failed_graphs": failed_graphs, "max_graph_failures": args.max_graph_failures,
             "commands": commands, "features_signature": signature, "omitted_proposals": omitted,
+            # KMD fields never offered as `$kernel.*` features, and why: the runtime admits only
+            # the shipping UED's knobs, and a graph-bound field is read from its problem twin.
+            "withheld_kernel_fields": withheld,
             # One entry per UHD emitted: its metric (null for a metric-less ranker), where it
             # was trained, and the exact commands that trained and evaluated it.
             "models": models,
@@ -1008,10 +1192,13 @@ def run_generate(args: argparse.Namespace) -> int:
         # Validate installation against the original tree before publishing any artifacts.
         for model in models:
             build_plan(Path(model["model_dir"]), tree, args.engine, role=args.role,
-                       arch=args.arch or arches[0], corpus=Path(model["corpus"]))
+                       arch=args.arch or arches[0], corpus=Path(model["corpus"]),
+                       uhd_ids={None: model["uhd_id"]} if model["uhd_id"] else None,
+                       feature_evaluator=args.feature_evaluator)
         # Where each model and its corpus land once the stage is renamed into place.
         published_models = [(output / Path(model["model_dir"]).relative_to(stage),
-                             output / Path(model["corpus"]).relative_to(stage)) for model in models]
+                             output / Path(model["corpus"]).relative_to(stage), model["uhd_id"])
+                            for model in models]
         # Recorded paths must refer to the final output rather than the staging directory.
         old_root = str(stage)
         for path in stage.rglob("*.json"):
@@ -1034,15 +1221,19 @@ def run_generate(args: argparse.Namespace) -> int:
             add_promote_arguments(parser)
             # In sequence, each against the role map the previous one wrote: promotion adds a
             # UHD beside the other metrics' and replaces only its own metric's.
-            for model_dir, corpus in published_models:
+            for model_dir, corpus, identity in published_models:
                 promote_args = ["--model-dir", str(model_dir), "--descriptor-tree", str(tree),
                                 "--role", args.role, "--arch", args.arch or arches[0],
                                 "--corpus", str(corpus)]
                 if args.engine:
                     promote_args.extend(["--engine", args.engine])
+                if identity:
+                    promote_args.extend(["--uhd-id", identity])
+                if args.feature_evaluator:
+                    promote_args.extend(["--feature-evaluator", args.feature_evaluator])
                 if run_promote(parser.parse_args(promote_args)):
                     raise ValueError(f"promotion failed; validated model and reproducible collection remain at {output}")
-        for model_dir, _ in published_models:
+        for model_dir, _, _ in published_models:
             print(f"Generated {'installable' if args.no_promote else 'installed'} UHD: {model_dir}")
         return 0
     except (OSError, TypeError, ValueError, KeyError, PromoteError) as error:

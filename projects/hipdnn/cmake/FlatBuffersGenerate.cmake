@@ -203,7 +203,9 @@ function(hipdnn_generate_flatbuffer_python)
         VERBATIM
     )
 
-    add_custom_target(generate_${ARG_NAME}_python_bindings DEPENDS "${_stamp}")
+    add_custom_target(generate_${ARG_NAME}_python_bindings
+        DEPENDS "${_stamp}"
+        COMMENT "FlatBuffers Python bindings for ${ARG_NAME}")
 
     if(ARG_TARGET)
         add_dependencies(${ARG_TARGET} generate_${ARG_NAME}_python_bindings)

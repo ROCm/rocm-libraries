@@ -326,6 +326,156 @@ TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicBuildsANativeHeuristicForNa
     EXPECT_EQ(heuristic->score(context, BoundTokens{}, makeDefinition(testId(0x01), 128)), 128.0);
 }
 
+/// A native cost scorer: milliseconds by block size, 256 the fast kernel. Registered for one
+/// test's duration, because the registry is process-wide.
+constexpr const char* MILLISECONDS_SYMBOL = "hipdnn.kernel_ingestor.test.milliseconds";
+
+class ScopedMillisecondsScorer
+{
+public:
+    ScopedMillisecondsScorer()
+    {
+        ScoreRegistry::registerSymbol(
+            MILLISECONDS_SYMBOL,
+            +[](const MatchContext&, const BoundTokens&, const KernelDefinition& kernel) {
+                switch(kernel.getIntMetadata(BLOCK_SIZE))
+                {
+                case 256:
+                    return 1.0;
+                case 64:
+                    return 10.0;
+                default:
+                    return 0.0; // no measurement
+                }
+            });
+    }
+    ~ScopedMillisecondsScorer()
+    {
+        ScoreRegistry::unregisterSymbol(MILLISECONDS_SYMBOL);
+    }
+    ScopedMillisecondsScorer(const ScopedMillisecondsScorer&) = delete;
+    ScopedMillisecondsScorer& operator=(const ScopedMillisecondsScorer&) = delete;
+};
+
+HeuristicDescriptor millisecondsDescriptor(const std::string& metric)
+{
+    HeuristicDescriptor descriptor;
+    descriptor.id = HEURISTIC_ID;
+    descriptor.name = "native cost scorer";
+    descriptor.adapter = UhdAdapter::NATIVE;
+    descriptor.nativeSymbol = MILLISECONDS_SYMBOL;
+    descriptor.objective = "min";
+    descriptor.score = {metric, !metric.empty(), "identity"};
+    return descriptor;
+}
+
+/// Regression (R4). A signature-less native scorer never saw the UHD's objective, and
+/// rankScored orders higher-first, so a `min` scorer returning milliseconds ranked the 10 ms
+/// kernel first. Both routes to a direct scorer are covered: the metric-less ranker the
+/// factory builds itself, and a metric's ranker, which UhdKernelHeuristic wraps.
+TEST(TestIngestorKernelHeuristic, ANativeMinScorerRanksTheCheapestKernelFirst)
+{
+    const ScopedMillisecondsScorer scorer;
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+
+    Catalog catalog;
+    const auto slowId = testId(0x01);
+    const auto fastId = testId(0x02);
+    catalog.entries = {makeDefinition(slowId, 64), makeDefinition(fastId, 256)};
+
+    for(const std::string metric : {"", "time"})
+    {
+        SCOPED_TRACE("metric '" + metric + "'");
+        const auto heuristic = makeKernelHeuristic(millisecondsDescriptor(metric));
+        ASSERT_NE(heuristic, nullptr);
+        const MatchContext context{graph, 0, properties, metric.empty() ? "tflops" : "time"};
+
+        const auto ranked = heuristic->rank(catalog, context);
+        ASSERT_EQ(ranked.size(), 2U);
+        EXPECT_EQ(ranked.front().kernelId, fastId) << "the 10 ms kernel outranked the 1 ms one";
+    }
+}
+
+/// Once a direct scorer is ordered in its objective's direction, a calibrated `time` native
+/// ranker's figure of merit is usable: ascending milliseconds, the physical values -- not the
+/// negated ordering key, which a caller comparing engines would read as negative time.
+TEST(TestIngestorKernelHeuristic, ACalibratedNativeTimeScorerReportsAscendingMilliseconds)
+{
+    const ScopedMillisecondsScorer scorer;
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties, "time"};
+
+    Catalog catalog;
+    catalog.entries = {makeDefinition(testId(0x01), 64), makeDefinition(testId(0x02), 256)};
+
+    const auto heuristic = makeKernelHeuristic(millisecondsDescriptor("time"));
+    std::string modelId;
+    const auto calibrated = heuristic->calibratedRanking(catalog, context, modelId);
+
+    ASSERT_EQ(calibrated.size(), 2U);
+    EXPECT_EQ(calibrated.front().kernelId, testId(0x02));
+    EXPECT_DOUBLE_EQ(calibrated.front().score, 1.0);
+    EXPECT_DOUBLE_EQ(calibrated.back().score, 10.0);
+    EXPECT_EQ(modelId, toString(HEURISTIC_ID));
+}
+
+/// Regression (S2). A direct scorer's value was reported in its transform's space and the
+/// inverse applied afterwards, past a zero test meant for "no measurement" -- so a `log` time
+/// scorer pricing a kernel at exactly 1 ms (log 1 = 0) read as unmeasured, and the whole
+/// calibrated ranking was withheld because its winner looked unpriced.
+TEST(TestIngestorKernelHeuristic, ATransformedZeroIsAMeasurementNotItsAbsence)
+{
+    constexpr const char* LOG_MILLISECONDS_SYMBOL = "hipdnn.kernel_ingestor.test.log_milliseconds";
+    ScoreRegistry::registerSymbol(
+        LOG_MILLISECONDS_SYMBOL,
+        +[](const MatchContext&, const BoundTokens&, const KernelDefinition& kernel) {
+            return std::log(kernel.getIntMetadata(BLOCK_SIZE) == 256 ? 1.0 : 10.0);
+        });
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties, "time"};
+
+    Catalog catalog;
+    catalog.entries = {makeDefinition(testId(0x01), 64), makeDefinition(testId(0x02), 256)};
+
+    auto descriptor = millisecondsDescriptor("time");
+    descriptor.nativeSymbol = LOG_MILLISECONDS_SYMBOL;
+    descriptor.score.transform = "log";
+    const auto heuristic = makeKernelHeuristic(descriptor);
+    std::string modelId;
+    const auto calibrated = heuristic->calibratedRanking(catalog, context, modelId);
+
+    ASSERT_EQ(calibrated.size(), 2U) << "a 1 ms winner was taken for an unmeasured one";
+    EXPECT_EQ(calibrated.front().kernelId, testId(0x02));
+    EXPECT_DOUBLE_EQ(calibrated.front().score, 1.0);
+    EXPECT_NEAR(calibrated.back().score, 10.0, 1e-12);
+    ScoreRegistry::unregisterSymbol(LOG_MILLISECONDS_SYMBOL);
+}
+
+/// Under `min` a zero cost is no measurement. Negated it would be -0, above every real
+/// candidate's negated cost, so the one kernel the scorer could not price would win.
+TEST(TestIngestorKernelHeuristic, AZeroCostDoesNotWinUnderANativeMinScorer)
+{
+    const ScopedMillisecondsScorer scorer;
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    Catalog catalog;
+    const auto unpricedId = testId(0x01);
+    const auto slowId = testId(0x02);
+    catalog.entries = {makeDefinition(unpricedId, 128), makeDefinition(slowId, 64)};
+
+    const auto heuristic = makeKernelHeuristic(millisecondsDescriptor(""));
+    const auto ranked = heuristic->rankScored(catalog, context);
+
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, slowId);
+    EXPECT_DOUBLE_EQ(ranked.back().score, 0.0) << "the unpriced kernel reported a figure of merit";
+}
+
 TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicDegradesWhenAModelCannotBeBroughtUp)
 {
     // A MODEL naming an artifact that is not there degrades rather than throwing, which is

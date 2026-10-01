@@ -72,7 +72,8 @@
         "ued": {"$ref": "#/definitions/dependency"},
         "kmd": {"$ref": "#/definitions/dependency"},
         "umd": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/definitions/dependency"}},
-        "selector_revision": {"type": "string", "minLength": 1}
+        "selector_revision": {"type": "string", "minLength": 1},
+        "feature_semantics_revision": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807}
       }
     },
     "objective": {"enum": ["max", "min"]},
@@ -87,10 +88,10 @@
       }
     },
     "static_order": {
+      "description": "No parameters: static_order ranks by UKD priority, then descriptor id. Declared ordering criteria (`order`) are not implemented and are refused.",
       "type": "object",
       "additionalProperties": false,
-      "patternProperties": {"^(x-|_)": {}},
-      "properties": {"order": {"type": "array", "items": {"type": "string"}}}
+      "patternProperties": {"^(x-|_)": {}}
     },
     "native": {
       "type": "object",

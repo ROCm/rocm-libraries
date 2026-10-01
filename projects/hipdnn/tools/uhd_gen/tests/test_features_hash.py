@@ -19,8 +19,11 @@ pd = pytest.importorskip("pandas")
 
 from uhd_gen import features
 from uhd_gen.features import (
-    build_features_signature, compute_features_hash, evaluate_feature_rows,
-    parse_signature_entry, signature_references,
+    build_features_signature,
+    compute_features_hash,
+    evaluate_feature_rows,
+    parse_signature_entry,
+    signature_references,
 )
 
 #: The digest TestFeatureExtractor.cpp pins for this signature. Retained deliberately:
@@ -33,18 +36,26 @@ RAW_DIGEST = "sha256:fe9d0487031089e0"
 
 
 def test_published_names_are_not_rewritten_into_q_namespace():
-    assert build_features_signature(["attention.query.dims[2]", "M", "kernel.tile_m"]) == [
-        "$attention.query.dims[2]", "$M", "$kernel.tile_m",
+    assert build_features_signature(
+        ["attention.query.dims[2]", "M", "kernel.tile_m"]
+    ) == [
+        "$attention.query.dims[2]",
+        "$M",
+        "$kernel.tile_m",
     ]
 
 
-@pytest.mark.parametrize("entry", ['"$q.batch"', '{"log2":["$q.batch"]}', "q.batch", "", 1, None, []])
+@pytest.mark.parametrize(
+    "entry", ['"$q.batch"', '{"log2":["$q.batch"]}', "q.batch", "", 1, None, []]
+)
 def test_legacy_stringified_or_noncanonical_entries_are_rejected(entry):
     with pytest.raises(ValueError):
         parse_signature_entry(entry)
 
 
-def test_a_supplied_evaluator_that_cannot_run_is_refused_not_rehashed_in_python(monkeypatch, tmp_path):
+def test_a_supplied_evaluator_that_cannot_run_is_refused_not_rehashed_in_python(
+    monkeypatch, tmp_path
+):
     """The behaviour that replaced the second implementation.
 
     Raw-reference signatures used to take a pure-Python digest, so generation succeeded
@@ -59,7 +70,9 @@ def test_a_supplied_evaluator_that_cannot_run_is_refused_not_rehashed_in_python(
         compute_features_hash(RAW_SIGNATURE)
 
 
-def test_an_installed_evaluator_is_found_without_path_or_environment(monkeypatch, tmp_path):
+def test_an_installed_evaluator_is_found_without_path_or_environment(
+    monkeypatch, tmp_path
+):
     """Discovery is relative, so a tree mounted at a different root still resolves.
 
     A committed batch script that named the executable absolutely ran on the login node
@@ -69,7 +82,11 @@ def test_an_installed_evaluator_is_found_without_path_or_environment(monkeypatch
     """
     monkeypatch.delenv(features.EVALUATOR_ENV_VAR, raising=False)
     monkeypatch.setenv("PATH", str(tmp_path / "nothing-here"))
-    stub = tmp_path / "bin" / (features.EVALUATOR_NAME + (".exe" if os.name == "nt" else ""))
+    stub = (
+        tmp_path
+        / "bin"
+        / (features.EVALUATOR_NAME + (".exe" if os.name == "nt" else ""))
+    )
     stub.parent.mkdir()
     stub.write_text("")
     stub.chmod(0o755)
@@ -77,7 +94,9 @@ def test_an_installed_evaluator_is_found_without_path_or_environment(monkeypatch
     assert Path(features.resolve_feature_evaluator()).samefile(stub)
 
 
-def test_no_evaluator_anywhere_names_the_variable_that_would_supply_one(monkeypatch, tmp_path):
+def test_no_evaluator_anywhere_names_the_variable_that_would_supply_one(
+    monkeypatch, tmp_path
+):
     monkeypatch.delenv(features.EVALUATOR_ENV_VAR, raising=False)
     monkeypatch.setenv("PATH", str(tmp_path / "nothing-here"))
     # The search roots come from this file's location, and this file lives in a checkout
@@ -93,11 +112,34 @@ def test_the_request_uhd_gen_builds_reaches_the_runtimes_hash_unaltered(evaluato
     assert compute_features_hash(RAW_SIGNATURE, executable=evaluator) == RAW_DIGEST
 
 
-@pytest.mark.parametrize("signature", [
-    RAW_SIGNATURE,
-    ["$q.batch", {"*": ["$q.batch", "$q.num_heads"]}],
-    [{"log2": [{"*": ["$q.batch", "$q.num_heads"]}]}],
-])
+def test_the_feature_semantics_revision_is_the_evaluators_and_absent_means_1(
+    evaluator_reporting,
+):
+    """FeatureSemantics.hpp: uhd_gen never restates the constant, it asks the build. An
+    evaluator whose responses carry no revision predates it, and what such a build computes
+    is revision 1 -- the rule a UHD recording none is read by."""
+    assert features.evaluator_feature_semantics_revision(evaluator_reporting(7)) == 7
+    assert features.evaluator_feature_semantics_revision(evaluator_reporting(None)) == 1
+
+
+@pytest.mark.parametrize("reported", [0, -1, True, 1.5, "1"])
+def test_a_malformed_feature_semantics_revision_is_refused(
+    evaluator_reporting, reported
+):
+    """Compared for equality downstream, so one revision must have one spelling: a bool or
+    a string passing here as 1 would stamp a model the loader then refuses to parse."""
+    with pytest.raises(ValueError, match="feature_semantics_revision"):
+        features.evaluator_feature_semantics_revision(evaluator_reporting(reported))
+
+
+@pytest.mark.parametrize(
+    "signature",
+    [
+        RAW_SIGNATURE,
+        ["$q.batch", {"*": ["$q.batch", "$q.num_heads"]}],
+        [{"log2": [{"*": ["$q.batch", "$q.num_heads"]}]}],
+    ],
+)
 def test_both_entry_points_report_one_digest_for_a_signature(signature, evaluator):
     """Whether a corpus is being extracted or not cannot change model identity.
 
@@ -116,8 +158,9 @@ def test_both_entry_points_report_one_digest_for_a_signature(signature, evaluato
 
 def test_signature_order_changes_model_identity(evaluator):
     signature = ["$q.batch", "$kernel.tile_m"]
-    assert (compute_features_hash(signature, executable=evaluator)
-            != compute_features_hash(list(reversed(signature)), executable=evaluator))
+    assert compute_features_hash(
+        signature, executable=evaluator
+    ) != compute_features_hash(list(reversed(signature)), executable=evaluator)
 
 
 def test_changing_only_an_expression_changes_the_fingerprint(evaluator):
@@ -131,8 +174,9 @@ def test_changing_only_an_expression_changes_the_fingerprint(evaluator):
     """
     intensity = [{"/": ["$q.flops", "$q.bytes"]}]
     flipped = [{"/": ["$q.bytes", "$q.flops"]}]
-    assert (compute_features_hash(intensity, executable=evaluator)
-            != compute_features_hash(flipped, executable=evaluator))
+    assert compute_features_hash(
+        intensity, executable=evaluator
+    ) != compute_features_hash(flipped, executable=evaluator)
 
 
 def test_categorical_codes_not_mapping_insertion_order_define_identity(evaluator):
@@ -156,7 +200,9 @@ def test_empty_encoding_preserves_existing_raw_reference_hash(evaluator):
     assert compute_features_hash(RAW_SIGNATURE, {}, evaluator) == RAW_DIGEST
 
 
-@pytest.mark.parametrize("literal", [1e15, -1e15, 18446744073709551616, float("nan"), float("inf")])
+@pytest.mark.parametrize(
+    "literal", [1e15, -1e15, 18446744073709551616, float("nan"), float("inf")]
+)
 def test_nonportable_literals_are_rejected_inside_nested_ast(literal):
     # Rejected while parsing the entry, before any request is built, so this holds on a
     # machine with no evaluator: a literal C++ cannot round-trip never reaches a digest.
@@ -165,6 +211,19 @@ def test_nonportable_literals_are_rejected_inside_nested_ast(literal):
 
 
 def test_reference_collection_preserves_generic_and_categorical_dependencies():
-    signature = ["$kernel.tile", {"if": [{"==": ["$attention.dtype", "fp16"]},
-                                        {"/": ["$attention.dims[2]", "$device.cu_count"]}, 0]}]
-    assert signature_references(signature) == ["$kernel.tile", "$attention.dtype", "$attention.dims[2]", "$device.cu_count"]
+    signature = [
+        "$kernel.tile",
+        {
+            "if": [
+                {"==": ["$attention.dtype", "fp16"]},
+                {"/": ["$attention.dims[2]", "$device.cu_count"]},
+                0,
+            ]
+        },
+    ]
+    assert signature_references(signature) == [
+        "$kernel.tile",
+        "$attention.dtype",
+        "$attention.dims[2]",
+        "$device.cu_count",
+    ]

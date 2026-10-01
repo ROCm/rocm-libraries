@@ -61,7 +61,7 @@ void addRole(nlohmann::json& arguments, const std::string& role)
 struct BuilderCase
 {
     std::string function;
-    std::vector<std::string> roles;   ///< tensor roles taking <role>Dims/<role>Strides
+    std::vector<std::string> roles; ///< tensor roles taking <role>Dims/<role>Strides
     std::vector<nlohmann::json> extra; ///< everything else the adapter reads
     size_t tensors = 0;
 
@@ -92,16 +92,15 @@ nlohmann::json declarationFor(const BuilderCase& builder)
     // Declared, not defaulted: an adapter that ignored it would otherwise pass by accident.
     arguments.push_back(scalar("dataType", "half"));
 
-    return nlohmann::json{
-        {"schema_version", "1.0"},
-        {"operation", builder.function},
-        {"parameters", {{"placeholder", {{"type", "int64"}}}}},
-        {"stratification_axis", "working_set"},
-        {"regimes", nlohmann::json::object()},
-        {"graph_builder",
-         {{"function", builder.function},
-          {"source", "hipdnn_corpus_gen/GraphBuilders.hpp"},
-          {"arguments", arguments}}}};
+    return nlohmann::json{{"schema_version", "1.0"},
+                          {"operation", builder.function},
+                          {"parameters", {{"placeholder", {{"type", "int64"}}}}},
+                          {"stratification_axis", "working_set"},
+                          {"regimes", nlohmann::json::object()},
+                          {"graph_builder",
+                           {{"function", builder.function},
+                            {"source", "hipdnn_corpus_gen/GraphBuilders.hpp"},
+                            {"arguments", arguments}}}};
 }
 
 /// Geometry shared by the three convolution directions and the two resample ones.
@@ -158,7 +157,8 @@ std::vector<BuilderCase> everyBuilder()
          3},
         {"blockScaledMatmul",
          {"a", "aScale", "b", "bScale", "c"},
-         {scalar("scaleDataType", "fp8_e8m0"), scalar("outputDataType", "fp16"),
+         {scalar("scaleDataType", "fp8_e8m0"),
+          scalar("outputDataType", "fp16"),
           nlohmann::json{{"name", "blockSize"}, {"kind", "constant"}, {"constant", 32}}},
          7,
          {"aScale", "bScale", "c", "a_dequantized", "b_dequantized"},
@@ -228,7 +228,8 @@ std::vector<BuilderCase> everyBuilder()
          {"scale"}},
         {"blockScaleDequantize",
          {"x", "scale", "y"},
-         {ints("blockSize", {32}), scalar("negativeScale", false),
+         {ints("blockSize", {32}),
+          scalar("negativeScale", false),
           scalar("scaleDataType", "float")},
          3,
          {"scale"}},
@@ -258,8 +259,8 @@ TEST(TestEveryGraphBuilder, EveryBuilderBuildsAReadableGraph)
     for(const auto& builder : everyBuilder())
     {
         const auto parsed = parseOperationMetadata(declarationFor(builder));
-        ASSERT_TRUE(parsed.ok())
-            << builder.function << ": " << (parsed.errors.empty() ? "" : parsed.errors.front());
+        ASSERT_TRUE(parsed.ok()) << builder.function << ": "
+                                 << (parsed.errors.empty() ? "" : parsed.errors.front());
 
         const auto built
             = buildGraphFor(*parsed.metadata, ProblemPoint{{"placeholder", int64_t{1}}});
@@ -346,8 +347,6 @@ TEST(TestEveryGraphBuilder, EveryRegisteredBuilderIsCoveredByThisFile)
 
     for(const auto& name : registeredBuilders())
     {
-        // customOperation is deliberately unregistered-by-design elsewhere; if it ever gains a
-        // registration it needs a case here too.
         EXPECT_EQ(covered.count(name), 1U) << name << " is registered but has no case here";
     }
 }

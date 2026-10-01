@@ -14,12 +14,15 @@
 // without losing the rest of the shard.
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
 #include <utility>
 
 #include <nlohmann/json.hpp>
@@ -47,6 +50,10 @@ constexpr const char* WINNER_LINE_DEVICE_FIELD = "device";
 constexpr const char* WINNER_LINE_GCN_ARCH_NAME_FIELD = "gcn_arch_name";
 constexpr const char* WINNER_LINE_WARP_SIZE_FIELD = "warp_size";
 constexpr const char* WINNER_LINE_MULTI_PROCESSOR_COUNT_FIELD = "multi_processor_count";
+constexpr const char* WINNER_LINE_TOTAL_GLOBAL_MEM_FIELD = "total_global_mem";
+constexpr const char* WINNER_LINE_MEMORY_BUS_WIDTH_FIELD = "memory_bus_width";
+constexpr const char* WINNER_LINE_MEMORY_CLOCK_RATE_FIELD = "memory_clock_rate";
+constexpr const char* WINNER_LINE_SHARED_MEM_PER_BLOCK_FIELD = "shared_mem_per_block";
 constexpr const char* WINNER_LINE_ENTRIES_FIELD = "entries";
 constexpr const char* WINNER_LINE_KERNEL_ID_FIELD = "kernel_id";
 constexpr const char* WINNER_LINE_PACK_ID_FIELD = "pack_id";
@@ -59,7 +66,11 @@ constexpr const char* WINNER_LINE_FORMAT_FIELD = "v";
 /// fromJson() produces, so an old line simply misses lookup instead of being misparsed --
 /// self-correcting. This field is the independent per-line stamp: a foreign line (wrong
 /// version) appended to an otherwise valid shard is skipped instead of parsed.
-constexpr int WINNER_LINE_FORMAT_VERSION = 1;
+///
+/// Version 2 added the four memory fields DeviceKey compares. A version-1 line carries only
+/// arch/warp/CU; decoding it with the memory fields defaulted to zero would yield a key no
+/// real device equals (or, worse, one an unresolved all-zero device does), so it is skipped.
+constexpr int WINNER_LINE_FORMAT_VERSION = 2;
 
 /// True if @p component is usable verbatim as a path component: a non-empty run of ASCII
 /// letters, digits, '_' and '-'.
@@ -78,21 +89,35 @@ inline bool isPlainPathComponent(std::string_view component)
     });
 }
 
-/// A JSON integer within int's range, or nullopt. nlohmann's get<int>() accepts a float and an
-/// out-of-range value and static-casts both, which is UB for the out-of-range case.
-inline std::optional<int> readBoundedInt(const nlohmann::json& parent, const char* field)
+/// A JSON integer within [0, max of @p T], or nullopt. nlohmann's get<T>() accepts a float, a
+/// negative and an out-of-range value and static-casts all of them, which silently invents a
+/// device field the writer never recorded (and is UB for the out-of-range signed case).
+template <typename T>
+inline std::optional<T> readNonNegative(const nlohmann::json& parent, const char* field)
 {
+    static_assert(std::is_integral_v<T>);
     const auto found = parent.find(field);
     if(found == parent.end() || !found->is_number_integer())
     {
         return std::nullopt;
     }
+    // A non-negative JSON integer is stored unsigned or signed depending on how it was
+    // produced; reject a negative one before widening to uint64_t.
+    if(found->is_number_unsigned())
+    {
+        const auto raw = found->get<uint64_t>();
+        if(raw > static_cast<uint64_t>(std::numeric_limits<T>::max()))
+        {
+            return std::nullopt;
+        }
+        return static_cast<T>(raw);
+    }
     const auto raw = found->get<int64_t>();
-    if(raw < 0 || raw > static_cast<int64_t>(std::numeric_limits<int>::max()))
+    if(raw < 0 || static_cast<uint64_t>(raw) > static_cast<uint64_t>(std::numeric_limits<T>::max()))
     {
         return std::nullopt;
     }
-    return static_cast<int>(raw);
+    return static_cast<T>(raw);
 }
 
 } // namespace detail
@@ -117,6 +142,7 @@ inline std::string_view winnerCacheVersion()
 /// -Wmissing-field-initializers, which this build treats as an error.
 struct EngineIdentity
 {
+    // NOLINTBEGIN(readability-redundant-member-init) - the initializers are load-bearing, see above
     /// `EngineDescriptor::name`. Empty disables the on-disk cache entirely.
     std::string name = {};
 
@@ -132,12 +158,23 @@ struct EngineIdentity
     /// A content hash over every model this engine can resolve, NOT over the UHD document's
     /// declared version. §9.2: "Hash the content, don't trust the id or a version field. A
     /// regenerated model normally keeps the same UHD id ... and a hand-maintained version can
-    /// be forgotten."
+    /// be forgotten." An artifact's content is its digest -- declared, or taken from its bytes
+    /// at load (engineModelHash()).
     ///
-    /// Empty when nothing hashable was declared, which is the case for a native scorer: its
-    /// "model" is code compiled into the provider, and the only thing that versions it is the
-    /// build, which the data-SDK version component already at the head of the path carries.
+    /// Empty when the engine ships no heuristic. A native scorer has no artifact: its "model"
+    /// is code compiled into the provider, versioned by the build, which the data-SDK version
+    /// component already at the head of the path carries.
     std::string modelHash = {};
+
+    /// False when some model this engine can resolve names an artifact that no digest
+    /// identifies: it declared no hash and had no bytes at load to digest (deployment is
+    /// separate from load, RFC 0019 §5). @ref modelHash then cannot tell that model's
+    /// later content apart from any other, so a persisted ranking could outlive the model
+    /// that produced it -- the on-disk cache is declined outright rather than keyed on an
+    /// identity that does not exist. A native scorer or static order has no artifact and
+    /// keeps its descriptor identity.
+    bool contentIdentified = true;
+    // NOLINTEND(readability-redundant-member-init)
 };
 
 /// Where @p engine's shard for @p gcnArchName lives:
@@ -165,15 +202,20 @@ struct EngineIdentity
 ///
 /// The device is NOT keyed on the HIP ordinal anywhere in this path or in `WinnerKey`,
 /// per §9.2: "Device 0 is a different GPU on a different machine, and can be a different GPU
-/// after a reboot." Arch selects the shard; `DeviceKey` carries warpSize and
-/// multiProcessorCount inside it.
+/// after a reboot." Arch selects the shard; `DeviceKey` carries the rest of the device
+/// identity (warp size, CU count, memory properties) inside each record.
 ///
-/// @return An empty path if `cacheRoot()` cannot resolve a usable cache directory, or if
-///     @p gcnArchName does not strip to a plain component; callers must fall back to
+/// @return An empty path if `cacheRoot()` cannot resolve a usable cache directory, if
+///     @p gcnArchName does not strip to a plain component, or if @p engine has no content
+///     identity (EngineIdentity::contentIdentified); callers must fall back to
 ///     in-memory-only behavior. Never throws.
 inline std::filesystem::path winnerCacheShardPath(const EngineIdentity& engine,
                                                   std::string_view gcnArchName)
 {
+    if(!engine.contentIdentified)
+    {
+        return {};
+    }
     const auto root = hipdnn_data_sdk::utilities::cacheRoot();
     if(root.empty())
     {
@@ -225,16 +267,31 @@ inline std::pair<std::optional<hipdnn_data_sdk::utilities::LineStoreShard>,
 }
 
 /// Encodes @p key and @p record as one JSON-Lines record: `key.graph` via
-/// `GraphContentKey::toJson()`, `key.device` folded in as plain JSON, and @p record as an
+/// `GraphContentKey::toJson()`, every field of `key.device` as plain JSON, and @p record as an
 /// array of ranked entries. `DescriptorId`s use the same UUID text format as
 /// `DescriptorLoader.hpp` (`formatUuid`/`parseUuid`).
 inline std::string encodeWinnerRecordLine(const WinnerKey& key, const WinnerRecord& record)
 {
+    // Structured binding, not member access: DeviceKey compares every DeviceProperties field,
+    // so a field this codec does not persist makes every reloaded key unequal to the live one
+    // and the disk cache silently never hits. Growing the struct stops this compiling until
+    // the codec (and WINNER_LINE_FORMAT_VERSION) follow.
+    const auto& [gcnArchName,
+                 warpSize,
+                 multiProcessorCount,
+                 totalGlobalMem,
+                 memoryBusWidth,
+                 memoryClockRate,
+                 sharedMemPerBlock]
+        = key.device.properties();
     nlohmann::json device;
-    device[detail::WINNER_LINE_GCN_ARCH_NAME_FIELD] = key.device.properties().gcnArchName;
-    device[detail::WINNER_LINE_WARP_SIZE_FIELD] = key.device.properties().warpSize;
-    device[detail::WINNER_LINE_MULTI_PROCESSOR_COUNT_FIELD]
-        = key.device.properties().multiProcessorCount;
+    device[detail::WINNER_LINE_GCN_ARCH_NAME_FIELD] = gcnArchName;
+    device[detail::WINNER_LINE_WARP_SIZE_FIELD] = warpSize;
+    device[detail::WINNER_LINE_MULTI_PROCESSOR_COUNT_FIELD] = multiProcessorCount;
+    device[detail::WINNER_LINE_TOTAL_GLOBAL_MEM_FIELD] = totalGlobalMem;
+    device[detail::WINNER_LINE_MEMORY_BUS_WIDTH_FIELD] = memoryBusWidth;
+    device[detail::WINNER_LINE_MEMORY_CLOCK_RATE_FIELD] = memoryClockRate;
+    device[detail::WINNER_LINE_SHARED_MEM_PER_BLOCK_FIELD] = sharedMemPerBlock;
 
     nlohmann::json entries = nlohmann::json::array();
     for(const auto& entry : record)
@@ -298,19 +355,35 @@ inline std::optional<std::pair<WinnerKey, WinnerRecord>>
             return std::nullopt;
         }
 
+        // Every DeviceKey field is required: a line missing one (a version-1 line, or a
+        // truncated one) must miss, never decode with a zero the writer did not measure.
         DeviceProperties properties;
         properties.gcnArchName
             = deviceField->at(detail::WINNER_LINE_GCN_ARCH_NAME_FIELD).get<std::string>();
         const auto warpSize
-            = detail::readBoundedInt(*deviceField, detail::WINNER_LINE_WARP_SIZE_FIELD);
-        const auto multiProcessorCount
-            = detail::readBoundedInt(*deviceField, detail::WINNER_LINE_MULTI_PROCESSOR_COUNT_FIELD);
-        if(!warpSize.has_value() || !multiProcessorCount.has_value())
+            = detail::readNonNegative<int>(*deviceField, detail::WINNER_LINE_WARP_SIZE_FIELD);
+        const auto multiProcessorCount = detail::readNonNegative<int>(
+            *deviceField, detail::WINNER_LINE_MULTI_PROCESSOR_COUNT_FIELD);
+        const auto totalGlobalMem = detail::readNonNegative<std::size_t>(
+            *deviceField, detail::WINNER_LINE_TOTAL_GLOBAL_MEM_FIELD);
+        const auto memoryBusWidth = detail::readNonNegative<int>(
+            *deviceField, detail::WINNER_LINE_MEMORY_BUS_WIDTH_FIELD);
+        const auto memoryClockRate = detail::readNonNegative<int>(
+            *deviceField, detail::WINNER_LINE_MEMORY_CLOCK_RATE_FIELD);
+        const auto sharedMemPerBlock = detail::readNonNegative<std::size_t>(
+            *deviceField, detail::WINNER_LINE_SHARED_MEM_PER_BLOCK_FIELD);
+        if(!warpSize.has_value() || !multiProcessorCount.has_value() || !totalGlobalMem.has_value()
+           || !memoryBusWidth.has_value() || !memoryClockRate.has_value()
+           || !sharedMemPerBlock.has_value())
         {
             return std::nullopt;
         }
         properties.warpSize = *warpSize;
         properties.multiProcessorCount = *multiProcessorCount;
+        properties.totalGlobalMem = *totalGlobalMem;
+        properties.memoryBusWidth = *memoryBusWidth;
+        properties.memoryClockRate = *memoryClockRate;
+        properties.sharedMemPerBlock = *sharedMemPerBlock;
 
         const auto entriesField = json.find(detail::WINNER_LINE_ENTRIES_FIELD);
         if(entriesField == json.end() || !entriesField->is_array())

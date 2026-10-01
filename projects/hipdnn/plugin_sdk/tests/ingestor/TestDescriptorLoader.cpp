@@ -15,6 +15,8 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -36,6 +38,7 @@
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/GbdtModelTestBuilder.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
@@ -550,6 +553,100 @@ TEST(TestDescriptorLoader, ChangedKernelMatcherDisablesOnlyTheAffectedArchitectu
     EXPECT_EQ(firstBlockSize(sets.front(), "gfx950"), 256);
 }
 
+namespace
+{
+
+/// makeSetDocuments' engine split into a gfx942 pack and a gfx950 pack that share the graph
+/// matcher and each use their own kernel matcher, plus a `predict_engine` model bound under
+/// both arch keys by one UUID (D2). The model records the matchers of every pack -- what
+/// enginePredictionProvenance publishes, so what every collected L1 model records.
+///
+/// The model is the last document, so a case can amend what it recorded.
+Documents twoArchPackDocuments(const std::string& engineName, const std::string& modelId)
+{
+    auto documents = makeSetDocuments('1', engineName);
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx942"});
+    auto gfx950Pack = documentOfType(documents, ".kdp.json");
+    auto gfx950Matcher = secondDocumentOfType(documents, ".umd.json");
+    gfx950Matcher["id"] = testUuid('2', ROLE_KERNEL_MATCHER);
+    gfx950Matcher["name"] = "gfx950 kernel dtype";
+    gfx950Pack["id"] = testUuid('1', 'e');
+    gfx950Pack["name"] = "gfx950 pack";
+    gfx950Pack["arch"] = nlohmann::json::array({"gfx950"});
+    gfx950Pack["matchers"] = {testUuid('1', ROLE_GRAPH_MATCHER), gfx950Matcher["id"]};
+    documents.push_back({".umd.json", std::move(gfx950Matcher)});
+    documents.push_back({".kdp.json", std::move(gfx950Pack)});
+
+    auto model = metricUhd(documents, modelId, "tflops");
+    model["trained_against"] = provenanceOf(documents);
+    documentOfType(documents, ".ued.json")["predict_engine"]
+        = {{"gfx942", modelId}, {"gfx950", modelId}};
+    documents.push_back({".uhd.json", std::move(model)});
+    return documents;
+}
+
+} // namespace
+
+/// R5 with D2: an L1 model collected over both packs records both kernel matchers, and each
+/// arch key checks only the matchers its own packs use. The other arch's matcher is
+/// ignored there, not refused, so the one model is valid under both keys it is bound to.
+TEST(TestDescriptorLoader, AMultiArchModelRecordingEveryPacksMatchersIsValidOnEachBoundArch)
+{
+    const auto modelId = testUuid('1', 'c');
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("multi_arch_umd"));
+    writeDocuments(dir.path(), twoArchPackDocuments("test:multi_arch_umd", modelId));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 2u);
+    EXPECT_TRUE(sets.front().unavailableEnginePredictionArches.empty());
+    ASSERT_EQ(sets.front().enginePredictionsByMetric.count("tflops"), 1u);
+    const auto& bound = sets.front().enginePredictionsByMetric.at("tflops");
+    ASSERT_EQ(bound.size(), 2u);
+    EXPECT_EQ(toString(bound.at("gfx942").id), modelId);
+    EXPECT_EQ(toString(bound.at("gfx950").id), modelId);
+}
+
+/// The other side of the arch-scoped rule: what the bound arch's packs use is still checked.
+/// A recorded matcher the arch uses, now at an incompatible revision, refuses the model on
+/// that arch alone; a recorded matcher no pack of the engine uses any more refuses it on
+/// every arch, because the model was trained against a matcher this engine does not have.
+TEST(TestDescriptorLoader, ArchScopedMatcherProvenanceStillRefusesWhatTheBoundArchUses)
+{
+    const auto modelId = testUuid('1', 'c');
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("umd_bumped"));
+        auto documents = twoArchPackDocuments("test:umd_bumped", modelId);
+        // gfx942's own kernel matcher; the model recorded it at 1.0.
+        secondDocumentOfType(documents, ".umd.json")["revision"] = "2.0";
+        writeDocuments(dir.path(), documents);
+
+        const auto sets = loadFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u);
+        const auto& bound = sets.front().enginePredictionsByMetric.at("tflops");
+        EXPECT_EQ(bound.count("gfx942"), 0u);
+        EXPECT_EQ(bound.count("gfx950"), 1u);
+        EXPECT_EQ(sets.front().unavailableEnginePredictionArches.at("tflops"),
+                  std::set<std::string>{"gfx942"});
+    }
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("umd_retired"));
+        auto documents = twoArchPackDocuments("test:umd_retired", modelId);
+        documents.back().body["trained_against"]["umd"].push_back(
+            {{"id", testUuid('3', ROLE_KERNEL_MATCHER)}, {"revision", "1.0"}});
+        writeDocuments(dir.path(), documents);
+
+        const auto sets = loadFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u);
+        EXPECT_TRUE(sets.front().enginePredictionsByMetric.empty());
+        EXPECT_EQ(sets.front().unavailableEnginePredictionArches.at("tflops"),
+                  (std::set<std::string>{"gfx942", "gfx950"}));
+    }
+}
+
 TEST(TestDescriptorLoader, AModelTrainedAgainstAnotherMetadataIdentityCannotRank)
 {
     const ScopedSymbols symbols;
@@ -828,6 +925,32 @@ TEST(TestDescriptorLoader, RejectsAUhdScoreCarryingUnits)
     EXPECT_FALSE(sets.front().heuristic.has_value());
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "unknown key 'units'"))
         << recorder.getRecordedLogsAsString();
+}
+
+/// static_order has no parameters: it always ranks by UKD priority, then descriptor id. A body
+/// declaring `order` asked for criteria nothing implements, so it is refused where it was
+/// authored rather than loaded and ranked by something other than what it says.
+TEST(TestDescriptorLoader, RejectsAStaticOrderBodyDeclaringCriteria)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("static_order_order"));
+    auto documents = makeSetDocuments('1', "test:static_order");
+    auto& uhd = documentOfType(documents, ".uhd.json");
+    uhd["adapter"] = "static_order";
+    uhd.erase("native");
+    uhd.erase("objective");
+    uhd["static_order"] = {{"order", nlohmann::json::array({"id", "priority"})}};
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadDescriptorCatalog(dir.path()).heuristics.empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "static_order.order is not supported"))
+        << recorder.getRecordedLogsAsString();
+
+    // The control: the same UHD with an empty body loads, so the refusal is about `order`.
+    uhd["static_order"] = nlohmann::json::object();
+    writeDocuments(dir.path(), documents);
+    EXPECT_EQ(loadDescriptorCatalog(dir.path()).heuristics.size(), 1u);
 }
 
 TEST(TestDescriptorLoader, MissingArchitectureModelFallsBackWithoutUsingTheDefaultModel)
@@ -1337,6 +1460,8 @@ TEST(TestDescriptorLoader, LoadsAnEngineThatOnlyTheDropInRootDefines)
 TEST(TestDescriptorLoader, ValidatesAnEngineComingOnlyFromTheDropInRoot)
 {
     const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("cross_root_validated"));
     const auto installed = dir.path() / "a";
     const auto dropIn = dir.path() / "b";
@@ -1350,6 +1475,13 @@ TEST(TestDescriptorLoader, ValidatesAnEngineComingOnlyFromTheDropInRoot)
     ASSERT_EQ(sets.size(), 2u);
     EXPECT_EQ(sets.front().engine.name, "test:validated_installed");
     EXPECT_EQ(sets.back().engine.name, "test:validated_drop_in");
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_INFO, "2 descriptor-backed engine(s) loaded from"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "; 0 dropped during validation"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining("descriptor set(s) dropped"))
+        << recorder.getRecordedLogsAsString();
 }
 
 TEST(TestDescriptorLoader, AMissingRootContributesNothingButTheOtherRootStillLoads)
@@ -2005,6 +2137,39 @@ TEST(TestDescriptorLoader, WarnsWhenAModelArtifactIsAbsentAndKeepsTheEngine)
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "never_packaged.bin"));
 }
 
+/// R6: a UHD declaring no artifact hash is identified by the bytes present at load, so
+/// replacing its weights changes the engine's model identity -- the directory its persisted
+/// rankings live under -- and its selector revision, with no descriptor edit at all. With
+/// nothing deployed there is no content identity, and the persistent cache is declined; a
+/// native ranker has no artifact and keeps its descriptor identity.
+TEST(TestDescriptorLoader, ReplacingUndeclaredWeightsChangesTheEngineModelIdentity)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("undeclared_weights"));
+    writeModelHeuristicSet(dir.path(), "test:undeclared_weights", "model.bin");
+    const auto loadWith = [&](const std::string& weights) {
+        std::ofstream(dir.path() / "model.bin", std::ios::binary) << weights;
+        return loadFrom(dir.path()).at(0);
+    };
+
+    const auto original = loadWith("weights, first training");
+    const auto retrained = loadWith("weights, second training");
+    EXPECT_EQ(original.heuristic->modelHash,
+              hipdnn_plugin_sdk::uhd::sha256(std::string("weights, first training")));
+    EXPECT_TRUE(engineIdentity(original).contentIdentified);
+    EXPECT_TRUE(engineIdentity(retrained).contentIdentified);
+    EXPECT_NE(engineIdentity(original).modelHash, engineIdentity(retrained).modelHash);
+    EXPECT_NE(engineSelectorRevision(original), engineSelectorRevision(retrained));
+
+    ASSERT_TRUE(std::filesystem::remove(dir.path() / "model.bin"));
+    EXPECT_FALSE(engineIdentity(loadFrom(dir.path()).at(0)).contentIdentified);
+
+    const hipdnn_test_sdk::utilities::ScopedDirectory nativeDir(uniqueDirectory("native_identity"));
+    writeDocuments(nativeDir.path(), makeSetDocuments('1', "test:native_identity"));
+    const auto native = engineIdentity(loadFrom(nativeDir.path()).at(0));
+    EXPECT_TRUE(native.contentIdentified);
+    EXPECT_FALSE(native.modelHash.empty());
+}
+
 TEST(TestDescriptorLoader, EscapingModelArtifactIsDisabledWithoutDroppingTheEngine)
 {
     const ScopedSymbols symbols;
@@ -2286,6 +2451,178 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionWithoutASelectorRevisionIsRef
                                           "records no trained_against.selector_revision"));
 }
 
+/// FeatureSemantics.hpp for a declared model: the check runs where selector_revision's does
+/// and refuses the same way -- UNAVAILABLE, the model is not bad, it is not this build's --
+/// with a reason naming both revisions. A document recording no revision is revision 1,
+/// which is how today's shipped ASM SDPA models load unedited.
+TEST(TestDescriptorLoader, DeclaredEnginePredictionTrainedOnOtherFeatureSemanticsIsUnavailable)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+    using hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION;
+    const ScopedL1Scorer scorer;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_fsr"));
+    const auto newer = FEATURE_SEMANTICS_REVISION + 1;
+    const auto recording = [](const std::string& id, std::optional<int64_t> revision) {
+        auto document = declaredL1Document(id);
+        if(revision.has_value())
+        {
+            document["trained_against"]["feature_semantics_revision"] = *revision;
+        }
+        return document;
+    };
+    const auto currentId = testUuid('f', '1');
+    const auto staleId = testUuid('f', '2');
+    const auto absentId = testUuid('f', '3');
+    const auto oneId = testUuid('f', '4');
+    writeDocument(dir.path(), {".uhd.json", recording(currentId, FEATURE_SEMANTICS_REVISION)});
+    writeDocument(dir.path(), {".uhd.json", recording(staleId, newer)});
+    writeDocument(dir.path(), {".uhd.json", recording(absentId, std::nullopt)});
+    writeDocument(dir.path(), {".uhd.json", recording(oneId, 1)});
+
+    const auto resolved = resolveDeclaredEnginePredictions(loadDescriptorCatalog(dir.path()),
+                                                           "test:opaque",
+                                                           L1_SELECTOR_REVISION,
+                                                           declaration({{"default", currentId},
+                                                                        {"gfx950", staleId},
+                                                                        {"gfx942", absentId},
+                                                                        {"gfx90a", oneId}}));
+
+    ASSERT_EQ(resolved.byMetric.count("tflops"), 1u);
+    EXPECT_EQ(resolved.byMetric.at("tflops").count("default"), 1u);
+    // Absent and an explicit 1 are one claim, so they bind or refuse together.
+    const auto boundOrRefusal = [&](const std::string& arch) {
+        const auto refused = resolved.refused.find("tflops");
+        return refused != resolved.refused.end() && refused->second.count(arch) != 0
+                   ? refused->second.at(arch).reason
+                   : std::string("bound");
+    };
+    EXPECT_EQ(boundOrRefusal("gfx942"), boundOrRefusal("gfx90a"));
+
+    ASSERT_EQ(resolved.refused.count("tflops"), 1u);
+    ASSERT_EQ(resolved.refused.at("tflops").count("gfx950"), 1u);
+    const auto& refusal = resolved.refused.at("tflops").at("gfx950");
+    EXPECT_EQ(refusal.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_NE(refusal.reason.find("revision " + std::to_string(newer)), std::string::npos)
+        << refusal.reason;
+    EXPECT_NE(refusal.reason.find("revision " + std::to_string(FEATURE_SEMANTICS_REVISION)),
+              std::string::npos)
+        << refusal.reason;
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, refusal.reason));
+}
+
+namespace
+{
+
+/// makeSetDocuments with its ranker turned into a feature-reading tree_data model, plus a
+/// feature-reading `predict_engine` model under the UED role map: one model per scoring
+/// role, both recording @p revision in `trained_against` (nothing when nullopt). Only
+/// resolution is under test, so neither artifact exists.
+Documents featureSemanticsDocuments(const std::string& engineName, std::optional<int64_t> revision)
+{
+    auto documents = makeSetDocuments('1', engineName);
+    auto provenance = provenanceOf(documents);
+    if(revision.has_value())
+    {
+        provenance["feature_semantics_revision"] = *revision;
+    }
+    auto& ranker = documentOfType(documents, ".uhd.json");
+    ranker["adapter"] = "tree_data";
+    ranker.erase("native");
+    ranker["features_signature"] = nlohmann::json::array({"$kernel.block_size"});
+    ranker["features_hash"]
+        = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash({"$kernel.block_size"});
+    ranker["trained_against"] = provenance;
+    ranker["objective"] = "max";
+    ranker["tree_data"] = {{"artifact", "ranker.bin"}};
+
+    const auto predictionId = testUuid('1', 'c');
+    auto prediction = ranker;
+    prediction["id"] = predictionId;
+    prediction["name"] = "engine throughput";
+    prediction["features_signature"] = nlohmann::json::array({"$graph.flops"});
+    prediction["features_hash"]
+        = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash({"$graph.flops"});
+    prediction["score"] = {{"metric", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
+    prediction["tree_data"] = {{"artifact", "prediction.bin"}};
+    documentOfType(documents, ".ued.json")["predict_engine"] = {{"default", predictionId}};
+    documents.push_back({".uhd.json", std::move(prediction)});
+    return documents;
+}
+
+} // namespace
+
+/// FeatureSemantics.hpp for UED role-mapped models: L2 (`sort_kernel_catalog`) and L1
+/// (`predict_engine`) read the same published features, so both are refused at the point
+/// descriptor provenance is, naming both revisions, and the engine keeps its declared-order
+/// fallback. Absent means revision 1, the shape of every model shipped before it existed.
+TEST(TestDescriptorLoader, AModelTrainedOnOtherFeatureSemanticsIsRefusedForEveryScoringRole)
+{
+    using hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION;
+    const ScopedSymbols symbols;
+    const auto load = [](const std::string& name, std::optional<int64_t> revision) {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(name));
+        writeDocuments(dir.path(), featureSemanticsDocuments("test:" + name, revision));
+        auto sets = loadFrom(dir.path());
+        if(sets.size() != 1u)
+        {
+            throw std::runtime_error("expected exactly one engine from " + name);
+        }
+        return std::move(sets.front());
+    };
+    const auto bound = [](const DescriptorSet& set) {
+        return std::make_pair(set.heuristicsByMetric.count("") == 1u,
+                              set.enginePredictionsByMetric.count("tflops") == 1u);
+    };
+
+    EXPECT_EQ(bound(load("fsr_current", FEATURE_SEMANTICS_REVISION)), std::make_pair(true, true));
+    EXPECT_EQ(bound(load("fsr_absent", std::nullopt)), bound(load("fsr_one", 1)));
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const auto newer = FEATURE_SEMANTICS_REVISION + 1;
+    // Kept alive through the ranking below, which reads the tree the set was loaded from.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("fsr_newer"));
+    writeDocuments(dir.path(), featureSemanticsDocuments("test:fsr_newer", newer));
+    const auto sets = loadFrom(dir.path());
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& stale = sets.front();
+    EXPECT_EQ(bound(stale), std::make_pair(false, false));
+    ASSERT_EQ(stale.unavailableHeuristicArches.count(""), 1u);
+    EXPECT_EQ(stale.unavailableHeuristicArches.at("").count("default"), 1u);
+    ASSERT_EQ(stale.unavailableEnginePredictionArches.count("tflops"), 1u);
+    EXPECT_EQ(stale.unavailableEnginePredictionArches.at("tflops").count("default"), 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                          "revision " + std::to_string(newer)
+                                              + ", this build computes revision "
+                                              + std::to_string(FEATURE_SEMANTICS_REVISION)))
+        << recorder.getRecordedLogsAsString();
+    // Refusing the ranker never costs the engine: it ranks in declared order (64 first).
+    EXPECT_EQ(firstBlockSize(stale), 64);
+}
+
+/// The revision governs what published feature values mean, so a ranker that reads none --
+/// a native comparator over kernel metadata, compiled into this same build -- is never
+/// refused by it, whatever it records. Otherwise a bump would disable every shipped
+/// signature-less ranker for a change it cannot observe.
+TEST(TestDescriptorLoader, ASignatureLessRankerIsNotRefusedByFeatureSemantics)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("fsr_signature_less"));
+    auto documents = makeSetDocuments('1', "test:fsr_signature_less");
+    auto provenance = provenanceOf(documents);
+    provenance["feature_semantics_revision"]
+        = hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION + 1;
+    documentOfType(documents, ".uhd.json")["trained_against"] = std::move(provenance);
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(firstBlockSize(sets.front()), 256);
+}
+
 /// No descriptor tree installed is the normal state of a machine that has not deployed a
 /// model yet, so a declared id that resolves to nothing is silence, never an error and
 /// never a refusal: RFC 0019 §5 separates deployment from load.
@@ -2303,7 +2640,7 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionWithNoTreeInstalledResolvesNo
     EXPECT_TRUE(resolved.byMetric.empty());
     EXPECT_TRUE(resolved.refused.empty());
 
-    hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
+    const hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
     hipdnn_plugin_sdk::uhd::FeatureExtractionContext features;
     features.bind("graph.flops", std::log1p(42.0));
     const auto prediction = binding.predict(
@@ -2408,6 +2745,59 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionsResolvePerMetric)
         EXPECT_EQ(prediction.uhd_id, id);
         EXPECT_NEAR(prediction.value, 42.0, 1e-12) << metric;
     }
+}
+
+/// D2 for a declared model: one UUID declared for gfx942 and gfx950 is one model, bound
+/// under both keys with one content identity and no duplicate-identity refusal. Coverage is
+/// the artifact's `training_arches`: trained on gfx942 only, it answers there and is
+/// UNAVAILABLE on gfx950 with the reason saying so.
+TEST(TestDescriptorLoader, ADeclaredModelBoundForTwoArchesAnswersOnlyWhereItWasTrained)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_d2"));
+    const auto modelId = testUuid('e', 'e');
+    auto document = declaredL1Document(modelId);
+    document["adapter"] = "tree_data";
+    document.erase("native");
+    document["tree_data"] = {{"artifact", "l1.bin"}};
+    ASSERT_TRUE(hipdnn_test_sdk::utilities::GbdtModelTestBuilder()
+                    .setNumFeatures(1)
+                    .setFeaturesHash(document.at("features_hash").get<std::string>())
+                    .setBaseScore(std::log1p(42.0))
+                    .setTrainingArches({"gfx942"})
+                    .buildToFile((dir.path() / "l1.bin").string()));
+    writeDocument(dir.path(), {".uhd.json", std::move(document)});
+
+    const auto resolved
+        = resolveDeclaredEnginePredictions(loadDescriptorCatalog(dir.path()),
+                                           "test:opaque",
+                                           L1_SELECTOR_REVISION,
+                                           declaration({{"gfx942", modelId}, {"gfx950", modelId}}));
+
+    EXPECT_TRUE(resolved.refused.empty());
+    ASSERT_EQ(resolved.byMetric.count("tflops"), 1u);
+    const auto& bound = resolved.byMetric.at("tflops");
+    ASSERT_EQ(bound.size(), 2u);
+    EXPECT_FALSE(bound.at("gfx942").modelHash.empty());
+    EXPECT_EQ(bound.at("gfx942").modelHash, bound.at("gfx950").modelHash);
+
+    hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
+    for(const auto& [arch, model] : bound)
+    {
+        binding.bind("tflops", arch, UhdKernelHeuristic::configFrom(model));
+    }
+    hipdnn_plugin_sdk::uhd::FeatureExtractionContext features;
+    features.bind("graph.flops", std::log1p(42.0));
+    const auto ask = [&](const std::string& arch) {
+        return binding.predict(
+            7, "test:opaque", L1_SELECTOR_REVISION, "tflops", arch, features, /*evaluate=*/true);
+    };
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+    const auto trained = ask("gfx942:sramecc+:xnack-");
+    ASSERT_EQ(trained.status, PredictionStatus::AVAILABLE) << trained.reason;
+    EXPECT_NEAR(trained.value, 42.0, 1e-12);
+    const auto untrained = ask("gfx950");
+    EXPECT_EQ(untrained.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(untrained.reason, "UHD model has no coverage for this architecture");
 }
 
 TEST(TestDescriptorLoader, DropsEveryEngineClaimingTheSameEngineId)
@@ -2660,6 +3050,38 @@ TEST(TestDescriptorLoader, UnregisteredScorerDoesNotDisableAnOtherwiseValidEngin
     ASSERT_EQ(sets.size(), 2u);
     EXPECT_EQ(firstBlockSize(sets.front()), 256);
     EXPECT_EQ(firstBlockSize(sets.back()), 64);
+}
+
+/// The summary line carries a count of dropped sets, not of ERROR lines. The first bad
+/// set below names two unregistered symbols, so it logs twice and still costs the count
+/// one; a count of lines would read 3 here.
+TEST(TestDescriptorLoader, ReportsHowManyDescriptorSetsWereDropped)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("drop_count"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:drop_count_survivor"));
+
+    auto twoUnregistered = makeSetDocuments('2', "test:drop_count_two_symbols");
+    documentOfType(twoUnregistered, ".umd.json")["match_symbol"] = "descriptorloader.absent";
+    documentOfType(twoUnregistered, ".udd.json")["dispatch_symbol"] = "descriptorloader.absent";
+    writeDocuments(dir.path(), twoUnregistered);
+
+    auto misrouted = makeSetDocuments('3', "test:drop_count_misrouted");
+    secondDocumentOfType(misrouted, ".umd.json")["match_symbol"] = GRAPH_SYMBOL;
+    writeDocuments(dir.path(), misrouted);
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    EXPECT_EQ(sets.size(), 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                          "2 descriptor set(s) dropped during validation; 1 "
+                                          "descriptor-backed engine(s) loaded from"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(
+        recorder.hasLogContaining(HIPDNN_SEV_INFO, "descriptor-backed engine(s) loaded from"))
+        << recorder.getRecordedLogsAsString();
 }
 
 /// The probe's catch: two kernels completing to the same metadata tuple make the state

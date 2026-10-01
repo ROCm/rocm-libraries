@@ -43,17 +43,18 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
-#include <functional>
 #include <iostream>
 #include <map>
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace
@@ -204,10 +205,18 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
                 throw std::invalid_argument("Engine prediction/description/collection modes "
                                             "are mutually exclusive");
             }
-            options.engineMode = arg == "--predict-engine" ? EngineMode::PREDICT
-                                 : arg == "--describe-engine-prediction"
-                                     ? EngineMode::DESCRIBE
-                                     : EngineMode::COLLECT_IMMEDIATE;
+            if(arg == "--predict-engine")
+            {
+                options.engineMode = EngineMode::PREDICT;
+            }
+            else if(arg == "--describe-engine-prediction")
+            {
+                options.engineMode = EngineMode::DESCRIBE;
+            }
+            else
+            {
+                options.engineMode = EngineMode::COLLECT_IMMEDIATE;
+            }
             options.json = true;
         }
         else if(arg == "--ranking-metric")
@@ -353,28 +362,29 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
     return true;
 }
 
-/// Device memory for the duration of the run. Not a general allocator -- it exists so the
-/// buffers outlive execute() and are released even when a measurement fails.
-class DeviceBuffers
+/// Variant-pack memory for the duration of the run. Not a general allocator -- it exists so
+/// the buffers outlive execute() and are released even when a measurement fails.
+class PackBuffers
 {
 public:
-    ~DeviceBuffers()
+    ~PackBuffers()
     {
-        for(void* pointer : _pointers)
+        for(void* pointer : _devicePointers)
         {
             (void)hipFree(pointer);
         }
     }
-    DeviceBuffers() = default;
-    DeviceBuffers(const DeviceBuffers&) = delete;
-    DeviceBuffers& operator=(const DeviceBuffers&) = delete;
-    DeviceBuffers(DeviceBuffers&&) = delete;
-    DeviceBuffers& operator=(DeviceBuffers&&) = delete;
+    PackBuffers() = default;
+    PackBuffers(const PackBuffers&) = delete;
+    PackBuffers& operator=(const PackBuffers&) = delete;
+    PackBuffers(PackBuffers&&) = delete;
+    PackBuffers& operator=(PackBuffers&&) = delete;
 
-    /// Allocates and zero-fills. Filled rather than left as whatever the device held: on some
-    /// hardware denormals and NaNs read from uninitialised memory are slower than normal
-    /// values, and a corpus row that recorded that would be measuring the allocator.
-    void* add(int64_t bytes)
+    /// Allocates and zero-fills device memory. Filled rather than left as whatever the device
+    /// held: on some hardware denormals and NaNs read from uninitialised memory are slower
+    /// than normal values, and a corpus row that recorded that would be measuring the
+    /// allocator.
+    void* addDevice(int64_t bytes)
     {
         void* pointer = nullptr;
         if(hipMalloc(&pointer, static_cast<size_t>(bytes)) != hipSuccess || pointer == nullptr)
@@ -386,26 +396,41 @@ public:
             (void)hipFree(pointer);
             return nullptr;
         }
-        _pointers.push_back(pointer);
+        _devicePointers.push_back(pointer);
         return pointer;
     }
 
+    /// Zero-filled host memory for the runtime pass-by-value scalars a provider reads on the
+    /// CPU. Stable for the object's lifetime: moving a block's vector keeps its buffer.
+    void* addHost(int64_t bytes)
+    {
+        _hostBlocks.emplace_back(static_cast<size_t>(bytes));
+        return _hostBlocks.back().data();
+    }
+
+    /// Memory for @p tensor where the plan says it lives.
+    void* add(const hipdnn_bench::TensorRequirement& tensor)
+    {
+        return tensor.storage == hipdnn_bench::TensorStorage::HOST ? addHost(tensor.bytes)
+                                                                   : addDevice(tensor.bytes);
+    }
+
 private:
-    std::vector<void*> _pointers;
+    std::vector<void*> _devicePointers;
+    std::vector<std::vector<std::byte>> _hostBlocks;
 };
 
-hipdnn_frontend::Error allocateVariantPack(const hipdnn_frontend::graph::Graph& graph,
-                                           DeviceBuffers& buffers,
+hipdnn_frontend::Error allocateVariantPack(const hipdnn_bench::VariantPackPlan& plan,
+                                           PackBuffers& buffers,
                                            std::unordered_map<int64_t, void*>& variantPack)
 {
-    const auto plan = hipdnn_bench::planVariantPack(graph);
     if(!plan.error.empty())
     {
         return {hipdnn_frontend::ErrorCode::INVALID_VALUE, plan.error};
     }
     for(const auto& tensor : plan.tensors)
     {
-        void* pointer = buffers.add(tensor.bytes);
+        void* pointer = buffers.add(tensor);
         if(pointer == nullptr)
         {
             return {hipdnn_frontend::ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -542,7 +567,7 @@ hipdnn_frontend::Error engineIdentity(hipdnnHandle_t handle,
 
     hipUUID uuid{};
     HIPDNN_CHECK_ERROR(hipError(hipDeviceGetUuid(&uuid, device), "Could not read device UUID"));
-    static constexpr char HEX[] = "0123456789abcdef";
+    static constexpr std::string_view HEX = "0123456789abcdef";
     std::string deviceId;
     deviceId.reserve(sizeof(uuid.bytes) * 2);
     for(const auto byte : uuid.bytes)
@@ -570,52 +595,47 @@ const char* predictionStatus(hipdnn_frontend::PredictionStatus status)
     }
 }
 
-/// @brief Uids of every tensor some node of @p graph writes.
-///
-/// The variant pack plan is a flat list of non-virtual tensors and carries no direction, so
-/// the fill below needs this to tell an input from a result. A tensor no node produces is a
-/// graph input; everything else the graph writes itself, and writing over one of those
-/// would hide the kernel that writes nothing -- the case leftOutputUntouched() exists to
-/// catch.
-std::unordered_set<int64_t> producedUids(const hipdnn_frontend::graph::Graph& graph)
+/// The row's three-valued `numerically_valid`: true, false, or null when not cross-checkable.
+nlohmann::json numericallyValid(hipdnn_bench::NumericalVerdict verdict)
 {
-    std::unordered_set<int64_t> produced;
-    const std::function<void(const hipdnn_frontend::graph::INode&)> collect
-        = [&produced](const hipdnn_frontend::graph::INode& node) {
-              for(const auto& tensor : node.getNodeOutputTensorAttributes())
-              {
-                  if(tensor != nullptr && tensor->has_uid())
-                  {
-                      produced.insert(tensor->get_uid());
-                  }
-              }
-          };
-    graph.visit(collect);
-    return produced;
+    switch(verdict)
+    {
+    case hipdnn_bench::NumericalVerdict::AGREED:
+        return true;
+    case hipdnn_bench::NumericalVerdict::DISAGREED:
+        return false;
+    default:
+        return nullptr;
+    }
 }
 
 /// @brief Writes the validation fill into every input buffer of @p variantPack.
 ///
-/// A tensor of a type this build cannot encode exactly keeps its zero fill: writing a code
-/// from a guessed exponent bias would put a NaN into an input, and a catalog that all
-/// computes NaN is condemned for a defect this tool introduced.
-hipdnn_frontend::Error fillGraphInputs(const hipdnn_frontend::graph::Graph& graph,
-                                       const hipdnn_bench::VariantPackPlan& plan,
+/// Results are left at their zero fill: writing over one would hide the kernel that writes
+/// nothing -- the case leftOutputUntouched() exists to catch. A tensor of a type this build
+/// cannot encode exactly keeps its zero fill too: writing a code from a guessed exponent bias
+/// would put a NaN into an input, and a catalog that all computes NaN is condemned for a
+/// defect this tool introduced.
+hipdnn_frontend::Error fillGraphInputs(const hipdnn_bench::VariantPackPlan& plan,
                                        const std::unordered_map<int64_t, void*>& variantPack,
                                        uint64_t seed)
 {
-    const auto produced = producedUids(graph);
     for(const auto& tensor : plan.tensors)
     {
         const auto buffer = variantPack.find(tensor.uid);
-        if(produced.count(tensor.uid) != 0 || buffer == variantPack.end())
+        if(tensor.produced || buffer == variantPack.end())
         {
-            continue; // A result, an intermediate, or something not in the pack at all.
+            continue; // A result, or something not in the pack at all.
         }
         const auto image = hipdnn_bench::detail::inputFillImage(
             tensor.dataType, static_cast<size_t>(tensor.bytes), seed, tensor.uid);
         if(image.empty())
         {
+            continue;
+        }
+        if(tensor.storage == hipdnn_bench::TensorStorage::HOST)
+        {
+            std::memcpy(buffer->second, image.data(), image.size());
             continue;
         }
         HIPDNN_CHECK_ERROR(
@@ -625,7 +645,8 @@ hipdnn_frontend::Error fillGraphInputs(const hipdnn_frontend::graph::Graph& grap
     return {};
 }
 
-/// @brief Runs one candidate once, untimed, and copies back everything it wrote.
+/// @brief Runs one candidate once, untimed, and copies back every non-virtual tensor it
+///        wrote -- its outputs, never its inputs (hipdnn_bench::crossCheckedOutputs).
 ///
 /// RFC 0019 §13.2 admits a timing as a training label only once the candidate is known
 /// correct, and the check has to see the candidate's own output to say anything about it.
@@ -664,18 +685,14 @@ hipdnn_frontend::Error
     HIPDNN_CHECK_ERROR(graph.build_plans());
 
     const auto plan = hipdnn_bench::planVariantPack(graph);
-    if(!plan.error.empty())
-    {
-        return {hipdnn_frontend::ErrorCode::INVALID_VALUE, plan.error};
-    }
-    DeviceBuffers buffers;
+    PackBuffers buffers;
     std::unordered_map<int64_t, void*> variantPack;
-    HIPDNN_CHECK_ERROR(allocateVariantPack(graph, buffers, variantPack));
+    HIPDNN_CHECK_ERROR(allocateVariantPack(plan, buffers, variantPack));
     HIPDNN_CHECK_ERROR(
-        fillGraphInputs(graph, plan, variantPack, hipdnn_bench::detail::graphFillSeed(graphBytes)));
+        fillGraphInputs(plan, variantPack, hipdnn_bench::detail::graphFillSeed(graphBytes)));
     int64_t workspaceSize = 0;
     HIPDNN_CHECK_ERROR(graph.get_workspace_size(workspaceSize));
-    void* workspace = workspaceSize > 0 ? buffers.add(workspaceSize) : nullptr;
+    void* workspace = workspaceSize > 0 ? buffers.addDevice(workspaceSize) : nullptr;
     if(workspaceSize > 0 && workspace == nullptr)
     {
         return {hipdnn_frontend::ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -685,7 +702,8 @@ hipdnn_frontend::Error
     HIPDNN_CHECK_ERROR(graph.execute(handle, variantPack, workspace));
     HIPDNN_CHECK_ERROR(hipError(hipDeviceSynchronize(), "Validation execution did not complete"));
 
-    for(const auto& tensor : plan.tensors)
+    // Produced tensors are always device-resident: only operand scalars live on the host.
+    for(const auto& tensor : hipdnn_bench::crossCheckedOutputs(plan))
     {
         tensors[tensor.uid] = {tensor.name, tensor.dataType};
         std::vector<uint8_t> image(static_cast<size_t>(tensor.bytes));
@@ -710,13 +728,14 @@ hipdnn_frontend::Error collectImmediate(hipdnnHandle_t handle,
     HIPDNN_CHECK_ERROR(graph.create_execution_plan_ext(options.engineId, settings));
     HIPDNN_CHECK_ERROR(graph.build_plans());
 
-    DeviceBuffers buffers;
+    PackBuffers buffers;
     std::unordered_map<int64_t, void*> variantPack;
-    HIPDNN_CHECK_ERROR(allocateVariantPack(graph, buffers, variantPack));
+    HIPDNN_CHECK_ERROR(
+        allocateVariantPack(hipdnn_bench::planVariantPack(graph), buffers, variantPack));
     int64_t workspaceSize = 0;
     HIPDNN_CHECK_ERROR(graph.get_workspace_size(workspaceSize));
     output["workspace_bytes"] = workspaceSize;
-    void* workspace = workspaceSize > 0 ? buffers.add(workspaceSize) : nullptr;
+    void* workspace = workspaceSize > 0 ? buffers.addDevice(workspaceSize) : nullptr;
     if(workspaceSize > 0 && workspace == nullptr)
     {
         return {hipdnn_frontend::ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -738,18 +757,30 @@ hipdnn_frontend::Error collectImmediate(hipdnnHandle_t handle,
     }
     HIPDNN_CHECK_ERROR(hipError(hipStreamSynchronize(stream), "Warmup synchronization failed"));
 
-    const auto timeOnce = [&](float& elapsed) -> hipdnn_frontend::Error {
+    // Unstalled, host-bracketed HIP events: this loop is not one of the stall-gated
+    // comparisons, so every sample reports TimingQuality::UNSTALLED and the pass below is
+    // run with stalled=false, which can never ask for a restart.
+    const auto timeOnce = [&](hipdnn_frontend::ExecutionTiming& timing) -> hipdnn_frontend::Error {
         HIPDNN_CHECK_ERROR(hipError(hipEventRecord(start.get(), stream), "Could not start timing"));
         HIPDNN_CHECK_ERROR(graph.execute(handle, variantPack, workspace));
         HIPDNN_CHECK_ERROR(hipError(hipEventRecord(stop.get(), stream), "Could not stop timing"));
         HIPDNN_CHECK_ERROR(
             hipError(hipEventSynchronize(stop.get()), "Timing synchronization failed"));
+        float elapsed = 0.0F;
         HIPDNN_CHECK_ERROR(hipError(hipEventElapsedTime(&elapsed, start.get(), stop.get()),
                                     "Could not read timing"));
-        if(!std::isfinite(elapsed) || elapsed <= 0.0F)
+        if(!std::isfinite(elapsed) || elapsed == 0.0F)
         {
             return {hipdnn_frontend::ErrorCode::HIPDNN_BACKEND_ERROR,
                     "HIP event timing must be finite and positive"};
+        }
+        // A finite negative reading leaves `timing` INVALID with no elapsed time, the same
+        // shape execute_timed_ext() reports it in, so the loop re-measures the slot within
+        // its bounded retry budget instead of failing the whole collection on it.
+        if(elapsed > 0.0F)
+        {
+            timing.elapsedMs = elapsed;
+            timing.quality = hipdnn_frontend::TimingQuality::UNSTALLED;
         }
         return {};
     };
@@ -757,6 +788,7 @@ hipdnn_frontend::Error collectImmediate(hipdnnHandle_t handle,
         = hipdnn_frontend::autotune::detail::runUntilStable(options.maxIterations,
                                                             AutotuneConfig{}.windowSize,
                                                             options.stability,
+                                                            /*stalled=*/false,
                                                             timeOnce,
                                                             [](int, float, float, bool) {});
     output["iterations"] = outcome.timings.size();
@@ -1079,9 +1111,10 @@ int runBench(const std::vector<std::string>& args)
         }
     }
 
-    DeviceBuffers buffers;
+    PackBuffers buffers;
     std::unordered_map<int64_t, void*> variantPack;
-    const auto allocated = allocateVariantPack(graph, buffers, variantPack);
+    const auto allocated
+        = allocateVariantPack(hipdnn_bench::planVariantPack(graph), buffers, variantPack);
     if(allocated.is_bad())
     {
         std::cerr << allocated.get_message() << "\n";
@@ -1129,7 +1162,7 @@ int runBench(const std::vector<std::string>& args)
     void* workspace = nullptr;
     if(workspaceSize > 0)
     {
-        workspace = buffers.add(workspaceSize);
+        workspace = buffers.addDevice(workspaceSize);
         if(workspace == nullptr)
         {
             std::cerr << "Out of device memory for a " << workspaceSize << " byte workspace\n";
@@ -1234,38 +1267,37 @@ int runBench(const std::vector<std::string>& args)
             }
             // Preserve existing is_valid semantics: measured, not numerical correctness.
             const bool timed = result.succeeded && result.iterationsRun > 0;
-            const std::string reason
-                = !result.succeeded
-                      ? "config_not_applicable: engine declined or failed to run this configuration"
-                  : result.iterationsRun == 0
-                      ? "not_timed: autotune reported success without running an iteration"
-                      : "";
+            std::string reason;
+            if(!result.succeeded)
+            {
+                reason = "config_not_applicable: engine declined or failed to run this "
+                         "configuration";
+            }
+            else if(result.iterationsRun == 0)
+            {
+                reason = "not_timed: autotune reported success without running an iteration";
+            }
             // Three-valued, and a separate field from `is_valid`. `is_valid` answers "did we
             // obtain a measurement", which uhd_gen and RFC 0019 §8.1 both depend on; folding a
             // correctness verdict into it would make an unmeasured row and an incorrect row
             // indistinguishable and break the coverage record §13.2 keeps deliberately.
             const auto& verdict = verdicts[index];
-            output["results"].push_back(
-                {{"candidate_id", candidate->id},
-                 {"knob_settings", knobJson(tuple)},
-                 {"kernel_features", candidate->kernelFeatures},
-                 {"rank", result.rank},
-                 {"succeeded", result.succeeded},
-                 {"is_valid", timed},
-                 {"numerically_valid",
-                  verdict.verdict == hipdnn_bench::NumericalVerdict::AGREED ? nlohmann::json(true)
-                  : verdict.verdict == hipdnn_bench::NumericalVerdict::DISAGREED
-                      ? nlohmann::json(false)
-                      : nlohmann::json(nullptr)},
-                 {"validation", verdict.reason},
-                 {"skip_reason", reason},
-                 {"min_time_ms", result.minTimeMs},
-                 {"avg_time_ms", result.avgTimeMs},
-                 {"robust_time_ms", result.robustTimeMs},
-                 {"stddev_ms", result.stddevMs},
-                 {"iterations", result.iterationsRun},
-                 {"converged", result.converged},
-                 {"workspace_bytes", result.workspaceSize}});
+            output["results"].push_back({{"candidate_id", candidate->id},
+                                         {"knob_settings", knobJson(tuple)},
+                                         {"kernel_features", candidate->kernelFeatures},
+                                         {"rank", result.rank},
+                                         {"succeeded", result.succeeded},
+                                         {"is_valid", timed},
+                                         {"numerically_valid", numericallyValid(verdict.verdict)},
+                                         {"validation", verdict.reason},
+                                         {"skip_reason", reason},
+                                         {"min_time_ms", result.minTimeMs},
+                                         {"avg_time_ms", result.avgTimeMs},
+                                         {"robust_time_ms", result.robustTimeMs},
+                                         {"stddev_ms", result.stddevMs},
+                                         {"iterations", result.iterationsRun},
+                                         {"converged", result.converged},
+                                         {"workspace_bytes", result.workspaceSize}});
         }
         std::cout << output.dump() << "\n";
         return results.empty() ? 2 : 0;

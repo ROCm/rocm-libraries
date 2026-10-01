@@ -92,6 +92,21 @@ bool readIsOverrideShapeEnabled(const GraphDescriptor& graphDesc)
     return flag;
 }
 
+/// Union payloads are optional in FlatBuffers, so VerifyBuffer accepts a KnobSetting whose
+/// type tag names a value with no payload table behind it -- and UnPack() then dereferences
+/// that null payload. True when every tagged knob value in @p config has its payload.
+bool everyKnobValueIsPresent(const hipdnn_flatbuffers_sdk::data_objects::EngineConfig* config)
+{
+    if(config == nullptr || config->knobs() == nullptr)
+    {
+        return true;
+    }
+    return std::all_of(config->knobs()->begin(), config->knobs()->end(), [](const auto* setting) {
+        return setting->value_type() == hipdnn_flatbuffers_sdk::data_objects::KnobValue::NONE
+               || setting->value() != nullptr;
+    });
+}
+
 } // namespace
 
 // Static accessor implementations for CRTP base class
@@ -672,7 +687,7 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
     {
         return invalid(error.what());
     }
-    constexpr size_t MAX_PREDICTION_BYTES = 16 * 1024 * 1024;
+    constexpr size_t MAX_PREDICTION_BYTES = size_t{16} * 1024 * 1024;
     if(data.ptr == nullptr || data.size == 0 || data.size > MAX_PREDICTION_BYTES)
     {
         return invalid("Empty or oversized prediction response");
@@ -683,6 +698,12 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
         return invalid("Malformed prediction response");
     }
     const auto* response = fb::GetEnginePrediction(data.ptr);
+    // Checked before anything reads the configuration, whatever the status: UnPackTo()
+    // below unpacks it for every status.
+    if(!everyKnobValueIsPresent(response->engine_config()))
+    {
+        return invalid("Prediction configuration names a knob value it does not carry");
+    }
     if(response->engine_id() != engineId || response->kind() != result.kind)
     {
         return invalid("Prediction engine or layer does not match the request");
@@ -704,11 +725,17 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
     }
     if(response->status() == fb::PredictionStatus::AVAILABLE)
     {
-        if(!evaluate || !hipdnn_data_sdk::utilities::isValidMetricValue(metric, response->value())
-           || response->uhd_id() == nullptr || response->uhd_id()->size() == 0)
+        if(!evaluate || !hipdnn_data_sdk::utilities::isValidMetricValue(metric, response->value()))
         {
-            return invalid("Available prediction needs an evaluated UHD and a valid '"
-                           + result.metric + "' value");
+            return invalid("Available prediction needs an evaluation and a valid '" + result.metric
+                           + "' value");
+        }
+        // An engine estimate only ever comes from a UHD, so it names one. A configuration
+        // answer may instead be a measured value (RFC 0019 §5 step 9), which names no UHD.
+        if(kind == HIPDNN_ENGINE_PREDICTION_ENGINE
+           && (response->uhd_id() == nullptr || response->uhd_id()->empty()))
+        {
+            return invalid("Available engine prediction needs the UHD that evaluated it");
         }
         const auto* selected = response->engine_config();
         if(kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION
@@ -721,7 +748,7 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
             return invalid("Engine-level prediction must not select a configuration");
         }
         if(selected != nullptr && selected->ranking_metric() != nullptr
-           && selected->ranking_metric()->size() != 0
+           && !selected->ranking_metric()->empty()
            && selected->ranking_metric()->string_view() != metric.name)
         {
             return invalid("Configuration prediction selected a configuration by another metric");

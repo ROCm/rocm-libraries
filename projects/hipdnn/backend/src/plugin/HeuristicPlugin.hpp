@@ -67,10 +67,6 @@ struct HeuristicPluginFunctionTable
                                                      size_t*)
         = nullptr;
 
-    // Trace retrieval (RFC 0019 §13)
-    hipdnnPluginStatus_t (*policyGetTrace)(hipdnnHeuristicPolicyDescriptor_t, int64_t, const char**)
-        = nullptr;
-
     // Optional prediction-aware ABI (0.1.0); absence preserves legacy behavior.
     decltype(&hipdnnHeuristicPolicyFinalizeWithHost) policyFinalizeWithHost = nullptr;
     decltype(&hipdnnHeuristicPolicyGetEngineConfig) policyGetEngineConfig = nullptr;

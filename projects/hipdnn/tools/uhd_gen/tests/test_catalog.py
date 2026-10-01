@@ -53,13 +53,15 @@ def _corpus(candidates_per_problem, problems: int = 12) -> pd.DataFrame:
     rows = []
     for index, count in enumerate(counts):
         for candidate in range(count):
-            rows.append({
-                **_ENVELOPE,
-                "benchmark": f"prob{index}",
-                "kernel": f"k{index}_{candidate}",
-                "robustMeanMs": 0.10 + 0.01 * candidate,
-                "kernel.block_m": 64 * (candidate + 1),
-            })
+            rows.append(
+                {
+                    **_ENVELOPE,
+                    "benchmark": f"prob{index}",
+                    "kernel": f"k{index}_{candidate}",
+                    "robustMeanMs": 0.10 + 0.01 * candidate,
+                    "kernel.block_m": 64 * (candidate + 1),
+                }
+            )
     return pd.DataFrame(rows)
 
 
@@ -177,9 +179,13 @@ def test_exclusions_name_the_cause_when_single_candidates_are_the_whole_reason()
 def test_exclusions_do_not_blame_the_catalog_when_the_sweep_also_failed():
     # Problems whose candidates never ran are a collection failure. Reporting them as a
     # deterministic catalog would send the operator to train L1 on a broken sweep.
-    exclusions = Exclusions(problems_single_candidate=17, problems_no_measured_candidate=3)
+    exclusions = Exclusions(
+        problems_single_candidate=17, problems_no_measured_candidate=3
+    )
     assert not exclusions.deterministic_catalog(scored=0)
-    exclusions = Exclusions(problems_single_candidate=17, problems_non_positive_oracle=1)
+    exclusions = Exclusions(
+        problems_single_candidate=17, problems_non_positive_oracle=1
+    )
     assert not exclusions.deterministic_catalog(scored=0)
 
 
@@ -198,16 +204,26 @@ def _oracle_scorer(frame: pd.DataFrame):
 
 
 def test_the_evaluation_report_records_the_condition():
-    result = evaluate_corpus(_corpus(1, problems=8), _oracle_scorer,
-                             target="robustMeanMs", objective="min", eval_fraction=1.0)
+    result = evaluate_corpus(
+        _corpus(1, problems=8),
+        _oracle_scorer,
+        target="robustMeanMs",
+        objective="min",
+        eval_fraction=1.0,
+    )
     assert result.report["metrics"]["problems_scored"] == 0
     assert result.report["metrics"]["deterministic_catalog"] is True
     assert result.report["exclusions"]["problems_single_candidate"] == 8
 
 
 def test_a_contested_report_records_the_condition_as_false():
-    result = evaluate_corpus(_corpus(3, problems=8), _oracle_scorer,
-                             target="robustMeanMs", objective="min", eval_fraction=1.0)
+    result = evaluate_corpus(
+        _corpus(3, problems=8),
+        _oracle_scorer,
+        target="robustMeanMs",
+        objective="min",
+        eval_fraction=1.0,
+    )
     assert result.report["metrics"]["problems_scored"] == 8
     assert result.report["metrics"]["deterministic_catalog"] is False
 
@@ -216,13 +232,19 @@ def test_a_contested_report_records_the_condition_as_false():
 
 
 def test_knob_analysis_reports_the_finding_instead_of_a_page_of_pinnable_fields(
-        tmp_path, capsys):
+    tmp_path, capsys
+):
     from uhd_gen.knobs import run_knobs
 
     corpus = tmp_path / "corpus.csv"
     _corpus(1, problems=6).to_csv(corpus, index=False)
-    args = argparse.Namespace(input=str(corpus), target="robustMeanMs", objective="min",
-                              device_column=None, manifest=None)
+    args = argparse.Namespace(
+        input=str(corpus),
+        target="robustMeanMs",
+        objective="min",
+        device_column=None,
+        manifest=None,
+    )
     assert run_knobs(args) == 0
     out = capsys.readouterr().out
     assert "deterministic catalog" in out

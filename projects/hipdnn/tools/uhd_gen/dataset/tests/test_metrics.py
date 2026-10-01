@@ -34,7 +34,9 @@ def test_the_counts_are_the_engines_own_rather_than_a_declarations():
     overstated by up to 7.8x. The engine's count is right because it knows what it read -- so a
     row carrying the problem parameters but no cost has nothing to derive from, by design.
     """
-    query = dict(batch=2, heads=32, seqlen_q=1024, seqlen_k=1024, head_dim=128, dtype="fp16")
+    query = dict(
+        batch=2, heads=32, seqlen_q=1024, seqlen_k=1024, head_dim=128, dtype="fp16"
+    )
     assert derive_metrics(query, time_ms=1.0) == {"tflops": None, "gbs": None}
 
 
@@ -75,7 +77,9 @@ def test_no_measurement_yields_null_never_a_winner(time_ms):
     assert got == {"tflops": None, "gbs": None}
 
 
-@pytest.mark.parametrize("absent", ["", None, float("nan"), float("inf"), 0.0, -1.0, "n/a"])
+@pytest.mark.parametrize(
+    "absent", ["", None, float("nan"), float("inf"), 0.0, -1.0, "n/a"]
+)
 def test_an_unfilled_cost_column_reads_as_absent_rather_than_as_zero(absent):
     """A corpus is written with an empty restval, so a column the engine did not fill arrives as
     `''` or NaN. Either turning into a 0.0 would give a real measurement a rate of exactly zero,
@@ -84,7 +88,8 @@ def test_an_unfilled_cost_column_reads_as_absent_rather_than_as_zero(absent):
     """
     assert reported(dict(flops=absent), "flops") is None
     assert derive_metrics(dict(flops=absent, bytes=absent), time_ms=1.0) == {
-        "tflops": None, "gbs": None
+        "tflops": None,
+        "gbs": None,
     }
 
 

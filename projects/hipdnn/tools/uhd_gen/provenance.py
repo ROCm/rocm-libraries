@@ -11,6 +11,10 @@ from pathlib import Path
 ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
 _REVISION = re.compile(r"^[0-9]+\.[0-9]+$")
 _UUID = re.compile(r"^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")
+#: `trained_against` member recording what published feature values mean (`FeatureSemantics.hpp`).
+FEATURE_SEMANTICS_REVISION = "feature_semantics_revision"
+#: The loader reads the revision as int64_t.
+_MAX_INT64 = 2**63 - 1
 
 
 class ProvenanceError(ValueError):
@@ -25,7 +29,9 @@ def descriptor_id(value: object, where: str) -> str:
 
 def revision(value: object, where: str) -> tuple[int, int]:
     if not isinstance(value, str) or not _REVISION.fullmatch(value):
-        raise ProvenanceError(f"{where}: expected semantic revision '<major>.<minor>', got {value!r}")
+        raise ProvenanceError(
+            f"{where}: expected semantic revision '<major>.<minor>', got {value!r}"
+        )
     return tuple(int(part) for part in value.split("."))
 
 
@@ -51,24 +57,51 @@ def validate_provenance(snapshot: object) -> dict:
         and MIOpen have no UED, KMD or UMD to name; their behaviour is decided by the
         library they wrap, so the revision string is the only thing to be trained against.
 
+    Either form may also record `feature_semantics_revision`, what the feature values the
+    model was trained on MEAN (`FeatureSemantics.hpp`); absent means 1, and
+    `require_feature_semantics` is what compares it.
+
     The loader learned the second form when opaque engines gained L1; this validator did
     not, so every opaque L1 collection died here with "requires exactly ued, kmd and umd"
     after measuring its whole corpus (runs 67929293, 67929294).
     """
     if not isinstance(snapshot, dict):
         raise ProvenanceError("trained_against must be an object")
-    unknown = set(snapshot) - {"ued", "kmd", "umd", "selector_revision"}
+    unknown = set(snapshot) - {
+        "ued",
+        "kmd",
+        "umd",
+        "selector_revision",
+        FEATURE_SEMANTICS_REVISION,
+    }
     if unknown:
         raise ProvenanceError(f"trained_against has unknown members: {sorted(unknown)}")
+    semantics = {}
+    if FEATURE_SEMANTICS_REVISION in snapshot:
+        recorded_semantics = snapshot[FEATURE_SEMANTICS_REVISION]
+        # An integer, as the loader requires: a bool or 1.0 spelling revision 1 would pass
+        # an equality check here that the runtime then refuses.
+        if (
+            isinstance(recorded_semantics, bool)
+            or not isinstance(recorded_semantics, int)
+            or not 1 <= recorded_semantics <= _MAX_INT64
+        ):
+            raise ProvenanceError(
+                f"trained_against.{FEATURE_SEMANTICS_REVISION} must be an integer >= 1"
+            )
+        semantics[FEATURE_SEMANTICS_REVISION] = recorded_semantics
     names_descriptor_set = bool({"ued", "kmd", "umd"} & set(snapshot))
     if not names_descriptor_set:
         if "selector_revision" not in snapshot:
             raise ProvenanceError(
-                "trained_against must name a descriptor set or a selector_revision")
+                "trained_against must name a descriptor set or a selector_revision"
+            )
         revision_text = snapshot["selector_revision"]
         if not isinstance(revision_text, str) or not revision_text:
-            raise ProvenanceError("trained_against.selector_revision must be a non-empty string")
-        return {"selector_revision": revision_text}
+            raise ProvenanceError(
+                "trained_against.selector_revision must be a non-empty string"
+            )
+        return {"selector_revision": revision_text, **semantics}
     # All three or none: two thirds of a descriptor set is not a weaker claim, it is an
     # unverifiable one.
     if not {"ued", "kmd", "umd"} <= set(snapshot):
@@ -87,16 +120,67 @@ def validate_provenance(snapshot: object) -> dict:
     if "selector_revision" in snapshot:
         # A descriptor-backed engine MAY also record the provider build it was measured
         # on; the loader accepts both together and checks each on its own terms.
-        if not isinstance(snapshot["selector_revision"], str) or not snapshot["selector_revision"]:
-            raise ProvenanceError("trained_against.selector_revision must be a non-empty string")
+        if (
+            not isinstance(snapshot["selector_revision"], str)
+            or not snapshot["selector_revision"]
+        ):
+            raise ProvenanceError(
+                "trained_against.selector_revision must be a non-empty string"
+            )
         recorded["selector_revision"] = snapshot["selector_revision"]
-    return recorded
+    return {**recorded, **semantics}
 
 
-def compare_provenance(trained: object, actual: object) -> None:
+def require_feature_semantics(trained: object, current: int) -> None:
+    """Refuse a model whose features meant something else when it was trained.
+
+    `current` is what `features.evaluator_feature_semantics_revision` reports -- the
+    revision of the build that would score the model -- and a model recording none was
+    trained at revision 1 -- as is one recording no `trained_against` at all (`None`). The
+    loader applies the same rule to the same field (`UhdParser.hpp`'s
+    `featureSemanticsMismatch`), and only to a model with a `features_signature`: one
+    reading no published feature cannot be misled by one changing. A mismatch in either
+    direction refuses, naming both.
+    """
+    recorded = (
+        1
+        if trained is None
+        else validate_provenance(trained).get(FEATURE_SEMANTICS_REVISION, 1)
+    )
+    if recorded != current:
+        raise ProvenanceError(
+            f"trained_against.{FEATURE_SEMANTICS_REVISION}: model was trained against feature "
+            f"semantics revision {recorded}, the feature evaluator computes revision {current}"
+        )
+
+
+def record_feature_semantics(snapshot: object, current: int) -> dict:
+    """`snapshot` with the evaluator's feature-semantics revision recorded, at train time.
+
+    A descriptor or binding snapshot says nothing about feature meaning, so absence there
+    is no claim and `current` is simply added. One that does record a revision -- a
+    hand-written `--provenance` -- must record this one: stamping over it would publish a
+    model claiming semantics its author said it was not trained on.
+    """
+    recorded = validate_provenance(snapshot)
+    if FEATURE_SEMANTICS_REVISION in recorded:
+        require_feature_semantics(recorded, current)
+    return {**recorded, FEATURE_SEMANTICS_REVISION: current}
+
+
+def compare_provenance(
+    trained: object, actual: object, *, foreign_matchers=frozenset()
+) -> None:
     """Existing dependencies must retain identity/major and not regress minor.
 
     Additional pack matchers are coverage changes, not contract breakages.
+
+    `foreign_matchers` are matchers the engine's packs for OTHER architectures own and none
+    of `actual`'s architecture's packs do (`foreign_matcher_ids`). A model collected over
+    several arches' packs records their union, and one UUID bound under each of those arch
+    keys is one model (D2), so on any one arch the matchers of the others are ignored
+    rather than refused -- the rule `DescriptorLoader.hpp`'s `provenanceError` applies. A
+    recorded matcher no pack of the engine owns at all is still a removed dependency.
 
     A selector revision is compared for equality, not compatibility: it is an opaque
     provider build string that only the provider can interpret, and the loader refuses a
@@ -110,15 +194,21 @@ def compare_provenance(trained: object, actual: object) -> None:
     # `provenance_for_engine` reads descriptors, which say nothing about the provider build,
     # so comparing there would reject every descriptor-backed model that also records the
     # revision it was measured on (run 67929708, promote of the gfx950 dense L1).
-    if recorded_revision is not None and "selector_revision" in actual \
-            and actual["selector_revision"] != recorded_revision:
+    if (
+        recorded_revision is not None
+        and "selector_revision" in actual
+        and actual["selector_revision"] != recorded_revision
+    ):
         raise ProvenanceError(
             f"trained_against.selector_revision: model records {recorded_revision!r}, "
-            f"the provider reports {actual.get('selector_revision')!r}")
+            f"the provider reports {actual.get('selector_revision')!r}"
+        )
     if "ued" not in trained:
         return
     if "ued" not in actual:
-        raise ProvenanceError("trained_against names a descriptor set the engine does not have")
+        raise ProvenanceError(
+            "trained_against names a descriptor set the engine does not have"
+        )
     for kind in ("ued", "kmd", "umd"):
         recorded = trained[kind] if kind == "umd" else [trained[kind]]
         available = actual[kind] if kind == "umd" else [actual[kind]]
@@ -126,15 +216,23 @@ def compare_provenance(trained: object, actual: object) -> None:
         for dependency in recorded:
             identity = dependency["id"]
             current = by_id.get(identity)
+            if current is None and kind == "umd" and identity in foreign_matchers:
+                continue
             if current is None:
-                raise ProvenanceError(f"trained_against.{kind}: dependency {identity} is missing or not owned by this engine/architecture")
+                raise ProvenanceError(
+                    f"trained_against.{kind}: dependency {identity} is missing or not owned by this engine/architecture"
+                )
             expected = revision(dependency["revision"], kind)
             found = revision(current["revision"], kind)
             if found[0] != expected[0] or found[1] < expected[1]:
-                raise ProvenanceError(f"trained_against.{kind}: {identity} revision {current['revision']} is incompatible with trained revision {dependency['revision']}")
+                raise ProvenanceError(
+                    f"trained_against.{kind}: {identity} revision {current['revision']} is incompatible with trained revision {dependency['revision']}"
+                )
 
 
-def load_descriptor_tree(descriptor_tree: Path) -> dict[str, dict[str, tuple[Path, dict]]]:
+def load_descriptor_tree(
+    descriptor_tree: Path,
+) -> dict[str, dict[str, tuple[Path, dict]]]:
     """Index dependency descriptors, rejecting even identical duplicate definitions."""
     root = Path(descriptor_tree)
     if not root.is_dir():
@@ -146,15 +244,21 @@ def load_descriptor_tree(descriptor_tree: Path) -> dict[str, dict[str, tuple[Pat
             try:
                 doc = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError) as error:
-                raise ProvenanceError(f"cannot read descriptor {path}: {error}") from error
+                raise ProvenanceError(
+                    f"cannot read descriptor {path}: {error}"
+                ) from error
             if not isinstance(doc, dict):
                 raise ProvenanceError(f"{path}: descriptor must be an object")
             identity = descriptor_id(doc.get("id"), str(path))
             if identity in identities:
-                raise ProvenanceError(f"duplicate/conflicting descriptor {identity}: {identities[identity]} and {path}")
+                raise ProvenanceError(
+                    f"duplicate/conflicting descriptor {identity}: {identities[identity]} and {path}"
+                )
             identities[identity] = path
             if doc.get("version") != "1.0":
-                raise ProvenanceError(f"{path}: unsupported file-format version {doc.get('version')!r}; expected 1.0")
+                raise ProvenanceError(
+                    f"{path}: unsupported file-format version {doc.get('version')!r}; expected 1.0"
+                )
             if kind != "kdp":
                 revision(doc.get("revision", "1.0"), str(path))
             entries[identity] = (path, doc)
@@ -163,10 +267,57 @@ def load_descriptor_tree(descriptor_tree: Path) -> dict[str, dict[str, tuple[Pat
 
 def select_engine(index: dict, engine: str | None) -> tuple[Path, dict]:
     entries = list(index["ued"].values())
-    matches = entries if engine is None else [entry for entry in entries if entry[1].get("name") == engine or entry[1]["id"] == engine]
+    matches = (
+        entries
+        if engine is None
+        else [
+            entry
+            for entry in entries
+            if entry[1].get("name") == engine or entry[1]["id"] == engine
+        ]
+    )
     if len(matches) != 1:
-        raise ProvenanceError(f"expected one UED for --engine {engine!r}, found {len(matches)}; select an unambiguous engine")
+        raise ProvenanceError(
+            f"expected one UED for --engine {engine!r}, found {len(matches)}; select an unambiguous engine"
+        )
     return matches[0]
+
+
+def _pack_matchers(index: dict, ued_id: str, arch: str | None) -> set[str]:
+    """Matcher ids of the engine's packs that serve `arch` (every pack for None/default).
+
+    A pack with no `arch` list serves every architecture, exactly as the loader reads it.
+    """
+    matchers = set()
+    for path, pack in index["kdp"].values():
+        owner = descriptor_id(pack.get("engine"), f"{path}.engine")
+        if owner != ued_id:
+            continue
+        arches = pack.get("arch", [])
+        if not isinstance(arches, list) or any(
+            not isinstance(item, str) for item in arches
+        ):
+            raise ProvenanceError(f"{path}.arch must be an array of strings")
+        if arch not in (None, "default") and arches and arch not in arches:
+            continue
+        refs = pack.get("matchers", [])
+        if not isinstance(refs, list):
+            raise ProvenanceError(f"{path}.matchers must be an array")
+        for identity in refs:
+            matchers.add(descriptor_id(identity, f"{path}.matchers"))
+    return matchers
+
+
+def foreign_matcher_ids(index: dict, ued: dict, arch: str | None) -> frozenset[str]:
+    """Matchers only the engine's packs for other architectures own, as seen from `arch`.
+
+    `compare_provenance` ignores these when a model recorded them: they are the other
+    arches' share of a multi-arch collection, not a dependency this arch lost.
+    """
+    ued_id = descriptor_id(ued.get("id"), "UED")
+    return frozenset(
+        _pack_matchers(index, ued_id, None) - _pack_matchers(index, ued_id, arch)
+    )
 
 
 def provenance_for_engine(index: dict, ued: dict, arch: str | None = None) -> dict:
@@ -182,29 +333,19 @@ def provenance_for_engine(index: dict, ued: dict, arch: str | None = None) -> di
     # knob-removal revision, without modifying the training snapshot.
     ued_dependency = resolve("ued", ued_id)
     ued_dependency["revision"] = ued.get("revision", "1.0")
-    matchers = set()
-    for path, pack in index["kdp"].values():
-        owner = descriptor_id(pack.get("engine"), f"{path}.engine")
-        if owner != ued_id:
-            continue
-        arches = pack.get("arch", [])
-        if not isinstance(arches, list) or any(not isinstance(item, str) for item in arches):
-            raise ProvenanceError(f"{path}.arch must be an array of strings")
-        if arch not in (None, "default") and arches and arch not in arches:
-            continue
-        refs = pack.get("matchers", [])
-        if not isinstance(refs, list):
-            raise ProvenanceError(f"{path}.matchers must be an array")
-        for identity in refs:
-            matchers.add(descriptor_id(identity, f"{path}.matchers"))
-    return validate_provenance({
-        "ued": ued_dependency,
-        "kmd": resolve("kmd", ued.get("metadata")),
-        "umd": [resolve("umd", identity) for identity in sorted(matchers)],
-    })
+    matchers = _pack_matchers(index, ued_id, arch)
+    return validate_provenance(
+        {
+            "ued": ued_dependency,
+            "kmd": resolve("kmd", ued.get("metadata")),
+            "umd": [resolve("umd", identity) for identity in sorted(matchers)],
+        }
+    )
 
 
-def snapshot_provenance(descriptor_tree: Path, engine: str | None = None, arch: str | None = None) -> dict:
+def snapshot_provenance(
+    descriptor_tree: Path, engine: str | None = None, arch: str | None = None
+) -> dict:
     """Snapshot the selected engine, its KMD, and all relevant pack matchers."""
     index = load_descriptor_tree(descriptor_tree)
     _, ued = select_engine(index, engine)

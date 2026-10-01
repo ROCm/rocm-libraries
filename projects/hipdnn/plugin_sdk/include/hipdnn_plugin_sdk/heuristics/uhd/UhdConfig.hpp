@@ -49,8 +49,7 @@ struct UhdConfig
     // Adapter configuration
     std::string adapterType = "static_order"; // "static_order", "tree_data", etc.
     std::string modelArtifactPath; // for tree_data/onnx/custom_library
-    std::string modelHash; // checksum of model artifact for integrity validation
-    std::vector<std::string> staticOrderFields = {"priority", "id"}; // for static_order
+    std::string modelHash; // artifact SHA-256: declared, else of the bytes present at parse
     std::string customLibrarySymbol; // for custom_library: symbol name in .so
     std::string nativeSymbol; // for native: symbol registered with NativeScorerRegistry
 

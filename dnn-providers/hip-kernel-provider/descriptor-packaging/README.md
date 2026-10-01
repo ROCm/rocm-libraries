@@ -27,6 +27,15 @@ stale product tree is removed; neither is an error. A root set but not a directo
 fatal. A KDP that prunes on every arch is a hard failure for a root the build NAMED, and
 dormancy for the inherited default root.
 
+A pack wipes its `OUT_ROOT` before refilling it, so nothing else may write there with a
+rule of its own: the next repack deletes it and no edge restores it. Files that must ship
+in a packed tree without being packed — the ASM SDPA engine's loose L1 models
+(`asm_sdpa/predict_engine/<arch>/`), declared as `HIPKERNELPROVIDER_PRODUCT_STAGE_FILES`
+in the provider's `CMakeLists.txt` — are passed as `STAGE_FILES <src> <dest>` pairs to
+`hkp_wire_pack_target()`, which copies them inside the pack command, after the packer
+and before the stamp, with each `<src>` an input. With production packaging dormant the
+provider stages and installs them itself.
+
 Two rules govern the walk:
 
 - **Hidden paths are skipped, and said so.** A dot-prefixed path segment or filename is
@@ -154,7 +163,7 @@ target, in `src/tests/CMakeLists.txt` beside `hkp_verify_embedded_sources()`:
 
 ```cmake
 hkp_register_census_tests(
-    TARGET hip_kernel_provider_tests
+    TARGET hip_kernel_provider_census_tests
     PACK_NAME unit
     SUITES TestPointwisePacks
     EXPECTED_CASES
@@ -169,13 +178,28 @@ hkp_register_census_tests(
 )
 ```
 
+`TARGET` is the census binary, `hip_kernel_provider_census_tests`. The `Test<Name>Packs`
+suites are compiled into it and not into `hip_kernel_provider_tests`: every census case
+needs a descriptor shard and the census environment, which an ordinary unit run must not
+require.
+
 `PACK_NAME` selects the wired pack target whose `OUT_ROOT` and recorded arch list the
-entries address. Per declared suite and per arch in that list, CMake registers
-`hip-kernel-provider-hkp-census-<arch>-<suite>`, invoking `hip_kernel_provider_tests
---gtest_filter=<suite>.*` directly, without Python, with
+entries address. `ARCHES` optionally narrows that list: omitted, the suites register at
+every arch the pack target was wired for; given, at the intersection of the named arches
+with that list; naming the keyword with no arch is fatal. A suite whose fixtures cover the
+whole root, like `TestPointwisePacks` above, omits it. A suite stating the inventory of a
+bundle that emits for specific arches names them — the gfx950 dense-attention census
+passes `ARCHES gfx950` — so a build packing other arches registers nothing for it rather
+than asserting that inventory against a shard that never held it.
+
+Per declared suite and per eligible arch, CMake registers
+`hip-kernel-provider-hkp-census-<arch>-<suite>`, invoking
+`hip_kernel_provider_census_tests --gtest_filter=<suite>.*` directly, without Python, with
 `HIPDNN_TEST_CENSUS_SUITE=<suite>`, `HIPDNN_TEST_EXPECTED_ARCH=<arch>` and
 `HIPDNN_DESCRIPTOR_DIR=<OUT_ROOT>/<arch>` — its own shard, not a shared stage tree. Each
-entry is an independent process labeled `unit_test;hip-kernel-provider;host`.
+entry is an independent process labeled `unit_test;hip-kernel-provider;host`, plus the
+tier labels `HKP_PACK_CTEST_CATEGORIES_YAML` assigns it; the installed twin carries the
+same labels as the build-tree entry.
 
 ```bash
 ctest --test-dir <build>/dnn-providers/hip-kernel-provider \
@@ -227,12 +251,11 @@ export AMD_COMGR_CACHE_DIR=/tmp/comgr-cache   # RAM disk or local disk
 |---|---|
 | `HKP_PACK_JOBS` | Prewarm worker count. Defaults to `min(32, ncpu)`; `1` forces the serial path for a clean traceback. |
 
-`HKP_PACK_JOBS` is read by a **direct child run** of `hkp_pack`. Inside the build the cap
-is the `PACK_JOBS <n>` argument at the `hkp_wire_pack_target()` call site, which the
-wiring transports to the tool. It is per call site because roots carry no ordering edge,
-so the generator runs them at once and unbounded pools multiply. All six calls name a
-value: `1` for the small roots, `2` for the `integration` test root and the production
-target. Omitting `PACK_JOBS` lets the packer size itself against the machine.
+`HKP_PACK_JOBS` is read by a **direct child run** of `hkp_pack`. Inside the build it comes
+from the `PACK_JOBS <n>` argument of each `hkp_wire_pack_target()` call: the test roots
+pass `1`, or `2` for `integration`, and the production root passes none, so the packer uses
+its default. The reason is in the `hkp_wire_pack_target()` header in
+`cmake/HkpPackaging.cmake`.
 
 ## Running the tests
 

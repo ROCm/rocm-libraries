@@ -47,7 +47,14 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
-__all__ = ["ABSENT", "numeric_slots", "word_key", "required_slots", "expand", "slots_used_by"]
+__all__ = [
+    "ABSENT",
+    "numeric_slots",
+    "word_key",
+    "required_slots",
+    "expand",
+    "slots_used_by",
+]
 
 #: A missing slot. Not NaN: "this kernel has no such field" is a real state a tree can split on,
 #: where NaN is routed by the learner's own default direction and so cannot be distinguished
@@ -89,7 +96,9 @@ def required_slots(descriptors: Iterable[str]) -> int:
     return max((len(_NUMBER.findall(text or "")) for text in descriptors), default=0)
 
 
-def slots_used_by(rows: Iterable[list[int]], groups: Iterable) -> dict[object, list[int]]:
+def slots_used_by(
+    rows: Iterable[list[int]], groups: Iterable
+) -> dict[object, list[int]]:
     """Which positions each group actually fills, observed from the corpus.
 
     A group's schema is whatever its descriptors turned out to carry -- a position no member
@@ -120,4 +129,8 @@ def expand(
     """
     texts = ["" if d is None else str(d) for d in descriptors]
     width = required_slots(texts) if slots is None else slots
-    return [numeric_slots(text, width) for text in texts], [word_key(text) for text in texts], width
+    return (
+        [numeric_slots(text, width) for text in texts],
+        [word_key(text) for text in texts],
+        width,
+    )

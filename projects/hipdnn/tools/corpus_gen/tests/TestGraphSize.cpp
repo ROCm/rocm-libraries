@@ -7,7 +7,8 @@
  *
  * The failure this guards is a ceiling that is merely too small: nothing errors, a problem too
  * large to time is admitted, and the corpus run stops finishing. So the properties checked are
- * that the width actually follows the dtype, and that no arithmetic wraps.
+ * that the width actually follows the dtype, that a tensor is charged the span its strides
+ * address rather than its element count, and that no arithmetic wraps.
  */
 
 #include <gtest/gtest.h>
@@ -15,6 +16,8 @@
 #include <hipdnn_corpus_gen/GraphSize.hpp>
 
 #include <limits>
+#include <utility>
+#include <vector>
 
 namespace hipdnn_corpus_gen
 {
@@ -23,16 +26,29 @@ namespace
 
 namespace fb = hipdnn_flatbuffers_sdk::data_objects;
 
-/// One tensor of @p dims in @p type, as a serialized graph.
-builders::GraphBytes graphOf(const std::vector<int64_t>& dims, fb::DataType type)
+/// One tensor of @p dims in @p type, laid out with @p strides (packed row-major if empty), as a
+/// serialized graph.
+builders::GraphBytes
+    graphOf(const std::vector<int64_t>& dims, fb::DataType type, std::vector<int64_t> strides = {})
 {
+    if(strides.empty())
+    {
+        strides.assign(dims.size(), 1);
+        for(size_t i = dims.size(); i > 1; --i)
+        {
+            strides[i - 2] = strides[i - 1] * dims[i - 1];
+        }
+    }
     builders::TensorSpec tensor;
     tensor.uid = 1;
     tensor.name = "x";
     tensor.dims = dims;
-    tensor.strides.assign(dims.size(), 1);
+    tensor.strides = std::move(strides);
     tensor.dataType = type;
-    return builders::reduction(tensor, tensor, fb::ReductionMode::ADD, /*deterministic=*/false,
+    return builders::reduction(tensor,
+                               tensor,
+                               fb::ReductionMode::ADD,
+                               /*deterministic=*/false,
                                builders::GraphTypes::uniform(type));
 }
 
@@ -74,6 +90,33 @@ TEST(TestGraphSize, ATensorCostsItsElementsTimesItsWidth)
     EXPECT_EQ(graphBytes(graphOf(dims, fb::DataType::FLOAT)), 2 * 24 * 4);
     EXPECT_EQ(graphBytes(graphOf(dims, fb::DataType::HALF)), 2 * 24 * 2);
     EXPECT_EQ(graphBytes(graphOf(dims, fb::DataType::DOUBLE)), 2 * 24 * 8);
+}
+
+TEST(TestGraphSize, APaddedTensorIsChargedTheSpanTheBenchAllocates)
+{
+    // The bench sizes a buffer by its furthest addressable element, not its element count. A
+    // 2x2 fp32 tensor with a row stride of 4096 is 4 elements and a 4098-element allocation;
+    // charged as 16 bytes, a padded layout passed every ceiling.
+    const int64_t span = 1 + ((2 - 1) * 4096) + ((2 - 1) * 1);
+    EXPECT_EQ(graphBytes(graphOf({2, 2}, fb::DataType::FLOAT, {4096, 1})), 2 * span * 4);
+}
+
+TEST(TestGraphSize, ATensorTheBenchCannotSizeIsOverEveryCeiling)
+{
+    // Strides that do not match the rank, or run backwards, have no span the bench will
+    // allocate; charging them anything finite would admit a problem that cannot be timed.
+    EXPECT_EQ(graphBytes(graphOf({2, 2}, fb::DataType::FLOAT, {1})),
+              std::numeric_limits<int64_t>::max());
+    EXPECT_EQ(graphBytes(graphOf({2, 2}, fb::DataType::FLOAT, {-2, 1})),
+              std::numeric_limits<int64_t>::max());
+}
+
+TEST(TestGraphSize, AStrideThatWrapsTheSpanSaturates)
+{
+    // Two elements are cheap; a stride near int64's range puts the second one past it.
+    EXPECT_EQ(
+        graphBytes(graphOf({2, 1}, fb::DataType::INT8, {std::numeric_limits<int64_t>::max(), 1})),
+        std::numeric_limits<int64_t>::max());
 }
 
 TEST(TestGraphSize, AnEnormousProblemSaturatesRatherThanWrapping)

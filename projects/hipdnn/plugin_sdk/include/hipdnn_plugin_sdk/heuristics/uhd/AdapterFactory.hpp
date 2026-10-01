@@ -35,14 +35,24 @@ inline std::shared_ptr<IUhdAdapter> makeUhdAdapter(const UhdConfig& cfg)
     {
         if(!cfg.modelArtifactPath.empty())
         {
-            return TreeDataAdapter::load(cfg.modelArtifactPath, cfg.featuresHash, cfg.modelHash);
+            // The score's transform and metric travel with the objective: a grouped model
+            // chooses its group itself, so it applies RFC 0019 §8.3's score rule itself.
+            return TreeDataAdapter::load(cfg.modelArtifactPath,
+                                         cfg.featuresHash,
+                                         cfg.modelHash,
+                                         cfg.objective,
+                                         cfg.scoreTransform,
+                                         cfg.scoreMetric);
         }
     }
     else if(cfg.adapterType == "table")
     {
         if(!cfg.modelArtifactPath.empty())
         {
-            return TableAdapter::load(cfg.modelArtifactPath, cfg.featuresHash);
+            // The digest travels with the path for every artifact adapter: it is the
+            // model's content identity (declared, or taken at parse), and a table scored
+            // under an identity its bytes do not have poisons every cache keyed on it.
+            return TableAdapter::load(cfg.modelArtifactPath, cfg.featuresHash, cfg.modelHash);
         }
     }
     else if(cfg.adapterType == "native")

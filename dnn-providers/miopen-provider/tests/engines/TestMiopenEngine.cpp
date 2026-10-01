@@ -1,14 +1,22 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cmath>
 #include <deque>
+#include <filesystem>
+#include <fstream>
 #include <gtest/gtest.h>
 #include <memory>
 #include <optional>
+#include <random>
+#include <regex>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -27,7 +35,15 @@
 #include "engines/MiopenEngine.hpp"
 #include "mocks/MockHipdnnMiopenContext.hpp"
 #include "mocks/MockPlanBuilder.hpp"
+#include "version.h"
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/GbdtModelTestBuilder.hpp>
+#include <nlohmann/json.hpp>
+#endif
 
 using namespace miopen_plugin;
 using namespace hipdnn_test_sdk::utilities;
@@ -622,7 +638,7 @@ TEST(TestMiopenEngine, ReportsNoEstimateWhenItsDeclaredL1ModelIsNotDeployed)
     SKIP_IF_NO_DEVICES();
 
     const MiopenEngine engine(
-        1, "test:miopen", {{"default", {"0f4d2c8b-6a19-4e73-9d05-8b1746ca3e2f"}}});
+        1, "test:miopen", {{"tflops", "0f4d2c8b-6a19-4e73-9d05-8b1746ca3e2f"}});
 
     auto builder = createValidBatchnormInferenceGraph();
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -667,27 +683,311 @@ TEST(TestMiopenEngine, DeclinesTheConfigurationPredictionQuery)
     EXPECT_EQ(prediction.metric, "time");
 }
 
-/// The two MIOpen engines are different engines with different performance, so each must
-/// declare its own model. One id shared by both would silently make one engine answer
-/// with the other's model.
-TEST(TestMiopenEngine, EachDeclaredEngineNamesADistinctWellFormedModelId)
+/// Each engine declares one model per ranking metric, bound for every architecture. The
+/// two MIOpen engines are different engines with different performance, and a `tflops`
+/// and a `time` model are different models, so every id is distinct: one id shared by
+/// two declarations would silently make one answer with the other's model.
+TEST(TestMiopenEngine, EachEngineDeclaresADistinctWellFormedModelIdPerMetric)
 {
     std::set<std::string> seen;
     for(const auto* declared : {&MIOPEN_ENGINE_L1_MODELS, &MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS})
     {
-        EXPECT_FALSE(declared->empty());
-        for(const auto& [arch, ids] : *declared)
+        std::set<std::string> metrics;
+        for(const auto& [metric, id] : *declared)
         {
-            EXPECT_FALSE(arch.empty());
-            EXPECT_FALSE(ids.empty()) << "arch '" << arch << "' declares an empty model list";
-            for(const auto& id : ids)
-            {
-                // A malformed literal would not fail the build -- it would silently mean
-                // "this engine never binds a model" -- so it is checked here.
-                EXPECT_NO_THROW(static_cast<void>(hipdnn_flatbuffers_sdk::utilities::parseUuid(id)))
-                    << id;
-                EXPECT_TRUE(seen.insert(id).second) << "id declared twice: " << id;
-            }
+            // An unregistered metric or a malformed literal would not fail the build -- it
+            // would silently mean "this engine never binds that model" -- so both are
+            // checked here.
+            EXPECT_NE(hipdnn_data_sdk::utilities::findRankingMetric(metric), nullptr) << metric;
+            EXPECT_NO_THROW(static_cast<void>(hipdnn_flatbuffers_sdk::utilities::parseUuid(id)))
+                << id;
+            EXPECT_TRUE(seen.insert(id).second) << "id declared twice: " << id;
+            metrics.insert(metric);
         }
+        EXPECT_EQ(metrics, (std::set<std::string>{"tflops", "time"}));
     }
 }
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+namespace
+{
+
+using hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT;
+using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+
+/// The ENGINE prediction for a small conv forward graph, asked in @p metric.
+EnginePredictionT predictConv(const MiopenEngine& engine,
+                              HipdnnMiopenHandle& handle,
+                              const std::string& metric,
+                              bool evaluate)
+{
+    auto graphBuilder = createValidConvFwdGraph();
+    const GraphWrapper graph(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    flatbuffers::FlatBufferBuilder configBuilder;
+    configBuilder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfigDirect(
+        configBuilder, 1, nullptr, metric.c_str()));
+    const EngineConfigWrapper config(configBuilder.GetBufferPointer(), configBuilder.GetSize());
+    return engine.getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, evaluate);
+}
+
+/// The binding a collection run records for @p engine: the description, which never
+/// touches a model.
+nlohmann::json describedBinding(const MiopenEngine& engine,
+                                HipdnnMiopenHandle& handle,
+                                const std::string& metric = "tflops")
+{
+    return nlohmann::json::parse(predictConv(engine, handle, metric, false).binding_json);
+}
+
+std::string describedRevision(const MiopenEngine& engine, HipdnnMiopenHandle& handle)
+{
+    return describedBinding(engine, handle).at("selector_revision").get<std::string>();
+}
+
+std::vector<std::string> revisionSegments(const std::string& revision)
+{
+    std::vector<std::string> parts;
+    std::istringstream stream(revision);
+    for(std::string part; std::getline(stream, part, '/');)
+    {
+        parts.push_back(part);
+    }
+    return parts;
+}
+
+/// @p revision with segment @p index replaced, i.e. the revision a build differing only
+/// in that input would report.
+std::string withSegment(const std::string& revision, size_t index, const std::string& value)
+{
+    auto parts = revisionSegments(revision);
+    parts.at(index) = value;
+    std::string joined;
+    for(const auto& part : parts)
+    {
+        joined += (joined.empty() ? "" : "/") + part;
+    }
+    return joined;
+}
+
+bool isSemver(const std::string& text)
+{
+    return std::regex_match(text, std::regex(R"(\d+\.\d+\.\d+)"));
+}
+
+} // namespace
+
+/// R1: the selector revision is the compatibility key a deployed model must match, so it
+/// may carry only deliberately versioned inputs. The build's commit used to be in it,
+/// which made committing a trained model invalidate that model at the next configure.
+TEST(TestMiopenEngine, SelectorRevisionIsTheVersionedPolicyAndNeverTheCommit)
+{
+    SKIP_IF_NO_DEVICES();
+
+    HipdnnMiopenHandle handle;
+    const auto binding = describedBinding(MiopenEngine(1, "test:miopen", {}), handle);
+    const auto revision = binding.at("selector_revision").get<std::string>();
+    // Collection records trained_against from the same string the loader compares.
+    EXPECT_EQ(binding.at("trained_against").at("selector_revision").get<std::string>(), revision);
+
+    // `miopen-provider/<semver>/<engine>-<policy>/miopen-<x.y.z>`: every segment is a
+    // versioned input, and none has room for a build id.
+    const auto parts = revisionSegments(revision);
+    ASSERT_EQ(parts.size(), 4u) << revision;
+    EXPECT_EQ(parts[0], "miopen-provider");
+    EXPECT_TRUE(isSemver(parts[1])) << revision;
+    EXPECT_EQ(parts[2].rfind("test:miopen-", 0), 0u) << revision;
+    EXPECT_GT(parts[2].size(), std::string("test:miopen-").size()) << revision;
+    ASSERT_EQ(parts[3].rfind("miopen-", 0), 0u) << revision;
+    EXPECT_TRUE(isSemver(parts[3].substr(std::string("miopen-").size()))) << revision;
+    if(const std::string commit = MIOPEN_PROVIDER_VERSION_TWEAK; commit != "unknown")
+    {
+        EXPECT_EQ(revision.find(commit), std::string::npos) << revision;
+    }
+
+    // Stable: another instance of the same engine in the same build reports the same key,
+    // and only the engine segment separates two engines.
+    EXPECT_EQ(describedRevision(MiopenEngine(2, "test:miopen", {}), handle), revision);
+    const auto other = describedRevision(MiopenEngine(1, "test:other", {}), handle);
+    EXPECT_NE(other, revision);
+    EXPECT_EQ(withSegment(other, 2, parts[2]), revision);
+}
+
+/// 0.2(b): collection promotes a first model under the id the engine declares for the
+/// metric it collected, so the description names that id before anything is deployed --
+/// and names the requested metric's id, never another metric's.
+TEST(TestMiopenEngine, DescriptionNamesTheModelIdDeclaredForTheRequestedMetric)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string tflopsId = "aceee89e-ae84-4e79-abfd-4cfed80eaf87";
+    const std::string timeId = "d318a8c5-dc1c-4a5e-8e4a-13f820ddc2fc";
+    HipdnnMiopenHandle handle;
+    const MiopenEngine engine(1, "test:miopen", {{"tflops", tflopsId}, {"time", timeId}});
+
+    EXPECT_EQ(describedBinding(engine, handle, "tflops").at("uhd_id").get<std::string>(), tflopsId);
+    EXPECT_EQ(describedBinding(engine, handle, "time").at("uhd_id").get<std::string>(), timeId);
+
+    const MiopenEngine tflopsOnly(1, "test:miopen", {{"tflops", tflopsId}});
+    EXPECT_FALSE(describedBinding(tflopsOnly, handle, "time").contains("uhd_id"));
+}
+
+namespace
+{
+
+/// The UHD a deployer publishes under a declared id: a calibrated tree_data model over
+/// one feature every graph binds, answering 42 in @p metric wherever it is trained.
+nlohmann::json deployedL1Document(const std::string& id,
+                                  const std::string& metric,
+                                  const std::string& selectorRevision)
+{
+    const std::vector<nlohmann::json> signature = {"$graph.node_count"};
+    return {{"version", "1.0"},
+            {"id", id},
+            {"name", "miopen " + metric},
+            {"adapter", "tree_data"},
+            {"tree_data", {{"artifact", "model.fb"}}},
+            {"features_signature", signature},
+            {"features_hash", hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(signature)},
+            {"objective",
+             std::string(hipdnn_data_sdk::utilities::objectiveOf(
+                 *hipdnn_data_sdk::utilities::findRankingMetric(metric)))},
+            {"score", {{"metric", metric}, {"calibrated", true}, {"transform", "log1p"}}},
+            {"trained_against", {{"selector_revision", selectorRevision}}}};
+}
+
+/// Deploys models for the container's declared ids into a fresh descriptor root, points
+/// the engine at it the way an operator does (HIPDNN_DESCRIPTOR_DIR), and queries the
+/// real engines. Returns every failed expectation, one per line; empty on success.
+///
+/// Must run in a process where no engine has declared an id yet: the engine parses its
+/// descriptor roots once per process, on the first such construction.
+std::string deployedModelScenario()
+{
+    using namespace hipdnn_data_sdk::utilities;
+    std::ostringstream failures;
+    const auto expect = [&failures](bool ok, const std::string& what) {
+        if(!ok)
+        {
+            failures << what << '\n';
+        }
+    };
+
+    HipdnnMiopenHandle handle;
+    // What collection records: the description of an engine that declares nothing, so
+    // the catalog is not parsed yet.
+    const auto engineBinding
+        = describedBinding(MiopenEngine(MIOPEN_ENGINE_ID, MIOPEN_ENGINE_NAME, {}), handle);
+    const auto engineRevision = engineBinding.at("selector_revision").get<std::string>();
+    const auto arch = engineBinding.at("arch").get<std::string>();
+    const auto deterministicRevision = describedRevision(
+        MiopenEngine(MIOPEN_ENGINE_DETERMINISTIC_ID, MIOPEN_ENGINE_DETERMINISTIC_NAME, {}), handle);
+    const auto testRevision = describedRevision(MiopenEngine(1, "test:miopen", {}), handle);
+
+    const hipdnn_test_sdk::utilities::ScopedDirectory root(
+        std::filesystem::temp_directory_path()
+        / ("miopen_declared_l1_" + std::to_string(std::random_device{}())));
+    if(!hipdnn_test_sdk::utilities::GbdtModelTestBuilder()
+            .setNumFeatures(1)
+            .setFeaturesHash(
+                hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash({"$graph.node_count"}))
+            .setTrainingArches({arch})
+            .setBaseScore(std::log1p(42.0))
+            .addTree(hipdnn_test_sdk::utilities::makeLeafTreeSpec(0.0))
+            .buildToFile((root.path() / "model.fb").string()))
+    {
+        return "cannot write the model artifact";
+    }
+    const std::string misdeployedId = "faa2b9e6-21b6-4e5b-a80b-171b33c12917";
+    const std::vector<nlohmann::json> documents = {
+        // Recorded against exactly what the engine describes: must answer.
+        deployedL1Document(MIOPEN_ENGINE_L1_MODELS.at("tflops"), "tflops", engineRevision),
+        // Recorded against another MIOpen release: must be refused.
+        deployedL1Document(MIOPEN_ENGINE_L1_MODELS.at("time"),
+                           "time",
+                           withSegment(engineRevision, 3, "miopen-999.0.0")),
+        // Recorded under a different selector policy: must be refused.
+        deployedL1Document(MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS.at("tflops"),
+                           "tflops",
+                           withSegment(deterministicRevision,
+                                       2,
+                                       revisionSegments(deterministicRevision).at(2) + "-bumped")),
+        // A tflops model published under an id declared for time.
+        deployedL1Document(misdeployedId, "tflops", testRevision)};
+    for(const auto& document : documents)
+    {
+        std::ofstream(root.path() / (document.at("id").get<std::string>() + ".uhd.json"))
+            << document.dump(2);
+    }
+
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter descriptorDir(
+        "HIPDNN_DESCRIPTOR_DIR", root.path().string());
+    // Additive roots from the runner would add models this case did not write.
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter runtimeDir(
+        "HIPDNN_DESCRIPTOR_RUNTIME_DIR");
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter searchPath(
+        "HIPDNN_DESCRIPTOR_PATH");
+
+    const MiopenEngine engine(MIOPEN_ENGINE_ID, MIOPEN_ENGINE_NAME, MIOPEN_ENGINE_L1_MODELS);
+    const auto tflops = predictConv(engine, handle, "tflops", true);
+    expect(tflops.status == PredictionStatus::AVAILABLE,
+           "MIOPEN_ENGINE tflops is not AVAILABLE: " + tflops.reason);
+    expect(std::abs(tflops.value - 42.0) < 1e-9,
+           "MIOPEN_ENGINE tflops value " + std::to_string(tflops.value) + " != 42");
+    expect(tflops.uhd_id == MIOPEN_ENGINE_L1_MODELS.at("tflops"),
+           "MIOPEN_ENGINE tflops answered with model '" + tflops.uhd_id + "'");
+
+    const auto otherRelease = predictConv(engine, handle, "time", true);
+    expect(otherRelease.status == PredictionStatus::UNAVAILABLE
+               && otherRelease.reason.find("trained against") != std::string::npos,
+           "a model recorded against another MIOpen release was not refused: "
+               + otherRelease.reason);
+
+    const MiopenEngine deterministic(MIOPEN_ENGINE_DETERMINISTIC_ID,
+                                     MIOPEN_ENGINE_DETERMINISTIC_NAME,
+                                     MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS);
+    const auto bumped = predictConv(deterministic, handle, "tflops", true);
+    expect(bumped.status == PredictionStatus::UNAVAILABLE
+               && bumped.reason.find("trained against") != std::string::npos,
+           "a model recorded under another selector policy was not refused: " + bumped.reason);
+
+    const MiopenEngine misdeclared(1, "test:miopen", {{"time", misdeployedId}});
+    const auto misdeployed = predictConv(misdeclared, handle, "tflops", true);
+    expect(misdeployed.status == PredictionStatus::INVALID
+               && misdeployed.reason.find("declared for metric 'time'") != std::string::npos,
+           "a tflops model under the time id was not refused: " + misdeployed.reason);
+
+    return failures.str();
+}
+
+} // namespace
+
+/// 0.1 + 0.2(b) end to end: a model deployed under the container's declared id, recorded
+/// against the revision the engine describes, answers through the real engine for a conv
+/// graph; the same deployment recorded against another MIOpen release or selector policy
+/// is refused, and a model whose metric is not the one its id is declared for never
+/// answers.
+TEST(TestMiopenEngine, DeployedModelsForTheDeclaredIdsAnswerThroughTheEngine)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // The engine parses its descriptor roots once per process, on the first engine that
+    // declares an id -- which other cases here, and every container, construct first.
+    // Only a fresh process can be pointed at this case's tree; "threadsafe" re-executes
+    // the binary for this one case rather than forking one that has already parsed.
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    // EXPECT_EXIT expands to a switch over AssumeRole() carrying no default label. The
+    // diagnostic is attributed to this expansion site rather than to the GoogleTest
+    // header, so -isystem does not suppress it and -Werror makes it fatal.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wswitch-default"
+    EXPECT_EXIT(
+        {
+            const auto failures = deployedModelScenario();
+            std::cerr << failures;
+            std::exit(failures.empty() ? 0 : 1);
+        },
+        testing::ExitedWithCode(0),
+        "");
+#pragma clang diagnostic pop
+}
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

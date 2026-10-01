@@ -24,13 +24,14 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/gbdt_model_generated.h>
 
+#include <array>
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <utility>
 #include <vector>
 
 using hipdnn_plugin_sdk::uhd::TreeDataAdapter;
-using hipdnn_plugin_sdk::uhd::UhdAdapterType;
 
 namespace
 {
@@ -176,14 +177,13 @@ TEST_F(TestTreeDataAdapter, AContractCheckThatDisablesTheModelReportsAnError)
                       .addTree(makeLeafTree(1.0))
                       .build();
 
-    EXPECT_EQ(TreeDataAdapter::loadFromBuffer(
-                  buffer.data(), buffer.size(), "sha256:different_hash"),
-              nullptr);
+    EXPECT_EQ(
+        TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "sha256:different_hash"),
+        nullptr);
     EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
         << "the features-hash check must report at ERROR:\n"
         << recorder.getRecordedLogsAsString();
-    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0U)
-        << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0U) << recorder.getRecordedLogsAsString();
 
     recorder.clearLogs();
 
@@ -193,8 +193,7 @@ TEST_F(TestTreeDataAdapter, AContractCheckThatDisablesTheModelReportsAnError)
     EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
         << "the model-digest check must report at ERROR:\n"
         << recorder.getRecordedLogsAsString();
-    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0U)
-        << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0U) << recorder.getRecordedLogsAsString();
 }
 
 TEST_F(TestTreeDataAdapter, LoadSucceedsWithEmptyExpectedHash)
@@ -576,22 +575,6 @@ TEST_F(TestTreeDataAdapter, ScoreWithEmptyFeatureVector)
     EXPECT_DOUBLE_EQ(score, 5.0);
 }
 
-TEST_F(TestTreeDataAdapter, ValidatesFeatureCount)
-{
-    auto buffer = GbdtModelBuilder()
-                      .setNumFeatures(3)
-                      .setFeaturesHash(TEST_HASH)
-                      .addTree(makeLeafTree(1.0))
-                      .build();
-
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
-    ASSERT_NE(adapter, nullptr);
-
-    EXPECT_TRUE(adapter->validateFeatureCount(3));
-    EXPECT_FALSE(adapter->validateFeatureCount(2));
-    EXPECT_FALSE(adapter->validateFeatureCount(4));
-}
-
 TEST_F(TestTreeDataAdapter, BatchScoring)
 {
     auto buffer = GbdtModelBuilder()
@@ -660,37 +643,7 @@ TEST_F(TestTreeDataAdapter, WorksWithFeatureExtractor)
     EXPECT_DOUBLE_EQ(adapter->score({64.0, 1.0}), 1.0);
 }
 
-// ========== RFC 0019 §9.2: Training arches and model version ==========
-
-TEST_F(TestTreeDataAdapter, ReturnsEmptyTrainingArchesByDefault)
-{
-    auto buffer = GbdtModelBuilder()
-                      .setNumFeatures(1)
-                      .setFeaturesHash(TEST_HASH)
-                      .addTree(makeLeafTree(1.0))
-                      .build();
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
-    ASSERT_NE(adapter, nullptr);
-
-    EXPECT_TRUE(adapter->getTrainingArches().empty());
-}
-
-TEST_F(TestTreeDataAdapter, ReturnsTrainingArchesWhenSet)
-{
-    auto buffer = GbdtModelBuilder()
-                      .setNumFeatures(1)
-                      .setFeaturesHash(TEST_HASH)
-                      .setTrainingArches({"gfx942", "gfx1100"})
-                      .addTree(makeLeafTree(1.0))
-                      .build();
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
-    ASSERT_NE(adapter, nullptr);
-
-    auto arches = adapter->getTrainingArches();
-    ASSERT_EQ(arches.size(), 2u);
-    EXPECT_EQ(arches[0], "gfx942");
-    EXPECT_EQ(arches[1], "gfx1100");
-}
+// ========== RFC 0019 §9.2: Training arches ==========
 
 TEST_F(TestTreeDataAdapter, IsTrainedForArchReturnsTrueWhenNoArches)
 {
@@ -738,33 +691,6 @@ TEST_F(TestTreeDataAdapter, IsTrainedForArchReturnsFalseWhenArchNotInList)
     EXPECT_FALSE(adapter->isTrainedForArch("gfx950"));
     EXPECT_FALSE(adapter->isTrainedForArch("gfx900"));
     EXPECT_FALSE(adapter->isTrainedForArch("gfx9420:sramecc+:xnack-"));
-}
-
-TEST_F(TestTreeDataAdapter, ReturnsEmptyModelVersionByDefault)
-{
-    auto buffer = GbdtModelBuilder()
-                      .setNumFeatures(1)
-                      .setFeaturesHash(TEST_HASH)
-                      .addTree(makeLeafTree(1.0))
-                      .build();
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
-    ASSERT_NE(adapter, nullptr);
-
-    EXPECT_TRUE(adapter->getModelVersion().empty());
-}
-
-TEST_F(TestTreeDataAdapter, ReturnsModelVersionWhenSet)
-{
-    auto buffer = GbdtModelBuilder()
-                      .setNumFeatures(1)
-                      .setFeaturesHash(TEST_HASH)
-                      .setModelVersion("1.2.3")
-                      .addTree(makeLeafTree(1.0))
-                      .build();
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
-    ASSERT_NE(adapter, nullptr);
-
-    EXPECT_EQ(adapter->getModelVersion(), "1.2.3");
 }
 
 // ========== Realistic Multi-Tree Ensemble Test ==========
@@ -859,7 +785,6 @@ TEST_F(TestTreeDataAdapter, RealisticGbdtEnsembleScoring)
     ASSERT_NE(adapter, nullptr);
     EXPECT_EQ(adapter->expectedFeatureCount(), 5u);
     EXPECT_EQ(adapter->treeCount(), 3u);
-    EXPECT_EQ(adapter->getModelVersion(), "1.0.0");
     EXPECT_TRUE(adapter->isTrainedForArch("gfx942"));
 
     // Test case 1: Small problem (M=256), small tile (tile_m=32), low CU count (cu_count=40)
@@ -1166,18 +1091,13 @@ TEST_F(TestTreeDataAdapter, OptionalFlagsPreserveComparisonAndMissingValueBehavi
     const std::vector<uint8_t> inclusive = {1};
     const std::vector<uint8_t> left = {1};
     const std::vector<uint8_t> right = {0};
+    // Each tree pairs one default_left flag set with one decision_lte flag set.
+    const std::array<std::pair<const std::vector<uint8_t>*, const std::vector<uint8_t>*>, 4> modes
+        = {{{nullptr, nullptr}, {&empty, &empty}, {&left, &strict}, {&right, &inclusive}}};
     double weight = 1.0;
-    for(int mode = 0; mode < 4; ++mode)
+    for(const auto& [defaults, decisions] : modes)
     {
         auto tree = makeBinarySplitTree(0, 5.0, weight, 2.0 * weight);
-        const auto* defaults = mode == 0   ? nullptr
-                               : mode == 1 ? &empty
-                               : mode == 2 ? &left
-                                           : &right;
-        const auto* decisions = mode == 0   ? nullptr
-                                : mode == 1 ? &empty
-                                : mode == 2 ? &strict
-                                            : &inclusive;
         trees.push_back(fb::CreateGbdtTreeDirect(builder,
                                                  &tree.featureIndices,
                                                  &tree.thresholds,
@@ -1288,6 +1208,24 @@ TEST(TestTreeDataAdapterGrouped, RowsOutsideTheChosenGroupAreUnusable)
     EXPECT_EQ(scores[2], -std::numeric_limits<double>::infinity());
 }
 
+TEST(TestTreeDataAdapterGrouped, AMinObjectiveChoosesTheGroupWithTheLowestLayerOneScore)
+{
+    // Regression. Layer 1 of a `min` model predicts a cost, and the group was chosen by the
+    // largest layer-1 score regardless -- the slowest group. The same artifact, loaded as a
+    // `min` model, has to flip the choice to group 0.0 (leaf 1.0 against 9.0).
+    const auto buffer = groupedBuilder().build();
+    const auto adapter = TreeDataAdapter::loadFromBuffer(
+        buffer.data(), buffer.size(), "sha256:grouped", /*expectedModelHash=*/"", "min");
+    ASSERT_NE(adapter, nullptr);
+
+    const auto scores = adapter->scoreBatch({{0.0, 0.0}, {1.0, 0.0}, {0.0, 1.0}});
+    ASSERT_EQ(scores.size(), 3u);
+    // Raw, unoriented layer-2 scores: orientation is the ranker's job, not the adapter's.
+    EXPECT_DOUBLE_EQ(scores[0], 100.0);
+    EXPECT_DOUBLE_EQ(scores[2], 100.0);
+    EXPECT_EQ(scores[1], -std::numeric_limits<double>::infinity());
+}
+
 TEST(TestTreeDataAdapterGrouped, TheSurvivingRowsAreScoredByTheirOwnGroupsTrees)
 {
     // Only group 0.0 is present, so layer 1 has one choice and layer 2 must be the group's
@@ -1301,6 +1239,69 @@ TEST(TestTreeDataAdapterGrouped, TheSurvivingRowsAreScoredByTheirOwnGroupsTrees)
     ASSERT_EQ(scores.size(), 2u);
     EXPECT_DOUBLE_EQ(scores[0], 100.0);
     EXPECT_DOUBLE_EQ(scores[1], 100.0);
+}
+
+TEST(TestTreeDataAdapterGrouped, EqualGroupStandingsResolveIndependentlyOfRowOrder)
+{
+    // Regression (S4a). Layer 1 kept the first row reaching the best score, so two groups
+    // scoring alike were decided by the order the catalog's rows arrived in -- and rank()'s
+    // priority/id tie-break could not repair it, since the other group was already discarded.
+    GbdtModelBuilder builder;
+    builder.setNumFeatures(2)
+        .setFeaturesHash("sha256:grouped")
+        .setGroupByFeatureIndex(0)
+        .addTree(makeLeafTree(5.0));
+    builder.addGroup(0.0, {makeLeafTree(100.0)});
+    builder.addGroup(1.0, {makeLeafTree(200.0)});
+    const auto buffer = builder.build();
+    const auto adapter
+        = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "sha256:grouped");
+    ASSERT_NE(adapter, nullptr);
+
+    const auto forward = adapter->scoreBatch({{1.0, 0.0}, {0.0, 0.0}});
+    const auto reversed = adapter->scoreBatch({{0.0, 0.0}, {1.0, 0.0}});
+    ASSERT_EQ(forward.size(), 2u);
+    ASSERT_EQ(reversed.size(), 2u);
+    // The smaller group value wins the tie, whichever row came first.
+    EXPECT_DOUBLE_EQ(forward[1], 100.0);
+    EXPECT_EQ(forward[0], -std::numeric_limits<double>::infinity());
+    EXPECT_DOUBLE_EQ(reversed[0], 100.0);
+    EXPECT_EQ(reversed[1], -std::numeric_limits<double>::infinity());
+}
+
+TEST(TestTreeDataAdapterGrouped, ALayerOneScoreOutsideItsTargetCannotChooseTheGroup)
+{
+    // Regression (S4b). A `time` model's layer 1 predicting a negative time for group 0.0 won
+    // the `min` comparison outright, and the group's valid layer-2 score then hid that the
+    // decision rested on a value no time can take. RFC 0019 §8.3 refuses that score for a
+    // candidate; it must not decide a group either.
+    GbdtModelBuilder builder;
+    builder.setNumFeatures(2).setFeaturesHash("sha256:grouped").setGroupByFeatureIndex(0);
+    GbdtModelBuilder::TreeSpec layerOne;
+    layerOne.featureIndices = {0, 0, 0};
+    layerOne.thresholds = {0.5, 0.0, 0.0};
+    layerOne.leftChildren = {1, -1, -1};
+    layerOne.rightChildren = {2, -1, -1};
+    layerOne.leafValues = {0.0, -1.0, 9.0}; // group 0.0: -1 ms; group 1.0: 9 ms
+    layerOne.defaultLeft = {1, 1, 1};
+    builder.addTree(layerOne);
+    builder.addGroup(0.0, {makeLeafTree(100.0)});
+    builder.addGroup(1.0, {makeLeafTree(200.0)});
+    const auto buffer = builder.build();
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(),
+                                                         buffer.size(),
+                                                         "sha256:grouped",
+                                                         /*expectedModelHash=*/"",
+                                                         "min",
+                                                         "identity",
+                                                         "time");
+    ASSERT_NE(adapter, nullptr);
+
+    const auto scores = adapter->scoreBatch({{0.0, 0.0}, {1.0, 0.0}});
+    ASSERT_EQ(scores.size(), 2u);
+    EXPECT_EQ(scores[0], -std::numeric_limits<double>::infinity())
+        << "a negative time chose the group";
+    EXPECT_DOUBLE_EQ(scores[1], 200.0);
 }
 
 TEST(TestTreeDataAdapterGrouped, ScoreStillAnswersWithLayerOne)

@@ -25,6 +25,7 @@
  *******************************************************************************/
 #include <algorithm>
 #include <cstring>
+#include <memory>
 #include <set>
 #include <tuple>
 #include <utility>
@@ -150,6 +151,8 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
                  "Initialization error: invalid device (%s)",
                  hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorCreate", msg);
+        delete *handle;
+        *handle = nullptr;
         return HIPTENSOR_STATUS_HIP_ERROR;
     }
     else if(hip_status == hipErrorInvalidValue)
@@ -158,6 +161,8 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
         snprintf(
             msg, sizeof(msg), "Initialization error: (%s)", hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorCreate", msg);
+        delete *handle;
+        *handle = nullptr;
         return HIPTENSOR_STATUS_INVALID_VALUE;
     }
 
@@ -168,8 +173,7 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
     }
     else
     {
-        hiptensor::PlanCache* planCache = new hiptensor::PlanCache;
-        (*handle)->setPlanCache(planCache);
+        (*handle)->setPlanCache(std::make_unique<hiptensor::PlanCache>());
         snprintf(msg, sizeof(msg), "Plan Cache is enabled.");
         logger->logAPITrace("hiptensorCreate", msg);
     }
@@ -189,7 +193,6 @@ hiptensorStatus_t hiptensorDestroy(hiptensorHandle_t handle)
     logger->logAPITrace("hiptensorDestroy", msg);
 
     delete handle;
-    handle = nullptr;
 
     return HIPTENSOR_STATUS_SUCCESS;
 }

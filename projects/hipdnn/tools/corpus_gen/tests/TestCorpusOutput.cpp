@@ -41,9 +41,8 @@ TEST(TestCorpusOutput, TheHeaderAndTheRowLineUp)
     const auto header = asQueryColumns(conv(), true);
     const auto row = asQueryColumns(conv(), false);
 
-    const auto count = [](const std::string& text) {
-        return std::count(text.begin(), text.end(), ',');
-    };
+    const auto count
+        = [](const std::string& text) { return std::count(text.begin(), text.end(), ','); };
     EXPECT_EQ(count(header), count(row));
     EXPECT_EQ(header, "q.C,q.H,q.N,q.causal,q.dtype") << "columns are not in point order";
     EXPECT_EQ(row, "64,56,8,false,fp16");

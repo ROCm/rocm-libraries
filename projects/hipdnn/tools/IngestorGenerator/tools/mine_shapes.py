@@ -466,19 +466,46 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
 #: silently mines as zero rows is indistinguishable from one nobody pointed at. Adding a
 #: spelling here is the whole maintenance cost of accepting a new publisher.
 SHAPE_COLUMNS = {
-    "batch": "batch", "batch_size": "batch", "b": "batch", "num_seqs": "batch",
-    "heads_q": "heads_q", "nhead_q": "heads_q", "num_query_heads": "heads_q",
-    "hq": "heads_q", "h": "heads_q", "heads": "heads_q",
-    "heads_kv": "heads_kv", "nhead_k": "heads_kv", "nhead_kv": "heads_kv",
-    "num_kv_heads": "heads_kv", "hkv": "heads_kv", "h_kv": "heads_kv",
-    "seqlen_q": "seqlen_q", "seq_q": "seqlen_q", "sq": "seqlen_q", "s_q": "seqlen_q",
-    "seqlen_k": "seqlen_kv", "seqlen_kv": "seqlen_kv", "seq_kv": "seqlen_kv",
-    "seq_k": "seqlen_kv", "skv": "seqlen_kv", "s_kv": "seqlen_kv",
-    "head_dim": "head_dim", "hdim_q": "head_dim", "hdim": "head_dim",
-    "head_size": "head_dim", "d": "head_dim",
-    "dtype": "dtype", "data_type": "dtype", "q_dtype": "dtype",
-    "mask": "mask", "mask_type": "mask", "causal": "mask", "is_causal": "mask",
-    "model": "model", "name": "model",
+    "batch": "batch",
+    "batch_size": "batch",
+    "b": "batch",
+    "num_seqs": "batch",
+    "heads_q": "heads_q",
+    "nhead_q": "heads_q",
+    "num_query_heads": "heads_q",
+    "hq": "heads_q",
+    "h": "heads_q",
+    "heads": "heads_q",
+    "heads_kv": "heads_kv",
+    "nhead_k": "heads_kv",
+    "nhead_kv": "heads_kv",
+    "num_kv_heads": "heads_kv",
+    "hkv": "heads_kv",
+    "h_kv": "heads_kv",
+    "seqlen_q": "seqlen_q",
+    "seq_q": "seqlen_q",
+    "sq": "seqlen_q",
+    "s_q": "seqlen_q",
+    "seqlen_k": "seqlen_kv",
+    "seqlen_kv": "seqlen_kv",
+    "seq_kv": "seqlen_kv",
+    "seq_k": "seqlen_kv",
+    "skv": "seqlen_kv",
+    "s_kv": "seqlen_kv",
+    "head_dim": "head_dim",
+    "hdim_q": "head_dim",
+    "hdim": "head_dim",
+    "head_size": "head_dim",
+    "d": "head_dim",
+    "dtype": "dtype",
+    "data_type": "dtype",
+    "q_dtype": "dtype",
+    "mask": "mask",
+    "mask_type": "mask",
+    "causal": "mask",
+    "is_causal": "mask",
+    "model": "model",
+    "name": "model",
     "arch": "arch",
 }
 
@@ -659,15 +686,23 @@ def _catalog_table(text: str) -> list[dict]:
         if not line.startswith("|"):
             header_seen = False
             continue
-        cells = [cell.strip().replace("**", "").replace("`", "")
-                 for cell in line.strip("|").split("|")]
+        cells = [
+            cell.strip().replace("**", "").replace("`", "")
+            for cell in line.strip("|").split("|")
+        ]
         if cells[:4] == ["model", "D", "q/kv heads", "causal"]:
             header_seen = True
             continue
         if not header_seen or set(cells[0]) <= set("-: "):
             continue
-        rows.append({"model": cells[0], "head_dims": cells[1],
-                     "heads": cells[2], "causal": cells[3]})
+        rows.append(
+            {
+                "model": cells[0],
+                "head_dims": cells[1],
+                "heads": cells[2],
+                "causal": cells[3],
+            }
+        )
     return rows
 
 
@@ -712,8 +747,14 @@ def from_model_catalog(path: Path, batches=CATALOG_BATCHES) -> list[dict]:
         model = row["model"]
         head_dims = _catalog_numbers(row["head_dims"])
         heads = _catalog_numbers(row["heads"])
-        body = next((section for name, section in sorted(sections.items())
-                     if name.startswith(model)), "")
+        body = next(
+            (
+                section
+                for name, section in sorted(sections.items())
+                if name.startswith(model)
+            ),
+            "",
+        )
         lengths = _catalog_lengths(body)
         # The dtypes the entry was actually validated in, not every dtype the model
         # could run in: an entry validated only in bf16 says nothing about fp16, and a
@@ -729,44 +770,75 @@ def from_model_catalog(path: Path, batches=CATALOG_BATCHES) -> list[dict]:
         causal = row["causal"].lower().startswith("y")
 
         if not heads or not head_dims or not lengths:
-            skipped.append(model + " (catalog records no " + ", ".join(
-                label for label, present in (("head count", heads),
-                                             ("head dim", head_dims),
-                                             ("sequence length", lengths))
-                if not present) + ")")
+            skipped.append(
+                model
+                + " (catalog records no "
+                + ", ".join(
+                    label
+                    for label, present in (
+                        ("head count", heads),
+                        ("head dim", head_dims),
+                        ("sequence length", lengths),
+                    )
+                    if not present
+                )
+                + ")"
+            )
             continue
 
         # `12/12` is query/KV; `5/10/20` is three MHA stages of one UNet, not a
         # grouping -- a single value repeats as its own KV count.
-        pairs = ([(heads[0], heads[1])] if len(heads) == 2
-                 else [(head, head) for head in heads])
+        pairs = (
+            [(heads[0], heads[1])]
+            if len(heads) == 2
+            else [(head, head) for head in heads]
+        )
         for head_dim in head_dims:
             for heads_q, heads_kv in pairs:
                 for dtype in dtypes:
                     for length in lengths:
                         for batch in batches:
                             common = {
-                                "batch": batch, "nhead_q": heads_q,
-                                "nhead_k": heads_kv, "hdim_q": head_dim,
-                                "hdim_v": head_dim, "dtype": dtype,
+                                "batch": batch,
+                                "nhead_q": heads_q,
+                                "nhead_k": heads_kv,
+                                "hdim_q": head_dim,
+                                "hdim_v": head_dim,
+                                "dtype": dtype,
                                 "mask_type": MASK_TYPE["causal" if causal else "full"],
                             }
-                            shapes.append({
-                                **common, "seqlen_q": length, "seqlen_k": length,
-                                "_provenance": {"source": "catalog", "model": model,
-                                                "phase": "prefill",
-                                                "catalog": path.name},
-                            })
+                            shapes.append(
+                                {
+                                    **common,
+                                    "seqlen_q": length,
+                                    "seqlen_k": length,
+                                    "_provenance": {
+                                        "source": "catalog",
+                                        "model": model,
+                                        "phase": "prefill",
+                                        "catalog": path.name,
+                                    },
+                                }
+                            )
                             if causal:
-                                shapes.append({
-                                    **common, "seqlen_q": 1, "seqlen_k": length,
-                                    "_provenance": {"source": "catalog",
-                                                    "model": model, "phase": "decode",
-                                                    "catalog": path.name},
-                                })
+                                shapes.append(
+                                    {
+                                        **common,
+                                        "seqlen_q": 1,
+                                        "seqlen_k": length,
+                                        "_provenance": {
+                                            "source": "catalog",
+                                            "model": model,
+                                            "phase": "decode",
+                                            "catalog": path.name,
+                                        },
+                                    }
+                                )
     if skipped:
-        print(f"  NOTE: {len(skipped)} catalog entr(ies) yielded no shape: "
-              + "; ".join(skipped))
+        print(
+            f"  NOTE: {len(skipped)} catalog entr(ies) yielded no shape: "
+            + "; ".join(skipped)
+        )
     return shapes
 
 
@@ -808,9 +880,20 @@ def write_query_csv(shapes: list[dict], path: Path) -> dict:
     `false` for the same reason: every source here records inference forwards, and
     none says whether a shape also ran as a training forward.
     """
-    columns = ["name", "op", "q.batch", "q.heads", "q.heads_kv", "q.seqlen_q",
-               "q.seqlen_k", "q.head_dim", "q.is_causal", "q.alignment",
-               "q.generate_stats", "q.dtype"]
+    columns = [
+        "name",
+        "op",
+        "q.batch",
+        "q.heads",
+        "q.heads_kv",
+        "q.seqlen_q",
+        "q.seqlen_k",
+        "q.head_dim",
+        "q.is_causal",
+        "q.alignment",
+        "q.generate_stats",
+        "q.dtype",
+    ]
     dropped: dict[str, int] = {}
     written = 0
     with path.open("w", newline="") as handle:
@@ -828,14 +911,22 @@ def write_query_csv(shapes: list[dict], path: Path) -> dict:
                 dropped[reason] = dropped.get(reason, 0) + 1
                 continue
             causal = shape["mask_type"] == MASK_TYPE["causal"]
-            writer.writerow([
-                _shape_name(shape, index), "sdpa_fwd",
-                shape["batch"], shape["nhead_q"], shape["nhead_k"],
-                shape["seqlen_q"], shape["seqlen_k"], shape["hdim_q"],
-                "true" if causal else "false",
-                shape.get("alignment", "top_left") if causal else "top_left",
-                "false", shape["dtype"],
-            ])
+            writer.writerow(
+                [
+                    _shape_name(shape, index),
+                    "sdpa_fwd",
+                    shape["batch"],
+                    shape["nhead_q"],
+                    shape["nhead_k"],
+                    shape["seqlen_q"],
+                    shape["seqlen_k"],
+                    shape["hdim_q"],
+                    "true" if causal else "false",
+                    shape.get("alignment", "top_left") if causal else "top_left",
+                    "false",
+                    shape["dtype"],
+                ]
+            )
             written += 1
     return {"written": written, "dropped": dropped}
 
@@ -930,8 +1021,13 @@ def main(argv=None) -> int:
     if not args.out and not args.out_query_csv:
         parser.error("give --out, --out-query-csv, or both; otherwise nothing is kept.")
 
-    if not args.published and not args.graphs and not args.rocke_bench \
-            and not args.catalog and not args.shape_dirs:
+    if (
+        not args.published
+        and not args.graphs
+        and not args.rocke_bench
+        and not args.catalog
+        and not args.shape_dirs
+    ):
         parser.error(
             "give at least one source. No corpus alone is sufficient: the CSV is "
             "what the kernel team measures, the graph tree is what callers send, "

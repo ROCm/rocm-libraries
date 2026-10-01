@@ -289,4 +289,139 @@ TEST_F(TestEngineQueries, CapabilitiesNeverEvaluateAModel)
     EXPECT_THAT(evaluateFlags, Each(0));
 }
 
+// Union payloads are optional in FlatBuffers: a KnobSetting tagged IntValue, FloatValue or
+// StringValue with no payload table verifies, and its typed accessor returns null. Both
+// decoders must report that as an error. Falsifying mutation: dereference
+// value_as_IntValue() (etc.) unchecked again, as both decoders did, and these crash.
+constexpr std::array<fb::KnobValue, 3> TAGGED_KNOB_VALUES{
+    fb::KnobValue::IntValue, fb::KnobValue::FloatValue, fb::KnobValue::StringValue};
+
+/// One knob named "test.knob" whose tag is @p tag; the payload is built only when
+/// @p withPayload, so the bare case leaves a set tag over an absent union value.
+flatbuffers::Offset<fb::KnobSetting>
+    knobSetting(flatbuffers::FlatBufferBuilder& builder, fb::KnobValue tag, bool withPayload)
+{
+    flatbuffers::Offset<void> payload = 0;
+    if(withPayload)
+    {
+        switch(tag)
+        {
+        case fb::KnobValue::IntValue:
+            payload = fb::CreateIntValue(builder, 4).Union();
+            break;
+        case fb::KnobValue::FloatValue:
+            payload = fb::CreateFloatValue(builder, 0.5).Union();
+            break;
+        default:
+            payload = fb::CreateStringValueDirect(builder, "s").Union();
+            break;
+        }
+    }
+    return fb::CreateKnobSettingDirect(builder, "test.knob", tag, payload);
+}
+
+flatbuffers::DetachedBuffer configurationPrediction(fb::KnobValue tag, bool withPayload)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<flatbuffers::Offset<fb::KnobSetting>> knobs{
+        knobSetting(builder, tag, withPayload)};
+    const auto config = fb::CreateEngineConfigDirect(builder, ENGINE_ID, &knobs);
+    builder.Finish(fb::CreateEnginePredictionDirect(builder,
+                                                    ENGINE_ID,
+                                                    fb::PredictionKind::CONFIGURATION,
+                                                    fb::PredictionStatus::AVAILABLE,
+                                                    1.0,
+                                                    "model",
+                                                    nullptr,
+                                                    config,
+                                                    "{}",
+                                                    "{}",
+                                                    "tflops"));
+    return builder.Release();
+}
+
+flatbuffers::DetachedBuffer candidatePage(fb::KnobValue tag, bool withPayload)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<flatbuffers::Offset<fb::KnobSetting>> knobs{
+        knobSetting(builder, tag, withPayload)};
+    const std::vector<flatbuffers::Offset<fb::EngineCandidate>> candidates{
+        fb::CreateEngineCandidateDirect(builder, "candidate", &knobs, "{}")};
+    const auto page = fb::CreateEngineCandidatePageDirect(
+        builder, "graph", "device", "gfx942", "{}", "{}", 1, 0, &candidates);
+    builder.Finish(
+        fb::CreateEngineDetailsDirect(builder, ENGINE_ID, nullptr, nullptr, nullptr, page));
+    return builder.Release();
+}
+
+TEST_F(TestEngineQueries, PredictionKnobTaggedWithoutItsValueIsAnError)
+{
+    flatbuffers::DetachedBuffer response;
+    ON_CALL(*_mockBackend, backendGetAttribute(_, HIPDNN_ATTR_ENGINECFG_PREDICTION_EXT, _, _, _, _))
+        .WillByDefault([&response](hipdnnBackendDescriptor_t,
+                                   hipdnnBackendAttributeName_t,
+                                   hipdnnBackendAttributeType_t,
+                                   int64_t,
+                                   int64_t*,
+                                   void* out) {
+            auto* data = static_cast<hipdnnBackendFlatbufferData_t*>(out);
+            data->ptr = response.data();
+            data->size = response.size();
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    for(const auto tag : TAGGED_KNOB_VALUES)
+    {
+        SCOPED_TRACE(fb::EnumNameKnobValue(tag));
+        EnginePrediction prediction;
+
+        // Control: the same response with its payload decodes, so the failure below is
+        // the missing payload and nothing else about the buffer.
+        response = configurationPrediction(tag, /*withPayload=*/true);
+        const auto good = detail::getEnginePrediction(
+            graph(), ENGINE_ID, prediction, PredictionKind::CONFIGURATION);
+        ASSERT_TRUE(good.is_good()) << good.get_message();
+
+        response = configurationPrediction(tag, /*withPayload=*/false);
+        flatbuffers::Verifier verifier(response.data(), response.size());
+        ASSERT_TRUE(verifier.VerifyBuffer<fb::EnginePrediction>());
+        EXPECT_FALSE(detail::getEnginePrediction(
+                         graph(), ENGINE_ID, prediction, PredictionKind::CONFIGURATION)
+                         .is_good());
+    }
+}
+
+TEST_F(TestEngineQueries, CandidateKnobTaggedWithoutItsValueIsAnError)
+{
+    flatbuffers::DetachedBuffer response;
+    ON_CALL(*_mockBackend, backendGetAttribute(_, HIPDNN_ATTR_ENGINE_CANDIDATES_EXT, _, _, _, _))
+        .WillByDefault([&response](hipdnnBackendDescriptor_t,
+                                   hipdnnBackendAttributeName_t,
+                                   hipdnnBackendAttributeType_t,
+                                   int64_t,
+                                   int64_t*,
+                                   void* out) {
+            auto* data = static_cast<hipdnnBackendFlatbufferData_t*>(out);
+            data->ptr = response.data();
+            data->size = response.size();
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    for(const auto tag : TAGGED_KNOB_VALUES)
+    {
+        SCOPED_TRACE(fb::EnumNameKnobValue(tag));
+        EngineCandidatePage page;
+
+        response = candidatePage(tag, /*withPayload=*/true);
+        const auto good = detail::getEngineCandidates(graph(), ENGINE_ID, page);
+        ASSERT_TRUE(good.is_good()) << good.get_message();
+        ASSERT_EQ(page.candidates.size(), 1U);
+
+        response = candidatePage(tag, /*withPayload=*/false);
+        flatbuffers::Verifier verifier(response.data(), response.size());
+        ASSERT_TRUE(verifier.VerifyBuffer<fb::EngineDetails>());
+        EXPECT_FALSE(detail::getEngineCandidates(graph(), ENGINE_ID, page).is_good());
+    }
+}
+
 } // namespace

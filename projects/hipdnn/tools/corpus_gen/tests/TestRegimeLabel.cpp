@@ -161,11 +161,9 @@ TEST(TestRegimeLabel, ThreeFacetsJoinInDeclarationOrder)
     ASSERT_TRUE(load.ok()) << (load.errors.empty() ? "" : load.errors.front());
 
     const auto label = [&load](int64_t sq, int64_t sk, int64_t hq, int64_t hkv) {
-        return regimeLabel(*load.metadata,
-                           ProblemPoint{{"seqlen_q", sq},
-                                        {"seqlen_k", sk},
-                                        {"heads", hq},
-                                        {"heads_kv", hkv}});
+        return regimeLabel(
+            *load.metadata,
+            ProblemPoint{{"seqlen_q", sq}, {"seqlen_k", sk}, {"heads", hq}, {"heads_kv", hkv}});
     };
 
     EXPECT_EQ(label(2048, 2048, 32, 32), "prefill_short_mha");

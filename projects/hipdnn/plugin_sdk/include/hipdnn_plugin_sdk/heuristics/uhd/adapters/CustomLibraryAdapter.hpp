@@ -123,7 +123,7 @@ inline std::string sharedLibraryError()
 /// cannot be turned into an allocation by a file nothing has verified yet.
 inline bool artifactHashMatches(const std::string& path, const std::string& expectedHash)
 {
-    constexpr std::streamoff MAX_ARTIFACT_BYTES = 256 * 1024 * 1024;
+    constexpr std::streamoff MAX_ARTIFACT_BYTES = std::streamoff{256} * 1024 * 1024;
 
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if(!file)
@@ -230,11 +230,6 @@ public:
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) - C ABI function pointer
         auto* scorer = reinterpret_cast<ScorerFunc>(_scorerFunc);
         return scorer(features.data(), features.size());
-    }
-
-    UhdAdapterType type() const override
-    {
-        return UhdAdapterType::CUSTOM_LIBRARY;
     }
 
     size_t expectedFeatureCount() const override

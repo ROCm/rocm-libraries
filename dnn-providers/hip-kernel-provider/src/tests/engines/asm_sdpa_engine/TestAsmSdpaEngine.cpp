@@ -18,6 +18,9 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include <string_view>
+
+#include "AsmSdpaSelectorRevisionFixtures.hpp"
 #include "core/Handle.hpp"
 #include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
 #include "version.h"
@@ -217,6 +220,59 @@ TEST_F(TestAsmSdpaEngine, UnregisteredMetricIsABadRequest)
     EXPECT_THROW(static_cast<void>(_engine.getPrediction(
                      _handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true)),
                  hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+namespace fixtures = selector_revision_fixtures;
+
+constexpr std::string_view SELECTOR_REVISION_PREFIX = "hip-kernel-provider/asm-sdpa-fwd/";
+
+/// The digest part of the revision this build reports.
+std::string_view builtDigest()
+{
+    std::string_view revision = AsmSdpaEngine::selectorRevision();
+    if(revision.substr(0, SELECTOR_REVISION_PREFIX.size()) != SELECTOR_REVISION_PREFIX)
+    {
+        return {};
+    }
+    revision.remove_prefix(SELECTOR_REVISION_PREFIX.size());
+    return revision;
+}
+
+/// A shipped model records the revision verbatim, so its form is a contract: a build that
+/// did not compute the digest reports "undetermined", which no model can match.
+TEST(TestAsmSdpaSelectorRevision, IsTheProviderPrefixAndSixteenLowercaseHexDigits)
+{
+    const std::string_view digest = builtDigest();
+    ASSERT_EQ(digest.size(), 16u) << AsmSdpaEngine::selectorRevision();
+    for(const char c : digest)
+    {
+        EXPECT_TRUE((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))
+            << AsmSdpaEngine::selectorRevision();
+    }
+}
+
+/// One commit is one selector, whatever the checkout's line endings: a Windows (CRLF) and a
+/// Linux (LF) checkout that disagree each refuse the models the other trained. The
+/// fixtures are this engine's tree written both ways, and the build's own revision is the
+/// one both must report.
+TEST(TestAsmSdpaSelectorRevision, CrlfAndLfCheckoutsReportTheBuiltRevision)
+{
+    EXPECT_EQ(std::string_view(fixtures::REVISION_CRLF), std::string_view(fixtures::REVISION_LF));
+    EXPECT_EQ(builtDigest(), std::string_view(fixtures::REVISION_LF));
+}
+
+/// The revision expires every deployed model, so it must move for each change to what
+/// decides the forward kernel or its arguments (else a stale L1 estimate picks the engine),
+/// and for nothing else (else every model expires for a change that cannot touch it).
+TEST(TestAsmSdpaSelectorRevision, MovesForEveryForwardSelectionInputAndNothingElse)
+{
+    const std::string_view base(fixtures::REVISION_LF);
+    for(const auto& probe : fixtures::PROBES)
+    {
+        EXPECT_EQ(std::string_view(probe.revision) != base, probe.mustExpire)
+            << probe.change << (probe.mustExpire ? " must" : " must not")
+            << " change the forward selector revision";
+    }
 }
 
 } // namespace

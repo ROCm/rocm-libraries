@@ -41,10 +41,8 @@ void EngineDescriptor::finalize()
                    HIPDNN_STATUS_BAD_PARAM,
                    "EngineDescriptor::finalize() failed: Engine id is not set.");
 
-    auto handle = _graph->getHandle();
-    auto pluginResourceManager = handle->getPluginResourceManager();
-
-    auto engineIds = pluginResourceManager->getApplicableEngineIds(_graph.get());
+    auto engineIds
+        = _graph->getHandle()->getPluginResourceManager()->getApplicableEngineIds(_graph.get());
     if(std::find(engineIds.begin(), engineIds.end(), _engineId) == engineIds.end())
     {
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
@@ -52,8 +50,10 @@ void EngineDescriptor::finalize()
                               "range of engine IDs");
     }
 
-    ensureDetailsLoaded(pluginResourceManager);
-
+    // Engine details load on the first read of an attribute derived from them, not here. A
+    // provider builds its knob list -- defaults included -- by ranking the engine's catalog,
+    // and finalize is also the first step of reading a prediction or a candidate page, neither
+    // of which reads a knob. Loading here made describing a prediction pay a cold ranking.
     HipdnnBackendDescriptorImpl<EngineDescriptor>::finalize();
 }
 
@@ -73,11 +73,10 @@ void EngineDescriptor::initializeHeuristicResult(std::shared_ptr<const GraphDesc
     HipdnnBackendDescriptorImpl<EngineDescriptor>::finalize();
 }
 
-void EngineDescriptor::ensureDetailsLoaded(
-    const std::shared_ptr<plugin::EnginePluginResourceManager>& manager) const
+void EngineDescriptor::ensureDetailsLoaded() const
 {
-    std::call_once(_detailsOnce, [this, &manager]() {
-        auto resourceManager = manager ? manager : _graph->getHandle()->getPluginResourceManager();
+    std::call_once(_detailsOnce, [this]() {
+        auto resourceManager = _graph->getHandle()->getPluginResourceManager();
         auto details = plugin::EnginePluginResourceManager::getEngineDetails(
             resourceManager, _engineId, _graph.get());
         std::optional<std::string> detailsName;

@@ -112,8 +112,7 @@ inline std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType>
 inline const std::vector<int64_t>* dims(const ArgumentResolution& resolved, const char* name)
 {
     const auto* argument = resolved.find(name);
-    return argument == nullptr ? nullptr
-                               : std::get_if<std::vector<int64_t>>(&argument->value);
+    return argument == nullptr ? nullptr : std::get_if<std::vector<int64_t>>(&argument->value);
 }
 
 /// Reads a resolved argument as a dtype, by name.
@@ -233,9 +232,8 @@ inline std::optional<builders::TensorSpec>
 /// fp32 accumulation. It is also not merely unrealistic: MIOpen's convolution builder declines
 /// any node whose `compute_data_type` is not FLOAT, so a uniform-fp16 graph is refused outright
 /// and the corpus reports an engine that serves no half precision at all.
-inline builders::GraphTypes
-    graphTypesFrom(const ArgumentResolution& resolved,
-                   hipdnn_flatbuffers_sdk::data_objects::DataType io)
+inline builders::GraphTypes graphTypesFrom(const ArgumentResolution& resolved,
+                                           hipdnn_flatbuffers_sdk::data_objects::DataType io)
 {
     builders::GraphTypes types = builders::GraphTypes::uniform(io);
     types.compute = dtype(resolved, "computeDataType").value_or(io);
@@ -257,7 +255,6 @@ inline builders::TensorSpec tensorFrom(int64_t uid,
     spec.dataType = type;
     return spec;
 }
-
 
 /// A norm's scale/bias shape for @p x: x's rank, 1 everywhere but the trailing (normalized)
 /// dimension. The frontend reads which dimensions are normalized off where scale is not 1.
@@ -429,7 +426,6 @@ inline std::optional<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode>
     return mode;
 }
 
-
 /// Resolves a declared enumerator name against a FlatBuffers EnumNames table.
 ///
 /// Refused rather than defaulted when the name is unknown: a corpus row claiming MUL while the
@@ -494,15 +490,20 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                 || ys == nullptr || pre == nullptr || post == nullptr || stride == nullptr
                 || dil == nullptr || !type.has_value())
              {
-                 return {{}, "convolutionForward needs xDims, xStrides, wDims, wStrides, yDims, "
-                             "yStrides, prePadding, postPadding, convStrides, convDilation, "
-                             "dataType"};
+                 return {{},
+                         "convolutionForward needs xDims, xStrides, wDims, wStrides, yDims, "
+                         "yStrides, prePadding, postPadding, convStrides, convDilation, "
+                         "dataType"};
              }
              return {builders::convolutionForward(
                          detail::tensorFrom(1, "x", *x, *xs, *type),
                          detail::tensorFrom(2, "w", *w, *ws, *type),
                          detail::tensorFrom(3, "y", *y, *ys, *type),
-                         builders::ConvGeometry{*pre, *post, *stride, *dil,
+                         builders::ConvGeometry{
+                             *pre,
+                             *post,
+                             *stride,
+                             *dil,
                              hipdnn_flatbuffers_sdk::data_objects::ConvMode::CROSS_CORRELATION},
                          detail::graphTypesFrom(resolved, *type)),
                      ""};
@@ -550,13 +551,16 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                          detail::tensorFrom(2, "w", *w, *ws, *type),
                          bias,
                          detail::tensorFrom(4, "y", *y, *ys, *type),
-                         builders::ConvGeometry{*pre, *post, *stride, *dil,
+                         builders::ConvGeometry{
+                             *pre,
+                             *post,
+                             *stride,
+                             *dil,
                              hipdnn_flatbuffers_sdk::data_objects::ConvMode::CROSS_CORRELATION},
                          activation,
                          detail::graphTypesFrom(resolved, *type)),
                      ""};
          }},
-
 
         {"sdpaForward",
          [](const ArgumentResolution& resolved) -> BuildResult {
@@ -572,8 +576,9 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              if(q == nullptr || qs == nullptr || k == nullptr || ks == nullptr || v == nullptr
                 || vs == nullptr || o == nullptr || os == nullptr || !type.has_value())
              {
-                 return {{}, "sdpaForward needs qDims/qStrides, kDims/kStrides, vDims/vStrides, "
-                             "oDims/oStrides, dataType"};
+                 return {{},
+                         "sdpaForward needs qDims/qStrides, kDims/kStrides, vDims/vStrides, "
+                         "oDims/oStrides, dataType"};
              }
              const auto alignment = detail::diagonalAlignment(resolved, "diagonalAlignment");
              if(!alignment.has_value())
@@ -620,15 +625,20 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                 || dxs == nullptr || pre == nullptr || post == nullptr || stride == nullptr
                 || dil == nullptr || !type.has_value())
              {
-                 return {{}, "convolutionBackwardData needs dyDims/dyStrides, wDims/wStrides, "
-                             "dxDims/dxStrides, prePadding, postPadding, convStrides, "
-                             "convDilation, dataType"};
+                 return {{},
+                         "convolutionBackwardData needs dyDims/dyStrides, wDims/wStrides, "
+                         "dxDims/dxStrides, prePadding, postPadding, convStrides, "
+                         "convDilation, dataType"};
              }
              return {builders::convolutionBackwardData(
                          detail::tensorFrom(1, "dy", *dy, *dys, *type),
                          detail::tensorFrom(2, "w", *w, *ws, *type),
                          detail::tensorFrom(3, "dx", *dx, *dxs, *type),
-                         builders::ConvGeometry{*pre, *post, *stride, *dil,
+                         builders::ConvGeometry{
+                             *pre,
+                             *post,
+                             *stride,
+                             *dil,
                              hipdnn_flatbuffers_sdk::data_objects::ConvMode::CROSS_CORRELATION},
                          detail::graphTypesFrom(resolved, *type)),
                      ""};
@@ -651,15 +661,20 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                 || dws == nullptr || pre == nullptr || post == nullptr || stride == nullptr
                 || dil == nullptr || !type.has_value())
              {
-                 return {{}, "convolutionBackwardWeights needs xDims/xStrides, dyDims/dyStrides, "
-                             "dwDims/dwStrides, prePadding, postPadding, convStrides, "
-                             "convDilation, dataType"};
+                 return {{},
+                         "convolutionBackwardWeights needs xDims/xStrides, dyDims/dyStrides, "
+                         "dwDims/dwStrides, prePadding, postPadding, convStrides, "
+                         "convDilation, dataType"};
              }
              return {builders::convolutionBackwardWeights(
                          detail::tensorFrom(1, "x", *x, *xs, *type),
                          detail::tensorFrom(2, "dy", *dy, *dys, *type),
                          detail::tensorFrom(3, "dw", *dw, *dws, *type),
-                         builders::ConvGeometry{*pre, *post, *stride, *dil,
+                         builders::ConvGeometry{
+                             *pre,
+                             *post,
+                             *stride,
+                             *dil,
                              hipdnn_flatbuffers_sdk::data_objects::ConvMode::CROSS_CORRELATION},
                          detail::graphTypesFrom(resolved, *type)),
                      ""};
@@ -676,26 +691,31 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              const auto* pre = detail::dims(resolved, "prePadding");
              const auto* post = detail::dims(resolved, "postPadding");
              const auto type = detail::dtype(resolved, "dataType");
-             if(x == nullptr || xs == nullptr || y == nullptr || ys == nullptr
-                || window == nullptr || stride == nullptr || pre == nullptr || post == nullptr
-                || !type.has_value())
+             if(x == nullptr || xs == nullptr || y == nullptr || ys == nullptr || window == nullptr
+                || stride == nullptr || pre == nullptr || post == nullptr || !type.has_value())
              {
-                 return {{}, "resampleForward needs xDims/xStrides, yDims/yStrides, window, "
-                             "poolStrides, prePadding, postPadding, dataType"};
+                 return {{},
+                         "resampleForward needs xDims/xStrides, yDims/yStrides, window, "
+                         "poolStrides, prePadding, postPadding, dataType"};
              }
-             builders::ResampleGeometry geometry{*window, *stride, *pre, *post,
+             builders::ResampleGeometry geometry{
+                 *window,
+                 *stride,
+                 *pre,
+                 *post,
                  hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL,
                  hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD};
-             if(!detail::resolveEnum(
-                    resolved, "resampleMode",
-                    hipdnn_flatbuffers_sdk::data_objects::EnumNamesResampleMode(), geometry.mode))
+             if(!detail::resolveEnum(resolved,
+                                     "resampleMode",
+                                     hipdnn_flatbuffers_sdk::data_objects::EnumNamesResampleMode(),
+                                     geometry.mode))
              {
                  return {{}, "unknown resample mode"};
              }
-             if(!detail::resolveEnum(
-                    resolved, "paddingMode",
-                    hipdnn_flatbuffers_sdk::data_objects::EnumNamesPaddingMode(),
-                    geometry.paddingMode))
+             if(!detail::resolveEnum(resolved,
+                                     "paddingMode",
+                                     hipdnn_flatbuffers_sdk::data_objects::EnumNamesPaddingMode(),
+                                     geometry.paddingMode))
              {
                  return {{}, "unknown padding mode"};
              }
@@ -718,7 +738,6 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                      ""};
          }},
 
-
         {"sdpaBackward",
          [](const ArgumentResolution& resolved) -> BuildResult {
              const auto type = detail::dtype(resolved, "dataType");
@@ -731,7 +750,8 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              std::vector<builders::TensorSpec> t;
              for(size_t i = 0; i < roles.size(); ++i)
              {
-                 auto one = detail::tensorRole(resolved, static_cast<int64_t>(i) + 1, roles[i], *type);
+                 auto one
+                     = detail::tensorRole(resolved, static_cast<int64_t>(i) + 1, roles[i], *type);
                  if(!one.has_value())
                  {
                      return {{}, std::string("sdpaBackward needs ") + roles[i] + "Dims/Strides"};
@@ -753,8 +773,17 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  return {{}, "sdpaBackward: diagonalAlignment must be top_left or bottom_right"};
              }
              options.diagonalAlignment = *alignment;
-             return {builders::sdpaBackward(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8],
-                                            options, detail::graphTypesFrom(resolved, *type)),
+             return {builders::sdpaBackward(t[0],
+                                            t[1],
+                                            t[2],
+                                            t[3],
+                                            t[4],
+                                            t[5],
+                                            t[6],
+                                            t[7],
+                                            t[8],
+                                            options,
+                                            detail::graphTypesFrom(resolved, *type)),
                      ""};
          }},
 
@@ -769,7 +798,8 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              std::vector<builders::TensorSpec> t;
              for(size_t i = 0; i < roles.size(); ++i)
              {
-                 auto one = detail::tensorRole(resolved, static_cast<int64_t>(i) + 1, roles[i], *type);
+                 auto one
+                     = detail::tensorRole(resolved, static_cast<int64_t>(i) + 1, roles[i], *type);
                  if(!one.has_value())
                  {
                      return {{},
@@ -777,12 +807,18 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  }
                  t.push_back(*one);
              }
-             return {builders::layernormBackward(t[0], t[1], t[2], t[3], t[4], t[5],
-                                                 detail::paddedNormalizedDimCount(
-                                                     resolved,
-                                                     detail::dims(resolved, "xDims")->size(),
-                                                     detail::integer(resolved, "normalizedDimCount", 1)),
-                                                 detail::graphTypesFrom(resolved, *type)),
+             return {builders::layernormBackward(
+                         t[0],
+                         t[1],
+                         t[2],
+                         t[3],
+                         t[4],
+                         t[5],
+                         detail::paddedNormalizedDimCount(
+                             resolved,
+                             detail::dims(resolved, "xDims")->size(),
+                             detail::integer(resolved, "normalizedDimCount", 1)),
+                         detail::graphTypesFrom(resolved, *type)),
                      ""};
          }},
 
@@ -797,17 +833,18 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              std::vector<builders::TensorSpec> t;
              for(size_t i = 0; i < roles.size(); ++i)
              {
-                 auto one = detail::tensorRole(resolved, static_cast<int64_t>(i) + 1, roles[i], *type);
+                 auto one
+                     = detail::tensorRole(resolved, static_cast<int64_t>(i) + 1, roles[i], *type);
                  if(!one.has_value())
                  {
-                     return {{},
-                             std::string("rmsNormBackward needs ") + roles[i] + "Dims/Strides"};
+                     return {{}, std::string("rmsNormBackward needs ") + roles[i] + "Dims/Strides"};
                  }
                  t.push_back(*one);
              }
-             return {builders::rmsNormBackward(t[0], t[1], t[2], t[3], t[4], t[5],
-                                               detail::graphTypesFrom(resolved, *type)),
-                     ""};
+             return {
+                 builders::rmsNormBackward(
+                     t[0], t[1], t[2], t[3], t[4], t[5], detail::graphTypesFrom(resolved, *type)),
+                 ""};
          }},
 
         {"batchnormForwardTraining",
@@ -822,11 +859,13 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              std::vector<builders::TensorSpec> t;
              for(size_t i = 0; i < roles.size(); ++i)
              {
-                 auto one = detail::batchnormRole(resolved, static_cast<int64_t>(i) + 1, roles[i], *type);
+                 auto one = detail::batchnormRole(
+                     resolved, static_cast<int64_t>(i) + 1, roles[i], *type);
                  if(!one.has_value())
                  {
-                     return {{}, std::string("batchnormForwardTraining needs ") + roles[i]
-                                     + "Dims/Strides"};
+                     return {{},
+                             std::string("batchnormForwardTraining needs ") + roles[i]
+                                 + "Dims/Strides"};
                  }
                  t.push_back(*one);
              }
@@ -850,15 +889,22 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  const auto nv = stat(12, "nextRunningVariance");
                  if(!pm || !pv || !nm || !nv)
                  {
-                     return {{}, "batchnormForwardTraining with running statistics needs "
-                                 "prev/nextRunningMean and prev/nextRunningVariance Dims/Strides"};
+                     return {{},
+                             "batchnormForwardTraining with running statistics needs "
+                             "prev/nextRunningMean and prev/nextRunningVariance Dims/Strides"};
                  }
                  auto momentum = detail::normEpsilon(10);
                  momentum.name = "momentum";
                  momentum.scalarValue = 0.1F;
                  running = builders::BatchnormRunningStats{*pm, *pv, momentum, *nm, *nv};
              }
-             return {builders::batchnormForwardTraining(t[0], t[1], t[2], t[3], t[4], t[5], t[6],
+             return {builders::batchnormForwardTraining(t[0],
+                                                        t[1],
+                                                        t[2],
+                                                        t[3],
+                                                        t[4],
+                                                        t[5],
+                                                        t[6],
                                                         detail::graphTypesFrom(resolved, *type),
                                                         running,
                                                         activation),
@@ -877,7 +923,8 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              std::vector<builders::TensorSpec> t;
              for(size_t i = 0; i < roles.size(); ++i)
              {
-                 auto one = detail::batchnormRole(resolved, static_cast<int64_t>(i) + 1, roles[i], *type);
+                 auto one = detail::batchnormRole(
+                     resolved, static_cast<int64_t>(i) + 1, roles[i], *type);
                  if(!one.has_value())
                  {
                      return {{},
@@ -891,7 +938,12 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              {
                  return {{}, error};
              }
-             return {builders::batchnormInference(t[0], t[1], t[2], t[3], t[4], t[5],
+             return {builders::batchnormInference(t[0],
+                                                  t[1],
+                                                  t[2],
+                                                  t[3],
+                                                  t[4],
+                                                  t[5],
                                                   detail::graphTypesFrom(resolved, *type),
                                                   activation),
                      ""};
@@ -904,8 +956,8 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              {
                  return {{}, "batchnormInferenceActivationBackward needs dataType"};
              }
-             const std::vector<std::string> roles = {"x",  "mean", "invVariance", "scale", "bias",
-                                                     "dy", "dx",   "dscale",      "dbias"};
+             const std::vector<std::string> roles
+                 = {"x", "mean", "invVariance", "scale", "bias", "dy", "dx", "dscale", "dbias"};
              std::vector<builders::TensorSpec> t;
              for(size_t i = 0; i < roles.size(); ++i)
              {
@@ -913,8 +965,9 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                      resolved, static_cast<int64_t>(i) + 1, roles[i], *type);
                  if(!one.has_value())
                  {
-                     return {{}, "batchnormInferenceActivationBackward needs " + roles[i]
-                                     + "Dims/Strides"};
+                     return {{},
+                             "batchnormInferenceActivationBackward needs " + roles[i]
+                                 + "Dims/Strides"};
                  }
                  t.push_back(*one);
              }
@@ -926,7 +979,16 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  return {{}, error};
              }
              return {builders::batchnormInferenceActivationBackward(
-                         t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], mode,
+                         t[0],
+                         t[1],
+                         t[2],
+                         t[3],
+                         t[4],
+                         t[5],
+                         t[6],
+                         t[7],
+                         t[8],
+                         mode,
                          detail::graphTypesFrom(resolved, *type)),
                      ""};
          }},
@@ -942,7 +1004,8 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              std::vector<builders::TensorSpec> t;
              for(size_t i = 0; i < roles.size(); ++i)
              {
-                 auto one = detail::batchnormRole(resolved, static_cast<int64_t>(i) + 1, roles[i], *type);
+                 auto one = detail::batchnormRole(
+                     resolved, static_cast<int64_t>(i) + 1, roles[i], *type);
                  if(!one.has_value())
                  {
                      return {{},
@@ -950,9 +1013,10 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  }
                  t.push_back(*one);
              }
-             return {builders::batchnormBackward(t[0], t[1], t[2], t[3], t[4], t[5],
-                                                 detail::graphTypesFrom(resolved, *type)),
-                     ""};
+             return {
+                 builders::batchnormBackward(
+                     t[0], t[1], t[2], t[3], t[4], t[5], detail::graphTypesFrom(resolved, *type)),
+                 ""};
          }},
 
         {"resampleBackward",
@@ -965,8 +1029,9 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              if(!type.has_value() || window == nullptr || stride == nullptr || pre == nullptr
                 || post == nullptr)
              {
-                 return {{}, "resampleBackward needs window, poolStrides, prePadding, "
-                             "postPadding, dataType"};
+                 return {{},
+                         "resampleBackward needs window, poolStrides, prePadding, "
+                         "postPadding, dataType"};
              }
              const auto dy = detail::tensorRole(resolved, 1, "dy", *type);
              const auto dx = detail::tensorRole(resolved, 2, "dx", *type);
@@ -974,14 +1039,20 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              {
                  return {{}, "resampleBackward needs dyDims/dyStrides and dxDims/dxStrides"};
              }
-             builders::ResampleGeometry geometry{*window, *stride, *pre, *post,
+             builders::ResampleGeometry geometry{
+                 *window,
+                 *stride,
+                 *pre,
+                 *post,
                  hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL,
                  hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD};
-             if(!detail::resolveEnum(
-                    resolved, "resampleMode",
-                    hipdnn_flatbuffers_sdk::data_objects::EnumNamesResampleMode(), geometry.mode)
+             if(!detail::resolveEnum(resolved,
+                                     "resampleMode",
+                                     hipdnn_flatbuffers_sdk::data_objects::EnumNamesResampleMode(),
+                                     geometry.mode)
                 || !detail::resolveEnum(
-                    resolved, "paddingMode",
+                    resolved,
+                    "paddingMode",
                     hipdnn_flatbuffers_sdk::data_objects::EnumNamesPaddingMode(),
                     geometry.paddingMode))
              {
@@ -997,8 +1068,8 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                      return {{}, "resampleBackward with an index needs indexDims/Strides"};
                  }
              }
-             return {builders::resampleBackward(*dy, *dx, geometry,
-                                                detail::graphTypesFrom(resolved, *type), index),
+             return {builders::resampleBackward(
+                         *dy, *dx, geometry, detail::graphTypesFrom(resolved, *type), index),
                      ""};
          }},
 
@@ -1015,15 +1086,17 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              // The scale tensor carries its own element type; quantization exists precisely to
              // make it differ from the data's, so defaulting it to dataType would describe a
              // problem nobody asked for.
-             const auto scale
-                 = detail::tensorRole(resolved, 3, "scale", scaleType.value_or(*type));
+             const auto scale = detail::tensorRole(resolved, 3, "scale", scaleType.value_or(*type));
              if(!x.has_value() || !y.has_value() || !scale.has_value())
              {
-                 return {{}, "blockScaleQuantize needs xDims/xStrides, yDims/yStrides, "
-                             "scaleDims/scaleStrides"};
+                 return {{},
+                         "blockScaleQuantize needs xDims/xStrides, yDims/yStrides, "
+                         "scaleDims/scaleStrides"};
              }
              return {builders::blockScaleQuantize(
-                         *x, *y, *scale,
+                         *x,
+                         *y,
+                         *scale,
                          static_cast<int32_t>(detail::integer(resolved, "blockSize", 32)),
                          detail::flag(resolved, "transpose"),
                          detail::graphTypesFrom(resolved, *type)),
@@ -1039,13 +1112,13 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  return {{}, "blockScaleDequantize needs dataType"};
              }
              const auto x = detail::tensorRole(resolved, 1, "x", *type);
-             const auto scale
-                 = detail::tensorRole(resolved, 2, "scale", scaleType.value_or(*type));
+             const auto scale = detail::tensorRole(resolved, 2, "scale", scaleType.value_or(*type));
              const auto y = detail::tensorRole(resolved, 3, "y", *type);
              if(!x.has_value() || !scale.has_value() || !y.has_value())
              {
-                 return {{}, "blockScaleDequantize needs xDims/xStrides, scaleDims/scaleStrides, "
-                             "yDims/yStrides"};
+                 return {{},
+                         "blockScaleDequantize needs xDims/xStrides, scaleDims/scaleStrides, "
+                         "yDims/yStrides"};
              }
              const auto* block = detail::dims(resolved, "blockSize");
              if(block == nullptr)
@@ -1058,7 +1131,10 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              {
                  blockSize.push_back(static_cast<int32_t>(one));
              }
-             return {builders::blockScaleDequantize(*x, *scale, *y, blockSize,
+             return {builders::blockScaleDequantize(*x,
+                                                    *scale,
+                                                    *y,
+                                                    blockSize,
                                                     detail::flag(resolved, "negativeScale"),
                                                     detail::graphTypesFrom(resolved, *type)),
                      ""};
@@ -1077,24 +1153,33 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              // Offsets are indices, not activations: they are integer-typed independently of
              // the GEMM's element type.
              const auto offset = detail::tensorRole(
-                 resolved, 3, "firstTokenOffset",
+                 resolved,
+                 3,
+                 "firstTokenOffset",
                  offsetType.value_or(hipdnn_flatbuffers_sdk::data_objects::DataType::INT32));
              const auto output = detail::tensorRole(resolved, 4, "output", *type);
              if(!token.has_value() || !weight.has_value() || !offset.has_value()
                 || !output.has_value())
              {
-                 return {{}, "moeGroupedMatmul needs token, weight, firstTokenOffset and output "
-                             "Dims/Strides"};
+                 return {{},
+                         "moeGroupedMatmul needs token, weight, firstTokenOffset and output "
+                         "Dims/Strides"};
              }
              auto mode = hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode::NONE;
              if(!detail::resolveEnum(
-                    resolved, "moeMode",
-                    hipdnn_flatbuffers_sdk::data_objects::EnumNamesMoeGroupedMatmulMode(), mode))
+                    resolved,
+                    "moeMode",
+                    hipdnn_flatbuffers_sdk::data_objects::EnumNamesMoeGroupedMatmulMode(),
+                    mode))
              {
                  return {{}, "unknown MoE grouped matmul mode"};
              }
              return {builders::moeGroupedMatmul(
-                         *token, *weight, *offset, *output, mode,
+                         *token,
+                         *weight,
+                         *offset,
+                         *output,
+                         mode,
                          static_cast<int32_t>(detail::integer(resolved, "topK", 1)),
                          detail::graphTypesFrom(resolved, *type)),
                      ""};
@@ -1111,18 +1196,22 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              const auto dOutput = detail::tensorRole(resolved, 1, "dOutput", *type);
              const auto token = detail::tensorRole(resolved, 2, "token", *type);
              const auto offset = detail::tensorRole(
-                 resolved, 3, "firstTokenOffset",
+                 resolved,
+                 3,
+                 "firstTokenOffset",
                  offsetType.value_or(hipdnn_flatbuffers_sdk::data_objects::DataType::INT32));
              const auto dWeight = detail::tensorRole(resolved, 4, "dWeight", *type);
              if(!dOutput.has_value() || !token.has_value() || !offset.has_value()
                 || !dWeight.has_value())
              {
-                 return {{}, "moeGroupedMatmulBackward needs dOutput, token, firstTokenOffset "
-                             "and dWeight Dims/Strides"};
+                 return {{},
+                         "moeGroupedMatmulBackward needs dOutput, token, firstTokenOffset "
+                         "and dWeight Dims/Strides"};
              }
-             return {builders::moeGroupedMatmulBackward(*dOutput, *token, *offset, *dWeight,
-                                                        detail::graphTypesFrom(resolved, *type)),
-                     ""};
+             return {
+                 builders::moeGroupedMatmulBackward(
+                     *dOutput, *token, *offset, *dWeight, detail::graphTypesFrom(resolved, *type)),
+                 ""};
          }},
 
         {"matmul",
@@ -1137,8 +1226,9 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              if(a == nullptr || as == nullptr || b == nullptr || bs == nullptr || c == nullptr
                 || cs == nullptr || !type.has_value())
              {
-                 return {{}, "matmul needs aDims, aStrides, bDims, bStrides, cDims, cStrides, "
-                             "dataType"};
+                 return {{},
+                         "matmul needs aDims, aStrides, bDims, bStrides, cDims, cStrides, "
+                         "dataType"};
              }
              return {builders::matmul(detail::tensorFrom(1, "a", *a, *as, *type),
                                       detail::tensorFrom(2, "b", *b, *bs, *type),
@@ -1184,8 +1274,8 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  }
                  activation = mode;
              }
-             return {builders::matmulEpilogue(*a, *b, bias, activation, *c,
-                                              detail::graphTypesFrom(resolved, *type)),
+             return {builders::matmulEpilogue(
+                         *a, *b, bias, activation, *c, detail::graphTypesFrom(resolved, *type)),
                      ""};
          }},
 
@@ -1199,8 +1289,9 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              const auto block = detail::integer(resolved, "blockSize", 0);
              if(!type.has_value() || !scaleType.has_value() || !outType.has_value() || block <= 0)
              {
-                 return {{}, "blockScaledMatmul needs dataType, scaleDataType, outputDataType, "
-                             "blockSize"};
+                 return {{},
+                         "blockScaledMatmul needs dataType, scaleDataType, outputDataType, "
+                         "blockSize"};
              }
              const auto a = detail::tensorRole(resolved, 1, "a", *type);
              const auto aScale = detail::tensorRole(resolved, 2, "aScale", *scaleType);
@@ -1211,7 +1302,11 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              {
                  return {{}, "blockScaledMatmul needs a, aScale, b, bScale, c Dims/Strides"};
              }
-             return {builders::blockScaledMatmul(*a, *aScale, *b, *bScale, *c,
+             return {builders::blockScaledMatmul(*a,
+                                                 *aScale,
+                                                 *b,
+                                                 *bScale,
+                                                 *c,
                                                  {static_cast<int32_t>(block)},
                                                  detail::graphTypesFrom(resolved, *type)),
                      ""};
@@ -1281,16 +1376,17 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              const auto x = detail::padToDeclaredRank(resolved, *d);
              const auto xStrides = x.size() == d->size() ? *st : detail::rowMajorStrides(x);
              const auto affine = detail::padToDeclaredRank(resolved, detail::normAffineDims(*d));
-             return {builders::layernormForward(
-                         detail::tensorFrom(1, "x", x, xStrides, *type),
-                         detail::tensorFrom(2, "scale", affine, detail::rowMajorStrides(affine), *type),
-                         detail::tensorFrom(3, "bias", affine, detail::rowMajorStrides(affine), *type),
-                         detail::normEpsilon(4),
-                         detail::tensorFrom(5, "y", x, xStrides, *type),
-                         detail::paddedNormalizedDimCount(resolved, d->size(), 1),
-                         hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::INFERENCE,
-                         detail::graphTypesFrom(resolved, *type)),
-                     ""};
+             return {
+                 builders::layernormForward(
+                     detail::tensorFrom(1, "x", x, xStrides, *type),
+                     detail::tensorFrom(2, "scale", affine, detail::rowMajorStrides(affine), *type),
+                     detail::tensorFrom(3, "bias", affine, detail::rowMajorStrides(affine), *type),
+                     detail::normEpsilon(4),
+                     detail::tensorFrom(5, "y", x, xStrides, *type),
+                     detail::paddedNormalizedDimCount(resolved, d->size(), 1),
+                     hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::INFERENCE,
+                     detail::graphTypesFrom(resolved, *type)),
+                 ""};
          }},
 
         {"rmsNormForward",
@@ -1305,14 +1401,15 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              const auto x = detail::padToDeclaredRank(resolved, *d);
              const auto xStrides = x.size() == d->size() ? *st : detail::rowMajorStrides(x);
              const auto affine = detail::padToDeclaredRank(resolved, detail::normAffineDims(*d));
-             return {builders::rmsNormForward(
-                         detail::tensorFrom(1, "x", x, xStrides, *type),
-                         detail::tensorFrom(2, "scale", affine, detail::rowMajorStrides(affine), *type),
-                         detail::normEpsilon(3),
-                         detail::tensorFrom(4, "y", x, xStrides, *type),
-                         hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::INFERENCE,
-                         detail::graphTypesFrom(resolved, *type)),
-                     ""};
+             return {
+                 builders::rmsNormForward(
+                     detail::tensorFrom(1, "x", x, xStrides, *type),
+                     detail::tensorFrom(2, "scale", affine, detail::rowMajorStrides(affine), *type),
+                     detail::normEpsilon(3),
+                     detail::tensorFrom(4, "y", x, xStrides, *type),
+                     hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::INFERENCE,
+                     detail::graphTypesFrom(resolved, *type)),
+                 ""};
          }},
 
         {"reduction",
@@ -1325,22 +1422,21 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              if(in == nullptr || ins == nullptr || out == nullptr || outs == nullptr
                 || !type.has_value())
              {
-                 return {{}, "reduction needs inDims, inStrides, outDims, outStrides, mode, "
-                             "dataType"};
+                 return {{},
+                         "reduction needs inDims, inStrides, outDims, outStrides, mode, "
+                         "dataType"};
              }
              auto mode = hipdnn_flatbuffers_sdk::data_objects::ReductionMode::ADD;
              const auto declared = detail::enumName(resolved, "mode");
              if(!declared.empty())
              {
-                 const auto* names
-                     = hipdnn_flatbuffers_sdk::data_objects::EnumNamesReductionMode();
+                 const auto* names = hipdnn_flatbuffers_sdk::data_objects::EnumNamesReductionMode();
                  bool matched = false;
                  for(size_t i = 0; names[i] != nullptr; ++i)
                  {
                      if(declared == names[i])
                      {
-                         mode = static_cast<
-                             hipdnn_flatbuffers_sdk::data_objects::ReductionMode>(i);
+                         mode = static_cast<hipdnn_flatbuffers_sdk::data_objects::ReductionMode>(i);
                          matched = true;
                      }
                  }
