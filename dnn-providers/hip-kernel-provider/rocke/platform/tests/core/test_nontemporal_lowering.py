@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from rocke.core.ir import BF16, F16, IRBuilder, PtrType
+from rocke.core.ir import BF16, F16, F32, IRBuilder, PtrType
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.helpers.compile import _lower_llvm_via_backend, compile_kernel
@@ -229,3 +229,53 @@ def test_flag_sets_the_nt_bit_in_the_isa(arch, load_nt, store_nt):
     assert len(loads) == len(stores) == 1, lines
     assert ("nt" in loads[0][1:]) is load_nt
     assert ("nt" in stores[0][1:]) is store_nt
+
+
+# Payload width/alignment -> a different instruction shape (or several).
+_WIDTHS = {
+    "bf16x2": (BF16, 2, None),  # 4 B   global_load_dword
+    "bf16x4": (BF16, 4, None),  # 8 B   global_load_dwordx2
+    "bf16x8": (BF16, 8, None),  # 16 B  global_load_dwordx4
+    "bf16x16": (BF16, 16, None),  # 32 B  split across several instructions
+    "f32x3": (F32, 3, None),  # 12 B  global_load_dwordx3
+    "bf16x8_align4": (BF16, 8, 4),  # 16 B, 4-byte aligned: may split
+}
+
+
+def _stores_vector(n: int) -> bool:
+    # global_store_vN takes n in {1, 2, 4, 8} for 2-byte types (n=16 is f32-only
+    # and n=3 does not exist); other widths store element by element and are
+    # checked on the load side only.
+    return n in (1, 2, 4, 8)
+
+
+def _width_kernel(elem, n: int, align):
+    b = IRBuilder("nt_width")
+    src = b.param("S", PtrType(elem, "global"), noalias=True, readonly=True, align=16)
+    dst = b.param("D", PtrType(elem, "global"), noalias=True, align=16)
+    off = b.mul(b.thread_id_x(), b.const_i32(n))
+    v = b.global_load_vN(src, off, elem, n, align=align, nontemporal=True)
+    if _stores_vector(n):
+        b.global_store_vN(dst, off, v, n, nontemporal=True)
+    else:
+        # Use every element: storing only one lets the backend shrink the load
+        # to that element, which would hide a split of the full-width access.
+        for i in range(n):
+            b.global_store(dst, b.add(off, b.const_i32(i)), b.vec_extract(v, i))
+    b.ret()
+    return b.kernel
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("width", sorted(_WIDTHS))
+def test_nt_bit_survives_every_width_and_split(arch, width):
+    """Every instruction a flagged access lowers to carries ``nt`` -- including
+    when the backend splits one access into several (32 B, under-aligned)."""
+    elem, n, align = _WIDTHS[width]
+    lines = _global_mem_lines(_width_kernel(elem, n, align), arch)
+    loads = [ln for ln in lines if ln[0].startswith("global_load")]
+    stores = [ln for ln in lines if ln[0].startswith("global_store")]
+    assert loads, lines
+    assert all("nt" in ln[1:] for ln in loads), loads
+    if _stores_vector(n):
+        assert stores and all("nt" in ln[1:] for ln in stores), stores
