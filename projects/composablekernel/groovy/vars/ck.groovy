@@ -735,7 +735,7 @@ def build_and_run_fmha(String arch){
 
 def cmake_build(Map conf=[:]){
 
-    def config_targets = conf.get("config_targets","check")
+    def config_targets = conf.get("config_targets","install")
     def build_envs = "CTEST_PARALLEL_LEVEL=4 " + conf.get("build_env","")
     def prefixpath = conf.get("prefixpath","/opt/rocm")
     def setup_args = conf.get("setup_args","")
@@ -758,7 +758,7 @@ def cmake_build(Map conf=[:]){
 
     if(runAllUnitTests)
     {
-        config_targets = 'install ' + 'check'
+        config_targets = 'install'
         setup_args = ' -DBUILD_DEV=On -DCMAKE_INSTALL_PREFIX=../install' + setup_args
     } else{
         setup_args = ' -DBUILD_DEV=On' + setup_args
@@ -975,7 +975,7 @@ def cmake_build(Map conf=[:]){
                         bash ../script/dependency-parser/smart_build_and_test.sh
                     """
                 }
-                else{ //run all tests
+                else{ //run all tests if runAllUnitTests = true
                     if(!setup_args.contains("gfx1250")){
                         echo "Full test suite requested (RUN_ALL_UNIT_TESTS=true or develop branch)"
                         sh "ninja -j${nt} install check"
