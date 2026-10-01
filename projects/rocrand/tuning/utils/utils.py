@@ -22,9 +22,9 @@
 
 import argparse
 from typing import Optional
-import os 
+import os
 
-BASE_DIR = f'{os.path.dirname(os.path.abspath(__file__))}/..'
+BASE_DIR = f"{os.path.dirname(os.path.abspath(__file__))}/.."
 
 class Parser:
     @staticmethod

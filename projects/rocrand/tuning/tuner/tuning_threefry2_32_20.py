@@ -30,7 +30,7 @@ from tuner.base_tuner import BaseTuner, TunerArgs
 class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        return TunerArgs(algo_full_name='threefry2_32_20')
+        return TunerArgs(algo_full_name="threefry2_32_20")
 
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)

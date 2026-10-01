@@ -4,8 +4,8 @@
 // Include primbench executor.
 #include "primbench.hpp"
 
-{% block backend_include %}  
-// Include the right backend 
+{% block backend_include %}
+// Include the right backend
     #include "rng/{{algo_name}}.hpp"
 {% endblock %}
 #include <cstdint>
@@ -35,7 +35,7 @@ struct output_type_supported : std::true_type
 DISABLE_ULL(generator_template);
 #undef DISABLE_ULL
 
-// QUEUING TEMPLATE 
+// QUEUING TEMPLATE
 template<class T, distribution Dist, template<class> class GeneratorTemplate, class ConfigProvider>
 void queue_one(primbench::executor& executor,
                size_t               dimensions,
@@ -209,8 +209,7 @@ extern "C" float {{algo_name}}_wrapper(
     
     double total = 0.0;
     for(double x : bps)
-        total += (1000.0 * primbench::GiB) / x;   
-    
+        total += (1000.0 * primbench::GiB) / x;    
     return total / static_cast<double>(bps.size());
     {% endblock %}
 

@@ -188,8 +188,8 @@ class BaseTuner(ABC):
     
     def _get_tune_params(self) -> OrderedDict:
         params = OrderedDict()
-        params['block_size_x'] = BLOCK_SIZES
-        params['grid_size'] = GRID_SIZES
+        params["block_size_x"] = BLOCK_SIZES
+        params["grid_size"] = GRID_SIZES
         return params
 
     def _get_restrictions(self) -> Callable[[dict], bool] | List[str]:
@@ -208,8 +208,8 @@ class BaseTuner(ABC):
         """
         min_total_threads = 32768
         def validate(params):
-            threads = params['block_size_x']
-            blocks = params['grid_size']
+            threads = params["block_size_x"]
+            blocks = params["grid_size"]
 
             return threads * blocks >= min_total_threads
 
@@ -221,7 +221,7 @@ class BaseTuner(ABC):
 
     def tune(self) -> None:
         """
-            Run tuning
+        Run tuning
         """
 
         print(f"\nTuning {self.algo_name}")
@@ -248,8 +248,7 @@ class BaseTuner(ABC):
             print(f"Error: {str(e)}")
             raise
 
-    def _run_default_config(
-        self, tune_kernel_args: Dict) -> None:
+    def _run_default_config(self, tune_kernel_args: Dict) -> None:
         """Runs the default configuration if enabled."""
         if self.exclude_default_config or self.simulation_mode:
             return
@@ -263,7 +262,9 @@ class BaseTuner(ABC):
             return
 
         targets = [
-            self.existing_config[k]['arch_name'] for k in self.existing_config if self.existing_config[k]['arch_name'] == target_arch
+            self.existing_config[k]["arch_name"]
+            for k in self.existing_config 
+            if self.existing_config[k]["arch_name"] == target_arch
         ]
         target = None
         if len(targets) > 0:
@@ -281,15 +282,13 @@ class BaseTuner(ABC):
         arch_config = self.existing_config[target]
 
         # Get first matching config
-        config = arch_config['tune_params']
+        config = arch_config["tune_params"]
 
         if config is None:
-            warnings.warn(
-                f"No existing configuration found for {self.algo_name}'"
-            )
+            warnings.warn(f"No existing configuration found for {self.algo_name}'")
             return
 
-        default_tune_params = { k: [v] for k, v in config.items()}
+        default_tune_params = {k: [v] for k, v in config.items()}
 
         # Get the base tuning archs and force set the range of the tune parameters
         # to the single-element lists 'default_tune_params'. We also change the
@@ -370,7 +369,7 @@ class BaseTuner(ABC):
 
     def _get_cache_file_name(self):
         """Return the name of the cache file based on algo name, arch name and key value types"""
-        cache_file_path = f'{self.algo_name}_{self.arch_name}_cache.json'
+        cache_file_path = f"{self.algo_name}_{self.arch_name}_cache.json"
 
         return cache_file_path
 

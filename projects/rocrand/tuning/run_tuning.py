@@ -63,7 +63,12 @@ def import_module_from_file(file_path: str, module_name: str) -> Optional[Module
 
 def get_available_algorithms() -> List[str]:
     """Return list of supported tuning algorithms."""
-    return sorted([re.sub(r'^tuning_|\.py', '', os.path.basename(f)) for f in glob(f'{BASE_DIR}/tuner/tuning_*')])
+    return sorted(
+        [
+            re.sub(r"^tuning_|\.py", "", os.path.basename(f))
+            for f in glob(f"{BASE_DIR}/tuner/tuning_*")
+        ]
+    )
 
 def filter_algorithms(available_algos: List[str], pattern: str) -> List[str]:
     """Filter algorithms based on regex pattern."""

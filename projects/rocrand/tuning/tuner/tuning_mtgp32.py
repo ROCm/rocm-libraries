@@ -30,7 +30,7 @@ from tuner.base_tuner import BaseTuner, TunerArgs
 class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        return TunerArgs(algo_full_name='mtgp32')
+        return TunerArgs(algo_full_name="mtgp32")
 
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
@@ -38,8 +38,8 @@ class Tuner(BaseTuner):
     def _get_restrictions(self):
         min_total_threads = 32768
         def validate(params):
-            threads = params['block_size_x']
-            blocks = params['grid_size']
+            threads = params["block_size_x"]
+            blocks = params["grid_size"]
 
             if threads * blocks < min_total_threads:
                 return False

@@ -30,7 +30,7 @@ from tuner.base_tuner import BaseTuner, TunerArgs
 class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        return TunerArgs(algo_full_name='mt19937')
+        return TunerArgs(algo_full_name="mt19937")
 
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
@@ -40,13 +40,15 @@ class Tuner(BaseTuner):
         mt19937_jumps_radix = 256
         threads_per_generator = 8
         def validate(params):
-            threads = params['block_size_x']
-            blocks = params['grid_size']
+            threads = params["block_size_x"]
+            blocks = params["grid_size"]
 
             if threads * blocks < min_total_threads:
                 return False
 
-            return (threads * blocks) // threads_per_generator <= (mt19937_jumps_radix * mt19937_jumps_radix)
+            return (threads * blocks) // threads_per_generator <= (
+                mt19937_jumps_radix * mt19937_jumps_radix
+            )
 
         return validate
 

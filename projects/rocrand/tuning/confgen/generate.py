@@ -16,7 +16,7 @@ log = logging.getLogger("confgen.generate")
 def make_config(
     type_data: dict[str, ty.Any]):
     import_keys = ["arch_name", "tune_params_keys", "tune_params"]
-    out = {k : type_data[k] for k in import_keys if k in type_data}
+    out = {k: type_data[k] for k in import_keys if k in type_data}
     return out
 
 def main():
@@ -99,7 +99,7 @@ def main():
                     algs[alg][target] = {}
 
                 config = make_config(data)
-                config['tune_params'] = min_configs
+                config["tune_params"] = min_configs
                 # Add config entry
                 algs[alg][target] = config
 
@@ -110,7 +110,7 @@ def main():
         loader=jinja2.FileSystemLoader(script_dir / "templates"),
         autoescape=jinja2.select_autoescape(),
         trim_blocks=True,
-        lstrip_blocks=True
+        lstrip_blocks=True,
     )
 
     # Find existing configs
@@ -131,7 +131,10 @@ def main():
             with open(config_file, "r") as file:
                 existing_data = config_parser.parse_lines(file.readlines())
 
-                merged_targets = {target_hash : make_config(target) for target_hash, target in existing_data.items()}
+                merged_targets = {
+                    target_hash : make_config(target)
+                      for target_hash, target in existing_data.items()
+                }
 
                 for target_hash, config in targets.items():
                     merged_targets[target_hash] = config
@@ -154,7 +157,7 @@ def main():
 
         with open(output_dir / f"{algo_name}_config.hpp", "w") as file:
             file.write(rendered)
-            file.write(f'\n')
+            file.write(f"\n")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
