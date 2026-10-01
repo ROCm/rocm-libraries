@@ -22,6 +22,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+#include "framework/interpolation.hpp"
+
 #include <gtest/gtest.h>
 #include <rpp/rpp.h>
 
@@ -30,7 +32,6 @@ SOFTWARE.
 
 #include "framework/config_param.hpp"
 #include "framework/intensity.hpp"
-#include "framework/interpolation.hpp"
 #include "framework/tensor_setup.hpp"
 
 // Unit tests for framework/interpolation.hpp -- src_texel() and sample().
@@ -455,14 +456,14 @@ TEST(SampleBorderModeTest, NearestOutsideTheRectangleOnEachAxis) {
     EXPECT_DOUBLE_EQ(col(5.0, BorderMode::Reflect101), 1.0);
 
     // The row axis is resolved by the same rule, independently.
-    EXPECT_DOUBLE_EQ(row(-1.0, BorderMode::Replicate), 0.0);   // row 0
-    EXPECT_DOUBLE_EQ(row(4.0, BorderMode::Replicate), 48.0);   // row 3
-    EXPECT_DOUBLE_EQ(row(-1.0, BorderMode::Wrap), 48.0);       // row 3
-    EXPECT_DOUBLE_EQ(row(4.0, BorderMode::Wrap), 0.0);         // row 0
-    EXPECT_DOUBLE_EQ(row(-1.0, BorderMode::Reflect), 0.0);     // row 0
-    EXPECT_DOUBLE_EQ(row(5.0, BorderMode::Reflect), 32.0);     // row 2
-    EXPECT_DOUBLE_EQ(row(-1.0, BorderMode::Reflect101), 16.0); // row 1
-    EXPECT_DOUBLE_EQ(row(4.0, BorderMode::Reflect101), 32.0);  // row 2
+    EXPECT_DOUBLE_EQ(row(-1.0, BorderMode::Replicate), 0.0);    // row 0
+    EXPECT_DOUBLE_EQ(row(4.0, BorderMode::Replicate), 48.0);    // row 3
+    EXPECT_DOUBLE_EQ(row(-1.0, BorderMode::Wrap), 48.0);        // row 3
+    EXPECT_DOUBLE_EQ(row(4.0, BorderMode::Wrap), 0.0);          // row 0
+    EXPECT_DOUBLE_EQ(row(-1.0, BorderMode::Reflect), 0.0);      // row 0
+    EXPECT_DOUBLE_EQ(row(5.0, BorderMode::Reflect), 32.0);      // row 2
+    EXPECT_DOUBLE_EQ(row(-1.0, BorderMode::Reflect101), 16.0);  // row 1
+    EXPECT_DOUBLE_EQ(row(4.0, BorderMode::Reflect101), 32.0);   // row 2
 }
 
 // (3.5, 0.0): v00 = v(3,0) = 3 and v01 = texel (4,0), each at weight 0.5, dy = 0. Under a
@@ -540,12 +541,12 @@ TEST(SampleBorderModeTest, RemappingIsRelativeToTheRoiNotTheImage) {
 // case where Reflect101's period collapses to zero.
 TEST(SampleBorderModeTest, SingleTexelRoi) {
     const Plane<Rpp8u> p = coord_plane();
-    for (BorderMode m : {BorderMode::Replicate, BorderMode::Wrap, BorderMode::Reflect,
-                         BorderMode::Reflect101}) {
+    for (BorderMode m :
+         {BorderMode::Replicate, BorderMode::Wrap, BorderMode::Reflect, BorderMode::Reflect101}) {
         for (double x : {-2.0, 0.0, 1.0, 3.0}) {
-            EXPECT_DOUBLE_EQ(sample(p.data(), p.desc, p.base(), x, 1.0, 1, 1, 2, 2,
-                                    NEAREST_NEIGHBOR, Border{m}),
-                             17.0)
+            EXPECT_DOUBLE_EQ(
+                sample(p.data(), p.desc, p.base(), x, 1.0, 1, 1, 2, 2, NEAREST_NEIGHBOR, Border{m}),
+                17.0)
                 << "x = " << x;
         }
     }
@@ -597,13 +598,13 @@ TEST(SampleTest, LayoutAgnostic) {
     // The same interior golden as InteriorWeights, offset per channel: 44.25 + 100*c.
     const double expected[3] = {44.25, 144.25, 244.25};
     for (Rpp32u c = 0; c < 3; ++c) {
-        EXPECT_DOUBLE_EQ(sample(pkd.data(), pkd.desc, pkd.base(c), 0.25, 2.75, 0, 0, 4, 4, BILINEAR,
-                                kBorder),
-                         expected[c])
+        EXPECT_DOUBLE_EQ(
+            sample(pkd.data(), pkd.desc, pkd.base(c), 0.25, 2.75, 0, 0, 4, 4, BILINEAR, kBorder),
+            expected[c])
             << "PKD3 channel " << c;
-        EXPECT_DOUBLE_EQ(sample(pln.data(), pln.desc, pln.base(c), 0.25, 2.75, 0, 0, 4, 4, BILINEAR,
-                                kBorder),
-                         expected[c])
+        EXPECT_DOUBLE_EQ(
+            sample(pln.data(), pln.desc, pln.base(c), 0.25, 2.75, 0, 0, 4, 4, BILINEAR, kBorder),
+            expected[c])
             << "PLN3 channel " << c;
     }
 }
@@ -616,8 +617,8 @@ TEST(SampleTest, I8OffsetCommutesWithInterpolation) {
     const Plane<Rpp8s> p = make_plane<Rpp8s>(
         DType::I8, Layout::PLN1, [](int x, int y, int) { return kCoordPlane[y][x] - 128; });
 
-    EXPECT_DOUBLE_EQ(sample_full(p, 1.5, 1.5, BILINEAR), 25.5 - 128.0);      // -102.5
-    EXPECT_DOUBLE_EQ(sample_full(p, 0.25, 2.75, BILINEAR), 44.25 - 128.0);   // -83.75
+    EXPECT_DOUBLE_EQ(sample_full(p, 1.5, 1.5, BILINEAR), 25.5 - 128.0);     // -102.5
+    EXPECT_DOUBLE_EQ(sample_full(p, 0.25, 2.75, BILINEAR), 44.25 - 128.0);  // -83.75
     EXPECT_DOUBLE_EQ(sample_full(p, 2.0, 1.0, NEAREST_NEIGHBOR), 18.0 - 128.0);
 }
 
