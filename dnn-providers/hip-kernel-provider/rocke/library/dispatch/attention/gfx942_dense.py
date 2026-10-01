@@ -108,14 +108,14 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
     variant. Which config gets which lever, and why, is the table in
     ``builders/gfx942/attention/prefill/README.md``.
 
-    When ``Gfx942AttentionDenseSpec.runtime_shape`` holds (not persistent and no
-    sliding window), the body reads ``batch``, ``seqlen_q``, ``seqlen_kv``,
+    When ``Gfx942AttentionDenseSpec.runtime_shape`` holds (not persistent; sliding
+    window included), the body reads ``batch``, ``seqlen_q``, ``seqlen_kv``,
     ``num_query_heads``, and ``num_kv_heads`` from kernel params
     (``spec.runtime_param_fields``). ``signature`` is ``attention_dense_signature``,
     which appends those five i32s after ``scale``, and ``bind_torch`` launches
     through ``run_attention_dense_torch``, which packs them via
-    ``attention_dense_runtime_args``. The persistent and sliding-window bodies
-    declare no shape params and keep the shape in the kernel name.
+    ``attention_dense_runtime_args``. The persistent body declares no shape params
+    and keeps the shape in the kernel name.
     """
 
     return make_dense_candidate(
