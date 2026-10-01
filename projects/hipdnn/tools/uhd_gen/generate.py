@@ -209,6 +209,27 @@ def one_measurement_per_shape(measured: list) -> tuple[list, int]:
     return kept, len(measured) - len(kept)
 
 
+def exposed_axes(shipping_knobs) -> set:
+    """The kernel columns a shipped catalog ranker may rank on: the shipping UED's knobs.
+
+    The collection UED exposes every KMD field, so each catalog entry is reachable while
+    measuring; the UED that ships does not, and the runtime refuses a model ranking on a field
+    it does not expose (RFC 0019 §6.3, UhdKernelHeuristic.hpp) -- the engine then ranks by
+    priority and nothing says the model was dropped except a log line.
+    """
+    return {"kernel." + knob for knob in shipping_knobs or []}
+
+
+def refuse_unexposed_axes(signature, kernel_fields, shipping_knobs) -> None:
+    """Refuse a recipe ranking on a kernel field the shipping UED does not expose."""
+    unexposed = sorted({ref[1:] for ref in signature_references(signature)}
+                       & set(kernel_fields) - exposed_axes(shipping_knobs))
+    if unexposed:
+        raise ValueError(f"the features rank on {unexposed}, which the shipping UED does not "
+                         f"expose as knobs {sorted(shipping_knobs or [])}; the runtime would refuse "
+                         "the model (RFC 0019 §6.3) and rank by priority instead")
+
+
 def load_collections(paths: list, *, role: str, sources: list) -> dict:
     """Merge recorded collections into one measurement per shape, the newest winning.
 
@@ -766,6 +787,7 @@ def run_generate(args: argparse.Namespace) -> int:
         provenance, kernel_fields = measured["provenance"], measured["kernel_fields"]
         knob_encodings = measured["knob_encodings"]
         shipping_knobs, collection_knobs = measured["shipping_knobs"], measured["collection_knobs"]
+        shipped_axes = exposed_axes(shipping_knobs)
 
         # One corpus per source, named plainly when there is only one.
         def staged(stem: str, source) -> str:
@@ -855,11 +877,17 @@ def run_generate(args: argparse.Namespace) -> int:
             scalar_columns = [name for name in sorted(published)
                               if train_frame[name].notna().all()
                               and train_frame[name].map(lambda value: isinstance(value, (str, int, float, bool))).all()]
+            # Of the kernel fields, only the shipping UED's knobs: the collection exposed every
+            # KMD field so each catalog entry was reachable, but the runtime refuses a model
+            # ranking on a field its UED does not expose as a knob (RFC 0019 §6.3,
+            # UhdKernelHeuristic.hpp), and keeps ranking by priority.
             legal_kernel_fields = {name for name in scalar_columns
-                                   if name.split("[", 1)[0] in kernel_fields}
+                                   if name.split("[", 1)[0] in kernel_fields
+                                   and name.split("[", 1)[0] in shipped_axes}
             signature, omitted = propose_features(train_frame[scalar_columns], legal_kernel_fields, pairs)
         if not isinstance(signature, list) or not signature:
             raise ValueError("the feature recipe must be a nonempty canonical array")
+        refuse_unexposed_axes(signature, kernel_fields, shipping_knobs)
         if immediate:
             validate_signature(signature, published)
         unknown = {ref[1:] for ref in signature_references(signature)} - published

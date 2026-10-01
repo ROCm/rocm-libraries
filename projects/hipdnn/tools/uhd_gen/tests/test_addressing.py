@@ -124,3 +124,17 @@ def test_load_collections_trains_shards_whose_tables_differ_only_by_what_they_sa
                   [candidate({"dtype": 1}, {"dtype": "FP16"})])))]
     merged = load_collections(shards, role="sort_kernel_catalog", sources=[None])
     assert [v["value"] for v in merged["knob_encodings"]["dtype"]["values"]] == ["BF16", "FP16"]
+
+
+def test_a_catalog_ranker_may_rank_only_on_what_the_shipping_ued_exposes():
+    """The runtime drops a model ranking on a non-knob field; training must not produce one."""
+    from uhd_gen.features import build_features_signature
+    from uhd_gen.generate import exposed_axes, refuse_unexposed_axes
+
+    kernel_fields = {"kernel.dtype", "kernel.block_m"}
+    assert exposed_axes(["block_m"]) == {"kernel.block_m"}
+    refuse_unexposed_axes(build_features_signature(["kernel.block_m", "q.seqlen"]),
+                          kernel_fields, ["block_m"])
+    with pytest.raises(ValueError, match=r"\['kernel.dtype'\].*does not expose"):
+        refuse_unexposed_axes(build_features_signature(["kernel.dtype", "kernel.block_m"]),
+                              kernel_fields, ["block_m"])
