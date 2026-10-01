@@ -120,3 +120,61 @@ def test_report_gdn_dispatcher_default_keeps_fastest_default(capsys):
         "  default / fastest = 1.000x",
         "  manual review: retain DEFAULT_TILE",
     ]
+
+
+def test_main_flags_kda_cells_with_equal_work_and_different_best_tiles(
+    monkeypatch, capsys
+):
+    """Equal batch * Hv must pick one tile, or the work-keyed table is invalid."""
+    shipped = (4, 16, 4)
+    monkeypatch.setattr(tune, "device_is_visible", lambda: True)
+    monkeypatch.setattr(
+        tune,
+        "dispatch_gdn_decode",
+        lambda request: SimpleNamespace(
+            spec=SimpleNamespace(
+                num_warps=shipped[0],
+                warp_threads_k=shipped[1],
+                blocks_per_v_dim=shipped[2],
+                num_v_heads=request.num_v_heads,
+            )
+        ),
+    )
+    monkeypatch.setattr(tune, "legal_configs", lambda base: [])
+
+    # Hv=32 cells win with the shipped tile; Hv=16 cells win with another tile
+    # and never measure the shipped one.
+    def fake_sweep(base, batch, configs):
+        if base.num_v_heads == 32:
+            return [(1.0, shipped, 0.0)]
+        return [(1.0, (1, 16, 4), 0.0)]
+
+    monkeypatch.setattr(tune, "sweep_batch", fake_sweep)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "tune.py",
+            "--gate-kind",
+            "kda",
+            "--geometries",
+            "16/32,8/16",
+            "--batches",
+            "4,8",
+        ],
+    )
+
+    assert tune.main() == 0
+    lines = capsys.readouterr().out.splitlines()
+    # work 128 = 4x32 (shipped wins) and 8x16 (other tile wins).
+    work_128 = next(line for line in lines if line.lstrip().startswith("128 "))
+    assert "4x32 8x16" in work_128
+    assert "TILES DISAGREE" in work_128
+    # work 64 (4x16) and 256 (8x32) each have a single cell, so no flag.
+    assert sum("TILES DISAGREE" in line for line in lines) == 1
+    assert "WARNING: work alone did not fix the best tile at 1 work value(s)." in (
+        "\n".join(lines)
+    )
+    assert (
+        sum("dispatcher default (4, 16, 4) is NOT in the" in line for line in lines)
+        == 2
+    )

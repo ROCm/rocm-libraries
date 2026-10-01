@@ -30,7 +30,7 @@ import sys
 
 
 from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode, dispatch_gdn_decode_all
-from dispatch.gdn.gfx950 import BLOCKS_PER_V_DIM, NUM_WARPS, WARP_THREADS_K
+from dispatch.gdn.gfx950 import BLOCKS_PER_V_DIM, NUM_WARPS, WARP_THREADS_K, work_for
 from kernels.gfx950.gdn_decode import GdnDecodeSpec, is_valid_spec
 
 ARCH = "gfx950"
@@ -235,6 +235,33 @@ def report_gdn_dispatcher_default(rows, auto_id: str) -> None:
     raise RuntimeError(f"dispatcher-selected GDN spec {auto_id!r} was not measured")
 
 
+def report_kda_work_keying(by_work) -> None:
+    """Check that cells sharing ``batch * num_v_heads`` pick the same best tile.
+
+    ``_TUNED_TILES_KDA`` is keyed on work alone. Cells with equal work but a
+    different (batch, num_v_heads) split are the evidence for or against that
+    key: a disagreement invalidates the table's key, not just one value.
+    """
+    print("\n=== KDA work -> best tile, across geometries ===")
+    print(f"{'work':>7}  {'best tile':16} {'us':>9}  cells (batch x Hv)")
+    disagreements = 0
+    for work in sorted(by_work):
+        cells = by_work[work]
+        tiles = {cell[1] for cell in cells}
+        fastest = min(cells)
+        cell_text = " ".join(f"{batch}x{hv}" for _, _, batch, hv in cells)
+        flag = "" if len(tiles) == 1 else "   <-- TILES DISAGREE"
+        disagreements += len(tiles) > 1
+        print(f"{work:>7}  {str(fastest[1]):16} {fastest[0]:9.3f}  {cell_text}{flag}")
+    if disagreements:
+        print(
+            f"\nWARNING: work alone did not fix the best tile at {disagreements} "
+            "work value(s). Check whether the disagreeing times sit inside "
+            "run-to-run variation; if they do not, _TUNED_TILES_KDA must not be "
+            "keyed on work."
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -266,6 +293,7 @@ def main() -> int:
         for item in args.geometries.split(",")
     ]
     failed = False
+    by_work = {}  # KDA work -> [(us, best tile, batch, num_v_heads), ...]
     for num_k_heads, num_v_heads in geometries:
         for batch in batches:
             request = GdnDecodeRequest(
@@ -300,6 +328,14 @@ def main() -> int:
                 for micros, tile, err in rows[: args.top]:
                     mark = " <- dispatcher default" if tile == auto_tile else ""
                     print(f"  {micros:9.3f}us tile={tile} err={err:.2e}{mark}")
+                if all(tile != auto_tile for _, tile, _ in rows):
+                    print(
+                        f"  dispatcher default {auto_tile} is NOT in the "
+                        "correct-and-timeable set for this cell"
+                    )
+                by_work.setdefault(work_for(batch, num_v_heads), []).append(
+                    (rows[0][0], rows[0][1], batch, num_v_heads)
+                )
                 continue
 
             results = dispatch_gdn_decode_all(request)
@@ -320,6 +356,8 @@ def main() -> int:
                 print(f"  {micros:9.3f}us  {spec_id} tile={tile} err={err:.2e}{mark}")
             report_gdn_dispatcher_default(rows, auto_id)
 
+    if by_work:
+        report_kda_work_keying(by_work)
     print(
         "\nDispatcher default is deterministic; measurements do not change selection."
     )

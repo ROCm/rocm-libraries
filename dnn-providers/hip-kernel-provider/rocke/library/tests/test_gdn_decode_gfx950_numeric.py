@@ -131,18 +131,26 @@ def test_simple_reference_path_matches(harness):
     assert max(out_err, state_err) <= harness["TOL"]
 
 
-def _assert_dispatch_result_matches_fp32(harness, result, batch):
-    """Compile and launch one dispatch result, including state-pool safety."""
+def _assert_dispatch_result_matches_fp32(harness, result, batch, launchers):
+    """Compile and launch one dispatch result, including state-pool safety.
+
+    ``launchers`` caches by ``compile_key``: the binary depends on arch, ABI and
+    spec only, so every batch that selects the same spec reuses one compile.
+    Only the launch grid changes with batch.
+    """
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
 
     spec = result.spec
-    artifact = compile_kernel(result.build(), arch=ARCH)
-    launcher = KernelLauncher(
-        hsaco=artifact.hsaco,
-        kernel_name=artifact.kernel_name,
-        signature=result.signature,
-    )
+    key = result.kernel_id.compile_key
+    if key not in launchers:
+        artifact = compile_kernel(result.build(), arch=ARCH)
+        launchers[key] = KernelLauncher(
+            hsaco=artifact.hsaco,
+            kernel_name=artifact.kernel_name,
+            signature=result.signature,
+        )
+    launcher = launchers[key]
     inputs = harness["make_inputs"](spec, batch)
     before = inputs["state"].clone()
     values, _ = harness["prepare"](spec, inputs, batch)
@@ -181,6 +189,7 @@ def test_all_registry_candidates_are_correct(harness, request):
         else [1, 16, 64, 256]
     )
     selected_id = request.config.getoption("--gdn-spec-id")
+    launchers = {}
     for batch in batches:
         results = dispatch_gdn_decode_all(GdnDecodeRequest(batch=batch, arch=ARCH))
         if selected_id:
@@ -191,7 +200,9 @@ def test_all_registry_candidates_are_correct(harness, request):
         else:
             assert len(results) == 54
         for result in results:
-            _assert_dispatch_result_matches_fp32(harness, result, batch)
+            _assert_dispatch_result_matches_fp32(harness, result, batch, launchers)
+    # One compile per spec, shared by every batch; the key must not merge specs.
+    assert len(launchers) == len(results)
 
 
 @requires_gfx950
@@ -204,7 +215,7 @@ def test_all_d64_registry_candidates_are_correct(harness):
     )
     assert len(results) == 20
     for result in results:
-        _assert_dispatch_result_matches_fp32(harness, result, batch=1)
+        _assert_dispatch_result_matches_fp32(harness, result, batch=1, launchers={})
 
 
 @requires_gfx950
