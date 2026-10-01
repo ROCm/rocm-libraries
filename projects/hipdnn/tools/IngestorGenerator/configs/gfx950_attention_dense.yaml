@@ -3,13 +3,23 @@
 # The descriptors under
 # dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_attention_dense/
 # and src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDensePacks.cpp
-# are generated from this file. After editing it, regenerate from the
-# IngestorGenerator root and copy exactly those files into the provider:
+# are generated from this file. Generation mints fresh UUIDs on every run, so never
+# copy a regenerated descriptor directory over the live one: that replaces every
+# retained id, which extend.md forbids. After editing this file, render into an empty
+# scratch directory from the IngestorGenerator root and splice only the additions
+# (tools/splice_additions.py refuses, writing nothing, if a retained entry changed):
+#     PROVIDER=../../../../dnn-providers/hip-kernel-provider
+#     LIVE=$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_attention_dense
 #     .venv/bin/python generate.py --config configs/gfx950_attention_dense.yaml \
-#         --output-dir <scratch> --force
+#         --output-dir <scratch>
+#     .venv/bin/python tools/splice_additions.py \
+#         --scratch <scratch>/descriptors/rocKE/gfx950_attention_dense --live "$LIVE"
+# The generated tests/TestGfx950AttentionDensePacks.cpp carries no UUIDs and is
+# already in the provider's clang-format form; copy it over the live census test.
 # The generated packs/Gfx950AttentionDenseNative.cpp and
 # tests/TestGfx950AttentionDenseMatchers.cpp are stubs; the provider's copies are
-# hand-maintained and must not be overwritten.
+# hand-maintained and must not be overwritten. See
+# projects/hipdnn/tools/ai/skills/hipdnn-ingestor-engine/extend.md.
 #
 # The kernel is the dense flash-attention prefill from
 # rocke/library/kernels/gfx950/attention_dense.py, in the PACKAGED dialect: hkp_pack
@@ -22,8 +32,10 @@
 # seqlen_kv, num_query_heads, num_kv_heads, head_size) are MANDATORY: hkp_pack hydrates
 # with Spec(**fields), so a missing one is a TypeError at pack time.
 #
-# Verify the builder before packing, from the IngestorGenerator root so
-# `codegen` is importable:
+# Verify the builder before packing, from the IngestorGenerator root so `codegen` is
+# importable, with the rocKE library on PYTHONPATH:
+#     PROVIDER=../../../../dnn-providers/hip-kernel-provider
+#     PYTHONPATH="$PROVIDER/rocke/library:$PROVIDER/rocke/platform/python" \
 #     .venv/bin/python -c "from codegen.sources import introspect; \
 #         print(introspect('kernels/gfx950/attention_dense.py', \
 #                          'build_attention_dense').signature_error or 'OK')"

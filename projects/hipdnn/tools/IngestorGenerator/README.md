@@ -6,7 +6,8 @@ matcher-test stub, and five CMake/registration text fragments. It follows
 `projects/hipdnn/tools/DescriptorGenerator`'s conventions with two deviations:
 `undefined=StrictUndefined`, so an unset UUID cross-reference fails at generation time,
 and a required `--force` to overwrite a non-empty output directory. Generate into scratch
-space, including when extending an engine, and splice addition-only.
+space, including when extending an engine, and splice addition-only with
+`tools/splice_additions.py` (see [Extending a live engine](#extending-a-live-engine)).
 
 Generation is toolchain-free and issues **no compiler evidence**: a complete integration
 also needs artifact agreement, real native loading and engine-attributed numerical device
@@ -29,6 +30,18 @@ cd projects/hipdnn/tools/IngestorGenerator
 
 Name the interpreter by absolute path; `python3` resolves through `PATH`. On a Windows
 checkout every `.venv/bin/<tool>` below is `.venv/Scripts/<tool>.exe`.
+
+Introspecting a rocKE builder (`codegen.sources.introspect`, and every config or tool that
+resolves a `kernel_source.kind: rocke` builder) imports the kernel module, so the rocKE
+library must be on `PYTHONPATH`. From this directory, for the in-tree provider:
+
+```bash
+PROVIDER=../../../../dnn-providers/hip-kernel-provider
+export PYTHONPATH="$PROVIDER/rocke/library:$PROVIDER/rocke/platform/python"
+```
+
+Without it the import fails with `RockeIntrospectionError: module not importable ...
+No module named 'kernels'`. On Windows the separator is `;`.
 
 ### The optional archive dependency
 
@@ -70,6 +83,45 @@ fails loudly, because naming one is a request to run the class. See the
 
 Exit codes: `0` success; `1` on a `ConfigError` or a template-rendering failure;
 `2` from argparse itself on a bad flag.
+
+### Extending a live engine
+
+Generation mints fresh UUIDs on every run, so never copy a scratch descriptor directory
+over a live one: that replaces every retained identity, which
+[extend.md](../ai/skills/hipdnn-ingestor-engine/extend.md) forbids. Render the edited
+config into an empty scratch directory, then splice only the additions:
+
+```bash
+.venv/bin/python tools/splice_additions.py \
+    --scratch <scratch>/descriptors/<producer>/<bundle> \
+    --live <provider>/src/engines/kernel_ingestor_engine/descriptors/<producer>/<bundle> \
+    --report splice_report.json      # add --check to verify without writing
+```
+
+The tool pairs documents by file name and kernel entries by `name`, maps every scratch UUID
+to its live twin, and refuses (exit 1, nothing written) if a live file or kernel is missing
+from scratch, or if any retained document or kernel differs beyond that UUID map. New
+kernel entries are appended after the live ones with their new ids; a scratch-only file
+(for example a new pack's KDP) is written whole with its references remapped. Retained
+bytes and line endings are kept, so the KDP change is a pure insertion.
+
+The generated census test (`tests/Test<Name>Packs.cpp`) carries no UUIDs and is emitted in
+the provider's clang-format form, so copy it over the live one. The native and matcher
+stubs are never copied over hand-maintained files.
+
+Review descriptor diffs with `--diff-algorithm=histogram` (or `patience`). Kernel entries
+are near-identical blocks, and Git's default (Myers) algorithm can pair the wrong ones:
+inserting 52 entries between existing ones in the 840-entry gfx950 KDP reads as 5249
+insertions and 2493 deletions by default, and as 2756 insertions and 0 deletions under
+histogram or patience. To make that the default for KDPs in your clone only:
+
+```bash
+git config diff.kdp.algorithm histogram
+echo '*.kdp.json diff=kdp' >> "$(git rev-parse --git-path info/attributes)"
+```
+
+The splice tool appends rather than interleaves, so its output reads as pure insertion
+under every algorithm.
 
 ## Output
 
@@ -128,7 +180,10 @@ would make an arch-gated matcher test vacuous everywhere except CI's own arch
 registration/loading path against the finalized emitted inventory: pack/kernel identities,
 counts, SDK version and runtime source kind come from the actual output, after
 normalization and deduplication. Packaged runtime source kind is KPACK, not the authored
-builder kind.
+builder kind. The file is emitted in the form the provider's `.clang-format` (pre-commit
+pins clang-format 18.1.4) produces, so a copy is not reformatted later;
+`tests/test_packs_formatting.py` checks the shipped gfx950 config against the live file and,
+with `HIPDNN_CLANG_FORMAT` naming a binary, every shipped config against clang-format.
 
 **The census lives in its own binary.** `Test<Name>Packs.cpp` is spliced into
 `hip_kernel_provider_census_tests`; the generated matcher test stays in the ordinary
@@ -304,6 +359,8 @@ machine.
 | `tools/reconcile_applicability.py` | Does this engine decline anything the reference library serves? | `reconcile_applicability.py --profile P --shapes S [--declines D]` |
 | `tools/mine_shapes.py` | Build the shape corpus, refusing categoricals it does not recognise. | see `--help` |
 | `tools/field_audit.py` | Which schema fields are never named as an accessor call in the native sources? A lexical inventory bounding the unchecked set | `field_audit.py SCHEMA.fbs SOURCE...`; prints `UNCHECKED: <field>` per unreferenced field and exits 1. Exits 2 on a schema that parses to zero fields, so an unparsed schema cannot read as a clean audit |
+| `tools/splice_additions.py` | Is a scratch render an addition-only change of the live engine, and what does it add? Applies only the additions | `splice_additions.py --scratch S --live L [--report R] [--check]`; see [Extending a live engine](#extending-a-live-engine). Exit 1 on any conflict, with nothing written |
+| `tools/inventory.py` | What does an installed (or authored) tree hold for one engine: kernels per KDP, source kinds, distinct metadata tuples, catalog digest, validator verdict? | `inventory.py ROOT --engine E [--group-by F1,F2] [--validator V] [--json J]`. Counts come from `kernelDescriptors`; a KDP without that key fails. The digest is RUNBOOK stage 8's recipe over the engine's bundle directory. Validator diagnostics are folded per message, so a warning repeated once per kernel is one line |
 
 A green tool proves only the properties it checked: missing, unsupported or mismatched
 required evidence fails full agreement, and structural-only results satisfy no
@@ -536,7 +593,8 @@ The floor covers `codegen/` alone. `tools/` and `generate.py` sit outside the co
 `source`: the tools are gated by the suites that drive each script as a subprocess
 (`tests/test_sweep_tools.py`, `tests/test_launch_surface.py`, `tests/test_coverage_gate.py`,
 `tests/test_verify_variant_sets.py`, `tests/test_device_probe.py`,
-`tests/test_dispatch_parity.py`), and the spawned CLI is traced only under
+`tests/test_dispatch_parity.py`, `tests/test_splice_additions.py`,
+`tests/test_inventory.py`), and the spawned CLI is traced only under
 `COVERAGE_PROCESS_START` plus a `coverage.process_startup()` `.pth`.
 
 The suite exercises descriptor identities, declaration carriage, semantic deduplication,

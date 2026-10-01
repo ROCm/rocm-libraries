@@ -49,7 +49,8 @@ directory outside product source.
 ## 1. Entry and early feasibility
 
 Record the entry contract; for extend, inventory the installed baseline per
-[extend.md](extend.md). Select `direct_load` or `packaged` before staging files.
+[extend.md](extend.md) with `"$PY" "$GEN/tools/inventory.py"` (the command is there).
+Select `direct_load` or `packaged` before staging files.
 Establish representability and a capable independent numerical reference using
 [graph-contract.md](graph-contract.md); a reference's skip is not verification, and
 unavailable semantics require an explicit scope/reference decision.
@@ -154,8 +155,20 @@ compiler evidence. Full artifact checking belongs after packing.
 
 Implement [native-pack.md](native-pack.md)'s referenced hooks and behavioral tests.
 Extensions remap scratch references and copy only additions per [extend.md](extend.md),
-including consumer IDs in shared KDP or per-UKD specialization declarations. Never edit
-packed evidence to match a changed descriptor; rebuild from authored inputs.
+including consumer IDs in shared KDP or per-UKD specialization declarations. For
+descriptors, `tools/splice_additions.py` does this and refuses any change to a retained
+entry:
+
+```bash
+"$PY" "$GEN/tools/splice_additions.py" \
+  --scratch "$GENERATED/descriptors/<producer>/<bundle>" \
+  --live "$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/<producer>/<bundle>" \
+  --report <evidence-dir>/splice_report.json
+```
+
+Copy the generated census test whole; it carries no UUIDs. Review the KDP diff with
+`git diff --diff-algorithm=histogram`. Never edit packed evidence to match a changed
+descriptor; rebuild from authored inputs.
 
 Apply fragments to their actual consumers, preserving unrelated entries:
 
