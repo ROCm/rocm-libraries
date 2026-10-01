@@ -634,11 +634,11 @@ rocblas_status rocblas_internal_syr2k_her2k_template(rocblas_handle    handle,
         i_diag = i_nb * nb; // diag block at c[i_diag, i_diag], size is nb
 
         // clang-format off
-        rocblas_internal_syr2k_her2k_non_recursive_template<API_INT, MIN_NB, BATCHED, TWOK, HERK>(
+        RETURN_IF_ROCBLAS_ERROR((rocblas_internal_syr2k_her2k_non_recursive_template<API_INT, MIN_NB, BATCHED, TWOK, HERK>(
                 handle, uplo, trans, nb, k, alpha,
                 dA, OFFSET_A(i_diag),         lda, stride_a,
                 dB, OFFSET_B(i_diag),         ldb, stride_b,
-                dC, OFFSET_C(i_diag, i_diag), ldc, stride_c, batch_count);
+                dC, OFFSET_C(i_diag, i_diag), ldc, stride_c, batch_count)));
         // clang-format on
     }
 
@@ -649,11 +649,11 @@ rocblas_status rocblas_internal_syr2k_her2k_template(rocblas_handle    handle,
         n_diag = n - i_diag;
 
         // clang-format off
-        rocblas_internal_syr2k_her2k_non_recursive_template<API_INT, MIN_NB, BATCHED, TWOK, HERK>(
+        RETURN_IF_ROCBLAS_ERROR((rocblas_internal_syr2k_her2k_non_recursive_template<API_INT, MIN_NB, BATCHED, TWOK, HERK>(
                 handle, uplo, trans, n_diag, k, alpha,
                 dA, OFFSET_A(i_diag),         lda, stride_a,
                 dB, OFFSET_B(i_diag),         ldb, stride_b,
-                dC, OFFSET_C(i_diag, i_diag), ldc, stride_c, batch_count);
+                dC, OFFSET_C(i_diag, i_diag), ldc, stride_c, batch_count)));
         // clang-format on
     }
 

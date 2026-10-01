@@ -181,100 +181,102 @@ rocblas_status rocblas_internal_trsv_left(rocblas_handle    handle,
         {
             // left, lower no-transpose
             jb = std::min(BLOCK, m);
-            rocblas_internal_gemv_launcher(handle,
-                                           transA,
-                                           jb,
-                                           jb,
-                                           &alpha_1<T>,
-                                           0,
-                                           invA,
-                                           offset_invAin,
-                                           BLOCK,
-                                           stride_invA,
-                                           (U)B,
-                                           offset_Bin,
-                                           incx,
-                                           stride_B,
-                                           &beta_0<T>,
-                                           0,
-                                           X,
-                                           0,
-                                           1,
-                                           stride_X,
-                                           batch_count);
+            RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemv_launcher(handle,
+                                                                    transA,
+                                                                    jb,
+                                                                    jb,
+                                                                    &alpha_1<T>,
+                                                                    0,
+                                                                    invA,
+                                                                    offset_invAin,
+                                                                    BLOCK,
+                                                                    stride_invA,
+                                                                    (U)B,
+                                                                    offset_Bin,
+                                                                    incx,
+                                                                    stride_B,
+                                                                    &beta_0<T>,
+                                                                    0,
+                                                                    X,
+                                                                    0,
+                                                                    1,
+                                                                    stride_X,
+                                                                    batch_count)));
 
             if(BLOCK < m)
             {
-                rocblas_internal_gemv_launcher(handle,
-                                               transA,
-                                               m - BLOCK,
-                                               BLOCK,
-                                               &alpha_negative_one<T>,
-                                               0,
-                                               A,
-                                               offset_Ain + BLOCK,
-                                               lda,
-                                               stride_A,
-                                               (U)X,
-                                               0,
-                                               1,
-                                               stride_X,
-                                               &beta_1<T>,
-                                               0,
-                                               B,
-                                               offset_Bin + BLOCK * incx,
-                                               incx,
-                                               stride_B,
-                                               batch_count);
+                RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemv_launcher(handle,
+                                                                        transA,
+                                                                        m - BLOCK,
+                                                                        BLOCK,
+                                                                        &alpha_negative_one<T>,
+                                                                        0,
+                                                                        A,
+                                                                        offset_Ain + BLOCK,
+                                                                        lda,
+                                                                        stride_A,
+                                                                        (U)X,
+                                                                        0,
+                                                                        1,
+                                                                        stride_X,
+                                                                        &beta_1<T>,
+                                                                        0,
+                                                                        B,
+                                                                        offset_Bin + BLOCK * incx,
+                                                                        incx,
+                                                                        stride_B,
+                                                                        batch_count)));
 
                 // remaining blocks
                 for(i = BLOCK; i < m; i += BLOCK)
                 {
                     jb = std::min(m - i, BLOCK);
 
-                    rocblas_internal_gemv_launcher(handle,
-                                                   transA,
-                                                   jb,
-                                                   jb,
-                                                   &alpha_1<T>,
-                                                   0,
-                                                   invA,
-                                                   offset_invAin + i * BLOCK,
-                                                   BLOCK,
-                                                   stride_invA,
-                                                   (U)B,
-                                                   offset_Bin + i * incx,
-                                                   incx,
-                                                   stride_B,
-                                                   &beta_0<T>,
-                                                   0,
-                                                   X,
-                                                   i,
-                                                   1,
-                                                   stride_X,
-                                                   batch_count);
+                    RETURN_IF_ROCBLAS_ERROR(
+                        (rocblas_internal_gemv_launcher(handle,
+                                                        transA,
+                                                        jb,
+                                                        jb,
+                                                        &alpha_1<T>,
+                                                        0,
+                                                        invA,
+                                                        offset_invAin + i * BLOCK,
+                                                        BLOCK,
+                                                        stride_invA,
+                                                        (U)B,
+                                                        offset_Bin + i * incx,
+                                                        incx,
+                                                        stride_B,
+                                                        &beta_0<T>,
+                                                        0,
+                                                        X,
+                                                        i,
+                                                        1,
+                                                        stride_X,
+                                                        batch_count)));
                     if(i + BLOCK < m)
-                        rocblas_internal_gemv_launcher(handle,
-                                                       transA,
-                                                       m - i - BLOCK,
-                                                       BLOCK,
-                                                       &alpha_negative_one<T>,
-                                                       0,
-                                                       A,
-                                                       offset_Ain + i + BLOCK + i * lda,
-                                                       lda,
-                                                       stride_A,
-                                                       (U)X,
-                                                       i,
-                                                       1,
-                                                       stride_X,
-                                                       &beta_1<T>,
-                                                       0,
-                                                       B,
-                                                       offset_Bin + (i + BLOCK) * incx,
-                                                       incx,
-                                                       stride_B,
-                                                       batch_count);
+                        RETURN_IF_ROCBLAS_ERROR(
+                            (rocblas_internal_gemv_launcher(handle,
+                                                            transA,
+                                                            m - i - BLOCK,
+                                                            BLOCK,
+                                                            &alpha_negative_one<T>,
+                                                            0,
+                                                            A,
+                                                            offset_Ain + i + BLOCK + i * lda,
+                                                            lda,
+                                                            stride_A,
+                                                            (U)X,
+                                                            i,
+                                                            1,
+                                                            stride_X,
+                                                            &beta_1<T>,
+                                                            0,
+                                                            B,
+                                                            offset_Bin + (i + BLOCK) * incx,
+                                                            incx,
+                                                            stride_B,
+                                                            batch_count)));
                 }
             }
         }
@@ -285,100 +287,102 @@ rocblas_status rocblas_internal_trsv_left(rocblas_handle    handle,
             i  = m - jb;
 
             // if m=n=35=lda=ldb, BLOCK =32, then jb = 3, i = 32; {3, 35, 3, 32, 35, 35}
-            rocblas_internal_gemv_launcher(handle,
-                                           transA,
-                                           jb,
-                                           jb,
-                                           &alpha_1<T>,
-                                           0,
-                                           invA,
-                                           offset_invAin + i * BLOCK,
-                                           BLOCK,
-                                           stride_invA,
-                                           (U)B,
-                                           offset_Bin + i * incx,
-                                           incx,
-                                           stride_B,
-                                           &beta_0<T>,
-                                           0,
-                                           X,
-                                           i,
-                                           1,
-                                           stride_X,
-                                           batch_count);
+            RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemv_launcher(handle,
+                                                                    transA,
+                                                                    jb,
+                                                                    jb,
+                                                                    &alpha_1<T>,
+                                                                    0,
+                                                                    invA,
+                                                                    offset_invAin + i * BLOCK,
+                                                                    BLOCK,
+                                                                    stride_invA,
+                                                                    (U)B,
+                                                                    offset_Bin + i * incx,
+                                                                    incx,
+                                                                    stride_B,
+                                                                    &beta_0<T>,
+                                                                    0,
+                                                                    X,
+                                                                    i,
+                                                                    1,
+                                                                    stride_X,
+                                                                    batch_count)));
 
             if(i >= BLOCK)
             {
-                rocblas_internal_gemv_launcher(handle,
-                                               transA,
-                                               i,
-                                               jb,
-                                               &alpha_negative_one<T>,
-                                               0,
-                                               A,
-                                               offset_Ain + i * lda,
-                                               lda,
-                                               stride_A,
-                                               (U)X,
-                                               i,
-                                               1,
-                                               stride_X,
-                                               &beta_1<T>,
-                                               0,
-                                               B,
-                                               offset_Bin,
-                                               incx,
-                                               stride_B,
-                                               batch_count);
+                RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemv_launcher(handle,
+                                                                        transA,
+                                                                        i,
+                                                                        jb,
+                                                                        &alpha_negative_one<T>,
+                                                                        0,
+                                                                        A,
+                                                                        offset_Ain + i * lda,
+                                                                        lda,
+                                                                        stride_A,
+                                                                        (U)X,
+                                                                        i,
+                                                                        1,
+                                                                        stride_X,
+                                                                        &beta_1<T>,
+                                                                        0,
+                                                                        B,
+                                                                        offset_Bin,
+                                                                        incx,
+                                                                        stride_B,
+                                                                        batch_count)));
 
                 // remaining blocks
                 for(i = m - jb - BLOCK; i >= 0; i -= BLOCK)
                 {
                     //{32, 35, 32, 32, 35, 35}
-                    rocblas_internal_gemv_launcher(handle,
-                                                   transA,
-                                                   BLOCK,
-                                                   BLOCK,
-                                                   &alpha_1<T>,
-                                                   0,
-                                                   invA,
-                                                   offset_invAin + i * BLOCK,
-                                                   BLOCK,
-                                                   stride_invA,
-                                                   (U)B,
-                                                   offset_Bin + i * incx,
-                                                   incx,
-                                                   stride_B,
-                                                   &beta_0<T>,
-                                                   0,
-                                                   X,
-                                                   i,
-                                                   1,
-                                                   stride_X,
-                                                   batch_count);
+                    RETURN_IF_ROCBLAS_ERROR(
+                        (rocblas_internal_gemv_launcher(handle,
+                                                        transA,
+                                                        BLOCK,
+                                                        BLOCK,
+                                                        &alpha_1<T>,
+                                                        0,
+                                                        invA,
+                                                        offset_invAin + i * BLOCK,
+                                                        BLOCK,
+                                                        stride_invA,
+                                                        (U)B,
+                                                        offset_Bin + i * incx,
+                                                        incx,
+                                                        stride_B,
+                                                        &beta_0<T>,
+                                                        0,
+                                                        X,
+                                                        i,
+                                                        1,
+                                                        stride_X,
+                                                        batch_count)));
 
                     if(i >= BLOCK)
-                        rocblas_internal_gemv_launcher(handle,
-                                                       transA,
-                                                       i,
-                                                       BLOCK,
-                                                       &alpha_negative_one<T>,
-                                                       0,
-                                                       A,
-                                                       offset_Ain + i * lda,
-                                                       lda,
-                                                       stride_A,
-                                                       (U)X,
-                                                       i,
-                                                       1,
-                                                       stride_X,
-                                                       &beta_1<T>,
-                                                       0,
-                                                       B,
-                                                       offset_Bin,
-                                                       incx,
-                                                       stride_B,
-                                                       batch_count);
+                        RETURN_IF_ROCBLAS_ERROR(
+                            (rocblas_internal_gemv_launcher(handle,
+                                                            transA,
+                                                            i,
+                                                            BLOCK,
+                                                            &alpha_negative_one<T>,
+                                                            0,
+                                                            A,
+                                                            offset_Ain + i * lda,
+                                                            lda,
+                                                            stride_A,
+                                                            (U)X,
+                                                            i,
+                                                            1,
+                                                            stride_X,
+                                                            &beta_1<T>,
+                                                            0,
+                                                            B,
+                                                            offset_Bin,
+                                                            incx,
+                                                            stride_B,
+                                                            batch_count)));
                 }
             }
         }
@@ -391,99 +395,101 @@ rocblas_status rocblas_internal_trsv_left(rocblas_handle    handle,
             jb = m % BLOCK == 0 ? BLOCK : m % BLOCK;
             i  = m - jb;
 
-            rocblas_internal_gemv_launcher(handle,
-                                           transA,
-                                           jb,
-                                           jb,
-                                           &alpha_1<T>,
-                                           0,
-                                           invA,
-                                           offset_invAin + i * BLOCK,
-                                           BLOCK,
-                                           stride_invA,
-                                           (U)B,
-                                           offset_Bin + i * incx,
-                                           incx,
-                                           stride_B,
-                                           &beta_0<T>,
-                                           0,
-                                           X,
-                                           i,
-                                           1,
-                                           stride_X,
-                                           batch_count);
+            RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemv_launcher(handle,
+                                                                    transA,
+                                                                    jb,
+                                                                    jb,
+                                                                    &alpha_1<T>,
+                                                                    0,
+                                                                    invA,
+                                                                    offset_invAin + i * BLOCK,
+                                                                    BLOCK,
+                                                                    stride_invA,
+                                                                    (U)B,
+                                                                    offset_Bin + i * incx,
+                                                                    incx,
+                                                                    stride_B,
+                                                                    &beta_0<T>,
+                                                                    0,
+                                                                    X,
+                                                                    i,
+                                                                    1,
+                                                                    stride_X,
+                                                                    batch_count)));
 
             if(i - BLOCK >= 0)
             {
-                rocblas_internal_gemv_launcher(handle,
-                                               transA,
-                                               jb,
-                                               i,
-                                               &alpha_negative_one<T>,
-                                               0,
-                                               A,
-                                               offset_Ain + i,
-                                               lda,
-                                               stride_A,
-                                               (U)X,
-                                               i,
-                                               1,
-                                               stride_X,
-                                               &beta_1<T>,
-                                               0,
-                                               B,
-                                               offset_Bin,
-                                               incx,
-                                               stride_B,
-                                               batch_count);
+                RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemv_launcher(handle,
+                                                                        transA,
+                                                                        jb,
+                                                                        i,
+                                                                        &alpha_negative_one<T>,
+                                                                        0,
+                                                                        A,
+                                                                        offset_Ain + i,
+                                                                        lda,
+                                                                        stride_A,
+                                                                        (U)X,
+                                                                        i,
+                                                                        1,
+                                                                        stride_X,
+                                                                        &beta_1<T>,
+                                                                        0,
+                                                                        B,
+                                                                        offset_Bin,
+                                                                        incx,
+                                                                        stride_B,
+                                                                        batch_count)));
 
                 // remaining blocks
                 for(i = m - jb - BLOCK; i >= 0; i -= BLOCK)
                 {
-                    rocblas_internal_gemv_launcher(handle,
-                                                   transA,
-                                                   BLOCK,
-                                                   BLOCK,
-                                                   &alpha_1<T>,
-                                                   0,
-                                                   invA,
-                                                   offset_invAin + i * BLOCK,
-                                                   BLOCK,
-                                                   stride_invA,
-                                                   (U)B,
-                                                   offset_Bin + i * incx,
-                                                   incx,
-                                                   stride_B,
-                                                   &beta_0<T>,
-                                                   0,
-                                                   X,
-                                                   i,
-                                                   1,
-                                                   stride_X,
-                                                   batch_count);
+                    RETURN_IF_ROCBLAS_ERROR(
+                        (rocblas_internal_gemv_launcher(handle,
+                                                        transA,
+                                                        BLOCK,
+                                                        BLOCK,
+                                                        &alpha_1<T>,
+                                                        0,
+                                                        invA,
+                                                        offset_invAin + i * BLOCK,
+                                                        BLOCK,
+                                                        stride_invA,
+                                                        (U)B,
+                                                        offset_Bin + i * incx,
+                                                        incx,
+                                                        stride_B,
+                                                        &beta_0<T>,
+                                                        0,
+                                                        X,
+                                                        i,
+                                                        1,
+                                                        stride_X,
+                                                        batch_count)));
 
                     if(i >= BLOCK)
-                        rocblas_internal_gemv_launcher(handle,
-                                                       transA,
-                                                       BLOCK,
-                                                       i,
-                                                       &alpha_negative_one<T>,
-                                                       0,
-                                                       A,
-                                                       offset_Ain + i,
-                                                       lda,
-                                                       stride_A,
-                                                       (U)X,
-                                                       i,
-                                                       1,
-                                                       stride_X,
-                                                       &beta_1<T>,
-                                                       0,
-                                                       B,
-                                                       offset_Bin,
-                                                       incx,
-                                                       stride_B,
-                                                       batch_count);
+                        RETURN_IF_ROCBLAS_ERROR(
+                            (rocblas_internal_gemv_launcher(handle,
+                                                            transA,
+                                                            BLOCK,
+                                                            i,
+                                                            &alpha_negative_one<T>,
+                                                            0,
+                                                            A,
+                                                            offset_Ain + i,
+                                                            lda,
+                                                            stride_A,
+                                                            (U)X,
+                                                            i,
+                                                            1,
+                                                            stride_X,
+                                                            &beta_1<T>,
+                                                            0,
+                                                            B,
+                                                            offset_Bin,
+                                                            incx,
+                                                            stride_B,
+                                                            batch_count)));
                 }
             }
         }
@@ -491,100 +497,102 @@ rocblas_status rocblas_internal_trsv_left(rocblas_handle    handle,
         {
             // left, upper transpose
             jb = std::min(BLOCK, m);
-            rocblas_internal_gemv_launcher(handle,
-                                           transA,
-                                           jb,
-                                           jb,
-                                           &alpha_1<T>,
-                                           0,
-                                           invA,
-                                           offset_invAin,
-                                           BLOCK,
-                                           stride_invA,
-                                           (U)B,
-                                           offset_Bin,
-                                           incx,
-                                           stride_B,
-                                           &beta_0<T>,
-                                           0,
-                                           X,
-                                           0,
-                                           1,
-                                           stride_X,
-                                           batch_count);
+            RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemv_launcher(handle,
+                                                                    transA,
+                                                                    jb,
+                                                                    jb,
+                                                                    &alpha_1<T>,
+                                                                    0,
+                                                                    invA,
+                                                                    offset_invAin,
+                                                                    BLOCK,
+                                                                    stride_invA,
+                                                                    (U)B,
+                                                                    offset_Bin,
+                                                                    incx,
+                                                                    stride_B,
+                                                                    &beta_0<T>,
+                                                                    0,
+                                                                    X,
+                                                                    0,
+                                                                    1,
+                                                                    stride_X,
+                                                                    batch_count)));
 
             if(BLOCK < m)
             {
-                rocblas_internal_gemv_launcher(handle,
-                                               transA,
-                                               BLOCK,
-                                               m - BLOCK,
-                                               &alpha_negative_one<T>,
-                                               0,
-                                               A,
-                                               offset_Ain + BLOCK * lda,
-                                               lda,
-                                               stride_A,
-                                               (U)X,
-                                               0,
-                                               1,
-                                               stride_X,
-                                               &beta_1<T>,
-                                               0,
-                                               B,
-                                               offset_Bin + BLOCK * incx,
-                                               incx,
-                                               stride_B,
-                                               batch_count);
+                RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemv_launcher(handle,
+                                                                        transA,
+                                                                        BLOCK,
+                                                                        m - BLOCK,
+                                                                        &alpha_negative_one<T>,
+                                                                        0,
+                                                                        A,
+                                                                        offset_Ain + BLOCK * lda,
+                                                                        lda,
+                                                                        stride_A,
+                                                                        (U)X,
+                                                                        0,
+                                                                        1,
+                                                                        stride_X,
+                                                                        &beta_1<T>,
+                                                                        0,
+                                                                        B,
+                                                                        offset_Bin + BLOCK * incx,
+                                                                        incx,
+                                                                        stride_B,
+                                                                        batch_count)));
 
                 // remaining blocks
                 for(i = BLOCK; i < m; i += BLOCK)
                 {
                     jb = std::min(m - i, BLOCK);
-                    rocblas_internal_gemv_launcher(handle,
-                                                   transA,
-                                                   jb,
-                                                   jb,
-                                                   &alpha_1<T>,
-                                                   0,
-                                                   invA,
-                                                   offset_invAin + i * BLOCK,
-                                                   BLOCK,
-                                                   stride_invA,
-                                                   (U)B,
-                                                   offset_Bin + i * incx,
-                                                   incx,
-                                                   stride_B,
-                                                   &beta_0<T>,
-                                                   0,
-                                                   X,
-                                                   i,
-                                                   1,
-                                                   stride_X,
-                                                   batch_count);
+                    RETURN_IF_ROCBLAS_ERROR(
+                        (rocblas_internal_gemv_launcher(handle,
+                                                        transA,
+                                                        jb,
+                                                        jb,
+                                                        &alpha_1<T>,
+                                                        0,
+                                                        invA,
+                                                        offset_invAin + i * BLOCK,
+                                                        BLOCK,
+                                                        stride_invA,
+                                                        (U)B,
+                                                        offset_Bin + i * incx,
+                                                        incx,
+                                                        stride_B,
+                                                        &beta_0<T>,
+                                                        0,
+                                                        X,
+                                                        i,
+                                                        1,
+                                                        stride_X,
+                                                        batch_count)));
 
                     if(i + BLOCK < m)
-                        rocblas_internal_gemv_launcher(handle,
-                                                       transA,
-                                                       BLOCK,
-                                                       m - i - BLOCK,
-                                                       &alpha_negative_one<T>,
-                                                       0,
-                                                       A,
-                                                       offset_Ain + i + (i + BLOCK) * lda,
-                                                       lda,
-                                                       stride_A,
-                                                       (U)X,
-                                                       i,
-                                                       1,
-                                                       stride_X,
-                                                       &beta_1<T>,
-                                                       0,
-                                                       B,
-                                                       offset_Bin + (i + BLOCK) * incx,
-                                                       incx,
-                                                       stride_B,
-                                                       batch_count);
+                        RETURN_IF_ROCBLAS_ERROR(
+                            (rocblas_internal_gemv_launcher(handle,
+                                                            transA,
+                                                            BLOCK,
+                                                            m - i - BLOCK,
+                                                            &alpha_negative_one<T>,
+                                                            0,
+                                                            A,
+                                                            offset_Ain + i + (i + BLOCK) * lda,
+                                                            lda,
+                                                            stride_A,
+                                                            (U)X,
+                                                            i,
+                                                            1,
+                                                            stride_X,
+                                                            &beta_1<T>,
+                                                            0,
+                                                            B,
+                                                            offset_Bin + (i + BLOCK) * incx,
+                                                            incx,
+                                                            stride_B,
+                                                            batch_count)));
                 }
             }
         }
@@ -623,17 +631,18 @@ rocblas_status rocblas_internal_special_trsv_template(rocblas_handle    handle,
         size_t j = parity ? q - 1 : r;
 
         // copy a BLOCK*n piece we are solving at a time
-        rocblas_internal_strided_vector_copy<BLOCK, T>(handle,
-                                                       x_temp,
-                                                       1,
-                                                       stride_X,
-                                                       B,
-                                                       incx,
-                                                       stride_B,
-                                                       BLOCK,
-                                                       batch_count,
-                                                       0,
-                                                       offset_Bin + incx * j * BLOCK);
+        RETURN_IF_ROCBLAS_ERROR(
+            (rocblas_internal_strided_vector_copy<BLOCK, T>(handle,
+                                                            x_temp,
+                                                            1,
+                                                            stride_X,
+                                                            B,
+                                                            incx,
+                                                            stride_B,
+                                                            BLOCK,
+                                                            batch_count,
+                                                            0,
+                                                            offset_Bin + incx * j * BLOCK)));
 
         if(r)
         {
@@ -653,50 +662,50 @@ rocblas_status rocblas_internal_special_trsv_template(rocblas_handle    handle,
                 offsetA = parity ? BLOCK * ((lda + 1) * q - lda) : M * lda;
             }
 
-            rocblas_internal_gemv_launcher(handle,
-                                           transA,
-                                           M,
-                                           N,
-                                           &alpha_negative_one<T>,
-                                           0,
-                                           A,
-                                           offset_Ain + offsetA,
-                                           lda,
-                                           stride_A,
-                                           (U)B,
-                                           offset_Bin + offsetB,
-                                           incx,
-                                           stride_B,
-                                           &beta_1<T>,
-                                           0,
-                                           x_temp,
-                                           0,
-                                           1,
-                                           stride_X,
-                                           batch_count);
+            RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemv_launcher(handle,
+                                                                    transA,
+                                                                    M,
+                                                                    N,
+                                                                    &alpha_negative_one<T>,
+                                                                    0,
+                                                                    A,
+                                                                    offset_Ain + offsetA,
+                                                                    lda,
+                                                                    stride_A,
+                                                                    (U)B,
+                                                                    offset_Bin + offsetB,
+                                                                    incx,
+                                                                    stride_B,
+                                                                    &beta_1<T>,
+                                                                    0,
+                                                                    x_temp,
+                                                                    0,
+                                                                    1,
+                                                                    stride_X,
+                                                                    batch_count)));
         }
 
-        rocblas_internal_gemv_launcher(handle,
-                                       transA,
-                                       BLOCK,
-                                       BLOCK,
-                                       &alpha_1<T>,
-                                       0,
-                                       invA,
-                                       offset_invAin + j * BLOCK * BLOCK,
-                                       BLOCK,
-                                       stride_invA,
-                                       (U)x_temp,
-                                       0,
-                                       1,
-                                       stride_X,
-                                       &beta_0<T>,
-                                       0,
-                                       B,
-                                       offset_Bin + j * BLOCK * incx,
-                                       incx,
-                                       stride_B,
-                                       batch_count);
+        RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemv_launcher(handle,
+                                                                transA,
+                                                                BLOCK,
+                                                                BLOCK,
+                                                                &alpha_1<T>,
+                                                                0,
+                                                                invA,
+                                                                offset_invAin + j * BLOCK * BLOCK,
+                                                                BLOCK,
+                                                                stride_invA,
+                                                                (U)x_temp,
+                                                                0,
+                                                                1,
+                                                                stride_X,
+                                                                &beta_0<T>,
+                                                                0,
+                                                                B,
+                                                                offset_Bin + j * BLOCK * incx,
+                                                                incx,
+                                                                stride_B,
+                                                                batch_count)));
     }
 
     return rocblas_status_success;
@@ -858,13 +867,35 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
     // TODO: workaround to fix negative incx issue
     rocblas_int abs_incx = incx < 0 ? -incx : incx;
     if(incx < 0)
-        rocblas_internal_flip_vector<BLOCK, T>(
-            handle, B, m, abs_incx, stride_B, batch_count, offset_B);
+        RETURN_IF_ROCBLAS_ERROR((rocblas_internal_flip_vector<BLOCK, T>(
+            handle, B, m, abs_incx, stride_B, batch_count, offset_B)));
+
+    // B is the caller's buffer and the line above reversed it in place. Called on the
+    // exits where B still holds that reversed input, so that a solve reporting an error
+    // does not also hand the caller's own data back reversed. Not needed on the exits
+    // below where B already holds the solution.
+    //
+    // The status is discarded rather than reported: this runs in the per-call path of
+    // rocblas_trsv, where the stream has just failed and so this flip will most likely
+    // fail too, and PRINT_IF_ROCBLAS_ERROR writes to stderr without consulting
+    // layer_mode. That would put a line on stderr for every failing call in a loop,
+    // on top of the status the caller already has. There is nothing to be done with it
+    // here in any case: the failure being returned is the one worth reporting.
+    auto restore_B = [&] {
+        if(incx < 0)
+            (void)rocblas_internal_flip_vector<BLOCK, T>(
+                handle, B, m, abs_incx, stride_B, batch_count, offset_B);
+    };
 
     if(BATCHED)
     {
-        RETURN_IF_ROCBLAS_ERROR(setup_batched_array<BLOCK>(
-            handle->get_stream(), (T*)x_temp, x_temp_els, (T**)x_temparr, batch_count));
+        status = setup_batched_array<BLOCK>(
+            handle->get_stream(), (T*)x_temp, x_temp_els, (T**)x_temparr, batch_count);
+        if(status != rocblas_status_success)
+        {
+            restore_B();
+            return status;
+        }
     }
 
     if(exact_blocks)
@@ -891,12 +922,15 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
                                                                   batch_count);
 
         if(status != rocblas_status_success)
+        {
+            restore_B();
             return status;
+        }
 
         // TODO: workaround to fix negative incx issue
         if(incx < 0)
-            rocblas_internal_flip_vector<BLOCK, T>(
-                handle, B, m, abs_incx, stride_B, batch_count, offset_B);
+            RETURN_IF_ROCBLAS_ERROR((rocblas_internal_flip_vector<BLOCK, T>(
+                handle, B, m, abs_incx, stride_B, batch_count, offset_B)));
     }
     else
     {
@@ -921,21 +955,32 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
                                                       batch_count);
 
         if(status != rocblas_status_success)
+        {
+            restore_B();
             return status;
+        }
 
         // copy solution X into B
         // TODO: workaround to fix negative incx issue
-        rocblas_internal_strided_vector_copy<BLOCK, T>(handle,
-                                                       B,
-                                                       abs_incx,
-                                                       stride_B,
-                                                       (V)(BATCHED ? x_temparr : x_temp),
-                                                       incx < 0 ? -1 : 1,
-                                                       x_temp_els,
-                                                       m,
-                                                       batch_count,
-                                                       offset_B,
-                                                       incx < 0 ? m - 1 : 0);
+        status = rocblas_internal_strided_vector_copy<BLOCK, T>(handle,
+                                                                B,
+                                                                abs_incx,
+                                                                stride_B,
+                                                                (V)(BATCHED ? x_temparr : x_temp),
+                                                                incx < 0 ? -1 : 1,
+                                                                x_temp_els,
+                                                                m,
+                                                                batch_count,
+                                                                offset_B,
+                                                                incx < 0 ? m - 1 : 0);
+        if(status != rocblas_status_success)
+        {
+            // This copy is what writes the solution over the reversed B, reversing it
+            // back as it goes, so if it did not run then B is still the caller's input
+            // reversed.
+            restore_B();
+            return status;
+        }
     }
 
     return status;

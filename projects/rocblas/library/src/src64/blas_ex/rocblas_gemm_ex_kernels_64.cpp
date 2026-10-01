@@ -128,8 +128,8 @@ rocblas_status rocblas_internal_gemm_ex_typecasting_64(rocblas_handle     handle
     if(handle->layer_mode & rocblas_layer_mode_log_internal)
     {
         rocblas_internal_ostream alphass, betass;
-        (void)rocblas_internal_log_trace_alpha_beta_ex(
-            rocblas_datatype_from_type<TScal>, alpha, beta, alphass, betass);
+        PRINT_IF_ROCBLAS_ERROR((rocblas_internal_log_trace_alpha_beta_ex(
+            rocblas_datatype_from_type<TScal>, alpha, beta, alphass, betass)));
 
         rocblas_internal_logger logger;
         logger.log_trace(handle,

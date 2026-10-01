@@ -18,6 +18,7 @@ target_sources(
           "${_CMAKE_CURRENT_SOURCE_DIR}/../rocblas_test.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/../general_gtest.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/../host_alloc_gtest.cpp"
+          "${_CMAKE_CURRENT_SOURCE_DIR}/../device_malloc_gtest.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/../set_get_pointer_mode_gtest.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/../set_get_atomics_mode_gtest.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/../set_get_alpha_beta_stride_gtest.cpp"

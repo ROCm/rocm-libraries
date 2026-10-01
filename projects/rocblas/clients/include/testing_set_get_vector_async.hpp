@@ -40,7 +40,7 @@ void testing_set_get_vector_async(const Arguments& arg)
     rocblas_local_handle handle{arg};
 
     hipStream_t stream;
-    rocblas_get_stream(handle, &stream);
+    CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
 
     // argument sanity check, quick return if input parameters are invalid before allocating invalid
     // memory

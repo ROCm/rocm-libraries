@@ -275,8 +275,8 @@ void testing_logging(const Arguments& arg)
         // Auxiliary functions
         rocblas_local_handle handle;
 
-        rocblas_set_pointer_mode(handle, test_pointer_mode);
-        rocblas_get_pointer_mode(handle, &mode);
+        CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, test_pointer_mode));
+        CHECK_ROCBLAS_ERROR(rocblas_get_pointer_mode(handle, &mode));
 
         if constexpr(!std::is_same_v<T, rocblas_half>)
         {
@@ -284,13 +284,13 @@ void testing_logging(const Arguments& arg)
             // *************************************************** BLAS1 ***************************************************
             if(arg.api == C_64)
             {
-                rocblas_iamax_64<T>(handle, n, dx, incx, i64_result);
-                rocblas_iamin_64<T>(handle, n, dx, incx, i64_result);
+                CHECK_ROCBLAS_ERROR(rocblas_iamax_64<T>(handle, n, dx, incx, i64_result));
+                CHECK_ROCBLAS_ERROR(rocblas_iamin_64<T>(handle, n, dx, incx, i64_result));
             }
             else
             {
-                rocblas_iamax<T>(handle, n, dx, incx, i32_result);
-                rocblas_iamin<T>(handle, n, dx, incx, i32_result);
+                CHECK_ROCBLAS_ERROR(rocblas_iamax<T>(handle, n, dx, incx, i32_result));
+                CHECK_ROCBLAS_ERROR(rocblas_iamin<T>(handle, n, dx, incx, i32_result));
             }
 
             auto rocblas_asum_fn    = rocblas_asum<T>;
@@ -645,7 +645,7 @@ void testing_logging(const Arguments& arg)
             // Auxiliary functions
             rocblas_local_handle handle;
 
-            rocblas_set_pointer_mode(handle, test_pointer_mode);
+            CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, test_pointer_mode));
 
             CHECK_ROCBLAS_ERROR(rocblas_gemm<T>(
                 handle, transA, transB, m, n, k, alpha, da, lda, db, ldb, beta, dc, ldc));

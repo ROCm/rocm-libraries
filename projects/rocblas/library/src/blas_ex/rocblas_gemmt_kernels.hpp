@@ -724,10 +724,10 @@ rocblas_status rocblas_internal_gemmt_non_batch_block_recursive_template(rocblas
 
     // call rocblas_internal_gemmt_general_template with batch_count = n_nb for n_nb diagonal blocks
     // clang-format off
-    rocblas_internal_gemmt_general_template<API_INT>(handle, uplo, transA, transB, nb, k, alpha,
+    RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemmt_general_template<API_INT>(handle, uplo, transA, transB, nb, k, alpha,
                          dA, lda, nb * a_s1,
                          dB, ldb, nb * b_s1, beta,
-                         dC, ldc, nb * (c_s1 + c_s2), n_nb);
+                         dC, ldc, nb * (c_s1 + c_s2), n_nb)));
     // clang-format on
 
     // remainder diagonal block of size n_diag < nb
@@ -737,10 +737,10 @@ rocblas_status rocblas_internal_gemmt_non_batch_block_recursive_template(rocblas
         n_diag = n - i_diag;
         // call rocblas_internal_gemmt_general_template for one remainder diagonal block of size n_diag
         // clang-format off
-        rocblas_internal_gemmt_general_template<API_INT>(handle, uplo, transA, transB, n_diag, k, alpha,
+        RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemmt_general_template<API_INT>(handle, uplo, transA, transB, n_diag, k, alpha,
                           dA + i_diag * a_s1, lda, stride_a,
                           dB + i_diag * b_s1, ldb, stride_b, beta,
-                          dC + i_diag * (c_s1 + c_s2), ldc, stride_c, batch_count);
+                          dC + i_diag * (c_s1 + c_s2), ldc, stride_c, batch_count)));
         // clang-format on
     }
 
@@ -861,15 +861,15 @@ rocblas_status rocblas_internal_gemmt_batched_strided_batched_block_recursive_te
 
         // clang-format off
         if(BATCHED)
-            rocblas_internal_gemmt_general_template<API_INT>(handle, uplo, transA, transB, nb, k, alpha,
+            RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemmt_general_template<API_INT>(handle, uplo, transA, transB, nb, k, alpha,
                          dA, lda, OFFSET_A(i_diag),
                          dB, ldb, OFFSET_B(i_diag), beta,
-                         dC, ldc, OFFSET_C(i_diag, i_diag), batch_count);
+                         dC, ldc, OFFSET_C(i_diag, i_diag), batch_count)));
         else
-            rocblas_internal_gemmt_general_template<API_INT>(handle, uplo, transA, transB, nb, k, alpha,
+            RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemmt_general_template<API_INT>(handle, uplo, transA, transB, nb, k, alpha,
                          dA + OFFSET_A(i_diag), lda, stride_a,
                          dB + OFFSET_B(i_diag), ldb, stride_b, beta,
-                         dC + OFFSET_C(i_diag, i_diag), ldc, stride_c, batch_count);
+                         dC + OFFSET_C(i_diag, i_diag), ldc, stride_c, batch_count)));
         // clang-format on
     }
 
@@ -881,15 +881,15 @@ rocblas_status rocblas_internal_gemmt_batched_strided_batched_block_recursive_te
 
         // clang-format off
         if(BATCHED)
-            rocblas_internal_gemmt_general_template<API_INT>(handle, uplo, transA, transB, n_diag, k, alpha,
+            RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemmt_general_template<API_INT>(handle, uplo, transA, transB, n_diag, k, alpha,
                          dA, lda, OFFSET_A(i_diag),
                          dB, ldb, OFFSET_B(i_diag), beta,
-                         dC, ldc, OFFSET_C(i_diag, i_diag), batch_count);
+                         dC, ldc, OFFSET_C(i_diag, i_diag), batch_count)));
         else
-            rocblas_internal_gemmt_general_template<API_INT>(handle, uplo, transA, transB, n_diag, k, alpha,
+            RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemmt_general_template<API_INT>(handle, uplo, transA, transB, n_diag, k, alpha,
                          dA + OFFSET_A(i_diag), lda, stride_a,
                          dB + OFFSET_B(i_diag), ldb, stride_b, beta,
-                         dC + OFFSET_C(i_diag, i_diag), ldc, stride_c, batch_count);
+                         dC + OFFSET_C(i_diag, i_diag), ldc, stride_c, batch_count)));
         // clang-format on
     }
 

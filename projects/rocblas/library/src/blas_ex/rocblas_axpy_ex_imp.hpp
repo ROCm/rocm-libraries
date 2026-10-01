@@ -67,6 +67,11 @@ namespace
                 if(layer_mode & rocblas_layer_mode_log_trace)
                 {
                     rocblas_internal_ostream alphass, betass;
+                    // Not reported: bf16_r is a supported alpha_type for this function and
+                    // the helper's switch has no case for it, so it answers
+                    // not_implemented for a call that is about to succeed. The gap is in
+                    // that switch, and reporting it here would put an error on stderr for
+                    // every successful bf16 call made under ROCBLAS_LAYER.
                     (void)rocblas_internal_log_trace_alpha_beta_ex(
                         alpha_type, alpha, nullptr, alphass, betass);
                     logger.log_trace(handle,
@@ -86,6 +91,7 @@ namespace
                 if(layer_mode & rocblas_layer_mode_log_bench)
                 {
                     std::string alphas, betas;
+                    // Not reported, for the reason given at the log_trace call above.
                     (void)rocblas_internal_log_bench_alpha_beta_ex(
                         alpha_type, alpha, nullptr, alphas, betas);
                     logger.log_bench(handle,

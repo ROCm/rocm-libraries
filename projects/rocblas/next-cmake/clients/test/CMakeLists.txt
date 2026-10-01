@@ -36,6 +36,7 @@ set(yaml_test_files
     "${_CMAKE_CURRENT_SOURCE_DIR}/blas2_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/blas3_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/copy_gtest.yaml"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/device_malloc_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/dgmm_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/dot_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/gbmv_gtest.yaml"

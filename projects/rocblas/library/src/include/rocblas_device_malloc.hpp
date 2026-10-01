@@ -38,6 +38,13 @@
 // C++ device memory allocation API. It is unlikely to change very often.
 
 #include "rocblas/rocblas.h"
+// <stdio.h>, not <cstdio>: the reports below name fprintf and stderr unqualified,
+// and only this header is required to declare them outside namespace std. This one
+// is installed as rocblas/internal/rocblas_device_malloc.hpp and compiled by
+// rocSOLVER and hipSOLVER, so it cannot rely on an implementation happening to
+// put them in the global namespace too.
+#include <stdio.h>
+
 #include <new>
 #include <type_traits>
 
@@ -88,7 +95,15 @@ public:
     rocblas_device_malloc& operator=(rocblas_device_malloc&& other)
     {
         if(dm_ptr && dm_ptr != other.dm_ptr)
-            rocblas_device_malloc_free(dm_ptr);
+        {
+            rocblas_status status_ = rocblas_device_malloc_free(dm_ptr);
+            if(status_ != rocblas_status_success)
+                fprintf(stderr,
+                        "rocblas error: '%s' at %s:%d\n",
+                        rocblas_status_to_string(status_),
+                        __FILE__,
+                        __LINE__);
+        }
         handle = other.handle;
         dm_ptr = other.dm_ptr;
         other.dm_ptr = nullptr;
@@ -137,7 +152,15 @@ public:
     ~rocblas_device_malloc()
     {
         if(dm_ptr)
-            rocblas_device_malloc_free(dm_ptr);
+        {
+            rocblas_status status_ = rocblas_device_malloc_free(dm_ptr);
+            if(status_ != rocblas_status_success)
+                fprintf(stderr,
+                        "rocblas error: '%s' at %s:%d\n",
+                        rocblas_status_to_string(status_),
+                        __FILE__,
+                        __LINE__);
+        }
     }
 
     // Copying and assigning to rocblas_device_malloc are deleted

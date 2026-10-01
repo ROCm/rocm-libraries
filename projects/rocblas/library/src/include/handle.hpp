@@ -165,7 +165,7 @@ private:
         {
             if(device_id != old_device_id)
             {
-                (void)(hipSetDevice(old_device_id));
+                PRINT_IF_HIP_ERROR(hipSetDevice(old_device_id));
             }
         }
 
@@ -737,6 +737,11 @@ private:
 // Support for default stream added in hip version 5.3.0
 #if HIP_VERSION >= 50300000
                 bool status = hipMallocAsync(&dev_mem, size, stream_in_use) == hipSuccess ;
+                if(!status)
+                {
+                    success = false;
+                    rocblas_cerr << " rocBLAS internal error: hipMallocAsync() failed to allocate memory of size : " << size << std::endl;
+                }
 
                 for(auto i= 0 ; i < count ; i++)
                     pointers.push_back(status ? dev_mem : nullptr);

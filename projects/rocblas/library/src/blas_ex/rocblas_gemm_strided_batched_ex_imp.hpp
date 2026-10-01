@@ -100,8 +100,8 @@ namespace
                 {
                     rocblas_internal_ostream alphass, betass;
 
-                    (void)rocblas_internal_log_trace_alpha_beta_ex(
-                        compute_type, alpha, beta, alphass, betass);
+                    PRINT_IF_ROCBLAS_ERROR((rocblas_internal_log_trace_alpha_beta_ex(
+                        compute_type, alpha, beta, alphass, betass)));
                     logger.log_trace(handle,
                                      ROCBLAS_API_STR(rocblas_gemm_strided_batched_ex),
                                      trans_a,
@@ -137,8 +137,8 @@ namespace
                 if(layer_mode & rocblas_layer_mode_log_bench)
                 {
                     std::string alphas, betas;
-                    (void)rocblas_internal_log_bench_alpha_beta_ex(
-                        compute_type, alpha, beta, alphas, betas);
+                    PRINT_IF_ROCBLAS_ERROR((rocblas_internal_log_bench_alpha_beta_ex(
+                        compute_type, alpha, beta, alphas, betas)));
                     logger.log_bench(handle,
                                      ROCBLAS_API_BENCH " -f gemm_strided_batched_ex",
                                      "--transposeA",

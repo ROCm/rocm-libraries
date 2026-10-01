@@ -70,7 +70,7 @@ int main()
 
             void* ptr = static_cast<void*>(mem);
 
-            hipMemset(ptr, 0, size);
+            CHECK_HIP_ERROR(hipMemset(ptr, 0, size));
 
             rocblas_device_malloc_base& ref = mem;
         }
@@ -104,7 +104,7 @@ int main()
                              << std::endl;
                 return 1;
             }
-            hipMemset(ptr, 0, sizes[i]);
+            CHECK_HIP_ERROR(hipMemset(ptr, 0, sizes[i]));
         }
 
         rocblas_device_malloc_base& ref = mem;

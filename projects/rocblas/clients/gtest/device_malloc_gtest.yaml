@@ -1,0 +1,26 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Tests:
+
+# Regression cover for the count form of _device_malloc reporting success after
+# hipMallocAsync failed. Nothing here varies with precision or size: the test asks for an
+# allocation no device can satisfy and checks the status rocblas_device_malloc_alloc
+# returns, so a single case is the whole of it.
+#
+# graph_test is what gets the handle built with stream-order allocation, which is the
+# branch carrying the discarded status. It does not run a graph capture here: that is
+# rocblas_local_handle::pre_test, which this test never calls.
+#
+# pre_checkin rather than quick, which is where the other 44 graph_test entries sit: a
+# stream-order handle's destructor calls rocblas_abort if it cannot trim the memory
+# pool, and that is not a hazard to introduce into the smoke gate. pre_checkin still
+# runs for PR validation (ctest_standard is *quick*:*pre_checkin*-*known_bug*).
+- name: device_malloc_count_alloc_failure
+  category: pre_checkin
+  function: device_malloc_count_alloc_failure
+  graph_test: true
+  precision: *single_precision
+
+...
