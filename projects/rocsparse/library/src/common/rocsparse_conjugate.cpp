@@ -38,9 +38,9 @@ namespace rocsparse
     {
         if constexpr(GRID_STRIDE)
         {
-            for(int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
-                idx < length;
-                idx += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
+            const int64_t gid    = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+            const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
+            for(int64_t idx = gid; idx < length; idx += stride)
             {
                 array[idx] = rocsparse::conj(array[idx]);
             }

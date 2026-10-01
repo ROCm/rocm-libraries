@@ -2744,9 +2744,9 @@ namespace rocsparse
         // Grid-stride loop over the non-permuted nnz index so a grid clamped by
         // rocsparse::get_grid_size_x still covers the full range. The index is
         // computed in 64-bit to avoid overflowing the block-grid product.
+        const int64_t gid    = static_cast<int64_t>(blockIdx.x) * DIMY + threadIdx.y;
         const int64_t stride = static_cast<int64_t>(gridDim.x) * DIMY;
-        for(int64_t jj = static_cast<int64_t>(blockIdx.x) * DIMY + threadIdx.y; jj < nnzb;
-            jj += stride)
+        for(int64_t jj = gid; jj < nnzb; jj += stride)
         {
             const I j = static_cast<I>(jj);
 

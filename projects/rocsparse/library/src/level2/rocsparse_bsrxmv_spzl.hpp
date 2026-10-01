@@ -50,11 +50,9 @@ namespace rocsparse
 
         // Grid-stride loop so a grid clamped by rocsparse::get_grid_size_x still
         // covers the full range.
-        const int64_t stride = static_cast<int64_t>(BLOCKSIZE) * hipGridDim_x;
-        for(int64_t idx = static_cast<int64_t>(hipThreadIdx_x)
-                          + static_cast<int64_t>(BLOCKSIZE) * hipBlockIdx_x;
-            idx < nentries;
-            idx += stride)
+        const int64_t gid    = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+        const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
+        for(int64_t idx = gid; idx < nentries; idx += stride)
         {
             if(bsr_mask_ptr == nullptr)
             {
@@ -90,11 +88,9 @@ namespace rocsparse
 
             // Grid-stride loop so a grid clamped by rocsparse::get_grid_size_x
             // still covers the full range.
-            const int64_t stride = static_cast<int64_t>(BLOCKSIZE) * hipGridDim_x;
-            for(int64_t idx = static_cast<int64_t>(hipThreadIdx_x)
-                              + static_cast<int64_t>(BLOCKSIZE) * hipBlockIdx_x;
-                idx < nentries;
-                idx += stride)
+            const int64_t gid    = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+            const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
+            for(int64_t idx = gid; idx < nentries; idx += stride)
             {
                 if(bsr_mask_ptr == nullptr)
                 {

@@ -22,42 +22,39 @@
  * ************************************************************************ */
 
 #include "rocsparse_assign_async.hpp"
+#include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
-#include "rocsparse_grid.hpp"
 #include "rocsparse_indextype_utils.hpp"
 
 namespace rocsparse
 {
-    // These entry points take a stream rather than a handle, so the grid.y
-    // limit cannot be read from the device properties; 65535 is the value
-    // maxGridSize[1] reports on every supported device.
-    static constexpr int64_t assign_max_grid_y = 65535;
+    static constexpr uint32_t assign_blocksize = 256;
 
-    template <typename T>
-    ROCSPARSE_KERNEL(32)
+    // Fixed upper bound on the grid; the kernels grid-stride over n.
+    static constexpr int64_t assign_max_blocks = 1024;
+
+    template <uint32_t BLOCKSIZE, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
     void assign_kernel(int64_t n, T* dest, T value)
     {
-        if(hipThreadIdx_x == 0)
+        const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
+        for(int64_t i = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; i < n;
+            i += stride)
         {
-            // Grid-stride over the batch dimension so batch counts above the
-            // grid-y limit (65535) are handled correctly.
-            for(int64_t batch_index = blockIdx.y; batch_index < n; batch_index += gridDim.y)
-            {
-                dest[batch_index] = value;
-            }
+            dest[i] = value;
         }
     }
 
-    template <typename T>
-    ROCSPARSE_KERNEL(32)
+    template <uint32_t BLOCKSIZE, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
     void assign_device_kernel(int64_t n, T* dest, const T* value)
     {
-        if(hipThreadIdx_x == 0)
+        const T       v      = value[0];
+        const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
+        for(int64_t i = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; i < n;
+            i += stride)
         {
-            for(int64_t batch_index = blockIdx.y; batch_index < n; batch_index += gridDim.y)
-            {
-                dest[batch_index] = value[0];
-            }
+            dest[i] = v;
         }
     }
 }
@@ -66,10 +63,18 @@ template <typename T>
 rocsparse_status
     rocsparse::assign_device_async(int64_t n, T* dest, const T* value, hipStream_t stream)
 {
+    if(n <= 0)
+    {
+        return rocsparse_status_success;
+    }
+
+    const int64_t nblocks
+        = std::min((n - 1) / rocsparse::assign_blocksize + 1, rocsparse::assign_max_blocks);
+
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        rocsparse::assign_device_kernel,
-        dim3(1, rocsparse::clamp_grid_extent(n, rocsparse::assign_max_grid_y)),
-        dim3(32),
+        (rocsparse::assign_device_kernel<rocsparse::assign_blocksize>),
+        dim3(nblocks),
+        dim3(rocsparse::assign_blocksize),
         0,
         stream,
         n,
@@ -81,15 +86,22 @@ rocsparse_status
 template <typename T>
 rocsparse_status rocsparse::assign_async(int64_t n, T* dest, T value, hipStream_t stream)
 {
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        rocsparse::assign_kernel,
-        dim3(1, rocsparse::clamp_grid_extent(n, rocsparse::assign_max_grid_y)),
-        dim3(32),
-        0,
-        stream,
-        n,
-        dest,
-        value);
+    if(n <= 0)
+    {
+        return rocsparse_status_success;
+    }
+
+    const int64_t nblocks
+        = std::min((n - 1) / rocsparse::assign_blocksize + 1, rocsparse::assign_max_blocks);
+
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::assign_kernel<rocsparse::assign_blocksize>),
+                                       dim3(nblocks),
+                                       dim3(rocsparse::assign_blocksize),
+                                       0,
+                                       stream,
+                                       n,
+                                       dest,
+                                       value);
     return rocsparse_status_success;
 }
 
