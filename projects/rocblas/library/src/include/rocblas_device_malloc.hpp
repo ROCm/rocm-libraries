@@ -38,7 +38,13 @@
 // C++ device memory allocation API. It is unlikely to change very often.
 
 #include "rocblas/rocblas.h"
-#include <cstdio>
+// <stdio.h>, not <cstdio>: the reports below name fprintf and stderr unqualified,
+// and only this header is required to declare them outside namespace std. This one
+// is installed as rocblas/internal/rocblas_device_malloc.hpp and compiled by
+// rocSOLVER and hipSOLVER, so it cannot rely on an implementation happening to
+// put them in the global namespace too.
+#include <stdio.h>
+
 #include <new>
 #include <type_traits>
 
