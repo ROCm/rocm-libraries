@@ -48,6 +48,23 @@ namespace hipdnn_corpus_gen
 /// engine; the default accepts everything, which explores the declared space alone.
 using ProblemOracle = std::function<bool(const ProblemPoint&)>;
 
+/// A point every oracle admits: the problems several engines all serve, which is the only
+/// corpus on which their selections can be compared. Stops at the first refusal, so an engine
+/// listed later is not asked about a problem an earlier one already declined.
+inline ProblemOracle allOf(std::vector<ProblemOracle> oracles)
+{
+    return [oracles = std::move(oracles)](const ProblemPoint& point) {
+        for(const auto& admits : oracles)
+        {
+            if(!admits(point))
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+}
+
 /// How hard to look, and for how much. Identical in meaning for every operation.
 struct ExplorationRequest
 {

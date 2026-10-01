@@ -452,4 +452,24 @@ TEST(TestProblemSpace, HeldPointsDoNotWallTheSearchOffFromTheRestOfTheRegion)
     }
 }
 
+TEST(TestProblemSpace, AllOfAdmitsOnlyWhatEveryEngineServes)
+{
+    // Two engines whose coverage overlaps on one band of M: a cross-engine corpus is that band.
+    int laterAsked = 0;
+    const ProblemOracle small
+        = [](const ProblemPoint& point) { return std::get<int64_t>(point.at("M")) <= 64; };
+    const ProblemOracle large = [&laterAsked](const ProblemPoint& point) {
+        ++laterAsked;
+        return std::get<int64_t>(point.at("M")) >= 32;
+    };
+    const auto both = allOf({small, large});
+
+    EXPECT_TRUE(both(ProblemPoint{{"M", int64_t{48}}}));
+    EXPECT_FALSE(both(ProblemPoint{{"M", int64_t{16}}}));
+    const auto askedBefore = laterAsked;
+    EXPECT_FALSE(both(ProblemPoint{{"M", int64_t{128}}}));
+    EXPECT_EQ(laterAsked, askedBefore) << "a problem the first engine declines is not offered on";
+    EXPECT_TRUE(allOf({})(ProblemPoint{{"M", int64_t{1}}})) << "no engine named, no constraint";
+}
+
 } // namespace hipdnn_corpus_gen

@@ -133,6 +133,11 @@ struct Options
     std::string probe;
     int64_t engineId = 0;
     bool haveEngineId = false;
+    /// Engines that must ALSO serve every problem (`--also-engine-name`), so the corpus is the
+    /// shapes every named engine runs -- what a cross-engine comparison needs, since a problem
+    /// one engine declines scores nothing in it. Resolved to registered ids before use.
+    std::vector<std::string> alsoEngineNames;
+    std::vector<int64_t> alsoEngineIds;
 
     /// Deliberate consent to generate without asking an engine anything. Naming an engine is
     /// otherwise required, because the alternative is a corpus whose applicability is inferred
@@ -183,6 +188,9 @@ void printHelp(const char* program)
               << "                         so the corpus is what that engine actually serves.\n"
               << "                         Needs a GPU and --plugin-dir.\n"
               << "  --engine-id <id>       Same, by id; decimal or 0x-prefixed hex\n"
+              << "  --also-engine-name <name>  Another engine that must ALSO serve every\n"
+              << "                         problem (repeatable): the corpus is then the\n"
+              << "                         shapes all of them serve, for comparing engines.\n"
               << "  --without-engine       Generate with no engine, on no GPU. The corpus is\n"
               << "                         then every problem the DECLARATIONS express, which\n"
               << "                         is a superset of what any engine serves, and any\n"
@@ -255,6 +263,10 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
             options.engineId
                 = hipdnn_data_sdk::utilities::engineNameToId(options.engineName);
             options.haveEngineId = true;
+        }
+        else if(arg == "--also-engine-name")
+        {
+            options.alsoEngineNames.push_back(next());
         }
         else if(arg == "--engine-id")
         {
@@ -682,11 +694,32 @@ int runGenerator(const std::vector<std::string>& args)
         // value means they never have to.
         options.engineId = requested->first;
         resolvedEngine = requested->second;
+        for(const auto& name : options.alsoEngineNames)
+        {
+            const auto also = std::find_if(
+                engines.begin(), engines.end(), [&](const auto& e) { return e.second == name; });
+            if(also == engines.end())
+            {
+                std::cerr << "Engine '" << name << "' (--also-engine-name) is not registered by "
+                          << "any loaded plugin.\n";
+                release();
+                return 1;
+            }
+            options.alsoEngineIds.push_back(also->first);
+        }
+    }
+    else if(!options.alsoEngineNames.empty())
+    {
+        std::cerr << "--also-engine-name needs an engine to ask: it cannot be combined with "
+                     "--without-engine\n";
+        release();
+        return 1;
     }
 
     // What shape generation records about an engine's coverage, beside the declarations.
     // Absent means nothing is recorded and every engine is searched.
     hipdnn_corpus_gen::EngineCoverageEntry coverage;
+    std::string coverageEngine = resolvedEngine;
     {
         const auto tablePath = std::filesystem::path(options.operationsDir) / "engines.json";
         if(std::filesystem::exists(tablePath))
@@ -710,10 +743,20 @@ int runGenerator(const std::vector<std::string>& args)
                 release();
                 return 1;
             }
-            const auto known = table.find(resolvedEngine);
-            if(known != table.end())
+            // The corpus is what EVERY named engine serves, so it is bounded by the narrowest
+            // coverage: one engine whose coverage is its pack makes the whole corpus the pack's.
+            std::vector<std::string> named{resolvedEngine};
+            named.insert(
+                named.end(), options.alsoEngineNames.begin(), options.alsoEngineNames.end());
+            for(const auto& name : named)
             {
-                coverage = known->second;
+                const auto known = table.find(name);
+                if(known != table.end()
+                   && (coverage.coverage != hipdnn_corpus_gen::EngineCoverage::PACK))
+                {
+                    coverage = known->second;
+                    coverageEngine = name;
+                }
             }
         }
     }
@@ -722,13 +765,14 @@ int runGenerator(const std::vector<std::string>& args)
     {
         if(options.packRoots.empty())
         {
-            std::cerr << resolvedEngine << " serves exactly its pack's shapes (engines.json: "
-                      << coverage.reason << ")\n"
+            std::cerr << coverageEngine
+                      << " serves exactly its pack's shapes (engines.json: " << coverage.reason
+                      << ")\n"
                       << "so its corpus comes from the pack: pass --kdp-root.\n";
             release();
             return 1;
         }
-        std::cerr << resolvedEngine << ": coverage is its pack (engines.json); no search is run.\n";
+        std::cerr << coverageEngine << ": coverage is its pack (engines.json); no search is run.\n";
     }
 
     if(!options.probe.empty())
@@ -931,20 +975,26 @@ int runGenerator(const std::vector<std::string>& args)
         // ceiling on every axis, so without one it would propose tensors no device can hold. The
         // pack and model lists are real workloads -- a pack geometry is a kernel the engine
         // ships -- and a default sized for the search dropped 133 of rocKE's 664 served shapes.
-        const auto oracle = hipdnn_corpus_gen::makeCorpusOracle(handle,
-                                                                options.engineId,
-                                                                metadata,
-                                                                &result.buildFailures,
-                                                                &result.firstBuildError,
-                                                                /*maxBytes=*/0,
-                                                                &timing);
-        const auto searchOracle = hipdnn_corpus_gen::makeCorpusOracle(handle,
-                                                                      options.engineId,
-                                                                      metadata,
-                                                                      &result.buildFailures,
-                                                                      &result.firstBuildError,
-                                                                      options.maxBytes,
-                                                                      &timing);
+        // Every named engine is asked, primary first; a problem is served only if all serve it.
+        std::vector<int64_t> askedEngines{options.engineId};
+        askedEngines.insert(
+            askedEngines.end(), options.alsoEngineIds.begin(), options.alsoEngineIds.end());
+        const auto everyEngine = [&](int64_t maxBytes) {
+            std::vector<hipdnn_corpus_gen::ProblemOracle> each;
+            for(const auto id : askedEngines)
+            {
+                each.push_back(hipdnn_corpus_gen::makeCorpusOracle(handle,
+                                                                   id,
+                                                                   metadata,
+                                                                   &result.buildFailures,
+                                                                   &result.firstBuildError,
+                                                                   maxBytes,
+                                                                   &timing));
+            }
+            return hipdnn_corpus_gen::allOf(std::move(each));
+        };
+        const auto oracle = everyEngine(/*maxBytes=*/0);
+        const auto searchOracle = everyEngine(options.maxBytes);
 
         // Every admitted point's graph, built once here and looked up again at emission.
         // Stamping before selection is what makes `--exclude-corpus` exact: the id is the key
@@ -1412,6 +1462,11 @@ int runGenerator(const std::vector<std::string>& args)
         manifest.reports = sourceReports;
         manifest.reports["engine"]
             = options.engineName.empty() ? nlohmann::json() : nlohmann::json(options.engineName);
+        if(!options.alsoEngineNames.empty())
+        {
+            // Every problem is served by each of these as well as by `engine`.
+            manifest.reports["also_engines"] = options.alsoEngineNames;
+        }
         manifest.reports["excluded"] = excludedRows;
         if(!quotaReports.empty())
         {
