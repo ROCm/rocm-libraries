@@ -797,3 +797,29 @@ def test_unsigned_fp16_restores_consecutive_pairs(toolchain, zero_point):
     assert body.rindex("v_and_or_b32") < body.index("v_pk_add_f16")
     assert body.rindex("v_pk_add_f16") < body.index("v_pk_mul_f16")
     assert body.rindex("v_pk_mul_f16") < body.index("v_perm_b32")
+
+
+def test_runtime_group_catalog_survives_custom_launch_conversion(toolchain):
+    from pathlib import Path
+    from Tensile import LibraryIO
+
+    _, iim, assembler, _ = toolchain
+    root = Path(TENSILE_ROOT).parent / "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151"
+    paths = sorted(root.glob("*/*I4*.yaml"))
+    assert paths
+    seen = set()
+    for path in paths:
+        data = LibraryIO.read(str(path), True)
+        logic = LibraryIO.parseLibraryLogicData(
+            data, str(path), assembler, False, False, False, iim, False)
+        assert len(logic.solutions) == len(data["Solutions"])
+        for solution in logic.solutions:
+            custom = solution["CustomKernel"]
+            assert custom["name"].startswith("RuntimeGroup")
+            assert custom["args"][-1]["semantic"] == "ScaleBlockSizeA"
+            assert not custom.get("generated", False)
+            assert all(value > 0 for value in custom["macrotile"])
+            if "Decode" in custom["name"]:
+                assert custom["macrotile"][:2] == [4, 1]
+            seen.add(custom["name"])
+    assert len(seen) == 10

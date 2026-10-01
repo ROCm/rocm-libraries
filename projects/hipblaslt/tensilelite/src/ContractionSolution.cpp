@@ -2751,22 +2751,12 @@ namespace TensileLite
         // Batch offset support for General Batched GEMM (SupportUserArgs kernels).
         // Appended at the tail, after the dstD/Synchronizer block, to match the
         // kernel signature order (see Signature.py).
-        const bool runtimeGroup = customKernel.name == "RuntimeGroup"
-                                  || customKernel.name.rfind("RuntimeGroup_", 0) == 0;
-        if(!problemType.groupedGemm
-           && (customKernel.name.empty() || customKernel.generated || runtimeGroup))
+        if(!problemType.groupedGemm && (customKernel.name.empty() || customKernel.generated))
         {
             rv.args.append<int64_t>("batchOffsetD", inputs.batchOffsetD);
             rv.args.append<int64_t>("batchOffsetC", inputs.batchOffsetC);
             rv.args.append<int64_t>("batchOffsetA", inputs.batchOffsetA);
             rv.args.append<int64_t>("batchOffsetB", inputs.batchOffsetB);
-        }
-        if(runtimeGroup)
-        {
-            if(problemType.groupedGemm || (rv.args.size() != 152 && rv.args.size() != 160))
-                throw std::runtime_error("RuntimeGroup requires the 152- or 160-byte single-GEMM argument layout");
-            rv.args.append<uint32_t>("groupSize", problem.scaleBlockSizeA());
-            rv.args.append<uint32_t>("groupSizePadding", 0);
         }
 
         // The fused GEMM+A2A segment follows batchOffsets in the kernel signature.
@@ -3263,6 +3253,24 @@ namespace TensileLite
                     break;
                 case CustomArgSemantic::AddressTD:
                     rv.args.template append<void const*>("AddressTD", inputs.d);
+                    break;
+                case CustomArgSemantic::AddressScaleZeroA:
+                    rv.args.template append<void const*>("AddressScaleZeroA", inputs.scaleZeroA);
+                    break;
+                case CustomArgSemantic::ScaleBlockSizeA:
+                    rv.args.appendCustomType("groupSize", problem.scaleBlockSizeA(), arg.type);
+                    break;
+                case CustomArgSemantic::BatchOffsetA:
+                    rv.args.appendCustomType("batchOffsetA", inputs.batchOffsetA, arg.type);
+                    break;
+                case CustomArgSemantic::BatchOffsetB:
+                    rv.args.appendCustomType("batchOffsetB", inputs.batchOffsetB, arg.type);
+                    break;
+                case CustomArgSemantic::BatchOffsetC:
+                    rv.args.appendCustomType("batchOffsetC", inputs.batchOffsetC, arg.type);
+                    break;
+                case CustomArgSemantic::BatchOffsetD:
+                    rv.args.appendCustomType("batchOffsetD", inputs.batchOffsetD, arg.type);
                     break;
                 case CustomArgSemantic::AddressScaleA:
                     rv.args.template append<void const*>("AddressScaleA", inputs.scaleA);

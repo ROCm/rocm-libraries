@@ -149,7 +149,13 @@ namespace TensileLite
         X_MACRO(ActivationArg) \
         X_MACRO(GSUSync) \
         /* Random seed args */ \
-        X_MACRO(RNDSeed)
+        X_MACRO(RNDSeed) \
+        X_MACRO(AddressScaleZeroA) \
+        X_MACRO(ScaleBlockSizeA) \
+        X_MACRO(BatchOffsetA) \
+        X_MACRO(BatchOffsetB) \
+        X_MACRO(BatchOffsetC) \
+        X_MACRO(BatchOffsetD)
 
     enum class CustomArgSemantic
     {

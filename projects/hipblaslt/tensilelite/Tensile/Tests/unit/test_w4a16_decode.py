@@ -9,7 +9,7 @@ import yaml
 
 from Tensile.Common.Utilities import state
 from Tensile.Contractions import ProblemPredicate
-from Tensile.CustomKernels import getCustomKernelConfigAndAssembly, readCustomKernelConfig
+from Tensile.CustomKernels import _readEmbeddedYaml, readCustomKernelConfig
 
 pytestmark = pytest.mark.unit
 
@@ -52,8 +52,7 @@ def test_decode_selection_bounds(group, suffix, runtime):
 @pytest.mark.parametrize("runtime", [False, True])
 def test_decode_universal_arguments_match_matrix_kernel(group, suffix, runtime):
     def metadata(name):
-        config, _ = getCustomKernelConfigAndAssembly(name, DIRECTORY)
-        return yaml.safe_load(config)["amdhsa.kernels"][0]
+        return _readEmbeddedYaml(name, DIRECTORY)["amdhsa.kernels"][0]
 
     name = runtime_name(suffix) if runtime else NAME
     general_name = RUNTIME_GENERAL if runtime else GENERAL
@@ -170,3 +169,24 @@ def test_block_scale_equality_grids_do_not_merge_duplicate_shape_keys():
         assert len(table) == 25
         assert len({tuple(row["key"]) for row in table}) == 25
         assert all(row["index"] in library.solutions for row in table)
+
+
+@pytest.mark.parametrize("suffix", ["_W4", "_W4_U1_A4", "_W4_NativePerm"])
+@pytest.mark.parametrize("runtime", [False, True])
+def test_decode_custom_launch_preserves_universal_abi(suffix, runtime):
+    from Tensile.CustomKernels import getCustomKernelConfig
+
+    name = runtime_name(suffix) if runtime else NAME.format(group=32, suffix=suffix)
+    general_name = RUNTIME_GENERAL if runtime else GENERAL.format(group=32)
+    decode = getCustomKernelConfig(name, {}, DIRECTORY)["CustomKernel"]
+    general = getCustomKernelConfig(general_name, {}, DIRECTORY)["CustomKernel"]
+    general_args = [dict(a) for a in general["args"]]
+    if runtime:
+        assert general_args[-1].pop("padding") == 4
+    assert decode["args"] == general_args
+    tail = [a["semantic"] for a in decode["args"]][24:]
+    assert tail == ["AddressScaleZeroA", "BatchOffsetD", "BatchOffsetC",
+                    "BatchOffsetA", "BatchOffsetB"] + (["ScaleBlockSizeA"] if runtime else [])
+    assert all(a["type"] == "int64" for a in decode["args"][25:29])
+    assert decode["grid"] == ["TilesXYBatchGSU", "One", "One"]
+    assert decode["macrotile"] == [4, 1, 256]
