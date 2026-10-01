@@ -159,11 +159,14 @@ class TestCoverageShapesReachTheArmsThatServeThem:
         import importlib
         import json
 
-        from dispatch_parity import _bind_provider, _load_profile
+        from dispatch_parity import ParityError, _bind_provider, _load_profile
 
         profile = _load_profile(str(_SHIPPED_PROFILE))
         monkeypatch.setattr(sys, "path", list(sys.path))
-        _bind_provider(profile["provider_root"])
+        try:
+            _bind_provider(profile["provider_root"])
+        except ParityError as exc:
+            pytest.skip(f"the rocKE tree is not present in this tree ({exc})")
         try:
             importlib.import_module(profile["dispatch"]["module"])
         except ImportError as exc:

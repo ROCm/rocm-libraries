@@ -477,9 +477,7 @@ class TestTheShippedProfilePinsTheDispatchArmItsCatalogWasBuiltFrom:
         """
         import importlib
 
-        profile = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))
-        monkeypatch.setattr(sys, "path", list(sys.path))
-        dispatch_parity._bind_provider(profile["provider_root"])
+        profile = _real_dispatcher_or_skip(monkeypatch)
         dispatch, request = profile["dispatch"], profile["request"]
         try:
             factory_module = importlib.import_module(dispatch["module"])
@@ -531,12 +529,17 @@ class TestTheShippedProfilePinsTheDispatchArmItsCatalogWasBuiltFrom:
 
 
 def _real_dispatcher_or_skip(monkeypatch) -> dict:
-    """The shipped gfx950 profile, bound, or a skip when rocKE cannot import."""
+    """The shipped gfx950 profile, bound, or a skip when the rocKE tree is absent
+    or cannot import. The root is found from this file's location (a checkout or
+    a `git archive` extract alike), so a skip here means the tree really lacks it."""
     import importlib
 
     profile = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))
     monkeypatch.setattr(sys, "path", list(sys.path))
-    dispatch_parity._bind_provider(profile["provider_root"])
+    try:
+        dispatch_parity._bind_provider(profile["provider_root"])
+    except dispatch_parity.ParityError as exc:
+        pytest.skip(f"the rocKE tree is not present in this tree ({exc})")
     try:
         importlib.import_module(profile["dispatch"]["module"])
     except ImportError as exc:
