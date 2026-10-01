@@ -48,8 +48,8 @@ namespace rocsparse
                                      ? static_cast<int64_t>(block_dim) * mb
                                      : static_cast<int64_t>(block_dim) * size_of_mask;
 
-        // Grid-stride loop so a grid clamped against maxGridSize[0] still covers
-        // the full range.
+        // Grid-stride loop so a grid clamped by rocsparse::get_grid_size_x still
+        // covers the full range.
         const int64_t stride = static_cast<int64_t>(BLOCKSIZE) * hipGridDim_x;
         for(int64_t idx = static_cast<int64_t>(hipThreadIdx_x)
                           + static_cast<int64_t>(BLOCKSIZE) * hipBlockIdx_x;
@@ -88,8 +88,8 @@ namespace rocsparse
                                          ? static_cast<int64_t>(block_dim) * mb
                                          : static_cast<int64_t>(block_dim) * size_of_mask;
 
-            // Grid-stride loop so a grid clamped against maxGridSize[0] still
-            // covers the full range.
+            // Grid-stride loop so a grid clamped by rocsparse::get_grid_size_x
+            // still covers the full range.
             const int64_t stride = static_cast<int64_t>(BLOCKSIZE) * hipGridDim_x;
             for(int64_t idx = static_cast<int64_t>(hipThreadIdx_x)
                               + static_cast<int64_t>(BLOCKSIZE) * hipBlockIdx_x;

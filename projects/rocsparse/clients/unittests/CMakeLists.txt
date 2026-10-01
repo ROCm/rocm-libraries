@@ -204,6 +204,9 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # Needs rocsparse_gthr_impl.cpp compiled in (see
   # ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES).
   unit_test_internal_level1_gthr_grids.cpp
+  # --- AISPARSE-656: bsrsv solve grid vs. the dispatch limit -----------------
+  # Drives the public rocsparse_dbsrsv_* entry points; no compile-in TUs.
+  unit_test_internal_level2_bsrsv_limit.cpp
 )
 
 # Host building-block library translation units under test by the

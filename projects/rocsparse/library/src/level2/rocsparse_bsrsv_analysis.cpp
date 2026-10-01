@@ -120,6 +120,9 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
     ROCSPARSE_CHECKARG_ARRAY(6, nnzb, bsr_val);
     ROCSPARSE_CHECKARG_ARRAY(8, nnzb, bsr_col_ind);
 
+    // Fail before the analysis does any work if the solve could not launch.
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrsv_solve_check_grid(handle, mb));
+
     if(analysis == rocsparse_analysis_policy_reuse)
     {
         auto trm = info->get_bsrsv_info(trans, descr->fill_mode);

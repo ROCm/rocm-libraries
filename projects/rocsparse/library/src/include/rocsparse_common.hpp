@@ -2741,8 +2741,8 @@ namespace rocsparse
         int lid = threadIdx.x & (BSRDIM - 1);
         int wid = threadIdx.x / BSRDIM;
 
-        // Grid-stride loop over the non-permuted nnz index so a grid clamped
-        // against maxGridSize[0] still covers the full range. The index is
+        // Grid-stride loop over the non-permuted nnz index so a grid clamped by
+        // rocsparse::get_grid_size_x still covers the full range. The index is
         // computed in 64-bit to avoid overflowing the block-grid product.
         const int64_t stride = static_cast<int64_t>(gridDim.x) * DIMY;
         for(int64_t jj = static_cast<int64_t>(blockIdx.x) * DIMY + threadIdx.y; jj < nnzb;
