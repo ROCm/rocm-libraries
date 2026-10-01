@@ -3141,6 +3141,38 @@ class TestSWaitAlu(unittest.TestCase):
         self.assertEqual(len(m._collect_logical_insts()), 2)
 
 
+class TestSWaitAluToString(unittest.TestCase):
+    """``toString`` parity with ``rocisa::SWaitAlu`` (common.hpp)."""
+
+    def setUp(self):
+        from rocisa_stinkytofu_adaptor import base as _base
+        self._base = _base
+        self._saved_kernel = _base.getKernel()
+        self._saved_current_isa = _base._current_isa
+        self._saved_is_init = _base._is_init
+
+    def tearDown(self):
+        self._base.setKernelInfo(self._saved_kernel)
+        self._base._current_isa = self._saved_current_isa
+        self._base._is_init = self._saved_is_init
+
+    def test_no_isa_is_empty(self):
+        self._base._current_isa = None
+        self.assertEqual(str(SWaitAlu(va_vdst=0)), "")
+
+    def test_gfx1250_fields_in_order(self):
+        self._base.init((12, 5, 0), "", False)
+        inst = SWaitAlu(sa_sdst=0, va_vdst=1, vm_vsrc=2, comment="c")
+        self.assertEqual(
+            str(inst).split("//")[0].rstrip(),
+            "s_wait_alu depctr_va_vdst(1) depctr_vm_vsrc(2) depctr_sa_sdst(0)",
+        )
+
+    def test_gfx1250_all_unset_is_empty(self):
+        self._base.init((12, 5, 0), "", False)
+        self.assertEqual(str(SWaitAlu(comment="c")), "")
+
+
 class TestSSchedulingFence(unittest.TestCase):
     """SSchedulingFence — scheduling barrier pseudo-instruction."""
 
