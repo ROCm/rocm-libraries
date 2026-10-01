@@ -98,8 +98,8 @@ gfx950 dense is six frozen `(tile × persist × wide-DMA)` candidates sharing
 the persist + wide-DMA default-tile combo (`spec_id=gfx950_attention_dense`).
 Wide-DMA variants do not admit SWA or sinks; `dispatch_attention` uses
 `attention_ranker` so an unpinned request still follows the historical auto
-policy (default tile, persist once `nqb*Hq*B >= num_persistent` unless the
-non-persistent auto order is `hq_minor_swz`, wide DMA on aligned causal D128)
+policy (default tile, persist once `nqb*Hq*B >= num_persistent`, wide DMA on
+aligned causal D128)
 rather than always picking the production name. Pin
 `dense_tile` / `dense_persistent` / `dense_wide_lds_dma` on `AttentionRequest`
 to filter, and `dense_waves_per_eu=1..8` to override the shipped WPE policy.

@@ -51,9 +51,10 @@ setup + K/V-prime cold-start is amortized once per CU instead of once per query-
 This closes the causal fixed-cost amortization gap. `num_persistent=256` = one 8-wave
 block per CU on MI355X (256 CUs) at 2 waves/SIMD; larger oversubscribes the CUs (tail
 loss). The work-item decode is `persist_decode="auto"` by default. For aligned
-causal attention auto selects `bt_hkv_minor` below `chiplet_num_xcds` batches;
-otherwise `hkv_major` when `gqa*NQB*B >= 2*NP`, else `qb_major`. Query blocks
-are folded under causal masking. The GQA-pair decodes below are explicit
+causal attention auto selects `hq_minor_swz` for MHA with more than `8*NP` work
+items, else `bt_hkv_minor` below `chiplet_num_xcds` batches; otherwise
+`hkv_major` when `gqa*NQB*B >= 2*NP`, else `qb_major`. Query blocks are folded
+or pair-folded under causal masking. The GQA-pair decodes below are explicit
 only.
 
 ### Balanced GQA-pair decode
@@ -216,8 +217,7 @@ and equal-length bottom-right requests retain the windowed path on both grids.
 
 `dense_persistent="auto"` turns on the persistent grid-stride variant once there is
 enough work to fill the grid (`⌈Sq/256⌉·Hq·B >= num_persistent`) — i.e. the large-Sq
-prefill regime — unless the non-persistent auto order is `hq_minor_swz` (large
-causal MHA), which measured ahead of the persistent grid there. Aligned causal
+prefill regime. Aligned causal
 D128/BN64 persistent shapes enable wide DMA/IGLP. The kernel name exposes the
 decisions through `wdma` and the block-order tokens (e.g. `bthkvmin`,
 `nphqminswz`). Callers may pin either order through `dense_persist_decode` /

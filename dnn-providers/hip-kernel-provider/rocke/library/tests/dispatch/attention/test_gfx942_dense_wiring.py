@@ -248,7 +248,7 @@ class TestGfx942DensePersistent(unittest.TestCase):
             req = _req(hdim_q=64, hdim_v=64, dense_persistent="auto")
             self.assertFalse(_dense_spec(req).persistent)
 
-    def test_large_causal_mha_stays_non_persistent_with_swizzled_head_first(self):
+    def test_large_causal_mha_uses_persistent_swizzled_head_first(self):
         with _Gfx942Arch():
             req = _req(
                 batch=16,
@@ -259,28 +259,15 @@ class TestGfx942DensePersistent(unittest.TestCase):
                 dense_persistent="auto",
             )
             spec = _dense_spec(req)
-            self.assertFalse(spec.persistent)
-            self.assertEqual(spec.resolved_nonpersist_decode, "hq_minor_swz")
+            self.assertTrue(spec.persistent)
+            self.assertEqual(spec.resolved_persist_decode, "hq_minor_swz")
 
     def test_nonpersist_decode_request_pin_reaches_spec(self):
         with _Gfx942Arch():
-            req = _req(dense_nonpersist_decode="hq_minor_swz")
+            req = _req(dense_persistent="off", dense_nonpersist_decode="hq_minor_swz")
             spec = _dense_spec(req)
             self.assertFalse(spec.persistent)
             self.assertEqual(spec.resolved_nonpersist_decode, "hq_minor_swz")
-
-    def test_pinned_nonpersist_decode_keeps_large_mha_persistent(self):
-        with _Gfx942Arch():
-            req = _req(
-                batch=16,
-                nhead_q=64,
-                nhead_k=64,
-                seqlen_q=4096,
-                seqlen_k=4096,
-                dense_nonpersist_decode="bt_hkv_minor",
-            )
-            spec = _dense_spec(req)
-            self.assertTrue(spec.persistent)
 
     def test_explicit_persistent_on_is_accepted_and_builds_persistent(self):
         """Post-P4 the persistent variant ships, so an explicit 'on' is accepted

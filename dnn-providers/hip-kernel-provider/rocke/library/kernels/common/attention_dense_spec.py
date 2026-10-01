@@ -300,17 +300,26 @@ class AttentionDenseSpec:
         """Resolve the persistent auto policy."""
         if self.persist_decode != "auto":
             return self.persist_decode
+        gqa = self.num_queries_per_kv
+        nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
+        work = nqb * self.num_query_heads * self.batch
         if self._aligned_causal:
             if self.interleave:
                 return PersistQbMajor.name  # the only decode interleave applies to
+            # Swizzled Head-first measured ahead of every other order on causal
+            # MHA with more than about 8 grid-stride rounds of work.
+            if (
+                gqa == 1
+                and PERSIST_DECODES[PersistHqMinorSwz.name].check(self) is None
+                and work > 8 * self.num_persistent
+            ):
+                return PersistHqMinorSwz.name
             # Batch is the fastest digit and xcd = wi % num_xcds, so with fewer
             # batches than XCDs the second digit still picks the XCD:
             # bt_hkv_minor then gives each XCD one kv head. From there on the
             # rule below measured ahead.
             if self.batch < self.chiplet_num_xcds:
                 return PersistBtHkvMinor.name
-        gqa = self.num_queries_per_kv
-        nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
         per_hkv = gqa * nqb * self.batch
         if gqa > 1 and per_hkv >= 2 * self.num_persistent:
             return PersistHkvMajor.name

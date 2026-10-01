@@ -166,7 +166,6 @@ def _dense_spec(req: OperatorRequest):
     returns :class:`Gfx942AttentionDenseSpec` directly so unsupported gfx950 knobs
     cannot enter this path and no later promotion can change its meaning.
     """
-    from kernels.common.attention_dense_decode import NonpersistHqMinorSwz
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
     from kernels.gfx942.attention_dense import (
         Gfx942AttentionDenseSpec,
@@ -207,7 +206,7 @@ def _dense_spec(req: OperatorRequest):
         raise ValueError(
             f"dense_persistent must be 'auto'/'on'/'off', got {req.dense_persistent!r}"
         )
-    spec = Gfx942AttentionDenseSpec(
+    return Gfx942AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
         seqlen_kv=sk,
@@ -229,13 +228,6 @@ def _dense_spec(req: OperatorRequest):
             req, _tuned_waves_per_eu(head_size, dtype)
         ),
     )
-    if mode == "auto" and persistent:
-        # Stay on the non-persistent grid where its auto order is Swizzled
-        # Head-first: measured ahead of the persistent grid there.
-        grid_spec = replace(spec, persistent=False)
-        if grid_spec.resolved_nonpersist_decode == NonpersistHqMinorSwz.name:
-            return grid_spec
-    return spec
 
 
 def dense_spec_for_request(req: AttentionRequest):

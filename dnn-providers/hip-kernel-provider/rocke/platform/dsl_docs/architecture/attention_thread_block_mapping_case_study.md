@@ -11,7 +11,8 @@ costs. The kernel is self-attention (`Sq == Skv`) in bf16/fp16 with D 64/128, ca
 non-causal, on gfx942 and gfx950. It records the experiments behind PR #12714, which
 added XCD- and L2-aware block orders. The previous version (the baseline) is `develop`
 at `c81bca5ecf`, whose dense kernels are unchanged up to `5d7f9be53e`. The new version
-is `1e905f9231`.
+is `1e905f9231`. The pair fold and the persistent `hq_minor_swz` (§2.3) came later, on
+top of it.
 
 Per [`platform/AGENTS.md`](../../AGENTS.md) §Compliance, this file records relative
 results only: ratios between two code paths on the same device, with the correctness
@@ -73,6 +74,12 @@ The order therefore decides three things, which turned out to matter in this ord
 - **Fold** (`qb < NQB/2 ? qb : NQB-1-(qb-NQB/2)`) is right for the pinned grid. Along a
   workgroup's stride it pairs a cheap block with an expensive one, so per-workgroup
   totals equalize.
+- **Pair fold** (persistent `hq_minor_swz`, `hkv_major`; even `NQB`) runs both blocks
+  of `{p, NQB-1-p}` on one workgroup's consecutive steps, so every unit costs the
+  same whatever the digit order. The fold balances only when a stride crosses both
+  halves: automatic when the query block is the slowest digit (`qb_major`,
+  `bt_hkv_minor`, where pairing had almost no effect, §7), not under XCD head bands
+  or with the kv head slowest.
 - **Alternating directions** (`interleave`: reverse on odd heads) is weaker than both.
   Every workgroup still sees the full cost range, and half of them end on the most
   expensive blocks.
@@ -91,7 +98,7 @@ K plus V of one `(batch, kv head)` is `512·S` bytes at D128, so a whole head fi
 XCD's L2 at about `S = 8K`. To confine a stream to one XCD, the stream also needs
 enough work to fill it: `G·NQB` items against 38 or 32 CUs. MHA never fills an XCD with
 one head's blocks. That is why MHA needs a head *band* per XCD (Swizzled Head-first,
-§4) rather than one stream per XCD.
+§3) rather than one stream per XCD.
 
 **Temporal locality beyond capacity.** A head that does not fit still gets L2 reuse.
 Workgroups that consume the same stream and start together walk its K/V tiles from 0
@@ -158,9 +165,10 @@ and `21ae719`, AOTriton 0.14b (`b5e8cfb`), FlashAttention `e9cf2c1`.
 |---|---|---|---|
 | non-persistent | `qb_minor` | `QGVB`, the previous grid | non-causal, and everything that is not aligned causal |
 | non-persistent | `bt_hkv_minor` (new) | `BVGQ`, longest-first | aligned causal (default) |
-| non-persistent | `hq_minor_swz` (new) | Swizzled Head-first: XCD `a` owns head band `a`, one head's blocks at a time, longest-first | causal MHA with many heads × batch × blocks |
+| non-persistent | `hq_minor_swz` (new) | Swizzled Head-first: XCD `a` owns head band `a`, one head's blocks at a time, longest-first | causal MHA with many heads × batch × blocks, where dispatch picks the non-persistent grid |
+| persistent | `hq_minor_swz` (new) | Swizzled Head-first, pair fold | aligned causal MHA with more than 8 grid-stride rounds of work (`Hq` divisible by 8, even `NQB`) |
 | persistent | `bt_hkv_minor` (new) | `BVGQ`, folded | aligned causal, batch below the XCD count |
-| persistent | `hkv_major` | `BGQV`, folded (unchanged) | GQA with enough work per kv head (the previous rule), including aligned causal from `chiplet_num_xcds` batches |
+| persistent | `hkv_major` | `BGQV`, now pair fold under causal | GQA with enough work per kv head (the previous rule), including aligned causal from `chiplet_num_xcds` batches |
 | persistent | `qb_major` | `BGVQ`, now folded under causal | everything else on the persistent grid |
 | persistent | `gqa_pair*` | unchanged | explicit only |
 
@@ -170,15 +178,14 @@ and `21ae719`, AOTriton 0.14b (`b5e8cfb`), FlashAttention `e9cf2c1`.
 - **Request field and builder flag:** `AttentionRequest.dense_nonpersist_decode`, and
   `--nonpersist-decode` on the builders.
 - **Kernel name and cache key:** both include the resolved order.
-- **Balance is automatic:** longest-first on the non-persistent grid, fold on the
-  persistent grid. There is no knob.
+- **Balance is automatic:** longest-first on the non-persistent grid, fold or pair
+  fold (§2.3) on the persistent grid. There is no knob.
 - **"Aligned causal"** means causal attention on the plain dense layout: no sliding
   window, ragged, varlen, paged, or moving bottom-right diagonal.
 - **Dispatch (§6.4):**
   - gfx942 takes the persistent grid at D128 for every batch and mask, and the
     non-persistent grid at D64;
-  - gfx950 keeps the previous rule: persistent once the work fills the grid;
-  - both arches stay non-persistent when auto resolves to `hq_minor_swz`.
+  - gfx950 keeps the previous rule: persistent once the work fills the grid.
 - **The persistent grid stays ahead at D128 on both arches, for different reasons.**
   - gfx950's persistent builder is a different kernel body with extra optimizations:
     wide LDS DMA (128-bit buffer→LDS loads) and a different scheduling template. So
@@ -230,6 +237,8 @@ flagged, and error metrics were identical on both sides.
   the non-persistent grid, measured +7.8% here (§7).
 - **gfx950 losses are almost all at `S ≤ 1K`,** where the work is about one wave or
   less. The sliding-window shapes are unchanged (−0.2%).
+- The later pair fold and persistent `hq_minor_swz` (§2.3) change no kernel in this
+  set.
 
 ### 6.2 Non-persistent orders, order-comparison grid
 
@@ -278,16 +287,15 @@ check ran on the `B = 1` shapes (the other two were too large).
 |  | new non-persistent `hq_minor_swz` | -0.8% | 77% | 0.29× |
 |  | new auto (persistent `bt_hkv_minor`) | +5.8% | 73% | 0.35× |
 | GQA 128/8, S=4K, B=16, causal | previous auto (persistent `hkv_major`) | +0.0% | 56% | 1.00× |
-|  | previous non-persistent `qb_minor` | -36.0% | 87% | 0.24× |
-|  | new non-persistent `bt_hkv_minor` | -5.9% | 65% | 0.76× |
-|  | new non-persistent `hq_minor_swz` | -7.7% | 77% | 0.49× |
-|  | new auto (persistent `hkv_major`) | -0.2% | 56% | 1.01× |
+|  | previous non-persistent `qb_minor` | -35.5% | 87% | 0.24× |
+|  | new non-persistent `bt_hkv_minor` | -6.6% | 65% | 0.75× |
+|  | new non-persistent `hq_minor_swz` | -8.1% | 76% | 0.49× |
+|  | new auto (persistent `hkv_major`) | +5.9% | 87% | 0.24× |
 | MHA 64/64, S=8K, B=4, causal | previous auto (persistent `qb_major`) | +0.0% | 25% | 1.00× |
-|  | previous non-persistent `qb_minor` | -27.8% | 63% | 0.48× |
-|  | new non-persistent `bt_hkv_minor` | -1.6% | 28% | 0.95× |
-|  | new non-persistent `hq_minor_swz` | +4.4% | 79% | 0.26× |
-|  | new persistent `bt_hkv_minor` | +2.5% | 26% | 0.99× |
-|  | new auto (non-persistent `hq_minor_swz`) | +4.4% | 79% | 0.26× |
+|  | previous non-persistent `qb_minor` | -28.7% | 63% | 0.48× |
+|  | new non-persistent `bt_hkv_minor` | -3.4% | 28% | 0.95× |
+|  | new non-persistent `hq_minor_swz` | +2.5% | 79% | 0.26× |
+|  | new auto (persistent `hq_minor_swz`) | +10.4% | 51% | 0.65× |
 | GQA 32/8, S=32K, B=1, causal | previous auto (persistent `qb_major`) | +0.0% | 9% | 1.00× |
 |  | previous non-persistent `qb_minor` | -14.0% | 61% | 0.42× |
 |  | new non-persistent `bt_hkv_minor` | +1.3% | 87% | 0.13× |
@@ -314,16 +322,15 @@ check ran on the `B = 1` shapes (the other two were too large).
 |  | new non-persistent `hq_minor_swz` | -8.5% | 91% | 0.21× |
 |  | new auto (persistent `bt_hkv_minor`) | +2.5% | 93% | 0.14× |
 | GQA 128/8, S=4K, B=16, causal | previous auto (persistent `hkv_major`) | +0.0% | 89% | 1.00× |
-|  | previous non-persistent `qb_minor` | -40.8% | 89% | 1.00× |
-|  | new non-persistent `bt_hkv_minor` | -6.6% | 58% | 4.92× |
-|  | new non-persistent `hq_minor_swz` | -6.3% | 90% | 0.82× |
-|  | new auto (persistent `hkv_major`) | +0.1% | 89% | 1.00× |
+|  | previous non-persistent `qb_minor` | -41.6% | 89% | 1.00× |
+|  | new non-persistent `bt_hkv_minor` | -8.4% | 58% | 4.90× |
+|  | new non-persistent `hq_minor_swz` | -9.6% | 90% | 0.82× |
+|  | new auto (persistent `hkv_major`) | +0.5% | 89% | 1.00× |
 | MHA 64/64, S=8K, B=4, causal | previous auto (persistent `qb_major`) | +0.0% | 17% | 1.00× |
-|  | previous non-persistent `qb_minor` | -25.5% | 57% | 0.50× |
-|  | new non-persistent `bt_hkv_minor` | -1.6% | 18% | 1.00× |
-|  | new non-persistent `hq_minor_swz` | +11.3% | 86% | 0.15× |
-|  | new persistent `bt_hkv_minor` | -0.2% | 17% | 1.00× |
-|  | new auto (non-persistent `hq_minor_swz`) | +11.3% | 86% | 0.14× |
+|  | previous non-persistent `qb_minor` | -26.0% | 57% | 0.50× |
+|  | new non-persistent `bt_hkv_minor` | -2.2% | 18% | 1.00× |
+|  | new non-persistent `hq_minor_swz` | +7.9% | 86% | 0.14× |
+|  | new auto (persistent `hq_minor_swz`) | +24.2% | 59% | 0.48× |
 | GQA 32/8, S=32K, B=1, causal | previous auto (persistent `hkv_major`) | +0.0% | 73% | 1.00× |
 |  | previous non-persistent `qb_minor` | -19.9% | 71% | 1.08× |
 |  | new non-persistent `bt_hkv_minor` | -4.2% | 95% | 0.15× |
@@ -345,8 +352,10 @@ check ran on the `B = 1` shapes (the other two were too large).
   - GQA `B = 1` causal: 2.2–2.9× fewer on gfx942 and 3–7× fewer on gfx950 than
     previous auto, whose `qb_major` / `gqa_pair*` choices spread each K/V stream over
     many XCDs;
-  - large MHA: `hq_minor_swz` needs 4–7× fewer (hit rate 79–86% vs 17–28% for the
-    other orders), and it is the fastest order there.
+  - large MHA: the non-persistent `hq_minor_swz` needs 4–7× fewer (hit rate 79–86%
+    vs 17–28% for the other orders). The persistent `hq_minor_swz` that auto now
+    picks misses more (51–59% hit rate) but is the fastest, +10.4% (gfx942) / +24.2%
+    (gfx950): balance again outweighs hit rate.
 - **Hit rate does not rank the grids.** On gfx942 the new auto (persistent
   `bt_hkv_minor`) has a lower hit rate than the non-persistent `bt_hkv_minor` (58–81% vs
   86–91%) and is still 3–5% faster; see §6.4.
@@ -355,13 +364,17 @@ check ran on the `B = 1` shapes (the other two were too large).
 - **Unchanged where nothing better was found:**
   - non-causal auto is still the previous persistent `qb_major` (the non-persistent
     orders are 9–13% behind it on gfx942);
-  - large-batch GQA auto is the previous `hkv_major`.
+  - large-batch GQA auto is still `hkv_major`, now with the pair fold: +5.9% on
+    gfx942, where its hit rate rises from 56% to 87% because each grid-stride phase
+    spans fewer kv heads, and +0.5% on gfx950, where it was already 89%.
 
 ### 6.4 Grid choice (dispatch)
 
 Auto vs previous auto, measured in the same session per arch. The shapes are the 46
 prefill geometries (mostly `B = 1`, a few `B` 2–4; D128, plus five D64), each run
-causal and non-causal, plus 20 large-batch shapes (`B` 8–32, causal, D128). Every
+causal and non-causal, plus 20 large-batch shapes (`B` 8–32, causal, D128). The
+large-batch shapes were re-measured with the pair fold (§2.3); outputs were
+bit-identical to the previous version. Every
 run with an affordable SDPA reference matched it (max abs error 3.9e-3 in bf16).
 
 | slice | gfx942 | gfx950 |
@@ -369,8 +382,8 @@ run with an affordable SDPA reference matched it (max abs error 3.9e-3 in bf16).
 | causal, `B ≤ 4` (46) | **+10.9%** (worst −3.5%) | **+6.5%** (worst −1.3%) |
 | non-causal, `B ≤ 4` (46) | +5.5% (worst −3.1%) | +0.2% (worst −1.6%) |
 | D64, both masks (10 of the 92 above) | +18.2% | +2.9% |
-| causal, `B` 8–32 (20) | +0.4% (worst −0.8%) | +0.8% (worst −0.5%) |
-| all (112) | **+6.7%** (worst −3.5%) | **+2.8%** (worst −1.6%) |
+| causal, `B` 8–32 (20) | +4.3% (worst −1.0%) | +3.7% (worst −2.8%) |
+| all (112) | **+7.4%** (worst −3.5%) | **+3.3%** (worst −2.8%) |
 
 - **gfx942 at D128: the persistent grid wins at every batch and mask.** With the new
   decodes it is ahead of the non-persistent auto by about 4% on causal and 10% on
@@ -379,10 +392,9 @@ run with an affordable SDPA reference matched it (max abs error 3.9e-3 in bf16).
   identified.
 - **gfx942 at D64: the non-persistent grid wins,** by about 11% (causal) and 16%
   (non-causal).
-- **Large batch, GQA:** where the previous rule picks `hkv_major`, it stays ahead of
-  the folded `qb_major` on gfx950 (by up to 10.7%), so auto keeps the previous rule.
-  On gfx942 the folded `qb_major` would be 1.5% faster on geomean there (from −1.2%
-  to +8.6%), which is left as a follow-up (§8).
+- **Large batch:** MHA now runs the persistent `hq_minor_swz`: +10.5% (gfx942) /
+  +20.0% (gfx950). GQA keeps the previous rule, `hkv_major` where it applied, now
+  with the pair fold: +2.8% / +0.0%, with gfx950 up to 2.8% behind at `S = 8K`.
 - **gfx950 at `S ≤ 1K`:** the unchanged previous rule picks the non-persistent grid
   when the work does not fill the persistent grid. There the persistent grid measured
   about 8% ahead on causal shapes (13 of 13) and 2% on non-causal (§8).
@@ -400,8 +412,9 @@ run with an affordable SDPA reference matched it (max abs error 3.9e-3 in bf16).
 | locality-maximizing orders (one K/V stream per XCD, e.g. `VGQB`) **(experimental)** | the best locality measured *worst*; `BVGQ` won with 8–32× poorer locality | pinning one stream per XCD gives each workgroup one query block, which ruins causal balance. Locality only separates orders once balance is equal |
 | kv-phase split (split the fused `(batch, kv head)` identity across the fastest and slowest digits) **(experimental)** | +1.3% on gfx942 persistent at `Hkv = 8` (large batch only); ties elsewhere; about 12 extra integer ops per item | not worth a knob |
 | `gqa_pair`, `gqa_pair_2phase` (gfx950) | very restrictive: GQA with even `G`, even `NQB`, a baked shape, and a CTA count that must equal `NQB·Hkv·B` (or half the work), so under the default CTA count they fire only by coincidence. At matched CTA count they are **2.2% (93 shapes) / 3.9% (64 shapes) behind** the new auto; at the default CTA count, far behind | the new persistent orders balance and localize at least as well without the constraints; now explicit only |
+| pair fold for persistent `bt_hkv_minor` and `qb_major` (causal, 54 shapes) **(experimental)** | almost no effect | the query block is their slowest digit, so a workgroup's stride already crosses both halves of the fold |
 | `interleave` vs fold (persistent `qb_major`, causal, 62 shapes) **(experimental)** | fold ahead by 4.5% (gfx942) / 4.9% (gfx950) geomean; interleave only 0.4–0.7% better than ascending | §2.3; interleave is kept only as an explicit knob |
-| Swizzled Head-first on the persistent grid, as-is **(experimental)** | 10.5% (gfx942) / 27% (gfx950) behind auto on causal shapes, whatever the traversal | grid-stride advances the block digit by `NP/8`; when that is a multiple of `NQB`, every workgroup keeps one query block for its whole life |
+| Swizzled Head-first on the persistent grid, as-is **(experimental)** | 10.5% (gfx942) / 27% (gfx950) behind auto on causal shapes, whatever the traversal | grid-stride advances the block digit by `NP/8`; when that is a multiple of `NQB`, every workgroup keeps one query block for its whole life. The pair fold fixes this (§2.3) |
 | aiter's KV-head-first swizzle (`hkv_minor_swz`: grid `(Hq·NQB, 1, B)`, XCD `a` owns kv heads `a·Hkv/8 …` one at a time, block-first over their query heads) **(prototype on the new version)** | vs non-persistent auto: `Hkv = 8` ties (+0.1–2.8%); `Hkv > 8` causal **+1.6% (gfx942) / +4.4% (gfx950)**, but gfx950 auto uses the faster persistent grid there anyway; `Hkv < 8` causal **13–35% behind**. MHA is identical to `hq_minor_swz` | `bt_hkv_minor` already pins each `(batch, kv head)` to one XCD whenever `B·Hkv % 8 == 0`. The `Hkv < 8` split hands one XCD the late, expensive blocks |
 | first version of the new rules, gfx942: persistent only from 16 batches | behind the previous auto on non-causal D128 (−3.3% geomean, worst −14.9%) and at `B = 8` (up to −7.3%) | it relied on the non-persistent grid beating the *old* persistent decodes; with the new ones the persistent grid wins at D128 (§6.4). The rule now keys on head size |
 | first version of the new rules: folded `qb_major` for aligned causal from `chiplet_num_xcds` batches | behind the previous `hkv_major` on gfx950 GQA (−2.9% geomean, worst −10.7%) | the earlier study compared it only with `bt_hkv_minor`; auto now keeps the previous rule there |
@@ -421,12 +434,8 @@ run with an affordable SDPA reference matched it (max abs error 3.9e-3 in bf16).
 ## 8. What can still be checked
 
 - **Pair longest and shortest block in one unit.**
-  - *Persistent:* bundle `{blk, NQB−1−blk}` so one workgroup runs both halves on
-    consecutive steps. The fold pairs them only *across* grid-stride steps, and only
-    balances when the work divides evenly. Every unit then costs the same, so XCD
-    bands (Swizzled Head-first) survive on the persistent grid. **(prototype)** on
-    causal MHA with `B·Hq ≥ 128`: +6.8% (gfx942) / +10.5% (gfx950) over auto; needs
-    even `NQB`.
+  - *Persistent:* done for even `NQB` (§2.3). Odd `NQB` still uses the fold; the
+    `hq_minor_swz` docstring has a recipe (pair the middle blocks of two heads).
   - *Non-persistent:* one workgroup computes both blocks. That halves the grid,
     equalizes workgroup cost and shares the K/V prefix, but needs `W/2 ≥` CUs and
     makes each workgroup twice as long. Unlike `interleave`, it pairs within a
@@ -441,17 +450,14 @@ run with an affordable SDPA reference matched it (max abs error 3.9e-3 in bf16).
   why the persistent grid loses there (§6.4).
 - **gfx950 grid choice for small problems:** persistent measured about 8% ahead at
   `S ≤ 1K` (causal), where the unchanged rule picks the non-persistent grid (§6.4).
-- **gfx942 at large batch:** the best persistent order differs from gfx950's, so this
-  needs a gfx942-only rule:
-  - MHA: `hkv_major` measured 5–10% ahead of the folded `qb_major` (21–35% behind on
-    gfx950);
-  - GQA, where the previous rule picks `hkv_major`: the folded `qb_major` is 1.5%
-    faster on geomean (§6.4).
+- **gfx942 GQA at large batch:** the folded `qb_major` measured 1.5% ahead of the
+  folded `hkv_major` the rule picked. The pair fold has since gained `hkv_major`
+  3.1% there, so recheck before adding a gfx942-only rule.
 - **gfx942 D128 shapes where the non-persistent grid still wins:** 40 heads at `S ≥ 4K`
   (up to 18% ahead of persistent; end to end these shapes gave back 7–17% of the first
   version's gain, landing within 3% of the previous version), and a 128-token sliding
-  window, where persistent is 11.5% slower. The first may be fold imbalance when the work does not divide the
-  304-workgroup grid.
+  window, where persistent is 11.5% slower. The first may be fold imbalance when the
+  work does not divide the 304-workgroup grid.
 - **Exploit temporal locality deliberately at long `S`:**
   - keep one stream's consumers in the same wave and XCD, and bound the streams per
     XCD (FlashAttention's L2-sized sections);

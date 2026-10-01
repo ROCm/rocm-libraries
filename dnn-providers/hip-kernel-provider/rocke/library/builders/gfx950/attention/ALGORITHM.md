@@ -387,21 +387,24 @@ $(\text{qb}, h_q, \text{bt})$ decides load balance *and* L2 locality:
   `hkv_major` below; `interleave` is an explicit alternative). But every 256-CTA
   grid-stride phase spans *all* KV heads at once → large L2 footprint (57% L2 hit
   at GQA-8).
-- **`hkv_major`** — `wi = hkv·(NQB·g·B) + blk·(g·B) + h_ql·B + bt`, with `blk`
-  folded to a **low/high-paired** query-block index (`blk < half → qb = blk`;
-  else `qb = NQB−1−(blk−half)`). Putting `hkv` in the MSB keeps each grid-stride
-  phase within ~1 KV head so the shared GQA K/V stays L2-resident across its $g$
-  query heads (**L2 hit 57% → ~93%, HBM misses 5.9× lower**); the low/high qb
-  pairing preserves `qb_major`'s causal-triangle balance. Valid only when the
-  CTA grid-strides across both halves of a KV head ($g\cdot NQB\cdot B \ge 2\,NP$).
+- **`hkv_major`** — `wi = hkv·(NQB·g·B) + blk·(g·B) + h_ql·B + bt`. Putting
+  `hkv` in the MSB keeps each grid-stride phase within ~1 KV head so the shared
+  GQA K/V stays L2-resident across its $g$ query heads (**L2 hit 57% → ~93%, HBM
+  misses 5.9× lower**). Under causal masking with even NQB, `blk` indexes a pair
+  `{p, NQB−1−p}` whose two blocks one CTA runs on consecutive grid-stride steps
+  (pair fold), so every CTA gets the same cost; otherwise `blk` is folded
+  (`blk < half → qb = blk`, else `qb = NQB−1−(blk−half)`).
 - **`bt_hkv_minor`** — `wi = ((blk·g + h_ql)·H_{kv} + hkv)·B + bt`, `blk`
   folded under causal. Batch, then KV head, are the fastest digits; the hardware
   assigns XCDs round-robin (`xcd = wi mod 8`), so with fewer batches than XCDs
   each XCD streams few KV heads' K/V.
+- **`hq_minor_swz`** — Swizzled Head-first: XCD `wi mod M` owns a band of query
+  heads; under causal masking the pair fold as in `hkv_major`.
 - **`gqa_pair`, `gqa_pair_2phase`** — explicit only; see the prefill README.
-- **`auto`** (default) — for aligned causal attention `bt_hkv_minor` below
-  `chiplet_num_xcds` batches; otherwise `hkv_major` when it is balance-safe
-  **and** GQA ($g>1$), else `qb_major`.
+- **`auto`** (default) — for aligned causal attention: `hq_minor_swz` for MHA
+  with more than $8\,NP$ work items ($H_q$ divisible by $M$, even NQB), else
+  `bt_hkv_minor` below `chiplet_num_xcds` batches; otherwise `hkv_major` for GQA
+  ($g>1$) with $g\cdot NQB\cdot B \ge 2\,NP$, else `qb_major`.
 
 **Default-grid block order (`nonpersist_decode`).** The grid shape and the
 block-id → work-item map:

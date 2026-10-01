@@ -265,24 +265,40 @@ class PersistQbMajor(PersistDecode):
 
 
 class PersistHkvMajor(PersistDecode):
-    """``wi = hkv*(NQB*gqa*B) + blk*(gqa*B) + hql*B + bt``, folded: each
-    grid-stride phase stays within about one kv head, so its K/V stays in L2
-    across the GQA group. Auto picks it only outside aligned causal attention."""
+    """``wi = hkv*(NQB*gqa*B) + blk*(gqa*B) + hql*B + bt``: each grid-stride
+    phase stays within about one kv head, so its K/V stays in L2 across the GQA
+    group. Under causal masking with even NQB and ``W > NP`` one CTA runs both
+    blocks of a fold pair ``{p, NQB-1-p}`` on consecutive steps (as
+    ``hq_minor_swz``); otherwise the block is folded."""
 
     name = "hkv_major"
     tag = "hkvmaj"
 
+    @staticmethod
+    def _digits(b, idx, B: int, gqa: int, nblk: int):
+        """``idx = hkv*(nblk*gqa*B) + blk*(gqa*B) + hql*B + bt`` ->
+        ``(bt, hq, blk, hkv)``."""
+        bt = b.mod(idx, b.const_i32(B))
+        rem = b.div(idx, b.const_i32(B))  # hkv*(nblk*gqa) + blk*gqa + hql
+        hql = b.mod(rem, b.const_i32(gqa))
+        r2 = b.div(rem, b.const_i32(gqa))  # hkv*nblk + blk
+        blk = b.mod(r2, b.const_i32(nblk))
+        hkv = b.div(r2, b.const_i32(nblk))
+        hq = b.add(b.mul(hkv, b.const_i32(gqa)), hql)
+        return bt, hq, blk, hkv
+
     def emit_decode(self, b, spec, wi, seqlen_q):
         nqb = _baked_nqb(spec, seqlen_q)
-        B, gqa = spec.batch, spec.num_queries_per_kv
-        bt = b.mod(wi, b.const_i32(B))
-        rem = b.div(wi, b.const_i32(B))  # hkv*(NQB*gqa) + blk*gqa + hql
-        hql = b.mod(rem, b.const_i32(gqa))
-        r2 = b.div(rem, b.const_i32(gqa))  # hkv*NQB + blk
-        blk = b.mod(r2, b.const_i32(nqb))
-        hkv = b.div(r2, b.const_i32(nqb))
-        hq = b.add(b.mul(hkv, b.const_i32(gqa)), hql)
-        return Decoded(emit_fold(b, blk, nqb), hq, bt, hkv)
+        B, gqa, NP = spec.batch, spec.num_queries_per_kv, spec.num_persistent
+        W = nqb * spec.num_query_heads * B
+        if spec.causal and nqb % 2 == 0 and W > NP:
+            unit, half = emit_pair_unit(b, wi, W, NP)
+            bt, hq, p, hkv = self._digits(b, unit, B, gqa, nqb // 2)
+            qb = emit_pair_block(b, p, half, nqb)
+        else:
+            bt, hq, blk, hkv = self._digits(b, wi, B, gqa, nqb)
+            qb = emit_fold(b, blk, nqb)
+        return Decoded(qb, hq, bt, hkv)
 
 
 class PersistBtHkvMinor(PersistDecode):
