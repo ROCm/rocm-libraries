@@ -377,6 +377,106 @@ def null_algo(run, output):
     print("PASS heuristic-null-algo: modes 1 and 2 select a JIT solution, mode 0 does not")
 
 
+def capture(run, output):
+    unpublished = (256, 128, 576)
+    python, trap = trap_python(output)
+    jit = dict(HIPBLASLT_JIT_PYTHON=str(python))
+    trapped = dict(jit, HIPBLASLT_JIT_TEST_TRAP=str(trap))
+    _, records = run(
+        "publish",
+        ["--api", "c", "--requested", "1", "--no-run"],
+        HIPBLASLT_JIT="2",
+        **jit,
+    )
+    (published,) = queries(records, "c")
+    require(published["count"] == 1, f"The JIT library was not seeded: {published}")
+    library = output / "lib"
+    held = (len(entries(library)), allocated(library))
+    failed = output / "failing-generation.txt"
+    _, records = run(
+        "failing-generation",
+        ["--api", "none", "--null-algo"] + size_args(unpublished),
+        HIPBLASLT_JIT="2",
+        **dict(jit, HIPBLASLT_JIT_TEST_TRAP=str(failed)),
+    )
+    missing = queries(records, "null-algo")[0]["status"]
+    require(
+        missing != 0 and failed.exists(), "Generation outside a capture did not fail"
+    )
+
+    def captured(name, capture_mode, size, drop=(), **overrides):
+        args = ["--api", "none", "--null-algo", "--capture", capture_mode]
+        stderr, records = run(
+            name, args + size_args(size), drop, **trapped, **overrides
+        )
+        (record,) = queries(records, "null-algo")
+        require(
+            record["capture"] == "active" and record["ended"] == 0,
+            f"{name}: the capture did not stay valid: {record}",
+        )
+        require(not trap.exists(), f"{name}: JIT generated during the capture")
+        return stderr, record
+
+    def replayed(name, stderr, record):
+        require(
+            record["status"] == 0 and record["nodes"] > 0,
+            f"{name}: no solution was captured: {record}",
+        )
+        require(
+            all(f"replay {replay} PASS" in stderr for replay in (0, 1)),
+            f"{name}: the graph replays were not checked",
+        )
+        require(not reports(stderr), f"{name}: a JIT problem was reported")
+
+    for mode in ("1", "2"):
+        for capture_mode in ("global", "thread-local", "relaxed"):
+            name = f"mode-{mode}-{capture_mode}"
+            stderr, record = captured(
+                name, capture_mode, DEFAULT_SIZE, HIPBLASLT_JIT=mode
+            )
+            replayed(name, stderr, record)
+            name += "-unpublished"
+            stderr, record = captured(
+                name, capture_mode, unpublished, HIPBLASLT_JIT=mode
+            )
+            require(
+                record["status"] == missing and record["nodes"] == 0,
+                f"{name}: expected status {missing} and an empty graph: {record}",
+            )
+            lines = reports(stderr)
+            require(
+                len(lines) == 1
+                and lines[0].startswith(
+                    "hipblaslt error: JIT generation skipped during stream capture for"
+                    " GEMM M=256 N=128 K=576 "
+                ),
+                f"{name}: expected one 'generation skipped' error, got {lines}",
+            )
+    require(
+        (len(entries(library)), allocated(library)) == held,
+        "A solution was published during a capture",
+    )
+
+    drop = ("HIPBLASLT_TENSILE_LIBPATH",)
+    _, records = run(
+        "mode-0-device-library",
+        ["--api", "none", "--null-algo"] + size_args(unpublished),
+        drop,
+    )
+    pretuned = queries(records, "null-algo")[0]["status"] == 0
+    for capture_mode in ("global", "thread-local", "relaxed") if pretuned else ():
+        name = f"mode-1-{capture_mode}-device-library"
+        stderr, record = captured(
+            name, capture_mode, unpublished, drop, HIPBLASLT_JIT="1"
+        )
+        replayed(name, stderr, record)
+    print(
+        "PASS heuristic-capture: during stream capture, hipblasLtMatmul without an"
+        " algorithm runs published JIT solutions and reports instead of generating"
+        + ("; a pre-tuned solution fills in mode 1" if pretuned else "")
+    )
+
+
 def report(run, output):
     for mode, status in (("1", INVALID_VALUE), ("2", 0)):
         for cause, python, phrase in (
@@ -701,6 +801,7 @@ ROUTES = {
     "unsupported": unsupported,
     "concurrent": concurrent,
     "null-algo": null_algo,
+    "capture": capture,
     "report": report,
     "partial-fill": partial_fill,
     "override": tuning_override,

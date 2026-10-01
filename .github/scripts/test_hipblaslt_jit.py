@@ -22,6 +22,7 @@ HEURISTIC_ROUTES = (
     "unsupported",
     "concurrent",
     "null-algo",
+    "capture",
     "report",
     "partial-fill",
     "override",

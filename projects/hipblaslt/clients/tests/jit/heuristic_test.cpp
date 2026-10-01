@@ -5,7 +5,8 @@
 // one FP16 GEMM, prints each query as a JSON line, and runs and checks every
 // returned algorithm. --from-index resolves algorithm indices instead, --tuned
 // reports hipblaslt_ext::matmulIsTuned, --git-revision reports
-// hipblasLtGetGitRevision, and --threads with --barrier issues the
+// hipblasLtGetGitRevision, --capture runs --null-algo inside a HIP stream
+// capture and replays the graph, and --threads with --barrier issues the
 // same queries from several threads that start together, also across
 // processes. Uses only the public API, so it builds
 // with and without HIPBLASLT_ENABLE_JIT; test_heuristic.py checks what
@@ -55,6 +56,7 @@ namespace
         bool             run       = true;
         bool             tuned     = false;
         bool             revision  = false;
+        std::string      capture; // empty, global, thread-local or relaxed
         std::vector<int> fromIndex;
         int              threads = 1;
         std::string      barrier;
@@ -286,6 +288,49 @@ namespace
         }
     }
 
+    // hipblasLtMatmul without an algorithm inside a capture of the GEMM stream.
+    // Prints the capture status after the call and the captured node count, then
+    // replays the graph twice and checks D each time when the call succeeded.
+    void capturedNullAlgo(Problem& p, int thread, int handle)
+    {
+        const auto mode = p.s.capture == "global"         ? hipStreamCaptureModeGlobal
+                          : p.s.capture == "thread-local" ? hipStreamCaptureModeThreadLocal
+                                                          : hipStreamCaptureModeRelaxed;
+        check(hipStreamBeginCapture(p.stream, mode), "Begin capture");
+        const auto             status  = p.matmul(nullptr);
+        hipStreamCaptureStatus capture = hipStreamCaptureStatusNone;
+        check(hipStreamIsCapturing(p.stream, &capture), "Query capture");
+        hipGraph_t graph = nullptr;
+        const auto ended = hipStreamEndCapture(p.stream, &graph);
+        size_t     nodes = 0;
+        if(graph)
+            check(hipGraphGetNodes(graph, nullptr, &nodes), "Count graph nodes");
+        {
+            std::lock_guard<std::mutex> lock(outputMutex);
+            std::cout << "{\"api\":\"null-algo\",\"thread\":" << thread << ",\"handle\":" << handle
+                      << ",\"status\":" << status << ",\"capture\":\""
+                      << (capture == hipStreamCaptureStatusActive        ? "active"
+                          : capture == hipStreamCaptureStatusInvalidated ? "invalidated"
+                                                                         : "none")
+                      << "\",\"ended\":" << ended << ",\"nodes\":" << nodes << "}" << std::endl;
+        }
+        if(status == HIPBLAS_STATUS_SUCCESS && ended == hipSuccess)
+        {
+            hipGraphExec_t exec = nullptr;
+            check(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0), "Instantiate graph");
+            for(int replay = 0; replay < 2; ++replay)
+            {
+                p.reset();
+                check(hipGraphLaunch(exec, p.stream), "Launch graph");
+                p.verify("Captured hipblasLtMatmul without an algorithm, replay "
+                         + std::to_string(replay));
+            }
+            static_cast<void>(hipGraphExecDestroy(exec));
+        }
+        if(graph)
+            static_cast<void>(hipGraphDestroy(graph));
+    }
+
     // Claims a ready-N file in dir, then waits for dir/go, so the threads of
     // several processes issue their first query together.
     void waitAtBarrier(const std::filesystem::path& dir)
@@ -349,6 +394,8 @@ namespace
                 s.tuned = true;
             else if(arg == "--git-revision")
                 s.revision = true;
+            else if(arg == "--capture")
+                s.capture = value();
             else if(arg == "--from-index")
                 s.fromIndex = parseIndices(value());
             else if(arg == "--threads")
@@ -360,7 +407,11 @@ namespace
         }
         if((s.api != "c" && s.api != "cpp" && s.api != "both" && s.api != "none")
            || s.requested < 1 || s.m < 1 || s.n < 1 || s.k < 0 || s.handles < 1
-           || s.queries < 1 || s.threads < 1)
+           || s.queries < 1 || s.threads < 1
+           || (!s.capture.empty()
+               && (!s.nullAlgo
+                   || (s.capture != "global" && s.capture != "thread-local"
+                       && s.capture != "relaxed"))))
             throw std::invalid_argument("Invalid arguments");
         return s;
     }
@@ -402,7 +453,12 @@ namespace
                 std::cout << "{\"api\":\"tuned\",\"thread\":" << thread << ",\"handle\":" << handle
                           << ",\"tuned\":" << tuned << "}" << std::endl;
             }
-            if(s.nullAlgo)
+            if(s.nullAlgo && !s.capture.empty())
+            {
+                problem.reset();
+                capturedNullAlgo(problem, thread, handle);
+            }
+            else if(s.nullAlgo)
             {
                 problem.reset();
                 const auto status = problem.matmul(nullptr);
