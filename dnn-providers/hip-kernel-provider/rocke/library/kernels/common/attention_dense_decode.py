@@ -395,21 +395,40 @@ class PersistQbMajor(PersistDecode):
 class PersistHkvMajor(PersistDecode):
     """``wi = hkv*(NQB*gqa*B) + blk*(gqa*B) + hql*B + bt``: each grid-stride
     phase stays within about one kv head, so its K/V stays in L2 across the GQA
-    group. The block is folded."""
+    group. Under causal masking, with even NQB and
+    ``W > NP``, one CTA runs both blocks of a fold pair ``{p, NQB-1-p}`` on
+    consecutive steps (as ``hq_minor_swz``); otherwise the block is folded."""
 
     name = "hkv_major"
     tag = "hkvmaj"
     fastdiv_divisors = ("batch", "gqa", "nqb")
 
-    def emit_decode(self, b, spec, wi, shape):
-        bt = shape.mod(wi, "batch")
-        rem = shape.div(wi, "batch")  # hkv*(NQB*gqa) + blk*gqa + hql
+    @staticmethod
+    def _digits(b, idx, shape: DecodeShape, nqb_scale: int):
+        """``idx = hkv*(nblk*gqa*B) + blk*(gqa*B) + hql*B + bt`` ->
+        ``(bt, hq, blk, hkv)``, with ``nblk = NQB // nqb_scale``."""
+        bt = shape.mod(idx, "batch")
+        rem = shape.div(idx, "batch")  # hkv*(nblk*gqa) + blk*gqa + hql
         hql = shape.mod(rem, "gqa")
-        r2 = shape.div(rem, "gqa")  # hkv*NQB + blk
-        blk = shape.mod(r2, "nqb")
-        hkv = shape.div(r2, "nqb")
+        r2 = shape.div(rem, "gqa")  # hkv*nblk + blk
+        blk = shape.mod(r2, "nqb", nqb_scale)
+        hkv = shape.div(r2, "nqb", nqb_scale)
         hq = b.add(b.mul(hkv, shape.val("gqa")), hql)
-        return Decoded(emit_fold(b, blk, shape), hq, bt, hkv)
+        return bt, hq, blk, hkv
+
+    def emit_decode(self, b, spec, wi, shape):
+        NP = spec.num_persistent
+
+        def paired():
+            unit, half = emit_pair_unit(b, wi, shape, NP)
+            bt, hq, p, hkv = self._digits(b, unit, shape, 2)
+            return emit_pair_block(b, p, half, shape), hq, bt, hkv
+
+        def folded():
+            bt, hq, blk, hkv = self._digits(b, wi, shape, 1)
+            return emit_fold(b, blk, shape), hq, bt, hkv
+
+        return Decoded(*shape.branch(shape.pair_fold(NP), paired, folded))
 
 
 class PersistBtHkvMinor(PersistDecode):
