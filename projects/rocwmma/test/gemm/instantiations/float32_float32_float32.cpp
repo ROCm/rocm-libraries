@@ -28,5 +28,10 @@
 
 namespace rocwmma
 {
+    // Own the shared float output kernels for every GPU architecture, including
+    // architectures that exclude the FP8/FNUZ input instantiations.
+    ROCWMMA_INSTANTIATE_GEMM_OUTPUT_KERNELS(, float32_t, row_major)
+    ROCWMMA_INSTANTIATE_GEMM_OUTPUT_KERNELS(, float32_t, col_major)
+
     ROCWMMA_INSTANTIATE_GEMM_KERNEL_BASE(float32_t, float32_t, float32_t);
 } // namespace rocwmma
