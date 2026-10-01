@@ -9,7 +9,7 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/detail/HipdnnBackendInterface.hpp>
 #include <hipdnn_frontend/detail/IncompatibleBackend.hpp>
-#include <hipdnn_frontend/version.h>
+#include <hipdnn_frontend/version_number.h>
 
 #ifndef HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND
 #include <hipdnn_frontend/detail/HipdnnDirectBackendWrapper.hpp>
