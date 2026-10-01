@@ -134,6 +134,14 @@ public:
                                              + archivePath + "' (" + error.codeName + ")");
         }
 
+        if(arches.empty())
+        {
+            throw KpackModuleLoadFailure(KpackLoadStage::ARCH_LOOKUP,
+                                         "kpack archive '" + archivePath
+                                             + "' declares no architectures; its gfx_arches "
+                                               "entry is absent or malformed");
+        }
+
         // Deliberate pre-check rather than letting kpack_get_kernel fail: a bare
         // KERNEL_NOT_FOUND cannot distinguish "wrong GPU" from "wrong toc_key", and
         // those two send a reader to entirely different places.
