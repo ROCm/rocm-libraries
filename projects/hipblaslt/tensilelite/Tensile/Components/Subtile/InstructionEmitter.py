@@ -360,20 +360,14 @@ class InstructionEmitter:
         tPA = self.tensorParametersMap['A']
         tPB = self.tensorParametersMap['B']
         from rocisa.code import Module
-        from rocisa.instruction import SCmpLeU32, SCMovB32
-        from rocisa.container import sgpr
+        from rocisa.instruction import SCmpLeU32
         mod = Module("GL2 Prefetch Increment")
         loopCounter = writer.loopCounter(kernel, writer.states.unrollIdx)
         pgl = kernel["PrefetchGL2"]
         pgr = kernel["PrefetchGlobalRead"]
         mod.add(SCmpLeU32(src0=loopCounter, src1=pgr + pgl,
                           comment=f"counterL <= PGR({pgr})+PGL({pgl})?"))
-        mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncA"), src=0))
-        mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncB"), src=0))
-        if kernel["ProblemType"].get("MXBlockA", 0):
-            mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncMXSA"), src=0))
-        if kernel["ProblemType"].get("MXBlockB", 0):
-            mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncMXSB"), src=0))
+        mod.add(writer.gl2PrefetchClearIncrement(kernel, tPA, tPB))
         mod.add(writer.gl2PrefetchIncrementAddr(kernel, tPA, tPB))
         return list(mod.flatitems())
 

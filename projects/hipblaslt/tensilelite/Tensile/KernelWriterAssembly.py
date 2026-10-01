@@ -1121,14 +1121,15 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("DummySgpr%d"%i, 1))
 
     if kernel["PrefetchGL2"]:
-      module.add(self.defineSgpr("GL2PrefetchIncA", self.states.rpgo))
-      module.add(self.defineSgpr("GL2PrefetchIncB", self.states.rpgo))
+      numGL2IncSgpr = GL2PrefetchLoad.numIncSgpr(kernel)
+      module.add(self.defineSgpr("GL2PrefetchIncA", numGL2IncSgpr, numGL2IncSgpr))
+      module.add(self.defineSgpr("GL2PrefetchIncB", numGL2IncSgpr, numGL2IncSgpr))
       if kernel["ProblemType"]["MXBlockA"]:
-        module.add(self.defineSgpr("GL2PrefetchIncMXSA", self.states.rpgo))
+        module.add(self.defineSgpr("GL2PrefetchIncMXSA", numGL2IncSgpr, numGL2IncSgpr))
       if kernel["ProblemType"]["MXBlockB"]:
-        module.add(self.defineSgpr("GL2PrefetchIncMXSB", self.states.rpgo))
+        module.add(self.defineSgpr("GL2PrefetchIncMXSB", numGL2IncSgpr, numGL2IncSgpr))
       if kernel["enableTDMMetadata"]:
-        module.add(self.defineSgpr("GL2PrefetchIncMetadata", self.states.rpgo))
+        module.add(self.defineSgpr("GL2PrefetchIncMetadata", numGL2IncSgpr, numGL2IncSgpr))
 
     if self.sgprPool.size() > self.states.regCaps["MaxSgpr"]:
       print ("warning: Number of defined SGPRS (%d) overflowed max SGPRS (%d)." \
@@ -21744,6 +21745,19 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(comp.issueLoad(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]))
     return mod
   
+  def gl2PrefetchClearIncrement(self, kernel, tPA, tPB) -> Module:
+    mod = Module("GL2 Prefetch Clear Increment")
+    comp = GL2PrefetchLoad.find(self)
+    mod.add(comp.clearIncrement(self, kernel, tPA))
+    mod.add(comp.clearIncrement(self, kernel, tPB))
+    if kernel["ProblemType"]["MXBlockA"]:
+      mod.add(comp.clearIncrement(self, kernel, tPA["MX"]))
+    if kernel["ProblemType"]["MXBlockB"]:
+      mod.add(comp.clearIncrement(self, kernel, tPB["MX"]))
+    if kernel["enableTDMMetadata"]:
+      mod.add(comp.clearIncrement(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]))
+    return mod
+
   def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
     mod = Module("GL2 Prefetch Increment Address")
     mod.addComment("GL2 Prefetch Increment Address")
