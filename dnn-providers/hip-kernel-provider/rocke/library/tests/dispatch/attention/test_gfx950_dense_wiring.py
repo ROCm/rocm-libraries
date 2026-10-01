@@ -299,19 +299,28 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         self.assertTrue(spec.wide_lds_dma)
         self.assertNotIn("gqapair", spec.kernel_name())
 
-    def test_large_batch_selects_hkv_major_for_gqa_and_qb_major_for_mha(self):
+    def test_large_batch_selects_hkv_major_for_gqa(self):
         gqa = _gfx950_dense_req(**{**_LLAMA_8K, "batch": 16})
         self.assertEqual(_spec(gqa, _PERSIST).resolved_persist_decode, "hkv_major")
-        mha = _gfx950_dense_req(
-            **{
-                **_LLAMA_8K,
-                "batch": 16,
-                "nhead_k": 32,
-                "seqlen_q": 2048,
-                "seqlen_k": 2048,
-            }
+
+    def test_large_batch_selects_hq_minor_swz_for_mha(self):
+        mha = dict(_LLAMA_8K, batch=16, nhead_k=32, seqlen_q=2048, seqlen_k=2048)
+        spec = _spec(_gfx950_dense_req(**mha), _PERSIST)
+        self.assertEqual(spec.resolved_persist_decode, "hq_minor_swz")
+
+    def test_large_batch_mha_without_head_bands_selects_qb_major(self):
+        # head bands need a head count divisible by the XCD count
+        mha = dict(
+            _LLAMA_8K, batch=16, nhead_q=36, nhead_k=36, seqlen_q=2048, seqlen_k=2048
         )
-        self.assertEqual(_spec(mha, _PERSIST).resolved_persist_decode, "qb_major")
+        spec = _spec(_gfx950_dense_req(**mha), _PERSIST)
+        self.assertEqual(spec.resolved_persist_decode, "qb_major")
+
+    def test_large_causal_mha_uses_persistent_swizzled_head_first(self):
+        mha = dict(_LLAMA_8K, batch=4, nhead_q=64, nhead_k=64)
+        spec = _spec(_gfx950_dense_req(**mha), _WIDE)
+        self.assertTrue(spec.wide_lds_dma)
+        self.assertEqual(spec.resolved_persist_decode, "hq_minor_swz")
 
 
 class TestDenseBottomRightWiring(unittest.TestCase):

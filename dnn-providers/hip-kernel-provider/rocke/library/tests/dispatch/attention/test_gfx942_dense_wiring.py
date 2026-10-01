@@ -282,6 +282,14 @@ class TestGfx942DensePersistent(unittest.TestCase):
             self.assertTrue(_spec(req, persistent=True).persistent)
             self.assertFalse(_spec(_req(), persistent=False).persistent)
 
+    def test_large_causal_mha_uses_persistent_swizzled_head_first(self):
+        with _Gfx942Arch():
+            spec = _spec(
+                _req(batch=16, nhead_q=64, nhead_k=64, seqlen_q=4096, seqlen_k=4096)
+            )
+            self.assertTrue(spec.persistent)
+            self.assertEqual(spec.resolved_persist_decode, "hq_minor_swz")
+
     def test_nonpersist_decode_is_a_knob_of_the_grid(self):
         """The non-persistent block order is a knob: kept on the grid unless it
         restates auto, dropped on the persistent body, which never reads it."""
@@ -550,7 +558,7 @@ class TestGfx942DensePersistentRuntimeShape(unittest.TestCase):
         lands in the same slot as the 'auto' that resolves to it."""
         common = dict(seqlen_q=8192, seqlen_k=8192)
         groups = {
-            # Batch below the XCD count
+            # GQA, batch below the XCD count
             "bt_hkv_minor": [
                 dict(batch=1, nhead_q=128, nhead_k=8),
                 dict(batch=1, nhead_q=40, nhead_k=8),
@@ -562,11 +570,11 @@ class TestGfx942DensePersistentRuntimeShape(unittest.TestCase):
                 dict(batch=8, nhead_q=40, nhead_k=8),
                 dict(batch=8, nhead_q=32, nhead_k=8),
             ],
-            # MHA, batch >= the XCD count
-            "qb_major": [
+            # MHA with more than 8 grid-stride rounds of work
+            "hq_minor_swz": [
+                dict(batch=4, nhead_q=32, nhead_k=32),
+                dict(batch=2, nhead_q=64, nhead_k=64),
                 dict(batch=8, nhead_q=32, nhead_k=32),
-                dict(batch=8, nhead_q=64, nhead_k=64),
-                dict(batch=16, nhead_q=32, nhead_k=32),
             ],
         }
         keys, names = {}, {}
@@ -595,7 +603,11 @@ class TestGfx942DensePersistentRuntimeShape(unittest.TestCase):
                     self.assertEqual(explicit.kernel_name(), names[decode])
             self.assertEqual(len(set(keys.values())), len(groups))
             self.assertEqual(len(set(names.values())), len(groups))
-            for decode, tag in (("bt_hkv_minor", "bthkvmin"), ("hkv_major", "hkvmaj")):
+            for decode, tag in (
+                ("bt_hkv_minor", "bthkvmin"),
+                ("hkv_major", "hkvmaj"),
+                ("hq_minor_swz", "hqminswz"),
+            ):
                 self.assertEqual(
                     [n for n in names.values() if tag in n], [names[decode]]
                 )

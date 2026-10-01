@@ -51,9 +51,10 @@ setup + K/V-prime cold-start is amortized once per CU instead of once per query-
 This closes the causal fixed-cost amortization gap. `num_persistent=256` = one 8-wave
 block per CU on MI355X (256 CUs) at 2 waves/SIMD; larger oversubscribes the CUs (tail
 loss). The work-item decode is `persist_decode="auto"` by default. For aligned
-causal attention auto selects `bt_hkv_minor` below `chiplet_num_xcds` batches;
-otherwise `hkv_major` when `gqa*NQB*B >= 2*NP`, else `qb_major`. Query blocks
-are folded under causal masking. The GQA-pair decodes below are explicit
+causal attention auto selects `hq_minor_swz` for MHA with more than `8*NP` work
+items, else `bt_hkv_minor` below `chiplet_num_xcds` batches; otherwise
+`hkv_major` when `gqa*NQB*B >= 2*NP`, else `qb_major`. Query blocks are folded
+or pair-folded under causal masking. The GQA-pair decodes below are explicit
 only.
 
 ### Balanced GQA-pair decode
