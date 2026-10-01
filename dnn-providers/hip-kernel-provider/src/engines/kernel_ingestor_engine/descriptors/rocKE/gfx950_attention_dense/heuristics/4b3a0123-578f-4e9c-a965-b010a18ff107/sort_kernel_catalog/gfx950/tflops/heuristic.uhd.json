@@ -1,16 +1,11 @@
 {
   "version": "1.0",
-  "id": "5001c27c-3d11-4881-bdf7-6a4755cb1502",
+  "id": "f0588452-d596-4bf0-a2e8-e5297e38508d",
   "name": "hipkernel:Gfx950AttentionDense catalog ranker (gfx950, 533 graphs) (tflops)",
   "adapter": "tree_data",
   "features_signature": [
     "$kernel.block_m",
     "$kernel.block_n",
-    "$kernel.causal",
-    "$kernel.dtype",
-    "$kernel.head_size",
-    "$kernel.num_kv_heads",
-    "$kernel.num_query_heads",
     "$gfx950_attention_dense.causal",
     "$gfx950_attention_dense.scale_bits",
     "$graph.arithmetic_intensity",
@@ -89,7 +84,7 @@
     "$graph.tensors[3].strides[1]",
     "$graph.tensors[3].strides[2]"
   ],
-  "features_hash": "sha256:a34968d97ad7a794",
+  "features_hash": "sha256:2ea4be14e2161313",
   "trained_against": {
     "ued": {
       "id": "4b3a0123-578f-4e9c-a965-b010a18ff107",
@@ -115,12 +110,6 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "b259a238856059eb79fffa3bc8fd79034c7fb73670a252f4fe91e79f566db974"
-  },
-  "categorical_encoding": {
-    "$kernel.dtype": {
-      "BF16": 0,
-      "FP16": 1
-    }
+    "hash": "b29568578ce2fdc55a351dc6e7f9d496f99ce8fe1ca4423dab22e1c7ebd45feb"
   }
 }

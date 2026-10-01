@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "id": "32814d4c-d110-4d55-8123-1f26b5452653",
+  "id": "c9139ee3-5f47-492b-948e-308ff0c22bcc",
   "name": "hipkernel:Gfx950AttentionDense estimate (gfx950, 533 graphs) (tflops)",
   "adapter": "tree_data",
   "features_signature": [
@@ -98,7 +98,7 @@
         "revision": "1.0"
       }
     ],
-    "selector_revision": "generic-untuned-v1/27ffed021b3766256ef523b0b3cbbc9efe216064be28032c3f1ce1eeb90882a0",
+    "selector_revision": "generic-untuned-v1/f82b91db2ec4a85593a851e163d2d3be34ef57bdd26cc90a57c018f7becd0ebe",
     "feature_semantics_revision": 1
   },
   "objective": "max",
@@ -109,6 +109,6 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "aa627f74fe0893b6a2eb3297df03655d09d5414e52652b0b749666969a02b0f6"
+    "hash": "323e4cae18b7945e8ceb1b34bad8a9ff759939e754c3ebc4c2f207fe61ec9dcd"
   }
 }
