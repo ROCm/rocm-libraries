@@ -431,13 +431,7 @@ struct amdgcn_mma<bf16_t, bf16_t, bf16_t, 16u, 16u, 32u, CompilerTarget, MmaOpFa
                                                                     cVec,
                                                                     0,   // matrix_a_reuse
                                                                     0)}; // matrix_b_reuse
-        // T0-01 (GFX1250_CONV_OPTIMIZATION_ROADMAP.md): this narrow-accumulate WMMA (D same
-        // width as C) frees C's registers for reuse the instant this instruction issues, while
-        // hardware may still be reading them. LLVM's GCNHazardRecognizer::hasWMMAToVALURegOverlap
-        // only adds the WAR check for SWMMAC's src2, never a plain WMMA's C operand (a live LLVM
-        // bug, still true upstream), so the compiler can otherwise hoist an unrelated VALU write
-        // into the freed C registers while the MMA is still reading them, corrupting an
-        // accumulator element. Block that hoist at the issue site.
+        // Keep subsequent instructions from scheduling across narrow-accumulate WMMA.
         __builtin_amdgcn_sched_barrier(0);
         return result;
     }
@@ -1090,8 +1084,7 @@ struct amdgcn_mma<fp16_t, fp16_t, fp16_t, 16u, 16u, 32u, CompilerTarget, MmaOpFa
                                                                   cVec,
                                                                   0,   // matrix_a_reuse
                                                                   0)}; // matrix_b_reuse
-        // T0-01 (GFX1250_CONV_OPTIMIZATION_ROADMAP.md): narrow-accumulate WMMA WAR hazard, see
-        // the identical comment on the bf16_16x16x32_bf16 specialization above.
+        // Keep subsequent instructions from scheduling across narrow-accumulate WMMA.
         __builtin_amdgcn_sched_barrier(0);
         return result;
     }

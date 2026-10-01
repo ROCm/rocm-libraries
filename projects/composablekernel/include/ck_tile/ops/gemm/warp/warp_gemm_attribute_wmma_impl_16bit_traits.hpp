@@ -199,10 +199,7 @@ struct WmmaTraits<gfx125_t, bf16_t, bf16_t, bf16_t, 16, 16, 32>
                                                                    c_vec,
                                                                    P::reuse_a,
                                                                    P::reuse_b);
-        // T0-01 (GFX1250_CONV_OPTIMIZATION_ROADMAP.md): narrow-accumulate WMMA WAR hazard — see
-        // the amdgcn_mma<bf16_t, bf16_t, bf16_t, ...> specialization in wmma_gfx12.hpp for the
-        // full mechanism. This legacy WarpGemm codepath calls the same builtin directly
-        // (bypassing amdgcn_mma), so it needs its own barrier at this issue site.
+        // Keep subsequent instructions from scheduling across narrow-accumulate WMMA.
         __builtin_amdgcn_sched_barrier(0);
         return result;
 #else

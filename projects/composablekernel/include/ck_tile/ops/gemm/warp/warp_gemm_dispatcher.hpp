@@ -178,14 +178,7 @@ template<> struct Dispatcher<bf16_t, bf16_t, float, 32, 32, 16,  true, true> { u
 
 // fp8
 // ADataType, BDataType, AccDataType, MPerWave, NPerWave, KPerWave, TransposeC, SwizzleA, UseStructuredSparsity
-// T2-03 (GFX1250_CONV_OPTIMIZATION_ROADMAP.md): the M=N=16,K=32 entries below (previously
-// unguarded) select an MFMA (CDNA-only) implementation; MFMA opcodes do not exist on gfx1250's
-// RDNA-based ISA. gfx1250 has no K=32 fp8/bf8 WMMA alternative either (native WMMA is K=64/K=128
-// only), so this was the root cause of the documented "warp_tile_k=32 (gfx9 MFMA) silently
-// returns all-zeros on gfx1250" finding (GFX950_VS_GFX1250_COVERAGE.md #6.4) -- gating them away
-// from gfx1250 means a gfx1250 build requesting this now fails to compile instead of emitting an
-// invalid/no-op instruction sequence. The M=N=32 entries on the surrounding lines are a different
-// MFMA tile shape, unaffected by this finding, and are left unguarded.
+// gfx1250 does not support these K=32 fp8/bf8 MFMA tiles.
 template<> struct Dispatcher<fp8_t, fp8_t, float, 32, 32,  16, false> { using Type = WarpGemmMfma_f32_32x32x16_fp8_fp8; };
 #if !defined(__gfx125__)
 template<> struct Dispatcher<fp8_t, fp8_t, float, 16, 16,  32, false> { using Type = WarpGemmMfma_f32_16x16x32_fp8_fp8; };
@@ -273,23 +266,13 @@ template<> struct Dispatcher<bf8_t, bf8_t, float, 32, 32,  32, false, false, fal
 #endif // defined(__gfx950__)
 
 //WMMA cases
-// T2-03 (GFX1250_CONV_OPTIMIZATION_ROADMAP.md): these K=16 fp8/bf8 WMMA specializations were
-// previously unguarded (unlike their f16/bf16/int8 K=16 siblings a few lines above, which are
-// correctly gated `#if defined(__gfx11__) || defined(__gfx120__)`), so a gfx1250 build could
-// select them for WarpTileK=16 fp8/bf8. gfx1250 has no K=16 fp8/bf8 WMMA instruction at all (only
-// K=64/K=128, see the gfx125-gated block below) -- WarpGemmAttributeWmmaImpl_f32_16x16x16_f8_f8
-// et al. (warp_gemm_attribute_wmma_impl.hpp) resolve on a gfx1250 build to a stubbed
-// `#else return CVecType{0.f}` body, i.e. this was the root cause of the documented "warp_tile_k=16
-// (gfx12 WMMA) silently returns all-zeros on gfx1250" finding (GFX950_VS_GFX1250_COVERAGE.md
-// #6.4). Gating this to gfx11/gfx120 (matching the sibling pattern exactly) means a gfx1250 build
-// requesting this now fails to compile (no matching Dispatcher<> specialization) instead of
-// silently producing a zero accumulator.
-#if defined(__gfx11__) || defined(__gfx120__)
+// Keep K=16 fp8/bf8 WMMA available on host; gfx1250 has no matching instruction.
+#if !defined(__gfx125__)
 template<bool TransposeC, WGAttrNumAccessEnum AttrNumAccess> struct Dispatcher<fp8_t, fp8_t, float, 16, 16, 16, TransposeC, false, false, AttrNumAccess, AttrNumAccess> : WmmaTag { using Type = WarpGemmWmma_f32_16x16x16_f8_f8<TransposeC, AttrNumAccess>; };
 template<bool TransposeC, WGAttrNumAccessEnum AttrNumAccess> struct Dispatcher<bf8_t, bf8_t, float, 16, 16, 16, TransposeC, false, false, AttrNumAccess, AttrNumAccess> : WmmaTag { using Type = WarpGemmWmma_f32_16x16x16_bf8_bf8<TransposeC, AttrNumAccess>; };
 template<bool TransposeC, WGAttrNumAccessEnum AttrNumAccess> struct Dispatcher<fp8_t, bf8_t, float, 16, 16, 16, TransposeC, false, false, AttrNumAccess, AttrNumAccess> : WmmaTag { using Type = WarpGemmWmma_f32_16x16x16_f8_bf8<TransposeC, AttrNumAccess>; };
 template<bool TransposeC, WGAttrNumAccessEnum AttrNumAccess> struct Dispatcher<bf8_t, fp8_t, float, 16, 16, 16, TransposeC, false, false, AttrNumAccess, AttrNumAccess> : WmmaTag { using Type = WarpGemmWmma_f32_16x16x16_bf8_f8<TransposeC, AttrNumAccess>; };
-#endif // defined(__gfx11__) || defined(__gfx120__)
+#endif // !defined(__gfx125__)
 template<bool TransposeC, WGAttrNumAccessEnum AttrNumAccess> struct Dispatcher<fp8_t, bf8_t, float, 16, 16, 64, TransposeC, false, false, AttrNumAccess, AttrNumAccess> : WmmaTag { using Type = WarpGemmWmma_f32_16x16x64_f8_bf8<TransposeC, AttrNumAccess>; };
 template<bool TransposeC, WGAttrNumAccessEnum AttrNumAccess> struct Dispatcher<bf8_t, fp8_t, float, 16, 16, 64, TransposeC, false, false, AttrNumAccess, AttrNumAccess> : WmmaTag { using Type = WarpGemmWmma_f32_16x16x64_bf8_f8<TransposeC, AttrNumAccess>; };
 

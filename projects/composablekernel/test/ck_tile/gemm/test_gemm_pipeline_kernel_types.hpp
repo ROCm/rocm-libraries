@@ -27,8 +27,6 @@ using CompAsyncEightWaves =
     ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompAsyncEightWaves>;
 using CompTDMV1 = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompTDMV1>;
 using CompTDMV2 = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompTDMV2>;
-using CompAsyncTDMHybrid =
-    ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompAsyncTDMHybrid>;
 
 using Persistent    = std::true_type;
 using NonPersistent = std::false_type;
@@ -325,16 +323,6 @@ using KernelTypesCompTDMWmma = ::testing::Types<
 using KernelTypesCompAsyncWmma = ::testing::Types<
     std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,        CompAsync>,
     std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,        CompAsync, Persistent>
->;
-
-// Task 9 (docs_gfx1250/GFX1250_WRW_REMAINING_TASKS.md): A via global_load_async, B via
-// TDM, in one pipeline. Row/Col (A col-major, B row-major) bf16/f16, matching
-// KernelTypesCompAsyncWmma's only config so the hybrid is validated against the exact
-// same shape/layout its two donor pipelines (CompAsync, CompTDMV1) are already proven
-// on for gfx125. Cluster launch is intentionally not exercised here: this hybrid does
-// not implement TDM multicast (see GetTDMWorkgroupMask note in the pipeline header).
-using KernelTypesCompAsyncTDMHybridWmma = ::testing::Types<
-    std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,        CompAsyncTDMHybrid>
 >;
 
 // clang-format on

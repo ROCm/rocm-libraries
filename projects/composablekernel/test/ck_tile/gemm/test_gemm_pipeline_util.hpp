@@ -27,8 +27,7 @@ enum struct GemmPipelineType
     CompAsync,
     CompAsyncEightWaves,
     CompTDMV1,
-    CompTDMV2,
-    CompAsyncTDMHybrid
+    CompTDMV2
 };
 
 template <typename Layout>
@@ -185,15 +184,6 @@ struct GemmPipelineTypeSelector<GemmPipelineType::CompTDMV2, Problem>
     static constexpr auto GetName() { return "GemmPipelineAgBgCrCompTDMV2"; }
 };
 
-template <typename Problem>
-struct GemmPipelineTypeSelector<GemmPipelineType::CompAsyncTDMHybrid, Problem>
-{
-    using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompAsync<Problem>;
-    using pipeline      = ck_tile::GemmPipelineAgBgCrCompAsyncTDMHybrid<Problem>;
-
-    static constexpr auto GetName() { return "GemmPipelineAgBgCrCompAsyncTDMHybrid"; }
-};
-
 template <GemmPipelineType PT, typename Problem, typename Enable = void>
 struct GemmEpilogueTypeSelector
 {
@@ -302,8 +292,7 @@ class TestCkTileGemmPipeline : public ::testing::Test
         constexpr bool DoubleSmemBuffer = (PipelineType == GemmPipelineType::CompV4 ||
                                            PipelineType == GemmPipelineType::CompAsync ||
                                            PipelineType == GemmPipelineType::CompTDMV1 ||
-                                           PipelineType == GemmPipelineType::CompTDMV2 ||
-                                           PipelineType == GemmPipelineType::CompAsyncTDMHybrid);
+                                           PipelineType == GemmPipelineType::CompTDMV2);
 
 #if defined(CK_USE_GFX1250)
         // gfx1250 only. Improve performance when C is RowMajor
@@ -479,7 +468,6 @@ class TestCkTileGemmPipeline : public ::testing::Test
                      PipelineType == GemmPipelineType::CompAsyncEightWaves || IsAsync_v ||
                      PipelineType == GemmPipelineType::CompTDMV1 ||
                      PipelineType == GemmPipelineType::CompTDMV2 ||
-                     PipelineType == GemmPipelineType::CompAsyncTDMHybrid ||
                      std::is_same_v<BDataType, ck_tile::pk_int4_t>)
         {
             // Only do k_batch = 1 when pipeline is CompV4, BDataType is I4 or async pipeline

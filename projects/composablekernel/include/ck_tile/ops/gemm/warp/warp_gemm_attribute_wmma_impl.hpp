@@ -136,27 +136,17 @@ using WarpGemmAttributeWmmaImpl_f32_16x16x16_bf16_bf16 =
 using WarpGemmAttributeWmmaImpl_i32_16x16x16_i8_i8 =
     WarpGemmAttributeWmmaImpl<WmmaTraits<DeviceIp, int8_t, int8_t, int32_t, 16, 16, 16>>;
 
-// T2-03 (GFX1250_CONV_OPTIMIZATION_ROADMAP.md): these K=16 fp8/bf8 WMMA aliases are only ever
-// selected by warp_gemm_dispatcher.hpp's gfx11/gfx120-gated Dispatcher<> specializations (see the
-// matching guard added there), so DeviceIp resolves to the correct gfx11/gfx120 target on every
-// build that can actually reach them. Previously hardcoded to gfx120_t (unlike every other K=16
-// alias here, which already used DeviceIp) -- harmless as long as the dispatcher guard holds, but
-// matching the sibling convention means an accidental future dispatcher regression fails to
-// compile (no WmmaTraits<gfx125_t, fp8_t/bf8_t, ..., 16> specialization exists) instead of
-// silently resolving to a stubbed-zero implementation, which is exactly what happened here: the
-// dispatcher guard was in fact missing, and this hardcoded gfx120_t alias is why gfx1250 builds
-// requesting WarpTileK=16 fp8/bf8 silently returned zero instead of failing to compile.
 using WarpGemmAttributeWmmaImpl_f32_16x16x16_f8_f8 =
-    WarpGemmAttributeWmmaImpl<WmmaTraits<DeviceIp, fp8_t, fp8_t, float, 16, 16, 16>>;
+    WarpGemmAttributeWmmaImpl<WmmaTraits<gfx120_t, fp8_t, fp8_t, float, 16, 16, 16>>;
 
 using WarpGemmAttributeWmmaImpl_f32_16x16x16_bf8_bf8 =
-    WarpGemmAttributeWmmaImpl<WmmaTraits<DeviceIp, bf8_t, bf8_t, float, 16, 16, 16>>;
+    WarpGemmAttributeWmmaImpl<WmmaTraits<gfx120_t, bf8_t, bf8_t, float, 16, 16, 16>>;
 
 using WarpGemmAttributeWmmaImpl_f32_16x16x16_f8_bf8 =
-    WarpGemmAttributeWmmaImpl<WmmaTraits<DeviceIp, fp8_t, bf8_t, float, 16, 16, 16>>;
+    WarpGemmAttributeWmmaImpl<WmmaTraits<gfx120_t, fp8_t, bf8_t, float, 16, 16, 16>>;
 
 using WarpGemmAttributeWmmaImpl_f32_16x16x16_bf8_f8 =
-    WarpGemmAttributeWmmaImpl<WmmaTraits<DeviceIp, bf8_t, fp8_t, float, 16, 16, 16>>;
+    WarpGemmAttributeWmmaImpl<WmmaTraits<gfx120_t, bf8_t, fp8_t, float, 16, 16, 16>>;
 
 using WarpGemmAttributeWmmaImpl_f32_16x16x32_f16_f16 =
     WarpGemmAttributeWmmaImpl<WmmaTraits<gfx125_t, fp16_t, fp16_t, float, 16, 16, 32>>;
