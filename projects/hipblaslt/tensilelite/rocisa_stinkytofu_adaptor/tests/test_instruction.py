@@ -42,6 +42,8 @@ import subprocess
 import sys
 import textwrap
 import unittest
+
+from _adaptor_testcase import AdaptorTestCase
 import unittest.mock
 
 # ---------------------------------------------------------------------------
@@ -52,6 +54,7 @@ _PKG_PARENT = os.path.normpath(os.path.join(_HERE, ".."))
 if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
+from rocisa_stinkytofu_adaptor import base as _base  # noqa: E402
 from rocisa_stinkytofu_adaptor.code import Module  # noqa: E402
 from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
     GLOBALModifiers,
@@ -313,7 +316,7 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
 # ===========================================================================
 
 
-class TestInstructionBase(unittest.TestCase):
+class TestInstructionBase(AdaptorTestCase):
     def test_cannot_use_toString_directly(self):
         # rocisa::Instruction::toString throws; we mirror that so any
         # accidental ``str(Instruction(...))`` is loud, not silent.
@@ -375,7 +378,7 @@ class TestInstructionBase(unittest.TestCase):
             pickle.dumps(Instruction(InstType.INST_B32))
 
 
-class TestMemIssueLatencyExplicit(unittest.TestCase):
+class TestMemIssueLatencyExplicit(AdaptorTestCase):
     """Factory ``latency=`` is KernelWriter Python SIA, not logical-IR cycles."""
 
     def test_ds_overrides_match_rocisa_mem_hpp(self):
@@ -407,7 +410,7 @@ class TestMemIssueLatencyExplicit(unittest.TestCase):
 # ===========================================================================
 
 
-class TestCommonInstructionFields(unittest.TestCase):
+class TestCommonInstructionFields(AdaptorTestCase):
     def test_construction_sets_all_fields(self):
         d = vgpr(0)
         s0, s1 = vgpr(1), vgpr(2)
@@ -449,7 +452,7 @@ class TestCommonInstructionFields(unittest.TestCase):
         self.assertEqual(ci.comment, "new")
 
 
-class TestCommonInstructionParams(unittest.TestCase):
+class TestCommonInstructionParams(AdaptorTestCase):
     def test_getParams_returns_dst_then_srcs(self):
         d, s0, s1 = vgpr(0), vgpr(1), vgpr(2)
         ci = CommonInstruction(InstType.INST_B32, dst=d, srcs=[s0, s1])
@@ -484,7 +487,7 @@ class TestCommonInstructionParams(unittest.TestCase):
         self.assertEqual(ci.getParams(), [vgpr(0)])
 
 
-class TestCommonInstructionToString(unittest.TestCase):
+class TestCommonInstructionToString(AdaptorTestCase):
     """Byte-parity with ``rocisa::CommonInstruction::toString``.
 
     Format: ``"<instStr> <dst>, <src0>, <src1>... // <comment>\\n"``
@@ -559,7 +562,7 @@ class TestCommonInstructionToString(unittest.TestCase):
                         repr(str(ci)))
 
 
-class TestCommonInstructionDeepcopy(unittest.TestCase):
+class TestCommonInstructionDeepcopy(AdaptorTestCase):
     def test_deepcopy_independent_dst(self):
         d = vgpr(0)
         ci = CommonInstruction(InstType.INST_B32, dst=d, srcs=[vgpr(1)],
@@ -598,7 +601,7 @@ class TestCommonInstructionDeepcopy(unittest.TestCase):
 # right-padded to col 50 followed by ``// comment``.
 
 
-class TestMacroInstructionFields(unittest.TestCase):
+class TestMacroInstructionFields(AdaptorTestCase):
     def test_default_comment_empty(self):
         mi = MacroInstruction("MY_MACRO", [1, 2, 3])
         self.assertEqual(mi.name, "MY_MACRO")
@@ -630,7 +633,7 @@ class TestMacroInstructionFields(unittest.TestCase):
         self.assertIsInstance(mi, Instruction)
 
 
-class TestMacroInstructionParams(unittest.TestCase):
+class TestMacroInstructionParams(AdaptorTestCase):
     def test_getParams_returns_args(self):
         mi = MacroInstruction("X", [1, "a", 3.0])
         self.assertEqual(mi.getParams(), [1, "a", 3.0])
@@ -652,7 +655,7 @@ class TestMacroInstructionParams(unittest.TestCase):
         self.assertIn("source parameters", str(ctx.exception))
 
 
-class TestMacroInstructionToString(unittest.TestCase):
+class TestMacroInstructionToString(AdaptorTestCase):
     """Byte-parity with ``rocisa::MacroInstruction::toString``."""
 
     def test_empty_args(self):
@@ -696,7 +699,7 @@ class TestMacroInstructionToString(unittest.TestCase):
         self.assertEqual(mi2.getArgStr(), "")
 
 
-class TestMacroInstructionDeepcopy(unittest.TestCase):
+class TestMacroInstructionDeepcopy(AdaptorTestCase):
     def test_deepcopy_independent_args_list(self):
         mi = MacroInstruction("X", [1, 2, 3], comment="c")
         c = copy.deepcopy(mi)
@@ -735,7 +738,7 @@ class TestMacroInstructionDeepcopy(unittest.TestCase):
 # ===========================================================================
 
 
-class TestAsRocisaI32(unittest.TestCase):
+class TestAsRocisaI32(AdaptorTestCase):
     def test_in_range_positive(self):
         self.assertEqual(_as_rocisa_i32(42), 42)
 
@@ -771,7 +774,7 @@ except ImportError:
 
 
 @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
-class TestToStinkyRegister(unittest.TestCase):
+class TestToStinkyRegister(AdaptorTestCase):
     def test_register_container_delegates_to_to_stinky(self):
         rc = vgpr(5)
         reg = _to_stinky_register(rc)
@@ -836,7 +839,7 @@ class TestToStinkyRegister(unittest.TestCase):
 # ===========================================================================
 
 
-class TestVMovB32Construction(unittest.TestCase):
+class TestVMovB32Construction(AdaptorTestCase):
     def test_positional_dst_src(self):
         d, s = vgpr(0), vgpr(1)
         v = VMovB32(d, s)
@@ -911,7 +914,7 @@ class TestVMovB32Construction(unittest.TestCase):
 # ===========================================================================
 
 
-class TestSMovB32Construction(unittest.TestCase):
+class TestSMovB32Construction(AdaptorTestCase):
     def test_positional_dst_src(self):
         d, s = sgpr(0), sgpr(1)
         m = SMovB32(d, s)
@@ -945,7 +948,7 @@ class TestSMovB32Construction(unittest.TestCase):
         self.assertEqual(str(c), str(m))
 
 
-class TestSMovB64Construction(unittest.TestCase):
+class TestSMovB64Construction(AdaptorTestCase):
     def test_inst_type_b64(self):
         m = SMovB64(sgpr(0, 2), sgpr(4, 2), comment="wide")
         self.assertEqual(m.instStr, "s_mov_b64")
@@ -961,7 +964,7 @@ class TestSMovB64Construction(unittest.TestCase):
 # ===========================================================================
 
 
-class TestSNopConstruction(unittest.TestCase):
+class TestSNopConstruction(AdaptorTestCase):
     def test_inst_type_notype(self):
         m = SNop(waitState=0)
         self.assertEqual(m.instStr, "s_nop")
@@ -1007,7 +1010,7 @@ class TestSNopConstruction(unittest.TestCase):
 # ===========================================================================
 
 
-class TestSSetPriorConstruction(unittest.TestCase):
+class TestSSetPriorConstruction(AdaptorTestCase):
     def test_keyword_prior(self):
         m = SSetPrior(prior=1, comment="Raise priority while processing macs")
         self.assertEqual(m.prior, 1)
@@ -1031,7 +1034,7 @@ class TestSSetPriorConstruction(unittest.TestCase):
         self.assertEqual(c.comment, "x")
 
 
-class TestSSleepConstruction(unittest.TestCase):
+class TestSSleepConstruction(AdaptorTestCase):
     def test_keyword_simm16(self):
         m = SSleep(simm16=1, comment="idle")
         self.assertEqual(m.simm16, 1)
@@ -1045,7 +1048,7 @@ class TestSSleepConstruction(unittest.TestCase):
         self.assertEqual(m.comment, "pad")
 
 
-class TestSSetVgprMsbConstruction(unittest.TestCase):
+class TestSSetVgprMsbConstruction(AdaptorTestCase):
     def test_simm16_keyword(self):
         m = SSetVgprMsb(simm16=5)
         self.assertEqual(m.simm16, 5)
@@ -1062,7 +1065,7 @@ class TestSSetVgprMsbConstruction(unittest.TestCase):
         self.assertEqual(m.comment, "pack")
 
 
-class TestSDelayAluConstruction(unittest.TestCase):
+class TestSDelayAluConstruction(AdaptorTestCase):
     def test_instid0_only(self):
         m = SDelayAlu(DelayALUType.VALU, 2)
         self.assertEqual(m.getParams(), [0, 2])
@@ -1103,7 +1106,7 @@ class TestSDelayAluConstruction(unittest.TestCase):
 # ===========================================================================
 
 
-class TestSLoadB32Construction(unittest.TestCase):
+class TestSLoadB32Construction(AdaptorTestCase):
     def test_is_smem_load_not_common(self):
         m = SLoadB32(sgpr(0), sgpr(2, 2), 0, comment="k")
         self.assertIsInstance(m, Instruction)
@@ -1138,7 +1141,7 @@ class TestSLoadB32Construction(unittest.TestCase):
         self.assertEqual(str(c), str(m))
 
 
-class TestSLoadB64Construction(unittest.TestCase):
+class TestSLoadB64Construction(AdaptorTestCase):
     def test_prestr_b64(self):
         m = SLoadB64(sgpr(0, 2), sgpr(4, 2), 0)
         self.assertIn("s_load_b64", str(m))
@@ -1149,7 +1152,7 @@ class TestSLoadB64Construction(unittest.TestCase):
 # ===========================================================================
 
 
-class TestCollectLogicalIntegration(unittest.TestCase):
+class TestCollectLogicalIntegration(AdaptorTestCase):
     """``VMovB32`` / ``SMovB32`` instruction-side contract for
     ``_collect_logical_insts``.
 
@@ -1200,7 +1203,7 @@ class TestCollectLogicalIntegration(unittest.TestCase):
         self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestScopedGlobalFences(unittest.TestCase):
+class TestScopedGlobalFences(AdaptorTestCase):
     def test_scope_is_rendered_like_rocisa(self):
         self.assertEqual(str(GlobalWb()), "global_wb scope:SCOPE_DEV\n")
         self.assertEqual(
@@ -1286,7 +1289,7 @@ _SCALAR_ALU_UNARY = [
 # ===========================================================================
 
 
-class TestSBarrierConstruction(unittest.TestCase):
+class TestSBarrierConstruction(AdaptorTestCase):
     """SBarrier is a zero-operand instruction with stinkytofu bridge."""
 
     def test_default_construction(self):
@@ -1346,7 +1349,7 @@ class TestSBarrierConstruction(unittest.TestCase):
                 self.assertEqual(text.count("s_barrier_wait"), int("wait" in expected))
 
 
-class TestSGetRegB32Construction(unittest.TestCase):
+class TestSGetRegB32Construction(AdaptorTestCase):
     """SGetRegB32 is a unary scalar control instruction."""
 
     def test_construction(self):
@@ -1371,7 +1374,7 @@ class TestSGetRegB32Construction(unittest.TestCase):
         self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestScalarALUBinaryConstruction(unittest.TestCase):
+class TestScalarALUBinaryConstruction(AdaptorTestCase):
     """All binary scalar ALU shims inherit CommonInstruction and emit correct asm."""
 
     def test_construction_and_str(self):
@@ -1415,7 +1418,7 @@ class TestScalarALUBinaryConstruction(unittest.TestCase):
         self.assertIn("42", text)
 
 
-class TestScalarALUUnaryConstruction(unittest.TestCase):
+class TestScalarALUUnaryConstruction(AdaptorTestCase):
     """Unary scalar ALU shims (dst, src) inherit CommonInstruction."""
 
     def test_construction_and_str(self):
@@ -1451,7 +1454,7 @@ class TestScalarALUUnaryConstruction(unittest.TestCase):
                 self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestDevelopInstructionExports(unittest.TestCase):
+class TestDevelopInstructionExports(AdaptorTestCase):
     """Develop-added rocisa instructions must resolve (dummy phase).
 
     Tensile imports these by name during module load; missing exports
@@ -1511,7 +1514,7 @@ _VECTOR_TERNARY = [
 ]
 
 
-class TestVectorALUBinaryConstruction(unittest.TestCase):
+class TestVectorALUBinaryConstruction(AdaptorTestCase):
     """Binary vector ALU shims (dst, src0, src1) inherit CommonInstruction."""
 
     def test_construction_and_str(self):
@@ -1555,7 +1558,7 @@ class TestVectorALUBinaryConstruction(unittest.TestCase):
         self.assertIn("42", text)
 
 
-class TestVectorShiftConstruction(unittest.TestCase):
+class TestVectorShiftConstruction(AdaptorTestCase):
     """Vector shift shims (dst, shiftHex, src) with rev mnemonics."""
 
     def test_construction_native_api(self):
@@ -1603,7 +1606,7 @@ class TestVectorShiftConstruction(unittest.TestCase):
                 self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestVectorTernaryConstruction(unittest.TestCase):
+class TestVectorTernaryConstruction(AdaptorTestCase):
     """Ternary vector ALU shims (dst, src0, src1, src2)."""
 
     def test_construction_and_str(self):
@@ -1644,7 +1647,7 @@ class TestVectorTernaryConstruction(unittest.TestCase):
                 self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestVCndMaskB32Construction(unittest.TestCase):
+class TestVCndMaskB32Construction(AdaptorTestCase):
     """VCndMaskB32 (native: dst, src0, src1, src2=VCC; logical IR: 2 srcs)."""
 
     def test_construction_with_src2(self):
@@ -1688,7 +1691,7 @@ class TestVCndMaskB32Construction(unittest.TestCase):
         self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestVReadfirstlaneB32Construction(unittest.TestCase):
+class TestVReadfirstlaneB32Construction(AdaptorTestCase):
     """VReadfirstlaneB32 (unary: dst, src)."""
 
     def test_construction_and_str(self):
@@ -1782,7 +1785,7 @@ _VECTOR_CMPX = [
 ]
 
 
-class TestScalarCmpConstruction(unittest.TestCase):
+class TestScalarCmpConstruction(AdaptorTestCase):
     """Scalar compare shims (no dst, src0, src1)."""
 
     def test_construction_and_str(self):
@@ -1827,7 +1830,7 @@ class TestScalarCmpConstruction(unittest.TestCase):
         self.assertIn("42", text)
 
 
-class TestVectorCmpConstruction(unittest.TestCase):
+class TestVectorCmpConstruction(AdaptorTestCase):
     """Vector compare shims (dst, src0, src1)."""
 
     def test_construction_and_str(self):
@@ -1868,8 +1871,13 @@ class TestVectorCmpConstruction(unittest.TestCase):
                 self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestVectorCmpXConstruction(unittest.TestCase):
+class TestVectorCmpXConstruction(AdaptorTestCase):
     """Vector compareX shims (dst, src0, src1)."""
+
+    def setUp(self):
+        # No ISA selected, so VCmpX renders as constructed; the gfx1250 rewrite
+        # is covered by TestVectorCmpXGfx1250Legalize.
+        _base._current_isa = None
 
     def test_construction_and_str(self):
         for cls, mnemonic, itype in _VECTOR_CMPX:
@@ -1907,40 +1915,25 @@ class TestVectorCmpXConstruction(unittest.TestCase):
                 self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestVectorCmpXGfx1250Legalize(unittest.TestCase):
+class TestVectorCmpXGfx1250Legalize(AdaptorTestCase):
     """gfx1250 has CMPXWritesSGPR=0: v_cmpx renders as v_cmp + s_mov exec (cmp.hpp)."""
-
-    def setUp(self):
-        from rocisa_stinkytofu_adaptor import base as _base
-        self._base = _base
-        self._saved_kernel = _base.getKernel()
-        self._saved_current_isa = _base._current_isa
-        self._saved_is_init = _base._is_init
-        _base.init((12, 5, 0), "", False)
-
-    def tearDown(self):
-        self._base.setKernelInfo(self._saved_kernel)
-        self._base._current_isa = self._saved_current_isa
-        self._base._is_init = self._saved_is_init
 
     @staticmethod
     def _lines(inst):
         return [l.split("//")[0].rstrip() for l in str(inst).splitlines()]
 
     def test_exec_dst_wave32(self):
-        self._base.setKernel((12, 5, 0), 32)
         inst = VCmpXEqU32(dst=EXEC(), src0=vgpr(7), src1=sgpr(3), comment="c")
         self.assertEqual(self._lines(inst),
                          ["v_cmp_eq_u32 vcc_lo, v7, s3", "s_mov_b32 exec_lo, vcc_lo"])
 
     def test_exec_dst_wave64(self):
-        self._base.setKernel((12, 5, 0), 64)
+        _base.setKernel((12, 5, 0), 64)
         inst = VCmpXGtU32(dst=EXEC(), src0=vgpr(7), src1=0)
         self.assertEqual(self._lines(inst),
                          ["v_cmp_gt_u32 vcc, v7, 0", "s_mov_b64 exec, vcc"])
 
     def test_sgpr_dst_wave32(self):
-        self._base.setKernel((12, 5, 0), 32)
         inst = VCmpXLtU64(dst=sgpr(10), src0=vgpr(4, 2), src1=sgpr(6, 2))
         self.assertEqual(self._lines(inst),
                          ["v_cmp_lt_u64 s10, v[4:5], s[6:7]", "s_mov_b32 exec_lo, s10"])
@@ -1993,7 +1986,7 @@ _VECTOR_TERNARY_MISC = [
 ]
 
 
-class TestScalarMinMaxAbsConstruction(unittest.TestCase):
+class TestScalarMinMaxAbsConstruction(AdaptorTestCase):
     """SAbsI32 (unary), SMaxI32/SMaxU32/SMinI32/SMinU32 (binary)."""
 
     def test_sabsi32_construction(self):
@@ -2054,7 +2047,7 @@ class TestScalarMinMaxAbsConstruction(unittest.TestCase):
                 self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestVectorUnaryConstruction(unittest.TestCase):
+class TestVectorUnaryConstruction(AdaptorTestCase):
     """Vector unary shims (dst, src)."""
 
     def test_construction_and_str(self):
@@ -2093,7 +2086,7 @@ class TestVectorUnaryConstruction(unittest.TestCase):
                 self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestVectorMinMaxConstruction(unittest.TestCase):
+class TestVectorMinMaxConstruction(AdaptorTestCase):
     """Vector min/max binary shims (dst, src0, src1)."""
 
     def test_construction_and_str(self):
@@ -2133,7 +2126,7 @@ class TestVectorMinMaxConstruction(unittest.TestCase):
                 self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestVectorTernaryMiscConstruction(unittest.TestCase):
+class TestVectorTernaryMiscConstruction(AdaptorTestCase):
     """VMed3I32, VMed3F32, VLShiftLeftOrB32 (dst, src0, src1, src2)."""
 
     def test_construction_and_str(self):
@@ -2175,7 +2168,7 @@ class TestVectorTernaryMiscConstruction(unittest.TestCase):
                 self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestVAShiftRightI32Construction(unittest.TestCase):
+class TestVAShiftRightI32Construction(AdaptorTestCase):
     """VAShiftRightI32 — vector shift (dst, shiftHex, src)."""
 
     def test_construction_and_str(self):
@@ -2242,7 +2235,7 @@ _CVT_SCALE = [
 ]
 
 
-class TestCvtUnaryConstruction(unittest.TestCase):
+class TestCvtUnaryConstruction(AdaptorTestCase):
     """Unary conversion shims (dst, src)."""
 
     def test_construction_and_str(self):
@@ -2279,7 +2272,7 @@ class TestCvtUnaryConstruction(unittest.TestCase):
                 self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestCvtBinaryConstruction(unittest.TestCase):
+class TestCvtBinaryConstruction(AdaptorTestCase):
     """Binary conversion shims (dst, src0, src1)."""
 
     def test_construction_and_str(self):
@@ -2316,7 +2309,7 @@ class TestCvtBinaryConstruction(unittest.TestCase):
                 self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestCvtScaleConstruction(unittest.TestCase):
+class TestCvtScaleConstruction(AdaptorTestCase):
     """Scale conversion shims (dst, src, scale)."""
 
     def test_construction_and_str(self):
@@ -2428,7 +2421,7 @@ _DS_STORE2 = [
 ]
 
 
-class TestBufferLoadInstructions(unittest.TestCase):
+class TestBufferLoadInstructions(AdaptorTestCase):
     def test_construction_and_mnemonic(self):
         for cls, mnemonic in _BUFFER_LOAD:
             with self.subTest(cls=cls.__name__):
@@ -2491,7 +2484,7 @@ class TestBufferLoadInstructions(unittest.TestCase):
         self.assertRegex(text, r"buffer_load_b32 .* nv")
 
 
-class TestBufferAtomicAddF32(unittest.TestCase):
+class TestBufferAtomicAddF32(AdaptorTestCase):
     def test_construction(self):
         inst = BufferAtomicAddF32(dst=vgpr(2), vaddr=vgpr(1),
                                   saddr=sgpr(4, 4), soffset=0, comment="at")
@@ -2503,7 +2496,7 @@ class TestBufferAtomicAddF32(unittest.TestCase):
         self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
 
 
-class TestBufferStoreInstructions(unittest.TestCase):
+class TestBufferStoreInstructions(AdaptorTestCase):
     def test_construction_and_mnemonic(self):
         for cls, mnemonic in _BUFFER_STORE:
             with self.subTest(cls=cls.__name__):
@@ -2555,7 +2548,7 @@ class TestBufferStoreInstructions(unittest.TestCase):
         self.assertEqual(logical.set_mubuf.call_args.kwargs.get("nv"), int(NonVolatile.NV))
 
 
-class TestFlatLoadInstructions(unittest.TestCase):
+class TestFlatLoadInstructions(AdaptorTestCase):
     def test_construction_and_mnemonic(self):
         for cls, mnemonic in _FLAT_LOAD:
             with self.subTest(cls=cls.__name__):
@@ -2585,7 +2578,7 @@ class TestFlatLoadInstructions(unittest.TestCase):
                 self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestFlatStoreInstructions(unittest.TestCase):
+class TestFlatStoreInstructions(AdaptorTestCase):
     def test_construction_and_mnemonic(self):
         for cls, mnemonic in _FLAT_STORE:
             with self.subTest(cls=cls.__name__):
@@ -2615,7 +2608,7 @@ class TestFlatStoreInstructions(unittest.TestCase):
                 self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestFlatAtomicCmpswapB32(unittest.TestCase):
+class TestFlatAtomicCmpswapB32(AdaptorTestCase):
     def test_construction(self):
         inst = FlatAtomicCmpswapB32(vaddr=vgpr(0), tmp=vgpr(1),
                                      src=vgpr(2), comment="cas")
@@ -2638,7 +2631,7 @@ class TestFlatAtomicCmpswapB32(unittest.TestCase):
         self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestDSLoadInstructions(unittest.TestCase):
+class TestDSLoadInstructions(AdaptorTestCase):
     def test_construction_and_mnemonic(self):
         for cls, mnemonic in _DS_LOAD:
             with self.subTest(cls=cls.__name__):
@@ -2668,7 +2661,7 @@ class TestDSLoadInstructions(unittest.TestCase):
                 self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestDSLoad2Instructions(unittest.TestCase):
+class TestDSLoad2Instructions(AdaptorTestCase):
     def test_construction_and_mnemonic(self):
         for cls, mnemonic in _DS_LOAD2:
             with self.subTest(cls=cls.__name__):
@@ -2698,7 +2691,7 @@ class TestDSLoad2Instructions(unittest.TestCase):
                 self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestDSStoreInstructions(unittest.TestCase):
+class TestDSStoreInstructions(AdaptorTestCase):
     def test_construction_and_mnemonic(self):
         for cls, mnemonic in _DS_STORE:
             with self.subTest(cls=cls.__name__):
@@ -2728,7 +2721,7 @@ class TestDSStoreInstructions(unittest.TestCase):
                 self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestDSStore2Instructions(unittest.TestCase):
+class TestDSStore2Instructions(AdaptorTestCase):
     def test_construction_and_mnemonic(self):
         for cls, mnemonic in _DS_STORE2:
             with self.subTest(cls=cls.__name__):
@@ -2759,7 +2752,7 @@ class TestDSStore2Instructions(unittest.TestCase):
                 self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestDSBPermuteB32(unittest.TestCase):
+class TestDSBPermuteB32(AdaptorTestCase):
     def test_construction(self):
         inst = DSBPermuteB32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2),
                              comment="perm")
@@ -2782,7 +2775,7 @@ class TestDSBPermuteB32(unittest.TestCase):
         self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestTensorLoadToLds(unittest.TestCase):
+class TestTensorLoadToLds(AdaptorTestCase):
     def test_construction(self):
         inst = TensorLoadToLds(group0=vgpr(0), group1=vgpr(1), comment="tld")
         self.assertIn("tensor_load_to_lds", str(inst))
@@ -2804,7 +2797,7 @@ class TestTensorLoadToLds(unittest.TestCase):
         self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestGlobalPrefetchB8(unittest.TestCase):
+class TestGlobalPrefetchB8(AdaptorTestCase):
     def _mods(self):
         return GLOBALModifiers(th=TemporalHint.TH_NT, scope=CacheScope.SCOPE_SE)
 
@@ -2881,7 +2874,7 @@ class TestGlobalPrefetchB8(unittest.TestCase):
 # ===========================================================================
 
 
-class TestBranchInstructionConstruction(unittest.TestCase):
+class TestBranchInstructionConstruction(AdaptorTestCase):
     """Branch instructions take (labelName, comment)."""
 
     def test_sbranch_default(self):
@@ -2958,7 +2951,7 @@ class TestBranchInstructionConstruction(unittest.TestCase):
 # ===========================================================================
 
 
-class TestSEndpgmConstruction(unittest.TestCase):
+class TestSEndpgmConstruction(AdaptorTestCase):
     """SEndpgm is a zero-operand terminator instruction."""
 
     def test_default(self):
@@ -3000,7 +2993,7 @@ class TestSEndpgmConstruction(unittest.TestCase):
 # ===========================================================================
 
 
-class TestWaitCntInstructions(unittest.TestCase):
+class TestWaitCntInstructions(AdaptorTestCase):
     """_SWaitCnt, SWaitCnt, SWaitXCnt, SWaitTensorcnt."""
 
     def test_swaitcnt_primitive_default(self):
@@ -3095,7 +3088,7 @@ class TestWaitCntInstructions(unittest.TestCase):
         self.assertEqual(len(m._collect_logical_insts()), 3)
 
 
-class TestSWaitAlu(unittest.TestCase):
+class TestSWaitAlu(AdaptorTestCase):
     """SWaitAlu — dependency counter wait instruction."""
 
     def test_default_construction(self):
@@ -3143,27 +3136,14 @@ class TestSWaitAlu(unittest.TestCase):
         self.assertEqual(len(m._collect_logical_insts()), 2)
 
 
-class TestSWaitAluToString(unittest.TestCase):
+class TestSWaitAluToString(AdaptorTestCase):
     """``toString`` parity with ``rocisa::SWaitAlu`` (common.hpp)."""
 
-    def setUp(self):
-        from rocisa_stinkytofu_adaptor import base as _base
-        self._base = _base
-        self._saved_kernel = _base.getKernel()
-        self._saved_current_isa = _base._current_isa
-        self._saved_is_init = _base._is_init
-
-    def tearDown(self):
-        self._base.setKernelInfo(self._saved_kernel)
-        self._base._current_isa = self._saved_current_isa
-        self._base._is_init = self._saved_is_init
-
     def test_no_isa_is_empty(self):
-        self._base._current_isa = None
+        _base._current_isa = None
         self.assertEqual(str(SWaitAlu(va_vdst=0)), "")
 
     def test_gfx1250_fields_in_order(self):
-        self._base.init((12, 5, 0), "", False)
         inst = SWaitAlu(sa_sdst=0, va_vdst=1, vm_vsrc=2, comment="c")
         self.assertEqual(
             str(inst).split("//")[0].rstrip(),
@@ -3171,11 +3151,10 @@ class TestSWaitAluToString(unittest.TestCase):
         )
 
     def test_gfx1250_all_unset_is_empty(self):
-        self._base.init((12, 5, 0), "", False)
         self.assertEqual(str(SWaitAlu(comment="c")), "")
 
 
-class TestSSchedulingFence(unittest.TestCase):
+class TestSSchedulingFence(AdaptorTestCase):
     """SSchedulingFence — scheduling barrier pseudo-instruction."""
 
     def test_default_construction(self):
@@ -3210,7 +3189,7 @@ class TestSSchedulingFence(unittest.TestCase):
         self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
-class TestIssueLatencyParity(unittest.TestCase):
+class TestIssueLatencyParity(AdaptorTestCase):
     """``issueLatency()`` must match native rocisa for every mirrored shim.
 
     KernelWriter's software instruction scheduler budgets each MFMA slot with
