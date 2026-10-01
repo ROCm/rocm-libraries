@@ -305,6 +305,7 @@ class StateValues:
   combineLocalAddresses: bool            = False # Debug
   unifiedVgprRegs: bool                  = False
   useAtomicAdd: bool                     = False
+  useAtomicPkAddBF16: bool               = False
   serializedStore: bool                  = False
   storeAlign8: bool                      = False
   subtileTotalMOffsetSgpr: Optional[int] = None
@@ -5891,7 +5892,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # Bracket them with a self-contained cluster-scope handshake so every
           # multicast load stays synchronized and signal/wait counts stay
           # balanced. Gated on streamKMulticast (cluster + TDM broadcast):
-          # gfx1250v0 has the cluster launch but no peer ld_bcst to keep in lockstep.
+          # gfx1250-strict has the cluster launch but no peer ld_bcst to keep in lockstep.
           if streamKMulticast(kernel):
             skComponent = Component.StreamK.find(self)
             module.add(skComponent.streamKMulticastProloguePrefetchHandshake(self, kernel))
@@ -7383,7 +7384,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # an `s_wait_tensorcnt 0` is emitted after the cooperative
                                # tensor_load group so the broadcast retires before the back edge.
                                # Requires TDM multicast, not just a cluster: without a peer
-                               # ld_bcst that wait has nothing to retire (gfx1250v0).
+                               # ld_bcst that wait has nothing to retire (gfx1250-strict).
                                "StreamKMulticast": bool(streamKMulticast(kernel)),
                                # TDMLoadWaveSyncPass (Gfx1250Backend): insert a barrier
                                # between an urgent and a deferrable tensor_load group.
@@ -8139,6 +8140,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if kernel["ProblemType"]["Sparse"] and not (kernel["DirectToVgprSparseMetadata"] or kernel["DirectToLdsMetadata"]):
       kernel["LocalWriteUseSgprMetadata"] = False
+
+    # GSU whose atomic target is the BF16 D tensor itself rather than an fp32
+    # staging workspace (GlobalSplitUAlgorithm AtomicDest). Accumulation is done
+    # by buffer_atomic_pk_add_bf16 on packed element pairs.
+    self.states.useAtomicPkAddBF16 = kernel["GlobalSplitUAlgorithm"] == "AtomicDest"
 
     # The inst HasAtomicAdd is using is not compatible with int32.
     self.states.useAtomicAdd = (self.states.asmCaps["HasAtomicAdd"] and kernel["ProblemType"]["ComputeDataType"].isSingle()) and \
