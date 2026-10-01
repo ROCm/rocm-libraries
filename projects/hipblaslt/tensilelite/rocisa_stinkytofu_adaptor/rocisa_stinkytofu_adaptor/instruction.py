@@ -2239,13 +2239,56 @@ def _make_vcmp_class(class_name: str, mnemonic: str, inst_type: "InstType"):
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
 
-    cls = type(class_name, (CommonInstruction,), {
+    attrs = {
         "__doc__": f"``{mnemonic} dst, src0, src1`` shim with stinkytofu left-path bridge.",
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
-    })
-    return cls
+    }
+    if "_cmpx_" in mnemonic:
+        attrs["toString"] = _vcmpx_to_string
+    return type(class_name, (CommonInstruction,), attrs)
+
+
+def _vcmpx_to_string(self) -> str:
+    """Port of ``rocisa::VCmpXInstruction::toString`` (cmp.hpp:113-173).
+
+    Temporary text-emission shim for callers that still ``str(module)``
+    instead of lowering through ``ToStinkyAsmPass`` (which legalizes VCmpX
+    itself via ``legalizeVCmpX``). Slated for removal with that path.
+    """
+    from .base import getArchCaps  # noqa: WPS433
+    from .container import EXEC, VCC, _kernel_wavefront_size  # noqa: WPS433
+
+    try:
+        writes_sgpr = getArchCaps().get("CMPXWritesSGPR", 0)
+    except RuntimeError:
+        # No ISA selected: there is no target to legalize for, so emit the
+        # instruction as constructed.
+        writes_sgpr = 1
+    if writes_sgpr:
+        kstr = self.preStr() + " " + self.getArgStr()
+        if self.sdwa is not None and hasattr(self.sdwa, "toString"):
+            kstr += self.sdwa.toString()
+        if self.vop3 is not None and hasattr(self.vop3, "toString"):
+            kstr += self.vop3.toString()
+        return self.formatWithComment(kstr)
+
+    inst_str = self.preStr().replace("_cmpx_", "_cmp_", 1)
+    dst_str = VCC().toString() if isinstance(self.dst, EXEC) else self.dst.toString()
+    parts = [dst_str]
+    if self.dst1 is not None:
+        parts.append(self.dst1.toString())
+    parts.extend(_input_to_str(s) for s in self.srcs)
+    kstr = inst_str + " " + ", ".join(parts)
+    if self.sdwa is not None and hasattr(self.sdwa, "toString"):
+        kstr += self.sdwa.toString()
+    kstr = self.formatWithComment(kstr)
+    if _kernel_wavefront_size() == 64:
+        mov = "s_mov_b64 exec, " + dst_str
+    else:
+        mov = "s_mov_b32 exec_lo, " + dst_str
+    return kstr + self.formatWithComment(mov)
 
 
 # -- Scalar Compare (no dst, 2 srcs) --
