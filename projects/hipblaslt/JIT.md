@@ -485,11 +485,13 @@ hipblaslt error: JIT generation skipped during stream capture for GEMM M=256 N=1
 When a pre-tuned solution is found instead, the skipped generation goes only to
 the info log.
 
-What a heuristic query does during HIP stream capture is not yet defined; the
-queries take no stream. Generate before capture: run the query first and pass
-the returned algorithm to `hipblasLtMatmul` inside the capture, or warm the JIT
-solution library by running the same queries beforehand, in this process or an
-earlier one.
+The heuristic queries take no stream and may generate during a capture: they
+follow the mode as they do outside one. Generating inside a capture was verified
+to keep the capture valid in global, thread-local and relaxed capture modes
+with HIP 7.17. Generation takes seconds, so warm the JIT solution library or run
+the query before the capture: run the same queries beforehand, in this process
+or an earlier one, or run the query first and pass the returned algorithm to
+`hipblasLtMatmul` inside the capture.
 
 #### Tool paths and scratch files
 
@@ -519,7 +521,8 @@ reuse of the library by later processes and by `getAlgosFromIndex` with JIT
 off, distinct kernels when several solutions are requested, the order of a
 device library's Equality results, JIT solutions and other pre-tuned results,
 a tuning override that names a JIT solution, `hipblasLtMatmul` without an
-algorithm during stream capture in each capture mode, the same query from
+algorithm and heuristic queries that generate during stream capture in each
+capture mode, the same query from
 several threads and processes at once, a problem the backend cannot rank, and
 failure reports.
 The `code-object-gfx1250` and `jit-gemm-gfx1250` routes run compile-only for

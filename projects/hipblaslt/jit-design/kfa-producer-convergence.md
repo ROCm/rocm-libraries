@@ -229,8 +229,8 @@ one at a time per problem and workspace limit in a process, while separate
 processes publish under the library lock; and reserved indices resolve through
 the JIT solution library in `getAlgosFromIndex`, `hipblasLtMatmul` and `Gemm`.
 During stream capture, `hipblasLtMatmul` without an algorithm only looks up
-published solutions; what a heuristic query does during a capture is not yet
-defined. A GEMM-templated library does not become operation-independent by
+published solutions, while heuristic queries, which take no stream, may
+generate. A GEMM-templated library does not become operation-independent by
 adding a type.
 
 ## Reviewable implementation sequence
