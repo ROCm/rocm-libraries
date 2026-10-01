@@ -260,6 +260,7 @@ void add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_bf16_instances(
                                                                   PassThrough,
                                                                   PassThrough,
                                                                   PassThrough>>>& instances);
+#ifdef CK_USE_GFX1250
 void add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_bf16_gfx1250_instances(
     std::vector<std::unique_ptr<DeviceGroupedConvBwdDataMultipleD<2,
                                                                   NHWGK,
@@ -273,6 +274,7 @@ void add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_bf16_gfx1250_in
                                                                   PassThrough,
                                                                   PassThrough,
                                                                   PassThrough>>>& instances);
+#endif
 #endif
 
 #ifdef CK_ENABLE_FP16

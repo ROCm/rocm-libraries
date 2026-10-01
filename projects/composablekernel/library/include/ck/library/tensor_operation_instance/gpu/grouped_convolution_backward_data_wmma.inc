@@ -280,6 +280,7 @@ void add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_instances
                                                                   PassThrough,
                                                                   PassThrough>>>& instances);
 
+#ifdef CK_USE_GFX1250
 void add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_large_tiles_instances(
     std::vector<std::unique_ptr<DeviceGroupedConvBwdDataMultipleD<2,
                                                                   NHWGK,
@@ -293,6 +294,7 @@ void add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_large_til
                                                                   PassThrough,
                                                                   PassThrough,
                                                                   PassThrough>>>& instances);
+#endif
 
 void add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_16_16_instances(
     std::vector<std::unique_ptr<DeviceGroupedConvBwdDataMultipleD<2,

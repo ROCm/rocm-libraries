@@ -166,6 +166,13 @@ using device_grouped_conv_fwd_wmma_cshufflev3_bf16_instances_part4 = std::tuple<
     // clang-format on
     >;
 
+// gfx1250-exclusive instances.
+//
+// These tiles are sized for the 320 KB LDS of gfx1250 and exceed the 64 KB LDS budget
+// of every other WMMA target. They are instantiated only by *_gfx1250_instance*.cpp
+// translation units, which the instance CMakeLists restricts to --offload-arch=gfx1250*.
+// Do NOT gate them on the host-side CK_USE_GFX1250 macro: that macro is global to the
+// build and cannot distinguish one offload architecture from another.
 template <index_t NDimSpatial,
           typename ALayout,
           typename BLayout,
@@ -174,8 +181,7 @@ template <index_t NDimSpatial,
           ConvolutionForwardSpecialization ConvSpec,
           typename DsDataTypes  = Tuple<>,
           typename OutElementOp = PassThrough>
-using device_grouped_conv_fwd_wmma_cshufflev3_bf16_instances_large_tiles = std::tuple<
-#if defined(CK_USE_GFX1250)
+using device_grouped_conv_fwd_wmma_cshufflev3_bf16_gfx1250_instances_large_tiles = std::tuple<
     // clang-format off
     DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  BF16,  BF16,     F32,     BF16,    DsDataTypes,  BF16, PassThrough, PassThrough, OutElementOp,       ConvSpec, GemmMNKPadding,   512,   512,    64,    128,   8,   8,   16,   16,     2,     4,     S<16, 32, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              8,         1,     S<16, 32, 1>,     S<1, 0, 2>,     S<1, 0, 2>,             2,              8,              8,         1,            1,            1,               S<1, 256, 1, 2>,               8, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v1>,
     DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  BF16,  BF16,     F32,     BF16,    DsDataTypes,  BF16, PassThrough, PassThrough, OutElementOp,       ConvSpec, GemmMNKPadding,   512,   512,   128,     64,   8,   8,   16,   16,     4,     4,     S< 8, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              8,         1,     S< 8, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,             2,              8,              8,         1,            1,            1,               S<1, 128, 1, 4>,               8, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v1>,
@@ -188,7 +194,6 @@ using device_grouped_conv_fwd_wmma_cshufflev3_bf16_instances_large_tiles = std::
     DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  BF16,  BF16,     F32,     BF16,    DsDataTypes,  BF16, PassThrough, PassThrough, OutElementOp,       ConvSpec, GemmMNKPadding,   256,   256,   128,     64,   8,   8,   16,   16,    16,     1,      S<8, 32, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              8,         1,     S<8, 32, 1>,      S<1, 0, 2>,     S<1, 0, 2>,             2,              8,              8,         1,            1,            1,               S<1, 16, 1, 16>,               8, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v1>,
     DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  BF16,  BF16,     F32,     BF16,    DsDataTypes,  BF16, PassThrough, PassThrough, OutElementOp,       ConvSpec, GemmMNKPadding,   256,   128,   256,     64,   8,   8,   16,   16,     8,     2,      S<8, 32, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              8,         1,     S<8, 32, 1>,      S<1, 0, 2>,     S<1, 0, 2>,             2,              8,              8,         1,            1,            1,               S<1, 16, 1, 16>,               8, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v1>
 // clang-format on
-#endif
     >;
 
 template <index_t NDimSpatial,

@@ -116,6 +116,13 @@ function(add_instance_library INSTANCE_NAME)
             message(DEBUG "removing grouped_conv3d_fwd_wmma fp8/bf8 instance ${source} ")
             list(REMOVE_ITEM ARGN "${source}")
         endif()
+        # Do not build gfx1250-exclusive instances unless gfx1250 is on the target list.
+        # These instances are tuned for the 320 KB LDS of gfx1250; their tiles exceed the
+        # 64 KB LDS budget of every other WMMA target.
+        if(NOT INST_TARGETS MATCHES "gfx1250" AND source_name MATCHES "_gfx1250")
+            message(DEBUG "removing gfx1250-only instance ${source} ")
+            list(REMOVE_ITEM ARGN "${source}")
+        endif()
         # Do not build gemm_universal_preshuffle_f8 for any targets except gfx94, gfx95 and gfx12
         if(NOT (INST_TARGETS MATCHES "gfx94|gfx95|gfx12") AND (source_name MATCHES "gemm_universal_preshuffle") AND source_name MATCHES "_f8_" )
             message(DEBUG "removing gemm_universal_preshuffle_f8 instance ${source} ")
@@ -180,6 +187,12 @@ function(add_instance_library INSTANCE_NAME)
             endif()
             if(source_name MATCHES "gemm_wmma_universal" AND source_name MATCHES "f8")
                 list(FILTER INST_TARGETS INCLUDE REGEX "gfx12")
+            endif()
+            # gfx1250-exclusive instances must never be offloaded to another architecture.
+            # Their LDS footprint (up to 197104 B) is legal only on the 320 KB LDS of
+            # gfx1250; emitting them for a 64 KB target is a hard ld.lld failure.
+            if(source_name MATCHES "_gfx1250")
+                list(FILTER INST_TARGETS INCLUDE REGEX "gfx1250")
             endif()
             set(offload_targets)
             foreach(target IN LISTS INST_TARGETS)

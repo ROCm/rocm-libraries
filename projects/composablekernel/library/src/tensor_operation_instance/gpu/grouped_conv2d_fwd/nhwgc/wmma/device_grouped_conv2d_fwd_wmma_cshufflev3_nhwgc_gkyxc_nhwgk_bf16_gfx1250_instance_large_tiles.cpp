@@ -24,7 +24,7 @@ void add_device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_bf16_instan
 {
     add_device_operation_instances(
         instances,
-        device_grouped_conv_fwd_wmma_cshufflev3_bf16_instances_large_tiles<2,
+        device_grouped_conv_fwd_wmma_cshufflev3_bf16_gfx1250_instances_large_tiles<2,
                                                                            NHWGC,
                                                                            GKYXC,
                                                                            Empty_Tuple,
@@ -33,7 +33,7 @@ void add_device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_bf16_instan
 
     add_device_operation_instances(
         instances,
-        device_grouped_conv_fwd_wmma_cshufflev3_bf16_instances_large_tiles<2,
+        device_grouped_conv_fwd_wmma_cshufflev3_bf16_gfx1250_instances_large_tiles<2,
                                                                            NHWGC,
                                                                            GKYXC,
                                                                            Empty_Tuple,
@@ -42,7 +42,7 @@ void add_device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_bf16_instan
 
     add_device_operation_instances(
         instances,
-        device_grouped_conv_fwd_wmma_cshufflev3_bf16_instances_large_tiles<2,
+        device_grouped_conv_fwd_wmma_cshufflev3_bf16_gfx1250_instances_large_tiles<2,
                                                                            NHWGC,
                                                                            GKYXC,
                                                                            Empty_Tuple,
@@ -51,7 +51,7 @@ void add_device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_bf16_instan
 
     add_device_operation_instances(
         instances,
-        device_grouped_conv_fwd_wmma_cshufflev3_bf16_instances_large_tiles<2,
+        device_grouped_conv_fwd_wmma_cshufflev3_bf16_gfx1250_instances_large_tiles<2,
                                                                            NHWGC,
                                                                            GKYXC,
                                                                            Empty_Tuple,

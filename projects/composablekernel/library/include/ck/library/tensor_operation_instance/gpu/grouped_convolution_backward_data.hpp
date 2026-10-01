@@ -156,8 +156,10 @@ struct DeviceOperationInstanceFactory<
                 {
                     add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_bf16_instances(
                         op_ptrs);
+#ifdef CK_USE_GFX1250
                     add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_bf16_gfx1250_instances(
                         op_ptrs);
+#endif
                     add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_bf16_large_tensors_instances(
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_data_xdl_nhwgk_gkyxc_nhwgc_bf16_instances(
@@ -477,8 +479,10 @@ struct DeviceOperationInstanceFactory<
                 {
                     add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_instances(
                         op_ptrs);
+#ifdef CK_USE_GFX1250
                     add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_large_tiles_instances(
                         op_ptrs);
+#endif
                     add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_16_16_instances(
                         op_ptrs);
                 }

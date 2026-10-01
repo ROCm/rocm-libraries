@@ -62,6 +62,7 @@ void add_device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_bf16_instan
                                                                 PassThrough,
                                                                 PassThrough,
                                                                 PassThrough>>>& instances);
+#ifdef CK_USE_GFX1250
 void add_device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_bf16_instances_large_tiles(
     std::vector<std::unique_ptr<DeviceGroupedConvFwdMultipleABD<2,
                                                                 NHWGC,
@@ -75,6 +76,7 @@ void add_device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_bf16_instan
                                                                 PassThrough,
                                                                 PassThrough,
                                                                 PassThrough>>>& instances);
+#endif
 
 void add_device_grouped_conv2d_fwd_wmma_cshufflev3_wave_transfer_nhwgc_gkyxc_nhwgk_bf16_instances(
     std::vector<std::unique_ptr<DeviceGroupedConvFwdMultipleABD<2,

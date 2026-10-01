@@ -951,6 +951,10 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                 {
                     add_device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_bf16_instances(
                         op_ptrs);
+#ifdef CK_USE_GFX1250
+                    add_device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_bf16_gfx1250_instances(
+                        op_ptrs);
+#endif
                     add_device_grouped_conv2d_bwd_weight_two_stage_wmma_nhwgc_gkyxc_nhwgk_bf16_pipev1_instances(
                         op_ptrs);
                     // Explicit GEMM
@@ -996,6 +1000,10 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                 {
                     add_device_grouped_conv3d_bwd_weight_wmma_ndhwgc_gkzyxc_ndhwgk_bf16_instances(
                         op_ptrs);
+#ifdef CK_USE_GFX1250
+                    add_device_grouped_conv3d_bwd_weight_wmma_ndhwgc_gkzyxc_ndhwgk_bf16_gfx1250_instances(
+                        op_ptrs);
+#endif
                     add_device_grouped_conv3d_bwd_weight_two_stage_wmma_ndhwgc_gkzyxc_ndhwgk_bf16_pipev1_instances(
                         op_ptrs);
                     // Explicit GEMM
