@@ -227,6 +227,72 @@ TEST(RocprimDeviceHistogramEven, IncorrectInput)
     testHistogramEvenIncorrectInput();
 }
 
+// A bin count above shared_impl_max_bins (2048) must accept the default, per-thread,
+// and legacy streams on every device. On gfx942 this selects the global private-histogram
+// path. hipGetStreamDeviceId(hipStreamLegacy) crashes on this runtime;
+// get_device_from_stream accepts that sentinel. On every other device the size query
+// reports 4 bytes. A larger size on gfx942 shows the private path ran.
+TEST(RocprimDeviceHistogramEven, LargeBinCountStreams)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    rocprim::detail::target_arch arch{};
+    HIP_CHECK(rocprim::detail::get_device_arch(device_id, arch));
+    const bool private_histogram = arch == rocprim::detail::target_arch::gfx942;
+
+    // 4096 bins is a power of two, so shared occupancy is 4097 and exceeds 2048.
+    constexpr unsigned int levels    = 4097;
+    constexpr unsigned int columns   = 1;
+    int*                   samples   = nullptr;
+    int*                   histogram = nullptr;
+
+    auto query = [&](hipStream_t stream, size_t& storage_size)
+    {
+        storage_size = 0;
+        return rocprim::histogram_even(nullptr,
+                                       storage_size,
+                                       samples,
+                                       columns,
+                                       histogram,
+                                       levels,
+                                       0,
+                                       static_cast<int>(levels - 1),
+                                       stream);
+    };
+
+    auto check = [&](hipStream_t stream)
+    {
+        size_t storage_size = 0;
+        ASSERT_EQ(query(stream, storage_size), hipSuccess);
+        if(private_histogram)
+        {
+            ASSERT_GT(storage_size, 4u);
+        }
+        else
+        {
+            ASSERT_EQ(storage_size, 4u);
+        }
+    };
+
+    hipStream_t stream{};
+    HIP_CHECK(hipStreamCreate(&stream));
+    check(stream);
+    HIP_CHECK(hipStreamDestroy(stream));
+    ASSERT_FALSE(HasFatalFailure());
+
+    static constexpr hipStream_t default_stream = 0;
+    ASSERT_NO_FATAL_FAILURE(check(default_stream));
+
+    ASSERT_NO_FATAL_FAILURE(check(hipStreamPerThread));
+
+    // hipStreamLegacy support was added in ROCm 6.2.0
+#if(HIP_VERSION_MAJOR > 6 || (HIP_VERSION_MAJOR == 6 && HIP_VERSION_MINOR >= 2))
+    ASSERT_NO_FATAL_FAILURE(check(hipStreamLegacy));
+#endif
+}
+
 template<class T>
 using is_half = std::is_same<rocprim::half, typename std::remove_cv<T>::type>;
 
