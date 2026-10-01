@@ -60,13 +60,13 @@ rms_threshold = 1e-4
 # Upcast fixtures keep them in FP32 and retain the 1e-4 threshold above.
 # These more-specific entries must follow the shared rule: later matches win.
 [[validator_overrides]]
-filters = ["*LayernormBackwardPure*Fp16.*"]
+filters = ["*LayernormBackwardPure*Fp16.*", "*LayernormBackward*fp16_*"]
 tensors = ["*::DSCALE", "*::DBIAS"]
 validator = "rms"
 rms_threshold = 1e-3
 
 [[validator_overrides]]
-filters = ["*LayernormBackwardPure*Bfp16.*"]
+filters = ["*LayernormBackwardPure*Bfp16.*", "*LayernormBackward*bfp16_*"]
 tensors = ["*::DSCALE", "*::DBIAS"]
 validator = "rms"
 rms_threshold = 1e-2
