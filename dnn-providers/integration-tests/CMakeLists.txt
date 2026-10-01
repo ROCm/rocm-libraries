@@ -71,6 +71,7 @@ include(GNUInstallDirs)
 include(ClangTidy)
 include(ClangCheck)
 include(Sanitizers)
+include(WindowsDllStaging)
 include(Tests)
 include(HipdnnIntegrationTestHelpers)
 
