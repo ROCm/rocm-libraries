@@ -494,7 +494,7 @@ private:
     std::enable_if_t<IsDevice && !IsScrambled> deallocate()
     {
         hipError_t error = hipFree(m_direction_vectors);
-        if(error != hipErrorInvalidValue)
+        if(error == hipErrorInvalidValue)
         {
             // hipErrorInvalidValue is thrown when hipFree tries to call an already
             // deallocated section of memory. This may occur when 'hipDeviceReset()' is
@@ -510,7 +510,7 @@ private:
     {
         hipError_t m_dir_error   = hipFree(m_direction_vectors);
         hipError_t m_scram_error = hipFree(m_scramble_constants);
-        if((m_dir_error != hipErrorInvalidValue) && (m_scram_error != hipErrorInvalidValue))
+        if((m_dir_error == hipErrorInvalidValue) || (m_scram_error == hipErrorInvalidValue))
         {
             // hipErrorInvalidValue is thrown when hipFree tries to call an already
             // deallocated section of memory. This may occur when 'hipDeviceReset()' is
