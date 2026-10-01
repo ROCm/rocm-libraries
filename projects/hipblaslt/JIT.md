@@ -441,7 +441,7 @@ solution of the same order: an Equality result, else a JIT solution, else a
 result of the other pre-tuned libraries. When rocRoller's early path applies, it
 uses a JIT solution only when that path finds none. In forced mode it uses only
 JIT solutions. When no solution is found it returns
-`HIPBLAS_STATUS_NOT_SUPPORTED`.
+`HIPBLAS_STATUS_INTERNAL_ERROR`.
 
 **Failure reporting.** JIT problems are printed on stderr without any
 `HIPBLASLT_LOG_LEVEL` setting, once per distinct message in a process, and are
