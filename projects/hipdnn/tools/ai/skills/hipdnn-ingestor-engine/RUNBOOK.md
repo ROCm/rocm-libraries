@@ -132,7 +132,13 @@ Add `--rocke-bench <actual-benchmark-tree>` when applicable. Reconcile each sour
 total, parsed, servable, covered and excluded counts; do not discard window/sink or
 independent operand dimensions to fit the request schema.
 
-For rocKE, resolve the provisional baseline through its actual dispatcher:
+For rocKE, resolve the provisional baseline through its actual dispatcher. The profile's
+`dispatch` entry must name the library's full dispatcher, not a single-variant spec
+factory: a factory pins one variant and refuses shapes another variant serves (for
+example, gfx950 Sq=128 shapes that only the block_m=128 variant serves). For attention it
+is `dispatch: {module: dispatch.attention, function: dispatch_attention, spec_attribute:
+spec}`, where `spec_attribute` names the attribute of the dispatcher's result that holds
+the spec:
 
 ```bash
 "$PY" "$GEN/tools/dispatch_parity.py" --profile "$PROFILE" \
