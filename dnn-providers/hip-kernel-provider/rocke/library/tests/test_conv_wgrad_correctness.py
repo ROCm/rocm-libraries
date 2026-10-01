@@ -1942,12 +1942,19 @@ class TestWgradValidatorAgreement(unittest.TestCase):
         ok, _ = self._agree(self._spec(split_k=4, epilogue="default"))
         self.assertFalse(ok, "split_k atomic + 16-bit dW + default must be rejected")
 
-    def test_two_stage_does_not_exempt_runtime_degree(self):
-        # split_k == 0 is the runtime-degree atomic encoding; the builder's
-        # `is_two_stage = split_k > 1 and two_stage` never reaches the scratch
-        # epilogue there, so it still needs cshuffle.
-        ok, _ = self._agree(self._spec(split_k=0, two_stage=True, epilogue="default"))
-        self.assertFalse(ok, "split_k=0 is atomic regardless of two_stage")
+    def test_two_stage_exempts_runtime_degree(self):
+        # split_k == 0 is the runtime-degree encoding. With two_stage the
+        # builder takes the f32 scratch epilogue there too (the slab index does
+        # not depend on the degree), so the packed-atomic cshuffle requirement
+        # does not apply -- and is_valid_wgrad_spec and validate() must agree.
+        ok, why = self._agree(self._spec(split_k=0, two_stage=True, epilogue="default"))
+        self.assertTrue(ok, f"split_k=0 + two_stage takes the scratch path: {why}")
+
+    def test_runtime_degree_without_two_stage_is_atomic(self):
+        # The other half of the contract: without two_stage, split_k == 0 is
+        # the packed atomic and still needs cshuffle for a 16-bit dW.
+        ok, _ = self._agree(self._spec(split_k=0, two_stage=False, epilogue="default"))
+        self.assertFalse(ok, "split_k=0 without two_stage is atomic")
 
     def test_two_stage_with_split_k_1_rejected_by_predicate(self):
         # validate() and the C++ both reject this; the public predicate used to

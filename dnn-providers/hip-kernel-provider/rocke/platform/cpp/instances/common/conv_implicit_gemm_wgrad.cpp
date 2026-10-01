@@ -137,9 +137,9 @@ bool rocke_wgrad_conv_spec_is_deterministic(const rocke_implicit_gemm_conv_wgrad
      *   is not associative. Stage 2's fold over the replicas is ordered, which
      *   does nothing for partial sums that were already reordered.
      * split_k == 0 is the RUNTIME-degree encoding: the degree rides a kernel
-     *   argument and the epilogue is always packed atomics. Treating 0 as
-     *   "<= 1" here would tell a host that an atomic kernel produces
-     *   reproducible dW. */
+     *   argument and the epilogue is atomic (packed into dW, or f32 into the
+     *   two-stage scratch). Treating 0 as "<= 1" here would tell a host that
+     *   an atomic kernel produces reproducible dW. */
     if(s->split_k == 0)
         return false;
     return s->split_k <= 1;
@@ -149,7 +149,9 @@ size_t rocke_wgrad_conv_workspace_bytes(const rocke_implicit_gemm_conv_wgrad_spe
 {
     if(!s->two_stage)
         return 0;
-    if(s->split_k <= 1)
+    /* Two-stage needs a split: a fixed degree > 1 or the runtime degree (0).
+     * The scratch does not depend on which, so 0 sizes like any degree. */
+    if(s->split_k == 1 || s->split_k < 0)
         return 0;
     int wg_M = rocke_wgrad_conv_spec_wg_M(s);
     int wg_N = rocke_wgrad_conv_spec_wg_N(s);
@@ -427,7 +429,7 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
          * The local per-group computation is deliberate: the shared
          * rocke_wgrad_conv_spec_wg_N() helper still returns the dense Z*Y*X*C
          * and is used for workspace sizing, so it is not interchangeable here. */
-        const bool effective_two_stage_gate = s->two_stage && sk > 1;
+        const bool effective_two_stage_gate = s->two_stage && (sk > 1 || sk == 0);
         const char* dt = s->dtype_d ? s->dtype_d : "fp16";
         if(!effective_two_stage_gate && (strcmp(dt, "fp16") == 0 || strcmp(dt, "bf16") == 0))
         {
@@ -498,11 +500,10 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
      * Matches Python is_valid_wgrad_spec / validate(): _needs_atomic guard. */
     if(sk > 1 || sk == 0)
     {
-        /* The `sk > 1` term applies to two_stage as well, not just to
-         * the builder computes
-         * is_two_stage = split_k > 1 && two_stage, so at sk == 0 a two_stage
-         * spec still lands on the atomic epilogue and must stay gated. */
-        bool effective_two_stage_v = s->two_stage && sk > 1;
+        /* Mirrors the builder's is_two_stage = is_split_k && two_stage: a
+         * two-stage spec at a fixed degree > 1 or at the runtime degree
+         * (sk == 0) takes the f32 scratch epilogue, not the packed atomic. */
+        bool effective_two_stage_v = s->two_stage && (sk > 1 || sk == 0);
         if(!effective_two_stage_v)
         {
             const char* dt = s->dtype_d ? s->dtype_d : "fp16";
@@ -608,6 +609,18 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
     {
         if(reason && reason_cap)
             snprintf(reason, reason_cap, "pipeline='basic' is incompatible with async_dma=True");
+        return false;
+    }
+
+    /* The wgrad builder has no load/math wave split, so "wavelet" would build
+     * the "mem" kernel under another name. Mirrors Python is_valid_wgrad_spec. */
+    if(s->pipeline && strcmp(s->pipeline, "wavelet") == 0)
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "pipeline='wavelet' is not implemented for wgrad (it would build "
+                     "the 'mem' kernel); use pipeline='mem'");
         return false;
     }
 

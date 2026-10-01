@@ -9,8 +9,11 @@ Combines two tightly coupled pieces:
   one HSACO. Only configuration and capability fields belong here; no problem
   extents. See the class docstring for why the distinction matters.
 
-* :class:`KernelCache` — reads, writes and lists HSACO blobs keyed by identity
-  from a directory tree under ``<root>/<arch>/``.
+* :class:`KernelCache` — reads, writes and lists HSACO blobs from a directory
+  tree under ``<root>/<arch>/``. Binaries are content-addressed by the
+  compiler input that produced them (see :func:`comgr_input_key`), so
+  identities that emit the same code share one binary and a rebuild after an
+  emitter change only recompiles the kernels whose code actually changed.
 
 Both classes live in ``library/`` (not in the installable ``rocke`` wheel)
 because they are specific to this library's conv kernel families and their
@@ -23,6 +26,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -62,6 +66,45 @@ def current_emitter_digest() -> str:
             h.update(b"\0")
             h.update(path.read_bytes())
             h.update(b"\0")
+    return h.hexdigest()
+
+
+@functools.lru_cache(maxsize=None)
+def current_comgr_id() -> str:
+    """Identity of the COMGR library this process compiles with.
+
+    The same LLVM IR compiled by another COMGR is another binary, so the
+    binary key has to change when the library does. Path plus size and
+    modification time is enough to tell installs apart without loading it.
+    """
+    from rocke.runtime.comgr import resolved_lib_path
+
+    path = resolved_lib_path()
+    if not path:
+        return "<no-comgr>"
+    real = os.path.realpath(path)
+    try:
+        st = os.stat(real)
+    except OSError:
+        return real
+    return f"{real}:{st.st_size}:{st.st_mtime_ns}"
+
+
+def comgr_input_key(comgr_input) -> str:
+    """Content key of the binary a :class:`rocke.helpers.compile.ComgrInput`
+    compiles to.
+
+    The HSACO is a function of the LLVM IR, the ISA, the COMGR options and the
+    COMGR library. The kernel's own name is normalised out of the IR, so two
+    identities whose code differs only in its name (an alias pipeline, a
+    split-K degree that rides a kernarg) share one binary -- each keeps its
+    own entry, which records the symbol to launch.
+    """
+    h = hashlib.sha256()
+    h.update(comgr_input.llvm_text.replace(comgr_input.kernel_name, "@K@").encode())
+    for part in (comgr_input.isa, *comgr_input.options, current_comgr_id()):
+        h.update(b"\0")
+        h.update(str(part).encode())
     return h.hexdigest()
 
 
@@ -166,13 +209,18 @@ class KernelIdentity:
     # not fit the tile/warp fields above; ``algorithm`` names the kernel
     # variant and this string carries the rest.
     knobs: str = ""
-    # ---- provenance: which emitter and LLVM flavor produced the binary ----
-    # Neither shows up in the configuration, yet either changes the HSACO: a
-    # binary from an older emitter or another flavor has to miss, not be
-    # silently reused. They default to this process's values, so an identity
-    # built for a lookup only ever matches binaries built the same way.
+    # ---- provenance: the LLVM flavor the binary was lowered for ----
+    # It changes the HSACO without showing up in the configuration, so a
+    # binary for another flavor has to miss. Defaults to this process's
+    # flavor, so a lookup only matches binaries lowered the same way.
+    #
+    # The emitter version is deliberately NOT part of the identity: an
+    # identity names a kernel configuration, and the same configuration keeps
+    # its entry across emitter changes. Whether its binary is still current is
+    # tracked per entry (the build-time emitter digest and the binary's
+    # content key in its metadata), which is what lets --compile-all rebuild
+    # only the kernels whose code changed.
     llvm_flavor: str = field(default_factory=current_llvm_flavor)
-    emitter_digest: str = field(default_factory=current_emitter_digest)
 
     @property
     def is_direct(self) -> bool:
@@ -251,10 +299,9 @@ class KernelIdentity:
         """
         known = {f for f in cls.__dataclass_fields__}
         kw = {k: v for k, v in d.items() if k in known}
-        # An entry that predates the provenance fields was built by an unknown
-        # emitter; "" never equals the current values, so it never matches.
+        # An entry that predates the provenance field was lowered for an
+        # unknown flavor; "" never equals the current one, so it never matches.
         kw.setdefault("llvm_flavor", "")
-        kw.setdefault("emitter_digest", "")
         return cls(**kw)
 
 
@@ -309,12 +356,21 @@ class KernelCache:
 
         <root>/
             <arch>/
+                blobs/
+                    <content key>.hsaco      one per distinct compiled binary
                 conv_fwd/
-                    <sha1>.hsaco
-                    <sha1>.meta.json
+                    <identity sha1>.meta.json   one per kernel identity
                 conv_wgrad/
                 conv_dgrad/
                 conv_direct/
+
+    An identity's metadata names its binary (``"blob"``, a
+    :func:`comgr_input_key`) and the symbol to launch (``"kernel_name"``).
+    Binaries are content-addressed, so identities that emit the same code
+    share one file, and entries are kept per identity, so an identity keeps
+    its entry when the emitter changes and only its ``blob`` moves if its code
+    did. Entries written before blobs existed (an ``.hsaco`` next to the
+    metadata) are still read.
 
     The cache is per-arch. Callers pass an ``arch`` at construction time and
     the cache scopes all operations under ``<root>/<arch>/``.
@@ -329,10 +385,61 @@ class KernelCache:
         subdir = _DIRECTION_DIRS.get(identity.direction, identity.direction)
         return self._base / subdir
 
-    def _paths(self, identity: KernelIdentity) -> Tuple[Path, Path]:
-        d = self._dir_for(identity)
-        h = identity.stable_hash()
-        return d / f"{h}.hsaco", d / f"{h}.meta.json"
+    def _meta_path(self, identity: KernelIdentity) -> Path:
+        return self._dir_for(identity) / f"{identity.stable_hash()}.meta.json"
+
+    def blob_path(self, key: str) -> Path:
+        """Where the binary with content key ``key`` lives."""
+        return self._base / "blobs" / f"{key}.hsaco"
+
+    def has_blob(self, key: str) -> bool:
+        p = self.blob_path(key)
+        return p.exists() and p.stat().st_size > 0
+
+    @staticmethod
+    def _write_atomic(path: Path, data: bytes) -> None:
+        # Several processes may finish the same binary; a rename never exposes
+        # a half-written file to a reader.
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, path)
+
+    def put_blob(self, key: str, hsaco: bytes, kernel_name: str) -> Path:
+        """Store a binary under its content key (no-op if already present).
+
+        ``kernel_name`` is the entry-point symbol inside it -- the name of the
+        identity it was compiled for. Every identity later linked to the same
+        binary launches that symbol, so it is recorded next to the binary.
+        """
+        path = self.blob_path(key)
+        if not self.has_blob(key):
+            self._write_atomic(
+                path.with_suffix(".json"),
+                json.dumps({"kernel_name": kernel_name}).encode("utf-8"),
+            )
+            self._write_atomic(path, hsaco)
+        return path
+
+    def blob_kernel_name(self, key: str) -> str:
+        """Entry-point symbol of the stored binary ``key``."""
+        side = self.blob_path(key).with_suffix(".json")
+        return json.loads(side.read_text(encoding="utf-8"))["kernel_name"]
+
+    def link(self, identity: KernelIdentity, key: str, meta: dict) -> None:
+        """Point ``identity`` at the stored binary ``key``."""
+        full_meta = {
+            "identity": identity.to_dict(),
+            "blob": key,
+            "hsaco_bytes": self.blob_path(key).stat().st_size,
+        }
+        full_meta.update(meta)
+        # The symbol to launch is the binary's, whichever identity compiled it.
+        full_meta["kernel_name"] = self.blob_kernel_name(key)
+        self._write_atomic(
+            self._meta_path(identity),
+            json.dumps(full_meta, indent=2, sort_keys=True).encode("utf-8"),
+        )
 
     def put(
         self,
@@ -340,49 +447,58 @@ class KernelCache:
         hsaco: bytes,
         meta: Optional[dict] = None,
     ) -> Path:
-        """Write an HSACO + metadata to the cache. Returns the HSACO path."""
-        hsaco_path, meta_path = self._paths(identity)
-        hsaco_path.parent.mkdir(parents=True, exist_ok=True)
-        hsaco_path.write_bytes(hsaco)
-        full_meta = {
-            "identity": identity.to_dict(),
-            "hsaco_bytes": len(hsaco),
-        }
-        if meta:
-            full_meta.update(meta)
-        meta_path.write_text(
-            json.dumps(full_meta, indent=2, sort_keys=True), encoding="utf-8"
-        )
-        return hsaco_path
+        """Store ``hsaco`` for ``identity``. Returns the binary's path.
+
+        Keyed by the bytes themselves; the sweep uses :meth:`put_blob` and
+        :meth:`link` with the compiler-input key instead, which is known
+        before anything is compiled.
+        """
+        meta = dict(meta or {})
+        key = hashlib.sha256(hsaco).hexdigest()
+        path = self.put_blob(key, hsaco, meta.get("kernel_name", ""))
+        self.link(identity, key, meta)
+        return path
+
+    def index(self) -> Dict[str, dict]:
+        """``{identity sha1: metadata}`` for every entry with a binary."""
+        return {ident.stable_hash(): meta for ident, _, meta in self._entries(None)}
+
+    def meta(self, identity: KernelIdentity) -> Optional[dict]:
+        """The identity's metadata, or ``None`` when it has no entry."""
+        meta_path = self._meta_path(identity)
+        if not meta_path.exists():
+            return None
+        try:
+            return json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    def _resolve(self, meta_path: Path, meta: dict) -> Path:
+        if "blob" in meta:
+            return self.blob_path(meta["blob"])
+        # Pre-blob layout: the binary sits next to its metadata.
+        return meta_path.with_suffix("").with_suffix(".hsaco")
 
     def get(self, identity: KernelIdentity) -> Optional[Tuple[bytes, dict]]:
         """Load an HSACO + metadata from cache, or ``None`` on miss."""
-        hsaco_path, meta_path = self._paths(identity)
-        if not hsaco_path.exists() or hsaco_path.stat().st_size == 0:
+        meta = self.meta(identity)
+        if meta is None:
             return None
-        hsaco = hsaco_path.read_bytes()
-        meta = {}
-        if meta_path.exists():
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        return hsaco, meta
+        path = self._resolve(self._meta_path(identity), meta)
+        if not path.exists() or path.stat().st_size == 0:
+            return None
+        return path.read_bytes(), meta
 
     def hsaco_path(self, identity: KernelIdentity) -> Path:
         """Where the identity's HSACO lives (whether or not it exists yet)."""
-        return self._paths(identity)[0]
+        meta = self.meta(identity) or {}
+        return self._resolve(self._meta_path(identity), meta)
 
     def has(self, identity: KernelIdentity) -> bool:
         """Check whether the cache has a valid entry for the identity."""
-        hsaco_path, _ = self._paths(identity)
-        return hsaco_path.exists() and hsaco_path.stat().st_size > 0
+        return self.get(identity) is not None
 
-    def list_all(
-        self, direction: Optional[str] = None
-    ) -> List[Tuple[KernelIdentity, Path]]:
-        """List all cached identities, optionally filtered by direction.
-
-        Returns ``(identity, hsaco_path)`` pairs.
-        """
-        results: List[Tuple[KernelIdentity, Path]] = []
+    def _entries(self, direction: Optional[str]):
         if direction is not None:
             subdirs = [_DIRECTION_DIRS.get(direction, direction)]
         else:
@@ -395,12 +511,35 @@ class KernelCache:
                 try:
                     meta = json.loads(meta_path.read_text(encoding="utf-8"))
                     ident = KernelIdentity.from_dict(meta["identity"])
-                    hsaco_path = meta_path.with_suffix("").with_suffix(".hsaco")
-                    if hsaco_path.exists() and hsaco_path.stat().st_size > 0:
-                        results.append((ident, hsaco_path))
-                except (KeyError, TypeError, json.JSONDecodeError):
+                except (OSError, KeyError, TypeError, json.JSONDecodeError):
                     continue
-        return results
+                path = self._resolve(meta_path, meta)
+                if path.exists() and path.stat().st_size > 0:
+                    yield ident, path, meta
+
+    def list_all(
+        self, direction: Optional[str] = None
+    ) -> List[Tuple[KernelIdentity, Path]]:
+        """List all cached identities, optionally filtered by direction.
+
+        Returns ``(identity, hsaco_path)`` pairs.
+        """
+        return [(ident, path) for ident, path, _ in self._entries(direction)]
+
+    def stale_entries(self, direction: Optional[str] = None) -> int:
+        """Entries built from different emitter sources than this process's.
+
+        Such a binary may still be current -- most emitter changes leave most
+        kernels' code alone -- but only a ``--compile-all`` can tell, by
+        re-emitting and comparing content keys. The run side reports the count
+        rather than rejecting the entries.
+        """
+        digest = current_emitter_digest()
+        return sum(
+            1
+            for _, _, meta in self._entries(direction)
+            if meta.get("emitter_digest") != digest
+        )
 
     def supports_problem(
         self, identity: KernelIdentity, problem: object
@@ -422,15 +561,14 @@ class KernelCache:
           geometry. The identity records those, so a mismatch is a hard no
           rather than a silent wrong answer.
         """
-        # A binary from another emitter or LLVM flavor is stale, whatever it
-        # was configured for.
+        # A binary lowered for another LLVM flavor is stale, whatever it was
+        # configured for. (Emitter changes are not checked here: see
+        # :meth:`stale_entries`.)
         if identity.llvm_flavor != current_llvm_flavor():
             return False, (
                 f"built for LLVM flavor {identity.llvm_flavor or '<unknown>'}, "
                 f"this process lowers to {current_llvm_flavor()}"
             )
-        if identity.emitter_digest != current_emitter_digest():
-            return False, "built by a different emitter version (stale entry)"
 
         cpg = int(getattr(problem, "cpg", 0))
         kpg = int(getattr(problem, "kpg", 0))
@@ -460,6 +598,27 @@ class KernelCache:
             want = "grouped" if problem_grouped else "ungrouped"
             have = "grouped" if identity.grouped else "ungrouped"
             return False, f"kernel is {have}, problem is {want}"
+
+        # Split-K wgrad without two-stage atomic-adds straight into dW. For a
+        # 16-bit dW that is a packed <2 x dtype> atomic, which needs an even
+        # dW row (wg_N = [Z*]Y*X*cpg) and store width; on an odd row it
+        # misaddresses silently. Ask the same predicate the spec validator uses.
+        if (
+            identity.direction == "wgrad"
+            and not identity.is_direct
+            and identity.split_k != 1
+            and not identity.two_stage
+            and hasattr(problem, "Y")
+        ):
+            from kernels.common.conv_implicit_gemm_wgrad import (
+                wgrad_atomic_epilogue_available,
+            )
+
+            ok, why = wgrad_atomic_epilogue_available(
+                problem, identity.dtype_d, identity.vector_size_c or None
+            )
+            if not ok:
+                return False, why
 
         # Baked filter geometry (direct conv) and the stride/dilation that
         # implicit-GEMM dgrad folds into its tilde decomposition. For implicit
@@ -531,14 +690,8 @@ class KernelCache:
         it: the HSACO's entry-point symbol is not derivable from the identity.
         """
         out: List[Tuple[KernelIdentity, Path, dict]] = []
-        for identity, hsaco_path in self.list_all(direction):
+        for identity, hsaco_path, meta in self._entries(direction):
             ok, _ = self.supports_problem(identity, problem)
-            if not ok:
-                continue
-            meta_path = hsaco_path.with_suffix(".meta.json")
-            try:
-                meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                meta = {}
-            out.append((identity, hsaco_path, meta))
+            if ok:
+                out.append((identity, hsaco_path, meta))
         return out

@@ -20,7 +20,12 @@ from __future__ import annotations
 
 import itertools
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    ProcessPoolExecutor,
+    as_completed,
+    wait,
+)
 from dataclasses import dataclass
 from typing import (
     Dict,
@@ -31,7 +36,14 @@ from typing import (
     Tuple,
 )  # noqa: F401 (Tuple used in annotations)
 
-from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
+from benchmarks.common.kernel_cache import (
+    KernelCache,
+    KernelIdentity,
+    comgr_input_key,
+    current_comgr_id,
+    current_emitter_digest,
+    current_llvm_flavor,
+)
 
 # ---------------------------------------------------------------------------
 # Implicit-GEMM AOT configuration grid
@@ -56,6 +68,21 @@ CACHE_VECS: Tuple[int, ...] = (1, 2, 4, 8)
 CACHE_PIPELINES: Tuple[str, ...] = ("mem", "compv3", "compv4", "wavelet", "basic")
 CACHE_EPILOGUES: Tuple[str, ...] = ("default", "cshuffle")
 
+# Pipeline names that emit exactly the code of another one, so the AOT cache
+# skips them (the JIT sweep shares CACHE_PIPELINES and still walks them).
+#
+# * "basic" in every direction: its K loop is the shared scf.for_iter body of
+#   "mem" and its schedule policy is mem's (no hints, no setprio), so the
+#   binary differs only in its name.
+# * "wavelet" in wgrad: the wgrad builder has no load/math wave split, and the
+#   wavelet schedule policy is mem's too. (fwd/dgrad have a real wavelet
+#   kernel, gfx1250 WMMA only; their validators reject it elsewhere.)
+_AOT_ALIAS_PIPELINES: Dict[str, Tuple[str, ...]] = {
+    "fwd": ("basic",),
+    "wgrad": ("basic", "wavelet"),
+    "dgrad": ("basic",),
+}
+
 # ---- capability axes ------------------------------------------------------
 # These are NOT tuning knobs: they change which problems a binary can serve.
 # Grouped convolution takes a different code path in every direction (the
@@ -66,6 +93,19 @@ CACHE_EPILOGUES: Tuple[str, ...] = ("default", "cshuffle")
 CACHE_GROUPED: Tuple[bool, ...] = (False, True)
 CACHE_DGRAD_STRIDES: Tuple[int, ...] = (1, 2)
 CACHE_DGRAD_DILATIONS: Tuple[int, ...] = (1, 2)
+
+# ---- wgrad split-K axis ---------------------------------------------------
+# split_k=0 is the "runtime atomic" mode: the split degree is passed as a
+# kernarg (``ks_count``), so one compiled binary handles any degree > 1 at
+# launch time.  This is identical to fixed-degree binaries (split_k=2/4/8)
+# at the ISA level -- the only difference between those was the value baked
+# into a compile-time constant that is now a kernarg.
+#
+# split_k=1 (direct store, no atomics) is a structurally different kernel
+# (different epilogue, dW is writeonly, vec_c can be > 1) so it remains a
+# separate set of binaries and is NOT included here.  Enumerate split_k=1
+# separately if you need it; the wgrad benchmark's JIT sweep still covers it.
+CACHE_WGRAD_SPLIT_KS: Tuple[int, ...] = (0,)
 
 # Private aliases for internal use -- the generators below refer to these.
 _TILE_MN = CACHE_TILE_MN
@@ -78,6 +118,7 @@ _EPILOGUES = CACHE_EPILOGUES
 _GROUPED = CACHE_GROUPED
 _DGRAD_STRIDES = CACHE_DGRAD_STRIDES
 _DGRAD_DILATIONS = CACHE_DGRAD_DILATIONS
+_WGRAD_SPLIT_KS = CACHE_WGRAD_SPLIT_KS
 
 
 @dataclass(frozen=True)
@@ -96,11 +137,15 @@ def _dtype_triple(dtype: str) -> Tuple[str, str, str]:
     return dtype, dtype, dtype
 
 
-def _fwd_jobs(
-    arch: str, dtype: str, wave_size: int, mma_family: str, target
-) -> Iterator[BuildJob]:
-    """Every forward implicit-GEMM variant worth caching for this arch/dtype."""
-    da, db, dd = _dtype_triple(dtype)
+def _geometries(target, mma_family: str, da: str, db: str) -> Iterator[tuple]:
+    """The tile/warp/atom geometries every direction's generator walks.
+
+    Yields ``(tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue,
+    atom)`` for each combination whose warp tiling fits the block tile and
+    whose K tile is a multiple of the selected MMA atom. Shared by the
+    generators and :func:`count_jobs`, so the progress total cannot drift from
+    what the generators actually yield.
+    """
     for (
         tile_m,
         tile_n,
@@ -129,14 +174,87 @@ def _fwd_jobs(
         )
         if atom is None or tile_k % atom.k:
             continue
+        yield tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom
+
+
+def _aot_pipeline(direction: str, pipeline: str) -> bool:
+    """Whether the AOT cache builds ``pipeline`` for ``direction``."""
+    return pipeline not in _AOT_ALIAS_PIPELINES[direction]
+
+
+def _fwd_k_loops(pipeline: str) -> List[Tuple[bool, bool]]:
+    """``(unroll_k, async_dma)`` K-loop drivers emitted per forward geometry.
+
+    async_dma replaces the K-loop driver entirely and ignores the pipeline
+    string, so it is only emitted once per geometry instead of as identical
+    binaries under different pipeline labels.
+    """
+    k_loops = [(False, False), (True, False)]
+    if pipeline == "mem":
+        k_loops.append((False, True))
+    return k_loops
+
+
+def _wgrad_two_stages(split_k: int) -> Tuple[bool, ...]:
+    """Two-stage variants for a split-K degree.
+
+    Two-stage applies whenever the reduction is split -- a fixed degree > 1 or
+    the runtime degree (0). It is what reaches problems the packed 16-bit
+    atomic cannot address (an odd dW row, e.g. a 3-channel stem conv).
+    """
+    return (False, True) if split_k == 0 or split_k > 1 else (False,)
+
+
+def _job_flavor(llvm_flavor: Optional[str]) -> str:
+    """The LLVM flavor recorded in every identity of one enumeration.
+
+    Resolved once per walk instead of per identity: ``KernelIdentity`` would
+    otherwise call :func:`current_llvm_flavor` from its ``default_factory`` for
+    each of millions of candidates, and that lookup globs the filesystem for
+    the comgr library every time -- it was most of the enumeration's runtime.
+    The parallel enumeration resolves it in the parent and passes it down, so
+    every worker records the same flavor the parent would.
+    """
+    return llvm_flavor if llvm_flavor is not None else current_llvm_flavor()
+
+
+def _fwd_jobs(
+    arch: str,
+    dtype: str,
+    wave_size: int,
+    mma_family: str,
+    target,
+    *,
+    geometries: Optional[Sequence[tuple]] = None,
+    llvm_flavor: Optional[str] = None,
+) -> Iterator[BuildJob]:
+    """Every forward implicit-GEMM variant worth caching for this arch/dtype.
+
+    ``geometries`` restricts the walk to a slice of :func:`_geometries` (the
+    parallel enumeration hands each worker one); ``llvm_flavor`` pins the
+    identity's flavor (see :func:`_job_flavor`).
+    """
+    da, db, dd = _dtype_triple(dtype)
+    flavor = _job_flavor(llvm_flavor)
+    for (
+        tile_m,
+        tile_n,
+        tile_k,
+        warp_m,
+        warp_n,
+        wt,
+        pipeline,
+        epilogue,
+        atom,
+    ) in (
+        _geometries(target, mma_family, da, db) if geometries is None else geometries
+    ):
+        if not _aot_pipeline("fwd", pipeline):
+            continue
         for vec_ab, vec_c in itertools.product(_VECS, _VECS):
-            # async_dma replaces the K-loop driver entirely and ignores the
-            # pipeline string, so only emit it once per geometry instead of
-            # four identical binaries under different pipeline labels.
-            k_loops = [(False, False), (True, False)]
-            if pipeline == "mem":
-                k_loops.append((False, True))
-            for (unroll_k, async_dma), grouped in itertools.product(k_loops, _GROUPED):
+            for (unroll_k, async_dma), grouped in itertools.product(
+                _fwd_k_loops(pipeline), _GROUPED
+            ):
                 cfg = dict(
                     tile_m=tile_m,
                     tile_n=tile_n,
@@ -160,6 +278,7 @@ def _fwd_jobs(
                         arch=arch,
                         direction="fwd",
                         algorithm="implicit_gemm",
+                        llvm_flavor=flavor,
                         dtype_a=da,
                         dtype_b=db,
                         dtype_d=dd,
@@ -206,9 +325,18 @@ def _async_chunks(cfg: dict, dtypes, caps: dict) -> dict:
 
 
 def _wgrad_jobs(
-    arch, dtype, wave_size, mma_family, target, split_ks
+    arch,
+    dtype,
+    wave_size,
+    mma_family,
+    target,
+    split_ks,
+    *,
+    geometries: Optional[Sequence[tuple]] = None,
+    llvm_flavor: Optional[str] = None,
 ) -> Iterator[BuildJob]:
     da, db, dd = _dtype_triple(dtype)
+    flavor = _job_flavor(llvm_flavor)
     for (
         tile_m,
         tile_n,
@@ -218,28 +346,16 @@ def _wgrad_jobs(
         wt,
         pipeline,
         epilogue,
-    ) in itertools.product(
-        _TILE_MN,
-        _TILE_MN,
-        _TILE_K,
-        _WARP_MN,
-        _WARP_MN,
-        _WARP_TILE_MN,
-        _PIPELINES,
-        _EPILOGUES,
+        atom,
+    ) in (
+        _geometries(target, mma_family, da, db) if geometries is None else geometries
     ):
-        if warp_m * wt > tile_m or warp_n * wt > tile_n:
-            continue
-        if tile_m % (warp_m * wt) or tile_n % (warp_n * wt):
-            continue
-        atom = target.mma.select_largest_k(
-            family=mma_family, a_dtype=da, b_dtype=db, c_dtype="fp32", m=wt, n=wt
-        )
-        if atom is None or tile_k % atom.k:
+        if not _aot_pipeline("wgrad", pipeline):
             continue
         for vec_ab, vec_c, split_k in itertools.product(_VECS, _VECS, split_ks):
-            two_stages = (False, True) if split_k > 1 else (False,)
-            for two_stage, grouped in itertools.product(two_stages, _GROUPED):
+            for two_stage, grouped in itertools.product(
+                _wgrad_two_stages(split_k), _GROUPED
+            ):
                 cfg = dict(
                     tile_m=tile_m,
                     tile_n=tile_n,
@@ -263,6 +379,7 @@ def _wgrad_jobs(
                         arch=arch,
                         direction="wgrad",
                         algorithm="implicit_gemm",
+                        llvm_flavor=flavor,
                         dtype_a=da,
                         dtype_b=db,
                         dtype_d=dd,
@@ -276,9 +393,18 @@ def _wgrad_jobs(
 
 
 def _dgrad_jobs(
-    arch, dtype, wave_size, mma_family, target, max_sub_gemms
+    arch,
+    dtype,
+    wave_size,
+    mma_family,
+    target,
+    max_sub_gemms,
+    *,
+    geometries: Optional[Sequence[tuple]] = None,
+    llvm_flavor: Optional[str] = None,
 ) -> Iterator[BuildJob]:
     da, db, dd = _dtype_triple(dtype)
+    flavor = _job_flavor(llvm_flavor)
     for (
         tile_m,
         tile_n,
@@ -288,24 +414,11 @@ def _dgrad_jobs(
         wt,
         pipeline,
         epilogue,
-    ) in itertools.product(
-        _TILE_MN,
-        _TILE_MN,
-        _TILE_K,
-        _WARP_MN,
-        _WARP_MN,
-        _WARP_TILE_MN,
-        _PIPELINES,
-        _EPILOGUES,
+        atom,
+    ) in (
+        _geometries(target, mma_family, da, db) if geometries is None else geometries
     ):
-        if warp_m * wt > tile_m or warp_n * wt > tile_n:
-            continue
-        if tile_m % (warp_m * wt) or tile_n % (warp_n * wt):
-            continue
-        atom = target.mma.select_largest_k(
-            family=mma_family, a_dtype=da, b_dtype=db, c_dtype="fp32", m=wt, n=wt
-        )
-        if atom is None or tile_k % atom.k:
+        if not _aot_pipeline("dgrad", pipeline):
             continue
         # dgrad folds the stride and dilation into its tilde decomposition,
         # so those are capabilities here, not launch parameters.
@@ -334,6 +447,7 @@ def _dgrad_jobs(
                     arch=arch,
                     direction="dgrad",
                     algorithm="implicit_gemm",
+                    llvm_flavor=flavor,
                     dtype_a=da,
                     dtype_b=db,
                     dtype_d=dd,
@@ -394,58 +508,270 @@ def _spec_is_valid(job: BuildJob, arch: str, dtype: str) -> bool:
         return False
 
 
+def count_jobs(
+    *,
+    dtype: str,
+    target,
+    directions: Sequence[str],
+    split_ks: Sequence[int] = CACHE_WGRAD_SPLIT_KS,
+) -> int:
+    """Raw candidate count :func:`enumerate_jobs` walks, before dedup/validation.
+
+    Cheap: it runs only the geometry filter and multiplies out the inner axes,
+    without building a single identity -- which is where enumeration spends
+    its time. Used as the denominator of the enumeration progress.
+    """
+    da, db, _ = _dtype_triple(dtype)
+    mma_family = "wmma" if target.wave_size == 32 else "mma"
+    vecs = len(_VECS) * len(_VECS)
+    groups = len(_GROUPED)
+    total = 0
+    for geo in _geometries(target, mma_family, da, db):
+        pipeline = geo[6]
+        if "fwd" in directions and _aot_pipeline("fwd", pipeline):
+            total += vecs * len(_fwd_k_loops(pipeline)) * groups
+        if "wgrad" in directions and _aot_pipeline("wgrad", pipeline):
+            total += vecs * sum(len(_wgrad_two_stages(sk)) for sk in split_ks) * groups
+        if "dgrad" in directions and _aot_pipeline("dgrad", pipeline):
+            total += vecs * len(_DGRAD_STRIDES) * len(_DGRAD_DILATIONS) * groups
+    return total
+
+
+def _direction_jobs(
+    direction: str,
+    arch: str,
+    dtype: str,
+    target,
+    split_ks: Sequence[int],
+    max_sub_gemms: int,
+    **kw,
+) -> Iterator[BuildJob]:
+    wave_size = target.wave_size
+    mma_family = "wmma" if wave_size == 32 else "mma"
+    if direction == "fwd":
+        return _fwd_jobs(arch, dtype, wave_size, mma_family, target, **kw)
+    if direction == "wgrad":
+        return _wgrad_jobs(arch, dtype, wave_size, mma_family, target, split_ks, **kw)
+    if direction == "dgrad":
+        return _dgrad_jobs(
+            arch, dtype, wave_size, mma_family, target, max_sub_gemms, **kw
+        )
+    raise ValueError(f"unknown direction {direction!r}")
+
+
+def _geometry_list(target, dtype: str) -> List[tuple]:
+    mma_family = "wmma" if target.wave_size == 32 else "mma"
+    da, db, _ = _dtype_triple(dtype)
+    return list(_geometries(target, mma_family, da, db))
+
+
+def _enumerate_chunk(
+    direction: str,
+    arch: str,
+    dtype: str,
+    target,
+    split_ks: Sequence[int],
+    max_sub_gemms: int,
+    validate: bool,
+    llvm_flavor: str,
+    geometries: Sequence[tuple],
+) -> Tuple[int, List[Tuple[str, BuildJob]]]:
+    """Walk one direction over ``geometries``.
+
+    Returns the raw candidate count and the ``(key, job)`` pairs that are
+    valid and first-seen within the chunk, in generator order. Duplicates
+    across chunks are resolved by the caller, which merges the chunks in order
+    and so keeps the same first occurrence a single serial walk would.
+    """
+    out: List[Tuple[str, BuildJob]] = []
+    seen = set()
+    n_raw = 0
+    for job in _direction_jobs(
+        direction,
+        arch,
+        dtype,
+        target,
+        split_ks,
+        max_sub_gemms,
+        geometries=geometries,
+        llvm_flavor=llvm_flavor,
+    ):
+        n_raw += 1
+        key = job.identity.stable_hash()
+        if key in seen:
+            continue
+        # An identity fixes the spec kwargs and capabilities the validator
+        # reads, so a repeat would get the same verdict: skip it either way.
+        seen.add(key)
+        if validate and not _spec_is_valid(job, arch, dtype):
+            continue
+        out.append((key, job))
+    return n_raw, out
+
+
+# Per-process geometry lists, so a worker running many chunks rebuilds the
+# grid once rather than once per chunk.
+_WORKER_GEOMETRIES: Dict[Tuple[str, str], List[tuple]] = {}
+
+
+def _enumerate_worker(payload):
+    (direction, arch, dtype, split_ks, max_sub_gemms, validate, flavor, lo, hi) = (
+        payload
+    )
+    from rocke.core.arch import ArchTarget
+
+    target = ArchTarget.from_gfx(arch)
+    geos = _WORKER_GEOMETRIES.get((arch, dtype))
+    if geos is None:
+        geos = _WORKER_GEOMETRIES[(arch, dtype)] = _geometry_list(target, dtype)
+    return _enumerate_chunk(
+        direction,
+        arch,
+        dtype,
+        target,
+        split_ks,
+        max_sub_gemms,
+        validate,
+        flavor,
+        geos[lo:hi],
+    )
+
+
 def enumerate_jobs(
     *,
     arch: str,
     dtype: str,
     target,
     directions: Sequence[str],
-    split_ks: Sequence[int] = (1, 2, 4, 8),
+    split_ks: Sequence[int] = CACHE_WGRAD_SPLIT_KS,
     max_sub_gemms: int = 64,
     validate: bool = True,
+    jobs: int = 1,
+    log=None,
+    log_every_s: float = 5.0,
 ) -> List[BuildJob]:
     """All buildable jobs for the requested directions, deduped by identity.
 
     With ``validate=True`` (the default) each candidate is run through its
     direction's spec validator first, so the returned list is what will
     actually compile rather than the raw cross product.
+
+    The raw cross product runs to millions of candidates. It is split into
+    chunks of tile geometries and, with ``jobs > 1``, the chunks are walked in
+    a process pool -- the work is pure-Python CPU, so threads would serialise
+    on the GIL. The result does not depend on ``jobs``: chunks are merged in
+    order, so the list (including its order) is the one a single serial walk
+    produces. With ``log`` set a progress line is emitted at most every
+    ``log_every_s`` seconds.
     """
-    wave_size = target.wave_size
-    mma_family = "wmma" if wave_size == 32 else "mma"
-    gens = {
-        "fwd": lambda: _fwd_jobs(arch, dtype, wave_size, mma_family, target),
-        "wgrad": lambda: _wgrad_jobs(
-            arch, dtype, wave_size, mma_family, target, split_ks
-        ),
-        "dgrad": lambda: _dgrad_jobs(
-            arch, dtype, wave_size, mma_family, target, max_sub_gemms
-        ),
-    }
     for direction in directions:
-        if direction not in gens:
+        if direction not in ("fwd", "wgrad", "dgrad"):
             raise ValueError(f"unknown direction {direction!r}")
+
+    flavor = current_llvm_flavor()
+    geos = _geometry_list(target, dtype)
+    jobs = max(1, int(jobs))
+    # Enough chunks per direction to keep every worker busy despite uneven
+    # chunk costs, and to give the serial walk regular progress points.
+    n_chunks = max(1, min(len(geos), jobs * 8 if jobs > 1 else 64))
+    bounds = [
+        (len(geos) * i // n_chunks, len(geos) * (i + 1) // n_chunks)
+        for i in range(n_chunks)
+    ]
+    payloads = [
+        (direction, arch, dtype, tuple(split_ks), max_sub_gemms, validate, flavor)
+        + bound
+        for direction in directions
+        for bound in bounds
+    ]
+
+    total = 0
+    if log is not None:
+        total = count_jobs(
+            dtype=dtype, target=target, directions=directions, split_ks=split_ks
+        )
+        log(f"  {total} candidates to check with {jobs} process(es)")
+
+    n_raw = n_valid = 0
+    started = last_log = time.perf_counter()
+    results: List[Optional[List[Tuple[str, BuildJob]]]] = [None] * len(payloads)
+
+    def _done(idx: int, chunk_raw: int, chunk_out) -> None:
+        nonlocal n_raw, n_valid, last_log
+        results[idx] = chunk_out
+        n_raw += chunk_raw
+        n_valid += len(chunk_out)
+        if log is None:
+            return
+        now = time.perf_counter()
+        if now - last_log >= log_every_s:
+            last_log = now
+            pct = 100.0 * n_raw / total if total else 0.0
+            log(
+                f"  enumerating: {n_raw}/{total} candidates checked "
+                f"({pct:.1f}%), ~{n_valid} valid ({now - started:.0f}s)"
+            )
+
+    if jobs <= 1:
+        # In-process, with the caller's target and the module's own grid.
+        for idx, payload in enumerate(payloads):
+            direction, lo, hi = payload[0], payload[-2], payload[-1]
+            _done(
+                idx,
+                *_enumerate_chunk(
+                    direction,
+                    arch,
+                    dtype,
+                    target,
+                    split_ks,
+                    max_sub_gemms,
+                    validate,
+                    flavor,
+                    geos[lo:hi],
+                ),
+            )
+    else:
+        with ProcessPoolExecutor(max_workers=jobs) as pool:
+            futures = {
+                pool.submit(_enumerate_worker, payload): idx
+                for idx, payload in enumerate(payloads)
+            }
+            for fut in as_completed(futures):
+                _done(futures[fut], *fut.result())
+
+    # Merge each direction's chunks in order, keeping the first occurrence.
+    seen = set()
+    per_direction: Dict[str, List[BuildJob]] = {d: [] for d in directions}
+    for payload, chunk_out in zip(payloads, results):
+        bucket = per_direction[payload[0]]
+        for key, job in chunk_out:
+            if key in seen:
+                continue
+            seen.add(key)
+            bucket.append(job)
 
     # Round-robin across the requested directions rather than draining one
     # before starting the next. The full grid is far larger than any single
-    # cache build, so callers routinely truncate it with --params-limit; taking
-    # them in order would make a truncated build contain only forward kernels
-    # and silently leave the backward directions unserved.
-    seen: Dict[str, BuildJob] = {}
-    streams = [iter(gens[d]()) for d in directions]
+    # cache build, so callers routinely truncate it with --limit; taking them
+    # in order would make a truncated build contain only forward kernels and
+    # silently leave the backward directions unserved.
+    out: List[BuildJob] = []
+    streams = [iter(per_direction[d]) for d in directions]
     while streams:
         still_running = []
         for stream in streams:
-            for job in stream:
-                key = job.identity.stable_hash()
-                if key in seen:
-                    continue
-                if validate and not _spec_is_valid(job, arch, dtype):
-                    continue
-                seen[key] = job
+            job = next(stream, None)
+            if job is not None:
+                out.append(job)
                 still_running.append(stream)
-                break
         streams = still_running
-    return list(seen.values())
+
+    if log is not None:
+        log(
+            f"  enumerated {n_raw} candidates -> {len(out)} unique valid "
+            f"({time.perf_counter() - started:.0f}s)"
+        )
+    return out
 
 
 # ---------------------------------------------------------------------
@@ -494,14 +820,13 @@ def _probe_problem(direction: str, caps: Optional[dict] = None):
     )
 
 
-def build_and_compile(job: BuildJob, arch: str, dtype: str):
-    """Build + compile one job. Returns ``(hsaco, kernel_name, meta)``.
+def build_kernel(job: BuildJob, arch: str, dtype: str):
+    """Build one job's kernel IR. Returns ``(kernel, meta)``; nothing compiled.
 
     Raises on an invalid configuration; the caller counts those as skipped
     rather than failed -- the grid is deliberately over-generated and most
     rejections are ordinary spec-validity rules.
     """
-    from rocke import compile_kernel
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
     data = ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype)
@@ -534,30 +859,69 @@ def build_and_compile(job: BuildJob, arch: str, dtype: str):
     else:
         raise ValueError(f"unknown direction {job.direction!r}")
 
-    artifact = compile_kernel(kernel, arch=arch)
     meta = {
-        "kernel_name": artifact.kernel_name,
         "spec_kernel_name": spec.kernel_name(),
         # launch_block_size only exists where a pipeline appends extra waves
         # (wavelet); wgrad has no such pipeline and exposes block_size alone.
         "block_size": getattr(spec, "launch_block_size", spec.block_size),
-        "timings": artifact.timings,
     }
-    return artifact.hsaco, artifact.kernel_name, meta
+    return kernel, meta
 
 
-def _worker(payload):
-    """ProcessPoolExecutor entry point: rebuild the job and compile it.
+def _emit(build, job: BuildJob, arch: str, dtype: str):
+    """Build and lower one job: ``(ComgrInput, content key, meta)``."""
+    from rocke.helpers.compile import lower_kernel_for_comgr
 
-    ``build`` is a module-level function so the payload pickles; it returns
-    ``(hsaco, kernel_name, meta)`` like :func:`build_and_compile`.
+    kernel, meta = build(job, arch, dtype)
+    comgr_input = lower_kernel_for_comgr(kernel, arch=arch)
+    return comgr_input, comgr_input_key(comgr_input), meta
+
+
+def _emit_worker(payload):
+    """Phase 1 worker: the job's binary content key, without compiling.
+
+    Returns ``(job, key, meta, error)``. The lowered IR itself is not sent
+    back -- it is large and most keys are already compiled; phase 2 re-emits
+    the few it needs.
     """
     build, job, arch, dtype = payload
     try:
-        hsaco, kernel_name, meta = build(job, arch, dtype)
-        return job, hsaco, meta, None
+        _, key, meta = _emit(build, job, arch, dtype)
+        return job, key, meta, None
     except Exception as exc:  # noqa: BLE001 - reported per job, never fatal
         return job, None, None, f"{type(exc).__name__}: {exc}"
+
+
+def _compile_worker(payload):
+    """Phase 2 worker: compile one binary. Returns ``(key, hsaco, name, error)``."""
+    from rocke.runtime.comgr import build_hsaco_from_llvm_ir
+
+    build, job, arch, dtype, key = payload
+    try:
+        comgr_input, got, _ = _emit(build, job, arch, dtype)
+        if got != key:
+            # The emitter is deterministic; a different key here means the
+            # sources changed between the two phases.
+            raise RuntimeError("kernel IR changed between emit and compile")
+        hsaco, _ = build_hsaco_from_llvm_ir(
+            comgr_input.llvm_text,
+            isa=comgr_input.isa,
+            options=list(comgr_input.options),
+        )
+        return key, hsaco, comgr_input.kernel_name, None
+    except Exception as exc:  # noqa: BLE001 - reported per binary, never fatal
+        return key, None, None, f"{type(exc).__name__}: {exc}"
+
+
+def _pool_map(fn, payloads, jobs: int, on_result) -> None:
+    if jobs <= 1:
+        for payload in payloads:
+            on_result(fn(payload))
+        return
+    with ProcessPoolExecutor(max_workers=jobs) as pool:
+        futures = [pool.submit(fn, p) for p in payloads]
+        for fut in as_completed(futures):
+            on_result(fut.result())
 
 
 def compile_all(
@@ -577,12 +941,22 @@ def compile_all(
     out over processes; ``jobs`` defaults to one but the caller normally passes
     ``os.cpu_count()``.
     """
+    log(
+        f"AOT compile-all: enumerating variants for {arch}/{dtype} "
+        f"({', '.join(directions)}) -- this walks the full tuning grid before "
+        f"compilation starts"
+    )
     return compile_jobs(
         cache=cache,
         all_jobs=enumerate_jobs(
-            arch=arch, dtype=dtype, target=target, directions=directions
+            arch=arch,
+            dtype=dtype,
+            target=target,
+            directions=directions,
+            jobs=jobs,
+            log=log,
         ),
-        build=build_and_compile,
+        build=build_kernel,
         arch=arch,
         dtype=dtype,
         directions=directions,
@@ -603,53 +977,154 @@ def compile_jobs(
     jobs: int = 1,
     limit: Optional[int] = None,
     log=print,
+    log_every_s: float = 5.0,
 ) -> int:
-    """Compile ``all_jobs`` with ``build`` and store what is not cached yet.
+    """Bring the cache up to date for ``all_jobs``; compile only what changed.
 
     Shared by every kernel family: the family only decides which jobs exist
-    and how one is built; skipping cached entries, the ``limit`` cut and the
-    process fan-out are the same for all of them.
+    and how one's kernel is built (``build(job, arch, dtype) -> (kernel,
+    meta)``). Three steps:
+
+    1. **Up to date.** An entry built from this process's emitter sources and
+       COMGR, whose binary is present, is skipped outright -- after a rebuild
+       with nothing changed, nothing below runs.
+    2. **Emit** (cheap). Every remaining job is built and lowered to LLVM IR
+       and keyed by :func:`comgr_input_key`, without compiling. A job whose
+       key already has a binary is linked to it on the spot.
+    3. **Compile** (expensive). The first job to emit a key with no binary
+       compiles it, in the same process pool as the emits, as soon as its
+       emit is done; every job with that key is linked when it lands. So
+       after an emitter change only the kernels whose code changed are
+       recompiled, identities that emit the same code share one compile, and
+       an interrupted run keeps every entry it finished.
+
+    ``limit`` caps how many jobs go through steps 2-3 (smoke tests).
     """
-    pending = [j for j in all_jobs if not cache.has(j.identity)]
-    cached = len(all_jobs) - len(pending)
+    digest = current_emitter_digest()
+    comgr_id = current_comgr_id()
+    index = cache.index()
+
+    def _up_to_date(job) -> bool:
+        meta = index.get(job.identity.stable_hash())
+        return (
+            meta is not None
+            and meta.get("emitter_digest") == digest
+            and meta.get("comgr_id") == comgr_id
+        )
+
+    pending = [j for j in all_jobs if not _up_to_date(j)]
+    up_to_date = len(all_jobs) - len(pending)
     if limit is not None:
         pending = pending[:limit]
 
     log(
         f"AOT compile-all: {len(all_jobs)} variants for {arch}/{dtype} "
-        f"({', '.join(directions)}); {cached} already cached, "
-        f"{len(pending)} to build with {jobs} job(s)"
+        f"({', '.join(directions)}); {up_to_date} up to date, "
+        f"{len(pending)} to check with {jobs} job(s)"
     )
+    if not pending:
+        log("AOT compile-all done: nothing to do")
+        return 0
 
-    built = failed = 0
-    started = time.perf_counter()
-    payloads = [(build, j, arch, dtype) for j in pending]
+    started = last_log = time.perf_counter()
+    state = dict(emitted=0, rejected=0, compiled=0, failed=0, linked=0, reused=0)
+    members: Dict[str, List[Tuple[BuildJob, dict]]] = {}
+    in_flight: set = set()
 
-    def _record(job, hsaco, meta, err):
-        nonlocal built, failed
-        if err is not None:
-            failed += 1
-            if failed <= 10:
-                log(f"  [skip] {job.identity.short_label()}: {err}")
+    def _link(key: str, job: BuildJob, meta: dict) -> None:
+        cache.link(
+            job.identity, key, dict(meta, emitter_digest=digest, comgr_id=comgr_id)
+        )
+        state["linked"] += 1
+
+    def _progress(force: bool = False) -> None:
+        nonlocal last_log
+        now = time.perf_counter()
+        if not force and now - last_log < log_every_s:
             return
-        cache.put(job.identity, hsaco, meta)
-        built += 1
-        if built % 50 == 0:
-            log(f"  ... {built} built")
+        last_log = now
+        log(
+            f"  emitted {state['emitted']}/{len(pending)} "
+            f"({100.0 * state['emitted'] / len(pending):.1f}%), "
+            f"{len(members)} distinct binaries: {state['reused']} already "
+            f"compiled, {state['compiled']} compiled, {len(in_flight)} compiling "
+            f"({now - started:.0f}s)"
+        )
 
+    def on_emitted(result, submit_compile) -> None:
+        job, key, meta, err = result
+        state["emitted"] += 1
+        if err is not None:
+            state["rejected"] += 1
+            if state["rejected"] <= 10:
+                log(f"  [skip] {job.identity.short_label()}: {err}")
+        else:
+            first = key not in members
+            members.setdefault(key, []).append((job, meta))
+            if cache.has_blob(key):
+                # Already compiled (by an earlier run, or earlier in this
+                # one): link straight away.
+                if first and key not in in_flight:
+                    state["reused"] += 1
+                _link(key, job, meta)
+            elif key not in in_flight:
+                # The first job to emit a missing binary compiles it; any
+                # later job with the same key is linked when it lands.
+                in_flight.add(key)
+                submit_compile((build, job, arch, dtype, key))
+        _progress()
+
+    def on_compiled(result) -> None:
+        key, hsaco, kernel_name, err = result
+        in_flight.discard(key)
+        if err is not None:
+            state["failed"] += 1
+            if state["failed"] <= 10:
+                job = members[key][0][0]
+                log(f"  [fail] {job.identity.short_label()}: {err}")
+            return
+        cache.put_blob(key, hsaco, kernel_name)
+        state["compiled"] += 1
+        # Entries are written as each binary lands, so an interrupted run
+        # keeps everything it finished.
+        for job, meta in members[key]:
+            _link(key, job, meta)
+        _progress()
+
+    emit_payloads = [(build, j, arch, dtype) for j in pending]
     if jobs <= 1:
-        for payload in payloads:
-            _record(*_worker(payload))
+        for payload in emit_payloads:
+            on_emitted(_emit_worker(payload), lambda p: on_compiled(_compile_worker(p)))
     else:
+        # One pool for both steps: a binary is compiled as soon as the first
+        # job emitting it is done, so a few slow-to-emit kernels never hold
+        # the compile workers idle.
         with ProcessPoolExecutor(max_workers=jobs) as pool:
-            futures = [pool.submit(_worker, p) for p in payloads]
-            for fut in as_completed(futures):
-                _record(*fut.result())
+            futures = {pool.submit(_emit_worker, p): "emit" for p in emit_payloads}
 
-    elapsed = time.perf_counter() - started
+            def submit_compile(payload) -> None:
+                futures[pool.submit(_compile_worker, payload)] = "compile"
+
+            while futures:
+                # The timeout keeps the progress line coming while only a few
+                # slow kernels are left and nothing finishes for minutes.
+                ready, _ = wait(
+                    list(futures), timeout=log_every_s, return_when=FIRST_COMPLETED
+                )
+                _progress()
+                for fut in ready:
+                    kind = futures.pop(fut)
+                    if kind == "emit":
+                        on_emitted(fut.result(), submit_compile)
+                    else:
+                        on_compiled(fut.result())
+
+    _progress(force=True)
     log(
-        f"AOT compile-all done: {built} built, {cached} already cached, "
-        f"{failed} rejected ({elapsed:.1f}s)"
+        f"AOT compile-all done: {state['compiled']} compiled, "
+        f"{state['linked']} entries updated, {up_to_date} up to date, "
+        f"{state['rejected']} rejected, {state['failed']} failed "
+        f"({time.perf_counter() - started:.1f}s)"
     )
     return 0
 
@@ -697,4 +1172,11 @@ def describe_cache(cache: KernelCache, log=print) -> int:
         return 2
     for direction, count in sorted(by_direction.items()):
         log(f"  {direction:8s} {count} kernels")
+    stale = cache.stale_entries()
+    if stale:
+        log(
+            f"  [warn] {stale} entries were built from different emitter sources "
+            f"than this checkout; rerun --compile-all to refresh them (only "
+            f"kernels whose code changed are recompiled)"
+        )
     return 0

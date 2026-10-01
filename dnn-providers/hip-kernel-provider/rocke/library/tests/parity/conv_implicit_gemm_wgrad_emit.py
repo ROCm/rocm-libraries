@@ -29,6 +29,9 @@
 #   16 -- split-K=4, two_stage=True (workspace-store epilogue), fp16, gfx942
 #   17 -- gfx1250 wave32 WMMA 16x16x32 K-outer (ds_load_tr16_b128 transpose reads)
 #   18 -- unroll_k double-buffered loop under split-K=4 (odd-tail prefetch guard), gfx950
+#   19 -- runtime split-K degree (split_k=0) + two_stage, odd wg_N (C=3), fp16, gfx950
+#   (no grouped or bf16 case: the C++ engine does not build grouped wgrad, and
+#    its tile loader has no elem_dtype, so bf16 operands load as half)
 #   (async_dma omitted: C++ async load path does not yet honour the wgrad A-descriptor
 #    override, so it would produce different IR and break the byte-identity gate)
 #
@@ -37,7 +40,7 @@
 #   102 -- split_k > 1 on RDNA gfx1151 (must raise ValueError)
 #   103 -- two_stage=True with split_k=1 (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-18, so run_diff.py stops at the shared END before reaching 100+; these
+# 0-19, so run_diff.py stops at the shared END before reaching 100+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -483,6 +486,30 @@ def _spec(idx: int):
                 data=ConvDataSpec(dtype_d="fp32"),
                 unroll_k=True,
                 split_k=4,
+            ),
+            "gfx950",
+        )
+
+    if idx == 19:
+        # Runtime split-K degree with the two-stage scratch: one binary for
+        # every degree > 1. wg_N = 3*3*3 = 27 is odd, which the packed 16-bit
+        # atomic cannot address -- this is the shape that needs it.
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=3, K=64, Y=3, X=3)
+        return (
+            WgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                split_k=0,
+                two_stage=True,
             ),
             "gfx950",
         )

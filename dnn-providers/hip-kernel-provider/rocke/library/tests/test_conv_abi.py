@@ -955,23 +955,36 @@ def _cache_identity(**kw):
 
 
 def test_cache_rejects_stale_provenance():
-    """A binary from another emitter version or LLVM flavor never matches,
-    and an entry that predates the provenance fields reads as stale."""
+    """A binary lowered for another LLVM flavor never matches, and an entry
+    that predates the flavor field reads as stale."""
     from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
 
     cache = KernelCache("/nonexistent-cache-dir-for-a-pure-predicate-test", _ARCH)
     current = _cache_identity()
     assert cache.supports_problem(current, _P2D)[0]
-    for stale in (
-        dc_replace(current, emitter_digest="0" * 40),
-        dc_replace(current, llvm_flavor="llvm-other"),
-    ):
-        assert not cache.supports_problem(stale, _P2D)[0]
-        assert stale.stable_hash() != current.stable_hash()
+    stale = dc_replace(current, llvm_flavor="llvm-other")
+    assert not cache.supports_problem(stale, _P2D)[0]
+    assert stale.stable_hash() != current.stable_hash()
 
     legacy = current.to_dict()
-    del legacy["llvm_flavor"], legacy["emitter_digest"]
+    del legacy["llvm_flavor"]
     assert not cache.supports_problem(KernelIdentity.from_dict(legacy), _P2D)[0]
+
+
+def test_identity_survives_emitter_changes(tmp_path):
+    """An identity names a configuration, not an emitter version: the same
+    configuration keeps its entry, and an entry built from other sources is
+    still offered but counted as stale for --compile-all to refresh."""
+    from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
+
+    current = _cache_identity()
+    legacy = dict(current.to_dict(), emitter_digest="0" * 40)
+    assert KernelIdentity.from_dict(legacy).stable_hash() == current.stable_hash()
+
+    cache = KernelCache(tmp_path, _ARCH)
+    cache.put(current, b"bin", {"kernel_name": "k", "emitter_digest": "0" * 40})
+    assert cache.supports_problem(current, _P2D)[0]
+    assert cache.stale_entries() == 1
 
 
 def test_cache_async_chunk_must_divide_cpg():
@@ -1009,3 +1022,234 @@ def test_cache_async_chunk_must_divide_cpg():
     assert not ok and "chunk" in reason
     # An async identity without a recorded width is not trusted.
     assert not cache.supports_problem(_cache_identity(async_dma=True), wide)[0]
+
+
+@pytest.mark.parametrize(
+    "directions", [("fwd",), ("wgrad",), ("dgrad",), ("fwd", "wgrad", "dgrad")]
+)
+def test_count_jobs_matches_the_generators(monkeypatch, directions):
+    """``count_jobs`` is the enumeration progress denominator.
+
+    It multiplies the inner axes out instead of walking the generators, so a
+    new axis added to a generator and not to the count would make the
+    percentage wrong. Shrink the grid so the generators can be walked here.
+    """
+    from rocke.core.arch import ArchTarget
+
+    ks = _shrink_sweep_grid(monkeypatch)
+    target = ArchTarget.from_gfx(_ARCH)
+    family = "wmma" if target.wave_size == 32 else "mma"
+    split_ks = (1, 4)
+    gens = {
+        "fwd": lambda: ks._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target),
+        "wgrad": lambda: ks._wgrad_jobs(
+            _ARCH, "fp16", target.wave_size, family, target, split_ks
+        ),
+        "dgrad": lambda: ks._dgrad_jobs(
+            _ARCH, "fp16", target.wave_size, family, target, 64
+        ),
+    }
+    walked = sum(sum(1 for _ in gens[d]()) for d in directions)
+    counted = ks.count_jobs(
+        dtype="fp16", target=target, directions=directions, split_ks=split_ks
+    )
+    assert walked > 0
+    assert counted == walked
+
+
+def _shrink_sweep_grid(monkeypatch):
+    from benchmarks.common import kernel_sweep as ks
+
+    monkeypatch.setattr(ks, "_TILE_MN", (32, 64))
+    monkeypatch.setattr(ks, "_TILE_K", (32,))
+    monkeypatch.setattr(ks, "_WARP_MN", (1, 2))
+    monkeypatch.setattr(ks, "_VECS", (2, 8))
+    # basic/wavelet are in so the AOT alias filter is exercised.
+    monkeypatch.setattr(ks, "_PIPELINES", ("mem", "compv3", "basic", "wavelet"))
+    return ks
+
+
+@pytest.mark.parametrize("jobs", [1, 3])
+def test_enumerate_jobs_matches_a_serial_round_robin(monkeypatch, jobs):
+    """The chunked/parallel enumeration must return exactly the serial result.
+
+    Order matters, not just membership: ``--limit`` truncates this list, and
+    the round-robin across directions is what keeps a truncated cache from
+    holding forward kernels only. The reference below is the original
+    single-stream walk.
+    """
+    import multiprocessing
+
+    from rocke.core.arch import ArchTarget
+
+    if jobs > 1 and multiprocessing.get_start_method() != "fork":
+        pytest.skip("workers only inherit the shrunken grid under fork")
+    ks = _shrink_sweep_grid(monkeypatch)
+    target = ArchTarget.from_gfx(_ARCH)
+    family = "wmma" if target.wave_size == 32 else "mma"
+    directions = ("fwd", "wgrad", "dgrad")
+    split_ks = (1, 4)
+
+    streams = [
+        iter(ks._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target)),
+        iter(ks._wgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, split_ks)),
+        iter(ks._dgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, 64)),
+    ]
+    seen = {}
+    while streams:
+        still_running = []
+        for stream in streams:
+            for job in stream:
+                key = job.identity.stable_hash()
+                if key in seen or not ks._spec_is_valid(job, _ARCH, "fp16"):
+                    continue
+                seen[key] = job
+                still_running.append(stream)
+                break
+        streams = still_running
+    expected = list(seen)
+
+    got = ks.enumerate_jobs(
+        arch=_ARCH,
+        dtype="fp16",
+        target=target,
+        directions=directions,
+        split_ks=split_ks,
+        jobs=jobs,
+    )
+    assert expected
+    assert [j.identity.stable_hash() for j in got] == expected
+
+
+def test_cache_rejects_packed_atomic_wgrad_on_odd_dw_row(tmp_path):
+    """A runtime split-K wgrad binary with a 16-bit dW uses the packed atomic.
+
+    That epilogue needs an even dW row (``wg_N = Y*X*cpg``); on an odd one it
+    misaddresses without an error, so the cache must not offer the binary.
+    """
+    from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
+
+    ident = KernelIdentity(
+        arch=_ARCH,
+        direction="wgrad",
+        algorithm="implicit_gemm",
+        dtype_a="fp16",
+        dtype_b="fp16",
+        dtype_d="fp16",
+        tile_m=64,
+        tile_n=64,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=32,
+        warp_tile_n=32,
+        warp_tile_k=16,
+        pipeline="mem",
+        epilogue="cshuffle",
+        wave_size=64,
+        vector_size_a=1,
+        vector_size_b=1,
+        vector_size_c=2,  # the packed atomic needs a partner element
+        split_k=0,
+    )
+    cache = KernelCache(tmp_path, _ARCH)
+    shape = dict(N=2, Hi=16, Wi=16, K=64, Y=3, X=3, sH=1, sW=1, pH=1, pW=1)
+    shape.update(dH=1, dW=1)
+    odd = ConvProblem(C=3, **shape)  # wg_N = 3*3*3 = 27
+    even = ConvProblem(C=64, **shape)
+    assert not cache.supports_problem(ident, odd)[0]
+    assert cache.supports_problem(ident, even)[0]
+
+
+def test_aot_grid_skips_alias_pipelines(monkeypatch):
+    """basic is mem everywhere and wavelet is mem in wgrad: never cached twice."""
+    from rocke.core.arch import ArchTarget
+
+    ks = _shrink_sweep_grid(monkeypatch)
+    target = ArchTarget.from_gfx(_ARCH)
+    jobs = ks.enumerate_jobs(
+        arch=_ARCH,
+        dtype="fp16",
+        target=target,
+        directions=("fwd", "wgrad", "dgrad"),
+        validate=False,
+    )
+    pipes = {(j.direction, j.identity.pipeline) for j in jobs}
+    assert not any(p == "basic" for _, p in pipes)
+    assert ("wgrad", "wavelet") not in pipes
+    assert ("wgrad", "mem") in pipes
+
+
+def test_wgrad_rejects_wavelet():
+    """The wgrad builder has no wavelet kernel; the predicate must say so."""
+    from kernels.common.conv_implicit_gemm_wgrad import (
+        WgradConvSpec,
+        is_valid_wgrad_spec,
+    )
+
+    problem = ConvProblem(N=2, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+    spec = WgradConvSpec(problem=problem, data=_DATA, pipeline="wavelet", **_TILE)
+    ok, why = is_valid_wgrad_spec(spec, arch=_ARCH)
+    assert not ok and "wavelet" in why
+
+
+def test_compile_jobs_is_incremental(monkeypatch, tmp_path):
+    """compile_jobs compiles each distinct binary once and only what changed.
+
+    Real kernels and a real COMGR compile (no GPU): a rebuild with nothing
+    changed does nothing, an emitter change that leaves the code alone only
+    refreshes entries, and a change to one kernel's code recompiles that one.
+    """
+    import re
+
+    from rocke.core.arch import ArchTarget
+    from benchmarks.common.kernel_cache import KernelCache
+
+    ks = _shrink_sweep_grid(monkeypatch)
+    target = ArchTarget.from_gfx(_ARCH)
+    family = "wmma" if target.wave_size == 32 else "mma"
+    pool = [
+        j
+        for j in ks._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target)
+        if not j.identity.async_dma and ks._spec_is_valid(j, _ARCH, "fp16")
+    ]
+    jobs, spare = pool[:3], pool[-1]
+    cache = KernelCache(tmp_path, _ARCH)
+    swap = {}
+
+    def build(job, arch, dtype):
+        # A swapped job stands in for "the emitter now emits other code for
+        # this identity".
+        return ks.build_kernel(swap.get(job.identity, job), arch, dtype)
+
+    def run():
+        lines = []
+        ks.compile_jobs(
+            cache=cache,
+            all_jobs=jobs,
+            build=build,
+            arch=_ARCH,
+            dtype="fp16",
+            directions=("fwd",),
+            log=lines.append,
+        )
+        done = lines[-1]
+        if "nothing to do" in done:
+            return 0, 0
+        m = re.search(r"(\d+) compiled, (\d+) entries updated", done)
+        return int(m.group(1)), int(m.group(2))
+
+    compiled, updated = run()
+    assert updated == 3 and 1 <= compiled <= 3
+    assert all(cache.has(j.identity) for j in jobs)
+
+    assert run() == (0, 0)  # nothing changed
+
+    monkeypatch.setattr(ks, "current_emitter_digest", lambda: "new-sources")
+    assert run() == (0, 3)  # sources changed, code did not
+
+    before = cache.meta(jobs[0].identity)["blob"]
+    swap[jobs[0].identity] = spare
+    monkeypatch.setattr(ks, "current_emitter_digest", lambda: "newer-sources")
+    assert run() == (1, 3)  # one kernel's code changed
+    assert cache.meta(jobs[0].identity)["blob"] != before

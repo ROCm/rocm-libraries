@@ -33,10 +33,12 @@ from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
 from benchmarks.common.kernel_sweep import BuildJob, compile_jobs
 
-# The cache holds fp16 binaries of the forward and dgrad kernels. The direct
-# kernels also build for bf16, and there is a direct wgrad kernel; both are
-# shape-generic too but are not enumerated into the cache yet.
-DIRECT_DTYPE = "fp16"
+# Operand dtypes the direct kernels build for. The cache is filled for one at a
+# time (--compile-all --dtype); each binary records its dtype and is only
+# offered to problems of that dtype. Variants without a kernel for a dtype
+# (the 4c atom is fp16-only) are dropped by their spec validators.
+DIRECT_DTYPES = ("fp16", "bf16")
+DIRECT_DTYPE = "fp16"  # the default dtype
 
 # ---------------------------------------------------------------------------
 # Tuning grids -- shared with benchmark_direct_conv's JIT sweep so the cache
@@ -307,14 +309,15 @@ def _identity(
     direction: str,
     caps: DirectCaps,
     knobs: dict,
+    dtype: str = DIRECT_DTYPE,
 ) -> KernelIdentity:
     return KernelIdentity(
         arch=arch,
         direction=direction,
         algorithm=variant,
-        dtype_a=DIRECT_DTYPE,
-        dtype_b=DIRECT_DTYPE,
-        dtype_d=DIRECT_DTYPE,
+        dtype_a=dtype,
+        dtype_b=dtype,
+        dtype_d=dtype,
         # Direct conv is not a GEMM: no tile, warp or vector fields.
         tile_m=0,
         tile_n=0,
@@ -345,7 +348,12 @@ def _identity(
 
 
 def _helper_identity(
-    arch: str, wave_size: int, variant: str, caps: DirectCaps, knobs: dict
+    arch: str,
+    wave_size: int,
+    variant: str,
+    caps: DirectCaps,
+    knobs: dict,
+    dtype: str = DIRECT_DTYPE,
 ) -> KernelIdentity:
     # The weight transforms depend on the filter and channel counts only;
     # stride and padding are zeroed so every pipeline entry that shares a
@@ -357,6 +365,7 @@ def _helper_identity(
         "direct_dgrad_helper",
         replace(caps, PAD=0, stride=0),
         knobs,
+        dtype,
     )
 
 
@@ -370,7 +379,7 @@ def _caps_of(identity: KernelIdentity) -> DirectCaps:
     )
 
 
-def probe_problem(caps: DirectCaps):
+def probe_problem(caps: DirectCaps, dtype: str = DIRECT_DTYPE):
     """A problem with exactly ``caps`` that every knob in the grid fits.
 
     The emitted IR does not depend on N, H, W or groups (the shape-invariance
@@ -393,6 +402,7 @@ def probe_problem(caps: DirectCaps):
         KW=caps.KW,
         PAD=caps.PAD,
         stride=caps.stride,
+        dtype=dtype,
     )
 
 
@@ -408,7 +418,7 @@ def _job(identity: KernelIdentity, caps: DirectCaps, knobs: dict) -> BuildJob:
 
 
 def enumerate_direct_jobs(
-    *, arch: str, target, directions: Sequence[str]
+    *, arch: str, target, directions: Sequence[str], dtype: str = DIRECT_DTYPE
 ) -> List[BuildJob]:
     """Every direct kernel worth caching for ``arch``, pre-validated.
 
@@ -418,6 +428,8 @@ def enumerate_direct_jobs(
     for d in directions:
         if d not in ("fwd", "dgrad"):
             raise ValueError(f"direct conv has no {d!r} kernel; expected fwd or dgrad")
+    if dtype not in DIRECT_DTYPES:
+        raise ValueError(f"direct conv builds {DIRECT_DTYPES}, not {dtype!r}")
     wave_size = target.wave_size
     seen: Dict[str, BuildJob] = {}
 
@@ -428,7 +440,7 @@ def enumerate_direct_jobs(
         if direction not in directions:
             continue
         for caps in caps_list:
-            probe = probe_problem(caps)
+            probe = probe_problem(caps, dtype)
             for knobs in _knob_grid(variant):
                 if variant == "direct_grouped_dgrad_mfma" and _mfma_knobs_reason(
                     probe, knobs
@@ -440,7 +452,13 @@ def enumerate_direct_jobs(
                 add(
                     _job(
                         _identity(
-                            arch, wave_size, variant, f"direct_{direction}", caps, knobs
+                            arch,
+                            wave_size,
+                            variant,
+                            f"direct_{direction}",
+                            caps,
+                            knobs,
+                            dtype,
                         ),
                         caps,
                         knobs,
@@ -449,7 +467,9 @@ def enumerate_direct_jobs(
                 if variant == "direct_grouped_dgrad_mfma":
                     add(
                         _job(
-                            _helper_identity(arch, wave_size, _TRANSPOSE, caps, {}),
+                            _helper_identity(
+                                arch, wave_size, _TRANSPOSE, caps, {}, dtype
+                            ),
                             caps,
                             {},
                         )
@@ -459,7 +479,7 @@ def enumerate_direct_jobs(
                         add(
                             _job(
                                 _helper_identity(
-                                    arch, wave_size, _REORGANIZE, caps, reorg
+                                    arch, wave_size, _REORGANIZE, caps, reorg, dtype
                                 ),
                                 caps,
                                 reorg,
@@ -469,20 +489,20 @@ def enumerate_direct_jobs(
 
 
 def build_direct_job(job: BuildJob, arch: str, dtype: str):
-    """Build + compile one direct job. Returns ``(hsaco, kernel_name, meta)``."""
-    from rocke import compile_kernel
+    """Build one direct job's kernel IR. Returns ``(kernel, meta)``.
 
-    if dtype != DIRECT_DTYPE:
-        raise ValueError(f"direct conv kernels are {DIRECT_DTYPE}-only (got {dtype})")
+    Compilation, deduplication and incremental rebuilds are
+    :func:`compile_jobs`'s; this only decides what the kernel is.
+    """
+    if dtype not in DIRECT_DTYPES:
+        raise ValueError(f"direct conv builds {DIRECT_DTYPES}, not {dtype!r}")
     caps = DirectCaps(**job.caps)
     variant = job.identity.algorithm
-    spec = make_spec(variant, probe_problem(caps), job.spec_kwargs)
+    spec = make_spec(variant, probe_problem(caps, dtype), job.spec_kwargs)
     ok, why = validate_spec(variant, spec, arch)
     if not ok:
         raise ValueError(why)
-    artifact = compile_kernel(_build_kernel(variant, spec, arch), arch=arch)
-    meta = {"kernel_name": artifact.kernel_name, "timings": artifact.timings}
-    return artifact.hsaco, artifact.kernel_name, meta
+    return _build_kernel(variant, spec, arch), {}
 
 
 def compile_all_direct(
@@ -494,14 +514,18 @@ def compile_all_direct(
     jobs: int = 1,
     limit: Optional[int] = None,
     log=print,
+    dtype: str = DIRECT_DTYPE,
 ) -> int:
-    """Populate ``cache`` with every direct kernel in :data:`DIRECT_CAPABILITIES`."""
+    """Populate ``cache`` with every direct kernel in :data:`DIRECT_CAPABILITIES`
+    for operand dtype ``dtype``."""
     return compile_jobs(
         cache=cache,
-        all_jobs=enumerate_direct_jobs(arch=arch, target=target, directions=directions),
+        all_jobs=enumerate_direct_jobs(
+            arch=arch, target=target, directions=directions, dtype=dtype
+        ),
         build=build_direct_job,
         arch=arch,
-        dtype=DIRECT_DTYPE,
+        dtype=dtype,
         directions=[f"direct_{d}" for d in directions],
         jobs=jobs,
         limit=limit,
@@ -513,14 +537,17 @@ def compile_all_direct(
 # Running a problem out of the cache (CPU half)
 # ---------------------------------------------------------------------------
 
-# Launch signature of the weight-transform kernels: source, destination and
-# their byte sizes, nothing else.
-_TRANSFORM_SIGNATURE = [
-    {"name": "A", "type": "ptr<f16, global>", "size_bytes": 8},
-    {"name": "D", "type": "ptr<f16, global>", "size_bytes": 8},
-    {"name": "A_bytes", "type": "i32", "size_bytes": 4},
-    {"name": "D_bytes", "type": "i32", "size_bytes": 4},
-]
+
+def _transform_signature(dtype: str) -> list:
+    """Launch signature of the weight-transform kernels: source, destination
+    and their byte sizes, nothing else."""
+    elem = {"fp16": "f16", "bf16": "bf16"}[dtype]
+    return [
+        {"name": "A", "type": f"ptr<{elem}, global>", "size_bytes": 8},
+        {"name": "D", "type": f"ptr<{elem}, global>", "size_bytes": 8},
+        {"name": "A_bytes", "type": "i32", "size_bytes": 4},
+        {"name": "D_bytes", "type": "i32", "size_bytes": 4},
+    ]
 
 
 @dataclass(frozen=True)
@@ -567,7 +594,7 @@ def _conv_step(identity, hsaco_path, meta, spec, problem, direction, buffers):
     return DirectStep(
         kernel_name=meta["kernel_name"],
         hsaco_path=hsaco_path,
-        signature=conv_direct_args_signature(DIRECT_DTYPE, direction=direction),
+        signature=conv_direct_args_signature(identity.dtype_a, direction=direction),
         grid=grid,
         block=block,
         buffers=buffers,
@@ -628,7 +655,12 @@ def plan_for(
     steps = []
     for helper, helper_knobs, src, dst in helpers:
         helper_id = _helper_identity(
-            identity.arch, identity.wave_size, helper, caps, helper_knobs
+            identity.arch,
+            identity.wave_size,
+            helper,
+            caps,
+            helper_knobs,
+            identity.dtype_a,
         )
         entry = cache.get(helper_id)
         if entry is None:
@@ -640,7 +672,7 @@ def plan_for(
             DirectStep(
                 kernel_name=entry[1]["kernel_name"],
                 hsaco_path=helper_path,
-                signature=_TRANSFORM_SIGNATURE,
+                signature=_transform_signature(identity.dtype_a),
                 grid=grid,
                 block=block,
                 buffers=(src, None, dst),
@@ -675,6 +707,9 @@ def direct_plans(
     for identity, hsaco_path, meta in cache.compatible(
         problem, direction=f"direct_{direction}"
     ):
+        # A binary only serves the operand dtype it was built for.
+        if identity.dtype_a != getattr(problem, "dtype", DIRECT_DTYPE):
+            continue
         plan, why = plan_for(cache, identity, hsaco_path, meta, problem, arch)
         if plan is None:
             rejected.append((identity, why))

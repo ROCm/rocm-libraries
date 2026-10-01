@@ -536,7 +536,7 @@ class WgradConvSpec:
     #      Caller must zero-init dW before launch.
     # ABI for 0 and >1: dW is not writeonly; K_wg is padded as needed.
     split_k: int = 1
-    # Two-stage mode (requires split_k > 1).
+    # Two-stage mode (requires a split: split_k > 1, or 0 for a runtime degree).
     # When True, Stage 1 f32-atomic-adds its partial sums into a scratch
     # buffer (ws_ptr) instead of 16-bit-atomic-adding into dW.  The caller
     # must zero the scratch first and launch a Stage 2 cast kernel
@@ -737,13 +737,14 @@ class WgradConvSpec:
         _gm_ok, _gm_why = wgrad_group_merge_available(self)
         if not _gm_ok:
             raise ValueError(_gm_why)
-        # The `split_k > 1` term is load-bearing, not defensive: the builder
-        # computes `_is_two_stage = split_k > 1 and two_stage`, so at
-        # split_k == 0 (runtime degree) a two_stage spec still lands on the
-        # *atomic* epilogue. Dropping the term here would exempt exactly that
-        # spec from the atomic gates below and re-open the admits/build hole
-        # one axis over.
-        _effective_two_stage = self.two_stage and self.split_k > 1
+        # Two-stage is in effect whenever the reduction is split -- a fixed
+        # degree > 1 or the runtime degree (split_k == 0); the scratch slab
+        # index does not depend on the degree. Must match the builder's
+        # `_is_two_stage` exactly, or a spec could pass the atomic gates below
+        # and then build the other epilogue.
+        _effective_two_stage = self.two_stage and (
+            self.split_k == 0 or self.split_k > 1
+        )
         _needs_atomic = (
             self.split_k == 0 or self.split_k > 1
         ) and not _effective_two_stage
@@ -1124,9 +1125,9 @@ def wgrad_group_merge_available(
     # compose, and the best depthwise configuration generally uses both. What a
     # merged tile cannot use is the packed-atomic split-K epilogue: it has no
     # way to drop an off-diagonal group pair, so it would accumulate garbage
-    # into a live dW element instead of skipping the store. Route split_k > 1
+    # into a live dW element instead of skipping the store. Route split-K
     # through two-stage, whose scratch atomic carries the mask.
-    _effective_two_stage = spec.two_stage and spec.split_k > 1
+    _effective_two_stage = spec.two_stage and (spec.split_k == 0 or spec.split_k > 1)
     if (spec.split_k == 0 or spec.split_k > 1) and not _effective_two_stage:
         return False, (
             f"group_merge with split_k={spec.split_k} needs the two-stage path "
@@ -1211,11 +1212,10 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     # -1 = auto: resolved at build time; always valid at the spec-check stage.
     # 0 = runtime atomic; validate constraints identically to >1 without a degree.
     _is_atomic = sk == 0 or sk > 1
-    # The `sk > 1` term mirrors the builder's
-    # `_is_two_stage = split_k > 1 and two_stage`: at sk == 0 a two_stage spec
-    # still lands on the atomic epilogue, so it must stay subject to the atomic
-    # gates below. See the matching comment in WgradConvSpec.validate().
-    _effective_two_stage = spec.two_stage and sk > 1
+    # Mirrors the builder's `_is_two_stage`: two-stage applies at a fixed
+    # degree > 1 and at the runtime degree (sk == 0). See the matching comment
+    # in WgradConvSpec.validate().
+    _effective_two_stage = spec.two_stage and _is_atomic
     # The two-stage scratch-atomic epilogue is MFMA-only. The packed *atomic*
     # epilogue does have a WMMA variant (_emit_wgrad_split_k_epilogue_wmma), so
     # split-K itself is fine on wave32 -- but _emit_wgrad_workspace_store_epilogue
@@ -1345,6 +1345,14 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
 
     if spec.pipeline == "basic" and spec.async_dma:
         return False, "pipeline='basic' is incompatible with async_dma=True"
+    # The wgrad builder has no load/math wave split, so a "wavelet" spec built
+    # silently as "mem" under another name. Reject it instead of benchmarking
+    # one kernel twice.
+    if spec.pipeline == "wavelet":
+        return False, (
+            "pipeline='wavelet' is not implemented for wgrad (it would build the "
+            "'mem' kernel); use pipeline='mem'"
+        )
 
     if spec.async_dma:
         # async_dma is Python-unrolled; a deep reduction explodes compile time.
@@ -1552,7 +1560,10 @@ def build_implicit_gemm_conv_wgrad(
     ir_dtype_d = _ir_dtype(spec.data.dtype_d)
 
     _is_split_k = spec.split_k > 1 or spec.split_k == 0
-    _is_two_stage = spec.split_k > 1 and spec.two_stage
+    # Two-stage at a fixed or runtime degree: the scratch slab index is
+    # group * R + z % R and the group decode reads ks_count, so nothing in the
+    # body depends on knowing the degree at build time.
+    _is_two_stage = _is_split_k and spec.two_stage
     # At group_merge == groups the merged problem has a single group, but the
     # kernel still has to decode the K-slice off z and the epilogue still has to
     # mask off-diagonal pairs -- so the grouped path stays engaged. Without this

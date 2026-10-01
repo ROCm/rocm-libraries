@@ -30,6 +30,7 @@
  *  16  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a16x16x16, mem/default,      gfx942, split_k=4 two_stage fp16
  *  17  N8H56W56C64_K64Y3X3 pad1, t32x32x32, w1x1, a16x16x32, mem/default, gfx1250 (WMMA w32), lds_k_outer fp32 out
  *  18  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, unroll_k, split_k=4 fp32
+ *  19  N8H56W56C3_K64Y3X3,  t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, split_k=0 (runtime) two_stage fp16
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -221,6 +222,14 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
         spec->dtype_d = "fp32";
         spec->unroll_k = true;
         spec->split_k = 4;
+        *arch = "gfx950";
+        return 0;
+    case 19:
+        /* Runtime split-K degree + two-stage scratch; odd wg_N = 27, which the
+         * packed 16-bit atomic cannot address. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 3, 64, 3, 3);
+        spec->split_k = 0;
+        spec->two_stage = true;
         *arch = "gfx950";
         return 0;
     default:

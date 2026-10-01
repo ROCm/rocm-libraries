@@ -1755,14 +1755,21 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
 
     if args.compile_all:
         cache_dir = Path(args.cache_dir) if args.cache_dir else Path("./kernel_cache")
-        return compile_all_direct(
-            cache=KernelCache(cache_dir, arch),
-            arch=arch,
-            target=ArchTarget.from_gfx(arch),
-            directions=directions or ("fwd", "dgrad"),
-            jobs=os.cpu_count() if args.jobs == 0 else max(1, args.jobs),
-            limit=args.limit,
-        )
+        rc = 0
+        for dtype in args.compile_dtypes:
+            rc = max(
+                rc,
+                compile_all_direct(
+                    cache=KernelCache(cache_dir, arch),
+                    arch=arch,
+                    target=ArchTarget.from_gfx(arch),
+                    directions=directions or ("fwd", "dgrad"),
+                    jobs=os.cpu_count() if args.jobs == 0 else max(1, args.jobs),
+                    limit=args.limit,
+                    dtype=dtype,
+                ),
+            )
+        return rc
 
     cache = KernelCache(Path(args.run_from_cache), arch)
     rc = describe_cache(cache)
@@ -1789,20 +1796,25 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
     def _u8(t):
         return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
+    from benchmarks.common.direct_kernel_sweep import DIRECT_DTYPES
+
     overall_rc = 0
     for case_idx, (p, dtype, case_direction) in enumerate(cases, 1):
-        if dtype != "fp16":
+        if dtype not in DIRECT_DTYPES:
             print(
-                f"Case {case_idx} {p.short()}: direct conv is fp16-only (got {dtype})"
+                f"Case {case_idx} {p.short()}: direct conv builds "
+                f"{'/'.join(DIRECT_DTYPES)} (got {dtype})"
             )
             continue
+        torch_dt = torch.bfloat16 if dtype == "bf16" else torch.float16
         for direction in directions or (case_direction,):
             plans, rejected = direct_plans(cache, p, direction, arch)
             if not plans:
                 why = (
                     rejected[0][1]
                     if rejected
-                    else "no cached kernel has these capabilities"
+                    else f"no cached {dtype} kernel has these capabilities; "
+                    f"build them with --compile-all --dtype {dtype}"
                 )
                 print(
                     f"Case {case_idx} {p.short()} {direction}: no runnable kernel "
@@ -1819,17 +1831,17 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
             torch.manual_seed(42)
             x_shape = (p.N, p.H, p.W, p.total_c)
             y_shape = (p.N, p.Ho, p.Wo, p.total_k)
-            W_t = torch.empty(
-                p.total_k, p.KH, p.KW, p.cpg, dtype=torch.float16
-            ).uniform_(-1, 1)
+            W_t = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=torch_dt).uniform_(
+                -1, 1
+            )
             if direction == "fwd":
                 in_name, out_name = "x", "y"
-                In_t = torch.empty(*x_shape, dtype=torch.float16).uniform_(-1, 1)
-                Out_t = torch.empty(*y_shape, dtype=torch.float16)
+                In_t = torch.empty(*x_shape, dtype=torch_dt).uniform_(-1, 1)
+                Out_t = torch.empty(*y_shape, dtype=torch_dt)
             else:
                 in_name, out_name = "dy", "dx"
-                In_t = torch.empty(*y_shape, dtype=torch.float16).uniform_(-1, 1)
-                Out_t = torch.empty(*x_shape, dtype=torch.float16)
+                In_t = torch.empty(*y_shape, dtype=torch_dt).uniform_(-1, 1)
+                Out_t = torch.empty(*x_shape, dtype=torch_dt)
 
             ref_out = None
             if args.verify:
@@ -2058,8 +2070,10 @@ def main() -> int:
     conv.add_argument(
         "--dtype",
         choices=("fp16", "bf16"),
-        default="fp16",
-        help="I/O data type when using shape flags (default: fp16; ignored when using --miopen-cmd/--miopen-file)",
+        default=None,
+        help="I/O data type when using shape flags (default: fp16; cases from "
+        "--miopen-cmd/--miopen-file carry their own dtype). --compile-all builds "
+        "the cache for every data type unless --dtype names one.",
     )
 
     cache_grp = parser.add_argument_group(
@@ -2111,6 +2125,12 @@ def main() -> int:
     )
 
     args = parser.parse_args()
+    # --dtype unset: one fp16 run for shape flags, every dtype for --compile-all.
+    from benchmarks.common.direct_kernel_sweep import DIRECT_DTYPES
+
+    args.compile_dtypes = (args.dtype,) if args.dtype is not None else DIRECT_DTYPES
+    if args.dtype is None:
+        args.dtype = "fp16"
 
     arch = args.arch
 

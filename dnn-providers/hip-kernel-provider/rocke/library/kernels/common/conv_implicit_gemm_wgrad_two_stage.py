@@ -56,7 +56,7 @@ Usage::
 from __future__ import annotations
 
 from dataclasses import replace as dc_replace
-from typing import Tuple
+from typing import Optional, Tuple
 
 
 from kernels.common.conv_implicit_gemm_wgrad import (
@@ -129,12 +129,25 @@ def wgrad_stage1_launch_values(
     dW_bytes: int,
     ws_ptr: int,
     ws_bytes: int,
+    split_k: Optional[int] = None,
 ) -> dict:
     """Host-side ``values`` dict for a Stage 1 launch.
 
     Mirrors :func:`_wgrad_stage1_signature`: the shared wgrad AOT arguments
     plus the workspace pair.
+
+    ``split_k`` is the degree to launch at. A fixed-degree spec defaults to its
+    own; a runtime-degree spec (``spec.split_k == 0``) must be given one > 1.
     """
+    if split_k is None:
+        if spec.split_k == 0:
+            raise ValueError(
+                "a runtime-degree two-stage kernel (split_k=0) needs the launch "
+                "degree: pass split_k > 1"
+            )
+        split_k = spec.split_k
+    if split_k <= 1:
+        raise ValueError(f"two-stage Stage 1 needs split_k > 1 (got {split_k})")
     from kernels.common.conv_args import ConvArgs
 
     return ConvArgs.from_problem(
@@ -150,7 +163,7 @@ def wgrad_stage1_launch_values(
         dY_bytes,
         X_bytes,
         dW_bytes,
-        split_k=max(1, spec.split_k),
+        split_k=split_k,
         ws_ptr=ws_ptr,
         ws_bytes=ws_bytes,
     )
@@ -218,10 +231,11 @@ def build_implicit_gemm_conv_wgrad_two_stage(
         ).split_k
         spec = dc_replace(spec, split_k=resolved)
 
-    if spec.split_k <= 1:
+    if spec.split_k == 1 or spec.split_k < -1:
         raise ValueError(
-            f"build_implicit_gemm_conv_wgrad_two_stage requires split_k > 1 "
-            f"(or split_k=-1 for auto-selection); got split_k={spec.split_k}"
+            f"build_implicit_gemm_conv_wgrad_two_stage requires split_k > 1, "
+            f"0 (runtime degree, passed at launch) or -1 (auto-selection); "
+            f"got split_k={spec.split_k}"
         )
 
     # Lazy imports: keep module import-time safe for static IR tests running

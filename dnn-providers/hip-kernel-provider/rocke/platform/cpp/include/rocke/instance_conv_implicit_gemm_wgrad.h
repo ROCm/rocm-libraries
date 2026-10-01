@@ -215,7 +215,8 @@ bool rocke_wgrad_conv_spec_is_deterministic(const rocke_implicit_gemm_conv_wgrad
 
 /* Returns the workspace buffer size in bytes required for the two-stage
  * wgrad path.  Formula: groups * ws_replicas * wg_M * wg_N * 4 (always f32).
- * Returns 0 when two_stage=false or split_k <= 1 (no workspace needed).
+ * Returns 0 when two_stage=false or there is no split (split_k == 1, or the
+ * unresolved auto sentinel -1); the runtime degree (0) sizes like any other.
  * Analogous to rocke_streamk_gemm_workspace_bytes / rocke_moe_fused_workspace_bytes. */
 size_t rocke_wgrad_conv_workspace_bytes(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
 
