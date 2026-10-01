@@ -21,6 +21,7 @@ option(ALLOW_FETCH_DEPS
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(BUILD_THREAD_SANITIZER "Build with Thread Sanitizer enabled" OFF)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Sanitizers.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/WindowsDllStaging.cmake)
 
 option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
 if(NOT ENABLE_CLANG_TIDY)
@@ -241,7 +242,7 @@ function(add_hipdnn_sample_test TARGET_NAME)
     install(TARGETS ${TARGET_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
     # On Windows, stage the shadowed ROCm DLLs before this sample is built so a partial build
-    # (`cmake --build --target ${TARGET_NAME}`) doesn't load the stale System32 amd_comgr.dll.
+    # (`cmake --build --target ${TARGET_NAME}`) doesn't load the stale System32 ROCm DLLs.
     if(TARGET stage_shadowed_rocm_dlls)
         add_dependencies(${TARGET_NAME} stage_shadowed_rocm_dlls)
     endif()
@@ -356,30 +357,6 @@ add_hipdnn_sample_test(hipdnn_sample_autotune)
 
 # Umbrella target for superbuild dependency tracking
 add_custom_target(hipdnn_samples COMMENT "Building all hipDNN samples" DEPENDS ${HIPDNN_ALL_SAMPLES})
-
-# Disable convolution samples under ASAN — known driver-level failures in MIOpen/CK
-# and Tensile that are unrelated to hipDNN can cause test hangs. Re-enable when
-# underlying issues are resolved. (SKIP_IF_ASAN())
-if(BUILD_ADDRESS_SANITIZER)
-    set_tests_properties(
-        hipdnn_sample_conv_fprop
-        ${HIPDNN_UNKNOWN_ENGINE_NAME_TEST}
-        hipdnn_sample_conv_dgrad
-        hipdnn_sample_conv_wgrad
-        hipdnn_sample_serialization_roundtrip
-        PROPERTIES DISABLED TRUE
-    )
-    # The fused-conv sample tests are only registered on non-Windows (see above),
-    # so only disable them there — otherwise set_tests_properties aborts configure.
-    if(NOT WIN32)
-        set_tests_properties(
-            hipdnn_sample_fused_conv_fprop_activ
-            hipdnn_sample_fused_conv_fprop_bias_activ
-            hipdnn_sample_conv_fprop_deterministic
-            PROPERTIES DISABLED TRUE
-        )
-    endif()
-endif()
 
 # Optional YAML-driven CTest categorization. Guarded so standalone /
 # sparse checkouts without shared/ctest still build (falls back to unlabeled
