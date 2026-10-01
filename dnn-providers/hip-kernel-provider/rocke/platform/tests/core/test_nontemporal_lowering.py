@@ -244,7 +244,6 @@ _WIDTHS = {
 # Widths that must lower to more than one load, so the split case cannot pass
 # vacuously if the backend narrows the access.
 _SPLIT = {"bf16x16"}
-}
 
 
 def _stores_vector(n: int) -> bool:
