@@ -238,13 +238,20 @@ def load_collections(paths: list, *, role: str, sources: list) -> dict:
         for key, what in (("engine_name", "engine"), ("engine_id", "engine id"),
                           ("selector_revision", "selector revision"),
                           ("trained_against", "trained_against provenance"),
-                          ("knob_encodings", "knob addressing"), ("collection_knobs", "collection knobs")):
+                          ("collection_knobs", "collection knobs")):
             if manifest.get(key) != first.get(key):
                 raise ValueError(f"collections disagree on {what}: {first.get(key)!r} vs "
                                  f"{manifest.get(key)!r} ({directory}); a model is trained against one")
         missing = [source for source in sources if source not in manifest["sources"]]
         if missing:
             raise ValueError(f"{directory} did not measure {missing}; it holds {manifest['sources']}")
+    # Each collection records the addressing its own candidates showed: a subset of the
+    # engine's numbering, which shards of one corpus split between them. Merged, refusing a
+    # pin two of them read differently.
+    try:
+        knob_encodings = addressing.merge_manifests(m.get("knob_encodings") for _, _, m in loaded)
+    except ValueError as error:
+        raise ValueError(f"collections disagree on knob addressing: {error}") from None
     rows, superseded, published = {source: [] for source in sources}, 0, set()
     for source in sources:
         measured = []
@@ -258,7 +265,7 @@ def load_collections(paths: list, *, role: str, sources: list) -> dict:
         published.update(manifest["published"])
     return {
         "rows": rows, "published": published, "superseded_rows": superseded,
-        "provenance": first["trained_against"], "knob_encodings": first["knob_encodings"],
+        "provenance": first["trained_against"], "knob_encodings": knob_encodings,
         "shipping_knobs": first["shipping_knobs"], "collection_knobs": first["collection_knobs"],
         "kernel_fields": set(first["kernel_fields"]), "engine_id": first["engine_id"],
         "graphs": [dict(graph, collection=directory) for _, directory, manifest in loaded
