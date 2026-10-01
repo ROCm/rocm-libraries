@@ -202,11 +202,15 @@ revision.** The loader refuses a model whose recorded `trained_against.selector_
 is not the one the provider reports, because L1 decides which engine runs.
 
 For `ASM_SDPA_ENGINE` that revision is **derived**, not written by hand:
-`hip-kernel-provider/asm-sdpa-fwd/<16 hex>`, where the digest is computed at configure
-time over the vendored forward kernels, the CSVs codegen reads to describe them, and the
-forward dispatch sources. Read the current value off the descriptors or the build rather
-than copying one out of this document — it changes exactly when the forward surface
-changes, which is the whole point.
+`hip-kernel-provider/asm-sdpa-fwd/<16 hex>`, computed at configure time by
+`asm_sdpa_engine/AsmSdpaSelectorRevision.cmake` over every input that decides forward
+selection: codegen, the forward CSVs and `.co` kernels of every arch directory, and the
+forward dispatch sources (plan builder, plan, shared mask classification, argument
+layout). Text inputs are hashed with line endings normalized to LF, so a Windows and a
+Linux checkout of one commit report the same revision; each input is a configure
+dependency, so editing one reconfigures. Read the current value off the descriptors or
+the build rather than copying one out of this document — it changes exactly when the
+forward surface changes, which is the whole point.
 
 It is derived because both hand-written alternatives fail, in opposite directions:
 

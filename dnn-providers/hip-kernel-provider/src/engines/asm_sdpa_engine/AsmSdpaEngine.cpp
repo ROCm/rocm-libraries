@@ -34,8 +34,10 @@ namespace
 /// What this build of the engine was, for a model that claims to have measured it.
 ///
 /// `<provider>/asm-sdpa-fwd/<digest>`, where the digest is computed at configure time over
-/// the vendored FORWARD kernels, the CSVs codegen reads to describe them, and this
-/// engine's forward dispatch sources (CMakeLists.txt, HKP_ASM_SDPA_FWD_REVISION).
+/// everything that decides which forward kernel runs and how it is launched: the vendored
+/// FORWARD kernels, the CSVs codegen turns into their config table, codegen itself, and the
+/// forward selection/launch sources -- text hashed line-ending-normalized, so a CRLF and an
+/// LF checkout of one commit agree (AsmSdpaSelectorRevision.cmake names each input and why).
 ///
 /// A deployed L1 model records this exact string as RFC 0019 §4.1's
 /// `trained_against.selector_revision`, and the loader refuses a model whose recorded
