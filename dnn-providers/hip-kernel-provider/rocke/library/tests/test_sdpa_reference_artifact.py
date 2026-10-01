@@ -125,3 +125,25 @@ def test_generated_bundle_cannot_reintroduce_tensor_files(tmp_path, suffix, loca
     lock.write_text(json.dumps(expected))
     with pytest.raises(ValueError, match="must not contain tensor files"):
         pack(bundle, tmp_path / "bad.tar.gz", lock)
+
+
+@pytest.mark.parametrize("layout", ["bin/hip_kernel_provider", "standalone"])
+def test_installed_bundle_lookup_is_relocatable_and_arch_specific(tmp_path, layout):
+    from sdpa_reference.paths import default_bundle_path
+
+    root = tmp_path / layout
+    tests = root / "tests/library/tests"
+    # A stale generic bundle must not hide missing per-arch test content.
+    (tests / "reference_bundles/gfx942").mkdir(parents=True)
+    expected = root / "engines/test_arch_content/rocke/sdpa"
+    assert default_bundle_path(tests, "gfx942") == expected / "gfx942"
+    assert default_bundle_path(tests, "gfx950") == expected / "gfx950"
+
+
+def test_source_bundle_lookup_preserves_local_layout(tmp_path):
+    from sdpa_reference.paths import default_bundle_path
+
+    tests = tmp_path / "rocke/library/tests"
+    assert (
+        default_bundle_path(tests, "gfx942") == tests / "reference_bundles/sdpa/gfx942"
+    )

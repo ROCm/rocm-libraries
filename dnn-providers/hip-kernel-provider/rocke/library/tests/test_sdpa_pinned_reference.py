@@ -17,6 +17,7 @@ from sdpa_reference.cli import load_bundle, verify_case
 from sdpa_reference.contract import checked_inputs, decode, encode
 from sdpa_reference.architectures import ARCHITECTURES, get_architecture
 from sdpa_reference.session import reuse_workers
+from sdpa_reference.paths import default_bundle_path
 
 
 @pytest.fixture(scope="module")
@@ -45,7 +46,7 @@ def reference_bundle():
     bundle = (
         Path(configured).resolve()
         if configured
-        else Path(__file__).parent / "reference_bundles" / arch
+        else default_bundle_path(Path(__file__).parent, arch)
     )
     if not bundle.is_dir():
         if os.environ.get("ROCKE_REQUIRE_SDPA_GPU") == "1" or configured:

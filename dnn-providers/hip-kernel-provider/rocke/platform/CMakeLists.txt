@@ -344,11 +344,11 @@ if(ROCKE_INSTALL_TESTS)
         endif()
         set(_lock "${_ROCKE_LIBRARY_DIR}/tests/sdpa_reference/architectures/${_arch}/baseline_lock.json")
         if(ROCKE_INSTALL_SDPA_REFERENCE AND NOT _bundle)
-          set(_archive "${_ROCKE_LIBRARY_DIR}/tests/reference_bundles/${_arch}.tar.gz")
+          set(_archive "${_ROCKE_LIBRARY_DIR}/tests/reference_bundles/sdpa/${_arch}.tar.gz")
           if(NOT EXISTS "${_archive}")
             message(FATAL_ERROR
                     "SDPA reference archive missing. Run dvc pull for "
-                    "dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/${_arch}.tar.gz.dvc "
+                    "dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/sdpa/${_arch}.tar.gz.dvc "
                     "or configure with ROCKE_INSTALL_SDPA_REFERENCE=OFF.")
           endif()
           find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -373,8 +373,10 @@ if(ROCKE_INSTALL_TESTS)
           if(NOT _result EQUAL 0)
             message(FATAL_ERROR "SDPA reference validation failed for ${_arch}: ${_error}")
           endif()
+          # TheRock captures test_arch_content in the test component; its kpack
+          # handler requires engines/ above it to split the bundle per GPU arch.
           install(DIRECTORY "${_bundle}/"
-                  DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library/tests/reference_bundles/${_arch}"
+                  DESTINATION "${ROCKE_TEST_INSTALL_DIR}/engines/test_arch_content/rocke/sdpa/${_arch}"
                   PATTERN "__pycache__" EXCLUDE REGEX "\\.pyc$" EXCLUDE)
           set(_ROCKE_HAS_SDPA_REFERENCE ON)
         endif()
@@ -503,7 +505,7 @@ if(ROCKE_INSTALL_TESTS)
            "  TIMEOUT 180)\n")
 
     # Enroll the SDPA lane only with a qualified bundle. Its files live beneath
-    # tests/ so the provider's existing artifact manifest captures them. Once
+    # engines/test_arch_content/ so packaging keeps them test-only and per-arch. Once
     # enrolled, missing gfx942 hardware or a failed qualification check is an
     # error; other GPU architectures remain explicitly outside this pilot.
     if(_ROCKE_HAS_SDPA_REFERENCE)

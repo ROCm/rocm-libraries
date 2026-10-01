@@ -120,12 +120,15 @@ the strategy's biggest holes live (see
   executions fail when hardware or qualification is missing. The first cohort
   is enrolled in installed tests when a qualified bundle is supplied at build time.
   Provider builds enable `ROCKE_INSTALL_SDPA_REFERENCE` by default. Run
-  `dvc pull dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/gfx942.tar.gz.dvc`
+  `dvc pull dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/sdpa/gfx942.tar.gz.dvc`
   from the repository root before configuring. TheRock already performs this
   DVC download during source preparation. CMake extracts the archive, validates
   every payload hash against
   [`baseline_lock.json`](library/tests/sdpa_reference/architectures/gfx942/baseline_lock.json), and
-  installs it under the existing provider `tests/**` artifact capture.
+  installs it under `engines/test_arch_content/rocke/sdpa/<arch>/` relative to
+  the test root (`bin/hip_kernel_provider/` for provider builds). TheRock captures
+  this in the test component and splits it into the matching architecture artifact,
+  while the Python harness and trusted locks remain in the generic test artifact.
   Missing or corrupt data fails configuration. For builds that intentionally
   omit this GPU lane, use `-DROCKE_INSTALL_SDPA_REFERENCE=OFF`.
   In rocm-libraries superbuild mode (`ROCM_LIBS_SUPERBUILD=ON`), this option
@@ -145,16 +148,23 @@ the strategy's biggest holes live (see
   across cases. Each case still executes both versions twice and validates its
   outputs independently; worker failures and timeouts fail the test.
   To publish a replacement, independently qualify it first, update the source
-  lock, and use `python library/tests/sdpa_reference/artifact.py pack --bundle <qualified-bundle> --lock library/tests/sdpa_reference/architectures/gfx942/baseline_lock.json --archive library/tests/reference_bundles/gfx942.tar.gz`
+  lock, and use `python library/tests/sdpa_reference/artifact.py pack --bundle <qualified-bundle> --lock library/tests/sdpa_reference/architectures/gfx942/baseline_lock.json --archive library/tests/reference_bundles/sdpa/gfx942.tar.gz`
   from the rocKE root. Then run `dvc add` and a scoped `dvc push` for the
   archive from the repository root before pushing its Git pointer. Git tracks
-  the lock, pointer, and ignore entry; compiled kernels and inputs stay in DVC.
+  the lock, pointer, and ignore entry; compiled kernels stay in DVC; inputs are regenerated.
   Architecture enrollments are listed in
   [`architectures/registry.json`](library/tests/sdpa_reference/architectures/registry.json),
   shared by CMake and Python. Each architecture owns its case list, source-dispatch
   adapter, and baseline lock under `sdpa_reference/architectures/<arch>/`, with a
-  separate DVC archive under `reference_bundles/<arch>.tar.gz`. Installed bundles
-  live under `tests/library/tests/reference_bundles/<arch>/`.
+  separate DVC archive under `reference_bundles/sdpa/<arch>.tar.gz`. Each operation
+  owns its directory under `reference_bundles/`, so future convolution references
+  can use `reference_bundles/conv/<arch>.tar.gz` and be updated independently.
+  Source pytest looks for extracted bundles under `reference_bundles/sdpa/<arch>/`;
+  explicit bundle-path overrides are unchanged. Installed bundles
+  live under `engines/test_arch_content/rocke/sdpa/<arch>/` relative to the test
+  root. The `engines/test_arch_content` spelling is required by TheRock's artifact
+  manifest and the hipkernelprovider kpack splitting handler. `arch_content` is
+  reserved for runtime content and must not be used for these test references.
   `ROCKE_SDPA_REFERENCE_ARCHITECTURES` selects the enrolled bundles to install;
   unknown architectures fail configuration. Only gfx942 is currently enrolled.
   Adding another architecture requires its adapter, independently qualified lock
