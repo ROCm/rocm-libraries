@@ -1,8 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 //
-// Portions derived from NVIDIA cuDNN frontend (include/cudnn_frontend_version.h),
-// used under the MIT license.
+// Portions derived from NVIDIA cuDNN frontend, used under the MIT license:
+//   include/cudnn_frontend_version.h
+//     Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
+// License text and pinned upstream version: THIRD_PARTY_LICENSES.md
+// (installed to share/doc/hipdnn_frontend).
 
 /**
  * @file cudnn_frontend_version.h
@@ -15,7 +18,8 @@
  *
  * This pin is also the single source of truth for the shim's node signatures:
  * `detail/graph_wrapper.h` static_asserts on `CUDNN_FRONTEND_VERSION` so a bump
- * here cannot land without re-diffing every node arity against upstream.
+ * here cannot land without re-diffing every node arity against upstream. A bump
+ * must also update the version and commit recorded in THIRD_PARTY_LICENSES.md.
  */
 
 #pragma once

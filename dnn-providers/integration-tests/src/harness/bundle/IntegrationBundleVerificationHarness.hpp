@@ -4,12 +4,15 @@
 #pragma once
 
 #include <cstdint>
+#include <exception>
 #include <filesystem>
+#include <initializer_list>
 #include <iosfwd>
 #include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -20,40 +23,70 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "harness/BundleMetadata.hpp"
-#include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
+#include "harness/bundle/GraphSession.hpp"
+#include "harness/bundle/HarnessDependencies.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/bundle/LoadedEngine.hpp"
+#include "harness/bundle/OutputComparison.hpp"
+#include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaims.hpp"
+#include "harness/bundle/SupportObservationLog.hpp"
+#include "harness/bundle/VerificationOutcome.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
 
-using OutputTensors
-    = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
+// OutputTensors and ExpectedTensorLookup come from OutputComparison.hpp, which owns
+// the comparison this harness drives.
 
-namespace detail
+// The probe SKIP_IF_NO_DEVICES() makes, spelled out because that macro's
+// GTEST_SKIP() returns from SetUp() and would carry the skip off before the
+// authoring log could be told about it. Same condition, same message, so a CI log
+// reader cannot tell the two apart. Only reached under a DEVICE policy, so the unit
+// tests -- which run HOST -- still never touch the HIP runtime.
+inline bool noHipDevicesAvailable()
 {
-std::unordered_map<int64_t, void*> buildVariantPack(
-    TensorMap& inputs,
-    OutputTensors& outputs,
-    const std::unordered_map<int64_t,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-        tensorAttributes,
-    const std::vector<int64_t>& outputTensorUids,
-    bool useDevice);
+    int deviceCount = 0;
+    const auto result = hipGetDeviceCount(&deviceCount);
+    return result == hipErrorNoDevice || deviceCount == 0;
 }
 
-// Fallback chain: golden → GPU ref → CPU ref → SKIP (RFC 0010 §4.4).
-// Inputs are read-only (shared); outputs are separate allocations per executor.
-//
-// TODO(ALMIOPEN-1969 follow-up): Unify graph-init with the non-golden harness.
+// detail::buildVariantPack() lives in VariantPackBuilder.hpp -- both harnesses use
+// it, so it is not this one's to own.
+
+/// Everything the claim phase produced: the verdicts to publish once the run is
+/// over, and any grievance about the phase itself. Both outlive the phase -- they
+/// are used at the end of TestBody(), once the outcome is known.
+struct ClaimPhase
+{
+    SupportObservation observation;
+    std::optional<HarnessComplaint> complaint;
+};
+
+/// Runs one bundle against the engine under test and decides what that says.
+///
+/// Fallback chain: golden → GPU ref → CPU ref → SKIP (RFC 0010 §4.4). Inputs are
+/// read-only (shared); outputs are separate allocations per executor.
+///
+/// **This class has no virtual members.** Everything that needs a GPU, a handle, a
+/// loaded engine plugin, or process-wide state lives behind one of the four
+/// collaborators in HarnessDependencies, so a unit test constructs the real harness
+/// with mocks rather than subclassing it to stub methods out. What is left here is
+/// the part worth testing: which oracle to try, how far the run got, and what that
+/// means for the graph's support claim.
+///
+/// Graph initialisation is still duplicated between this harness and
+/// BundleReferenceValidationHarness; unifying the two is future work.
 class IntegrationBundleVerificationHarness : public ::testing::Test
 {
 public:
-    explicit IntegrationBundleVerificationHarness(bool requiresDevice)
-        : _requiresDevice(requiresDevice)
+    explicit IntegrationBundleVerificationHarness(HarnessDependencies dependencies,
+                                                  std::optional<LoadedEngine> engineUnderTest = {})
+        : _deps(std::move(dependencies))
+        , _engineUnderTest(std::move(engineUnderTest))
     {
     }
 
@@ -76,23 +109,45 @@ public:
         }
     }
 
-protected:
+    // Public rather than protected: the unit tests drive a real harness directly
+    // instead of subclassing it, so they need to call these. GTest calls them
+    // through the base class either way.
+    //
     // NOLINTNEXTLINE(readability-identifier-naming)
     void SetUp() override
     {
-        if(_requiresDevice)
+        // Before the first skip exit, so a bundle this SetUp() goes on to skip is still
+        // counted as selected. That is the whole point of the counter: the gap between it
+        // and the bodies that ran is exactly what SetUp() skipped, and the gap above it is
+        // --gtest_filter.
+        //
+        // shouldObserveClaims(), not a bare sidecar check, because registration seeds
+        // graphsWithClaims only when an engine was named (BundleRegistration.hpp) and the
+        // two counters have to nest or the subtraction above is arithmetic on unrelated
+        // sets. Keying this on the file alone made a run without --test-engine report 0
+        // with claims against a positive selected count -- a summary that blames the
+        // harness for a missing flag.
+        if(shouldObserveClaims())
         {
-            SKIP_IF_NO_DEVICES();
+            _deps.reporter->recordSelectedWithClaims();
+        }
+
+        if(_deps.policy.useDevice() && noHipDevicesAvailable())
+        {
+            noteSkipBeforeObservation();
+            GTEST_SKIP() << "No devices available. Skipping test.";
         }
 
         if(_bundle == nullptr)
         {
+            noteSkipBeforeObservation();
             GTEST_SKIP() << "No bundle set";
         }
 
         if(auto reason = checkTomlSkip(currentTestName()))
         {
-            GTEST_SKIP() << "[arch " << TestConfig::get().getCurrentArch() << "] " << *reason;
+            noteSkipBeforeObservation();
+            GTEST_SKIP() << "[arch " << _deps.policy.arch << "] " << *reason;
         }
 
         applyMetadataGuards();
@@ -101,43 +156,171 @@ protected:
     // NOLINTNEXTLINE(readability-identifier-naming)
     void TestBody() override
     {
-        runComparison();
-        if(!HasFatalFailure() && !IsSkipped())
+        // First line of the body, ahead of everything that can throw. The fact is
+        // already true here, and both openGraph() below and the sidecar read inside
+        // the try can throw -- either would otherwise lose it and leave the summary
+        // blaming SetUp() for a skip that never happened. Same predicate as the
+        // selected counter above, so the two subtract cleanly.
+        if(shouldObserveClaims())
         {
-            EXPECT_TRUE(_verified)
-                << "test completed without verifying anything for " << _bundlePath;
+            _deps.reporter->recordReachedBody();
         }
+
+        // One from_binary, one ranked query, one applicability answer. Everything
+        // below takes the session as an argument, so nothing re-derives it and
+        // nothing caches it on the harness.
+        GraphSession session = openGraph();
+
+        if(TestConfig::get().writeSupportClaims())
+        {
+            observeAndRecordSupport(session);
+            GTEST_SKIP() << "support-claim authoring run (--write-support-claims)";
+        }
+
+        // Declared out here so the tail below still sees it when the read throws: a
+        // default-constructed ClaimPhase commits nothing and complains about nothing.
+        ClaimPhase claims;
+
+        VerificationOutcome outcome;
+        try
+        {
+            // Inside the try because a hand-edited sidecar that does not parse
+            // throws, and that is the class of fault the catch exists for.
+            claims = observeClaims(session);
+
+            auto claimOutcome = enforcedClaimFailure(claims.observation);
+            outcome = claimOutcome ? *claimOutcome : runComparison(session);
+        }
+        catch(const std::exception& e)
+        {
+            // Every throw still produces an outcome, or the summary is short a row
+            // and reconciles against nothing. A throw from the claim read lands here
+            // before the graph is counted as queried, keeping withClaims >= queried
+            // true. HARNESS at NOT_REACHED: a throw is our bug, not the engine's.
+            outcome = VerificationOutcome::failed(
+                VerificationDepth::NOT_REACHED, FailureOrigin::HARNESS, e.what());
+        }
+
+        commitClaims(claims.observation.results, outcome);
+        // Unconditional: both rules are self-guarding, so neither needs a surrounding
+        // condition here.
+        raiseComplaints(
+            {claims.complaint,
+             shallowPassComplaint(outcome, bundleRequiredDepth(), _bundlePath.string())});
+        reportOutcome(outcome);
     }
 
-    virtual void executeGraphThroughEngine(std::unordered_map<int64_t, void*>& variantPack);
-    virtual void runReferenceExecutor(ReferenceExecutorType type,
-                                      std::unordered_map<int64_t, void*>& variantPack);
-    virtual std::unique_ptr<IReferenceGraphExecutor>
-        makeReferenceExecutor(ReferenceExecutorType type);
-    virtual VerificationMode getVerificationMode() const;
-    virtual bool isEnforcingSupportClaims() const;
-    virtual void applyMetadataGuards() const;
-
-    // Virtual so deviceless tests can observe the non-FULL routing decision without
-    // reaching getSharedHandle(). The real implementation needs a device.
-    virtual void enforceAtLevel(EnforcementLevel level);
-
-    // Protected so a stubbed enforceAtLevel() can exit the same way the real one does
-    // when it cannot verify: marks the bundle accounted for, then skips.
-    void skipUnverifiable(const std::string& reason);
-
+    /// Exposed so a test can pin the fill recipes a bundle would otherwise carry in
+    /// its metadata.
     InputFillRecipes& inputFillRecipes()
     {
         return _inputFillRecipes;
     }
 
+    /// Exposed so a test can check the packed copy of the bundle's inputs that the
+    /// engine receives. Empty unless an input is sub-byte.
+    const TensorMap& packedInputs() const
+    {
+        return _packedInputs;
+    }
+
+    /// Mode B/C support observation: which engines take this graph?
+    ///
+    /// Returns observations rather than recording them to a singleton, so a test
+    /// can call it with a canned engine list and inspect the result. Mode C
+    /// (--test-engine) narrows to _engineUnderTest automatically.
+    std::vector<ObservedGraphSupport> observeSupportOnly(const GraphSession& session,
+                                                         const std::vector<LoadedEngine>& engines);
+
 private:
-    bool _requiresDevice;
-    mutable bool _verified = false;
-    std::filesystem::path _bundlePath;
-    SupportClaimLocator _claimLocator;
-    std::shared_ptr<IntegrationTestBundle> _bundle;
-    InputFillRecipes _inputFillRecipes;
+    // The one place a graph is built and the ranked list is asked for.
+    GraphSession openGraph();
+
+    void applyMetadataGuards() const;
+
+    // Called at every SetUp() exit that returns before TestBody(). Must run before
+    // the GTEST_SKIP() beside it, because GTEST_SKIP() expands to a return.
+    //
+    // static because no harness state is read or written -- the count lives in the
+    // process-wide log, which is what lets a skip recorded here be subtracted by an
+    // authoring run in main().
+    static void noteSkipBeforeObservation()
+    {
+        SupportObservationLog::get().recordSkipBeforeObservation();
+    }
+
+    SupportObservation observeSupportClaims(const GraphSession& session);
+
+    // The one place the claim mode is read: whether a bad verdict costs anything. The
+    // verdict itself is recorded either way, which is what makes a warn-only run
+    // worth printing. Needs no shouldObserveClaims() guard on top -- an unqueried graph
+    // carries no results, so there is nothing to block on.
+    std::optional<VerificationOutcome>
+        enforcedClaimFailure(const SupportObservation& observation) const
+    {
+        if(_deps.policy.claims != ClaimMode::ENFORCE)
+        {
+            return std::nullopt;
+        }
+        return claimBlocked(observation);
+    }
+
+    void observeAndRecordSupport(const GraphSession& session);
+
+    // Reads this graph's claims and applies the coverage rules to the run counters.
+    // Returns the complaint owed for an unreached sidecar rather than raising it, so
+    // the rule stays assertable on its own.
+    ClaimPhase observeClaims(const GraphSession& session);
+
+    // The one place a HarnessComplaint turns into a gtest failure. nullopts are
+    // skipped, which is what lets the call site pass every rule unconditionally.
+    static void raiseComplaints(std::initializer_list<std::optional<HarnessComplaint>> complaints);
+
+    // Publishes every verdict, promoting the engine-under-test's accepted claim by
+    // what the run actually achieved. Called exactly once per test.
+    void commitClaims(const std::vector<SupportResult>& results,
+                      const VerificationOutcome& outcome);
+
+    // The only place a test's *disposition* is decided -- pass, skip or fail. Called
+    // last, because GTEST_SKIP() and FAIL() both return. raiseComplaints() above can
+    // add a non-terminal failure before it, but it never decides what the test is.
+    static void reportOutcome(const VerificationOutcome& outcome);
+
+    // Records the bundle as unverifiable and yields the skip outcome for TestBody()
+    // to issue.
+    VerificationOutcome unverifiable(const std::string& reason,
+                                     VerificationDepth reached = VerificationDepth::NOT_REACHED);
+
+    // The single definition of "this graph's claims are this run's business": an engine
+    // was named to check against, this is not an authoring run, and a sidecar exists.
+    // Deliberately free of the claim mode -- what a broken claim costs is
+    // enforcedClaimFailure()'s question, and reading it here too would make a run that
+    // cannot fail also unable to report.
+    //
+    // An authoring run skips every body before the claim check, so counting it would
+    // leave bodies reached with none queried -- the shape the summary calls a harness
+    // defect. Excluded here rather than at each counter, so the counters cannot drift.
+    //
+    // Ordered cheapest-first on purpose: carriesSidecar() stats the filesystem on every
+    // call, a few times per test, and a run that named no engine must not pay.
+    bool shouldObserveClaims() const
+    {
+        return _engineUnderTest.has_value() && !TestConfig::get().writeSupportClaims()
+               && carriesSidecar();
+    }
+
+    // "There is a sidecar here", and nothing more -- no engine.
+    bool carriesSidecar() const
+    {
+        return !_claimLocator.sidecarPath.empty()
+               && std::filesystem::exists(_claimLocator.sidecarPath);
+    }
+
+    VerificationDepth bundleRequiredDepth() const
+    {
+        return _bundle != nullptr ? requiredDepth(_bundle->metadata.enforcementLevel)
+                                  : VerificationDepth::VERIFIED;
+    }
 
     enum class RefStatus
     {
@@ -149,47 +332,82 @@ private:
     {
         RefStatus status;
         std::string message;
+        /// Where the reference left its outputs, and so where they are compared. Only
+        /// meaningful when `status == RAN`.
+        ValidationSite site = ValidationSite::HOST;
     };
 
-    void runComparison();
-    void runGoldenMode();
-    void runExplicitRefMode(ReferenceExecutorType type);
-    void runAutoMode();
-    void runGoldenCheckMode();
+    enum class EngineStatus
+    {
+        RAN, ///< the engine executed the graph; `outputs` holds what it wrote
+        DECLINED, ///< the engine refused the graph
+        ERRORED, ///< the engine broke while compiling or executing
+    };
+    struct EngineRunResult
+    {
+        EngineStatus status = EngineStatus::DECLINED;
+        /// Plans compiled before the engine stopped, so the run reached BUILDABLE
+        /// even though it did not execute.
+        bool plansBuilt = false;
+        std::string message;
+        OutputTensors outputs;
+    };
 
-    bool ensureInputsAvailable();
-    bool fillBundleInputs();
+    // Verifies the bundle at the depth its enforcement_level asks for. Only
+    // APPLICABILITY and BUILDABLE come here; FULL takes the comparison path.
+    VerificationOutcome enforceAtLevel(EnforcementLevel level, GraphSession& session);
+
+    VerificationOutcome runComparison(GraphSession& session);
+    VerificationOutcome runGoldenMode(GraphSession& session);
+    VerificationOutcome runExplicitRefMode(GraphSession& session, ReferenceExecutorType type);
+    VerificationOutcome runAutoMode(GraphSession& session);
+
+    // nullopt when the inputs are ready; otherwise the outcome to return.
+    std::optional<VerificationOutcome> prepareInputs();
+    std::optional<VerificationOutcome> fillBundleInputs();
 
     OutputTensors allocateSentinelOutputs() const;
-    std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs,
-                                                        bool useDevice) const;
-    std::optional<OutputTensors> runEngineCapturingOutputs(std::string& error);
-    std::optional<OutputTensors> runEngineOrSkip();
+    std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs, bool useDevice);
+    EngineRunResult runEngine(GraphSession& session);
+    VerificationOutcome engineDidNotRun(const EngineRunResult& run) const;
 
     RefRunResult runReferenceCapturingOutputs(ReferenceExecutorType type,
                                               OutputTensors& refOutputs);
     void markOutputsModified(OutputTensors& outputs) const;
-    static void markOutputsModifiedFor(OutputTensors& outputs, bool device);
 
-    void compareAgainstGolden(OutputTensors& engineOutputs);
-    void compareOutputs(OutputTensors& engineOutputs, OutputTensors& expected);
+    // Golden data is loaded on the host, so under --validator auto it is compared there.
+    VerificationOutcome compareAgainstGolden(OutputTensors& engineOutputs);
+    VerificationOutcome
+        compareOutputs(OutputTensors& engineOutputs, OutputTensors& expected, ValidationSite site);
 
-    template <typename ExpectedLookup>
-    void compareEach(OutputTensors& engineOutputs, ExpectedLookup expectedFor);
+    // Resolves tolerances, runs bundle::compareOutputs() at `site` — or wherever
+    // policy.validator overrides it to — and turns each mismatch it returns into one
+    // failure. The comparison itself owns no gtest state.
+    VerificationOutcome compareAgainst(OutputTensors& engineOutputs,
+                                       const ExpectedTensorLookup& expectedFor,
+                                       ValidationSite site);
 
-    void compareOutputTensor(int64_t uid,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
-                             hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-                             hipdnn_data_sdk::utilities::ITensor& expected,
-                             hipdnn_data_sdk::utilities::ITensor& actual,
-                             float atol,
-                             float rtol) const;
+    // VERIFIED either way: the oracle ran and the outputs were examined. A mismatch
+    // carries no message because compareAgainst() has already put one failure per
+    // drifted tensor on the record — the only place in this harness where that is
+    // true, and so the only caller of alreadyReportedFailure().
+    static VerificationOutcome comparisonOutcome(bool allMatched)
+    {
+        return allMatched ? VerificationOutcome::passed(VerificationDepth::VERIFIED)
+                          : VerificationOutcome::alreadyReportedFailure(VerificationDepth::VERIFIED,
+                                                                        FailureOrigin::COMPARISON);
+    }
 
     void recordRefError(const std::string& reason);
     static std::string refLabel(ReferenceExecutorType type);
 
-    static std::string
-        labelFor(int64_t uid, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs);
+    HarnessDependencies _deps;
+    std::optional<LoadedEngine> _engineUnderTest;
+    std::filesystem::path _bundlePath;
+    SupportClaimLocator _claimLocator;
+    std::shared_ptr<IntegrationTestBundle> _bundle;
+    InputFillRecipes _inputFillRecipes;
+    TensorMap _packedInputs;
 };
 
 } // namespace hipdnn_integration_tests::bundle

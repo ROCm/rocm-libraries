@@ -30,14 +30,6 @@ if(BUILD_ROCSPARSE_ILP64)
   add_compile_options(-Drocsparse_ILP64)
 endif()
 
-if(BUILD_WITH_CSC_TRSV)
-  add_compile_options(-DROCSPARSE_WITH_CSC_TRSV)
-endif()
-
-if(BUILD_WITH_CSC_TRSM)
-  add_compile_options(-DROCSPARSE_WITH_CSC_TRSM)
-endif()
-
 set(ROCSPARSE_BENCHMARK_SOURCES
   client.cpp
   rocsparse_bench_app.cpp
@@ -233,11 +225,8 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_check_matrix_hyb.cpp
 ../testings/testing_check_spmat.cpp
 ../testings/testing_bsrpad_value.cpp
+../testings/testing_spildlt0.cpp
 )
-
-if(BUILD_WITH_ILDLT0)
-  list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_spildlt0.cpp)
-endif()
 
 if(BUILD_WITH_ELL_TRSV)
   list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_spsv_ell.cpp)

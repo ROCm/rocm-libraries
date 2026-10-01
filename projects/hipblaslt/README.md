@@ -271,14 +271,12 @@ inv build --architecture gfx1100 --clean
 
 * `TENSILELITE_BUILD_PARALLEL_LEVEL` Number of CPU cores to use for building device libraries (will use nproc if unset)
 * `TENSILELITE_KEEP_BUILD_TMP` OFF CACHE STRING Keep temporary build directory for device libraries (default: see below)
-* `TENSILELITE_LIBRARY_FORMAT` Format of master solution library files (msgpack or yaml) (default: see below)
 * `TENSILELITE_ASM_DEBUG` Keep debug information for built code objects (default: see below)
 * `TENSILELITE_LOGIC_FILTER` Cutomsized logic filter, default is *, i.e. all logics (default: see below)
 * `TENSILELITE_NO_COMPRESS` Do not compress device code object files (default: see below)
 * `TENSILELITE_EXPERIMENTAL` Process experimental logic files (default: see below)
 * `HIPBLASLT_LIBLOGIC_PATH` Path to library logic files (will use 'library' if unset) (default: `Off`)
 * `HIPBLASLT_TENSILE_LIBPATH` Path to output the device gemm libraries (default: `build/Tensile`)
-* `HIPBLASLT_ASIC_REVISION` gfx1250 ASIC revision to build for, `v0` or `v1`; `invoke build` probes the local GPU and sets it when unset (default: empty, treated as `v1`)
 
 > [!NOTE]
 > To determine defaults for the `TensileCreateLibrary` command generated when building the device
@@ -294,8 +292,12 @@ hipBLASLt with `--clients`.
 
 You can find more information at the following links:
 
-* [hipblaslt-test](clients/gtest/README.md)
-* [hipblaslt-bench](clients/benchmarks/README.md)
+* [hipblaslt-test](clients/tests/README.md)
+* [hipblaslt-bench](clients/bench/README.md)
+
+For the full testing strategy (what gates a pull request, what does not, and why), see
+[TESTING.md](TESTING.md); TensileLite's own testing strategy is documented separately in
+[tensilelite/TESTING.md](tensilelite/TESTING.md).
 
 ## Documentation
 

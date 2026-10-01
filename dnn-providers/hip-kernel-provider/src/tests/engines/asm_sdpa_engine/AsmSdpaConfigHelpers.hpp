@@ -13,6 +13,7 @@
 #include "asm_fmha_v3_fwd_configs.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
 namespace asm_sdpa_engine
 {
@@ -34,6 +35,7 @@ struct GraphTestCase
     int64_t seqKv = 128;
 
     std::optional<float> attnScale;
+    bool withStats = false;
 
     std::string name;
     std::string arch;
@@ -101,32 +103,38 @@ std::string getConfigDescription(const fmha_v3_fwdConfig& config);
 
 /**
  * @brief Wraps a kernel config in a GraphTestCase descriptor with default dimensions.
- */
-GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config);
-
-/**
- * @brief Builds the SDPA forward graph topology described by a GraphTestCase.
- */
-std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTestCase& testCase);
-
-/**
- * @brief Generates compatible graph test case descriptors for all configs.
- * @note ConfigType requires a corresponding configToTestCase and getConfigDescription function
- * @todo If we upgrade to C++20, add a concept that guarantees these functions are declared
  *
- * @tparam ConfigType The config type
- * @param configMap The map of all configs
- * @return Vector of GraphTestCase descriptors for each config
+ * @param config The kernel configuration
+ * @param withStats When true, sets the withStats flag on the test case
  */
+GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config, bool withStats = false);
+
+/// An SDPA forward graph together with its STATS output attribute.
+struct SdpaFwdGraph
+{
+    std::shared_ptr<hipdnn_frontend::graph::Graph> graph;
+    /// The log-sum-exp output, or null when the test case does not enable stats.
+    std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> stats;
+};
+
+/// Builds the SDPA forward graph topology described by @p testCase, enabling stats when
+/// testCase.withStats is set and returning that output's attribute alongside the graph so
+/// callers can address it by identity.
+SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase);
+
+/// GraphTestCase descriptors for every config in @p configMap, stats-enabled when
+/// @p withStats is set. ConfigType requires matching configToTestCase and
+/// getConfigDescription overloads.
 template <typename ConfigType>
 std::vector<GraphTestCase>
-    getCompatibleGraphTestCases(const std::unordered_map<std::string, ConfigType>& configMap)
+    getCompatibleGraphTestCases(const std::unordered_map<std::string, ConfigType>& configMap,
+                                bool withStats = false)
 {
     std::vector<GraphTestCase> testCases;
     testCases.reserve(configMap.size());
     for(const auto& [key, config] : configMap)
     {
-        testCases.push_back(configToTestCase(config));
+        testCases.push_back(configToTestCase(config, withStats));
     }
     return testCases;
 }

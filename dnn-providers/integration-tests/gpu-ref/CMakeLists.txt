@@ -33,13 +33,17 @@ add_library(
     src/GpuReferencePointwise.cpp
     src/GpuFpReferenceConvolution.cpp
     src/GpuFpReferenceLayernorm.cpp
+    src/GpuFpReferenceMatmul.cpp
     src/GpuFpReferenceSdpa.cpp
+    src/GpuFpReferenceReduction.cpp
     src/GpuFpReferenceRMSNorm.cpp
     src/GpuFpReferenceBatchnorm.cpp
+    src/GpuFpReferenceRmsValidation.cpp
     src/GpuFpReferenceValidation.cpp
     src/GpuIntReferenceValidation.cpp
     src/GpuReferenceValidationFactory.cpp
     src/GpuRefKernelCompiler.cpp
+    src/GpuRefLaunch.cpp
     src/GpuRefValidatorHelpers.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/kernels/GpuRefKernelSources.cpp
 )

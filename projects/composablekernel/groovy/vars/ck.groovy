@@ -248,6 +248,38 @@ def runShell(String command){
     return (output != "")
 }
 
+// Path-length check (ROCM-29381). Bounds the repository-relative path so the
+// absolute path stays under the Windows MAX_PATH of 260; ninja's Stat() does
+// not honour LongPathsEnabled, so an over-long source path fails the build.
+//
+// Scoped to the files this change adds or renames (--diff-filter=AR) rather
+// than the whole tree: the tree already carries paths over the limit, and
+// unrelated work must not be blocked by them. New paths are what we need to
+// keep short. Modifications are excluded on purpose, so a PR that merely
+// edits a pre-existing long file is not forced into a rename project.
+// Deletions are excluded too, so removing a long path always passes.
+//
+// The diff itself lives in check_changed_path_length.sh, not inline here: a
+// `git diff ... | xargs` pipeline returns xargs's status, so a base ref that
+// does not resolve produced no files and still reported success. The script
+// resolves the base explicitly and fails loudly when it cannot.
+//
+// Called from the unconditional "Determine CI Execution" stage rather than from
+// runStaticChecks(), because that stage is gated on SHOULD_RUN_CI and a change
+// touching only docs, Markdown, .github or .gitignore skips it -- yet such a
+// change can still add a path that breaks the Windows checkout. The script needs
+// only bash and git, so it runs directly on the node instead of inside the CK
+// docker image, and does not depend on the "Build Docker" stage having run.
+//
+// The base branch is interpolated by Groovy rather than read from the shell's
+// environment, so the check does not depend on CHANGE_TARGET being exported.
+def runPathLengthCheck() {
+    def baseBranch = env.CHANGE_TARGET ?: "develop"
+    dir("projects/composablekernel") {
+        sh "script/check_changed_path_length.sh ${baseBranch}"
+    }
+}
+
 def shouldRunCICheck() {
     // File patterns that should not trigger CI
     def skipFilePatterns = [
@@ -703,12 +735,13 @@ def build_and_run_fmha(String arch){
 
 def cmake_build(Map conf=[:]){
 
-    def config_targets = conf.get("config_targets","check")
+    def config_targets = conf.get("config_targets","install")
     def build_envs = "CTEST_PARALLEL_LEVEL=4 " + conf.get("build_env","")
     def prefixpath = conf.get("prefixpath","/opt/rocm")
     def setup_args = conf.get("setup_args","")
     // make sure all unit tests always run on develop branch
     def runAllUnitTests = (env.BRANCH_NAME == "develop") ? true : params.RUN_ALL_UNIT_TESTS
+    echo "runAllUnitTests = ${runAllUnitTests}, RUN_ALL_UNIT_TESTS = ${params.RUN_ALL_UNIT_TESTS}"
 
     if (prefixpath != "/usr/local"){
         setup_args = setup_args + " -DCMAKE_PREFIX_PATH=${prefixpath} "
@@ -723,9 +756,9 @@ def cmake_build(Map conf=[:]){
         cmake_envs = "CXX=/opt/rocm/llvm/bin/clang++ CXXFLAGS='-Werror' " + conf.get("cmake_ex_env","")
     }
 
-    if(conf.get("build_install","") == "true")
+    if(runAllUnitTests)
     {
-        config_targets = 'install ' + config_targets
+        config_targets = 'install'
         setup_args = ' -DBUILD_DEV=On -DCMAKE_INSTALL_PREFIX=../install' + setup_args
     } else{
         setup_args = ' -DBUILD_DEV=On' + setup_args
@@ -942,7 +975,7 @@ def cmake_build(Map conf=[:]){
                         bash ../script/dependency-parser/smart_build_and_test.sh
                     """
                 }
-                else{ //run all tests
+                else{ //run all tests if runAllUnitTests = true
                     if(!setup_args.contains("gfx1250")){
                         echo "Full test suite requested (RUN_ALL_UNIT_TESTS=true or develop branch)"
                         sh "ninja -j${nt} install check"
@@ -961,7 +994,7 @@ def cmake_build(Map conf=[:]){
                     if(params.BUILD_PACKAGES || params.BUILD_INSTANCES_ONLY){
                         echo "Build ckProfiler packages"
                         sh 'ninja -j64 package'
-                        sh "mv composablekernel-ckprofiler_*.deb composablekernel-ckprofiler_1.2.0_amd64_${arch_name}.deb"
+                        sh "mv composablekernel-ckprofiler_*.deb composablekernel-ckprofiler_1.3.0_amd64_${arch_name}.deb"
                         stash includes: "composablekernel-ckprofiler**.deb", name: "profiler_package_${arch_name}"
                     }
                 }
@@ -1322,10 +1355,10 @@ def getFaTestsCmds() {
 }
 
 // All static checks in one container on a single node: clang-format (always),
-// cppcheck (when RUN_CPPCHECK), then the ASCII-only and CRLF checks. Combined
-// into a single buildAndTest, driven by one Jenkinsfile stage, to keep the
-// declarative pipeline's WorkflowScript under the JVM 64KB method-size limit and
-// to avoid per-check checkout/container overhead.
+// cppcheck (when RUN_CPPCHECK), then the ASCII-only, CRLF and path-length
+// checks. Combined into a single buildAndTest, driven by one Jenkinsfile stage,
+// to keep the declarative pipeline's WorkflowScript under the JVM 64KB
+// method-size limit and to avoid per-check checkout/container overhead.
 //
 // Every check runs from projects/composablekernel (cmake_build runs execute_cmd
 // from .../build, so the single leading `cd ..` lands there); no check changes
@@ -1346,6 +1379,12 @@ def runStaticChecks() {
     }
     checks << """${checkFiles} -print0 | xargs -0 -P 8 -n 64 script/check_ascii_only.sh"""
     checks << """${checkFiles} -print0 | xargs -0 -P 8 -n 64 script/check_no_crlf.sh"""
+
+    // The path-length check (ROCM-29381) deliberately does NOT live here. This
+    // stage is gated on SHOULD_RUN_CI, which is false for a change touching only
+    // docs, Markdown, .github or .gitignore -- categories that can still carry an
+    // over-long path. See runPathLengthCheck(), called unconditionally from the
+    // "Determine CI Execution" stage.
 
     buildAndTest(
         setup_args: "NO_CK_BUILD",
@@ -1404,115 +1443,6 @@ def runComprehensiveConvDatasetTests() {
     )
 }
 
-def runTileEngineBasicTests(String compiler) {
-    buildAndTest(
-        setup_args: "NO_CK_BUILD",
-        build_type: 'Release',
-        execute_cmd: """
-            cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
-                -D BUILD_CK_TILE_ENGINE="ON" \
-                -D CMAKE_CXX_COMPILER="${compiler}" \
-                -D CMAKE_BUILD_TYPE=Release \
-                -D GPU_TARGETS="gfx942" \
-                -D GEMM_UNIVERSAL_DATATYPE="fp8;fp16" \
-                -D GEMM_UNIVERSAL_LAYOUT="rcr;rrr;crr;ccr" \
-                -D GEMM_UNIVERSAL_CONFIG_FILE="default_ci_config.json" \
-                -D GEMM_MULTI_D_DATATYPE="fp16" \
-                -D GEMM_MULTI_D_LAYOUT="rcrr;rrrr;crrr;ccrr" \
-                -D GEMM_MULTI_D_CONFIG_FILE="default_ci_config.json" \
-                -D GEMM_PRESHUFFLE_DATATYPE="fp16;fp8;bf16;bf8" \
-                -D GEMM_PRESHUFFLE_LAYOUT="rcr" \
-                -D GEMM_PRESHUFFLE_CONFIG_FILE="default_ci_config.json" .. && \
-            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all && \
-            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_preshuffle_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_multi_d_results.json"""
-    )
-}
-
-def runTileEngineGemmTests(String arch, String compiler) {
-    def execute_cmd
-    if (arch == "gfx942") {
-        execute_cmd = """
-            cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
-                -D BUILD_CK_TILE_ENGINE="ON" \
-                -D CMAKE_CXX_COMPILER="${compiler}" \
-                -D CMAKE_BUILD_TYPE=Release \
-                -D GPU_TARGETS="gfx942" \
-                -D GEMM_UNIVERSAL_DATATYPE="fp8;fp16;bf8;bf16" \
-                -D GEMM_UNIVERSAL_LAYOUT="rcr;rrr;crr;ccr" \
-                -D GEMM_STREAMK_DATATYPE="fp8;fp16" \
-                -D GEMM_STREAMK_LAYOUT="rcr" \
-                -D GEMM_MULTI_D_DATATYPE="fp16" \
-                -D GEMM_MULTI_D_LAYOUT="rcrr;rrrr;crrr;ccrr" \
-                -D GEMM_PRESHUFFLE_DATATYPE="fp16;fp8;bf16;bf8" \
-                -D GEMM_PRESHUFFLE_LAYOUT="rcr" \
-                -D GROUPED_GEMM_DATATYPE="fp8;fp16" \
-                -D GROUPED_GEMM_LAYOUT="rcr;rrr;crr;ccr" \
-                -D GEMM_MULTI_ABD_DATATYPE="fp16" \
-                -D GEMM_MULTI_ABD_LAYOUT="rcrr" \
-                -D BATCHED_CONTRACTION_DATATYPE="fp16" \
-                -D BATCHED_CONTRACTION_LAYOUT="rcr" \
-                -D GEMM_ROWCOLQUANT_DATATYPE="fp8;bf8" \
-                -D GEMM_ROWCOLQUANT_LAYOUT="rcr" \
-                -D GEMM_TENSOR_QUANT_DATATYPE="fp8;bf8" \
-                -D GEMM_TENSOR_QUANT_LAYOUT="rcr" \
-                -D GROUPED_GEMM_ROWCOLQUANT_DATATYPE="fp8;bf8" \
-                -D GROUPED_GEMM_ROWCOLQUANT_LAYOUT="rcr" \
-                -D GROUPED_GEMM_TENSORQUANT_DATATYPE="fp8;bf8" \
-                -D GROUPED_GEMM_TENSORQUANT_LAYOUT="rcr" \
-                -D BATCHED_GEMM_DATATYPE="fp16" \
-                -D BATCHED_GEMM_LAYOUT="rcr" \
-                -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
-            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_gemm_streamk_all benchmark_grouped_gemm_all  benchmark_gemm_multi_abd_all benchmark_batched_contraction_all benchmark_gemm_rowcolquant_all benchmark_gemm_tensor_quant_all benchmark_grouped_gemm_rowcolquant_all benchmark_grouped_gemm_tensorquant_all benchmark_batched_gemm_all && \
-            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_preshuffle_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_multi_d_results.json && \
-            python3 ../tile_engine/ops/gemm/grouped_gemm/grouped_gemm_benchmark.py . --problem-sizes "1024,1024,1024" --group-counts 8 --warmup 5 --repeat 5 --verbose --json grouped_gemm_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_multi_abd/gemm_multi_abd_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_multi_abd_results.json && \
-            python3 ../tile_engine/ops/gemm/batched_contraction/batched_contraction_benchmark.py . --problem-configs "g=2;m=1024;n=1024;k=1024" --warmup 5 --repeat 5 --verbose --json batched_contraction_results.json && \
-            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_rowcolquant/gemm_rowcolquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_rowcolquant_results.json && \
-            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_tensor_quant/gemm_tensor_quant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_tensor_quant_results.json && \
-            python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_rowcolquant/grouped_gemm_rowcolquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json grouped_gemm_rowcolquant_results.json && \
-            python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_tensorquant/grouped_gemm_tensorquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json grouped_gemm_tensorquant_results.json  && \
-            python3 ../tile_engine/ops/gemm/batched_gemm/batched_gemm_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json batched_gemm_results.json """
-    } else if (arch == "gfx950") {
-        execute_cmd = """
-            cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
-                -D BUILD_CK_TILE_ENGINE="ON" \
-                -D CMAKE_CXX_COMPILER="${compiler}" \
-                -D CMAKE_BUILD_TYPE=Release \
-                -D GPU_TARGETS="gfx950" \
-                -D GEMM_UNIVERSAL_DATATYPE="fp8;fp16" \
-                -D GEMM_UNIVERSAL_LAYOUT="rcr;rrr;crr;ccr" \
-                -D GEMM_MULTI_D_DATATYPE="fp16" \
-                -D GEMM_MULTI_D_LAYOUT="rcrr;rrrr;crrr;ccrr" \
-                -D GEMM_PRESHUFFLE_DATATYPE="fp16;fp8;bf16;bf8" \
-                -D GEMM_PRESHUFFLE_LAYOUT="rcr" \
-                -D MX_GEMM_DATATYPE="fp4;fp8" \
-                -D MX_GEMM_LAYOUT="rcr" \
-                -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
-            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all && \
-            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_preshuffle_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_multi_d_results.json && \
-            python3 ../tile_engine/ops/gemm/mx_gemm/mx_gemm_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json mx_gemm_results.json """
-    } else if (arch == "gfx1201") {
-        execute_cmd = """
-            cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
-                -D BUILD_CK_TILE_ENGINE="ON" \
-                -D CMAKE_CXX_COMPILER="${compiler}" \
-                -D CMAKE_BUILD_TYPE=Release \
-                -D GPU_TARGETS="gfx1201" \
-                -D GEMM_UNIVERSAL_DATATYPE="fp16" \
-                -D GEMM_UNIVERSAL_LAYOUT="rcr;rrr;crr;ccr" \
-                -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
-            ninja -j${nthreads()} benchmark_gemm_universal_all && \
-            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json"""
-    }
-    buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
-}
-
 def runBuildCKAndTests(String arch) {
     def gpuTarget
     def extraSetupArgs = ""
@@ -1522,7 +1452,6 @@ def runBuildCKAndTests(String arch) {
     switch (arch) {
         case "gfx90a":
             gpuTarget = "gfx90a"
-            extraSetupArgs = " -DCK_CXX_STANDARD=\"17\""
             execute_cmd = build_client_examples(gpuTarget)
             break
         case "gfx1250":

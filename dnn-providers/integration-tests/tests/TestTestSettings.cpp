@@ -8,9 +8,12 @@
 #include <fstream>
 #include <string>
 
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
+
 #include "harness/TestSettings.hpp"
 
 using hipdnn_integration_tests::TestSettings;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 
 // NOLINTBEGIN(readability-identifier-naming) -- gtest macro-generated names
 
@@ -18,21 +21,22 @@ namespace
 {
 
 // Helper to create a temporary TOML file that is auto-deleted on destruction.
+//
+// The name is drawn from the shared scratch directory rather than std::rand(): an
+// unseeded std::rand() yields the same sequence in every process, so two concurrent
+// runs of this binary both draw the same first value and race on one file.
 class TempTomlFile
 {
 public:
     explicit TempTomlFile(const std::string& content)
-        : _path(std::filesystem::temp_directory_path()
-                / ("test_settings_" + std::to_string(std::rand()) + ".toml"))
+        : _dir(claimScratchDirectory("test_settings"))
+        , _path(_dir.path() / "settings.toml")
     {
         std::ofstream ofs(_path);
         ofs << content;
     }
 
-    ~TempTomlFile()
-    {
-        std::filesystem::remove(_path);
-    }
+    ~TempTomlFile() = default;
 
     TempTomlFile(const TempTomlFile&) = delete;
     TempTomlFile& operator=(const TempTomlFile&) = delete;
@@ -45,6 +49,7 @@ public:
     }
 
 private:
+    hipdnn_test_sdk::utilities::ScopedDirectory _dir;
     std::filesystem::path _path;
 };
 
@@ -290,6 +295,339 @@ rtol = 5e-2
     ASSERT_TRUE(result.has_value());
     EXPECT_FLOAT_EQ(result->atol, 1e-3F);
     EXPECT_FLOAT_EQ(result->rtol, 1e-2F);
+}
+
+// ---------------------------------------------------------------------------
+// [[validator_overrides]]
+//
+// allclose is the default everywhere and this section is the only thing that can
+// change it, so the parser is strict: an entry that does not say exactly what it
+// means is a load error, not a silent fall-back to allclose.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+const char* const K_RMS_CONFIG = R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*LayernormBackward*"]
+tensors = ["*::DSCALE", "*::DBIAS"]
+validator = "rms"
+rms_threshold = 1e-4
+)";
+
+} // namespace
+
+TEST(TestSettingsValidatorOverrides, NoOverridesMeansNoOverride)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+)");
+
+    const TestSettings settings(file.path());
+    EXPECT_EQ(settings.validatorOverrideCount(), 0U);
+    EXPECT_FALSE(settings.findValidatorOverride("AnyTest", "AnyTensor").has_value());
+}
+
+TEST(TestSettingsValidatorOverrides, MatchesOnBothNameAndTensorGlob)
+{
+    const TempTomlFile file(K_RMS_CONFIG);
+    const TestSettings settings(file.path());
+
+    ASSERT_EQ(settings.validatorOverrideCount(), 1U);
+
+    const auto hit = settings.findValidatorOverride(
+        "Smoke/IntegrationGpuLayernormBackwardPure5DFp32.Correctness/9",
+        "LayernormBackward_0::DSCALE");
+    ASSERT_TRUE(hit.has_value());
+    EXPECT_EQ(hit->kind, hipdnn_integration_tests::ValidatorOverrideKind::RMS);
+    EXPECT_FLOAT_EQ(hit->rmsThreshold, 1e-4F);
+}
+
+// The tensor glob is what keeps dx on allclose while dscale moves to RMS. Matching
+// on the test name alone would take the whole graph with it.
+TEST(TestSettingsValidatorOverrides, OtherTensorsInTheSameCaseAreUnaffected)
+{
+    const TempTomlFile file(K_RMS_CONFIG);
+    const TestSettings settings(file.path());
+
+    EXPECT_FALSE(
+        settings
+            .findValidatorOverride("Smoke/IntegrationGpuLayernormBackwardPure5DFp32.Correctness/9",
+                                   "LayernormBackward_0::DX")
+            .has_value());
+}
+
+TEST(TestSettingsValidatorOverrides, OtherSuitesWithTheSameTensorAreUnaffected)
+{
+    const TempTomlFile file(K_RMS_CONFIG);
+    const TestSettings settings(file.path());
+
+    EXPECT_FALSE(
+        settings
+            .findValidatorOverride("Smoke/IntegrationGpuRMSNormBackwardPureFp32.Correctness/0",
+                                   "RMSNormBackward_0::DSCALE")
+            .has_value());
+}
+
+TEST(TestSettingsValidatorOverrides, LaterEntriesTakePrecedence)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*LayernormBackward*"]
+tensors = ["*::DSCALE"]
+validator = "rms"
+rms_threshold = 1e-4
+
+[[validator_overrides]]
+filters = ["*LayernormBackward*Bfp16*"]
+tensors = ["*::DSCALE"]
+validator = "allclose"
+)");
+
+    const TestSettings settings(file.path());
+
+    const auto fp32
+        = settings.findValidatorOverride("Smoke/LayernormBackwardFp32.C/0", "x::DSCALE");
+    ASSERT_TRUE(fp32.has_value());
+    EXPECT_EQ(fp32->kind, hipdnn_integration_tests::ValidatorOverrideKind::RMS);
+
+    const auto bf16
+        = settings.findValidatorOverride("Smoke/LayernormBackwardBfp16.C/0", "x::DSCALE");
+    ASSERT_TRUE(bf16.has_value());
+    EXPECT_EQ(bf16->kind, hipdnn_integration_tests::ValidatorOverrideKind::ALLCLOSE);
+}
+
+TEST(TestSettingsValidatorOverrides, ParsesAllcloseMatchingInfinities)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*SdpaFwd*"]
+tensors = ["*::LSE"]
+validator = "allclose_matching_infinities"
+)");
+
+    const TestSettings settings(file.path());
+    ASSERT_EQ(settings.validatorOverrideCount(), 1U);
+
+    const auto hit
+        = settings.findValidatorOverride("Smoke/SdpaFwdPure4D.Correctness/0", "Sdpa_0::LSE");
+    ASSERT_TRUE(hit.has_value());
+    EXPECT_EQ(hit->kind,
+              hipdnn_integration_tests::ValidatorOverrideKind::ALLCLOSE_MATCHING_INFINITIES);
+    // Nothing else on the entry carries a number: this kind takes its atol/rtol from
+    // the tolerance the harness resolved, so rms_threshold stays zero.
+    EXPECT_FLOAT_EQ(hit->rmsThreshold, 0.0F);
+
+    EXPECT_FALSE(settings.findValidatorOverride("Smoke/SdpaFwdPure4D.Correctness/0", "Sdpa_0::O")
+                     .has_value())
+        << "the 'tensors' glob is what keeps the other outputs of the same graph on allclose";
+    EXPECT_FALSE(settings.findValidatorOverride("Smoke/ConvFwdPure4D.Correctness/0", "Conv_0::LSE")
+                     .has_value())
+        << "the 'filters' glob is what keeps other tests out";
+}
+
+TEST(TestSettingsValidatorOverrides, AllcloseMatchingInfinitiesLaterEntryTakesPrecedence)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*SdpaFwd*"]
+tensors = ["*::LSE"]
+validator = "rms"
+rms_threshold = 1e-4
+
+[[validator_overrides]]
+filters = ["*SdpaFwd*Masked*"]
+tensors = ["*::LSE"]
+validator = "allclose_matching_infinities"
+)");
+
+    const TestSettings settings(file.path());
+
+    const auto unmasked = settings.findValidatorOverride("Smoke/SdpaFwdPure4D.C/0", "Sdpa_0::LSE");
+    ASSERT_TRUE(unmasked.has_value());
+    EXPECT_EQ(unmasked->kind, hipdnn_integration_tests::ValidatorOverrideKind::RMS);
+
+    const auto masked
+        = settings.findValidatorOverride("Smoke/SdpaFwdMaskedPure4D.C/0", "Sdpa_0::LSE");
+    ASSERT_TRUE(masked.has_value());
+    EXPECT_EQ(masked->kind,
+              hipdnn_integration_tests::ValidatorOverrideKind::ALLCLOSE_MATCHING_INFINITIES);
+}
+
+TEST(TestSettingsValidatorOverrides, ThrowsOnMissingTensors)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*LayernormBackward*"]
+validator = "rms"
+rms_threshold = 1e-4
+)");
+
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
+}
+
+// This entry is wrong twice over: the name is not one the parser knows, and it carries
+// a threshold no non-rms validator may carry. The name is the one to report: an
+// operator told to delete 'rms_threshold' would be sent to the line that is not the
+// mistake.
+TEST(TestSettingsValidatorOverrides, ThrowsOnUnknownValidatorKind)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*LayernormBackward*"]
+tensors = ["*::DSCALE"]
+validator = "relative-rms"
+rms_threshold = 1e-4
+)");
+
+    try
+    {
+        const TestSettings settings(file.path());
+        FAIL() << "an unknown validator name must be a load error";
+    }
+    catch(const std::runtime_error& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("unknown validator"), std::string::npos)
+            << "reported the wrong line: " << e.what();
+    }
+}
+
+TEST(TestSettingsValidatorOverrides, ThrowsOnRmsWithoutThreshold)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*LayernormBackward*"]
+tensors = ["*::DSCALE"]
+validator = "rms"
+)");
+
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
+}
+
+TEST(TestSettingsValidatorOverrides, ThrowsOnNonPositiveRmsThreshold)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*LayernormBackward*"]
+tensors = ["*::DSCALE"]
+validator = "rms"
+rms_threshold = 0.0
+)");
+
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
+}
+
+// An allclose entry carrying a threshold means the file no longer says what its
+// author meant — 'validator' was edited and 'rms_threshold' left behind, or the
+// reverse. Either way, the file is wrong about which check runs.
+TEST(TestSettingsValidatorOverrides, ThrowsOnAllcloseWithRmsThreshold)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*LayernormBackward*"]
+tensors = ["*::DSCALE"]
+validator = "allclose"
+rms_threshold = 1e-4
+)");
+
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
+}
+
+// The same "does not say what it means" rule covers the matching-infinities spelling:
+// it takes its atol/rtol from the resolved tolerance and has no threshold of its own.
+TEST(TestSettingsValidatorOverrides, ThrowsOnAllcloseMatchingInfinitiesWithRmsThreshold)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*SdpaFwd*"]
+tensors = ["*::LSE"]
+validator = "allclose_matching_infinities"
+rms_threshold = 1e-4
+)");
+
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
+}
+
+// An entry with 'tensors' but no 'filters' reads as "apply to every test" to a human,
+// and is one of the likelier hand-edit mistakes. It is a load error instead, because
+// a validator override is scoped to the tests whose numerics justified it.
+TEST(TestSettingsValidatorOverrides, ThrowsOnMissingFilters)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+tensors = ["*::DSCALE"]
+validator = "rms"
+rms_threshold = 1e-4
+)");
+
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
+}
+
+TEST(TestSettingsValidatorOverrides, ThrowsOnEmptyFilters)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = []
+tensors = ["*::DSCALE"]
+validator = "rms"
+rms_threshold = 1e-4
+)");
+
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
+}
+
+// A bare value where a table belongs — the shape a mistyped array-of-tables takes.
+// Reading it as "no overrides" would drop the entry and quietly grade with allclose.
+// The key sits above [meta] so it lands at the document root: written below the
+// header it would be a key of [meta] instead, which is a different mistake.
+TEST(TestSettingsValidatorOverrides, ThrowsOnNonTableEntry)
+{
+    const TempTomlFile file(R"(
+validator_overrides = ["*LayernormBackward*"]
+
+[meta]
+version = 1
+)");
+
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
 }
 
 // ---------------------------------------------------------------------------

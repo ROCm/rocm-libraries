@@ -1,16 +1,27 @@
 cmake_minimum_required(VERSION 3.21)
 
-# Take the GPU list from GPU_TARGETS, which is what a ROCm consumer sets.
+# The GPU hipconv offloads to when a build names none that hipconv serves.
 #
-# Enabling the HIP language is what fills CMAKE_HIP_ARCHITECTURES, from the build
-# machine's own devices, so this has to precede project(). Entries that are not
-# offload targets are dropped: GPU_TARGETS also carries TheRock family names such as
-# gfx94X-dcgpu, and hipconv serves no generic target.
+# gfx942 is cdna3's target, and cdna3 has no kernels of its own, so every other
+# architecture's entry guards discard their bodies on it. docs/architecture-guards.md says
+# why the stand-in must be a GPU hipconv declares.
+set(HIPCONV_BASELINE_GPU gfx942)
+
+# Take the GPU list from GPU_TARGETS when nothing has already named the GPUs.
+#
+# GPU_TARGETS is ROCm's GPU list, set by the consumer or filled from amdgpu-arch by
+# find_package(hip) when unset, and MIOpen enables no HIP language, so it names its
+# GPUs this way alone. CMake's HIP language reads CMAKE_HIP_ARCHITECTURES and fills
+# it from the build machine's own devices, so this has to precede project(). A
+# consumer that sets CMAKE_HIP_ARCHITECTURES itself, as TheRock's toolchain does,
+# skips this. Entries naming no offload target are dropped, hipconv serving no
+# generic target. A '-strict' suffix names a specific silicon revision rather than a
+# generic family, so it is kept.
 if(NOT CMAKE_HIP_ARCHITECTURES AND GPU_TARGETS)
     set(_hipconv_gpus "")
     foreach(_hipconv_gpu IN LISTS GPU_TARGETS)
         string(REGEX REPLACE ":.*" "" _hipconv_logical "${_hipconv_gpu}")
-        if(_hipconv_logical MATCHES "^gfx[0-9a-f]+$")
+        if(_hipconv_logical MATCHES "^gfx[0-9a-f]+(-strict)?$")
             list(APPEND _hipconv_gpus "${_hipconv_gpu}")
         else()
             message(STATUS
@@ -20,13 +31,13 @@ if(NOT CMAKE_HIP_ARCHITECTURES AND GPU_TARGETS)
     if(_hipconv_gpus)
         set(CMAKE_HIP_ARCHITECTURES "${_hipconv_gpus}")
     else()
-        # gfx942 is hipconv's cdna3 target, which declares no kernels of its own, so it
-        # is the cheapest stand-in. Detecting the build machine's devices instead would
-        # compile kernels for GPUs this build was never asked to serve.
+        # Detecting the build machine's devices instead would compile kernels for GPUs
+        # this build was never asked to serve.
         message(WARNING
-            "hipconv: no GPU_TARGETS entry is an offload target; building for gfx942. "
+            "hipconv: no GPU_TARGETS entry is an offload target; building for "
+            "${HIPCONV_BASELINE_GPU}. "
             "Set CMAKE_HIP_ARCHITECTURES to name the GPUs hipconv should serve.")
-        set(CMAKE_HIP_ARCHITECTURES gfx942)
+        set(CMAKE_HIP_ARCHITECTURES ${HIPCONV_BASELINE_GPU})
     endif()
 endif()
 
@@ -80,6 +91,25 @@ endif()
 option(HIPCONV_ENABLE_CDNA4_DW_2D_TOEPLITZ
     "Build the experimental cdna4 depthwise 2D patch-Toeplitz kernel (slower than 1D; not auto-selected)" OFF)
 
+option(HIPCONV_LINE_TABLES "Emit DWARF line tables for device code (-gline-tables-only)" OFF)
+if(HIPCONV_LINE_TABLES)
+    string(APPEND CMAKE_HIP_FLAGS " -gline-tables-only")
+endif()
+
+# Device LTO costs up to 8x on the kernels this library exists to provide.
+#
+# Some ROCm clangs default the AMDGCN LTO mode to full, and under that pipeline the
+# register allocator spills into direct_wgrad's software-pipelined row loop. The
+# computation is unchanged and no test can see it. docs/rocm-device-lto-regression.md
+# has the measurements; ROCm/llvm-project#4434 is the upstream report.
+#
+# Carried on the targets rather than in CMAKE_HIP_FLAGS because a consumer may compile
+# these sources as CXX -- MIOpen does -- and then the HIP flags never reach them.
+option(HIPCONV_OFFLOAD_LTO "Leave the compiler's device LTO default alone" OFF)
+if(NOT HIPCONV_OFFLOAD_LTO)
+    set(HIPCONV_DEVICE_COMPILE_OPTIONS -fno-offload-lto)
+endif()
+
 # Every arch in the tree is built, whatever this build targets: the set of arch
 # directories is a property of the snapshot, the GPU list is not.
 file(GLOB _hipconv_arch_directories RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "src/arch/*")
@@ -101,13 +131,14 @@ endforeach()
 if(NOT _arch_targets)
     message(FATAL_ERROR "hipconv: no architectures found under src/arch")
 endif()
+hipconv_set_stand_in_offload("${_arch_targets}")
 
 # ---- hipconv static library ----
 set(_arch_registry "src/arch_registry.cpp")
 hipconv_make_arch_registry("${_arch_targets}" "${_arch_registry}")
 
 set(_hipconv_srcs
-    src/conv2d_params.cpp
+    src/conv_params.cpp
     src/conv_kernel.cpp
     src/kv_descriptor.cpp
     src/registry.cpp
@@ -136,7 +167,8 @@ target_include_directories(hipconv
 # Position-independent so the static lib can link into libMIOpen.so
 set_target_properties(hipconv PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(hipconv PUBLIC hip::device)
-target_compile_options(hipconv PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
+target_compile_options(hipconv PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden
+                                       ${HIPCONV_DEVICE_COMPILE_OPTIONS})
 if(HIPCONV_ENABLE_POINTWISE)
     target_link_libraries(hipconv PUBLIC roc::hipblaslt)
     target_compile_definitions(hipconv PUBLIC HIPCONV_ENABLE_POINTWISE)
