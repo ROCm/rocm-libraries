@@ -139,7 +139,7 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
 
     // Compile kernel and configure launch dimensions
     _compiledProgram = kernelCompiler.compile("RMSNormFwd.cpp", options);
-    _runnableKernel = _compiledProgram->getKernel("RMSnormFwd");
+    _runnableKernel = _compiledProgram->getKernel("rmsNormFwd");
 
     _runnableKernel->setBlockSize(xlocalsize, ylocalsize, zlocalsize);
     _runnableKernel->setGridSize(xgridsize, ygridsize, zgridsize);

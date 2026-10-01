@@ -26,7 +26,7 @@
 define_property(GLOBAL PROPERTY KERNELTIDY_TARGETS)
 
 
-# add_kernel_tidy_target(NAME <target> FILES <kernel>...)
+# add_kernel_tidy_target(NAME <target>  PRELUDE <header> FILES <kernel>...)
 #
 #   Create <target>, a custom target that runs clang-tidy over the embedded kernels in
 #   FILES. Builds explicitly, or through the `tidy` targets that  hip_kernel_provider_tidy_dependencies()
@@ -48,6 +48,12 @@ function(add_kernel_tidy_target)
 
     if(NOT KERNEL_TIDY_FILES)
         message(FATAL_ERROR "add_kernel_tidy_target called without any FILES!")
+    endif()
+        if(NOT KERNEL_TIDY_PRELUDE)
+        message(FATAL_ERROR "add_kernel_tidy_target called without a PRELUDE!")
+    endif()
+    if(NOT EXISTS "${KERNEL_TIDY_PRELUDE}")
+        message(FATAL_ERROR "add_kernel_tidy_target: PRELUDE ${KERNEL_TIDY_PRELUDE} does not exist.")
     endif()
 
     # The target only ever exists to run clang-tidy, and Windows has no `tidy` target at
@@ -71,7 +77,7 @@ function(add_kernel_tidy_target)
                 "clang-tidy not found. The '${KERNEL_TIDY_NAME}' target will not be available.")
         return()
     endif()
-
+    get_filename_component(KERNEL_TIDY_PRELUDE "${KERNEL_TIDY_PRELUDE}" ABSOLUTE)
     set(_tidy_config "${PROJECT_SOURCE_DIR}/.clang-tidy")
 
     # Absolute, de-duplicated list of the directories the kernels include each other from.
@@ -92,10 +98,16 @@ function(add_kernel_tidy_target)
     # Flags after `--` replace the compile database, which has no entry for these files.
     set(_kernel_tidy_compiler_flags
         -x hip
-        --offload-host-only
+        --offload-device-only
         -std=c++${CMAKE_CXX_STANDARD}
-        ${_kernel_include_flags})
-
+        -nogpulib
+        -nogpuinc
+        -D__HIPCC_RTC__
+        -include "${KERNEL_TIDY_PRELUDE}"
+        -include "/workspaces/dev-container/rocm-libraries/hiprtc_runtime.h"
+        #${_kernel_include_flags}
+    )
+    
     set(_stamp_dir "${CMAKE_CURRENT_BINARY_DIR}/kernel_tidy")
     set(_stamps "")
     foreach(_kernel_file IN LISTS _kernel_files)
@@ -108,10 +120,13 @@ function(add_kernel_tidy_target)
 
         add_custom_command(
             OUTPUT ${_stamp}
-            COMMAND ${CLANG_TIDY_EXE} -config-file=${_tidy_config} --quiet
-                    ${CLANG_TIDY_HIP_ARGS} ${_kernel_file} -- ${_kernel_tidy_compiler_flags}
+            COMMAND /opt/rocm/llvm/bin/clang-tidy -config-file=${_tidy_config} --quiet
+                    --exclude-header-filter=hiprtc_runtime* 
+                    ${CLANG_TIDY_HIP_ARGS}  # TODO replace with exported header
+                    ${_kernel_file} 
+                    -- ${_kernel_tidy_compiler_flags}
             COMMAND ${CMAKE_COMMAND} -E touch ${_stamp}
-            DEPENDS ${_kernel_file} ${_tidy_config}
+            DEPENDS ${_kernel_file}  ${KERNEL_TIDY_PRELUDE} ${_tidy_config}
             COMMENT "Running clang-tidy on embedded kernel ${_kernel_relative}"
             VERBATIM
         )

@@ -30,4 +30,5 @@ add_kernels_for_embedding(
 # Create custom target for running clang-tidy on embedded kernels
 add_kernel_tidy_target(
     NAME hip_mlops_kernel_tidy
+    PRELUDE ${CMAKE_CURRENT_SOURCE_DIR}/tidy/KernelTidyDefaults.hpp
     FILES ${HIP_MLOPS_KERNEL_FILES})

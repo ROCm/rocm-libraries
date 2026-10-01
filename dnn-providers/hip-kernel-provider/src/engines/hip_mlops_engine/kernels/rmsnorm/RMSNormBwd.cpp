@@ -14,15 +14,16 @@ using DxType = HIP_PLUGIN_RMSNORM_DX_TYPE;
 using ScaleType = HIP_PLUGIN_RMSNORM_SCALE_TYPE;
 using ComputeType = HIP_PLUGIN_RMSNORM_COMPUTE_TYPE;
 
-extern "C" __global__ void RMSnormBwdWeightBias(const DyType* __restrict__ dy,
+extern "C" __global__ void rmsNormBwdWeightBias(const DyType* __restrict__ dy,
                                                 const XType* __restrict__ x,
                                                 const ComputeType* __restrict__ rstd,
                                                 ScaleType* __restrict__ dweight,
                                                 ScaleType* __restrict__ dbias)
 {
-    static_assert(std::is_same<ComputeType, float>::value,
-                  "ComputeType must be float for the RMSnormBwdWeightBias kernel");
+    static_assert(std::is_same_v<ComputeType, float>,
+                  "ComputeType must be float for the rmsNormBwdWeightBias kernel");
 
+    // NOLINTNEXTLINE(readability-static-accessed-through-instance)
     const unsigned int tidx = threadIdx.x + blockIdx.x * LOCAL_SIZE;
 
     if(tidx >= INNER_SIZE)
@@ -30,53 +31,53 @@ extern "C" __global__ void RMSnormBwdWeightBias(const DyType* __restrict__ dy,
         return;
     }
 
-    float sum_dw = 0.0f;
-    float sum_db = 0.0f;
+    float sumDw = 0.0f;
+    float sumDb = 0.0f;
 
     // backward weight calculation
     for(unsigned int o = 0; o < OUTER_SIZE; ++o)
     {
         for(unsigned int s = 0; s < STRIDE; ++s)
         {
-            size_t idx = o * INNER_SIZE * STRIDE + tidx * STRIDE + s;
+            const size_t idx = o * INNER_SIZE * STRIDE + tidx * STRIDE + s;
 
-            float prstd = rstd[o * STRIDE + s];
+            const float prstd = rstd[o * STRIDE + s];
             float pdy = hip_kernel_provider::cast<float>(dy[idx]);
             float px = hip_kernel_provider::cast<float>(x[idx]);
 
-            sum_dw += pdy * px * prstd;
-            sum_db += pdy;
+            sumDw += pdy * px * prstd;
+            sumDb += pdy;
         }
     }
 
-    dweight[tidx] = hip_kernel_provider::cast<ScaleType>(sum_dw);
-    if(dbias)
+    dweight[tidx] = hip_kernel_provider::cast<ScaleType>(sumDw);
+    if(dbias != nullptr)
     {
-        dbias[tidx] = hip_kernel_provider::cast<ScaleType>(sum_db);
+        dbias[tidx] = hip_kernel_provider::cast<ScaleType>(sumDb);
     }
 }
 
-extern "C" __global__ void RMSnormBwdData(const DyType* __restrict__ dy,
+extern "C" __global__ void rmsNormBwdData(const DyType* __restrict__ dy,
                                           const XType* __restrict__ x,
                                           const ScaleType* __restrict__ weight,
                                           const ComputeType* __restrict__ rstd,
                                           DxType* __restrict__ dx)
 {
-    static_assert(std::is_same<ComputeType, float>::value,
-                  "ComputeType must be float for the RMSnormBwdData kernel");
+    static_assert(std::is_same_v<ComputeType, float>,
+                  "ComputeType must be float for the rmsNormBwdData kernel");
 
-    const unsigned int gid = blockIdx.x;
-    const unsigned int lid = threadIdx.x;
+    const unsigned int gid = blockIdx.x; // NOLINT(readability-static-accessed-through-instance)
+    const unsigned int lid = threadIdx.x; // NOLINT(readability-static-accessed-through-instance)
     const unsigned int o = gid / STRIDE;
     const unsigned int s = gid % STRIDE;
 
-    __shared__ float ltmp[LOCAL_SIZE];
+    __shared__ float s_ltmp[LOCAL_SIZE];
     float mean = 0.0f;
 
     // reduce sum
     for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
     {
-        size_t idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
+        const size_t idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
 
         float pdy = hip_kernel_provider::cast<float>(dy[idx]);
         float px = hip_kernel_provider::cast<float>(x[idx]);
@@ -85,31 +86,31 @@ extern "C" __global__ void RMSnormBwdData(const DyType* __restrict__ dy,
         mean += pdy * pw * px;
     }
 
-    ltmp[lid] = mean;
+    s_ltmp[lid] = mean;
     __syncthreads();
 
     for(unsigned int i = LOCAL_SIZE >> 1; i > 0; i >>= 1)
     {
         if(lid < i)
         {
-            ltmp[lid] += ltmp[lid + i];
+            s_ltmp[lid] += s_ltmp[lid + i];
         }
         __syncthreads();
     }
 
-    mean = ltmp[0] / INNER_SIZE;
-    float prstd = rstd[gid];
+    mean = s_ltmp[0] / INNER_SIZE;
+    const float prstd = rstd[gid];
 
     // backward data calculation
     for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
     {
-        size_t idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
+        const size_t idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
 
         float pdy = hip_kernel_provider::cast<float>(dy[idx]);
         float px = hip_kernel_provider::cast<float>(x[idx]);
         float pw = hip_kernel_provider::cast<float>(weight[i]);
 
-        float dx_val = (pdy * pw * prstd) - (mean * px * prstd * prstd * prstd);
-        dx[idx] = hip_kernel_provider::cast<DxType>(dx_val);
+        const float dxVal = (pdy * pw * prstd) - (mean * px * prstd * prstd * prstd);
+        dx[idx] = hip_kernel_provider::cast<DxType>(dxVal);
     }
 }

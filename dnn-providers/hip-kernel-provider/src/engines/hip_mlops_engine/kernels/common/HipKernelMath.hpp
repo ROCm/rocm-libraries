@@ -113,12 +113,12 @@ __forceinline__ __device__ _Float16 pow(_Float16 x, _Float16 y)
 }
 __forceinline__ __device__ _Float16 tanh(_Float16 x)
 {
-    float x_scaled = static_cast<float>(x) * 1.4426950408889634f; // 0x1.715476p+0f = log2(e)
-    float a = __builtin_amdgcn_exp2f(x_scaled);
-    float b = __builtin_amdgcn_exp2f(-x_scaled);
+    const auto xScaled = static_cast<float>(x) * 1.4426950408889634f; // 0x1.715476p+0f = log2(e)
+    const float a = __builtin_amdgcn_exp2f(xScaled);
+    const float b = __builtin_amdgcn_exp2f(-xScaled);
 
-    _Float16 ret = static_cast<_Float16>((a - b) * __builtin_amdgcn_rcpf(a + b));
-    _Float16 one = __builtin_copysignf(1.0f, x);
+    auto ret = static_cast<_Float16>((a - b) * __builtin_amdgcn_rcpf(a + b));
+    auto one = static_cast<_Float16>(__builtin_copysignf(1.0f, x));
 
     return __ocml_fabs_f16(x) > 4.5f ? one : ret;
 }
@@ -224,8 +224,8 @@ __forceinline__ __device__ __bf16 pow(__bf16 x, __bf16 y)
 }
 __forceinline__ __device__ __bf16 tan(__bf16 x)
 {
-    float sinVal = sin(static_cast<float>(x));
-    float cosVal = cos(static_cast<float>(x));
+    const float sinVal = sin(static_cast<float>(x));
+    const float cosVal = cos(static_cast<float>(x));
 
     return static_cast<__bf16>(sinVal / cosVal);
 }
@@ -233,9 +233,9 @@ __forceinline__ __device__ __bf16 tanh(__bf16 x)
 {
     const auto two = static_cast<__bf16>(2.0f);
     const auto one = static_cast<__bf16>(1.0f);
-    __bf16 exp2x = static_cast<__bf16>(exp(static_cast<float>(two * x)));
-    __bf16 numerator = exp2x - one;
-    __bf16 denominator = exp2x + one;
+    const auto exp2x = static_cast<__bf16>(exp(static_cast<float>(two * x)));
+    const __bf16 numerator = exp2x - one;
+    const __bf16 denominator = exp2x + one;
     return (numerator / denominator);
 }
 
@@ -308,13 +308,13 @@ __forceinline__ __device__ double fma(double a, double b, double c)
 //=============================================================================
 
 #define SINGLE_OPERAND_VEC_MATH(BASE)                                                  \
-    template <typename FpVecType>                                                      \
-    __forceinline__ __device__ FpVecType BASE(FpVecType x)                             \
+    template <typename fpVecType>                                                      \
+    __forceinline__ __device__ fpVecType BASE(fpVecType x)                             \
     {                                                                                  \
-        constexpr auto VecSize = mapped_vector_info<FpVecType>::size;                  \
+        constexpr auto VecSize = MappedVectorInfo<fpVecType>::size;                    \
         if constexpr(VecSize == 4)                                                     \
         {                                                                              \
-            FpVecType out;                                                             \
+            fpVecType out;                                                             \
             out.x = detail::BASE(x.x);                                                 \
             out.y = detail::BASE(x.y);                                                 \
             out.z = detail::BASE(x.z);                                                 \
@@ -323,7 +323,7 @@ __forceinline__ __device__ double fma(double a, double b, double c)
         }                                                                              \
         else if constexpr(VecSize == 2)                                                \
         {                                                                              \
-            FpVecType out;                                                             \
+            fpVecType out;                                                             \
             out.x = detail::BASE(x.x);                                                 \
             out.y = detail::BASE(x.y);                                                 \
             return out;                                                                \
@@ -348,13 +348,13 @@ SINGLE_OPERAND_VEC_MATH(fabs);
 #undef SINGLE_OPERAND_VEC_MATH
 
 #define DUAL_OPERAND_VEC_MATH(BASE)                                                    \
-    template <typename FpVecType>                                                      \
-    __forceinline__ __device__ FpVecType BASE(FpVecType x, FpVecType y)                \
+    template <typename fpVecType>                                                      \
+    __forceinline__ __device__ fpVecType BASE(fpVecType x, fpVecType y)                \
     {                                                                                  \
-        constexpr auto VecSize = mapped_vector_info<FpVecType>::size;                  \
+        constexpr auto VecSize = MappedVectorInfo<fpVecType>::size;                    \
         if constexpr(VecSize == 4)                                                     \
         {                                                                              \
-            FpVecType out;                                                             \
+            fpVecType out;                                                             \
             out.x = detail::BASE(x.x, y.x);                                            \
             out.y = detail::BASE(x.y, y.y);                                            \
             out.z = detail::BASE(x.z, y.z);                                            \
@@ -363,7 +363,7 @@ SINGLE_OPERAND_VEC_MATH(fabs);
         }                                                                              \
         else if constexpr(VecSize == 2)                                                \
         {                                                                              \
-            FpVecType out;                                                             \
+            fpVecType out;                                                             \
             out.x = detail::BASE(x.x, y.x);                                            \
             out.y = detail::BASE(x.y, y.y);                                            \
             return out;                                                                \
@@ -383,15 +383,15 @@ DUAL_OPERAND_VEC_MATH(fmax);
 DUAL_OPERAND_VEC_MATH(pow);
 
 // Forward calls from hip_kernel_provider::min() to fmin
-template <typename FpVecType>
-__forceinline__ __device__ FpVecType min(FpVecType x, FpVecType y)
+template <typename fpVecType>
+__forceinline__ __device__ fpVecType min(fpVecType x, fpVecType y)
 {
     return fmin(x, y);
 }
 
 // Forward calls from hip_kernel_provider::max() to fmax
-template <typename FpVecType>
-__forceinline__ __device__ FpVecType max(FpVecType x, FpVecType y)
+template <typename fpVecType>
+__forceinline__ __device__ fpVecType max(fpVecType x, fpVecType y)
 {
     return fmax(x, y);
 }
@@ -399,13 +399,13 @@ __forceinline__ __device__ FpVecType max(FpVecType x, FpVecType y)
 #undef DUAL_OPERAND_VEC_MATH
 
 #define TRIPLE_OPERAND_VEC_MATH(BASE)                                                  \
-    template <typename FpVecType>                                                      \
-    __forceinline__ __device__ FpVecType BASE(FpVecType x, FpVecType y, FpVecType z)   \
+    template <typename fpVecType>                                                      \
+    __forceinline__ __device__ fpVecType BASE(fpVecType x, fpVecType y, fpVecType z)   \
     {                                                                                  \
-        constexpr auto VecSize = mapped_vector_info<FpVecType>::size;                  \
+        constexpr auto VecSize = MappedVectorInfo<fpVecType>::size;                    \
         if constexpr(VecSize == 4)                                                     \
         {                                                                              \
-            FpVecType out;                                                             \
+            fpVecType out;                                                             \
             out.x = detail::BASE(x.x, y.x, z.x);                                       \
             out.y = detail::BASE(x.y, y.y, z.y);                                       \
             out.z = detail::BASE(x.z, y.z, z.z);                                       \
@@ -414,7 +414,7 @@ __forceinline__ __device__ FpVecType max(FpVecType x, FpVecType y)
         }                                                                              \
         else if constexpr(VecSize == 2)                                                \
         {                                                                              \
-            FpVecType out;                                                             \
+            fpVecType out;                                                             \
             out.x = detail::BASE(x.x, y.x, z.x);                                       \
             out.y = detail::BASE(x.y, y.y, z.y);                                       \
             return out;                                                                \

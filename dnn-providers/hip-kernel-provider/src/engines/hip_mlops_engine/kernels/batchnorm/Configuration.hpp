@@ -10,20 +10,20 @@
 namespace hip_kernel_provider
 {
 
-enum class type_strategy : int
+enum class TypeStrategy : int
 {
-    fp16,
-    fp32,
-    fpmix,
-    bfpmix,
+    FP16,
+    FP32,
+    FPMIX,
+    BFPMIX,
 };
 
-enum class neuron_op_type : int
+enum class NeuronOpType : int
 {
-    pasthru = 0, // x
-    relu = 3, // max(0, x)
-    clipped_relu = 7, // min(alpha, max(0, x))
-    clamp = 10,
+    PASTHRU = 0, // x
+    RELU = 3, // max(0, x)
+    CLIPPED_RELU = 7, // min(alpha, max(0, x))
+    CLAMP = 10,
 };
 
 namespace detail
@@ -38,7 +38,7 @@ template <int LayoutNHWC,
           int UseBfpmix,
           int UseAMDGCN,
           int NrnOpId>
-struct proto_config
+struct ProtoConfig
 {
     static_assert(LayoutNHWC == 0 || LayoutNHWC == 1,
                   "LayoutNHWC (HIP_PLUGIN_LAYOUT_NHWC) must be 0 or 1");
@@ -55,28 +55,31 @@ struct proto_config
     static_assert(NrnOpId >= 0 && NrnOpId <= 10,
                   "NrnOpId can only be interger between 0-10 (inclusive)");
 
-    static constexpr bool layout_nhwc = static_cast<bool>(LayoutNHWC);
-    static constexpr bool save_mean_variance = static_cast<bool>(SaveMeanVariance);
-    static constexpr bool running_result = static_cast<bool>(RunningResult);
-    static constexpr type_strategy input_type_strategy
-        = UseFp16 ? type_strategy::fp16
-                  : (UseFp32 ? type_strategy::fp32
-                             : (UseFpmix ? type_strategy::fpmix : type_strategy::bfpmix));
-    static constexpr bool use_amdgcn = UseAMDGCN;
-    static constexpr auto neuron_op = static_cast<neuron_op_type>(NrnOpId);
+    static constexpr bool LAYOUT_NHWC = static_cast<bool>(LayoutNHWC);
+    static constexpr bool SAVE_MEAN_VARIANCE = static_cast<bool>(SaveMeanVariance);
+    static constexpr bool RUNNING_RESULT = static_cast<bool>(RunningResult);
+    // NOLINTBEGIN(readability-avoid-nested-conditional-operator)
+    static constexpr TypeStrategy INPUT_TYPE_STRATEGY
+        = (UseFp16 != 0)
+              ? TypeStrategy::FP16
+              : ((UseFp32 != 0) ? TypeStrategy::FP32
+                                : ((UseFpmix != 0) ? TypeStrategy::FPMIX : TypeStrategy::BFPMIX));
+    // NOLINTEND(readability-avoid-nested-conditional-operator)
+    static constexpr bool USE_AMDGCN = UseAMDGCN != 0;
+    static constexpr auto NEURON_OP = static_cast<NeuronOpType>(NrnOpId);
 };
 
 } // namespace detail
 
-using config = detail::proto_config<HIP_PLUGIN_LAYOUT_NHWC,
-                                    HIP_PLUGIN_BN_SAVE_MEAN_VARIANCE,
-                                    HIP_PLUGIN_BN_RUNNING_RESULT,
-                                    HIP_PLUGIN_USE_FP16,
-                                    HIP_PLUGIN_USE_FP32,
-                                    HIP_PLUGIN_USE_FPMIX,
-                                    HIP_PLUGIN_USE_BFPMIX,
-                                    HIP_PLUGIN_USE_AMDGCN,
-                                    HIP_PLUGIN_BN_NRN_OP_ID>;
+using config = detail::ProtoConfig<HIP_PLUGIN_LAYOUT_NHWC,
+                                   HIP_PLUGIN_BN_SAVE_MEAN_VARIANCE,
+                                   HIP_PLUGIN_BN_RUNNING_RESULT,
+                                   HIP_PLUGIN_USE_FP16,
+                                   HIP_PLUGIN_USE_FP32,
+                                   HIP_PLUGIN_USE_FPMIX,
+                                   HIP_PLUGIN_USE_BFPMIX,
+                                   HIP_PLUGIN_USE_AMDGCN,
+                                   HIP_PLUGIN_BN_NRN_OP_ID>;
 
 } // namespace hip_kernel_provider
 
@@ -87,48 +90,48 @@ namespace hip_kernel_provider
 namespace batchnorm
 {
 
-enum class architecture : int
+enum class Architecture : int
 {
-    unknown,
-    gfx103x,
-    gfx110x,
-    gfx115x,
-    gfx120x,
+    UNKNOWN,
+    GFX103X,
+    GFX110X,
+    GFX115X,
+    GFX120X,
 };
 
 namespace detail
 {
 
 // TODO: why this is here, because before c++ 20, double is not supported to be template parameter
-struct half_max
+struct HalfMax
 {
-    static constexpr double value = 65504;
+    static constexpr double VALUE = 65504;
 };
 
 // TODO: why this is here, because before c++ 20, double is not supported to be template parameter
-struct flt_max
+struct FltMax
 {
-    static constexpr double value = 3.402823466e+38;
+    static constexpr double VALUE = 3.402823466e+38;
 };
 
-struct bf16_max
+struct Bf16Max
 {
-    static constexpr double value = 0x1.fep+127;
+    static constexpr double VALUE = 0x1.fep+127;
 };
 
 template <int Grp0, int Grp1, int Grp2>
-struct launch_dimension
+struct LaunchDimension
 {
     static_assert(Grp0 >= 0, "HIP_PLUGIN_BN_GRP0 should be always >= 0");
     static_assert(Grp1 >= 0, "HIP_PLUGIN_BN_GRP1 should be always >= 0");
     static_assert(Grp2 >= 0, "HIP_PLUGIN_BN_GRP2 should be always >= 0");
-    static constexpr unsigned int grp0 = static_cast<unsigned int>(Grp0);
-    static constexpr unsigned int grp1 = static_cast<unsigned int>(Grp1);
-    static constexpr unsigned int grp2 = static_cast<unsigned int>(Grp2);
+    static constexpr unsigned int GRP0 = static_cast<unsigned int>(Grp0);
+    static constexpr unsigned int GRP1 = static_cast<unsigned int>(Grp1);
+    static constexpr unsigned int GRP2 = static_cast<unsigned int>(Grp2);
 };
 
 template <int Gfx103x, int Gfx110x, int Gfx120x, int Gfx115x>
-struct architecture_switch
+struct ArchitectureSwitch
 {
     static_assert(Gfx103x == 0 || Gfx103x == 1, "Gfx103x must be 0 or 1");
     static_assert(Gfx110x == 0 || Gfx110x == 1, "Gfx110x must be 0 or 1");
@@ -137,15 +140,17 @@ struct architecture_switch
     static_assert(Gfx103x + Gfx110x + Gfx120x + Gfx115x == 1
                       || Gfx103x + Gfx110x + Gfx120x + Gfx115x == 0,
                   "only one of these configs can be chosen.");
-    static constexpr architecture value
+    // NOLINTBEGIN(readability-avoid-nested-conditional-operator)
+    static constexpr Architecture VALUE
         = static_cast<bool>(Gfx103x)
-              ? architecture::gfx103x
+              ? Architecture::GFX103X
               : (static_cast<bool>(Gfx110x)
-                     ? architecture::gfx110x
+                     ? Architecture::GFX110X
                      : (static_cast<bool>(Gfx120x)
-                            ? architecture::gfx120x
-                            : (static_cast<bool>(Gfx115x) ? architecture::gfx115x
-                                                          : architecture::unknown)));
+                            ? Architecture::GFX120X
+                            : (static_cast<bool>(Gfx115x) ? Architecture::GFX115X
+                                                          : Architecture::UNKNOWN)));
+    // NOLINTEND(readability-avoid-nested-conditional-operator)
 };
 
 template <typename HipKernelConfig,
@@ -153,15 +158,15 @@ template <typename HipKernelConfig,
           typename FltMax,
           typename Bf16Max,
           typename LaunchDim,
-          typename Architecture,
+          typename ArchSwitch,
           int Variant,
-          int NCHW,
+          int NCHWValue,
           int NElements,
-          int N,
-          int C,
-          int HW,
-          int NHW,
-          int CHW,
+          int NValue,
+          int CValue,
+          int HWValue,
+          int NHWValue,
+          int CHWValue,
           int VecSize,
           int StashMethod,
           int LoopUnrollMaxN,
@@ -169,36 +174,37 @@ template <typename HipKernelConfig,
           int LDSGCNSize,
           int LDSSize,
           int UseNodpp>
-struct proto_config
+struct ProtoConfig
 {
     static_assert(UseNodpp == 0 || UseNodpp == 1, "UseNodpp must be 0 or 1");
-    static_assert(NCHW >= 0, "HIP_PLUGIN_BN_NCHW should be always >= 0");
-    static_assert(C >= 0, "HIP_PLUGIN_BN_C should be always >= 0");
-    static_assert(N >= 0, "HIP_PLUGIN_BN_N should be always >= 0");
-    static_assert(HW >= 0, "HIP_PLUGIN_BN_HW should be always >= 0");
-    static_assert(NHW >= 0, "HIP_PLUGIN_BN_NHW should be always >= 0");
-    static_assert(CHW >= 0, "HIP_PLUGIN_BN_CHW should be always >= 0");
+    static_assert(NCHWValue >= 0, "HIP_PLUGIN_BN_NCHW should be always >= 0");
+    static_assert(CValue >= 0, "HIP_PLUGIN_BN_C should be always >= 0");
+    static_assert(NValue >= 0, "HIP_PLUGIN_BN_N should be always >= 0");
+    static_assert(HWValue >= 0, "HIP_PLUGIN_BN_HW should be always >= 0");
+    static_assert(NHWValue >= 0, "HIP_PLUGIN_BN_NHW should be always >= 0");
+    static_assert(CHWValue >= 0, "HIP_PLUGIN_BN_CHW should be always >= 0");
 
-    static constexpr auto input_type_strategy = HipKernelConfig::input_type_strategy;
+    static constexpr auto INPUT_TYPE_STRATEGY = HipKernelConfig::INPUT_TYPE_STRATEGY;
 
-    using fp_type = typename std::conditional<
-        input_type_strategy == type_strategy::fp16 || input_type_strategy == type_strategy::fpmix,
+    using fp_type = typename std::conditional_t<
+        INPUT_TYPE_STRATEGY == TypeStrategy::FP16 || INPUT_TYPE_STRATEGY == TypeStrategy::FPMIX,
         _Float16,
-        typename std::conditional<input_type_strategy == type_strategy::fp32, float, __bf16>::
-            type>::type;
+        typename std::conditional_t<INPUT_TYPE_STRATEGY == TypeStrategy::FP32, float, __bf16>>;
     using fp_prec_type = float;
     using fp_accum_type = float;
-    static constexpr double epsilon
-        = input_type_strategy == type_strategy::fp16 ? 0.0001 : 0.000001;
-    static constexpr fp_type max_val
-        = input_type_strategy == type_strategy::fp16 || input_type_strategy == type_strategy::fpmix
+    static constexpr double EPSILON = INPUT_TYPE_STRATEGY == TypeStrategy::FP16 ? 0.0001 : 0.000001;
+    // NOLINTBEGIN(readability-avoid-nested-conditional-operator)
+    static constexpr fp_type MAX_VAL
+        = INPUT_TYPE_STRATEGY == TypeStrategy::FP16 || INPUT_TYPE_STRATEGY == TypeStrategy::FPMIX
               ? HalfMax::value
-              : (input_type_strategy == type_strategy::fp32
+              : (INPUT_TYPE_STRATEGY == TypeStrategy::FP32
                      ? FltMax::value
                      : Bf16Max::
                            value); // According to the old FloatTypes mechanism (on which this is based), for mixed-precision cases the max value is defined as the max of the smaller type
-    static constexpr auto launch_dim = LaunchDim{};
-    static constexpr unsigned int nchw = static_cast<unsigned int>(NCHW);
+    // NOLINTEND(readability-avoid-nested-conditional-operator)
+
+    static constexpr auto LAUNCH_DIM = LaunchDim{};
+    static constexpr unsigned int NCHW = static_cast<unsigned int>(NCHWValue);
 
     // `max_n` is a limit on the number of batch elements from the x tensor that can be cached in per-thread memory as part of
     // variant 3 kernels. If batchsize (n_elements) exceeds this limit then the kernel doesn't cache the global memory accesses.
@@ -206,76 +212,75 @@ struct proto_config
     // variant to use. In BN Fwd training, the heuristics only selects variant 3 when N <= 32, so the caching optimization is always
     // used. In BN Bwd training, the heuristics only selects variant 3 when N > 64, so the caching optimization is never used. If
     // there are future changes to how the heuristic selects variant 3 kernels, then it may be worth revisiting this caching limit.
-    static constexpr unsigned int max_n = 65;
-    static constexpr unsigned int n_elements = static_cast<unsigned int>(NElements);
-    static constexpr unsigned int n = static_cast<unsigned int>(N);
-    static constexpr unsigned int c = static_cast<unsigned int>(C);
-    static constexpr unsigned int hw = static_cast<unsigned int>(HW);
-    static constexpr unsigned int nhw = static_cast<unsigned int>(NHW);
-    static constexpr unsigned int chw = static_cast<unsigned int>(CHW);
-    static constexpr int stash_method = StashMethod;
-    static constexpr int loop_unroll_max_n = LoopUnrollMaxN;
-    static constexpr int loop_unroll_max_hw = LoopUnrollMaxHW;
-    static constexpr unsigned int lds_gcn_size = static_cast<unsigned int>(LDSGCNSize);
-    static constexpr unsigned int lds_size = static_cast<unsigned int>(LDSSize);
-    static constexpr bool use_nodpp
-        = input_type_strategy == type_strategy::fpmix ? false : static_cast<bool>(UseNodpp);
-    static constexpr int variant = Variant;
-    static constexpr auto target_arch = Architecture::value;
-    static constexpr bool use_amdgcn
-        = HipKernelConfig::use_amdgcn
-          && !(target_arch == architecture::gfx103x || target_arch == architecture::gfx110x
-               || target_arch == architecture::gfx120x || target_arch == architecture::gfx115x)
-          && !(use_nodpp && (variant != 0));
-    static constexpr unsigned int vec_size = VecSize;
-    static constexpr bool vectorize = VecSize > 1;
-    static constexpr unsigned int vec_size_x
-        = vectorize && HipKernelConfig::layout_nhwc ? vec_size : 1;
-    static constexpr unsigned int vec_size_y
-        = vectorize && !HipKernelConfig::layout_nhwc ? vec_size : 1;
+    static constexpr unsigned int MAX_N = 65;
+    static constexpr unsigned int N_ELEMENTS = static_cast<unsigned int>(NElements);
+    static constexpr unsigned int N = static_cast<unsigned int>(NValue);
+    static constexpr unsigned int C = static_cast<unsigned int>(CValue);
+    static constexpr unsigned int HW = static_cast<unsigned int>(HWValue);
+    static constexpr unsigned int NHW = static_cast<unsigned int>(NHWValue);
+    static constexpr unsigned int CHW = static_cast<unsigned int>(CHWValue);
+    static constexpr int STASH_METHOD = StashMethod;
+    static constexpr int LOOP_UNROLL_MAX_N = LoopUnrollMaxN;
+    static constexpr int LOOP_UNROLL_MAX_HW = LoopUnrollMaxHW;
+    static constexpr unsigned int LDS_GCN_SIZE = static_cast<unsigned int>(LDSGCNSize);
+    static constexpr unsigned int LDS_SIZE = static_cast<unsigned int>(LDSSize);
+    static constexpr bool USE_NODPP
+        = INPUT_TYPE_STRATEGY == TypeStrategy::FPMIX ? false : static_cast<bool>(UseNodpp);
+    static constexpr int VARIANT = Variant;
+    static constexpr auto TARGET_ARCH = ArchSwitch::VALUE;
+    static constexpr bool USE_AMDGCN
+        = HipKernelConfig::USE_AMDGCN
+          && !(TARGET_ARCH == Architecture::GFX103X || TARGET_ARCH == Architecture::GFX110X
+               || TARGET_ARCH == Architecture::GFX120X || TARGET_ARCH == Architecture::GFX115X)
+          && (!USE_NODPP || (VARIANT == 0));
+    static constexpr unsigned int VEC_SIZE = VecSize;
+    static constexpr bool VECTORIZE = VecSize > 1;
+    static constexpr unsigned int VEC_SIZE_X
+        = VECTORIZE && HipKernelConfig::LAYOUT_NHWC ? VEC_SIZE : 1;
+    static constexpr unsigned int VEC_SIZE_Y
+        = VECTORIZE && !HipKernelConfig::layout_nhwc ? VEC_SIZE : 1;
 
     using fp_prec_c_type =
-        typename std::conditional<vectorize && HipKernelConfig::layout_nhwc,
-                                  typename mapped_vector_type<fp_prec_type, vec_size>::type,
+        typename std::conditional<VECTORIZE && HipKernelConfig::LAYOUT_NHWC,
+                                  typename MappedVectorType<fp_prec_type, VEC_SIZE>::type,
                                   fp_prec_type>::type;
 
     using fp_prec_ls_type =
-        typename std::conditional<vectorize,
-                                  typename mapped_vector_type<fp_prec_type, vec_size>::type,
+        typename std::conditional<VECTORIZE,
+                                  typename MappedVectorType<fp_prec_type, VEC_SIZE>::type,
                                   fp_prec_type>::type;
 
-    using fp_c_type =
-        typename std::conditional<vectorize && HipKernelConfig::layout_nhwc,
-                                  typename mapped_vector_type<fp_type, vec_size>::type,
-                                  fp_type>::type;
+    using fp_c_type = typename std::conditional<VECTORIZE && HipKernelConfig::LAYOUT_NHWC,
+                                                typename MappedVectorType<fp_type, VEC_SIZE>::type,
+                                                fp_type>::type;
 
     using fp_ls_type = typename std::
-        conditional<vectorize, typename mapped_vector_type<fp_type, vec_size>::type, fp_type>::type;
+        conditional<VECTORIZE, typename MappedVectorType<fp_type, VEC_SIZE>::type, fp_type>::type;
 
     using fp_accum_c_type =
-        typename std::conditional<vectorize && HipKernelConfig::layout_nhwc,
-                                  typename mapped_vector_type<fp_accum_type, vec_size>::type,
+        typename std::conditional<VECTORIZE && HipKernelConfig::LAYOUT_NHWC,
+                                  typename MappedVectorType<fp_accum_type, VEC_SIZE>::type,
                                   fp_accum_type>::type;
 
     using fp_accum_ls_type =
-        typename std::conditional<vectorize,
-                                  typename mapped_vector_type<fp_accum_type, vec_size>::type,
+        typename std::conditional<VECTORIZE,
+                                  typename MappedVectorType<fp_accum_type, VEC_SIZE>::type,
                                   fp_accum_type>::type;
 };
 
 } // namespace detail
 
-using config = hip_kernel_provider::batchnorm::detail::proto_config<
+using config = hip_kernel_provider::batchnorm::detail::ProtoConfig<
     hip_kernel_provider::config,
-    hip_kernel_provider::batchnorm::detail::half_max,
-    hip_kernel_provider::batchnorm::detail::flt_max,
-    hip_kernel_provider::batchnorm::detail::bf16_max,
+    hip_kernel_provider::batchnorm::detail::HalfMax,
+    hip_kernel_provider::batchnorm::detail::FltMax,
+    hip_kernel_provider::batchnorm::detail::Bf16Max,
     hip_kernel_provider::batchnorm::detail::
-        launch_dimension<HIP_PLUGIN_BN_GRP0, HIP_PLUGIN_BN_GRP1, HIP_PLUGIN_BN_GRP2>,
-    hip_kernel_provider::batchnorm::detail::architecture_switch<HIP_PLUGIN_GFX103X,
-                                                                HIP_PLUGIN_GFX110X,
-                                                                HIP_PLUGIN_GFX120X,
-                                                                HIP_PLUGIN_GFX115X>,
+        LaunchDimension<HIP_PLUGIN_BN_GRP0, HIP_PLUGIN_BN_GRP1, HIP_PLUGIN_BN_GRP2>,
+    hip_kernel_provider::batchnorm::detail::ArchitectureSwitch<HIP_PLUGIN_GFX103X,
+                                                               HIP_PLUGIN_GFX110X,
+                                                               HIP_PLUGIN_GFX120X,
+                                                               HIP_PLUGIN_GFX115X>,
     HIP_PLUGIN_BN_VARIANT,
     HIP_PLUGIN_BN_NCHW,
     HIP_PLUGIN_BN_N_ELEMENTS,

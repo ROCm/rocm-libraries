@@ -192,7 +192,7 @@ void LayernormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
 
     // Compile kernel and configure launch dimensions
     _compiledProgram = kernelCompiler.compile("LayernormBwd.cpp", options);
-    _runnableKernels.push_back(_compiledProgram->getKernel("LayernormBwd"));
+    _runnableKernels.push_back(_compiledProgram->getKernel("layernormBwd"));
     _runnableKernels[0]->setBlockSize(static_cast<unsigned int>(_localSize),
                                       static_cast<unsigned int>(1),
                                       static_cast<unsigned int>(1));

@@ -255,7 +255,7 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
 
     // Compile kernel and configure launch dimensions
     _compiledProgram = kernelCompiler.compile("BatchNormFwdInferSpatial.cpp", options);
-    _runnableKernel = _compiledProgram->getKernel("BatchNormFwdInferSpatialEst");
+    _runnableKernel = _compiledProgram->getKernel("batchNormFwdInferSpatialEst");
 
     _runnableKernel->setBlockSize(static_cast<unsigned int>(xlocalsize),
                                   static_cast<unsigned int>(ylocalsize),
