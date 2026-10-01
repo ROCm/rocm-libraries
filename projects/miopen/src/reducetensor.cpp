@@ -224,6 +224,19 @@ inline int GetDataTypeSize(miopenDataType_t t)
 
 }; // end of namespace detail
 
+namespace {
+
+int ToIntOrThrow(std::size_t value, const char* what)
+{
+    if(value > std::numeric_limits<int>::max())
+        MIOPEN_THROW(miopenStatusBadParm,
+                     std::string{"Reduction "} + what + " " + std::to_string(value) +
+                         " exceeds INT32_MAX, which is not supported.");
+    return static_cast<int>(value);
+}
+
+} // namespace
+
 namespace detailDynamic {
 
 static ck::DataTypeEnum_t mapDataTypeId(miopenDataType_t t)
@@ -365,6 +378,7 @@ static std::pair<bool, bool> get_padding_need(ReductionMethod_t reduceImpl,
         bool dst_need_padding = false;
         int copySliceLen;
         int reduceSizePerBlock;
+        size_t paddedReduceLen;
 
         switch(reduceImpl)
         {
@@ -395,8 +409,11 @@ static std::pair<bool, bool> get_padding_need(ReductionMethod_t reduceImpl,
                 (((toReduceLen + BlkGroupSize - 1) / BlkGroupSize + copySliceLen - 1) /
                  copySliceLen) *
                 copySliceLen;
-            src_need_padding =
-                (toReduceLen < static_cast<size_t>(reduceSizePerBlock) * BlkGroupSize);
+            // the kernel computes the padded length as int; with a single output the number of
+            // blocks is not capped, so it can exceed INT32_MAX even when the tensor itself fits
+            paddedReduceLen = static_cast<size_t>(reduceSizePerBlock) * BlkGroupSize;
+            ToIntOrThrow(paddedReduceLen, "padded reduced length");
+            src_need_padding = (toReduceLen < paddedReduceLen);
             return std::make_pair(src_need_padding, dst_need_padding);
         };
 
@@ -503,15 +520,6 @@ void ValidateReduceTensorFitsIntoInt(const TensorDescriptor& desc, const char* n
         MIOPEN_THROW(miopenStatusBadParm,
                      std::string{"Reduction "} + name +
                          " tensor spans more than INT32_MAX bytes, which is not supported.");
-}
-
-int ToIntOrThrow(std::size_t value, const char* what)
-{
-    if(value > std::numeric_limits<int>::max())
-        MIOPEN_THROW(miopenStatusBadParm,
-                     std::string{"Reduction "} + what + " " + std::to_string(value) +
-                         " exceeds INT32_MAX, which is not supported.");
-    return static_cast<int>(value);
 }
 
 } // namespace
