@@ -11,6 +11,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -72,6 +73,75 @@ struct DiscoveredBundle
     }
 };
 
+inline bool isDescendantOf(const std::filesystem::path& path, const std::filesystem::path& ancestor)
+{
+    const auto normalizedPath = path.lexically_normal();
+    const auto normalizedAncestor = ancestor.lexically_normal();
+
+    auto pathIt = normalizedPath.begin();
+    auto ancestorIt = normalizedAncestor.begin();
+    for(; pathIt != normalizedPath.end() && ancestorIt != normalizedAncestor.end();
+        ++pathIt, ++ancestorIt)
+    {
+        if(*pathIt != *ancestorIt)
+        {
+            return false;
+        }
+    }
+
+    return ancestorIt == normalizedAncestor.end();
+}
+
+// True when the directory symlink at `link` points at itself or at one of its own
+// ancestors, so descending into it would revisit the same tree forever.
+inline bool linksToAncestor(const std::filesystem::path& link)
+{
+    std::error_code error;
+    const auto target = std::filesystem::canonical(link, error);
+    if(error)
+    {
+        return false;
+    }
+    const auto parent = std::filesystem::canonical(link.parent_path(), error);
+    return !error && isDescendantOf(parent, target);
+}
+
+// Visits every entry at or under `root`, the one walk every discovery scan uses.
+// Directory symlinks are followed at any depth, so a bundle root assembled from
+// links (for example quick/SdpaFwd linked to an installed tree) is discovered like
+// the same tree copied. Entries keep their path through the link, which is what
+// test names are derived from. A link to its own ancestor is skipped rather than
+// descended, so a cycle cannot recurse until the path is too long.
+template <typename Visit>
+void forEachBundleTreeEntry(const std::filesystem::path& root, Visit&& visit)
+{
+    namespace fs = std::filesystem;
+    for(auto it
+        = fs::recursive_directory_iterator(root, fs::directory_options::follow_directory_symlink);
+        it != fs::recursive_directory_iterator();
+        ++it)
+    {
+        if(it->is_symlink() && it->is_directory() && linksToAncestor(it->path()))
+        {
+            HIPDNN_PLUGIN_LOG_WARN(
+                "Not following bundle directory link to its own ancestor: " << it->path());
+            it.disable_recursion_pending();
+            continue;
+        }
+        visit(*it);
+    }
+}
+
+// The path of `path` below `root`, derived from the paths alone. Lexical on purpose:
+// std::filesystem::relative() resolves symlinks, and a bundle reached through a link
+// whose target lies outside the root would get a "../.." name instead of the name of
+// the folder it was found in.
+inline std::filesystem::path relativeToRoot(const std::filesystem::path& path,
+                                            const std::filesystem::path& root)
+{
+    return path.lexically_normal().lexically_relative(root.lexically_normal());
+}
+
 // Generic recursive file scanner. It carries no bundle knowledge; graph vs
 // companion vs sweep filtering is layered on top by isGraphFile() and
 // discoverBundles().
@@ -79,13 +149,12 @@ inline std::vector<std::filesystem::path>
     scanFilesByExtension(const std::filesystem::path& directory, const std::string& extension)
 {
     std::vector<std::filesystem::path> paths;
-    for(const auto& entry : std::filesystem::recursive_directory_iterator(directory))
-    {
+    forEachBundleTreeEntry(directory, [&](const std::filesystem::directory_entry& entry) {
         if(entry.is_regular_file() && entry.path().extension() == extension)
         {
             paths.push_back(entry.path());
         }
-    }
+    });
     std::sort(paths.begin(), paths.end());
     return paths;
 }
@@ -98,14 +167,13 @@ inline std::vector<std::filesystem::path> findLeafDirectories(const std::filesys
     std::set<std::filesystem::path> withSubdir;
     std::set<std::filesystem::path> allDirs;
     allDirs.insert(root);
-    for(const auto& entry : std::filesystem::recursive_directory_iterator(root))
-    {
+    forEachBundleTreeEntry(root, [&](const std::filesystem::directory_entry& entry) {
         if(entry.is_directory())
         {
             allDirs.insert(entry.path());
             withSubdir.insert(entry.path().parent_path());
         }
-    }
+    });
 
     std::vector<std::filesystem::path> leaves;
     for(const auto& dir : allDirs)
@@ -228,7 +296,7 @@ inline std::string deriveSuiteName(const std::filesystem::path& relativeDir,
 inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
                                       const std::filesystem::path& bundleDir)
 {
-    const auto relative = std::filesystem::relative(jsonPath, bundleDir);
+    const auto relative = relativeToRoot(jsonPath, bundleDir);
     const auto relativeDir = relative.parent_path();
     if(relativeDir.empty())
     {
@@ -237,25 +305,6 @@ inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
     }
 
     return {deriveSuiteName(relativeDir, jsonPath), sanitizeForGtest(jsonPath.stem().string())};
-}
-
-inline bool isDescendantOf(const std::filesystem::path& path, const std::filesystem::path& ancestor)
-{
-    const auto normalizedPath = path.lexically_normal();
-    const auto normalizedAncestor = ancestor.lexically_normal();
-
-    auto pathIt = normalizedPath.begin();
-    auto ancestorIt = normalizedAncestor.begin();
-    for(; pathIt != normalizedPath.end() && ancestorIt != normalizedAncestor.end();
-        ++pathIt, ++ancestorIt)
-    {
-        if(*pathIt != *ancestorIt)
-        {
-            return false;
-        }
-    }
-
-    return ancestorIt == normalizedAncestor.end();
 }
 
 // A sweep root is any directory with both graph.template.json and sweep.json.
@@ -271,13 +320,12 @@ inline std::vector<std::filesystem::path>
         sweepDirs.insert(bundleDir);
     }
 
-    for(const auto& entry : std::filesystem::recursive_directory_iterator(bundleDir))
-    {
+    forEachBundleTreeEntry(bundleDir, [&](const std::filesystem::directory_entry& entry) {
         if(entry.is_directory() && isSweepBundleRoot(entry.path()))
         {
             sweepDirs.insert(entry.path());
         }
-    }
+    });
 
     return {sweepDirs.begin(), sweepDirs.end()};
 }
@@ -371,8 +419,7 @@ inline std::vector<DiscoveredBundle> discoverSweepCases(const std::filesystem::p
 {
     const auto sweepPath = sweepDir / "sweep.json";
     const auto templatePath = sweepDir / "graph.template.json";
-    const auto suiteName
-        = deriveSuiteName(std::filesystem::relative(sweepDir, bundleDir), sweepPath);
+    const auto suiteName = deriveSuiteName(relativeToRoot(sweepDir, bundleDir), sweepPath);
 
     std::vector<DiscoveredBundle> bundles;
     for(const auto& caseId : readSweepCaseIds(sweepPath))

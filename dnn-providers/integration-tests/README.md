@@ -110,6 +110,13 @@ the on-disk layout, DVC remote layout, and pull/push workflow, and
 [`migration-scripts/README.md`](migration-scripts/README.md) for the exact
 field mapping between the two.
 
+To run against part of the tree, point `--golden-data-dir` (`--gd`) at a directory
+that holds only the pieces you want. They can be copies or directory symlinks into
+an existing tree, e.g. `quick/SdpaFwd -> <install>/lib/integration-test-bundles/quick/SdpaFwd`.
+Discovery follows directory links at any depth. Tests take their names from the
+path through the link, so a linked subtree gets the same test names as a copy. A
+link back to one of its own parent directories is skipped with a warning.
+
 ### When to use which
 
 **Default to a template-sweep bundle.** Use a straight single-graph bundle only

@@ -321,6 +321,60 @@ TEST_F(TestBundleDiscoveryFixture, TemplateSweepCasesAreExpandedFromManifest)
     EXPECT_EQ(fp16->sweep->caseId, "small_fp16_nchw");
 }
 
+// A bundle root assembled from directory links (say quick/SdpaFwd linked to an
+// installed tree) must discover what a copy of the same tree would, under the link's
+// name, including a sweep that sits further down behind the link.
+TEST_F(TestBundleDiscoveryFixture, DirectorySymlinksInsideTheRootAreFollowed)
+{
+    const auto root = _tempDir / "root";
+    const auto outside = _tempDir / "outside";
+    createMinimalBundle(outside / "Direct" / "nchw" / "Small", "Small");
+    createTemplateSweep(
+        outside / "Swept" / "Inference",
+        {{"small_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+    std::filesystem::create_directories(root / "quick");
+    try
+    {
+        std::filesystem::create_directory_symlink(outside / "Direct", root / "quick" / "Direct");
+        std::filesystem::create_directory_symlink(outside / "Swept", root / "quick" / "Swept");
+    }
+    catch(const std::filesystem::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create directory symlinks here: " << e.what();
+    }
+
+    const auto result = discoverBundles(root);
+    ASSERT_EQ(result.size(), 2u);
+
+    const auto* direct = findByTest(result, "Small");
+    ASSERT_NE(direct, nullptr);
+    EXPECT_EQ(direct->suiteName, "quick_Direct_nchw_Small");
+    EXPECT_EQ(direct->jsonPath, root / "quick" / "Direct" / "nchw" / "Small" / "Small.json");
+
+    const auto* swept = findByTest(result, "small_fp32_nchw");
+    ASSERT_NE(swept, nullptr);
+    EXPECT_EQ(swept->suiteName, "quick_Swept_Inference");
+}
+
+// A link back to its own ancestor would make the walk revisit the tree forever. It is
+// not descended: discovery finishes and finds each bundle once.
+TEST_F(TestBundleDiscoveryFixture, DirectorySymlinkToAnAncestorIsNotFollowed)
+{
+    createMinimalBundle(_tempDir / "conv" / "good", "good");
+    try
+    {
+        std::filesystem::create_directory_symlink(_tempDir, _tempDir / "conv" / "loop");
+    }
+    catch(const std::filesystem::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create directory symlinks here: " << e.what();
+    }
+
+    const auto result = discoverBundles(_tempDir);
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result.front().suiteName, "conv_good");
+}
+
 TEST_F(TestBundleDiscoveryFixture, JsonAtRootUsesFolderNameAsSuite)
 {
     // A .json directly at the data root uses the root folder name as suite.
