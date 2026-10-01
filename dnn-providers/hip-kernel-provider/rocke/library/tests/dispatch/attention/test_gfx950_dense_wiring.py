@@ -515,8 +515,11 @@ class TestDenseSlidingWindowWiring(unittest.TestCase):
             dense_spec_for_request(req)
 
         err_msg = str(cm.exception)
-        self.assertIn("ragged", err_msg.lower())
-        self.assertIn("sliding_window", err_msg.lower())
+        # The graph is not ragged; the reason names the length, the tile and the window.
+        self.assertIn("seqlen_q 500 is not a multiple of block_m 256", err_msg)
+        self.assertIn("seqlen_kv 500 is not a multiple of block_n 64", err_msg)
+        self.assertIn("sliding_window", err_msg)
+        self.assertNotIn("ragged", err_msg)
 
     def test_sliding_window_without_ragged_accepted(self):
         """Sliding window works fine on non-ragged shapes (block-aligned seqlens)."""

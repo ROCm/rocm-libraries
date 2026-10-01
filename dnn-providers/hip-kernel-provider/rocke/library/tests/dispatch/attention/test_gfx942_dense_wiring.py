@@ -152,16 +152,37 @@ class TestGfx942DenseSupportGates(unittest.TestCase):
             self.assertIn("capability", why)
             self.assertIn("sinks", why)
 
-    def test_rejects_ragged_sequence_length(self):
-        """_dense_spec sets ragged=True for any non-256-multiple self-attention
-        length -- most real serving shapes. The kernel must decline, not
+    def test_rejects_a_partial_tile_and_names_the_length(self):
+        """_dense_spec sets ragged=True for any self-attention length that is not a
+        tile multiple -- most real serving shapes. The kernel must decline, not
         select-then-fail. Capability cannot see this one: it is a property of the
-        BUILT spec, so it stays in the predicate."""
+        BUILT spec, so it stays in the predicate. The graph is not ragged, so the
+        reason names the length and the tile instead of saying "ragged"."""
+        cases = (
+            (384, ["seqlen_q 384 is not a multiple of block_m 256"]),
+            (1152, ["seqlen_q 1152 is not a multiple of block_m 256"]),
+            (
+                1000,
+                [
+                    "seqlen_q 1000 is not a multiple of block_m 256",
+                    "seqlen_kv 1000 is not a multiple of block_n 64",
+                ],
+            ),
+        )
         with _Gfx942Arch():
-            ok, why = _candidate().admits(_req(seqlen_q=1000, seqlen_k=1000))
-            self.assertFalse(ok)
-            self.assertNotIn("capability", why)
-            self.assertIn("ragged", why)
+            for seqlen, expected in cases:
+                with self.subTest(seqlen=seqlen):
+                    ok, why = _candidate().admits(
+                        _req(seqlen_q=seqlen, seqlen_k=seqlen)
+                    )
+                    self.assertFalse(ok)
+                    self.assertNotIn("capability", why)
+                    self.assertNotIn("ragged", why)
+                    for part in expected:
+                        self.assertIn(part, why)
+            # 1152 is a block_n multiple, so only the query length is named.
+            ok, why = _candidate().admits(_req(seqlen_q=1152, seqlen_k=1152))
+            self.assertNotIn("seqlen_kv", why)
 
 
 class TestGfx942BottomRightSafety(unittest.TestCase):
