@@ -80,7 +80,7 @@ class TestSupportIsCheckedOnTheFinalSpec:
         """Control: with no overrides both shapes are supported, so an exclusion below
         comes from the perturbation."""
         profile, resolutions = sweep
-        config, unbuildable = knob_sweep._arm(resolutions, profile, {})
+        config, unbuildable, _gained = knob_sweep._arm(resolutions, profile, {})
         assert unbuildable == []
         assert len(config["packs"][0]["kernels"]) == 2
 
@@ -89,7 +89,9 @@ class TestSupportIsCheckedOnTheFinalSpec:
     ):
         """Naming the excluded shape is what makes a narrowed arm measurable."""
         profile, resolutions = sweep
-        config, unbuildable = knob_sweep._arm(resolutions, profile, {"head_size": 64})
+        config, unbuildable, _gained = knob_sweep._arm(
+            resolutions, profile, {"head_size": 64}
+        )
 
         assert [index for index, _reason in unbuildable] == [0]
         assert "unsupported" in unbuildable[0][1]
@@ -105,7 +107,9 @@ class TestSupportIsCheckedOnTheFinalSpec:
         this tool must not invent an answer."""
         profile, resolutions = sweep
         profile.pop("predicate")
-        _config, unbuildable = knob_sweep._arm(resolutions, profile, {"head_size": 64})
+        _config, unbuildable, _gained = knob_sweep._arm(
+            resolutions, profile, {"head_size": 64}
+        )
         assert unbuildable == []
 
 
@@ -115,7 +119,7 @@ class TestTheDeclarationReachesTheEmittedConfig:
         specialization_contract, leaving the receiving machine nothing to check the
         compiled bytes against."""
         profile, resolutions = sweep
-        config, _unbuildable = knob_sweep._arm(resolutions, profile, {})
+        config, _unbuildable, _gained = knob_sweep._arm(resolutions, profile, {})
         assert config["specialization"] == profile["specialization"]
 
     def test_a_missing_declaration_is_refused_rather_than_emitted_empty(self, sweep):
@@ -135,3 +139,65 @@ class TestTheDeclarationReachesTheEmittedConfig:
         }
         with pytest.raises(Exception, match="use_cfvst"):
             knob_sweep._arm(resolutions, profile, {})
+
+
+_SHIPPED_PROFILE = (
+    Path(__file__).resolve().parents[1]
+    / "configs"
+    / "gfx950_attention_dense.profile.yaml"
+)
+_D128 = dict(nhead_q=8, nhead_k=8, hdim_q=128, hdim_v=128, dtype="bf16", mask_type=0)
+
+
+class TestCoverageShapesReachTheArmsThatServeThem:
+    """942:S6-2: a tile arm exists for shapes the dispatcher's own tile cannot
+    serve (Skv % 64 == 32 needs block_n=32). The sweep resolved every shape at the
+    dispatcher's choice first, so those shapes never reached any arm and every
+    arm reported the same served count."""
+
+    def _sweep(self, monkeypatch, tmp_path, capsys):
+        import importlib
+        import json
+
+        from dispatch_parity import _bind_provider, _load_profile
+
+        profile = _load_profile(str(_SHIPPED_PROFILE))
+        monkeypatch.setattr(sys, "path", list(sys.path))
+        _bind_provider(profile["provider_root"])
+        try:
+            importlib.import_module(profile["dispatch"]["module"])
+        except ImportError as exc:
+            pytest.skip(f"the rocKE library cannot be imported here ({exc})")
+        shapes = tmp_path / "shapes.json"
+        shapes.write_text(
+            json.dumps(
+                [
+                    {**_D128, "batch": 1, "seqlen_q": 512, "seqlen_k": 512},
+                    {**_D128, "batch": 1, "seqlen_q": 512, "seqlen_k": 288},
+                ]
+            )
+        )
+        argv = ["--profile", str(_SHIPPED_PROFILE), "--shapes", str(shapes)]
+        rc = knob_sweep.main([*argv, "--isolate", "--out-dir", str(tmp_path / "arms")])
+        return rc, capsys.readouterr().out, tmp_path / "arms"
+
+    def test_the_block_n_32_arm_serves_the_shape_the_parity_tile_refuses(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        import yaml
+
+        rc, out, arms = self._sweep(monkeypatch, tmp_path, capsys)
+        assert rc == 0, out
+        assert "coverage shapes   1" in out
+        assert "COVERAGE: serves 1 of 1" in out
+
+        def seqlens(arm):
+            config = yaml.safe_load((arms / arm).read_text())
+            return sorted(
+                k["kernel_source"]["spec"]["seqlen_kv"]
+                for k in config["packs"][0]["kernels"]
+            )
+
+        assert seqlens("arm_block_n_32.yaml") == [288, 512]
+        assert seqlens("arm_parity.yaml") == [512], "parity serves only its own tile"
+        assert seqlens("arm_block_n_64.yaml") == [512]

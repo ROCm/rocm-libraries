@@ -306,23 +306,45 @@ def resolve_shapes(shapes: list[dict], profile: dict) -> list[Resolution]:
     return out
 
 
-def _canonical_values(profile: dict) -> dict:
-    """The profile's `runtime_param_fields` mapping: spec field -> the value a
-    catalog entry is built at. The list form names the fields without values,
-    so it cannot say what to canonicalise to."""
+def runtime_fields(profile: dict) -> dict:
+    """The profile's `runtime_param_fields` mapping, normalised to
+    `spec field -> (canonical value, request field)`.
+
+    Each entry is the canonical integer, or `{canonical: <int>, request:
+    <request field>}` when the request spells the field differently (the spec's
+    `seqlen_kv` is the attention request's `seqlen_k`). The list form names the
+    fields without values, so it cannot say what to canonicalise to.
+    """
     declared = profile.get("runtime_param_fields")
     if not declared:
         return {}
-    if not isinstance(declared, dict) or any(
-        type(v) is not int for v in declared.values()
-    ):
+    out = {}
+    for field, value in declared.items() if isinstance(declared, dict) else ():
+        if type(value) is int:
+            out[field] = (value, field)
+        elif (
+            isinstance(value, dict)
+            and type(value.get("canonical")) is int
+            and isinstance(value.get("request", field), str)
+        ):
+            out[field] = (value["canonical"], value.get("request", field))
+        else:
+            out = None
+            break
+    if not out:
         raise ParityError(
             "runtime_param_fields must map each spec field to its canonical "
-            "integer value (e.g. {batch: 1, seqlen_q: 512, seqlen_kv: 512}) for "
-            "dispatch_parity to canonicalise; pass --per-shape to keep one "
-            "kernel per shape at its own values instead."
+            "integer value, or to {canonical: <int>, request: <request field>} "
+            "(e.g. {batch: 1, seqlen_q: 512, seqlen_kv: {canonical: 512, request: "
+            "seqlen_k}}) for dispatch_parity to canonicalise; pass --per-shape to "
+            "keep one kernel per shape at its own values instead."
         )
-    return declared
+    return out
+
+
+def _canonical_values(profile: dict) -> dict:
+    """Spec field -> the value a catalog entry is built at."""
+    return {field: value for field, (value, _) in runtime_fields(profile).items()}
 
 
 def canonicalise(

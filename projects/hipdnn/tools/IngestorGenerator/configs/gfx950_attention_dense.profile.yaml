@@ -220,7 +220,9 @@ sweep:
 runtime_param_fields:
   batch: 1
   seqlen_q: 512
-  seqlen_kv: 512
+  # The request spells this field seqlen_k; knob_sweep needs the request name
+  # to probe coverage shapes.
+  seqlen_kv: {canonical: 512, request: seqlen_k}
 
 # Graph features the engine's graph_match admits beyond the request fields
 # (Gfx950AttentionDenseNative.cpp): dense BSHD operands only, and none of the

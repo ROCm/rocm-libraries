@@ -36,6 +36,7 @@ from dispatch_parity import (  # noqa: E402
     build_config,
     knob_partition,
     resolve_shapes,
+    runtime_fields,
 )
 
 
@@ -74,6 +75,48 @@ def _promote(spec, arch_spec_cls, overrides: dict):
     return arch_spec_cls(**{**shared, **overrides})
 
 
+def coverage_probes(resolutions, profile: dict) -> dict:
+    """Shapes the dispatcher refuses or declines that a runtime-shape spec of the
+    same kernel could still serve with a different knob value: the shapes a
+    coverage tile exists for (Sq % 256 == 128 under a 256-row default tile).
+
+    The dispatcher answers only for its own choice, so each such shape is asked
+    again at probe values of the profile's `runtime_param_fields`: canonical
+    multiples that keep the real values' equality and order (Sq == Skv stays
+    equal, Sq < Skv stays smaller), so the probe asks about the same problem.
+    A probe the dispatcher serves, with a spec that reads every runtime field
+    as a kernel argument, gives `index -> (probe spec, {spec field: real
+    value})`. Each arm then builds that spec at the real values with its own
+    knobs (`_arm`), and the spec class and predicate decide whether the arm
+    serves the shape. Empty when the profile declares no runtime fields.
+    """
+    runtime = runtime_fields(profile)
+    if not runtime:
+        return {}
+    probes = {}
+    for index, resolution in enumerate(resolutions):
+        if resolution.spec is not None or resolution.kind not in (
+            "refused",
+            "declined",
+        ):
+            continue
+        reals = {f: resolution.shape.get(req) for f, (_, req) in runtime.items()}
+        if any(type(v) is not int or v <= 0 for v in reals.values()):
+            continue
+        rank = {v: i for i, v in enumerate(sorted(set(reals.values())))}
+        probe = dict(resolution.shape)
+        for field, (canonical, request_field) in runtime.items():
+            probe[request_field] = canonical * (rank[reals[field]] + 1)
+        [answer] = resolve_shapes([probe], profile)
+        spec = answer.spec
+        if spec is None or not set(runtime) <= set(
+            getattr(spec, "runtime_param_fields", ()) or ()
+        ):
+            continue
+        probes[index] = (spec, reals)
+    return probes
+
+
 def _support_predicate(profile: dict):
     """The engine's own eligibility predicate, or None when the profile
     declares none. Bound once per arm rather than per shape: a predicate that
@@ -85,8 +128,12 @@ def _support_predicate(profile: dict):
 
 
 def _arm(
-    resolutions, profile: dict, overrides: dict, arch_spec_cls=None
-) -> tuple[dict, list[tuple[int, str]]]:
+    resolutions,
+    profile: dict,
+    overrides: dict,
+    arch_spec_cls=None,
+    probes: dict | None = None,
+) -> tuple[dict, list[tuple[int, str]], list[int]]:
     """One arm: the parity set with `overrides` forced onto every served spec.
 
     Built by mutating the dispatcher's own resolution, so the arm differs from
@@ -94,10 +141,12 @@ def _arm(
     one is declared, including the baseline, which would otherwise also differ
     in the subclass's private defaults.
 
-    Returns `(config, unbuildable)`, where `unbuildable` lists
+    Returns `(config, unbuildable, gained)`. `unbuildable` lists
     `(shape_index, reason)` for every served shape whose spec refuses this
     arm's value -- a property of the set that the caller must report, since a
-    ratio over a different shape population is not a comparison.
+    ratio over a different shape population is not a comparison. `gained`
+    lists the coverage shapes (see `coverage_probes`) this arm serves although
+    the dispatcher's own choice does not; they are in the config too.
 
     A shape is refused either by the spec constructor or by the eligibility
     predicate, which is asked about the final spec, after promotion and this
@@ -105,14 +154,22 @@ def _arm(
     """
     mutated = []
     unbuildable: list[tuple[int, str]] = []
+    gained: list[int] = []
     predicate = _support_predicate(profile)
     arch = profile.get("arch")
+    probes = probes or {}
     for index, resolution in enumerate(resolutions):
-        if resolution.spec is None:
+        coverage = resolution.spec is None and index in probes
+        if resolution.spec is None and not coverage:
             mutated.append(resolution)
             continue
+        base, fields = (
+            (probes[index][0], {**overrides, **probes[index][1]})
+            if coverage
+            else (resolution.spec, overrides)
+        )
         clone = copy.copy(resolution)
-        private = [k for k in overrides if not hasattr(resolution.spec, k)]
+        private = [k for k in overrides if not hasattr(base, k)]
         if private and arch_spec_cls is None:
             raise ParityError(
                 f"{private} are not on the spec the dispatcher returns and no "
@@ -126,16 +183,17 @@ def _arm(
         # wide-DMA for. Drop those shapes and count them rather than aborting.
         try:
             if arch_spec_cls is not None:
-                clone.spec = _promote(resolution.spec, arch_spec_cls, overrides)
+                clone.spec = _promote(base, arch_spec_cls, fields)
             else:
                 # The spec is a frozen dataclass, so replace() rather than
                 # setattr: mutating a shared object in place is how one arm's
                 # override leaks into the next one's baseline.
-                clone.spec = dataclasses.replace(resolution.spec, **overrides)
+                clone.spec = dataclasses.replace(base, **fields)
         except ParityError:
             raise
         except Exception as exc:
-            unbuildable.append((index, f"{type(exc).__name__}: {exc}"))
+            if not coverage:
+                unbuildable.append((index, f"{type(exc).__name__}: {exc}"))
             continue
         if predicate is not None:
             # The final spec, promoted to the builder's class and carrying this
@@ -145,10 +203,13 @@ def _arm(
                 predicate, clone.spec, **({"arch": arch} if arch else {})
             )
             if not supported:
-                unbuildable.append((index, f"unsupported: {why}"))
+                if not coverage:
+                    unbuildable.append((index, f"unsupported: {why}"))
                 continue
+        if coverage:
+            gained.append(index)
         mutated.append(clone)
-    return build_config(mutated, profile), unbuildable
+    return build_config(mutated, profile), unbuildable, gained
 
 
 def _write(config: dict, path: Path) -> int:
@@ -191,6 +252,7 @@ def main(argv=None) -> int:
         _bind_provider(profile.get("provider_root"))
         shapes = json.loads(Path(args.shapes).read_text())
         resolutions = resolve_shapes(shapes, profile)
+        probes = coverage_probes(resolutions, profile)
     except ParityError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 2
@@ -222,6 +284,10 @@ def main(argv=None) -> int:
 
     print("knob sweep")
     print(f"  shapes served     {len(served)}")
+    print(
+        f"  coverage shapes   {len(probes)}  (the dispatcher's choice refuses them; "
+        f"an arm may serve them)"
+    )
     print(f"  dispatcher varies {', '.join(varies) or '(none)'}")
     print(f"  candidates        {len(candidates)}")
     for knob in candidates:
@@ -247,37 +313,48 @@ def main(argv=None) -> int:
         if not candidates:
             print("\nFAIL: no candidate knobs to isolate.", file=sys.stderr)
             return 1
-        baseline, base_unbuildable = _arm(resolutions, profile, {}, arch_spec_cls)
+        baseline, base_unbuildable, base_gained = _arm(
+            resolutions, profile, {}, arch_spec_cls, probes
+        )
         assert not base_unbuildable, (
             "the PARITY baseline itself has unbuildable shapes, which is impossible "
             "by construction -- the dispatcher resolved these specs, so they build. "
             f"Got: {base_unbuildable[:3]}"
         )
         count = _write(baseline, out / "arm_parity.yaml")
-        served_total = count
-        print(f"\n  arm_parity.yaml               {count:5d} kernels  (the baseline)")
+        print(
+            f"\n  arm_parity.yaml               {count:5d} kernels  (the baseline"
+            + (f"; +{len(base_gained)} coverage shapes" if base_gained else "")
+            + ")"
+        )
         base_specs = [
             k["kernel_source"]["spec"] for k in baseline["packs"][0]["kernels"]
         ]
         for knob in candidates:
             for value in knob.values:
-                arm, unbuildable = _arm(
-                    resolutions, profile, {knob.name: value}, arch_spec_cls
+                arm, unbuildable, gained = _arm(
+                    resolutions, profile, {knob.name: value}, arch_spec_cls, probes
                 )
                 name = f"arm_{knob.name}_{value}.yaml"
                 count = _write(arm, out / name)
                 # An arm whose value is what the dispatcher already resolves is
                 # the baseline under another name: it measures 1.000x and
                 # reports "no effect" having never tried the other side.
-                arm_specs = [
-                    k["kernel_source"]["spec"] for k in arm["packs"][0]["kernels"]
-                ]
-                identical = arm_specs and all(
-                    b.get(knob.name) == a.get(knob.name)
-                    for b, a in zip(base_specs, arm_specs)
+                identical = (
+                    base_specs
+                    and all(b.get(knob.name) == value for b in base_specs)
+                    and len(gained) == len(base_gained)
                 )
                 note = "  == parity, measures nothing" if identical else ""
                 print(f"  {name:<30}{count:5d} kernels{note}")
+                # Coverage is what a tile knob is for: shapes the dispatcher's
+                # own tile cannot serve. Counted separately, since they are not
+                # in the baseline and so are not part of any ratio against it.
+                if len(gained) > len(base_gained):
+                    print(
+                        f"  {'':30}{'':5} COVERAGE: serves {len(gained)} of "
+                        f"{len(probes)} coverage shapes the parity set cannot"
+                    )
                 # A narrowed arm is not a full comparison. Report the fraction
                 # and the distinct reasons so the arm's coverage is a number
                 # the reader checks rather than assumes.
@@ -286,9 +363,9 @@ def main(argv=None) -> int:
                     for _, why in unbuildable:
                         reasons[why] = reasons.get(why, 0) + 1
                     print(
-                        f"  {'':30}{'':5} NARROWED: covers {count} of "
-                        f"{served_total} served shapes; "
-                        f"{len(unbuildable)} cannot express this value"
+                        f"  {'':30}{'':5} NARROWED: covers "
+                        f"{len(served) - len(unbuildable)} of {len(served)} served "
+                        f"shapes; {len(unbuildable)} cannot express this value"
                     )
                     for why, n in sorted(reasons.items(), key=lambda kv: -kv[1]):
                         print(f"  {'':30}{'':5}   {n:4d} x {why}")
@@ -296,7 +373,8 @@ def main(argv=None) -> int:
             "\n  Two arms per knob, everything else at parity, so an effect is "
             "attributable\n  to that knob alone. Measure these before pairing anything."
             "\n  A NARROWED arm is measurable but is NOT a comparison over the whole"
-            "\n  set -- report its fraction, never a bare ratio against parity."
+            "\n  set -- report its fraction, never a bare ratio against parity. A"
+            "\n  COVERAGE arm's extra shapes have no parity time; report them apart."
         )
         return 0
 
@@ -318,13 +396,19 @@ def main(argv=None) -> int:
         for combo in combos:
             overrides = dict(zip(names, combo))
             label = "_".join(f"{k}{v}" for k, v in overrides.items())
-            arm, unbuildable = _arm(resolutions, profile, overrides, arch_spec_cls)
-            count = _write(arm, out / f"pair_{label}.yaml")
-            note = (
-                f"  NARROWED: {len(unbuildable)} shapes cannot express this combination"
-                if unbuildable
-                else ""
+            arm, unbuildable, gained = _arm(
+                resolutions, profile, overrides, arch_spec_cls, probes
             )
+            count = _write(arm, out / f"pair_{label}.yaml")
+            notes = []
+            if unbuildable:
+                notes.append(
+                    f"NARROWED: {len(unbuildable)} shapes cannot express this "
+                    f"combination"
+                )
+            if gained:
+                notes.append(f"COVERAGE: +{len(gained)} of {len(probes)}")
+            note = ("  " + "; ".join(notes)) if notes else ""
             print(f"  pair_{label:<26}{count:5d} kernels{note}")
         return 0
 
