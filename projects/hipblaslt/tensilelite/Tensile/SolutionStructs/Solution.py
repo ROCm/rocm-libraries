@@ -2949,9 +2949,19 @@ class Solution(collections.abc.Mapping):
     #         and not state["UnrollMajorLDSB"] and not state["DirectToVgprB"]
     # TODO- Is it possible for devices with asmCaps["HasLDSTr"], we automatically use it when UnrollMajorLDS=0
     #       Supporting manually transpose load when having "HasLDSTr" is not worthy.
-    state["enableLDSTrA"] = isLDSTrEnabled(isaInfoMap[isa].asmCaps, state["LDSTrInst"], state["UnrollMajorLDSA"], state["DirectToVgprA"], numBytesA)
+    # LDSTrInstA/B default to -1 (follow LDSTrInst), except SourceSwap +
+    # Sparse B (Sparse==2), which defaults LDSTrInstA to disabled for
+    # performance (still works if explicitly set to 1 in the YAML).
+    if state["LDSTrInstA"] == -1:
+      if state["SourceSwap"] and state["ProblemType"]["Sparse"] == 2:
+        state["LDSTrInstA"] = 0
+      else:
+        state["LDSTrInstA"] = int(state["LDSTrInst"])
+    if state["LDSTrInstB"] == -1:
+      state["LDSTrInstB"] = int(state["LDSTrInst"])
+    state["enableLDSTrA"] = isLDSTrEnabled(isaInfoMap[isa].asmCaps, state["LDSTrInstA"], state["UnrollMajorLDSA"], state["DirectToVgprA"], numBytesA)
     state["enableLDSTrMXSA"] = False
-    state["enableLDSTrB"] = isLDSTrEnabled(isaInfoMap[isa].asmCaps, state["LDSTrInst"], state["UnrollMajorLDSB"], state["DirectToVgprB"], numBytesB)
+    state["enableLDSTrB"] = isLDSTrEnabled(isaInfoMap[isa].asmCaps, state["LDSTrInstB"], state["UnrollMajorLDSB"], state["DirectToVgprB"], numBytesB)
     state["enableLDSTrMXSB"] = False
 
     # This reject kernels in 950 logic yaml, temporarily comment it out.
@@ -3231,9 +3241,10 @@ class Solution(collections.abc.Mapping):
 
     for tc, numBytes in (("A", numBytesA), ("B", numBytesB)):
       if state["enableTDM%s"%tc] and numBytes in _LDS_TR_READ_BYTES \
-         and not state["UnrollMajorLDS%s"%tc] and not state["enableLDSTr%s"%tc]:
+         and not state["UnrollMajorLDS%s"%tc] and not state["LDSTrInst%s"%tc] \
+         and not (tc == "A" and state["SourceSwap"]):
         reject(state, printRejectionReason,
-               "TileMajor%s with TDM requires LDSTrInst=True"%tc)
+               "TileMajor%s with TDM requires LDSTrInst%s=True"%(tc, tc))
         return
 
     if state["enableTDMMetadata"] and state["ProblemType"]["MetadataLayout"]:
@@ -4313,6 +4324,11 @@ class Solution(collections.abc.Mapping):
             else:
               if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
                 LdsBlockSizePerPad = int(mt * tmpBpe * lrvw)
+                # LdsBlockSizePerPad only exists to avoid bank conflicts.
+                # On the TDM TileMajor path with TLU, when LDSTr is not
+                # enabled, no bank conflict occurs, so no pad block is needed.
+                if state.get("enableTDM%s"%tc, False) and state["ProblemType"]["TLU%s"%tc] and not state.get("enableLDSTr%s"%tc, False):
+                  LdsBlockSizePerPad = 0
                 if wmmaV3:
                   miWaveTileIdx = 0 if "A" in tc else 1
                   ldsType = state["ProblemType"]["DataType%s"%tc] if state["ConvertAfterDS"] else state["ProblemType"]["MacDataType%s"%tc]
@@ -4462,7 +4478,7 @@ class Solution(collections.abc.Mapping):
               if state["LocalReadVectorWidthA"] * state["ProblemType"]["MacDataTypeA"].numBytes() > maxNumDsLoadBytesA:
                 reject(state, printRejectionReason, "LocalReadVectorWidthA(%d) * BytePerMacDataTypeA(%s) > %d bytes." % (state["LocalReadVectorWidthA"], state["ProblemType"]["MacDataTypeA"].numBytes(), maxNumDsLoadBytesA))
             elif not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not(state["ProblemType"]["MacDataTypeA"].is8bitFloat() and (state["MatrixInstK"] in [64, 128,])):
-              if state["LocalReadVectorWidthA"] < state["MIInputPerThread"] and not state["LDSTrInst"] and not isaInfoMap[isa].asmCaps["HasWMMA_V3"]:
+              if state["LocalReadVectorWidthA"] < state["MIInputPerThread"] and not state["LDSTrInstA"] and not isaInfoMap[isa].asmCaps["HasWMMA_V3"]:
                 reject(state, printRejectionReason, "LocalReadVectorWidthA < %u" %(state["MIInputPerThread"])) # << Rejected here
             if state["LocalReadVectorWidthA"] > state["MIInputPerThread"] and not state["TransposeLDS"]:
               reject(state, printRejectionReason, "LocalReadVectorWidth require Transpose LDS")
@@ -4498,7 +4514,7 @@ class Solution(collections.abc.Mapping):
               if state["LocalReadVectorWidthB"] * state["ProblemType"]["MacDataTypeB"].numBytes() > maxNumDsLoadBytesB:
                 reject(state, printRejectionReason, "LocalReadVectorWidthB(%d) * BytePerMacDataTypeB(%s) > %d bytes." % (state["LocalReadVectorWidthB"], state["ProblemType"]["MacDataTypeB"].numBytes(), maxNumDsLoadBytesB))
             elif not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not(state["ProblemType"]["MacDataTypeB"].is8bitFloat() and (state["MatrixInstK"] in [64, 128,])):
-              if state["LocalReadVectorWidthB"] < state["MIInputPerThread"] and not state["LDSTrInst"] and not isaInfoMap[isa].asmCaps["HasWMMA_V3"]:
+              if state["LocalReadVectorWidthB"] < state["MIInputPerThread"] and not state["LDSTrInstB"] and not isaInfoMap[isa].asmCaps["HasWMMA_V3"]:
                 reject(state, printRejectionReason, "LocalReadVectorWidthB < %u" %(state["MIInputPerThread"]))
             if state["LocalReadVectorWidthB"] > state["MIInputPerThread"] and not state["TransposeLDS"]:
               reject(state, printRejectionReason, "LocalReadVectorWidthB require Transpose LDS")
@@ -5836,7 +5852,7 @@ class Solution(collections.abc.Mapping):
         state["LdsBlockSizePerPadB"] = 128
     assert(state["LdsPadB"] >= 0)
 
-    # In an unroll-major layout, ordinary LDS padding is relative to the whole
+        # In an unroll-major layout, ordinary LDS padding is relative to the whole
     # tensor, but every wave-separated TDM descriptor starts a new padding
     # phase at its equal component base.  Check each enabled TDM operand
     # independently: TN has two unroll-major operands, while NN/TT have one.
@@ -5907,6 +5923,14 @@ class Solution(collections.abc.Mapping):
     # set ldsbspp = 0 for ldspad = 0
     for tc in ['A', 'B']:
       if state["LdsPad%s"%tc] == 0:
+        state["LdsBlockSizePerPad%s"%tc] = 0
+      # LdsPad only exists to avoid bank conflicts. On the TDM TileMajor
+      # path with TLU, when LDSTr is not enabled, no bank conflict occurs,
+      # so no padding (amount or block) is needed; clear both together so
+      # they stay consistent for the TDM check below.
+      elif (state.get("enableTDM%s"%tc, False) and state["ProblemType"]["TLU%s"%tc]
+            and not state.get("enableLDSTr%s"%tc, False)):
+        state["LdsPad%s"%tc] = 0
         state["LdsBlockSizePerPad%s"%tc] = 0
 
     if state["TDMInst"]:
@@ -6986,7 +7010,7 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["MXBlockA"] and (not state["DirectToLdsMXSA"]) or state["ProblemType"]["MXBlockB"] and (not state["DirectToLdsMXSB"]):
         reject(state, printRejectionReason, "UnrollLoopSwapGlobalReadOrder doesn't support MX + non DTL")
 
-    if state["ExpandPointerSwap"] == 1 and state["LDSTrInst"]:
+    if state["ExpandPointerSwap"] == 1 and (state["enableLDSTrA"] or state["enableLDSTrB"]):
       reject(state, printRejectionReason, "LDSTrInst + ExpandPointerSwap not supported")
 
     # guard against out of bounds reads

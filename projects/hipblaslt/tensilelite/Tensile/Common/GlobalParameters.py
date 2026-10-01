@@ -614,6 +614,8 @@ defaultBenchmarkCommonParameters = [
     {"ForceDisableShadowInit": [False]},
     {"InitCIterWmma": [-1]},
     {"LDSTrInst": [False]},
+    {"LDSTrInstA": [-1]},
+    {"LDSTrInstB": [-1]},
     {"WaveSplitK": [ False ]},
     {"MbskPrefetchMethod": [-1]},
     {"PrefetchAcrossPersistent": [0]},
