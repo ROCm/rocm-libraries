@@ -24,6 +24,7 @@
 #include "rocblas.hpp"
 #include "rocblas_data.hpp"
 #include "rocblas_test.hpp"
+#include "type_dispatch.hpp"
 #include <cstring>
 
 // rocblas_device_malloc_alloc is the public entry point rocSOLVER and hipSOLVER reach
@@ -118,10 +119,13 @@ namespace
 
     struct device_malloc : RocBLAS_Test<device_malloc, device_malloc_testing>
     {
-        // The allocation is counted in bytes, so nothing here varies with the type.
-        static bool type_filter(const Arguments&)
+        // Nothing here varies with the type, the allocation being counted in bytes, so
+        // device_malloc_testing is valid for all of them. Dispatched anyway rather than
+        // answering true, because type_filter_functor also applies the global filters --
+        // os_flags, gpu_arch, the no-Tensile exclusions -- and those do apply.
+        static bool type_filter(const Arguments& arg)
         {
-            return true;
+            return rocblas_simple_dispatch<type_filter_functor>(arg);
         }
 
         static bool function_filter(const Arguments& arg)
