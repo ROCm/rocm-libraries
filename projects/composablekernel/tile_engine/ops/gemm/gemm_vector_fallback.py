@@ -59,16 +59,18 @@ class VectorFallback:
             )
             print(f"  Vector-width fallback triples: {self.expand_kwargs['vector_sizes']}")
 
-    @staticmethod
-    def limit_base_kernels(configs, max_kernels):
+    def limit_base_kernels(self, configs, max_kernels):
         """First ``max_kernels`` native kernels, each with its fixed-width variants.
 
-        expand_sweep emits every native config right before its fixed-width
-        variants, so --max-kernels counts tiles and a small limit still keeps the
-        kernels misaligned problems need; without the fallback it is a plain slice.
+        The fallback sweep tries (0, 0, 0) first, so expand_sweep emits every
+        native config right before its fixed-width variants; a small limit thus
+        still keeps kernels for misaligned problems. Without the fallback it is
+        a plain slice.
         """
         if max_kernels <= 0:
             return configs
+        if not self.enabled:
+            return configs[:max_kernels]
         n_native = itertools.accumulate(not any(c.vector_sizes) for c in configs)
         return [c for c, n in zip(configs, n_native) if n <= max_kernels]
 

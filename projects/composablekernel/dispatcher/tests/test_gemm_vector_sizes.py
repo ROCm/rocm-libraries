@@ -278,18 +278,24 @@ class TestHeaderLookup(unittest.TestCase):
 
 
 class TestExpandSweep(unittest.TestCase):
-    def test_fallback_configs_and_rejects(self):
+    @classmethod
+    def setUpClass(cls):
         from gemm_utils import expand_sweep
 
         cfg = (
             DISPATCHER_DIR.parent / "tile_engine" / "ops" / "gemm" / "configs"
             / "default_ci_config.json"
         )
-        rejects = {}
-        cfgs = expand_sweep(
+        # Driver path: K=257 makes the fallback sweep (0, 0, 0) and (1, 1, 8).
+        cls.vfb = VectorFallback([dict(M=393216, N=256, K=257)], "rcr", "bf16", "standard")
+        cls.cfgs = expand_sweep(
             str(cfg), "gfx950", dtype="bf16", layout="rcr", variant="standard",
-            vector_sizes=[(0, 0, 0), (1, 1, 8)], rejects=rejects,
+            **cls.vfb.expand_kwargs,
         )
+
+    def test_fallback_configs_and_rejects(self):
+        cfgs, rejects = self.cfgs, self.vfb.rejects
+        self.assertEqual(self.vfb.expand_kwargs["vector_sizes"], [(0, 0, 0), (1, 1, 8)])
         native = [c for c in cfgs if not any(c.vector_sizes)]
         fixed = [c for c in cfgs if any(c.vector_sizes)]
         self.assertTrue(native and fixed)
@@ -300,26 +306,14 @@ class TestExpandSweep(unittest.TestCase):
         self.assertEqual(len({c.name for c in cfgs}), len(cfgs))
 
     def test_max_kernels_keeps_fixed_width_variants(self):
-        from gemm_utils import expand_sweep
-
-        cfg = (
-            DISPATCHER_DIR.parent / "tile_engine" / "ops" / "gemm" / "configs"
-            / "default_ci_config.json"
-        )
-        cfgs = expand_sweep(
-            str(cfg), "gfx950", dtype="bf16", layout="rcr", variant="standard",
-            vector_sizes=[(0, 0, 0), (1, 1, 8)],
-        )
-        limit = VectorFallback.limit_base_kernels
-        # One tile keeps its fixed-width variant, else K-misaligned problems
-        # get no kernel under --max-kernels 1.
-        one = limit(cfgs, 1)
-        self.assertEqual(sum(not any(c.vector_sizes) for c in one), 1)
-        self.assertTrue(any(c.name.endswith("_vec1_1_8") for c in one))
-        # Native-only sweeps (fallback off) keep the plain slice.
-        native = [c for c in cfgs if not any(c.vector_sizes)]
-        self.assertEqual(limit(native, 2), native[:2])
-        self.assertEqual(limit(cfgs, 0), cfgs)
+        # --max-kernels counts native kernels and keeps their fixed-width
+        # variants, else --max-kernels 1 leaves K=257 without a kernel.
+        one = self.vfb.limit_base_kernels(self.cfgs, 1)
+        self.assertEqual([any(c.vector_sizes) for c in one], [False, True])
+        self.assertEqual(self.vfb.limit_base_kernels(self.cfgs, 0), self.cfgs)
+        # Without the fallback it stays the plain slice.
+        off = VectorFallback([], "rcr", "bf16", "standard", disabled=True)
+        self.assertEqual(off.limit_base_kernels(self.cfgs, 2), self.cfgs[:2])
 
     def test_fixed_widths_force_padding(self):
         cfg = GemmKernelConfig(
