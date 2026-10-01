@@ -592,8 +592,12 @@ class GlobalWriteBatchWriter:
     # sibling wave may still be reading bias/SAV -- so one barrier on the last
     # batch covers it. Multi-DU emits its stores after the barrier and keeps the
     # per-batch placement. The assert below holds the "loads only" premise.
+    #
+    # Held to the MXF4 subtile path: that is the store epilogue the premise was
+    # read off and measured on, so every other kernel keeps the per-batch barrier.
     isLastBatch = (self.batchIdx == self.numBatches - 1)
-    needsCrossWaveBarrier = needsBiasSavDrain and (isMultiDU or isLastBatch)
+    needsCrossWaveBarrier = needsBiasSavDrain and \
+      (isMultiDU or isLastBatch or not isMxf4SubtilePath(self.kernel))
     if not isMultiDU:
       self._emitAdd(module)
     if needsCrossWaveBarrier:
