@@ -43,7 +43,8 @@ using TensorMap = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::u
 //   metadata         — .meta.json contents for direct bundles, or inline sweep
 //                      metadata for template-sweep cases. Metadata is mandatory
 //                      only when golden output blobs are present; graph-only and
-//                      reference-verified bundles default to empty metadata.
+//                      reference-verified bundles without a .meta.json default to
+//                      empty metadata. Present-but-malformed metadata is a LoadError.
 //   outputTensorUids — UIDs of the graph's output tensors, derived from the
 //                      graph. Always available, even for graph-only bundles, so
 //                      the harness knows which tensors to compare or allocate.
@@ -727,7 +728,9 @@ inline std::optional<std::filesystem::path>
 //   * graph .json not parseable            -> LoadError::MALFORMED_JSON
 //   * parseable but not a valid graph      -> LoadError::INVALID_GRAPH_SCHEMA
 //   * golden outputs present, no metadata  -> LoadError::UNVALIDATABLE_GOLDEN_DATA
+//   * golden outputs present, bad metadata -> LoadError::UNVALIDATABLE_GOLDEN_DATA
 //   * no golden outputs, no metadata       -> bundle with empty metadata
+//   * no golden outputs, bad metadata      -> LoadError::MISSING_METADATA
 //   * valid graph, input blobs absent      -> bundle with tensors == nullopt
 //   * present blob fails to load           -> LoadError::TENSOR_LOAD_FAILED
 //   * inputs present, outputs absent       -> bundle verified against reference
@@ -776,7 +779,20 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
         = !bundle.outputTensorUids.empty()
           && detail::blobsPresentFor(bundle.outputTensorUids, blobPathForUid);
 
-    auto metadata = hipdnn_integration_tests::loadBundleMetadata(jsonPath);
+    // An absent .meta.json is fine for a graph-only bundle (default metadata) but
+    // not next to golden blobs. A present-but-malformed one is an authoring error
+    // either way, so it never falls back to default metadata.
+    std::optional<hipdnn_integration_tests::BundleMetadata> metadata;
+    try
+    {
+        metadata = hipdnn_integration_tests::loadBundleMetadata(jsonPath);
+    }
+    catch(const hipdnn_integration_tests::BundleMetadataError& e)
+    {
+        HIPDNN_SDK_LOG_WARN(e.what());
+        return goldenOutputsPresent ? LoadError::UNVALIDATABLE_GOLDEN_DATA
+                                    : LoadError::MISSING_METADATA;
+    }
     if(!metadata.has_value())
     {
         if(goldenOutputsPresent)
@@ -883,14 +899,17 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
         return goldenOutputsPresent ? LoadError::UNVALIDATABLE_GOLDEN_DATA
                                     : LoadError::MISSING_METADATA;
     }
-    auto metadata = hipdnn_integration_tests::parseBundleMetadataJson(
-        caseJson->at("metadata"), discovered.diagnosticPath().string());
-    if(!metadata.has_value())
+    try
     {
+        bundle.metadata = hipdnn_integration_tests::parseBundleMetadataJson(
+            caseJson->at("metadata"), discovered.diagnosticPath().string());
+    }
+    catch(const hipdnn_integration_tests::BundleMetadataError& e)
+    {
+        HIPDNN_SDK_LOG_WARN(e.what());
         return goldenOutputsPresent ? LoadError::UNVALIDATABLE_GOLDEN_DATA
                                     : LoadError::INVALID_SWEEP_CASE;
     }
-    bundle.metadata = std::move(*metadata);
 
     if(goldenDirectory.has_value())
     {

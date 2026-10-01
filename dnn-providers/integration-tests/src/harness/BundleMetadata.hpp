@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -57,52 +58,44 @@ struct BundleMetadata
     EnforcementLevel enforcementLevel = EnforcementLevel::FULL;
 };
 
+/// Thrown when a metadata object exists but is malformed: not a JSON object,
+/// missing/invalid/unsupported `format_version`, an invalid `enforcement_level`,
+/// or (for a .meta.json file) unreadable or not valid JSON. An authoring error,
+/// never a "metadata not recorded" case, so it must not degrade to defaults.
+class BundleMetadataError : public std::runtime_error
+{
+public:
+    using std::runtime_error::runtime_error;
+};
+
 // ---------------------------------------------------------------------------
 /// Parse metadata from a JSON object.
 ///
-/// Returns std::nullopt when the object is missing required fields or carries an
-/// unsupported format version. Never throws.
-inline std::optional<BundleMetadata> parseBundleMetadataJson(const nlohmann::json& json,
-                                                             std::string_view source = {})
+/// Throws BundleMetadataError when the object is not a JSON object, is missing
+/// `format_version`, carries an unsupported format version, or has an invalid
+/// `enforcement_level`. `source` names the origin (file path or sweep case) in
+/// the error message.
+inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
+                                              std::string_view source = {})
 {
+    const std::string where = source.empty() ? std::string("Metadata") : std::string(source);
+
     if(!json.is_object())
     {
-        if(source.empty())
-        {
-            HIPDNN_SDK_LOG_WARN("Metadata JSON is not an object");
-        }
-        else
-        {
-            HIPDNN_SDK_LOG_WARN(source << " is not a metadata JSON object");
-        }
-        return std::nullopt;
+        throw BundleMetadataError(where + " is not a metadata JSON object");
     }
 
     if(!json.contains("format_version") || !json["format_version"].is_number_integer())
     {
-        if(source.empty())
-        {
-            HIPDNN_SDK_LOG_WARN("Metadata missing or invalid format_version");
-        }
-        else
-        {
-            HIPDNN_SDK_LOG_WARN(source << " missing or invalid format_version");
-        }
-        return std::nullopt;
+        throw BundleMetadataError(where + " is missing or has an invalid format_version");
     }
 
-    const int version = json["format_version"].get<int>();
+    // Compare the JSON value, not a narrowed copy: get<int>() would truncate
+    // 4294967297 (2^32 + 1) to 1 and accept it.
+    const auto& version = json["format_version"];
     if(version != 1)
     {
-        if(source.empty())
-        {
-            HIPDNN_SDK_LOG_WARN("Metadata has unsupported format_version " << version);
-        }
-        else
-        {
-            HIPDNN_SDK_LOG_WARN(source << " has unsupported format_version " << version);
-        }
-        return std::nullopt;
+        throw BundleMetadataError(where + " has unsupported format_version " + version.dump());
     }
 
     BundleMetadata meta;
@@ -139,8 +132,8 @@ inline std::optional<BundleMetadata> parseBundleMetadataJson(const nlohmann::jso
     meta.minimumVramMb = readInt64("minimum_vram_mb");
 
     // enforcement_level: absent leaves the default Full (set above). Present
-    // but not one of the three valid tokens rejects the whole metadata (like
-    // an invalid format_version) so a typo can't silently flip the level. The
+    // but not one of the three valid tokens throws (like an invalid
+    // format_version) so a typo can't silently flip the level. The
     // RFC §6.2 hard pre-commit error (a claim exists but enforcement_level is
     // missing/invalid) is the claim-bearing cross-check against support.json;
     // it belongs to the downstream enforcement/verifier ticket.
@@ -148,9 +141,7 @@ inline std::optional<BundleMetadata> parseBundleMetadataJson(const nlohmann::jso
     {
         if(!json["enforcement_level"].is_string())
         {
-            HIPDNN_SDK_LOG_WARN((source.empty() ? std::string("Metadata") : std::string(source))
-                                << " has invalid enforcement_level");
-            return std::nullopt;
+            throw BundleMetadataError(where + " has invalid enforcement_level (not a string)");
         }
 
         const auto level = json["enforcement_level"].get<std::string>();
@@ -168,9 +159,7 @@ inline std::optional<BundleMetadata> parseBundleMetadataJson(const nlohmann::jso
         }
         else
         {
-            HIPDNN_SDK_LOG_WARN((source.empty() ? std::string("Metadata") : std::string(source))
-                                << " has invalid enforcement_level \"" << level << "\"");
-            return std::nullopt;
+            throw BundleMetadataError(where + " has invalid enforcement_level \"" + level + "\"");
         }
     }
 
@@ -207,10 +196,10 @@ inline std::filesystem::path metaJsonPath(const std::filesystem::path& bundleJso
 
 /// Load metadata from a .meta.json companion file.
 ///
-/// Returns std::nullopt if the file does not exist (backwards compatible — old
-/// bundles simply have no metadata). Returns std::nullopt with a warning log
-/// if the file exists but cannot be parsed or has an unsupported
-/// format_version. Never throws.
+/// Returns std::nullopt only if the file does not exist (backwards compatible —
+/// old bundles simply have no metadata). A file that exists but cannot be
+/// opened, is not valid JSON, or is rejected by parseBundleMetadataJson throws
+/// BundleMetadataError.
 inline std::optional<BundleMetadata> loadBundleMetadata(const std::filesystem::path& bundleJsonPath)
 {
     auto path = metaJsonPath(bundleJsonPath);
@@ -221,23 +210,23 @@ inline std::optional<BundleMetadata> loadBundleMetadata(const std::filesystem::p
         return std::nullopt;
     }
 
+    std::ifstream file(path);
+    if(!file)
+    {
+        throw BundleMetadataError("Could not open metadata file " + path.string());
+    }
+
+    nlohmann::json json;
     try
     {
-        std::ifstream file(path);
-        if(!file)
-        {
-            HIPDNN_SDK_LOG_WARN("Could not open metadata file " << path);
-            return std::nullopt;
-        }
-
-        auto json = nlohmann::json::parse(file);
-        return parseBundleMetadataJson(json, path.string());
+        json = nlohmann::json::parse(file);
     }
-    catch(const std::exception& e)
+    catch(const nlohmann::json::exception& e)
     {
-        HIPDNN_SDK_LOG_WARN("Failed to parse metadata file " << path << ": " << e.what());
-        return std::nullopt;
+        throw BundleMetadataError("Failed to parse metadata file " + path.string() + ": "
+                                  + e.what());
     }
+    return parseBundleMetadataJson(json, path.string());
 }
 
 // ---------------------------------------------------------------------------

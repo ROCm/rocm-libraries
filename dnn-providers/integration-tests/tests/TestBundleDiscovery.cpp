@@ -560,10 +560,27 @@ TEST_F(TestBundleDiscoveryFixture, LoadGoldenBundleUnparseableMetadataIsError)
     EXPECT_EQ(std::get<LoadError>(result), LoadError::UNVALIDATABLE_GOLDEN_DATA);
 }
 
+// A graph-only bundle whose .meta.json is present but malformed does not fall back
+// to default metadata: a typo'd enforcement_level would otherwise silently run at
+// FULL. It is MISSING_METADATA (skip), not UNVALIDATABLE_GOLDEN_DATA (fail), since
+// there are no golden blobs it was meant to describe.
+TEST_F(TestBundleDiscoveryFixture, LoadGraphOnlyBundleMalformedMetadataIsError)
+{
+    auto dir = _tempDir / "op" / "graphbadmeta";
+    createMinimalBundle(dir, "graphbadmeta"); // graph only, no .bin
+    std::ofstream(dir / "graphbadmeta.meta.json")
+        << R"({"format_version": 1, "enforcement_level": "buildible"})";
+
+    auto result = loadIntegrationTestBundle(dir / "graphbadmeta.json");
+    ASSERT_TRUE(std::holds_alternative<LoadError>(result));
+    EXPECT_EQ(std::get<LoadError>(result), LoadError::MISSING_METADATA);
+}
+
 // The invariant the whole change exists to protect: pulling golden data must never
 // make a bundle quietly disappear. One bundle, one unparseable .meta.json, observed
-// twice — before and after its output blob shows up. Without the blob it is an
-// ordinary graph-only bundle; with it the run must go red, never silently shrink.
+// twice — before and after its output blob shows up. Without the blob it is a
+// graph-only bundle with bad metadata, skipped as MISSING_METADATA; with it the run
+// must go red, never silently shrink.
 TEST_F(TestBundleDiscoveryFixture, PullingGoldenDataNeverSilentlyDropsABundle)
 {
     auto dir = _tempDir / "op" / "pullme";
@@ -575,10 +592,10 @@ TEST_F(TestBundleDiscoveryFixture, PullingGoldenDataNeverSilentlyDropsABundle)
     ASSERT_EQ(discovered.size(), 1u);
 
     auto beforePull = loadIntegrationTestBundle(dir / "pullme.json");
-    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(beforePull));
-    EXPECT_FALSE(std::get<IntegrationTestBundle>(beforePull).hasGoldenOutputs);
+    ASSERT_TRUE(std::holds_alternative<LoadError>(beforePull));
+    EXPECT_EQ(std::get<LoadError>(beforePull), LoadError::MISSING_METADATA);
     EXPECT_TRUE(
-        std::holds_alternative<detail::LoadedBundle>(detail::classifyBundle(discovered.front())));
+        std::holds_alternative<detail::SkippedLoad>(detail::classifyBundle(discovered.front())));
 
     writeGoldenOutputBlob(dir, "pullme"); // post-`dvc pull` state
 
@@ -848,6 +865,38 @@ TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseGoldenWithUnparseableMet
     auto result = loadIntegrationTestBundle(discovered.front());
     ASSERT_TRUE(std::holds_alternative<LoadError>(result));
     EXPECT_EQ(std::get<LoadError>(result), LoadError::UNVALIDATABLE_GOLDEN_DATA);
+}
+
+// A graph-only sweep case whose metadata block is rejected by the schema is
+// INVALID_SWEEP_CASE: no golden blobs, so a skip rather than a red run.
+TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseGraphOnlyWithMalformedMetadataIsError)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"graph_only_bad_meta_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          false, // includeGolden
+                          false, // goldenHasPath
+                          true}}); // includeMetadata
+
+    nlohmann::json sweepJson;
+    {
+        std::ifstream in(sweepDir / "sweep.json");
+        sweepJson = nlohmann::json::parse(in);
+    }
+    sweepJson["cases"][0]["metadata"]["enforcement_level"] = "buildible";
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto result = loadIntegrationTestBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<LoadError>(result));
+    EXPECT_EQ(std::get<LoadError>(result), LoadError::INVALID_SWEEP_CASE);
 }
 
 // Every sweep case must carry metadata, golden or not: a graph-only case that
