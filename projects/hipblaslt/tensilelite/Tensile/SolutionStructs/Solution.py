@@ -6881,6 +6881,7 @@ class Solution(collections.abc.Mapping):
 
     if state["PrefetchGL2"] == 0:
       state["PrefetchGL2Inc64Bit"] = False
+      state["PrefetchGL2SAddr"] = False
     if state["PrefetchGL2"] > 0:
       if not isaInfoMap[isa].asmCaps["HasGlobalPrefetch"]:
         reject(state, printRejectionReason, "ISA %s does not support global prefetch" % isa)

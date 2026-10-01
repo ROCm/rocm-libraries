@@ -9558,21 +9558,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         vgprIdx += 1
   
       if kernel["PrefetchGL2"]:
-        vgprIdx = int((vgprIdx + 1) / 2) * 2
-        self.states.a.startVgprGL2PrefetchAddr = vgprIdx
-        vgprIdx += tensorParametersA["gl2nl"] * self.states.rpga
-        self.states.b.startVgprGL2PrefetchAddr = vgprIdx
-        vgprIdx += tensorParametersB["gl2nl"] * self.states.rpga
-        if kernel["ProblemType"]["MXBlockA"]:
-          self.states.mxsa.startVgprGL2PrefetchAddr = vgprIdx
-          vgprIdx += tensorParametersA["MX"]["gl2nl"] * self.states.rpga
-        if kernel["ProblemType"]["MXBlockB"]:
-          self.states.mxsb.startVgprGL2PrefetchAddr = vgprIdx
-          vgprIdx += tensorParametersB["MX"]["gl2nl"] * self.states.rpga      
-        if kernel["enableTDMMetadata"]:
-          tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
-          self.states.m.startVgprGL2PrefetchAddr = vgprIdx
-          vgprIdx += tPM["gl2nl"] * self.states.rpga
+        vgprIdx = self.allocGL2PrefetchAddrVgprs(kernel, tensorParametersA, tensorParametersB, vgprIdx)
 
       # TODO: Serial is always the first/last register in the pool so the store
       # code doesn't have to deal with fragmentation
@@ -9613,21 +9599,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # GL2 prefetch: init tp fields and allocate address VGPRs
       if kernel["PrefetchGL2"]:
         self.gl2PrefetchInit(kernel, tensorParametersA, tensorParametersB)
-        vgprIdx = int((vgprIdx + 1) / 2) * 2
-        self.states.a.startVgprGL2PrefetchAddr = vgprIdx
-        vgprIdx += tensorParametersA["gl2nl"] * self.states.rpga
-        self.states.b.startVgprGL2PrefetchAddr = vgprIdx
-        vgprIdx += tensorParametersB["gl2nl"] * self.states.rpga
-        if kernel["ProblemType"]["MXBlockA"]:
-          self.states.mxsa.startVgprGL2PrefetchAddr = vgprIdx
-          vgprIdx += tensorParametersA["MX"]["gl2nl"] * self.states.rpga
-        if kernel["ProblemType"]["MXBlockB"]:
-          self.states.mxsb.startVgprGL2PrefetchAddr = vgprIdx
-          vgprIdx += tensorParametersB["MX"]["gl2nl"] * self.states.rpga
-        if kernel["enableTDMMetadata"]:
-          tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
-          self.states.m.startVgprGL2PrefetchAddr = vgprIdx
-          vgprIdx += tPM["gl2nl"] * self.states.rpga
+        vgprIdx = self.allocGL2PrefetchAddrVgprs(kernel, tensorParametersA, tensorParametersB, vgprIdx)
 
       self.states.totalVgprs = vgprIdx
 
@@ -11996,6 +11968,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   @abc.abstractmethod
   def gl2PrefetchInit(self, kernel, tPA, tPB):
     return ""
+
+  @abc.abstractmethod
+  def allocGL2PrefetchAddrVgprs(self, kernel, tPA, tPB, vgprIdx: int) -> int:
+    return vgprIdx
   
   @abc.abstractmethod
   def gl2PrefetchCalcAddr(self, kernel, tPA, tPB) -> Module:
