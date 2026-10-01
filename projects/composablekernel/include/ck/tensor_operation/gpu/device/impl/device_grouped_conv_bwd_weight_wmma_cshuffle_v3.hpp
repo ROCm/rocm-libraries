@@ -451,9 +451,9 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
             }
             else
             {
-                // A scalar Set-only candidate must not instantiate a packed half/bfloat atomic.
+                // Scalar 16-bit output must not instantiate a packed half/bfloat atomic.
                 constexpr auto occupancy_store_op =
-                    CShuffleBlockTransferScalarPerVector_NPerBlock == 1
+                    sizeof(WeiDataType) == 2 && CShuffleBlockTransferScalarPerVector_NPerBlock == 1
                         ? InMemoryDataOperationEnum::Set
                         : InMemoryDataOperationEnum::AtomicAdd;
                 hip_check_error(hipOccupancyMaxActiveBlocksPerMultiprocessor(
@@ -953,8 +953,8 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
             constexpr index_t minimum_occupancy =
                 BlkGemmPipeSched == BlockGemmPipelineScheduler::Intrawave ? 1 : 2;
 
-            // Split 1 uses Set; split > 1 uses AtomicAdd only for supported
-            // vector-width output stores. Scalar output candidates are Set-only.
+            // Split 1 uses Set. Split > 1 requires vector stores for 16-bit atomics;
+            // FP32 output also supports scalar AtomicAdd.
             if(has_main_k_block_loop)
             {
                 // Tail number always full
@@ -963,7 +963,8 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
                 {
                     if(gemm_arg.KBatch > 1)
                     {
-                        if constexpr(CShuffleBlockTransferScalarPerVector_NPerBlock > 1)
+                        if constexpr(sizeof(WeiDataType) != 2 ||
+                                     CShuffleBlockTransferScalarPerVector_NPerBlock > 1)
                         {
                             const auto kernel = kernel_grouped_conv_bwd_weight_wmma_cshuffle_v3<
                                 GridwiseGemm,
@@ -976,6 +977,11 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
                                 InMemoryDataOperationEnum::AtomicAdd,
                                 minimum_occupancy>;
                             Run(kernel);
+                        }
+                        else
+                        {
+                            throw std::runtime_error(
+                                "Scalar 16-bit WRW WMMA output does not support split-K > 1");
                         }
                     }
                     else
@@ -1005,7 +1011,8 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
                 {
                     if(gemm_arg.KBatch > 1)
                     {
-                        if constexpr(CShuffleBlockTransferScalarPerVector_NPerBlock > 1)
+                        if constexpr(sizeof(WeiDataType) != 2 ||
+                                     CShuffleBlockTransferScalarPerVector_NPerBlock > 1)
                         {
                             const auto kernel = kernel_grouped_conv_bwd_weight_wmma_cshuffle_v3<
                                 GridwiseGemm,
@@ -1018,6 +1025,11 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
                                 InMemoryDataOperationEnum::AtomicAdd,
                                 minimum_occupancy>;
                             Run(kernel);
+                        }
+                        else
+                        {
+                            throw std::runtime_error(
+                                "Scalar 16-bit WRW WMMA output does not support split-K > 1");
                         }
                     }
                     else
@@ -1143,7 +1155,8 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
             return false;
         }
         // Scalar low-precision output can use Set, but not a packed half/bfloat atomic.
-        if constexpr(CShuffleBlockTransferScalarPerVector_NPerBlock == 1)
+        if constexpr(sizeof(WeiDataType) == 2 &&
+                     CShuffleBlockTransferScalarPerVector_NPerBlock == 1)
         {
             if(gemm_arg.KBatch > 1)
                 return false;

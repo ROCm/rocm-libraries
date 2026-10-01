@@ -45,6 +45,7 @@ struct DepthwiseBwdWeightBf16Argument : BaseArgument, ArgumentSplitK, DepthwiseB
 template <typename DataType>
 __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_bf16(DepthwiseBwdWeightBf16Params arg)
 {
+#if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx125__)
     constexpr index_t GroupChunk     = 8;
     constexpr index_t ReductionLanes = 32;
     const index_t group_lane         = threadIdx.x % GroupChunk;
@@ -101,6 +102,9 @@ __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_bf16(DepthwiseBwdWeig
                                         filter_x * arg.wei_strides[4];
         arg.wei[wei_offset] = type_convert<DataType>(partial[group_lane]);
     }
+#else
+    ignore = arg;
+#endif
 }
 
 struct DeviceGroupedConvBwdWeightDepthwiseBf16 final

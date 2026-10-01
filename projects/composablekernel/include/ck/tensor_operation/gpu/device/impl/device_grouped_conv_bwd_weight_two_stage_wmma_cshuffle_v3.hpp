@@ -620,44 +620,15 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
                 const auto k_batch_max = math::integer_divide_ceil(gemmK, KPerBlock);
                 k_batch_               = std::min(k_batch_, k_batch_max);
 
-                // Joint model: the occupancy-driven k_batch_ above is
-                // max_occupancy_per_cu * num_cu / grid_size, uncapped by how much
-                // reduction work is actually available per split. Once grid_size
-                // drops below num_cu / max_occupancy_per_cu, that formula starts
-                // recommending k_batch values whose real-hardware performance
-                // monotonically *worsens* well before the gemmK-derived cap above
-                // ever binds: every shape swept in this regime (gfx1250, this
-                // tile config) peaks at k_batch close to max_occupancy_per_cu^2
-                // (the value the formula itself would pick right at grid_size ==
-                // num_cu / max_occupancy_per_cu) and degrades on both sides of
-                // it. Capping there is a plain min() and so self-gates: for
-                // grid_size >= num_cu / max_occupancy_per_cu the formula already
-                // picks <= max_occupancy_per_cu^2 and this is a no-op.
-                //
-                // A prior attempt (a per-dimension "is M or N narrower than one
-                // MPerBlock/NPerBlock tile" gate, tightening to 2x
-                // max_occupancy_per_cu, or - before that - a gemmK/(MinIters*
-                // KPerBlock) divisor) got the *sign* of the effect right but the
-                // wrong trigger and the wrong magnitude, confirmed on the two
-                // shapes this task doc calls out by name:
-                //   - M18 (G1,N42,K24,C3,Y=X=3,480x640,s2,p1): gemmM=24, gemmN=27
-                //     - *neither* is narrower than its MPerBlock/NPerBlock=16
-                //     tile, so the per-dimension gate never fired here at all,
-                //     leaving this shape's real ~15% loss (auto picks 2048, true
-                //     optimum ~1024) completely unaddressed.
-                //   - M00 (G1,N42,K10,C128,Y=X=1,120x160): gemmM=10 *is* narrower
-                //     than MPerBlock=16, so the per-dimension gate fired and, at
-                //     2x max_occupancy_per_cu (=64 here), cut k_batch from the
-                //     already-correct auto pick of 1024 down to 64 - a ~3.2x
-                //     slowdown, far worse than the earlier, already-reverted
-                //     gemmK/(MinIters*KPerBlock) attempt's -26.6%.
-                // grid_size, not per-dimension tile narrowness, is what actually
-                // separates these two shapes (grid_size=4 for M18, 8 for M00),
-                // and is exactly what the formula below is self-gated on.
-                const ck::index_t occupancy_k_batch_ceiling =
-                    active_workgroups_per_cu.max_occupancy_ *
-                    active_workgroups_per_cu.max_occupancy_;
-                k_batch_ = clamp_gemm_k_batch(std::min(k_batch_, occupancy_k_batch_ceiling));
+                // Limit auto split-K on gfx1250 to the squared per-CU occupancy.
+                // Smaller grids otherwise request excessive reduction partitions.
+                if(ck::is_gfx125_supported())
+                {
+                    const ck::index_t occupancy_k_batch_ceiling =
+                        active_workgroups_per_cu.max_occupancy_ *
+                        active_workgroups_per_cu.max_occupancy_;
+                    k_batch_ = std::min(k_batch_, occupancy_k_batch_ceiling);
+                }
 
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
                 {

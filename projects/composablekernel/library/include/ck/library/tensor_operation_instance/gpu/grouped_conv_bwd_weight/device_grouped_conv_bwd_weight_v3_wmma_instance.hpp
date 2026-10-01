@@ -41,8 +41,7 @@ static constexpr auto ConvBwdWeightFilter1x1Stride1Pad0 =
     ck::tensor_operation::device::ConvolutionBackwardWeightSpecialization::Filter1x1Stride1Pad0;
 
 #if defined(CK_USE_GFX1250)
-// The direct low-precision scalar store is safe only for a single K batch. A split K
-// would use the packed half/bfloat16 atomic path, which requires paired output lanes.
+// gfx1250 scalar direct-output rows retain a distinct name for instance selection.
 template <typename DeviceOp>
 struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3_Split1 : DeviceOp
 {
@@ -50,7 +49,7 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3_Split1 : DeviceOp
 
     static bool IsSupportedArgument(const Argument& arg)
     {
-        return arg.k_batch_ == 1 && DeviceOp::IsSupportedArgument(arg);
+        return ck::is_gfx125_supported() && DeviceOp::IsSupportedArgument(arg);
     }
 
     bool IsSupportedArgument(const BaseArgument* p_arg) override
@@ -65,9 +64,9 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3_Split1 : DeviceOp
                   const StreamConfig& stream_config = StreamConfig{}) override
         {
             const auto* arg = dynamic_cast<const Argument*>(p_arg);
-            if(arg == nullptr || arg->k_batch_ != 1)
+            if(arg == nullptr || !IsSupportedArgument(*arg))
             {
-                throw std::runtime_error("Scalar direct WRW requires a split-1 argument");
+                throw std::runtime_error("Unsupported gfx1250 scalar direct WRW argument");
             }
             return DeviceOp::Invoker::Run(*arg, stream_config);
         }
@@ -145,42 +144,17 @@ using device_grouped_conv_bwd_weight_v3_wmma_c_shuffle_bf16_instances = std::tup
     DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,    96,    96,    96,    48,    8,   16,   16,       6,       2,       S<6, 16, 1>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              6,              8,         0,       S<6, 16, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              6,              8,         0,           1,           1,        S<1, 16, 1, 6>,                      8, Scheduler, PipelineVersion>,
     DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,    96,    96,    96,    48,    8,   16,   16,       6,       2,       S<6, 16, 1>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              6,              8,         1,       S<6, 16, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              6,              8,         0,           1,           1,        S<1, 16, 1, 6>,                      8, Scheduler, PipelineVersion>
 #endif
-    //clang-format on
-    >;
-
-// gfx1250-only large-tile instances, ported from the analogous
-// device_grouped_conv_bwd_data_wmma_v3_bf16_large_tiles_instances /
-// device_grouped_conv_fwd_wmma_cshufflev3_bf16_instances_large_tiles families
-// (see GFX1250_CONV_OPTIMIZATION_ROADMAP.md item T2-05): fwd and bwd_data both
-// ship a dedicated large-tile instance file compiled with
-// "-mllvm -enable-post-misched=1 -mllvm --amdgpu-mfma-vgpr-form" (see their
-// CMakeLists.txt COMPILE_OPTIONS), while bwd_weight's large tiles previously
-// lived inline in the regular (non-flagged) instance file. These are the same
-// tile configs moved out verbatim so they can be compiled with the same
-// scheduling flags and benchmarked against the un-flagged baseline.
-template <ck::index_t NDimSpatial,
-          typename ALayout,
-          typename BLayout,
-          typename ELayout,
-          ConvolutionBackwardWeightSpecialization ConvSpec,
-          BlockGemmPipelineScheduler Scheduler     = BlockGemmPipelineScheduler::Intrawave,
-          BlockGemmPipelineVersion PipelineVersion = BlockGemmPipelineVersion::v1>
-using device_grouped_conv_bwd_weight_v3_wmma_c_shuffle_bf16_instances_large_tiles = std::tuple<
 #if defined(CK_USE_GFX1250)
-    // clang-format off
-    //#########################################|        Num| InLayout| WeiLayout| OutLayout| InData| WeiData| OutData| AccData|          In|         Wei|         Out|   ConvBackward| Block|  MPer|  NPer|  KPer| ABK1| MPer| NPer| MRepeat| NRepeat|    ABlockTransfer|   ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockLds|    BBlockTransfer| BBlockTransfer| BBlockTransfer| BlockTransfer| BBlockTransfer| BBlockTransfer| BBlockLds|    CShuffle|    CShuffle| CShuffleBlockTransfer|  CShuffleBlockTransfer| BlockGemm|       BlockGemm|
-    //#########################################|        Dim|         |          |          |   Type|    Type|    Type|    Type| Elementwise| Elementwise| Elementwise|         Weight|  Size| Block| Block| Block|     | Wmma| Wmma|        |        |     ThreadCluster|    ThreadCluster| SrcAccessOrder|   SrcVectorDim|      SrcScalar|      DstScalar| AddExtraM|     ThreadCluster|  ThreadCluster| SrcAccessOrder|  SrcVectorDim|      SrcScalar|      DstScalar| AddExtraN|     MRepeat|     NRepeat|        ClusterLengths|        ScalarPerVector|  Pipeline|        Pipeline|
-    //#########################################|    Spatial|         |          |          |       |        |        |        |   Operation|   Operation|   Operation| Specialization|      |      |      |      |     |     |     |        |        | Lengths_AK0_M_AK1|     ArrangeOrder|               |               |      PerVector|  PerVector_AK1|          | Lengths_BK0_N_BK1|   ArrangeOrder|               |              |      PerVector|  PerVector_BK1|          |  PerShuffle|  PerShuffle|      MBlock_MPerBlock|             _NPerBlock| Scheduler|         Version|
-    //#########################################|           |         |          |          |       |        |        |        |            |            |            |               |      |      |      |      |     |     |     |        |        |                  |                 |               |               |               |               |          |                  |               |               |              |               |               |          |            |            |      NBlock_NPerBlock|                       |          |                |
+    ,
     DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,   256,    64,   256,   256,    8,   16,   16,       2,       4,       S<32, 8, 1>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              8,              8,         1,       S<32, 8, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              8,              8,         0,           1,           1,        S<1, 32, 1, 8>,                      8, Scheduler, PipelineVersion>,
     DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,   256,   128,   256,   128,    8,   16,   16,       4,       4,      S<16, 16, 1>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              8,              8,         1,      S<16, 16, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              8,              8,         0,           1,           1,        S<1, 32, 1, 8>,                      8, Scheduler, PipelineVersion>,
     DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,   256,   256,   256,    64,    8,   16,   16,       8,       4,       S<8, 32, 1>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              8,              8,         1,       S<8, 32, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              8,              8,         0,           1,           1,        S<1, 32, 1, 8>,                      8, Scheduler, PipelineVersion>,
-    DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,   512,   128,   256,   256,    8,   16,   16,       4,       2,      S<32, 16, 1>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              8,              8,         1,      S<32, 16, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              8,              8,         0,           1,           1,       S<1, 32, 1, 16>,                      8, Scheduler, PipelineVersion>,
+    DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,   512,   128,   256,   256,    8,   16,   16,       4,       2,      S<32, 16, 1>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              8,              8,         1,      S<32, 16, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              8,              8,         0,           1,           1,        S<1, 32, 1,16>,                      8, Scheduler, PipelineVersion>,
     DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,   256,   256,   256,    64,    8,   16,   16,       8,       4,      S< 1, 32, 8>,       S<0, 2, 1>,     S<0, 2, 1>,              1,              8,              8,         1,      S< 1, 32, 8>,     S<0, 2, 1>,     S<0, 2, 1>,             1,              8,              8,         1,           1,           1,        S<1, 32, 1, 8>,                      8, Scheduler, PipelineVersion, BF16, BF16, 1, 1, true, true>,
     DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,   512,   128,   256,   128,    8,   16,   16,       4,       2,      S< 4, 16, 8>,       S<0, 2, 1>,     S<0, 2, 1>,              1,              8,              8,         1,      S< 2, 32, 8>,     S<0, 2, 1>,     S<0, 2, 1>,             1,              8,              8,         1,           1,           1,        S<1, 32, 1,16>,                      8, Scheduler, PipelineVersion, BF16, BF16, 1, 1, true, true>,
     DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,   512,   128,   128,    64,    8,   16,   16,       4,       1,      S< 4, 16, 8>,       S<0, 2, 1>,     S<0, 2, 1>,              1,              8,              8,         1,      S< 4, 16, 8>,     S<0, 2, 1>,     S<0, 2, 1>,             1,              8,              8,         1,           1,           1,        S<1, 32, 1,16>,                      8, Scheduler, PipelineVersion, BF16, BF16, 1, 1, true, true>
 #endif
-    // clang-format on
+    //clang-format on
     >;
 
 } // namespace instance

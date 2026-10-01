@@ -54,6 +54,7 @@ struct DepthwiseRowStripBf16Argument : BaseArgument,
 template <typename Params>
 __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_row_strip_bf16(Params a)
 {
+#if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx125__)
     using DeviceIndex                    = typename Params::Index;
     constexpr index_t FilterWidth        = 11;
     constexpr index_t FilterRows         = 2;
@@ -162,6 +163,9 @@ __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_row_strip_bf16(Params
         if(second_row)
             a.partial[offset + FilterWidth] = second[0];
     }
+#else
+    ignore = a;
+#endif
 }
 
 // Neighboring lanes read neighboring filter elements in each s plane. Sixteen
@@ -169,6 +173,7 @@ __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_row_strip_bf16(Params
 template <typename Params>
 __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_row_strip_finalize_bf16(Params a)
 {
+#if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx125__)
     using DeviceIndex              = typename Params::Index;
     constexpr index_t FilterTile   = 16;
     constexpr index_t SplitLanes   = 16;
@@ -207,6 +212,9 @@ __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_row_strip_finalize_bf
                 wave_sums[w] += wave_sums[w + step];
         a.wei[f] = type_convert<bhalf_t>(wave_sums[0]);
     }
+#else
+    ignore = a;
+#endif
 }
 
 struct DeviceGroupedConvBwdWeightDepthwiseRowStripBf16 final

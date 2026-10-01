@@ -58,6 +58,7 @@ template <index_t ConvStride>
 __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_bf16(
     DepthwiseGroupedRowStripBf16Params a)
 {
+#if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx125__)
     static_assert(ConvStride == 1 || ConvStride == 2);
     constexpr index_t GroupLanes     = 16;
     constexpr index_t ReductionLanes = 16;
@@ -151,6 +152,9 @@ __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_bf1
             a.partial[offset + f] = wave_sums[0];
         }
     }
+#else
+    ignore = a;
+#endif
 }
 
 // Adjacent weight lanes load adjacent taps/groups; each split lane accumulates
@@ -158,6 +162,7 @@ __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_bf1
 __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_finalize_bf16(
     DepthwiseGroupedRowStripBf16Params a)
 {
+#if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx125__)
     constexpr index_t WeightLanes = 16;
     constexpr index_t SplitLanes  = 16;
     const index_t tid             = threadIdx.x;
@@ -195,6 +200,9 @@ __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_fin
                 wave_sums[w] += wave_sums[w + step];
         a.wei[weight] = type_convert<bhalf_t>(wave_sums[0]);
     }
+#else
+    ignore = a;
+#endif
 }
 
 struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
@@ -291,7 +299,7 @@ struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
            !CheckedMultiply(splits, weights, MaxFloatElements, partials))
             return false;
         const auto logical_bytes = static_cast<size_t>(partials) * sizeof(float);
-        if(logical_bytes > 6193152 || logical_bytes > static_cast<size_t>(MaxBytes - 255))
+        if(logical_bytes > static_cast<size_t>(MaxBytes - 255))
             return false;
         // Empirical occupancy gate for newly admitted groups, not an arithmetic
         // safety limit. Preserve the original G=192..512 low-CTA domain.

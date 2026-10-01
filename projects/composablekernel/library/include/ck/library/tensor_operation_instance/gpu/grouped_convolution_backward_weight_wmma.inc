@@ -48,18 +48,6 @@ void add_device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_bf16_instances(
                                                            PassThrough,
                                                            PassThrough>>>& instances);
 
-void add_device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_bf16_instances_large_tiles(
-    std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<2,
-                                                           NHWGC,
-                                                           GKYXC,
-                                                           NHWGK,
-                                                           BF16,
-                                                           BF16,
-                                                           BF16,
-                                                           PassThrough,
-                                                           PassThrough,
-                                                           PassThrough>>>& instances);
-
 void add_device_grouped_conv2d_bwd_weight_two_stage_wmma_nhwgc_gkyxc_nhwgk_bf16_pipev1_instances(
     std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<2,
                                                            NHWGC,

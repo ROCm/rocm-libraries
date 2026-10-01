@@ -25,7 +25,7 @@ elseif(DL_KERNELS)
    target_link_device_conv_libraries_if_exist(test_grouped_convnd_bwd_weight PRIVATE utility device_conv_operations)
 endif()
 
-if(GPU_TARGETS MATCHES "gfx1250" AND CK_USE_WMMA
+if(SUPPORTED_GPU_TARGETS MATCHES "gfx1250" AND CK_USE_WMMA
    AND TARGET device_grouped_conv2d_bwd_weight_nhwgc_instance
    AND TARGET device_grouped_conv3d_bwd_weight_ndhwgc_instance)
    add_gtest_executable(test_grouped_convnd_bwd_weight_wmma_overwrite test_grouped_convnd_bwd_weight_wmma_overwrite.cpp)
@@ -34,7 +34,7 @@ if(GPU_TARGETS MATCHES "gfx1250" AND CK_USE_WMMA
       device_grouped_conv3d_bwd_weight_ndhwgc_instance)
 endif()
 
-if(GPU_TARGETS MATCHES "gfx1250" AND CK_ENABLE_BF16)
+if(SUPPORTED_GPU_TARGETS MATCHES "gfx1250" AND CK_ENABLE_BF16)
    add_gtest_executable(test_grouped_convnd_bwd_weight_row_strip_bf16 test_grouped_convnd_bwd_weight_row_strip_bf16.cpp)
    target_link_libraries(test_grouped_convnd_bwd_weight_row_strip_bf16 PRIVATE utility)
    add_gtest_executable(test_grouped_convnd_bwd_weight_grouped_row_strip_bf16 test_grouped_convnd_bwd_weight_grouped_row_strip_bf16.cpp)

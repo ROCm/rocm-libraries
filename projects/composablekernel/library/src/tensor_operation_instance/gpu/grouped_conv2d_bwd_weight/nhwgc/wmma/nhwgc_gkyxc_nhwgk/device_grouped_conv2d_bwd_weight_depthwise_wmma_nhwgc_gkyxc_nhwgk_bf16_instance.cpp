@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+// The WMMA filename marker selects RDNA-only compilation for these scalar wave32 kernels.
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_weight_depthwise_bf16.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_weight_depthwise_row_strip_bf16.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_weight_depthwise_grouped_row_strip_bf16.hpp"

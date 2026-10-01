@@ -4,11 +4,10 @@
 # NHWGC layout instances for grouped_conv2d_bwd_weight
 set(GROUPED_CONV2D_BWD_WEIGHT_NHWGC
    # wmma
-   wmma/nhwgc_gkyxc_nhwgk/device_grouped_conv2d_bwd_weight_depthwise_nhwgc_gkyxc_nhwgk_bf16_instance.cpp
+   wmma/nhwgc_gkyxc_nhwgk/device_grouped_conv2d_bwd_weight_depthwise_wmma_nhwgc_gkyxc_nhwgk_bf16_instance.cpp
    wmma/nhwgc_gkyxc_nhwgk/device_grouped_conv2d_bwd_weight_two_stage_wmma_nhwgc_gkyxc_nhwgk_bf16_pipev1_instance.cpp
    wmma/nhwgc_gkyxc_nhwgk/device_grouped_conv2d_bwd_weight_two_stage_wmma_nhwgc_gkyxc_nhwgk_f16_pipev1_instance.cpp
    wmma/nhwgc_gkyxc_nhwgk/device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_bf16_instance.cpp
-   wmma/nhwgc_gkyxc_nhwgk/device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_bf16_instance_large_tiles.cpp
    wmma/nhwgc_gkyxc_nhwgk/device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_f16_instance.cpp
    # xdl
    xdl/nhwgc_gkyxc_nhwgk/device_grouped_conv2d_bwd_weight_two_stage_xdl_nhwgc_gkyxc_nhwgk_bf16_pipev1_instance.cpp
@@ -61,10 +60,6 @@ set(GROUPED_CONV2D_BWD_WEIGHT_NHWGC
    xdl/nhwgc_gkyxc_nhwgk/device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_f16_default_large_tensors_instance.cpp
    xdl/nhwgc_gkyxc_nhwgk/device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_f32_default_large_tensors_instance.cpp
 )
-
-if(SUPPORTED_GPU_TARGETS STREQUAL "gfx1250")
-set_source_files_properties(wmma/nhwgc_gkyxc_nhwgk/device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_bf16_instance_large_tiles.cpp PROPERTIES COMPILE_OPTIONS ";-mllvm;-enable-post-misched=1;-mllvm;--amdgpu-mfma-vgpr-form")
-endif()
 
 if(DL_KERNELS)
     list(APPEND GROUPED_CONV2D_BWD_WEIGHT_NHWGC

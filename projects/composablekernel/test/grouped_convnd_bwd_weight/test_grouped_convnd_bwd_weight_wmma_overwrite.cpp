@@ -253,6 +253,9 @@ void CheckCandidate(const ck::utils::conv::ConvParam& param,
         }
         if(!supported || !expected_support)
         {
+            if(candidate == Candidate::DirectScalar && !supported)
+                EXPECT_THROW(op->MakeInvokerPointer()->Run(arg.get(), StreamConfig{nullptr, false}),
+                             std::runtime_error);
             continue;
         }
         if(candidate == Candidate::TwoStageScalar)
