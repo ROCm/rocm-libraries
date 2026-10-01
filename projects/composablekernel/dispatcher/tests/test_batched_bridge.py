@@ -306,6 +306,12 @@ class TestBatchedDtypeLayoutGate(unittest.TestCase):
             with self.assertRaises(ValueError, msg=dtype):
                 expand_sweep("/nonexistent/config.json", arch="gfx942", dtype=dtype)
 
+    def test_rejects_arch_without_fp32_rows(self):
+        # gfx1201 has no fp32 warp tiles in arch_specs; the bridge does not
+        # accept the arch at all, so fp32 can never be generated for it.
+        with self.assertRaisesRegex(ValueError, "Unsupported GPU architecture"):
+            expand_sweep("/nonexistent/config.json", arch="gfx1201", dtype="fp32")
+
     def test_rejects_unsupported_layout(self):
         for layout in ("rc", "rcrr", "xyz"):
             with self.assertRaises(ValueError, msg=layout):

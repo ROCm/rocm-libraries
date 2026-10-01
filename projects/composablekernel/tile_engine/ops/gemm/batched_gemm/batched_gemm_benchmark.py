@@ -689,12 +689,16 @@ def main():
     for size_str in args.problem_sizes:
         try:
             dims = tuple(map(int, size_str.split(",")))
-            if len(dims) not in (3, 4):
+            if len(dims) not in (3, 4) or min(dims) <= 0:
                 raise ValueError
             problem_sizes.append(dims)
         except ValueError:
             print(f"Invalid problem size: {size_str}")
             return 1
+
+    if min(args.batch_count) <= 0:
+        print(f"Invalid batch count: {args.batch_count} (must be positive)")
+        return 1
 
     # Create benchmark instance
     benchmark = GemmBenchmark(args.build_dir, verbose=args.verbose)

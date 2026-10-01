@@ -323,6 +323,14 @@ class TestDtypeLayoutCoverage(unittest.TestCase):
         self.assertFalse(vu.op_warp_tile_allowed("gfx1250", "fp16", [16, 16, 4]))
         self.assertTrue(vu.op_warp_tile_allowed("gfx942", "fp32", [32, 32, 8]))
         self.assertFalse(vu.op_warp_tile_allowed("gfx950", "fp32", [16, 16, 32]))
+        # fp32 has no WMMA rows on gfx12 (gfx1201); a mixed target list must
+        # satisfy every target.
+        self.assertFalse(vu.op_warp_tile_allowed("gfx1201", "fp32", [16, 16, 4]))
+        self.assertFalse(
+            vu.op_warp_tile_allowed("gfx942;gfx1201", "fp32", [32, 32, 8])
+        )
+        self.assertTrue(vu.op_warp_tile_allowed("gfx942;gfx950", "fp32", [32, 32, 8]))
+        self.assertTrue(vu.op_warp_tile_allowed("gfx942;gfx1201", "fp16", [16, 16, 16]))
         # Other (arch, dtype) pairs are left to the shared table.
         self.assertTrue(vu.op_warp_tile_allowed("gfx942", "fp16", [16, 16, 4]))
 

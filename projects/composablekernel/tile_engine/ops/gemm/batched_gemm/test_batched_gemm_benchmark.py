@@ -125,9 +125,18 @@ class TestBatchCount(unittest.TestCase):
         self.assertEqual(seen["batch_counts"], [96, 256])
 
     def test_cli_rejects_bad_problem(self):
-        argv = ["prog", ".", "--problem-sizes", "1,2"]
-        with mock.patch.object(sys, "argv", argv), mock.patch("builtins.print"):
-            self.assertEqual(bgb.main(), 1)
+        for extra in (
+            ["--problem-sizes", "1,2"],
+            ["--problem-sizes", "0,64,64,64"],
+            ["--problem-sizes", "4,64,-2,64"],
+            ["--problem-sizes", "64,0,64"],
+            ["--batch-count", "0"],
+            ["--batch-count", "8", "-1"],
+        ):
+            with mock.patch.object(sys, "argv", ["prog", "."] + extra), mock.patch(
+                "builtins.print"
+            ):
+                self.assertEqual(bgb.main(), 1, msg=extra)
 
 
 if __name__ == "__main__":

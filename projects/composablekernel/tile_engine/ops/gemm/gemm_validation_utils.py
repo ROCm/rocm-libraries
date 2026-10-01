@@ -729,21 +729,29 @@ GFX1250_WARP_TILES = {
     "fp32": ([16, 16, 4],),
     "fp8": ([16, 16, 64], [16, 16, 128]),
     "bf8": ([16, 16, 64], [16, 16, 128]),
+    "int8": ([16, 16, 64],),
 }
 GFX9_FP32_WARP_TILES = ([16, 16, 4], [16, 16, 8], [16, 16, 16], [32, 32, 4], [32, 32, 8])
 
 
 def op_warp_tile_allowed(gpu_target, datatype, warp_tile):
-    """True if ``warp_tile`` [m, n, k] exists for ``datatype`` on ``gpu_target``.
+    """False if ``warp_tile`` [m, n, k] is missing from the op-opt-in rows above.
 
-    Covers only the gaps of the shared table (gfx1250, fp32 on gfx9); every
+    Covers only the gaps of the shared table: gfx1250, and fp32, which has MFMA
+    rows on gfx9 only, so no fp32 tile is allowed on any other arch (e.g.
+    gfx1201). ``gpu_target`` may be a ';'-separated list (CMake builds one kernel
+    for all of them); these rows are then checked against every target. Every
     other (arch, dtype) returns True and is left to the shared checks.
     """
     warp_tile = list(warp_tile)
-    if _base_gfx_arch(str(gpu_target)) == "gfx1250":
-        return warp_tile in GFX1250_WARP_TILES.get(datatype, ())
-    if datatype == "fp32":
-        return warp_tile in GFX9_FP32_WARP_TILES
+    for target in str(gpu_target).split(";"):
+        arch = _base_gfx_arch(target.strip())
+        if arch == "gfx1250":
+            if warp_tile not in GFX1250_WARP_TILES.get(datatype, ()):
+                return False
+        elif datatype == "fp32":
+            if not arch.startswith("gfx9") or warp_tile not in GFX9_FP32_WARP_TILES:
+                return False
     return True
 
 

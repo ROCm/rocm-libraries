@@ -105,7 +105,7 @@ class TestWarpTileRow(unittest.TestCase):
     def test_matches_dispatcher_arch_specs(self):
         row = WARP_TILE_SUPPORTED_COMBINATIONS["gfx1250"]
         for dtype, tiles in gub.GFX1250_WARP_TILES.items():
-            key = f"{dtype}_{dtype}_fp32"
+            (key,) = [k for k in row if k.startswith(f"{dtype}_{dtype}_")]
             self.assertEqual(sorted(map(list, tiles)), sorted(row[key]), dtype)
         self.assertEqual({k.split("_")[0] for k in row}, set(gub.GFX1250_WARP_TILES))
 
