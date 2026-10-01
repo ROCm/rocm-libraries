@@ -154,9 +154,11 @@ failures are operational errors, never unsupported-shape evidence.
 **Canonical runtime-shape entries.** When the kernel reads batch and sequence lengths
 as kernel arguments (the spec's `runtime_param_fields`), one compiled entry serves every
 runtime value its tile divides, so the catalog needs one entry per semantic key and tile,
-not one per corpus shape. Declare the canonical values in the profile as a mapping, for
-example `runtime_param_fields: {batch: 1, seqlen_q: 512, seqlen_kv: 512}` as in
-`configs/gfx950_attention_dense.profile.yaml`. `dispatch_parity.py` then replaces, in
+not one per corpus shape. Declare the canonical values in the profile as a mapping. A
+value is either the canonical int or `{canonical: <int>, request: <request field>}` when
+the request spells the field differently, which `knob_sweep.py` needs to probe coverage
+shapes. `configs/gfx950_attention_dense.profile.yaml` has `batch: 1`, `seqlen_q: 512` and
+`seqlen_kv: {canonical: 512, request: seqlen_k}`. `dispatch_parity.py` then replaces, in
 each served spec, the fields that both the profile maps and the spec's own
 `runtime_param_fields` returns, and collapses identical specs into one entry; specs
 whose mode bakes those fields (persistent, ragged, sliding-window, varlen) keep their
