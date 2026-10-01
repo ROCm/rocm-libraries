@@ -17,6 +17,9 @@ Documentation for rocFFT is available at
   `rocfft_setup` report success without initializing. A failed `rocfft_setup` acquires nothing
   and must not be paired with a `rocfft_cleanup`. Log files opened by the failed attempt are
   now closed when a later `rocfft_setup` reopens them.
+* Fixed undefined behavior when `ROCFFT_READ_EXPLICIT_SOL_MAP_FILE` or
+  `ROCFFT_READ_SOL_MAP_FROM_FOLDER` names a solution map file that does not exist. The missing
+  file is now reported as empty, as the surrounding code already intended.
 
 ## rocFFT 1.0.40 for ROCm 10.1
 
