@@ -894,7 +894,9 @@ rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
                                       int align /* <=0 => default */);
 /* Like rocke_b_global_load_vN but nontemporal != 0 records the
  * `nontemporal=True` attr (Python keyword; lowered to `!nontemporal`). The
- * plain rocke_b_global_load_vN forwards here with nontemporal=0. */
+ * plain rocke_b_global_load_vN forwards here with nontemporal=0.
+ * The backend picks the cache bits per arch: on gfx942 / gfx950 only `nt`,
+ * i.e. ROCKE_CACHE_STREAM, NOT ROCKE_NON_TEMPORAL (which also sets SC0). */
 rocke_value_t* rocke_b_global_load_vN_ex(rocke_ir_builder_t* b,
                                          rocke_value_t* ptr,
                                          rocke_value_t* idx,
@@ -1356,7 +1358,8 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
                              int n,
                              int align /* <=0 => default */);
 /* Like rocke_b_global_store_vN but nontemporal != 0 records the
- * `nontemporal=True` attr. The plain form forwards here with 0. */
+ * `nontemporal=True` attr. The plain form forwards here with 0. Per-arch bits
+ * as for rocke_b_global_load_vN_ex (gfx942 / gfx950: `nt` only). */
 void rocke_b_global_store_vN_ex(rocke_ir_builder_t* b,
                                 rocke_value_t* ptr,
                                 rocke_value_t* idx,

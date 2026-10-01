@@ -97,6 +97,14 @@ CACHE_ALL = 0  # Cache at all levels (default).
 CACHE_GLOBAL = 1  # GLC set — skip L2; useful for one-shot loads.
 CACHE_STREAM = 2  # SLC set — streaming hint (don't evict useful lines).
 NON_TEMPORAL = 3  # GLC + SLC — bypass cache hierarchy entirely.
+# GLC / SLC are the gfx90a names; on gfx942 / gfx950 the same bit values
+# are SC0 (1) and NT (2).
+#
+# Not the same thing as the ``nontemporal=True`` keyword of
+# ``global_load_vN`` / ``global_store_vN``. That keyword emits LLVM
+# ``!nontemporal`` and the backend picks the bits per arch: on gfx942 /
+# gfx950 it sets NT only, i.e. the bits of CACHE_STREAM, NOT NON_TEMPORAL
+# (which also sets SC0).
 
 
 # ----- target-neutral MMA metadata ---------------------------------------
@@ -1582,8 +1590,13 @@ class IRBuilder:
         element alignment for 12-byte loads. An explicit alignment is a caller
         guarantee about the address after adding idx.
 
-        ``nontemporal=True`` marks the load as streaming (LLVM
-        ``!nontemporal``; the AMDGPU ``nt`` cache-policy bit). The attr is
+        ``nontemporal=True`` marks the load as streaming: the lowering emits
+        LLVM ``!nontemporal`` and the AMDGPU backend picks the cache-policy
+        bits per arch. On gfx942 / gfx950 that is the ``nt`` bit only -- the
+        same bits as ``CACHE_STREAM`` on a buffer op, NOT ``NON_TEMPORAL``
+        (which also sets SC0). gfx90a gets GLC + SLC, and gfx12 a TH_NT
+        policy. It is a bool hint rather than a ``coherency=`` value because a
+        plain LLVM ``load`` has no slot for raw cache bits. The attr is
         recorded only when set, so default loads are unchanged.
         """
         if dtype.name in ("f16", "bf16", "i16"):
@@ -4194,7 +4207,9 @@ class IRBuilder:
         ``global_store_dwordxN`` transaction.
 
         ``nontemporal=True`` marks the store as streaming (LLVM
-        ``!nontemporal``); the attr is recorded only when set.
+        ``!nontemporal``); the attr is recorded only when set. The bits it
+        sets are chosen per arch, as for ``global_load_vN`` -- on gfx942 /
+        gfx950 the ``nt`` bit only, i.e. ``CACHE_STREAM``, NOT ``NON_TEMPORAL``.
         """
         if n not in (1, 2, 4, 8, 16):
             raise ValueError(f"global_store_vN n must be 1, 2, 4, 8, or 16 (got {n})")

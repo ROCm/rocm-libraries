@@ -33,6 +33,11 @@ CACHE_STREAM = 2   # SLC set, streaming hint (don't evict useful lines)
 NON_TEMPORAL = 3   # GLC + SLC, bypass cache hierarchy
 ```
 
+GLC / SLC are the gfx90a names; on gfx942 / gfx950 the same values are SC0 (1) and NT (2).
+These are raw bit values for buffer ops. They are **not** the `nontemporal=True` keyword of
+`global_load_vN` / `global_store_vN` (below), whose bits the backend picks per arch: on
+gfx942 / gfx950 it sets NT only, the bits of `CACHE_STREAM`, **not** `NON_TEMPORAL`.
+
 ### `Value`
 
 ```text
@@ -174,8 +179,10 @@ global_store(ptr, idx, value, align=1)
 global_load_vN_f16(ptr, idx, n)        # n in {2,4,8}; aligned by default
 global_load_vN(ptr, idx, dtype, n, nontemporal=False)   # f16 or bf16; n in {2,4,8}
 global_store_vN(ptr, idx, value, n, nontemporal=False)  # vector stores
-# nontemporal=True: streaming access; LLVM `!nontemporal` -> `nt` bit on the
-# global load/store (HIP backend: __builtin_nontemporal_load/store).
+# nontemporal=True: streaming access; LLVM `!nontemporal`, bits chosen per arch by the
+# backend (gfx942/gfx950: `nt` only = CACHE_STREAM, NOT NON_TEMPORAL; gfx90a: GLC+SLC).
+# A plain load has no slot for raw cache bits, hence a bool, not `coherency=`.
+# HIP backend: __builtin_nontemporal_load/store.
 global_atomic_add_f32(ptr, idx, value) # used by split-K paths
 ```
 
