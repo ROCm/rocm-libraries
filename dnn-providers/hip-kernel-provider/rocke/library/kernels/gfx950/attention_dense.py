@@ -96,6 +96,7 @@ from kernels.common.attention_dense_decode import (
     PersistGqaPair,
     PersistGqaPair2Phase,
     PersistHkvMajor,
+    PersistHqMinorSwz,
     PersistQbMajor,
 )
 from kernels.gfx950.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
@@ -253,6 +254,7 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 PersistQbMajor.name,
                 PersistHkvMajor.name,
                 PersistBtHkvMinor.name,
+                PersistHqMinorSwz.name,
                 PersistGqaPair.name,
                 PersistGqaPair2Phase.name,
             }

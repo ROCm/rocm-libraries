@@ -3616,6 +3616,10 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
             dict(persistent=True, num_persistent=64, persist_decode="hkv_major"),
             "_hkvmaj",
         ),
+        "hq_minor_swz": (
+            dict(persistent=True, num_persistent=64, persist_decode="hq_minor_swz"),
+            "_hqminswz",
+        ),
         "qb_major": (
             dict(persistent=True, num_persistent=64, persist_decode="qb_major"),
             None,
