@@ -21,7 +21,17 @@ struct GemmPipelineAgBgCrCompTDMV1;
  * specialization.
  *
  */
+// Selects how a freshly-DMA'd LDS tile is published to the consumer waves.
+//
+//   0 - workgroup barrier: every wave rendezvouses (s_barrier_signal/wait -1).
+//   1 - the TDM engine signals an LdsAtomicBarrier on transfer completion and
+//       consumers spin on its phase, so no wave-wide rendezvous is needed.
+//
+// Overridable from the build so the two can be compared without editing this
+// header; see LdsAtomicBarrier in core/arch/barrier.hpp.
+#ifndef BARRIER_ATOMIC_IN_TDM
 #define BARRIER_ATOMIC_IN_TDM 0
+#endif
 template <typename Problem, typename Policy = GemmPipelineAgBgCrCompTDMDefaultPolicy<true>>
 struct GemmPipelineAgBgCrCompTDMV2 : public GemmPipelineAgBgCrCompTDMV1<Problem, Policy>
 {
@@ -119,17 +129,29 @@ struct GemmPipelineAgBgCrCompTDMV2 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             bool is_warp2 = (warp_id == 2);
             bool is_warp3 = (warp_id == 3);
 #if BARRIER_ATOMIC_IN_TDM
+            // Per-buffer LDS size. GetSmemSize() lays the workgroup's LDS out as
+            // num_lds_buffers tiles followed by one barrier per tile, so the
+            // barriers start right after the last tile.
+            constexpr index_t smem_size = Policy::template GetSmemSize<Problem>();
+
             // currently lds config is set to 29; so phase width is 3
             LdsAtomicBarrier<3>* barriers[2];
             barriers[0] = reinterpret_cast<LdsAtomicBarrier<3>*>(
-                static_cast<char*>(p_smem) + 2 * smem_size); // after both LDS buffers
+                static_cast<char*>(p_smem) +
+                num_lds_buffers * smem_size); // after every LDS buffer
             barriers[1] = reinterpret_cast<LdsAtomicBarrier<3>*>(
-                static_cast<char*>(p_smem) + 2 * smem_size +
+                static_cast<char*>(p_smem) + num_lds_buffers * smem_size +
                 sizeof(LdsAtomicBarrier<3>)); // after first barrier
             if(is_warp0)
             {
-                barriers[0]->init(1);
-                barriers[1]->init(1);
+                // Two DMA transfers signal each barrier -- A and B both target
+                // barriers[i] (see the atomic_barrier_address assignments
+                // below) -- and the consumer advances its expected phase once
+                // per loop iteration. The member count must therefore be 2, or
+                // the phase advances twice per iteration while the waiter
+                // expects one and the two never line up.
+                barriers[0]->init(2);
+                barriers[1]->init(2);
             }
 
             block_sync_lds();
@@ -167,10 +189,15 @@ struct GemmPipelineAgBgCrCompTDMV2 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 tdm_config_a[i].atomic_barrier_enable = true;
                 tdm_config_b[i].atomic_barrier_enable = true;
 
+                // Shift THEN narrow. The field holds an 8-byte-granule LDS
+                // index, so narrowing first caps the usable byte address at
+                // 64 Ki and silently aliases the barrier into the middle of a
+                // tile -- the DMA then signals the wrong address, the phase
+                // never advances, and the consumer spin-wait hangs.
                 tdm_config_a[i].atomic_barrier_address =
-                    static_cast<uint16_t>(reinterpret_cast<uintptr_t>(barriers[i])) >> 3;
+                    static_cast<uint16_t>(reinterpret_cast<uintptr_t>(barriers[i]) >> 3);
                 tdm_config_b[i].atomic_barrier_address =
-                    static_cast<uint16_t>(reinterpret_cast<uintptr_t>(barriers[i])) >> 3;
+                    static_cast<uint16_t>(reinterpret_cast<uintptr_t>(barriers[i]) >> 3);
 #endif
             });
 

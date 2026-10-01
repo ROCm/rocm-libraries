@@ -44,13 +44,27 @@ class LdsAtomicBarrier
         __atomic_store_n(reinterpret_cast<uint64_t*>(&this->barrier_), temp.raw_, __ATOMIC_RELAXED);
     }
 
+    // Spin until the signaller(s) advance the phase to `phase`.
+    //
+    // Define CK_TILE_BARRIER_SPIN_LIMIT to bound the spin. That does NOT make a
+    // mis-driven barrier correct -- the kernel then proceeds on data that may
+    // not have landed and will fail validation -- but it turns a whole-GPU hang
+    // into a reported wrong answer, which is debuggable. Leave it undefined for
+    // production builds.
     CK_TILE_DEVICE void wait(uint32_t phase)
     {
         phase = phase & ((1 << PhaseWidth) - 1);
+#ifdef CK_TILE_BARRIER_SPIN_LIMIT
+        uint64_t spins = 0;
+#endif
         while(this->barrier_.phase != phase)
         {
 #if defined(__gfx125__)
             __builtin_amdgcn_s_sleep(1); // wait for 1-64 clocks
+#endif
+#ifdef CK_TILE_BARRIER_SPIN_LIMIT
+            if(++spins > CK_TILE_BARRIER_SPIN_LIMIT)
+                return;
 #endif
         }
     }
