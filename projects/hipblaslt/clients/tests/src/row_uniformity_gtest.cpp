@@ -1746,10 +1746,10 @@ namespace
     // MatrixInstK 128. Outside that envelope 256 is the wrong number rather
     // than a violated one, so the envelope is pinned too.
     //
-    // NoSwizzle (0) is also refused: Option-B uses a canonical per-DU scale
-    // K-step, but StreamK UseSubtileImpl still applies the HPS *32 depthU
-    // multiplier, so K-partials over-advance NoSwizzle scale SRDs. Lock both
-    // unaudited formats explicitly; only HostPreSwizzle remains admitted.
+    // NoSwizzle (0) remains refused under USO pending a hardware audit with
+    // itersPerTile > 1 (ordinary StreamK NoSwizzle depthU is format-gated
+    // correctly). InMemorySwizzle (2) is likewise unaudited. Only
+    // HostPreSwizzle remains admitted under this envelope.
     TEST(RowUniformityStreamKRejection_pre_checkin, MXScaleFormatEnvelope)
     {
         const auto hardware = probeHardware();

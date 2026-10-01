@@ -6133,17 +6133,12 @@ namespace TensileLite
                 // MX StreamK USO is audited only for HostPreSwizzle (1) under the
                 // envelope below (mxBlock 32, MatrixInstK 128, DepthU % 256 == 0).
                 //
-                // NoSwizzle (0) remains refused even though Option-B emit
-                // (SubtileScaleEmit.emitScaleGRPtrUpdate) uses a canonical
-                // scaleDepthU*bpe K-step: StreamK._depthUForTc still multiplies
-                // UseSubtileImpl MXSA/MXSB by 32 unconditionally — the HPS-era
-                // contract that pairs with KernelWriter's ×MXBlock stride
-                // scaling. NoSwizzle keeps canonical strides (no ×MXBlock), so
-                // a nonzero StreamKLocalStart over-advances the scale SRD by
-                // 32×. USO increases exposure to K-partials (itersPerTile > 1);
-                // DP-only / single-iter tiles hide the mismatch. Do not admit
-                // format 0 until _depthUForTc is gated on MXScaleFormat and
-                // USO+StreamK+scaleA=3 is verified on hardware.
+                // NoSwizzle (0): StreamK._depthUForTc is format-gated so ordinary
+                // StreamK uses the canonical _DepthUMXS* K-step that matches
+                // Option-B emit (SubtileScaleEmit.emitScaleGRPtrUpdate). USO
+                // still refuses format 0 until USO+StreamK+scaleA=3 is verified
+                // on hardware with itersPerTile > 1 (K-partial exposure that
+                // DP-only / single-iter tiles hide).
                 //
                 // InMemorySwizzle (2) is likewise unaudited (gfx1250 TDM path).
                 // Change the swizzle format, the block size or MatrixInstK and

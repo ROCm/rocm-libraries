@@ -473,19 +473,22 @@ class StreamK(Component):
         tensors always use DepthU even in multi-DU mode (where _DepthU{A,B} is
         the smaller per-uid swizzle sub-stride, not a compression).
 
-        For MXSA/MXSB under UseSubtileImpl + HostPreSwizzle / InMemorySwizzle,
-        KernelWriter scales StridesMXS{A,B} by MXBlock (<<5) so M-strides are
-        in data-K units; the swizzle granule is 32 * 256, so this path applies
-        an additional *32 to _DepthUMXS{A,B} (= DepthU/MXBlock) and recovers a
-        DepthU-sized StreamK K-step that matches those strides.
+        For MXSA/MXSB under UseSubtileImpl the StreamK K-step depends on
+        MXScaleFormat (must match KernelWriter's StridesMXS{A,B} scaling):
 
-        NoSwizzle Option B keeps canonical scale strides and advances the SRD
-        by scaleDepthU*bpe per unroll (SubtileScaleEmit.emitScaleGRPtrUpdate).
-        The unconditional *32 below therefore over-advances NoSwizzle scale
-        SRDs whenever StreamKLocalStart != 0. USO refuses mxScaleFormat==0 for
-        that reason (ContractionSolution.streamKUniformSummationOrderObstacle);
-        do not format-gate this *32 without also widening that refuse and
-        verifying USO+StreamK+scaleA=3 with itersPerTile > 1.
+          * HostPreSwizzle / InMemorySwizzle: strides are scaled by MXBlock
+            (<<5) so M-strides are in data-K units; apply *32 to
+            _DepthUMXS{A,B} (= DepthU/MXBlock) to recover a DepthU-sized
+            StreamK K-step that matches those strides.
+          * NoSwizzle Option B: keeps canonical scale strides and advances
+            the SRD by scaleDepthU*bpe per unroll
+            (SubtileScaleEmit.emitScaleGRPtrUpdate). Use the unscaled
+            _DepthUMXS{A,B} so StreamKLocalStart offsets the correct K window.
+
+        USO still refuses mxScaleFormat==0 pending hardware audit of
+        USO+StreamK+scaleA=3 with itersPerTile > 1
+        (ContractionSolution.streamKUniformSummationOrderObstacle); ordinary
+        StreamK NoSwizzle (non-USO / DP-only) relies on this format gate.
 
         For Sparse problems the compressed data operand and the Metadata
         tensor genuinely hold fewer elements per DepthU of computation, so
@@ -496,7 +499,11 @@ class StreamK(Component):
             key = "_DepthU%s" % tc
             if key in kernel:
                 _DepthU = kernel[key]
-                if kernel.get("UseSubtileImpl"):
+                # Pair with KernelWriter's <<5 on StridesMXS{A,B} for swizzled
+                # layouts only; NoSwizzle must keep canonical depthU.
+                mxFmt = kernel.get("MXScaleFormat", "NoSwizzle")
+                if (kernel.get("UseSubtileImpl")
+                        and mxFmt in ("HostPreSwizzle", "InMemorySwizzle")):
                     _DepthU = (_DepthU * 32)
                 return _DepthU
             return kernel["DepthU"]
