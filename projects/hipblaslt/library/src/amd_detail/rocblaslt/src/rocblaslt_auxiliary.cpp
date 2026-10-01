@@ -44,7 +44,6 @@
 #include "UserDrivenTuningParser.hpp"
 #include "definitions.h"
 #include "handle.h"
-#include "rocblaslt_arch_revision.hpp"
 #include "rocblaslt.h"
 #include "rocblaslt_fused_a2a_validate.hpp"
 #include "rocblaslt_mat_utils.hpp"
@@ -56,6 +55,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <map>
+#include <sstream>
 #include <utility>
 
 #define TO_STR2(x) #x
@@ -174,6 +174,53 @@ inline bool
 }
 
 // Preload problem/solution mappings
+namespace
+{
+    /**
+     * Whether an entry's recorded name still matches what its index resolves to.
+     *
+     * The index only locates a solution in the running build; the recorded
+     * name is what authorizes using it. A row with no name was already accepted
+     * or refused on the file's build stamp when it was loaded.
+     */
+    bool tuned_entry_identity_matches(rocblaslt_handle                         handle,
+                                      const TensileLite::TunedEntry&           entry,
+                                      const rocblaslt_matmul_heuristic_result& resolved)
+    {
+        // Each name is compared against the accessor it was written from. Both
+        // give the bare name: getSolutionNameFromData appends GSU/WGM notes when
+        // they differ from the solution's defaults, which could never match.
+        std::string recorded;
+        std::string current;
+        if(entry.kernelName)
+        {
+            recorded = *entry.kernelName;
+            current  = getKernelNameFromAlgoIndex(handle, resolved.algo);
+        }
+        else if(entry.solutionName)
+        {
+            recorded = *entry.solutionName;
+            current  = getSolutionNameFromAlgoIndex(handle, resolved.algo);
+        }
+        else
+        {
+            return true;
+        }
+
+        if(current == recorded)
+            return true;
+
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+        {
+            std::ostringstream msg;
+            msg << "Ignoring tuning file entry: index " << entry.solutionIndex
+                << " now resolves to '" << current << "', recorded '" << recorded << "'";
+            log_info(__func__, msg.str());
+        }
+        return false;
+    }
+} // namespace
+
 bool problem_override_from_file(rocblaslt_handle&                 handle,
                                 RocblasltContractionProblem&      problem,
                                 rocblaslt_matmul_desc&            matmul_desc,
@@ -195,16 +242,24 @@ bool problem_override_from_file(rocblaslt_handle&                 handle,
         std::vector<rocblaslt_matmul_heuristic_result> overrideResults;
         std::vector<int>                               solutionIndex(1);
         TensileLite::ProblemOverride prob_key(RocblasltContractionProblem2ProblemOverride(problem));
-        auto                         sol_iter = m_override.find(prob_key);
 
-        for(auto sol_idx = sol_iter.first; !success && sol_idx != sol_iter.second; sol_idx++)
+        for(const auto& entry : m_override.find(prob_key))
         {
-            solutionIndex[0] = sol_idx->second;
+            if(success)
+                break;
+
+            solutionIndex[0] = entry.solutionIndex;
+
+            // getSolutionsFromIndex appends, and everything below reads [0].
+            overrideResults.clear();
 
             if(rocblaslt_status_success
-               == getSolutionsFromIndex(
-                   handle, solutionIndex, overrideResults, max_workspace_bytes))
+                   == getSolutionsFromIndex(
+                       handle, solutionIndex, overrideResults, max_workspace_bytes)
+               && !overrideResults.empty())
             {
+                if(!tuned_entry_identity_matches(handle, entry, overrideResults[0]))
+                    continue;
 
                 size_t required_workspace_size = 0;
                 auto&  tensile_data            = matmul_desc->m_data;
@@ -272,6 +327,13 @@ bool problem_override_from_file_cpp(
     const std::string&                              file_path,
     size_t                                          max_workspace_bytes)
 {
+    // Rows describe single GEMMs, and TensileDataGemm2ProblemOverride reads
+    // gemmData as a TensileDataGemm.
+    if(gemmType != rocblaslt::RocGemmType::ROCBLASLT_GEMM)
+    {
+        log_info(__func__, "Grouped GEMM does not use the override file.");
+        return false;
+    }
 
     bool success = false;
     TensileLite::getContractionProblemsFromFile(file_path);
@@ -286,15 +348,24 @@ bool problem_override_from_file_cpp(
         std::vector<rocblaslt_matmul_heuristic_result> overrideResults;
         std::vector<int>                               solutionIndex(1);
         TensileLite::ProblemOverride prob_key(TensileDataGemm2ProblemOverride(gemmData));
-        auto                         sol_iter = m_override.find(prob_key);
 
-        for(auto sol_idx = sol_iter.first; !success && sol_idx != sol_iter.second; sol_idx++)
+        for(const auto& entry : m_override.find(prob_key))
         {
-            solutionIndex[0] = sol_idx->second;
+            if(success)
+                break;
+
+            solutionIndex[0] = entry.solutionIndex;
+
+            // getSolutionsFromIndex appends, and everything below reads [0].
+            overrideResults.clear();
+
             if(rocblaslt_status_success
-               == getSolutionsFromIndex(
-                   handle, solutionIndex, overrideResults, max_workspace_bytes))
+                   == getSolutionsFromIndex(
+                       handle, solutionIndex, overrideResults, max_workspace_bytes)
+               && !overrideResults.empty())
             {
+                if(!tuned_entry_identity_matches(handle, entry, overrideResults[0]))
+                    continue;
 
                 size_t                  required_workspace_size = 0;
                 rocblaslt::RocTuningV2* tuning                  = nullptr;
@@ -326,6 +397,12 @@ bool problem_override_from_file_cpp(
                         {
                             success = true;
                             log_info(__func__, "Use the fallback fp32 solution");
+                        }
+                        else
+                        {
+                            // Later entries and default selection run on this
+                            // same problem.
+                            problem->setF32XdlMathOp(rocisa::DataType::XFloat32);
                         }
                     }
                 }
@@ -2301,6 +2378,11 @@ rocblaslt_status
 
         OverrideSingleton& override         = OverrideSingleton::getInstance();
         bool               override_success = false;
+
+        // Set before the lookup: a hit for a single-algo request skips
+        // getBestSolutions, and the dedup below still reads this count.
+        *returnAlgoCount = 0;
+
         if(override.env_mode)
         {
             override_success = problem_override_from_file(handle,
@@ -2714,19 +2796,6 @@ std::string rocblaslt_internal_get_arch_name()
     return ArchName{}(deviceProperties);
 }
 
-// The GEMM library subtree the current device loads; folds in asicRevision, the
-// only signal telling the gfx1250 revisions apart (see rocblaslt_arch_revision.hpp).
-std::string rocblaslt_internal_get_library_arch_name()
-{
-    int deviceId = 0;
-    static_cast<void>(hipGetDevice(&deviceId));
-    // Zero-init: a failed query leaves the arch name empty, so no subtree matches.
-    hipDeviceProp_t deviceProperties{};
-    static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-    const int asicRevision = deviceProperties.asicRevision;
-    return rocblaslt_revisioned_arch_name(ArchName{}(deviceProperties), asicRevision);
-}
-
 bool rocblaslt_internal_test_path(const std::string& path)
 {
 #ifdef _WIN32
@@ -2897,4 +2966,13 @@ extern "C" int rocblaslt_matmul_is_tuned(rocblaslt_handle        handle,
 extern "C" HIPBLASLT_EXPORT void hipblaslt_debug_reload()
 {
     TensileLite::Debug::Instance().reloadDebugBitsForTest();
+}
+
+// Test support, like hipblaslt_debug_reload: HIPBLASLT_TUNING_OVERRIDE_FILE is
+// read on first use and each file is loaded once per process. Not part of any
+// supported interface.
+extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
+{
+    TensileLite::OverrideMap::getMap().resetForTest();
+    OverrideSingleton::getInstance().reloadForTest();
 }

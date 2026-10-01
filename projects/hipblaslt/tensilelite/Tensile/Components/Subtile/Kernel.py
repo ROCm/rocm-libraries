@@ -8,7 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import singledispatch
 from typing import Dict, List, NamedTuple, Optional, Tuple, Type
-from Tensile.Components.Subtile.LogicalScheduler import (
+from .LogicalScheduler import (
       LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
       ReadGranularity, GRPlacementStrategy)
 
@@ -109,7 +109,7 @@ from .SubtileGREmit import (
     graInitPointer, graTileAssignment,
     emitSingleBufferLoad, emitSubtileBufferLoad, globalReadDoSubtile,
     globalReadDTLInitCommonSgpr, globalReadLDSBufferSwap, globalReadPtrUpdates,
-    tdmGlobalOffsetSubtile, initTDMDescriptorSubtile, tdmApplyStreamKOffsetSubtile,
+    tdmGlobalOffsetSubtile, initTDMDescriptorSubtile, tdmApplyTileKOffsetSubtile,
 )
 from .SubtileLREmit import (
     _emitLocalReadOffset, _emitLocalRead,
