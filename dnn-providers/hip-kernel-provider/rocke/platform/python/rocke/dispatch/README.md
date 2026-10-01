@@ -39,7 +39,7 @@ library tree and use the same `core.py` contracts and coverage invariants:
 - `library/dispatch/attention/` — SDPA. Per-arch modules (`generic.py`,
   `gfx942_dense.py`, `gfx942_unified.py`, `gfx950_dense.py`,
   `gfx950_unified.py`, `gfx1250.py`), the attention knob space (`axes.py`,
-  `dense_rules.py`, `unified_rules.py`, `candidate.py`), `bindings.py`, and
+  `dense_rules.py`, `unified_rules.py`, `waves.py`, `candidate.py`), `bindings.py`, and
   `__init__.py` with the registries and entry points. It keeps two registries:
   a route registry that production selects from (it includes path labels with
   no builder) and an execution registry that sweeps enumerate. See
@@ -159,11 +159,14 @@ for result in registry.iter_dispatch_all(req, kernel_id=kernel_id_fn, sample=0):
 `iter_combos` / `sweep_space` / `iter_dispatch_all` walk the whole registry,
 probe opt-in candidates by pinning their own `algorithm` / `spec_id`, and expand
 each candidate's `sweep_space` — or, with `sample > 0`, draw that many specs per
-candidate from its full space. Production `dispatch_*` never sees an opt-in
-candidate. Each result's stored request is pinned to its spec
-(`core.pin_to_spec`), so `request_hash` differs per configuration and the
-stored request reselects exactly what ran. Attention wraps these as
-`iter_dispatch_attention_all(req, sweep_level=..., tuning_sample=...)`.
+candidate from its full space (a negative `sample` is refused). Production
+`dispatch_*` never sees an opt-in candidate; one refuses an unpinned request
+with a reason that names both selectors it needs. Each result's stored request
+is pinned to its spec (`core.pin_to_spec`), so `request_hash` differs per
+configuration and the stored request reselects exactly what ran; a spec with
+no `tuning_id` resets the request's `tuning_id` / `tuning_knobs` to
+`"auto"` / `()`, so a stale pin is never carried along. Attention wraps these
+as `iter_dispatch_attention_all(req, sweep_level=..., tuning_sample=...)`.
 
 ## Tuned candidates
 
@@ -203,10 +206,29 @@ relative to, a changed default refuses old pins instead of silently building a
 different kernel; a long-lived cache should also store `spec_hash` and treat a
 mismatch on replay as a miss (ARCHITECTURE.md section 11.1). Knobs that compile to the default are dropped and
 illegal ones are refused with a reason, so one kernel has one id however it was
-reached (sweep, sample, knob pin, or id).
+reached (sweep, sample, knob pin, or id). Knob values are converted to the type
+their axis declares: `True` and `1`, or `2` and `2.0`, compare and hash equal,
+so they name one configuration, and a value with no lossless conversion is
+refused.
 
-Everything above comes from `rocke.dispatch.tuning`. A family writes its axes
-as data, a `KnobSpace` subclass with its kernel's rules, and one
+Everything above comes from `rocke.dispatch.tuning`, which names no kernel
+field. What a family needs beyond its axes is a `KnobSpace` hook:
+
+- `validate(base, kernel)` is the legality gate for anything the kernel's own
+  validator does not model; it also prunes the walk. Attention's gfx950 2D
+  space uses it for the LDS budget and the padded-K / aliased-Q rule.
+- `outer_knob` with `outer_values(base, level)` and `outer_default(base)`
+  names one field that is cheap to sweep on top of every knob set: the walk
+  checks a knob set once and only rebuilds it per outer value, so the drop
+  rules must not read it. Attention uses `waves_per_eu`
+  (`library/dispatch/attention/waves.py`); a space without one sweeps nothing
+  extra.
+- `stem(kernel)` / `stem_prefix()` give the display part of the id
+  (`variant_id` by default) and the prefix a bare id must carry to be looked
+  up.
+
+A family writes its axes as data, a `KnobSpace` subclass with its kernel's
+rules, and one
 `make_tuned_candidate(...)` per variant, then checks it with
 `assert_tuning_contract`. ARCHITECTURE.md section 14 is the step-by-step
 template; `platform/tests/dispatch/dispatch_tests/tuning/test_tuning_template.py`

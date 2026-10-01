@@ -64,7 +64,9 @@ field on the tiled kernel specs is a declared `KnobAxis` in `axes.py`
 (`_GFX950_2D_AXES`, `_GFX942_2D_AXES`, `_3D_AXES`); `test_tuning_space.py`
 fails if a kernel field is on no axis. Axes are ordered prerequisites-first,
 and the space is walked depth-first with the kernel's own spec validator
-pruning illegal prefixes. There is no size cap: the full space is millions of
+pruning illegal prefixes, plus `UnifiedSpace.validate` on gfx950 2D (the LDS
+budget and the padded-K / aliased-Q rule, which the tiled 2D validator does
+not model). There is no size cap: the full space is millions of
 specs per shape on the transposed paths, so `sweep_space` is a lazy stream and
 `sample_space(req, n, seed)` draws `n` random legal specs per candidate. Held
 out on purpose: `KNOWN_WRONG_KNOBS` (gfx942 `use_k_hbm_direct`). They reject
@@ -84,8 +86,10 @@ Policy-free spec construction lives next to its consumers in
 candidates and never calls `_select_*`,
 `_enable_*`, `_num_segments`, or `_resolve_lds_budget`; problem semantics are
 derived from `UnifiedAttentionProblem`, while explicit geometry/codegen points
-are accepted or rejected by the concrete spec and `supports_tiled_*` validators.
-This is deliberately separate from the heuristic production builders.
+are accepted or rejected by the concrete spec and `supports_tiled_*` validators
+(and, on gfx950 2D, by `UnifiedSpace.validate` above them). It never resizes
+an invalid point. This is deliberately separate from the heuristic production
+builders.
 
 Four candidate families are **opt-in only** and never win under `algorithm="auto"`:
 `attention_gfx942_dense`, every `attention_gfx950_dense_*` variant, and
@@ -127,16 +131,23 @@ a pinned request selects.
 Every spec a tuning candidate hands out comes from one canonicalize step,
 the shared `rocke.dispatch.tuning.KnobSpace.canonicalize` (attention's
 subclasses are `DenseSpace` in `dense_rules.py` and `UnifiedSpace` in
-`unified_rules.py`), whether it was swept,
-sampled, pinned by knobs, or found by id. Knobs that compile to the default
-are dropped (default values, restated policies, knobs the body does not read);
-illegal ones are refused with the reason (`KNOWN_WRONG_KNOBS`, fields on no
-axis, codepath-fixed knobs, kernel-validator rejections). So one kernel has
-one id, and a knob pin cannot reach a configuration a sweep would not.
+`unified_rules.py`, both through `WavesPerEuSpace` in `waves.py`), whether it
+was swept, sampled, pinned by knobs, or found by id. Knob values are first
+converted to the type their axis declares (`True` / `1` name one
+configuration). Knobs that compile to the default are dropped (default
+values, restated policies, knobs the body does not read, a gfx950 KQ pad the
+kernel lays out as none); illegal ones are refused with the reason
+(`KNOWN_WRONG_KNOBS`, fields on no axis, codepath-fixed knobs,
+kernel-validator rejections, and on gfx950 2D the LDS budget and padded K with
+aliased Q). So one kernel has one id, and a knob pin cannot reach a
+configuration a sweep would not.
 
 gfx950 dense is six frozen `(tile × persist × wide-DMA)` variants. The gate is
 the kernel's own `supports_attention_dense`: dispatch adds no eligibility rule
-of its own, so wide DMA is offered on every shape the kernel accepts.
+of its own, so wide DMA is offered on every shape the kernel accepts,
+including non-causal, sinks and sliding-window masks;
+`TestWideDmaFeatures` in `test_attention_dense_gfx950_numeric.py` checks those
+numerically.
 
 Each dense variant's `sweep_space` / `sample_space` walks the gfx950 dense knob
 space declared as `_GFX950_DENSE_AXES` in `axes.py` (registered as
@@ -191,9 +202,12 @@ priority-30 tuning catalog). Both dense modules build their candidates with
 validator, variants and features. The family-neutral machinery (axis
 helpers, the walk and sampler, `config_key` / `tuning_id`, `KnobSpace`,
 `make_tuned_candidate`, the conformance kit) is `rocke.dispatch.tuning` in the
-platform; attention keeps only its data and rules: `axes.py` (knob axes,
-production stacks, held-out knobs), `dense_rules.py` / `unified_rules.py` (the
-`KnobSpace` subclasses), and `candidate.py` (the two factories).
+platform, and names no kernel field; attention keeps only its data and rules:
+`axes.py` (knob axes, production stacks, held-out knobs), `dense_rules.py` /
+`unified_rules.py` (the `KnobSpace` subclasses), `waves.py` (`waves_per_eu`
+as their outer knob: the WPE values and `WavesPerEuSpace`, which sets the
+outer knob and the `_wpe{N}` id stem), and `candidate.py` (the two
+factories).
 `tests/dispatch/attention/test_tuning_contract.py` runs the conformance kit.
 
 **Adding a tuned family** (any operator, not only attention): follow the
@@ -362,7 +376,8 @@ exhaustively. Those stacks leave off the knobs the kernels label as dead ends
 out of both levels. `full` is the sampled non-production space: every other
 kernel knob, dead ends included. A single gfx942 transposed-x8 geometry has
 roughly 16M legal knob settings, so `full` is consumed by sampling:
-`tuning_sample` / `seed` (default 256, 0 walks the full stream). Sampling is a
+`tuning_sample` / `seed` (default 256, 0 walks the full stream, a negative
+value is refused). Sampling is a
 random walk uniform at each knob decision, not uniform over the whole legal
 set. `production` ignores `tuning_sample`.
 
