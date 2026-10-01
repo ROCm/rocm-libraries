@@ -65,6 +65,7 @@
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <complex>
 #include <exception>
@@ -4827,11 +4828,19 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
         }
     }
 
-    heuristicResults.resize(solutions.size());
+    // SolutionSet is ordered by pointer address, and the heuristic fallback takes the first
+    // supported entry, so order by index to make that choice identical in every process.
+    std::vector<std::shared_ptr<TensileLite::ContractionSolution>> sortedSolutions(
+        solutions.begin(), solutions.end());
+    std::sort(sortedSolutions.begin(), sortedSolutions.end(), [](auto const& a, auto const& b) {
+        return a->index < b->index;
+    });
+
+    heuristicResults.resize(sortedSolutions.size());
 
     int i                 = 0;
     int duplicated_counts = 0;
-    for(auto solution : solutions)
+    for(auto solution : sortedSolutions)
     {
         // Custom kernels don't support general batched mode (pointer arrays)
         // Only check for ContractionProblemGemm (grouped gemm doesn't use batchMode)
