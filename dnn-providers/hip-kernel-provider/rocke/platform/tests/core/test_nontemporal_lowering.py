@@ -8,19 +8,27 @@ lowerers, adds nothing when unset (so every existing kernel's serialized IR and
 ``.ll`` bytes stay put), and is rejected rather than coerced when the attr
 arrives with a non-bool value (IR can be hand-built or deserialized).
 
-No GPU: pure text lowering.
+No GPU: text lowering, plus an optional COMGR compile + ``llvm-objdump`` check
+that skips when either tool is missing. The C++ HIP lowerer is reached through
+the native ``rocke_nontemporal_hip`` test binary named by
+``ROCKE_NONTEMPORAL_HIP_TEST``.
 """
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
 
 import pytest
 
 from rocke.core.ir import BF16, F16, IRBuilder, PtrType
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
-from rocke.helpers.compile import _lower_llvm_via_backend
+from rocke.helpers.compile import _lower_llvm_via_backend, compile_kernel
 
 
 def _copy_kernel(*, load_nt: bool, store_nt: bool, elem=BF16, n=8, align=None):
@@ -120,3 +128,85 @@ def test_hip_backend_rejects_nontemporal_on_the_memcpy_path():
     kernel = _copy_kernel(load_nt=True, store_nt=False, elem=F16, n=8, align=2)
     with pytest.raises(ValueError, match="nontemporal needs a naturally aligned"):
         lower_kernel_to_hip(kernel, arch="gfx950")
+    # Without the flag the same kernel still lowers through memcpy, so the
+    # rejection above is the flag's, not the alignment's.
+    plain = _copy_kernel(load_nt=False, store_nt=False, elem=F16, n=8, align=2)
+    assert "__builtin_memcpy(" in lower_kernel_to_hip(plain, arch="gfx950")
+
+
+def test_hip_backend_rejects_non_bool_attr():
+    kernel = _with_int_attr(_copy_kernel(load_nt=True, store_nt=False))
+    with pytest.raises(ValueError, match="nontemporal attr must be a bool"):
+        lower_kernel_to_hip(kernel, arch="gfx950")
+
+
+# Case names shared with tests/core/test_nontemporal_hip.cpp.
+_HIP_CASES = {
+    "both": dict(load_nt=True, store_nt=True),
+    "load": dict(load_nt=True, store_nt=False),
+    "store": dict(load_nt=False, store_nt=True),
+    "plain": dict(load_nt=False, store_nt=False),
+    "memcpy_plain": dict(load_nt=False, store_nt=False, elem=F16, n=8, align=2),
+}
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("case", sorted(_HIP_CASES))
+def test_hip_source_matches_cpp_engine(case, arch):
+    executable = os.environ.get("ROCKE_NONTEMPORAL_HIP_TEST")
+    if not executable:
+        pytest.skip("set ROCKE_NONTEMPORAL_HIP_TEST to the built rocke_nontemporal_hip")
+    assert Path(executable).is_file()
+    native = subprocess.run(
+        [executable, "--hip", case, arch], check=True, capture_output=True, text=True
+    ).stdout
+    assert native == lower_kernel_to_hip(_copy_kernel(**_HIP_CASES[case]), arch=arch)
+
+
+def _objdump() -> str | None:
+    for candidate in (
+        os.environ.get("LLVM_OBJDUMP"),
+        os.path.join(os.environ.get("ROCM_PATH", "/opt/rocm"), "llvm/bin/llvm-objdump"),
+        shutil.which("llvm-objdump"),
+    ):
+        if candidate and os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def _global_mem_lines(kernel, arch: str) -> list[str]:
+    from rocke.runtime import comgr
+
+    objdump = _objdump()
+    if objdump is None:
+        pytest.skip("llvm-objdump not found (LLVM_OBJDUMP / ROCM_PATH / PATH)")
+    try:
+        comgr._resolve_lib()
+    except comgr.ComgrError as e:
+        pytest.skip(f"COMGR not loadable: {str(e)[:200]}")
+    hsaco = compile_kernel(kernel, arch=arch).hsaco
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "nt_copy.hsaco"
+        path.write_bytes(hsaco)
+        isa = subprocess.run(
+            [objdump, "-d", f"--mcpu={arch}", str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    return [ln.split("//")[0].split() for ln in isa.splitlines() if "global_" in ln]
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize(
+    "load_nt,store_nt", [(True, True), (True, False), (False, False)]
+)
+def test_flag_sets_the_nt_bit_in_the_isa(arch, load_nt, store_nt):
+    """The flag reaches the instruction: the AMDGPU backend sets the ``nt``
+    cache-policy bit on exactly the flagged global load/store."""
+    lines = _global_mem_lines(_copy_kernel(load_nt=load_nt, store_nt=store_nt), arch)
+    loads = [ln for ln in lines if ln[0].startswith("global_load_dwordx4")]
+    stores = [ln for ln in lines if ln[0].startswith("global_store_dwordx4")]
+    assert len(loads) == len(stores) == 1, lines
+    assert ("nt" in loads[0][1:]) is load_nt
+    assert ("nt" in stores[0][1:]) is store_nt

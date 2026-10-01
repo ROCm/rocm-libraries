@@ -101,6 +101,21 @@ if(BUILD_TESTING)
                  rocke_future_intrinsic_lowering)
   endif()
 
+  # nontemporal= on global_load_vN/global_store_vN through the C++ HIP lowerer.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_nontemporal_hip.cpp")
+    add_executable(rocke_nontemporal_hip core/test_nontemporal_hip.cpp)
+    target_link_libraries(rocke_nontemporal_hip PRIVATE rocke_core)
+    add_test(NAME rocke_nontemporal_hip COMMAND rocke_nontemporal_hip)
+    set_tests_properties(rocke_nontemporal_hip PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_nontemporal_hip)
+    set_target_properties(rocke_nontemporal_hip
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_nontemporal_hip
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_nontemporal_hip)
+  endif()
+
   # Direct f32 tanh lowering and narrow-type rejection in the C++ engine.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_tanh_lowering.cpp")
     add_executable(rocke_tanh_lowering core/test_tanh_lowering.cpp)
