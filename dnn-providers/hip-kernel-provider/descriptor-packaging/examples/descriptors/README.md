@@ -8,6 +8,20 @@ This tree drives the production packaging path, which the presets and CI lanes
 otherwise leave dormant: without a source root set, the pack step ships nothing
 and says nothing.
 
+## Disposition
+
+| Set | Verdict |
+|---|---|
+| `hip/pointwise_add/` | not shipped — CI production-path exercise, and layout fixture |
+| `rocKE/gfx942_tiled_attention/` | not shipped — CI production-path exercise, and layout fixture |
+
+Neither set reaches a product build: `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` is empty by
+default, so nothing points at this tree and no install rule copies it. Two things do use it.
+`hipdnn-superbuild-ci.yml` points the production source root here in the Linux lane, which is
+the only place the production packaging path runs end to end. `test_hkp_pack_layout.py` packs
+the tree directly, which is what makes its layout assertion strict: changing anything here
+changes what those tests pin.
+
 ## Layout
 
 ```
@@ -73,10 +87,17 @@ for every nested one.
 
 ## Why this rocKE builder
 
-`build_unified_attention_2d_tiled` rather than `build_attention_dense`: the
-latter takes a keyword-only `tuning: Gfx942DenseTuning` that no descriptor can
-set, so the packer refuses it by design. That refusal has its own regression test
-(`test_real_gfx942_attention_dense_is_refused`); this tree covers the happy path.
+`build_unified_attention_2d_tiled` rather than `build_attention_dense`. Both
+carry the `(spec, *, arch)` signature the packer requires, and each has a
+regression test holding it there (`test_real_gfx942_tiled_2d_is_accepted`,
+`test_real_gfx942_attention_dense_is_accepted`), so the choice is about which
+one models a shipped descriptor. The tiled builder's spec is compile-time
+shape only — head size, KV block size, head counts, dtype, feature flags — with
+sequence count and lengths arriving at runtime through `cu_q` and the block
+tables, so one authored descriptor covers every problem size. `AttentionDenseSpec`
+bakes `batch`, `seqlen_q` and `seqlen_kv` in as constants, so a descriptor naming
+it pins its kernel to one exact problem shape and the tree would need another
+descriptor for the next one.
 
 **The rocKE half borrows the pointwise pack's native symbols, and that bounds what
 this tree proves.** A descriptor only resolves to something a compiled native pack
@@ -88,7 +109,7 @@ runtime dispatch; that needs a native pack nobody has written yet. Writing one i
 next step toward a true rocKE end-to-end.
 
 The descriptors here are authored against the schema the C++ loader enforces,
-modelled on `src/integration_tests/kernel_ingestor_engine/fixtures/packaged/`.
+modelled on `src/engines/kernel_ingestor_engine/test_descriptors/`.
 Do not model them on `descriptor-packaging/tests/fixtures/`: that is packer-only
 test data which never passes through `DescriptorLoader.hpp`, so a tree copied
 from it can pack cleanly and still fail to load.

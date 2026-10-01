@@ -7,7 +7,7 @@ These numbers are smoke-grade — they confirm the kernels build, verify, and re
 ## Static Unit Tests
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python:../library \
   python tests/test_rocke.py
 ```
 
@@ -18,7 +18,7 @@ Result on this checkout: **245 tests, OK** in ~1.7 s. Covers IR construction, LL
 `dsl_docs/development/verify_dsl_docs.py` imports every symbol referenced by this documentation tree, exercises every IR builder method, lowers every spec dataclass to LLVM / HIP / CK Tile, builds HSACO via libamd_comgr, and launches small kernels via `KernelLauncher`, `PipelineLauncher`, and `time_launches`. It exits non-zero if any check fails.
 
 ```bash
-PYTHONPATH=python python \
+PYTHONPATH=python:../library python \
   dsl_docs/development/verify_dsl_docs.py
 ```
 
@@ -68,8 +68,8 @@ Build + verify in one shot from the README-style entry:
 
 ```bash
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
-PYTHONPATH=python python \
-  -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+PYTHONPATH=python:../library python \
+  -m builders.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 PYTHONPATH=python python \
   -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
@@ -266,10 +266,10 @@ Single command to reproduce the full validation pass in this doc:
 cd <composablekernel-checkout>
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python python tests/test_rocke.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python:../library python tests/test_rocke.py
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python python python/test/test_rocke_examples.py
 
-PYTHONPATH=python python -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+PYTHONPATH=python:../library python -m builders.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 PYTHONPATH=python python -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 
 PYTHONPATH=python python python/rocke/examples/common/distribution_reduce_demo.py --M 32 --N 4096

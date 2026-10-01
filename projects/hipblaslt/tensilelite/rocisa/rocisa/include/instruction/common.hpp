@@ -5519,6 +5519,36 @@ namespace rocisa
         }
     };
 
+    // true16 16-bit conditional select (half-word via operand .l/.h suffix).
+    struct VCndMaskB16 : public CommonInstruction
+    {
+        VCndMaskB16(const std::shared_ptr<Container>& dst,
+                    const InstructionInput&           src0,
+                    const InstructionInput&           src1,
+                    const std::shared_ptr<Container>& src2    = std::make_shared<VCC>(),
+                    const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_B16,
+                                dst,
+                                {src0, src1, src2},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("v_cndmask_b16");
+        }
+
+        VCndMaskB16(const VCndMaskB16& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VCndMaskB16>(*this);
+        }
+    };
+
     struct VLShiftLeftB16 : public CommonInstruction
     {
         VLShiftLeftB16(const std::shared_ptr<Container>& dst,

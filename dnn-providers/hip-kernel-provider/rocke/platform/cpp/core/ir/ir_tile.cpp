@@ -69,6 +69,9 @@ static bool rocke_mma_is_int_acc(const char* op_id)
 
 static const char* rocke_mma_result_hint(const char* op_id)
 {
+    const char* family = rocke_arch_mma_op_id_family(op_id);
+    if(family && strcmp(family, "wmma_scaled") == 0)
+        return "mxacc";
     size_t i;
     if(op_id)
     {
@@ -346,8 +349,9 @@ rocke_value_t* rocke_b_smem_load_vN(rocke_ir_builder_t* b,
     const rocke_type_t* vt;
     rocke_attr_map_t attrs;
     const char* dn;
-    static const int allowed_8bit[] = {1, 2, 4, 8, 16};
-    static const int allowed_other[] = {1, 2, 4, 8};
+    static const int allowed_8bit[] = {1, 2, 4, 8, 12, 16};
+    static const int allowed_16bit[] = {1, 2, 4, 6, 8};
+    static const int allowed_32bit[] = {1, 2, 3, 4, 8};
     char hint[16];
     if(!rocke_i_live(b))
     {
@@ -372,8 +376,9 @@ rocke_value_t* rocke_b_smem_load_vN(rocke_ir_builder_t* b,
     {
         bool eight
             = (strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0 || strcmp(dn, "i8") == 0);
-        const int* allowed = eight ? allowed_8bit : allowed_other;
-        int acount = eight ? 5 : 4;
+        bool half = strcmp(dn, "f16") == 0 || strcmp(dn, "bf16") == 0;
+        const int* allowed = eight ? allowed_8bit : half ? allowed_16bit : allowed_32bit;
+        int acount = eight ? 6 : 5;
         if(!rocke_n_in(n, allowed, acount))
         {
             return (rocke_value_t*)rocke_i_set_err(
@@ -758,6 +763,58 @@ rocke_op_t* rocke_b_inline_asm_multi(rocke_ir_builder_t* b,
      * given result_types reproduces the emission for any N. */
     return rocke_b_inline_asm(
         b, asm_template, constraints, operands, num_operands, result_types, num_results, opts);
+}
+
+static void rocke_b_gfx1250_scalar_control(rocke_ir_builder_t* b, const char* mnemonic, int imm)
+{
+    rocke_inline_asm_opts_t opts;
+    rocke_op_t* op;
+    const char* text;
+    if(!rocke_i_live(b))
+        return;
+    if(imm < 0 || imm > 0xFFFF)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s imm must fit an unsigned i16 (0..65535), got %d",
+                        mnemonic,
+                        imm);
+        return;
+    }
+    text = rocke_arena_printf(&b->arena, "%s %d", mnemonic, imm);
+    if(!text)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_OOM, "%s inline-asm text allocation failed", mnemonic);
+        return;
+    }
+    memset(&opts, 0, sizeof(opts));
+    opts.sideeffect = true;
+    opts.sideeffect_set = true;
+    op = rocke_b_inline_asm(b, text, "", NULL, 0, NULL, 0, &opts);
+    if(!op)
+        return;
+    rocke_attr_set_str(b, &op->attrs, "required_arch", "gfx1250");
+    rocke_attr_set_str(b, &op->attrs, "required_llvm_flavor", "llvm23");
+}
+
+void rocke_b_s_delay_alu(rocke_ir_builder_t* b, int imm)
+{
+    rocke_b_gfx1250_scalar_control(b, "s_delay_alu", imm);
+}
+
+void rocke_b_s_wait_alu(rocke_ir_builder_t* b, int imm)
+{
+    rocke_b_gfx1250_scalar_control(b, "s_wait_alu", imm);
+}
+
+void rocke_b_s_clause(rocke_ir_builder_t* b, int imm)
+{
+    rocke_b_gfx1250_scalar_control(b, "s_clause", imm);
+}
+
+void rocke_b_s_wait_xcnt(rocke_ir_builder_t* b, int imm)
+{
+    rocke_b_gfx1250_scalar_control(b, "s_wait_xcnt", imm);
 }
 
 /* ---- tile.exec_* -- wavelet pipeline exec-mask split (MFMA path) ----

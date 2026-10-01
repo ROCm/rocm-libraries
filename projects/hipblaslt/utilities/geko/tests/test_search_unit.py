@@ -51,6 +51,8 @@ def test_configure_sets_skip_ratio_from_latency() -> None:
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
                 "us": 10.0,
             },
             {
@@ -65,6 +67,8 @@ def test_configure_sets_skip_ratio_from_latency() -> None:
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
                 "us": 30.0,
             },
         ]
@@ -107,6 +111,44 @@ def test_run_rejects_non_positive_chunk_size(tmp_path: Path) -> None:
         )
 
 
+def test_run_raises_for_unbuilt_custom_library_before_launch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    hip = tmp_path / "hip"
+    hip.mkdir()
+
+    cfg = {
+        "transA": "N",
+        "transB": "N",
+        "batch_count": 1,
+        "M": 32,
+        "N": 32,
+        "K": 32,
+        "a_type": "f16_r",
+        "b_type": "f16_r",
+        "c_type": "f16_r",
+        "d_type": "f16_r",
+        "compute_type": "f32_r",
+    }
+
+    custom_lib = tmp_path / "custom"
+    custom_lib.mkdir()
+
+    def _runner_should_not_be_called(*_args, **_kwargs):
+        raise AssertionError("Runner should not be launched for unbuilt custom_lib_dir")
+
+    monkeypatch.setattr(search, "Runner", _runner_should_not_be_called)
+
+    with pytest.raises(ValueError, match="is not built"):
+        search.run(
+            hip,
+            [cfg],
+            tmp_path / "out",
+            custom_lib_dir=custom_lib,
+            devices=[0],
+        )
+
+
 def test_run_empty_configs_returns_empty_df(tmp_path: Path) -> None:
     hip = tmp_path / "hip"
     hip.mkdir()
@@ -133,6 +175,8 @@ def test_run_uses_existing_data_when_all_configs_processed(tmp_path: Path) -> No
         "c_type": "f16_r",
         "d_type": "f16_r",
         "compute_type": "f32_r",
+        "scaleA": 1,
+        "scaleB": 1,
     }
 
     processed = pd.DataFrame(
@@ -149,6 +193,8 @@ def test_run_uses_existing_data_when_all_configs_processed(tmp_path: Path) -> No
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "c_f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
             }
         ]
     )
@@ -168,6 +214,8 @@ def test_run_uses_existing_data_when_all_configs_processed(tmp_path: Path) -> No
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "c_f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
                 "us": 1.0,
             }
         ]
@@ -195,6 +243,8 @@ def test_run_persists_winners_with_stubbed_runner(monkeypatch: pytest.MonkeyPatc
         "c_type": "f16_r",
         "d_type": "f16_r",
         "compute_type": "f32_r",
+        "scaleA": 1,
+        "scaleB": 1,
     }
 
     monkeypatch.setattr(search.bench.log, "dump", lambda data, p: yaml.safe_dump(data, Path(p).open("w"), sort_keys=False))
@@ -219,6 +269,8 @@ def test_run_persists_winners_with_stubbed_runner(monkeypatch: pytest.MonkeyPatc
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "c_f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
                 "us": 2.0,
             }
         ]

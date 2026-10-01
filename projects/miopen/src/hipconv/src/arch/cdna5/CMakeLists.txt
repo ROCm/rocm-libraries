@@ -1,6 +1,6 @@
 include(GpuArch)
 
-hipconv_add_arch_lib(cdna5 TARGETS gfx1250)
+hipconv_add_arch_lib(cdna5 TARGETS gfx1250 gfx1250-strict)
 hipconv_autoshard(ARCH         cdna5
                   NAMESPACE    direct
                   KERNEL_CLASS Direct_F16_ConvKernel
@@ -19,4 +19,10 @@ hipconv_autoshard(ARCH         cdna5
                   KERNEL_CLASS Grouped_Multi_G_WgradConvKernel
                   CONFIG_TABLE grouped/grouped_multi_g_wgrad/config_table.hpp
                   KERNEL       grouped/grouped_multi_g_wgrad/kernel.hpp
+                  NUM_SHARDS   ${HIPCONV_NUM_SHARDS})
+hipconv_autoshard(ARCH         cdna5
+                  NAMESPACE    depthwise_1d_toeplitz
+                  KERNEL_CLASS Depthwise_1D_Toeplitz_ConvKernel
+                  CONFIG_TABLE depthwise/depthwise_1d_toeplitz/config_table.h
+                  KERNEL       depthwise/depthwise_1d_toeplitz/kernel.h
                   NUM_SHARDS   ${HIPCONV_NUM_SHARDS})

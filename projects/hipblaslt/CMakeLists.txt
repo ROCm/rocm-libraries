@@ -31,7 +31,7 @@ include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
 
-set(HIPBLASLT_PROJECT_VERSION "1.4.1" CACHE STRING "Semantic version string.")
+set(HIPBLASLT_PROJECT_VERSION "1.5.0" CACHE STRING "Semantic version string.")
 
 set(PROJECT_VERSION "${HIPBLASLT_PROJECT_VERSION}")
 string(REPLACE "." ";" VERSION_LIST ${PROJECT_VERSION})
@@ -66,6 +66,15 @@ option(HIPBLASLT_ENABLE_FETCH "Fetch dependencies using fetch content" OFF)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
 option(HIPBLASLT_ENABLE_THEROCK "Build hipBLASLt for TheRock." OFF)
 option(HIPBLASLT_VALIDATE_INSTALL "Run post-install per-base layout / .dat integrity checks on the install tree." OFF)
+option(HIPBLASLT_ENABLE_GEMM_A2A_FUSION "Build experimental fused GEMM + all-to-all support." OFF)
+
+if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT HIPBLASLT_ENABLE_HOST)
+    message(FATAL_ERROR "HIPBLASLT_ENABLE_GEMM_A2A_FUSION requires HIPBLASLT_ENABLE_HOST=ON")
+endif()
+if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT HIPBLASLT_ENABLE_DEVICE)
+    message(FATAL_ERROR "HIPBLASLT_ENABLE_GEMM_A2A_FUSION requires HIPBLASLT_ENABLE_DEVICE=ON")
+endif()
+
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(TENSILELITE_BUILD_TESTING "Build client when building tests" OFF)
 option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_TESTING})
@@ -104,6 +113,12 @@ set(CMAKE_SKIP_BUILD_RPATH FALSE CACHE BOOL "Skip build RPATH")
 set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE CACHE BOOL "Build with install RPATH")
 set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib:$ORIGIN/../llvm/lib" CACHE STRING "Install RPATH")
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE CACHE BOOL "Use link path for RPATH")
+
+# Holds the vendored libnuma/libdrm pulled in as direct DT_NEEDED entries by
+# the static libhsakmt that SDMA links.
+if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
+    list(APPEND CMAKE_INSTALL_RPATH "$ORIGIN/../lib/rocm_sysdeps/lib")
+endif()
 
 mark_as_advanced(CMAKE_SKIP_BUILD_RPATH)
 mark_as_advanced(CMAKE_BUILD_WITH_INSTALL_RPATH)
@@ -304,6 +319,12 @@ target_link_libraries(hipblaslt-headers INTERFACE hip::host)
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblaslt-version.h.in"
     "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-version.h"
+)
+
+set(HIPBLASLT_HAS_GEMM_A2A_FUSION ${HIPBLASLT_ENABLE_GEMM_A2A_FUSION})
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblaslt-opt-in-features.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-opt-in-features.h"
 )
 
 # Configure the Windows version resource (PE VERSIONINFO) embedded into
@@ -655,6 +676,18 @@ if(HIPBLASLT_ENABLE_CLIENT)
         COMPONENT benchmarks
     )
 
+    if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
+        rocm_install(
+            TARGETS hipblaslt-bench-a2a
+            COMPONENT benchmarks
+        )
+        rocm_install(
+            PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/a2a/hipblaslt-bench-a2a-launch"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}"
+            COMPONENT benchmarks
+        )
+    endif()
+
     # Cotenant CU-contention helper: the kernel and its launcher install side by
     # side in bin/ so hipblaslt-cotenant finds the precompiled kernel next to it.
     # POSIX-only (see clients/CMakeLists.txt); not built/installed on Windows.
@@ -733,11 +766,12 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         COMPONENT tests
     )
 
-    # Imported directly by unit tests (test_amax_true16_activation.py), so it must
-    # ship at the tensilelite root, not under scripts/.
+    # Imported directly by unit tests, so these generators must ship at the
+    # tensilelite root, not under scripts/.
     install(
         FILES
             "${_tensilelite_src}/AMaxGenerator.py"
+            "${_tensilelite_src}/LayerNormGenerator.py"
         DESTINATION "${_tensilelite_install_dest}"
         COMPONENT tests
     )
@@ -806,6 +840,13 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         DESTINATION "${_tensilelite_install_dest}"
         COMPONENT tests
         OPTIONAL
+    )
+
+    # Python dependencies for running tests from the installed artifact.
+    install(
+        FILES "${_tensilelite_src}/requirements-test.txt"
+        DESTINATION "${_tensilelite_install_dest}"
+        COMPONENT tests
     )
 
     if(TENSILELITE_ENABLE_CLIENT)
@@ -888,11 +929,27 @@ if(ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
 endif()
 
 if(HIPBLASLT_ENABLE_COVERAGE)
-    target_compile_options(hipblaslt PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(hipblaslt PUBLIC -fprofile-instr-generate)
+    # HIP C++ compilation has separate host and device passes; ordinary C is host-only.
+    # Keep each host selector paired with its flag so CMake does not de-duplicate it.
+    target_compile_options(hipblaslt PRIVATE
+        -g
+        -O0
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fprofile-instr-generate>"
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fcoverage-mapping>"
+        "$<$<COMPILE_LANGUAGE:C>:-fprofile-instr-generate>"
+        "$<$<COMPILE_LANGUAGE:C>:-fcoverage-mapping>"
+    )
+    target_link_options(hipblaslt PUBLIC "SHELL:-Xarch_host -fprofile-instr-generate")
 
-    target_compile_options(hipblaslt-clients-common PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(hipblaslt-clients-common PUBLIC -fprofile-instr-generate)
+    target_compile_options(hipblaslt-clients-common PRIVATE
+        -g
+        -O0
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fprofile-instr-generate>"
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fcoverage-mapping>"
+        "$<$<COMPILE_LANGUAGE:C>:-fprofile-instr-generate>"
+        "$<$<COMPILE_LANGUAGE:C>:-fcoverage-mapping>"
+    )
+    target_link_options(hipblaslt-clients-common PUBLIC "SHELL:-Xarch_host -fprofile-instr-generate")
     target_compile_definitions(hipblaslt-clients-common PRIVATE CODE_COVERAGE)
 
     set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")

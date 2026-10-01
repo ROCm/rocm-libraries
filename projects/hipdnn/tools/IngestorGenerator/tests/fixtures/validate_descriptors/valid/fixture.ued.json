@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "id": "13ab344f-4818-4772-bb8e-8e1441fec82c",
+  "name": "hipkernel:ValidateFixture",
+  "graph_match": { "native": "hipkernel.fixture.graph_match" },
+  "heuristic": "70437ac9-d791-4d71-a51c-49294cf45516",
+  "metadata": "46d64d06-18eb-483d-9bb4-94472d32b78d",
+  "knobs": [
+    "block_size"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}
