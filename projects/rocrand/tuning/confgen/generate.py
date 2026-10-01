@@ -38,6 +38,7 @@ def main():
         "--target-arch",
         "-t",
         action="append",
+        required=True,
         help="The target arch <gfx> that these configs are for.",
     )
 
@@ -91,8 +92,10 @@ def main():
             alg: str = data["algo_name"]
             if alg not in algs:
                 algs[alg] = {}
-
+            arch = data["arch_name"]
             for target in gfx_target:
+                if target != arch:
+                    continue
                 # Ensure target entry exists
                 if target not in algs[alg]:
                     algs[alg][target] = {}
