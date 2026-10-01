@@ -1,0 +1,14 @@
+{% extends "common/base.cpp.jinja2" %}
+
+{% block backend_include %}  
+    #include "rng/threefry.hpp"
+{% endblock %}
+
+{% block generator_define %}
+    template<class ConfigProvider>
+    using generator_template
+        = rocrand_impl::host::threefry_generator_template<
+    rocrand_impl::system::device_system,
+    rocrand_impl::host::threefry_device_engine<rocrand_device::threefry2x32_20_engine>,
+    ConfigProvider>;
+{% endblock %}
