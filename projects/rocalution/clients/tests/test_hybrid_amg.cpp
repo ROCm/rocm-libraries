@@ -33,8 +33,8 @@ typedef std::pair<int, std::string> hybrid_amg_problem;
 
 typedef std::tuple<hybrid_amg_problem, int, std::string, int, int, int> hybrid_amg_tuple;
 
-// Problem sizes are chosen such that the unsmoothed aggregation AMG creates at
-// least 3 levels without a level limit
+// Problem sizes are chosen such that the unsmoothed aggregation AMG creates more
+// levels than the largest max_levels without a level limit
 std::vector<hybrid_amg_problem> hybrid_amg_problems
     = {hybrid_amg_problem(134, "Laplacian2D"), hybrid_amg_problem(40, "Laplacian3D")};
 std::vector<int>         hybrid_amg_max_levels       = {2, 3};

@@ -27,7 +27,6 @@
 
 #include "utility.hpp"
 
-#include <algorithm>
 #include <rocalution/rocalution.hpp>
 
 using namespace rocalution;
@@ -189,8 +188,11 @@ bool testing_hybrid_amg(Arguments argus)
 
     bool success = true;
 
-    // The level limit is respected and does not affect the coarsening otherwise
-    success &= (p.GetNumLevels() == std::min(ref_levels, max_levels));
+    // The problem must coarsen beyond max_levels, otherwise the level limit is not exercised
+    success &= (ref_levels > max_levels);
+
+    // The level limit is respected
+    success &= (p.GetNumLevels() == max_levels);
 
     // The Ruge-Stueben AMG has been built on the coarsest unsmoothed aggregation level
     success &= (rs.GetNumLevels() > 1);
