@@ -1520,7 +1520,7 @@ int runGenerator(const std::vector<std::string>& args)
         if(options.count > 0 && total < requested)
         {
             std::cerr << "Corpus is the engine's whole coverage: " << total << " of " << requested
-                      << " requested. " << resolvedEngine
+                      << " requested. " << coverageEngine
                       << " serves only its pack's shapes (engines.json).\n";
         }
         return 0;
