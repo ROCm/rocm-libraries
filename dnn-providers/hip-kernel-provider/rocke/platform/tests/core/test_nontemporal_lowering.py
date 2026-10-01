@@ -236,9 +236,14 @@ _WIDTHS = {
     "bf16x2": (BF16, 2, None),  # 4 B   global_load_dword
     "bf16x4": (BF16, 4, None),  # 8 B   global_load_dwordx2
     "bf16x8": (BF16, 8, None),  # 16 B  global_load_dwordx4
-    "bf16x16": (BF16, 16, None),  # 32 B  split across several instructions
+    "bf16x16": (BF16, 16, None),  # 32 B  split into two global_load_dwordx4
     "f32x3": (F32, 3, None),  # 12 B  global_load_dwordx3
-    "bf16x8_align4": (BF16, 8, 4),  # 16 B, 4-byte aligned: may split
+    "bf16x8_align4": (BF16, 8, 4),  # 16 B, 4-byte aligned (explicit align path)
+}
+
+# Widths that must lower to more than one load, so the split case cannot pass
+# vacuously if the backend narrows the access.
+_SPLIT = {"bf16x16"}
 }
 
 
@@ -270,12 +275,14 @@ def _width_kernel(elem, n: int, align):
 @pytest.mark.parametrize("width", sorted(_WIDTHS))
 def test_nt_bit_survives_every_width_and_split(arch, width):
     """Every instruction a flagged access lowers to carries ``nt`` -- including
-    when the backend splits one access into several (32 B, under-aligned)."""
+    when the backend splits one access into several (the 32 B case)."""
     elem, n, align = _WIDTHS[width]
     lines = _global_mem_lines(_width_kernel(elem, n, align), arch)
     loads = [ln for ln in lines if ln[0].startswith("global_load")]
     stores = [ln for ln in lines if ln[0].startswith("global_store")]
     assert loads, lines
+    if width in _SPLIT:
+        assert len(loads) > 1, loads
     assert all("nt" in ln[1:] for ln in loads), loads
     if _stores_vector(n):
         assert stores and all("nt" in ln[1:] for ln in stores), stores
