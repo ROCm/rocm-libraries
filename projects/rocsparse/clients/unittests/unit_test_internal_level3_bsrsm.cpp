@@ -48,6 +48,13 @@
 // the grid-stride loops the panels/elements past the first sweep keep their
 // untouched input.
 //
+// The solve kernels come in two instantiations (AISPARSE-670 follow-up): the
+// narrow one, one block per pair with 32 bit arithmetic, which the host launches
+// when bsrsm_solve_needs_wide is false, and the WIDE grid-stride one. The full
+// grid runs both; the undersized grids run WIDE; the solve_public_* tests shrink
+// maxGridSize[0] and go through rocsparse_sbsrsm_solve, so they also check that
+// the host selects WIDE whenever the grid is clamped.
+//
 // The solve problem is an 8 x 8 block-bidiagonal matrix of 2 x 2 blocks (16 scalar
 // rows) with 100 right hand sides, so the whole footprint is a few tens of
 // kilobytes and this runs on any GPU (including the 15 GB gfx1201). No memory
@@ -59,12 +66,19 @@
 
 #include "unit_test_utils.hpp"
 
+// ScopedMaxGridSizeX: shrinks handle->properties.maxGridSize[0], the limit
+// get_grid_size_x clamps grid.x against.
+#include "unit_test_grid_clamp.hpp"
+
 #include "bsrsm_device.h"
 #include "bsrsm_device_large.h"
+
+#include "rocsparse.h"
 
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <limits>
+#include <memory>
 #include <vector>
 
 namespace
@@ -171,6 +185,7 @@ namespace
     // is the caller's choice rather than the value bsrsm_solve_grid_size would
     // pick, so the grid-stride loop can be driven with far fewer blocks than the
     // flattened space needs.
+    template <bool WIDE>
     void
         solve_on_grid(bool lower, int64_t grid_x, std::vector<test_T>& result, rocsparse_int& pivot)
     {
@@ -212,7 +227,8 @@ namespace
         if(lower)
         {
             hipLaunchKernelGGL(
-                (rocsparse::bsrsm_lower_large_kernel<bsrsm_blocksize, bsrsm_ncols, false, test_T>),
+                (rocsparse::
+                     bsrsm_lower_large_kernel<bsrsm_blocksize, bsrsm_ncols, false, WIDE, test_T>),
                 dim3(static_cast<uint32_t>(grid_x)),
                 dim3(bsrsm_blocksize),
                 0,
@@ -235,7 +251,8 @@ namespace
         else
         {
             hipLaunchKernelGGL(
-                (rocsparse::bsrsm_upper_large_kernel<bsrsm_blocksize, bsrsm_ncols, false, test_T>),
+                (rocsparse::
+                     bsrsm_upper_large_kernel<bsrsm_blocksize, bsrsm_ncols, false, WIDE, test_T>),
                 dim3(static_cast<uint32_t>(grid_x)),
                 dim3(bsrsm_blocksize),
                 0,
@@ -351,17 +368,71 @@ TEST(internal_level3_bsrsm, solve_grid_size_is_always_a_multiple_of_mb)
     }
 }
 
+// The host picks the narrow instantiation only when the grid covers every
+// (RHS panel, block row) pair and every block id, done_array offset, column
+// index and X offset fits in rocsparse_int.
+TEST(internal_level3_bsrsm, solve_needs_wide_only_past_32_bit_or_clamped)
+{
+    constexpr int64_t int_max = std::numeric_limits<rocsparse_int>::max();
+
+    // Unclamped, small: narrow.
+    EXPECT_FALSE(rocsparse::bsrsm_solve_needs_wide(8, 2, 100, 16, 100, 56));
+    EXPECT_FALSE(rocsparse::bsrsm_solve_needs_wide(262144, 32, 1, 16, 1, 262144));
+
+    // Clamped grid: wide, even though every offset is small.
+    EXPECT_TRUE(rocsparse::bsrsm_solve_needs_wide(8, 2, 100, 16, 100, 55));
+    EXPECT_TRUE(rocsparse::bsrsm_solve_needs_wide(8, 2, 100, 16, 100, 8));
+
+    // X extent mb * block_dim * ldx at and just past rocsparse_int.
+    EXPECT_FALSE(rocsparse::bsrsm_solve_needs_wide(1, 1, 16, 16, int_max, 1));
+    EXPECT_TRUE(rocsparse::bsrsm_solve_needs_wide(1, 1, 16, 16, int_max + 1, 1));
+    EXPECT_TRUE(rocsparse::bsrsm_solve_needs_wide(65536, 32, 1024, 16, 1024, 65536 * 64));
+
+    // A large ldx with a small nrhs (trans_X == transpose, caller's ldx).
+    EXPECT_TRUE(rocsparse::bsrsm_solve_needs_wide(262144, 8, 1, 16, 1024, 262144));
+
+    // Padded column count past rocsparse_int.
+    EXPECT_TRUE(rocsparse::bsrsm_solve_needs_wide(1, 1, int_max, 16, int_max, 134217728));
+
+    // The AISPARSE-670 configuration: the pair count does not fit, and the grid
+    // is clamped anyway.
+    EXPECT_TRUE(rocsparse::bsrsm_solve_needs_wide(
+        50000,
+        1,
+        700000,
+        16,
+        700000,
+        rocsparse::bsrsm_solve_grid_size(50000, 700000, 16, 2147483647)));
+    EXPECT_TRUE(rocsparse::bsrsm_solve_needs_wide(
+        50000, 1, 700000, 16, 700000, rocsparse::bsrsm_num_blocks(50000, 700000, 16)));
+
+    // Degenerate sizes never need it.
+    EXPECT_FALSE(rocsparse::bsrsm_solve_needs_wide(0, 2, 100, 16, 100, 0));
+    EXPECT_FALSE(rocsparse::bsrsm_solve_needs_wide(8, 2, 0, 16, 1, 0));
+}
+
 // ---------------------------------------------------------------------------
 // Defect 1, end-to-end: the flattened solve grid-stride loop on the GPU.
 // ---------------------------------------------------------------------------
 
-// Control: the grid covers the whole flattened space, so the stride loop runs
-// exactly one iteration. This is the pre-existing behaviour and must not change.
+// Control: the grid covers the whole flattened space. The narrow instantiation
+// (one block per pair, 32 bit arithmetic) is what the host launches whenever the
+// grid is not clamped; the WIDE one runs its stride loop exactly once here. Both
+// must give the pre-existing result.
 TEST(internal_level3_bsrsm, solve_lower_full_grid)
 {
     std::vector<test_T> got;
     rocsparse_int       pivot = 0;
-    ASSERT_NO_FATAL_FAILURE(solve_on_grid(true, bsrsm_blocks, got, pivot));
+    ASSERT_NO_FATAL_FAILURE(solve_on_grid<false>(true, bsrsm_blocks, got, pivot));
+    EXPECT_EQ(pivot, std::numeric_limits<rocsparse_int>::max());
+    expect_exact_solution(true, got, bsrsm_blocks);
+}
+
+TEST(internal_level3_bsrsm, solve_lower_full_grid_wide)
+{
+    std::vector<test_T> got;
+    rocsparse_int       pivot = 0;
+    ASSERT_NO_FATAL_FAILURE(solve_on_grid<true>(true, bsrsm_blocks, got, pivot));
     EXPECT_EQ(pivot, std::numeric_limits<rocsparse_int>::max());
     expect_exact_solution(true, got, bsrsm_blocks);
 }
@@ -374,7 +445,7 @@ TEST(internal_level3_bsrsm, solve_lower_undersized_grid_two_panels)
 
     std::vector<test_T> got;
     rocsparse_int       pivot = 0;
-    ASSERT_NO_FATAL_FAILURE(solve_on_grid(true, grid_x, got, pivot));
+    ASSERT_NO_FATAL_FAILURE(solve_on_grid<true>(true, grid_x, got, pivot));
     EXPECT_EQ(pivot, std::numeric_limits<rocsparse_int>::max());
     expect_exact_solution(true, got, grid_x);
 }
@@ -388,7 +459,7 @@ TEST(internal_level3_bsrsm, solve_lower_undersized_grid_single_panel)
 
     std::vector<test_T> got;
     rocsparse_int       pivot = 0;
-    ASSERT_NO_FATAL_FAILURE(solve_on_grid(true, grid_x, got, pivot));
+    ASSERT_NO_FATAL_FAILURE(solve_on_grid<true>(true, grid_x, got, pivot));
     EXPECT_EQ(pivot, std::numeric_limits<rocsparse_int>::max());
     expect_exact_solution(true, got, grid_x);
 }
@@ -409,7 +480,7 @@ TEST(internal_level3_bsrsm, solve_lower_ragged_grid_is_not_a_multiple_of_mb)
 
     std::vector<test_T> got;
     rocsparse_int       pivot = 0;
-    ASSERT_NO_FATAL_FAILURE(solve_on_grid(true, grid_x, got, pivot));
+    ASSERT_NO_FATAL_FAILURE(solve_on_grid<true>(true, grid_x, got, pivot));
     EXPECT_EQ(pivot, std::numeric_limits<rocsparse_int>::max());
     expect_exact_solution(true, got, grid_x);
 }
@@ -420,7 +491,16 @@ TEST(internal_level3_bsrsm, solve_upper_full_grid)
 {
     std::vector<test_T> got;
     rocsparse_int       pivot = 0;
-    ASSERT_NO_FATAL_FAILURE(solve_on_grid(false, bsrsm_blocks, got, pivot));
+    ASSERT_NO_FATAL_FAILURE(solve_on_grid<false>(false, bsrsm_blocks, got, pivot));
+    EXPECT_EQ(pivot, std::numeric_limits<rocsparse_int>::max());
+    expect_exact_solution(false, got, bsrsm_blocks);
+}
+
+TEST(internal_level3_bsrsm, solve_upper_full_grid_wide)
+{
+    std::vector<test_T> got;
+    rocsparse_int       pivot = 0;
+    ASSERT_NO_FATAL_FAILURE(solve_on_grid<true>(false, bsrsm_blocks, got, pivot));
     EXPECT_EQ(pivot, std::numeric_limits<rocsparse_int>::max());
     expect_exact_solution(false, got, bsrsm_blocks);
 }
@@ -432,7 +512,7 @@ TEST(internal_level3_bsrsm, solve_upper_undersized_grid_single_panel)
 
     std::vector<test_T> got;
     rocsparse_int       pivot = 0;
-    ASSERT_NO_FATAL_FAILURE(solve_on_grid(false, grid_x, got, pivot));
+    ASSERT_NO_FATAL_FAILURE(solve_on_grid<true>(false, grid_x, got, pivot));
     EXPECT_EQ(pivot, std::numeric_limits<rocsparse_int>::max());
     expect_exact_solution(false, got, grid_x);
 }
@@ -444,9 +524,219 @@ TEST(internal_level3_bsrsm, solve_upper_undersized_grid_two_panels)
 
     std::vector<test_T> got;
     rocsparse_int       pivot = 0;
-    ASSERT_NO_FATAL_FAILURE(solve_on_grid(false, grid_x, got, pivot));
+    ASSERT_NO_FATAL_FAILURE(solve_on_grid<true>(false, grid_x, got, pivot));
     EXPECT_EQ(pivot, std::numeric_limits<rocsparse_int>::max());
     expect_exact_solution(false, got, grid_x);
+}
+
+// ---------------------------------------------------------------------------
+// Defect 1 through the public API, with a forced clamp.
+// ---------------------------------------------------------------------------
+//
+// The direct launches above pick the instantiation themselves. These run
+// rocsparse_sbsrsm_solve with handle->properties.maxGridSize[0] shrunk, so the
+// host's choice between the narrow kernels (one block per pair, 32 bit) and the
+// WIDE ones is under test as well: a clamped grid launched on the narrow kernels
+// leaves every RHS panel past the first sweep at alpha * B.
+//
+// Limits: 0 keeps the device limit (narrow path), 1 is below mb (the grid is
+// raised to mb, one panel per sweep), 8 is exactly mb, 16 is two panels and 19 is
+// ragged, rounded down to 16.
+
+namespace
+{
+    constexpr int solve_clamp_limits[] = {0, 1, 8, 16, 19};
+
+    struct bsrsm_public_objects
+    {
+        rocsparse_handle    handle = nullptr;
+        rocsparse_mat_descr descr  = nullptr;
+        rocsparse_mat_info  info   = nullptr;
+
+        ~bsrsm_public_objects()
+        {
+            if(info != nullptr)
+            {
+                rocsparse_destroy_mat_info(info);
+            }
+            if(descr != nullptr)
+            {
+                rocsparse_destroy_mat_descr(descr);
+            }
+            if(handle != nullptr)
+            {
+                rocsparse_destroy_handle(handle);
+            }
+        }
+    };
+
+    // Solve through the public API and return X row major, as solve_on_grid does.
+    // B(r, c) = c + 1 in the layout trans_X selects, and X starts poisoned.
+    void solve_public(bool                 lower,
+                      rocsparse_operation  trans_X,
+                      int                  max_grid_x,
+                      std::vector<test_T>& result)
+    {
+        std::vector<rocsparse_int> row_ptr;
+        std::vector<rocsparse_int> col_ind;
+        std::vector<test_T>        val;
+        std::vector<rocsparse_int> map;
+        build_matrix(lower, row_ptr, col_ind, val, map);
+
+        const rocsparse_int nnzb  = static_cast<rocsparse_int>(col_ind.size());
+        const bool          trans = (trans_X == rocsparse_operation_transpose);
+        const rocsparse_int ld    = trans ? bsrsm_nrhs : bsrsm_rows;
+
+        auto at = [&](rocsparse_int r, rocsparse_int c) {
+            return trans ? static_cast<size_t>(r) * ld + c : static_cast<size_t>(c) * ld + r;
+        };
+
+        std::vector<test_T> B(static_cast<size_t>(bsrsm_rows) * bsrsm_nrhs);
+        for(rocsparse_int r = 0; r < bsrsm_rows; ++r)
+        {
+            for(rocsparse_int c = 0; c < bsrsm_nrhs; ++c)
+            {
+                B[at(r, c)] = static_cast<test_T>(c + 1);
+            }
+        }
+
+        rocsparse_ut::device_vector<rocsparse_int> d_row_ptr(row_ptr);
+        rocsparse_ut::device_vector<rocsparse_int> d_col_ind(col_ind);
+        rocsparse_ut::device_vector<test_T>        d_val(val);
+        rocsparse_ut::device_vector<test_T>        d_B(B);
+        rocsparse_ut::device_vector<test_T>        d_X(
+            std::vector<test_T>(B.size(), static_cast<test_T>(-7)));
+
+        ASSERT_NE(d_row_ptr.ptr, nullptr);
+        ASSERT_NE(d_col_ind.ptr, nullptr);
+        ASSERT_NE(d_val.ptr, nullptr);
+        ASSERT_NE(d_B.ptr, nullptr);
+        ASSERT_NE(d_X.ptr, nullptr);
+
+        bsrsm_public_objects o;
+        ASSERT_EQ(rocsparse_create_handle(&o.handle), rocsparse_status_success);
+        ASSERT_EQ(rocsparse_create_mat_descr(&o.descr), rocsparse_status_success);
+        ASSERT_EQ(rocsparse_set_mat_fill_mode(
+                      o.descr, lower ? rocsparse_fill_mode_lower : rocsparse_fill_mode_upper),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_create_mat_info(&o.info), rocsparse_status_success);
+
+        size_t buffer_size = 0;
+        ASSERT_EQ(rocsparse_sbsrsm_buffer_size(o.handle,
+                                               rocsparse_direction_row,
+                                               rocsparse_operation_none,
+                                               trans_X,
+                                               bsrsm_mb,
+                                               bsrsm_nrhs,
+                                               nnzb,
+                                               o.descr,
+                                               d_val.ptr,
+                                               d_row_ptr.ptr,
+                                               d_col_ind.ptr,
+                                               bsrsm_block_dim,
+                                               o.info,
+                                               &buffer_size),
+                  rocsparse_status_success);
+
+        rocsparse_ut::device_vector<char> d_buffer(std::vector<char>(buffer_size + 1, 0));
+        ASSERT_NE(d_buffer.ptr, nullptr);
+
+        ASSERT_EQ(rocsparse_sbsrsm_analysis(o.handle,
+                                            rocsparse_direction_row,
+                                            rocsparse_operation_none,
+                                            trans_X,
+                                            bsrsm_mb,
+                                            bsrsm_nrhs,
+                                            nnzb,
+                                            o.descr,
+                                            d_val.ptr,
+                                            d_row_ptr.ptr,
+                                            d_col_ind.ptr,
+                                            bsrsm_block_dim,
+                                            o.info,
+                                            rocsparse_analysis_policy_force,
+                                            rocsparse_solve_policy_auto,
+                                            d_buffer.ptr),
+                  rocsparse_status_success);
+
+        const test_T alpha = static_cast<test_T>(1);
+        {
+            std::unique_ptr<rocsparse_ut::ScopedMaxGridSizeX> clamp;
+            if(max_grid_x > 0)
+            {
+                clamp = std::make_unique<rocsparse_ut::ScopedMaxGridSizeX>(o.handle, max_grid_x);
+            }
+
+            ASSERT_EQ(rocsparse_sbsrsm_solve(o.handle,
+                                             rocsparse_direction_row,
+                                             rocsparse_operation_none,
+                                             trans_X,
+                                             bsrsm_mb,
+                                             bsrsm_nrhs,
+                                             nnzb,
+                                             &alpha,
+                                             o.descr,
+                                             d_val.ptr,
+                                             d_row_ptr.ptr,
+                                             d_col_ind.ptr,
+                                             bsrsm_block_dim,
+                                             o.info,
+                                             d_B.ptr,
+                                             ld,
+                                             d_X.ptr,
+                                             ld,
+                                             rocsparse_solve_policy_auto,
+                                             d_buffer.ptr),
+                      rocsparse_status_success);
+        }
+
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        rocsparse_int pivot = 0;
+        EXPECT_EQ(rocsparse_bsrsm_zero_pivot(o.handle, o.info, &pivot), rocsparse_status_success);
+
+        const std::vector<test_T> X = rocsparse_ut::to_host(d_X);
+        result.assign(X.size(), static_cast<test_T>(0));
+        for(rocsparse_int r = 0; r < bsrsm_rows; ++r)
+        {
+            for(rocsparse_int c = 0; c < bsrsm_nrhs; ++c)
+            {
+                result[static_cast<size_t>(r) * bsrsm_nrhs + c] = X[at(r, c)];
+            }
+        }
+    }
+
+    void solve_public_all_limits(bool lower, rocsparse_operation trans_X)
+    {
+        for(int limit : solve_clamp_limits)
+        {
+            SCOPED_TRACE(::testing::Message() << "maxGridSize[0]=" << limit);
+
+            std::vector<test_T> got;
+            ASSERT_NO_FATAL_FAILURE(solve_public(lower, trans_X, limit, got));
+            ASSERT_NO_FATAL_FAILURE(expect_exact_solution(lower, got, limit));
+        }
+    }
+}
+
+TEST(internal_level3_bsrsm, solve_public_lower_clamped)
+{
+    solve_public_all_limits(true, rocsparse_operation_none);
+}
+
+TEST(internal_level3_bsrsm, solve_public_upper_clamped)
+{
+    solve_public_all_limits(false, rocsparse_operation_none);
+}
+
+TEST(internal_level3_bsrsm, solve_public_lower_clamped_trans_X)
+{
+    solve_public_all_limits(true, rocsparse_operation_transpose);
+}
+
+TEST(internal_level3_bsrsm, solve_public_upper_clamped_trans_X)
+{
+    solve_public_all_limits(false, rocsparse_operation_transpose);
 }
 
 // ---------------------------------------------------------------------------

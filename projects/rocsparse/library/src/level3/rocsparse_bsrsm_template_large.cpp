@@ -109,17 +109,13 @@ namespace rocsparse
 // rather than a grid too small to hold one RHS panel, which the kernels cannot
 // stride. Saturate the narrowing so that stays true if mb also exceeds
 // UINT32_MAX, rather than wrapping into a legal looking grid.
-#define LAUNCH_LARGE_KERNEL(K_, M_, S_)                                                        \
-    const int64_t bsrsm_grid_x = rocsparse::bsrsm_solve_grid_size(                             \
-        mb,                                                                                    \
-        nrhs,                                                                                  \
-        NCOL,                                                                                  \
-        rocsparse::get_grid_size_x(                                                            \
-            handle, rocsparse::bsrsm_num_blocks(mb, nrhs, NCOL), NCOL * M_));                  \
-    dim3 bsrsm_blocks(static_cast<uint32_t>(rocsparse::min(                                    \
-        bsrsm_grid_x, static_cast<int64_t>(std::numeric_limits<uint32_t>::max()))));           \
-    dim3 bsrsm_threads(NCOL* M_);                                                              \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((K_<NCOL * M_, NCOL, S_>),                              \
+//
+// The kernels take the WIDE (grid-stride, 64 bit offsets) instantiation only
+// when bsrsm_solve_needs_wide says the narrow one, one block per pair with 32
+// bit arithmetic, would be wrong: a clamped grid, or a pair count, column count
+// or X extent past rocsparse_int.
+#define LAUNCH_LARGE_KERNEL_W(K_, M_, S_, W_)                                                  \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((K_<NCOL * M_, NCOL, S_, W_>),                          \
                                        bsrsm_blocks,                                           \
                                        bsrsm_threads,                                          \
                                        0,                                                      \
@@ -131,13 +127,32 @@ namespace rocsparse
                                        local_bsr_val,                                          \
                                        block_dim,                                              \
                                        Xt,                                                     \
-                                       ldimX,                                                  \
+                                       static_cast<rocsparse::bsrsm_offset_t<W_>>(ldimX),      \
                                        done_array,                                             \
                                        (const rocsparse_int*)trm_info->get_row_map(),          \
                                        (rocsparse_int*)info->get_bsrsm_info()->get_position(), \
                                        descr->base,                                            \
                                        descr->diag_type,                                       \
-                                       dir);
+                                       dir)
+
+#define LAUNCH_LARGE_KERNEL(K_, M_, S_)                                                   \
+    const int64_t bsrsm_grid_x = rocsparse::bsrsm_solve_grid_size(                        \
+        mb,                                                                               \
+        nrhs,                                                                             \
+        NCOL,                                                                             \
+        rocsparse::get_grid_size_x(                                                       \
+            handle, rocsparse::bsrsm_num_blocks(mb, nrhs, NCOL), NCOL * M_));             \
+    dim3 bsrsm_blocks(static_cast<uint32_t>(rocsparse::min(                               \
+        bsrsm_grid_x, static_cast<int64_t>(std::numeric_limits<uint32_t>::max()))));      \
+    dim3 bsrsm_threads(NCOL* M_);                                                         \
+    if(rocsparse::bsrsm_solve_needs_wide(mb, block_dim, nrhs, NCOL, ldimX, bsrsm_grid_x)) \
+    {                                                                                     \
+        LAUNCH_LARGE_KERNEL_W(K_, M_, S_, true);                                          \
+    }                                                                                     \
+    else                                                                                  \
+    {                                                                                     \
+        LAUNCH_LARGE_KERNEL_W(K_, M_, S_, false);                                         \
+    }
 
         hipStream_t stream = handle->stream;
 
@@ -328,6 +343,7 @@ namespace rocsparse
             }
         }
 #undef LAUNCH_LARGE_KERNEL
+#undef LAUNCH_LARGE_KERNEL_W
 
         // Transpose X back if X was not initially transposed
         if(trans_X == rocsparse_operation_none)
