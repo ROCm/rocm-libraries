@@ -27,7 +27,8 @@ SOFTWARE.
 
 #include <rpp/rpp.h>
 
-#include "framework/intensity.hpp"
+#include <type_traits>
+
 #include "framework/tensor_setup.hpp"
 
 namespace rpptest {
@@ -50,16 +51,17 @@ Per-type form
   caller compares with zero tolerance.
 */
 
-inline double bitwise_not_scalar(double v) {
-    return static_cast<double>(static_cast<Rpp8u>(~static_cast<Rpp8u>(v)));
+inline Rpp8u bitwise_not_scalar(Rpp8u v) {
+    return static_cast<Rpp8u>(~v);
 }
 
 template <typename T>
 void bitwise_not_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,
                            const RpptROI* roi, RpptRoiType roiType) {
+    static_assert(std::is_same_v<T, Rpp8u>, "bitwise_not is U8-only");
     for_each_roi_io(sd, dd, roi, roiType,
                     [&](Rpp32u, Rpp32u, Rpp32u, Rpp32u, std::size_t srcIdx, std::size_t dstIdx) {
-                        dst[dstIdx] = from_double<T>(bitwise_not_scalar(to_double(src[srcIdx])));
+                        dst[dstIdx] = bitwise_not_scalar(src[srcIdx]);
                     });
 }
 

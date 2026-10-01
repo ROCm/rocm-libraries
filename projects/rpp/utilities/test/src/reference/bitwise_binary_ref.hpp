@@ -27,7 +27,8 @@ SOFTWARE.
 
 #include <rpp/rpp.h>
 
-#include "framework/intensity.hpp"
+#include <type_traits>
+
 #include "framework/tensor_setup.hpp"
 
 namespace rpptest {
@@ -55,32 +56,26 @@ Per-type form
 
 enum class BitwiseOp { And, Or, Xor };
 
-inline double bitwise_binary_scalar(double a, double b, BitwiseOp op) {
-    const Rpp8u x = static_cast<Rpp8u>(a);
-    const Rpp8u y = static_cast<Rpp8u>(b);
-    Rpp8u r = 0;
+inline Rpp8u bitwise_binary_scalar(Rpp8u a, Rpp8u b, BitwiseOp op) {
     switch (op) {
         case BitwiseOp::And:
-            r = x & y;
-            break;
+            return a & b;
         case BitwiseOp::Or:
-            r = x | y;
-            break;
+            return a | b;
         case BitwiseOp::Xor:
-            r = x ^ y;
-            break;
+            return a ^ b;
     }
-    return static_cast<double>(r);
+    return 0;
 }
 
 template <typename T>
 void bitwise_binary_reference(const T* src1, const T* src2, const RpptDesc& sd, T* dst,
                               const RpptDesc& dd, const RpptROI* roi, RpptRoiType roiType,
                               BitwiseOp op) {
+    static_assert(std::is_same_v<T, Rpp8u>, "bitwise and/or/xor are U8-only");
     for_each_roi_io(sd, dd, roi, roiType,
                     [&](Rpp32u, Rpp32u, Rpp32u, Rpp32u, std::size_t srcIdx, std::size_t dstIdx) {
-                        dst[dstIdx] = from_double<T>(bitwise_binary_scalar(
-                            to_double(src1[srcIdx]), to_double(src2[srcIdx]), op));
+                        dst[dstIdx] = bitwise_binary_scalar(src1[srcIdx], src2[srcIdx], op);
                     });
 }
 
