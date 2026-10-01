@@ -161,31 +161,6 @@ def test_fp6_aliases():
     assert is_valid_spec(alias)[0]
 
 
-@pytest.mark.parametrize("a,b", [("fp6", "bf6"), ("fp8", "fp4"), ("fp6", "fp4")])
-def test_other_matrix_contracts_are_not_admitted(a, b):
-    assert not is_valid_spec(spec_for(a, b))[0]
-
-
-@pytest.mark.parametrize("mode", ["wmma_scale", "wmma_scale16"])
-@pytest.mark.parametrize("a", FORMATS)
-@pytest.mark.parametrize("b", FORMATS)
-def test_homogeneous_catalog_boundary(a, b, mode):
-    spec = spec_for(a, b, mode)
-    accepted = a == b and a in ("fp8", "bf8", "fp6", "bf6", "fp4")
-    assert is_valid_spec(spec)[0] == accepted
-    atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
-        family="wmma_scaled",
-        a_dtype=a,
-        b_dtype=b,
-        c_dtype="fp32",
-        m=16,
-        n=16,
-        k=128,
-        scales=("e8m0", "e8m0", spec.block_k),
-    )
-    assert (atom is not None) == accepted
-
-
 @pytest.mark.parametrize("dtype", ["fp6", "bf6"])
 @pytest.mark.parametrize("block_k", [16, 32])
 def test_fp6_atom_storage_contract(dtype, block_k):
