@@ -64,7 +64,7 @@ def _evaluate(value, *, lane=0, tile=(0, 0), loads=None):
     return operations[op.name](*(evaluate(v) for v in op.operands))
 
 
-@pytest.mark.parametrize("dtype", ["fp8", "bf8"])
+@pytest.mark.parametrize("dtype", ["fp8", "bf8", "fp4"])
 @pytest.mark.parametrize("block_k", [16, 32])
 @pytest.mark.parametrize("role", ["a_scale", "b_scale"])
 def test_scale_coordinates(dtype, block_k, role):
@@ -128,7 +128,7 @@ def test_scale_metadata_rejects_inconsistent_maps(role):
             replace(atom, **{f"{role}_frag_len": count})
 
 
-@pytest.mark.parametrize("dtype", ["fp8", "bf8"])
+@pytest.mark.parametrize("dtype", ["fp8", "bf8", "fp4"])
 @pytest.mark.parametrize("block_k", [16, 32])
 def test_instance_scale_addresses_and_packed_words(dtype, block_k):
     spec = BlockScaledGemmSpec(
