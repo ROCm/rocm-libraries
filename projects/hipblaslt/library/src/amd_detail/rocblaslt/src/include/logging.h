@@ -270,9 +270,17 @@ private:
 
     ~LoggerSingleton()
     {
-        if(log_file_ofs.is_open())
+        // open_log_stream arms this stream to throw, and close() flushes. An
+        // exception escaping a destructor terminates the process.
+        try
         {
-            log_file_ofs.close();
+            if(log_file_ofs.is_open())
+            {
+                log_file_ofs.close();
+            }
+        }
+        catch(...)
+        {
         }
     }
 };
