@@ -157,9 +157,10 @@ case id (§5.4):
   support.json             # NEW: machine-managed claims, keyed by cases[].id
 ```
 
-The support sidecar is **machine-owned**: written wholesale by `--write-support-claims` (§9),
-never hand-edited, and kept separate from the human-authored `meta.json` (and, for a sweep, from
-`sweep.json`). The runner reads it at test time and compares its recorded verdict against a live
+The support sidecar is **machine-written**: `--write-support-claims` (§9) adds claims and never
+removes one, since retracting a claim is a deliberate, reviewed change. It is kept separate from
+the human-authored `meta.json` (and, for a sweep, from `sweep.json`). The runner reads it at test
+time and compares its recorded verdict against a live
 engine support query for the exact graph — the expanded case, for a sweep.
 
 Claim evaluation is built on RFC 0011's existing machinery:
@@ -613,12 +614,16 @@ the actor and cadence differ.
   the current `(engine, arch, platform)` keys, leaving siblings byte-identical. A sweep's grouped
   array (§5.4) can't be patched in place — a changed cell may move a case between groups — so the
   tool **flattens, overlays, then re-groups canonically**: it expands `support.json` to
-  per-`(engine, case, arch, platform)` cells, overlays only the cells this run observed, leaves the
-  rest as-is, and re-derives the canonical grouped form (§5.4). Both paths re-emit canonical JSON
+  per-`(engine, case, arch, platform)` cells, adds the cells this run observed as supported, keeps
+  the rest, and re-derives the canonical grouped form (§5.4). Both paths re-emit canonical JSON
   (sorted keys, fixed number formatting, stable newline), so an unchanged run is a **zero diff**
   and untouched engines stay byte-identical. Because engines, arches, and platforms are disjoint
   cells, separate per-engine/per-arch regenerations merge cleanly; only one binary runs at a time,
   so no multi-writer coordination is needed.
+- **Add-only.** A write never removes a claim, including one the run observed as declined. A
+  regression and a deliberate withdrawal reach the tool as the same observation, and nothing in
+  the run can tell them apart, so retracting a claim is a deliberate, reviewed change. Until it
+  lands, the enforcing run reports the disagreement as `CLAIM_BROKEN`.
 - **Change churn is bounded and safe.** The zero-diff guarantee is for an *unchanged* run; when a
   support value actually changes, canonical regrouping may merge or split groups, so the diff can
   be larger than the one changed cell. Canonical formatting keeps this granular — one case id per

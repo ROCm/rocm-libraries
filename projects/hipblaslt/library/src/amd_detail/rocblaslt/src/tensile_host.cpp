@@ -36,6 +36,8 @@
 #include "Debug.hpp"
 #include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
+#include "rocblaslt_arch_revision.hpp"
+#include "rocblaslt_fused_a2a_peers.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
@@ -1962,7 +1964,16 @@ namespace
         TensileLite::TensorDescriptor scaleD{"scaleD"};
         TensileLite::TensorDescriptor scaleAlphaVec{"scaleAlphaVec"};
 
-        // The ContractionProblemGemm
+        const TensileLite::TensorOps aOps
+            = prob.trans_a == HIPBLAS_OP_C
+                  ? TensileLite::TensorOps{TensileLite::TensorOp::ComplexConjugate()}
+                  : TensileLite::TensorOps{};
+        const TensileLite::TensorOps bOps
+            = prob.trans_b == HIPBLAS_OP_C
+                  ? TensileLite::TensorOps{TensileLite::TensorOp::ComplexConjugate()}
+                  : TensileLite::TensorOps{};
+
+        // Pass tensor operations at construction so the cached operation identifier includes them.
         TensileLite::ContractionProblemGemm tensileProblem{a,
                                                            b,
                                                            c,
@@ -1978,6 +1989,10 @@ namespace
                                                            batchIndex,
                                                            boundIndex,
                                                            value_category(beta),
+                                                           aOps,
+                                                           bOps,
+                                                           {},
+                                                           {},
                                                            prob.workspaceSize};
 
         tensileProblem.setComputeInputTypeA(
@@ -2117,6 +2132,17 @@ namespace
         tensileProblem.setScaleC(compute_type);
         tensileProblem.setScaleD(compute_type);
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        RocblasltFusedEpilogueInfo fusedInfo;
+        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
+           && fusedInfo.hasA2APrefix)
+        {
+            tensileProblem.setFusedGemmA2A(true);
+            tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
+            tensileProblem.setFusedA2AWorld(prob.fused_a2a_world);
+        }
+#endif
+
         // set Actvation
         tensileProblem.setActivationType(is_act_enabled(prob.epilogue)
                                              ? TensileLite::ActivationType::Hipblaslt_all
@@ -2238,11 +2264,14 @@ namespace
                                    {prob.m, prob.n, prob.batch_count},
                                    {prob.row_stride_d, prob.col_stride_d, prob.batch_stride_d});
 
-        if(prob.trans_a == HIPBLAS_OP_C)
-            tensileProblem.setAOps({TensileLite::TensorOp::ComplexConjugate()});
-
-        if(prob.trans_b == HIPBLAS_OP_C)
-            tensileProblem.setBOps({TensileLite::TensorOp::ComplexConjugate()});
+        tensileProblem.setAOps(
+            prob.trans_a == HIPBLAS_OP_C
+                ? TensileLite::TensorOps{TensileLite::TensorOp::ComplexConjugate()}
+                : TensileLite::TensorOps{});
+        tensileProblem.setBOps(
+            prob.trans_b == HIPBLAS_OP_C
+                ? TensileLite::TensorOps{TensileLite::TensorOp::ComplexConjugate()}
+                : TensileLite::TensorOps{});
 
         double alpha = 0, beta = 0;
         assignAlphaBeta(compute_type, a_type, prob.alpha, prob.beta, &alpha, &beta);
@@ -2382,6 +2411,17 @@ namespace
         tensileProblem.setScaleB(compute_type, 1);
         tensileProblem.setScaleC(compute_type);
         tensileProblem.setScaleD(compute_type);
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        RocblasltFusedEpilogueInfo fusedInfo;
+        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
+           && fusedInfo.hasA2APrefix)
+        {
+            tensileProblem.setFusedGemmA2A(true);
+            tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
+            tensileProblem.setFusedA2AWorld(prob.fused_a2a_world);
+        }
+#endif
 
         // set Actvation
         tensileProblem.setActivationType(is_act_enabled(prob.epilogue)
@@ -2658,7 +2698,49 @@ namespace
             inputs.beta           = static_cast<float>(std::get<hipblasLtHalf>(inputs.beta));
         }
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        // Device-side fused-A2A operands.
+        RocblasltFusedEpilogueInfo fusedInfo;
+        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
+           && fusedInfo.hasA2APrefix)
+        {
+            inputs.fusedA2ACounter = prob.Synchronizer;
+            inputs.fusedA2APeers  = rocblaslt::buildFusedA2APeerFields(prob.fused_a2a_peer_flag,
+                                                                      fusedInfo.a2aRecvPtrs,
+                                                                      prob.fused_a2a_world,
+                                                                      fusedInfo.commChannel,
+                                                                      fusedInfo.a2aSdmaQueues);
+            inputs.fusedA2AMyRank = prob.fused_a2a_rank;
+            inputs.fusedA2ADrain  = rocblaslt::fusedA2ADrainFor(fusedInfo.a2aCompletionMode);
+        }
+#endif
+
         return inputs;
+    }
+
+    // True when `filename` is a code object built for exactly `processor`. The
+    // architecture is the trailing token of the stem, and matching it whole
+    // matters where several architectures share one directory -- which
+    // HIPBLASLT_TENSILE_LIBPATH permits: a bare gfx1250 would otherwise claim
+    // gfx1250-strict's objects, which share its ISA but carry an ELF machine
+    // code it cannot load.
+    bool codeObjectTargets(const std::filesystem::path& filename, const std::string& processor)
+    {
+        if(filename.extension().string() != ".co")
+            return false;
+
+        const std::string stem = filename.stem().string();
+        if(stem.size() < processor.size()
+           || stem.compare(stem.size() - processor.size(), processor.size(), processor) != 0)
+            return false;
+
+        if(stem.size() == processor.size())
+            return true;
+
+        // Both separators the producers use: TensileLibrary_..._gfx942 and
+        // extop_gfx942 underscore it, Kernels.so-000-gfx942 hyphenates it.
+        const char preceding = stem[stem.size() - processor.size() - 1];
+        return preceding == '_' || preceding == '-';
     }
 
     TensileLite::LazyLoadingInit getLazyLoadingArch(int deviceID)
@@ -2752,6 +2834,13 @@ namespace
         else if(deviceString.find("gfx1201") != std::string::npos)
         {
             return TensileLite::LazyLoadingInit::gfx1201;
+        }
+        // Must precede gfx1250, whose substring test this name also satisfies.
+        // The caller de-duplicates devices by this value, so sharing gfx1250's
+        // would drop the second stepping on a machine holding both.
+        else if(deviceString.find("gfx1250-strict") != std::string::npos)
+        {
+            return TensileLite::LazyLoadingInit::gfx1250_strict;
         }
         else if(deviceString.find("gfx1250") != std::string::npos)
         {
@@ -2916,30 +3005,44 @@ namespace
                 // path. Only use the subdir if a Tensile mapping file is actually present
                 // there; otherwise the directory may have been created by ExtOp/Transform
                 // installs without a corresponding Tensile library (multi-arch non-TheRock
-                // builds). The subdir is revisioned (library/gfx1250v0/ for a v0 part, no
-                // fallback) while the mapping filenames keep the base `processor` token.
+                // builds). The mapping filenames carry `processor`, the name the runtime
+                // reports for this device -- which is the compiler target the kernels in
+                // it were built for, including gfx1250-strict. The subdir is revisioned:
+                // an A0 part reporting gfx1250 loads library/gfx1250v0/, with no fallback.
                 {
-                    auto processor_path     = path / rocblaslt_internal_get_library_arch_name();
+                    int asicRevision = -1;
+                    if(processor == "gfx1250")
+                    {
+                        hipDeviceProp_t deviceProperties;
+                        HIP_CHECK_EXC(hipGetDeviceProperties(&deviceProperties, deviceId));
+                        asicRevision = deviceProperties.asicRevision;
+                    }
+                    const auto libArch      = rocblaslt_revisioned_arch_name(processor, asicRevision);
+                    auto processor_path     = path / libArch;
                     auto mapping_msgpack    = processor_path / ("TensileLibrary_lazy_" + processor + ".dat");
                     auto mapping_msgpack_gz = processor_path / ("TensileLibrary_lazy_" + processor + ".dat.zlib");
                     auto mapping_yaml       = processor_path / ("TensileLibrary_lazy_" + processor + ".yaml");
                     if(std::filesystem::exists(mapping_msgpack) || std::filesystem::exists(mapping_msgpack_gz)
                        || std::filesystem::exists(mapping_yaml))
                     {
-                        // Grab the chosen subdir name before the move. It differs
-                        // from the base `processor` only for a silicon revision
-                        // (e.g. gfx1250v0); log that -- the only runtime signal a
-                        // non-v1 revision was loaded.
-                        const auto libArch = processor_path.filename().string();
-                        path               = std::move(processor_path);
-                        if(libArch != processor
-                           && (get_logger_layer_mode() & rocblaslt_layer_mode_log_info))
-                        {
-                            std::ostringstream msg;
-                            msg << "Loading ASIC-revision GEMM subtree: " << libArch
-                                << " (compiler target " << processor << ")" << std::endl;
-                            log_info(__func__, msg.str());
-                        }
+                        path = std::move(processor_path);
+                    }
+                    else if(libArch != processor)
+                    {
+                        auto master = processor_path / ("TensileLibrary_" + processor);
+                        if(!std::filesystem::exists(master.string() + ".dat")
+                           && !std::filesystem::exists(master.string() + ".dat.zlib")
+                           && !std::filesystem::exists(master.string() + ".yaml"))
+                            std::cerr << "\nrocblaslt error: " << processor
+                                      << " device with asicRevision 0 (A0) needs the " << libArch
+                                      << " GEMM library, but " << processor_path
+                                      << " holds no Tensile library. Build with the "
+                                      << libArch << " subtree (the default for -a " << processor
+                                      << "), or run with HSA_DISABLE_GFX12_STRICT=0 and a "
+                                      << processor << "-strict build. Not falling back to "
+                                      << (path / processor)
+                                      << ": its kernels give wrong results on A0." << std::endl;
+                        path = std::move(processor_path);
                     }
                 }
 
@@ -2951,16 +3054,15 @@ namespace
                 }
             }
 
-            // only load modules for the current architecture (contains the processor
-            // string and ends in "co").
+            // only load modules for the current architecture (named for the processor
+            // and ending in "co").
             if(!lazyLoad)
             {
                 bool no_match = true;
                 for(const auto& entry : std::filesystem::directory_iterator(path))
                 {
                     auto filename = entry.path().filename();
-                    if(filename.string().find(processor) != std::string::npos
-                       && filename.extension().string() == ".co")
+                    if(codeObjectTargets(filename, processor))
                     {
                         static_cast<void>(adapter.loadCodeObjectFile(entry.path().string()));
                         no_match = false;
@@ -3159,27 +3261,6 @@ namespace
         return nullptr;
     }
 
-#if 0
-    /**************************************************************************
-    * We normally print error messages only once, to avoid excessive logging *
-    **************************************************************************/
-    void print_once(const std::ostream& msg)
-    {
-        if(rocblaslt_suppress_tensile_error_messages())
-            return;
-        static constexpr char varname[] = "ROCBLASLT_VERBOSE_TENSILE_ERROR";
-        static const char*    verbose   = getenv(varname);
-        if(!verbose)
-        {
-            static auto& once = std::cerr
-                                << msg
-                                << "\nThis message will be only be displayed once, unless the "
-                                << varname << " environment variable is set." << std::endl;
-        }
-        else
-            std::cerr << msg << std::endl;
-    }
-#endif
 } // namespace
 
 struct TensileDataGemm
@@ -3402,33 +3483,57 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
 }
 #endif
 
-// Points inputs.Synchronizer at the region the chosen solution actually wants.
-//
-// Two consumers share this pointer and they need very different amounts: a
-// Stream-K kernel reads it as one flag per workgroup, a GSU (MBSK) kernel reads
-// it as the reduction area, which is orders of magnitude larger. They cannot
-// both be live in one kernel -- the Stream-K flag path requires
-// streamKAtomic == 0, and that path forces gsu to 1, which rules MBSK out -- so
-// one pointer is enough and only the target changes.
-//
-// It has to stay one pointer. ContractionInputs is exported by more than one
-// ROCm library (hipsparselt embeds its own TensileLite and exports the same
-// symbols), so adding a field to it makes the destructor resolve to a copy
-// compiled against the old layout and corrupts the heap.
-static void bindFlagRegion(const RocblasltContractionProblem&      prob,
-                           const TensileLite::ContractionSolution& solution,
-                           TensileLite::ContractionInputs&         inputs)
+static bool readsStreamKFlags(const TensileLite::ContractionSolution& solution)
 {
-    if(prob.streamKFlags == nullptr)
-        return;
-    if(solution.sizeMapping.streamK <= 0 || solution.sizeMapping.streamKAtomic != 0)
-        return;
-    // outputAmaxD hands the same pointer to the amax counter, which would then
-    // land on top of flag zero. Leave those on the GSU region: no better than
-    // before for that combination, but no worse.
-    if(solution.problemType.outputAmaxD)
-        return;
-    inputs.Synchronizer = prob.streamKFlags;
+    // Amax uses Synchronizer for its counter, so retain its GSU region.
+    return solution.sizeMapping.streamK > 0 && solution.sizeMapping.streamKAtomic == 0
+           && !solution.problemType.outputAmaxD;
+}
+
+// Stream-K needs one flag per workgroup; GSU reduction needs a much larger
+// region. Reuse the existing input pointer: adding a ContractionInputs field
+// would change a layout also exported by other libraries embedding TensileLite.
+// Direct dispatch already has both regions. Inputs may outlive the solution
+// that selected them, so the caller must assign the result on every solve.
+static void* synchronizerForSolution(const TensileLite::ContractionSolution& solution,
+                                     void*                                   streamKRegion,
+                                     void*                                   gsuRegion)
+{
+    if(readsStreamKFlags(solution) && streamKRegion != nullptr)
+        return streamKRegion;
+    return gsuRegion;
+}
+
+// The object API learns its stream at initialize(). Bind one input or a
+// contiguous group before solve() embeds these pointers in kernel arguments.
+static rocblaslt_status bindSynchronizers(rocblaslt_handle                        handle,
+                                          const TensileLite::ContractionSolution& solution,
+                                          hipStream_t                             stream,
+                                          TensileLite::ContractionInputs*         inputs,
+                                          size_t                                  count = 1)
+{
+    const bool readsFlags = readsStreamKFlags(solution);
+    // Reject before changing bindings: problems in one launch must never
+    // wrap onto another problem's flags.
+    if(readsFlags && count > _rocblaslt_handle::c_syncSkSlotsPerStream)
+        return rocblaslt_status_invalid_value;
+
+    for(size_t i = 0; i < count; ++i)
+    {
+        void* region = nullptr;
+        if(readsFlags)
+        {
+            auto status = handle->streamKFlagsForStream(stream, i, &region);
+            if(status != rocblaslt_status_success)
+                return status;
+        }
+        // Always replace the old binding, including when Stream-K storage
+        // is unavailable or the newly selected solution does not read flags.
+        if(region == nullptr)
+            region = handle->gsuFlagsForProblem(i);
+        inputs[i].Synchronizer = region;
+    }
+    return rocblaslt_status_success;
 }
 
 /******************************************************************************
@@ -3497,7 +3602,8 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         {
             auto picked = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
             if(picked)
-                bindFlagRegion(prob, *picked, data->inputs);
+                data->inputs.Synchronizer
+                    = synchronizerForSolution(*picked, prob.streamKFlags, prob.Synchronizer);
         }
 
         if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
@@ -3595,10 +3701,6 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
         if(!solution)
         {
-#if 0
-            std::ostream msg;
-            print_once(msg << "\nrocblaslt error: No Tensile solution found for " << prob);
-#endif
             status = rocblaslt_status_not_implemented;
         }
         else
@@ -3623,7 +3725,8 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             // are packed. Passing GetTensileInputs(prob) straight in would use
             // the problem's original pointer and drop the choice.
             auto skInputs = GetTensileInputs(prob);
-            bindFlagRegion(prob, *solution, skInputs);
+            skInputs.Synchronizer
+                = synchronizerForSolution(*solution, prob.streamKFlags, prob.Synchronizer);
             auto kernels = solution->solve(data->problem, skInputs, *hardware);
             // Remove this after supports getting comgr buffers from hip.
             bool isPreloaded = false;
@@ -3671,19 +3774,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
@@ -3728,19 +3821,9 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
@@ -3825,19 +3908,9 @@ rocblaslt_status groupedGemmCreate(std::vector<RocblasltContractionProblem>& pro
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
@@ -3938,21 +4011,15 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             // flag pointer is baked into the kernel arguments by solve() just
             // below. If this solution reads the flags as Stream-K, point them at
             // a region private to this stream so two Gemm objects initialized on
-            // different streams cannot share one.
-            if(solution->sizeMapping.streamK > 0 && solution->sizeMapping.streamKAtomic == 0
-               && !solution->problemType.outputAmaxD)
+            // different streams cannot share one. Every other solution is put
+            // back on the shared GSU region: `data->inputs` survives across
+            // initialize() calls, so a Stream-K binding left in place would send
+            // an MBSK reduction into the small Stream-K region.
+            if(auto s = bindSynchronizers(handle, *solution, stream, &data->inputs);
+               s != rocblaslt_status_success)
             {
-                void* region = nullptr;
-                if(rocblaslt_status s = handle->streamKFlagsForStream(stream, 0, &region);
-                   s != rocblaslt_status_success)
-                {
-                    log_error(__func__,
-                              "no Stream-K flag region left: this handle has already handed "
-                              "one to c_syncSkStreamSlots distinct streams");
-                    return s;
-                }
-                if(region != nullptr)
-                    data->inputs.Synchronizer = region;
+                log_error(__func__, "no Stream-K flag region left for this stream");
+                return s;
             }
 
             data->kernels = solution->solve(data->problem, data->inputs, *hardware);
@@ -4036,30 +4103,21 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             // Grouped GEMM does select Stream-K solutions, so isolation has to
             // cover the stream as well as the problem index: offsetting by index
             // alone keeps one grouped call internally safe but still shares the
-            // region with every other stream.
-            if(solution->sizeMapping.streamK > 0 && solution->sizeMapping.streamKAtomic == 0
-               && !solution->problemType.outputAmaxD)
+            // region with every other stream. Every other solution is put back
+            // on the GSU region its own problem index owns, for the reason the
+            // single-GEMM branch above assigns unconditionally.
+            if(auto s = bindSynchronizers(handle,
+                                          *solution,
+                                          stream,
+                                          data->inputs.grouped.data(),
+                                          data->inputs.grouped.size());
+               s != rocblaslt_status_success)
             {
-                for(size_t i = 0; i < data->inputs.grouped.size(); i++)
-                {
-                    // SynchronizerSizeCheck refuses every solution that uses
-                    // these flags once the group is wider than the block, so
-                    // problems past it never read the pointer. Give them the
-                    // stream's first region rather than failing a call that runs
-                    // fine without it.
-                    const size_t slot   = i < _rocblaslt_handle::c_syncSkSlotsPerStream ? i : 0;
-                    void*        region = nullptr;
-                    if(rocblaslt_status s = handle->streamKFlagsForStream(stream, slot, &region);
-                       s != rocblaslt_status_success)
-                    {
-                        log_error(__func__,
-                                  "no Stream-K flag region left: this handle has already "
-                                  "handed one to c_syncSkStreamSlots distinct streams");
-                        return s;
-                    }
-                    if(region != nullptr)
-                        data->inputs.grouped[i].Synchronizer = region;
-                }
+                if(s == rocblaslt_status_invalid_value)
+                    log_error(__func__, "a Stream-K group exceeds c_syncSkSlotsPerStream problems");
+                else
+                    log_error(__func__, "no Stream-K flag region left for this stream");
+                return s;
             }
 
             data->useUserArgs = useUserArgs;
@@ -4098,19 +4156,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
@@ -4264,19 +4312,9 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
@@ -4327,19 +4365,9 @@ rocblaslt_status getDeviceUserArgumentsValuesFromContractionProblem(rocblaslt_ha
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: "
-                       << "Is hostDeviceUserArgs not match the size of the problem type? " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: "
-                       << "Is hostDeviceUserArgs not match the size of the problem type? " << prob);
-#endif
     }
 
     return status;
@@ -4451,19 +4479,9 @@ rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       hand
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
@@ -4514,19 +4532,9 @@ rocblaslt_status runKernelFromDeviceUserArguments(rocblaslt_handle             h
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
@@ -5275,7 +5283,14 @@ rocblaslt_status dispatchByComputeType(rocisa::DataType dt, F&& f)
         return f(static_cast<float*>(nullptr));
     case rocisa::DataType::Double:
         return f(static_cast<double*>(nullptr));
-    // Extend as needed:
+    case rocisa::DataType::Int32:
+        return f(static_cast<int32_t*>(nullptr));
+    case rocisa::DataType::ComplexFloat:
+        return f(static_cast<hipblaslt_complex_float*>(nullptr));
+    case rocisa::DataType::ComplexDouble:
+        return f(static_cast<hipblaslt_complex_double*>(nullptr));
+    case rocisa::DataType::Half:
+        return f(static_cast<hipblasLtHalf*>(nullptr));
     default:
         return rocblaslt_status_not_implemented;
     }
