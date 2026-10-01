@@ -34,11 +34,13 @@ from __future__ import annotations
 import argparse
 import copy
 import dataclasses
+import hashlib
 import inspect
 import itertools
 import json
 import math
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -393,30 +395,35 @@ def knob_partition(resolutions: list[Resolution]) -> tuple[list[str], list[str]]
     return varies, constant
 
 
-def _kernel_name(slug: str, spec, index: int) -> str:
-    """A kernel name derived from the spec's own fields, whatever op this is.
+def _kernel_name(slug: str, spec: dict, metadata: dict, metadata_fields: list) -> str:
+    """A kernel name derived from what the kernel IS, never from where its shape
+    sat in the corpus: names reach the descriptors and the kpack, so a name that
+    moves when the shape list is reordered churns both.
 
-    Hand-listing one op's field names collapses other ops' variants onto the
-    same string, and nothing downstream catches it. Scalars only, with the
-    index appended unconditionally.
+    The catalog key (the profile's metadata fields, in profile order) names the
+    kernel, `prefix{value}` per field, which is also what `factorise_config`
+    binds name tokens to. A profile with no metadata fields falls back to the
+    spec's scalar fields. Two kernels the fields cannot tell apart are
+    disambiguated in `build_config` by a digest of their spec.
     """
+    if metadata_fields:
+        items = [(name, metadata.get(name)) for name in metadata_fields]
+    else:
+        items = list(spec.items())
     parts = [slug]
-    try:
-        fields = [f.name for f in dataclasses.fields(spec)]
-    except TypeError:  # not a dataclass; fall back to the index alone
-        fields = []
-    for name in fields:
-        value = getattr(spec, name, None)
+    for name, value in items:
         if value is None or isinstance(value, (list, tuple, dict, set)):
             continue
         if isinstance(value, bool):
-            # A bare 0/1 reads as a magnitude; the field name alone reads as a flag.
-            if value:
-                parts.append(_abbrev(name))
-            continue
-        parts.append(f"{_abbrev(name)}{value}")
-    parts.append(f"v{index}")
-    return "_".join(str(p) for p in parts)
+            value = int(value)
+        rendered = re.sub(r"[^0-9A-Za-z]", "", str(value))
+        parts.append(f"{_abbrev(name)}{rendered}")
+    return "_".join(parts)
+
+
+def _spec_digest(spec: dict) -> str:
+    text = json.dumps(spec, sort_keys=True, default=str)
+    return hashlib.sha256(text.encode()).hexdigest()[:8]
 
 
 def _abbrev(field: str) -> str:
@@ -540,7 +547,7 @@ def build_config(
     # differing only in canonicalised runtime fields) are one compiled kernel,
     # so one catalog entry.
     emitted: set = set()
-    for index, resolution in enumerate(resolutions):
+    for resolution in resolutions:
         if resolution.spec is None:
             continue
         spec = {
@@ -595,9 +602,7 @@ def build_config(
                 # from the shared spec, so a `knob in variant_spec` guard would
                 # skip exactly the knobs worth sweeping.
                 variant_spec[knob] = value
-            name = _kernel_name(slug, resolution.spec, index)
-            if pinned:
-                name += "." + "_".join(f"{k}{pinned[k]}" for k in axis_names)
+            name = _kernel_name(slug, variant_spec, variant_metadata, metadata_fields)
             kernels.append(
                 {
                     "name": name,
@@ -610,6 +615,27 @@ def build_config(
                     "metadata": variant_metadata,
                 }
             )
+    # Kernels the name fields cannot tell apart get a digest of their spec, and
+    # the list is ordered by name, so neither names nor descriptor order depend
+    # on the order of the shape corpus.
+    seen: dict = {}
+    for kernel in kernels:
+        seen[kernel["name"]] = seen.get(kernel["name"], 0) + 1
+    clashes = sorted(name for name, count in seen.items() if count > 1)
+    for kernel in kernels:
+        if seen[kernel["name"]] > 1:
+            kernel["name"] += "_h" + _spec_digest(kernel["kernel_source"]["spec"])
+    if clashes and metadata_fields:
+        # Same metadata is the same catalog key: the engine cannot tell these
+        # binaries apart, so a spec field that matters is missing from
+        # metadata_fields (or the shape should not be served).
+        print(
+            f"  WARNING: {len(clashes)} catalog key(s) are shared by kernels with "
+            f"different specs (names suffixed _h<digest>): {', '.join(clashes[:4])}"
+            + (" ..." if len(clashes) > 4 else ""),
+            file=sys.stderr,
+        )
+    kernels.sort(key=lambda kernel: kernel["name"])
     # `dialect: packaged` is stated rather than guessed: a rocKE builder can
     # only be authored packaged, and the loader rejects any other pairing.
     return {

@@ -632,3 +632,46 @@ class TestTheRealDispatcherBoundary:
         )
         assert rc == 0
         assert "4 kernels for 4 servable shapes" in capsys.readouterr().out
+
+
+class TestEmittedNamesDoNotDependOnShapeOrder:
+    """Names land in the descriptors and the kpack. A name carrying the shape's
+    position in the corpus churns both whenever the corpus is re-mined in another
+    order (942:S3-1)."""
+
+    _SHAPES = [
+        {**_D128, "batch": 1, "seqlen_q": 512, "seqlen_k": 512},
+        {**_D128, "batch": 2, "seqlen_q": 1024, "seqlen_k": 1024, "mask_type": 0},
+        {**_D128, "batch": 1, "seqlen_q": 4096, "seqlen_k": 4096, "nhead_k": 2},
+        {**_D128, "batch": 1, "seqlen_q": 300, "seqlen_k": 300},
+        {**_D128, "batch": 1, "seqlen_q": 128, "seqlen_k": 256, "mask_type": 0},
+    ]
+
+    def _emit(self, monkeypatch, tmp_path, shapes, *extra) -> str:
+        _real_dispatcher_or_skip(monkeypatch)
+        path = tmp_path / "shapes.json"
+        path.write_text(json.dumps(shapes))
+        out = tmp_path / "config.yaml"
+        argv = ["--profile", str(_SHIPPED_PROFILE), "--shapes", str(path)]
+        assert dispatch_parity.main([*argv, "--out", str(out), *extra]) == 0
+        return out.read_text()
+
+    @pytest.mark.parametrize("extra", [(), ("--per-shape",)])
+    def test_a_reordered_corpus_emits_the_identical_config(
+        self, monkeypatch, tmp_path, extra
+    ):
+        forward = self._emit(monkeypatch, tmp_path, self._SHAPES, *extra)
+        backward = self._emit(monkeypatch, tmp_path, self._SHAPES[::-1], *extra)
+        assert forward == backward
+
+    def test_names_are_the_catalog_key_not_a_position(self, monkeypatch, tmp_path):
+        _real_dispatcher_or_skip(monkeypatch)
+        profile = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))
+        config = dispatch_parity.build_config(
+            dispatch_parity.resolve_shapes(self._SHAPES[:1], profile), profile
+        )
+        [kernel] = config["packs"][0]["kernels"]
+        assert kernel["name"] == (
+            "gfx950_attention_dense_dtBF16_hs128_nqh8_nkh8_ca1_ra0_sw0_ba1_sq512_sk512"
+            "_bm256_bn64"
+        )
