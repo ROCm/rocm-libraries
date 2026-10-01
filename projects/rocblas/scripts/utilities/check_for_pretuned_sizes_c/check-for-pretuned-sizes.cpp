@@ -320,13 +320,15 @@ int main(int argc, char* argv[])
                     0, // solution_index
                     0 // flags
                 );
+                // Reported but not fatal. This call is a fitness query -- A, B, C and D
+                // are null -- so a status here describes the size, not this program:
+                // Tensile answers rocblas_status_not_implemented when it has no solution
+                // for the size, which is the very thing the scan is looking for. The
+                // fitness value below still classifies it, and the remaining sizes in the
+                // log are still worth reporting on.
                 if(status != rocblas_status_success)
-                {
-                    std::cerr << "rocblas_gemm_ex failed: " << rocblas_status_to_string(status)
-                              << " " << buffer << std::endl;
-                    destroy_handle();
-                    return 1;
-                }
+                    std::cerr << "rocblas_gemm_ex: " << rocblas_status_to_string(status) << " "
+                              << buffer << std::endl;
 
                if(!fitness)
                {
