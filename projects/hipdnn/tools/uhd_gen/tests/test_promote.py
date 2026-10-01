@@ -13,6 +13,10 @@ from pathlib import Path
 
 import pytest
 
+# Every model here is a real artifact built by the shipping converter, which needs both.
+pytest.importorskip("flatbuffers")
+pytest.importorskip("lightgbm")
+
 from uhd_gen.features import (
     compute_features_hash,
     evaluator_feature_semantics_revision,

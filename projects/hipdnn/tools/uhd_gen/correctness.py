@@ -34,7 +34,14 @@ SUPPRESSED_TIMINGS = ("robustMeanMs", "minTimeMs", "avgTimeMs", "stddevMs")
 #: Labels derived from the timings above, cleared with them where a row already carries one.
 DERIVED_LABELS = ("tflops", "gbs")
 
-_SPELLINGS = {"true": True, "false": False, "": None, "none": None, "null": None, "nan": None}
+_SPELLINGS = {
+    "true": True,
+    "false": False,
+    "": None,
+    "none": None,
+    "null": None,
+    "nan": None,
+}
 
 
 def numerical_verdict(value) -> bool | None:
@@ -57,7 +64,11 @@ def numerical_verdict(value) -> bool | None:
 
 def numerical_reason(value) -> str | None:
     """The verdict's reason as text, or None when the row records none."""
-    if value is None or value is pd.NA or (isinstance(value, float) and math.isnan(value)):
+    if (
+        value is None
+        or value is pd.NA
+        or (isinstance(value, float) and math.isnan(value))
+    ):
         return None
     if not isinstance(value, str):
         raise ValueError(f"{REASON} must be text; got {value!r}")
@@ -72,8 +83,8 @@ def known_wrong(frame: pd.DataFrame) -> pd.Series:
     """
     if VERDICT not in frame.columns:
         return pd.Series(False, index=frame.index, dtype=bool)
-    return frame[VERDICT].map(lambda value: numerical_verdict(value) is False).astype(
-        bool
+    return (
+        frame[VERDICT].map(lambda value: numerical_verdict(value) is False).astype(bool)
     )
 
 
