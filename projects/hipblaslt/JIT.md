@@ -391,8 +391,7 @@ Any other value leaves JIT off and prints
 `hipblaslt warning: HIPBLASLT_JIT=<value> is not 0, 1 or 2; JIT is off` once.
 A build without JIT ignores a nonzero value and prints
 `hipblaslt warning: HIPBLASLT_JIT=<value> is ignored: hipBLASLt was built without HIPBLASLT_ENABLE_JIT`
-once. The [comgr cache policy](#code-object-construction-with-comgr) follows
-the same parsing.
+once.
 
 **Order.** In fallback mode, `hipblasLtMatmulAlgoGetHeuristic` and
 `GemmInstance::algoGetHeuristic` take results from these sources in turn, each
@@ -636,15 +635,14 @@ and `hipModuleLoadData` accepts raw executable and linkable format (ELF)
 objects. The generator receives the compiler path, which TensileLite uses to
 probe assembler capabilities, and needs no offload bundler.
 
-comgr's own on-disk cache (`~/.cache/comgr`) and the JIT solution library serve
-different purposes, so hipBLASLt turns the comgr cache off for JIT builds.
-When `HIPBLASLT_JIT` is `1` or `2` and `AMD_COMGR_CACHE` is unset, hipBLASLt
-sets `AMD_COMGR_CACHE=0` when the library is loaded, and again before its first
-build for a mode set after load. It never overwrites a value the user set. comgr
-reads `AMD_COMGR_CACHE` and its cache directory once, at the first cached
-action of any comgr user in the process, so the setting applies to hipRTC and
-rocRoller in that process too, and a value set after that action has no effect.
-The builder logs which case applied at info level.
+comgr's own on-disk cache (`~/.cache/comgr`) keeps its default in every
+`HIPBLASLT_JIT` mode: hipBLASLt never sets `AMD_COMGR_CACHE`. That cache is
+separate from the JIT solution library and serves a different purpose. It holds
+the results of comgr actions for every comgr user in the process, such as
+hipRTC, and comgr reads its setting once per process. The JIT solution library
+holds the solutions that hipBLASLt generated, and its
+[cache key](#persistent-solution-library) ignores the variables that control
+only comgr's cache.
 
 ### JIT solution library
 
@@ -759,7 +757,7 @@ each step advances.
 | --- | --- | --- | --- |
 | 1. Demote the public API | Done | `hipblaslt-jit.hpp` and `hipblaslt-jit-tensilelite.hpp` are not installed and `hipblaslt-ext.hpp` does not include them; they are internal headers used by unit tests. The direct and generic GEMM test binaries under `clients/tests/jit` are run by the shared driver. `hipblaslt-bench --jit-gemm` used the internal header until step 5 removed it. | Backend interface |
 | 2. Jit component and interfaces | Done | Add Jit, the backend interface, the mock backend, and the Predictor and TuningKnowledge interfaces. Wrap the existing TensileLite provider and C++ predictor behind them; TuningKnowledge returns TensileLite defaults. | Backend interface; prediction; tuning blueprints |
-| 3. comgr code-object builder | Done | hipBLASLt builds one code object per solution through comgr, adapted from rocRoller's `InProcessAssembler`, linking the main kernel assembly and the helper HIP source together. With `--source-only`, TensileLite emits only assembly, helper source and metadata, and `Tensile.JitGemm` can publish several ranked bundles. hipBLASLt disables the comgr cache when `HIPBLASLT_JIT` is `1` or `2`. | Backend interface |
+| 3. comgr code-object builder | Done | hipBLASLt builds one code object per solution through comgr, adapted from rocRoller's `InProcessAssembler`, linking the main kernel assembly and the helper HIP source together. With `--source-only`, TensileLite emits only assembly, helper source and metadata, and `Tensile.JitGemm` can publish several ranked bundles. comgr's own cache keeps its default. | Backend interface |
 | 4. JIT solution library | Done | One standard lazy TensileLite library per cache key under `HIPBLASLT_JIT_LIBRARY_PATH` or a private per-user default, with exact-size entries merged under a file lock by atomic rename, loaded as a second master library that reloads when other processes publish, with reserved solution indices from 2^30 to `INT32_MAX`. `jit::getLibraryAlgos` looks solutions up and publishes them; step 5 connects the heuristic queries to it. | JIT solution library (cache) |
 | 5. Heuristic integration | Done | `HIPBLASLT_JIT` modes 0, 1 and 2 in `hipblasLtMatmulAlgoGetHeuristic`, `GemmInstance::algoGetHeuristic` and `hipblasLtMatmul` without an algorithm, with the fallback order and failure rules above and every JIT failure reported on stderr. The tool-path defaults are compiled into the library, a JIT-off build warns once when it sees `HIPBLASLT_JIT`, and `hipblaslt-bench --jit-gemm` is removed. The shared driver checks each mode, reuse of the library by a second process, failure reports and the JIT-off warning. | JustInTime library type; backend interface |
 | 6. Validation sweep | Done | The shared driver's heuristic routes cover each mode, a published index resolved with JIT off, distinct kernels when several solutions are requested, the order of a device library's Equality results, JIT solutions and other pre-tuned results, a problem the backend cannot rank, and threads and processes that query the same problem at once. The gfx1250 routes generate ranked heuristic solutions and build their code objects without a gfx1250 device. | Overall JIT validation |

@@ -41,7 +41,8 @@ an empty directory, and points `HIPBLASLT_JIT_LIBRARY_PATH` into the output
 directory so that no case uses the default JIT solution library. It removes
 `HIPBLASLT_JIT`, every other `HIPBLASLT_JIT_*` variable and every
 `AMD_COMGR_*` variable from the inherited environment, and points
-`XDG_CACHE_HOME` into the output directory. It records commands, logs,
+`XDG_CACHE_HOME` into the output directory, so comgr's own cache, which keeps
+its default, never writes outside it. It records commands, logs,
 generated bundles, and a `summary.json`. A failed case makes the driver return
 a failing status.
 
@@ -73,10 +74,9 @@ to replay, publish or rebuild it.
 | `process-runner` | Shell-free process arguments, environment and working directory; output capture, failures and descriptor cleanup |
 | `artifact-loader` | Source bundles read by directory convention: file ordering and roles, a missing `sources` or `library` directory, duplicate or corrupt library entries, missing main assembly, nested entries, empty or oversized files, the file-count cap, native Unicode paths, compressed library bytes, and path and symbolic-link containment |
 | `jit-component` | Jit over fake stages, without a GPU: count limiting, excluded kernels, prediction only for backends that consume it, the stage of each failure, publish and load ordering, scratch lifetime, concurrent generation, and the TensileLite default seeds |
-| `code-object` | comgr builds, loaded and run on the GPU: assembly and HIP relocatables, multi-source and mixed links, code-object versions, linker flags, target rewriting, a missing ROCm path, concurrent builds, malformed inputs and the comgr cache policy, plus the `splitk-api` bundle's main kernel and 26 helpers assembled, compiled, linked into one code object, loaded and resolved |
+| `code-object` | comgr builds, loaded and run on the GPU: assembly and HIP relocatables, multi-source and mixed links, code-object versions, linker flags, target rewriting, a missing ROCm path, concurrent builds and malformed inputs, plus the `splitk-api` bundle's main kernel and 26 helpers assembled, compiled, linked into one code object, loaded and resolved |
 | `code-object-gfx1250` | The hardware-free part of `code-object` for gfx1250, on any host |
 | `jit-gemm-gfx1250` | Compile-only on any host: `Tensile.JitGemm` generates two ranked gfx1250 solutions from a heuristic request with the arguments hipBLASLt passes, skipping a ranked candidate that repeats an accepted kernel, and comgr assembles, compiles and links each one into a wave32 code object that uses the gfx1250 WMMA instruction |
-| `comgr-cache` | In fresh processes with private cache directories: `HIPBLASLT_JIT=1` leaves no comgr cache, `AMD_COMGR_CACHE=1` creates one, which shows the check can detect it, and a user-set `AMD_COMGR_CACHE` is kept under `HIPBLASLT_JIT=1` |
 | `mock-backend` | The in-process mock backend replaying the `splitk-api` source bundle through Jit and the comgr builder: C/C++ numerics, owned scalar values, copied algorithms outliving their owners, name lookups, 65 streams, insufficient workspace, forged tokens and indices, the wrong device, NOT_SUPPORTED for a non-GEMM request or another ProblemType, generation and build faults, and bundle lifetime |
 | `mock-backend-library` | `getLibraryAlgos` publishes the mock solution into a fresh JIT solution library and returns a reserved index, which `getAlgosFromIndex` and `hipblasLtMatmul` run with checked numerics. A second process then runs that index before any lookup, and `getLibraryAlgos` finds it there with a backend that aborts the process if it generates |
 | `jit-library` | The JIT solution library without a GPU: cache-key fields and compiler-environment filtering; rejected group- or other-writable, linked and non-directory roots; the stock TensileLite loader reading a published library; exact-size matching with the solution predicates still applied; deduplication, hash collisions, order, count and excluded kernels; mismatched and tampered keys ignored and left untouched; index allocation up to `INT32_MAX` and exhaustion; a publisher killed after each publication step; and readers reloading after another instance publishes |
@@ -89,7 +89,7 @@ to replay, publish or rebuild it.
 | `helper-failures` | A missing helper source or renamed helper symbols are detected before output/workspace writes; an earlier C++ launch remains usable |
 | `bundle-failures` | Damaged source bundles are rejected through the public API: a foreign target, an escaping symbolic link, missing sources or main assembly, an undefined main kernel, invalid assembly or helper source (the message names the comgr log), corrupt or truncated library entries, missing helper source or symbols, and unsupported problems |
 | `heuristic-fallback-c`, `heuristic-fallback-cpp` | `HIPBLASLT_JIT=1` with an empty device library: the C or C++ heuristic query returns only JIT indices for one and three requested solutions, each checked through `hipblasLtMatmul` or `Gemm`, publishes them, and reports any shortfall as a warning |
-| `heuristic-forced` | `HIPBLASLT_JIT=2` with an empty and with the build's device library: both queries return only JIT indices with checked numerics, and comgr's on-disk cache stays unused |
+| `heuristic-forced` | `HIPBLASLT_JIT=2` with an empty and with the build's device library: both queries return only JIT indices with checked numerics |
 | `heuristic-cache-hit` | A second process whose generator fails if it runs gets the first process's published index from both queries and from `hipblasLtMatmul` without an algorithm, with no JIT report; a third process with `HIPBLASLT_JIT=0` resolves that index through `getAlgosFromIndex` and runs it with checked numerics |
 | `heuristic-distinct` | With one solution already published, a request for three in mode 2 returns that solution first and two new ones, three distinct kernels in all, with no JIT report |
 | `heuristic-unsupported` | A problem the backend cannot rank (K=0) in modes 1 and 2: exactly one `hipblaslt error: JIT predict failed` line naming the reason across two handles, two queries and both APIs; the queries return no results with the status the mode defines, and nothing is published |
@@ -206,9 +206,7 @@ on the simulator that `HSA_MODEL_TOPOLOGY` and `HSA_MODEL_LIB` select. Simulator
 runs are manual: neither the shared driver nor CI runs `--ffm`.
 `--bundle` adds the checks for a TensileLite source bundle, or for a full-build
 bundle kept with `--keep-build-tmp`, whose code objects are then compared with
-the comgr-built ones. `--expect-comgr-cache present|absent` adds the comgr cache
-check that the `comgr-cache` route runs; that check expects `XDG_CACHE_HOME`
-and `HOME` to name existing scratch directories. `--only` selects tests by name.
+the comgr-built ones. `--only` selects tests by name.
 
 `test_gfx1250_jit_gemm.py <code-object-test> <request> <compiler> <fresh-output>`
 runs the `jit-gemm-gfx1250` route. The driver passes

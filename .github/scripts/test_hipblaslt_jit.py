@@ -53,7 +53,6 @@ def main():
             "code-object",
             "code-object-gfx1250",
             "jit-gemm-gfx1250",
-            "comgr-cache",
             "streamk-api",
             "amax-api",
             "alpha-zero-api",
@@ -185,21 +184,6 @@ def main():
             ],
             {},
             600,
-        ),
-        (
-            "comgr-cache",
-            [
-                sys.executable,
-                str(
-                    source / "projects/hipblaslt/clients/tests/jit/test_comgr_cache.py"
-                ),
-                str(staging / "hipblaslt-jit-code-object-test"),
-                str(output / "comgr-cache"),
-                "--architecture",
-                args.architecture,
-            ],
-            {},
-            300,
         ),
     ]
 

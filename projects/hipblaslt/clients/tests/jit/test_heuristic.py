@@ -171,10 +171,7 @@ def forced(run, output):
             name, ["--api", "both", "--requested", "2"], drop, HIPBLASLT_JIT="2"
         )
         check_jit_results(stderr, records, ("c", "cpp"), 2)
-    require(
-        not (output / "xdg/comgr").exists(), "JIT processes used comgr's on-disk cache"
-    )
-    print("PASS heuristic-forced: only JIT solutions, comgr cache off")
+    print("PASS heuristic-forced: only JIT solutions")
 
 
 def cache_hit(run, output):

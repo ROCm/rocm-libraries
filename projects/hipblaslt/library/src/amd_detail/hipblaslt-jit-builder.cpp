@@ -3,11 +3,8 @@
 
 #include "hipblaslt-jit-code-object.hpp"
 #include "hipblaslt-jit-component.hpp"
-#include "utility.hpp"
 #include <algorithm>
-#include <cstdlib>
 #include <fstream>
-#include <mutex>
 #include <set>
 #include <sstream>
 #include <system_error>
@@ -89,7 +86,6 @@ namespace hipblaslt_jit
                          const GenerationRequest& request,
                          BuiltSolution&           built) const override
             {
-                prepareComgr();
                 built             = {};
                 const auto target = co::Target::fromTargetId(request.target.targetId);
                 co::Options options;
@@ -216,19 +212,5 @@ namespace hipblaslt_jit
     std::shared_ptr<const CodeObjectBuilder> makeComgrBuilder()
     {
         return std::make_shared<const ComgrBuilder>();
-    }
-
-    void prepareComgr()
-    {
-        static std::once_flag once;
-        std::call_once(once, [] {
-            const auto  setting = co::prepareProcessEnvironment();
-            const char* value   = std::getenv("AMD_COMGR_CACHE");
-            std::string message = std::string("comgr cache: ") + co::toString(setting)
-                                  + " (AMD_COMGR_CACHE=" + (value ? value : "unset") + ")";
-            if(setting == co::ComgrCache::DisabledLate)
-                message += "; a comgr action before this one may have fixed the previous value";
-            log_info("prepareComgr", message);
-        });
     }
 }
