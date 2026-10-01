@@ -48,8 +48,8 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
     {
         transforms_per_block_unscaled = transforms_per_block;
 
-        transforms_per_block *= max_factor_pp;
-        workgroup_size *= max_factor_pp;
+        transforms_per_block *= pp_factors_prod;
+        workgroup_size *= pp_factors_prod;
 
         // c2r runs the SBCC first, so that is the kernel doing steps 1/2
         partial_pass_steps = transform_type_pp == rocfft_transform_type_real_inverse
@@ -105,12 +105,12 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
 
     unsigned int launcher_workgroup_size() override
     {
-        return workgroup_size / max_factor_pp;
+        return workgroup_size / pp_factors_prod;
     }
 
     unsigned int launcher_transforms_per_block() override
     {
-        return transforms_per_block / max_factor_pp;
+        return transforms_per_block / pp_factors_prod;
     }
 
     // blocks are arranged as tiles along dim1 within each off-dimension group
@@ -273,8 +273,8 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
             // steps 3/4 covers pp_factors_prod consecutive off-dimension points
             // per block, so the block base has to be scaled up to match
             offset_pp_value
-                = offset + Parens(offset / lengths[1]) * (lengths[1] * pp_factors_prod - lengths[1])
-                  + batch * stride[dim];
+                = offset_pp_value
+                  + Parens(offset / lengths[1]) * (lengths[1] * pp_factors_prod - lengths[1]);
         }
         stmts += Declaration(offset_pp, offset_pp_value);
 
@@ -344,7 +344,7 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
                 = [&](unsigned int i) { return (thread_pp + i * stripmine_h) * stride0; };
             auto offset_tile_wlds = [&](unsigned int i) {
                 return tid_hor_lds * stride_lds
-                       + (thread_lds + i * stripmine_h * max_factor_pp) * 1;
+                       + (thread_lds + i * stripmine_h * pp_factors_prod) * 1;
             };
 
             for(unsigned int i = 0; i < length / stripmine_h; ++i)
@@ -414,7 +414,7 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
                    + (thread_pp + i * stripmine_h) * stride0;
         };
         auto offset_tile_rlds = [&](unsigned int i) {
-            return tid_hor_lds * stride_lds + (thread_lds + i * stripmine_h * max_factor_pp) * 1;
+            return tid_hor_lds * stride_lds + (thread_lds + i * stripmine_h * pp_factors_prod) * 1;
         };
 
         for(unsigned int i = 0; i < length / stripmine_h; ++i)
@@ -445,8 +445,8 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
 
         for(unsigned int w = 0; w < width; ++w)
         {
-            const auto tid = Parens{thread + dt + h * threads_per_transform * max_factor_pp};
-            const auto idx = offset_lds + (tid + w * (length / width) * max_factor_pp) * lstride;
+            const auto tid = Parens{thread + dt + h * threads_per_transform * pp_factors_prod};
+            const auto idx = offset_lds + (tid + w * (length / width) * pp_factors_prod) * lstride;
             work += Assign(l_offset, idx);
 
             switch(component)
@@ -478,14 +478,16 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
             hr = h;
         StatementList work;
 
+        // every main-transform element owns pp_factors_prod interleaved slots
+        const auto cumheight_lds = cumheight * pp_factors_prod;
+
         for(unsigned int w = 0; w < width; ++w)
         {
-            const auto tid = thread + dt + h * threads_per_transform * max_factor_pp;
-            const auto idx
-                = offset_lds
-                  + (Parens{tid / (cumheight * max_factor_pp)} * (width * cumheight * max_factor_pp)
-                     + tid % (cumheight * max_factor_pp) + w * cumheight * max_factor_pp)
-                        * lstride;
+            const auto tid = thread + dt + h * threads_per_transform * pp_factors_prod;
+            const auto idx = offset_lds
+                             + (Parens{tid / cumheight_lds} * (width * cumheight_lds)
+                                + tid % cumheight_lds + w * cumheight_lds)
+                                   * lstride;
             work += Assign(l_offset, idx);
 
             switch(component)
@@ -560,7 +562,7 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
                          height,
                          ThreadGuardMode::GUARD_BY_IF,
                          false,
-                         max_factor_pp);
+                         pp_factors_prod);
         return f;
     }
 
@@ -677,7 +679,7 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
                                 height,
                                 ThreadGuardMode::GUARD_BY_IF,
                                 false,
-                                max_factor_pp);
+                                pp_factors_prod);
                 body += lds2reg_full;
 
                 auto apply_twiddle
@@ -710,7 +712,7 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
                     height,
                     ThreadGuardMode::GUARD_BY_IF,
                     false,
-                    max_factor_pp);
+                    pp_factors_prod);
 
                 body += reg2lds_full;
             }
@@ -785,10 +787,10 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
         body += CommentLines{"calc the thread_in_device value once and for all device funcs"};
         body += Declaration{thread_in_device,
                             Ternary{lds_linear,
-                                    thread_id % (threads_per_transform * max_factor_pp),
+                                    thread_id % (threads_per_transform * pp_factors_prod),
                                     thread_id / transforms_per_block}};
         body += Declaration{thread_in_device_twd,
-                            Parens(thread_id / max_factor_pp) % threads_per_transform};
+                            Parens(thread_id / pp_factors_prod) % threads_per_transform};
 
         // before starting the transform job (core device function)
         // we call a re-load lds-to-reg function here, but it's not always doing things.

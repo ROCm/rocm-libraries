@@ -1175,8 +1175,9 @@ void SBCCPPNode::SetupGridParam_internal(GridParam& gp)
     gp.wgs_x = wgs;
 
     // Grid arrangement is different than regular SBCC
-    // for improved global memory access patterns.
-    auto factor = *std::max_element(kernelFactorsPP.begin(), kernelFactorsPP.end());
+    // for improved global memory access patterns.  A block covers every
+    // off-dimension point that this kernel's partial pass transforms.
+    auto factor = product(kernelFactorsPP.begin(), kernelFactorsPP.end());
 
     gp.b_x /= factor;
     gp.wgs_x *= factor;

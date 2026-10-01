@@ -56,12 +56,19 @@ struct StockhamPartialPassKernel : public StockhamKernel
                                        : (params.off_dim + 1) % params.parent_length.size();
         length_pp                = params.parent_length[off_dim_index];
         factors_pp               = params.pp_factors_curr;
-        max_factor_pp            = *std::max_element(factors_pp.begin(), factors_pp.end());
         factors_pp_other         = params.pp_factors_other;
         pp_factors_prod          = product(factors_pp.begin(), factors_pp.end());
         pp_factors_other_prod    = product(factors_pp_other.begin(), factors_pp_other.end());
         threads_per_transform_pp = params.pp_threads_per_transform;
         transforms_per_block_pp  = workgroup_size / threads_per_transform_pp;
+
+        // the interleaved layout addresses LDS per transform point, so a thread
+        // has to own a whole number of off-dimension transforms
+        if(lds_column_pattern == LDSColumnPattern::OFF_DIM_INTERLEAVED && factors_pp.size() > 1
+           && length % (threads_per_transform * pp_factors_prod) != 0)
+            throw std::runtime_error(
+                "interleaved partial pass with multiple factors needs length divisible by "
+                "threads_per_transform * pp_factors_prod");
 
         if(!transform_type.has_value())
             throw std::runtime_error("transform_type is not set");
@@ -72,7 +79,6 @@ struct StockhamPartialPassKernel : public StockhamKernel
     StockhamPartialPassParams params;
 
     unsigned int              off_dim_index;
-    unsigned int              max_factor_pp;
     unsigned int              pp_factors_prod;
     unsigned int              pp_factors_other_prod;
     std::vector<unsigned int> factors_pp_other;
@@ -176,6 +182,11 @@ struct StockhamPartialPassKernel : public StockhamKernel
         return work;
     }
 
+    // A thread's slice of the interleaved column holds its transform points back
+    // to back, each point's pp_factors_prod off-dimension values contiguous, so
+    // butterfly hr belongs to point hr / nbutterfly and gathers its inputs from
+    // within that point.  Collapses to a straight copy for a single-factor
+    // partial pass, where one butterfly covers the whole off-dimension.
     StatementList load_off_dim_interleaved_lds_generator(
         unsigned int h, unsigned int hr, unsigned int width, unsigned int dt, Expression guard)
     {
@@ -183,9 +194,14 @@ struct StockhamPartialPassKernel : public StockhamKernel
             hr = h;
         StatementList work;
 
+        const auto nbutterfly = pp_factors_prod / width;
+        const auto base       = (hr / nbutterfly) * pp_factors_prod;
+        const auto butterfly  = hr % nbutterfly;
+
         for(unsigned int w = 0; w < width; ++w)
-            work += Assign(R[hr * width + w],
-                           lds_complex[offset_lds + (hr * width + w) * stride_lds]);
+            work += Assign(
+                R[hr * width + w],
+                lds_complex[offset_lds + (base + butterfly + w * nbutterfly) * stride_lds]);
 
         return work;
     }
@@ -215,16 +231,28 @@ struct StockhamPartialPassKernel : public StockhamKernel
         return work;
     }
 
-    StatementList store_off_dim_interleaved_lds_generator(
-        unsigned int h, unsigned int hr, unsigned int width, unsigned int dt, Expression guard)
+    StatementList store_off_dim_interleaved_lds_generator(unsigned int h,
+                                                          unsigned int hr,
+                                                          unsigned int width,
+                                                          unsigned int dt,
+                                                          Expression   guard,
+                                                          unsigned int cumheight)
     {
         if(hr == 0)
             hr = h;
         StatementList work;
 
+        const auto nbutterfly = pp_factors_prod / width;
+        const auto base       = (hr / nbutterfly) * pp_factors_prod;
+        const auto butterfly  = hr % nbutterfly;
+
         for(unsigned int w = 0; w < width; ++w)
-            work += Assign(lds_complex[offset_lds + (hr * width + w) * stride_lds],
-                           R[hr * width + w]);
+        {
+            const auto idx = base + (butterfly / cumheight) * (width * cumheight)
+                             + butterfly % cumheight + w * cumheight;
+
+            work += Assign(lds_complex[offset_lds + idx * stride_lds], R[hr * width + w]);
+        }
 
         return work;
     }
@@ -410,10 +438,11 @@ struct StockhamPartialPassKernel : public StockhamKernel
         auto store_lds
             = std::mem_fn(&StockhamPartialPassKernel::store_off_dim_interleaved_lds_generator);
         // last pass of store (partial-pass)
-        unsigned int width  = factors_pp.back();
-        float        height = static_cast<float>(length) / width / threads_per_transform;
+        unsigned int width     = factors_pp.back();
+        float        height    = static_cast<float>(length) / width / threads_per_transform;
+        unsigned int cumheight = product(factors_pp.begin(), factors_pp.end() - 1);
         body += SyncThreads();
-        body += add_work(std::bind(store_lds, this, _1, _2, _3, _4, _5),
+        body += add_work(std::bind(store_lds, this, _1, _2, _3, _4, _5, cumheight),
                          width,
                          height,
                          ThreadGuardMode::NO_GUARD);
@@ -482,16 +511,22 @@ struct StockhamPartialPassKernel : public StockhamKernel
         if(hr == 0)
             hr = h;
         StatementList work;
+
+        // when the off-dimension is interleaved into the LDS column, hr walks
+        // the main transform and the off-dimension index is known at generation
+        // time from the butterfly this register belongs to
+        const auto butterfly = hr % (pp_factors_prod / width);
+        const auto off_dim = (butterfly / cumheight) * (width * cumheight) + butterfly % cumheight;
+
         for(unsigned int w = 0; w < width; ++w)
         {
             auto tid = thread + dt + h * threads_per_transform_pp;
-            // when the off-dimension is interleaved into the LDS column, hr
-            // walks the main transform and w alone indexes the off-dimension
-            auto tidx = lds_column_pattern == LDSColumnPattern::NON_INTERLEAVED
-                            ? Expression{thread_pp * Literal(length_pp)
-                                         + (Parens{tid / cumheight} * (width * cumheight)
-                                            + tid % cumheight + w * cumheight)}
-                            : Expression{thread_pp * Literal(length_pp) + w * cumheight};
+            auto tidx
+                = lds_column_pattern == LDSColumnPattern::NON_INTERLEAVED
+                      ? Expression{thread_pp * Literal(length_pp)
+                                   + (Parens{tid / cumheight} * (width * cumheight)
+                                      + tid % cumheight + w * cumheight)}
+                      : Expression{thread_pp * Literal(length_pp) + (off_dim + w * cumheight)};
             auto ridx = hr * width + w;
 
             work += Assign(W, twiddles_pp[tidx]);
@@ -509,6 +544,53 @@ struct StockhamPartialPassKernel : public StockhamKernel
         tpls.append(lds_linear);
         tpls.append(direct_load_to_reg);
         return tpls;
+    }
+
+    // The Stockham shuffle between two partial-pass radix passes goes through
+    // LDS in both layouts.  Only the addressing and the work decomposition
+    // differ: one LDS column per transform splits the off-dimension across
+    // threads_per_transform_pp threads, while interleaving it into the column
+    // gives each thread a private slice of its own transform points.
+    StatementList add_pp_lds2reg_work(unsigned int width, float height)
+    {
+        if(lds_column_pattern == LDSColumnPattern::NON_INTERLEAVED)
+        {
+            auto load_lds
+                = std::mem_fn(&StockhamPartialPassKernel::load_non_interleaved_lds_generator);
+            return add_pp_work(std::bind(load_lds, this, _1, _2, _3, _4, _5),
+                               width,
+                               height,
+                               ThreadGuardMode::GUARD_BY_IF,
+                               true);
+        }
+
+        auto load_lds
+            = std::mem_fn(&StockhamPartialPassKernel::load_off_dim_interleaved_lds_generator);
+        return add_work(std::bind(load_lds, this, _1, _2, _3, _4, _5),
+                        width,
+                        height,
+                        ThreadGuardMode::NO_GUARD);
+    }
+
+    StatementList add_pp_reg2lds_work(unsigned int width, float height, unsigned int cumheight)
+    {
+        if(lds_column_pattern == LDSColumnPattern::NON_INTERLEAVED)
+        {
+            auto store_lds
+                = std::mem_fn(&StockhamPartialPassKernel::store_non_interleaved_lds_generator);
+            return add_pp_work(std::bind(store_lds, this, _1, _2, _3, _4, _5, cumheight),
+                               width,
+                               height,
+                               ThreadGuardMode::GUARD_BY_IF,
+                               false);
+        }
+
+        auto store_lds
+            = std::mem_fn(&StockhamPartialPassKernel::store_off_dim_interleaved_lds_generator);
+        return add_work(std::bind(store_lds, this, _1, _2, _3, _4, _5, cumheight),
+                        width,
+                        height,
+                        ThreadGuardMode::NO_GUARD);
     }
 
     ArgumentList device_pp_steps_1_2_arguments()
@@ -567,21 +649,12 @@ struct StockhamPartialPassKernel : public StockhamKernel
                     + " butterflies",
                 "therefore each thread will do " + std::to_string(height) + " butterflies"};
 
-            auto load_lds
-                = std::mem_fn(&StockhamPartialPassKernel::load_non_interleaved_lds_generator);
-            auto store_lds
-                = std::mem_fn(&StockhamPartialPassKernel::store_non_interleaved_lds_generator);
-
             if(npass > 0)
             {
                 // internal full lds2reg (both linear/nonlinear variants)
                 StatementList lds2reg_full;
                 lds2reg_full += SyncThreads();
-                lds2reg_full += add_pp_work(std::bind(load_lds, this, _1, _2, _3, _4, _5),
-                                            width,
-                                            height,
-                                            ThreadGuardMode::GUARD_BY_IF,
-                                            true);
+                lds2reg_full += add_pp_lds2reg_work(width, height);
                 body += If{Not{lds_is_real}, lds2reg_full};
 
                 auto apply_twiddle
@@ -612,12 +685,7 @@ struct StockhamPartialPassKernel : public StockhamKernel
                     reg2lds_full += If{!direct_load_to_reg, {SyncThreads()}};
                 else
                     reg2lds_full += SyncThreads();
-                reg2lds_full
-                    += add_pp_work(std::bind(store_lds, this, _1, _2, _3, _4, _5, cumheight),
-                                   width,
-                                   height,
-                                   ThreadGuardMode::GUARD_BY_IF,
-                                   false);
+                reg2lds_full += add_pp_reg2lds_work(width, height, cumheight);
 
                 body += reg2lds_full;
             }
@@ -676,21 +744,12 @@ struct StockhamPartialPassKernel : public StockhamKernel
                     + " butterflies",
                 "therefore each thread will do " + std::to_string(height) + " butterflies"};
 
-            auto load_lds
-                = std::mem_fn(&StockhamPartialPassKernel::load_non_interleaved_lds_generator);
-            auto store_lds
-                = std::mem_fn(&StockhamPartialPassKernel::store_non_interleaved_lds_generator);
-
             if(npass > 0)
             {
                 // internal full lds2reg (both linear/nonlinear variants)
                 StatementList lds2reg_full;
                 lds2reg_full += SyncThreads();
-                lds2reg_full += add_pp_work(std::bind(load_lds, this, _1, _2, _3, _4, _5),
-                                            width,
-                                            height,
-                                            ThreadGuardMode::GUARD_BY_IF,
-                                            true);
+                lds2reg_full += add_pp_lds2reg_work(width, height);
                 body += If{Not{lds_is_real}, lds2reg_full};
 
                 auto apply_twiddle
@@ -714,12 +773,7 @@ struct StockhamPartialPassKernel : public StockhamKernel
             {
                 StatementList reg2lds_full;
                 reg2lds_full += SyncThreads();
-                reg2lds_full
-                    += add_pp_work(std::bind(store_lds, this, _1, _2, _3, _4, _5, cumheight),
-                                   width,
-                                   height,
-                                   ThreadGuardMode::GUARD_BY_IF,
-                                   false);
+                reg2lds_full += add_pp_reg2lds_work(width, height, cumheight);
 
                 body += reg2lds_full;
             }
