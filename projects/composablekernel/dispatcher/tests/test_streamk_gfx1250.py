@@ -27,6 +27,7 @@ DISPATCHER_DIR = SCRIPT_DIR.parent
 CK_ROOT = DISPATCHER_DIR.parent
 sys.path.insert(0, str(DISPATCHER_DIR / "python"))
 
+import gemm_utils  # noqa: E402
 from gemm_utils import _SUPPORTED_ARCHES, expand_sweep  # noqa: E402
 
 GFX1250_CONFIG = (
@@ -130,6 +131,65 @@ class TestGfx1250StreamKExpansion(unittest.TestCase):
                 variant="stream_k",
             )
 
+    def test_k_block_divides_across_all_k_waves(self):
+        with open(GFX1250_CONFIG) as f:
+            cfg = json.load(f)
+        cfg["tile_config"]["warp_k"]["values"] = [2]
+        cfg["tile_config"]["warp_tile_k"]["values"] = [32]
+        cfg["tile_config"]["tile_k"]["values"] = [32, 64, 96, 128]
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.json"
+            config_path.write_text(json.dumps(cfg))
+            # Isolate K divisibility from the independent architecture/trait validators.
+            with patch.object(
+                gemm_utils, "_warp_config_supported", return_value=True
+            ), patch.object(
+                gemm_utils._cu,
+                "validate_kernel_config",
+                return_value=SimpleNamespace(is_valid=True),
+            ):
+                configs = expand_sweep(
+                    str(config_path),
+                    "gfx1250",
+                    dtype="fp16",
+                    layout="rcr",
+                    variant="stream_k",
+                )
+        self.assertEqual({c.tile_k for c in configs}, {64, 128})
+        self.assertEqual(len(configs), 4)
+
+    def test_gfx1250_streamk_compile_command_has_architecture_features(self):
+        config = self._expand()[0]
+        from dispatcher_common import arch_feature_defines, unified_framework_flags
+
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp)
+            with patch.object(
+                gemm_utils._cu, "get_build_dir", return_value=build
+            ), patch.object(
+                gemm_utils._cu,
+                "get_generated_kernels_dir",
+                return_value=build / "generated",
+            ), patch.object(
+                gemm_utils, "_resolve_hipcc", return_value="hipcc"
+            ):
+                job, _ = gemm_utils._build_compile_jobs(config, build / "kernel.hpp")
+        command = job["compile_cmd"]
+        self.assertIn("--offload-arch=gfx1250", command)
+        self.assertIn("-DCK_TILE_USE_WMMA=1", command)
+        self.assertIn("-DCK_USE_GFX1250", command)
+        self.assertIn("-DCK_GFX1250_SUPPORT", command)
+        for define in arch_feature_defines("gfx1250") + unified_framework_flags(
+            "gfx1250"
+        ):
+            self.assertIn(define, command)
+        self.assertTrue(
+            any(arg.endswith("streamk_gemm_ctypes_lib.cpp") for arg in command)
+        )
+        self.assertFalse(
+            any(arg.endswith("libck_tile_dispatcher.a") for arg in job["link_cmd"])
+        )
+
 
 class TestGfx1250StreamKDriver(unittest.TestCase):
     @classmethod
@@ -187,7 +247,9 @@ class TestGfx1250StreamKDriver(unittest.TestCase):
                         sys.modules["gemm_utils"], "_default_use_ocp", return_value=True
                     ), patch.object(
                         np.random, "randn", side_effect=[a / 0.1, b / 0.1]
-                    ), contextlib.redirect_stdout(output):
+                    ), contextlib.redirect_stdout(
+                        output
+                    ):
                         self.worker._run_one(
                             0,
                             "unused.so",
