@@ -26,6 +26,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -419,9 +420,7 @@ struct NodeMetaData
     std::vector<size_t>     length;
     std::vector<size_t>     outputLength;
     std::vector<size_t>     inStride, outStride;
-    std::vector<size_t>     inStrideBlue, outStrideBlue;
     size_t                  iDist = 0, oDist = 0;
-    size_t                  iDistBlue = 0, oDistBlue = 0;
     size_t                  iOffset = 0, oOffset = 0;
     int                     direction         = -1;
     rocfft_result_placement placement         = rocfft_placement_inplace;
@@ -573,14 +572,116 @@ public:
     // Stride of the FFT in each dimension
     std::vector<size_t> inStride, outStride;
 
-    // Stride of the fused Bluestein FFT in each dimension
-    std::vector<size_t> inStrideBlue, outStrideBlue;
-
     // Distance between consecutive batch members:
     size_t iDist = 0, oDist = 0;
 
-    // Distance between consecutive batch members in fused Bluestein nodes
-    size_t iDistBlue = 0, oDistBlue = 0;
+    // Encapsulation of Bluestein-specific additional members (stored as an
+    // optional instance in TreeNode object, valued only for nodes involved
+    // in a Bluestein algorithm strategy).
+    struct BluesteinParams
+    {
+        BluesteinParams(size_t transformLength, size_t paddedLength, BluesteinType bluesteinType)
+            : type(bluesteinType)
+            , transform_length(transformLength)
+            , padded_length(paddedLength)
+            , fuse(BluesteinFuseType::BFT_NONE)
+        {
+            if(paddedLength + 1 < 2 * transformLength)
+                throw std::invalid_argument(
+                    ROCFFT_CURRENT_FUNCTION
+                    + ": paddedLength is too small for the given transformLength");
+        }
+
+        // Bluestein strategy for this node; fixed at construction.
+        BluesteinType get_type() const
+        {
+            return type;
+        }
+        // Original (unpadded) FFT length "N", always complex.
+        size_t get_transform_length() const
+        {
+            return transform_length;
+        }
+        // Padded convolution length "M >= 2*N - 1", always complex.
+        size_t get_padded_length() const
+        {
+            return padded_length;
+        }
+
+        BluesteinFuseType get_fuse_type() const
+        {
+            return fuse;
+        }
+
+        // Load- and store-side descriptions of the data set in
+        // the convolution buffer (OB_TEMP_BLUESTEIN buffer), valued
+        // for fused-Bluestein's BFT_FWD_CHIRP_MUL and BFT_INV_CHIRP_MUL
+        // stages (only). These stages re-interpret the padded_length as
+        // the product of 2 smaller lengths (1D-via-2D transforms).
+        const std::optional<data_layout_t>& get_conv_buf_layout(io_data_label io) const
+        {
+            return io == io_data_label::INPUT ? conv_buf_layout_in : conv_buf_layout_out;
+        }
+
+        // Set the fused-operation type.  A real (non-BFT_NONE) fuse type
+        // is only valid on a BT_MULTI_KERNEL_FUSED node, and such a node
+        // cannot be reset to BFT_NONE.
+        void set_fuse_type(BluesteinFuseType fuseType)
+        {
+            if((fuseType == BluesteinFuseType::BFT_NONE) != (type != BT_MULTI_KERNEL_FUSED))
+                throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                            + ": a non-BFT_NONE fuse type requires a "
+                                              "BT_MULTI_KERNEL_FUSED node (and vice versa)");
+            fuse = fuseType;
+        }
+
+        void set_conv_buffer_layout(io_data_label io, data_layout_t buffer_layout)
+        {
+            // Only the Hadamard-product stages address OB_TEMP_BLUESTEIN,
+            // on both sides.
+            if(type != BT_MULTI_KERNEL_FUSED
+               || (fuse != BluesteinFuseType::BFT_FWD_CHIRP_MUL
+                   && fuse != BluesteinFuseType::BFT_INV_CHIRP_MUL))
+            {
+                throw std::runtime_error(
+                    ROCFFT_CURRENT_FUNCTION
+                    + ": the Bluestein's convolution buffer's I/O layouts are relevant only for "
+                      "the FWD_CHIRP_MUL and INV_CHIRP_MUL stages of a BT_MULTI_KERNEL_FUSED");
+            }
+            auto buffer_layout_len = buffer_layout.lengths();
+            if(buffer_layout_len.size() < 2
+               || buffer_layout_len[0] * buffer_layout_len[1] != padded_length)
+            {
+                throw std::invalid_argument(
+                    ROCFFT_CURRENT_FUNCTION
+                    + ": the first two length dimensions of the convolution buffer layout must "
+                      "factorize the padded length");
+            }
+            const auto& other_layout = get_conv_buf_layout(other(io));
+            if(other_layout && !other_layout->is_dimensionally_consistent_with(buffer_layout))
+            {
+                throw std::invalid_argument(
+                    ROCFFT_CURRENT_FUNCTION
+                    + ": the I/O layouts of convolution buffers must be dimensionally consistent");
+            }
+
+            if(io == io_data_label::INPUT)
+                conv_buf_layout_in = std::move(buffer_layout);
+            else
+                conv_buf_layout_out = std::move(buffer_layout);
+        }
+
+    private:
+        BluesteinType                type;
+        size_t                       transform_length;
+        size_t                       padded_length;
+        BluesteinFuseType            fuse;
+        std::optional<data_layout_t> conv_buf_layout_in, conv_buf_layout_out;
+    };
+
+    // Bluestein state: set on Bluestein nodes and their non-FFT children;
+    // FFT sub-plans (and their descendants) carry it only in the fused strategy.
+    std::optional<BluesteinParams> blue;
 
     // Offsets to start of data in buffer:
     size_t iOffset = 0, oOffset = 0;
@@ -637,22 +738,11 @@ public:
     ComputeScheme   scheme = CS_NONE;
     OperatingBuffer obIn = OB_UNINIT, obOut = OB_UNINIT;
 
-    // Length of the FFT for computing zero-padded linear convolutions
-    // in Bluestein's algorithm. If Bluestein is required to compute an
-    // FFT of length N, then lengthBlue >= 2N - 1.
-    size_t lengthBlue  = 0;
-    size_t lengthBlueN = 0;
-
     // Index of off-dimension in partial-pass nodes
     size_t ppOffDim = 0;
 
     // Index of current dimension (full pass) in partial-pass nodes
     size_t ppCurrDim = 0;
-
-    //
-    BluesteinType     typeBlue   = BluesteinType::BT_NONE;
-    BluesteinFuseType fuseBlue   = BluesteinFuseType::BFT_NONE;
-    bool              need_chirp = false;
 
     // Device pointers:
     // twiddle memory is owned by the repo
@@ -944,6 +1034,20 @@ public:
     // of user data
     bool IsBluesteinChirpSetup();
 
+    // return true if this node is a fused-Bluestein leaf whose kernel
+    // reads the chirp table.
+    bool NeedsChirp() const;
+
+    BluesteinFuseType GetBluesteinFuseType() const
+    {
+        return blue ? blue->get_fuse_type() : BluesteinFuseType::BFT_NONE;
+    }
+
+    BluesteinType GetBluesteinType() const
+    {
+        return blue ? blue->get_type() : BluesteinType::BT_NONE;
+    }
+
     // Assuming callbacks need to run on this node, return the
     // specific CallbackType for this node - takes into account
     // whether the node is treating real data as complex
@@ -1077,26 +1181,24 @@ public:
         // compute_ptrdiff returns the buffer size (one-past-the-end).
         auto ptrdiff = compute_ptrdiff(io_length, io_stride, batch, io_dist) - 1;
 
+        if(!blue || !blue->get_conv_buf_layout(io))
+            return ptrdiff;
         // Fused Bluestein kernels index the Bluestein work buffer in the same
         // kernel, over the same lengths but with the Bluestein strides + dist.
         // Whichever side reaches further decides the integer type.
-        const auto& io_stride_blue = io == io_data_label::INPUT ? inStrideBlue : outStrideBlue;
-        if(fuseBlue == BFT_NONE || io_stride_blue.size() < io_length.size())
-            return ptrdiff;
+        const auto fuse_type = GetBluesteinFuseType();
 
-        const auto& io_dist_blue = io == io_data_label::INPUT ? iDistBlue : oDistBlue;
-
-        // The INV_CHIRP_MUL CC load and FWD_CHIRP_MUL RC store add lengthBlue to the index
-        // in-kernel, to skip the chirp's FFT stored first in the Bluestein buffer.
-        const bool offset_by_length_blue
-            = (io == io_data_label::INPUT && fuseBlue == BFT_INV_CHIRP_MUL
+        // The INV_CHIRP_MUL CC load and FWD_CHIRP_MUL RC store add the padded length to the
+        // index in-kernel, to skip the chirp's FFT stored first in the Bluestein buffer.
+        const bool offset_by_padded_length
+            = (io == io_data_label::INPUT && fuse_type == BFT_INV_CHIRP_MUL
                && scheme == CS_KERNEL_STOCKHAM_BLOCK_CC)
-              || (io == io_data_label::OUTPUT && fuseBlue == BFT_FWD_CHIRP_MUL
+              || (io == io_data_label::OUTPUT && fuse_type == BFT_FWD_CHIRP_MUL
                   && scheme == CS_KERNEL_STOCKHAM_BLOCK_RC);
 
         return std::max(ptrdiff,
-                        compute_ptrdiff(io_length, io_stride_blue, batch, io_dist_blue) - 1
-                            + (offset_by_length_blue ? lengthBlue : 0));
+                        blue->get_conv_buf_layout(io)->buffer_element_count() - 1
+                            + (offset_by_padded_length ? blue->get_padded_length() : 0));
     };
 
     // Max stride or dist packed into the kernel argument buffer for a given
@@ -1113,26 +1215,27 @@ public:
                                                    : *std::max_element(io_stride.begin(), io_stride.end());
         max_stride             = std::max(max_stride, io_dist);
 
-        if(fuseBlue == BFT_NONE)
+        if(GetBluesteinFuseType() == BFT_NONE)
             return max_stride;
 
         // Fused Bluestein kernels also take the Bluestein lengths, and the
         // higher-dimension Bluestein strides + dist, as integer_type.  See
         // BluesteinData and RTCKernelStockham::get_launch_args.
-        max_stride = std::max({max_stride, lengthBlueN, lengthBlue});
+        // Note: max(padded_length, transform_length) == padded_length by construction.
+        max_stride = std::max(max_stride, blue->get_padded_length());
 
-        // BFT_FWD_CHIRP passes zeros for the Bluestein strides and dist.
-        if(fuseBlue == BFT_FWD_CHIRP)
+        // BFT_FWD_CHIRP does not use the convolution buffer
+        const auto& conv_layout = blue->get_conv_buf_layout(io);
+        if(!conv_layout)
             return max_stride;
 
-        const auto& io_stride_blue = io == io_data_label::INPUT ? inStrideBlue : outStrideBlue;
-        const auto& io_dist_blue   = io == io_data_label::INPUT ? iDistBlue : oDistBlue;
-
-        // Only dims 2 and 3 are packed; dims 0 and 1 are implied by lengthBlue.
+        const auto io_stride_blue = conv_layout->strides();
+        // Only dims 2 and 3 are packed; dims 0 and 1 are implied by
+        // padded_length.
         for(size_t i = 2; i < io_stride_blue.size() && i < 4; ++i)
             max_stride = std::max(max_stride, io_stride_blue[i]);
 
-        return std::max(max_stride, io_dist_blue);
+        return std::max(max_stride, conv_layout->distance());
     };
 
     virtual void GetKernelFactors();

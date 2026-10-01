@@ -386,6 +386,7 @@ add_executable( rocfft_aot_helper
 
 add_executable( rocfft_kernel_config_search
   rocfft_kernel_config_search.cpp
+  data_layout.cpp
   rocfft_stub.cpp
 )
 

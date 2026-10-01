@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -205,7 +205,8 @@ static bool ValidOutBufferBluestein(TreeNode& node)
     //   (2) chirp / input Hadamard product + padding + forward fft
 
     // First check multi-kernel fused Bluestein implementation
-    if((node.fuseBlue == BFT_FWD_CHIRP || node.fuseBlue == BFT_FWD_CHIRP_MUL)
+    if((node.GetBluesteinFuseType() == BFT_FWD_CHIRP
+        || node.GetBluesteinFuseType() == BFT_FWD_CHIRP_MUL)
        && node.scheme == CS_KERNEL_STOCKHAM_BLOCK_RC)
     {
         return true;
@@ -303,10 +304,11 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
     // the input side of an in-place R2C transform (which the plan
     // would normally call OB_USER_OUT).
     auto dataFits = [&execPlan](const TreeNode& node, OperatingBuffer buffer) {
-        auto outLengthBlueN = {node.lengthBlueN};
-        auto nodeLen        = (node.fuseBlue == BFT_NONE) ? node.GetOutputLength() : outLengthBlueN;
-        auto bufLen         = buffer == OB_USER_OUT ? execPlan.rootPlan->GetOutputLength()
-                                                    : execPlan.rootPlan->length;
+        auto nodeLen = node.GetBluesteinFuseType() == BFT_NONE
+                           ? node.GetOutputLength()
+                           : std::vector<size_t>{node.blue->get_transform_length()};
+        auto bufLen  = buffer == OB_USER_OUT ? execPlan.rootPlan->GetOutputLength()
+                                             : execPlan.rootPlan->length;
 
         // if node's output is complex and buffer's format is real,
         // adjust output length to be 2x to make the units of
@@ -380,12 +382,12 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
     // second node in multi-kernel fused Bluestein must write only to
     // two specific buffers
     else if((buffer == OB_USER_OUT || buffer == OB_TEMP_CMPLX_FOR_REAL)
-            && node.fuseBlue == BFT_FWD_CHIRP_MUL)
+            && node.GetBluesteinFuseType() == BFT_FWD_CHIRP_MUL)
     {
         test_result = false;
     }
     // third node in multi-kernel fused Bluestein must not write to OB_TEMP_CMPLX_FOR_REAL
-    else if(buffer == OB_TEMP_CMPLX_FOR_REAL && node.fuseBlue == BFT_INV_CHIRP_MUL)
+    else if(buffer == OB_TEMP_CMPLX_FOR_REAL && node.GetBluesteinFuseType() == BFT_INV_CHIRP_MUL)
     {
         test_result = false;
     }
@@ -424,8 +426,9 @@ static void RecursiveTraverse(TreeNode* node, const std::function<void(TreeNode*
 bool AssignmentPolicy::CheckAssignmentValid(ExecPlan& execPlan)
 {
     auto getBufSize = [](TreeNode* node, bool input) {
-        auto lengthBlueN = {node->lengthBlueN};
-        auto outputLen   = node->fuseBlue == BFT_NONE ? node->GetOutputLength() : lengthBlueN;
+        auto outputLen = node->GetBluesteinFuseType() == BFT_NONE
+                             ? node->GetOutputLength()
+                             : std::vector<size_t>{node->blue->get_transform_length()};
 
         if(input)
             return compute_ptrdiff(node->length, node->inStride, node->batch, node->iDist);
@@ -571,7 +574,7 @@ void AssignmentPolicy::FindBluesteinFusedNodes(ExecPlan&               execPlan,
     execPlan.rootPlan->AssignParams();
 
     for(const auto& node : blueNodes)
-        if(node->typeBlue == BT_MULTI_KERNEL_FUSED)
+        if(node->GetBluesteinType() == BT_MULTI_KERNEL_FUSED)
             fusedNodes.emplace_back(node);
 }
 
@@ -798,7 +801,7 @@ void AssignmentPolicy::Enumerate(PlacementTrace*   parent,
         // bluestein setup kernels can input/output bluestein buffer only.
         do
         {
-            if(blueNode->typeBlue != BT_MULTI_KERNEL_FUSED)
+            if(blueNode->GetBluesteinType() != BT_MULTI_KERNEL_FUSED)
             {
                 // chirp setup nodes must use bluestein buffer, not
                 // connected to other nodes, so just set their buffers
