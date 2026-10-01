@@ -26,12 +26,17 @@ corpus_dir: /shared/sweeps/ingestor/corpora
 # machine and the benchmark's reported gpu_arch. A family or marketing name is refused.
 arch: gfx950
 
-# engine_name is the identity the BENCHMARK RESULT rows carry, matched exactly; a prefix
-# match would credit a sibling engine's work to this one. engine_ued_name is what the
-# INSTALLED ENGINE registry advertises, which discovery resolves to a numeric engine ID.
-# Usually the same string, declared separately because a mismatch is the finding.
-engine_name: hipkernel:AttentionDenseGfx950
-engine_ued_name: hipkernel:AttentionDenseGfx950
+# engine_ued_name is what the INSTALLED ENGINE registry advertises; discovery resolves
+# it to a numeric engine ID. List both with
+#   <install>/bin/hipdnn_list_engines --plugin-dir <install>/lib/hipdnn_plugins/engines
+# which prints e.g. `hipkernel:Gfx950AttentionDense (0x89C9139111D7C3A5)`.
+# engine_name is a label of that engine, matched exactly (a prefix match would credit a
+# sibling engine's work to this one): the UED name, or engine_<hex ID> with the ID
+# unsigned (engine_0x89c9139111d7c3a5) or signed (engine_-0x7636ec6eee283c5b, what
+# dnn-benchmark writes for an ingestor engine). Result rows carrying any of the three
+# are attributed when their engine_id is the discovered ID.
+engine_name: hipkernel:Gfx950AttentionDense
+engine_ued_name: hipkernel:Gfx950AttentionDense
 
 # Corpora are measured separately and never merged: published is what the kernel team
 # judges themselves on, servable is what this integration generated for.

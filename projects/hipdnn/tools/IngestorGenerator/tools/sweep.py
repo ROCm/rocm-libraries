@@ -477,12 +477,11 @@ def discover_engine(config, arm, env, destination):
             "installed engine discovery did not uniquely identify engine_ued_name"
         )
     engine_id = selected[0]
-    if config["engine_name"] not in (
-        config["engine_ued_name"],
-        f"engine_{engine_id:#x}",
-    ):
+    labels = engine_labels(config["engine_ued_name"], engine_id)
+    if config["engine_name"] not in labels:
         raise GateError(
-            "engine_name does not match the installed name or exact engine-ID fallback"
+            f"engine_name {config['engine_name']!r} is not a label of the installed "
+            f"engine; use one of {list(labels)}"
         )
     return engine_id
 
@@ -525,6 +524,41 @@ def signed64(engine_id):
     identity, two spellings, converted here rather than in each caller.
     """
     return engine_id - (1 << 64) if engine_id >= (1 << 63) else engine_id
+
+
+def engine_labels(ued_name, engine_id):
+    """Every `engine_name` dnn-benchmark can give this engine's rows.
+
+    The benchmark labels a row with the registered name when the bindings resolve one,
+    else `engine_{id:#x}` of the ID its bindings return, which is signed int64: an ID
+    with the top bit set (hipkernel:Gfx950AttentionDense is 0x89C9139111D7C3A5) is
+    printed as `engine_-0x7636ec6eee283c5b`. The unsigned spelling is what discovery
+    prints. All three name one engine; the row's engine_id still has to agree.
+    """
+    return (
+        ued_name,
+        f"engine_{engine_id:#x}",
+        f"engine_{signed64(engine_id):#x}",
+    )
+
+
+def _is_reference(row, provider):
+    """True when a result row is the validation provider's row, not an engine's.
+
+    An explicit `role` decides. dnn-benchmark through at least 73fff8a never writes
+    one (its timed reference row keeps the default role, which to_dict omits), so a
+    row without `role` is the reference when it is the configured provider's row with
+    the reference engine_id 0. Any other unlabelled row is an engine row.
+    """
+    if "role" in row:
+        return row["role"] == "reference"
+    engine_id = row.get("engine_id")
+    return (
+        provider is not None
+        and row.get("provider") == provider
+        and type(engine_id) is int
+        and engine_id == 0
+    )
 
 
 def evaluate_phase(
@@ -591,6 +625,8 @@ def evaluate_phase(
         errors.append(f"result parse: {exc}")
         rows = {}
         metadata = None
+    labels = engine_labels(config["engine_ued_name"], engine_id)
+    wanted = config["correctness"]["reference"]
     for source in inventory:
         name = source["graph_name"]
         entry = {
@@ -610,15 +646,14 @@ def evaluate_phase(
             if not isinstance(row, dict):
                 entry.update(outcome="ambiguous", reason="non-mapping result row")
                 continue
-            if row.get("role", "engine") == "reference":
+            if _is_reference(row, wanted):
                 references.append(row)
                 continue
-            if row.get("engine_name") == config["engine_name"]:
+            if row.get("engine_name") in labels:
                 candidates.append(row)
         # A reference row is only evidence when it names the requested provider and
         # actually ran: a silently skipped reference leaves every engine row with
         # tolerance_match null, which the suite counts as a pass.
-        wanted = config["correctness"]["reference"]
         chosen = [
             r
             for r in references
