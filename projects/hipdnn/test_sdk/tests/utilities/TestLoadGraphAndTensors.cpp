@@ -46,7 +46,7 @@ void writeVectorToFile(const std::filesystem::path& filename, const std::vector<
     ASSERT_TRUE(f.good());
 
     f.write(reinterpret_cast<const char*>(values.data()),
-            static_cast<std::streamsize>(values.size() * sizeof(int)));
+            static_cast<std::streamsize>(values.size() * sizeof(T)));
 }
 } // namespace
 
@@ -386,6 +386,116 @@ TEST(TestLoadGraphAndTensors, LoadsRaggedBundle)
             = dynamic_cast<const RaggedTensorBase<hipdnn_data_sdk::types::bfloat16>*>(tensor.get());
         ASSERT_NE(raggedTensor, nullptr);
         EXPECT_EQ(raggedTensor->raggedOffset(), res.tensorMap.at(raggedOffsetUid).get());
+    }
+}
+
+namespace
+{
+
+constexpr int64_t RAGGED_X_UID = 0;
+constexpr int64_t RAGGED_Y_UID = 5;
+constexpr int64_t RAGGED_OFFSET_UID = 6;
+
+std::string raggedTensorJson(int64_t uid, int64_t raggedOffsetUid)
+{
+    return R"({"name": "", "uid": )" + std::to_string(uid)
+           + R"(, "strides": [8, 2, 2, 1], "dims": [2, 4, 1, 2], "data_type": "float", )"
+             R"("virtual": false, "ragged_offset_tensor_uid": )"
+           + std::to_string(raggedOffsetUid) + "}";
+}
+
+std::string denseStatsTensorJson(int64_t uid)
+{
+    return R"({"name": "", "uid": )" + std::to_string(uid)
+           + R"(, "strides": [2, 2, 2, 1], "dims": [1, 1, 1, 2], "data_type": "float", )"
+             R"("virtual": false})";
+}
+
+// The offset tensor is declared last so loading must defer the ragged tensors until it exists.
+void writeRaggedBatchnormBundle(const std::filesystem::path& jsonPath,
+                                int64_t referencedOffsetUid,
+                                const std::vector<int32_t>& offsets,
+                                const std::vector<float>& raggedValues)
+{
+    std::ofstream(jsonPath)
+        << R"({"nodes": [{"inputs": {"x_tensor_uid": 0, "mean_tensor_uid": 1, )"
+           R"("inv_variance_tensor_uid": 2, "scale_tensor_uid": 3, "bias_tensor_uid": 4}, )"
+           R"("outputs": {"y_tensor_uid": 5}, "type": "BatchnormInferenceAttributes", )"
+           R"("compute_data_type": "float", "name": ""}], "tensors": [)"
+        << raggedTensorJson(RAGGED_X_UID, referencedOffsetUid) << ", " << denseStatsTensorJson(1)
+        << ", " << denseStatsTensorJson(2) << ", " << denseStatsTensorJson(3) << ", "
+        << denseStatsTensorJson(4) << ", " << raggedTensorJson(RAGGED_Y_UID, referencedOffsetUid)
+        << ", "
+        << R"({"name": "", "uid": 6, "strides": [1, 1, 1, 1], "dims": [3, 1, 1, 1], )"
+           R"("data_type": "int32", "virtual": false}], "io_data_type": "float", )"
+           R"("compute_data_type": "float", "intermediate_data_type": "float", "name": ""})";
+
+    auto basePath = jsonPath;
+    basePath.replace_extension();
+    const auto blobPath = [&](int64_t uid) {
+        return std::filesystem::path(basePath.string() + ".tensor" + std::to_string(uid) + ".bin");
+    };
+
+    const std::vector<float> stats{1.0f, 2.0f};
+    for(const int64_t uid : {1, 2, 3, 4})
+    {
+        writeVectorToFile(blobPath(uid), stats);
+    }
+    writeVectorToFile(blobPath(RAGGED_X_UID), raggedValues);
+    writeVectorToFile(blobPath(RAGGED_Y_UID), raggedValues);
+    writeVectorToFile(blobPath(RAGGED_OFFSET_UID), offsets);
+}
+
+} // namespace
+
+TEST(TestLoadGraphAndTensors, LoadsRaggedTensorsDeclaredBeforeTheirOffset)
+{
+    const ScopedDirectory dir = claimScratchDirectory("load_ragged");
+    const auto jsonPath = dir.path() / "Ragged.json";
+    const std::vector<float> raggedValues{0.5f, 1.5f, 2.5f, 3.5f, 4.5f, 5.5f};
+    writeRaggedBatchnormBundle(jsonPath, RAGGED_OFFSET_UID, {0, 4, 6}, raggedValues);
+
+    auto res = loadGraphAndTensors(jsonPath);
+
+    ASSERT_EQ(res.tensorMap.size(), 7u);
+    EXPECT_EQ(res.outputTensorUids, std::vector<int64_t>{RAGGED_Y_UID});
+    const auto& offsetTensor = res.tensorMap.at(RAGGED_OFFSET_UID);
+    EXPECT_FALSE(offsetTensor->raggedIterationInfo().has_value());
+
+    for(const int64_t uid : {RAGGED_X_UID, RAGGED_Y_UID})
+    {
+        const auto* ragged
+            = dynamic_cast<const RaggedTensorBase<float>*>(res.tensorMap.at(uid).get());
+        ASSERT_NE(ragged, nullptr) << "uid " << uid;
+        EXPECT_EQ(ragged->raggedOffset(), offsetTensor.get()) << "uid " << uid;
+        EXPECT_EQ(ragged->dims(), (std::vector<int64_t>{2, 4, 1, 2})) << "uid " << uid;
+        EXPECT_EQ(ragged->raggedIterationInfo()->rowOffsets, (std::vector<int64_t>{0, 4, 6}))
+            << "uid " << uid;
+        ASSERT_EQ(ragged->elementSpace(), raggedValues.size()) << "uid " << uid;
+
+        const auto* data = static_cast<const float*>(res.tensorMap.at(uid)->rawHostData());
+        EXPECT_EQ(std::vector<float>(data, data + raggedValues.size()), raggedValues)
+            << "uid " << uid;
+    }
+}
+
+TEST(TestLoadGraphAndTensors, ThrowsWhenRaggedOffsetTensorMissing)
+{
+    const ScopedDirectory dir = claimScratchDirectory("load_ragged_missing_offset");
+    const auto jsonPath = dir.path() / "Ragged.json";
+    constexpr int64_t UNDECLARED_UID = 42;
+    writeRaggedBatchnormBundle(jsonPath, UNDECLARED_UID, {0, 4, 6}, std::vector<float>(6, 0.0f));
+
+    try
+    {
+        loadGraphAndTensors(jsonPath);
+        FAIL() << "Expected loadGraphAndTensors to throw";
+    }
+    catch(const std::runtime_error& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("references missing offset tensor 42"),
+                  std::string::npos)
+            << e.what();
     }
 }
 

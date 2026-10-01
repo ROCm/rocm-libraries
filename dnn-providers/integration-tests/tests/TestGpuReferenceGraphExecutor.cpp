@@ -655,6 +655,22 @@ TEST(TestGpuReferenceGraphExecutor, IsNotApplicableForRaggedGraph)
     EXPECT_FALSE(executor.isApplicable(ragged.data(), ragged.size()));
 }
 
+TEST(TestGpuReferenceGraphExecutor, IsNotApplicableForRaggedBinaryGraph)
+{
+    SKIP_IF_NO_DEVICES();
+
+    hipdnn_test_sdk::utilities::PointwiseGraphSpec spec;
+    spec.mode = PointwiseMode::ADD;
+    spec.secondInputDims = spec.inputDims;
+    auto builder = hipdnn_test_sdk::utilities::createPointwiseGraph(spec);
+
+    GpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+
+    auto ragged = markFirstTensorRagged(builder.GetBufferPointer());
+    EXPECT_FALSE(executor.isApplicable(ragged.data(), ragged.size()));
+}
+
 TEST(TestGpuReferenceGraphExecutorFp32, ConvFwdBasicExecutes)
 {
     SKIP_IF_NO_DEVICES();
