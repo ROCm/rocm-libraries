@@ -758,7 +758,7 @@ def cmake_build(Map conf=[:]){
 
     if(runAllUnitTests)
     {
-        config_targets = 'install ' + config_targets
+        config_targets = 'install ' + 'check'
         setup_args = ' -DBUILD_DEV=On -DCMAKE_INSTALL_PREFIX=../install' + setup_args
     } else{
         setup_args = ' -DBUILD_DEV=On' + setup_args
