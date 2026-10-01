@@ -3144,6 +3144,36 @@ class SWaitAlu(Instruction):
     def getSrcParams(self):
         return []
 
+    def toString(self) -> str:
+        """Port of ``rocisa::SWaitAlu::toString`` (common.hpp:3030-3055).
+
+        Temporary text-emission shim for callers that still ``str(module)``
+        instead of lowering through the logical IR pipeline. Slated for
+        removal with that path.
+        """
+        from .base import getArchCaps  # noqa: WPS433
+
+        try:
+            has_sched_mode = getArchCaps().get("HasSchedMode", 0)
+        except RuntimeError:
+            has_sched_mode = 0
+        if not has_sched_mode:
+            return ""
+
+        fields = (
+            ("va_vdst", self.va_vdst),
+            ("va_sdst", self.va_sdst),
+            ("va_ssrc", self.va_ssrc),
+            ("hold_cnt", self.hold_cnt),
+            ("vm_vsrc", self.vm_vsrc),
+            ("va_vcc", self.va_vcc),
+            ("sa_sdst", self.sa_sdst),
+        )
+        result = "".join(f" depctr_{name}({value})" for name, value in fields if value != -1)
+        if not result:
+            return ""
+        return self.formatWithComment(self.instStr + result)
+
     def to_stinky_logical(self, _module=None):
         import stinkytofu as st
         return st.SWaitAlu(
