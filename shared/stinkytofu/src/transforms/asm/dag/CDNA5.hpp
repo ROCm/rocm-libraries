@@ -1997,7 +1997,14 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
     };
 
     if (!globalReadQueue.empty()) consider(globalReadQueue.top(), kGlobalRead);
-    consider(pickedDS, kLocalRead);
+    if (pickedDS) {
+        consider(pickedDS, kLocalRead);
+    } else {
+        // Focus and preload-hold policies are soft. Once every preferred bucket
+        // is exhausted, rank all remaining local reads by wait/id so the final
+        // safety net can always drain a non-empty queue and make progress.
+        for (DAGNode* n : localReadQueue) consider(n, kLocalRead);
+    }
     // Held work (prefetch lead, strict-wait hold) is skipped while anything else can go;
     // it is still taken last, so the fallback always makes progress.
     auto firstUnheld = [&](const ReadySetByDAGid& q) -> DAGNode* {
@@ -2608,9 +2615,16 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         bool pickedPending = false;
         int pickedEarly = INT_MAX;
         const bool holdIssuedOnlyPreload = wmmaIssueConfig.issuedCount > 0;
+        // Steady-state loops may look ahead across consumers. At a tail, retain
+        // exact-consumer focus: there is no next iteration to prepare, and
+        // younger loads would only sit ahead of the current consumer in DS FIFO.
+        const Loop* loop = getLoop();
+        const bool inSteadyLoop = loop && currentBB_ && loop->contains(currentBB_);
         for (DAGNode* n : localReadQueue) {
             if (holdIssuedOnlyPreload && dsFeedsIssuedOnlyWmma(n)) continue;
             const int early = earliestPendingWmmaId(n);
+            if (!inSteadyLoop && dsWindowFocusWmmaId_ != INT_MAX && early > dsWindowFocusWmmaId_)
+                continue;
             const bool pending = early != INT_MAX;
             if (!pickedDS || (pending && !pickedPending) ||
                 (pending == pickedPending &&
@@ -2620,17 +2634,6 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                 pickedPending = pending;
                 pickedEarly = early;
             }
-        }
-        // Steady-state loops need look-ahead across consumers to hide four-load
-        // groups across multiple WMMA windows. At a tail, retain exact-consumer
-        // focus: there is no next iteration to prepare, and younger loads would
-        // only sit ahead of the current consumer in DS FIFO.
-        if (pickedDS) {
-            const Loop* loop = getLoop();
-            const bool inSteadyLoop = loop && currentBB_ && loop->contains(currentBB_);
-            if (!inSteadyLoop && dsWindowFocusWmmaId_ != INT_MAX &&
-                pickedEarly > dsWindowFocusWmmaId_)
-                pickedDS = nullptr;
         }
     }
 
