@@ -58,7 +58,8 @@ Expression
     dst(r, c)    = inPatch ? src1(crop.y0 + r - patch.y0, crop.x0 + c - patch.x0)
                            : src2(dstRoi.y0 + r,          dstRoi.x0 + c)
 
-  Reads that fall outside [0,h) x [0,w) are skipped rather than clamped.
+  Reads or writes that fall outside [0,h) x [0,w) are skipped rather than
+  clamped.
 
 Per-type form
   No arithmetic, rounding, or clamping is performed -- every output element is
@@ -80,7 +81,7 @@ void crop_and_patch_reference(const T* src1, const T* src2, T* dst, const RpptDe
                 const T* src = inPatch ? src1 : src2;
                 const Rpp32u sy = inPatch ? cb.y0 + (r - pb.y0) : db.y0 + r;
                 const Rpp32u sx = inPatch ? cb.x0 + (col - pb.x0) : db.x0 + col;
-                if (sy >= d.h || sx >= d.w) continue;
+                if (r >= d.h || col >= d.w || sy >= d.h || sx >= d.w) continue;
                 for (Rpp32u c = 0; c < d.c; ++c) {
                     const std::size_t base = plane_base(d, n, c);
                     dst[plane_index(d, base, r, col)] = src[plane_index(d, base, sy, sx)];

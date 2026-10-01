@@ -67,6 +67,8 @@ void run_crop_and_patch(const TestConfig& cfg, const CropAndPatchParams& op) {
     const Rpp32u dstW = op.dstW ? op.dstW : desc.w, dstH = op.dstW ? op.dstH : desc.h;
     const Rpp32u dstX = op.dstW ? op.dstX : 0u, dstY = op.dstW ? op.dstY : 0u;
     const Rpp32u patchW = op.patchW ? op.patchW : op.w, patchH = op.patchH ? op.patchH : op.h;
+    ASSERT_LE(dstX + dstW, desc.w) << "dstRoi overruns image width";
+    ASSERT_LE(dstY + dstH, desc.h) << "dstRoi overruns image height";
     PinnedArray<RpptROI> dstRoi(cfg.backend, shape.n), cropRoi(cfg.backend, shape.n),
         patchRoi(cfg.backend, shape.n);
     for (Rpp32u i = 0; i < shape.n; ++i) {
