@@ -3933,6 +3933,20 @@ try
     if(desc.inFields.empty() || desc.outFields.empty())
         return false;
 
+    // This path transforms in each brick's own layout and stores the results in
+    // temp buffers sized only for a packed layout, so it can only handle bricks
+    // whose data is packed contiguously.
+    auto all_bricks_contiguous = [](const std::vector<rocfft_field_t>& fields) {
+        return std::all_of(fields.begin(), fields.end(), [](const rocfft_field_t& field) {
+            return std::all_of(
+                field.bricks.begin(), field.bricks.end(), [](const rocfft_brick_t& brick) {
+                    return brick.layout.is_contiguous();
+                });
+        });
+    };
+    if(!all_bricks_contiguous(desc.inFields) || !all_bricks_contiguous(desc.outFields))
+        return false;
+
     // work out what FFT dimensions are already contiguous in the fields
     std::vector<size_t> contiguousInputDims;
     std::vector<size_t> contiguousOutputDims;
@@ -4969,12 +4983,6 @@ static rocfft_status rocfft_plan_create_internal(rocfft_plan                   p
     }
 }
 
-rocfft_status rocfft_plan_allocate(rocfft_plan* plan)
-{
-    *plan = new rocfft_plan_t;
-    return rocfft_status_success;
-}
-
 rocfft_status rocfft_plan_create(rocfft_plan*                  plan,
                                  const rocfft_result_placement placement,
                                  const rocfft_transform_type   transform_type,
@@ -4985,7 +4993,12 @@ rocfft_status rocfft_plan_create(rocfft_plan*                  plan,
                                  const rocfft_plan_description description)
 try
 {
-    rocfft_plan_allocate(plan);
+    if(!plan)
+        return rocfft_status_invalid_arg_value;
+
+    // Alloc plan internally, don't assign it to the user's pointer
+    // until we're sure we've succeeded
+    auto plan_temp = std::make_unique<rocfft_plan_t>();
 
     size_t log_len[3] = {1, 1, 1};
     if(dimensions > 0)
@@ -4997,7 +5010,7 @@ try
 
     log_trace(__func__,
               "plan",
-              *plan,
+              plan_temp.get(),
               "placement",
               placement,
               "transform_type",
@@ -5013,14 +5026,17 @@ try
               "description",
               description);
 
-    return rocfft_plan_create_internal(*plan,
-                                       placement,
-                                       transform_type,
-                                       precision,
-                                       dimensions,
-                                       lengths,
-                                       number_of_transforms,
-                                       description);
+    auto ret = rocfft_plan_create_internal(plan_temp.get(),
+                                           placement,
+                                           transform_type,
+                                           precision,
+                                           dimensions,
+                                           lengths,
+                                           number_of_transforms,
+                                           description);
+    if(ret == rocfft_status_success)
+        *plan = plan_temp.release();
+    return ret;
 }
 catch(...)
 {

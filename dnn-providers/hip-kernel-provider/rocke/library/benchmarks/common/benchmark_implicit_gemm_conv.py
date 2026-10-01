@@ -48,6 +48,7 @@ import random
 import re
 import sys
 from dataclasses import dataclass
+from typing import NamedTuple
 from typing import List
 
 # hipDeviceAttributeMaxGridDimZ. Grouped wgrad puts groups*split_k on z, which
@@ -79,10 +80,50 @@ _ASYNC_PIPELINE = "mem"
 # Split-K degrees swept when --split-k 0 (auto) is passed for wgrad.
 _SPLIT_K_AUTO = (128, 64, 32, 16, 8, 4, 2, 1)
 
+# Group-merge degrees swept for depthwise wgrad. Powers of two only: the
+# merged index math uses shifts and an xor.
+_GROUP_MERGE_SWEEP = (2, 4, 8, 16)
+
+# Scratch replica counts swept when --ws-replicas 0 is passed. Powers of two
+# because the Stage 1 slab pick is `blockIdx.z % R`; 1 is the degenerate
+# no-replication case (one atomic target, Stage 2 collapses to a single load).
+_WS_REPLICAS_SWEEP = (1, 2, 4, 8, 16, 32)
+
 
 # ---------------------------------------------------------------------------
 # Result record
 # ---------------------------------------------------------------------------
+
+
+class WgradCombo(NamedTuple):
+    """One point in the wgrad sweep.
+
+    A NamedTuple rather than a bare tuple because four sites unpack this and
+    they have to agree: when ``async_dma`` was added as a plain 9th field the
+    two-stage leg kept a stale 8-field unpack, and because that leg only runs
+    when ``C/groups`` is odd, nothing in CI noticed until a depthwise shape
+    reached it. A defaulted field cannot reproduce that -- callers that do not
+    know about it still construct correctly.
+    """
+
+    tile_m: int
+    tile_n: int
+    tile_k: int
+    warp_m: int
+    warp_n: int
+    warp_tile_mn: int
+    pipeline: str
+    epilogue: str
+    async_dma: bool
+    split_k: int
+    # Conv groups merged into one workgroup. Only ever > 1 for depthwise, where
+    # it is swept against the split-K instances rather than combined with them.
+    group_merge: int = 1
+    # Scratch replica slabs for the two-stage leg. 0 means "leave the instance
+    # default"; the single-stage leg ignores it entirely (it writes dW with
+    # 16-bit atomics and allocates no scratch), which is why the axis is only
+    # expanded on the two-stage work list.
+    ws_replicas: int = 0
 
 
 @dataclass
@@ -109,6 +150,14 @@ class Result:
     async_dma: bool = False
     passed: bool | None = None  # None when --verify was not requested
     two_stage: bool = False  # True when timed as Stage1+Stage2 deterministic pipeline
+    # Conv groups merged per workgroup. > 1 only on the depthwise merged leg;
+    # without it two rows differing only in Gm would be indistinguishable in
+    # the ranked table and would collide in the prune key.
+    group_merge: int = 1
+    # Scratch replica slabs. Two-stage leg only; same indistinguishability
+    # argument as group_merge -- an --ws-replicas sweep prints one row per R
+    # and they must be tellable apart.
+    ws_replicas: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -129,14 +178,18 @@ def _grid_for_spec(spec, p):
 def _grid_for_wgrad_spec(spec, split_k: int):
     """Derive launch grid from wgrad spec and split-K degree.
 
-    gx/gy tile the per-group GEMM (spec.wg_M/wg_N). The group index rides on
-    block_id_z, giving z = groups * split_k (== split_k for the ungrouped
-    groups==1 path).
+    gx/gy tile the GEMM the tile actually covers (spec.grid_M/grid_N). The group
+    index rides on block_id_z, giving z = grid_groups * split_k (== split_k for
+    the ungrouped groups==1 path).
+
+    grid_* rather than wg_* because a group-merged spec has one workgroup per Gm
+    conv groups: the tile is Gm times larger and there are Gm times fewer of
+    them. The two are equal whenever group_merge == 1.
     """
     tile_m, tile_n = spec.tile_m, spec.tile_n
-    gx = (spec.wg_N + tile_n - 1) // tile_n
-    gy = (spec.wg_M + tile_m - 1) // tile_m
-    return (gx, gy, spec.problem.groups * split_k)
+    gx = (spec.grid_N + tile_n - 1) // tile_n
+    gy = (spec.grid_M + tile_m - 1) // tile_m
+    return (gx, gy, spec.grid_groups * split_k)
 
 
 def _sample_combos(combos: list, frac: float, seed: int) -> list:
@@ -149,10 +202,11 @@ def _sample_combos(combos: list, frac: float, seed: int) -> list:
 def _verify_kernel(
     *,
     rt,
-    launcher,
-    values: dict,
-    grid: tuple,
-    block: tuple,
+    launcher=None,
+    values: "dict | None" = None,
+    grid: "tuple | None" = None,
+    block: "tuple | None" = None,
+    launch_fn=None,
     out_dev,
     out_t,
     zero_init_out: bool,
@@ -171,6 +225,13 @@ def _verify_kernel(
     zero_init_out:
         Zero the output buffer before launching (required for split-K atomic
         accumulation; not needed for direct-store kernels).
+    launch_fn:
+        Optional callable that performs the full launch sequence in place of
+        the single ``launcher(values, config=...)`` call below — e.g. a
+        multi-kernel deterministic pipeline (two-stage wgrad: Stage1 GEMM →
+        Stage2 reduce). It must clear its own scratch/output buffers, so pass
+        ``zero_init_out=False`` alongside it. When given, ``launcher``,
+        ``values``, ``grid``, and ``block`` are ignored.
     dump_fail:
         Directory path to dump tensors into on first failure, or ``None`` to
         just print the error.
@@ -190,9 +251,12 @@ def _verify_kernel(
     if zero_init_out:
         rt.memset(out_dev, 0, out_t.nbytes)
 
-    from rocke.runtime.launcher import LaunchConfig
+    if launch_fn is not None:
+        launch_fn()
+    else:
+        from rocke.runtime.launcher import LaunchConfig
 
-    launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
+        launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
 
     out_cpu = torch.empty_like(out_t)
     rt.memcpy_d2h(u8(out_cpu), out_dev, out_t.nbytes)
@@ -812,6 +876,22 @@ def main() -> int:
     )
 
     parser.add_argument(
+        "--ws-replicas",
+        type=int,
+        default=-1,
+        dest="ws_replicas",
+        metavar="R",
+        help=(
+            "two-stage scratch replica slabs (Stage 1 picks one with "
+            "blockIdx.z %% R, Stage 2 folds all R): "
+            "-1 = use the instance default (one point), "
+            "0 = sweep all of %(sweep)s, "
+            ">=1 = fixed count. Only affects the two-stage leg; the "
+            "single-stage leg allocates no scratch."
+        ).replace("%(sweep)s", str(list(_WS_REPLICAS_SWEEP))),
+    )
+
+    parser.add_argument(
         "--csv-top",
         type=int,
         default=5,
@@ -1365,6 +1445,7 @@ def _build_wgrad_one(args_tuple):
     Must live at module level for pickle.
     """
     combo, problem, dtype, arch = args_tuple
+    combo = WgradCombo(*combo)
     (
         tile_m,
         tile_n,
@@ -1376,7 +1457,8 @@ def _build_wgrad_one(args_tuple):
         epilogue,
         async_dma,
         split_k,
-    ) = combo
+    ) = combo[:10]
+    group_merge = combo.group_merge
 
     from rocke.core.arch import ArchTarget
     from kernels.common.conv_implicit_gemm import ConvDataSpec
@@ -1424,6 +1506,8 @@ def _build_wgrad_one(args_tuple):
             tile_n=tile_n,
             tile_k=tile_k,
             arch=arch,
+            groups=problem.groups,
+            block_size=warp_m * warp_n * target.wave_size,
         ).split_k
     else:
         # split_k=0 (runtime) or split_k=1 (no-split): pass through as-is.
@@ -1452,6 +1536,7 @@ def _build_wgrad_one(args_tuple):
         pipeline=pipeline,
         epilogue=epilogue,
         split_k=resolved_split_k,
+        group_merge=group_merge,
         lds_k_outer=lds_k_outer,
         async_dma=async_dma,
     )
@@ -1478,6 +1563,7 @@ def _build_wgrad_two_stage_one(args_tuple):
     # only reachable when C/groups is odd, which nothing in CI exercises, so it
     # silently kept a stale 9-field unpack after async_dma was added and raised
     # "too many values to unpack" the moment a depthwise shape reached it.
+    combo = WgradCombo(*combo)
     (
         tile_m,
         tile_n,
@@ -1489,7 +1575,9 @@ def _build_wgrad_two_stage_one(args_tuple):
         epilogue,
         async_dma,
         split_k,
-    ) = combo
+    ) = combo[:10]
+    group_merge = combo.group_merge
+    ws_replicas = combo.ws_replicas
 
     from rocke.core.arch import ArchTarget
     from kernels.common.conv_implicit_gemm import ConvDataSpec
@@ -1529,6 +1617,8 @@ def _build_wgrad_two_stage_one(args_tuple):
             tile_n=tile_n,
             tile_k=tile_k,
             arch=arch,
+            groups=problem.groups,
+            block_size=warp_m * warp_n * target.wave_size,
         ).split_k
     elif split_k == 0:
         # Runtime split-K is atomic, not two-stage — skip.
@@ -1567,7 +1657,11 @@ def _build_wgrad_two_stage_one(args_tuple):
         pipeline=pipeline,
         epilogue=epilogue,
         split_k=resolved_split_k,
+        group_merge=group_merge,
         two_stage=True,
+        # 0 = leave the instance default rather than restate it here, so the
+        # benchmark does not pin a value the instance may retune.
+        **({} if ws_replicas <= 0 else {"ws_replicas": ws_replicas}),
         # Carried for the same comparability reason as lds_k_outer below: the
         # two legs must differ only in the epilogue, or the side-by-side
         # timings are measuring two different kernels.
@@ -1594,10 +1688,18 @@ def _build_wgrad_two_stage_one(args_tuple):
     except ValueError:
         return None
 
-    s2_spec = WgradReduceSpec(problem=problem, dtype_d=dtype, groups=problem.groups)
+    s2_spec = WgradReduceSpec(
+        problem=problem,
+        dtype_d=dtype,
+        groups=problem.groups,
+        # Must match Stage 1. Folding fewer slabs than Stage 1 wrote silently
+        # drops part of the sum; folding more reads past the scratch.
+        ws_replicas=spec.ws_replicas,
+    )
     # WgradReduceSpec carries no tile configuration -- it is a function of
-    # (problem, dtype_d, groups) alone -- so every combo in a sweep produces a
-    # bit-identical Stage-2 kernel. Memoise it; see _S2_IR_CACHE.
+    # (problem, dtype_d, groups, ws_replicas) alone -- so every combo in a
+    # sweep that shares those produces a bit-identical Stage-2 kernel. Memoise
+    # it; see _S2_IR_CACHE (keyed on the name, which carries ws_replicas).
     _s2_key = (arch, s2_spec.kernel_name())
     s2_kernel = _S2_IR_CACHE.get(_s2_key)
     if s2_kernel is None:
@@ -2230,6 +2332,7 @@ def _run_sweep(
             f"warp={r.warp_m}x{r.warp_n} "
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
             f"vec={r.vec_a}/{r.vec_b}/{r.vec_c} "
+            f"{f'gm{r.group_merge} ' if r.group_merge > 1 else ''}"
             f"{r.pipeline}/{r.epilogue}"
         )
         if show_verify:
@@ -2389,8 +2492,21 @@ def _run_wgrad_sweep(
     # several kernel names and measure one kernel several times.
     _legs = [(_p, False) for _p in _PIPELINES] + [(_ASYNC_PIPELINE, True)]
 
+    # Depthwise has no usable single-stage instance: split_k == 1 leaves one
+    # workgroup per (merged) group, which cannot fill the device, and split_k
+    # in (0, 1) is the only way to reach the direct-store / runtime-atomic
+    # bodies. The reduction degree is where the parallelism comes from here, so
+    # drop the single-stage degrees rather than compile and time them.
+    _depthwise = p.cpg == 1 and p.kpg == 1 and p.groups > 1
+
+    def _degrees(pipeline: str, async_dma: bool) -> tuple:
+        vals = _split_k_values_for(pipeline, async_dma)
+        if _depthwise:
+            vals = tuple(v for v in vals if v not in (0, 1))
+        return vals
+
     combos = [
-        (*_geom, _pipeline, _epilogue, _async_dma, _sk)
+        WgradCombo(*_geom, _pipeline, _epilogue, _async_dma, _sk)
         for _geom in itertools.product(
             _TILE_MN, _TILE_MN, _TILE_K, _WARP_MN, _WARP_MN, _WARP_TILE_MN
         )
@@ -2398,8 +2514,50 @@ def _run_wgrad_sweep(
         if _geom[3] * _geom[5] <= _geom[0] and _geom[4] * _geom[5] <= _geom[1]
         for _epilogue in _EPILOGUES
         for _pipeline, _async_dma in _legs
-        for _sk in _split_k_values_for(_pipeline, _async_dma)
+        for _sk in _degrees(_pipeline, _async_dma)
     ]
+
+    # Depthwise (cpg == kpg == 1) additionally sweeps group-merged instances.
+    # Merging fixes the load width -- a depthwise free axis is one element wide,
+    # so every load is scalar -- while split-K fixes occupancy. They act on the
+    # CTA count in opposite directions and compose, so the merged family is
+    # swept over the same split-K degrees as the unmerged one. No flag: merging
+    # is only legal for depthwise, and for depthwise the scalar per-channel load
+    # is exactly what it exists to fix.
+    if _depthwise:
+        _spatial = (p.Z if getattr(p, "is_3d", False) else 1) * p.Y * p.X
+        _gm_combos = [
+            WgradCombo(*_geom, _pipeline, _epilogue, False, _sk, _gm)
+            for _geom in itertools.product(
+                _TILE_MN, _TILE_MN, _TILE_K, _WARP_MN, _WARP_MN, _WARP_TILE_MN
+            )
+            if _geom[3] * _geom[5] <= _geom[0] and _geom[4] * _geom[5] <= _geom[1]
+            for _epilogue in _EPILOGUES
+            # 'basic' is the Python-unrolled K-loop. Merging shrinks the grid,
+            # the groups-aware selector answers with a deeper split_k, and the
+            # shorter K-slice drops the iteration count back under the unroll
+            # cap -- so the merged combos are precisely the ones that would
+            # fully unroll and cost minutes each to compile. The unrolled body
+            # has never won a depthwise sweep, so skip it rather than pay it.
+            for _pipeline in (_p for _p in _PIPELINES if _p != "basic")
+            for _gm in _GROUP_MERGE_SWEEP
+            for _sk in _degrees(_pipeline, False)
+            # The merged GEMM must fit one tile, or a tile straddles group pairs
+            # the diagonal mask cannot separate. Filtered here rather than left
+            # to the validator so the combo count does not balloon.
+            if p.groups % _gm == 0
+            and _gm <= p.groups
+            and _gm <= _geom[0]
+            and _spatial * _gm <= _geom[1]
+        ]
+        combos = combos + _gm_combos
+        print(
+            f"  depthwise: +{len(_gm_combos)} group-merged combos "
+            f"(Gm in {_GROUP_MERGE_SWEEP}) swept alongside the unmerged ones, "
+            f"two-stage only. Merging widens the loads and divides the grid by "
+            f"Gm; split-K multiplies it back, so the two compose.",
+            flush=True,
+        )
 
     if args.sample is not None:
         total = len(combos)
@@ -2449,8 +2607,28 @@ def _run_wgrad_sweep(
                 f"  C/groups={p.C // p.groups} is odd — enabling two-stage deterministic path.",
                 flush=True,
             )
+        # The replica axis is expanded here rather than in `combos` because
+        # the single-stage leg has no scratch and would just build R identical
+        # kernels under R different names.
+        if args.ws_replicas == 0:
+            _ws_reps = _WS_REPLICAS_SWEEP
+        elif args.ws_replicas < 0:
+            _ws_reps = (0,)  # 0 => leave the instance default
+        else:
+            _ws_reps = (args.ws_replicas,)
+        work_2s = [
+            (combo._replace(ws_replicas=_r), problem, dtype, arch)
+            for combo in combos
+            for _r in _ws_reps
+        ]
+        if len(_ws_reps) > 1:
+            print(
+                f"  sweeping ws_replicas over {list(_ws_reps)} "
+                f"({len(work_2s)} two-stage configs).",
+                flush=True,
+            )
         pending_2s = _build_ir_parallel(
-            work, _build_and_compile_wgrad_two_stage_one, jobs
+            work_2s, _build_and_compile_wgrad_two_stage_one, jobs
         )
         pending_2s.sort(key=lambda r: (r[0][:8], -r[2]))
         n_built += len(pending_2s)
@@ -2515,7 +2693,8 @@ def _run_wgrad_sweep(
             epilogue,
             _async_dma,
             _,
-        ) = combo
+        ) = combo[:10]
+        _gm = combo[10] if len(combo) > 10 else 1
         warp_tile_k = spec.warp_tile_k
         _is_rt = resolved_split_k == 0  # runtime split-K kernel
 
@@ -2667,6 +2846,7 @@ def _run_wgrad_sweep(
                     vec_a=_va,
                     vec_b=_vb,
                     vec_c=_vc,
+                    group_merge=_gm,
                 )
             )
 
@@ -2700,6 +2880,7 @@ def _run_wgrad_sweep(
                 f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
                 f"{pipeline}/{epilogue:9s} {_spk_label:<7s} "
                 f"{'async ' if _async_dma else '      '}"
+                f"{f'gm{_gm} ' if _gm > 1 else '    '}"
                 f"vec={_va}/{_vb}/{_vc} "
                 f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms"
                 f"{prune_marker}",
@@ -2751,7 +2932,8 @@ def _run_wgrad_sweep(
                 epilogue,
                 _async_dma,
                 _,
-            ) = combo
+            ) = combo[:10]
+            _gm = combo[10] if len(combo) > 10 else 1
             warp_tile_k = spec.warp_tile_k
 
             ws_nbytes = wgrad_two_stage_workspace_nbytes(spec)
@@ -2766,6 +2948,8 @@ def _run_wgrad_sweep(
                 problem=spec.problem,
                 dtype_d=spec.data.dtype_d,
                 groups=spec.problem.groups,
+                # Must match Stage 1 or the fold covers the wrong slab count.
+                ws_replicas=spec.ws_replicas,
             )
             s2_grid = wgrad_reduce_grid(s2_spec)
             s2_block = (s2_spec.tile_m * s2_spec.tile_n, 1, 1)
@@ -2809,7 +2993,6 @@ def _run_wgrad_sweep(
                 "dw_ptr": dW_dev2,
                 "wg_M": spec.wg_M,
                 "wg_N": spec.wg_N,
-                "split_k": resolved_split_k,
                 "ws_bytes": ws_nbytes,
                 "dw_bytes": dW_t.nbytes,
                 "groups": spec.problem.groups,
@@ -2824,10 +3007,39 @@ def _run_wgrad_sweep(
                 _v2=s2_values,
                 _c1=s1_cfg,
                 _c2=s2_cfg,
+                _ws=ws_dev,
+                _ws_nb=ws_nbytes,
             ):
+                # Stage 1 accumulates into the scratch, so it has to start from
+                # zero; dW is a plain store target for Stage 2 and needs no
+                # clearing, but zeroing it keeps a failed launch visible.
+                rt2.memset(_ws, 0, _ws_nb)
                 rt2.memset(dW_dev2, 0, dW_t.nbytes)
                 _s1(_v1, config=_c1)
                 _s2(_v2, config=_c2)
+
+            if args.verify or args.dump_fail:
+                stopped, _ = _verify_kernel(
+                    rt=rt2,
+                    launch_fn=_launch_two_stage,
+                    out_dev=dW_dev2,
+                    out_t=dW_t,
+                    zero_init_out=False,
+                    ref_out=ref_out,
+                    kernel_name=s1_art.kernel_name,
+                    dump_fail=args.dump_fail,
+                    extra_tensors={"dY": dY_t, "X": X_t},
+                    u8=_u8,
+                    arch=arch,
+                    compute_dtype=dtype,
+                )
+                if stopped:
+                    if ws_dev is not None:
+                        rt2.free(ws_dev)
+                    rt2.free(dY_dev2)
+                    rt2.free(X_dev2)
+                    rt2.free(dW_dev2)
+                    return 1, []
 
             ms = time_launches(
                 _launch_two_stage,
@@ -2864,6 +3076,8 @@ def _run_wgrad_sweep(
                     vec_b=_vb,
                     vec_c=_vc,
                     two_stage=True,
+                    group_merge=_gm,
+                    ws_replicas=spec.ws_replicas,
                 )
             )
             print(
@@ -2871,6 +3085,8 @@ def _run_wgrad_sweep(
                 f"warp={warp_m}x{warp_n} "
                 f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
                 f"{pipeline}/{epilogue:9s} spk{resolved_split_k}2s  "
+                f"{f'gm{_gm} ' if _gm > 1 else '    '}"
+                f"wsr{spec.ws_replicas} "
                 f"vec={_va}/{_vb}/{_vc} "
                 f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
                 flush=True,
@@ -2894,11 +3110,15 @@ def _run_wgrad_sweep(
     print(f"\n{'='*92}")
     print(f"Top {top_n} wgrad configurations for {arch} {dtype} {p.short()}")
     print(f"{'='*92}")
-    hdr = f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  {'mode':<10}  config"
+    hdr = f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  {'mode':<14}  config"
     print(hdr)
     print("-" * 92)
     for rank, r in enumerate(results[:top_n], 1):
         mode = f"spk{r.split_k}2s" if r.two_stage else f"spk{r.split_k}"
+        if r.group_merge > 1:
+            mode += f" gm{r.group_merge}"
+        if r.ws_replicas > 0:
+            mode += f" wsr{r.ws_replicas}"
         cfg_str = (
             f"tile={r.tile_m}x{r.tile_n}x{r.tile_k} "
             f"warp={r.warp_m}x{r.warp_n} "
@@ -2908,7 +3128,7 @@ def _run_wgrad_sweep(
             f"{' async' if r.async_dma else ''}"
         )
         print(
-            f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {mode:<10}  {cfg_str}"
+            f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {mode:<14}  {cfg_str}"
         )
 
     best = results[0]

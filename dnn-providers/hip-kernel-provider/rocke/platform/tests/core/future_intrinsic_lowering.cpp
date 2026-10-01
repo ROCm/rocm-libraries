@@ -19,6 +19,7 @@
 #include <cstring>
 #include <string>
 
+#include "rocke/arch_target.h"
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
@@ -755,7 +756,7 @@ void case_hip_zext_uses_unsigned_source_cast()
     EXPECT_NO_IR(hip, "(int64_t)byte");
 }
 
-/* ---- gfx1250 native SCALE / SCALE16 FP8 WMMA ---- */
+/* ---- gfx1250 native SCALE / SCALE16 FP8/FP4 WMMA ---- */
 void case_gfx1250_scaled_wmma()
 {
     struct Variant
@@ -779,35 +780,52 @@ void case_gfx1250_scaled_wmma()
          "i64"},
     };
 
-    for(const Variant& v : variants)
-    {
-        const auto build = [&v](rocke_ir_builder_t* b) {
-            rocke_value_t* matrix = global_ptr_param(b, "matrix", rocke_i32());
-            rocke_value_t* accum = global_ptr_param(b, "accum", rocke_f32());
-            rocke_value_t* scales = global_ptr_param(b, "scales", v.scale_type());
-            rocke_value_t* lane = rocke_b_thread_id_x(b);
-            rocke_value_t* lo = rocke_b_global_load_vN(b, matrix, lane, rocke_i32(), 8, 0);
-            rocke_value_t* eight = rocke_b_const_i32(b, 8);
-            rocke_value_t* hi_idx = rocke_b_add(b, lane, eight);
-            rocke_value_t* hi = rocke_b_global_load_vN(b, matrix, hi_idx, rocke_i32(), 8, 0);
-            rocke_value_t* fragment = rocke_b_vec_concat(b, lo, hi);
-            rocke_value_t* c = rocke_b_global_load_vN(b, accum, lane, rocke_f32(), 8, 0);
-            rocke_value_t* scale = rocke_b_global_load(b, scales, lane, v.scale_type(), 1);
-            rocke_value_t* d = v.scale16 ? rocke_b_wmma_scale16_f32_16x16x128_fp8_fp8(
-                                               b, fragment, fragment, c, scale, scale)
-                                         : rocke_b_wmma_scale_f32_16x16x128_fp8_fp8(
-                                               b, fragment, fragment, c, scale, scale);
-            rocke_b_global_store(b, accum, lane, rocke_b_vec_extract(b, d, 0), 1);
-        };
-        const char* name = v.scale16 ? "wmma_scale16" : "wmma_scale";
-        const std::string ir = lower_one(name, build, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23);
-        EXPECT_IR(ir, v.intrinsic);
-        const std::string scale_arg = std::string(", ") + v.scale_llvm_type + " %";
-        EXPECT_IR(ir, scale_arg.c_str());
+    for(int fmt : {0, 4})
+        for(const Variant& v : variants)
+        {
+            const auto build = [&v, fmt](rocke_ir_builder_t* b) {
+                rocke_value_t* matrix = global_ptr_param(b, "matrix", rocke_i32());
+                rocke_value_t* accum = global_ptr_param(b, "accum", rocke_f32());
+                rocke_value_t* scales = global_ptr_param(b, "scales", v.scale_type());
+                rocke_value_t* lane = rocke_b_thread_id_x(b);
+                rocke_value_t* lo = rocke_b_global_load_vN(b, matrix, lane, rocke_i32(), 8, 0);
+                rocke_value_t* eight = rocke_b_const_i32(b, 8);
+                rocke_value_t* hi_idx = rocke_b_add(b, lane, eight);
+                rocke_value_t* hi = rocke_b_global_load_vN(b, matrix, hi_idx, rocke_i32(), 8, 0);
+                rocke_value_t* fragment = rocke_b_vec_concat(b, lo, hi);
+                rocke_value_t* c = rocke_b_global_load_vN(b, accum, lane, rocke_f32(), 8, 0);
+                rocke_value_t* scale = rocke_b_global_load(b, scales, lane, v.scale_type(), 1);
+                const auto block = v.scale16 ? ROCKE_MMA_SCALE_K16 : ROCKE_MMA_SCALE_K32;
+                const rocke_mma_scale_filter_t scales_query = {"e8m0", "e8m0", block};
+                const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx1250");
+                const rocke_mma_op_t* atom
+                    = rocke_mma_catalog_op_for_shape(&target->mma,
+                                                     "wmma_scaled",
+                                                     fmt == 4 ? "fp4" : "fp8",
+                                                     fmt == 4 ? "fp4e2m1" : "fp8",
+                                                     "fp32",
+                                                     16,
+                                                     16,
+                                                     128,
+                                                     &scales_query);
+                if(!atom)
+                    fail("scaled WMMA aliases must resolve the requested atom", __LINE__);
+                rocke_value_t* extra[2] = {scale, scale};
+                rocke_value_t* d = rocke_b_mma(b, atom->op_id, fragment, fragment, c, extra, 2);
+                rocke_b_global_store(b, accum, lane, rocke_b_vec_extract(b, d, 0), 1);
+            };
+            const char* name = v.scale16 ? "wmma_scale16" : "wmma_scale";
+            const std::string ir = lower_one(name, build, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23);
+            EXPECT_IR(ir, v.intrinsic);
+            const std::string scale_arg = std::string(", ") + v.scale_llvm_type + " %";
+            EXPECT_IR(ir, scale_arg.c_str());
 
-        const std::string hip = lower_one_hip(name, build, "gfx1250");
-        EXPECT_IR(hip, v.builtin);
-    }
+            const std::string hip = lower_one_hip(name, build, "gfx1250");
+            const std::string hip_call = std::string(v.builtin) + "(" + std::to_string(fmt) + ",";
+            EXPECT_IR(hip, hip_call.c_str());
+            const std::string matrix_arg = "i32 " + std::to_string(fmt) + ", <16 x i32>";
+            EXPECT_IR_COUNT(ir, matrix_arg.c_str(), 2);
+        }
 }
 
 /* ---- opcode table alignment ---- */
@@ -884,6 +902,82 @@ void case_opcode_names_are_aligned()
     }
 }
 
+/* Malformed result lists must reach the public lowering error boundary. */
+void case_wmma_result_count()
+{
+    for(bool integer : {false, true})
+    {
+        for(int count : {0, 2, 1})
+        {
+            rocke_ir_builder_t b;
+            if(rocke_ir_builder_init(&b, "wmma_result_count") != ROCKE_OK)
+            {
+                fail("rocke_ir_builder_init", __LINE__);
+                return;
+            }
+            auto* a = rocke_b_zero_vec(&b, integer ? rocke_i32() : rocke_f16(), integer ? 4 : 16);
+            auto* c = rocke_b_zero_vec(&b, integer ? rocke_i32() : rocke_f32(), 8);
+            auto* d = rocke_b_mma(&b,
+                                  integer ? "wmma_i32_16x16x16_iu8" : "wmma_f32_16x16x16_f16",
+                                  a,
+                                  a,
+                                  c,
+                                  nullptr,
+                                  0);
+            rocke_value_t* results[] = {d, d};
+            d->op->num_results = count;
+            d->op->results = count ? results : nullptr;
+            rocke_b_ret(&b);
+            char* out = nullptr;
+            char err[ROCKE_ERR_MSG_CAP] = {};
+            const auto status = rocke_lower_kernel_to_llvm_ex(
+                b.kernel, ROCKE_LLVM_FLAVOR_LLVM23, "gfx1151", &out, err, sizeof(err));
+            if(count == 1)
+            {
+                if(status != ROCKE_OK || !out)
+                    fail("valid WMMA failed", __LINE__);
+                else
+                    EXPECT_IR(std::string(out), integer ? "call <8 x i32>" : "call <8 x float>");
+            }
+            else
+            {
+                char expected[80];
+                snprintf(expected,
+                         sizeof(expected),
+                         "tile.mma: expected exactly one result, got %d",
+                         count);
+                if(status != ROCKE_ERR_VALUE || out || strcmp(err, expected) != 0)
+                    fail("malformed WMMA did not return its result-count error", __LINE__);
+            }
+            std::free(out);
+            rocke_ir_builder_free(&b);
+        }
+    }
+}
+
+void case_lowbit_dtype_aliases()
+{
+    const char* aliases[][2] = {
+        {"fp8", "fp8e4m3"},
+        {"bf8", "bf8e5m2"},
+        {"fp6", "fp6e2m3"},
+        {"bf6", "fp6e3m2"},
+        {"fp4", "fp4e2m1"},
+    };
+    char scratch[32];
+    for(const auto& pair : aliases)
+    {
+        if(strcmp(rocke_normalize_dtype(pair[0], scratch, sizeof(scratch)), pair[1]) != 0
+           || strcmp(rocke_normalize_dtype(pair[1], scratch, sizeof(scratch)), pair[1]) != 0)
+            fail("low-bit alias must resolve to explicit catalog key", __LINE__);
+        const auto* arch = rocke_arch_target_from_gfx("gfx950");
+        const int k = strcmp(pair[0], "fp4") == 0 ? 128 : 96;
+        if((strcmp(pair[0], "fp4") == 0 || strcmp(pair[0], "fp6") == 0)
+           && !rocke_mma_catalog_has_shape(&arch->mma, "mma", pair[0], pair[1], "fp32", 16, 16, k))
+            fail("low-bit aliases must resolve native catalog rows", __LINE__);
+    }
+}
+
 struct TestCase
 {
     const char* name;
@@ -891,6 +985,8 @@ struct TestCase
 };
 
 const TestCase k_cases[] = {
+    {"lowbit_dtype_aliases", case_lowbit_dtype_aliases},
+    {"wmma_result_count", case_wmma_result_count},
     {"ds_swizzle_raw_offset", case_ds_swizzle_raw_offset},
     {"quad_perm_hip", case_quad_perm_hip},
     {"quad_perm_rejects_invalid_input", case_quad_perm_rejects_invalid_input},
