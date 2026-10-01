@@ -32,6 +32,7 @@ BenchmarkProblems:
       UseE: True
       UseBias:       1
       Activation:    True
+      ActivationType: hipblaslt_all
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -81,6 +82,7 @@ BenchmarkProblems:
       UseE: True
       UseBias:       1
       Activation:    True
+      ActivationType: hipblaslt_all
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
       BenchmarkCommonParameters:
